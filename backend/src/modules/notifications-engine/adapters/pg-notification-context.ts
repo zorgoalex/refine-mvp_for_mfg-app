@@ -19,7 +19,7 @@ interface DeadlineEntityTypeRow {
 }
 
 interface ProjectAttributionRow {
-  project_id: string;
+  group_id: string;
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -72,7 +72,7 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
 
     const deadlineInstanceId = event.aggregateType === 'deadline' ? event.aggregateId : null;
     const deadlineEntityType = await this.resolveDeadlineEntityType(client, deadlineInstanceId);
-    const projectIds = await this.resolveProjectIds(client, orderId, deadlineInstanceId);
+    const groupIds = await this.resolveProjectIds(client, orderId, deadlineInstanceId);
     const isCurrentDeadlineEvent = await this.resolveIsCurrentDeadlineEvent(client, event, orderId);
 
     return {
@@ -86,7 +86,7 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
       deadlineId,
       deadlineEntityType,
       deadlineInstanceId,
-      projectIds,
+      groupIds,
       orderStatusId,
       isOrderCompleted,
       isCurrentDeadlineEvent,
@@ -181,22 +181,22 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
       ? await client.query<ProjectAttributionRow>(
         `
         WITH explicit_deadline_projects AS (
-          SELECT DISTINCT pel.project_id
-          FROM public.project_entity_links pel
+          SELECT DISTINCT pel.group_id
+          FROM public.group_entity_links pel
           WHERE pel.entity_type_code = 'deadline_instance'
             AND pel.entity_id_text = $1::text
             AND pel.valid_to IS NULL
         ),
         derived_order_projects AS (
-          SELECT DISTINCT pop.project_id
-          FROM public.project_order_projects pop
+          SELECT DISTINCT pop.group_id
+          FROM public.group_order_groups pop
           WHERE pop.order_id = $2::bigint
             AND pop.valid_to IS NULL
         )
-        SELECT project_id
+        SELECT group_id
         FROM explicit_deadline_projects
         UNION
-        SELECT project_id
+        SELECT group_id
         FROM derived_order_projects
         WHERE NOT EXISTS (SELECT 1 FROM explicit_deadline_projects)
         `,
@@ -204,8 +204,8 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
       )
       : await client.query<ProjectAttributionRow>(
         `
-        SELECT DISTINCT pop.project_id
-        FROM public.project_order_projects pop
+        SELECT DISTINCT pop.group_id
+        FROM public.group_order_groups pop
         WHERE pop.order_id = $1::bigint
           AND pop.valid_to IS NULL
         `,
@@ -213,8 +213,8 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
       );
 
     return result.rows
-      .map((row) => row.project_id)
-      .filter((projectId): projectId is string => typeof projectId === 'string' && projectId.trim() !== '')
-      .map((projectId) => projectId.toLowerCase());
+      .map((row) => row.group_id)
+      .filter((groupId): groupId is string => typeof groupId === 'string' && groupId.trim() !== '')
+      .map((groupId) => groupId.toLowerCase());
   }
 }

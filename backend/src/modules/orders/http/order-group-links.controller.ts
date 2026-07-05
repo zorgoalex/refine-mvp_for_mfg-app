@@ -4,8 +4,8 @@ import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
-import { ProjectsRuntimeConfigService } from '../../projects/projects-runtime-config.service';
-import { OrderProjectLinkService } from '../application/order-project-link.service';
+import { GroupsRuntimeConfigService } from '../../groups/groups-runtime-config.service';
+import { OrderGroupLinkService } from '../application/order-group-link.service';
 import type {
   OrderProjectsResponseDto,
   ReplaceOrderProjectsRequestDto,
@@ -119,15 +119,15 @@ const replaceOrderProjectsResponseSwaggerSchema = {
 
 @ApiTags('Orders')
 @ApiBearerAuth()
-@Controller('orders/:orderId/projects')
-export class OrderProjectLinksController {
+@Controller('orders/:orderId/groups')
+export class OrderGroupLinksController {
   constructor(
-    @Inject(OrderProjectLinkService)
-    private readonly links: OrderProjectLinkService,
+    @Inject(OrderGroupLinkService)
+    private readonly links: OrderGroupLinkService,
     @Inject(OrdersRuntimeConfigService)
     private readonly runtimeConfig: OrdersRuntimeConfigService,
-    @Inject(ProjectsRuntimeConfigService)
-    private readonly projectsRuntimeConfig: ProjectsRuntimeConfigService,
+    @Inject(GroupsRuntimeConfigService)
+    private readonly groupsRuntimeConfig: GroupsRuntimeConfigService,
   ) {}
 
   @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
@@ -145,7 +145,7 @@ export class OrderProjectLinksController {
     @Query() query: Record<string, string | string[] | undefined> = {},
   ): Promise<OrderProjectsResponseDto> {
     this.assertOrdersReadEnabled();
-    this.assertProjectsEnabled();
+    this.assertGroupsEnabled();
     rejectUnsupportedProjectTemporalQuery(query);
     return this.links.get({
       currentUser: this.requireCurrentUser(request),
@@ -172,7 +172,7 @@ export class OrderProjectLinksController {
     @Body() body: unknown,
   ): Promise<ReplaceOrderProjectsResponseDto> {
     this.assertOrdersWriteEnabled();
-    this.assertProjectWritesEnabled();
+    this.assertGroupWritesEnabled();
     return this.links.replace({
       currentUser: this.requireCurrentUser(request),
       orderId: parseOrderId(orderIdParam),
@@ -205,20 +205,20 @@ export class OrderProjectLinksController {
     }
   }
 
-  private assertProjectsEnabled(): void {
-    if (!this.projectsRuntimeConfig.getFeatureFlags().projectsEnabled) {
-      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Projects API is disabled', {
-        feature: 'projects',
+  private assertGroupsEnabled(): void {
+    if (!this.groupsRuntimeConfig.getFeatureFlags().groupsEnabled) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Groups API is disabled', {
+        feature: 'groups',
       });
     }
   }
 
-  private assertProjectWritesEnabled(): void {
-    this.assertProjectsEnabled();
+  private assertGroupWritesEnabled(): void {
+    this.assertGroupsEnabled();
 
-    if (this.projectsRuntimeConfig.getFeatureFlags().projectsReadOnly) {
-      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Projects API is read-only', {
-        feature: 'projects',
+    if (this.groupsRuntimeConfig.getFeatureFlags().groupsReadOnly) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Groups API is read-only', {
+        feature: 'groups',
         readOnly: true,
       });
     }

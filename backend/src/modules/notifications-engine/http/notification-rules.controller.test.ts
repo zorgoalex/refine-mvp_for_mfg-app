@@ -134,7 +134,7 @@ describe('NotificationRulesController', () => {
         }, {
           eventType: 'order.status_changed',
           isEnabled: 'true',
-          projectId: '11111111-1111-4111-8111-111111111111',
+          groupId: '11111111-1111-4111-8111-111111111111',
         }),
       ).resolves.toEqual([notificationRule()]);
 
@@ -145,7 +145,7 @@ describe('NotificationRulesController', () => {
           filter: {
             eventType: 'order.status_changed',
             isEnabled: true,
-            projectId: '11111111-1111-4111-8111-111111111111',
+            groupId: '11111111-1111-4111-8111-111111111111',
           },
         },
       ]);
@@ -163,16 +163,16 @@ describe('NotificationRulesController', () => {
         },
       });
 
-      await controller.list({ user: currentUser() }, { projectId: 'global' });
+      await controller.list({ user: currentUser() }, { groupId: 'global' });
 
-      expect(calls).toEqual([{ userId: 'admin-id', filter: { projectId: 'global' } }]);
+      expect(calls).toEqual([{ userId: 'admin-id', filter: { groupId: 'global' } }]);
     });
 
-    it('rejects malformed list projectId with 422', async () => {
+    it('rejects malformed list groupId with 422', async () => {
       const controller = createController({ flags: flags({ engineEnabled: true }) });
 
       await expect(
-        controller.list({ user: currentUser() }, { projectId: 'not-a-uuid' }),
+        controller.list({ user: currentUser() }, { groupId: 'not-a-uuid' }),
       ).rejects.toMatchObject({
         statusCode: 422,
         code: 'VALIDATION_ERROR',
@@ -239,7 +239,7 @@ describe('NotificationRulesController', () => {
           input: {
             ruleCode: 'notify-order-overdue',
             eventType: 'order.status_changed',
-            projectId: '11111111-1111-4111-8111-111111111111',
+            groupId: '11111111-1111-4111-8111-111111111111',
             level: 'warning',
             priority: 50,
             isEnabled: true,
@@ -280,7 +280,7 @@ describe('NotificationRulesController', () => {
           {
             priority: 25,
             isEnabled: false,
-            projectId: null,
+            groupId: null,
             reason: 'Lower urgency',
             expectedUpdatedAt: '2026-06-14T10:00:00.123Z',
           },
@@ -293,7 +293,7 @@ describe('NotificationRulesController', () => {
           requestId: 'req-update-1',
           ruleId: 'rule-7',
           command: {
-            patch: { priority: 25, isEnabled: false, projectId: null },
+            patch: { priority: 25, isEnabled: false, groupId: null },
             reason: 'Lower urgency',
             expectedUpdatedAt: '2026-06-14T10:00:00.123Z',
           },
@@ -402,7 +402,7 @@ describe('NotificationRulesController', () => {
 interface FakeNotificationRulesService {
   list?(
     user: CurrentUser,
-    filter: { eventType?: string; isEnabled?: boolean; projectId?: string | 'global' },
+    filter: { eventType?: string; isEnabled?: boolean; groupId?: string | 'global' },
   ): Promise<NotificationRule[]>;
   getById?(user: CurrentUser, ruleId: string): Promise<NotificationRule>;
   create?(user: CurrentUser, requestId: string, input: unknown): Promise<NotificationRule>;
@@ -464,7 +464,7 @@ function notificationRule(overrides: Partial<NotificationRule> = {}): Notificati
     notificationRuleId: 'rule-1',
     ruleCode: 'notify-order-overdue',
     eventType: 'order.status_changed',
-    projectId: null,
+    groupId: null,
     isEnabled: true,
     priority: 100,
     level: 'info',
@@ -485,7 +485,7 @@ function validCreateBody(): Record<string, unknown> {
     level: 'warning',
     priority: 50,
     isEnabled: true,
-    projectId: '11111111-1111-4111-8111-111111111111',
+    groupId: '11111111-1111-4111-8111-111111111111',
     conditions: {},
     recipients: { roleCodes: ['manager'] },
   };

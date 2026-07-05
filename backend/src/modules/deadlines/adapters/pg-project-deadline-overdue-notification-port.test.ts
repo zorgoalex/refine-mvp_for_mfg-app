@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { PgProjectDeadlineOverdueNotificationPort } from './pg-project-deadline-overdue-notification-port';
+import { PgGroupDeadlineOverdueNotificationPort } from './pg-group-deadline-overdue-notification-port';
 
-describe('PgProjectDeadlineOverdueNotificationPort', () => {
-  it('notifies projects with current generic deadline links and typed order links', async () => {
+describe('PgGroupDeadlineOverdueNotificationPort', () => {
+  it('notifies groups with current generic deadline links and typed order links', async () => {
     const database = fakeDatabase([
-      { project_id: projectId('1') },
-      { project_id: projectId('2') },
+      { group_id: projectId('1') },
+      { group_id: projectId('2') },
     ]);
     const notifications = fakeNotifications();
-    const port = new PgProjectDeadlineOverdueNotificationPort(database, notifications, true);
+    const port = new PgGroupDeadlineOverdueNotificationPort(database, notifications, true);
 
     await port.notifyDeadlineOverdue({
       deadlineEventId: 'event-1',
@@ -21,14 +21,14 @@ describe('PgProjectDeadlineOverdueNotificationPort', () => {
     expect(database.queries[0]).toMatchObject({
       params: [deadlineId('1'), '42'],
     });
-    expect(database.queries[0]?.text).toContain('FROM public.project_entity_links');
+    expect(database.queries[0]?.text).toContain('FROM public.group_entity_links');
     expect(database.queries[0]?.text).toContain("pel.entity_type_code = 'deadline_instance'");
     expect(database.queries[0]?.text).toContain('pel.valid_to IS NULL');
-    expect(database.queries[0]?.text).toContain('FROM public.project_order_projects');
+    expect(database.queries[0]?.text).toContain('FROM public.group_order_groups');
     expect(database.queries[0]?.text).toContain('pop.valid_to IS NULL');
     expect(notifications.calls).toEqual([
       {
-        projectId: projectId('1'),
+        groupId: projectId('1'),
         sourceId: 'event-1',
         actorUserId: '7',
         requestId: 'req-1',
@@ -36,7 +36,7 @@ describe('PgProjectDeadlineOverdueNotificationPort', () => {
         orderId: '42',
       },
       {
-        projectId: projectId('2'),
+        groupId: projectId('2'),
         sourceId: 'event-1',
         actorUserId: '7',
         requestId: 'req-1',
@@ -49,7 +49,7 @@ describe('PgProjectDeadlineOverdueNotificationPort', () => {
   it('does not notify when no approved deadline_instance link exists', async () => {
     const database = fakeDatabase([]);
     const notifications = fakeNotifications();
-    const port = new PgProjectDeadlineOverdueNotificationPort(database, notifications, true);
+    const port = new PgGroupDeadlineOverdueNotificationPort(database, notifications, true);
 
     await port.notifyDeadlineOverdue({
       deadlineEventId: 'event-1',
@@ -60,14 +60,14 @@ describe('PgProjectDeadlineOverdueNotificationPort', () => {
     });
 
     expect(notifications.calls).toEqual([]);
-    expect(database.queries[1]?.text).toContain('PROJECT_DEADLINE_OVERDUE_SKIPPED');
-    expect(database.queries[1]?.params?.[2]).toBe('projects:p8:deadline-overdue-skipped:event-1:no_project_link');
+    expect(database.queries[1]?.text).toContain('GROUP_DEADLINE_OVERDUE_SKIPPED');
+    expect(database.queries[1]?.params?.[2]).toBe('groups:p8:deadline-overdue-skipped:event-1:no_group_link');
   });
 
-  it('records skipped evidence when the project P8 gate is disabled', async () => {
-    const database = fakeDatabase([{ project_id: projectId('1') }]);
+  it('records skipped evidence when the group P8 gate is disabled', async () => {
+    const database = fakeDatabase([{ group_id: projectId('1') }]);
     const notifications = fakeNotifications();
-    const port = new PgProjectDeadlineOverdueNotificationPort(database, notifications, false);
+    const port = new PgGroupDeadlineOverdueNotificationPort(database, notifications, false);
 
     await port.notifyDeadlineOverdue({
       deadlineEventId: 'event-1',
@@ -79,16 +79,16 @@ describe('PgProjectDeadlineOverdueNotificationPort', () => {
 
     expect(notifications.calls).toEqual([]);
     expect(database.queries).toHaveLength(1);
-    expect(database.queries[0]?.text).toContain('PROJECT_DEADLINE_OVERDUE_SKIPPED');
+    expect(database.queries[0]?.text).toContain('GROUP_DEADLINE_OVERDUE_SKIPPED');
     expect(database.queries[0]?.params?.[2]).toBe(
-      'projects:p8:deadline-overdue-skipped:event-1:project_p8_notifications_disabled',
+      'groups:p8:deadline-overdue-skipped:event-1:group_p8_notifications_disabled',
     );
   });
 
   it('records skipped evidence when there is no order visibility anchor', async () => {
-    const database = fakeDatabase([{ project_id: projectId('1') }]);
+    const database = fakeDatabase([{ group_id: projectId('1') }]);
     const notifications = fakeNotifications();
-    const port = new PgProjectDeadlineOverdueNotificationPort(database, notifications, true);
+    const port = new PgGroupDeadlineOverdueNotificationPort(database, notifications, true);
 
     await port.notifyDeadlineOverdue({
       deadlineEventId: 'event-1',
@@ -101,12 +101,12 @@ describe('PgProjectDeadlineOverdueNotificationPort', () => {
     expect(notifications.calls).toEqual([]);
     expect(database.queries).toHaveLength(1);
     expect(database.queries[0]?.params?.[2]).toBe(
-      'projects:p8:deadline-overdue-skipped:event-1:no_order_visibility_anchor',
+      'groups:p8:deadline-overdue-skipped:event-1:no_order_visibility_anchor',
     );
   });
 });
 
-function fakeDatabase(rows: Array<{ project_id: string }>) {
+function fakeDatabase(rows: Array<{ group_id: string }>) {
   return {
     queries: [] as Array<{ text: string; params: readonly unknown[] | undefined }>,
     async query(text: string, params?: readonly unknown[]) {
@@ -119,15 +119,15 @@ function fakeDatabase(rows: Array<{ project_id: string }>) {
 function fakeNotifications() {
   return {
     calls: [] as Array<{
-      projectId: string;
+      groupId: string;
       sourceId: string;
       actorUserId: string | null;
       requestId: string;
       deadlineInstanceId: string;
       orderId: string | null;
     }>,
-    async handleProjectDeadlineOverdue(input: {
-      projectId: string;
+    async handleGroupDeadlineOverdue(input: {
+      groupId: string;
       sourceId: string;
       actorUserId: string | null;
       requestId: string;

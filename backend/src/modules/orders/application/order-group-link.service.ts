@@ -2,41 +2,41 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
-import type { ProjectNotificationService } from '../../projects/notifications/project-notification.service';
+import type { GroupNotificationService } from '../../groups/notifications/group-notification.service';
 import type {
   GetOrderProjectsCommand,
   OrderProjectLinkRepositoryPort,
   ReplaceOrderProjectsCommand,
 } from './order-project-link.types';
 
-export interface OrderProjectLinkServicePorts {
+export interface OrderGroupLinkServicePorts {
   links: OrderProjectLinkRepositoryPort;
   permissions?: PermissionsService;
-  projectNotifications?: ProjectNotificationService;
-  projectP8NotificationsEnabled?: boolean;
+  groupNotifications?: GroupNotificationService;
+  groupP8NotificationsEnabled?: boolean;
 }
 
-export class OrderProjectLinkService {
+export class OrderGroupLinkService {
   private readonly permissions: PermissionsService;
 
-  constructor(private readonly ports: OrderProjectLinkServicePorts) {
+  constructor(private readonly ports: OrderGroupLinkServicePorts) {
     this.permissions = ports.permissions ?? new PermissionsService();
   }
 
   get(command: GetOrderProjectsCommand) {
-    this.requireAny(command.currentUser, ['orders.view', 'projects.view']);
+    this.requireAny(command.currentUser, ['orders.view', 'groups.view']);
     return this.ports.links.getOrderProjects(command);
   }
 
   async replace(command: ReplaceOrderProjectsCommand) {
-    this.requirePermission(command.currentUser, 'projects.manage_links');
-    const before = this.ports.projectP8NotificationsEnabled
+    this.requirePermission(command.currentUser, 'groups.manage_links');
+    const before = this.ports.groupP8NotificationsEnabled
       ? await this.ports.links.getOrderProjects(command)
       : null;
     const response = await this.ports.links.replaceOrderProjects(command);
 
     const p8NotificationFacts = internalOrderP8Facts(response);
-    if (this.ports.projectP8NotificationsEnabled && response.changed) {
+    if (this.ports.groupP8NotificationsEnabled && response.changed) {
       await this.notifyOrderProjectChanges(command, p8NotificationFacts, before?.projects, response.projects);
     }
 
@@ -45,11 +45,11 @@ export class OrderProjectLinkService {
 
   private async notifyOrderProjectChanges(
     command: ReplaceOrderProjectsCommand,
-    persistedFacts: Array<{ orderId: string; projectId: string; action: 'added' | 'removed' }>,
+    persistedFacts: Array<{ orderId: string; groupId: string; action: 'added' | 'removed' }>,
     before: Array<{ id: string }> | undefined,
     after: Array<{ id: string }>,
   ): Promise<void> {
-    if (!this.ports.projectNotifications) return;
+    if (!this.ports.groupNotifications) return;
 
     const facts = persistedFacts.length > 0 || !before
       ? persistedFacts
@@ -57,7 +57,7 @@ export class OrderProjectLinkService {
 
     if (facts.length === 0) return;
 
-    await this.ports.projectNotifications.handleProjectOrderLinksChanged({
+    await this.ports.groupNotifications.handleGroupOrderLinksChanged({
       sourceId: command.dto.idempotencyKey,
       actorUserId: command.currentUser.id,
       requestId: command.requestId ?? command.dto.idempotencyKey,
@@ -86,34 +86,34 @@ function orderProjectFactsFromDiff(
   orderId: number,
   before: Array<{ id: string }>,
   after: Array<{ id: string }>,
-): Array<{ orderId: string; projectId: string; action: 'added' | 'removed' }> {
+): Array<{ orderId: string; groupId: string; action: 'added' | 'removed' }> {
   const beforeIds = new Set(before.map((project) => project.id));
   const afterIds = new Set(after.map((project) => project.id));
   return [
     ...after.filter((project) => !beforeIds.has(project.id)).map((project) => ({
       orderId: String(orderId),
-      projectId: project.id,
+      groupId: project.id,
       action: 'added' as const,
     })),
     ...before.filter((project) => !afterIds.has(project.id)).map((project) => ({
       orderId: String(orderId),
-      projectId: project.id,
+      groupId: project.id,
       action: 'removed' as const,
     })),
   ];
 }
 
-function internalOrderP8Facts(response: unknown): Array<{ orderId: string; projectId: string; action: 'added' | 'removed' }> {
+function internalOrderP8Facts(response: unknown): Array<{ orderId: string; groupId: string; action: 'added' | 'removed' }> {
   const facts = (response as { p8NotificationFacts?: unknown }).p8NotificationFacts;
   if (!Array.isArray(facts)) return [];
   return facts.filter(isOrderP8Fact);
 }
 
-function isOrderP8Fact(value: unknown): value is { orderId: string; projectId: string; action: 'added' | 'removed' } {
+function isOrderP8Fact(value: unknown): value is { orderId: string; groupId: string; action: 'added' | 'removed' } {
   if (!value || typeof value !== 'object') return false;
   const fact = value as Record<string, unknown>;
   return typeof fact.orderId === 'string'
-    && typeof fact.projectId === 'string'
+    && typeof fact.groupId === 'string'
     && (fact.action === 'added' || fact.action === 'removed');
 }
 

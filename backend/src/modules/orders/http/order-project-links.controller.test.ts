@@ -2,18 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
-import type { OrderProjectLinkService } from '../application/order-project-link.service';
+import type { OrderGroupLinkService } from '../application/order-group-link.service';
 import type {
   OrderProjectsResponseDto,
   ReplaceOrderProjectsResponseDto,
 } from '../dto/order-project-link.dto';
-import type { ProjectsRuntimeConfigService } from '../../projects/projects-runtime-config.service';
-import { OrderProjectLinksController, parseReplaceOrderProjectsRequest } from './order-project-links.controller';
+import type { GroupsRuntimeConfigService } from '../../groups/groups-runtime-config.service';
+import { OrderGroupLinksController, parseReplaceOrderProjectsRequest } from './order-group-links.controller';
 import type { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 
 const PROJECT_ID = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
 
-describe('OrderProjectLinksController', () => {
+describe('OrderGroupLinksController', () => {
   it('normalizes primary project id before cross-field validation', () => {
     expect(parseReplaceOrderProjectsRequest({
       idempotencyKey: 'mixed-case-primary',
@@ -26,21 +26,21 @@ describe('OrderProjectLinksController', () => {
     });
   });
 
-  it('fails GET closed when projects are disabled', async () => {
+  it('fails GET closed when groups are disabled', async () => {
     const controller = createController({
-      projectsFlags: { projectsEnabled: false, projectsReadOnly: false },
+      groupsFlags: { groupsEnabled: false, groupsReadOnly: false },
     });
 
     await expect(controller.get({ user: currentUser(), requestId: 'req-1' }, '15')).rejects.toMatchObject({
       statusCode: 503,
       code: 'SERVICE_UNAVAILABLE',
-      details: { feature: 'projects' },
+      details: { feature: 'groups' },
     } satisfies Partial<ApiError>);
   });
 
-  it('fails PUT closed when projects are disabled or read-only', async () => {
+  it('fails PUT closed when groups are disabled or read-only', async () => {
     await expect(createController({
-      projectsFlags: { projectsEnabled: false, projectsReadOnly: false },
+      groupsFlags: { groupsEnabled: false, groupsReadOnly: false },
     }).replace(
       { user: currentUser(), requestId: 'req-1' },
       '15',
@@ -48,11 +48,11 @@ describe('OrderProjectLinksController', () => {
     )).rejects.toMatchObject({
       statusCode: 503,
       code: 'SERVICE_UNAVAILABLE',
-      details: { feature: 'projects' },
+      details: { feature: 'groups' },
     } satisfies Partial<ApiError>);
 
     await expect(createController({
-      projectsFlags: { projectsEnabled: true, projectsReadOnly: true },
+      groupsFlags: { groupsEnabled: true, groupsReadOnly: true },
     }).replace(
       { user: currentUser(), requestId: 'req-1' },
       '15',
@@ -60,7 +60,7 @@ describe('OrderProjectLinksController', () => {
     )).rejects.toMatchObject({
       statusCode: 503,
       code: 'SERVICE_UNAVAILABLE',
-      details: { feature: 'projects', readOnly: true },
+      details: { feature: 'groups', readOnly: true },
     } satisfies Partial<ApiError>);
   });
 
@@ -92,9 +92,9 @@ describe('OrderProjectLinksController', () => {
 
 function createController(options: {
   ordersFlags?: { ordersEnabled: boolean; ordersReadOnly: boolean };
-  projectsFlags?: { projectsEnabled: boolean; projectsReadOnly: boolean };
-  links?: Partial<OrderProjectLinkService>;
-} = {}): OrderProjectLinksController {
+  groupsFlags?: { groupsEnabled: boolean; groupsReadOnly: boolean };
+  links?: Partial<OrderGroupLinkService>;
+} = {}): OrderGroupLinksController {
   const links = {
     async get() {
       return orderProjectsResponse();
@@ -103,19 +103,19 @@ function createController(options: {
       return replaceProjectsResponse();
     },
     ...options.links,
-  } as unknown as OrderProjectLinkService;
+  } as unknown as OrderGroupLinkService;
   const ordersRuntimeConfig = {
     getFeatureFlags() {
       return options.ordersFlags ?? { ordersEnabled: true, ordersReadOnly: false };
     },
   } as OrdersRuntimeConfigService;
-  const projectsRuntimeConfig = {
+  const groupsRuntimeConfig = {
     getFeatureFlags() {
-      return options.projectsFlags ?? { projectsEnabled: true, projectsReadOnly: false };
+      return options.groupsFlags ?? { groupsEnabled: true, groupsReadOnly: false };
     },
-  } as ProjectsRuntimeConfigService;
+  } as GroupsRuntimeConfigService;
 
-  return new OrderProjectLinksController(links, ordersRuntimeConfig, projectsRuntimeConfig);
+  return new OrderGroupLinksController(links, ordersRuntimeConfig, groupsRuntimeConfig);
 }
 
 function currentUser(): CurrentUser {

@@ -5,25 +5,25 @@ import { DatabaseService } from '../../database/database.service';
 import type { BackendEnv } from '../../config/env.validation';
 import { PgOrderDeadlineSync } from '../deadlines/adapters/pg-order-deadline-sync';
 import {
-  PgProjectNotificationRecipientRepository,
-  UnavailableProjectNotificationRecipientRepository,
-} from '../projects/notifications/project-notification-recipient.repository';
+  PgGroupNotificationRecipientRepository,
+  UnavailableGroupNotificationRecipientRepository,
+} from '../groups/notifications/group-notification-recipient.repository';
 import {
-  PgProjectNotificationRepository,
-  UnavailableProjectNotificationRepository,
-} from '../projects/notifications/project-notification.repository';
-import { ProjectNotificationService } from '../projects/notifications/project-notification.service';
-import { ProjectsRuntimeConfigService } from '../projects/projects-runtime-config.service';
+  PgGroupNotificationRepository,
+  UnavailableGroupNotificationRepository,
+} from '../groups/notifications/group-notification.repository';
+import { GroupNotificationService } from '../groups/notifications/group-notification.service';
+import { GroupsRuntimeConfigService } from '../groups/groups-runtime-config.service';
 import { PgOrderExporter } from './adapters/pg-order-exporter';
 import { PgOrderReadRepository } from './adapters/pg-order-read-repository';
 import { PgOrderSnapshot } from './adapters/pg-order-snapshot';
-import { PgOrderProjectLinkRepository, UnavailableOrderProjectLinkRepository } from './adapters/pg-order-project-link-repository';
+import { PgOrderGroupLinkRepository, UnavailableOrderGroupLinkRepository } from './adapters/pg-order-group-link-repository';
 import { PgOrderTransactionManager } from './adapters/pg-order-transaction-manager';
 import { UnavailableOrderExporter } from './adapters/unavailable-order-exporter';
 import { UnavailableOrderReadRepository } from './adapters/unavailable-order-read-repository';
 import { UnavailableOrderSnapshot } from './adapters/unavailable-order-snapshot';
 import { OrderExportService } from './application/order-export.service';
-import { OrderProjectLinkService } from './application/order-project-link.service';
+import { OrderGroupLinkService } from './application/order-group-link.service';
 import { OrderSnapshotService } from './application/order-snapshot.service';
 import { OrderTransactionService } from './application/order-transaction.service';
 import { OrderQueryService } from './application/order-query.service';
@@ -31,7 +31,7 @@ import { RateLimitService } from '../../rate-limit/rate-limit.service';
 import { UnavailableOrderTransactionManager } from './adapters/unavailable-order-transaction-manager';
 import { SharedOrderExportRateLimiter } from './application/order-export-rate-limiter';
 import { OrderExportController } from './http/order-export.controller';
-import { OrderProjectLinksController } from './http/order-project-links.controller';
+import { OrderGroupLinksController } from './http/order-group-links.controller';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
 import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service';
@@ -52,10 +52,10 @@ export function shouldEnableOrderDeadlineSync(input: {
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [OrdersController, OrderExportController, OrderSnapshotController, OrderProjectLinksController],
+  controllers: [OrdersController, OrderExportController, OrderSnapshotController, OrderGroupLinksController],
   providers: [
     OrdersRuntimeConfigService,
-    ProjectsRuntimeConfigService,
+    GroupsRuntimeConfigService,
     {
       provide: OrderTransactionService,
       useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) =>
@@ -92,48 +92,48 @@ export function shouldEnableOrderDeadlineSync(input: {
       inject: [DatabaseService, ConfigService],
     },
     {
-      provide: OrderProjectLinkService,
+      provide: OrderGroupLinkService,
       useFactory: (
         database: DatabaseService,
-        projectNotifications: ProjectNotificationService,
-        projectsRuntimeConfig: ProjectsRuntimeConfigService,
+        groupNotifications: GroupNotificationService,
+        groupsRuntimeConfig: GroupsRuntimeConfigService,
       ) =>
-        new OrderProjectLinkService({
+        new OrderGroupLinkService({
           links: database.isConfigured
-            ? new PgOrderProjectLinkRepository(database)
-            : new UnavailableOrderProjectLinkRepository(),
-          projectNotifications,
-          projectP8NotificationsEnabled: projectsRuntimeConfig.getFeatureFlags().projectP8NotificationsEnabled,
+            ? new PgOrderGroupLinkRepository(database)
+            : new UnavailableOrderGroupLinkRepository(),
+          groupNotifications,
+          groupP8NotificationsEnabled: groupsRuntimeConfig.getFeatureFlags().groupP8NotificationsEnabled,
         }),
-      inject: [DatabaseService, ProjectNotificationService, ProjectsRuntimeConfigService],
+      inject: [DatabaseService, GroupNotificationService, GroupsRuntimeConfigService],
     },
     {
-      provide: PgProjectNotificationRecipientRepository,
+      provide: PgGroupNotificationRecipientRepository,
       useFactory: (database: DatabaseService) =>
         database.isConfigured
-          ? new PgProjectNotificationRecipientRepository(database)
-          : new UnavailableProjectNotificationRecipientRepository(),
+          ? new PgGroupNotificationRecipientRepository(database)
+          : new UnavailableGroupNotificationRecipientRepository(),
       inject: [DatabaseService],
     },
     {
-      provide: PgProjectNotificationRepository,
+      provide: PgGroupNotificationRepository,
       useFactory: (database: DatabaseService) =>
         database.isConfigured
-          ? new PgProjectNotificationRepository(database)
-          : new UnavailableProjectNotificationRepository(),
+          ? new PgGroupNotificationRepository(database)
+          : new UnavailableGroupNotificationRepository(),
       inject: [DatabaseService],
     },
     {
-      provide: ProjectNotificationService,
+      provide: GroupNotificationService,
       useFactory: (
-        recipients: PgProjectNotificationRecipientRepository,
-        notifications: PgProjectNotificationRepository,
+        recipients: PgGroupNotificationRecipientRepository,
+        notifications: PgGroupNotificationRepository,
       ) =>
-        new ProjectNotificationService({
+        new GroupNotificationService({
           recipients,
           notifications,
         }),
-      inject: [PgProjectNotificationRecipientRepository, PgProjectNotificationRepository],
+      inject: [PgGroupNotificationRecipientRepository, PgGroupNotificationRepository],
     },
     {
       provide: OrderExportService,

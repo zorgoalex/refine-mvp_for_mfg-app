@@ -1,6 +1,6 @@
 import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../../database/database.types';
-import type { ProjectNotificationService } from '../../projects/notifications/project-notification.service';
+import type { GroupNotificationService } from '../../groups/notifications/group-notification.service';
 import type {
   DeadlineProjectDeadlineOverdueNotificationInput,
   DeadlineProjectDeadlineOverdueNotificationPort,
@@ -8,19 +8,19 @@ import type {
 } from '../application/deadline.types';
 
 interface ProjectLinkRow extends QueryResultRow {
-  project_id: string;
+  group_id: string;
 }
 
-export class PgProjectDeadlineOverdueNotificationPort implements DeadlineProjectDeadlineOverdueNotificationPort {
+export class PgGroupDeadlineOverdueNotificationPort implements DeadlineProjectDeadlineOverdueNotificationPort {
   constructor(
     private readonly database: DatabaseClient,
-    private readonly notifications: ProjectNotificationService,
+    private readonly notifications: GroupNotificationService,
     private readonly enabled: boolean,
   ) {}
 
   async notifyDeadlineOverdue(input: DeadlineProjectDeadlineOverdueNotificationInput): Promise<void> {
     if (!this.enabled) {
-      await this.recordSkipped(input, 'project_p8_notifications_disabled');
+      await this.recordSkipped(input, 'group_p8_notifications_disabled');
       return;
     }
     if (!input.orderId) {
@@ -31,37 +31,37 @@ export class PgProjectDeadlineOverdueNotificationPort implements DeadlineProject
     const result = await this.database.query<ProjectLinkRow>(
       `
       WITH deadline_links AS (
-        SELECT pel.project_id
-        FROM public.project_entity_links pel
+        SELECT pel.group_id
+        FROM public.group_entity_links pel
         WHERE pel.entity_type_code = 'deadline_instance'
           AND pel.entity_id_text = $1
           AND pel.valid_to IS NULL
       ),
       order_links AS (
-        SELECT pop.project_id
-        FROM public.project_order_projects pop
+        SELECT pop.group_id
+        FROM public.group_order_groups pop
         WHERE pop.order_id = $2::bigint
           AND pop.valid_to IS NULL
       )
-      SELECT DISTINCT project_id::text AS project_id
+      SELECT DISTINCT group_id::text AS group_id
       FROM (
-        SELECT project_id FROM deadline_links
+        SELECT group_id FROM deadline_links
         UNION
-        SELECT project_id FROM order_links
-      ) linked_projects
-      ORDER BY project_id::text ASC
+        SELECT group_id FROM order_links
+      ) linked_groups
+      ORDER BY group_id::text ASC
       `,
       [input.deadlineInstanceId, input.orderId],
     );
 
     if (result.rows.length === 0) {
-      await this.recordSkipped(input, 'no_project_link');
+      await this.recordSkipped(input, 'no_group_link');
       return;
     }
 
     for (const row of result.rows) {
-      await this.notifications.handleProjectDeadlineOverdue({
-        projectId: row.project_id,
+      await this.notifications.handleGroupDeadlineOverdue({
+        groupId: row.group_id,
         sourceId: input.deadlineEventId,
         actorUserId: input.actorUserId,
         requestId: input.requestId,
@@ -81,7 +81,7 @@ export class PgProjectDeadlineOverdueNotificationPort implements DeadlineProject
         event_type, aggregate_type, aggregate_id, payload_json, idempotency_key
       )
       VALUES (
-        'PROJECT_DEADLINE_OVERDUE_SKIPPED',
+        'GROUP_DEADLINE_OVERDUE_SKIPPED',
         'deadline_instance',
         $1,
         $2::jsonb,
@@ -92,8 +92,8 @@ export class PgProjectDeadlineOverdueNotificationPort implements DeadlineProject
       [
         input.deadlineInstanceId,
         JSON.stringify({
-          source: 'projects-p8-notifications',
-          eventType: 'PROJECT_DEADLINE_OVERDUE',
+          source: 'groups-p8-notifications',
+          eventType: 'GROUP_DEADLINE_OVERDUE',
           deadlineEventId: input.deadlineEventId,
           deadlineInstanceId: input.deadlineInstanceId,
           orderId: input.orderId,
@@ -101,7 +101,7 @@ export class PgProjectDeadlineOverdueNotificationPort implements DeadlineProject
           requestId: input.requestId,
           skipReason,
         }),
-        `projects:p8:deadline-overdue-skipped:${input.deadlineEventId}:${skipReason}`,
+        `groups:p8:deadline-overdue-skipped:${input.deadlineEventId}:${skipReason}`,
       ],
     );
   }

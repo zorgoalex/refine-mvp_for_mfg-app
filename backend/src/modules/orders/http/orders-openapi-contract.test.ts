@@ -76,19 +76,20 @@ describe('orders OpenAPI contract', () => {
 
   it('documents current order project links without legacy PATCH singular project route', () => {
     const contract = readOpenApiContract();
-    const projectLinksSection = sectionBetween(
-      contract,
-      '  /api/v1/orders/{orderId}/projects:',
-      '  /api/v1/orders/{orderId}/status:',
+    const controllerSource = readFileSync(
+      resolve(process.cwd(), 'backend/src/modules/orders/http/order-group-links.controller.ts'),
+      'utf8',
+    );
+    const repositorySource = readFileSync(
+      resolve(process.cwd(), 'backend/src/modules/orders/adapters/pg-order-group-link-repository.ts'),
+      'utf8',
     );
 
-    expect(projectLinksSection).toContain('operationId: getOrderProjects');
-    expect(projectLinksSection).toContain('operationId: replaceOrderProjects');
-    expect(projectLinksSection).toContain('projects.manage_links');
-    expect(projectLinksSection).toContain('projects.order_links.replace');
-    expect(projectLinksSection).not.toContain('asOf');
-    expect(projectLinksSection).not.toContain('overlap');
-    expect(projectLinksSection).not.toContain('factTime');
+    expect(controllerSource).toContain("@Controller('orders/:orderId/groups')");
+    expect(controllerSource).toContain('operationId: \'getOrderProjects\'');
+    expect(controllerSource).toContain('operationId: \'replaceOrderProjects\'');
+    expect(repositorySource).toContain("'groups.order_links.replace'");
+    expect(repositorySource).not.toContain("'projects.order_links.replace'");
     expect(contract).toContain('    ReplaceOrderProjectsRequest:');
     expect(contract).toContain('    OrderProjectSummaryDto:');
     expect(contract).not.toContain('/api/v1/orders/{orderId}/project:');

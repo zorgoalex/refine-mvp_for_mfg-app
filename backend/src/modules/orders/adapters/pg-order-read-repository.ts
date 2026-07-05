@@ -198,7 +198,7 @@ interface OrderDowelingLinkRow extends QueryResultRow {
 }
 
 interface OrderProjectLinkRow extends QueryResultRow {
-  project_id: string;
+  group_id: string;
   code: string;
   name: string;
   relation_type: OrderProjectRelationType;
@@ -453,8 +453,8 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           ),
           '[]'::jsonb
         ) AS project_links_json
-        FROM public.project_order_projects pop
-        INNER JOIN public.project_projects p ON p.id = pop.project_id
+        FROM public.group_order_groups pop
+        INNER JOIN public.group_groups p ON p.id = pop.group_id
         WHERE pop.order_id = o.order_id
           AND pop.valid_to IS NULL
       ) project_projection ON true
@@ -591,14 +591,14 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     const projectLinks = await this.database.query<OrderProjectLinkRow>(
       `
       SELECT
-        p.id::text AS project_id,
+        p.id::text AS group_id,
         p.code,
         p.name,
         pop.relation_type,
         pop.is_primary,
         pop.valid_from
-      FROM public.project_order_projects pop
-      INNER JOIN public.project_projects p ON p.id = pop.project_id
+      FROM public.group_order_groups pop
+      INNER JOIN public.group_groups p ON p.id = pop.group_id
       WHERE pop.order_id = $1
         AND pop.valid_to IS NULL
       ORDER BY pop.is_primary DESC, pop.relation_type ASC, p.name ASC, p.code ASC, pop.id ASC
@@ -841,7 +841,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       clauses.push(`
         NOT EXISTS (
           SELECT 1
-          FROM public.project_order_projects pop_filter
+          FROM public.group_order_groups pop_filter
           WHERE pop_filter.order_id = o.order_id
             AND pop_filter.valid_to IS NULL
         )
@@ -851,32 +851,32 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       if (command.query.projectMode === 'all') {
         clauses.push(`
           (
-            SELECT COUNT(DISTINCT pop_filter.project_id)::int
-            FROM public.project_order_projects pop_filter
+            SELECT COUNT(DISTINCT pop_filter.group_id)::int
+            FROM public.group_order_groups pop_filter
             WHERE pop_filter.order_id = o.order_id
               AND pop_filter.valid_to IS NULL
-              AND pop_filter.project_id = ANY($${projectIdsIndex}::uuid[])
+              AND pop_filter.group_id = ANY($${projectIdsIndex}::uuid[])
           ) = ${command.query.projectIds.length}
         `);
       } else if (command.query.projectMode === 'primary') {
         clauses.push(`
           EXISTS (
             SELECT 1
-            FROM public.project_order_projects pop_filter
+            FROM public.group_order_groups pop_filter
             WHERE pop_filter.order_id = o.order_id
               AND pop_filter.valid_to IS NULL
               AND pop_filter.is_primary
-              AND pop_filter.project_id = ANY($${projectIdsIndex}::uuid[])
+              AND pop_filter.group_id = ANY($${projectIdsIndex}::uuid[])
           )
         `);
       } else {
         clauses.push(`
           EXISTS (
             SELECT 1
-            FROM public.project_order_projects pop_filter
+            FROM public.group_order_groups pop_filter
             WHERE pop_filter.order_id = o.order_id
               AND pop_filter.valid_to IS NULL
-              AND pop_filter.project_id = ANY($${projectIdsIndex}::uuid[])
+              AND pop_filter.group_id = ANY($${projectIdsIndex}::uuid[])
           )
         `);
       }
@@ -1201,7 +1201,7 @@ function mapDowelingLink(row: OrderDowelingLinkRow) {
 
 function mapProjectLinkRow(row: OrderProjectLinkRow): OrderProjectSummaryDto {
   return {
-    id: row.project_id,
+    id: row.group_id,
     code: row.code,
     name: row.name,
     relationType: row.relation_type,

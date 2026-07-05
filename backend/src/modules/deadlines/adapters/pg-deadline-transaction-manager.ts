@@ -8,21 +8,21 @@ import {
   changeOrderStatusFromDeadlineInTransaction,
   changeProductionStatusFromDeadlineInTransaction,
 } from '../../production-actions/adapters/pg-production-action-repository';
-import { PgProjectNotificationRecipientRepository } from '../../projects/notifications/project-notification-recipient.repository';
-import { PgProjectNotificationRepository } from '../../projects/notifications/project-notification.repository';
-import { ProjectNotificationService } from '../../projects/notifications/project-notification.service';
+import { PgGroupNotificationRecipientRepository } from '../../groups/notifications/group-notification-recipient.repository';
+import { PgGroupNotificationRepository } from '../../groups/notifications/group-notification.repository';
+import { GroupNotificationService } from '../../groups/notifications/group-notification.service';
 import { PgDeadlineRepository } from './pg-deadline-repository';
-import { PgProjectDeadlineOverdueNotificationPort } from './pg-project-deadline-overdue-notification-port';
+import { PgGroupDeadlineOverdueNotificationPort } from './pg-group-deadline-overdue-notification-port';
 
 export class PgDeadlineTransactionManager implements DeadlineTransactionManagerPort {
   constructor(
     private readonly database: DatabaseService,
-    private readonly projectP8NotificationsEnabled: boolean = false,
+    private readonly groupP8NotificationsEnabled: boolean = false,
   ) {}
 
   runInTransaction<T>(handler: (unitOfWork: DeadlineUnitOfWork) => Promise<T>): Promise<T> {
     return this.database.transaction((tx) =>
-      handler(new PgDeadlineUnitOfWork(tx, this.projectP8NotificationsEnabled)));
+      handler(new PgDeadlineUnitOfWork(tx, this.groupP8NotificationsEnabled)));
   }
 }
 
@@ -32,7 +32,7 @@ class PgDeadlineUnitOfWork implements DeadlineUnitOfWork {
   readonly productionStatusActionPort: DeadlineUnitOfWork['productionStatusActionPort'];
   readonly projectDeadlineOverduePort: DeadlineUnitOfWork['projectDeadlineOverduePort'];
 
-  constructor(tx: TransactionClient, projectP8NotificationsEnabled: boolean) {
+  constructor(tx: TransactionClient, groupP8NotificationsEnabled: boolean) {
     this.deadlines = new PgDeadlineRepository(tx);
     this.statusActionPort = {
       async changeOrderStatusFromDeadline(command) {
@@ -54,13 +54,13 @@ class PgDeadlineUnitOfWork implements DeadlineUnitOfWork {
         };
       },
     };
-    this.projectDeadlineOverduePort = new PgProjectDeadlineOverdueNotificationPort(
+    this.projectDeadlineOverduePort = new PgGroupDeadlineOverdueNotificationPort(
       tx,
-      new ProjectNotificationService({
-        recipients: new PgProjectNotificationRecipientRepository(tx),
-        notifications: new PgProjectNotificationRepository(tx),
+      new GroupNotificationService({
+        recipients: new PgGroupNotificationRecipientRepository(tx),
+        notifications: new PgGroupNotificationRepository(tx),
       }),
-      projectP8NotificationsEnabled,
+      groupP8NotificationsEnabled,
     );
   }
 }

@@ -49,12 +49,12 @@ describe('validateNotificationRuleInput', () => {
     ).toEqual({ ok: true });
   });
 
-  it('rejects head resolvers for the project-only PROJECT_DEADLINE_OVERDUE event', () => {
+  it('rejects head resolvers for the project-only GROUP_DEADLINE_OVERDUE event', () => {
     expect(
       validateNotificationRuleInput(
         {
           ...base,
-          eventType: 'PROJECT_DEADLINE_OVERDUE',
+          eventType: 'GROUP_DEADLINE_OVERDUE',
           conditions: {},
           recipients: { resolvers: ['workshop_head' as const] },
         },
@@ -65,7 +65,7 @@ describe('validateNotificationRuleInput', () => {
 
   it('rejects order-status conditions on an event without order context', () => {
     expect(validateNotificationRuleInput(
-      { ...base, eventType: 'PROJECT_DEADLINE_OVERDUE', conditions: { allowedFromOrderStatusIds: [1] }, recipients: { resolvers: ['project_participants'] } },
+      { ...base, eventType: 'GROUP_DEADLINE_OVERDUE', conditions: { allowedFromOrderStatusIds: [1] }, recipients: { resolvers: ['group_participants'] } },
       { knownRoleCodes: [] },
     )).toEqual({ ok: false, code: 'ORDER_CONDITION_UNSUPPORTED' });
   });

@@ -28,7 +28,7 @@ export class NotificationRulesController {
   @ApiQuery({ name: 'eventType', required: false, type: String })
   @ApiQuery({ name: 'isEnabled', required: false, type: Boolean })
   @ApiQuery({
-    name: 'projectId',
+    name: 'groupId',
     required: false,
     schema: {
       oneOf: [
@@ -176,9 +176,9 @@ function parseListFilter(query: Record<string, unknown>): ListNotificationRulesF
     filter.isEnabled = parseBooleanQueryParam(isEnabled);
   }
 
-  const projectId = query?.['projectId'];
-  if (projectId !== undefined) {
-    filter.projectId = parseProjectIdQueryParam(projectId);
+  const groupId = query?.['groupId'];
+  if (groupId !== undefined) {
+    filter.groupId = parseProjectIdQueryParam(groupId);
   }
 
   return filter;
@@ -212,7 +212,7 @@ function parseProjectIdQueryParam(value: unknown): string | 'global' {
   }
 
   throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid notification rule list filter', {
-    errors: [{ field: 'projectId', message: 'projectId must be a UUID or global' }],
+    errors: [{ field: 'groupId', message: 'groupId must be a UUID or global' }],
   });
 }
 

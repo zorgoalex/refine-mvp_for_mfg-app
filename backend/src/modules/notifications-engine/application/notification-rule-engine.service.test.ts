@@ -22,7 +22,7 @@ function ctx(overrides: Partial<NotificationEventContext> = {}): NotificationEve
     deadlineId: null,
     deadlineEntityType: null,
     deadlineInstanceId: null,
-    projectIds: [],
+    groupIds: [],
     orderStatusId: 30,
     isOrderCompleted: false,
     isCurrentDeadlineEvent: true,
@@ -36,7 +36,7 @@ function rule(overrides: Partial<NotificationRule> = {}): NotificationRule {
     notificationRuleId: 'rule-1',
     ruleCode: 'rule_code_1',
     eventType: 'order.production_status_changed',
-    projectId: null,
+    groupId: null,
     isEnabled: true,
     priority: 100,
     level: 'info',
@@ -121,22 +121,22 @@ describe('NotificationRuleEngineService.processEvent', () => {
   });
 
   it('matches global rules and project-scoped rules for attributed events', async () => {
-    const globalRule = rule({ notificationRuleId: 'global-rule', projectId: null, recipients: { userIds: [1] } });
+    const globalRule = rule({ notificationRuleId: 'global-rule', groupId: null, recipients: { userIds: [1] } });
     const scopedRule = rule({
       notificationRuleId: 'scoped-rule',
-      projectId: '11111111-1111-4111-8111-111111111111',
+      groupId: '11111111-1111-4111-8111-111111111111',
       recipients: { userIds: [2] },
     });
     const otherProjectRule = rule({
       notificationRuleId: 'other-rule',
-      projectId: '22222222-2222-4222-8222-222222222222',
+      groupId: '22222222-2222-4222-8222-222222222222',
       recipients: { userIds: [3] },
     });
     const deps = fakes({
       ruleRepo: { listEnabledByEvent: vi.fn(async () => [globalRule, scopedRule, otherProjectRule]) },
       contextBuilder: {
         buildContext: vi.fn(async () => ctx({
-          projectIds: ['11111111-1111-4111-8111-111111111111'],
+          groupIds: ['11111111-1111-4111-8111-111111111111'],
         })),
       },
       recipientResolver: {
@@ -157,12 +157,12 @@ describe('NotificationRuleEngineService.processEvent', () => {
   it('skips project-scoped rules when the event has no project attribution', async () => {
     const scopedRule = rule({
       notificationRuleId: 'scoped-rule',
-      projectId: '11111111-1111-4111-8111-111111111111',
+      groupId: '11111111-1111-4111-8111-111111111111',
       recipients: { userIds: [1] },
     });
     const deps = fakes({
       ruleRepo: { listEnabledByEvent: vi.fn(async () => [scopedRule]) },
-      contextBuilder: { buildContext: vi.fn(async () => ctx({ projectIds: [] })) },
+      contextBuilder: { buildContext: vi.fn(async () => ctx({ groupIds: [] })) },
       recipientResolver: { resolve: vi.fn(async () => [1]) },
     });
     const svc = service(deps);

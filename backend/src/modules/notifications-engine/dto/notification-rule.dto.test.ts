@@ -79,18 +79,18 @@ describe('parseCreateNotificationRuleRequest', () => {
     });
   });
 
-  it('parses projectId on create', () => {
+  it('parses groupId on create', () => {
     const result = parseCreateNotificationRuleRequest({
       ruleCode: 'project-deadline-overdue',
       eventType: 'DEADLINE_EXPIRED',
       level: 'warning',
       priority: 10,
       isEnabled: true,
-      projectId: '11111111-1111-4111-8111-111111111111',
-      recipients: { resolvers: ['project_participants'] },
+      groupId: '11111111-1111-4111-8111-111111111111',
+      recipients: { resolvers: ['group_participants'] },
     });
 
-    expect(result.projectId).toBe('11111111-1111-4111-8111-111111111111');
+    expect(result.groupId).toBe('11111111-1111-4111-8111-111111111111');
   });
 
   it('preserves deadlineEntityTypes in conditions on create', () => {
@@ -292,13 +292,13 @@ describe('parseCreateNotificationRuleRequest', () => {
     );
   });
 
-  it('rejects malformed projectId', () => {
+  it('rejects malformed groupId', () => {
     expectInvalidPayloadError(() =>
       parseCreateNotificationRuleRequest({
         ruleCode: 'bad-project',
         eventType: 'DEADLINE_EXPIRED',
-        projectId: 'not-a-uuid',
-        recipients: { resolvers: ['project_participants'] },
+        groupId: 'not-a-uuid',
+        recipients: { resolvers: ['group_participants'] },
       }),
     );
   });
@@ -338,14 +338,14 @@ describe('parseUpdateNotificationRuleRequest', () => {
     });
   });
 
-  it('parses null projectId on update as explicit clear', () => {
+  it('parses null groupId on update as explicit clear', () => {
     const result = parseUpdateNotificationRuleRequest({
-      projectId: null,
+      groupId: null,
       reason: 'make rule global',
       expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
     });
 
-    expect(result.patch).toEqual({ projectId: null });
+    expect(result.patch).toEqual({ groupId: null });
   });
 
   it('parses an update touching conditions and recipients', () => {

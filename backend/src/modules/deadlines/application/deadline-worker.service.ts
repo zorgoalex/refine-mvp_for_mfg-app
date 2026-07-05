@@ -128,10 +128,10 @@ export class DeadlineWorkerService {
           ) {
             // The notification engine owns the DEADLINE_EXPIRED event during
             // the convergence cutover. The engine reproduces project-overdue
-            // delivery via the project_participants resolver, so the inline
+            // delivery via the group_participants resolver, so the inline
             // P8 port must NOT write a project_notification. Record an outbox
             // skip marker so the existing skip-evidence pattern is preserved
-            // (mirrors `pg-project-deadline-overdue-notification-port.recordSkipped`).
+            // (mirrors `pg-group-deadline-overdue-notification-port.recordSkipped`).
             await projectDeadlineOverduePort.recordSkipped(
               {
                 deadlineEventId: event.deadlineEventId,

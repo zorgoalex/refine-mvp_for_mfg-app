@@ -8,7 +8,7 @@ export interface ValidateRuleContext {
 export interface NotificationRuleInput {
   ruleCode: string;
   eventType: string;
-  projectId?: string | null;
+  groupId?: string | null;
   level: 'info' | 'warning' | 'error';
   priority: number;
   conditions: NotificationRuleConditions;

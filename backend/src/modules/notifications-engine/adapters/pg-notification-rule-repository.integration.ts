@@ -48,7 +48,7 @@ maybe('PgNotificationRuleRepository integration', () => {
 
     expect(created.ruleCode).toBe(ruleCode);
     expect(created.eventType).toBe(eventType);
-    expect(created.projectId).toBeNull();
+    expect(created.groupId).toBeNull();
     expect(created.level).toBe('info');
     expect(created.isEnabled).toBe(true);
     expect(created.conditions).toEqual({ allowedFromOrderStatusIds: [1, 2] });
@@ -61,7 +61,7 @@ maybe('PgNotificationRuleRepository integration', () => {
 
     const updated = await repository.update(pool, created.notificationRuleId, {
       level: 'warning',
-      projectId: null,
+      groupId: null,
       priority: 50,
       isEnabled: false,
       conditions: { allowedFromOrderStatusIds: [3] },
@@ -73,7 +73,7 @@ maybe('PgNotificationRuleRepository integration', () => {
     });
 
     expect(updated.level).toBe('warning');
-    expect(updated.projectId).toBeNull();
+    expect(updated.groupId).toBeNull();
     expect(updated.priority).toBe(50);
     expect(updated.isEnabled).toBe(false);
     expect(updated.conditions).toEqual({ allowedFromOrderStatusIds: [3] });

@@ -28,7 +28,7 @@ interface LockedOrderRow extends QueryResultRow {
 
 interface ProjectLinkRow extends QueryResultRow {
   link_id: string;
-  project_id: string;
+  group_id: string;
   code: string;
   name: string;
   relation_type: OrderProjectRelationType;
@@ -61,9 +61,9 @@ type OrderProjectDatabase = DatabaseClient & {
   transaction<T>(handler: (client: TransactionClient) => Promise<T>): Promise<T>;
 };
 
-const SOURCE = 'projects-order-links';
+const SOURCE = 'groups-order-links';
 
-export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryPort {
+export class PgOrderGroupLinkRepository implements OrderProjectLinkRepositoryPort {
   private readonly orderAccessPolicy = new OrderAccessPolicy();
 
   constructor(private readonly database: OrderProjectDatabase) {}
@@ -112,7 +112,7 @@ export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryP
       let nextVersion = currentVersion;
       let auditId: string | undefined;
       let projects = currentRows;
-      let p8NotificationFacts: Array<{ orderId: string; projectId: string; action: 'added' | 'removed' }> = [];
+      let p8NotificationFacts: Array<{ orderId: string; groupId: string; action: 'added' | 'removed' }> = [];
 
       if (changed) {
         if (removed.length > 0) {
@@ -185,7 +185,7 @@ export class PgOrderProjectLinkRepository implements OrderProjectLinkRepositoryP
   }
 }
 
-export class UnavailableOrderProjectLinkRepository implements OrderProjectLinkRepositoryPort {
+export class UnavailableOrderGroupLinkRepository implements OrderProjectLinkRepositoryPort {
   async getOrderProjects(): Promise<OrderProjectsResponseDto> {
     throw databaseUnavailable();
   }
@@ -229,14 +229,14 @@ async function loadCurrentLinks(database: DatabaseClient, orderId: number): Prom
     `
     SELECT
       pop.id::text AS link_id,
-      pop.project_id::text AS project_id,
+      pop.group_id::text AS group_id,
       p.code,
       p.name,
       pop.relation_type,
       pop.is_primary,
       pop.valid_from
-    FROM public.project_order_projects pop
-    INNER JOIN public.project_projects p ON p.id = pop.project_id
+    FROM public.group_order_groups pop
+    INNER JOIN public.group_groups p ON p.id = pop.group_id
     WHERE pop.order_id = $1
       AND pop.valid_to IS NULL
     ORDER BY pop.is_primary DESC, pop.relation_type ASC, p.name ASC, p.code ASC, pop.id ASC
@@ -253,7 +253,7 @@ async function validateSubmittedProjects(tx: DatabaseClient, projectIds: string[
   const result = await tx.query<ProjectValidationRow>(
     `
     SELECT id::text AS id, status, archived_at
-    FROM public.project_projects
+    FROM public.group_groups
     WHERE id = ANY($1::uuid[])
     FOR KEY SHARE
     `,
@@ -281,7 +281,7 @@ async function closeLinks(
 ): Promise<void> {
   await tx.query(
     `
-    UPDATE public.project_order_projects
+    UPDATE public.group_order_groups
     SET valid_to = now(),
         ended_by = $2,
         end_reason = $3
@@ -300,15 +300,15 @@ async function insertLink(
 ): Promise<ProjectLinkRow> {
   const result = await tx.query<ProjectLinkRow>(
     `
-    INSERT INTO public.project_order_projects (
-      order_id, project_id, relation_type, is_primary, created_by
+    INSERT INTO public.group_order_groups (
+      order_id, group_id, relation_type, is_primary, created_by
     )
     VALUES ($1, $2::uuid, $3, $4, $5)
     RETURNING
       id::text AS link_id,
-      project_id::text,
-      (SELECT code FROM public.project_projects WHERE id = project_id) AS code,
-      (SELECT name FROM public.project_projects WHERE id = project_id) AS name,
+      group_id::text,
+      (SELECT code FROM public.group_groups WHERE id = group_id) AS code,
+      (SELECT name FROM public.group_groups WHERE id = group_id) AS name,
       relation_type,
       is_primary,
       valid_from
@@ -351,7 +351,7 @@ async function writeAudit(
       before_json, after_json, diff_json, metadata_json
     )
     VALUES (
-      'projects.order_links_changed', 'order', $1, $2, $3, $4, $4,
+      'groups.order_links_changed', 'order', $1, $2, $3, $4, $4,
       $5, $6, $7, $8,
       $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb
     )
@@ -394,15 +394,15 @@ async function enqueueOutbox(
   },
 ): Promise<void> {
   const addedFacts = input.added.map((link) => ({
-    factKey: orderProjectFactKey(input.command.orderId, link.projectId, 'added'),
+    factKey: orderGroupFactKey(input.command.orderId, link.projectId, 'added'),
     orderId: String(input.command.orderId),
-    projectId: link.projectId,
+    groupId: link.projectId,
     action: 'added' as const,
   }));
   const removedFacts = input.removed.map((link) => ({
-    factKey: orderProjectFactKey(input.command.orderId, link.project_id, 'removed'),
+    factKey: orderGroupFactKey(input.command.orderId, link.group_id, 'removed'),
     orderId: String(input.command.orderId),
-    projectId: link.project_id,
+    groupId: link.group_id,
     action: 'removed' as const,
   }));
   const facts = [...addedFacts, ...removedFacts];
@@ -416,49 +416,49 @@ async function enqueueOutbox(
     ON CONFLICT (idempotency_key) DO NOTHING
     `,
     [
-      'PROJECT_ORDER_LINKS_CHANGED',
+      'GROUP_ORDER_LINKS_CHANGED',
       String(input.command.orderId),
       JSON.stringify({
         source: SOURCE,
-        eventType: 'PROJECT_ORDER_LINKS_CHANGED',
+        eventType: 'GROUP_ORDER_LINKS_CHANGED',
         idempotencyKey: input.command.dto.idempotencyKey,
         actorUserId: input.command.currentUser.id,
         requestId: input.requestId,
         auditId: input.auditId,
         orderId: input.command.orderId,
         clientId: toNullableNumber(input.order.client_id),
-        addedProjectIds: input.added.map((link) => link.projectId),
-        removedProjectIds: input.removed.map((link) => link.project_id),
+        addedGroupIds: input.added.map((link) => link.projectId),
+        removedGroupIds: input.removed.map((link) => link.group_id),
         facts,
-        recipientVisibilityPolicy: 'project_participants_must_pass_base_entity_visibility',
+        recipientVisibilityPolicy: 'group_participants_must_pass_base_entity_visibility',
         previousVersion: input.previousVersion,
         version: input.nextVersion,
         primaryProject: input.projects.find((project) => project.isPrimary) ?? null,
         projects: input.projects,
       }),
-      `${input.command.dto.idempotencyKey}:project_order_links_changed`,
+      `${input.command.dto.idempotencyKey}:group_order_links_changed`,
     ],
   );
 }
 
-function orderProjectFactKey(orderId: number, projectId: string, action: 'added' | 'removed'): string {
-  return `order:${orderId}:project:${projectId}:${action}`;
+function orderGroupFactKey(orderId: number, groupId: string, action: 'added' | 'removed'): string {
+  return `order:${orderId}:group:${groupId}:${action}`;
 }
 
 function orderProjectNotificationFacts(
   orderId: number,
   added: ReplaceOrderProjectLinkDto[],
   removed: ProjectLinkRow[],
-): Array<{ orderId: string; projectId: string; action: 'added' | 'removed' }> {
+): Array<{ orderId: string; groupId: string; action: 'added' | 'removed' }> {
   return [
     ...added.map((link) => ({
       orderId: String(orderId),
-      projectId: link.projectId,
+      groupId: link.projectId,
       action: 'added' as const,
     })),
     ...removed.map((link) => ({
       orderId: String(orderId),
-      projectId: link.project_id,
+      groupId: link.group_id,
       action: 'removed' as const,
     })),
   ];
@@ -485,7 +485,7 @@ async function reconcileIdempotency(
     INSERT INTO command_idempotency_keys (
       idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status
     )
-    VALUES ($1, 'projects.order_links.replace', $2, 'order', $3, $4, 'processing')
+    VALUES ($1, 'groups.order_links.replace', $2, 'order', $3, $4, 'processing')
     ON CONFLICT (idempotency_key) DO NOTHING
     RETURNING idempotency_key, request_hash, response_json, status
     `,
@@ -599,7 +599,7 @@ function buildOrderProjectsResponse(input: {
 
 function mapProjectLinkRow(row: ProjectLinkRow): OrderProjectSummaryDto {
   return {
-    id: row.project_id,
+    id: row.group_id,
     code: row.code,
     name: row.name,
     relationType: row.relation_type,
@@ -609,7 +609,7 @@ function mapProjectLinkRow(row: ProjectLinkRow): OrderProjectSummaryDto {
 }
 
 function linkKey(row: ProjectLinkRow): string {
-  return `${row.project_id}:${row.relation_type}:${row.is_primary ? '1' : '0'}`;
+  return `${row.group_id}:${row.relation_type}:${row.is_primary ? '1' : '0'}`;
 }
 
 function linkInputKey(row: ReplaceOrderProjectLinkDto): string {
@@ -651,7 +651,7 @@ function sortForHash(value: unknown): unknown {
 }
 
 function requestIdOrFallback(value: string | undefined): string {
-  return value ?? 'projects-order-links';
+  return value ?? 'groups-order-links';
 }
 
 function normalizeReason(value: string | null | undefined): string | null {
@@ -686,7 +686,7 @@ function toIsoString(value: string | Date): string {
 
 function databaseUnavailable() {
   return new ApiError(503, 'SERVICE_UNAVAILABLE', 'Order project links adapter is not configured', {
-    feature: 'projects',
+    feature: 'groups',
     adapter: 'order_project_link_repository',
   });
 }

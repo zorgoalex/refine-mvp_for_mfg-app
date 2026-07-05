@@ -30,7 +30,7 @@ function buildContext(overrides: Partial<NotificationEventContext>): Notificatio
     paymentId: null,
     deadlineId: null,
     deadlineInstanceId: 'dl-uuid-1',
-    projectIds: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+    groupIds: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
     orderStatusId: null,
     isOrderCompleted: false,
     payload: {},
@@ -38,34 +38,34 @@ function buildContext(overrides: Partial<NotificationEventContext>): Notificatio
   };
 }
 
-describe('PgRecipientSourceAdapter.project_participants fanout', () => {
+describe('PgRecipientSourceAdapter.group_participants fanout', () => {
   const adapter = new PgRecipientSourceAdapter();
 
-  it('fans out only over effective context projectIds', async () => {
+  it('fans out only over effective context groupIds', async () => {
     const { client, calls } = fakeClient([{ user_id: 7 }, { user_id: 9 }]);
     const ctx = buildContext({
       orderId: 42,
       deadlineInstanceId: 'dl-uuid-1',
-      projectIds: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+      groupIds: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
     });
 
-    const result = await adapter.resolveDynamic(client, 'project_participants', ctx);
+    const result = await adapter.resolveDynamic(client, 'group_participants', ctx);
 
     expect(result).toEqual([7, 9]);
     expect(calls).toHaveLength(1);
     const { sql, params } = calls[0];
-    expect(sql).toContain('project_participants');
-    expect(sql).toContain('pp.project_id = ANY($1::uuid[])');
-    expect(sql).not.toContain('project_order_projects');
-    expect(sql).not.toContain('project_entity_links');
+    expect(sql).toContain('group_participants');
+    expect(sql).toContain('pp.group_id = ANY($1::uuid[])');
+    expect(sql).not.toContain('group_order_groups');
+    expect(sql).not.toContain('group_entity_links');
     expect(params).toEqual([['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']]);
   });
 
   it('returns [] when effective project attribution is empty', async () => {
     const { client, calls } = fakeClient([{ user_id: 5 }]);
-    const ctx = buildContext({ orderId: 42, deadlineInstanceId: null, projectIds: [] });
+    const ctx = buildContext({ orderId: 42, deadlineInstanceId: null, groupIds: [] });
 
-    const result = await adapter.resolveDynamic(client, 'project_participants', ctx);
+    const result = await adapter.resolveDynamic(client, 'group_participants', ctx);
 
     expect(result).toEqual([]);
     expect(calls).toHaveLength(0);
@@ -75,7 +75,7 @@ describe('PgRecipientSourceAdapter.project_participants fanout', () => {
     const { client, calls } = fakeClient([{ user_id: 1 }]);
     const ctx = buildContext({ orderId: null, deadlineInstanceId: 'dl-uuid-1' });
 
-    const result = await adapter.resolveDynamic(client, 'project_participants', ctx);
+    const result = await adapter.resolveDynamic(client, 'group_participants', ctx);
 
     expect(result).toEqual([]);
     expect(calls).toHaveLength(0);
