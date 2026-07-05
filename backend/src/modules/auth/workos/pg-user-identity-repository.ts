@@ -1,7 +1,7 @@
 import type { QueryResultRow } from 'pg';
 import { DatabaseService } from '../../../database/database.service';
 import { mapRoleIdToRole } from '../../../permissions/permissions';
-import type { AuthSchemaCapabilities } from '../../auth.module';
+import type { AuthSchemaCapabilities } from '../auth.module';
 
 const DEFAULT_REQUEST_ID = 'auth-command';
 
