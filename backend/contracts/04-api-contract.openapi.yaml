@@ -399,41 +399,50 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/auth/workos/link:
+  /api/v1/auth/workos/links:
     get:
       tags:
         - Auth
-      operationId: authWorkosLinkStatus
-      summary: Статус привязки текущего юзера к SSO
+      operationId: authWorkosListLinks
+      summary: Список SSO identity, привязанных к текущему юзеру
       security:
         - bearerAuth: []
       responses:
         '200':
-          description: Статус привязки
+          description: Список привязанных identity
           headers:
             X-Request-Id:
               $ref: '#/components/headers/RequestId'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WorkosLinkStatusResponse'
+                $ref: '#/components/schemas/WorkosLinkListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/auth/workos/links/{identityId}:
     delete:
       tags:
         - Auth
-      operationId: authWorkosUnlink
-      summary: Отвязать текущего юзера от SSO
+      operationId: authWorkosUnlinkOne
+      summary: Отвязать одну SSO identity от текущего юзера
       description: |
-        Требует подтверждения паролем (после unlink остаётся только парольный
-        вход). При login_policy='external' отвязка запрещена (409) — юзер
-        не может запереть себя.
+        Требует подтверждения паролем. При login_policy='external' отвязка
+        запрещена (409) — юзер не может запереть себя без альтернативного
+        способа входа.
       security:
         - bearerAuth: []
+      x-rate-limit: auth_workos_unlink
+      parameters:
+        - name: identityId
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -452,10 +461,103 @@ paths:
                 $ref: '#/components/schemas/WorkosUnlinkResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/auth/workos/admin/users/{userId}/links:
+    get:
+      tags:
+        - Auth
+      operationId: authWorkosAdminListLinks
+      summary: Список SSO identity, привязанных к юзеру
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Список привязанных identity у юзера
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosLinkListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/auth/workos/admin/users/{userId}/links/{identityId}:
+    delete:
+      tags:
+        - Auth
+      operationId: authWorkosAdminUnlinkOne
+      summary: Отвязать одну SSO identity от юзера
+      security:
+        - bearerAuth: []
+      x-rate-limit: auth_workos_admin_unlink
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: identityId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkosAdminUnlinkRequest'
+      responses:
+        '200':
+          description: Identity отвязана администратором
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosUnlinkResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
         '500':
           $ref: '#/components/responses/InternalError'
         '503':
@@ -7770,13 +7872,41 @@ components:
           type: boolean
           enum: [true]
 
-    WorkosLinkStatusResponse:
+    WorkosLinkListResponse:
       type: object
       required:
-        - linked
+        - links
       properties:
-        linked:
-          type: boolean
+        links:
+          type: array
+          items:
+            type: object
+            required:
+              - identityId
+              - authMethod
+              - emailAtLink
+              - linkedAt
+              - lastLoginAt
+            properties:
+              identityId:
+                type: string
+              authMethod:
+                type: string
+                nullable: true
+              emailAtLink:
+                type: string
+              linkedAt:
+                type: string
+              lastLoginAt:
+                type: string
+                nullable: true
+
+    WorkosAdminUnlinkRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          minLength: 1
 
     WorkosUnlinkRequest:
       type: object
