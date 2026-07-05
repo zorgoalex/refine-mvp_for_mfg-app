@@ -107,6 +107,52 @@ export function buildOcrTemplateInput(state: {
   };
 }
 
+export interface NormalizedBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Converts a 4-point OCR box (pixel coordinates in a processed image of size
+ * imgW×imgH) into a normalized bounding rect (0..1 fractions of the image
+ * dimensions) suitable for drawing as a CSS-percentage overlay on top of the
+ * displayed <img>. Returns null when the box is missing/malformed or the
+ * image dimensions are not known/positive.
+ */
+export function normalizeBox(
+  box: number[][] | undefined,
+  imgW: number | undefined,
+  imgH: number | undefined,
+): NormalizedBox | null {
+  if (!Array.isArray(box) || box.length === 0) return null;
+  if (!(typeof imgW === 'number') || !(typeof imgH === 'number') || !(imgW > 0) || !(imgH > 0)) return null;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of box) {
+    if (!Array.isArray(point) || point.length < 2) return null;
+    const [x, y] = point;
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+
+  const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
+
+  return {
+    left: clamp01(minX / imgW),
+    top: clamp01(minY / imgH),
+    width: clamp01((maxX - minX) / imgW),
+    height: clamp01((maxY - minY) / imgH),
+  };
+}
+
 /** Distinct non-ignore field RU labels, in first-occurrence order — for the list column. */
 export function summarizeFieldTags(rules: OcrTemplateRule[]): string[] {
   const seenFields = new Set<OcrFieldCode>();

@@ -4,6 +4,7 @@ import {
   buildOcrTemplateInput,
   fieldLabelRu,
   isStrongFieldFe,
+  normalizeBox,
   suggestAnchor,
   summarizeFieldTags,
   validateOcrRulesFe,
@@ -165,6 +166,41 @@ describe('ocrTemplateHelpers', () => {
         idempotencyKey: 'idem-key-2',
       });
       expect(input.rules.map((r) => r.field)).toEqual(['ignore', 'material', 'dimensions']);
+    });
+  });
+
+  describe('normalizeBox', () => {
+    it('converts a 4-point pixel box into a normalized rect', () => {
+      expect(
+        normalizeBox(
+          [
+            [10, 20],
+            [110, 20],
+            [110, 60],
+            [10, 60],
+          ],
+          200,
+          100,
+        ),
+      ).toEqual({ left: 0.05, top: 0.2, width: 0.5, height: 0.4 });
+    });
+
+    it('returns null for a malformed or missing box', () => {
+      expect(normalizeBox([], 200, 100)).toBeNull();
+      expect(normalizeBox(undefined, 200, 100)).toBeNull();
+      expect(normalizeBox([[1]], 200, 100)).toBeNull();
+      expect(normalizeBox([['x', 'y'] as unknown as number[]], 200, 100)).toBeNull();
+    });
+
+    it('returns null when image dimensions are missing or non-positive', () => {
+      const box = [
+        [10, 20],
+        [110, 60],
+      ];
+      expect(normalizeBox(box, 0, 100)).toBeNull();
+      expect(normalizeBox(box, 200, 0)).toBeNull();
+      expect(normalizeBox(box, undefined, 100)).toBeNull();
+      expect(normalizeBox(box, 200, undefined)).toBeNull();
     });
   });
 });

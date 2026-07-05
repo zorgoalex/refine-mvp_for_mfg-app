@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Divider, Drawer, Input, Select, Space, Switch, Table, Tag, Typography, Upload, message } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
 import { ApiError } from '../../../api/apiError';
@@ -10,7 +10,7 @@ import type {
   OcrTemplateRule,
   OcrTestResult,
 } from '../../../api/types/labelsApi.types';
-import { OCR_FIELD_LABELS_RU, buildOcrTemplateInput, suggestAnchor, validateOcrRulesFe } from './ocrTemplateHelpers';
+import { OCR_FIELD_LABELS_RU, buildOcrTemplateInput, normalizeBox, suggestAnchor, validateOcrRulesFe } from './ocrTemplateHelpers';
 
 const { Text } = Typography;
 
@@ -25,6 +25,7 @@ interface OcrTemplateEditorProps {
 interface RecognizedLine {
   text: string;
   score: number;
+  box?: number[][];
 }
 
 const FIELD_OPTIONS = (Object.keys(OCR_FIELD_LABELS_RU) as OcrFieldCode[]).map((field) => ({
@@ -120,6 +121,21 @@ export const OcrTemplateEditor: React.FC<OcrTemplateEditorProps> = ({ open, temp
 
   const [saving, setSaving] = useState(false);
 
+  // Uploaded sample photo + the OCR-processed image's pixel dimensions, used
+  // to draw the recognized-line box overlay on top of it. Re-edit (template
+  // prop only, no fresh upload) never sets these, so the overlay stays hidden.
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [imageWidth, setImageWidth] = useState<number | undefined>(undefined);
+  const [imageHeight, setImageHeight] = useState<number | undefined>(undefined);
+  // Shared by both interaction directions: hovering a line row highlights its
+  // box, and clicking a box selects (and scrolls to) its row.
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const rowRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const photoUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    photoUrlRef.current = photoUrl;
+  }, [photoUrl]);
+
   useEffect(() => {
     if (!open) return;
     if (template) {
@@ -136,7 +152,22 @@ export const OcrTemplateEditor: React.FC<OcrTemplateEditorProps> = ({ open, temp
     setRecognizeError(null);
     setTestError(null);
     setTestResult(null);
+    setPhotoUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setImageWidth(undefined);
+    setImageHeight(undefined);
+    setActiveIndex(null);
   }, [open, template]);
+
+  // Revoke whatever object URL is live when the editor unmounts entirely
+  // (Drawer's destroyOnClose tears the component down on close).
+  useEffect(() => {
+    return () => {
+      if (photoUrlRef.current) URL.revokeObjectURL(photoUrlRef.current);
+    };
+  }, []);
 
   const handleRecognize = useCallback(async (file: File) => {
     setRecognizing(true);
@@ -146,6 +177,13 @@ export const OcrTemplateEditor: React.FC<OcrTemplateEditorProps> = ({ open, temp
       setLines(result.lines);
       setRules(result.lines.map((line) => ({ field: 'ignore' as OcrFieldCode, sampleText: line.text, anchor: null })));
       setTestResult(null);
+      setActiveIndex(null);
+      setImageWidth(result.imageWidth);
+      setImageHeight(result.imageHeight);
+      setPhotoUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(file);
+      });
     } catch (error) {
       setRecognizeError(describeOcrError(error));
     } finally {
@@ -259,21 +297,97 @@ export const OcrTemplateEditor: React.FC<OcrTemplateEditorProps> = ({ open, temp
         {lines.length > 0 && (
           <div>
             <Text strong>Строки бирки</Text>
+
+            {photoUrl && (
+              <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', marginTop: 8 }}>
+                <img src={photoUrl} alt="Фото бирки" style={{ display: 'block', maxWidth: '100%', height: 'auto' }} />
+                <div style={{ position: 'absolute', inset: 0 }}>
+                  {lines.map((line, index) => {
+                    const box = normalizeBox(line.box, imageWidth, imageHeight);
+                    if (!box) return null;
+                    const rule = rules[index] ?? { field: 'ignore' as OcrFieldCode, anchor: null };
+                    const isActive = activeIndex === index;
+                    const isIgnored = rule.field === 'ignore';
+                    return (
+                      <div
+                        key={index}
+                        role="button"
+                        tabIndex={0}
+                        onMouseEnter={() => setActiveIndex(index)}
+                        onClick={() => {
+                          setActiveIndex(index);
+                          rowRefs.current[index]?.scrollIntoView({ block: 'nearest' });
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            setActiveIndex(index);
+                            rowRefs.current[index]?.scrollIntoView({ block: 'nearest' });
+                          }
+                        }}
+                        title={line.text}
+                        style={{
+                          position: 'absolute',
+                          left: `${box.left * 100}%`,
+                          top: `${box.top * 100}%`,
+                          width: `${box.width * 100}%`,
+                          height: `${box.height * 100}%`,
+                          boxSizing: 'border-box',
+                          border: isActive ? '2px solid #1677ff' : isIgnored ? '1px solid rgba(140,140,140,0.5)' : '1px solid #52c41a',
+                          background: isActive ? 'rgba(22,119,255,0.12)' : 'transparent',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span
+                          style={{
+                            position: 'absolute',
+                            top: -1,
+                            left: -1,
+                            transform: 'translateY(-100%)',
+                            fontSize: 10,
+                            lineHeight: '14px',
+                            padding: '0 3px',
+                            color: '#fff',
+                            background: isActive ? '#1677ff' : isIgnored ? 'rgba(140,140,140,0.7)' : '#52c41a',
+                            borderRadius: 2,
+                          }}
+                        >
+                          {index + 1}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginTop: 8 }}
+              message="Порядок правил = порядок распознанных строк (сверху вниз). Размечайте поля в том же порядке, в каком они распознаны на фото."
+            />
+
             <Space direction="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
               {lines.map((line, index) => {
                 const rule = rules[index] ?? { field: 'ignore' as OcrFieldCode, anchor: null };
                 const anchorEnabled = typeof rule.anchor === 'string';
+                const isActive = activeIndex === index;
                 return (
                   <div
                     key={index}
+                    ref={(el) => {
+                      rowRefs.current[index] = el;
+                    }}
+                    onMouseEnter={() => setActiveIndex(index)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 8,
                       flexWrap: 'wrap',
                       padding: '6px 8px',
-                      border: '1px solid var(--app-border, #d9d9d9)',
+                      border: isActive ? '1px solid #1677ff' : '1px solid var(--app-border, #d9d9d9)',
                       borderRadius: 6,
+                      background: isActive ? 'rgba(22,119,255,0.06)' : undefined,
                     }}
                   >
                     <Text code style={{ flex: '1 1 220px', wordBreak: 'break-word' }}>
