@@ -389,9 +389,11 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         const bearerProviderSession = await this.readProviderSession(tx, bearerSessionId);
         await this.revokeBearerSessionWithAudit(tx, command, currentUser, bearerProviderSession);
 
-        // The redirect can end only one IdP session — prefer the acting
-        // tab's (bearer) provider session.
-        if (bearerProviderSession.providerSessionId) {
+        // The acting tab's provenance wins whenever ITS session was
+        // SSO-issued — even without a usable sid, so the controller answers
+        // 'unavailable' (login-page warning) instead of a false
+        // 'not_applicable' from the cookie session.
+        if (bearerProviderSession.authSource === 'workos') {
           return { ok: true as const, ...bearerProviderSession };
         }
       }

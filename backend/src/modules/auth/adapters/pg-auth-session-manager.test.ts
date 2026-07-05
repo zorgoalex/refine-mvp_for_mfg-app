@@ -357,6 +357,62 @@ describe('PgAuthSessionManager', () => {
     expect(audits).toHaveLength(2);
   });
 
+  it('keeps the acting tab SSO provenance in the desync case even without a sid', async () => {
+    const refreshRow = {
+      token_id: 'token-old',
+      user_id: '42',
+      session_id: 'session-1',
+      token_family_id: 'family-1',
+      expires_at: new Date('2100-01-01T00:00:00.000Z'),
+      revoked_at: null,
+      session_status: 'active',
+      username: 'manager',
+      role_id: 10,
+      is_active: true,
+    };
+    const currentUser = {
+      id: '42',
+      username: 'manager',
+      role: 'manager' as const,
+      roleId: 10,
+      permissions: [],
+      sessionId: 'session-2',
+    };
+
+    // cookie=backend, bearer=workos WITHOUT sid: the result must carry the
+    // workos provenance so the controller answers 'unavailable', never a
+    // false 'not_applicable' from the cookie session.
+    const backendCookie = createDatabase({
+      refreshRow,
+      providerSessions: {
+        'session-1': { provider_session_id: null, auth_source: 'backend' },
+        'session-2': { provider_session_id: null, auth_source: 'workos' },
+      },
+    });
+    await expect(
+      createManager(backendCookie.service, { supportsProviderSessions: true }).logout({
+        refreshToken: 'refresh-login',
+        currentUser,
+      }),
+    ).resolves.toEqual({ ok: true, authSource: 'workos' });
+
+    // cookie=workos (other session, with sid), bearer=workos without sid:
+    // still the acting tab wins.
+    const workosCookie = createDatabase({
+      refreshRow,
+      providerSessions: {
+        'session-1': { provider_session_id: 'sid-1', auth_source: 'workos' },
+        'session-2': { provider_session_id: null, auth_source: 'workos' },
+      },
+    });
+    await expect(
+      createManager(workosCookie.service, { supportsProviderSessions: true }).logout({
+        refreshToken: 'refresh-login',
+        currentUser,
+      }),
+    ).resolves.toEqual({ ok: true, authSource: 'workos' });
+  });
+
   it('does not fabricate a logout audit for an already revoked session (stale bearer)', async () => {
     const database = createDatabase({ deadSessions: ['session-dead'] });
     const manager = createManager(database.service, { supportsProviderSessions: true });
