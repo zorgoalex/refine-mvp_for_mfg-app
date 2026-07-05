@@ -22,11 +22,11 @@ import { DeadlineSettingsController } from './http/deadline-settings.controller'
 import { DeadlineWorkerController } from './http/deadline-worker.controller';
 import { DeadlinesController } from './http/deadlines.controller';
 import { DeadlinesRuntimeConfigService } from './http/deadlines-runtime-config.service';
-import { ProjectsModule } from '../projects/projects.module';
-import { ProjectsRuntimeConfigService } from '../projects/projects-runtime-config.service';
+import { GroupsModule } from '../groups/groups.module';
+import { GroupsRuntimeConfigService } from '../groups/groups-runtime-config.service';
 
 @Module({
-  imports: [DatabaseModule, ProjectsModule],
+  imports: [DatabaseModule, GroupsModule],
   controllers: [
     DeadlinesController,
     DeadlinePoliciesController,
@@ -61,13 +61,13 @@ import { ProjectsRuntimeConfigService } from '../projects/projects-runtime-confi
       provide: DeadlineWorkerService,
       useFactory: (
         database: DatabaseService,
-        projectsRuntimeConfig: ProjectsRuntimeConfigService,
+        groupsRuntimeConfig: GroupsRuntimeConfigService,
       ) =>
         new DeadlineWorkerService({
           transactions: database.isConfigured
             ? new PgDeadlineTransactionManager(
                 database,
-                projectsRuntimeConfig.getFeatureFlags().projectP8NotificationsEnabled,
+                groupsRuntimeConfig.getFeatureFlags().groupP8NotificationsEnabled,
               )
             : new UnavailableDeadlineTransactionManager(),
           targetResolver: database.isConfigured
@@ -103,7 +103,7 @@ import { ProjectsRuntimeConfigService } from '../projects/projects-runtime-confi
             },
           },
         }),
-      inject: [DatabaseService, ProjectsRuntimeConfigService],
+      inject: [DatabaseService, GroupsRuntimeConfigService],
     },
     {
       provide: DeadlineWorkerSchedulerService,

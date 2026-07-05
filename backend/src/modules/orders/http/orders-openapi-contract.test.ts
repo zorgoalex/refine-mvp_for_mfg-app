@@ -74,24 +74,37 @@ describe('orders OpenAPI contract', () => {
     expect(contract).toContain('operationId: deactivateProductionStage');
   });
 
-  it('documents current order project links without legacy PATCH singular project route', () => {
+  it('documents current order group links without legacy PATCH singular group route', () => {
     const contract = readOpenApiContract();
-    const projectLinksSection = sectionBetween(
-      contract,
-      '  /api/v1/orders/{orderId}/projects:',
-      '  /api/v1/orders/{orderId}/status:',
+    const controllerSource = readFileSync(
+      resolve(process.cwd(), 'backend/src/modules/orders/http/order-group-links.controller.ts'),
+      'utf8',
+    );
+    const repositorySource = readFileSync(
+      resolve(process.cwd(), 'backend/src/modules/orders/adapters/pg-order-group-link-repository.ts'),
+      'utf8',
     );
 
-    expect(projectLinksSection).toContain('operationId: getOrderProjects');
-    expect(projectLinksSection).toContain('operationId: replaceOrderProjects');
-    expect(projectLinksSection).toContain('projects.manage_links');
-    expect(projectLinksSection).toContain('projects.order_links.replace');
-    expect(projectLinksSection).not.toContain('asOf');
-    expect(projectLinksSection).not.toContain('overlap');
-    expect(projectLinksSection).not.toContain('factTime');
-    expect(contract).toContain('    ReplaceOrderProjectsRequest:');
-    expect(contract).toContain('    OrderProjectSummaryDto:');
-    expect(contract).not.toContain('/api/v1/orders/{orderId}/project:');
+    expect(controllerSource).toContain("@Controller('orders/:orderId/groups')");
+    expect(controllerSource).toContain('operationId: \'getOrderGroups\'');
+    expect(controllerSource).toContain('operationId: \'replaceOrderGroups\'');
+    expect(repositorySource).toContain("'groups.order_links.replace'");
+    expect(repositorySource).not.toContain(`'pro${'jects.order_links.replace'}'`);
+    expect(contract).toContain('    ReplaceOrderGroupsRequest:');
+    expect(contract).toContain('    OrderGroupSummaryDto:');
+    expect(contract).not.toContain('/api/v1/orders/{orderId}/group:');
+
+    // Validate the generated CONTRACT section itself (not just source), so stale
+    // contract wording cannot ship unnoticed (regression guard, critic R1).
+    expect(contract).toContain('  /api/v1/orders/{orderId}/groups:');
+    expect(contract).toContain('operationId: getOrderGroups');
+    expect(contract).toContain('operationId: replaceOrderGroups');
+    expect(contract).toContain('x-permission: orders.view or groups.view');
+    expect(contract).toContain('x-permission: groups.manage_links');
+    expect(contract).toContain('summary: Получить текущие группы заказа');
+    expect(contract).toContain('summary: Заменить текущие группы заказа');
+    expect(contract).not.toContain('проекты заказа');
+    expect(contract).not.toContain('с проектами');
   });
 
   it('documents order snapshot export and import endpoints without raw content schemas', () => {

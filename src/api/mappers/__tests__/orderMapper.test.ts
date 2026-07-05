@@ -88,8 +88,8 @@ describe('orderMapper inbound (OrderDto -> form values)', () => {
     workshops: [],
     requirements: [],
     dowelingLinks: [],
-    primaryProject: null,
-    projects: [],
+    primaryGroup: null,
+    groups: [],
     totals: { totalAmount: 0, finalAmount: 0, paidAmount: 0, partsCount: 1, totalArea: 1 } as any,
     version: 0,
   } as any;

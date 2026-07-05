@@ -12,7 +12,7 @@ const ALLOWLIST: Record<string, number> = {
   // link_failed, linked, mass-unlinked, and per-identity delete-one unlinked.
   'src/modules/auth/workos/pg-user-identity-repository.ts': 4,
   // DEFERRED Variant-B; remove each when its module is migrated.
-  'src/modules/orders/adapters/pg-order-project-link-repository.ts': 1,
+  'src/modules/orders/adapters/pg-order-group-link-repository.ts': 1,
   'src/modules/orders/adapters/pg-order-transaction-manager.ts': 1,
   'src/modules/deadlines/adapters/pg-deadline-repository.ts': 2,
 };

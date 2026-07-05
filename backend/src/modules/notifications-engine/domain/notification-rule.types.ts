@@ -29,7 +29,7 @@ export interface NotificationRule {
   notificationRuleId: string;
   ruleCode: string;
   eventType: string;
-  projectId: string | null;
+  groupId: string | null;
   isEnabled: boolean;
   priority: number;
   level: NotificationLevel;
@@ -63,10 +63,10 @@ export interface NotificationEventContext {
    */
   deadlineInstanceId: string | null;
   /**
-   * Effective project attribution for this event. Global rules ignore this;
-   * project-scoped rules match only when their project id is present here.
+   * Effective group attribution for this event. Global rules ignore this;
+   * group-scoped rules match only when their group id is present here.
    */
-  projectIds: string[];
+  groupIds: string[];
   orderStatusId: number | null;
   isOrderCompleted: boolean;
   /**

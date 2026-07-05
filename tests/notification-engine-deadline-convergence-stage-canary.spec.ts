@@ -8,12 +8,12 @@ import crypto from 'node:crypto';
  *
  * Opt-in, `backend-test`-only. Proves the cutover invariant end-to-end with the
  * convergence flag ON: a single `DEADLINE_EXPIRED` event is delivered by the
- * notification ENGINE (manager / stage-assignee / project-participant rules
+ * notification ENGINE (manager / stage-assignee / group-participant rules
  * seeded by migration 015), while the legacy INLINE paths write nothing —
  * `deadline_action_executions` notify/escalate rows are
  * `status='skipped', skip_reason='owned_by_notification_engine'` and the P8
- * inline port leaves a `PROJECT_DEADLINE_OVERDUE_SKIPPED` outbox marker (zero
- * `project_notifications` residue). Replay is idempotent, delivered text never
+ * inline port leaves a `GROUP_DEADLINE_OVERDUE_SKIPPED` outbox marker (zero
+ * `group-feature notifications` residue). Replay is idempotent, delivered text never
  * leaks payload/phone/secret data, and all fixtures restore to zero.
  *
  * PRECONDITIONS the operator must satisfy on `backend-test` / `erp_test`
@@ -21,10 +21,10 @@ import crypto from 'node:crypto';
  *  - migrations `014` (engine) + `015` (deadline parity seed) applied
  *  - `BACKEND_ENABLE_NOTIFICATION_ENGINE=true`, `BACKEND_OUTBOX_RELAY_OWNER!=none`
  *  - `BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE=true`
- *  - legacy `BACKEND_DEADLINE_NOTIFICATIONS_ENABLED` / `BACKEND_ENABLE_PROJECT_P8_NOTIFICATIONS`
+ *  - legacy `BACKEND_DEADLINE_NOTIFICATIONS_ENABLED` / `BACKEND_ENABLE_GROUP_P8_NOTIFICATIONS`
  *    left at their (default-off) values — the convergence flag is the single owner switch
  *  - an OVERDUE fixture deadline_instance linked to the fixture order, with a
- *    manager, a stage assignee, a project participant, and a non-visible user
+ *    manager, a stage assignee, a group participant, and a non-visible user
  *
  * The spec mutates only fixture-scoped rows and restores them; it never seeds
  * the parity rules (those come from migration 015) and never flips flags.
@@ -34,7 +34,7 @@ const FIXTURE_KEY = 'notification-engine-deadline-convergence-2026-06-10';
 const SEED_RULE_CODES = [
   'deadline-expired-notify-manager',
   'deadline-expired-notify-assignee',
-  'deadline-expired-project-participants',
+  'deadline-expired-group-participants',
   'deadline-expired-escalate-manager',
 ] as const;
 const DEADLINE_EVENT_TYPE = 'DEADLINE_EXPIRED';
@@ -137,7 +137,7 @@ test.describe('notification engine deadline convergence stage canary', () => {
     const participantCount = engineDeliveryCount(participantUserId!);
     expect(managerCount, 'manager must receive an engine-delivered notification').toBeGreaterThanOrEqual(1);
     expect(assigneeCount, 'stage assignee must receive an engine-delivered notification').toBeGreaterThanOrEqual(1);
-    expect(participantCount, 'project participant must receive an engine-delivered notification').toBeGreaterThanOrEqual(1);
+    expect(participantCount, 'group participant must receive an engine-delivered notification').toBeGreaterThanOrEqual(1);
 
     const nonVisibleCount = engineDeliveryCount(nonVisibleUserId!);
     expect(nonVisibleCount, 'base-visibility filter must drop the non-visible recipient').toBe(0);
@@ -149,10 +149,10 @@ test.describe('notification engine deadline convergence stage canary', () => {
     expect(inlineActive, 'inline dispatcher must NOT execute notify_*/escalate when engine owns the event').toBe(0);
     expect(inlineSkipped, 'inline notify/escalate must be recorded skipped:owned_by_notification_engine').toBeGreaterThanOrEqual(1);
 
-    // 5) P8 inline wrote nothing: a PROJECT_DEADLINE_OVERDUE_SKIPPED marker exists
-    //    and there is zero project_notification residue for this deadline.
-    expect(p8SkipMarkerCount(), 'P8 inline must leave a PROJECT_DEADLINE_OVERDUE_SKIPPED marker').toBeGreaterThanOrEqual(1);
-    expect(p8InlineResidueCount(), 'P8 inline must write zero project_notifications when engine owns the event').toBe(0);
+    // 5) P8 inline wrote nothing: a GROUP_DEADLINE_OVERDUE_SKIPPED marker exists
+    //    and there is zero group-feature notification residue for this deadline.
+    expect(p8SkipMarkerCount(), 'P8 inline must leave a GROUP_DEADLINE_OVERDUE_SKIPPED marker').toBeGreaterThanOrEqual(1);
+    expect(p8InlineResidueCount(), 'P8 inline must write zero group-feature notifications when engine owns the event').toBe(0);
 
     // 6) Replay idempotency: re-draining the same envelope creates no duplicates.
     const totalBefore = engineDeliveryTotal();
@@ -396,7 +396,7 @@ function p8SkipMarkerCount(): number {
   return Number(
     psql(`
       SELECT count(*)::int FROM outbox_events
-      WHERE event_type = 'PROJECT_DEADLINE_OVERDUE_SKIPPED'
+      WHERE event_type = 'GROUP_DEADLINE_OVERDUE_SKIPPED'
         AND aggregate_type = 'deadline_instance'
         AND aggregate_id = '${escapeSql(fixtureDeadlineInstanceId)}'
         AND payload_json->>'skipReason' = 'owned_by_notification_engine';
@@ -406,9 +406,11 @@ function p8SkipMarkerCount(): number {
 
 /**
  * Residue of the legacy P8 inline write path for this deadline. The legacy port
- * delivers via the generic `notifications` table (entity_type='project',
- * source_id=`${deadlineEventId}:${factKey}`) — there is no dedicated
- * `project_notifications` table. Under convergence the engine owns the event so
+ * delivers via the generic `notifications` table with entity_type='project'
+ * (the DEADLINE entity_type VALUE — kept as the documented rename boundary; the
+ * port writes `input.entityType`, i.e. the deadline's own entity_type),
+ * source_id=`${deadlineEventId}:${factKey}` — there is no dedicated
+ * group-feature notifications table. Under convergence the engine owns the event so
  * the P8 inline port records only a skip marker and writes zero notifications
  * for this deadline's events.
  */
@@ -438,7 +440,7 @@ function restoreFixture(): void {
       AND n.entity_id = '${escapeSql(String(fixtureOrderId))}'
       AND r.rule_code IN (${SEED_RULE_CODES.map((c) => `'${escapeSql(c)}'`).join(', ')});
     DELETE FROM outbox_events
-    WHERE event_type = 'PROJECT_DEADLINE_OVERDUE_SKIPPED'
+    WHERE event_type = 'GROUP_DEADLINE_OVERDUE_SKIPPED'
       AND aggregate_type = 'deadline_instance'
       AND aggregate_id = '${escapeSql(fixtureDeadlineInstanceId)}';
   `);

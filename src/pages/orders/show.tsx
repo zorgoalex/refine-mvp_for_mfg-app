@@ -24,7 +24,7 @@ import { getDowelingOrderShowPath } from "./utils/dowelingOrderPaths";
 import { resolveOrderExportClientName, toOrderExportClient } from "./utils/orderExportClient";
 import { ordersApi } from "../../api/ordersApi";
 import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
-import { ProjectLinksEditor } from "./components/projects/ProjectLinksEditor";
+import { GroupLinksEditor } from "./components/groups/GroupLinksEditor";
 import { AddToCutModal } from "./components/AddToCutModal";
 import { can, canAny } from "../../utils/permissions";
 import { cutApi } from "../../api/cutApi";
@@ -48,10 +48,10 @@ import {
   type OrderDetailColumnDefinition,
 } from "./components/tables/OrderDetailColumnSettings";
 
-type OrderInfoPanelKey = 'projects' | 'deadlines' | 'finance' | 'cut' | 'additional';
+type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 
 const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
-  { key: 'projects', label: 'Проекты', color: '#722ed1' },
+  { key: 'groups', label: 'Группы заказа', color: '#722ed1' },
   { key: 'deadlines', label: 'Дедлайны', color: '#1677ff' },
   { key: 'finance', label: 'Финансы', color: '#faad14' },
   { key: 'cut', label: 'Раскрой', color: '#13c2c2' },
@@ -1012,15 +1012,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   background: 'var(--app-surface)',
                 }}
               >
-                {activeInfoPanel === 'projects' && (
-                  useBackendOrdersRead && featureFlags.useBackendProjects && record?.order_id ? (
-                    <ProjectLinksEditor
+                {activeInfoPanel === 'groups' && (
+                  useBackendOrdersRead && featureFlags.useBackendGroups && record?.order_id ? (
+                    <GroupLinksEditor
                       orderId={record.order_id}
                       version={record.version ?? backendOrder?.version ?? 0}
-                      initialProjects={record.projects ?? backendOrder?.projects ?? []}
+                      initialGroups={record.groups ?? backendOrder?.groups ?? []}
                     />
                   ) : (
-                    <span style={{ color: 'var(--app-text-muted)', fontStyle: 'italic' }}>Проекты недоступны</span>
+                    <span style={{ color: 'var(--app-text-muted)', fontStyle: 'italic' }}>Группы недоступны</span>
                   )
                 )}
 

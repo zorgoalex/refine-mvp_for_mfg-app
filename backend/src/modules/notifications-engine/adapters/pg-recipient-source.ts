@@ -25,15 +25,15 @@ export class PgRecipientSourceAdapter implements RecipientSourcePort {
         );
         return res.rows.map((r) => Number(r.user_id)).filter(Number.isFinite);
       }
-      case 'project_participants': {
-        if (ctx.projectIds.length === 0) return [];
+      case 'group_participants': {
+        if (ctx.groupIds.length === 0) return [];
         const res = await client.query<{ user_id: string | number }>(
           `SELECT DISTINCT pp.participant_id_text::bigint AS user_id
-           FROM public.project_participants pp
-           WHERE pp.project_id = ANY($1::uuid[])
+           FROM public.group_participants pp
+           WHERE pp.group_id = ANY($1::uuid[])
              AND pp.valid_to IS NULL
              AND pp.participant_type = 'user'`,
-          [ctx.projectIds],
+          [ctx.groupIds],
         );
         return res.rows.map((r) => Number(r.user_id)).filter(Number.isFinite);
       }

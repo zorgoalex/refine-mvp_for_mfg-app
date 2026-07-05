@@ -86,25 +86,25 @@ describe('NotificationRulesService', () => {
       expect(audit.denied).toHaveLength(0);
     });
 
-    it('passes projectId through create/update and keeps null as global scope', async () => {
+    it('passes groupId through create/update and keeps null as global scope', async () => {
       const repo = fakeRepository({ rules: [createRule()] });
       const service = buildService({ repo });
 
-      await service.create(currentUser(), 'req-project-scope-create', {
+      await service.create(currentUser(), 'req-group-scope-create', {
         ...validCreateInput(),
-        projectId: '11111111-1111-4111-8111-111111111111',
+        groupId: '11111111-1111-4111-8111-111111111111',
       });
 
-      expect(repo.created[0].projectId).toBe('11111111-1111-4111-8111-111111111111');
+      expect(repo.created[0].groupId).toBe('11111111-1111-4111-8111-111111111111');
 
-      await service.update(currentUser(), 'req-project-scope-update', 'rule-1', {
-        patch: { projectId: null },
-        reason: 'clear project scope',
+      await service.update(currentUser(), 'req-group-scope-update', 'rule-1', {
+        patch: { groupId: null },
+        reason: 'clear group scope',
       });
 
       expect(repo.updated.at(-1)).toMatchObject({
         ruleId: 'rule-1',
-        patch: { projectId: null },
+        patch: { groupId: null },
       });
     });
   });
@@ -360,7 +360,7 @@ function createRule(overrides: Partial<NotificationRule> = {}): NotificationRule
     notificationRuleId: 'rule-1',
     ruleCode: 'notify-order-overdue-manager',
     eventType: 'order.production_status_changed',
-    projectId: null,
+    groupId: null,
     isEnabled: true,
     priority: 100,
     level: 'warning',
@@ -434,7 +434,7 @@ function fakeRepository(options: { rules?: NotificationRule[] } = {}): Notificat
         notificationRuleId: rules.size === 0 ? 'rule-1' : `rule-${counter}`,
         ruleCode: input.ruleCode,
         eventType: input.eventType,
-        projectId: input.projectId ?? null,
+        groupId: input.groupId ?? null,
         isEnabled: input.isEnabled,
         priority: input.priority,
         level: input.level,
@@ -456,7 +456,7 @@ function fakeRepository(options: { rules?: NotificationRule[] } = {}): Notificat
       }
       const next: NotificationRule = {
         ...existing,
-        projectId: patch.projectId !== undefined ? patch.projectId : existing.projectId,
+        groupId: patch.groupId !== undefined ? patch.groupId : existing.groupId,
         level: patch.level ?? existing.level,
         priority: patch.priority ?? existing.priority,
         isEnabled: patch.isEnabled ?? existing.isEnabled,

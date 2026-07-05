@@ -21,7 +21,7 @@ export const ORDER_LIST_SORT_FIELDS = [
 
 export type OrderListSortBy = (typeof ORDER_LIST_SORT_FIELDS)[number];
 export type SortOrder = 'asc' | 'desc';
-export type OrderProjectFilterMode = 'any' | 'all' | 'primary' | 'none';
+export type OrderGroupFilterMode = 'any' | 'all' | 'primary' | 'none';
 
 export interface OrderListQuery {
   page: number;
@@ -36,8 +36,8 @@ export interface OrderListQuery {
   dateFrom?: string;
   dateTo?: string;
   onlyMyOrders: boolean;
-  projectIds?: string[];
-  projectMode?: OrderProjectFilterMode;
+  groupIds?: string[];
+  groupMode?: OrderGroupFilterMode;
 }
 
 export interface ListOrdersCommand {

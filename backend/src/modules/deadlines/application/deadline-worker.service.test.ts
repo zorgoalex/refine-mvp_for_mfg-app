@@ -186,7 +186,7 @@ describe('DeadlineWorkerService', () => {
     expect(createNotification).not.toHaveBeenCalled();
   });
 
-  it('notifies project overdue adapter only after a newly persisted DEADLINE_EXPIRED event', async () => {
+  it('notifies group overdue adapter only after a newly persisted DEADLINE_EXPIRED event', async () => {
     const calls: unknown[] = [];
     const events: DeadlineEventDto[] = [];
     const repository = createRepository({
@@ -199,7 +199,7 @@ describe('DeadlineWorkerService', () => {
       transactions: transactionManager(repository),
       targetResolver: createTargetResolver({ isCompleted: false }),
       notificationPort: createNotificationPort(),
-      projectDeadlineOverduePort: {
+      groupDeadlineOverduePort: {
         async notifyDeadlineOverdue(input) {
           calls.push(input);
         },
@@ -227,9 +227,9 @@ describe('DeadlineWorkerService', () => {
     ]);
   });
 
-  it('rolls back the newly persisted DEADLINE_EXPIRED event when project overdue adapter fails', async () => {
+  it('rolls back the newly persisted DEADLINE_EXPIRED event when group overdue adapter fails', async () => {
     const events: DeadlineEventDto[] = [];
-    const projectSideEffects: string[] = [];
+    const groupSideEffects: string[] = [];
     const repository = createRepository({
       due: [createDeadline({ deadlineId: deadlineUuid('1'), orderId: 42 })],
       events,
@@ -240,11 +240,11 @@ describe('DeadlineWorkerService', () => {
       transactions: eventRollbackTransactionManager({
         repository,
         events,
-        projectSideEffects,
-        projectDeadlineOverduePort: {
+        groupSideEffects,
+        groupDeadlineOverduePort: {
           async notifyDeadlineOverdue(input) {
-            projectSideEffects.push(`reserved:${input.deadlineEventId}`);
-            throw new Error('project overdue adapter unavailable');
+            groupSideEffects.push(`reserved:${input.deadlineEventId}`);
+            throw new Error('group overdue adapter unavailable');
           },
         },
       }),
@@ -258,10 +258,10 @@ describe('DeadlineWorkerService', () => {
       workerId: 'worker-a',
       trigger: 'manual',
       config: { actionsEnabled: false, notificationsEnabled: false },
-    })).rejects.toThrow('project overdue adapter unavailable');
+    })).rejects.toThrow('group overdue adapter unavailable');
 
     expect(events).toEqual([]);
-    expect(projectSideEffects).toEqual([]);
+    expect(groupSideEffects).toEqual([]);
   });
 
   it('skips P8 inline port and records owned_by_notification_engine marker when convergence flag is on', async () => {
@@ -277,7 +277,7 @@ describe('DeadlineWorkerService', () => {
       transactions: transactionManager(repository),
       targetResolver: createTargetResolver({ isCompleted: false }),
       notificationPort: createNotificationPort(),
-      projectDeadlineOverduePort: { notifyDeadlineOverdue, recordSkipped },
+      groupDeadlineOverduePort: { notifyDeadlineOverdue, recordSkipped },
     });
 
     await worker.processDueDeadlines({
@@ -301,7 +301,7 @@ describe('DeadlineWorkerService', () => {
     );
   });
 
-  it('does not notify project overdue adapter for idempotent replay or completed events', async () => {
+  it('does not notify group overdue adapter for idempotent replay or completed events', async () => {
     const notifyDeadlineOverdue = vi.fn();
     const existingEvent = createEvent({
       deadlineEventId: 'event-existing',
@@ -324,7 +324,7 @@ describe('DeadlineWorkerService', () => {
       }),
       targetResolver: createTargetResolver({ isCompleted: false }),
       notificationPort: createNotificationPort(),
-      projectDeadlineOverduePort: { notifyDeadlineOverdue },
+      groupDeadlineOverduePort: { notifyDeadlineOverdue },
     });
 
     await replayWorker.processDueDeadlines({
@@ -342,7 +342,7 @@ describe('DeadlineWorkerService', () => {
         completedAt: '2026-05-01T08:30:00.000Z',
       }),
       notificationPort: createNotificationPort(),
-      projectDeadlineOverduePort: { notifyDeadlineOverdue },
+      groupDeadlineOverduePort: { notifyDeadlineOverdue },
     });
 
     await completedWorker.processDueDeadlines({
@@ -732,24 +732,24 @@ function transactionManager(repository: DeadlineRepositoryPort): DeadlineTransac
 function eventRollbackTransactionManager(input: {
   repository: DeadlineRepositoryPort;
   events: DeadlineEventDto[];
-  projectSideEffects?: string[];
-  projectDeadlineOverduePort?: DeadlineUnitOfWork['projectDeadlineOverduePort'];
+  groupSideEffects?: string[];
+  groupDeadlineOverduePort?: DeadlineUnitOfWork['groupDeadlineOverduePort'];
 }): DeadlineTransactionManagerPort {
   return {
     async runInTransaction(handler) {
       const beforeEvents = [...input.events];
-      const beforeProjectSideEffects = [...(input.projectSideEffects ?? [])];
+      const beforeGroupSideEffects = [...(input.groupSideEffects ?? [])];
       try {
         return await handler({
           deadlines: input.repository,
-          projectDeadlineOverduePort: input.projectDeadlineOverduePort,
+          groupDeadlineOverduePort: input.groupDeadlineOverduePort,
         });
       } catch (error) {
         input.events.splice(0, input.events.length, ...beforeEvents);
-        input.projectSideEffects?.splice(
+        input.groupSideEffects?.splice(
           0,
-          input.projectSideEffects.length,
-          ...beforeProjectSideEffects,
+          input.groupSideEffects.length,
+          ...beforeGroupSideEffects,
         );
         throw error;
       }

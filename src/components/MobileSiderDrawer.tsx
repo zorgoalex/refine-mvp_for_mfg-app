@@ -37,7 +37,7 @@ const CATEGORY_MAP: Record<string, string> = {
   film_vendors: "Контрагенты",
   payments: "Финансы",
   payments_view: "Финансы",
-  projects: "Производство",
+  groups: "Производство",
   order_workshops: "Производство",
   workshops: "Производство",
   work_centers: "Производство",
@@ -54,7 +54,7 @@ const CATEGORY_MAP: Record<string, string> = {
 const RESOURCE_LABELS: Record<string, string> = {
   orders_view: "Заказы",
   calendar: "Календарь",
-  projects: "Проекты",
+  groups: "Группы",
   clients: "Клиенты",
   payments: "Платежи",
   materials: "Материалы",

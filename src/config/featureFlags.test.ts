@@ -20,7 +20,7 @@ describe('featureFlags', () => {
       useBackendProductionActions: false,
       useBackendDeadlines: false,
       useBackendOrderExport: false,
-      useBackendProjects: false,
+      useBackendGroups: false,
       useBackendUsers: false,
       useBackendVlm: false,
       useBackendReferences: false,
@@ -93,7 +93,7 @@ describe('featureFlags', () => {
           VITE_USE_BACKEND_ORDERS_READ: 'true',
           VITE_USE_BACKEND_ORDERS_WRITE: 'true',
           VITE_USE_BACKEND_PAYMENTS: 'false',
-          VITE_USE_BACKEND_PROJECTS: 'false',
+          VITE_USE_BACKEND_GROUPS: 'false',
           VITE_USE_BACKEND_CLIENT_PHONES: 'false',
           VITE_USE_BACKEND_PRODUCTION_ACTIONS: 'false',
           VITE_USE_BACKEND_VLM: 'true',
@@ -102,7 +102,7 @@ describe('featureFlags', () => {
           backendAuth: true,
           backendOrdersWrite: false,
           backendPayments: true,
-          backendProjects: true,
+          backendGroups: true,
           backendClientPhones: true,
           backendProductionActions: true,
         },
@@ -112,7 +112,7 @@ describe('featureFlags', () => {
       useBackendOrdersRead: true,
       useBackendOrdersWrite: false,
       useBackendPayments: true,
-      useBackendProjects: true,
+      useBackendGroups: true,
       useBackendClientPhones: true,
       useBackendProductionActions: true,
       useBackendVlm: true,
@@ -217,11 +217,11 @@ describe('featureFlags', () => {
     expect(readOptionalBooleanFlag('not-a-boolean')).toBeUndefined();
   });
 
-  it('reads backend projects from env and runtime config with a safe default', () => {
-    expect(getFeatureFlags({}).useBackendProjects).toBe(false);
-    expect(getFeatureFlags({ VITE_USE_BACKEND_PROJECTS: 'true' }).useBackendProjects).toBe(true);
+  it('reads backend groups from env and runtime config with a safe default', () => {
+    expect(getFeatureFlags({}).useBackendGroups).toBe(false);
+    expect(getFeatureFlags({ VITE_USE_BACKEND_GROUPS: 'true' }).useBackendGroups).toBe(true);
     expect(
-      getFeatureFlags({ VITE_USE_BACKEND_PROJECTS: 'false' }, { backendProjects: true }).useBackendProjects,
+      getFeatureFlags({ VITE_USE_BACKEND_GROUPS: 'false' }, { backendGroups: true }).useBackendGroups,
     ).toBe(true);
   });
 

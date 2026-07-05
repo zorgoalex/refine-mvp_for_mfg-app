@@ -1865,14 +1865,14 @@ describe('DeadlineActionDispatcherService', () => {
       await dispatcher.dispatch({
         event: createEvent({
           entityType: 'project',
-          entityId: 'project-1',
+          entityId: 'group-1',
           orderId: undefined,
         }),
         repository: {
           ...createRepository({
             rules: [
               createRule({
-                actionRuleId: 'overdue-project-rule',
+                actionRuleId: 'overdue-group-rule',
                 actionType: 'set_overdue_flag',
                 config: { conditions: { excludeCompletedOrders: true } },
               }),
@@ -1896,7 +1896,7 @@ describe('DeadlineActionDispatcherService', () => {
       // missing_order_id, NOT executed, NOT a DB write.
       expect(overdueUpdates).toEqual([]);
       expect(executions[0]).toMatchObject({
-        actionRuleId: 'overdue-project-rule',
+        actionRuleId: 'overdue-group-rule',
         actionType: 'set_overdue_flag',
         status: 'skipped',
         skipReason: 'missing_order_id',

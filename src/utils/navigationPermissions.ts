@@ -38,7 +38,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   payments: ['payments.view'],
   payments_view: ['payments.view', 'analytics.view'],
   clients_analytics_view: ['analytics.view'],
-  projects: ['projects.view'],
+  groups: ['groups.view'],
   users: ['users.view'],
   employees: ['users.view'],
   configuration: ['settings.view', 'settings.manage'],

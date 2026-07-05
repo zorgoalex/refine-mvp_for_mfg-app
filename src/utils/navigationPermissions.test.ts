@@ -35,10 +35,10 @@ describe('navigation permissions', () => {
       canViewNavigationResource('materials', { permissions: ['orders.view'] }, true),
     ).toBe(false);
     expect(
-      canViewNavigationResource('projects', { permissions: ['projects.view'] }, true),
+      canViewNavigationResource('groups', { permissions: ['groups.view'] }, true),
     ).toBe(true);
     expect(
-      canViewNavigationResource('projects', { permissions: ['orders.view'] }, true),
+      canViewNavigationResource('groups', { permissions: ['orders.view'] }, true),
     ).toBe(false);
     ['order_statuses', 'payment_statuses', 'payment_types'].forEach((resourceName) => {
       expect(

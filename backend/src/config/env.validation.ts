@@ -131,13 +131,13 @@ export const envSchema = z
     BACKEND_ENABLE_USERS: booleanFromEnv.default(false),
     BACKEND_ENABLE_VLM: booleanFromEnv.default(false),
     BACKEND_ENABLE_DEADLINES: booleanFromEnv.default(false),
-    BACKEND_ENABLE_PROJECTS: booleanFromEnv.default(false),
-    BACKEND_ENABLE_PROJECT_P8_NOTIFICATIONS: booleanFromEnv.default(false),
-    BACKEND_ENABLE_PROJECTS_BATCH_LINK_WRITE: booleanFromEnv.default(false),
+    BACKEND_ENABLE_GROUPS: booleanFromEnv.default(false),
+    BACKEND_ENABLE_GROUP_P8_NOTIFICATIONS: booleanFromEnv.default(false),
+    BACKEND_ENABLE_GROUPS_BATCH_LINK_WRITE: booleanFromEnv.default(false),
     BACKEND_ENABLE_ORG_MANAGEMENT: booleanFromEnv.default(false),
     BACKEND_ORG_MANAGEMENT_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_ORDERS_READ_ONLY: booleanFromEnv.default(true),
-    BACKEND_PROJECTS_READ_ONLY: booleanFromEnv.default(true),
+    BACKEND_GROUPS_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_EXPORT_DISABLED: booleanFromEnv.default(true),
     BACKEND_VLM_DISABLED: booleanFromEnv.default(true),
     BACKEND_DEADLINES_READ_ONLY: booleanFromEnv.default(true),
@@ -385,10 +385,10 @@ export const envSchema = z
       });
     }
 
-    if (env.BACKEND_ENABLE_PROJECTS && !env.DATABASE_URL) {
+    if (env.BACKEND_ENABLE_GROUPS && !env.DATABASE_URL) {
       ctx.addIssue({
         code: 'custom',
-        message: 'DATABASE_URL is required when BACKEND_ENABLE_PROJECTS is true',
+        message: 'DATABASE_URL is required when BACKEND_ENABLE_GROUPS is true',
         path: ['DATABASE_URL'],
       });
     }

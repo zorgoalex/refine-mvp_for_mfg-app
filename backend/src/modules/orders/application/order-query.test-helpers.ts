@@ -41,8 +41,8 @@ export function createOrderDtoForQueryTest(orderId: number): OrderDto {
     workshops: [],
     requirements: [],
     dowelingLinks: [],
-    primaryProject: null,
-    projects: [],
+    primaryGroup: null,
+    groups: [],
     totals: {
       totalAmount: 0,
       finalAmount: 0,

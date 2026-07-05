@@ -13,9 +13,9 @@ describe('notification event registry', () => {
     expect(isEngineOwnedEvent('order.payment_status_changed')).toBe(true);
   });
 
-  it('does not own legacy-inline deadline/project events in phase 1', () => {
+  it('does not own legacy-inline deadline/group events in phase 1', () => {
     expect(isEngineOwnedEvent('DEADLINE_EXPIRED')).toBe(false);
-    expect(isEngineOwnedEvent('PROJECT_DEADLINE_OVERDUE')).toBe(false);
+    expect(isEngineOwnedEvent('GROUP_DEADLINE_OVERDUE')).toBe(false);
   });
 
   it('declares order context + supported resolvers for order status events', () => {
@@ -23,7 +23,7 @@ describe('notification event registry', () => {
     expect(def?.contextFields).toContain('orderId');
     expect(def?.supportsOrderConditions).toBe(true);
     expect(def?.supportedResolvers).toEqual(
-      expect.arrayContaining(['order_manager', 'stage_assignee', 'project_participants']),
+      expect.arrayContaining(['order_manager', 'stage_assignee', 'group_participants']),
     );
   });
 
@@ -46,14 +46,14 @@ describe('notification event registry', () => {
     }
   });
 
-  it('does not add head resolvers to the project-only PROJECT_DEADLINE_OVERDUE event', () => {
-    const def = getEventDefinition('PROJECT_DEADLINE_OVERDUE');
-    expect(def?.supportedResolvers).toEqual(['project_participants']);
+  it('does not add head resolvers to the group-only GROUP_DEADLINE_OVERDUE event', () => {
+    const def = getEventDefinition('GROUP_DEADLINE_OVERDUE');
+    expect(def?.supportedResolvers).toEqual(['group_participants']);
   });
 
   it('declares deadline condition support only for deadline events', () => {
     expect(getEventDefinition('DEADLINE_EXPIRED')?.supportsDeadlineConditions).toBe(true);
-    expect(getEventDefinition('PROJECT_DEADLINE_OVERDUE')?.supportsDeadlineConditions).toBe(true);
+    expect(getEventDefinition('GROUP_DEADLINE_OVERDUE')?.supportsDeadlineConditions).toBe(true);
     expect(getEventDefinition('order.status_changed')?.supportsDeadlineConditions).toBe(false);
     expect(getEventDefinition('order.production_status_changed')?.supportsDeadlineConditions).toBe(false);
     expect(getEventDefinition('order.payment_status_changed')?.supportsDeadlineConditions).toBe(false);
@@ -68,7 +68,7 @@ describe('notification event registry', () => {
         'order.production_status_changed',
         'order.payment_status_changed',
         'DEADLINE_EXPIRED',
-        'PROJECT_DEADLINE_OVERDUE',
+        'GROUP_DEADLINE_OVERDUE',
       ]),
     );
     expect(isEngineOwnedEvent('DEADLINE_EXPIRED')).toBe(false);

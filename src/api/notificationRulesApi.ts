@@ -11,7 +11,7 @@ import type {
 export interface ListNotificationRulesParams {
   eventType?: string;
   isEnabled?: boolean;
-  projectId?: string | 'global';
+  groupId?: string | 'global';
 }
 
 export const notificationRulesApi = {

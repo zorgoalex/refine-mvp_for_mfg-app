@@ -42,7 +42,7 @@ function deadlineContext(overrides: Partial<NotificationEventContext> = {}): Not
     deadlineId: null,
     deadlineEntityType: 'order',
     deadlineInstanceId: 'deadline-instance-1',
-    projectIds: [],
+    groupIds: [],
     orderStatusId: 11,
     isOrderCompleted: false,
     isCurrentDeadlineEvent: true,
@@ -186,8 +186,8 @@ describe('Deadline convergence — zero double-send (engine fakes)', () => {
       }),
       rule({
         notificationRuleId: 'seed-participants',
-        ruleCode: 'deadline-expired-project-participants',
-        recipients: { resolvers: ['project_participants'] },
+        ruleCode: 'deadline-expired-group-participants',
+        recipients: { resolvers: ['group_participants'] },
       }),
       rule({
         notificationRuleId: 'seed-escalate',
@@ -206,7 +206,7 @@ describe('Deadline convergence — zero double-send (engine fakes)', () => {
         resolve: vi.fn(async (_c, recipients) => {
           if (recipients.resolvers?.includes('order_manager')) return [100];
           if (recipients.resolvers?.includes('stage_assignee')) return [200, 201];
-          if (recipients.resolvers?.includes('project_participants')) return [300];
+          if (recipients.resolvers?.includes('group_participants')) return [300];
           return [];
         }),
       },

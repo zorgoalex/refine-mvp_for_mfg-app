@@ -2,7 +2,7 @@ export type NotificationOwner = 'engine' | 'legacy_inline';
 export type RecipientResolverKind =
   | 'order_manager'
   | 'stage_assignee'
-  | 'project_participants'
+  | 'group_participants'
   | 'workshop_head'
   | 'direction_head';
 export type EventContextField = 'orderId' | 'clientId' | 'paymentId' | 'deadlineId';
@@ -20,7 +20,7 @@ export interface NotificationEventDefinition {
 const ORDER_RESOLVERS: RecipientResolverKind[] = [
   'order_manager',
   'stage_assignee',
-  'project_participants',
+  'group_participants',
   'workshop_head',
   'direction_head',
 ];
@@ -62,12 +62,12 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     supportsOrderConditions: true,
     supportsDeadlineConditions: true,
   },
-  PROJECT_DEADLINE_OVERDUE: {
-    eventType: 'PROJECT_DEADLINE_OVERDUE',
+  GROUP_DEADLINE_OVERDUE: {
+    eventType: 'GROUP_DEADLINE_OVERDUE',
     aggregateType: 'deadline',
     owner: 'legacy_inline',
     contextFields: ['orderId', 'deadlineId'],
-    supportedResolvers: ['project_participants'],
+    supportedResolvers: ['group_participants'],
     supportsOrderConditions: false,
     supportsDeadlineConditions: true,
   },

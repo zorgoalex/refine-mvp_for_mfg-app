@@ -8,7 +8,7 @@ import type {
   OrderListItemDto,
   OrderListResponseDto,
 } from '../dto/order.dto';
-import type { OrderProjectRelationType, OrderProjectSummaryDto } from '../dto/order-project-link.dto';
+import type { OrderGroupRelationType, OrderGroupSummaryDto } from '../dto/order-group-link.dto';
 import type {
   GetOrderFormDataCommand,
   GetOrderAuditCommand,
@@ -107,7 +107,7 @@ interface OrderHeaderRow extends QueryResultRow {
   latest_doweling_order_name: string | null;
   latest_design_engineer_id: string | number | null;
   passed_production_status_codes: unknown[] | null;
-  project_links_json: unknown;
+  group_links_json: unknown;
 }
 
 interface OrderDetailRow extends QueryResultRow {
@@ -197,11 +197,11 @@ interface OrderDowelingLinkRow extends QueryResultRow {
   ref_key_1c: string | null;
 }
 
-interface OrderProjectLinkRow extends QueryResultRow {
-  project_id: string;
+interface OrderGroupLinkRow extends QueryResultRow {
+  group_id: string;
   code: string;
   name: string;
-  relation_type: OrderProjectRelationType;
+  relation_type: OrderGroupRelationType;
   is_primary: boolean;
   valid_from: string | Date;
 }
@@ -373,7 +373,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         latest_doweling.doweling_order_name AS latest_doweling_order_name,
         latest_doweling.design_engineer_id AS latest_design_engineer_id,
         production_projection.passed_production_status_codes,
-        project_projection.project_links_json
+        group_projection.group_links_json
       FROM page_orders o
       LEFT JOIN LATERAL (
         SELECT
@@ -452,12 +452,12 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
             ORDER BY pop.is_primary DESC, pop.relation_type ASC, p.name ASC, p.code ASC
           ),
           '[]'::jsonb
-        ) AS project_links_json
-        FROM public.project_order_projects pop
-        INNER JOIN public.project_projects p ON p.id = pop.project_id
+        ) AS group_links_json
+        FROM public.group_order_groups pop
+        INNER JOIN public.group_groups p ON p.id = pop.group_id
         WHERE pop.order_id = o.order_id
           AND pop.valid_to IS NULL
-      ) project_projection ON true
+      ) group_projection ON true
       ORDER BY ${PAGE_SORT_COLUMNS[command.query.sortBy]} ${command.query.sortOrder === 'asc' ? 'ASC' : 'DESC'}, o.order_id DESC
       `,
       params,
@@ -588,17 +588,17 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       `,
       [command.orderId],
     );
-    const projectLinks = await this.database.query<OrderProjectLinkRow>(
+    const groupLinks = await this.database.query<OrderGroupLinkRow>(
       `
       SELECT
-        p.id::text AS project_id,
+        p.id::text AS group_id,
         p.code,
         p.name,
         pop.relation_type,
         pop.is_primary,
         pop.valid_from
-      FROM public.project_order_projects pop
-      INNER JOIN public.project_projects p ON p.id = pop.project_id
+      FROM public.group_order_groups pop
+      INNER JOIN public.group_groups p ON p.id = pop.group_id
       WHERE pop.order_id = $1
         AND pop.valid_to IS NULL
       ORDER BY pop.is_primary DESC, pop.relation_type ASC, p.name ASC, p.code ASC, pop.id ASC
@@ -613,7 +613,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       workshops.rows,
       requirements.rows,
       dowelingLinks.rows,
-      projectLinks.rows.map(mapProjectLinkRow),
+      groupLinks.rows.map(mapGroupLinkRow),
     );
   }
 
@@ -837,46 +837,46 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       clauses.push(`o.manager_id = $${params.push(Number(command.currentUser.id))}`);
     }
 
-    if (command.query.projectMode === 'none') {
+    if (command.query.groupMode === 'none') {
       clauses.push(`
         NOT EXISTS (
           SELECT 1
-          FROM public.project_order_projects pop_filter
+          FROM public.group_order_groups pop_filter
           WHERE pop_filter.order_id = o.order_id
             AND pop_filter.valid_to IS NULL
         )
       `);
-    } else if (command.query.projectIds?.length) {
-      const projectIdsIndex = params.push(command.query.projectIds);
-      if (command.query.projectMode === 'all') {
+    } else if (command.query.groupIds?.length) {
+      const groupIdsIndex = params.push(command.query.groupIds);
+      if (command.query.groupMode === 'all') {
         clauses.push(`
           (
-            SELECT COUNT(DISTINCT pop_filter.project_id)::int
-            FROM public.project_order_projects pop_filter
+            SELECT COUNT(DISTINCT pop_filter.group_id)::int
+            FROM public.group_order_groups pop_filter
             WHERE pop_filter.order_id = o.order_id
               AND pop_filter.valid_to IS NULL
-              AND pop_filter.project_id = ANY($${projectIdsIndex}::uuid[])
-          ) = ${command.query.projectIds.length}
+              AND pop_filter.group_id = ANY($${groupIdsIndex}::uuid[])
+          ) = ${command.query.groupIds.length}
         `);
-      } else if (command.query.projectMode === 'primary') {
+      } else if (command.query.groupMode === 'primary') {
         clauses.push(`
           EXISTS (
             SELECT 1
-            FROM public.project_order_projects pop_filter
+            FROM public.group_order_groups pop_filter
             WHERE pop_filter.order_id = o.order_id
               AND pop_filter.valid_to IS NULL
               AND pop_filter.is_primary
-              AND pop_filter.project_id = ANY($${projectIdsIndex}::uuid[])
+              AND pop_filter.group_id = ANY($${groupIdsIndex}::uuid[])
           )
         `);
       } else {
         clauses.push(`
           EXISTS (
             SELECT 1
-            FROM public.project_order_projects pop_filter
+            FROM public.group_order_groups pop_filter
             WHERE pop_filter.order_id = o.order_id
               AND pop_filter.valid_to IS NULL
-              AND pop_filter.project_id = ANY($${projectIdsIndex}::uuid[])
+              AND pop_filter.group_id = ANY($${groupIdsIndex}::uuid[])
           )
         `);
       }
@@ -971,7 +971,7 @@ function mapOrderDto(
   workshops: OrderWorkshopRow[],
   requirements: OrderRequirementRow[],
   dowelingLinks: OrderDowelingLinkRow[],
-  projects: OrderProjectSummaryDto[],
+  groups: OrderGroupSummaryDto[],
 ): OrderDto {
   return {
     header: {
@@ -1022,8 +1022,8 @@ function mapOrderDto(
     workshops: workshops.map(mapWorkshop),
     requirements: requirements.map(mapRequirement),
     dowelingLinks: dowelingLinks.map(mapDowelingLink),
-    primaryProject: projects.find((project) => project.isPrimary) ?? null,
-    projects,
+    primaryGroup: groups.find((group) => group.isPrimary) ?? null,
+    groups,
     totals: {
       totalAmount: toNumber(row.total_amount),
       finalAmount: toNumber(row.final_amount),
@@ -1041,7 +1041,7 @@ function mapOrderDto(
 }
 
 function mapListItem(row: OrderHeaderRow): OrderListItemDto {
-  const projects = mapProjectSummaryArray(row.project_links_json);
+  const groups = mapGroupSummaryArray(row.group_links_json);
   return {
     orderId: toNumber(row.order_id),
     orderName: row.order_name,
@@ -1082,8 +1082,8 @@ function mapListItem(row: OrderHeaderRow): OrderListItemDto {
     dowelingOrderName: row.latest_doweling_order_name,
     designEngineerId: toNullableNumber(row.latest_design_engineer_id),
     passedProductionStatusCodes: toStringArray(row.passed_production_status_codes),
-    primaryProject: projects.find((project) => project.isPrimary) ?? null,
-    projects,
+    primaryGroup: groups.find((group) => group.isPrimary) ?? null,
+    groups,
     createdBy: toNullableNumber(row.created_by),
     editedBy: toNullableNumber(row.edited_by),
     updatedAt: toIsoString(row.updated_at),
@@ -1199,9 +1199,9 @@ function mapDowelingLink(row: OrderDowelingLinkRow) {
   };
 }
 
-function mapProjectLinkRow(row: OrderProjectLinkRow): OrderProjectSummaryDto {
+function mapGroupLinkRow(row: OrderGroupLinkRow): OrderGroupSummaryDto {
   return {
-    id: row.project_id,
+    id: row.group_id,
     code: row.code,
     name: row.name,
     relationType: row.relation_type,
@@ -1210,7 +1210,7 @@ function mapProjectLinkRow(row: OrderProjectLinkRow): OrderProjectSummaryDto {
   };
 }
 
-function mapProjectSummaryArray(value: unknown): OrderProjectSummaryDto[] {
+function mapGroupSummaryArray(value: unknown): OrderGroupSummaryDto[] {
   const parsed = typeof value === 'string' ? parseJsonArray(value) : value;
   if (!Array.isArray(parsed)) {
     return [];
@@ -1232,7 +1232,7 @@ function mapProjectSummaryArray(value: unknown): OrderProjectSummaryDto[] {
         id: record.id,
         code: record.code,
         name: record.name,
-        relationType: record.relationType as OrderProjectRelationType,
+        relationType: record.relationType as OrderGroupRelationType,
         isPrimary: Boolean(record.isPrimary),
         validFrom:
           record.validFrom instanceof Date
@@ -1240,7 +1240,7 @@ function mapProjectSummaryArray(value: unknown): OrderProjectSummaryDto[] {
             : String(record.validFrom ?? ''),
       };
     })
-    .filter((item): item is OrderProjectSummaryDto => item !== null);
+    .filter((item): item is OrderGroupSummaryDto => item !== null);
 }
 
 function parseJsonArray(value: string): unknown[] {

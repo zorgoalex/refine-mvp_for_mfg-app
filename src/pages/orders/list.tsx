@@ -48,7 +48,7 @@ import { ordersApi } from "../../api/ordersApi";
 import { findOrderByName, countOrdersAfter } from "../../api/reports/ordersSearchReportApi";
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
-import { ProjectFilter } from "./components/projects/ProjectFilter";
+import { GroupFilter } from "./components/groups/GroupFilter";
 import { AddToCutModal } from "./components/AddToCutModal";
 import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
 import { useIsMobile } from "../../hooks/useDeviceTier";
@@ -65,7 +65,7 @@ const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'order_id', label: 'id', lockVisible: true },
   { key: 'order_name', label: 'Заказ', lockVisible: true },
   { key: 'doweling_order_name', label: 'Прис.' },
-  { key: 'projects', label: 'Проект' },
+  { key: 'groups', label: 'Группа' },
   { key: 'order_date', label: 'Дата заказа' },
   { key: 'client_name', label: 'Клиент' },
   { key: 'milling_type_name', label: 'Фрез-ка' },
@@ -103,7 +103,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [showResultCount, setShowResultCount] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
-  const [projectMode, setProjectMode] = useState<'any' | 'all' | 'primary' | 'none'>('any');
+  const [groupMode, setGroupMode] = useState<'any' | 'all' | 'primary' | 'none'>('any');
   const [snapshotBatchOpen, setSnapshotBatchOpen] = useState(false);
   const [snapshotBatchRange, setSnapshotBatchRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [snapshotBatchExporting, setSnapshotBatchExporting] = useState(false);
@@ -150,11 +150,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   }, [filters, currentUser?.id]);
 
   useEffect(() => {
-    const modeFilter = (filters || []).find((f: any) => f.field === "project_mode");
+    const modeFilter = (filters || []).find((f: any) => f.field === "group_mode");
     const mode = modeFilter?.value;
     if (mode === "any" || mode === "all" || mode === "primary" || mode === "none") {
-      setProjectMode(mode);
-      form.setFieldValue("project_mode", mode);
+      setGroupMode(mode);
+      form.setFieldValue("group_mode", mode);
     }
   }, [filters, form]);
 
@@ -384,11 +384,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       newFilters.push({ field: "doweling_order_name", operator: "eq", value: values.doweling_order_name });
     }
 
-    if (useBackendOrdersRead && values.project_mode === "none") {
-      newFilters.push({ field: "project_mode", operator: "eq", value: "none" });
-    } else if (useBackendOrdersRead && Array.isArray(values.project_ids) && values.project_ids.length > 0) {
-      newFilters.push({ field: "project_ids", operator: "in", value: values.project_ids });
-      newFilters.push({ field: "project_mode", operator: "eq", value: values.project_mode ?? "any" });
+    if (useBackendOrdersRead && values.group_mode === "none") {
+      newFilters.push({ field: "group_mode", operator: "eq", value: "none" });
+    } else if (useBackendOrdersRead && Array.isArray(values.group_ids) && values.group_ids.length > 0) {
+      newFilters.push({ field: "group_ids", operator: "in", value: values.group_ids });
+      newFilters.push({ field: "group_mode", operator: "eq", value: values.group_mode ?? "any" });
     }
 
     setFilters(newFilters, "replace");
@@ -403,7 +403,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     setCurrent(1); // Сброс на первую страницу
     setShowResultCount(false);
     setShowMyOrders(false); // Также сбрасываем быстрый фильтр
-    setProjectMode("any");
+    setGroupMode("any");
   };
 
   // Обработчик переключения фильтра "Мои заказы"
@@ -931,19 +931,19 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         ) : null;
       },
     },
-    ...(useBackendOrdersRead && featureFlags.useBackendProjects
+    ...(useBackendOrdersRead && featureFlags.useBackendGroups
       ? [{
-          dataIndex: "projects",
-          key: "projects",
-          title: "Проект",
+          dataIndex: "groups",
+          key: "groups",
+          title: "Группа",
           width: 150,
           className: "orders-col",
-          render: (projects: any[]) => {
-            const primary = projects?.find((project) => project.isPrimary) ?? projects?.[0];
+          render: (groups: any[]) => {
+            const primary = groups?.find((group) => group.isPrimary) ?? groups?.[0];
             return primary ? (
               <span>{primary.code} · {primary.name}</span>
             ) : (
-              <span style={{ color: 'var(--app-text-muted)' }}>Проект не указан</span>
+              <span style={{ color: 'var(--app-text-muted)' }}>Группа не указана</span>
             );
           },
         }]
@@ -1291,18 +1291,18 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                     />
                   </Form.Item>
                 </Col>
-                {useBackendOrdersRead && featureFlags.useBackendProjects && (
+                {useBackendOrdersRead && featureFlags.useBackendGroups && (
                   <Col xs={24} sm={12} md={8} lg={5}>
-                    <Form.Item name="project_ids" label="Проект">
-                      <ProjectFilter
-                        projectMode={projectMode}
-                        onProjectModeChange={(mode) => {
-                          setProjectMode(mode);
-                          form.setFieldValue("project_mode", mode);
+                    <Form.Item name="group_ids" label="Группа">
+                      <GroupFilter
+                        groupMode={groupMode}
+                        onGroupModeChange={(mode) => {
+                          setGroupMode(mode);
+                          form.setFieldValue("group_mode", mode);
                         }}
                       />
                     </Form.Item>
-                    <Form.Item name="project_mode" hidden initialValue="any" />
+                    <Form.Item name="group_mode" hidden initialValue="any" />
                   </Col>
                 )}
                 <Col xs={24} sm={24} md={24} lg={8} style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end' }}>

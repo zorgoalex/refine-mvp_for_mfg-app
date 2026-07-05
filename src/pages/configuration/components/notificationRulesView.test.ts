@@ -16,7 +16,7 @@ const baseRule: NotificationRuleDto = {
   notificationRuleId: '11111111-1111-4111-8111-111111111111',
   ruleCode: 'notify-overdue-manager',
   eventType: 'order.production_status_changed',
-  projectId: '22222222-2222-4222-8222-222222222222',
+  groupId: '22222222-2222-4222-8222-222222222222',
   isEnabled: true,
   priority: 100,
   level: 'warning',
@@ -59,7 +59,7 @@ describe('notificationRulesView', () => {
       const draft: NotificationRuleDraft = {
         ruleCode: 'notify-overdue-manager',
         eventType: 'order.production_status_changed',
-        projectId: null,
+        groupId: null,
         level: 'warning',
         priority: 100,
         isEnabled: true,
@@ -78,7 +78,7 @@ describe('notificationRulesView', () => {
       expect(buildCreatePayload(draft)).toEqual({
         ruleCode: 'notify-overdue-manager',
         eventType: 'order.production_status_changed',
-        projectId: null,
+        groupId: null,
         level: 'warning',
         priority: 100,
         isEnabled: true,
@@ -115,18 +115,18 @@ describe('notificationRulesView', () => {
       expect(payload.recipients).toEqual({ userIds: [100, 200] });
     });
 
-    it('builds create payload with project scope', () => {
+    it('builds create payload with group scope', () => {
       const payload = buildCreatePayload({
         ...emptyDraft(),
         ruleCode: 'project-deadline',
         eventType: 'DEADLINE_EXPIRED',
-        projectId: '11111111-1111-4111-8111-111111111111',
+        groupId: '11111111-1111-4111-8111-111111111111',
         deadlineEntityTypes: ['order_stage'],
         requireCurrentDeadlineEvent: false,
-        resolvers: ['project_participants'],
+        resolvers: ['group_participants'],
       });
 
-      expect(payload.projectId).toBe('11111111-1111-4111-8111-111111111111');
+      expect(payload.groupId).toBe('11111111-1111-4111-8111-111111111111');
       expect(payload.conditions).toEqual({
         deadlineEntityTypes: ['order_stage'],
         requireCurrentDeadlineEvent: false,
@@ -170,17 +170,17 @@ describe('notificationRulesView', () => {
       expect('conditions' in result).toBe(true);
     });
 
-    it('builds update payload that clears project scope', () => {
+    it('builds update payload that clears group scope', () => {
       const payload = buildUpdatePayload(
         {
           ...emptyDraft(),
-          projectId: null,
+          groupId: null,
         },
-        'clear project',
+        'clear group',
         '2026-06-14T00:00:00.000Z',
       );
 
-      expect(payload.projectId).toBeNull();
+      expect(payload.groupId).toBeNull();
     });
   });
 
@@ -190,7 +190,7 @@ describe('notificationRulesView', () => {
       expect(draft).toEqual({
         ruleCode: 'notify-overdue-manager',
         eventType: 'order.production_status_changed',
-        projectId: '22222222-2222-4222-8222-222222222222',
+        groupId: '22222222-2222-4222-8222-222222222222',
         level: 'warning',
         priority: 100,
         isEnabled: true,
@@ -211,7 +211,7 @@ describe('notificationRulesView', () => {
       const draft = emptyDraft();
       expect(draft.ruleCode).toBe('');
       expect(draft.eventType).toBe('');
-      expect(draft.projectId).toBeNull();
+      expect(draft.groupId).toBeNull();
       expect(draft.level).toBe('info');
       expect(draft.priority).toBe(100);
       expect(draft.isEnabled).toBe(true);

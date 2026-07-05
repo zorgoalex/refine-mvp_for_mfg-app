@@ -9,10 +9,10 @@ export interface BackendFeatureFlags {
   orderExport: boolean;
   users: boolean;
   vlm: boolean;
-  projects: boolean;
+  groups: boolean;
   deadlines: boolean;
   ordersReadOnly: boolean;
-  projectsReadOnly: boolean;
+  groupsReadOnly: boolean;
   exportDisabled: boolean;
   vlmDisabled: boolean;
   deadlinesReadOnly: boolean;
@@ -39,10 +39,10 @@ export function getBackendFeatureFlags(env: BackendEnv): BackendFeatureFlags {
     orderExport: env.BACKEND_ENABLE_ORDER_EXPORT,
     users: env.BACKEND_ENABLE_USERS,
     vlm: env.BACKEND_ENABLE_VLM,
-    projects: env.BACKEND_ENABLE_PROJECTS,
+    groups: env.BACKEND_ENABLE_GROUPS,
     deadlines: env.BACKEND_ENABLE_DEADLINES,
     ordersReadOnly: env.BACKEND_ORDERS_READ_ONLY,
-    projectsReadOnly: env.BACKEND_PROJECTS_READ_ONLY,
+    groupsReadOnly: env.BACKEND_GROUPS_READ_ONLY,
     exportDisabled: env.BACKEND_EXPORT_DISABLED,
     vlmDisabled: env.BACKEND_VLM_DISABLED,
     deadlinesReadOnly: env.BACKEND_DEADLINES_READ_ONLY,

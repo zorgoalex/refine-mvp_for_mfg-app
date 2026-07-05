@@ -13,16 +13,16 @@ function sectionBetween(start: string, end: string): string {
 }
 
 describe('notification rules OpenAPI contract', () => {
-  it('documents projectId list filter as UUID or global', () => {
+  it('documents groupId list filter as UUID or global', () => {
     const section = sectionBetween('  /api/v1/notification-rules:', '  /api/v1/notification-rules/{ruleId}:');
 
-    expect(section).toContain('name: projectId');
+    expect(section).toContain('name: groupId');
     expect(section).toContain('oneOf:');
     expect(section).toContain('format: uuid');
     expect(section).toContain('global');
   });
 
-  it('documents nullable projectId on rule and mutation schemas', () => {
+  it('documents nullable groupId on rule and mutation schemas', () => {
     for (const schemaName of [
       'NotificationRule:',
       'CreateNotificationRuleRequest:',
@@ -30,7 +30,7 @@ describe('notification rules OpenAPI contract', () => {
     ]) {
       const section = sectionBetween(`    ${schemaName}`, '\n\n    ');
 
-      expect(section).toContain('projectId:');
+      expect(section).toContain('groupId:');
       expect(section).toContain('format: uuid');
       expect(section).toContain('nullable: true');
     }
