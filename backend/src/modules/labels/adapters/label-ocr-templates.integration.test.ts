@@ -152,6 +152,12 @@ describeIntegration('PgLabelsRepository OCR templates (integration)', () => {
     expect(created.isActive).toBe(true);
     expect(created.name).toBe(name);
     expect(created.rules).toEqual(sampleRules);
+    expect(typeof created.createdAt).toBe('string');
+    expect(Number.isNaN(Date.parse(created.createdAt))).toBe(false);
+    expect(created.createdBy).toBe(7);
+    expect(typeof created.updatedAt).toBe('string');
+    expect(Number.isNaN(Date.parse(created.updatedAt))).toBe(false);
+    expect(created.updatedBy).toBe(7);
 
     const row = await sessionClient.query(
       'SELECT name, is_active, version FROM label_ocr_templates WHERE label_ocr_template_id = $1',
@@ -225,6 +231,52 @@ describeIntegration('PgLabelsRepository OCR templates (integration)', () => {
     );
     expect(audit.rows).toHaveLength(1);
     expect(audit.rows[0].diff_json.fieldCodes).toEqual(['detail_number']);
+  });
+
+  it('an anchor-only update (name/version/fieldCodes unchanged) still audits the new rule content', async () => {
+    const name = `${namePrefix} anchor-only`;
+    const rulesBefore = [{ field: 'order_number' as const, sampleText: 'ФК123', anchor: null }];
+    const created = await repo.createOcrTemplate({
+      currentUser: currentUser(),
+      requestId: 'req-anchor-create',
+      input: {
+        name,
+        rules: rulesBefore,
+        sampleLines: ['ФК123'],
+        isActive: true,
+        idempotencyKey: `${namePrefix}-anchor-create-key`,
+      },
+    });
+
+    const rulesAfter = [{ field: 'order_number' as const, sampleText: 'ФК123', anchor: 'ФК' }];
+    const updated = await repo.updateOcrTemplate({
+      currentUser: currentUser(),
+      requestId: 'req-anchor-update',
+      id: created.labelOcrTemplateId,
+      expectedVersion: created.version,
+      input: {
+        name,
+        rules: rulesAfter,
+        sampleLines: ['ФК123'],
+        isActive: true,
+        idempotencyKey: `${namePrefix}-anchor-update-key`,
+      },
+    });
+
+    expect(updated.rules).toEqual(rulesAfter);
+
+    const audit = await sessionClient.query(
+      `SELECT before_json, after_json, diff_json FROM audit_log
+        WHERE event = 'label_ocr_template.updated' AND entity_id = $1`,
+      [String(created.labelOcrTemplateId)],
+    );
+    expect(audit.rows).toHaveLength(1);
+    // fieldCodes/name/version are unchanged by an anchor-only edit — the real
+    // proof is that rules (full content) differ between before and after.
+    expect(audit.rows[0].before_json.rules).toEqual(rulesBefore);
+    expect(audit.rows[0].after_json.rules).toEqual(rulesAfter);
+    expect(audit.rows[0].diff_json.rules).toEqual(rulesAfter);
+    expect(audit.rows[0].after_json.rules).not.toEqual(audit.rows[0].before_json.rules);
   });
 
   it('reactivates a deleted template via update(isActive:true) and audits the change', async () => {

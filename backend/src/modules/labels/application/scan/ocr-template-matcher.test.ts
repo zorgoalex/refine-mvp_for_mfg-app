@@ -126,4 +126,17 @@ describe('matchOcrTemplates', () => {
     expect(result).not.toBeNull();
     expect(result).not.toHaveProperty('bazisFields');
   });
+
+  it('9. a 2-digit-year date line (00.00.17) contributes strong weight and fills fields.date', () => {
+    const template: OcrTemplateForMatch = {
+      id: 5,
+      name: 'date-2digit-year',
+      rules: [{ field: 'date' }, { field: 'material' }, { field: 'dimensions' }],
+    };
+    const result = matchOcrTemplates(['00.00.17', 'ЛДСП 16мм', '649 X 238'], [template]);
+    expect(result).not.toBeNull();
+    expect(result!.fields.date).toBe('00.00.17');
+    expect(result!.fields.width).toBe(649);
+    expect(result!.fields.height).toBe(238);
+  });
 });

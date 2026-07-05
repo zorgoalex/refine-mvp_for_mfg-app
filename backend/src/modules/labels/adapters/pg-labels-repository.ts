@@ -180,7 +180,8 @@ function qrAuditShape(dto: LabelQrTemplateDto): Record<string, unknown> {
   };
 }
 
-const OCR_TEMPLATE_COLUMNS = `label_ocr_template_id, name, rules, sample_lines, is_active, version`;
+const OCR_TEMPLATE_COLUMNS = `label_ocr_template_id, name, rules, sample_lines, is_active, version,
+  created_at, created_by, updated_at, updated_by`;
 
 interface OcrTemplateRow extends QueryResultRow {
   label_ocr_template_id: string | number;
@@ -189,6 +190,10 @@ interface OcrTemplateRow extends QueryResultRow {
   sample_lines: string[];
   is_active: boolean;
   version: string | number;
+  created_at: string | Date;
+  created_by: string | number | null;
+  updated_at: string | Date;
+  updated_by: string | number | null;
 }
 
 interface OcrTemplateForMatchRow extends QueryResultRow {
@@ -205,16 +210,22 @@ function mapOcrTemplateRow(row: OcrTemplateRow): LabelOcrTemplateDto {
     sampleLines: row.sample_lines ?? [],
     isActive: row.is_active,
     version: toNumber(row.version),
+    createdAt: toIsoString(row.created_at),
+    createdBy: nullableNumber(row.created_by),
+    updatedAt: toIsoString(row.updated_at),
+    updatedBy: nullableNumber(row.updated_by),
   };
 }
 
+// Includes full rule content (not just fieldCodes) so anchor/sampleText-only
+// edits still produce a non-identical diff, matching the qrAuditShape precedent.
 function ocrAuditShape(dto: LabelOcrTemplateDto): Record<string, unknown> {
   return {
     name: dto.name,
     isActive: dto.isActive,
     version: dto.version,
+    rules: dto.rules,
     fieldCodes: dto.rules.map((rule) => rule.field),
-    rulesCount: dto.rules.length,
   };
 }
 
@@ -1899,6 +1910,10 @@ function toNumber(value: string | number): number {
 
 function nullableNumber(value: string | number | null): number | null {
   return value == null ? null : toNumber(value);
+}
+
+function toIsoString(value: string | Date): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
 function auditShape(value: LabelTemplateDto): Record<string, unknown> {

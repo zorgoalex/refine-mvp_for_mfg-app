@@ -94,9 +94,17 @@ export const OcrTemplatesConfig: React.FC<OcrTemplatesConfigProps> = ({ canManag
         </Space>
       ),
     },
-    // LabelOcrTemplate has no updatedAt timestamp yet — version is the closest
-    // change-indicator available from the backend DTO.
     { title: 'Версия', dataIndex: 'version', key: 'version', width: 90 },
+    {
+      title: 'Обновлён',
+      dataIndex: 'updatedAt',
+      key: 'updatedAt',
+      width: 160,
+      render: (updatedAt: string) => {
+        const date = updatedAt ? new Date(updatedAt) : null;
+        return date && !Number.isNaN(date.getTime()) ? date.toLocaleString('ru-RU') : '—';
+      },
+    },
     {
       title: '',
       key: 'actions',

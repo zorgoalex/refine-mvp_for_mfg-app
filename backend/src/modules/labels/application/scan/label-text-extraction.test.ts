@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractLabelFields } from './label-text-extraction';
+import { extractLabelFields, parseDate } from './label-text-extraction';
 
 describe('extractLabelFields (fixtures = сырой OCR-вывод прототипа 2026-07-04)', () => {
   it('чистая бирка (paddle label1)', () => {
@@ -53,5 +53,11 @@ describe('extractLabelFields (fixtures = сырой OCR-вывод протот�
     expect(f.orderName).toBe('548-16мм МДФ');
     const g = extractLabelFields(['Заказ№: 548-16мм МДФ', 'Бир.№ 1/0']);
     expect(g.orderName).toBe('548-16мм МДФ');
+  });
+
+  it('parseDate принимает и 2-, и 4-значный год (dd.mm.yy(yy))', () => {
+    expect(parseDate('00.00.17')).toBe('00.00.17');
+    expect(parseDate('24.06.26')).toBe('24.06.26');
+    expect(parseDate('24.06.2026')).toBe('24.06.2026');
   });
 });

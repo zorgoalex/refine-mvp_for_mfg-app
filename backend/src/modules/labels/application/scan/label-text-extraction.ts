@@ -13,7 +13,8 @@ const SIZE_PATTERN =
   /(?<![\dА-Яа-яA-Za-z])(\d{2,4})[\s]*[xхXХ×%]{1,2}[\s]*(\d{2,4})(?![\dА-Яа-яA-Za-z])/;
 const MDF_PATTERN = /МДФ\s*(\d+)\s*мм/i;
 const LDSP_PATTERN = /ЛДСП(?:\s*(\d+)\s*мм)?/i;
-const DATE_PATTERN = /\b(\d{2})\.(\d{2})\.(\d{4})\b/;
+// dd.mm.yy(yy) — bazis labels carry both 2-digit (e.g. 00.00.17) and 4-digit years.
+const DATE_PATTERN = /\b(\d{2})\.(\d{2})\.(\d{2}(?:\d{2})?)\b/;
 const ORDER_NUMBER_PATTERN = /^\D*(\d{1,6})\D*$/;
 const DETAIL_NUMBER_PATTERN = /^\D*(\d{1,5})\D*$/;
 const QUANTITY_PATTERN = /(\d+)\s*ШТ/i;

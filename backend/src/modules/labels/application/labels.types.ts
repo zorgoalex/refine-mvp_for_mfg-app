@@ -244,6 +244,10 @@ export interface LabelOcrTemplateDto {
   sampleLines: string[];
   isActive: boolean;
   version: number;
+  createdAt: string;
+  createdBy: number | null;
+  updatedAt: string;
+  updatedBy: number | null;
 }
 
 export interface LabelOcrTemplateInput {
