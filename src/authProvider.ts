@@ -269,14 +269,23 @@ async function logoutFromBackend() {
     }
   } catch (error) {
     logAuthError(error, 'Выход из системы');
-  } finally {
-    authSession.clear();
-    authStorage.clear();
 
-    if (user?.id) {
-      const { deleteAll } = useNotificationStore.getState();
-      deleteAll(user.id);
-    }
+    // The backend did NOT confirm the logout: the HttpOnly refresh cookie
+    // (and possibly the SSO provider session) is still alive. Pretending to
+    // be logged out on a shared machine is worse than failing loudly — keep
+    // the session and let the user retry.
+    return {
+      success: false,
+      error: new Error('Не удалось завершить сессию — попробуйте выйти ещё раз'),
+    };
+  }
+
+  authSession.clear();
+  authStorage.clear();
+
+  if (user?.id) {
+    const { deleteAll } = useNotificationStore.getState();
+    deleteAll(user.id);
   }
 
   // SSO sessions are also terminated at the provider; WorkOS redirects back

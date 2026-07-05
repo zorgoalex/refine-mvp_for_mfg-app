@@ -95,6 +95,9 @@ describe('workos callback helpers contract', () => {
     // must stay retryable and a link retry must stay a link.
     const settle = callbackSource.split('const settleAfterBackendResponse')[1]?.split('const exchange')[0] ?? '';
     expect(settle).toContain('error instanceof ApiError');
+    // Pre-exchange backend denials (429/403/503/422) did not consume the
+    // state/code — they must stay retryable like transport faults.
+    expect(settle).toContain('PRE_EXCHANGE_ERROR_CODES.has(error.code)');
     expect(settle).toContain('consumedCodes.set(code, "settled")');
     expect(settle).toContain('sessionStorage.removeItem(LINK_INTENT_KEY)');
     expect(settle).toContain('consumedCodes.delete(code)');
@@ -139,6 +142,17 @@ describe('workos UI gating', () => {
   it('login SSO button and profile link card render only behind the flag', () => {
     expect(loginPageSource).toContain('featureFlags.workosAuth && <WorkosSsoButton />');
     expect(profileSource).toContain('featureFlags.workosAuth && <WorkosLinkCard />');
+  });
+});
+
+describe('logout failure contract', () => {
+  it('does not fake a successful logout when the backend did not confirm it', () => {
+    const logoutFn = authProviderSource.split('async function logoutFromBackend')[1] ?? '';
+    const catchBlock = logoutFn.split('catch (error)')[1]?.split('authSession.clear()')[0] ?? '';
+    // The refresh cookie is HttpOnly: only a confirmed backend logout may
+    // clear local auth state and redirect to /login.
+    expect(catchBlock).toContain('success: false');
+    expect(catchBlock).not.toContain('authStorage.clear()');
   });
 });
 

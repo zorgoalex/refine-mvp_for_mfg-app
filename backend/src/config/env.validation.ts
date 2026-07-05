@@ -282,6 +282,20 @@ export const envSchema = z
       });
     }
 
+    // Plain-HTTP localhost API base is for LOCAL MOCKS only: on staging/prod
+    // it would bounce logout redirects to loopback and post the client
+    // secret + one-time code to a local service.
+    if (
+      (env.NODE_ENV === 'production' || env.NODE_ENV === 'staging') &&
+      env.WORKOS_API_BASE.startsWith('http://')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'WORKOS_API_BASE must be https://*.workos.com in staging/production',
+        path: ['WORKOS_API_BASE'],
+      });
+    }
+
     if (env.BACKEND_ENABLE_WORKOS_AUTH) {
       if (!env.BACKEND_ENABLE_AUTH) {
         ctx.addIssue({

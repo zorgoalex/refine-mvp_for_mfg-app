@@ -13,6 +13,18 @@ const consumedCodes = new Map<string, "pending" | "settled">();
 
 const LINK_INTENT_KEY = "erp_workos_link_intent";
 
+// Backend errors raised BEFORE the state/code were consumed (throttle, origin
+// check, feature off, validation, expired bearer on the link path): the code
+// and the state cookie are still valid, so the same callback URL may retry.
+const PRE_EXCHANGE_ERROR_CODES = new Set([
+  "RATE_LIMIT_EXCEEDED",
+  "RATE_LIMIT_UNAVAILABLE",
+  "ORIGIN_NOT_ALLOWED",
+  "SERVICE_UNAVAILABLE",
+  "VALIDATION_ERROR",
+  "AUTH_REQUIRED",
+]);
+
 /**
  * Binds the link intent to the EXACT state of the started flow: a stale flag
  * from an aborted link attempt must not misroute the next normal SSO login
@@ -69,14 +81,19 @@ export const WorkosCallbackPage: React.FC = () => {
     let exchangeStarted = false;
 
     const settleAfterBackendResponse = (error?: unknown) => {
-      if (error === undefined || error instanceof ApiError) {
+      const consumed =
+        error === undefined ||
+        (error instanceof ApiError && !PRE_EXCHANGE_ERROR_CODES.has(error.code));
+
+      if (consumed) {
         consumedCodes.set(code, "settled");
         if (isLink) {
           sessionStorage.removeItem(LINK_INTENT_KEY);
         }
         return;
       }
-      // Transport fault: nothing reached the backend — release the code.
+      // Transport fault or a pre-exchange backend denial: nothing consumed
+      // the state/code — release the entry so the URL stays retryable.
       consumedCodes.delete(code);
     };
 
