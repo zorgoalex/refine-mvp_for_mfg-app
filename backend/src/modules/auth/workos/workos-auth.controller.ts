@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { ConfigService } from '@nestjs/config';
@@ -192,6 +192,21 @@ export class WorkosAuthController {
   }
 
   @ApiBearerAuth()
+  @ApiResponse({ status: 200, description: 'Linked SSO identities for the current user' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
+  @ApiOperation({ operationId: 'authWorkosListLinks', summary: 'List the current user SSO links' })
+  @Get('auth/workos/links')
+  async listLinks(
+    @Req() request: WorkosRequest,
+  ): Promise<{ links: Awaited<ReturnType<WorkosAuthService['listOwnLinks']>> }> {
+    const service = this.assertEnabled();
+    const currentUser = this.assertCurrentUser(request);
+
+    return { links: await service.listOwnLinks(currentUser) };
+  }
+
+  @ApiBearerAuth()
   @ApiBody({
     schema: swaggerSchema({
       type: 'object',
@@ -201,17 +216,21 @@ export class WorkosAuthController {
   })
   @ApiResponse({ status: 200, description: 'Identity unlinked' })
   @ApiResponse({ status: 401, description: 'Authentication required or invalid password' })
+  @ApiResponse({ status: 404, description: 'Identity not found' })
   @ApiResponse({ status: 409, description: 'Unlink is forbidden for external-only login policy' })
+  @ApiResponse({ status: 422, description: 'Validation error' })
   @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
-  @ApiOperation({ operationId: 'authWorkosUnlink', summary: 'Unlink the current user from SSO' })
-  @Delete('auth/workos/link')
+  @ApiOperation({ operationId: 'authWorkosUnlinkOne', summary: 'Unlink one SSO identity from the current user' })
+  @Delete('auth/workos/links/:identityId')
   @HttpCode(200)
-  async unlink(
+  async unlinkOne(
     @Req() request: WorkosRequest,
+    @Param('identityId') identityIdParam: string,
     @Body() body: { password?: string },
   ): Promise<{ unlinked: boolean }> {
     const service = this.assertEnabled();
     const currentUser = this.assertCurrentUser(request);
+    const identityId = this.parseNumericId(identityIdParam, 'identityId');
 
     if (typeof body?.password !== 'string' || body.password.length === 0) {
       throw new ApiError(422, 'VALIDATION_ERROR', 'Требуется подтверждение паролем');
@@ -223,12 +242,13 @@ export class WorkosAuthController {
     // confirmations accumulate.
     const unlinkLimit = {
       rule: { feature: 'auth_workos_unlink', maxRequests: 10, windowMs: 3_600_000 },
-      subject: { route: 'auth/workos/link', userId: currentUser.id },
+      subject: { route: 'auth/workos/unlink', userId: currentUser.id },
     };
     await this.rateLimits.assertAllowed(unlinkLimit);
 
-    const result = await service.unlink({
+    const result = await service.unlinkOwn({
       currentUser,
+      identityId,
       password: body.password,
       userAgent: request.get('user-agent') ?? undefined,
       ipAddress: request.ip,
@@ -240,17 +260,72 @@ export class WorkosAuthController {
   }
 
   @ApiBearerAuth()
-  @ApiResponse({ status: 200, description: 'Link status of the current user' })
+  @ApiResponse({ status: 200, description: 'Linked SSO identities for the target user' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Permission denied' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 422, description: 'Validation error' })
   @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
-  @ApiOperation({ operationId: 'authWorkosLinkStatus', summary: 'Check whether the current user is linked to SSO' })
-  @Get('auth/workos/link')
-  async linkStatus(@Req() request: WorkosRequest): Promise<{ linked: boolean }> {
-    this.assertEnabled();
+  @ApiOperation({ operationId: 'authWorkosAdminListLinks', summary: 'List SSO links for a user' })
+  @Get('auth/workos/admin/users/:userId/links')
+  async adminListLinks(
+    @Req() request: WorkosRequest,
+    @Param('userId') userIdParam: string,
+  ): Promise<{ links: Awaited<ReturnType<WorkosAuthService['adminListLinks']>> }> {
+    const service = this.assertEnabled();
     const currentUser = this.assertCurrentUser(request);
-    const link = await this.identities?.findByUserId(currentUser.id, WORKOS_PROVIDER);
+    const userId = this.parseNumericId(userIdParam, 'userId');
 
-    return { linked: Boolean(link) };
+    return {
+      links: await service.adminListLinks({
+        currentUser,
+        targetUserId: userId,
+      }),
+    };
+  }
+
+  @ApiBearerAuth()
+  @ApiBody({
+    schema: swaggerSchema({
+      type: 'object',
+      properties: { reason: { type: 'string', minLength: 1 } },
+    }),
+  })
+  @ApiResponse({ status: 200, description: 'Identity unlinked by administrator' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Permission denied' })
+  @ApiResponse({ status: 404, description: 'User or identity not found' })
+  @ApiResponse({ status: 409, description: 'Unlink is forbidden for external-only login policy' })
+  @ApiResponse({ status: 422, description: 'Validation error' })
+  @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
+  @ApiOperation({ operationId: 'authWorkosAdminUnlinkOne', summary: 'Unlink one SSO identity for a user' })
+  @Delete('auth/workos/admin/users/:userId/links/:identityId')
+  @HttpCode(200)
+  async adminUnlink(
+    @Req() request: WorkosRequest,
+    @Param('userId') userIdParam: string,
+    @Param('identityId') identityIdParam: string,
+    @Body() body?: { reason?: string },
+  ): Promise<{ unlinked: boolean }> {
+    const service = this.assertEnabled();
+    const currentUser = this.assertCurrentUser(request);
+    const userId = this.parseNumericId(userIdParam, 'userId');
+    const identityId = this.parseNumericId(identityIdParam, 'identityId');
+
+    await this.rateLimits.assertAllowed({
+      rule: { feature: 'auth_workos_admin_unlink', maxRequests: 30, windowMs: 60_000 },
+      subject: { route: 'auth/workos/admin/unlink', userId: currentUser.id },
+    });
+
+    return service.adminUnlink({
+      currentUser,
+      targetUserId: userId,
+      identityId,
+      reason: body?.reason,
+      userAgent: request.get('user-agent') ?? undefined,
+      ipAddress: request.ip,
+      requestId: request.requestId,
+    });
   }
 
   private startFlow(
@@ -346,6 +421,14 @@ export class WorkosAuthController {
     }
 
     return request.user;
+  }
+
+  private parseNumericId(value: string, field: 'userId' | 'identityId'): string {
+    if (!/^[1-9]\d*$/.test(value)) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный идентификатор', { field });
+    }
+
+    return value;
   }
 
   /** Defense-in-depth for browser calls; non-browser clients send no Origin. */

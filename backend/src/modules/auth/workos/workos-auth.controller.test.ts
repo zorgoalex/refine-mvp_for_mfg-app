@@ -2,11 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import { WorkosAuthController } from './workos-auth.controller';
 
-/**
- * Unlink verifies the LOCAL password from a live bearer session, so it must
- * carry its own per-user budget (consume-before-verify, refund-on-success) —
- * otherwise it is a brute-force bypass around the /auth/login limiters.
- */
 describe('WorkosAuthController.linkStart', () => {
   it('fails fast when the bearer has no sessionId claim — never sends the user to the provider', async () => {
     const harness = createHarness({});
@@ -18,7 +13,7 @@ describe('WorkosAuthController.linkStart', () => {
     await expect(
       harness.controller.linkStart(request as never, { cookie: () => undefined } as never),
     ).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
-    expect(harness.calls).toEqual([]);
+    expect(harness.serviceCalls).toEqual([]);
   });
 });
 
@@ -27,108 +22,320 @@ describe('WorkosAuthController callback rate limiting', () => {
     const harness = createHarness({});
     const response = { cookie: () => undefined } as never;
 
-    // Both throw 422 on the empty body AFTER consuming the limiter — the
-    // recorded keys must be identical (same feature, same route subject).
-    await expect(
-      harness.controller.callback(createRequest(), response, {}),
-    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-    await expect(
-      harness.controller.linkCallback(createRequest(), response, {}),
-    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(harness.controller.callback(createRequest(), response, {})).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+    await expect(harness.controller.linkCallback(createRequest(), response, {})).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
 
-    const consumes = harness.calls.filter((call) => call.startsWith('consume:auth_workos_callback'));
-    expect(consumes).toHaveLength(2);
-    expect(new Set(consumes).size).toBe(1);
-    expect(consumes[0]).toContain('route=auth/workos/callback');
+    expect(harness.rateLimitConsumes).toEqual([
+      {
+        rule: { feature: 'auth_workos_callback', maxRequests: 10, windowMs: 60_000 },
+        subject: { route: 'auth/workos/callback', ipAddress: '127.0.0.1' },
+      },
+      {
+        rule: { feature: 'auth_workos_callback', maxRequests: 10, windowMs: 60_000 },
+        subject: { route: 'auth/workos/callback', ipAddress: '127.0.0.1' },
+      },
+    ]);
   });
 });
 
-describe('WorkosAuthController.unlink rate limiting', () => {
-  it('consumes the per-user budget before the password check and refunds on success', async () => {
-    const harness = createHarness({ unlinkResult: { unlinked: true } });
+describe('WorkosAuthController self identity routes', () => {
+  it('lists the current user links', async () => {
+    const links = [{ id: '17', provider: 'workos' }];
+    const harness = createHarness({ listOwnLinksResult: links });
+    const request = createRequest();
 
+    await expect(harness.controller.listLinks(request)).resolves.toEqual({ links });
+    expect(harness.serviceCalls).toEqual([{ method: 'listOwnLinks', input: request.user }]);
+  });
+
+  it('requires a password confirmation before self unlink', async () => {
+    const harness = createHarness({});
+
+    await expect(harness.controller.unlinkOne(createRequest(), '17', {})).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      message: 'Требуется подтверждение паролем',
+    });
     await expect(
-      harness.controller.unlink(createRequest(), { password: 'correct' }),
-    ).resolves.toEqual({ unlinked: true });
+      harness.controller.unlinkOne(createRequest(), '17', { password: '' }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      message: 'Требуется подтверждение паролем',
+    });
 
-    expect(harness.calls).toEqual([
-      'consume:auth_workos_unlink:route=auth/workos/link:user=42',
-      'unlink',
-      'refund:auth_workos_unlink:route=auth/workos/link:user=42',
+    expect(harness.rateLimitConsumes).toEqual([]);
+    expect(harness.serviceCalls).toEqual([]);
+  });
+
+  it.each(['abc', '1x'])(
+    'rejects malformed self identity ids before calling the service: %s',
+    async (identityId) => {
+      const harness = createHarness({});
+
+      await expect(
+        harness.controller.unlinkOne(createRequest(), identityId, { password: 'secret' }),
+      ).rejects.toMatchObject({
+        statusCode: 422,
+        code: 'VALIDATION_ERROR',
+      });
+
+      expect(harness.rateLimitConsumes).toEqual([]);
+      expect(harness.serviceCalls).toEqual([]);
+    },
+  );
+
+  it('consumes the constant self-unlink budget and refunds on success', async () => {
+    const harness = createHarness({ unlinkOwnResult: { unlinked: true } });
+    const request = createRequest();
+
+    await expect(harness.controller.unlinkOne(request, '17', { password: 'correct' })).resolves.toEqual({
+      unlinked: true,
+    });
+
+    expect(harness.rateLimitConsumes).toEqual([
+      {
+        rule: { feature: 'auth_workos_unlink', maxRequests: 10, windowMs: 3_600_000 },
+        subject: { route: 'auth/workos/unlink', userId: '42' },
+      },
+    ]);
+    expect(harness.serviceCalls).toEqual([
+      {
+        method: 'unlinkOwn',
+        input: {
+          currentUser: request.user,
+          identityId: '17',
+          password: 'correct',
+          userAgent: 'test-agent',
+          ipAddress: '127.0.0.1',
+          requestId: 'req-1',
+        },
+      },
+    ]);
+    expect(harness.rateLimitRefunds).toEqual([
+      {
+        rule: { feature: 'auth_workos_unlink', maxRequests: 10, windowMs: 3_600_000 },
+        subject: { route: 'auth/workos/unlink', userId: '42' },
+      },
+    ]);
+  });
+});
+
+describe('WorkosAuthController admin identity routes', () => {
+  it('lists links for a target user', async () => {
+    const links = [{ id: '5', provider: 'workos' }];
+    const harness = createHarness({ adminListLinksResult: links });
+    const request = createRequest();
+
+    await expect(harness.controller.adminListLinks(request, '99')).resolves.toEqual({ links });
+    expect(harness.serviceCalls).toEqual([
+      {
+        method: 'adminListLinks',
+        input: { currentUser: request.user, targetUserId: '99' },
+      },
     ]);
   });
 
-  it('keeps the budget consumed on a failed password confirmation', async () => {
+  it.each(['abc', '1x'])(
+    'rejects malformed admin user ids before calling the service: %s',
+    async (userId) => {
+      const harness = createHarness({});
+
+      await expect(harness.controller.adminListLinks(createRequest(), userId)).rejects.toMatchObject({
+        statusCode: 422,
+        code: 'VALIDATION_ERROR',
+      });
+
+      expect(harness.serviceCalls).toEqual([]);
+    },
+  );
+
+  it.each(['abc', '1x'])(
+    'rejects malformed admin identity ids before calling the service: %s',
+    async (identityId) => {
+      const harness = createHarness({});
+
+      await expect(
+        harness.controller.adminUnlink(createRequest(), '99', identityId, { reason: 'cleanup' }),
+      ).rejects.toMatchObject({
+        statusCode: 422,
+        code: 'VALIDATION_ERROR',
+      });
+
+      expect(harness.rateLimitConsumes).toEqual([]);
+      expect(harness.serviceCalls).toEqual([]);
+    },
+  );
+
+  it('propagates permission denied from the service on admin list for a worker current user', async () => {
     const harness = createHarness({
-      unlinkError: new ApiError(401, 'INVALID_CREDENTIALS', 'invalid'),
+      adminListLinksError: new ApiError(403, 'PERMISSION_DENIED', 'denied'),
+    });
+
+    await expect(harness.controller.adminListLinks(createRequest({ role: 'worker' }), '99')).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+    });
+  });
+
+  it('propagates permission denied from the service on admin unlink for a worker current user', async () => {
+    const harness = createHarness({
+      adminUnlinkError: new ApiError(403, 'PERMISSION_DENIED', 'denied'),
     });
 
     await expect(
-      harness.controller.unlink(createRequest(), { password: 'wrong' }),
-    ).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' });
-
-    expect(harness.calls).toEqual(['consume:auth_workos_unlink:route=auth/workos/link:user=42', 'unlink']);
-    expect(harness.calls).not.toContain('refund:auth_workos_unlink:route=auth/workos/link:user=42');
+      harness.controller.adminUnlink(createRequest({ role: 'worker' }), '99', '17', { reason: 'cleanup' }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+    });
   });
 
-  it('blocks the burst before the service is even called once the budget is spent', async () => {
+  it('consumes the per-admin unlink budget and never refunds on success', async () => {
+    const harness = createHarness({ adminUnlinkResult: { unlinked: true } });
+    const request = createRequest();
+
+    await expect(
+      harness.controller.adminUnlink(request, '99', '17', { reason: 'compromised account' }),
+    ).resolves.toEqual({ unlinked: true });
+
+    expect(harness.rateLimitConsumes).toEqual([
+      {
+        rule: { feature: 'auth_workos_admin_unlink', maxRequests: 30, windowMs: 60_000 },
+        subject: { route: 'auth/workos/admin/unlink', userId: '42' },
+      },
+    ]);
+    expect(harness.serviceCalls).toEqual([
+      {
+        method: 'adminUnlink',
+        input: {
+          currentUser: request.user,
+          targetUserId: '99',
+          identityId: '17',
+          reason: 'compromised account',
+          userAgent: 'test-agent',
+          ipAddress: '127.0.0.1',
+          requestId: 'req-1',
+        },
+      },
+    ]);
+    expect(harness.rateLimitRefunds).toEqual([]);
+  });
+
+  it('propagates USER_NOT_FOUND unchanged on admin list', async () => {
     const harness = createHarness({
-      unlinkError: new ApiError(401, 'INVALID_CREDENTIALS', 'invalid'),
-      maxAttempts: 2,
+      adminListLinksError: new ApiError(404, 'USER_NOT_FOUND', 'missing'),
     });
 
-    await expect(harness.controller.unlink(createRequest(), { password: 'w1' })).rejects.toMatchObject({
-      code: 'INVALID_CREDENTIALS',
+    await expect(harness.controller.adminListLinks(createRequest(), '99')).rejects.toMatchObject({
+      statusCode: 404,
+      code: 'USER_NOT_FOUND',
     });
-    await expect(harness.controller.unlink(createRequest(), { password: 'w2' })).rejects.toMatchObject({
-      code: 'INVALID_CREDENTIALS',
-    });
-    await expect(harness.controller.unlink(createRequest(), { password: 'w3' })).rejects.toMatchObject({
-      code: 'RATE_LIMIT_EXCEEDED',
+  });
+
+  it('propagates IDENTITY_NOT_FOUND unchanged on admin unlink and does not refund', async () => {
+    const harness = createHarness({
+      adminUnlinkError: new ApiError(404, 'IDENTITY_NOT_FOUND', 'missing'),
     });
 
-    expect(harness.calls.filter((call) => call === 'unlink')).toHaveLength(2);
+    await expect(
+      harness.controller.adminUnlink(createRequest(), '99', '17', { reason: 'cleanup' }),
+    ).rejects.toMatchObject({
+      statusCode: 404,
+      code: 'IDENTITY_NOT_FOUND',
+    });
+
+    expect(harness.rateLimitRefunds).toEqual([]);
+  });
+
+  it('propagates UNLINK_FORBIDDEN_EXTERNAL_POLICY unchanged on admin unlink and does not refund', async () => {
+    const harness = createHarness({
+      adminUnlinkError: new ApiError(409, 'UNLINK_FORBIDDEN_EXTERNAL_POLICY', 'blocked'),
+    });
+
+    await expect(
+      harness.controller.adminUnlink(createRequest(), '99', '17', { reason: 'cleanup' }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'UNLINK_FORBIDDEN_EXTERNAL_POLICY',
+    });
+
+    expect(harness.rateLimitRefunds).toEqual([]);
+  });
+});
+
+describe('WorkosAuthController retired routes', () => {
+  it('removes the legacy /auth/workos/link handlers', () => {
+    const harness = createHarness({});
+
+    expect(Reflect.get(harness.controller as object, 'unlink')).toBeUndefined();
+    expect(Reflect.get(harness.controller as object, 'linkStatus')).toBeUndefined();
   });
 });
 
 function createHarness(options: {
-  unlinkResult?: { unlinked: boolean };
-  unlinkError?: Error;
-  maxAttempts?: number;
+  listOwnLinksResult?: unknown[];
+  unlinkOwnResult?: { unlinked: boolean };
+  unlinkOwnError?: Error;
+  adminListLinksResult?: unknown[];
+  adminListLinksError?: Error;
+  adminUnlinkResult?: { unlinked: boolean };
+  adminUnlinkError?: Error;
 }) {
-  const calls: string[] = [];
-  let consumed = 0;
+  const serviceCalls: Array<{ method: string; input: unknown }> = [];
+  const rateLimitConsumes: Array<{
+    rule: { feature: string; maxRequests: number; windowMs: number };
+    subject: Record<string, string | undefined>;
+  }> = [];
+  const rateLimitRefunds: Array<{
+    rule: { feature: string; maxRequests: number; windowMs: number };
+    subject: Record<string, string | undefined>;
+  }> = [];
 
   const workos = {
-    async unlink() {
-      calls.push('unlink');
-      if (options.unlinkError) {
-        throw options.unlinkError;
+    async listOwnLinks(currentUser: unknown) {
+      serviceCalls.push({ method: 'listOwnLinks', input: currentUser });
+      return options.listOwnLinksResult ?? [];
+    },
+    async unlinkOwn(input: unknown) {
+      serviceCalls.push({ method: 'unlinkOwn', input });
+      if (options.unlinkOwnError) {
+        throw options.unlinkOwnError;
       }
-      return options.unlinkResult ?? { unlinked: true };
+      return options.unlinkOwnResult ?? { unlinked: true };
+    },
+    async adminListLinks(input: unknown) {
+      serviceCalls.push({ method: 'adminListLinks', input });
+      if (options.adminListLinksError) {
+        throw options.adminListLinksError;
+      }
+      return options.adminListLinksResult ?? [];
+    },
+    async adminUnlink(input: unknown) {
+      serviceCalls.push({ method: 'adminUnlink', input });
+      if (options.adminUnlinkError) {
+        throw options.adminUnlinkError;
+      }
+      return options.adminUnlinkResult ?? { unlinked: true };
     },
   };
 
   const rateLimits = {
     async assertAllowed(input: {
-      rule: { feature: string };
-      subject: { userId?: string; route?: string };
+      rule: { feature: string; maxRequests: number; windowMs: number };
+      subject: Record<string, string | undefined>;
     }) {
-      consumed += 1;
-      calls.push(
-        `consume:${input.rule.feature}:route=${input.subject.route}:user=${input.subject.userId}`,
-      );
-      if (options.maxAttempts !== undefined && consumed > options.maxAttempts) {
-        throw new ApiError(429, 'RATE_LIMIT_EXCEEDED', 'Rate limit exceeded');
-      }
+      rateLimitConsumes.push(input);
     },
     async refund(input: {
-      rule: { feature: string };
-      subject: { userId?: string; route?: string };
+      rule: { feature: string; maxRequests: number; windowMs: number };
+      subject: Record<string, string | undefined>;
     }) {
-      calls.push(
-        `refund:${input.rule.feature}:route=${input.subject.route}:user=${input.subject.userId}`,
-      );
+      rateLimitRefunds.push(input);
     },
   };
 
@@ -159,22 +366,27 @@ function createHarness(options: {
     config as never,
   );
 
-  return { controller, calls };
+  return { controller, serviceCalls, rateLimitConsumes, rateLimitRefunds };
 }
 
-function createRequest() {
+function createRequest(options?: { role?: string }) {
   return {
     ip: '127.0.0.1',
     headers: {},
+    requestId: 'req-1',
     user: {
       id: '42',
       username: 'manager',
-      role: 'manager',
+      role: options?.role ?? 'manager',
       roleId: 10,
       permissions: [],
       sessionId: 'session-1',
     },
-    get() {
+    get(name: string) {
+      if (name === 'user-agent') {
+        return 'test-agent';
+      }
+
       return undefined;
     },
   } as never;
