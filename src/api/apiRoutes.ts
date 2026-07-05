@@ -6,6 +6,21 @@ export function backendApiPath(path: string): string {
   return `${BACKEND_API_PREFIX}${normalizedPath}`;
 }
 
+const orderGroupsRoute = (orderId: number) => backendApiPath(`/orders/${orderId}/groups`);
+const groupsRoutes = {
+  list: backendApiPath('/groups'),
+  lookup: backendApiPath('/groups/lookup'),
+  byId: (groupId: string) => backendApiPath(`/groups/${groupId}`),
+  overview: (groupId: string) => backendApiPath(`/groups/${groupId}/overview`),
+  entityLinks: (groupId: string) => backendApiPath(`/groups/${groupId}/entity-links`),
+  batchLink: (groupId: string) => backendApiPath(`/groups/${groupId}/batch-link`),
+  participants: (groupId: string) => backendApiPath(`/groups/${groupId}/participants`),
+  participantRoles: backendApiPath('/groups/participant-roles'),
+  reports: {
+    deadlineStatusCounts: backendApiPath('/groups/reports/deadline-status-counts'),
+  },
+} as const;
+
 export const apiRoutes = {
   auth: {
     login: backendApiPath('/auth/login'),
@@ -51,7 +66,8 @@ export const apiRoutes = {
       backendApiPath(`/orders/${orderId}/deadline-overrides`),
     deadlineOverride: (orderId: number, overrideId: string) =>
       backendApiPath(`/orders/${orderId}/deadline-overrides/${overrideId}`),
-    projects: (orderId: number) => backendApiPath(`/orders/${orderId}/projects`),
+    groups: orderGroupsRoute,
+    projects: orderGroupsRoute,
   },
   orderDetails: {
     productionStageEvent: (detailId: number, productionStatusId: number) =>
@@ -166,19 +182,8 @@ export const apiRoutes = {
     byId: (ruleId: string) => backendApiPath(`/notification-rules/${encodeURIComponent(ruleId)}`),
     eventTypes: backendApiPath('/notification-event-types'),
   },
-  projects: {
-    list: backendApiPath('/projects'),
-    lookup: backendApiPath('/projects/lookup'),
-    byId: (projectId: string) => backendApiPath(`/projects/${projectId}`),
-    overview: (projectId: string) => backendApiPath(`/projects/${projectId}/overview`),
-    entityLinks: (projectId: string) => backendApiPath(`/projects/${projectId}/entity-links`),
-    batchLink: (projectId: string) => backendApiPath(`/projects/${projectId}/batch-link`),
-    participants: (projectId: string) => backendApiPath(`/projects/${projectId}/participants`),
-    participantRoles: backendApiPath('/projects/participant-roles'),
-    reports: {
-      deadlineStatusCounts: backendApiPath('/projects/reports/deadline-status-counts'),
-    },
-  },
+  groups: groupsRoutes,
+  projects: groupsRoutes,
   org: {
     directions: backendApiPath('/org/directions'),
     directionById: (directionId: number) => backendApiPath(`/org/directions/${directionId}`),

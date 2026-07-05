@@ -14,7 +14,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { projectsApi } from '../../api/projectsApi';
+import { projectsApi } from '../../api/groupsApi';
 import type {
   CreateProjectRequest,
   ProjectDeadlineStatusCountsResponse,
@@ -26,7 +26,7 @@ import type {
   ProjectStatus,
   ReplaceProjectEntityLink,
   ReplaceProjectParticipant,
-} from '../../api/types/projectApi.types';
+} from '../../api/types/groupApi.types';
 import { featureFlags } from '../../config/featureFlags';
 import { can, canAll } from '../../utils/permissions';
 import type { UserIdentity } from '../../types/auth';

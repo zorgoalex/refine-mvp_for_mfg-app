@@ -10,6 +10,7 @@ export interface FrontendRuntimeConfigResponse {
     backendProductionActions: boolean;
     backendDeadlines: boolean;
     backendOrderExport: boolean;
+    backendGroups: boolean;
     backendProjects: boolean;
     backendUsers: boolean;
     backendVlm: boolean;
@@ -34,6 +35,10 @@ export function buildFrontendRuntimeConfig(
     env.RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS,
     false,
   );
+  const backendGroups = readBooleanEnv(
+    env.RUNTIME_CONFIG_BACKEND_GROUPS,
+    readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_PROJECTS, false),
+  );
   const backendClientPhones =
     readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_CLIENT_PHONES, false) &&
     backendProductionActions;
@@ -50,7 +55,8 @@ export function buildFrontendRuntimeConfig(
       backendProductionActions,
       backendDeadlines: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_DEADLINES, false),
       backendOrderExport: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ORDER_EXPORT, false),
-      backendProjects: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_PROJECTS, false),
+      backendGroups,
+      backendProjects: backendGroups,
       backendUsers: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_USERS, false),
       backendVlm: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_VLM, false),
       backendReferences: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_REFERENCES, false),

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type {
   ProjectDeadlineStatusCountsResponse,
   ProjectOverviewResponse,
-} from '../../api/types/projectApi.types';
+} from '../../api/types/groupApi.types';
 import { ProjectDetailOverview } from './ProjectDetailOverview';
 
 const overviewFixture: ProjectOverviewResponse = {

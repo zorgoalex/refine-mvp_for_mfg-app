@@ -1,7 +1,7 @@
 // TypeScript types for Orders and related entities
 // Based on PostgreSQL schema v11.6
 
-import type { EntityProjectLink } from '../api/types/projectApi.types';
+import type { EntityProjectLink } from '../api/types/groupApi.types';
 
 // ============================================================================
 // ORDERS (Header)

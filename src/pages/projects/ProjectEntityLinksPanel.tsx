@@ -7,7 +7,7 @@ import type {
   ProjectEntityLinksResponse,
   ProjectEntityTypeCode,
   ReplaceProjectEntityLink,
-} from '../../api/types/projectApi.types';
+} from '../../api/types/groupApi.types';
 import { featureFlags } from '../../config/featureFlags';
 import { can, type PermissionCarrier } from '../../utils/permissions';
 

@@ -6,7 +6,7 @@ import type {
   ProjectDeadlineStatusCountsResponse,
   ProjectOverviewResponse,
   ProjectStatus,
-} from '../../api/types/projectApi.types';
+} from '../../api/types/groupApi.types';
 
 const { Text, Title } = Typography;
 

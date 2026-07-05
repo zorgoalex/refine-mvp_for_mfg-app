@@ -1,7 +1,7 @@
 export type DateOnlyString = string;
 export type IsoDateTimeString = string;
 
-import type { EntityProjectLink } from './projectApi.types';
+import type { EntityProjectLink } from './groupApi.types';
 
 export interface SaveOrderDto {
   header: SaveOrderHeaderDto;

@@ -8,6 +8,7 @@ export interface FrontendFeatureFlags {
   useBackendProductionActions: boolean;
   useBackendDeadlines: boolean;
   useBackendOrderExport: boolean;
+  useBackendGroups: boolean;
   useBackendProjects: boolean;
   useBackendUsers: boolean;
   useBackendVlm: boolean;
@@ -41,6 +42,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   backendProductionActions: string | boolean;
   backendDeadlines: string | boolean;
   backendOrderExport: string | boolean;
+  backendGroups: string | boolean;
   backendProjects: string | boolean;
   backendUsers: string | boolean;
   backendVlm: string | boolean;
@@ -59,6 +61,10 @@ export function getFeatureFlags(
   runtimeFeatures: RuntimeFeatureFlagSource = {},
 ): FrontendFeatureFlags {
   const legacyOrdersFlag = readBooleanFlag(env.VITE_USE_BACKEND_ORDERS, false);
+  const backendGroupsFlag = readBooleanFlag(
+    env.VITE_USE_BACKEND_GROUPS,
+    readBooleanFlag(env.VITE_USE_BACKEND_PROJECTS, false),
+  );
   const envFlags: FrontendFeatureFlags = {
     useBackendAuth: readBooleanFlag(env.VITE_USE_BACKEND_AUTH, false),
     useBackendPermissions: readBooleanFlag(env.VITE_USE_BACKEND_PERMISSIONS, false),
@@ -78,7 +84,8 @@ export function getFeatureFlags(
     ),
     useBackendDeadlines: readBooleanFlag(env.VITE_USE_BACKEND_DEADLINES, false),
     useBackendOrderExport: readBooleanFlag(env.VITE_USE_BACKEND_ORDER_EXPORT, false),
-    useBackendProjects: readBooleanFlag(env.VITE_USE_BACKEND_PROJECTS, false),
+    useBackendGroups: backendGroupsFlag,
+    useBackendProjects: backendGroupsFlag,
     useBackendUsers: readBooleanFlag(env.VITE_USE_BACKEND_USERS, false),
     useBackendVlm: readBooleanFlag(env.VITE_USE_BACKEND_VLM, false),
     useBackendReferences: readBooleanFlag(env.VITE_USE_BACKEND_REFERENCES, false),
@@ -97,6 +104,10 @@ export function mergeRuntimeFeatureFlags(
   runtimeFeatures: RuntimeFeatureFlagSource = {},
 ): FrontendFeatureFlags {
   const runtimeOrdersFlag = readOptionalBooleanFlag(runtimeFeatures.backendOrders);
+  const runtimeGroupsFlag =
+    readOptionalBooleanFlag(runtimeFeatures.backendGroups) ??
+    readOptionalBooleanFlag(runtimeFeatures.backendProjects);
+  const useBackendGroups = runtimeGroupsFlag ?? fallback.useBackendGroups;
 
   return enforceFrontendFeatureDependencies({
     useBackendAuth: readOptionalBooleanFlag(runtimeFeatures.backendAuth) ?? fallback.useBackendAuth,
@@ -123,8 +134,8 @@ export function mergeRuntimeFeatureFlags(
       fallback.useBackendDeadlines,
     useBackendOrderExport:
       readOptionalBooleanFlag(runtimeFeatures.backendOrderExport) ?? fallback.useBackendOrderExport,
-    useBackendProjects:
-      readOptionalBooleanFlag(runtimeFeatures.backendProjects) ?? fallback.useBackendProjects,
+    useBackendGroups,
+    useBackendProjects: useBackendGroups,
     useBackendUsers: readOptionalBooleanFlag(runtimeFeatures.backendUsers) ?? fallback.useBackendUsers,
     useBackendVlm: readOptionalBooleanFlag(runtimeFeatures.backendVlm) ?? fallback.useBackendVlm,
     useBackendReferences:

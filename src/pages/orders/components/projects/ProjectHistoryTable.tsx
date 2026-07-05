@@ -1,6 +1,6 @@
 import React from 'react';
 import { Table, Tag } from 'antd';
-import type { EntityProjectLink } from '../../../../api/types/projectApi.types';
+import type { EntityProjectLink } from '../../../../api/types/groupApi.types';
 
 export const ProjectHistoryTable: React.FC<{ links: EntityProjectLink[] }> = ({ links }) => (
   <Table

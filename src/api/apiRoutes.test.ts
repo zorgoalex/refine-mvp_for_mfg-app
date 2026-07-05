@@ -37,11 +37,12 @@ describe('apiRoutes', () => {
     expect(apiRoutes.deadlineTransitionRules.byId('rule-id')).toBe(
       '/api/v1/deadline-transition-rules/rule-id',
     );
-    expect(apiRoutes.projects.list).toBe('/api/v1/projects');
-    expect(apiRoutes.projects.lookup).toBe('/api/v1/projects/lookup');
-    expect(apiRoutes.projects.byId('project-id')).toBe('/api/v1/projects/project-id');
-    expect(apiRoutes.projects.overview('11111111-1111-4111-8111-111111111111')).toBe(
-      '/api/v1/projects/11111111-1111-4111-8111-111111111111/overview',
+    expect(apiRoutes.orders.groups(42)).toBe('/api/v1/orders/42/groups');
+    expect(apiRoutes.groups.list).toBe('/api/v1/groups');
+    expect(apiRoutes.groups.lookup).toBe('/api/v1/groups/lookup');
+    expect(apiRoutes.groups.byId('group-id')).toBe('/api/v1/groups/group-id');
+    expect(apiRoutes.groups.overview('11111111-1111-4111-8111-111111111111')).toBe(
+      '/api/v1/groups/11111111-1111-4111-8111-111111111111/overview',
     );
     expect(apiRoutes.orders.autoProductionStatusMode(42)).toBe('/api/v1/orders/42/production-status-mode/auto');
     expect(apiRoutes.orders.manualProductionStatusMode(42)).toBe('/api/v1/orders/42/production-status-mode/manual');

@@ -21,7 +21,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../../api/apiError';
 import { notificationRulesApi } from '../../../api/notificationRulesApi';
-import { projectsApi } from '../../../api/projectsApi';
+import { projectsApi } from '../../../api/groupsApi';
 import type {
   DeadlineNotificationEntityType,
   NotificationEventTypeDto,

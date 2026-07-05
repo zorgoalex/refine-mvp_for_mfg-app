@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Select } from 'antd';
 import type { SelectProps } from 'antd';
-import { projectsApi } from '../../../../api/projectsApi';
-import type { ProjectLookupItem, ProjectRef } from '../../../../api/types/projectApi.types';
+import { projectsApi } from '../../../../api/groupsApi';
+import type { ProjectLookupItem, ProjectRef } from '../../../../api/types/groupApi.types';
 
 interface ProjectSelectProps extends Omit<SelectProps<string | string[]>, 'options' | 'onSearch'> {
   mode?: 'multiple';

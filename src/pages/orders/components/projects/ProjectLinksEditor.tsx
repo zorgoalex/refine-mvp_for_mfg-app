@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Modal, Space, Tag, Typography, Form, message } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
-import { projectsApi } from '../../../../api/projectsApi';
-import type { EntityProjectLink } from '../../../../api/types/projectApi.types';
+import { projectsApi } from '../../../../api/groupsApi';
+import type { EntityProjectLink } from '../../../../api/types/groupApi.types';
 import { featureFlags } from '../../../../config/featureFlags';
 import { can } from '../../../../utils/permissions';
 import { ProjectSelect } from './ProjectSelect';

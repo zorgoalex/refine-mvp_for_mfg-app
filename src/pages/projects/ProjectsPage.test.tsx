@@ -5,7 +5,7 @@ import { applyFeatureFlags, getFeatureFlags } from '../../config/featureFlags';
 import type {
   ProjectDeadlineStatusCountsResponse,
   ProjectOverviewResponse,
-} from '../../api/types/projectApi.types';
+} from '../../api/types/groupApi.types';
 import {
   ProjectsPage,
   getMatchingDeadlineStatusCounts,

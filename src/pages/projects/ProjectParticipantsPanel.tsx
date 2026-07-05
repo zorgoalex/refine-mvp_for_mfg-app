@@ -7,7 +7,7 @@ import type {
   ProjectParticipantsResponse,
   ProjectParticipantType,
   ReplaceProjectParticipant,
-} from '../../api/types/projectApi.types';
+} from '../../api/types/groupApi.types';
 
 const PARTICIPANT_TYPE_OPTIONS: Array<{ label: string; value: ProjectParticipantType }> = [
   { label: 'Пользователь', value: 'user' },
