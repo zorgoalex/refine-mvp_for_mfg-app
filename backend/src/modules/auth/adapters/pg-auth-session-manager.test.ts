@@ -310,6 +310,73 @@ describe('PgAuthSessionManager', () => {
     expect(JSON.stringify(audit?.params)).not.toContain('refresh-login');
   });
 
+  it('revokes BOTH sessions when the bearer and the refresh cookie desynced (multi-tab re-login)', async () => {
+    const refreshRow = {
+      token_id: 'token-old',
+      user_id: '42',
+      session_id: 'session-1',
+      token_family_id: 'family-1',
+      expires_at: new Date('2100-01-01T00:00:00.000Z'),
+      revoked_at: null,
+      session_status: 'active',
+      username: 'manager',
+      role_id: 10,
+      is_active: true,
+    };
+    const database = createDatabase({
+      refreshRow,
+      providerSessions: {
+        'session-1': { provider_session_id: null, auth_source: 'backend' },
+        'session-2': { provider_session_id: 'sid-2', auth_source: 'workos' },
+      },
+    });
+    const manager = createManager(database.service, { supportsProviderSessions: true });
+
+    // Tab B re-logged in (cookie now session-1); tab A still acts on
+    // session-2 via its bearer. Logout must end both, and the provider
+    // redirect must target the ACTING tab's SSO session.
+    await expect(
+      manager.logout({
+        refreshToken: 'refresh-login',
+        currentUser: {
+          id: '42',
+          username: 'manager',
+          role: 'manager',
+          roleId: 10,
+          permissions: [],
+          sessionId: 'session-2',
+        },
+      }),
+    ).resolves.toEqual({ ok: true, providerSessionId: 'sid-2', authSource: 'workos' });
+
+    const revokes = database.queries.filter(
+      (query) => query.text.includes("SET status = 'revoked'") && query.text.includes('RETURNING session_id'),
+    );
+    expect(revokes.map((query) => query.params[0])).toEqual(['session-2']);
+    const audits = database.queries.filter((query) => query.params[0] === 'auth.logout' || query.text.includes("'auth.logout'"));
+    expect(audits).toHaveLength(2);
+  });
+
+  it('does not fabricate a logout audit for an already revoked session (stale bearer)', async () => {
+    const database = createDatabase({ deadSessions: ['session-dead'] });
+    const manager = createManager(database.service, { supportsProviderSessions: true });
+
+    await expect(
+      manager.logout({
+        currentUser: {
+          id: '42',
+          username: 'manager',
+          role: 'manager',
+          roleId: 10,
+          permissions: [],
+          sessionId: 'session-dead',
+        },
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(database.queries.filter((query) => query.text.includes('audit_log'))).toHaveLength(0);
+  });
+
   it('degrades whitespace-only legacy provider_session_id to a local logout', async () => {
     const refreshRow = {
       token_id: 'token-old',
@@ -476,6 +543,8 @@ function createDatabase(
     guardIsActive?: boolean;
     guardLoginPolicy?: string | null;
     guardLinked?: boolean;
+    deadSessions?: string[];
+    providerSessions?: Record<string, { provider_session_id: string | null; auth_source: string | null }>;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -485,6 +554,13 @@ function createDatabase(
 
       if (text.includes('FROM user_identities')) {
         return { rows: options.guardLinked === false ? [] : [{ '?column?': 1 }] };
+      }
+
+      if (text.includes("SET status = 'revoked'") && text.includes('RETURNING session_id')) {
+        const sessionId = String(params[0]);
+        return {
+          rows: options.deadSessions?.includes(sessionId) ? [] : [{ session_id: sessionId }],
+        };
       }
 
       if (text.includes('FROM users WHERE user_id = $1 FOR UPDATE')) {
@@ -511,6 +587,12 @@ function createDatabase(
       }
 
       if (text.includes('SELECT provider_session_id, auth_source FROM auth_sessions')) {
+        const sessionId = String(params[0]);
+
+        if (options.providerSessions && sessionId in options.providerSessions) {
+          return { rows: [options.providerSessions[sessionId]] };
+        }
+
         return {
           rows:
             options.providerSessionId === undefined && options.authSource === undefined

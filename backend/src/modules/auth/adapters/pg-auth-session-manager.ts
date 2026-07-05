@@ -330,27 +330,14 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
   }
 
   async logout(command: LogoutCommand): Promise<LogoutResult> {
+    const bearerSessionId = command.currentUser?.sessionId;
+
     if (!command.refreshToken) {
-      if (command.currentUser?.sessionId) {
-        const currentUser = {
-          ...command.currentUser,
-          sessionId: command.currentUser.sessionId,
-        };
+      if (bearerSessionId && command.currentUser) {
+        const currentUser = { ...command.currentUser, sessionId: bearerSessionId };
         return this.database.transaction(async (tx) => {
-          const providerSession = await this.readProviderSession(tx, currentUser.sessionId);
-          await tx.query(
-            `
-            UPDATE auth_sessions
-            SET status = 'revoked', revoked_at = now(), revoke_reason = 'logout'
-            WHERE session_id = $1 AND status = 'active'
-            `,
-            [currentUser.sessionId],
-          );
-          await this.writeCurrentUserLogoutAudit(
-            tx,
-            { ...command, currentUser },
-            providerSession.authSource === 'workos' ? 'workos' : 'backend',
-          );
+          const providerSession = await this.readProviderSession(tx, bearerSessionId);
+          await this.revokeBearerSessionWithAudit(tx, command, currentUser, providerSession);
           return { ok: true as const, ...providerSession };
         });
       }
@@ -363,10 +350,18 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       const current = await this.lockRefreshToken(tx, tokenHash);
 
       if (!current) {
+        // Unknown cookie, but the bearer session is authoritative for the
+        // acting tab — still end it.
+        if (bearerSessionId && command.currentUser) {
+          const currentUser = { ...command.currentUser, sessionId: bearerSessionId };
+          const providerSession = await this.readProviderSession(tx, bearerSessionId);
+          await this.revokeBearerSessionWithAudit(tx, command, currentUser, providerSession);
+          return { ok: true as const, ...providerSession };
+        }
         return { ok: true as const };
       }
 
-      const providerSession = await this.readProviderSession(tx, current.session_id);
+      const cookieProviderSession = await this.readProviderSession(tx, current.session_id);
       await this.revokeTokenFamily(tx, current, 'logout');
       await this.writeAudit(tx, {
         event: 'auth.logout',
@@ -378,14 +373,59 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         requestId: command.requestId,
         userAgent: command.userAgent,
         ipAddress: command.ipAddress,
-        authSource: providerSession.authSource === 'workos' ? 'workos' : undefined,
+        authSource: cookieProviderSession.authSource === 'workos' ? 'workos' : undefined,
         metadata: {
           reason: 'logout',
           refreshTokenPresent: true,
         },
       });
-      return { ok: true as const, ...providerSession };
+
+      // Multi-tab desync: a re-login in another tab rotates the refresh
+      // cookie, so the ACTING tab's bearer can point at a different session.
+      // Logging out must end BOTH — otherwise the bearer session survives
+      // until access-token expiry on a shared machine.
+      if (bearerSessionId && bearerSessionId !== current.session_id && command.currentUser) {
+        const currentUser = { ...command.currentUser, sessionId: bearerSessionId };
+        const bearerProviderSession = await this.readProviderSession(tx, bearerSessionId);
+        await this.revokeBearerSessionWithAudit(tx, command, currentUser, bearerProviderSession);
+
+        // The redirect can end only one IdP session — prefer the acting
+        // tab's (bearer) provider session.
+        if (bearerProviderSession.providerSessionId) {
+          return { ok: true as const, ...bearerProviderSession };
+        }
+      }
+
+      return { ok: true as const, ...cookieProviderSession };
     });
+  }
+
+  /** Revokes the bearer session; audits ONLY when a live row transitioned. */
+  private async revokeBearerSessionWithAudit(
+    tx: TransactionClient,
+    command: LogoutCommand,
+    currentUser: CurrentUser & { sessionId: string },
+    providerSession: { providerSessionId?: string; authSource?: string },
+  ): Promise<void> {
+    const revoked = await tx.query(
+      `
+      UPDATE auth_sessions
+      SET status = 'revoked', revoked_at = now(), revoke_reason = 'logout'
+      WHERE session_id = $1 AND status = 'active'
+      RETURNING session_id
+      `,
+      [currentUser.sessionId],
+    );
+
+    // A stale-but-signed access token against an already revoked/missing
+    // session must not fabricate duplicate auth.logout audit rows.
+    if (revoked.rows.length > 0) {
+      await this.writeCurrentUserLogoutAudit(
+        tx,
+        { ...command, currentUser },
+        providerSession.authSource === 'workos' ? 'workos' : 'backend',
+      );
+    }
   }
 
   private async readProviderSession(
