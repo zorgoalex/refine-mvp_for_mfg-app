@@ -131,10 +131,6 @@ export const PERMISSIONS = [
   'groups.members.manage',
   'groups.participants.view',
   'groups.participants.manage',
-  'groups.entity_links_changed',
-  'groups.members_changed',
-  'groups.participants_changed',
-  'groups.notification_created',
 
   'org.view',
   'org.manage',

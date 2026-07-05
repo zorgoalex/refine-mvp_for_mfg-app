@@ -106,16 +106,11 @@ describe('permissions foundation', () => {
     expect(can('superadmin', 'groups.manage_links')).toBe(true);
     expect(can('superadmin', 'groups.members.manage')).toBe(true);
     expect(can('superadmin', 'groups.participants.manage')).toBe(true);
-    expect(can('superadmin', 'groups.entity_links_changed')).toBe(true);
-    expect(can('superadmin', 'groups.members_changed')).toBe(true);
-    expect(can('superadmin', 'groups.participants_changed')).toBe(true);
-    expect(can('superadmin', 'groups.notification_created')).toBe(true);
     expect(can('admin', 'groups.members.manage')).toBe(true);
     expect(can('admin', 'groups.members.view')).toBe(true);
     expect(can('admin', 'groups.participants.manage')).toBe(true);
     expect(can('admin', 'groups.archive')).toBe(true);
     expect(can('admin', 'groups.view_history')).toBe(true);
-    expect(can('admin', 'groups.notification_created')).toBe(true);
 
     expect(can('top_manager', 'groups.view')).toBe(true);
     expect(can('top_manager', 'groups.view_history')).toBe(true);
@@ -125,7 +120,6 @@ describe('permissions foundation', () => {
     expect(can('top_manager', 'groups.participants.manage')).toBe(false);
     expect(can('top_manager', 'groups.members.manage')).toBe(false);
     expect(can('top_manager', 'groups.create')).toBe(false);
-    expect(can('top_manager', 'groups.notification_created')).toBe(false);
 
     expect(can('manager', 'groups.view')).toBe(true);
     expect(can('manager', 'groups.view_history')).toBe(false);
@@ -133,7 +127,6 @@ describe('permissions foundation', () => {
     expect(can('manager', 'groups.members.manage')).toBe(false);
     expect(can('manager', 'groups.participants.view')).toBe(false);
     expect(can('manager', 'groups.participants.manage')).toBe(false);
-    expect(can('manager', 'groups.notification_created')).toBe(false);
     expect(can('viewer', 'groups.view')).toBe(true);
     expect(can('viewer', 'groups.members.view')).toBe(false);
     expect(can('viewer', 'groups.participants.view')).toBe(false);
@@ -229,10 +222,10 @@ describe('permissions foundation', () => {
     expect(contractPermissions).toContain('deadlines.manage_order_overrides');
   });
 
-  it('keeps group permissions registered in the PermissionName catalog', () => {
+  it('keeps group permissions registered in the PermissionName catalog and OpenAPI contract', () => {
     const groupPermissions = PERMISSIONS.filter((permission) => permission.startsWith('groups.'));
 
-    expect(groupPermissions).toEqual([
+    const expectedGroupPermissions = [
       'groups.view',
       'groups.create',
       'groups.update',
@@ -243,11 +236,19 @@ describe('permissions foundation', () => {
       'groups.members.manage',
       'groups.participants.view',
       'groups.participants.manage',
-      'groups.entity_links_changed',
-      'groups.members_changed',
-      'groups.participants_changed',
-      'groups.notification_created',
-    ]);
+    ];
+
+    // Audit event names (groups.*_changed / groups.notification_created) are NOT
+    // grant permissions and must NOT leak into the RBAC catalog.
+    expect(groupPermissions).toEqual(expectedGroupPermissions);
+
+    // Contract parity: every group grant permission must exist in the OpenAPI
+    // PermissionName enum (regression guard — restored after critic R5 flagged
+    // a weakened self-check that hid contract drift).
+    const contractPermissions = readPermissionNameEnum(readOpenApiContract());
+    for (const permission of expectedGroupPermissions) {
+      expect(contractPermissions).toContain(permission);
+    }
   });
 
   it('keeps label permissions in the static OpenAPI PermissionName enum', () => {
