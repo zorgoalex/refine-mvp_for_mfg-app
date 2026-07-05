@@ -317,12 +317,340 @@ test.describe('WorkOS link retry (mocked, own storage lifecycle)', () => {
     });
 });
 
+test.describe('WorkOS multi-link management (mocked)', () => {
+    test.beforeEach(async ({ page, context }) => {
+        await context.clearCookies();
+        await page.addInitScript(() => {
+            localStorage.clear();
+            sessionStorage.clear();
+        });
+    });
+
+    test('profile lists linked identities and unlinks only the chosen row once', async ({ page }) => {
+        await mockRuntimeConfig(page, { backendAuth: true, workosAuth: true });
+
+        const actionEvents: string[] = [];
+        let trackAction = false;
+        await mockLoggedInApp(page, {
+            onRefresh: () => {
+                if (trackAction) {
+                    actionEvents.push('refresh');
+                }
+            },
+        });
+
+        const links = makeWorkosLinks();
+        await page.route(/\/api\/v1\/auth\/workos\/links$/, async (route) => {
+            await fulfillJson(route, { links });
+        });
+
+        await page.route(/\/api\/v1\/auth\/workos\/links\/[^/]+$/, async (route) => {
+            const pathname = new URL(route.request().url()).pathname;
+            actionEvents.push(`delete:${pathname}`);
+            await fulfillJson(route, { unlinked: true });
+        });
+
+        await page.goto('/profile');
+        await expect(page.getByRole('button', { name: 'Привязать ещё' })).toBeVisible({ timeout: 30000 });
+        await expect(page.locator('tr', { hasText: links[0].emailAtLink })).toHaveCount(1);
+        await expect(page.locator('tr', { hasText: links[1].emailAtLink })).toHaveCount(1);
+
+        trackAction = true;
+        await clickUnlinkForRow(page, links[0].emailAtLink);
+        await confirmProfileUnlink(page, 'correct horse battery staple');
+
+        await expect(page.locator('tr', { hasText: links[0].emailAtLink })).toHaveCount(0);
+        await expect(page.locator('tr', { hasText: links[1].emailAtLink })).toHaveCount(1);
+        assertSingleUnlink(actionEvents, `/api/v1/auth/workos/links/${links[0].identityId}`);
+    });
+
+    test('profile keeps the link and shows an inline error on 409 external policy', async ({ page }) => {
+        await mockRuntimeConfig(page, { backendAuth: true, workosAuth: true });
+
+        const actionEvents: string[] = [];
+        let trackAction = false;
+        await mockLoggedInApp(page, {
+            onRefresh: () => {
+                if (trackAction) {
+                    actionEvents.push('refresh');
+                }
+            },
+        });
+
+        const links = makeWorkosLinks();
+        await page.route(/\/api\/v1\/auth\/workos\/links$/, async (route) => {
+            await fulfillJson(route, { links });
+        });
+        await page.route(/\/api\/v1\/auth\/workos\/links\/[^/]+$/, async (route) => {
+            const pathname = new URL(route.request().url()).pathname;
+            actionEvents.push(`delete:${pathname}`);
+            await fulfillJson(
+                route,
+                {
+                    error: {
+                        code: 'UNLINK_FORBIDDEN_EXTERNAL_POLICY',
+                        message: 'password login disabled',
+                    },
+                },
+                409,
+            );
+        });
+
+        await page.goto('/profile');
+        await expect(page.getByRole('button', { name: 'Привязать ещё' })).toBeVisible({ timeout: 30000 });
+
+        trackAction = true;
+        await clickUnlinkForRow(page, links[0].emailAtLink);
+        await confirmProfileUnlink(page, 'correct horse battery staple');
+
+        const modal = page.locator('.ant-modal').filter({ hasText: 'Отвязать вход через SSO' });
+        await expect(
+            modal.getByText('Нельзя отвязать SSO: вход по паролю для вашей учётной записи отключён.'),
+        ).toBeVisible();
+        await expect(page.locator('tr', { hasText: links[0].emailAtLink })).toHaveCount(1);
+        await expect(page.locator('tr', { hasText: links[1].emailAtLink })).toHaveCount(1);
+        assertSingleUnlink(actionEvents, `/api/v1/auth/workos/links/${links[0].identityId}`);
+    });
+
+    test('admin user show unlinks only the chosen identity once', async ({ page }) => {
+        const adminUser = {
+            ...MOCK_USER,
+            permissions: [...MOCK_USER.permissions, 'users.manage_sso'],
+        };
+        await mockRuntimeConfig(page, { backendAuth: true, workosAuth: true, backendUsers: true });
+
+        const actionEvents: string[] = [];
+        let trackAction = false;
+        await mockLoggedInApp(page, {
+            user: adminUser,
+            onRefresh: () => {
+                if (trackAction) {
+                    actionEvents.push('refresh');
+                }
+            },
+        });
+
+        const links = makeWorkosLinks();
+        const managedUserId = 77;
+        await page.route(new RegExp(`/api/v1/users/${managedUserId}$`), async (route) => {
+            await fulfillJson(route, {
+                user: {
+                    id: managedUserId,
+                    username: 'managed-user',
+                    email: 'managed-user@example.test',
+                    fullName: 'Managed User',
+                    role: 'manager',
+                    permissions: ['orders.view'],
+                    employeeId: null,
+                    isActive: true,
+                    createdAt: '2026-06-01T10:00:00.000Z',
+                    updatedAt: '2026-06-02T10:00:00.000Z',
+                },
+            });
+        });
+        await page.route(new RegExp(`/api/v1/auth/workos/admin/users/${managedUserId}/links$`), async (route) => {
+            await fulfillJson(route, { links });
+        });
+        await page.route(
+            new RegExp(`/api/v1/auth/workos/admin/users/${managedUserId}/links/[^/]+$`),
+            async (route) => {
+                const pathname = new URL(route.request().url()).pathname;
+                actionEvents.push(`delete:${pathname}`);
+                await fulfillJson(route, { unlinked: true });
+            },
+        );
+
+        await page.goto(`/users/show/${managedUserId}`);
+        await expect(page.getByText('SSO-связки пользователя')).toBeVisible({ timeout: 30000 });
+        await expect(page.locator('tr', { hasText: links[0].emailAtLink })).toHaveCount(1);
+        await expect(page.locator('tr', { hasText: links[1].emailAtLink })).toHaveCount(1);
+
+        trackAction = true;
+        await clickUnlinkForRow(page, links[0].emailAtLink);
+        await confirmAdminUnlink(page);
+
+        await expect(page.locator('tr', { hasText: links[0].emailAtLink })).toHaveCount(0);
+        await expect(page.locator('tr', { hasText: links[1].emailAtLink })).toHaveCount(1);
+        assertSingleUnlink(
+            actionEvents,
+            `/api/v1/auth/workos/admin/users/${managedUserId}/links/${links[0].identityId}`,
+        );
+    });
+
+    test('admin user show keeps the link and shows an inline error on 409 external policy', async ({ page }) => {
+        const adminUser = {
+            ...MOCK_USER,
+            permissions: [...MOCK_USER.permissions, 'users.manage_sso'],
+        };
+        await mockRuntimeConfig(page, { backendAuth: true, workosAuth: true, backendUsers: true });
+
+        const actionEvents: string[] = [];
+        let trackAction = false;
+        await mockLoggedInApp(page, {
+            user: adminUser,
+            onRefresh: () => {
+                if (trackAction) {
+                    actionEvents.push('refresh');
+                }
+            },
+        });
+
+        const links = makeWorkosLinks();
+        const managedUserId = 78;
+        await page.route(new RegExp(`/api/v1/users/${managedUserId}$`), async (route) => {
+            await fulfillJson(route, {
+                user: {
+                    id: managedUserId,
+                    username: 'managed-user-409',
+                    email: 'managed-user-409@example.test',
+                    fullName: 'Managed User 409',
+                    role: 'manager',
+                    permissions: ['orders.view'],
+                    employeeId: null,
+                    isActive: true,
+                    createdAt: '2026-06-01T10:00:00.000Z',
+                    updatedAt: '2026-06-02T10:00:00.000Z',
+                },
+            });
+        });
+        await page.route(new RegExp(`/api/v1/auth/workos/admin/users/${managedUserId}/links$`), async (route) => {
+            await fulfillJson(route, { links });
+        });
+        await page.route(
+            new RegExp(`/api/v1/auth/workos/admin/users/${managedUserId}/links/[^/]+$`),
+            async (route) => {
+                const pathname = new URL(route.request().url()).pathname;
+                actionEvents.push(`delete:${pathname}`);
+                await fulfillJson(
+                    route,
+                    {
+                        error: {
+                            code: 'UNLINK_FORBIDDEN_EXTERNAL_POLICY',
+                            message: 'password login disabled',
+                        },
+                    },
+                    409,
+                );
+            },
+        );
+
+        await page.goto(`/users/show/${managedUserId}`);
+        await expect(page.getByText('SSO-связки пользователя')).toBeVisible({ timeout: 30000 });
+
+        trackAction = true;
+        await clickUnlinkForRow(page, links[0].emailAtLink);
+        await confirmAdminUnlink(page);
+
+        const modal = page.locator('.ant-modal').filter({ hasText: 'Отвязать SSO-вход пользователя' });
+        await expect(
+            modal.getByText('Нельзя отвязать SSO: вход по паролю для этой учётной записи отключён.'),
+        ).toBeVisible();
+        await expect(page.locator('tr', { hasText: links[0].emailAtLink })).toHaveCount(1);
+        await expect(page.locator('tr', { hasText: links[1].emailAtLink })).toHaveCount(1);
+        assertSingleUnlink(
+            actionEvents,
+            `/api/v1/auth/workos/admin/users/${managedUserId}/links/${links[0].identityId}`,
+        );
+    });
+
+    test('admin user show keeps the link and shows not found on 404', async ({ page }) => {
+        const adminUser = {
+            ...MOCK_USER,
+            permissions: [...MOCK_USER.permissions, 'users.manage_sso'],
+        };
+        await mockRuntimeConfig(page, { backendAuth: true, workosAuth: true, backendUsers: true });
+
+        const actionEvents: string[] = [];
+        let trackAction = false;
+        await mockLoggedInApp(page, {
+            user: adminUser,
+            onRefresh: () => {
+                if (trackAction) {
+                    actionEvents.push('refresh');
+                }
+            },
+        });
+
+        const links = makeWorkosLinks();
+        const managedUserId = 79;
+        await page.route(new RegExp(`/api/v1/users/${managedUserId}$`), async (route) => {
+            await fulfillJson(route, {
+                user: {
+                    id: managedUserId,
+                    username: 'managed-user-404',
+                    email: 'managed-user-404@example.test',
+                    fullName: 'Managed User 404',
+                    role: 'manager',
+                    permissions: ['orders.view'],
+                    employeeId: null,
+                    isActive: true,
+                    createdAt: '2026-06-01T10:00:00.000Z',
+                    updatedAt: '2026-06-02T10:00:00.000Z',
+                },
+            });
+        });
+        await page.route(new RegExp(`/api/v1/auth/workos/admin/users/${managedUserId}/links$`), async (route) => {
+            await fulfillJson(route, { links });
+        });
+        await page.route(
+            new RegExp(`/api/v1/auth/workos/admin/users/${managedUserId}/links/[^/]+$`),
+            async (route) => {
+                const pathname = new URL(route.request().url()).pathname;
+                actionEvents.push(`delete:${pathname}`);
+                await fulfillJson(
+                    route,
+                    {
+                        error: {
+                            code: 'LINK_NOT_FOUND',
+                            message: 'link not found',
+                        },
+                    },
+                    404,
+                );
+            },
+        );
+
+        await page.goto(`/users/show/${managedUserId}`);
+        await expect(page.getByText('SSO-связки пользователя')).toBeVisible({ timeout: 30000 });
+
+        trackAction = true;
+        await clickUnlinkForRow(page, links[0].emailAtLink);
+        await confirmAdminUnlink(page);
+
+        const modal = page.locator('.ant-modal').filter({ hasText: 'Отвязать SSO-вход пользователя' });
+        await expect(modal.getByText('линк не найден')).toBeVisible();
+        await expect(page.locator('tr', { hasText: links[0].emailAtLink })).toHaveCount(1);
+        await expect(page.locator('tr', { hasText: links[1].emailAtLink })).toHaveCount(1);
+        assertSingleUnlink(
+            actionEvents,
+            `/api/v1/auth/workos/admin/users/${managedUserId}/links/${links[0].identityId}`,
+        );
+    });
+});
+
 /**
  * Loads /login and reloads once after the app is up. On a cold Vite dev server
  * the first page load spends longer transforming modules than the 1.5s
  * runtime-config fetch budget, so the mocked feature flags silently fall back
  * to build-time defaults; the reload re-fetches the config on a warm server.
  */
+/**
+ * Anti-replay invariant for a granular unlink: the destructive DELETE fires
+ * EXACTLY ONCE and only for the targeted identity, and a session refresh
+ * precedes it (R17/R9 anti-stale-token). Incidental app-lifecycle refreshes
+ * (session keep-alive on navigation) may also appear — only the single delete
+ * and the refresh→delete ordering are load-bearing, so we assert those rather
+ * than an exact event sequence that a background refresh would flake.
+ */
+function assertSingleUnlink(actionEvents: string[], deletePath: string): void {
+    const deletes = actionEvents.filter((event) => event.startsWith('delete:'));
+    expect(deletes).toEqual([`delete:${deletePath}`]);
+    const firstRefresh = actionEvents.indexOf('refresh');
+    const deleteIndex = actionEvents.indexOf(`delete:${deletePath}`);
+    expect(firstRefresh).toBeGreaterThanOrEqual(0);
+    expect(firstRefresh).toBeLessThan(deleteIndex);
+}
+
 async function gotoLoginWarm(page: Page): Promise<void> {
     await page.goto('/login');
     await expect(page.getByRole('button', { name: 'Войти', exact: true })).toBeVisible({ timeout: 30000 });
@@ -346,6 +674,67 @@ async function mockLoggedOut(page: Page): Promise<void> {
     await page.route(/\/api\/refresh$/, async (route) => {
         await fulfillJson(route, { error: 'Unauthenticated' }, 401);
     });
+}
+
+async function mockLoggedInApp(
+    page: Page,
+    options: {
+        user?: typeof MOCK_USER;
+        onRefresh?: () => void;
+    } = {},
+): Promise<void> {
+    const user = options.user ?? MOCK_USER;
+    const loginResponse = { ...LOGIN_RESPONSE, user };
+
+    await page.route(/\/api\/v1\/auth\/refresh$/, async (route) => {
+        options.onRefresh?.();
+        await fulfillJson(route, loginResponse);
+    });
+    await page.route(/\/api\/v1\/me$/, async (route) => {
+        await fulfillJson(route, { user });
+    });
+    await page.route(/\/api\/v1\/me\/preferences$/, async (route) => {
+        await fulfillJson(route, { preferences: { themeMode: 'light' } });
+    });
+    await page.route(/\/v1\/graphql$/, async (route) => {
+        await fulfillJson(route, { data: {} });
+    });
+}
+
+function makeWorkosLinks() {
+    return [
+        {
+            identityId: 'identity-google-primary',
+            authMethod: 'google',
+            emailAtLink: 'primary-link@example.test',
+            linkedAt: '2026-06-01T12:00:00.000Z',
+            lastLoginAt: '2026-06-10T08:30:00.000Z',
+        },
+        {
+            identityId: 'identity-microsoft-secondary',
+            authMethod: 'microsoft',
+            emailAtLink: 'secondary-link@example.test',
+            linkedAt: '2026-06-02T13:00:00.000Z',
+            lastLoginAt: '2026-06-11T09:45:00.000Z',
+        },
+    ];
+}
+
+async function clickUnlinkForRow(page: Page, emailAtLink: string): Promise<void> {
+    await page.locator('tr', { hasText: emailAtLink }).getByRole('button', { name: 'Отвязать' }).click();
+}
+
+async function confirmProfileUnlink(page: Page, password: string): Promise<void> {
+    const modal = page.locator('.ant-modal').filter({ hasText: 'Отвязать вход через SSO' });
+    await expect(modal).toBeVisible();
+    await modal.getByPlaceholder('Пароль').fill(password);
+    await modal.getByRole('button', { name: 'Отвязать', exact: true }).click();
+}
+
+async function confirmAdminUnlink(page: Page): Promise<void> {
+    const modal = page.locator('.ant-modal').filter({ hasText: 'Отвязать SSO-вход пользователя' });
+    await expect(modal).toBeVisible();
+    await modal.getByRole('button', { name: 'Отвязать', exact: true }).click();
 }
 
 async function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
