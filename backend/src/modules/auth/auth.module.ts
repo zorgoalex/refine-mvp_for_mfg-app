@@ -1,8 +1,10 @@
 import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { auditService } from '../../common/audit/audit.service';
 import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
+import { PermissionsService } from '../../permissions/permissions.service';
 import { AuthService } from './auth.service';
 import { PgAuthAuditRepository } from './adapters/pg-auth-audit-repository';
 import { BcryptPasswordVerifier } from './adapters/bcrypt-password-verifier';
@@ -27,11 +29,12 @@ import {
   WORKOS_IDENTITY_REPOSITORY,
 } from './workos/workos-auth.controller';
 import { WorkosAuthService } from './workos/workos-auth.service';
+import { PermissionsModule } from '../../permissions/permissions.module';
 
 export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, PermissionsModule],
   controllers: [AuthController, WorkosAuthController],
   providers: [
     AuthRuntimeConfigService,
@@ -109,6 +112,7 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
         database: DatabaseService,
         tokenService: TokenService,
         capabilities: AuthSchemaCapabilities,
+        permissions: PermissionsService,
       ): WorkosAuthService | null => {
         const sessionManager = createPgSessionManager(config, database, tokenService, capabilities);
         const workosClient = createWorkosClient(config);
@@ -130,6 +134,9 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
           tokens: createAccessTokenIssuer(config),
           audit: new PgAuthAuditRepository(database),
           passwords: new BcryptPasswordVerifier(),
+          permissions,
+          deniedAudit: auditService,
+          database,
           loadUserById: async (userId) => {
             const result = await database.query<{
               user_id: string | number;
@@ -169,7 +176,7 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
           },
         });
       },
-      inject: [ConfigService, DatabaseService, TokenService, AUTH_SCHEMA_CAPABILITIES],
+      inject: [ConfigService, DatabaseService, TokenService, AUTH_SCHEMA_CAPABILITIES, PermissionsService],
     },
   ],
 })
