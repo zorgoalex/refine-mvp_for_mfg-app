@@ -120,6 +120,15 @@ export const labelsApi = {
   scanResolve(payload: string, source: 'qr' | 'manual'): Promise<ScanResolveResult> {
     return httpClient.post<ScanResolveResult>(apiRoutes.labels.scanResolve(), { payload, source });
   },
+
+  // FormData body: httpClient's jsonBody() passes FormData through as-is and
+  // buildRequestInit() skips the Content-Type header for it, so the browser
+  // sets the multipart boundary itself (same pattern as vlmApi.upload).
+  scanResolveImage(file: File | Blob): Promise<ScanResolveResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return httpClient.post<ScanResolveResult>(apiRoutes.labels.scanResolveImage(), formData);
+  },
 };
 
 function validateId(value: number, field: string): number {

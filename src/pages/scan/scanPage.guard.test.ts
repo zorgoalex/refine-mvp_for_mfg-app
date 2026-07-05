@@ -77,7 +77,22 @@ describe('ScanPage', () => {
     expect(src).toContain('Скан из фото');
     expect(src).toContain('accept="image/*,.emf,.bmp"'); // .emf от Базиса = часто растр
     expect(src).toContain('decodeQrFromFile');
-    expect(src).toContain('QR-код на фото не распознан');
+  });
+
+  it('offers an OCR fallback (pendingOcrFile + "Распознать текст бирки") when no QR is decoded from the photo', () => {
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('pendingOcrFile');
+    expect(src).toContain('Распознать текст бирки');
+    expect(src).toContain('scanResolveImage');
+    // Loading label must be visible while the OCR request is in flight.
+    expect(src).toContain('Распознаём бирку');
+  });
+
+  it('maps OCR ApiError codes to Russian messages, including OCR_SERVICE_BUSY', () => {
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('OCR_SERVICE_UNAVAILABLE');
+    expect(src).toContain('OCR_SERVICE_BUSY');
+    expect(src).toContain('UNSUPPORTED_IMAGE_TYPE');
   });
 });
 

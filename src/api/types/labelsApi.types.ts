@@ -191,4 +191,6 @@ export interface ScanResolveResult {
   candidates: ScanCandidate[];
   parsed: Record<string, string> | null;
   templatesTried: number;
+  /** Present only for scanResolveImage (OCR fallback) responses. */
+  ocr?: { lineCount: number; durationMs: number };
 }

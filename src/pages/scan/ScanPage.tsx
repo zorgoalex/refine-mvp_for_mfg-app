@@ -85,6 +85,10 @@ export const ScanPage: React.FC = () => {
   const [actionCandidate, setActionCandidate] = useState<ScanCandidate | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoCandidate, setInfoCandidate] = useState<ScanCandidate | null>(null);
+  // Photo decoded locally but no QR found: hold the file so the user can opt
+  // into server-side OCR instead of failing outright (kept on OCR error too,
+  // so "Распознать текст бирки" doubles as a retry button).
+  const [pendingOcrFile, setPendingOcrFile] = useState<File | null>(null);
 
   const applyAction = useCallback(
     (candidate: ScanCandidate, action: ScanAction) => {
@@ -205,7 +209,8 @@ export const ScanPage: React.FC = () => {
   };
 
   // Скан из фото-файла: декод QR локально (без камеры и сети), дальше тот же
-  // resolve-путь, что и у live-скана.
+  // resolve-путь, что и у live-скана. Если QR не найден — не сразу ошибка:
+  // держим файл в pendingOcrFile и предлагаем серверный OCR-фоллбек бирки.
   const handlePhotoFile = async (file: File | null) => {
     if (!file) return;
     setResolving(true);
@@ -213,14 +218,50 @@ export const ScanPage: React.FC = () => {
     try {
       const text = await decodeQrFromFile(file);
       if (text) {
+        setPendingOcrFile(null);
         await resolvePayload(text, 'qr');
       } else {
         setResult(null);
-        setScanError('QR-код на фото не распознан. Попробуйте другое фото или введите данные вручную.');
+        setPendingOcrFile(file);
       }
     } finally {
       setResolving(false);
       if (fileInputRef.current) fileInputRef.current.value = ''; // повторный выбор того же файла
+    }
+  };
+
+  // OCR fallback: user opted in via "Распознать текст бирки" after a photo
+  // decoded no QR. Same downstream resolve flow as QR/manual (confident
+  // leader / list / Empty / sessionStorage) via handleResolved.
+  const handleResolveOcr = async () => {
+    const file = pendingOcrFile;
+    if (!file) return;
+    setResolving(true);
+    setScanError(null);
+    try {
+      const res = await labelsApi.scanResolveImage(file);
+      handleResolved(file.name, res);
+      setPendingOcrFile(null);
+    } catch (err) {
+      setResult(null);
+      if (err instanceof ApiError) {
+        if (err.code === 'OCR_SERVICE_UNAVAILABLE') {
+          setScanError('Распознавание временно недоступно');
+        } else if (err.code === 'OCR_SERVICE_BUSY') {
+          setScanError('Сканер занят, попробуйте через минуту');
+        } else if (err.code === 'UNSUPPORTED_IMAGE_TYPE') {
+          setScanError('Формат изображения не поддерживается');
+        } else if (err.status === 403 || err.status === 401) {
+          setScanError('Нет доступа к сканеру бирок. Обратитесь к администратору.');
+        } else {
+          setScanError('Сервис сканера временно недоступен. Попробуйте позже.');
+        }
+      } else {
+        setScanError('Ошибка сети. Проверьте подключение и попробуйте ещё раз.');
+      }
+      // Keep pendingOcrFile so the Alert can offer a retry of the same photo.
+    } finally {
+      setResolving(false);
     }
   };
 
@@ -281,7 +322,39 @@ export const ScanPage: React.FC = () => {
 
       {cameraError && <Alert type="warning" showIcon message={cameraError} style={{ marginBottom: 16 }} />}
 
-      {scanError && <Alert type="error" showIcon message={scanError} style={{ marginBottom: 16 }} />}
+      {scanError && (
+        <Alert
+          type="error"
+          showIcon
+          message={scanError}
+          action={
+            pendingOcrFile ? (
+              <Button size="small" loading={resolving} onClick={() => void handleResolveOcr()}>
+                Повторить
+              </Button>
+            ) : undefined
+          }
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
+      {!scanError && pendingOcrFile && (
+        <Alert
+          type="info"
+          showIcon
+          message="QR-код на фото не найден"
+          description={
+            resolving ? (
+              <Text type="secondary">Распознаём бирку… (до 10 секунд)</Text>
+            ) : (
+              <Button size="small" onClick={() => void handleResolveOcr()}>
+                Распознать текст бирки
+              </Button>
+            )
+          }
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
       <Input.Search
         placeholder="Строка QR / № или имя заказа"

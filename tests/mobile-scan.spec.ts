@@ -208,25 +208,113 @@ test('photo-file scan: uploaded QR image decodes in-browser and resolves to the 
     });
 });
 
-test('photo-file scan: image without a QR shows the not-recognized error, not «Не найдено»', async ({ page }) => {
+// 1×1 PNG без QR — декодер обязан вернуть null (общая фикстура для обоих OCR-фоллбек сценариев ниже).
+const blankPng = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+);
+
+async function mockScanResolveImage(page: import('@playwright/test').Page, status: number, body: string) {
+    await page.route(/\/api\/v1\/labels\/scan-resolve-image$/, async (route) => {
+        await route.fulfill({ status, contentType: 'application/json', body });
+    });
+}
+
+test('photo-file scan: image without a QR offers the OCR fallback button, not the old auto-error', async ({ page }) => {
     const db = createWorkflowMockDb();
     await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
 
     await page.goto('/scan', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('button', { name: 'Скан из фото' })).toBeVisible({ timeout: 30000 });
 
-    // 1×1 PNG без QR — декодер обязан вернуть null.
-    const blankPng = Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-        'base64',
-    );
     await page.setInputFiles('[data-testid="scan-photo-input"]', {
         name: 'blank.png',
         mimeType: 'image/png',
         buffer: blankPng,
     });
 
-    await expect(page.getByText('QR-код на фото не распознан', { exact: false })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('QR-код на фото не найден', { exact: false })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('button', { name: 'Распознать текст бирки' })).toBeVisible();
+    await expect(page.getByText('Не найдено')).toBeHidden();
+});
+
+test('OCR fallback: tap "Распознать текст бирки" resolves via scan-resolve-image → single candidate → navigates', async ({
+    page,
+}) => {
+    const db = createWorkflowMockDb();
+    await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
+    await mockScanResolveImage(
+        page,
+        200,
+        JSON.stringify({
+            candidates: [
+                {
+                    detailId: DETAIL_ID,
+                    orderId: ORDER_ID,
+                    orderName: 'E2E Тест Импорт 68',
+                    detailNumber: 3,
+                    width: 600,
+                    height: 400,
+                    quantity: 2,
+                    materialName: 'ЛДСП белый',
+                    productionStatusName: 'В работе',
+                    matchedFields: ['orderName'],
+                    matchedBy: 'ocr-fields',
+                    score: 100,
+                },
+            ],
+            parsed: { orderName: 'импорт 68' },
+            templatesTried: 1,
+            ocr: { lineCount: 3, durationMs: 420 },
+        }),
+    );
+    // Pref pre-seeded → single-candidate resolve navigates straight away, no chooser modal.
+    await page.addInitScript(() => {
+        localStorage.setItem('scanDefaultAction:1', 'open-order');
+    });
+
+    await page.goto('/scan', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('button', { name: 'Скан из фото' })).toBeVisible({ timeout: 30000 });
+
+    await page.setInputFiles('[data-testid="scan-photo-input"]', {
+        name: 'blank.png',
+        mimeType: 'image/png',
+        buffer: blankPng,
+    });
+
+    const ocrButton = page.getByRole('button', { name: 'Распознать текст бирки' });
+    await expect(ocrButton).toBeVisible({ timeout: 15000 });
+    await ocrButton.click();
+
+    await expect(page).toHaveURL(new RegExp(`/orders/show/${ORDER_ID}\\?highlightDetail=${DETAIL_ID}`), {
+        timeout: 15000,
+    });
+});
+
+test('OCR fallback: backend 503 OCR_SERVICE_BUSY shows the busy Alert, not Empty', async ({ page }) => {
+    const db = createWorkflowMockDb();
+    await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
+    // httpClient's createApiErrorFromBody() reads status + body.error.{code,message}.
+    await mockScanResolveImage(
+        page,
+        503,
+        JSON.stringify({ error: { code: 'OCR_SERVICE_BUSY', message: 'OCR service is busy' } }),
+    );
+
+    await page.goto('/scan', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('button', { name: 'Скан из фото' })).toBeVisible({ timeout: 30000 });
+
+    await page.setInputFiles('[data-testid="scan-photo-input"]', {
+        name: 'blank.png',
+        mimeType: 'image/png',
+        buffer: blankPng,
+    });
+
+    const ocrButton = page.getByRole('button', { name: 'Распознать текст бирки' });
+    await expect(ocrButton).toBeVisible({ timeout: 15000 });
+    await ocrButton.click();
+
+    await expect(page.getByText('Сканер занят', { exact: false })).toBeVisible({ timeout: 15000 });
     await expect(page.getByText('Не найдено')).toBeHidden();
 });
 

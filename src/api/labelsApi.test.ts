@@ -144,4 +144,18 @@ describe('labelsApi', () => {
     await labelsApi.listQrTemplates(true);
     expect(get).toHaveBeenCalledWith(`${apiRoutes.labels.qrTemplates}?includeInactive=true`);
   });
+
+  it('scanResolveImage POSTs the file as multipart FormData to scan-resolve-image', async () => {
+    const post = vi.spyOn(httpClient, 'post').mockResolvedValue({ candidates: [], parsed: null, templatesTried: 1 });
+    const file = new File(['fake-bytes'], 'label.jpg', { type: 'image/jpeg' });
+
+    await labelsApi.scanResolveImage(file);
+
+    expect(post).toHaveBeenCalledWith(apiRoutes.labels.scanResolveImage(), expect.any(FormData));
+    // NOTE: httpClient.post is spied (not restored) by earlier tests in this
+    // file, so mock.calls accumulates across tests — index the LAST call,
+    // not [0], or this picks up a stale call's args.
+    const formData = post.mock.calls[post.mock.calls.length - 1][1] as FormData;
+    expect(formData.get('file')).toBe(file);
+  });
 });
