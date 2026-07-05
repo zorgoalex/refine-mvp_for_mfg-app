@@ -59,7 +59,7 @@ export class GroupEntityLinksService {
 
   visibleEntityTypes(currentUser: CurrentUser): GroupEntityTypeCode[] {
     return Object.entries(GROUP_ENTITY_REGISTRY)
-      .filter(([, entry]) => this.permissions.canUser(currentUser, entry.requiredPermission as PermissionName))
+      .filter(([, entry]) => this.permissions.canUser(currentUser, entry.requiredPermission))
       .map(([code]) => code as GroupEntityTypeCode);
   }
 
@@ -70,13 +70,12 @@ export class GroupEntityLinksService {
   }
 
   private requireEntityPermission(currentUser: CurrentUser, entityType: GroupEntityTypeCode): void {
-    const permission = GROUP_ENTITY_REGISTRY[entityType].requiredPermission as PermissionName;
+    const permission = GROUP_ENTITY_REGISTRY[entityType].requiredPermission;
     this.requirePermission(currentUser, permission);
   }
 
-  private requirePermission(currentUser: CurrentUser, permission: string): void {
-    const typedPermission = permission as PermissionName;
-    if (!this.permissions.canUser(currentUser, typedPermission)) {
+  private requirePermission(currentUser: CurrentUser, permission: PermissionName): void {
+    if (!this.permissions.canUser(currentUser, permission)) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
         requiredPermissions: [permission],
       });

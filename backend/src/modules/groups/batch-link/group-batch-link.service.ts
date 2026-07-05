@@ -153,13 +153,12 @@ export class GroupBatchLinkService {
 
     this.requirePermission(
       command.currentUser,
-      GROUP_ENTITY_REGISTRY[command.dto.entityType].requiredPermission as PermissionName,
+      GROUP_ENTITY_REGISTRY[command.dto.entityType].requiredPermission,
     );
   }
 
-  private requirePermission(currentUser: CurrentUser, permission: string): void {
-    const typedPermission = permission as PermissionName;
-    if (!this.permissions.canUser(currentUser, typedPermission)) {
+  private requirePermission(currentUser: CurrentUser, permission: PermissionName): void {
+    if (!this.permissions.canUser(currentUser, permission)) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
         requiredPermissions: [permission],
       });

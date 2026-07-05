@@ -1,10 +1,12 @@
+import type { PermissionName } from '../../../permissions/permissions';
+
 export interface GroupEntityExistenceQuery {
   text: string;
   values: [string];
 }
 
 interface GroupEntityRegistryEntry {
-  readonly requiredPermission: string;
+  readonly requiredPermission: PermissionName;
   readonly query: (entityId: string) => GroupEntityExistenceQuery;
 }
 

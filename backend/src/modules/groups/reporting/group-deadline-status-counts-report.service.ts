@@ -12,7 +12,7 @@ const REQUIRED_REPORT_PERMISSIONS = [
   'groups.view',
   'orders.view',
   'deadlines.view',
-] as const;
+] as const satisfies readonly PermissionName[];
 
 export interface ListGroupDeadlineStatusCountsReportCommand {
   currentUser: CurrentUser;
@@ -40,9 +40,9 @@ export class GroupDeadlineStatusCountsReportService {
     return this.ports.reports.listDeadlineStatusCounts(command.query);
   }
 
-  private requirePermissions(currentUser: CurrentUser, requiredPermissions: readonly string[]): void {
+  private requirePermissions(currentUser: CurrentUser, requiredPermissions: readonly PermissionName[]): void {
     const missingPermissions = requiredPermissions.filter(
-      (permission) => !this.permissions.canUser(currentUser, permission as PermissionName),
+      (permission) => !this.permissions.canUser(currentUser, permission),
     );
 
     if (missingPermissions.length > 0) {

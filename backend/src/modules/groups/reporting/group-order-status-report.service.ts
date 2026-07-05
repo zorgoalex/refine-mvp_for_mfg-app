@@ -8,7 +8,7 @@ import type {
 } from './group-order-status-report.dto';
 import type { GroupOrderStatusReportRepositoryPort } from './group-order-status-report.repository';
 
-const REQUIRED_REPORT_PERMISSIONS = ['groups.view', 'orders.view'] as const;
+const REQUIRED_REPORT_PERMISSIONS = ['groups.view', 'orders.view'] as const satisfies readonly PermissionName[];
 
 export interface ListGroupOrderStatusReportCommand {
   currentUser: CurrentUser;
@@ -36,9 +36,9 @@ export class GroupOrderStatusReportService {
     return this.ports.reports.listOrderStatusCounts(command.query);
   }
 
-  private requirePermissions(currentUser: CurrentUser, requiredPermissions: readonly string[]): void {
+  private requirePermissions(currentUser: CurrentUser, requiredPermissions: readonly PermissionName[]): void {
     const missingPermissions = requiredPermissions.filter(
-      (permission) => !this.permissions.canUser(currentUser, permission as PermissionName),
+      (permission) => !this.permissions.canUser(currentUser, permission),
     );
 
     if (missingPermissions.length > 0) {

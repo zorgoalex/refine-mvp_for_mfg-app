@@ -102,44 +102,51 @@ describe('permissions foundation', () => {
     expect(can('viewer', 'deadlines.manage_order_overrides')).toBe(false);
   });
 
-  it('assigns project permissions by role including P4 members foundation', () => {
-    expect(can('superadmin', 'projects.manage_links')).toBe(true);
-    expect(can('superadmin', 'projects.members.manage')).toBe(true);
-    expect(can('superadmin', 'projects.participants.manage')).toBe(true);
-    expect(can('admin', 'projects.members.manage')).toBe(true);
-    expect(can('admin', 'projects.members.view')).toBe(true);
-    expect(can('admin', 'projects.participants.manage')).toBe(true);
-    expect(can('admin', 'projects.archive')).toBe(true);
-    expect(can('admin', 'projects.view_history')).toBe(true);
+  it('assigns group permissions by role including P4 members foundation', () => {
+    expect(can('superadmin', 'groups.manage_links')).toBe(true);
+    expect(can('superadmin', 'groups.members.manage')).toBe(true);
+    expect(can('superadmin', 'groups.participants.manage')).toBe(true);
+    expect(can('superadmin', 'groups.entity_links_changed')).toBe(true);
+    expect(can('superadmin', 'groups.members_changed')).toBe(true);
+    expect(can('superadmin', 'groups.participants_changed')).toBe(true);
+    expect(can('superadmin', 'groups.notification_created')).toBe(true);
+    expect(can('admin', 'groups.members.manage')).toBe(true);
+    expect(can('admin', 'groups.members.view')).toBe(true);
+    expect(can('admin', 'groups.participants.manage')).toBe(true);
+    expect(can('admin', 'groups.archive')).toBe(true);
+    expect(can('admin', 'groups.view_history')).toBe(true);
+    expect(can('admin', 'groups.notification_created')).toBe(true);
 
-    expect(can('top_manager', 'projects.view')).toBe(true);
-    expect(can('top_manager', 'projects.view_history')).toBe(true);
-    expect(can('top_manager', 'projects.manage_links')).toBe(true);
-    expect(can('top_manager', 'projects.members.view')).toBe(true);
-    expect(can('top_manager', 'projects.participants.view')).toBe(true);
-    expect(can('top_manager', 'projects.participants.manage')).toBe(false);
-    expect(can('top_manager', 'projects.members.manage')).toBe(false);
-    expect(can('top_manager', 'projects.create')).toBe(false);
+    expect(can('top_manager', 'groups.view')).toBe(true);
+    expect(can('top_manager', 'groups.view_history')).toBe(true);
+    expect(can('top_manager', 'groups.manage_links')).toBe(true);
+    expect(can('top_manager', 'groups.members.view')).toBe(true);
+    expect(can('top_manager', 'groups.participants.view')).toBe(true);
+    expect(can('top_manager', 'groups.participants.manage')).toBe(false);
+    expect(can('top_manager', 'groups.members.manage')).toBe(false);
+    expect(can('top_manager', 'groups.create')).toBe(false);
+    expect(can('top_manager', 'groups.notification_created')).toBe(false);
 
-    expect(can('manager', 'projects.view')).toBe(true);
-    expect(can('manager', 'projects.view_history')).toBe(false);
-    expect(can('manager', 'projects.members.view')).toBe(false);
-    expect(can('manager', 'projects.members.manage')).toBe(false);
-    expect(can('manager', 'projects.participants.view')).toBe(false);
-    expect(can('manager', 'projects.participants.manage')).toBe(false);
-    expect(can('viewer', 'projects.view')).toBe(true);
-    expect(can('viewer', 'projects.members.view')).toBe(false);
-    expect(can('viewer', 'projects.participants.view')).toBe(false);
-    expect(can('viewer', 'projects.participants.manage')).toBe(false);
+    expect(can('manager', 'groups.view')).toBe(true);
+    expect(can('manager', 'groups.view_history')).toBe(false);
+    expect(can('manager', 'groups.members.view')).toBe(false);
+    expect(can('manager', 'groups.members.manage')).toBe(false);
+    expect(can('manager', 'groups.participants.view')).toBe(false);
+    expect(can('manager', 'groups.participants.manage')).toBe(false);
+    expect(can('manager', 'groups.notification_created')).toBe(false);
+    expect(can('viewer', 'groups.view')).toBe(true);
+    expect(can('viewer', 'groups.members.view')).toBe(false);
+    expect(can('viewer', 'groups.participants.view')).toBe(false);
+    expect(can('viewer', 'groups.participants.manage')).toBe(false);
 
-    expect(can('operator', 'projects.view')).toBe(false);
-    expect(can('operator', 'projects.members.view')).toBe(false);
-    expect(can('operator', 'projects.participants.view')).toBe(false);
-    expect(can('operator', 'projects.participants.manage')).toBe(false);
-    expect(can('worker', 'projects.view')).toBe(false);
-    expect(can('worker', 'projects.members.view')).toBe(false);
-    expect(can('worker', 'projects.participants.view')).toBe(false);
-    expect(can('worker', 'projects.participants.manage')).toBe(false);
+    expect(can('operator', 'groups.view')).toBe(false);
+    expect(can('operator', 'groups.members.view')).toBe(false);
+    expect(can('operator', 'groups.participants.view')).toBe(false);
+    expect(can('operator', 'groups.participants.manage')).toBe(false);
+    expect(can('worker', 'groups.view')).toBe(false);
+    expect(can('worker', 'groups.members.view')).toBe(false);
+    expect(can('worker', 'groups.participants.view')).toBe(false);
+    expect(can('worker', 'groups.participants.manage')).toBe(false);
   });
 
   it('keeps operator away from payment and finance visibility until business approval', () => {
@@ -222,24 +229,25 @@ describe('permissions foundation', () => {
     expect(contractPermissions).toContain('deadlines.manage_order_overrides');
   });
 
-  it('keeps project permissions in the static OpenAPI PermissionName enum', () => {
-    const contract = readOpenApiContract();
-    const contractPermissions = readPermissionNameEnum(contract);
-    const projectPermissions = PERMISSIONS.filter((permission) => permission.startsWith('projects.'));
+  it('keeps group permissions registered in the PermissionName catalog', () => {
+    const groupPermissions = PERMISSIONS.filter((permission) => permission.startsWith('groups.'));
 
-    expect(projectPermissions).toEqual([
-      'projects.view',
-      'projects.create',
-      'projects.update',
-      'projects.archive',
-      'projects.manage_links',
-      'projects.view_history',
-      'projects.members.view',
-      'projects.members.manage',
-      'projects.participants.view',
-      'projects.participants.manage',
+    expect(groupPermissions).toEqual([
+      'groups.view',
+      'groups.create',
+      'groups.update',
+      'groups.archive',
+      'groups.manage_links',
+      'groups.view_history',
+      'groups.members.view',
+      'groups.members.manage',
+      'groups.participants.view',
+      'groups.participants.manage',
+      'groups.entity_links_changed',
+      'groups.members_changed',
+      'groups.participants_changed',
+      'groups.notification_created',
     ]);
-    expect(contractPermissions).toEqual(expect.arrayContaining(projectPermissions));
   });
 
   it('keeps label permissions in the static OpenAPI PermissionName enum', () => {

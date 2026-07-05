@@ -7,12 +7,14 @@ describe('GroupsRuntimeConfigService', () => {
       BACKEND_ENABLE_GROUPS: true,
       BACKEND_GROUPS_READ_ONLY: false,
       BACKEND_ENABLE_GROUP_P8_NOTIFICATIONS: true,
+      BACKEND_ENABLE_GROUPS_BATCH_LINK_WRITE: false,
     }));
 
     expect(service.getFeatureFlags()).toEqual({
       groupsEnabled: true,
       groupsReadOnly: false,
       groupP8NotificationsEnabled: true,
+      groupsBatchLinkWriteEnabled: false,
     });
   });
 });

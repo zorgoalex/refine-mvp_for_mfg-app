@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../common/errors/api-error';
 import type { CurrentUser } from '../../permissions/current-user';
-import { getPermissionsForRole, type PermissionName } from '../../permissions/permissions';
+import { getPermissionsForRole } from '../../permissions/permissions';
 import type {
   CreateGroupRequestDto,
   GroupMembersResponseDto,
@@ -292,11 +292,7 @@ function currentUser(role: CurrentUser['role']): CurrentUser {
     username: role,
     role,
     roleId: 0,
-    permissions: getPermissionsForRole(role).map((permission) => (
-      permission.startsWith('projects.')
-        ? permission.replace(/^projects\./, 'groups.')
-        : permission
-    )) as PermissionName[],
+    permissions: getPermissionsForRole(role),
   };
 }
 

@@ -121,16 +121,20 @@ export const PERMISSIONS = [
   'deadlines.worker.manage',
   'deadlines.worker.schedule',
 
-  'projects.view',
-  'projects.create',
-  'projects.update',
-  'projects.archive',
-  'projects.manage_links',
-  'projects.view_history',
-  'projects.members.view',
-  'projects.members.manage',
-  'projects.participants.view',
-  'projects.participants.manage',
+  'groups.view',
+  'groups.create',
+  'groups.update',
+  'groups.archive',
+  'groups.manage_links',
+  'groups.view_history',
+  'groups.members.view',
+  'groups.members.manage',
+  'groups.participants.view',
+  'groups.participants.manage',
+  'groups.entity_links_changed',
+  'groups.members_changed',
+  'groups.participants_changed',
+  'groups.notification_created',
 
   'org.view',
   'org.manage',
@@ -256,11 +260,11 @@ export const ROLE_PERMISSIONS = {
     'deadlines.pause',
     'deadlines.audit.view',
 
-    'projects.view',
-    'projects.manage_links',
-    'projects.view_history',
-    'projects.members.view',
-    'projects.participants.view',
+    'groups.view',
+    'groups.manage_links',
+    'groups.view_history',
+    'groups.members.view',
+    'groups.participants.view',
 
     'vlm.use',
   ],
@@ -323,7 +327,7 @@ export const ROLE_PERMISSIONS = {
     'deadlines.override',
     'deadlines.pause',
 
-    'projects.view',
+    'groups.view',
 
     'vlm.use',
   ],
@@ -435,7 +439,7 @@ export const ROLE_PERMISSIONS = {
     'employees.view',
 
     'deadlines.view',
-    'projects.view',
+    'groups.view',
   ],
 } as const satisfies Record<UserRole, readonly PermissionName[]>;
 

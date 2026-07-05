@@ -9,6 +9,12 @@ export interface GroupsHttpFeatureFlags {
   groupsBatchLinkWriteEnabled: boolean;
 }
 
+type GroupsRuntimeBooleanFlagKey =
+  | 'BACKEND_ENABLE_GROUPS'
+  | 'BACKEND_GROUPS_READ_ONLY'
+  | 'BACKEND_ENABLE_GROUP_P8_NOTIFICATIONS'
+  | 'BACKEND_ENABLE_GROUPS_BATCH_LINK_WRITE';
+
 @Injectable()
 export class GroupsRuntimeConfigService {
   constructor(@Inject(ConfigService) private readonly config: ConfigService<BackendEnv, true>) {}
@@ -22,7 +28,7 @@ export class GroupsRuntimeConfigService {
     };
   }
 
-  private getBooleanFlag(key: string): boolean {
-    return this.config.get(key as keyof BackendEnv, { infer: true }) as boolean;
+  private getBooleanFlag(key: GroupsRuntimeBooleanFlagKey): boolean {
+    return this.config.get(key, { infer: true });
   }
 }

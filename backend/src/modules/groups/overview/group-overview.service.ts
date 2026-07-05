@@ -6,7 +6,7 @@ import { GROUP_ENTITY_REGISTRY } from '../entity-links/group-entity-registry';
 import type { GroupOverviewQuery, GroupOverviewResponseDto } from './group-overview.dto';
 import type { GroupOverviewRepositoryPort } from './group-overview.repository';
 
-const REQUIRED_OVERVIEW_PERMISSIONS = ['groups.view', 'orders.view'] as const;
+const REQUIRED_OVERVIEW_PERMISSIONS = ['groups.view', 'orders.view'] as const satisfies readonly PermissionName[];
 
 export interface GetGroupOverviewCommand {
   currentUser: CurrentUser;
@@ -38,11 +38,11 @@ export class GroupOverviewService {
       groupId: command.groupId,
       query: command.query,
       visibleEntityTypes: Object.entries(GROUP_ENTITY_REGISTRY)
-        .filter(([, entry]) => this.permissions.canUser(command.currentUser, entry.requiredPermission as PermissionName, command.requestId))
+        .filter(([, entry]) => this.permissions.canUser(command.currentUser, entry.requiredPermission, command.requestId))
         .map(([code]) => code as keyof typeof GROUP_ENTITY_REGISTRY),
       canViewParticipants: this.permissions.canUser(
         command.currentUser,
-        'groups.participants.view' as PermissionName,
+        'groups.participants.view',
         command.requestId,
       ),
     });
@@ -50,11 +50,11 @@ export class GroupOverviewService {
 
   private requirePermissions(
     currentUser: CurrentUser,
-    requiredPermissions: readonly string[],
+    requiredPermissions: readonly PermissionName[],
     requestId?: string,
   ): void {
     const missingPermissions = requiredPermissions.filter(
-      (permission) => !this.permissions.canUser(currentUser, permission as PermissionName, requestId),
+      (permission) => !this.permissions.canUser(currentUser, permission, requestId),
     );
 
     if (missingPermissions.length > 0) {
