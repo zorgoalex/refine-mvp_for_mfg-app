@@ -15,22 +15,44 @@ describe('resolveAuthSchemaCapabilities', () => {
     const capabilities = await resolveAuthSchemaCapabilities(
       createConfig({ BACKEND_ENABLE_WORKOS_AUTH: false }),
       createDatabase([
-        { has_login_policy: true, has_provider_session_id: true, has_auth_source: true, has_user_identities: true },
+        {
+          has_login_policy: true,
+          has_provider_session_id: true,
+          has_auth_source: true,
+          has_user_identities: true,
+          has_auth_method: false,
+        },
       ]),
     );
 
-    expect(capabilities).toEqual({ loginPolicy: true, providerSessions: true, userIdentities: true });
+    expect(capabilities).toEqual({
+      loginPolicy: true,
+      providerSessions: true,
+      userIdentities: true,
+      authMethod: false,
+    });
   });
 
   it('stays deployable against a pre-052 database even with the flag ON', async () => {
     const capabilities = await resolveAuthSchemaCapabilities(
       createConfig({ BACKEND_ENABLE_WORKOS_AUTH: true }),
       createDatabase([
-        { has_login_policy: false, has_provider_session_id: false, has_auth_source: false, has_user_identities: false },
+        {
+          has_login_policy: false,
+          has_provider_session_id: false,
+          has_auth_source: false,
+          has_user_identities: false,
+          has_auth_method: false,
+        },
       ]),
     );
 
-    expect(capabilities).toEqual({ loginPolicy: false, providerSessions: false, userIdentities: false });
+    expect(capabilities).toEqual({
+      loginPolicy: false,
+      providerSessions: false,
+      userIdentities: false,
+      authMethod: false,
+    });
   });
 
   it('falls back to the flag when the probe fails so boot never breaks', async () => {
@@ -38,10 +60,20 @@ describe('resolveAuthSchemaCapabilities', () => {
 
     await expect(
       resolveAuthSchemaCapabilities(createConfig({ BACKEND_ENABLE_WORKOS_AUTH: true }), failing),
-    ).resolves.toEqual({ loginPolicy: true, providerSessions: true, userIdentities: true });
+    ).resolves.toEqual({
+      loginPolicy: true,
+      providerSessions: true,
+      userIdentities: true,
+      authMethod: false,
+    });
     await expect(
       resolveAuthSchemaCapabilities(createConfig({ BACKEND_ENABLE_WORKOS_AUTH: false }), failing),
-    ).resolves.toEqual({ loginPolicy: false, providerSessions: false, userIdentities: false });
+    ).resolves.toEqual({
+      loginPolicy: false,
+      providerSessions: false,
+      userIdentities: false,
+      authMethod: false,
+    });
   });
 
   it('reports no capabilities without a configured database', async () => {
@@ -49,7 +81,54 @@ describe('resolveAuthSchemaCapabilities', () => {
 
     await expect(
       resolveAuthSchemaCapabilities(createConfig({ BACKEND_ENABLE_WORKOS_AUTH: true }), database),
-    ).resolves.toEqual({ loginPolicy: false, providerSessions: false, userIdentities: false });
+    ).resolves.toEqual({
+      loginPolicy: false,
+      providerSessions: false,
+      userIdentities: false,
+      authMethod: false,
+    });
+  });
+
+  it('reports authMethod capability from the user_identities.auth_method column', async () => {
+    const on = await resolveAuthSchemaCapabilities(
+      createConfig({ BACKEND_ENABLE_WORKOS_AUTH: true }),
+      createDatabase([
+        {
+          has_login_policy: true,
+          has_provider_session_id: true,
+          has_auth_source: true,
+          has_user_identities: true,
+          has_auth_method: true,
+        },
+      ]),
+    );
+    expect(on.authMethod).toBe(true);
+
+    const off = await resolveAuthSchemaCapabilities(
+      createConfig({ BACKEND_ENABLE_WORKOS_AUTH: true }),
+      createDatabase([
+        {
+          has_login_policy: true,
+          has_provider_session_id: true,
+          has_auth_source: true,
+          has_user_identities: true,
+          has_auth_method: false,
+        },
+      ]),
+    );
+    expect(off.authMethod).toBe(false);
+  });
+
+  it('degrades authMethod to false on probe failure (pre-055 stays safe)', async () => {
+    const failing = {
+      isConfigured: true,
+      async query() {
+        throw new Error('probe down');
+      },
+    } as unknown as DatabaseService;
+
+    const caps = await resolveAuthSchemaCapabilities(createConfig({ BACKEND_ENABLE_WORKOS_AUTH: true }), failing);
+    expect(caps.authMethod).toBe(false);
   });
 });
 

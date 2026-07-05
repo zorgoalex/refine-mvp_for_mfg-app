@@ -98,7 +98,7 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
         capabilities: AuthSchemaCapabilities,
       ) =>
         isWorkosEnabled(config) && database.isConfigured && isWorkosSchemaReady(capabilities)
-          ? new PgUserIdentityRepository(database)
+          ? new PgUserIdentityRepository(database, capabilities)
           : null,
       inject: [ConfigService, DatabaseService, AUTH_SCHEMA_CAPABILITIES],
     },
@@ -125,7 +125,7 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
         return new WorkosAuthService({
           workos: workosClient,
           users,
-          identities: new PgUserIdentityRepository(database),
+          identities: new PgUserIdentityRepository(database, capabilities),
           sessions: sessionManager,
           tokens: createAccessTokenIssuer(config),
           audit: new PgAuthAuditRepository(database),
@@ -190,6 +190,8 @@ export interface AuthSchemaCapabilities {
   providerSessions: boolean;
   /** user_identities table exists (migration 052). */
   userIdentities: boolean;
+  /** user_identities.auth_method exists (post-052 additive column). */
+  authMethod: boolean;
 }
 
 /**
@@ -213,7 +215,7 @@ export async function resolveAuthSchemaCapabilities(
   database: DatabaseService,
 ): Promise<AuthSchemaCapabilities> {
   if (!database.isConfigured) {
-    return { loginPolicy: false, providerSessions: false, userIdentities: false };
+    return { loginPolicy: false, providerSessions: false, userIdentities: false, authMethod: false };
   }
 
   try {
@@ -222,6 +224,7 @@ export async function resolveAuthSchemaCapabilities(
       has_provider_session_id: boolean;
       has_auth_source: boolean;
       has_user_identities: boolean;
+      has_auth_method: boolean;
     }>(
       `
       SELECT
@@ -238,7 +241,11 @@ export async function resolveAuthSchemaCapabilities(
          WHERE table_schema = current_schema()
            AND table_name = 'user_identities'
            AND column_name IN ('identity_id', 'user_id', 'provider', 'provider_user_id',
-                               'email_at_link', 'email_verified_at_link')) = 6 AS has_user_identities
+                               'email_at_link', 'email_verified_at_link')) = 6 AS has_user_identities,
+        EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'user_identities'
+                  AND column_name = 'auth_method') AS has_auth_method
       `,
     );
     const row = result.rows[0];
@@ -247,10 +254,11 @@ export async function resolveAuthSchemaCapabilities(
       loginPolicy: row?.has_login_policy === true,
       providerSessions: row?.has_provider_session_id === true && row?.has_auth_source === true,
       userIdentities: row?.has_user_identities === true,
+      authMethod: row?.has_auth_method === true,
     };
   } catch {
     const enabled = isWorkosEnabled(config);
-    return { loginPolicy: enabled, providerSessions: enabled, userIdentities: enabled };
+    return { loginPolicy: enabled, providerSessions: enabled, userIdentities: enabled, authMethod: false };
   }
 }
 
