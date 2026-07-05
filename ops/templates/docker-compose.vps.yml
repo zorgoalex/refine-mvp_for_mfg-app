@@ -212,6 +212,7 @@ services:
       # CAD SVG/DXF service over the internal "back" network. Backend calls it
       # by service DNS and skips the token (trusted Docker CIDR).
       CAD_SERVICE_BASE_URL: ${CAD_SERVICE_BASE_URL:-http://cad-service:8000}
+      OCR_SERVICE_BASE_URL: ${OCR_SERVICE_BASE_URL:-http://ocr-service:8000}
       CAD_SERVICE_API_TOKEN: ${CAD_SERVICE_API_TOKEN:-}
       # Twenty CRM one-way sync (Phase 2) — fail-closed
       BACKEND_ENABLE_TWENTY_SYNC: ${BACKEND_ENABLE_TWENTY_SYNC:-false}
@@ -269,6 +270,18 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
+    networks:
+      - back
+
+  ocr-service:
+    build:
+      context: ${OCR_BUILD_CONTEXT:-./repo_erp/ocr-service}
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8000"
+    # ANTI-EXPOSURE: только внутренняя сеть back; НИКАКИХ ports/traefik/edge
+    # (Codex-гейт scan-ocr плана; НЕ копировать паттерн cad-service ниже).
     networks:
       - back
 
