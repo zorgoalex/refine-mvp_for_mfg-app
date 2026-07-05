@@ -25,6 +25,8 @@ export interface FrontendFeatureFlags {
   // Flag is removed in a follow-up cleanup release.
   sheetMaterialsReads: boolean;
   enableLegacyHasura: boolean;
+  /** Hybrid SSO login via WorkOS AuthKit; requires useBackendAuth. */
+  workosAuth: boolean;
 }
 
 type EnvSource = Record<string, string | boolean | undefined>;
@@ -49,6 +51,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   sheetMaterials: string | boolean;
   enableLegacyHasura: string | boolean;
   legacyHasura: string | boolean;
+  workosAuth: string | boolean;
 }>;
 
 export function getFeatureFlags(
@@ -83,6 +86,7 @@ export function getFeatureFlags(
     labels: readBooleanFlag(env.VITE_USE_BACKEND_LABELS, false),
     sheetMaterialsReads: readBooleanFlag(env.VITE_SHEET_MATERIALS_READS, false),
     enableLegacyHasura: readBooleanFlag(env.VITE_ENABLE_LEGACY_HASURA, true),
+    workosAuth: readBooleanFlag(env.VITE_WORKOS_AUTH, false),
   };
 
   return mergeRuntimeFeatureFlags(envFlags, runtimeFeatures);
@@ -135,16 +139,27 @@ export function mergeRuntimeFeatureFlags(
       readOptionalBooleanFlag(runtimeFeatures.enableLegacyHasura) ??
       readOptionalBooleanFlag(runtimeFeatures.legacyHasura) ??
       fallback.enableLegacyHasura,
+    workosAuth: readOptionalBooleanFlag(runtimeFeatures.workosAuth) ?? fallback.workosAuth,
   });
 }
 
 function enforceFrontendFeatureDependencies(flags: FrontendFeatureFlags): FrontendFeatureFlags {
+  // SSO login exchanges the provider code for a backend session; without
+  // backend-auth mode the app cannot consume that session (POC gotcha #7).
+  // The coercion must stay VISIBLE to ops — a silently vanished SSO button
+  // reads as a frontend bug instead of a runtime-config mistake.
+  if (flags.workosAuth && !flags.useBackendAuth) {
+    // eslint-disable-next-line no-console
+    console.warn('[featureFlags] workosAuth requires backendAuth; SSO login is disabled');
+  }
+
   return {
     ...flags,
     useBackendClientPhones:
       flags.useBackendClientPhones && flags.useBackendProductionActions,
     useBackendDeadlines:
       flags.useBackendDeadlines && flags.useBackendAuth && flags.useBackendOrdersRead,
+    workosAuth: flags.workosAuth && flags.useBackendAuth,
   };
 }
 

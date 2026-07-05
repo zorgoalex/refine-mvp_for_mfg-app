@@ -15,6 +15,7 @@ const ROLLOUT_FEATURE_KEYS = [
   'backendVlm',
   'backendReferences',
   'labels',
+  'workosAuth',
 ];
 
 const STATIC_FEATURE_EXPECTATIONS = {

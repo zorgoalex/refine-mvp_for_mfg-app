@@ -71,6 +71,14 @@ export interface RefreshResponse {
 
 export interface LogoutResponse {
   ok: true;
+  /** Hosted provider logout URL; present when the session came from SSO. */
+  providerLogoutUrl?: string;
+  /**
+   * 'redirect' — follow providerLogoutUrl; 'unavailable' — SSO session but
+   * the provider logout could not be prepared (provider session may still be
+   * alive, show a warning); 'not_applicable' — plain local session.
+   */
+  providerLogoutStatus?: 'redirect' | 'unavailable' | 'not_applicable';
 }
 
 export interface MeResponse {

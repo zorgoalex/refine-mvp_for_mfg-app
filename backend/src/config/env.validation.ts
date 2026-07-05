@@ -100,6 +100,29 @@ export const envSchema = z
     REFRESH_COOKIE_SECURE: optionalBooleanFromEnv,
     REFRESH_COOKIE_SAME_SITE: sameSiteFromEnv,
     BACKEND_ENABLE_AUTH: booleanFromEnv.default(false),
+    BACKEND_ENABLE_WORKOS_AUTH: booleanFromEnv.default(false),
+    WORKOS_API_KEY: z.string().trim().min(1).optional(),
+    WORKOS_CLIENT_ID: z.string().trim().min(1).optional(),
+    WORKOS_REDIRECT_URI: z.string().trim().url().optional(),
+    // Browser redirects (authorize/logout) AND the server-side code exchange
+    // (client secret in the body) go to this host — a loose value is an open
+    // redirect plus a secret exfiltration channel. Pin to WorkOS over https;
+    // plain-http localhost is allowed only for local mocks.
+    WORKOS_API_BASE: z
+      .string()
+      .trim()
+      .url()
+      .refine((value) => {
+        const url = new URL(value);
+        if (url.protocol === 'https:') {
+          return url.hostname === 'api.workos.com' || url.hostname.endsWith('.workos.com');
+        }
+        return (
+          url.protocol === 'http:' &&
+          (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+        );
+      }, 'WORKOS_API_BASE must be an https://*.workos.com URL (or http://localhost for local mocks)')
+      .default('https://api.workos.com'),
     BACKEND_ENABLE_ORDERS: booleanFromEnv.default(false),
     BACKEND_ENABLE_PAYMENTS: booleanFromEnv.default(false),
     BACKEND_ENABLE_CLIENT_PHONES: booleanFromEnv.default(false),
@@ -258,6 +281,40 @@ export const envSchema = z
         message: 'DATABASE_POOL_MIN cannot be greater than DATABASE_POOL_MAX',
         path: ['DATABASE_POOL_MIN'],
       });
+    }
+
+    // Plain-HTTP localhost API base is for LOCAL MOCKS only: on staging/prod
+    // it would bounce logout redirects to loopback and post the client
+    // secret + one-time code to a local service.
+    if (
+      (env.NODE_ENV === 'production' || env.NODE_ENV === 'staging') &&
+      env.WORKOS_API_BASE.startsWith('http://')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'WORKOS_API_BASE must be https://*.workos.com in staging/production',
+        path: ['WORKOS_API_BASE'],
+      });
+    }
+
+    if (env.BACKEND_ENABLE_WORKOS_AUTH) {
+      if (!env.BACKEND_ENABLE_AUTH) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'BACKEND_ENABLE_AUTH is required when BACKEND_ENABLE_WORKOS_AUTH is true',
+          path: ['BACKEND_ENABLE_AUTH'],
+        });
+      }
+
+      for (const key of ['WORKOS_API_KEY', 'WORKOS_CLIENT_ID', 'WORKOS_REDIRECT_URI'] as const) {
+        if (!env[key]) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `${key} is required when BACKEND_ENABLE_WORKOS_AUTH is true`,
+            path: [key],
+          });
+        }
+      }
     }
 
     if (env.BACKEND_ENABLE_AUTH) {

@@ -21,6 +21,39 @@ describe('RateLimitService', () => {
     });
   });
 
+  it('refund returns one attempt so only failures accumulate (memory store)', async () => {
+    const service = new RateLimitService(new MemoryRateLimitStore());
+    const input = {
+      rule: { feature: 'auth_login_account', maxRequests: 2, windowMs: 60_000 },
+      subject: { route: 'auth/login', username: 'manager' },
+    };
+
+    await service.assertAllowed(input);
+    await service.refund(input);
+    await service.assertAllowed(input);
+    await expect(service.assertAllowed(input)).resolves.toBeUndefined();
+    await expect(service.assertAllowed(input)).rejects.toMatchObject({ statusCode: 429 });
+  });
+
+  it('refund is best-effort and never throws', async () => {
+    const store: RateLimitStore = {
+      consume: async () => {
+        throw new Error('unused');
+      },
+      refund: async () => {
+        throw new Error('redis unavailable');
+      },
+    };
+    const service = new RateLimitService(store);
+
+    await expect(
+      service.refund({
+        rule: { feature: 'auth_login_account', maxRequests: 5, windowMs: 60_000 },
+        subject: { route: 'auth/login', username: 'manager' },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('does not expose raw identifiers in keys', () => {
     const key = createRateLimitKey('auth_login', {
       route: 'auth/login',

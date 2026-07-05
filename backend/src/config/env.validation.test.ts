@@ -567,4 +567,34 @@ describe('backend env validation', () => {
       BACKEND_ENABLE_TWENTY_SYNC: true,
     });
   });
+
+  it('pins WORKOS_API_BASE to workos.com over https (localhost http only for mocks)', () => {
+    expect(validateEnv({})).toMatchObject({ WORKOS_API_BASE: 'https://api.workos.com' });
+    expect(
+      validateEnv({ WORKOS_API_BASE: 'https://api.workos.com' }).WORKOS_API_BASE,
+    ).toBe('https://api.workos.com');
+    expect(
+      validateEnv({ WORKOS_API_BASE: 'http://localhost:8787' }).WORKOS_API_BASE,
+    ).toBe('http://localhost:8787');
+
+    // A loose value would be an open redirect AND would receive the client
+    // secret + one-time code from the server-side exchange.
+    expect(() => validateEnv({ WORKOS_API_BASE: 'https://evil.example.com' })).toThrow(
+      /workos\.com/,
+    );
+    expect(() => validateEnv({ WORKOS_API_BASE: 'http://api.workos.com' })).toThrow(
+      /workos\.com/,
+    );
+    expect(() => validateEnv({ WORKOS_API_BASE: 'https://api.workos.com.evil.example' })).toThrow(
+      /workos\.com/,
+    );
+
+    // Loopback mocks are for local development only.
+    expect(() =>
+      validateEnv({ NODE_ENV: 'production', FRONTEND_ORIGIN: 'https://app.example', WORKOS_API_BASE: 'http://localhost:8787' }),
+    ).toThrow(/staging\/production/);
+    expect(() =>
+      validateEnv({ NODE_ENV: 'staging', WORKOS_API_BASE: 'http://127.0.0.1:8787' }),
+    ).toThrow(/staging\/production/);
+  });
 });

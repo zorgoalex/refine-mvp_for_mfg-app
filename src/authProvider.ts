@@ -9,6 +9,13 @@ import { legacyApiRoutes } from './api/legacyApiRoutes';
 import { featureFlags } from './config/featureFlags';
 
 /**
+ * One-shot sessionStorage flag: set when logout could not terminate the SSO
+ * provider session (providerLogoutStatus='unavailable'); the login page reads
+ * and clears it to show an inline warning (plan §4.4).
+ */
+export const SSO_LOGOUT_WARNING_KEY = 'erp_sso_logout_warning';
+
+/**
  * AuthProvider для Refine
  * Управляет аутентификацией пользователей через JWT токены
  */
@@ -248,19 +255,45 @@ async function loginWithBackend(credentials: LoginCredentials) {
 
 async function logoutFromBackend() {
   const user = authSession.getUser();
+  let providerLogoutUrl: string | undefined;
 
   try {
-    await authApi.logout();
+    const response = await authApi.logout();
+    providerLogoutUrl = response.providerLogoutUrl;
+
+    // Plan §4.4: an SSO session whose provider logout could not be prepared
+    // must not look like a clean local logout — the provider session may
+    // still be alive. One-shot flag, rendered as a warning on /login.
+    if (response.providerLogoutStatus === 'unavailable') {
+      sessionStorage.setItem(SSO_LOGOUT_WARNING_KEY, '1');
+    }
   } catch (error) {
     logAuthError(error, 'Выход из системы');
-  } finally {
-    authSession.clear();
-    authStorage.clear();
 
-    if (user?.id) {
-      const { deleteAll } = useNotificationStore.getState();
-      deleteAll(user.id);
-    }
+    // The backend did NOT confirm the logout: the HttpOnly refresh cookie
+    // (and possibly the SSO provider session) is still alive. Pretending to
+    // be logged out on a shared machine is worse than failing loudly — keep
+    // the session and let the user retry.
+    return {
+      success: false,
+      error: new Error('Не удалось завершить сессию — попробуйте выйти ещё раз'),
+    };
+  }
+
+  authSession.clear();
+  authStorage.clear();
+
+  if (user?.id) {
+    const { deleteAll } = useNotificationStore.getState();
+    deleteAll(user.id);
+  }
+
+  // SSO sessions are also terminated at the provider; WorkOS redirects back
+  // to its configured logout URI. Without this, "выход" would leave the
+  // provider session alive and the next SSO click would re-enter silently.
+  if (providerLogoutUrl) {
+    window.location.assign(providerLogoutUrl);
+    return { success: true };
   }
 
   return {

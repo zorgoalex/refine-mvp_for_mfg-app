@@ -115,7 +115,7 @@ describe('authProvider backend cutover mode', () => {
     ]);
   });
 
-  it('logs out through /api/v1/auth/logout and clears memory session even on backend error', async () => {
+  it('keeps the session when backend logout fails — no fake logged-out state', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -138,9 +138,10 @@ describe('authProvider backend cutover mode', () => {
       permissions: ['orders.view'],
     });
 
+    // The backend did not confirm the logout: the HttpOnly refresh cookie is
+    // still alive, so the UI must keep the session and surface the failure.
     await expect(authProvider.logout?.({})).resolves.toMatchObject({
-      success: true,
-      redirectTo: '/login',
+      success: false,
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -150,8 +151,8 @@ describe('authProvider backend cutover mode', () => {
         credentials: 'include',
       }),
     );
-    expect(authSession.getAccessToken()).toBeNull();
-    expect(authSession.getUser()).toBeNull();
+    expect(authSession.getAccessToken()).toBe('access-token');
+    expect(authSession.getUser()).toMatchObject({ username: 'admin' });
   });
 });
 

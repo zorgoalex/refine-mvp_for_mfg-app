@@ -9,12 +9,19 @@ export interface LoginCommand {
   requestId?: string;
 }
 
+export type LoginPolicy = 'local' | 'external' | 'both';
+
+export type AuthSource = 'backend' | 'workos';
+
 export interface AuthUserRecord {
   id: string;
   username: string;
   roleId: number;
   passwordHash: string;
   isActive: boolean;
+  loginPolicy: LoginPolicy;
+  /** Present when the loader selects it (used for SSO email-drift auditing). */
+  email?: string | null;
 }
 
 export interface AuthSessionRecord {
@@ -32,21 +39,47 @@ export interface PasswordVerifierPort {
   verify(password: string, passwordHash: string): Promise<boolean>;
 }
 
-export interface SessionManagerPort {
-  createLoginSession(
-    user: AuthUserRecord,
-    context: Pick<LoginCommand, 'userAgent' | 'ipAddress' | 'requestId'>,
-  ): Promise<AuthSessionRecord>;
+export interface LoginSessionContext extends Pick<LoginCommand, 'userAgent' | 'ipAddress' | 'requestId'> {
+  /** Written to the first-class audit_log.source column ('backend' when absent). */
+  authSource?: AuthSource;
+  /** External provider session id, persisted for provider-side logout. */
+  providerSessionId?: string;
+  /** Extra queryable fields merged into the auth.login.success audit metadata. */
+  auditMetadata?: Record<string, unknown>;
+  /**
+   * SSO login: the identity link is re-proven INSIDE the session transaction
+   * (provider+sub still owned by this user) — a concurrent unlink/relink
+   * between the exchange and the session insert must deny.
+   */
+  requireLinkedIdentity?: { provider: string; providerUserId: string };
 }
+
+export interface SessionManagerPort {
+  createLoginSession(user: AuthUserRecord, context: LoginSessionContext): Promise<AuthSessionRecord>;
+}
+
+export type LoginFailedReason =
+  | 'unknown_user'
+  | 'invalid_password'
+  | 'inactive_user'
+  | 'login_method_not_allowed'
+  | 'email_not_verified'
+  | 'identity_not_linked'
+  | 'provider_error'
+  | 'state_mismatch';
 
 export interface AuthAuditPort {
   writeLoginFailed(input: {
     username: string;
     user?: Pick<AuthUserRecord, 'id' | 'username' | 'roleId' | 'isActive'>;
-    reason: 'unknown_user' | 'invalid_password' | 'inactive_user';
+    /** Resolved account id when known WITHOUT a loadable user row (stale link). */
+    relatedUserId?: string;
+    reason: LoginFailedReason;
     requestId?: string;
     userAgent?: string;
     ipAddress?: string;
+    authSource?: AuthSource;
+    metadata?: Record<string, unknown>;
   }): Promise<void>;
 }
 

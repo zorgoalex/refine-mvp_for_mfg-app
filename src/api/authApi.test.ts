@@ -73,7 +73,7 @@ describe('authApi', () => {
     expect(authSession.getAccessToken()).toBe('new-access-token');
   });
 
-  it('clears memory session on logout even when backend logout fails', async () => {
+  it('keeps the memory session when backend logout fails (refresh cookie is still alive)', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -102,6 +102,19 @@ describe('authApi', () => {
         credentials: 'include',
       }),
     );
+    // The backend did not confirm the logout: the session must survive so
+    // the user can retry instead of being silently "logged out" while the
+    // HttpOnly refresh cookie stays valid.
+    expect(authSession.getAccessToken()).toBe('access-token');
+    expect(authSession.getUser()).toMatchObject({ username: 'admin' });
+  });
+
+  it('clears the memory session on a confirmed logout', async () => {
+    mockFetch({ ok: true, providerLogoutStatus: 'not_applicable' });
+    authSession.setAccessToken('access-token');
+    authSession.setUser({ id: '1', username: 'admin', role: 'superadmin' });
+
+    await expect(authApi.logout()).resolves.toMatchObject({ ok: true });
     expect(authSession.getAccessToken()).toBeNull();
     expect(authSession.getUser()).toBeNull();
   });

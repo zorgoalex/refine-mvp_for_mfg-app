@@ -32,6 +32,19 @@ export class RateLimitService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Best-effort return of one consumed attempt (used to count only failures
+   * against a budget). A failed refund only leaves the limit slightly
+   * tighter, which is the safe direction — never throws.
+   */
+  async refund(input: RateLimitConsumeInput): Promise<void> {
+    try {
+      await this.store.refund?.(input);
+    } catch {
+      // best-effort by contract
+    }
+  }
+
   async ping(): Promise<void> {
     await this.store.ping?.();
   }

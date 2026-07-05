@@ -1,9 +1,18 @@
 import React from "react";
-import { Form, Input, Button, Card, Typography } from "antd";
-import { UserOutlined, LockOutlined } from "@ant-design/icons";
+import { Form, Input, Button, Card, Typography, Alert } from "antd";
+import { UserOutlined, LockOutlined, LoginOutlined } from "@ant-design/icons";
 import { useLogin } from "@refinedev/core";
+import { featureFlags } from "../../config/featureFlags";
+import { SSO_LOGOUT_WARNING_KEY } from "../../authProvider";
 
 const { Title, Text } = Typography;
+
+/** One-shot: read and clear the SSO-logout warning left by authProvider. */
+function consumeSsoLogoutWarning(): boolean {
+  const raised = sessionStorage.getItem(SSO_LOGOUT_WARNING_KEY) === "1";
+  sessionStorage.removeItem(SSO_LOGOUT_WARNING_KEY);
+  return raised;
+}
 
 /**
  * Кастомная страница входа в систему
@@ -11,6 +20,7 @@ const { Title, Text } = Typography;
  */
 export const LoginPage: React.FC = () => {
   const { mutate: login, isLoading } = useLogin();
+  const [ssoLogoutWarning] = React.useState(consumeSsoLogoutWarning);
 
   const onFinish = (values: { username: string; password: string }) => {
     login(values);
@@ -41,6 +51,16 @@ export const LoginPage: React.FC = () => {
             Система управления производством
           </Text>
         </div>
+
+        {ssoLogoutWarning && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="Сессия SSO-провайдера может быть ещё активна"
+            description="Не удалось завершить сессию провайдера входа. На общем компьютере завершите её вручную (выход из аккаунта провайдера)."
+          />
+        )}
 
         <Form
           name="login"
@@ -95,7 +115,47 @@ export const LoginPage: React.FC = () => {
             </Button>
           </Form.Item>
         </Form>
+
+        {featureFlags.workosAuth && <WorkosSsoButton />}
       </Card>
+    </div>
+  );
+};
+
+/** Вход через hosted SSO (WorkOS AuthKit); виден только за флагом workosAuth. */
+const WorkosSsoButton: React.FC = () => {
+  const [redirecting, setRedirecting] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const startSso = async () => {
+    setRedirecting(true);
+    setError(null);
+    try {
+      const { authApi } = await import("../../api/authApi");
+      const url = await authApi.workosAuthorizeUrl();
+      window.location.assign(url);
+    } catch {
+      setError("SSO недоступен, войдите по паролю");
+      setRedirecting(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <Button
+        block
+        icon={<LoginOutlined />}
+        loading={redirecting}
+        onClick={startSso}
+        style={{ height: 40 }}
+      >
+        Войти через SSO
+      </Button>
+      {error && (
+        <Text type="danger" style={{ display: "block", marginTop: 8, textAlign: "center" }}>
+          {error}
+        </Text>
+      )}
     </div>
   );
 };

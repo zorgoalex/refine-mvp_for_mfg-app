@@ -18,7 +18,15 @@ export interface LogoutCommand {
   ipAddress?: string;
 }
 
+export interface LogoutResult {
+  ok: true;
+  /** Present when the revoked session was issued via an external provider. */
+  providerSessionId?: string;
+  /** Which path issued the session ('backend' | 'workos'), when recorded. */
+  authSource?: string;
+}
+
 export interface AuthSessionHttpPort {
   refresh(command: RefreshCommand): Promise<LoginResult>;
-  logout(command: LogoutCommand): Promise<void>;
+  logout(command: LogoutCommand): Promise<LogoutResult>;
 }

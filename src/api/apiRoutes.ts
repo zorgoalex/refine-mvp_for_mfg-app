@@ -12,6 +12,11 @@ export const apiRoutes = {
     refresh: backendApiPath('/auth/refresh'),
     logout: backendApiPath('/auth/logout'),
     me: backendApiPath('/me'),
+    workosAuthorize: backendApiPath('/auth/workos/authorize'),
+    workosCallback: backendApiPath('/auth/workos/callback'),
+    workosLinkStart: backendApiPath('/auth/workos/link/start'),
+    workosLinkCallback: backendApiPath('/auth/workos/link/callback'),
+    workosLink: backendApiPath('/auth/workos/link'),
   },
   profile: {
     preferences: backendApiPath('/me/preferences'),

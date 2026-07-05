@@ -27,6 +27,7 @@ const EXPECTED_FEATURE_KEYS = [
   'backendReferences',
   'labels',
   'enableLegacyHasura',
+  'workosAuth',
 ];
 
 describe('runtime config canary examples', () => {

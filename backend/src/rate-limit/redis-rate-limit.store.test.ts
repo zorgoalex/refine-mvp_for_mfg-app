@@ -28,6 +28,33 @@ describe('RedisRateLimitStore', () => {
     expect([...client.counts.keys()][0]).not.toContain('manager');
   });
 
+  it('refund returns one consumed attempt so only failures accumulate', async () => {
+    const client = new FakeRedisClient();
+    const store = new RedisRateLimitStore({ url: 'redis://unused', client });
+    const input = {
+      rule: { feature: 'auth_login_account', maxRequests: 2, windowMs: 60_000 },
+      subject: { route: 'auth/login', username: 'manager' },
+    };
+
+    await store.consume(input);
+    await store.refund(input);
+    await store.consume(input);
+    await expect(store.consume(input)).resolves.toMatchObject({ allowed: true, remaining: 0 });
+  });
+
+  it('refund of a missing key expires the stray negative counter', async () => {
+    const client = new FakeRedisClient();
+    const store = new RedisRateLimitStore({ url: 'redis://unused', client });
+
+    await store.refund({
+      rule: { feature: 'auth_login_account', maxRequests: 2, windowMs: 60_000 },
+      subject: { route: 'auth/login', username: 'ghost' },
+    });
+
+    expect(client.expirations).toHaveLength(1);
+    expect(client.expirations[0].milliseconds).toBe(1);
+  });
+
   it('uses ping for readiness checks', async () => {
     const client = new FakeRedisClient();
     const store = new RedisRateLimitStore({ url: 'redis://unused', client });
@@ -45,6 +72,12 @@ class FakeRedisClient implements RedisRateLimitClient {
 
   async incr(key: string): Promise<number> {
     const next = (this.counts.get(key) ?? 0) + 1;
+    this.counts.set(key, next);
+    return next;
+  }
+
+  async decr(key: string): Promise<number> {
+    const next = (this.counts.get(key) ?? 0) - 1;
     this.counts.set(key, next);
     return next;
   }

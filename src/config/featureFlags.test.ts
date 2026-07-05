@@ -28,6 +28,7 @@ describe('featureFlags', () => {
       labels: false,
       sheetMaterialsReads: false,
       enableLegacyHasura: true,
+      workosAuth: false,
     });
   });
 

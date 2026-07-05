@@ -4,7 +4,7 @@ import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, mapRoleIdToRole } from '../../../permissions/permissions';
-import { UserInactiveError } from '../auth.errors';
+import { LoginMethodNotAllowedError, UserInactiveError } from '../auth.errors';
 import type {
   AuthResponse,
   AuthSessionRecord,
@@ -12,9 +12,10 @@ import type {
   IssuedAccessToken,
   LoginCommand,
   LoginResult,
+  LoginSessionContext,
   SessionManagerPort,
 } from '../auth.types';
-import type { AuthSessionHttpPort, LogoutCommand, RefreshCommand } from '../http/auth-session-http.port';
+import type { AuthSessionHttpPort, LogoutCommand, LogoutResult, RefreshCommand } from '../http/auth-session-http.port';
 import { TokenService } from '../token.service';
 import { JwtAccessTokenIssuer } from './jwt-access-token-issuer';
 
@@ -38,6 +39,8 @@ interface RefreshSessionRow extends QueryResultRow {
   username: string;
   role_id: string | number;
   is_active: boolean;
+  /** Present only when supportsProviderSessions selects it (post-052). */
+  auth_source?: string | null;
 }
 
 interface AuthAuditInput {
@@ -50,6 +53,8 @@ interface AuthAuditInput {
   requestId?: string;
   userAgent?: string;
   ipAddress?: string;
+  /** First-class audit_log.source column value; 'backend' when absent. */
+  authSource?: 'backend' | 'workos';
   metadata?: Record<string, unknown>;
 }
 
@@ -58,6 +63,17 @@ const DEFAULT_REQUEST_ID = 'auth-command';
 export interface PgAuthSessionManagerOptions {
   refreshTokenPepper: string;
   refreshTokenTtlDays: number;
+  /**
+   * auth_sessions.provider_session_id exists only after migration 052; the
+   * column is written/read only when the schema capability says it exists so
+   * the backend stays deployable against a pre-052 database.
+   */
+  supportsProviderSessions?: boolean;
+  /**
+   * users.login_policy exists (migration 052): the session transaction
+   * re-checks the policy under a row lock right before issuing the session.
+   */
+  enforceLoginPolicy?: boolean;
 }
 
 export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttpPort {
@@ -68,23 +84,85 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     private readonly options: PgAuthSessionManagerOptions,
   ) {}
 
-  async createLoginSession(
-    user: AuthUserRecord,
-    context: Pick<LoginCommand, 'userAgent' | 'ipAddress' | 'requestId'>,
-  ): Promise<AuthSessionRecord> {
+  async createLoginSession(user: AuthUserRecord, context: LoginSessionContext): Promise<AuthSessionRecord> {
     const refreshToken = this.tokenService.generateRefreshToken();
     const tokenHash = this.hashRefreshToken(refreshToken);
     const expiresAt = this.refreshTokenExpiresAt();
-
     return this.database.transaction(async (tx) => {
-      const session = await tx.query<CreatedSessionRow>(
-        `
-        INSERT INTO auth_sessions (user_id, expires_at, ip_address, user_agent)
-        VALUES ($1, $2, $3, $4)
-        RETURNING session_id::text, token_family_id::text
-        `,
-        [user.id, expiresAt, context.ipAddress ?? null, context.userAgent ?? null],
+      // TOCTOU guard: the service checked is_active/login_policy on a stale
+      // snapshot BEFORE bcrypt; re-prove both under a row lock in the same
+      // transaction that issues the session, so an account tightened to
+      // external-only (or deactivated) mid-login cannot get one more session.
+      const guard = await tx.query<{ is_active: boolean; login_policy?: string | null } & QueryResultRow>(
+        `SELECT is_active${this.options.enforceLoginPolicy ? ', login_policy' : ''}
+         FROM users WHERE user_id = $1 FOR UPDATE`,
+        [user.id],
       );
+      const guardRow = guard.rows[0];
+
+      if (!guardRow?.is_active) {
+        throw new UserInactiveError();
+      }
+
+      if (this.options.enforceLoginPolicy) {
+        const policy = guardRow.login_policy;
+        const source = context.authSource ?? 'backend';
+
+        if ((source === 'backend' && policy === 'external') || (source === 'workos' && policy === 'local')) {
+          throw new LoginMethodNotAllowedError();
+        }
+      }
+
+      if (context.requireLinkedIdentity) {
+        // SSO login: the exchange proved the link on a stale snapshot; a
+        // concurrent unlink (or unlink + relink to another user) must deny
+        // at the commit boundary, not mint one more session.
+        const link = await tx.query(
+          `
+          SELECT 1 FROM user_identities
+          WHERE provider = $1 AND provider_user_id = $2 AND user_id = $3
+          FOR UPDATE
+          `,
+          [
+            context.requireLinkedIdentity.provider,
+            context.requireLinkedIdentity.providerUserId,
+            user.id,
+          ],
+        );
+
+        if (link.rows.length === 0) {
+          throw new ApiError(401, 'IDENTITY_NOT_LINKED', 'Вход через SSO не привязан');
+        }
+      }
+
+      // With the 052 columns present, the auth source is ALWAYS persisted —
+      // an SSO session whose provider returned no usable sid must stay
+      // distinguishable at logout ('unavailable', not 'not_applicable').
+      // Pre-052 databases keep the legacy insert.
+      const session = this.options.supportsProviderSessions
+        ? await tx.query<CreatedSessionRow>(
+            `
+            INSERT INTO auth_sessions (user_id, expires_at, ip_address, user_agent, provider_session_id, auth_source)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING session_id::text, token_family_id::text
+            `,
+            [
+              user.id,
+              expiresAt,
+              context.ipAddress ?? null,
+              context.userAgent ?? null,
+              context.providerSessionId ?? null,
+              context.authSource ?? 'backend',
+            ],
+          )
+        : await tx.query<CreatedSessionRow>(
+            `
+            INSERT INTO auth_sessions (user_id, expires_at, ip_address, user_agent)
+            VALUES ($1, $2, $3, $4)
+            RETURNING session_id::text, token_family_id::text
+            `,
+            [user.id, expiresAt, context.ipAddress ?? null, context.userAgent ?? null],
+          );
       const sessionRow = session.rows[0];
 
       await tx.query(
@@ -122,8 +200,10 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         requestId: context.requestId,
         userAgent: context.userAgent,
         ipAddress: context.ipAddress,
+        authSource: context.authSource,
         metadata: {
           outcome: 'success',
+          ...context.auditMetadata,
         },
       });
 
@@ -231,6 +311,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         requestId: command.requestId,
         userAgent: command.userAgent,
         ipAddress: command.ipAddress,
+        authSource: sessionAuthSource(current),
         metadata: {
           outcome: 'success',
           rotated: true,
@@ -248,37 +329,39 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     });
   }
 
-  async logout(command: LogoutCommand): Promise<void> {
+  async logout(command: LogoutCommand): Promise<LogoutResult> {
+    const bearerSessionId = command.currentUser?.sessionId;
+
     if (!command.refreshToken) {
-      if (command.currentUser?.sessionId) {
-        const currentUser = {
-          ...command.currentUser,
-          sessionId: command.currentUser.sessionId,
-        };
-        await this.database.transaction(async (tx) => {
-          await tx.query(
-            `
-            UPDATE auth_sessions
-            SET status = 'revoked', revoked_at = now(), revoke_reason = 'logout'
-            WHERE session_id = $1 AND status = 'active'
-            `,
-            [currentUser.sessionId],
-          );
-          await this.writeCurrentUserLogoutAudit(tx, { ...command, currentUser });
+      if (bearerSessionId && command.currentUser) {
+        const currentUser = { ...command.currentUser, sessionId: bearerSessionId };
+        return this.database.transaction(async (tx) => {
+          const providerSession = await this.readProviderSession(tx, bearerSessionId);
+          await this.revokeBearerSessionWithAudit(tx, command, currentUser, providerSession);
+          return { ok: true as const, ...providerSession };
         });
       }
-      return;
+      return { ok: true };
     }
 
     const tokenHash = this.hashRefreshToken(command.refreshToken);
 
-    await this.database.transaction(async (tx) => {
+    return this.database.transaction(async (tx) => {
       const current = await this.lockRefreshToken(tx, tokenHash);
 
       if (!current) {
-        return;
+        // Unknown cookie, but the bearer session is authoritative for the
+        // acting tab — still end it.
+        if (bearerSessionId && command.currentUser) {
+          const currentUser = { ...command.currentUser, sessionId: bearerSessionId };
+          const providerSession = await this.readProviderSession(tx, bearerSessionId);
+          await this.revokeBearerSessionWithAudit(tx, command, currentUser, providerSession);
+          return { ok: true as const, ...providerSession };
+        }
+        return { ok: true as const };
       }
 
+      const cookieProviderSession = await this.readProviderSession(tx, current.session_id);
       await this.revokeTokenFamily(tx, current, 'logout');
       await this.writeAudit(tx, {
         event: 'auth.logout',
@@ -290,12 +373,85 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         requestId: command.requestId,
         userAgent: command.userAgent,
         ipAddress: command.ipAddress,
+        authSource: cookieProviderSession.authSource === 'workos' ? 'workos' : undefined,
         metadata: {
           reason: 'logout',
           refreshTokenPresent: true,
         },
       });
+
+      // Multi-tab desync: a re-login in another tab rotates the refresh
+      // cookie, so the ACTING tab's bearer can point at a different session.
+      // Logging out must end BOTH — otherwise the bearer session survives
+      // until access-token expiry on a shared machine.
+      if (bearerSessionId && bearerSessionId !== current.session_id && command.currentUser) {
+        const currentUser = { ...command.currentUser, sessionId: bearerSessionId };
+        const bearerProviderSession = await this.readProviderSession(tx, bearerSessionId);
+        await this.revokeBearerSessionWithAudit(tx, command, currentUser, bearerProviderSession);
+
+        // The acting tab's provenance wins whenever ITS session was
+        // SSO-issued — even without a usable sid, so the controller answers
+        // 'unavailable' (login-page warning) instead of a false
+        // 'not_applicable' from the cookie session.
+        if (bearerProviderSession.authSource === 'workos') {
+          return { ok: true as const, ...bearerProviderSession };
+        }
+      }
+
+      return { ok: true as const, ...cookieProviderSession };
     });
+  }
+
+  /** Revokes the bearer session; audits ONLY when a live row transitioned. */
+  private async revokeBearerSessionWithAudit(
+    tx: TransactionClient,
+    command: LogoutCommand,
+    currentUser: CurrentUser & { sessionId: string },
+    providerSession: { providerSessionId?: string; authSource?: string },
+  ): Promise<void> {
+    const revoked = await tx.query(
+      `
+      UPDATE auth_sessions
+      SET status = 'revoked', revoked_at = now(), revoke_reason = 'logout'
+      WHERE session_id = $1 AND status = 'active'
+      RETURNING session_id
+      `,
+      [currentUser.sessionId],
+    );
+
+    // A stale-but-signed access token against an already revoked/missing
+    // session must not fabricate duplicate auth.logout audit rows.
+    if (revoked.rows.length > 0) {
+      await this.writeCurrentUserLogoutAudit(
+        tx,
+        { ...command, currentUser },
+        providerSession.authSource === 'workos' ? 'workos' : 'backend',
+      );
+    }
+  }
+
+  private async readProviderSession(
+    tx: TransactionClient,
+    sessionId: string,
+  ): Promise<{ providerSessionId?: string; authSource?: string }> {
+    if (!this.options.supportsProviderSessions) {
+      return {};
+    }
+
+    const result = await tx.query<
+      { provider_session_id: string | null; auth_source: string | null } & QueryResultRow
+    >('SELECT provider_session_id, auth_source FROM auth_sessions WHERE session_id = $1', [sessionId]);
+    // Normalize at the read boundary: legacy/dirty whitespace-only values
+    // must degrade to "no provider session", not leak into a logout redirect
+    // with a garbage session_id.
+    const raw = result.rows[0]?.provider_session_id;
+    const normalized = typeof raw === 'string' ? raw.trim() : null;
+    const authSource = normalizeAuthSource(result.rows[0]?.auth_source);
+
+    return {
+      ...(normalized ? { providerSessionId: normalized } : {}),
+      ...(authSource ? { authSource } : {}),
+    };
   }
 
   private async lockRefreshToken(
@@ -314,7 +470,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         s.status AS session_status,
         u.username,
         u.role_id,
-        u.is_active
+        u.is_active${this.options.supportsProviderSessions ? ',\n        s.auth_source' : ''}
       FROM refresh_tokens rt
       JOIN auth_sessions s ON s.session_id = rt.session_id
       JOIN users u ON u.user_id = rt.user_id
@@ -360,6 +516,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       requestId: context?.requestId,
       userAgent: context?.userAgent,
       ipAddress: context?.ipAddress,
+      authSource: sessionAuthSource(current),
       metadata: {
         outcome: 'rejected',
         reason: 'reuse_detected',
@@ -427,7 +584,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         event, entity_type, entity_id, user_id, username, role_code, role,
         request_id, ip_address, user_agent, source, metadata_json
       )
-      VALUES ($1, 'auth_session', $2, $3, $4, $5, $5, $6, $7::inet, $8, 'backend', $9::jsonb)
+      VALUES ($1, 'auth_session', $2, $3, $4, $5, $5, $6, $7::inet, $8, $9, $10::jsonb)
       `,
       [
         input.event,
@@ -438,6 +595,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         input.requestId ?? DEFAULT_REQUEST_ID,
         input.ipAddress ?? null,
         input.userAgent ?? null,
+        input.authSource ?? 'backend',
         JSON.stringify({
           sessionId: input.sessionId,
           tokenFamilyId: input.tokenFamilyId,
@@ -450,6 +608,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
   private async writeCurrentUserLogoutAudit(
     tx: TransactionClient,
     command: LogoutCommand & { currentUser: CurrentUser & { sessionId: string } },
+    authSource: 'backend' | 'workos',
   ): Promise<void> {
     await tx.query(
       `
@@ -457,7 +616,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         event, entity_type, entity_id, user_id, username, role_code, role,
         request_id, ip_address, user_agent, source, metadata_json
       )
-      VALUES ('auth.logout', 'auth_session', $1, $2, $3, $4, $4, $5, $6::inet, $7, 'backend', $8::jsonb)
+      VALUES ('auth.logout', 'auth_session', $1, $2, $3, $4, $4, $5, $6::inet, $7, $8, $9::jsonb)
       `,
       [
         command.currentUser.sessionId,
@@ -467,6 +626,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         command.requestId ?? DEFAULT_REQUEST_ID,
         command.ipAddress ?? null,
         command.userAgent ?? null,
+        authSource,
         JSON.stringify({
           sessionId: command.currentUser.sessionId,
           reason: 'logout',
@@ -509,6 +669,24 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       },
     };
   }
+}
+
+/**
+ * Normalizes a stored auth_source at the read boundary: legacy/dirty values
+ * ('WORKOS', padded strings) must not silently lose WorkOS provenance.
+ */
+function normalizeAuthSource(value: unknown): 'workos' | 'backend' | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'workos' || normalized === 'backend' ? normalized : undefined;
+}
+
+/** The persisted issuing path of the session ('backend' when absent/legacy). */
+function sessionAuthSource(row: RefreshSessionRow): 'workos' | undefined {
+  return normalizeAuthSource(row.auth_source) === 'workos' ? 'workos' : undefined;
 }
 
 function toNullableUserId(userId: string | number): number | null {

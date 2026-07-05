@@ -62,7 +62,13 @@ describe('AuthController HTTP shell', () => {
       }),
     ).resolves.toEqual(createAuthResponse());
 
-    expect(context.calls).toEqual(['rate-limit', 'login: manager :secret']);
+    // The ip+identifier limiter is keyed on the TRIMMED username (same
+    // normalization as the auth lookup); the per-account fail budget lives
+    // in AuthService keyed on the canonical user id.
+    expect(context.calls).toEqual([
+      'rate-limit:auth_login:manager',
+      'login: manager :secret',
+    ]);
     expect(context.cookies).toEqual([
       {
         name: REFRESH_COOKIE_NAME,
@@ -104,7 +110,7 @@ describe('AuthController HTTP shell', () => {
       ),
     ).resolves.toEqual(createAuthResponse({ accessToken: 'access_refreshed' }));
 
-    expect(context.calls).toEqual(['rate-limit', 'refresh:old_refresh_token']);
+    expect(context.calls).toEqual(['rate-limit:auth_refresh:', 'refresh:old_refresh_token']);
     expect(context.cookies[0]).toMatchObject({
       name: REFRESH_COOKIE_NAME,
       value: 'refresh_token_secret',
@@ -154,7 +160,7 @@ describe('AuthController HTTP shell', () => {
         },
         context.response,
       ),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, providerLogoutStatus: 'not_applicable' });
 
     expect(context.calls).toEqual(['logout:refresh_to_revoke:user_manager']);
     expect(context.cookies).toEqual([
@@ -170,6 +176,81 @@ describe('AuthController HTTP shell', () => {
         },
       },
     ]);
+  });
+
+  it('returns providerLogoutUrl with redirect status for SSO-issued sessions', async () => {
+    const context = createController({
+      authEnabled: true,
+      providerSessionId: 'sid-1',
+      logoutAuthSource: 'workos',
+      workosLogoutUrl: 'https://sso.example/logout?session_id=sid-1',
+    });
+
+    await expect(
+      context.controller.logout(createRequest(`${REFRESH_COOKIE_NAME}=refresh_to_revoke`), context.response),
+    ).resolves.toEqual({
+      ok: true,
+      providerLogoutUrl: 'https://sso.example/logout?session_id=sid-1',
+      providerLogoutStatus: 'redirect',
+    });
+  });
+
+  it('marks a sid-less SSO session unavailable — never a plain local logout', async () => {
+    // The provider returned no usable sid at login; the session is still
+    // SSO-issued and its provider session may be alive.
+    const context = createController({
+      authEnabled: true,
+      logoutAuthSource: 'workos',
+      workosLogoutUrl: 'https://sso.example/logout',
+    });
+
+    await expect(
+      context.controller.logout(createRequest(`${REFRESH_COOKIE_NAME}=refresh_to_revoke`), context.response),
+    ).resolves.toEqual({ ok: true, providerLogoutStatus: 'unavailable' });
+  });
+
+  it('keeps the provider redirect for already-issued SSO sessions during a WorkOS rollback', async () => {
+    // Flag off / partial 052 schema: the URL builder is independent of the
+    // WorkOS entrypoints, so a live IdP session is still terminated.
+    const context = createController({
+      authEnabled: true,
+      providerSessionId: 'sid-1',
+      logoutAuthSource: 'workos',
+    });
+
+    await expect(
+      context.controller.logout(createRequest(`${REFRESH_COOKIE_NAME}=refresh_to_revoke`), context.response),
+    ).resolves.toEqual({
+      ok: true,
+      providerLogoutUrl: 'https://api.workos.test/logout?session_id=sid-1',
+      providerLogoutStatus: 'redirect',
+    });
+  });
+
+  it('marks provider logout unavailable when the logout URL cannot be built', async () => {
+    const context = createController({
+      authEnabled: true,
+      providerSessionId: 'sid-1',
+      logoutAuthSource: 'workos',
+      logoutUrlBuilderThrows: true,
+    });
+
+    await expect(
+      context.controller.logout(createRequest(`${REFRESH_COOKIE_NAME}=refresh_to_revoke`), context.response),
+    ).resolves.toEqual({ ok: true, providerLogoutStatus: 'unavailable' });
+  });
+
+  it('ignores a stray provider_session_id on a backend-issued session (auth_source is the truth)', async () => {
+    const context = createController({
+      authEnabled: true,
+      providerSessionId: 'sid-legacy-garbage',
+      logoutAuthSource: 'backend',
+      workosLogoutUrl: 'https://sso.example/logout',
+    });
+
+    await expect(
+      context.controller.logout(createRequest(`${REFRESH_COOKIE_NAME}=refresh_to_revoke`), context.response),
+    ).resolves.toEqual({ ok: true, providerLogoutStatus: 'not_applicable' });
   });
 
   it('requires current user for /api/v1/me and returns permissions without tokens', () => {
@@ -200,6 +281,11 @@ function createController(options: {
   nodeEnv?: string;
   refreshCookieSecure?: boolean;
   refreshCookieSameSite?: 'lax' | 'strict' | 'none';
+  loginError?: Error;
+  providerSessionId?: string;
+  logoutAuthSource?: string;
+  workosLogoutUrl?: string;
+  logoutUrlBuilderThrows?: boolean;
 }) {
   const calls: string[] = [];
   const cookies: CookieWrite[] = [];
@@ -210,6 +296,9 @@ function createController(options: {
   };
   const auth = {
     async login(command: LoginCommand): Promise<LoginResult> {
+      if (options.loginError) {
+        throw options.loginError;
+      }
       calls.push(`login:${command.username}:${command.password}`);
       return createLoginResult();
     },
@@ -219,8 +308,9 @@ function createController(options: {
       calls.push(`refresh:${command.refreshToken}`);
       return createLoginResult({ accessToken: 'access_refreshed' });
     },
-    async logout(command: LogoutCommand): Promise<void> {
+    async logout(command: LogoutCommand): Promise<{ ok: true; providerSessionId?: string; authSource?: string }> {
       calls.push(`logout:${command.refreshToken}:${command.currentUser?.id ?? 'anonymous'}`);
+      return { ok: true, providerSessionId: options.providerSessionId, authSource: options.logoutAuthSource };
     },
   } as AuthSessionHttpPort;
   const runtimeConfig = {
@@ -236,13 +326,25 @@ function createController(options: {
     },
   } as AuthRuntimeConfigService;
   const rateLimits = {
-    async assertAllowed(): Promise<void> {
-      calls.push('rate-limit');
+    async assertAllowed(input: { rule: { feature: string }; subject: { username?: string | null } }): Promise<void> {
+      calls.push(`rate-limit:${input.rule.feature}:${input.subject.username ?? ''}`);
     },
-  } as RateLimitService;
+    async refund(input: { rule: { feature: string }; subject: { username?: string | null } }): Promise<void> {
+      calls.push(`refund:${input.rule.feature}:${input.subject.username ?? ''}`);
+    },
+  } as unknown as RateLimitService;
+
+  // The logout-url builder is ALWAYS available (WORKOS_API_BASE default) —
+  // it must survive a WorkOS rollback for already-issued SSO sessions.
+  const logoutUrlBuilder = (providerSessionId: string): string => {
+    if (options.logoutUrlBuilderThrows) {
+      throw new Error('bad api base');
+    }
+    return options.workosLogoutUrl ?? `https://api.workos.test/logout?session_id=${providerSessionId}`;
+  };
 
   return {
-    controller: new AuthController(auth, sessions, runtimeConfig, rateLimits),
+    controller: new AuthController(auth, sessions, runtimeConfig, rateLimits, logoutUrlBuilder),
     response: response as never,
     calls,
     cookies,
