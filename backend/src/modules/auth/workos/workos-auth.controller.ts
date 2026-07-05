@@ -156,7 +156,10 @@ export class WorkosAuthController {
     const currentUser = this.assertCurrentUser(request);
     await this.rateLimits.assertAllowed({
       rule: { feature: 'auth_workos_callback', maxRequests: 10, windowMs: 60_000 },
-      subject: { route: 'auth/workos/link/callback', ipAddress: request.ip },
+      // SAME bucket as the login callback (plan §4.7: one 10/60s per-IP
+      // budget) — a distinct route key would double the budget by simply
+      // alternating the two callback endpoints.
+      subject: { route: 'auth/workos/callback', ipAddress: request.ip },
     });
 
     // Possession proof at callback time: live bearer session (middleware) AND

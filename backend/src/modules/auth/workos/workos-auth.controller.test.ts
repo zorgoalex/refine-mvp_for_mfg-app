@@ -22,6 +22,27 @@ describe('WorkosAuthController.linkStart', () => {
   });
 });
 
+describe('WorkosAuthController callback rate limiting', () => {
+  it('login and link callbacks share ONE per-IP bucket (no doubling by alternating routes)', async () => {
+    const harness = createHarness({});
+    const response = { cookie: () => undefined } as never;
+
+    // Both throw 422 on the empty body AFTER consuming the limiter — the
+    // recorded keys must be identical (same feature, same route subject).
+    await expect(
+      harness.controller.callback(createRequest(), response, {}),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(
+      harness.controller.linkCallback(createRequest(), response, {}),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+
+    const consumes = harness.calls.filter((call) => call.startsWith('consume:auth_workos_callback'));
+    expect(consumes).toHaveLength(2);
+    expect(new Set(consumes).size).toBe(1);
+    expect(consumes[0]).toContain('route=auth/workos/callback');
+  });
+});
+
 describe('WorkosAuthController.unlink rate limiting', () => {
   it('consumes the per-user budget before the password check and refunds on success', async () => {
     const harness = createHarness({ unlinkResult: { unlinked: true } });
@@ -31,9 +52,9 @@ describe('WorkosAuthController.unlink rate limiting', () => {
     ).resolves.toEqual({ unlinked: true });
 
     expect(harness.calls).toEqual([
-      'consume:auth_workos_unlink:user=42',
+      'consume:auth_workos_unlink:route=auth/workos/link:user=42',
       'unlink',
-      'refund:auth_workos_unlink:user=42',
+      'refund:auth_workos_unlink:route=auth/workos/link:user=42',
     ]);
   });
 
@@ -46,8 +67,8 @@ describe('WorkosAuthController.unlink rate limiting', () => {
       harness.controller.unlink(createRequest(), { password: 'wrong' }),
     ).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' });
 
-    expect(harness.calls).toEqual(['consume:auth_workos_unlink:user=42', 'unlink']);
-    expect(harness.calls).not.toContain('refund:auth_workos_unlink:user=42');
+    expect(harness.calls).toEqual(['consume:auth_workos_unlink:route=auth/workos/link:user=42', 'unlink']);
+    expect(harness.calls).not.toContain('refund:auth_workos_unlink:route=auth/workos/link:user=42');
   });
 
   it('blocks the burst before the service is even called once the budget is spent', async () => {
@@ -89,15 +110,25 @@ function createHarness(options: {
   };
 
   const rateLimits = {
-    async assertAllowed(input: { rule: { feature: string }; subject: { userId?: string } }) {
+    async assertAllowed(input: {
+      rule: { feature: string };
+      subject: { userId?: string; route?: string };
+    }) {
       consumed += 1;
-      calls.push(`consume:${input.rule.feature}:user=${input.subject.userId}`);
+      calls.push(
+        `consume:${input.rule.feature}:route=${input.subject.route}:user=${input.subject.userId}`,
+      );
       if (options.maxAttempts !== undefined && consumed > options.maxAttempts) {
         throw new ApiError(429, 'RATE_LIMIT_EXCEEDED', 'Rate limit exceeded');
       }
     },
-    async refund(input: { rule: { feature: string }; subject: { userId?: string } }) {
-      calls.push(`refund:${input.rule.feature}:user=${input.subject.userId}`);
+    async refund(input: {
+      rule: { feature: string };
+      subject: { userId?: string; route?: string };
+    }) {
+      calls.push(
+        `refund:${input.rule.feature}:route=${input.subject.route}:user=${input.subject.userId}`,
+      );
     },
   };
 
