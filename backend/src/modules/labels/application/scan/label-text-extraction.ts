@@ -7,6 +7,64 @@ export interface LabelTextFields {
   material?: string;
 }
 
+// Shared regex constants, reused both by extractLabelFields (joined text) and
+// by the per-line helpers below (used by the OCR template matcher).
+const SIZE_PATTERN =
+  /(?<![\dА-Яа-яA-Za-z])(\d{2,4})[\s]*[xхXХ×%]{1,2}[\s]*(\d{2,4})(?![\dА-Яа-яA-Za-z])/;
+const MDF_PATTERN = /МДФ\s*(\d+)\s*мм/i;
+const LDSP_PATTERN = /ЛДСП(?:\s*(\d+)\s*мм)?/i;
+const DATE_PATTERN = /\b(\d{2})\.(\d{2})\.(\d{4})\b/;
+const ORDER_NUMBER_PATTERN = /^\D*(\d{1,6})\D*$/;
+const DETAIL_NUMBER_PATTERN = /^\D*(\d{1,5})\D*$/;
+const QUANTITY_PATTERN = /(\d+)\s*ШТ/i;
+
+/** Parses `width x height` (tolerant separators) from a single line. */
+export function parseDimensions(line: string): { width: number; height: number } | null {
+  const m = line.match(SIZE_PATTERN);
+  if (!m) return null;
+  return { width: parseInt(m[1], 10), height: parseInt(m[2], 10) };
+}
+
+/** Recognizes МДФ/ЛДСП material mentions on a single line; returns normalized material or null. */
+export function matchesMaterial(line: string): string | null {
+  const mdfMatch = line.match(MDF_PATTERN);
+  if (mdfMatch) {
+    return `МДФ ${mdfMatch[1]}мм`;
+  }
+  const ldspMatch = line.match(LDSP_PATTERN);
+  if (ldspMatch) {
+    return ldspMatch[1] ? `ЛДСП ${ldspMatch[1]}мм` : 'ЛДСП';
+  }
+  return null;
+}
+
+/** Parses a dd.mm.yyyy date from a single line. */
+export function parseDate(line: string): string | null {
+  const m = line.match(DATE_PATTERN);
+  return m ? m[0] : null;
+}
+
+/** Whole-line (tolerant) order number: line is mostly one digit run 1-6 digits. */
+export function parseOrderNumber(line: string): string | null {
+  const m = line.match(ORDER_NUMBER_PATTERN);
+  return m ? m[1] : null;
+}
+
+/** Whole-line (tolerant) detail number: integer in range 1..32767. */
+export function parseDetailNumber(line: string): number | null {
+  const m = line.match(DETAIL_NUMBER_PATTERN);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  if (n < 1 || n > 32767) return null;
+  return n;
+}
+
+/** Parses a quantity like "3 ШТ" from a single line. */
+export function parseQuantity(line: string): number | null {
+  const m = line.match(QUANTITY_PATTERN);
+  return m ? parseInt(m[1], 10) : null;
+}
+
 export function extractLabelFields(lines: string[]): LabelTextFields {
   const text = lines.join(' ');
   const result: LabelTextFields = {};
@@ -26,31 +84,25 @@ export function extractLabelFields(lines: string[]): LabelTextFields {
   }
 
   // Extract date (dd.mm.yyyy format)
-  const dateMatch = text.match(/\b(\d{2})\.(\d{2})\.(\d{4})\b/);
-  if (dateMatch) {
-    result.date = dateMatch[0];
+  const date = parseDate(text);
+  if (date) {
+    result.date = date;
   }
 
   // Extract material (МДФ with mm size, or ЛДСП with optional mm size)
-  const mdfMatch = text.match(/МДФ\s*(\d+)\s*мм/i);
-  if (mdfMatch) {
-    result.material = `МДФ ${mdfMatch[1]}мм`;
-  } else {
-    const ldspMatch = text.match(/ЛДСП(?:\s*(\d+)\s*мм)?/i);
-    if (ldspMatch) {
-      result.material = ldspMatch[1] ? `ЛДСП ${ldspMatch[1]}мм` : 'ЛДСП';
-    }
+  const material = matchesMaterial(text);
+  if (material) {
+    result.material = material;
   }
 
   // Extract dimensions (width x height)
   // - 2-4 digit numbers
   // - Separated by x/X/х/Х/×/% (one or two chars)
   // - No letters/digits glued to numbers (word boundaries via lookbehind/lookahead)
-  const sizePattern = /(?<![\dА-Яа-яA-Za-z])(\d{2,4})[\s]*[xхXХ×%]{1,2}[\s]*(\d{2,4})(?![\dА-Яа-яA-Za-z])/g;
-  const sizeMatch = sizePattern.exec(text);
-  if (sizeMatch) {
-    result.width = parseInt(sizeMatch[1], 10);
-    result.height = parseInt(sizeMatch[2], 10);
+  const dimensions = parseDimensions(text);
+  if (dimensions) {
+    result.width = dimensions.width;
+    result.height = dimensions.height;
   }
 
   return result;
