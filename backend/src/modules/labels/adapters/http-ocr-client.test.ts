@@ -167,6 +167,23 @@ describe('HttpOcrClient', () => {
     expect(result.imageHeight).toBeUndefined();
   });
 
+  it('NaN/Infinity imageWidth/imageHeight → undefined (Number.isFinite guard)', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(true, 200, {
+        lines: [{ text: 'A', score: 0.9 }],
+        durationMs: 5,
+        imageWidth: Number.NaN,
+        imageHeight: Number.POSITIVE_INFINITY,
+      }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    const result = await client.recognize(image, 'image/jpeg');
+
+    expect(result.imageWidth).toBeUndefined();
+    expect(result.imageHeight).toBeUndefined();
+  });
+
   it('finite imageWidth/imageHeight (1600/1200) pass through unchanged', async () => {
     const mockFetch = vi.fn().mockResolvedValue(
       makeResponse(true, 200, {
