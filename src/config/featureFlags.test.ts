@@ -21,7 +21,6 @@ describe('featureFlags', () => {
       useBackendDeadlines: false,
       useBackendOrderExport: false,
       useBackendGroups: false,
-      useBackendProjects: false,
       useBackendUsers: false,
       useBackendVlm: false,
       useBackendReferences: false,
@@ -104,7 +103,6 @@ describe('featureFlags', () => {
           backendOrdersWrite: false,
           backendPayments: true,
           backendGroups: true,
-          backendProjects: true,
           backendClientPhones: true,
           backendProductionActions: true,
         },
@@ -115,7 +113,6 @@ describe('featureFlags', () => {
       useBackendOrdersWrite: false,
       useBackendPayments: true,
       useBackendGroups: true,
-      useBackendProjects: true,
       useBackendClientPhones: true,
       useBackendProductionActions: true,
       useBackendVlm: true,
@@ -226,7 +223,6 @@ describe('featureFlags', () => {
     expect(
       getFeatureFlags({ VITE_USE_BACKEND_GROUPS: 'false' }, { backendGroups: true }).useBackendGroups,
     ).toBe(true);
-    expect(getFeatureFlags({ VITE_USE_BACKEND_GROUPS: 'true' }).useBackendProjects).toBe(true);
   });
 
   it('can update the exported featureFlags object in place', () => {

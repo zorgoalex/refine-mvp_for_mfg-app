@@ -21,7 +21,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../../api/apiError';
 import { notificationRulesApi } from '../../../api/notificationRulesApi';
-import { projectsApi } from '../../../api/groupsApi';
+import { groupsApi } from '../../../api/groupsApi';
 import type {
   DeadlineNotificationEntityType,
   NotificationEventTypeDto,
@@ -50,7 +50,7 @@ const RESOLVER_LABELS: Record<RecipientResolverKind, string> = {
   stage_assignee: 'Ответственный за этап',
   workshop_head: 'Руководитель цеха',
   direction_head: 'Руководитель направления',
-  project_participants: 'Участники проекта',
+  group_participants: 'Участники группы',
 };
 
 const LEVEL_LABELS: Record<NotificationLevel, string> = {
@@ -122,8 +122,8 @@ export function NotificationRulesConfig() {
   const [loading, setLoading] = useState(false);
   const [rules, setRules] = useState<NotificationRuleDto[]>([]);
   const [eventTypes, setEventTypes] = useState<NotificationEventTypeDto[]>([]);
-  const [projectOptions, setProjectOptions] = useState<Array<{ label: string; value: string }>>([]);
-  const [projectOptionsLoading, setProjectOptionsLoading] = useState(false);
+  const [groupOptions, setGroupOptions] = useState<Array<{ label: string; value: string }>>([]);
+  const [groupOptionsLoading, setGroupOptionsLoading] = useState(false);
   const [error, setError] = useState<{ kind: 'engine_disabled' | 'other'; message: string } | null>(null);
 
   const [editor, setEditor] = useState<EditorMode>({ kind: 'closed' });
@@ -143,25 +143,25 @@ export function NotificationRulesConfig() {
   }, [eventTypes]);
 
   const selectedEventType = editor.kind === 'closed' ? null : eventTypeByName.get(draft.eventType) ?? null;
-  const projectNameById = useMemo(() => {
+  const groupNameById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const option of projectOptions) {
+    for (const option of groupOptions) {
       map.set(option.value, option.label);
     }
     return map;
-  }, [projectOptions]);
+  }, [groupOptions]);
 
-  const loadProjectOptions = useCallback(async (search?: string) => {
-    setProjectOptionsLoading(true);
+  const loadGroupOptions = useCallback(async (search?: string) => {
+    setGroupOptionsLoading(true);
     try {
-      const projects = await projectsApi.listProjectOptions({
+      const groups = await groupsApi.listGroupOptions({
         ...(search?.trim() ? { search: search.trim() } : {}),
       });
-      setProjectOptions(projects);
+      setGroupOptions(groups);
     } catch {
-      setProjectOptions([]);
+      setGroupOptions([]);
     } finally {
-      setProjectOptionsLoading(false);
+      setGroupOptionsLoading(false);
     }
   }, []);
 
@@ -172,7 +172,7 @@ export function NotificationRulesConfig() {
       if (!canView) {
         setRules([]);
         setEventTypes([]);
-        setProjectOptions([]);
+        setGroupOptions([]);
         return;
       }
 
@@ -186,14 +186,14 @@ export function NotificationRulesConfig() {
         if (cancelled) return;
         setRules(ruleList);
         setEventTypes(events);
-        setProjectOptionsLoading(true);
+        setGroupOptionsLoading(true);
         try {
-          const projects = await projectsApi.listProjectOptions();
-          if (!cancelled) setProjectOptions(projects);
+          const groups = await groupsApi.listGroupOptions();
+          if (!cancelled) setGroupOptions(groups);
         } catch {
-          if (!cancelled) setProjectOptions([]);
+          if (!cancelled) setGroupOptions([]);
         } finally {
-          if (!cancelled) setProjectOptionsLoading(false);
+          if (!cancelled) setGroupOptionsLoading(false);
         }
       } catch (loadError) {
         if (cancelled) return;
@@ -398,12 +398,12 @@ export function NotificationRulesConfig() {
               width: 220,
             },
             {
-              title: 'Проект',
-              dataIndex: 'projectId',
-              key: 'projectId',
+              title: 'Группа',
+              dataIndex: 'groupId',
+              key: 'groupId',
               width: 180,
-              render: (projectId: string | null) =>
-                projectId ? projectNameById.get(projectId) ?? projectId : 'Все проекты',
+              render: (groupId: string | null) =>
+                groupId ? groupNameById.get(groupId) ?? groupId : 'Все группы',
             },
             {
               title: 'Level',
@@ -504,18 +504,18 @@ export function NotificationRulesConfig() {
             />
           </Form.Item>
 
-          <Form.Item label="Проект">
+          <Form.Item label="Группа">
             <Select
               allowClear
               showSearch
-              placeholder="Все проекты"
-              value={draft.projectId ?? undefined}
-              options={projectOptions}
-              onChange={(value) => updateDraft({ projectId: value ?? null })}
-              onSearch={(value) => void loadProjectOptions(value)}
+              placeholder="Все группы"
+              value={draft.groupId ?? undefined}
+              options={groupOptions}
+              onChange={(value) => updateDraft({ groupId: value ?? null })}
+              onSearch={(value) => void loadGroupOptions(value)}
               filterOption={false}
-              loading={projectOptionsLoading}
-              notFoundContent={projectOptionsLoading ? <Spin size="small" /> : null}
+              loading={groupOptionsLoading}
+              notFoundContent={groupOptionsLoading ? <Spin size="small" /> : null}
             />
           </Form.Item>
 

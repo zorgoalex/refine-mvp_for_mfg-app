@@ -2,13 +2,13 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type {
-  ProjectDeadlineStatusCountsResponse,
-  ProjectOverviewResponse,
+  GroupDeadlineStatusCountsResponse,
+  GroupOverviewResponse,
 } from '../../api/types/groupApi.types';
-import { ProjectDetailOverview } from './ProjectDetailOverview';
+import { GroupDetailOverview } from './GroupDetailOverview';
 
-const overviewFixture: ProjectOverviewResponse = {
-  project: {
+const overviewFixture: GroupOverviewResponse = {
+  group: {
     id: '11111111-1111-4111-8111-111111111111',
     code: 'P7',
     name: 'P7 Overview',
@@ -38,7 +38,7 @@ const overviewFixture: ProjectOverviewResponse = {
     ],
   },
   filter: {
-    projectId: '11111111-1111-4111-8111-111111111111',
+    groupId: '11111111-1111-4111-8111-111111111111',
     temporalMode: 'current',
   },
   omitted: [
@@ -55,19 +55,19 @@ const overviewFixture: ProjectOverviewResponse = {
   ],
 };
 
-const deadlineStatusCounts: ProjectDeadlineStatusCountsResponse = {
+const deadlineStatusCounts: GroupDeadlineStatusCountsResponse = {
   data: [{ deadlineStatus: 'overdue', deadlineCount: 1 }],
   filter: {
-    projectMode: 'any',
-    projectIds: [overviewFixture.project.id],
+    groupMode: 'any',
+    groupIds: [overviewFixture.group.id],
     temporalMode: 'current',
   },
 };
 
-describe('ProjectDetailOverview', () => {
+describe('GroupDetailOverview', () => {
   it('renders accepted aggregate overview fields without omitted domain labels', () => {
     const html = renderToString(
-      <ProjectDetailOverview overview={overviewFixture} deadlineStatusCounts={deadlineStatusCounts} />,
+      <GroupDetailOverview overview={overviewFixture} deadlineStatusCounts={deadlineStatusCounts} />,
     );
 
     expect(html).toContain('P7 Overview');

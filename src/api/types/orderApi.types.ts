@@ -1,7 +1,7 @@
 export type DateOnlyString = string;
 export type IsoDateTimeString = string;
 
-import type { EntityProjectLink } from './groupApi.types';
+import type { EntityGroupLink } from './groupApi.types';
 
 export interface SaveOrderDto {
   header: SaveOrderHeaderDto;
@@ -65,8 +65,8 @@ export interface OrderListQuery {
   dateFrom?: DateOnlyString;
   dateTo?: DateOnlyString;
   onlyMyOrders?: boolean;
-  projectIds?: string[];
-  projectMode?: 'any' | 'all' | 'primary' | 'none';
+  groupIds?: string[];
+  groupMode?: 'any' | 'all' | 'primary' | 'none';
 }
 
 export interface ChangeOrderStatusRequest {
@@ -343,8 +343,8 @@ export interface OrderDto {
   workshops: OrderWorkshopDto[];
   requirements: OrderResourceRequirementDto[];
   dowelingLinks: OrderDowelingLinkDto[];
-  primaryProject: EntityProjectLink | null;
-  projects: EntityProjectLink[];
+  primaryGroup: EntityGroupLink | null;
+  groups: EntityGroupLink[];
   totals: OrderTotalsDto;
   version: number;
 }
@@ -546,8 +546,8 @@ export interface OrderListItemDto {
   dowelingOrderName?: string | null;
   designEngineerId?: number | null;
   passedProductionStatusCodes?: string[];
-  primaryProject?: EntityProjectLink | null;
-  projects?: EntityProjectLink[];
+  primaryGroup?: EntityGroupLink | null;
+  groups?: EntityGroupLink[];
   createdBy?: number | null;
   editedBy?: number | null;
   updatedAt?: IsoDateTimeString;

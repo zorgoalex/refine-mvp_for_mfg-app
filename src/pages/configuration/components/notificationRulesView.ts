@@ -11,7 +11,7 @@ import { canAny, type PermissionCarrier } from '../../../utils/permissions';
 export interface NotificationRuleDraft {
   ruleCode: string;
   eventType: string;
-  projectId: string | null;
+  groupId: string | null;
   level: NotificationLevel;
   priority: number;
   isEnabled: boolean;
@@ -31,7 +31,7 @@ export function emptyDraft(): NotificationRuleDraft {
   return {
     ruleCode: '',
     eventType: '',
-    projectId: null,
+    groupId: null,
     level: 'info',
     priority: 100,
     isEnabled: true,
@@ -52,7 +52,7 @@ export function buildDraftFromRule(rule: NotificationRuleDto): NotificationRuleD
   return {
     ruleCode: rule.ruleCode,
     eventType: rule.eventType,
-    projectId: rule.projectId,
+    groupId: rule.groupId,
     level: rule.level,
     priority: rule.priority,
     isEnabled: rule.isEnabled,
@@ -163,7 +163,7 @@ export function buildCreatePayload(draft: NotificationRuleDraft): CreateNotifica
   return {
     ruleCode: draft.ruleCode,
     eventType: draft.eventType,
-    projectId: draft.projectId,
+    groupId: draft.groupId,
     level: draft.level,
     priority: draft.priority,
     isEnabled: draft.isEnabled,
@@ -186,7 +186,7 @@ export function buildUpdatePayload(
 
   if (draft.priority !== undefined) result.priority = draft.priority;
   if (draft.isEnabled !== undefined) result.isEnabled = draft.isEnabled;
-  if (draft.projectId !== undefined) result.projectId = draft.projectId;
+  if (draft.groupId !== undefined) result.groupId = draft.groupId;
 
   // Always send `conditions` on edit (even `{}`). The backend merge keeps the
   // existing `conditions` when the key is ABSENT, so omitting an empty object

@@ -41,8 +41,8 @@ const FRONTEND_ONLY_FIELDS = new Set([
   'doweling_links',
   'doweling_order_id',
   'doweling_order_name',
-  'primary_project',
-  'projects',
+  'primary_group',
+  'groups',
   'client_name',
   'order_status_name',
   'payment_status_name',
@@ -190,8 +190,8 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
   header.doweling_order_id = firstLink?.doweling_order?.doweling_order_id ?? null;
   header.doweling_order_name = firstLink?.doweling_order?.doweling_order_name ?? null;
   header.doweling_links = dowelingLinks;
-  header.primary_project = order.primaryProject;
-  header.projects = order.projects ?? [];
+  header.primary_group = order.primaryGroup;
+  header.groups = order.groups ?? [];
 
   return {
     header,
@@ -266,8 +266,8 @@ export function mapOrderListItemToLegacyRow(item: OrderListItemDto): LegacyOrder
     doweling_order_name: item.dowelingOrderName ?? null,
     design_engineer_id: item.designEngineerId ?? null,
     passed_production_status_codes: item.passedProductionStatusCodes ?? [],
-    primary_project: item.primaryProject ?? null,
-    projects: item.projects ?? [],
+    primary_group: item.primaryGroup ?? null,
+    groups: item.groups ?? [],
     created_by: item.createdBy ?? undefined,
     edited_by: item.editedBy ?? undefined,
     updated_at: item.updatedAt,

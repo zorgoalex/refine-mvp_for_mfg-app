@@ -1,7 +1,7 @@
 // TypeScript types for Orders and related entities
 // Based on PostgreSQL schema v11.6
 
-import type { EntityProjectLink } from '../api/types/groupApi.types';
+import type { EntityGroupLink } from '../api/types/groupApi.types';
 
 // ============================================================================
 // ORDERS (Header)
@@ -72,8 +72,8 @@ export interface Order {
   // Массив всех связанных присадок
   doweling_links?: OrderDowelingLink[];
 
-  primary_project?: EntityProjectLink | null;
-  projects?: EntityProjectLink[];
+  primary_group?: EntityGroupLink | null;
+  groups?: EntityGroupLink[];
 
   // Management and audit
   manager_id?: number | null;

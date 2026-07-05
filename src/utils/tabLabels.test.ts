@@ -5,6 +5,7 @@ describe('resolveTabLabel', () => {
   it('maps a list route to its resource label', () => {
     expect(resolveTabLabel('/orders')).toBe('Заказы');
     expect(resolveTabLabel('/calendar')).toBe('Календарь');
+    expect(resolveTabLabel('/groups')).toBe('Группы');
   });
   it('labels an order edit route with the id and edit suffix', () => {
     expect(resolveTabLabel('/orders/edit/11195')).toBe('Заказ #11195 · Редактирование');
@@ -29,5 +30,6 @@ describe('resolveTabLabel', () => {
   });
   it('exposes RESOURCE_LABELS for the sider', () => {
     expect(RESOURCE_LABELS.orders_view).toBe('Заказы');
+    expect(RESOURCE_LABELS.groups).toBe('Группы');
   });
 });

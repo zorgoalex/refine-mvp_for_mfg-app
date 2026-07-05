@@ -1,7 +1,7 @@
 export const RESOURCE_LABELS: Record<string, string> = {
   orders_view: 'Заказы',
   calendar: 'Календарь',
-  projects: 'Проекты',
+  groups: 'Группы',
   clients: 'Клиенты',
   clients_analytics_view: '+Клиенты',
   suppliers: 'Поставщики',
@@ -43,7 +43,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
 const PATH_TO_RESOURCE: Record<string, string> = {
   orders: 'orders_view',
   calendar: 'calendar',
-  projects: 'projects',
+  groups: 'groups',
   clients: 'clients',
   'clients-analytics': 'clients_analytics_view',
   payments: 'payments',

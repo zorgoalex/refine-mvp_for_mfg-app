@@ -2,42 +2,42 @@ import React from 'react';
 import { Button, Form, Input, Select, Space, Table, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type {
-  ProjectParticipantDto,
-  ProjectParticipantRoleDto,
-  ProjectParticipantsResponse,
-  ProjectParticipantType,
-  ReplaceProjectParticipant,
+  GroupParticipantDto,
+  GroupParticipantRoleDto,
+  GroupParticipantsResponse,
+  GroupParticipantType,
+  ReplaceGroupParticipant,
 } from '../../api/types/groupApi.types';
 
-const PARTICIPANT_TYPE_OPTIONS: Array<{ label: string; value: ProjectParticipantType }> = [
+const PARTICIPANT_TYPE_OPTIONS: Array<{ label: string; value: GroupParticipantType }> = [
   { label: 'Пользователь', value: 'user' },
   { label: 'Сотрудник', value: 'employee' },
 ];
 
-interface ProjectParticipantsFormValues {
-  participantType: ProjectParticipantType;
+interface GroupParticipantsFormValues {
+  participantType: GroupParticipantType;
   participantId: string;
   roleCode: string;
 }
 
-interface ProjectParticipantsPanelProps {
-  response: ProjectParticipantsResponse | null;
-  roles: ProjectParticipantRoleDto[];
+interface GroupParticipantsPanelProps {
+  response: GroupParticipantsResponse | null;
+  roles: GroupParticipantRoleDto[];
   loading?: boolean;
   canManage?: boolean;
-  onReplace: (participants: ReplaceProjectParticipant[]) => void;
+  onReplace: (participants: ReplaceGroupParticipant[]) => void;
 }
 
-export const ProjectParticipantsPanel: React.FC<ProjectParticipantsPanelProps> = ({
+export const GroupParticipantsPanel: React.FC<GroupParticipantsPanelProps> = ({
   response,
   roles,
   loading = false,
   canManage = false,
   onReplace,
 }) => {
-  const [form] = Form.useForm<ProjectParticipantsFormValues>();
+  const [form] = Form.useForm<GroupParticipantsFormValues>();
   const canSubmitReplacement = canManage && response !== null && roles.length > 0;
-  const columns: ColumnsType<ProjectParticipantDto> = [
+  const columns: ColumnsType<GroupParticipantDto> = [
     { title: 'Тип', dataIndex: 'participantType', key: 'participantType', width: 140 },
     {
       title: 'Участник',
@@ -49,7 +49,7 @@ export const ProjectParticipantsPanel: React.FC<ProjectParticipantsPanelProps> =
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Typography.Text strong>Участники проекта</Typography.Text>
+      <Typography.Text strong>Участники группы</Typography.Text>
       <Table
         rowKey="id"
         size="small"
@@ -89,9 +89,9 @@ export const ProjectParticipantsPanel: React.FC<ProjectParticipantsPanelProps> =
 };
 
 export function upsertParticipant(
-  existing: ProjectParticipantDto[],
-  next: ReplaceProjectParticipant,
-): ReplaceProjectParticipant[] {
+  existing: GroupParticipantDto[],
+  next: ReplaceGroupParticipant,
+): ReplaceGroupParticipant[] {
   if (existing.some((participant) => participant.participantId === null)) {
     throw new Error('Cannot replace participants while a current participant id is unavailable');
   }
@@ -111,7 +111,7 @@ export function upsertParticipant(
   return [...preserved, { ...next, metadata: next.metadata ?? {} }];
 }
 
-function mapParticipantForm(values: ProjectParticipantsFormValues): ReplaceProjectParticipant {
+function mapParticipantForm(values: GroupParticipantsFormValues): ReplaceGroupParticipant {
   return {
     participantType: values.participantType,
     participantId: values.participantId.trim(),

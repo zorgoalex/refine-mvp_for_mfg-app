@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { groupsApi, projectsApi, validateGroupId, validateProjectId } from './groupsApi';
+import { groupsApi, validateGroupId } from './groupsApi';
 import type { GroupDto, GroupOverviewResponse } from './types/groupApi.types';
 
 describe('groupsApi', () => {
@@ -136,7 +136,6 @@ describe('groupsApi', () => {
     const fetchMock = mockFetch({ group: groupDto() });
 
     expect(() => validateGroupId('not-a-uuid')).toThrow('Invalid groupId');
-    expect(() => validateProjectId('not-a-uuid')).toThrow('Invalid groupId');
     await expect(groupsApi.getGroup('11111111-1111-1111-1111-111111111111')).rejects.toThrow(
       'Invalid groupId',
     );
@@ -263,27 +262,6 @@ describe('groupsApi', () => {
       '/api/v1/groups/reports/deadline-status-counts?groupMode=any&groupIds=11111111-1111-4111-8111-111111111111&temporalMode=current',
     );
     expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
-  });
-
-  it('keeps projectsApi compatibility for order links and group lookups pending Task 8', async () => {
-    const fetchMock = mockFetch(
-      { orderId: 15, version: 3, primaryGroup: null, groups: [], requestId: 'request-1' },
-      { group: groupDto() },
-    );
-
-    await expect(projectsApi.getOrderProjects(15)).resolves.toEqual({
-      orderId: 15,
-      version: 3,
-      primaryProject: null,
-      projects: [],
-      requestId: 'request-1',
-    });
-    await expect(projectsApi.createProject({ code: 'GRP-001', name: 'Group' })).resolves.toEqual({
-      project: groupDto(),
-    });
-
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/15/groups');
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/groups');
   });
 
   it('rejects invalid or empty deadline report group ids before fetch', async () => {

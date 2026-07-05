@@ -3,26 +3,26 @@ import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { applyFeatureFlags, getFeatureFlags } from '../../config/featureFlags';
 import type {
-  ProjectDeadlineStatusCountsResponse,
-  ProjectOverviewResponse,
+  GroupDeadlineStatusCountsResponse,
+  GroupOverviewResponse,
 } from '../../api/types/groupApi.types';
 import {
-  ProjectsPage,
+  GroupsPage,
   getMatchingDeadlineStatusCounts,
   getNextOverviewSelectionState,
   type OverviewSelectionState,
-} from './ProjectsPage';
-import { upsertParticipant } from './ProjectParticipantsPanel';
+} from './GroupsPage';
+import { upsertParticipant } from './GroupParticipantsPanel';
 
 vi.mock('@refinedev/core', () => ({
   useGetIdentity: () => ({ data: mockIdentity }),
 }));
 
-describe('ProjectsPage', () => {
-  const projectFixture = {
+describe('GroupsPage', () => {
+  const groupFixture = {
     id: '11111111-1111-4111-8111-111111111111',
     code: 'PRJ-001',
-    name: 'Project',
+    name: 'Group',
     description: null,
     status: 'active',
     startsAt: null,
@@ -35,23 +35,23 @@ describe('ProjectsPage', () => {
     createdBy: null,
   } as const;
 
-  const defaultFlags = { ...getFeatureFlags({}), useBackendProjects: true };
+  const defaultFlags = { ...getFeatureFlags({}), useBackendGroups: true };
 
-  it('renders a minimal project list with create and archive controls', () => {
-    mockIdentityPermissions(['projects.view', 'projects.create', 'projects.archive']);
+  it('renders a minimal group list with create and archive controls', () => {
+    mockIdentityPermissions(['groups.view', 'groups.create', 'groups.archive']);
     applyFeatureFlags({
       ...defaultFlags,
       useBackendPermissions: false,
     });
 
     const html = renderToString(
-      <ProjectsPage
-        initialProjects={[projectFixture]}
+      <GroupsPage
+        initialGroups={[groupFixture]}
       />,
     );
 
-    expect(html).toContain('Проекты');
-    expect(html).toContain('Код проекта');
+    expect(html).toContain('Группы');
+    expect(html).toContain('Код группы');
     expect(html).toContain('Название');
     expect(html).toContain('Создать');
     expect(html).toContain('Обзор');
@@ -59,30 +59,30 @@ describe('ProjectsPage', () => {
     expect(html).not.toContain('Архив</span>');
   });
 
-  it('hides project overview action when backend permissions lack orders.view', () => {
-    mockIdentityPermissions(['projects.view', 'projects.create', 'projects.archive']);
+  it('hides group overview action when backend permissions lack orders.view', () => {
+    mockIdentityPermissions(['groups.view', 'groups.create', 'groups.archive']);
     applyFeatureFlags({
       ...defaultFlags,
       useBackendPermissions: true,
     });
 
-    const html = renderToString(<ProjectsPage initialProjects={[projectFixture]} />);
+    const html = renderToString(<GroupsPage initialGroups={[groupFixture]} />);
 
-    expect(html).toContain('Проекты');
+    expect(html).toContain('Группы');
     expect(html).not.toContain('Обзор');
     expect(html).toContain('Архивировать');
   });
 
-  it('renders project entity links with accepted backend permissions', () => {
-    mockIdentityPermissions(['projects.view', 'orders.view', 'projects.manage_links']);
+  it('renders group entity links with accepted backend permissions', () => {
+    mockIdentityPermissions(['groups.view', 'orders.view', 'groups.manage_links']);
     applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
 
     const html = renderToString(
-      <ProjectsPage
-        initialProjects={[projectFixture]}
-        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
+      <GroupsPage
+        initialGroups={[groupFixture]}
+        initialOverview={createOverviewFixture(groupFixture.id, groupFixture.name)}
         initialEntityLinks={{
-          projectId: projectFixture.id,
+          groupId: groupFixture.id,
           requestId: 'req-links',
           links: [{
             id: 'link-1',
@@ -105,15 +105,15 @@ describe('ProjectsPage', () => {
   });
 
   it('filters entity link rows and add options by entity-specific permissions', () => {
-    mockIdentityPermissions(['projects.view', 'orders.view', 'projects.manage_links']);
+    mockIdentityPermissions(['groups.view', 'orders.view', 'groups.manage_links']);
     applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
 
     const html = renderToString(
-      <ProjectsPage
-        initialProjects={[projectFixture]}
-        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
+      <GroupsPage
+        initialGroups={[groupFixture]}
+        initialOverview={createOverviewFixture(groupFixture.id, groupFixture.name)}
         initialEntityLinks={{
-          projectId: projectFixture.id,
+          groupId: groupFixture.id,
           requestId: 'req-links',
           links: [
             {
@@ -149,15 +149,15 @@ describe('ProjectsPage', () => {
   });
 
   it('renders typed participants when participants permission is present', () => {
-    mockIdentityPermissions(['projects.view', 'orders.view', 'projects.participants.view']);
+    mockIdentityPermissions(['groups.view', 'orders.view', 'groups.participants.view']);
     applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
 
     const html = renderToString(
-      <ProjectsPage
-        initialProjects={[projectFixture]}
-        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
+      <GroupsPage
+        initialGroups={[groupFixture]}
+        initialOverview={createOverviewFixture(groupFixture.id, groupFixture.name)}
         initialParticipants={{
-          projectId: projectFixture.id,
+          groupId: groupFixture.id,
           requestId: 'req-participants',
           participants: [{
             id: 'participant-1',
@@ -174,7 +174,7 @@ describe('ProjectsPage', () => {
       />,
     );
 
-    expect(html).toContain('Участники проекта');
+    expect(html).toContain('Участники группы');
     expect(html).toContain('employee');
     expect(html).toContain('Engineer A');
     expect(html).toContain('Observer');
@@ -182,23 +182,23 @@ describe('ProjectsPage', () => {
 
   it('does not show participant replace form until participants are loaded', () => {
     mockIdentityPermissions([
-      'projects.view',
+      'groups.view',
       'orders.view',
-      'projects.participants.view',
-      'projects.participants.manage',
+      'groups.participants.view',
+      'groups.participants.manage',
     ]);
     applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
 
     const html = renderToString(
-      <ProjectsPage
-        initialProjects={[projectFixture]}
-        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
+      <GroupsPage
+        initialGroups={[groupFixture]}
+        initialOverview={createOverviewFixture(groupFixture.id, groupFixture.name)}
         initialParticipants={null}
         initialParticipantRoles={{ requestId: 'req-roles', roles: [{ code: 'observer', label: 'Observer' }] }}
       />,
     );
 
-    expect(html).toContain('Участники проекта');
+    expect(html).toContain('Участники группы');
     expect(html).not.toContain('Сохранить участников');
   });
 
@@ -225,14 +225,14 @@ describe('ProjectsPage', () => {
   });
 
   it('renders deadline status counts only when deadline report permissions are present', () => {
-    mockIdentityPermissions(['projects.view', 'orders.view', 'deadlines.view']);
+    mockIdentityPermissions(['groups.view', 'orders.view', 'deadlines.view']);
     applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
 
     const html = renderToString(
-      <ProjectsPage
-        initialProjects={[projectFixture]}
-        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
-        initialDeadlineStatusCounts={createDeadlineStatusCounts(projectFixture.id)}
+      <GroupsPage
+        initialGroups={[groupFixture]}
+        initialOverview={createOverviewFixture(groupFixture.id, groupFixture.name)}
+        initialDeadlineStatusCounts={createDeadlineStatusCounts(groupFixture.id)}
       />,
     );
 
@@ -241,14 +241,14 @@ describe('ProjectsPage', () => {
   });
 
   it('does not render injected deadline status counts without deadlines.view', () => {
-    mockIdentityPermissions(['projects.view', 'orders.view']);
+    mockIdentityPermissions(['groups.view', 'orders.view']);
     applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
 
     const html = renderToString(
-      <ProjectsPage
-        initialProjects={[projectFixture]}
-        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
-        initialDeadlineStatusCounts={createDeadlineStatusCounts(projectFixture.id)}
+      <GroupsPage
+        initialGroups={[groupFixture]}
+        initialOverview={createOverviewFixture(groupFixture.id, groupFixture.name)}
+        initialDeadlineStatusCounts={createDeadlineStatusCounts(groupFixture.id)}
       />,
     );
 
@@ -256,14 +256,14 @@ describe('ProjectsPage', () => {
     expect(html).not.toContain('overdue');
   });
 
-  it('does not render injected deadline status counts for another project', () => {
-    mockIdentityPermissions(['projects.view', 'orders.view', 'deadlines.view']);
+  it('does not render injected deadline status counts for another group', () => {
+    mockIdentityPermissions(['groups.view', 'orders.view', 'deadlines.view']);
     applyFeatureFlags({ ...defaultFlags, useBackendPermissions: true });
 
     const html = renderToString(
-      <ProjectsPage
-        initialProjects={[projectFixture]}
-        initialOverview={createOverviewFixture(projectFixture.id, projectFixture.name)}
+      <GroupsPage
+        initialGroups={[groupFixture]}
+        initialOverview={createOverviewFixture(groupFixture.id, groupFixture.name)}
         initialDeadlineStatusCounts={createDeadlineStatusCounts('22222222-2222-4222-8222-222222222222')}
       />,
     );
@@ -272,63 +272,63 @@ describe('ProjectsPage', () => {
     expect(html).not.toContain('overdue');
   });
 
-  it('matches deadline status counts only to the selected project id', () => {
+  it('matches deadline status counts only to the selected group id', () => {
     const response = createDeadlineStatusCounts('22222222-2222-4222-8222-222222222222');
-    const multiProjectResponse: ProjectDeadlineStatusCountsResponse = {
-      ...createDeadlineStatusCounts(projectFixture.id),
+    const multiGroupResponse: GroupDeadlineStatusCountsResponse = {
+      ...createDeadlineStatusCounts(groupFixture.id),
       filter: {
-        projectMode: 'any',
-        projectIds: [projectFixture.id, '22222222-2222-4222-8222-222222222222'],
+        groupMode: 'any',
+        groupIds: [groupFixture.id, '22222222-2222-4222-8222-222222222222'],
         temporalMode: 'current',
       },
     };
 
-    expect(getMatchingDeadlineStatusCounts(projectFixture.id, response)).toBeNull();
+    expect(getMatchingDeadlineStatusCounts(groupFixture.id, response)).toBeNull();
     expect(getMatchingDeadlineStatusCounts('22222222-2222-4222-8222-222222222222', response)).toBe(response);
-    expect(getMatchingDeadlineStatusCounts(projectFixture.id, multiProjectResponse)).toBeNull();
-    expect(getMatchingDeadlineStatusCounts(projectFixture.id, null)).toBeNull();
+    expect(getMatchingDeadlineStatusCounts(groupFixture.id, multiGroupResponse)).toBeNull();
+    expect(getMatchingDeadlineStatusCounts(groupFixture.id, null)).toBeNull();
   });
 
   it('keeps the latest selected overview when requests resolve out of order', () => {
     const initialState: OverviewSelectionState = {
       activeRequestId: 0,
-      loadingProjectId: null,
+      loadingGroupId: null,
       overview: null,
     };
 
     const firstLoadingState = getNextOverviewSelectionState(initialState, {
       type: 'request',
-      projectId: '11111111-1111-4111-8111-111111111111',
+      groupId: '11111111-1111-4111-8111-111111111111',
     });
     const secondLoadingState = getNextOverviewSelectionState(firstLoadingState, {
       type: 'request',
-      projectId: '22222222-2222-4222-8222-222222222222',
+      groupId: '22222222-2222-4222-8222-222222222222',
     });
     const secondLoadedState = getNextOverviewSelectionState(secondLoadingState, {
       type: 'success',
       requestId: secondLoadingState.activeRequestId,
-      overview: createOverviewFixture('22222222-2222-4222-8222-222222222222', 'Project B'),
+      overview: createOverviewFixture('22222222-2222-4222-8222-222222222222', 'Group B'),
     });
     const staleFirstState = getNextOverviewSelectionState(secondLoadedState, {
       type: 'success',
       requestId: firstLoadingState.activeRequestId,
-      overview: createOverviewFixture('11111111-1111-4111-8111-111111111111', 'Project A'),
+      overview: createOverviewFixture('11111111-1111-4111-8111-111111111111', 'Group A'),
     });
 
-    expect(staleFirstState.overview?.project.name).toBe('Project B');
-    expect(staleFirstState.loadingProjectId).toBeNull();
+    expect(staleFirstState.overview?.group.name).toBe('Group B');
+    expect(staleFirstState.loadingGroupId).toBeNull();
   });
 
   it('does not reopen overview when a pending request resolves after close', () => {
     const loadingState = getNextOverviewSelectionState(
       {
         activeRequestId: 0,
-        loadingProjectId: null,
+        loadingGroupId: null,
         overview: null,
       },
       {
         type: 'request',
-        projectId: '11111111-1111-4111-8111-111111111111',
+        groupId: '11111111-1111-4111-8111-111111111111',
       },
     );
 
@@ -336,18 +336,18 @@ describe('ProjectsPage', () => {
     const lateSuccessState = getNextOverviewSelectionState(closedState, {
       type: 'success',
       requestId: loadingState.activeRequestId,
-      overview: createOverviewFixture('11111111-1111-4111-8111-111111111111', 'Closed Project'),
+      overview: createOverviewFixture('11111111-1111-4111-8111-111111111111', 'Closed Group'),
     });
 
     expect(lateSuccessState.overview).toBeNull();
-    expect(lateSuccessState.loadingProjectId).toBeNull();
+    expect(lateSuccessState.loadingGroupId).toBeNull();
   });
 });
 
-function createOverviewFixture(projectId: string, name: string): ProjectOverviewResponse {
+function createOverviewFixture(groupId: string, name: string): GroupOverviewResponse {
   return {
-    project: {
-      id: projectId,
+    group: {
+      id: groupId,
       code: name.replace(/\s+/g, '-').toUpperCase(),
       name,
       description: null,
@@ -368,19 +368,19 @@ function createOverviewFixture(projectId: string, name: string): ProjectOverview
     linkedEntityCounts: [],
     participants: { currentSummary: [] },
     filter: {
-      projectId,
+      groupId,
       temporalMode: 'current',
     },
     omitted: [],
   };
 }
 
-function createDeadlineStatusCounts(projectId: string): ProjectDeadlineStatusCountsResponse {
+function createDeadlineStatusCounts(groupId: string): GroupDeadlineStatusCountsResponse {
   return {
     data: [{ deadlineStatus: 'overdue', deadlineCount: 1 }],
     filter: {
-      projectMode: 'any',
-      projectIds: [projectId],
+      groupMode: 'any',
+      groupIds: [groupId],
       temporalMode: 'current',
     },
   };
@@ -390,7 +390,7 @@ let mockIdentity = {
   id: '1',
   username: 'admin',
   role: 'admin',
-  permissions: ['projects.view', 'projects.create', 'projects.archive'],
+  permissions: ['groups.view', 'groups.create', 'groups.archive'],
 };
 
 function mockIdentityPermissions(permissions: string[]): void {

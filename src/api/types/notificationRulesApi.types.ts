@@ -6,7 +6,7 @@ export type RecipientResolverKind =
   | 'stage_assignee'
   | 'workshop_head'
   | 'direction_head'
-  | 'project_participants';
+  | 'group_participants';
 
 export interface NotificationRuleConditions {
   allowedFromOrderStatusIds?: number[];
@@ -26,7 +26,7 @@ export interface NotificationRuleDto {
   notificationRuleId: string;
   ruleCode: string;
   eventType: string;
-  projectId: string | null;
+  groupId: string | null;
   isEnabled: boolean;
   priority: number;
   level: NotificationLevel;
@@ -50,7 +50,7 @@ export interface NotificationEventTypeDto {
 export interface CreateNotificationRuleRequest {
   ruleCode: string;
   eventType: string;
-  projectId?: string | null;
+  groupId?: string | null;
   level: NotificationLevel;
   priority: number;
   isEnabled: boolean;
@@ -61,7 +61,7 @@ export interface CreateNotificationRuleRequest {
 }
 
 export interface UpdateNotificationRuleRequest {
-  projectId?: string | null;
+  groupId?: string | null;
   level?: NotificationLevel;
   priority?: number;
   isEnabled?: boolean;

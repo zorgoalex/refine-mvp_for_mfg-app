@@ -14,30 +14,30 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { projectsApi } from '../../api/groupsApi';
+import { groupsApi } from '../../api/groupsApi';
 import type {
-  CreateProjectRequest,
-  ProjectDeadlineStatusCountsResponse,
-  ProjectDto,
-  ProjectEntityLinksResponse,
-  ProjectOverviewResponse,
-  ProjectParticipantRolesResponse,
-  ProjectParticipantsResponse,
-  ProjectStatus,
-  ReplaceProjectEntityLink,
-  ReplaceProjectParticipant,
+  CreateGroupRequest,
+  GroupDeadlineStatusCountsResponse,
+  GroupDto,
+  GroupEntityLinksResponse,
+  GroupOverviewResponse,
+  GroupParticipantRolesResponse,
+  GroupParticipantsResponse,
+  GroupStatus,
+  ReplaceGroupEntityLink,
+  ReplaceGroupParticipant,
 } from '../../api/types/groupApi.types';
 import { featureFlags } from '../../config/featureFlags';
 import { can, canAll } from '../../utils/permissions';
 import type { UserIdentity } from '../../types/auth';
-import { canViewProjectsPage } from '../../utils/projectAccess';
-import { ProjectDetailOverview } from './ProjectDetailOverview';
-import { ProjectEntityLinksPanel } from './ProjectEntityLinksPanel';
-import { ProjectParticipantsPanel } from './ProjectParticipantsPanel';
+import { canViewGroupsPage } from '../../utils/groupAccess';
+import { GroupDetailOverview } from './GroupDetailOverview';
+import { GroupEntityLinksPanel } from './GroupEntityLinksPanel';
+import { GroupParticipantsPanel } from './GroupParticipantsPanel';
 
 const { Title } = Typography;
 
-const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+const GROUP_STATUS_LABELS: Record<GroupStatus, string> = {
   draft: 'Черновик',
   active: 'Активен',
   paused: 'Пауза',
@@ -45,40 +45,40 @@ const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   archived: 'Архив',
 };
 
-const MUTABLE_STATUS_OPTIONS: Array<{ label: string; value: ProjectStatus }> = [
+const MUTABLE_STATUS_OPTIONS: Array<{ label: string; value: GroupStatus }> = [
   { label: 'Черновик', value: 'draft' },
   { label: 'Активен', value: 'active' },
   { label: 'Пауза', value: 'paused' },
   { label: 'Завершен', value: 'completed' },
 ];
 
-interface ProjectFormValues {
+interface GroupFormValues {
   code: string;
   name: string;
   description?: string;
-  status?: ProjectStatus;
+  status?: GroupStatus;
   startsAt?: { format: (format: string) => string } | null;
   endsAt?: { format: (format: string) => string } | null;
 }
 
-interface ProjectsPageProps {
-  initialProjects?: ProjectDto[];
-  initialOverview?: ProjectOverviewResponse | null;
-  initialEntityLinks?: ProjectEntityLinksResponse | null;
-  initialParticipants?: ProjectParticipantsResponse | null;
-  initialParticipantRoles?: ProjectParticipantRolesResponse | null;
-  initialDeadlineStatusCounts?: ProjectDeadlineStatusCountsResponse | null;
+interface GroupsPageProps {
+  initialGroups?: GroupDto[];
+  initialOverview?: GroupOverviewResponse | null;
+  initialEntityLinks?: GroupEntityLinksResponse | null;
+  initialParticipants?: GroupParticipantsResponse | null;
+  initialParticipantRoles?: GroupParticipantRolesResponse | null;
+  initialDeadlineStatusCounts?: GroupDeadlineStatusCountsResponse | null;
 }
 
 export interface OverviewSelectionState {
   activeRequestId: number;
-  loadingProjectId: string | null;
-  overview: ProjectOverviewResponse | null;
+  loadingGroupId: string | null;
+  overview: GroupOverviewResponse | null;
 }
 
 type OverviewSelectionAction =
-  | { type: 'request'; projectId: string; requestId?: number }
-  | { type: 'success'; requestId: number; overview: ProjectOverviewResponse }
+  | { type: 'request'; groupId: string; requestId?: number }
+  | { type: 'success'; requestId: number; overview: GroupOverviewResponse }
   | { type: 'failure'; requestId: number }
   | { type: 'close' };
 
@@ -91,18 +91,18 @@ export function getNextOverviewSelectionState(
       const requestId = action.requestId ?? state.activeRequestId + 1;
       return {
         activeRequestId: requestId,
-        loadingProjectId: action.projectId,
+        loadingGroupId: action.groupId,
         overview: null,
       };
     }
     case 'success':
-      if (action.requestId !== state.activeRequestId || state.loadingProjectId === null) {
+      if (action.requestId !== state.activeRequestId || state.loadingGroupId === null) {
         return state;
       }
 
       return {
         activeRequestId: state.activeRequestId,
-        loadingProjectId: null,
+        loadingGroupId: null,
         overview: action.overview,
       };
     case 'failure':
@@ -112,13 +112,13 @@ export function getNextOverviewSelectionState(
 
       return {
         activeRequestId: state.activeRequestId,
-        loadingProjectId: null,
+        loadingGroupId: null,
         overview: state.overview,
       };
     case 'close':
       return {
         activeRequestId: state.activeRequestId + 1,
-        loadingProjectId: null,
+        loadingGroupId: null,
         overview: null,
       };
     default:
@@ -126,64 +126,64 @@ export function getNextOverviewSelectionState(
   }
 }
 
-export const ProjectsPage: React.FC<ProjectsPageProps> = ({
-  initialProjects = [],
+export const GroupsPage: React.FC<GroupsPageProps> = ({
+  initialGroups = [],
   initialOverview = null,
   initialEntityLinks = null,
   initialParticipants = null,
   initialParticipantRoles = null,
   initialDeadlineStatusCounts = null,
 }) => {
-  const [form] = Form.useForm<ProjectFormValues>();
+  const [form] = Form.useForm<GroupFormValues>();
   const { data: identity } = useGetIdentity<UserIdentity>();
-  const [projects, setProjects] = useState<ProjectDto[]>(initialProjects);
+  const [groups, setGroups] = useState<GroupDto[]>(initialGroups);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
   const [overviewSelection, setOverviewSelection] = useState<OverviewSelectionState>({
     activeRequestId: 0,
-    loadingProjectId: null,
+    loadingGroupId: null,
     overview: initialOverview,
   });
-  const [entityLinks, setEntityLinks] = useState<ProjectEntityLinksResponse | null>(initialEntityLinks);
-  const [participants, setParticipants] = useState<ProjectParticipantsResponse | null>(initialParticipants);
-  const [participantRoles, setParticipantRoles] = useState<ProjectParticipantRolesResponse | null>(
+  const [entityLinks, setEntityLinks] = useState<GroupEntityLinksResponse | null>(initialEntityLinks);
+  const [participants, setParticipants] = useState<GroupParticipantsResponse | null>(initialParticipants);
+  const [participantRoles, setParticipantRoles] = useState<GroupParticipantRolesResponse | null>(
     initialParticipantRoles,
   );
   const [deadlineStatusCounts, setDeadlineStatusCounts] =
-    useState<ProjectDeadlineStatusCountsResponse | null>(initialDeadlineStatusCounts);
+    useState<GroupDeadlineStatusCountsResponse | null>(initialDeadlineStatusCounts);
   const overviewRequestIdRef = useRef(0);
 
   const currentUser = identity ?? null;
-  const canView = canViewProjectsPage(featureFlags, currentUser);
-  const canCreate = !featureFlags.useBackendPermissions || can('projects.create', currentUser);
-  const canArchive = !featureFlags.useBackendPermissions || can('projects.archive', currentUser);
-  const canViewOverview = !featureFlags.useBackendPermissions || canAll(['projects.view', 'orders.view'], currentUser);
-  const canViewEntityLinks = !featureFlags.useBackendPermissions || can('projects.view', currentUser);
-  const canManageEntityLinks = !featureFlags.useBackendPermissions || can('projects.manage_links', currentUser);
-  const canViewParticipants = !featureFlags.useBackendPermissions || can('projects.participants.view', currentUser);
-  const canManageParticipants = !featureFlags.useBackendPermissions || can('projects.participants.manage', currentUser);
+  const canView = canViewGroupsPage(featureFlags, currentUser);
+  const canCreate = !featureFlags.useBackendPermissions || can('groups.create', currentUser);
+  const canArchive = !featureFlags.useBackendPermissions || can('groups.archive', currentUser);
+  const canViewOverview = !featureFlags.useBackendPermissions || canAll(['groups.view', 'orders.view'], currentUser);
+  const canViewEntityLinks = !featureFlags.useBackendPermissions || can('groups.view', currentUser);
+  const canManageEntityLinks = !featureFlags.useBackendPermissions || can('groups.manage_links', currentUser);
+  const canViewParticipants = !featureFlags.useBackendPermissions || can('groups.participants.view', currentUser);
+  const canManageParticipants = !featureFlags.useBackendPermissions || can('groups.participants.manage', currentUser);
   const canViewDeadlineStatusCounts =
     !featureFlags.useBackendPermissions ||
-    canAll(['projects.view', 'orders.view', 'deadlines.view'], currentUser);
+    canAll(['groups.view', 'orders.view', 'deadlines.view'], currentUser);
 
-  const loadProjects = useCallback(async () => {
+  const loadGroups = useCallback(async () => {
     if (!canView) return;
 
     setLoading(true);
     try {
-      const response = await projectsApi.listProjects({ page: 1, pageSize: 50, includeArchived: true });
-      setProjects(response.data);
+      const response = await groupsApi.listGroups({ page: 1, pageSize: 50, includeArchived: true });
+      setGroups(response.data);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Не удалось загрузить проекты');
+      message.error(error instanceof Error ? error.message : 'Не удалось загрузить группы');
     } finally {
       setLoading(false);
     }
   }, [canView]);
 
   useEffect(() => {
-    void loadProjects();
-  }, [loadProjects]);
+    void loadGroups();
+  }, [loadGroups]);
 
   useEffect(() => {
     if (!canViewDeadlineStatusCounts) {
@@ -191,65 +191,65 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     }
   }, [canViewDeadlineStatusCounts]);
 
-  const handleCreate = async (values: ProjectFormValues) => {
+  const handleCreate = async (values: GroupFormValues) => {
     setCreating(true);
     try {
-      await projectsApi.createProject(mapCreateRequest(values));
+      await groupsApi.createGroup(mapCreateRequest(values));
       form.resetFields();
-      await loadProjects();
-      message.success('Проект создан');
+      await loadGroups();
+      message.success('Группа создана');
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Не удалось создать проект');
+      message.error(error instanceof Error ? error.message : 'Не удалось создать группу');
     } finally {
       setCreating(false);
     }
   };
 
-  const handleArchive = useCallback(async (projectId: string) => {
-    setArchivingId(projectId);
+  const handleArchive = useCallback(async (groupId: string) => {
+    setArchivingId(groupId);
     try {
-      await projectsApi.archiveProject(projectId);
-      await loadProjects();
-      message.success('Проект архивирован');
+      await groupsApi.archiveGroup(groupId);
+      await loadGroups();
+      message.success('Группа архивирована');
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Не удалось архивировать проект');
+      message.error(error instanceof Error ? error.message : 'Не удалось архивировать группу');
     } finally {
       setArchivingId(null);
     }
-  }, [loadProjects]);
+  }, [loadGroups]);
 
   const handleAuxiliaryLoadError = useCallback((error: unknown, requestId: number): null => {
     if (overviewRequestIdRef.current === requestId) {
-      message.error(error instanceof Error ? error.message : 'Не удалось загрузить данные проекта');
+      message.error(error instanceof Error ? error.message : 'Не удалось загрузить данные группы');
     }
     return null;
   }, []);
 
-  const handleOverview = useCallback(async (projectId: string) => {
+  const handleOverview = useCallback(async (groupId: string) => {
     const requestId = overviewRequestIdRef.current + 1;
     overviewRequestIdRef.current = requestId;
     setOverviewSelection((state) => getNextOverviewSelectionState(state, {
       type: 'request',
-      projectId,
+      groupId,
       requestId,
     }));
 
     try {
       const [response, linksResponse, participantsResponse, rolesResponse, deadlineResponse] = await Promise.all([
-        projectsApi.getProjectOverview(projectId),
+        groupsApi.getGroupOverview(groupId),
         canViewEntityLinks
-          ? projectsApi.getProjectEntityLinks(projectId).catch((error) => handleAuxiliaryLoadError(error, requestId))
+          ? groupsApi.getGroupEntityLinks(groupId).catch((error) => handleAuxiliaryLoadError(error, requestId))
           : Promise.resolve(null),
         canViewParticipants
-          ? projectsApi.getProjectParticipants(projectId).catch((error) => handleAuxiliaryLoadError(error, requestId))
+          ? groupsApi.getGroupParticipants(groupId).catch((error) => handleAuxiliaryLoadError(error, requestId))
           : Promise.resolve(null),
         canViewParticipants
-          ? projectsApi.getProjectParticipantRoles().catch((error) => handleAuxiliaryLoadError(error, requestId))
+          ? groupsApi.getGroupParticipantRoles().catch((error) => handleAuxiliaryLoadError(error, requestId))
           : Promise.resolve(null),
         canViewDeadlineStatusCounts
-          ? projectsApi.getProjectDeadlineStatusCounts({
-              projectMode: 'any',
-              projectIds: [projectId],
+          ? groupsApi.getGroupDeadlineStatusCounts({
+              groupMode: 'any',
+              groupIds: [groupId],
               temporalMode: 'current',
             }).catch((error) => handleAuxiliaryLoadError(error, requestId))
           : Promise.resolve(null),
@@ -267,7 +267,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
       }
     } catch (error) {
       if (overviewRequestIdRef.current === requestId) {
-        message.error(error instanceof Error ? error.message : 'Не удалось загрузить обзор проекта');
+        message.error(error instanceof Error ? error.message : 'Не удалось загрузить обзор группы');
       }
       setOverviewSelection((state) => getNextOverviewSelectionState(state, {
         type: 'failure',
@@ -290,39 +290,39 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
     setDeadlineStatusCounts(null);
   }, []);
 
-  const handleAppendEntityLink = useCallback(async (link: ReplaceProjectEntityLink) => {
-    const projectId = overviewSelection.overview?.project.id;
-    if (!projectId) return;
+  const handleAppendEntityLink = useCallback(async (link: ReplaceGroupEntityLink) => {
+    const groupId = overviewSelection.overview?.group.id;
+    if (!groupId) return;
 
     try {
-      const response = await projectsApi.appendProjectEntityLinks(projectId, {
-        idempotencyKey: createProjectIdempotencyKey('project-entity-links'),
+      const response = await groupsApi.appendGroupEntityLinks(groupId, {
+        idempotencyKey: createGroupIdempotencyKey('group-entity-links'),
         links: [link],
       });
       setEntityLinks(response);
-      message.success('Связь проекта добавлена');
+      message.success('Связь группы добавлена');
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Не удалось сохранить связь проекта');
+      message.error(error instanceof Error ? error.message : 'Не удалось сохранить связь группы');
     }
-  }, [overviewSelection.overview?.project.id]);
+  }, [overviewSelection.overview?.group.id]);
 
-  const handleReplaceParticipants = useCallback(async (nextParticipants: ReplaceProjectParticipant[]) => {
-    const projectId = overviewSelection.overview?.project.id;
-    if (!projectId) return;
+  const handleReplaceParticipants = useCallback(async (nextParticipants: ReplaceGroupParticipant[]) => {
+    const groupId = overviewSelection.overview?.group.id;
+    if (!groupId) return;
 
     try {
-      const response = await projectsApi.replaceProjectParticipants(projectId, {
-        idempotencyKey: createProjectIdempotencyKey('project-participants'),
+      const response = await groupsApi.replaceGroupParticipants(groupId, {
+        idempotencyKey: createGroupIdempotencyKey('group-participants'),
         participants: nextParticipants,
       });
       setParticipants(response);
-      message.success('Участники проекта сохранены');
+      message.success('Участники группы сохранены');
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Не удалось сохранить участников проекта');
+      message.error(error instanceof Error ? error.message : 'Не удалось сохранить участников группы');
     }
-  }, [overviewSelection.overview?.project.id]);
+  }, [overviewSelection.overview?.group.id]);
 
-  const columns = useMemo<ColumnsType<ProjectDto>>(
+  const columns = useMemo<ColumnsType<GroupDto>>(
     () => [
       {
         title: 'Код',
@@ -340,33 +340,33 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         dataIndex: 'status',
         key: 'status',
         width: 130,
-        render: (status: ProjectStatus) => <Tag>{PROJECT_STATUS_LABELS[status] ?? status}</Tag>,
+        render: (status: GroupStatus) => <Tag>{GROUP_STATUS_LABELS[status] ?? status}</Tag>,
       },
       {
         title: 'Даты',
         key: 'dates',
         width: 180,
-        render: (_, project) => [project.startsAt, project.endsAt].filter(Boolean).join(' - ') || '-',
+        render: (_, group) => [group.startsAt, group.endsAt].filter(Boolean).join(' - ') || '-',
       },
       {
         title: '',
         key: 'actions',
         width: 260,
-        render: (_, project) => (
+        render: (_, group) => (
           <Space>
             {canViewOverview ? (
               <Button
-                loading={overviewSelection.loadingProjectId === project.id}
-                onClick={() => void handleOverview(project.id)}
+                loading={overviewSelection.loadingGroupId === group.id}
+                onClick={() => void handleOverview(group.id)}
               >
                 Обзор
               </Button>
             ) : null}
             <Button
               danger
-              disabled={!canArchive || project.status === 'archived'}
-              loading={archivingId === project.id}
-              onClick={() => void handleArchive(project.id)}
+              disabled={!canArchive || group.status === 'archived'}
+              loading={archivingId === group.id}
+              onClick={() => void handleArchive(group.id)}
             >
               Архивировать
             </Button>
@@ -374,7 +374,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         ),
       },
     ],
-    [archivingId, canArchive, canViewOverview, handleArchive, handleOverview, overviewSelection.loadingProjectId],
+    [archivingId, canArchive, canViewOverview, handleArchive, handleOverview, overviewSelection.loadingGroupId],
   );
 
   if (!canView) {
@@ -383,7 +383,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         <Alert
           type="warning"
           showIcon
-          message="Нет доступа к проектам"
+          message="Нет доступа к группым"
         />
       </div>
     );
@@ -391,7 +391,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
 
   return (
     <div style={{ padding: 24 }}>
-      <Title level={3}>Проекты</Title>
+      <Title level={3}>Группы</Title>
       <Form
         form={form}
         layout="inline"
@@ -400,7 +400,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
       >
         <Form.Item
           name="code"
-          label="Код проекта"
+          label="Код группы"
           rules={[{ required: true }, { pattern: /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/ }]}
         >
           <Input disabled={!canCreate} style={{ width: 140 }} />
@@ -430,23 +430,23 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
         <Table
           rowKey="id"
           columns={columns}
-          dataSource={projects}
+          dataSource={groups}
           loading={loading}
           pagination={{ pageSize: 25 }}
         />
         {overviewSelection.overview ? (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Button onClick={handleCloseOverview}>Закрыть</Button>
-            <ProjectDetailOverview
+            <GroupDetailOverview
               overview={overviewSelection.overview}
               deadlineStatusCounts={
                 canViewDeadlineStatusCounts
-                  ? getMatchingDeadlineStatusCounts(overviewSelection.overview.project.id, deadlineStatusCounts)
+                  ? getMatchingDeadlineStatusCounts(overviewSelection.overview.group.id, deadlineStatusCounts)
                   : null
               }
             />
             {canViewEntityLinks ? (
-              <ProjectEntityLinksPanel
+              <GroupEntityLinksPanel
                 response={entityLinks}
                 currentUser={currentUser}
                 canManage={canManageEntityLinks}
@@ -454,7 +454,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
               />
             ) : null}
             {canViewParticipants ? (
-              <ProjectParticipantsPanel
+              <GroupParticipantsPanel
                 response={participants}
                 roles={participantRoles?.roles ?? []}
                 canManage={canManageParticipants}
@@ -468,7 +468,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({
   );
 };
 
-function mapCreateRequest(values: ProjectFormValues): CreateProjectRequest {
+function mapCreateRequest(values: GroupFormValues): CreateGroupRequest {
   return {
     code: values.code.trim(),
     name: values.name.trim(),
@@ -479,7 +479,7 @@ function mapCreateRequest(values: ProjectFormValues): CreateProjectRequest {
   };
 }
 
-function createProjectIdempotencyKey(prefix: string): string {
+function createGroupIdempotencyKey(prefix: string): string {
   const uuid =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
@@ -488,11 +488,11 @@ function createProjectIdempotencyKey(prefix: string): string {
 }
 
 export function getMatchingDeadlineStatusCounts(
-  projectId: string,
-  response: ProjectDeadlineStatusCountsResponse | null,
-): ProjectDeadlineStatusCountsResponse | null {
-  if (!response || response.filter.projectMode === 'none') return null;
-  return response.filter.projectIds.length === 1 && response.filter.projectIds[0] === projectId
+  groupId: string,
+  response: GroupDeadlineStatusCountsResponse | null,
+): GroupDeadlineStatusCountsResponse | null {
+  if (!response || response.filter.groupMode === 'none') return null;
+  return response.filter.groupIds.length === 1 && response.filter.groupIds[0] === groupId
     ? response
     : null;
 }

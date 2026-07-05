@@ -3,15 +3,15 @@ import { Button, Form, Input, Select, Space, Table, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { PermissionName } from '../../api/types/authApi.types';
 import type {
-  ProjectEntityLinkDto,
-  ProjectEntityLinksResponse,
-  ProjectEntityTypeCode,
-  ReplaceProjectEntityLink,
+  GroupEntityLinkDto,
+  GroupEntityLinksResponse,
+  GroupEntityTypeCode,
+  ReplaceGroupEntityLink,
 } from '../../api/types/groupApi.types';
 import { featureFlags } from '../../config/featureFlags';
 import { can, type PermissionCarrier } from '../../utils/permissions';
 
-const PROJECT_ENTITY_TYPE_OPTIONS: Array<{ label: string; value: ProjectEntityTypeCode }> = [
+const GROUP_ENTITY_TYPE_OPTIONS: Array<{ label: string; value: GroupEntityTypeCode }> = [
   { label: 'order', value: 'order' },
   { label: 'user', value: 'user' },
   { label: 'employee', value: 'employee' },
@@ -20,7 +20,7 @@ const PROJECT_ENTITY_TYPE_OPTIONS: Array<{ label: string; value: ProjectEntityTy
   { label: 'deadline_instance', value: 'deadline_instance' },
 ];
 
-const PROJECT_ENTITY_REQUIRED_PERMISSIONS: Record<ProjectEntityTypeCode, PermissionName> = {
+const GROUP_ENTITY_REQUIRED_PERMISSIONS: Record<GroupEntityTypeCode, PermissionName> = {
   order: 'orders.view',
   user: 'users.view',
   employee: 'employees.view',
@@ -29,30 +29,30 @@ const PROJECT_ENTITY_REQUIRED_PERMISSIONS: Record<ProjectEntityTypeCode, Permiss
   deadline_instance: 'deadlines.view',
 };
 
-interface ProjectEntityLinksFormValues {
-  entityType: ProjectEntityTypeCode;
+interface GroupEntityLinksFormValues {
+  entityType: GroupEntityTypeCode;
   entityId: string;
   relationType?: string;
 }
 
-interface ProjectEntityLinksPanelProps {
-  response: ProjectEntityLinksResponse | null;
+interface GroupEntityLinksPanelProps {
+  response: GroupEntityLinksResponse | null;
   currentUser: PermissionCarrier | null;
   loading?: boolean;
   canManage?: boolean;
-  onAppend: (link: ReplaceProjectEntityLink) => void;
+  onAppend: (link: ReplaceGroupEntityLink) => void;
 }
 
-export const ProjectEntityLinksPanel: React.FC<ProjectEntityLinksPanelProps> = ({
+export const GroupEntityLinksPanel: React.FC<GroupEntityLinksPanelProps> = ({
   response,
   currentUser,
   loading = false,
   canManage = false,
   onAppend,
 }) => {
-  const [form] = Form.useForm<ProjectEntityLinksFormValues>();
+  const [form] = Form.useForm<GroupEntityLinksFormValues>();
   const entityTypeOptions = useMemo(
-    () => PROJECT_ENTITY_TYPE_OPTIONS.filter((option) => canViewEntityType(option.value, currentUser)),
+    () => GROUP_ENTITY_TYPE_OPTIONS.filter((option) => canViewEntityType(option.value, currentUser)),
     [currentUser],
   );
   const rows = useMemo(
@@ -60,7 +60,7 @@ export const ProjectEntityLinksPanel: React.FC<ProjectEntityLinksPanelProps> = (
     [currentUser, response?.links],
   );
 
-  const columns: ColumnsType<ProjectEntityLinkDto> = [
+  const columns: ColumnsType<GroupEntityLinkDto> = [
     { title: 'Тип', dataIndex: 'entityType', key: 'entityType', width: 160 },
     {
       title: 'Сущность',
@@ -108,7 +108,7 @@ export const ProjectEntityLinksPanel: React.FC<ProjectEntityLinksPanelProps> = (
   );
 };
 
-function mapLinkForm(values: ProjectEntityLinksFormValues): ReplaceProjectEntityLink {
+function mapLinkForm(values: GroupEntityLinksFormValues): ReplaceGroupEntityLink {
   return {
     entityType: values.entityType,
     entityId: values.entityId.trim(),
@@ -117,6 +117,6 @@ function mapLinkForm(values: ProjectEntityLinksFormValues): ReplaceProjectEntity
   };
 }
 
-function canViewEntityType(entityType: ProjectEntityTypeCode, user: PermissionCarrier | null): boolean {
-  return !featureFlags.useBackendPermissions || can(PROJECT_ENTITY_REQUIRED_PERMISSIONS[entityType], user);
+function canViewEntityType(entityType: GroupEntityTypeCode, user: PermissionCarrier | null): boolean {
+  return !featureFlags.useBackendPermissions || can(GROUP_ENTITY_REQUIRED_PERMISSIONS[entityType], user);
 }

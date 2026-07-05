@@ -1193,14 +1193,14 @@ function mapOrdersViewQueryToBackend(
           break;
         }
         return null;
-      case 'project_ids': {
-        const projectIds = Array.isArray(value) ? value.map(String) : String(value).split(',');
-        query.projectIds = projectIds.map((item) => item.trim()).filter(Boolean);
+      case 'group_ids': {
+        const groupIds = Array.isArray(value) ? value.map(String) : String(value).split(',');
+        query.groupIds = groupIds.map((item) => item.trim()).filter(Boolean);
         break;
       }
-      case 'project_mode':
+      case 'group_mode':
         if (value === 'any' || value === 'all' || value === 'primary' || value === 'none') {
-          query.projectMode = value;
+          query.groupMode = value;
           break;
         }
         return null;

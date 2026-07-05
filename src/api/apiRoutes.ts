@@ -67,7 +67,6 @@ export const apiRoutes = {
     deadlineOverride: (orderId: number, overrideId: string) =>
       backendApiPath(`/orders/${orderId}/deadline-overrides/${overrideId}`),
     groups: orderGroupsRoute,
-    projects: orderGroupsRoute,
   },
   orderDetails: {
     productionStageEvent: (detailId: number, productionStatusId: number) =>
@@ -183,7 +182,6 @@ export const apiRoutes = {
     eventTypes: backendApiPath('/notification-event-types'),
   },
   groups: groupsRoutes,
-  projects: groupsRoutes,
   org: {
     directions: backendApiPath('/org/directions'),
     directionById: (directionId: number) => backendApiPath(`/org/directions/${directionId}`),

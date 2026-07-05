@@ -2,15 +2,15 @@ import React from 'react';
 import { Descriptions, Space, Statistic, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type {
-  OrderProjectRelationType,
-  ProjectDeadlineStatusCountsResponse,
-  ProjectOverviewResponse,
-  ProjectStatus,
+  OrderGroupRelationType,
+  GroupDeadlineStatusCountsResponse,
+  GroupOverviewResponse,
+  GroupStatus,
 } from '../../api/types/groupApi.types';
 
 const { Text, Title } = Typography;
 
-const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+const GROUP_STATUS_LABELS: Record<GroupStatus, string> = {
   draft: 'Черновик',
   active: 'Активен',
   paused: 'Пауза',
@@ -18,17 +18,17 @@ const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   archived: 'Архив',
 };
 
-interface ProjectDetailOverviewProps {
-  overview: ProjectOverviewResponse;
-  deadlineStatusCounts?: ProjectDeadlineStatusCountsResponse | null;
+interface GroupDetailOverviewProps {
+  overview: GroupOverviewResponse;
+  deadlineStatusCounts?: GroupDeadlineStatusCountsResponse | null;
 }
 
-type StatusCountRow = ProjectOverviewResponse['orders']['statusCounts'][number];
-type RelationCountRow = ProjectOverviewResponse['orders']['relationCounts'][number];
-type CreatedMonthCountRow = ProjectOverviewResponse['orders']['createdMonthCounts'][number];
-type LinkedEntityCountRow = ProjectOverviewResponse['linkedEntityCounts'][number];
-type ParticipantSummaryRow = ProjectOverviewResponse['participants']['currentSummary'][number];
-type DeadlineStatusCountRow = ProjectDeadlineStatusCountsResponse['data'][number];
+type StatusCountRow = GroupOverviewResponse['orders']['statusCounts'][number];
+type RelationCountRow = GroupOverviewResponse['orders']['relationCounts'][number];
+type CreatedMonthCountRow = GroupOverviewResponse['orders']['createdMonthCounts'][number];
+type LinkedEntityCountRow = GroupOverviewResponse['linkedEntityCounts'][number];
+type ParticipantSummaryRow = GroupOverviewResponse['participants']['currentSummary'][number];
+type DeadlineStatusCountRow = GroupDeadlineStatusCountsResponse['data'][number];
 
 const statusColumns: ColumnsType<StatusCountRow> = [
   {
@@ -45,7 +45,7 @@ const statusColumns: ColumnsType<StatusCountRow> = [
   },
 ];
 
-const relationLabels: Record<OrderProjectRelationType, string> = {
+const relationLabels: Record<OrderGroupRelationType, string> = {
   main: 'main',
   secondary: 'secondary',
   reporting: 'reporting',
@@ -58,7 +58,7 @@ const relationColumns: ColumnsType<RelationCountRow> = [
     title: 'Тип',
     dataIndex: 'relationType',
     key: 'relationType',
-    render: (relationType: OrderProjectRelationType) => relationLabels[relationType] ?? relationType,
+    render: (relationType: OrderGroupRelationType) => relationLabels[relationType] ?? relationType,
   },
   {
     title: 'Основная',
@@ -136,32 +136,32 @@ const deadlineStatusColumns: ColumnsType<DeadlineStatusCountRow> = [
   },
 ];
 
-export const ProjectDetailOverview: React.FC<ProjectDetailOverviewProps> = ({
+export const GroupDetailOverview: React.FC<GroupDetailOverviewProps> = ({
   overview,
   deadlineStatusCounts = null,
 }) => {
-  const { project, orders } = overview;
-  const dateRange = [project.startsAt, project.endsAt].filter(Boolean).join(' - ') || '-';
+  const { group, orders } = overview;
+  const dateRange = [group.startsAt, group.endsAt].filter(Boolean).join(' - ') || '-';
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Space direction="vertical" size={4}>
         <Title level={4} style={{ margin: 0 }}>
-          {project.code} · {project.name}
+          {group.code} · {group.name}
         </Title>
-        <Tag>{PROJECT_STATUS_LABELS[project.status] ?? project.status}</Tag>
+        <Tag>{GROUP_STATUS_LABELS[group.status] ?? group.status}</Tag>
       </Space>
 
       <Descriptions size="small" bordered column={2}>
-        <Descriptions.Item label="Код">{project.code}</Descriptions.Item>
-        <Descriptions.Item label="Название">{project.name}</Descriptions.Item>
+        <Descriptions.Item label="Код">{group.code}</Descriptions.Item>
+        <Descriptions.Item label="Название">{group.name}</Descriptions.Item>
         <Descriptions.Item label="Статус">
-          {PROJECT_STATUS_LABELS[project.status] ?? project.status}
+          {GROUP_STATUS_LABELS[group.status] ?? group.status}
         </Descriptions.Item>
         <Descriptions.Item label="Даты">{dateRange}</Descriptions.Item>
-        {project.description ? (
+        {group.description ? (
           <Descriptions.Item label="Описание" span={2}>
-            {project.description}
+            {group.description}
           </Descriptions.Item>
         ) : null}
       </Descriptions>

@@ -24,7 +24,7 @@ const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edi
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const ScanPage = lazy(async () => ({ default: (await import("./pages/scan/ScanPage")).ScanPage }));
-const ProjectsPage = lazy(async () => ({ default: (await import("./pages/projects/ProjectsPage")).ProjectsPage }));
+const GroupsPage = lazy(async () => ({ default: (await import("./pages/groups/GroupsPage")).GroupsPage }));
 const DowelOrderEdit = lazy(async () => ({ default: (await import("./pages/doweling_orders/edit")).DowelOrderEdit }));
 const DowelOrderShow = lazy(async () => ({ default: (await import("./pages/doweling_orders/show")).DowelOrderShow }));
 const ConfigurationPage = lazy(async () => ({ default: (await import("./pages/configuration")).ConfigurationPage }));
@@ -240,14 +240,14 @@ const ThemedApp = () => {
                     label: "Календарь",
                   },
                 },
-                ...(featureFlags.useBackendProjects
+                ...(featureFlags.useBackendGroups
                   ? [
                       {
-                        name: "projects",
-                        list: "/projects",
+                        name: "groups",
+                        list: "/groups",
                         meta: {
                           idColumnName: "id",
-                          label: "Проекты",
+                          label: "Группы",
                         },
                       },
                     ]
@@ -593,9 +593,9 @@ const ThemedApp = () => {
                   <Route path="/calendar" >
                     <Route index element={<CalendarList />} />
                   </Route>
-                  {featureFlags.useBackendProjects && (
-                    <Route path="/projects">
-                      <Route index element={<ProjectsPage />} />
+                  {featureFlags.useBackendGroups && (
+                    <Route path="/groups">
+                      <Route index element={<GroupsPage />} />
                     </Route>
                   )}
                   {featureFlags.useBackendCut && (
