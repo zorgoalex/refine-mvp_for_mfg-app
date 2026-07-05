@@ -4,10 +4,10 @@ const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/;
 const ENTITY_TYPES = new Set(['order', 'user', 'employee', 'client', 'workshop', 'deadline_instance']);
 const CHUNK_SIZE = 500;
 const DEFAULT_BACKEND_URL = 'https://backend-test.mebelkz.app/api/v1';
-const DEFAULT_USERNAME_ENVS = ['PROJECTS_LIVE_BACKFILL_USERNAME', 'CODEX_PLAYWRIGHT_USERNAME'];
-const DEFAULT_PASSWORD_ENVS = ['PROJECTS_LIVE_BACKFILL_PASSWORD', 'CODEX_PLAYWRIGHT_PASSWORD'];
+const DEFAULT_USERNAME_ENVS = ['GROUPS_LIVE_BACKFILL_USERNAME', 'CODEX_PLAYWRIGHT_USERNAME'];
+const DEFAULT_PASSWORD_ENVS = ['GROUPS_LIVE_BACKFILL_PASSWORD', 'CODEX_PLAYWRIGHT_PASSWORD'];
 
-function parseProjectsLiveBackfillManifest(input) {
+function parseGroupsLiveBackfillManifest(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('Manifest must be an object');
   }
@@ -19,7 +19,7 @@ function parseProjectsLiveBackfillManifest(input) {
 
   const manifest = {
     fixtureKey: requireFixtureKey(input.fixtureKey),
-    projectId: requireProjectId(input.projectId),
+    groupId: requireGroupId(input.groupId),
     entityType: requireEntityType(input.entityType),
     relationType: requireSlug(input.relationType, 'relationType'),
     source,
@@ -29,15 +29,15 @@ function parseProjectsLiveBackfillManifest(input) {
   return manifest;
 }
 
-function buildProjectsLiveBackfillPlan(manifestInput) {
-  const manifest = parseProjectsLiveBackfillManifest(manifestInput);
+function buildGroupsLiveBackfillPlan(manifestInput) {
+  const manifest = parseGroupsLiveBackfillManifest(manifestInput);
   const chunks = [];
   for (let start = 0; start < manifest.items.length; start += CHUNK_SIZE) {
     const chunkNumber = chunks.length + 1;
     const items = manifest.items.slice(start, start + CHUNK_SIZE);
     chunks.push({
       chunkNumber,
-      projectId: manifest.projectId,
+      groupId: manifest.groupId,
       dryRunPayload: buildPayload(manifest, items, 'dry-run', chunkNumber),
       writePayload: buildPayload(manifest, items, 'write', chunkNumber),
     });
@@ -45,7 +45,7 @@ function buildProjectsLiveBackfillPlan(manifestInput) {
 
   return {
     summary: {
-      projectId: manifest.projectId,
+      groupId: manifest.groupId,
       entityType: manifest.entityType,
       itemCount: manifest.items.length,
       chunkCount: chunks.length,
@@ -54,7 +54,7 @@ function buildProjectsLiveBackfillPlan(manifestInput) {
   };
 }
 
-function validateProjectsLiveBackfillDryRunResponse(chunk, response) {
+function validateGroupsLiveBackfillDryRunResponse(chunk, response) {
   if (!response || typeof response !== 'object' || Array.isArray(response)) {
     throw new Error('dry-run response must be an object');
   }
@@ -63,8 +63,8 @@ function validateProjectsLiveBackfillDryRunResponse(chunk, response) {
   }
   const expectedCount = chunk.dryRunPayload.items.length;
   const summary = response.summary ?? {};
-  if (response.projectId !== undefined && response.projectId !== chunk.projectId) {
-    throw new Error('dry-run response projectId does not match the manifest chunk');
+  if (response.groupId !== undefined && response.groupId !== chunk.groupId) {
+    throw new Error('dry-run response groupId does not match the manifest chunk');
   }
   if (summary.proposed !== expectedCount) {
     throw new Error(`dry-run proposed count must be ${expectedCount}`);
@@ -74,7 +74,7 @@ function validateProjectsLiveBackfillDryRunResponse(chunk, response) {
   }
 
   return {
-    projectId: response.projectId,
+    groupId: response.groupId,
     mode: response.mode,
     proposed: summary.proposed,
     skipped: summary.skipped,
@@ -82,50 +82,50 @@ function validateProjectsLiveBackfillDryRunResponse(chunk, response) {
   };
 }
 
-function buildProjectsLiveBackfillProofSql(manifestInput) {
-  const plan = buildProjectsLiveBackfillPlan(manifestInput);
+function buildGroupsLiveBackfillProofSql(manifestInput) {
+  const plan = buildGroupsLiveBackfillPlan(manifestInput);
   const entityIds = plan.chunks.flatMap((chunk) => chunk.writePayload.items.map((item) => item.entityId));
   const firstWritePayload = plan.chunks[0]?.writePayload;
-  const projectId = sqlLiteral(plan.summary.projectId);
+  const groupId = sqlLiteral(plan.summary.groupId);
   const entityType = sqlLiteral(plan.summary.entityType);
   const entityIdList = entityIds.map(sqlLiteral).join(', ');
   const writeIdempotencyKeys = plan.chunks.map((chunk) => sqlLiteral(chunk.writePayload.idempotencyKey)).join(', ');
   const outboxIdempotencyKeys = plan.chunks
-    .map((chunk) => sqlLiteral(`${chunk.writePayload.idempotencyKey}:project_entity_links_changed`))
+    .map((chunk) => sqlLiteral(`${chunk.writePayload.idempotencyKey}:group_entity_links_changed`))
     .join(', ');
 
   return {
     summary: {
-      projectId: plan.summary.projectId,
+      groupId: plan.summary.groupId,
       entityType: plan.summary.entityType,
       itemCount: plan.summary.itemCount,
       chunkCount: plan.summary.chunkCount,
       firstWriteIdempotencyKey: firstWritePayload?.idempotencyKey ?? null,
     },
     queries: {
-      project:
-        `select id, code, name, status, metadata from project_projects where id=${projectId};`,
+      group:
+        `select id, code, name, status, metadata from group_groups where id=${groupId};`,
       links:
-        `select id, project_id, entity_type_code, entity_id_text, relation_type, valid_to, metadata ` +
-        `from project_entity_links where project_id=${projectId} and entity_type_code=${entityType} ` +
+        `select id, group_id, entity_type_code, entity_id_text, relation_type, valid_to, metadata ` +
+        `from group_entity_links where group_id=${groupId} and entity_type_code=${entityType} ` +
         `and entity_id_text in (${entityIdList}) order by entity_id_text;`,
       activeLinkCount:
-        `select count(*) as active_links from project_entity_links where project_id=${projectId} ` +
+        `select count(*) as active_links from group_entity_links where group_id=${groupId} ` +
         `and entity_type_code=${entityType} and entity_id_text in (${entityIdList}) and valid_to is null;`,
       audit:
         `select audit_id, source, entity_type, entity_id, action, created_at from audit_log ` +
-        `where source='projects-batch-link' and entity_id=${projectId} order by created_at desc limit 10;`,
+        `where source='groups-batch-link' and entity_id=${groupId} order by created_at desc limit 10;`,
       outbox:
         `select outbox_event_id, event_type, aggregate_type, aggregate_id, idempotency_key, status, created_at, processed_at ` +
-        `from outbox_events where aggregate_id=${projectId} and idempotency_key in (${outboxIdempotencyKeys}) ` +
+        `from outbox_events where aggregate_id=${groupId} and idempotency_key in (${outboxIdempotencyKeys}) ` +
         `order by created_at desc;`,
       idempotency:
         `select idempotency_key, command_name, entity_type, entity_id, status, created_at, completed_at ` +
         `from command_idempotency_keys where idempotency_key in (${writeIdempotencyKeys}) order by created_at;`,
       privacyScan:
         `with rows as (` +
-        `select metadata_json::text as body from audit_log where source='projects-batch-link' and entity_id=${projectId} ` +
-        `union all select payload_json::text from outbox_events where aggregate_id=${projectId} ` +
+        `select metadata_json::text as body from audit_log where source='groups-batch-link' and entity_id=${groupId} ` +
+        `union all select payload_json::text from outbox_events where aggregate_id=${groupId} ` +
         `and idempotency_key in (${outboxIdempotencyKeys})` +
         `) select count(*) filter (where body ~* '(authorization|bearer|password|access[_-]?token|refresh[_-]?token|cookie)') ` +
         `as suspect_rows, count(*) as scanned_rows from rows;`,
@@ -133,7 +133,7 @@ function buildProjectsLiveBackfillProofSql(manifestInput) {
   };
 }
 
-function parseProjectsLiveBackfillRunArgs(argv) {
+function parseGroupsLiveBackfillRunArgs(argv) {
   const args = Array.isArray(argv) ? [...argv] : [];
   const parsed = {
     manifestPath: undefined,
@@ -187,15 +187,15 @@ function parseProjectsLiveBackfillRunArgs(argv) {
   return parsed;
 }
 
-function resolveProjectsLiveBackfillRunConfig(parsedArgs, env = process.env) {
-  const targetEnv = parsedArgs.targetEnv ?? env.PROJECTS_LIVE_BACKFILL_TARGET_ENV;
-  const approveWrite = parsedArgs.approveWrite || env.PROJECTS_LIVE_BACKFILL_APPROVE_WRITE === 'true';
+function resolveGroupsLiveBackfillRunConfig(parsedArgs, env = process.env) {
+  const targetEnv = parsedArgs.targetEnv ?? env.GROUPS_LIVE_BACKFILL_TARGET_ENV;
+  const approveWrite = parsedArgs.approveWrite || env.GROUPS_LIVE_BACKFILL_APPROVE_WRITE === 'true';
   const username = parsedArgs.usernameEnv
     ? readNamedEnv(env, parsedArgs.usernameEnv, '--username-env')
-    : readFirstEnv(env, DEFAULT_USERNAME_ENVS, 'PROJECTS_LIVE_BACKFILL_USERNAME or CODEX_PLAYWRIGHT_USERNAME');
+    : readFirstEnv(env, DEFAULT_USERNAME_ENVS, 'GROUPS_LIVE_BACKFILL_USERNAME or CODEX_PLAYWRIGHT_USERNAME');
   const password = parsedArgs.passwordEnv
     ? readNamedEnv(env, parsedArgs.passwordEnv, '--password-env')
-    : readFirstEnv(env, DEFAULT_PASSWORD_ENVS, 'PROJECTS_LIVE_BACKFILL_PASSWORD or CODEX_PLAYWRIGHT_PASSWORD');
+    : readFirstEnv(env, DEFAULT_PASSWORD_ENVS, 'GROUPS_LIVE_BACKFILL_PASSWORD or CODEX_PLAYWRIGHT_PASSWORD');
 
   const config = {
     ...parsedArgs,
@@ -206,52 +206,52 @@ function resolveProjectsLiveBackfillRunConfig(parsedArgs, env = process.env) {
     password,
   };
 
-  assertProjectsLiveBackfillRunAllowed(config);
+  assertGroupsLiveBackfillRunAllowed(config);
   return config;
 }
 
-function assertProjectsLiveBackfillRunAllowed(config) {
+function assertGroupsLiveBackfillRunAllowed(config) {
   if (!config.manifestPath) throw new Error('--manifest <path> is required');
   if (!['dry-run', 'write'].includes(config.mode)) throw new Error('--mode must be dry-run or write');
   if (config.targetEnv !== 'backend-test') {
-    throw new Error('PROJECTS_LIVE_BACKFILL_TARGET_ENV=backend-test or --target-env backend-test is required');
+    throw new Error('GROUPS_LIVE_BACKFILL_TARGET_ENV=backend-test or --target-env backend-test is required');
   }
   const backendUrl = new URL(config.backendUrl);
   if (/prod|production|live/i.test(backendUrl.hostname)) {
-    throw new Error('Refusing Projects live backfill runner against prod/production/live backend host');
+    throw new Error('Refusing Groups live backfill runner against prod/production/live backend host');
   }
   const backendHostname = backendUrl.hostname.replace(/^\[(.*)\]$/, '$1');
   const allowedBackendHosts = new Set(['backend-test.mebelkz.app', 'localhost', '127.0.0.1', '::1']);
   if (!allowedBackendHosts.has(backendHostname)) {
-    throw new Error('Refusing Projects live backfill runner against non-backend-test backend host');
+    throw new Error('Refusing Groups live backfill runner against non-backend-test backend host');
   }
   if (config.mode === 'write' && config.approveWrite !== true) {
-    throw new Error('write mode requires --approve-write or PROJECTS_LIVE_BACKFILL_APPROVE_WRITE=true');
+    throw new Error('write mode requires --approve-write or GROUPS_LIVE_BACKFILL_APPROVE_WRITE=true');
   }
-  if (!config.username) throw new Error('Projects live backfill username is required');
-  if (!config.password) throw new Error('Projects live backfill password is required');
+  if (!config.username) throw new Error('Groups live backfill username is required');
+  if (!config.password) throw new Error('Groups live backfill password is required');
 }
 
-async function runProjectsLiveBackfill(configInput) {
+async function runGroupsLiveBackfill(configInput) {
   const config = {
     ...configInput,
     backendUrl: trimTrailingSlash(configInput.backendUrl ?? DEFAULT_BACKEND_URL),
   };
-  assertProjectsLiveBackfillRunAllowed(config);
+  assertGroupsLiveBackfillRunAllowed(config);
 
   const { readFileSync } = require('node:fs');
   const manifest = JSON.parse(readFileSync(config.manifestPath, 'utf8'));
-  const plan = buildProjectsLiveBackfillPlan(manifest);
+  const plan = buildGroupsLiveBackfillPlan(manifest);
   const fetchImpl = config.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== 'function') throw new Error('fetch is not available');
 
-  const token = await loginProjectsLiveBackfill(config, fetchImpl);
+  const token = await loginGroupsLiveBackfill(config, fetchImpl);
   const chunks = [];
 
   for (const chunk of plan.chunks) {
     const payload = config.mode === 'write' ? chunk.writePayload : chunk.dryRunPayload;
-    const response = await postProjectsLiveBackfillChunk(config, fetchImpl, token, chunk, payload);
-    if (config.mode === 'dry-run') validateProjectsLiveBackfillDryRunResponse(chunk, response.body);
+    const response = await postGroupsLiveBackfillChunk(config, fetchImpl, token, chunk, payload);
+    if (config.mode === 'dry-run') validateGroupsLiveBackfillDryRunResponse(chunk, response.body);
     chunks.push({
       chunkNumber: chunk.chunkNumber,
       status: response.status,
@@ -264,14 +264,14 @@ async function runProjectsLiveBackfill(configInput) {
 
   return {
     mode: config.mode,
-    projectId: plan.summary.projectId,
+    groupId: plan.summary.groupId,
     chunkCount: plan.summary.chunkCount,
     itemCount: plan.summary.itemCount,
     chunks,
   };
 }
 
-async function loginProjectsLiveBackfill(config, fetchImpl) {
+async function loginGroupsLiveBackfill(config, fetchImpl) {
   const response = await fetchJson(fetchImpl, `${config.backendUrl}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -284,8 +284,8 @@ async function loginProjectsLiveBackfill(config, fetchImpl) {
   return response.body.accessToken;
 }
 
-async function postProjectsLiveBackfillChunk(config, fetchImpl, token, chunk, payload) {
-  return fetchJson(fetchImpl, `${config.backendUrl}/projects/${chunk.projectId}/batch-link`, {
+async function postGroupsLiveBackfillChunk(config, fetchImpl, token, chunk, payload) {
+  return fetchJson(fetchImpl, `${config.backendUrl}/groups/${chunk.groupId}/batch-link`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${token}`,
@@ -302,7 +302,7 @@ async function fetchJson(fetchImpl, url, options, label) {
     return null;
   });
   if (!response.ok) {
-    throw new Error(`Projects live backfill ${label} failed with HTTP ${response.status}`);
+    throw new Error(`Groups live backfill ${label} failed with HTTP ${response.status}`);
   }
   return { status: response.status, body };
 }
@@ -360,15 +360,15 @@ function buildPayload(manifest, items, mode, chunkNumber) {
 }
 
 function buildIdempotencyKey(manifest, mode, chunkNumber) {
-  const dateToken = manifest.fixtureKey.replace(/^projects-live-backfill-/, '');
+  const dateToken = manifest.fixtureKey.replace(/^groups-live-backfill-/, '');
   const paddedChunk = String(chunkNumber).padStart(3, '0');
-  return `projects-live-backfill-${mode}-${dateToken}-project-${manifest.projectId}-chunk-${paddedChunk}`;
+  return `groups-live-backfill-${mode}-${dateToken}-group-${manifest.groupId}-chunk-${paddedChunk}`;
 }
 
 function requireFixtureKey(value) {
   const fixtureKey = requireSlug(value, 'fixtureKey');
-  if (!fixtureKey.startsWith('projects-live-backfill-')) {
-    throw new Error('fixtureKey must start with projects-live-backfill-');
+  if (!fixtureKey.startsWith('groups-live-backfill-')) {
+    throw new Error('fixtureKey must start with groups-live-backfill-');
   }
   return fixtureKey;
 }
@@ -415,12 +415,12 @@ function requireManualConfidence(value, index) {
   return confidence;
 }
 
-function requireProjectId(value) {
-  const projectId = requireText(value, 'projectId', 36);
-  if (!PROJECT_UUID_PATTERN.test(projectId)) {
-    throw new Error('projectId must be an explicit UUID');
+function requireGroupId(value) {
+  const groupId = requireText(value, 'groupId', 36);
+  if (!PROJECT_UUID_PATTERN.test(groupId)) {
+    throw new Error('groupId must be an explicit UUID');
   }
-  return projectId;
+  return groupId;
 }
 
 function requireEntityType(value) {
@@ -462,12 +462,12 @@ function sqlLiteral(value) {
 }
 
 module.exports = {
-  buildProjectsLiveBackfillProofSql,
-  buildProjectsLiveBackfillPlan,
-  parseProjectsLiveBackfillRunArgs,
-  parseProjectsLiveBackfillManifest,
-  resolveProjectsLiveBackfillRunConfig,
-  assertProjectsLiveBackfillRunAllowed,
-  runProjectsLiveBackfill,
-  validateProjectsLiveBackfillDryRunResponse,
+  buildGroupsLiveBackfillProofSql,
+  buildGroupsLiveBackfillPlan,
+  parseGroupsLiveBackfillRunArgs,
+  parseGroupsLiveBackfillManifest,
+  resolveGroupsLiveBackfillRunConfig,
+  assertGroupsLiveBackfillRunAllowed,
+  runGroupsLiveBackfill,
+  validateGroupsLiveBackfillDryRunResponse,
 };

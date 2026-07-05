@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import { OrderGroupLinkService } from './order-group-link.service';
-import type { OrderProjectLinkRepositoryPort } from './order-project-link.types';
+import type { OrderGroupLinkRepositoryPort } from './order-project-link.types';
 
 describe('OrderGroupLinkService', () => {
   it('notifies P8 order-link facts after a changed replace when gate is enabled', async () => {
@@ -90,7 +90,7 @@ function fakeLinks(input: {
   beforeProjectIds?: string[];
   afterProjectIds?: string[];
   p8NotificationFacts?: Array<{ orderId: string; groupId: string; action: 'added' | 'removed' }>;
-} = {}): OrderProjectLinkRepositoryPort {
+} = {}): OrderGroupLinkRepositoryPort {
   return {
     async getOrderProjects(command) {
       return {

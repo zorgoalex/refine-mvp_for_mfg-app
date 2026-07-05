@@ -2,22 +2,22 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import manifestLib from './projects-live-backfill-manifest-lib.js';
+import manifestLib from './groups-live-backfill-manifest-lib.js';
 
 const {
-  parseProjectsLiveBackfillRunArgs,
-  resolveProjectsLiveBackfillRunConfig,
-  assertProjectsLiveBackfillRunAllowed,
-  runProjectsLiveBackfill,
+  parseGroupsLiveBackfillRunArgs,
+  resolveGroupsLiveBackfillRunConfig,
+  assertGroupsLiveBackfillRunAllowed,
+  runGroupsLiveBackfill,
 } = manifestLib;
 
-describe('projects live backfill runner', () => {
+describe('groups live backfill runner', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
   it('parses required runner args and env-backed write approval', () => {
-    const parsed = parseProjectsLiveBackfillRunArgs([
+    const parsed = parseGroupsLiveBackfillRunArgs([
       '--manifest',
       '/tmp/manifest.json',
       '--mode',
@@ -40,8 +40,8 @@ describe('projects live backfill runner', () => {
       passwordEnv: 'BACKFILL_PASS',
     });
 
-    expect(resolveProjectsLiveBackfillRunConfig(parsed, {
-      PROJECTS_LIVE_BACKFILL_APPROVE_WRITE: 'true',
+    expect(resolveGroupsLiveBackfillRunConfig(parsed, {
+      GROUPS_LIVE_BACKFILL_APPROVE_WRITE: 'true',
       BACKFILL_USER: 'manager',
       BACKFILL_PASS: 'secret',
     })).toMatchObject({
@@ -52,7 +52,7 @@ describe('projects live backfill runner', () => {
   });
 
   it('covers guarded refusal cases before a runner is allowed', () => {
-    expect(() => assertProjectsLiveBackfillRunAllowed({
+    expect(() => assertGroupsLiveBackfillRunAllowed({
       manifestPath: '/tmp/manifest.json',
       mode: 'dry-run',
       backendUrl: 'https://backend-production.mebelkz.app/api/v1',
@@ -62,7 +62,7 @@ describe('projects live backfill runner', () => {
       password: 'secret',
     })).toThrow(/prod|production|live/);
 
-    expect(() => assertProjectsLiveBackfillRunAllowed({
+    expect(() => assertGroupsLiveBackfillRunAllowed({
       manifestPath: '/tmp/manifest.json',
       mode: 'dry-run',
       backendUrl: 'https://example.com/api/v1',
@@ -72,7 +72,7 @@ describe('projects live backfill runner', () => {
       password: 'secret',
     })).toThrow(/non-backend-test backend host/);
 
-    expect(() => assertProjectsLiveBackfillRunAllowed({
+    expect(() => assertGroupsLiveBackfillRunAllowed({
       manifestPath: '/tmp/manifest.json',
       mode: 'dry-run',
       backendUrl: 'https://backend-test.mebelkz.app/api/v1',
@@ -82,7 +82,7 @@ describe('projects live backfill runner', () => {
       password: 'secret',
     })).toThrow(/backend-test/);
 
-    expect(() => assertProjectsLiveBackfillRunAllowed({
+    expect(() => assertGroupsLiveBackfillRunAllowed({
       manifestPath: '/tmp/manifest.json',
       mode: 'write',
       backendUrl: 'https://backend-test.mebelkz.app/api/v1',
@@ -92,7 +92,7 @@ describe('projects live backfill runner', () => {
       password: 'secret',
     })).toThrow(/approve-write/);
 
-    expect(() => assertProjectsLiveBackfillRunAllowed({
+    expect(() => assertGroupsLiveBackfillRunAllowed({
       manifestPath: '/tmp/manifest.json',
       mode: 'dry-run',
       backendUrl: 'https://backend-test.mebelkz.app/api/v1',
@@ -102,7 +102,7 @@ describe('projects live backfill runner', () => {
       password: 'secret',
     })).not.toThrow();
 
-    expect(() => assertProjectsLiveBackfillRunAllowed({
+    expect(() => assertGroupsLiveBackfillRunAllowed({
       manifestPath: '/tmp/manifest.json',
       mode: 'dry-run',
       backendUrl: 'http://localhost:3000/api/v1',
@@ -117,7 +117,7 @@ describe('projects live backfill runner', () => {
     const manifestPath = writeManifest(validManifest());
     const fetchMock = vi.fn();
 
-    await expect(runProjectsLiveBackfill({
+    await expect(runGroupsLiveBackfill({
       manifestPath,
       mode: 'dry-run',
       backendUrl: 'https://example.com/api/v1',
@@ -137,7 +137,7 @@ describe('projects live backfill runner', () => {
       .mockResolvedValueOnce(jsonResponse(200, { accessToken: 'token-redacted' }))
       .mockResolvedValueOnce(jsonResponse(200, dryRunResponse()));
 
-    const summary = await runProjectsLiveBackfill({
+    const summary = await runGroupsLiveBackfill({
       manifestPath,
       mode: 'dry-run',
       backendUrl: 'https://backend-test.mebelkz.app/api/v1',
@@ -152,7 +152,7 @@ describe('projects live backfill runner', () => {
       method: 'POST',
       body: JSON.stringify({ username: 'manager', password: 'secret' }),
     }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://backend-test.mebelkz.app/api/v1/projects/11111111-1111-4111-8111-111111111111/batch-link', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://backend-test.mebelkz.app/api/v1/groups/11111111-1111-4111-8111-111111111111/batch-link', expect.objectContaining({
       method: 'POST',
       headers: expect.objectContaining({ authorization: 'Bearer token-redacted' }),
     }));
@@ -160,7 +160,7 @@ describe('projects live backfill runner', () => {
     expect(JSON.stringify(summary)).not.toContain('token-redacted');
     expect(summary).toEqual({
       mode: 'dry-run',
-      projectId: '11111111-1111-4111-8111-111111111111',
+      groupId: '11111111-1111-4111-8111-111111111111',
       chunkCount: 1,
       itemCount: 1,
       chunks: [
@@ -189,7 +189,7 @@ describe('projects live backfill runner', () => {
         outboxEventId: 'outbox-1',
       }));
 
-    const summary = await runProjectsLiveBackfill({
+    const summary = await runGroupsLiveBackfill({
       manifestPath,
       mode: 'write',
       backendUrl: 'https://backend-test.mebelkz.app/api/v1/',
@@ -220,7 +220,7 @@ describe('projects live backfill runner', () => {
     });
     const fetchMock = vi.fn();
 
-    await expect(runProjectsLiveBackfill({
+    await expect(runGroupsLiveBackfill({
       manifestPath,
       mode: 'dry-run',
       backendUrl: 'https://backend-test.mebelkz.app/api/v1',
@@ -246,7 +246,7 @@ function jsonResponse(status, body) {
 
 function dryRunResponse() {
   return {
-    projectId: '11111111-1111-4111-8111-111111111111',
+    groupId: '11111111-1111-4111-8111-111111111111',
     mode: 'dry-run',
     summary: { proposed: 1, skipped: 0, conflicts: 0, sampledEvidenceRows: 1 },
     proposals: [{ entityId: '11195' }],
@@ -260,7 +260,7 @@ function dryRunResponse() {
 }
 
 function writeManifest(manifest) {
-  const dir = mkdtempSync(join(tmpdir(), 'projects-live-backfill-run-'));
+  const dir = mkdtempSync(join(tmpdir(), 'groups-live-backfill-run-'));
   const manifestPath = join(dir, 'manifest.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, 'utf8');
   return manifestPath;
@@ -268,8 +268,8 @@ function writeManifest(manifest) {
 
 function validManifest() {
   return {
-    fixtureKey: 'projects-live-backfill-2026-06-15',
-    projectId: '11111111-1111-4111-8111-111111111111',
+    fixtureKey: 'groups-live-backfill-2026-06-15',
+    groupId: '11111111-1111-4111-8111-111111111111',
     entityType: 'order',
     relationType: 'manual_backfill',
     source: {
@@ -279,7 +279,7 @@ function validManifest() {
     items: [
       {
         entityId: '11195',
-        reason: 'operator selected order for project backfill',
+        reason: 'operator selected order for group backfill',
         confidence: 'manual',
         sourceRow: 'manifest-row-1',
       },

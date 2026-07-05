@@ -11,7 +11,7 @@ const ALLOWLIST: Record<string, number> = {
   // persist ip_address/user_agent like the other auth writers.
   'src/modules/auth/workos/pg-user-identity-repository.ts': 3,
   // DEFERRED Variant-B; remove each when its module is migrated.
-  'src/modules/orders/adapters/pg-order-project-link-repository.ts': 1,
+  'src/modules/orders/adapters/pg-order-group-link-repository.ts': 1,
   'src/modules/orders/adapters/pg-order-transaction-manager.ts': 1,
   'src/modules/deadlines/adapters/pg-deadline-repository.ts': 2,
 };

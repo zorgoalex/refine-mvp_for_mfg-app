@@ -3,43 +3,43 @@ import bcrypt from 'bcryptjs';
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 
-const canaryEnabled = process.env.PROJECTS_BATCH_LINK_WRITE_STAGE_CANARY === 'true';
-const fixtureKey = process.env.PROJECTS_BATCH_LINK_WRITE_FIXTURE_KEY?.trim() ?? '';
-const targetEnv = process.env.PROJECTS_BATCH_LINK_WRITE_TARGET_ENV?.trim() ?? '';
+const canaryEnabled = process.env.GROUPS_BATCH_LINK_WRITE_STAGE_CANARY === 'true';
+const fixtureKey = process.env.GROUPS_BATCH_LINK_WRITE_FIXTURE_KEY?.trim() ?? '';
+const targetEnv = process.env.GROUPS_BATCH_LINK_WRITE_TARGET_ENV?.trim() ?? '';
 const backendApiUrl = trimTrailingSlash(
-  process.env.PROJECTS_BATCH_LINK_WRITE_BACKEND_API_URL ?? 'https://backend-test.mebelkz.app/api/v1',
+  process.env.GROUPS_BATCH_LINK_WRITE_BACKEND_API_URL ?? 'https://backend-test.mebelkz.app/api/v1',
 );
 const postgresContainer =
-  process.env.PROJECTS_BATCH_LINK_WRITE_POSTGRES_CONTAINER ?? 'erp_test-postgresdb-1';
-const backendContainer = process.env.PROJECTS_BATCH_LINK_WRITE_BACKEND_CONTAINER?.trim() ?? '';
-const fixtureOrderId = readNumberEnv('PROJECTS_BATCH_LINK_WRITE_FIXTURE_ORDER_ID');
-const fixtureOrderName = process.env.PROJECTS_BATCH_LINK_WRITE_FIXTURE_ORDER_NAME?.trim() ?? '';
+  process.env.GROUPS_BATCH_LINK_WRITE_POSTGRES_CONTAINER ?? 'erp_test-postgresdb-1';
+const backendContainer = process.env.GROUPS_BATCH_LINK_WRITE_BACKEND_CONTAINER?.trim() ?? '';
+const fixtureOrderId = readNumberEnv('GROUPS_BATCH_LINK_WRITE_FIXTURE_ORDER_ID');
+const fixtureOrderName = process.env.GROUPS_BATCH_LINK_WRITE_FIXTURE_ORDER_NAME?.trim() ?? '';
 
 const missingPrerequisites = [
-  fixtureKey ? null : 'PROJECTS_BATCH_LINK_WRITE_FIXTURE_KEY',
-  targetEnv === 'backend-test' ? null : 'PROJECTS_BATCH_LINK_WRITE_TARGET_ENV=backend-test',
-  process.env.PROJECTS_BATCH_LINK_WRITE_RESTORE === 'true'
+  fixtureKey ? null : 'GROUPS_BATCH_LINK_WRITE_FIXTURE_KEY',
+  targetEnv === 'backend-test' ? null : 'GROUPS_BATCH_LINK_WRITE_TARGET_ENV=backend-test',
+  process.env.GROUPS_BATCH_LINK_WRITE_RESTORE === 'true'
     ? null
-    : 'PROJECTS_BATCH_LINK_WRITE_RESTORE=true',
-  backendApiUrl ? null : 'PROJECTS_BATCH_LINK_WRITE_BACKEND_API_URL',
-  postgresContainer ? null : 'PROJECTS_BATCH_LINK_WRITE_POSTGRES_CONTAINER',
-  backendContainer ? null : 'PROJECTS_BATCH_LINK_WRITE_BACKEND_CONTAINER',
-  fixtureOrderId ? null : 'PROJECTS_BATCH_LINK_WRITE_FIXTURE_ORDER_ID',
-  fixtureOrderName ? null : 'PROJECTS_BATCH_LINK_WRITE_FIXTURE_ORDER_NAME',
+    : 'GROUPS_BATCH_LINK_WRITE_RESTORE=true',
+  backendApiUrl ? null : 'GROUPS_BATCH_LINK_WRITE_BACKEND_API_URL',
+  postgresContainer ? null : 'GROUPS_BATCH_LINK_WRITE_POSTGRES_CONTAINER',
+  backendContainer ? null : 'GROUPS_BATCH_LINK_WRITE_BACKEND_CONTAINER',
+  fixtureOrderId ? null : 'GROUPS_BATCH_LINK_WRITE_FIXTURE_ORDER_ID',
+  fixtureOrderName ? null : 'GROUPS_BATCH_LINK_WRITE_FIXTURE_ORDER_NAME',
   dockerContainerExists(postgresContainer) ? null : `docker container ${postgresContainer}`,
   backendContainer && dockerContainerExists(backendContainer)
     ? null
     : `docker container ${backendContainer || '<backend-container>'}`,
 ].filter((value): value is string => Boolean(value));
 
-test.describe('Projects batch-link write mode stage canary', () => {
+test.describe('Groups batch-link write mode stage canary', () => {
   test.skip(
     !canaryEnabled,
-    'Set PROJECTS_BATCH_LINK_WRITE_STAGE_CANARY=true to enable this opt-in stage canary.',
+    'Set GROUPS_BATCH_LINK_WRITE_STAGE_CANARY=true to enable this opt-in stage canary.',
   );
   test.skip(
     canaryEnabled && missingPrerequisites.length > 0,
-    `Missing Projects batch-link write canary prerequisites: ${missingPrerequisites.join(', ')}`,
+    `Missing Groups batch-link write canary prerequisites: ${missingPrerequisites.join(', ')}`,
   );
   test.setTimeout(240000);
 
@@ -49,7 +49,7 @@ test.describe('Projects batch-link write mode stage canary', () => {
   test.beforeAll(() => {
     requireCanaryEnv();
     runtimeFlags = captureRuntimeFlags();
-    requireProjectsBatchWriteRuntime(runtimeFlags);
+    requireGroupsBatchWriteRuntime(runtimeFlags);
     assertMigration013Applied();
     restoreFixtureRows();
     expectRestored(loadRestoreProof(), 'preflight restore');
@@ -61,7 +61,7 @@ test.describe('Projects batch-link write mode stage canary', () => {
   test.afterAll(() => {
     let restoreError: unknown;
     try {
-      if (process.env.PROJECTS_BATCH_LINK_WRITE_RESTORE === 'true') {
+      if (process.env.GROUPS_BATCH_LINK_WRITE_RESTORE === 'true') {
         restoreFixtureRows();
         expectRestored(loadRestoreProof(), 'afterAll restore');
       }
@@ -83,34 +83,34 @@ test.describe('Projects batch-link write mode stage canary', () => {
   }) => {
     const fixture = discoverFixture();
     const runId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
-    const admin = createSmokeUser(`e2e_projects_batch_write_admin_${runId}`, 1);
+    const admin = createSmokeUser(`e2e_groups_batch_write_admin_${runId}`, 1);
     userIds = [admin.userId];
 
     const token = await loginForApiToken(request, admin.username, admin.password);
-    const project = await createProject(request, token, runId);
+    const group = await createGroup(request, token, runId);
     const idempotencyKey = `${fixtureKey}:write:${runId}`;
     const dryRunPayload = batchPayload('dry-run', idempotencyKey, fixture);
 
-    const dryRun = await postJson<ProjectBatchLinkResponse>(
+    const dryRun = await postJson<GroupBatchLinkResponse>(
       request,
-      `/projects/${project.id}/batch-link`,
+      `/groups/${group.id}/batch-link`,
       token,
       dryRunPayload,
     );
     expect(dryRun.mode).toBe('dry-run');
     expect(dryRun.writeEnabled).toBe(false);
     expect(dryRun.summary.proposed).toBe(1);
-    expect(loadProjectProof(project.id, idempotencyKey)).toMatchObject({
-      projectEntityLinks: 0,
+    expect(loadGroupProof(group.id, idempotencyKey)).toMatchObject({
+      groupEntityLinks: 0,
       commandIdempotencyKeys: 0,
       auditLogRows: 0,
       outboxEvents: 0,
     });
 
     const writePayload = batchPayload('write', idempotencyKey, fixture);
-    const created = await postJson<ProjectBatchLinkResponse>(
+    const created = await postJson<GroupBatchLinkResponse>(
       request,
-      `/projects/${project.id}/batch-link`,
+      `/groups/${group.id}/batch-link`,
       token,
       writePayload,
     );
@@ -123,16 +123,16 @@ test.describe('Projects batch-link write mode stage canary', () => {
     expect(created.outboxEventId).toBeTruthy();
     expect(created.requestId).toBeTruthy();
 
-    const replay = await postJson<ProjectBatchLinkResponse>(
+    const replay = await postJson<GroupBatchLinkResponse>(
       request,
-      `/projects/${project.id}/batch-link`,
+      `/groups/${group.id}/batch-link`,
       token,
       writePayload,
     );
     expect(stripVolatileResponseFields(replay)).toEqual(stripVolatileResponseFields(created));
 
     await expectStatus(
-      request.post(`${backendApiUrl}/projects/${project.id}/batch-link`, {
+      request.post(`${backendApiUrl}/groups/${group.id}/batch-link`, {
         headers: authHeaders(token),
         data: batchPayload('write', idempotencyKey, {
           ...fixture,
@@ -144,9 +144,9 @@ test.describe('Projects batch-link write mode stage canary', () => {
     );
 
     const existingPayload = batchPayload('write', `${fixtureKey}:existing:${runId}`, fixture);
-    const existing = await postJson<ProjectBatchLinkResponse>(
+    const existing = await postJson<GroupBatchLinkResponse>(
       request,
-      `/projects/${project.id}/batch-link`,
+      `/groups/${group.id}/batch-link`,
       token,
       existingPayload,
     );
@@ -156,9 +156,9 @@ test.describe('Projects batch-link write mode stage canary', () => {
     expect(existing.auditId ?? null).toBeNull();
     expect(existing.outboxEventId ?? null).toBeNull();
 
-    const proofBeforeRestore = loadProjectProof(project.id, idempotencyKey);
+    const proofBeforeRestore = loadGroupProof(group.id, idempotencyKey);
     expect(proofBeforeRestore).toMatchObject({
-      projectEntityLinks: 1,
+      groupEntityLinks: 1,
       commandIdempotencyKeys: 2,
       auditLogRows: 1,
       outboxEvents: 1,
@@ -167,8 +167,8 @@ test.describe('Projects batch-link write mode stage canary', () => {
     expect(proofBeforeRestore.outboxRequestId).toBe(created.requestId);
     expect(proofBeforeRestore.auditFixtureKey).toBe(fixtureKey);
     expect(proofBeforeRestore.auditBatchSourceType).toBe('operator_csv');
-    expect(proofBeforeRestore.outboxSource).toBe('projects-batch-link');
-    expect(proofBeforeRestore.outboxIdempotencyKey).toBe(`${idempotencyKey}:project_entity_links_changed`);
+    expect(proofBeforeRestore.outboxSource).toBe('groups-batch-link');
+    expect(proofBeforeRestore.outboxIdempotencyKey).toBe(`${idempotencyKey}:group_entity_links_changed`);
 
     restoreFixtureRows();
     expectRestored(loadRestoreProof(), 'explicit restore');
@@ -177,23 +177,23 @@ test.describe('Projects batch-link write mode stage canary', () => {
 });
 
 function requireCanaryEnv() {
-  if (process.env.PROJECTS_BATCH_LINK_WRITE_STAGE_CANARY !== 'true') {
-    throw new Error('PROJECTS_BATCH_LINK_WRITE_STAGE_CANARY=true is required');
+  if (process.env.GROUPS_BATCH_LINK_WRITE_STAGE_CANARY !== 'true') {
+    throw new Error('GROUPS_BATCH_LINK_WRITE_STAGE_CANARY=true is required');
   }
   if (!fixtureKey) {
-    throw new Error('PROJECTS_BATCH_LINK_WRITE_FIXTURE_KEY is required');
+    throw new Error('GROUPS_BATCH_LINK_WRITE_FIXTURE_KEY is required');
   }
   if (!fixtureOrderId) {
-    throw new Error('PROJECTS_BATCH_LINK_WRITE_FIXTURE_ORDER_ID must be a positive integer');
+    throw new Error('GROUPS_BATCH_LINK_WRITE_FIXTURE_ORDER_ID must be a positive integer');
   }
   if (!fixtureOrderName) {
-    throw new Error('PROJECTS_BATCH_LINK_WRITE_FIXTURE_ORDER_NAME is required');
+    throw new Error('GROUPS_BATCH_LINK_WRITE_FIXTURE_ORDER_NAME is required');
   }
-  if (process.env.PROJECTS_BATCH_LINK_WRITE_RESTORE !== 'true') {
-    throw new Error('PROJECTS_BATCH_LINK_WRITE_RESTORE=true is required');
+  if (process.env.GROUPS_BATCH_LINK_WRITE_RESTORE !== 'true') {
+    throw new Error('GROUPS_BATCH_LINK_WRITE_RESTORE=true is required');
   }
   if (targetEnv !== 'backend-test') {
-    throw new Error('PROJECTS_BATCH_LINK_WRITE_TARGET_ENV=backend-test is required');
+    throw new Error('GROUPS_BATCH_LINK_WRITE_TARGET_ENV=backend-test is required');
   }
   assertTestTarget(backendApiUrl, postgresContainer);
 }
@@ -201,10 +201,10 @@ function requireCanaryEnv() {
 function assertTestTarget(backend: string, postgres: string) {
   const combined = `${backend} ${postgres} ${backendContainer} ${targetEnv}`;
   if (/prod|production|live/i.test(combined)) {
-    throw new Error('Refusing to run Projects batch-link write canary against prod/live target');
+    throw new Error('Refusing to run Groups batch-link write canary against prod/live target');
   }
   const parsedBackend = new URL(backend);
-  expect(parsedBackend.hostname, 'Projects batch-link write canary must target backend-test').toBe(
+  expect(parsedBackend.hostname, 'Groups batch-link write canary must target backend-test').toBe(
     'backend-test.mebelkz.app',
   );
   expect(parsedBackend.pathname.replace(/\/+$/, ''), 'Backend API path must be /api/v1').toBe(
@@ -225,38 +225,38 @@ function captureRuntimeFlags(): RuntimeFlagSnapshot {
   }));
   return {
     source: 'container-env',
-    projectsEnabled: envMap.get('BACKEND_ENABLE_PROJECTS') === 'true',
-    projectsReadOnly: envMap.get('BACKEND_PROJECTS_READ_ONLY') !== 'false',
-    projectsBatchLinkWriteEnabled: envMap.get('BACKEND_ENABLE_PROJECTS_BATCH_LINK_WRITE') === 'true',
+    groupsEnabled: envMap.get('BACKEND_ENABLE_GROUPS') === 'true',
+    groupsReadOnly: envMap.get('BACKEND_GROUPS_READ_ONLY') !== 'false',
+    groupsBatchLinkWriteEnabled: envMap.get('BACKEND_ENABLE_GROUPS_BATCH_LINK_WRITE') === 'true',
   };
 }
 
-function requireProjectsBatchWriteRuntime(flags: RuntimeFlagSnapshot) {
-  if (!flags.projectsEnabled || flags.projectsReadOnly || !flags.projectsBatchLinkWriteEnabled) {
+function requireGroupsBatchWriteRuntime(flags: RuntimeFlagSnapshot) {
+  if (!flags.groupsEnabled || flags.groupsReadOnly || !flags.groupsBatchLinkWriteEnabled) {
     throw new Error(
-      'Projects batch-link write canary requires BACKEND_ENABLE_PROJECTS=true, BACKEND_PROJECTS_READ_ONLY=false, and BACKEND_ENABLE_PROJECTS_BATCH_LINK_WRITE=true. This spec does not mutate runtime flags.',
+      'Groups batch-link write canary requires BACKEND_ENABLE_GROUPS=true, BACKEND_GROUPS_READ_ONLY=false, and BACKEND_ENABLE_GROUPS_BATCH_LINK_WRITE=true. This spec does not mutate runtime flags.',
     );
   }
 }
 
 function expectRuntimeFlagsUnchanged(before: RuntimeFlagSnapshot) {
   const after = captureRuntimeFlags();
-  expect(after.projectsEnabled).toBe(before.projectsEnabled);
-  expect(after.projectsReadOnly).toBe(before.projectsReadOnly);
-  expect(after.projectsBatchLinkWriteEnabled).toBe(before.projectsBatchLinkWriteEnabled);
+  expect(after.groupsEnabled).toBe(before.groupsEnabled);
+  expect(after.groupsReadOnly).toBe(before.groupsReadOnly);
+  expect(after.groupsBatchLinkWriteEnabled).toBe(before.groupsBatchLinkWriteEnabled);
 }
 
 function assertMigration013Applied() {
   const snapshot = psqlJson<MigrationPrecondition>(`
     SELECT json_build_object(
-      'entityTypes', to_regclass('public.project_entity_types') IS NOT NULL,
-      'entityLinks', to_regclass('public.project_entity_links') IS NOT NULL,
-      'projects', to_regclass('public.project_projects') IS NOT NULL
+      'entityTypes', to_regclass('public.group_entity_types') IS NOT NULL,
+      'entityLinks', to_regclass('public.group_entity_links') IS NOT NULL,
+      'groups', to_regclass('public.group_groups') IS NOT NULL
     )::text;
   `);
   expect(snapshot.entityTypes).toBe(true);
   expect(snapshot.entityLinks).toBe(true);
-  expect(snapshot.projects).toBe(true);
+  expect(snapshot.groups).toBe(true);
 }
 
 function discoverFixture(): FixturePreflight {
@@ -275,16 +275,16 @@ function discoverFixture(): FixturePreflight {
   return found;
 }
 
-async function createProject(
+async function createGroup(
   request: APIRequestContext,
   token: string,
   runId: string,
-): Promise<ProjectDto> {
-  const response = await request.post(`${backendApiUrl}/projects`, {
+): Promise<GroupDto> {
+  const response = await request.post(`${backendApiUrl}/groups`, {
     headers: authHeaders(token),
     data: {
       code: `pbw_${runId}`,
-      name: `Projects batch-link write canary ${runId}`,
+      name: `Groups batch-link write canary ${runId}`,
       status: 'active',
       ownerUserId: null,
       metadata: { fixtureKey, runId },
@@ -292,15 +292,15 @@ async function createProject(
   });
   await expectOk(response);
   const body = await response.json();
-  expect(body.project?.id).toBeTruthy();
-  return body.project as ProjectDto;
+  expect(body.group?.id).toBeTruthy();
+  return body.group as GroupDto;
 }
 
 function batchPayload(
   mode: 'dry-run' | 'write',
   idempotencyKey: string,
   fixture: FixturePreflight,
-): ProjectBatchLinkRequest {
+): GroupBatchLinkRequest {
   return {
     mode,
     ...(mode === 'write' ? { writeIntent: 'explicit-selected-ids' as const } : {}),
@@ -377,7 +377,7 @@ function createSmokeUser(username: string, roleId: number): SmokeUser {
           '${sqlQuote(email)}',
           '${sqlQuote(passwordHash)}',
           ${roleId},
-          'E2E Projects Batch Link Write Canary',
+          'E2E Groups Batch Link Write Canary',
           true
         )
         RETURNING user_id
@@ -403,48 +403,48 @@ function restoreFixtureRows() {
   psql(`
     DO $$
     DECLARE
-      fixture_project_ids uuid[];
+      fixture_group_ids uuid[];
     BEGIN
       SELECT COALESCE(array_agg(id), ARRAY[]::uuid[])
-      INTO fixture_project_ids
-      FROM public.project_projects
+      INTO fixture_group_ids
+      FROM public.group_groups
       WHERE metadata->>'fixtureKey' = '${sqlQuote(fixtureKey)}';
 
       DELETE FROM public.notifications
       WHERE idempotency_key LIKE '${sqlQuote(fixtureKey)}:%';
       DELETE FROM public.outbox_events
       WHERE idempotency_key LIKE '${sqlQuote(fixtureKey)}:%'
-         OR aggregate_id = ANY(ARRAY(SELECT unnest(fixture_project_ids)::text))
-         OR payload_json->>'projectId' = ANY(ARRAY(SELECT unnest(fixture_project_ids)::text));
+         OR aggregate_id = ANY(ARRAY(SELECT unnest(fixture_group_ids)::text))
+         OR payload_json->>'groupId' = ANY(ARRAY(SELECT unnest(fixture_group_ids)::text));
       DELETE FROM public.audit_log
       WHERE request_id LIKE '${sqlQuote(fixtureKey)}:%'
          OR metadata_json->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
-         OR entity_id = ANY(ARRAY(SELECT unnest(fixture_project_ids)::text));
+         OR entity_id = ANY(ARRAY(SELECT unnest(fixture_group_ids)::text));
       DELETE FROM public.command_idempotency_keys
       WHERE idempotency_key LIKE '${sqlQuote(fixtureKey)}:%';
-      DELETE FROM public.project_entity_links
-      WHERE project_id = ANY(fixture_project_ids);
-      DELETE FROM public.project_members
-      WHERE project_id = ANY(fixture_project_ids);
-      DELETE FROM public.project_projects
-      WHERE id = ANY(fixture_project_ids);
+      DELETE FROM public.group_entity_links
+      WHERE group_id = ANY(fixture_group_ids);
+      DELETE FROM public.group_members
+      WHERE group_id = ANY(fixture_group_ids);
+      DELETE FROM public.group_groups
+      WHERE id = ANY(fixture_group_ids);
     END $$;
   `);
 }
 
 function loadRestoreProof(): RestoreProof {
   return psqlJson<RestoreProof>(`
-    WITH fixture_projects AS (
+    WITH fixture_groups AS (
       SELECT id
-      FROM public.project_projects
+      FROM public.group_groups
       WHERE metadata->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
     )
     SELECT json_build_object(
-      'projectRows', (SELECT count(*)::int FROM fixture_projects),
-      'projectEntityLinks', (
+      'groupRows', (SELECT count(*)::int FROM fixture_groups),
+      'groupEntityLinks', (
         SELECT count(*)::int
-        FROM public.project_entity_links
-        WHERE project_id IN (SELECT id FROM fixture_projects)
+        FROM public.group_entity_links
+        WHERE group_id IN (SELECT id FROM fixture_groups)
       ),
       'commandIdempotencyKeys', (
         SELECT count(*)::int
@@ -455,12 +455,12 @@ function loadRestoreProof(): RestoreProof {
         SELECT count(*)::int
         FROM public.audit_log
         WHERE metadata_json->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
-           OR entity_id IN (SELECT id::text FROM fixture_projects)
+           OR entity_id IN (SELECT id::text FROM fixture_groups)
       ),
       'outboxEvents', (
         SELECT count(*)::int
         FROM public.outbox_events
-        WHERE aggregate_id IN (SELECT id::text FROM fixture_projects)
+        WHERE aggregate_id IN (SELECT id::text FROM fixture_groups)
            OR idempotency_key LIKE '${sqlQuote(fixtureKey)}:%'
       ),
       'notifications', (
@@ -472,13 +472,13 @@ function loadRestoreProof(): RestoreProof {
   `);
 }
 
-function loadProjectProof(projectId: string, idempotencyKey: string): ProjectProof {
-  return psqlJson<ProjectProof>(`
+function loadGroupProof(groupId: string, idempotencyKey: string): GroupProof {
+  return psqlJson<GroupProof>(`
     SELECT json_build_object(
-      'projectEntityLinks', (
+      'groupEntityLinks', (
         SELECT count(*)::int
-        FROM public.project_entity_links
-        WHERE project_id = '${sqlQuote(projectId)}'::uuid
+        FROM public.group_entity_links
+        WHERE group_id = '${sqlQuote(groupId)}'::uuid
       ),
       'commandIdempotencyKeys', (
         SELECT count(*)::int
@@ -488,8 +488,8 @@ function loadProjectProof(projectId: string, idempotencyKey: string): ProjectPro
       'auditLogRows', (
         SELECT count(*)::int
         FROM public.audit_log
-        WHERE entity_type = 'project'
-          AND entity_id = '${sqlQuote(projectId)}'
+        WHERE entity_type = 'group'
+          AND entity_id = '${sqlQuote(groupId)}'
           AND metadata_json->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
       ),
       'outboxEvents', (
@@ -500,8 +500,8 @@ function loadProjectProof(projectId: string, idempotencyKey: string): ProjectPro
       'auditRequestId', (
         SELECT request_id
         FROM public.audit_log
-        WHERE entity_type = 'project'
-          AND entity_id = '${sqlQuote(projectId)}'
+        WHERE entity_type = 'group'
+          AND entity_id = '${sqlQuote(groupId)}'
           AND metadata_json->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
         ORDER BY created_at DESC
         LIMIT 1
@@ -509,8 +509,8 @@ function loadProjectProof(projectId: string, idempotencyKey: string): ProjectPro
       'auditFixtureKey', (
         SELECT metadata_json->>'fixtureKey'
         FROM public.audit_log
-        WHERE entity_type = 'project'
-          AND entity_id = '${sqlQuote(projectId)}'
+        WHERE entity_type = 'group'
+          AND entity_id = '${sqlQuote(groupId)}'
           AND metadata_json->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
         ORDER BY created_at DESC
         LIMIT 1
@@ -518,8 +518,8 @@ function loadProjectProof(projectId: string, idempotencyKey: string): ProjectPro
       'auditBatchSourceType', (
         SELECT metadata_json->>'batchSourceType'
         FROM public.audit_log
-        WHERE entity_type = 'project'
-          AND entity_id = '${sqlQuote(projectId)}'
+        WHERE entity_type = 'group'
+          AND entity_id = '${sqlQuote(groupId)}'
           AND metadata_json->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
         ORDER BY created_at DESC
         LIMIT 1
@@ -527,19 +527,19 @@ function loadProjectProof(projectId: string, idempotencyKey: string): ProjectPro
       'outboxRequestId', (
         SELECT payload_json->>'requestId'
         FROM public.outbox_events
-        WHERE idempotency_key = '${sqlQuote(idempotencyKey)}:project_entity_links_changed'
+        WHERE idempotency_key = '${sqlQuote(idempotencyKey)}:group_entity_links_changed'
         LIMIT 1
       ),
       'outboxSource', (
         SELECT payload_json->>'source'
         FROM public.outbox_events
-        WHERE idempotency_key = '${sqlQuote(idempotencyKey)}:project_entity_links_changed'
+        WHERE idempotency_key = '${sqlQuote(idempotencyKey)}:group_entity_links_changed'
         LIMIT 1
       ),
       'outboxIdempotencyKey', (
         SELECT idempotency_key
         FROM public.outbox_events
-        WHERE idempotency_key = '${sqlQuote(idempotencyKey)}:project_entity_links_changed'
+        WHERE idempotency_key = '${sqlQuote(idempotencyKey)}:group_entity_links_changed'
         LIMIT 1
       )
     )::text;
@@ -547,8 +547,8 @@ function loadProjectProof(projectId: string, idempotencyKey: string): ProjectPro
 }
 
 function expectRestored(proof: RestoreProof, label: string) {
-  expect(proof.projectRows, label).toBe(0);
-  expect(proof.projectEntityLinks, label).toBe(0);
+  expect(proof.groupRows, label).toBe(0);
+  expect(proof.groupEntityLinks, label).toBe(0);
   expect(proof.commandIdempotencyKeys, label).toBe(0);
   expect(proof.auditLogRows, label).toBe(0);
   expect(proof.outboxEvents, label).toBe(0);
@@ -640,15 +640,15 @@ function sqlQuote(value: string): string {
 
 interface RuntimeFlagSnapshot {
   source: 'container-env';
-  projectsEnabled: boolean;
-  projectsReadOnly: boolean;
-  projectsBatchLinkWriteEnabled: boolean;
+  groupsEnabled: boolean;
+  groupsReadOnly: boolean;
+  groupsBatchLinkWriteEnabled: boolean;
 }
 
 interface MigrationPrecondition {
   entityTypes: boolean;
   entityLinks: boolean;
-  projects: boolean;
+  groups: boolean;
 }
 
 interface FixturePreflight {
@@ -657,16 +657,16 @@ interface FixturePreflight {
 }
 
 interface RestoreProof {
-  projectRows: number;
-  projectEntityLinks: number;
+  groupRows: number;
+  groupEntityLinks: number;
   commandIdempotencyKeys: number;
   auditLogRows: number;
   outboxEvents: number;
   notifications: number;
 }
 
-interface ProjectProof {
-  projectEntityLinks: number;
+interface GroupProof {
+  groupEntityLinks: number;
   commandIdempotencyKeys: number;
   auditLogRows: number;
   outboxEvents: number;
@@ -684,11 +684,11 @@ interface SmokeUser {
   password: string;
 }
 
-interface ProjectDto {
+interface GroupDto {
   id: string;
 }
 
-interface ProjectBatchLinkRequest {
+interface GroupBatchLinkRequest {
   mode: 'dry-run' | 'write';
   writeIntent?: 'explicit-selected-ids';
   fixtureKey: string;
@@ -704,8 +704,8 @@ interface ProjectBatchLinkRequest {
   }>;
 }
 
-interface ProjectBatchLinkResponse {
-  projectId: string;
+interface GroupBatchLinkResponse {
+  groupId: string;
   mode: 'dry-run' | 'write';
   summary: {
     proposed: number;

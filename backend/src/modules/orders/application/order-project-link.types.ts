@@ -18,7 +18,7 @@ export interface ReplaceOrderProjectsCommand {
   requestId?: string;
 }
 
-export interface OrderProjectLinkRepositoryPort {
+export interface OrderGroupLinkRepositoryPort {
   getOrderProjects(command: GetOrderProjectsCommand): Promise<OrderProjectsResponseDto>;
   replaceOrderProjects(command: ReplaceOrderProjectsCommand): Promise<ReplaceOrderProjectsResponseDto>;
 }

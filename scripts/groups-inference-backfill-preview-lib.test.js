@@ -1,32 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import {
-  assertProjectsInferencePreviewAllowed,
+  assertGroupsInferencePreviewAllowed,
   buildStrictSameClientPreviewSql,
-  parseProjectsInferencePreviewArgs,
-} from './projects-inference-backfill-preview-lib.js';
+  parseGroupsInferencePreviewArgs,
+} from './groups-inference-backfill-preview-lib.js';
 
-describe('projects inference backfill preview args', () => {
+describe('groups inference backfill preview args', () => {
   it('accepts backend-test strict-same-client preview output outside repo_erp', () => {
-    const args = parseProjectsInferencePreviewArgs([
+    const args = parseGroupsInferencePreviewArgs([
       '--target-env',
       'backend-test',
       '--rule',
       'strict-same-client',
       '--output',
-      '/home/ovhtest/projects/erp_dev/spec_erp/manifests/projects-inference-preview-2026-06-15.json',
+      '/home/ovhtest/projects/erp_dev/spec_erp/manifests/groups-inference-preview-2026-06-15.json',
     ]);
 
     expect(args).toEqual({
       targetEnv: 'backend-test',
       rule: 'strict-same-client',
-      output: '/home/ovhtest/projects/erp_dev/spec_erp/manifests/projects-inference-preview-2026-06-15.json',
+      output: '/home/ovhtest/projects/erp_dev/spec_erp/manifests/groups-inference-preview-2026-06-15.json',
       limit: null,
     });
-    expect(() => assertProjectsInferencePreviewAllowed(args)).not.toThrow();
+    expect(() => assertGroupsInferencePreviewAllowed(args)).not.toThrow();
   });
 
   it('rejects non-backend-test targets', () => {
-    const args = parseProjectsInferencePreviewArgs([
+    const args = parseGroupsInferencePreviewArgs([
       '--target-env',
       'production',
       '--rule',
@@ -35,11 +35,11 @@ describe('projects inference backfill preview args', () => {
       '/home/ovhtest/projects/erp_dev/spec_erp/manifests/out.json',
     ]);
 
-    expect(() => assertProjectsInferencePreviewAllowed(args)).toThrow(/backend-test/);
+    expect(() => assertGroupsInferencePreviewAllowed(args)).toThrow(/backend-test/);
   });
 
   it('rejects output inside repo_erp', () => {
-    const args = parseProjectsInferencePreviewArgs([
+    const args = parseGroupsInferencePreviewArgs([
       '--target-env',
       'backend-test',
       '--rule',
@@ -48,11 +48,11 @@ describe('projects inference backfill preview args', () => {
       '/home/ovhtest/projects/erp_dev/repo_erp/out.json',
     ]);
 
-    expect(() => assertProjectsInferencePreviewAllowed(args)).toThrow(/outside repo_erp/);
+    expect(() => assertGroupsInferencePreviewAllowed(args)).toThrow(/outside repo_erp/);
   });
 
   it('rejects fuzzy rules', () => {
-    const args = parseProjectsInferencePreviewArgs([
+    const args = parseGroupsInferencePreviewArgs([
       '--target-env',
       'backend-test',
       '--rule',
@@ -61,11 +61,11 @@ describe('projects inference backfill preview args', () => {
       '/home/ovhtest/projects/erp_dev/spec_erp/manifests/out.json',
     ]);
 
-    expect(() => assertProjectsInferencePreviewAllowed(args)).toThrow(/strict-same-client/);
+    expect(() => assertGroupsInferencePreviewAllowed(args)).toThrow(/strict-same-client/);
   });
 
   it('rejects invalid limit values', () => {
-    expect(() => parseProjectsInferencePreviewArgs([
+    expect(() => parseGroupsInferencePreviewArgs([
       '--target-env',
       'backend-test',
       '--rule',
@@ -83,6 +83,8 @@ describe('strict same-client preview SQL', () => {
     const sql = buildStrictSameClientPreviewSql({ limit: 25 });
     const normalized = sql.toLowerCase();
 
+    expect(sql).toContain('from group_entity_links l');
+    expect(sql).toContain('join group_groups g on g.id = l.group_id');
     expect(sql).toContain("o.order_name !~* '^(E2E|TEST|Тест|Check-deafline)'");
     expect(sql).toContain('not exists (');
     expect(sql).toContain("existing.entity_type_code='order'");

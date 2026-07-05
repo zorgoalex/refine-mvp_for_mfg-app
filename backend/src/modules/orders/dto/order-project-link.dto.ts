@@ -17,7 +17,7 @@ export interface OrderProjectsResponseDto {
   requestId: string;
 }
 
-export interface ReplaceOrderProjectLinkDto {
+export interface ReplaceOrderGroupLinkDto {
   projectId: string;
   relationType: OrderProjectRelationType;
   isPrimary: boolean;
@@ -27,7 +27,7 @@ export interface ReplaceOrderProjectsRequestDto {
   idempotencyKey: string;
   version: number;
   primaryProjectId?: string | null;
-  projects: ReplaceOrderProjectLinkDto[];
+  projects: ReplaceOrderGroupLinkDto[];
   reason?: string | null;
 }
 

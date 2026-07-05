@@ -3,34 +3,34 @@ import bcrypt from 'bcryptjs';
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 
-const canaryEnabled = process.env.PROJECTS_GENERIC_LINKING_STAGE_CANARY === 'true';
-const fixtureKey = process.env.PROJECTS_GENERIC_LINKING_FIXTURE_KEY?.trim() ?? '';
-const targetEnv = process.env.PROJECTS_GENERIC_LINKING_TARGET_ENV?.trim() ?? '';
+const canaryEnabled = process.env.GROUPS_GENERIC_LINKING_STAGE_CANARY === 'true';
+const fixtureKey = process.env.GROUPS_GENERIC_LINKING_FIXTURE_KEY?.trim() ?? '';
+const targetEnv = process.env.GROUPS_GENERIC_LINKING_TARGET_ENV?.trim() ?? '';
 const frontendUrl = trimTrailingSlash(
-  process.env.PROJECTS_GENERIC_LINKING_STAGE_FRONTEND_URL ?? 'https://app-test.mebelkz.app',
+  process.env.GROUPS_GENERIC_LINKING_STAGE_FRONTEND_URL ?? 'https://app-test.mebelkz.app',
 );
 const backendApiUrl = trimTrailingSlash(
-  process.env.PROJECTS_GENERIC_LINKING_STAGE_BACKEND_API_URL ??
+  process.env.GROUPS_GENERIC_LINKING_STAGE_BACKEND_API_URL ??
     'https://backend-test.mebelkz.app/api/v1',
 );
 const postgresContainer =
-  process.env.PROJECTS_GENERIC_LINKING_STAGE_POSTGRES_CONTAINER ?? 'erp_test-postgresdb-1';
-const backendContainer = process.env.PROJECTS_GENERIC_LINKING_STAGE_BACKEND_CONTAINER?.trim() ?? '';
-const fixtureOrderId = readNumberEnv('PROJECTS_GENERIC_LINKING_FIXTURE_ORDER_ID');
-const fixtureOrderName = process.env.PROJECTS_GENERIC_LINKING_FIXTURE_ORDER_NAME?.trim() ?? '';
+  process.env.GROUPS_GENERIC_LINKING_STAGE_POSTGRES_CONTAINER ?? 'erp_test-postgresdb-1';
+const backendContainer = process.env.GROUPS_GENERIC_LINKING_STAGE_BACKEND_CONTAINER?.trim() ?? '';
+const fixtureOrderId = readNumberEnv('GROUPS_GENERIC_LINKING_FIXTURE_ORDER_ID');
+const fixtureOrderName = process.env.GROUPS_GENERIC_LINKING_FIXTURE_ORDER_NAME?.trim() ?? '';
 
 const missingPrerequisites = [
-  fixtureKey ? null : 'PROJECTS_GENERIC_LINKING_FIXTURE_KEY',
-  targetEnv === 'backend-test' ? null : 'PROJECTS_GENERIC_LINKING_TARGET_ENV=backend-test',
-  process.env.PROJECTS_GENERIC_LINKING_RESTORE === 'true'
+  fixtureKey ? null : 'GROUPS_GENERIC_LINKING_FIXTURE_KEY',
+  targetEnv === 'backend-test' ? null : 'GROUPS_GENERIC_LINKING_TARGET_ENV=backend-test',
+  process.env.GROUPS_GENERIC_LINKING_RESTORE === 'true'
     ? null
-    : 'PROJECTS_GENERIC_LINKING_RESTORE=true',
-  frontendUrl ? null : 'PROJECTS_GENERIC_LINKING_STAGE_FRONTEND_URL',
-  backendApiUrl ? null : 'PROJECTS_GENERIC_LINKING_STAGE_BACKEND_API_URL',
-  postgresContainer ? null : 'PROJECTS_GENERIC_LINKING_STAGE_POSTGRES_CONTAINER',
-  backendContainer ? null : 'PROJECTS_GENERIC_LINKING_STAGE_BACKEND_CONTAINER',
-  fixtureOrderId ? null : 'PROJECTS_GENERIC_LINKING_FIXTURE_ORDER_ID',
-  fixtureOrderName ? null : 'PROJECTS_GENERIC_LINKING_FIXTURE_ORDER_NAME',
+    : 'GROUPS_GENERIC_LINKING_RESTORE=true',
+  frontendUrl ? null : 'GROUPS_GENERIC_LINKING_STAGE_FRONTEND_URL',
+  backendApiUrl ? null : 'GROUPS_GENERIC_LINKING_STAGE_BACKEND_API_URL',
+  postgresContainer ? null : 'GROUPS_GENERIC_LINKING_STAGE_POSTGRES_CONTAINER',
+  backendContainer ? null : 'GROUPS_GENERIC_LINKING_STAGE_BACKEND_CONTAINER',
+  fixtureOrderId ? null : 'GROUPS_GENERIC_LINKING_FIXTURE_ORDER_ID',
+  fixtureOrderName ? null : 'GROUPS_GENERIC_LINKING_FIXTURE_ORDER_NAME',
   dockerContainerExists(postgresContainer) ? null : `docker container ${postgresContainer}`,
   backendContainer && dockerContainerExists(backendContainer)
     ? null
@@ -39,14 +39,14 @@ const missingPrerequisites = [
 
 let fixture: FixturePreflight | null = null;
 
-test.describe('Projects generic linking + participants stage canary', () => {
+test.describe('Groups generic linking + participants stage canary', () => {
   test.skip(
     !canaryEnabled,
-    'Set PROJECTS_GENERIC_LINKING_STAGE_CANARY=true to enable this opt-in stage canary.',
+    'Set GROUPS_GENERIC_LINKING_STAGE_CANARY=true to enable this opt-in stage canary.',
   );
   test.skip(
     canaryEnabled && missingPrerequisites.length > 0,
-    `Missing Projects generic linking canary prerequisites: ${missingPrerequisites.join(', ')}`,
+    `Missing Groups generic linking canary prerequisites: ${missingPrerequisites.join(', ')}`,
   );
   test.setTimeout(240000);
 
@@ -56,20 +56,20 @@ test.describe('Projects generic linking + participants stage canary', () => {
   test.beforeAll(() => {
     requireCanaryEnv();
     runtimeFlags = captureRuntimeFlags();
-    requireProjectsWriteRuntime(runtimeFlags);
+    requireGroupsWriteRuntime(runtimeFlags);
     assertMigration013Applied();
     restoreFixtureRows();
     expectRestored(loadRestoreProof(), 'preflight restore');
     fixture = discoverFixture();
     expect(fixture.orderId).toBe(fixtureOrderId);
     expect(fixture.orderName).toBe(fixtureOrderName);
-    expect(fixture.projectOrderLinksBefore).toBeGreaterThanOrEqual(0);
+    expect(fixture.groupOrderLinksBefore).toBeGreaterThanOrEqual(0);
   });
 
   test.afterAll(() => {
     let restoreError: unknown;
     try {
-      if (process.env.PROJECTS_GENERIC_LINKING_RESTORE === 'true') {
+      if (process.env.GROUPS_GENERIC_LINKING_RESTORE === 'true') {
         restoreFixtureRows();
         expectRestored(loadRestoreProof(), 'afterAll restore');
       }
@@ -93,9 +93,9 @@ test.describe('Projects generic linking + participants stage canary', () => {
     const currentFixture = fixture!;
     const runId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
 
-    const admin = createSmokeUser(`e2e_projects_generic_admin_${runId}`, 2);
-    const manager = createSmokeUser(`e2e_projects_generic_manager_${runId}`, 10);
-    const topManager = createSmokeUser(`e2e_projects_generic_top_${runId}`, 15);
+    const admin = createSmokeUser(`e2e_groups_generic_admin_${runId}`, 2);
+    const manager = createSmokeUser(`e2e_groups_generic_manager_${runId}`, 10);
+    const topManager = createSmokeUser(`e2e_groups_generic_top_${runId}`, 15);
     userIds = [admin.userId, manager.userId, topManager.userId];
 
     const adminToken = await loginForApiToken(request, admin.username, admin.password);
@@ -103,7 +103,7 @@ test.describe('Projects generic linking + participants stage canary', () => {
     const topManagerToken = await loginForApiToken(request, topManager.username, topManager.password);
     await expectFrontendRuntimeConfigIfAvailable(request);
 
-    const project = await createProject(request, adminToken, runId);
+    const group = await createGroup(request, adminToken, runId);
     const linksIdempotencyKey = `${fixtureKey}:links:${runId}`;
     const participantsIdempotencyKey = `${fixtureKey}:participants:${runId}`;
 
@@ -118,29 +118,29 @@ test.describe('Projects generic linking + participants stage canary', () => {
       ],
     };
 
-    const links = await putJson<ProjectEntityLinksResponse>(
+    const links = await putJson<GroupEntityLinksResponse>(
       request,
-      `/projects/${project.id}/entity-links`,
+      `/groups/${group.id}/entity-links`,
       adminToken,
       linkPayload,
     );
-    expect(links.projectId).toBe(project.id);
+    expect(links.groupId).toBe(group.id);
     expect(links.links).toHaveLength(4);
     expect(new Set(links.links.map((link) => link.entityType))).toEqual(
       new Set(['order', 'client', 'employee', 'workshop']),
     );
 
-    const linksReplay = await putJson<ProjectEntityLinksResponse>(
+    const linksReplay = await putJson<GroupEntityLinksResponse>(
       request,
-      `/projects/${project.id}/entity-links`,
+      `/groups/${group.id}/entity-links`,
       adminToken,
       linkPayload,
     );
     expect(stripVolatileResponseFields(linksReplay)).toEqual(stripVolatileResponseFields(links));
 
-    const participants = await putJson<ProjectParticipantsResponse>(
+    const participants = await putJson<GroupParticipantsResponse>(
       request,
-      `/projects/${project.id}/participants`,
+      `/groups/${group.id}/participants`,
       adminToken,
       {
         idempotencyKey: participantsIdempotencyKey,
@@ -151,16 +151,16 @@ test.describe('Projects generic linking + participants stage canary', () => {
         ],
       },
     );
-    expect(participants.projectId).toBe(project.id);
+    expect(participants.groupId).toBe(group.id);
     expect(participants.participants).toHaveLength(2);
     expect(participants.participants.map((participant) => participant.role.code).sort()).toEqual([
       'manager',
       'observer',
     ]);
 
-    const participantsReplay = await putJson<ProjectParticipantsResponse>(
+    const participantsReplay = await putJson<GroupParticipantsResponse>(
       request,
-      `/projects/${project.id}/participants`,
+      `/groups/${group.id}/participants`,
       adminToken,
       {
         idempotencyKey: participantsIdempotencyKey,
@@ -175,23 +175,23 @@ test.describe('Projects generic linking + participants stage canary', () => {
       stripVolatileResponseFields(participants),
     );
 
-    const listedLinks = await getJson<ProjectEntityLinksResponse>(
+    const listedLinks = await getJson<GroupEntityLinksResponse>(
       request,
-      `/projects/${project.id}/entity-links`,
+      `/groups/${group.id}/entity-links`,
       adminToken,
     );
     expect(listedLinks.links).toHaveLength(4);
 
-    const listedParticipants = await getJson<ProjectParticipantsResponse>(
+    const listedParticipants = await getJson<GroupParticipantsResponse>(
       request,
-      `/projects/${project.id}/participants`,
+      `/groups/${group.id}/participants`,
       adminToken,
     );
     expect(listedParticipants.participants).toHaveLength(2);
 
-    const overview = await getJson<ProjectOverviewResponse>(
+    const overview = await getJson<GroupOverviewResponse>(
       request,
-      `/projects/${project.id}/overview`,
+      `/groups/${group.id}/overview`,
       adminToken,
     );
     expect(countByEntity(overview, 'order')).toBe(1);
@@ -202,15 +202,15 @@ test.describe('Projects generic linking + participants stage canary', () => {
     expect(countByRole(overview, 'observer')).toBe(1);
 
     await expectStatus(
-      request.put(`${backendApiUrl}/projects/${project.id}/entity-links`, {
+      request.put(`${backendApiUrl}/groups/${group.id}/entity-links`, {
         headers: authHeaders(managerToken),
         data: { ...linkPayload, idempotencyKey: `${fixtureKey}:no-manage-links:${runId}` },
       }),
       403,
-      'manager without projects.manage_links cannot write entity links',
+      'manager without groups.manage_links cannot write entity links',
     );
     await expectStatus(
-      request.put(`${backendApiUrl}/projects/${project.id}/entity-links`, {
+      request.put(`${backendApiUrl}/groups/${group.id}/entity-links`, {
         headers: authHeaders(topManagerToken),
         data: {
           idempotencyKey: `${fixtureKey}:no-users-view:${runId}`,
@@ -222,7 +222,7 @@ test.describe('Projects generic linking + participants stage canary', () => {
       'top_manager without users.view cannot link user entities',
     );
     await expectStatus(
-      request.put(`${backendApiUrl}/projects/${project.id}/participants`, {
+      request.put(`${backendApiUrl}/groups/${group.id}/participants`, {
         headers: authHeaders(managerToken),
         data: {
           idempotencyKey: `${fixtureKey}:no-participants-manage:${runId}`,
@@ -233,15 +233,15 @@ test.describe('Projects generic linking + participants stage canary', () => {
         },
       }),
       403,
-      'manager without projects.participants.manage cannot replace participants',
+      'manager without groups.participants.manage cannot replace participants',
     );
 
     const proofBeforeRestore = loadRestoreProof();
-    expect(proofBeforeRestore.projectRows).toBe(1);
-    expect(proofBeforeRestore.projectEntityLinks).toBe(4);
-    expect(proofBeforeRestore.projectParticipants).toBe(2);
+    expect(proofBeforeRestore.groupRows).toBe(1);
+    expect(proofBeforeRestore.groupEntityLinks).toBe(4);
+    expect(proofBeforeRestore.groupParticipants).toBe(2);
     expect(proofBeforeRestore.commandIdempotencyKeys).toBeGreaterThanOrEqual(2);
-    expect(proofBeforeRestore.projectOrderProjects).toBe(currentFixture.projectOrderLinksBefore);
+    expect(proofBeforeRestore.groupOrderGroups).toBe(currentFixture.groupOrderLinksBefore);
 
     restoreFixtureRows();
     expectRestored(loadRestoreProof(), 'explicit restore');
@@ -251,23 +251,23 @@ test.describe('Projects generic linking + participants stage canary', () => {
 });
 
 function requireCanaryEnv() {
-  if (process.env.PROJECTS_GENERIC_LINKING_STAGE_CANARY !== 'true') {
-    throw new Error('PROJECTS_GENERIC_LINKING_STAGE_CANARY=true is required');
+  if (process.env.GROUPS_GENERIC_LINKING_STAGE_CANARY !== 'true') {
+    throw new Error('GROUPS_GENERIC_LINKING_STAGE_CANARY=true is required');
   }
   if (!fixtureKey) {
-    throw new Error('PROJECTS_GENERIC_LINKING_FIXTURE_KEY is required');
+    throw new Error('GROUPS_GENERIC_LINKING_FIXTURE_KEY is required');
   }
   if (!fixtureOrderId) {
-    throw new Error('PROJECTS_GENERIC_LINKING_FIXTURE_ORDER_ID must be a positive integer');
+    throw new Error('GROUPS_GENERIC_LINKING_FIXTURE_ORDER_ID must be a positive integer');
   }
   if (!fixtureOrderName) {
-    throw new Error('PROJECTS_GENERIC_LINKING_FIXTURE_ORDER_NAME is required');
+    throw new Error('GROUPS_GENERIC_LINKING_FIXTURE_ORDER_NAME is required');
   }
-  if (process.env.PROJECTS_GENERIC_LINKING_RESTORE !== 'true') {
-    throw new Error('PROJECTS_GENERIC_LINKING_RESTORE=true is required');
+  if (process.env.GROUPS_GENERIC_LINKING_RESTORE !== 'true') {
+    throw new Error('GROUPS_GENERIC_LINKING_RESTORE=true is required');
   }
   if (targetEnv !== 'backend-test') {
-    throw new Error('PROJECTS_GENERIC_LINKING_TARGET_ENV=backend-test is required');
+    throw new Error('GROUPS_GENERIC_LINKING_TARGET_ENV=backend-test is required');
   }
   assertTestTarget(frontendUrl, backendApiUrl, postgresContainer);
 }
@@ -275,17 +275,17 @@ function requireCanaryEnv() {
 function assertTestTarget(frontend: string, backend: string, postgres: string) {
   const combined = `${frontend} ${backend} ${postgres} ${backendContainer} ${targetEnv}`;
   if (/prod|production|live/i.test(combined)) {
-    throw new Error('Refusing to run Projects generic linking canary against prod/live target');
+    throw new Error('Refusing to run Groups generic linking canary against prod/live target');
   }
   const parsedBackend = new URL(backend);
-  expect(parsedBackend.hostname, 'Projects generic linking canary must target backend-test').toBe(
+  expect(parsedBackend.hostname, 'Groups generic linking canary must target backend-test').toBe(
     'backend-test.mebelkz.app',
   );
   expect(parsedBackend.pathname.replace(/\/+$/, ''), 'Backend API path must be /api/v1').toBe(
     '/api/v1',
   );
   const parsedFrontend = new URL(frontend);
-  expect(parsedFrontend.hostname, 'Projects canary frontend must target app-test').toBe(
+  expect(parsedFrontend.hostname, 'Groups canary frontend must target app-test').toBe(
     'app-test.mebelkz.app',
   );
 }
@@ -303,36 +303,36 @@ function captureRuntimeFlags(): RuntimeFlagSnapshot {
   }));
   return {
     source: 'container-env',
-    projectsEnabled: envMap.get('BACKEND_ENABLE_PROJECTS') === 'true',
-    projectsReadOnly: envMap.get('BACKEND_PROJECTS_READ_ONLY') !== 'false',
+    groupsEnabled: envMap.get('BACKEND_ENABLE_GROUPS') === 'true',
+    groupsReadOnly: envMap.get('BACKEND_GROUPS_READ_ONLY') !== 'false',
   };
 }
 
-function requireProjectsWriteRuntime(flags: RuntimeFlagSnapshot) {
-  if (!flags.projectsEnabled || flags.projectsReadOnly) {
+function requireGroupsWriteRuntime(flags: RuntimeFlagSnapshot) {
+  if (!flags.groupsEnabled || flags.groupsReadOnly) {
     throw new Error(
-      'Projects canary requires backend-test already configured with BACKEND_ENABLE_PROJECTS=true and BACKEND_PROJECTS_READ_ONLY=false. This spec does not mutate runtime flags without a safe restart/reconfigure mechanism.',
+      'Groups canary requires backend-test already configured with BACKEND_ENABLE_GROUPS=true and BACKEND_GROUPS_READ_ONLY=false. This spec does not mutate runtime flags without a safe restart/reconfigure mechanism.',
     );
   }
 }
 
 function expectRuntimeFlagsUnchanged(before: RuntimeFlagSnapshot) {
   const after = captureRuntimeFlags();
-  expect(after.projectsEnabled).toBe(before.projectsEnabled);
-  expect(after.projectsReadOnly).toBe(before.projectsReadOnly);
+  expect(after.groupsEnabled).toBe(before.groupsEnabled);
+  expect(after.groupsReadOnly).toBe(before.groupsReadOnly);
 }
 
 function assertMigration013Applied() {
   const snapshot = psqlJson<MigrationPrecondition>(`
     SELECT json_build_object(
-      'entityTypes', to_regclass('public.project_entity_types') IS NOT NULL,
-      'entityLinks', to_regclass('public.project_entity_links') IS NOT NULL,
-      'participantRoles', to_regclass('public.project_participant_roles') IS NOT NULL,
-      'participants', to_regclass('public.project_participants') IS NOT NULL,
+      'entityTypes', to_regclass('public.group_entity_types') IS NOT NULL,
+      'entityLinks', to_regclass('public.group_entity_links') IS NOT NULL,
+      'participantRoles', to_regclass('public.group_participant_roles') IS NOT NULL,
+      'participants', to_regclass('public.group_participants') IS NOT NULL,
       'participantNumericConstraint', EXISTS (
         SELECT 1 FROM pg_constraint
-        WHERE conname = 'chk_project_participants_participant_id_numeric'
-          AND conrelid = 'public.project_participants'::regclass
+        WHERE conname = 'chk_group_participants_participant_id_numeric'
+          AND conrelid = 'public.group_participants'::regclass
       )
     )::text;
   `);
@@ -387,9 +387,9 @@ function discoverFixture(): FixturePreflight {
       'clientId', fo.client_id,
       'workshopId', fw.workshop_id,
       'employeeId', fe.employee_id,
-      'projectOrderLinksBefore', (
+      'groupOrderLinksBefore', (
         SELECT count(*)::int
-        FROM public.project_order_projects pop
+        FROM public.group_order_groups pop
         WHERE pop.order_id = fo.order_id
           AND pop.valid_to IS NULL
       )
@@ -405,16 +405,16 @@ function discoverFixture(): FixturePreflight {
   return found;
 }
 
-async function createProject(
+async function createGroup(
   request: APIRequestContext,
   token: string,
   runId: string,
-): Promise<ProjectDto> {
-  const response = await request.post(`${backendApiUrl}/projects`, {
+): Promise<GroupDto> {
+  const response = await request.post(`${backendApiUrl}/groups`, {
     headers: authHeaders(token),
     data: {
       code: `pgl_${runId}`,
-      name: `Projects generic linking canary ${runId}`,
+      name: `Groups generic linking canary ${runId}`,
       status: 'active',
       ownerUserId: null,
       metadata: { fixtureKey, runId },
@@ -422,8 +422,8 @@ async function createProject(
   });
   await expectOk(response);
   const body = await response.json();
-  expect(body.project?.id).toBeTruthy();
-  return body.project as ProjectDto;
+  expect(body.group?.id).toBeTruthy();
+  return body.group as GroupDto;
 }
 
 async function expectFrontendRuntimeConfigIfAvailable(request: APIRequestContext) {
@@ -431,8 +431,8 @@ async function expectFrontendRuntimeConfigIfAvailable(request: APIRequestContext
   if (response.status() === 401 || response.status() === 403 || response.status() === 404) return;
   await expectOk(response);
   const body = await response.json();
-  if (body.features?.backendProjects !== undefined) {
-    expect(body.features.backendProjects).toBe(true);
+  if (body.features?.backendGroups !== undefined) {
+    expect(body.features.backendGroups).toBe(true);
   }
 }
 
@@ -441,10 +441,10 @@ async function expectPostRestoreProbe(
   token: string,
   flags: RuntimeFlagSnapshot,
 ) {
-  const response = await request.get(`${backendApiUrl}/projects?page=1&pageSize=1`, {
+  const response = await request.get(`${backendApiUrl}/groups?page=1&pageSize=1`, {
     headers: authHeaders(token),
   });
-  if (!flags.projectsEnabled) {
+  if (!flags.groupsEnabled) {
     expect(response.status()).toBe(503);
     return;
   }
@@ -520,7 +520,7 @@ function createSmokeUser(username: string, roleId: number): SmokeUser {
           '${sqlQuote(email)}',
           '${sqlQuote(passwordHash)}',
           ${roleId},
-          'E2E Projects Generic Linking Canary',
+          'E2E Groups Generic Linking Canary',
           true
         )
         RETURNING user_id
@@ -546,14 +546,14 @@ function restoreFixtureRows() {
   psql(`
     DO $$
     DECLARE
-      fixture_project_ids uuid[];
+      fixture_group_ids uuid[];
     BEGIN
       SELECT COALESCE(array_agg(id), ARRAY[]::uuid[])
-      INTO fixture_project_ids
-      FROM public.project_projects
+      INTO fixture_group_ids
+      FROM public.group_groups
       WHERE metadata->>'fixtureKey' = '${sqlQuote(fixtureKey)}';
 
-      IF array_length(fixture_project_ids, 1) IS NULL THEN
+      IF array_length(fixture_group_ids, 1) IS NULL THEN
         DELETE FROM public.notifications
         WHERE idempotency_key LIKE '${sqlQuote(fixtureKey)}:%';
         DELETE FROM public.outbox_events
@@ -572,47 +572,47 @@ function restoreFixtureRows() {
       WHERE idempotency_key LIKE '${sqlQuote(fixtureKey)}:%';
       DELETE FROM public.outbox_events
       WHERE idempotency_key LIKE '${sqlQuote(fixtureKey)}:%'
-         OR aggregate_id = ANY(ARRAY(SELECT unnest(fixture_project_ids)::text))
-         OR payload_json->>'projectId' = ANY(ARRAY(SELECT unnest(fixture_project_ids)::text));
+         OR aggregate_id = ANY(ARRAY(SELECT unnest(fixture_group_ids)::text))
+         OR payload_json->>'groupId' = ANY(ARRAY(SELECT unnest(fixture_group_ids)::text));
       DELETE FROM public.audit_log
-      WHERE entity_type = 'project'
-        AND entity_id = ANY(ARRAY(SELECT unnest(fixture_project_ids)::text));
+      WHERE entity_type = 'group'
+        AND entity_id = ANY(ARRAY(SELECT unnest(fixture_group_ids)::text));
       DELETE FROM public.command_idempotency_keys
       WHERE idempotency_key LIKE '${sqlQuote(fixtureKey)}:%';
-      DELETE FROM public.project_participants
-      WHERE project_id = ANY(fixture_project_ids);
-      DELETE FROM public.project_entity_links
-      WHERE project_id = ANY(fixture_project_ids);
-      DELETE FROM public.project_members
-      WHERE project_id = ANY(fixture_project_ids);
-      DELETE FROM public.project_projects
-      WHERE id = ANY(fixture_project_ids);
+      DELETE FROM public.group_participants
+      WHERE group_id = ANY(fixture_group_ids);
+      DELETE FROM public.group_entity_links
+      WHERE group_id = ANY(fixture_group_ids);
+      DELETE FROM public.group_members
+      WHERE group_id = ANY(fixture_group_ids);
+      DELETE FROM public.group_groups
+      WHERE id = ANY(fixture_group_ids);
     END $$;
   `);
 }
 
 function loadRestoreProof(): RestoreProof {
   return psqlJson<RestoreProof>(`
-    WITH fixture_projects AS (
+    WITH fixture_groups AS (
       SELECT id
-      FROM public.project_projects
+      FROM public.group_groups
       WHERE metadata->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
     )
     SELECT json_build_object(
-      'projectRows', (SELECT count(*)::int FROM fixture_projects),
-      'projectEntityLinks', (
+      'groupRows', (SELECT count(*)::int FROM fixture_groups),
+      'groupEntityLinks', (
         SELECT count(*)::int
-        FROM public.project_entity_links
-        WHERE project_id IN (SELECT id FROM fixture_projects)
+        FROM public.group_entity_links
+        WHERE group_id IN (SELECT id FROM fixture_groups)
       ),
-      'projectParticipants', (
+      'groupParticipants', (
         SELECT count(*)::int
-        FROM public.project_participants
-        WHERE project_id IN (SELECT id FROM fixture_projects)
+        FROM public.group_participants
+        WHERE group_id IN (SELECT id FROM fixture_groups)
       ),
-      'projectOrderProjects', (
+      'groupOrderGroups', (
         SELECT count(*)::int
-        FROM public.project_order_projects
+        FROM public.group_order_groups
         WHERE order_id = ${fixtureOrderId}
           AND valid_to IS NULL
       ),
@@ -624,13 +624,13 @@ function loadRestoreProof(): RestoreProof {
       'auditLogRows', (
         SELECT count(*)::int
         FROM public.audit_log
-        WHERE entity_type = 'project'
-          AND entity_id IN (SELECT id::text FROM fixture_projects)
+        WHERE entity_type = 'group'
+          AND entity_id IN (SELECT id::text FROM fixture_groups)
       ),
       'outboxEvents', (
         SELECT count(*)::int
         FROM public.outbox_events
-        WHERE aggregate_id IN (SELECT id::text FROM fixture_projects)
+        WHERE aggregate_id IN (SELECT id::text FROM fixture_groups)
            OR idempotency_key LIKE '${sqlQuote(fixtureKey)}:%'
       ),
       'notifications', (
@@ -643,15 +643,15 @@ function loadRestoreProof(): RestoreProof {
 }
 
 function expectRestored(proof: RestoreProof, label: string) {
-  expect(proof.projectRows, label).toBe(0);
-  expect(proof.projectEntityLinks, label).toBe(0);
-  expect(proof.projectParticipants, label).toBe(0);
+  expect(proof.groupRows, label).toBe(0);
+  expect(proof.groupEntityLinks, label).toBe(0);
+  expect(proof.groupParticipants, label).toBe(0);
   expect(proof.commandIdempotencyKeys, label).toBe(0);
   expect(proof.auditLogRows, label).toBe(0);
   expect(proof.outboxEvents, label).toBe(0);
   expect(proof.notifications, label).toBe(0);
   if (fixture) {
-    expect(proof.projectOrderProjects, label).toBe(fixture.projectOrderLinksBefore);
+    expect(proof.groupOrderGroups, label).toBe(fixture.groupOrderLinksBefore);
   }
 }
 
@@ -662,11 +662,11 @@ function stripVolatileResponseFields<T extends Record<string, unknown>>(value: T
   return clone;
 }
 
-function countByEntity(overview: ProjectOverviewResponse, entityType: string): number {
+function countByEntity(overview: GroupOverviewResponse, entityType: string): number {
   return overview.linkedEntityCounts.find((entry) => entry.entityType === entityType)?.currentCount ?? 0;
 }
 
-function countByRole(overview: ProjectOverviewResponse, roleCode: string): number {
+function countByRole(overview: GroupOverviewResponse, roleCode: string): number {
   return (
     overview.participants.currentSummary.find((entry) => entry.roleCode === roleCode)
       ?.participantCount ?? 0
@@ -736,8 +736,8 @@ function sqlQuote(value: string): string {
 
 interface RuntimeFlagSnapshot {
   source: 'container-env';
-  projectsEnabled: boolean;
-  projectsReadOnly: boolean;
+  groupsEnabled: boolean;
+  groupsReadOnly: boolean;
 }
 
 interface MigrationPrecondition {
@@ -754,14 +754,14 @@ interface FixturePreflight {
   clientId: number;
   workshopId: number;
   employeeId: number;
-  projectOrderLinksBefore: number;
+  groupOrderLinksBefore: number;
 }
 
 interface RestoreProof {
-  projectRows: number;
-  projectEntityLinks: number;
-  projectParticipants: number;
-  projectOrderProjects: number;
+  groupRows: number;
+  groupEntityLinks: number;
+  groupParticipants: number;
+  groupOrderGroups: number;
   commandIdempotencyKeys: number;
   auditLogRows: number;
   outboxEvents: number;
@@ -774,12 +774,12 @@ interface SmokeUser {
   password: string;
 }
 
-interface ProjectDto {
+interface GroupDto {
   id: string;
 }
 
-interface ProjectEntityLinksResponse {
-  projectId: string;
+interface GroupEntityLinksResponse {
+  groupId: string;
   links: Array<{
     entityType: string;
     entityId: string;
@@ -789,8 +789,8 @@ interface ProjectEntityLinksResponse {
   auditId?: string;
 }
 
-interface ProjectParticipantsResponse {
-  projectId: string;
+interface GroupParticipantsResponse {
+  groupId: string;
   participants: Array<{
     participantType: string;
     participantId: string | null;
@@ -800,7 +800,7 @@ interface ProjectParticipantsResponse {
   auditId?: string;
 }
 
-interface ProjectOverviewResponse {
+interface GroupOverviewResponse {
   linkedEntityCounts: Array<{
     entityType: string;
     currentCount: number;

@@ -3,30 +3,30 @@ import bcrypt from 'bcryptjs';
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 
-const canaryEnabled = process.env.PROJECTS_P8_NOTIFICATION_STAGE_CANARY === 'true';
-const fixtureKey = process.env.PROJECTS_P8_NOTIFICATION_CANARY_FIXTURE_KEY?.trim() ?? '';
-const targetEnv = process.env.PROJECTS_P8_NOTIFICATION_TARGET_ENV?.trim() ?? '';
+const canaryEnabled = process.env.GROUPS_P8_NOTIFICATION_STAGE_CANARY === 'true';
+const fixtureKey = process.env.GROUPS_P8_NOTIFICATION_CANARY_FIXTURE_KEY?.trim() ?? '';
+const targetEnv = process.env.GROUPS_P8_NOTIFICATION_TARGET_ENV?.trim() ?? '';
 const backendApiUrl = trimTrailingSlash(
-  process.env.PROJECTS_P8_NOTIFICATION_STAGE_BACKEND_API_URL ??
+  process.env.GROUPS_P8_NOTIFICATION_STAGE_BACKEND_API_URL ??
     'https://backend-test.mebelkz.app/api/v1',
 );
 const postgresContainer =
-  process.env.PROJECTS_P8_NOTIFICATION_STAGE_POSTGRES_CONTAINER ?? 'erp_test-postgresdb-1';
-const fixtureOrderId = readNumberEnv('PROJECTS_P8_NOTIFICATION_FIXTURE_ORDER_ID');
-const restoreEnabled = process.env.PROJECTS_P8_NOTIFICATION_RESTORE === 'true';
-const expectP8Disabled = process.env.PROJECTS_P8_NOTIFICATION_EXPECT_DISABLED === 'true';
+  process.env.GROUPS_P8_NOTIFICATION_STAGE_POSTGRES_CONTAINER ?? 'erp_test-postgresdb-1';
+const fixtureOrderId = readNumberEnv('GROUPS_P8_NOTIFICATION_FIXTURE_ORDER_ID');
+const restoreEnabled = process.env.GROUPS_P8_NOTIFICATION_RESTORE === 'true';
+const expectP8Disabled = process.env.GROUPS_P8_NOTIFICATION_EXPECT_DISABLED === 'true';
 
 let fixture: FixturePreflight | null = null;
 
 test.describe.configure({ mode: 'serial' });
 
-test.describe('Projects P8 notification stage canary', () => {
+test.describe('Groups P8 notification stage canary', () => {
   test.skip(
     !canaryEnabled,
-    'Set PROJECTS_P8_NOTIFICATION_STAGE_CANARY=true to enable this opt-in stage canary.',
+    'Set GROUPS_P8_NOTIFICATION_STAGE_CANARY=true to enable this opt-in stage canary.',
   );
-  test.skip(!fixtureKey, 'PROJECTS_P8_NOTIFICATION_CANARY_FIXTURE_KEY is required.');
-  test.skip(targetEnv !== 'backend-test', 'PROJECTS_P8_NOTIFICATION_TARGET_ENV=backend-test is required.');
+  test.skip(!fixtureKey, 'GROUPS_P8_NOTIFICATION_CANARY_FIXTURE_KEY is required.');
+  test.skip(targetEnv !== 'backend-test', 'GROUPS_P8_NOTIFICATION_TARGET_ENV=backend-test is required.');
   test.setTimeout(240000);
 
   let createdUserIds: number[] = [];
@@ -56,13 +56,13 @@ test.describe('Projects P8 notification stage canary', () => {
     }
   });
 
-  test('proves project participant/order-link notification posture, idempotency, privacy, and restore-to-zero', async ({
+  test('proves group participant/order-link notification posture, idempotency, privacy, and restore-to-zero', async ({
     request,
   }) => {
     expect(fixture).not.toBeNull();
     const currentFixture = fixture!;
     const runId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
-    const notificationPrefix = `projects:p8:`;
+    const notificationPrefix = `groups:p8:`;
 
     const admin = createSmokeUser(`e2e_p8_notify_admin_${runId}`, 2);
     const manager = createSmokeUser(`e2e_p8_notify_manager_${runId}`, 10);
@@ -70,7 +70,7 @@ test.describe('Projects P8 notification stage canary', () => {
     createdUserIds = [admin.userId, manager.userId, worker.userId];
 
     const adminToken = await loginForApiToken(request, admin.username, admin.password);
-    const project = await createProject(request, adminToken, runId);
+    const group = await createGroup(request, adminToken, runId);
     const participantsKey = `${fixtureKey}:participants:${runId}`;
     const orderLinksKey = `${fixtureKey}:order-links:${runId}`;
 
@@ -85,73 +85,73 @@ test.describe('Projects P8 notification stage canary', () => {
       ],
     };
 
-    const participantNotificationsBefore = loadNotificationCount(project.id);
-    const participants = await putJson<ProjectParticipantsResponse>(
+    const participantNotificationsBefore = loadNotificationCount(group.id);
+    const participants = await putJson<GroupParticipantsResponse>(
       request,
-      `/projects/${project.id}/participants`,
+      `/groups/${group.id}/participants`,
       adminToken,
       participantsPayload,
     );
     expect(participants.participants).toHaveLength(4);
     if (expectP8Disabled) {
-      expect(loadNotificationCount(project.id)).toBe(participantNotificationsBefore);
-      expect(loadP8Residue(project.id)).toEqual({
+      expect(loadNotificationCount(group.id)).toBe(participantNotificationsBefore);
+      expect(loadP8Residue(group.id)).toEqual({
         notifications: 0,
         outboxEvents: 0,
         auditLogRows: 0,
         commandIdempotencyKeys: 1,
       });
     } else {
-      expect(loadNotificationCount(project.id)).toBeGreaterThan(participantNotificationsBefore);
+      expect(loadNotificationCount(group.id)).toBeGreaterThan(participantNotificationsBefore);
     }
 
-    const participantReplayBefore = loadP8Residue(project.id);
-    await putJson<ProjectParticipantsResponse>(
+    const participantReplayBefore = loadP8Residue(group.id);
+    await putJson<GroupParticipantsResponse>(
       request,
-      `/projects/${project.id}/participants`,
+      `/groups/${group.id}/participants`,
       adminToken,
       participantsPayload,
     );
-    expect(loadP8Residue(project.id)).toEqual(participantReplayBefore);
+    expect(loadP8Residue(group.id)).toEqual(participantReplayBefore);
 
     const orderLinksPayload = {
       idempotencyKey: orderLinksKey,
       version: currentFixture.orderVersion,
-      primaryProjectId: project.id,
-      projects: [{ projectId: project.id, relationType: 'main', isPrimary: true }],
+      primaryGroupId: group.id,
+      groups: [{ groupId: group.id, relationType: 'main', isPrimary: true }],
     };
 
-    const orderLinks = await putJson<OrderProjectsResponse>(
+    const orderLinks = await putJson<OrderGroupsResponse>(
       request,
-      `/orders/${currentFixture.orderId}/projects`,
+      `/orders/${currentFixture.orderId}/groups`,
       adminToken,
       orderLinksPayload,
     );
-    expect(orderLinks.projects.map((item) => item.id)).toContain(project.id);
-    await expectProjectsSmoke(request, adminToken, project.id);
+    expect(orderLinks.groups.map((item) => item.id)).toContain(group.id);
+    await expectGroupsSmoke(request, adminToken, group.id);
 
-    const orderLinkResidue = loadP8Residue(project.id);
-    await putJson<OrderProjectsResponse>(
+    const orderLinkResidue = loadP8Residue(group.id);
+    await putJson<OrderGroupsResponse>(
       request,
-      `/orders/${currentFixture.orderId}/projects`,
+      `/orders/${currentFixture.orderId}/groups`,
       adminToken,
       orderLinksPayload,
     );
-    expect(loadP8Residue(project.id)).toEqual(orderLinkResidue);
+    expect(loadP8Residue(group.id)).toEqual(orderLinkResidue);
 
-    const notificationSnapshot = loadNotificationSnapshot(project.id, notificationPrefix);
+    const notificationSnapshot = loadNotificationSnapshot(group.id, notificationPrefix);
     if (expectP8Disabled) {
-      expect(notificationSnapshot.projectMemberEvents).toBe(0);
-      expect(notificationSnapshot.projectOrderEvents).toBe(0);
-      expect(loadP8Residue(project.id)).toEqual({
+      expect(notificationSnapshot.groupMemberEvents).toBe(0);
+      expect(notificationSnapshot.groupOrderEvents).toBe(0);
+      expect(loadP8Residue(group.id)).toEqual({
         notifications: 0,
         outboxEvents: 0,
         auditLogRows: 0,
         commandIdempotencyKeys: 2,
       });
     } else {
-      expect(notificationSnapshot.projectMemberEvents).toBeGreaterThanOrEqual(1);
-      expect(notificationSnapshot.projectOrderEvents).toBeGreaterThanOrEqual(1);
+      expect(notificationSnapshot.groupMemberEvents).toBeGreaterThanOrEqual(1);
+      expect(notificationSnapshot.groupOrderEvents).toBeGreaterThanOrEqual(1);
     }
     expect(notificationSnapshot.workerOrderNotifications).toBe(0);
     expect(notificationSnapshot.employeeRecipientNotifications).toBe(0);
@@ -164,20 +164,20 @@ test.describe('Projects P8 notification stage canary', () => {
 });
 
 function requireCanaryEnv() {
-  if (!canaryEnabled) throw new Error('PROJECTS_P8_NOTIFICATION_STAGE_CANARY=true is required');
-  if (fixtureKey !== 'projects-p8-controlled-enable-2026-06-06') {
-    throw new Error('Unexpected PROJECTS_P8_NOTIFICATION_CANARY_FIXTURE_KEY');
+  if (!canaryEnabled) throw new Error('GROUPS_P8_NOTIFICATION_STAGE_CANARY=true is required');
+  if (fixtureKey !== 'groups-p8-controlled-enable-2026-06-06') {
+    throw new Error('Unexpected GROUPS_P8_NOTIFICATION_CANARY_FIXTURE_KEY');
   }
-  if (targetEnv !== 'backend-test') throw new Error('PROJECTS_P8_NOTIFICATION_TARGET_ENV=backend-test is required');
-  if (!restoreEnabled) throw new Error('PROJECTS_P8_NOTIFICATION_RESTORE=true is required');
-  if (!fixtureOrderId) throw new Error('PROJECTS_P8_NOTIFICATION_FIXTURE_ORDER_ID must be a positive integer');
+  if (targetEnv !== 'backend-test') throw new Error('GROUPS_P8_NOTIFICATION_TARGET_ENV=backend-test is required');
+  if (!restoreEnabled) throw new Error('GROUPS_P8_NOTIFICATION_RESTORE=true is required');
+  if (!fixtureOrderId) throw new Error('GROUPS_P8_NOTIFICATION_FIXTURE_ORDER_ID must be a positive integer');
   assertTestTarget(backendApiUrl, postgresContainer, targetEnv);
 }
 
 function assertTestTarget(...values: string[]) {
   const combined = values.join(' ');
   if (/prod|production|live/i.test(combined)) {
-    throw new Error('Refusing to run Projects P8 notification canary against prod/live target');
+    throw new Error('Refusing to run Groups P8 notification canary against prod/live target');
   }
   const parsedBackend = new URL(backendApiUrl);
   expect(parsedBackend.hostname, 'P8 canary must target backend-test').toBe('backend-test.mebelkz.app');
@@ -187,8 +187,8 @@ function assertTestTarget(...values: string[]) {
 function assertSchemaPreconditions() {
   const snapshot = psqlJson<SchemaPrecondition>(`
     SELECT json_build_object(
-      'entityLinks', to_regclass('public.project_entity_links') IS NOT NULL,
-      'participants', to_regclass('public.project_participants') IS NOT NULL,
+      'entityLinks', to_regclass('public.group_entity_links') IS NOT NULL,
+      'participants', to_regclass('public.group_participants') IS NOT NULL,
       'notificationsIdempotencyKey', EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'public'
@@ -256,12 +256,12 @@ function discoverFixture(): FixturePreflight {
   return found;
 }
 
-async function createProject(
+async function createGroup(
   request: APIRequestContext,
   token: string,
   runId: string,
-): Promise<ProjectDto> {
-  const response = await request.post(`${backendApiUrl}/projects`, {
+): Promise<GroupDto> {
+  const response = await request.post(`${backendApiUrl}/groups`, {
     headers: authHeaders(token),
     data: {
       code: `p8_${runId}`,
@@ -273,8 +273,8 @@ async function createProject(
   });
   await expectOk(response);
   const body = await response.json();
-  expect(body.project?.id).toBeTruthy();
-  return body.project as ProjectDto;
+  expect(body.group?.id).toBeTruthy();
+  return body.group as GroupDto;
 }
 
 async function loginForApiToken(
@@ -309,11 +309,11 @@ async function expectOk(response: APIResponse) {
   expect(response.ok(), await response.text()).toBe(true);
 }
 
-async function expectProjectsSmoke(request: APIRequestContext, token: string, projectId: string) {
+async function expectGroupsSmoke(request: APIRequestContext, token: string, groupId: string) {
   for (const path of [
-    '/projects?page=1&pageSize=5',
-    `/projects/${projectId}`,
-    `/projects/${projectId}/overview`,
+    '/groups?page=1&pageSize=5',
+    `/groups/${groupId}`,
+    `/groups/${groupId}/overview`,
   ]) {
     const response = await request.get(`${backendApiUrl}${path}`, {
       headers: authHeaders(token),
@@ -326,7 +326,7 @@ async function expectPostRestoreProbe(
   request: APIRequestContext,
   token: string,
 ) {
-  const response = await request.get(`${backendApiUrl}/projects?page=1&pageSize=1`, {
+  const response = await request.get(`${backendApiUrl}/groups?page=1&pageSize=1`, {
     headers: authHeaders(token),
   });
   await expectOk(response);
@@ -345,7 +345,7 @@ function createSmokeUser(username: string, roleId: number): SmokeUser {
           '${sqlQuote(email)}',
           '${sqlQuote(passwordHash)}',
           ${roleId},
-          'E2E Projects P8 Notification Canary',
+          'E2E Groups P8 Notification Canary',
           true
         )
         RETURNING user_id
@@ -367,37 +367,37 @@ function cleanupUser(userId: number) {
   `);
 }
 
-function loadNotificationCount(projectId: string): number {
+function loadNotificationCount(groupId: string): number {
   return Number(
     psql(`
       SELECT count(*)::int
       FROM public.notifications
-      WHERE entity_type = 'project'
-        AND entity_id = '${sqlQuote(projectId)}'
-        AND idempotency_key LIKE 'projects:p8:%';
+      WHERE entity_type = 'group'
+        AND entity_id = '${sqlQuote(groupId)}'
+        AND idempotency_key LIKE 'groups:p8:%';
     `),
   );
 }
 
-function loadP8Residue(projectId: string): P8Residue {
+function loadP8Residue(groupId: string): P8Residue {
   return psqlJson<P8Residue>(`
     SELECT json_build_object(
       'notifications', (
         SELECT count(*)::int FROM public.notifications
-        WHERE entity_type = 'project'
-          AND entity_id = '${sqlQuote(projectId)}'
-          AND idempotency_key LIKE 'projects:p8:%'
+        WHERE entity_type = 'group'
+          AND entity_id = '${sqlQuote(groupId)}'
+          AND idempotency_key LIKE 'groups:p8:%'
       ),
       'outboxEvents', (
         SELECT count(*)::int FROM public.outbox_events
-        WHERE aggregate_id = '${sqlQuote(projectId)}'
+        WHERE aggregate_id = '${sqlQuote(groupId)}'
           AND event_type IN ('PROJECT_NOTIFICATION_FACT_RESERVED', 'PROJECT_NOTIFICATION_CREATED')
       ),
       'auditLogRows', (
         SELECT count(*)::int FROM public.audit_log
-        WHERE entity_type = 'project'
-          AND entity_id = '${sqlQuote(projectId)}'
-          AND event = 'projects.notification_created'
+        WHERE entity_type = 'group'
+          AND entity_id = '${sqlQuote(groupId)}'
+          AND event = 'groups.notification_created'
       ),
       'commandIdempotencyKeys', (
         SELECT count(*)::int FROM public.command_idempotency_keys
@@ -407,24 +407,24 @@ function loadP8Residue(projectId: string): P8Residue {
   `);
 }
 
-function loadNotificationSnapshot(projectId: string, notificationPrefix: string): NotificationSnapshot {
+function loadNotificationSnapshot(groupId: string, notificationPrefix: string): NotificationSnapshot {
   return psqlJson<NotificationSnapshot>(`
     SELECT json_build_object(
-      'projectMemberEvents', (
+      'groupMemberEvents', (
         SELECT count(*)::int FROM public.notifications
-        WHERE entity_id = '${sqlQuote(projectId)}'
+        WHERE entity_id = '${sqlQuote(groupId)}'
           AND source_type IN ('PROJECT_MEMBER_ADDED', 'PROJECT_MEMBER_REMOVED')
           AND idempotency_key LIKE '${sqlQuote(notificationPrefix)}%'
       ),
-      'projectOrderEvents', (
+      'groupOrderEvents', (
         SELECT count(*)::int FROM public.notifications
-        WHERE entity_id = '${sqlQuote(projectId)}'
+        WHERE entity_id = '${sqlQuote(groupId)}'
           AND source_type = 'PROJECT_ORDER_LINKS_CHANGED'
           AND idempotency_key LIKE '${sqlQuote(notificationPrefix)}%'
       ),
       'workerOrderNotifications', (
         SELECT count(*)::int FROM public.notifications
-        WHERE entity_id = '${sqlQuote(projectId)}'
+        WHERE entity_id = '${sqlQuote(groupId)}'
           AND source_type = 'PROJECT_ORDER_LINKS_CHANGED'
           AND user_id IN (
             SELECT user_id FROM public.users
@@ -437,19 +437,19 @@ function loadNotificationSnapshot(projectId: string, notificationPrefix: string)
         FROM (
           SELECT concat_ws(' ', title, message, source_type, source_id) AS payload
           FROM public.notifications
-          WHERE entity_id = '${sqlQuote(projectId)}'
+          WHERE entity_id = '${sqlQuote(groupId)}'
             AND idempotency_key LIKE '${sqlQuote(notificationPrefix)}%'
           UNION ALL
           SELECT concat_ws(' ', event_type, payload_json::text)
           FROM public.outbox_events
-          WHERE aggregate_id = '${sqlQuote(projectId)}'
+          WHERE aggregate_id = '${sqlQuote(groupId)}'
             AND event_type IN ('PROJECT_NOTIFICATION_FACT_RESERVED', 'PROJECT_NOTIFICATION_CREATED')
           UNION ALL
           SELECT concat_ws(' ', event, metadata_json::text, before_json::text, after_json::text, diff_json::text)
           FROM public.audit_log
-          WHERE entity_type = 'project'
-            AND entity_id = '${sqlQuote(projectId)}'
-            AND event = 'projects.notification_created'
+          WHERE entity_type = 'group'
+            AND entity_id = '${sqlQuote(groupId)}'
+            AND event = 'groups.notification_created'
         ) scanned
         WHERE payload ILIKE '%client%'
            OR payload ILIKE '%payment%'
@@ -461,7 +461,7 @@ function loadNotificationSnapshot(projectId: string, notificationPrefix: string)
            OR payload IN (
              SELECT concat_ws(' ', title, message, source_type, source_id)
              FROM public.notifications
-             WHERE entity_id = '${sqlQuote(projectId)}'
+             WHERE entity_id = '${sqlQuote(groupId)}'
                AND idempotency_key LIKE '${sqlQuote(notificationPrefix)}%'
                AND concat_ws(' ', title, message, source_type, source_id) ILIKE '%audit%'
            )
@@ -474,12 +474,12 @@ function restoreFixtureRows() {
   psql(`
     DO $$
     DECLARE
-      fixture_project_ids uuid[];
+      fixture_group_ids uuid[];
       fixture_user_ids bigint[];
     BEGIN
       SELECT COALESCE(array_agg(id), ARRAY[]::uuid[])
-      INTO fixture_project_ids
-      FROM public.project_projects
+      INTO fixture_group_ids
+      FROM public.group_groups
       WHERE metadata->>'fixtureKey' = '${sqlQuote(fixtureKey)}';
 
       SELECT COALESCE(array_agg(user_id), ARRAY[]::bigint[])
@@ -488,28 +488,28 @@ function restoreFixtureRows() {
       WHERE username LIKE 'e2e_p8_notify_%';
 
       DELETE FROM public.notifications
-      WHERE idempotency_key LIKE 'projects:p8:%:${sqlQuote(fixtureKey)}:%'
-         OR (entity_type = 'project' AND entity_id = ANY(ARRAY(SELECT unnest(fixture_project_ids)::text)))
+      WHERE idempotency_key LIKE 'groups:p8:%:${sqlQuote(fixtureKey)}:%'
+         OR (entity_type = 'group' AND entity_id = ANY(ARRAY(SELECT unnest(fixture_group_ids)::text)))
          OR idempotency_key LIKE '${sqlQuote(fixtureKey)}:%'
          OR user_id = ANY(fixture_user_ids);
       DELETE FROM public.outbox_events
       WHERE idempotency_key LIKE '${sqlQuote(fixtureKey)}:%'
-         OR aggregate_id = ANY(ARRAY(SELECT unnest(fixture_project_ids)::text))
-         OR payload_json->>'projectId' = ANY(ARRAY(SELECT unnest(fixture_project_ids)::text));
+         OR aggregate_id = ANY(ARRAY(SELECT unnest(fixture_group_ids)::text))
+         OR payload_json->>'groupId' = ANY(ARRAY(SELECT unnest(fixture_group_ids)::text));
       DELETE FROM public.audit_log
       WHERE request_id LIKE '${sqlQuote(fixtureKey)}:%'
-         OR entity_id = ANY(ARRAY(SELECT unnest(fixture_project_ids)::text))
+         OR entity_id = ANY(ARRAY(SELECT unnest(fixture_group_ids)::text))
          OR metadata_json->>'reason' = '${sqlQuote(fixtureKey)}';
       DELETE FROM public.command_idempotency_keys
       WHERE idempotency_key LIKE '${sqlQuote(fixtureKey)}:%';
-      DELETE FROM public.project_order_projects
-      WHERE project_id = ANY(fixture_project_ids);
-      DELETE FROM public.project_participants
-      WHERE project_id = ANY(fixture_project_ids);
-      DELETE FROM public.project_entity_links
-      WHERE project_id = ANY(fixture_project_ids);
-      DELETE FROM public.project_projects
-      WHERE id = ANY(fixture_project_ids);
+      DELETE FROM public.group_order_groups
+      WHERE group_id = ANY(fixture_group_ids);
+      DELETE FROM public.group_participants
+      WHERE group_id = ANY(fixture_group_ids);
+      DELETE FROM public.group_entity_links
+      WHERE group_id = ANY(fixture_group_ids);
+      DELETE FROM public.group_groups
+      WHERE id = ANY(fixture_group_ids);
       DELETE FROM public.refresh_tokens
       WHERE user_id = ANY(fixture_user_ids);
       DELETE FROM public.auth_sessions
@@ -522,23 +522,23 @@ function restoreFixtureRows() {
 
 function loadRestoreProof(): RestoreProof {
   return psqlJson<RestoreProof>(`
-    WITH fixture_projects AS (
-      SELECT id FROM public.project_projects
+    WITH fixture_groups AS (
+      SELECT id FROM public.group_groups
       WHERE metadata->>'fixtureKey' = '${sqlQuote(fixtureKey)}'
     )
     SELECT json_build_object(
-      'projectRows', (SELECT count(*)::int FROM fixture_projects),
-      'projectEntityLinks', (
-        SELECT count(*)::int FROM public.project_entity_links
-        WHERE project_id IN (SELECT id FROM fixture_projects)
+      'groupRows', (SELECT count(*)::int FROM fixture_groups),
+      'groupEntityLinks', (
+        SELECT count(*)::int FROM public.group_entity_links
+        WHERE group_id IN (SELECT id FROM fixture_groups)
       ),
-      'projectParticipants', (
-        SELECT count(*)::int FROM public.project_participants
-        WHERE project_id IN (SELECT id FROM fixture_projects)
+      'groupParticipants', (
+        SELECT count(*)::int FROM public.group_participants
+        WHERE group_id IN (SELECT id FROM fixture_groups)
       ),
-      'projectOrderProjects', (
-        SELECT count(*)::int FROM public.project_order_projects
-        WHERE project_id IN (SELECT id FROM fixture_projects)
+      'groupOrderGroups', (
+        SELECT count(*)::int FROM public.group_order_groups
+        WHERE group_id IN (SELECT id FROM fixture_groups)
       ),
       'commandIdempotencyKeys', (
         SELECT count(*)::int FROM public.command_idempotency_keys
@@ -546,18 +546,18 @@ function loadRestoreProof(): RestoreProof {
       ),
       'auditLogRows', (
         SELECT count(*)::int FROM public.audit_log
-        WHERE entity_type = 'project'
-          AND entity_id IN (SELECT id::text FROM fixture_projects)
+        WHERE entity_type = 'group'
+          AND entity_id IN (SELECT id::text FROM fixture_groups)
       ),
       'outboxEvents', (
         SELECT count(*)::int FROM public.outbox_events
-        WHERE aggregate_id IN (SELECT id::text FROM fixture_projects)
+        WHERE aggregate_id IN (SELECT id::text FROM fixture_groups)
            OR idempotency_key LIKE '${sqlQuote(fixtureKey)}:%'
       ),
       'notifications', (
         SELECT count(*)::int FROM public.notifications
         WHERE idempotency_key LIKE '${sqlQuote(fixtureKey)}:%'
-           OR (entity_type = 'project' AND entity_id IN (SELECT id::text FROM fixture_projects))
+           OR (entity_type = 'group' AND entity_id IN (SELECT id::text FROM fixture_groups))
            OR user_id IN (
              SELECT user_id FROM public.users
              WHERE username LIKE 'e2e_p8_notify_%'
@@ -572,10 +572,10 @@ function loadRestoreProof(): RestoreProof {
 }
 
 function expectRestored(proof: RestoreProof, label: string) {
-  expect(proof.projectRows, label).toBe(0);
-  expect(proof.projectEntityLinks, label).toBe(0);
-  expect(proof.projectParticipants, label).toBe(0);
-  expect(proof.projectOrderProjects, label).toBe(0);
+  expect(proof.groupRows, label).toBe(0);
+  expect(proof.groupEntityLinks, label).toBe(0);
+  expect(proof.groupParticipants, label).toBe(0);
+  expect(proof.groupOrderGroups, label).toBe(0);
   expect(proof.commandIdempotencyKeys, label).toBe(0);
   expect(proof.auditLogRows, label).toBe(0);
   expect(proof.outboxEvents, label).toBe(0);
@@ -647,11 +647,11 @@ interface FixturePreflight {
   employeeId: number;
 }
 
-interface ProjectDto {
+interface GroupDto {
   id: string;
 }
 
-interface ProjectParticipantsResponse {
+interface GroupParticipantsResponse {
   participants: Array<{
     participantType: string;
     participantId: string | null;
@@ -659,8 +659,8 @@ interface ProjectParticipantsResponse {
   }>;
 }
 
-interface OrderProjectsResponse {
-  projects: Array<{ id: string }>;
+interface OrderGroupsResponse {
+  groups: Array<{ id: string }>;
 }
 
 interface SmokeUser {
@@ -677,18 +677,18 @@ interface P8Residue {
 }
 
 interface NotificationSnapshot {
-  projectMemberEvents: number;
-  projectOrderEvents: number;
+  groupMemberEvents: number;
+  groupOrderEvents: number;
   workerOrderNotifications: number;
   employeeRecipientNotifications: number;
   forbiddenPayloadMatches: number;
 }
 
 interface RestoreProof {
-  projectRows: number;
-  projectEntityLinks: number;
-  projectParticipants: number;
-  projectOrderProjects: number;
+  groupRows: number;
+  groupEntityLinks: number;
+  groupParticipants: number;
+  groupOrderGroups: number;
   commandIdempotencyKeys: number;
   auditLogRows: number;
   outboxEvents: number;

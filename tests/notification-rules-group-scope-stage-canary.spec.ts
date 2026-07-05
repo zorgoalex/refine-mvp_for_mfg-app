@@ -2,45 +2,45 @@ import { expect, test, type APIRequestContext, type APIResponse } from '@playwri
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 
-const canaryEnabled = process.env.NOTIFICATION_RULES_PROJECT_SCOPE_STAGE_CANARY === 'true';
-const targetEnv = process.env.NOTIFICATION_RULES_PROJECT_SCOPE_TARGET_ENV?.trim() ?? '';
-const restoreEnabled = process.env.NOTIFICATION_RULES_PROJECT_SCOPE_RESTORE === 'true';
-const fixtureKey = process.env.NOTIFICATION_RULES_PROJECT_SCOPE_FIXTURE_KEY?.trim() ?? '';
+const canaryEnabled = process.env.NOTIFICATION_RULES_GROUP_SCOPE_STAGE_CANARY === 'true';
+const targetEnv = process.env.NOTIFICATION_RULES_GROUP_SCOPE_TARGET_ENV?.trim() ?? '';
+const restoreEnabled = process.env.NOTIFICATION_RULES_GROUP_SCOPE_RESTORE === 'true';
+const fixtureKey = process.env.NOTIFICATION_RULES_GROUP_SCOPE_FIXTURE_KEY?.trim() ?? '';
 const backendApiUrl = trimTrailingSlash(
-  process.env.NOTIFICATION_RULES_PROJECT_SCOPE_BACKEND_API_URL ?? 'https://backend-test.mebelkz.app/api/v1',
+  process.env.NOTIFICATION_RULES_GROUP_SCOPE_BACKEND_API_URL ?? 'https://backend-test.mebelkz.app/api/v1',
 );
 const postgresContainer =
-  process.env.NOTIFICATION_RULES_PROJECT_SCOPE_POSTGRES_CONTAINER ?? 'erp_test-postgresdb-1';
+  process.env.NOTIFICATION_RULES_GROUP_SCOPE_POSTGRES_CONTAINER ?? 'erp_test-postgresdb-1';
 const adminUsername =
-  process.env.NOTIFICATION_RULES_PROJECT_SCOPE_ADMIN_USERNAME?.trim() ||
+  process.env.NOTIFICATION_RULES_GROUP_SCOPE_ADMIN_USERNAME?.trim() ||
   process.env.CODEX_PLAYWRIGHT_USERNAME?.trim() ||
   'codex_playwright';
-const adminPassword = process.env.NOTIFICATION_RULES_PROJECT_SCOPE_ADMIN_PASSWORD ?? process.env.CODEX_PLAYWRIGHT_PASSWORD ?? '';
+const adminPassword = process.env.NOTIFICATION_RULES_GROUP_SCOPE_ADMIN_PASSWORD ?? process.env.CODEX_PLAYWRIGHT_PASSWORD ?? '';
 const vercelBypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim() ?? '';
 
 const runId = crypto.randomBytes(5).toString('hex');
-const projectCode = `E2E-NOTIF-SCOPE-${runId}`;
+const groupCode = `E2E-NOTIF-SCOPE-${runId}`;
 const globalRuleCode = `${fixtureKey}-global-${runId}`;
-const scopedRuleCode = `${fixtureKey}-project-${runId}`;
+const scopedRuleCode = `${fixtureKey}-group-${runId}`;
 
 const missingPrerequisites = [
-  targetEnv === 'backend-test' ? null : 'NOTIFICATION_RULES_PROJECT_SCOPE_TARGET_ENV=backend-test',
-  restoreEnabled ? null : 'NOTIFICATION_RULES_PROJECT_SCOPE_RESTORE=true',
-  fixtureKey ? null : 'NOTIFICATION_RULES_PROJECT_SCOPE_FIXTURE_KEY',
-  backendApiUrl ? null : 'NOTIFICATION_RULES_PROJECT_SCOPE_BACKEND_API_URL',
-  adminUsername ? null : 'NOTIFICATION_RULES_PROJECT_SCOPE_ADMIN_USERNAME or CODEX_PLAYWRIGHT_USERNAME',
-  adminPassword ? null : 'NOTIFICATION_RULES_PROJECT_SCOPE_ADMIN_PASSWORD or CODEX_PLAYWRIGHT_PASSWORD',
+  targetEnv === 'backend-test' ? null : 'NOTIFICATION_RULES_GROUP_SCOPE_TARGET_ENV=backend-test',
+  restoreEnabled ? null : 'NOTIFICATION_RULES_GROUP_SCOPE_RESTORE=true',
+  fixtureKey ? null : 'NOTIFICATION_RULES_GROUP_SCOPE_FIXTURE_KEY',
+  backendApiUrl ? null : 'NOTIFICATION_RULES_GROUP_SCOPE_BACKEND_API_URL',
+  adminUsername ? null : 'NOTIFICATION_RULES_GROUP_SCOPE_ADMIN_USERNAME or CODEX_PLAYWRIGHT_USERNAME',
+  adminPassword ? null : 'NOTIFICATION_RULES_GROUP_SCOPE_ADMIN_PASSWORD or CODEX_PLAYWRIGHT_PASSWORD',
   dockerContainerExists(postgresContainer) ? null : `docker container ${postgresContainer}`,
 ].filter((value): value is string => Boolean(value));
 
-test.describe('notification rules project-scope stage canary', () => {
+test.describe('notification rules group-scope stage canary', () => {
   test.skip(
     !canaryEnabled,
-    'Set NOTIFICATION_RULES_PROJECT_SCOPE_STAGE_CANARY=true to enable this opt-in stage canary.',
+    'Set NOTIFICATION_RULES_GROUP_SCOPE_STAGE_CANARY=true to enable this opt-in stage canary.',
   );
   test.skip(
     canaryEnabled && missingPrerequisites.length > 0,
-    `Missing notification rules project-scope canary prerequisites: ${missingPrerequisites.join(', ')}`,
+    `Missing notification rules group-scope canary prerequisites: ${missingPrerequisites.join(', ')}`,
   );
   test.setTimeout(180000);
 
@@ -48,51 +48,51 @@ test.describe('notification rules project-scope stage canary', () => {
     assertTargetEnv(targetEnv);
     assertBackendApiUrl(backendApiUrl);
     restoreFixtureRows();
-    expect(loadResidueCounts()).toEqual({ projects: 0, rules: 0 });
+    expect(loadResidueCounts()).toEqual({ groups: 0, rules: 0 });
   });
 
   test.afterAll(() => {
     if (restoreEnabled) {
       restoreFixtureRows();
-      expect(loadResidueCounts()).toEqual({ projects: 0, rules: 0 });
+      expect(loadResidueCounts()).toEqual({ groups: 0, rules: 0 });
     }
   });
 
-  test('proves create/list/update/delete projectId API contract and restore-to-zero', async ({ request }) => {
+  test('proves create/list/update/delete groupId API contract and restore-to-zero', async ({ request }) => {
     const token = await loginForApiToken(request);
-    const project = await createProject(request, token);
+    const group = await createGroup(request, token);
 
     const globalRule = await createRule(request, token, {
       ruleCode: globalRuleCode,
-      projectId: null,
+      groupId: null,
     });
-    expect(globalRule.projectId).toBeNull();
+    expect(globalRule.groupId).toBeNull();
 
     const scopedRule = await createRule(request, token, {
       ruleCode: scopedRuleCode,
-      projectId: project.id,
+      groupId: group.id,
     });
-    expect(scopedRule.projectId).toBe(project.id);
+    expect(scopedRule.groupId).toBe(group.id);
 
     const globalRules = await listRules(request, token, 'global');
     expect(globalRules.some((rule) => rule.ruleCode === globalRuleCode)).toBe(true);
     expect(globalRules.some((rule) => rule.ruleCode === scopedRuleCode)).toBe(false);
 
-    const projectRules = await listRules(request, token, project.id);
-    expect(projectRules.some((rule) => rule.ruleCode === scopedRuleCode)).toBe(true);
-    expect(projectRules.some((rule) => rule.ruleCode === globalRuleCode)).toBe(false);
+    const groupRules = await listRules(request, token, group.id);
+    expect(groupRules.some((rule) => rule.ruleCode === scopedRuleCode)).toBe(true);
+    expect(groupRules.some((rule) => rule.ruleCode === globalRuleCode)).toBe(false);
 
     const cleared = await patchRule(request, token, scopedRule.notificationRuleId, scopedRule.updatedAt);
-    expect(cleared.projectId).toBeNull();
+    expect(cleared.groupId).toBeNull();
 
     await deleteRule(request, token, globalRule.notificationRuleId);
     await deleteRule(request, token, scopedRule.notificationRuleId);
     restoreFixtureRows();
-    expect(loadResidueCounts()).toEqual({ projects: 0, rules: 0 });
+    expect(loadResidueCounts()).toEqual({ groups: 0, rules: 0 });
   });
 });
 
-interface ProjectDto {
+interface GroupDto {
   id: string;
   code: string;
   name: string;
@@ -101,41 +101,41 @@ interface ProjectDto {
 interface RuleDto {
   notificationRuleId: string;
   ruleCode: string;
-  projectId: string | null;
+  groupId: string | null;
   updatedAt: string;
 }
 
-async function createProject(request: APIRequestContext, token: string): Promise<ProjectDto> {
-  const response = await request.post(`${backendApiUrl}/projects`, {
+async function createGroup(request: APIRequestContext, token: string): Promise<GroupDto> {
+  const response = await request.post(`${backendApiUrl}/groups`, {
     headers: authHeaders(token),
     data: {
-      code: projectCode,
+      code: groupCode,
       name: `E2E notification scope ${runId}`,
       status: 'active',
       metadata: { fixtureKey, runId },
     },
   });
   await expectOk(response);
-  const body = (await response.json()) as { project: ProjectDto };
-  return body.project;
+  const body = (await response.json()) as { group: GroupDto };
+  return body.group;
 }
 
 async function createRule(
   request: APIRequestContext,
   token: string,
-  input: { ruleCode: string; projectId: string | null },
+  input: { ruleCode: string; groupId: string | null },
 ): Promise<RuleDto> {
   const response = await request.post(`${backendApiUrl}/notification-rules`, {
     headers: authHeaders(token),
     data: {
       ruleCode: input.ruleCode,
       eventType: 'DEADLINE_EXPIRED',
-      projectId: input.projectId,
+      groupId: input.groupId,
       level: 'info',
       priority: 100,
       isEnabled: true,
       conditions: {},
-      recipients: { resolvers: ['project_participants'] },
+      recipients: { resolvers: ['group_participants'] },
       titleTemplate: 'E2E {orderId}',
       messageTemplate: 'E2E {orderId} {eventType}',
     },
@@ -147,10 +147,10 @@ async function createRule(
 async function listRules(
   request: APIRequestContext,
   token: string,
-  projectId: string | 'global',
+  groupId: string | 'global',
 ): Promise<RuleDto[]> {
   const response = await request.get(
-    `${backendApiUrl}/notification-rules?eventType=DEADLINE_EXPIRED&projectId=${encodeURIComponent(projectId)}`,
+    `${backendApiUrl}/notification-rules?eventType=DEADLINE_EXPIRED&groupId=${encodeURIComponent(groupId)}`,
     { headers: authHeaders(token) },
   );
   await expectOk(response);
@@ -166,8 +166,8 @@ async function patchRule(
   const response = await request.patch(`${backendApiUrl}/notification-rules/${encodeURIComponent(ruleId)}`, {
     headers: authHeaders(token),
     data: {
-      projectId: null,
-      reason: 'E2E clear project scope',
+      groupId: null,
+      reason: 'E2E clear group scope',
       expectedUpdatedAt,
     },
   });
@@ -208,19 +208,19 @@ function restoreFixtureRows(): void {
   psql(`
     DELETE FROM notification_rules
     WHERE rule_code IN ('${escapeSql(globalRuleCode)}', '${escapeSql(scopedRuleCode)}');
-    DELETE FROM project_projects
-    WHERE code = '${escapeSql(projectCode)}';
+    DELETE FROM group_groups
+    WHERE code = '${escapeSql(groupCode)}';
   `);
 }
 
-function loadResidueCounts(): { projects: number; rules: number } {
+function loadResidueCounts(): { groups: number; rules: number } {
   const result = psql(`
     SELECT
-      (SELECT count(*)::int FROM project_projects WHERE code = '${escapeSql(projectCode)}') || '|' ||
+      (SELECT count(*)::int FROM group_groups WHERE code = '${escapeSql(groupCode)}') || '|' ||
       (SELECT count(*)::int FROM notification_rules WHERE rule_code IN ('${escapeSql(globalRuleCode)}', '${escapeSql(scopedRuleCode)}'));
   `);
-  const [projects, rules] = result.split('|').map((value) => Number(value));
-  return { projects, rules };
+  const [groups, rules] = result.split('|').map((value) => Number(value));
+  return { groups, rules };
 }
 
 function psql(sql: string): string {

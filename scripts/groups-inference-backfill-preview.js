@@ -4,14 +4,14 @@ const { execFileSync } = require('node:child_process');
 const { mkdirSync, writeFileSync } = require('node:fs');
 const { dirname } = require('node:path');
 const {
-  assertProjectsInferencePreviewAllowed,
+  assertGroupsInferencePreviewAllowed,
   buildStrictSameClientPreviewSql,
-  parseProjectsInferencePreviewArgs,
-} = require('./projects-inference-backfill-preview-lib.js');
+  parseGroupsInferencePreviewArgs,
+} = require('./groups-inference-backfill-preview-lib.js');
 
 function main() {
-  const config = parseProjectsInferencePreviewArgs(process.argv.slice(2));
-  assertProjectsInferencePreviewAllowed(config);
+  const config = parseGroupsInferencePreviewArgs(process.argv.slice(2));
+  assertGroupsInferencePreviewAllowed(config);
 
   const sql = buildStrictSameClientPreviewSql({ limit: config.limit });
   const raw = execFileSync('docker', [
@@ -33,8 +33,8 @@ function main() {
   ], { encoding: 'utf8' });
 
   const rows = parseRows(raw);
-  const eligible = rows.filter((row) => row.candidateProjectCount === 1);
-  const conflicts = rows.filter((row) => row.candidateProjectCount > 1);
+  const eligible = rows.filter((row) => row.candidateGroupCount === 1);
+  const conflicts = rows.filter((row) => row.candidateGroupCount > 1);
   const output = {
     generatedAt: new Date().toISOString(),
     targetEnv: config.targetEnv,
@@ -43,7 +43,7 @@ function main() {
       rows: rows.length,
       eligible: eligible.length,
       conflicts: conflicts.length,
-      projects: [...new Set(rows.map((row) => row.projectCode))].sort(),
+      groups: [...new Set(rows.map((row) => row.groupCode))].sort(),
     },
     eligible,
     conflicts,
@@ -61,9 +61,9 @@ function parseRows(raw) {
     .filter(Boolean)
     .map((line) => {
       const [
-        projectId,
-        projectCode,
-        projectName,
+        groupId,
+        groupCode,
+        groupName,
         clientId,
         clientName,
         orderId,
@@ -72,13 +72,13 @@ function parseRows(raw) {
         orderDate,
         confidence,
         reason,
-        candidateProjectCount,
-        conflictProjectCodes,
+        candidateGroupCount,
+        conflictGroupCodes,
       ] = line.split('\t');
       return {
-        projectId,
-        projectCode,
-        projectName,
+        groupId,
+        groupCode,
+        groupName,
         clientId,
         clientName,
         orderId,
@@ -87,8 +87,8 @@ function parseRows(raw) {
         orderDate,
         confidence,
         reason,
-        candidateProjectCount: Number(candidateProjectCount),
-        conflictProjectCodes,
+        candidateGroupCount: Number(candidateGroupCount),
+        conflictGroupCodes,
       };
     });
 }

@@ -90,8 +90,8 @@ describe('orders OpenAPI contract', () => {
     expect(controllerSource).toContain('operationId: \'replaceOrderProjects\'');
     expect(repositorySource).toContain("'groups.order_links.replace'");
     expect(repositorySource).not.toContain("'projects.order_links.replace'");
-    expect(contract).toContain('    ReplaceOrderProjectsRequest:');
-    expect(contract).toContain('    OrderProjectSummaryDto:');
+    expect(contract).toContain('    ReplaceOrderGroupsRequest:');
+    expect(contract).toContain('    OrderGroupSummaryDto:');
     expect(contract).not.toContain('/api/v1/orders/{orderId}/project:');
   });
 

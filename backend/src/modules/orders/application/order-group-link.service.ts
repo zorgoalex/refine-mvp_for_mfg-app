@@ -5,12 +5,12 @@ import { PermissionsService } from '../../../permissions/permissions.service';
 import type { GroupNotificationService } from '../../groups/notifications/group-notification.service';
 import type {
   GetOrderProjectsCommand,
-  OrderProjectLinkRepositoryPort,
+  OrderGroupLinkRepositoryPort,
   ReplaceOrderProjectsCommand,
 } from './order-project-link.types';
 
 export interface OrderGroupLinkServicePorts {
-  links: OrderProjectLinkRepositoryPort;
+  links: OrderGroupLinkRepositoryPort;
   permissions?: PermissionsService;
   groupNotifications?: GroupNotificationService;
   groupP8NotificationsEnabled?: boolean;

@@ -8,13 +8,13 @@ import type {
   OrderProjectRelationType,
   OrderProjectSummaryDto,
   OrderProjectsResponseDto,
-  ReplaceOrderProjectLinkDto,
+  ReplaceOrderGroupLinkDto,
   ReplaceOrderProjectsResponseDto,
 } from '../dto/order-project-link.dto';
 import { OrderNotFoundError, OrderVersionConflictError } from '../errors/order.errors';
 import type {
   GetOrderProjectsCommand,
-  OrderProjectLinkRepositoryPort,
+  OrderGroupLinkRepositoryPort,
   ReplaceOrderProjectsCommand,
 } from '../application/order-project-link.types';
 
@@ -63,7 +63,7 @@ type OrderProjectDatabase = DatabaseClient & {
 
 const SOURCE = 'groups-order-links';
 
-export class PgOrderGroupLinkRepository implements OrderProjectLinkRepositoryPort {
+export class PgOrderGroupLinkRepository implements OrderGroupLinkRepositoryPort {
   private readonly orderAccessPolicy = new OrderAccessPolicy();
 
   constructor(private readonly database: OrderProjectDatabase) {}
@@ -185,7 +185,7 @@ export class PgOrderGroupLinkRepository implements OrderProjectLinkRepositoryPor
   }
 }
 
-export class UnavailableOrderGroupLinkRepository implements OrderProjectLinkRepositoryPort {
+export class UnavailableOrderGroupLinkRepository implements OrderGroupLinkRepositoryPort {
   async getOrderProjects(): Promise<OrderProjectsResponseDto> {
     throw databaseUnavailable();
   }
@@ -263,7 +263,7 @@ async function validateSubmittedProjects(tx: DatabaseClient, projectIds: string[
 
   const missingProjectId = uniqueProjectIds.find((projectId) => !rowsById.has(projectId));
   if (missingProjectId) {
-    throw new OrderProjectLinkProjectNotFoundError(missingProjectId);
+    throw new OrderGroupLinkProjectNotFoundError(missingProjectId);
   }
 
   const archivedProjectId = uniqueProjectIds.find((projectId) => {
@@ -271,7 +271,7 @@ async function validateSubmittedProjects(tx: DatabaseClient, projectIds: string[
     return row?.status === 'archived' || row?.archived_at != null;
   });
   if (archivedProjectId) {
-    throw new OrderProjectLinkProjectArchivedError(archivedProjectId);
+    throw new OrderGroupLinkProjectArchivedError(archivedProjectId);
   }
 }
 
@@ -296,7 +296,7 @@ async function insertLink(
   tx: DatabaseClient,
   orderId: number,
   currentUserId: string,
-  link: ReplaceOrderProjectLinkDto,
+  link: ReplaceOrderGroupLinkDto,
 ): Promise<ProjectLinkRow> {
   const result = await tx.query<ProjectLinkRow>(
     `
@@ -389,7 +389,7 @@ async function enqueueOutbox(
     previousVersion: number;
     nextVersion: number;
     projects: OrderProjectSummaryDto[];
-    added: ReplaceOrderProjectLinkDto[];
+    added: ReplaceOrderGroupLinkDto[];
     removed: ProjectLinkRow[];
   },
 ): Promise<void> {
@@ -447,7 +447,7 @@ function orderGroupFactKey(orderId: number, groupId: string, action: 'added' | '
 
 function orderProjectNotificationFacts(
   orderId: number,
-  added: ReplaceOrderProjectLinkDto[],
+  added: ReplaceOrderGroupLinkDto[],
   removed: ProjectLinkRow[],
 ): Array<{ orderId: string; groupId: string; action: 'added' | 'removed' }> {
   return [
@@ -467,7 +467,7 @@ function orderProjectNotificationFacts(
 async function reconcileIdempotency(
   tx: DatabaseClient,
   command: ReplaceOrderProjectsCommand,
-  normalizedProjects: ReplaceOrderProjectLinkDto[],
+  normalizedProjects: ReplaceOrderGroupLinkDto[],
 ): Promise<{ completedResponse?: ReplaceOrderProjectsResponseDto }> {
   const requestHash = hashRequest({
     actorUserId: command.currentUser.id,
@@ -512,18 +512,18 @@ async function reconcileIdempotency(
   );
   const row = existing.rows[0];
   if (!row) {
-    throw new OrderProjectLinkIdempotencyInProgressError(command.dto.idempotencyKey);
+    throw new OrderGroupLinkIdempotencyInProgressError(command.dto.idempotencyKey);
   }
   if (row.request_hash !== requestHash) {
-    throw new OrderProjectLinkIdempotencyKeyReusedError(command.dto.idempotencyKey);
+    throw new OrderGroupLinkIdempotencyKeyReusedError(command.dto.idempotencyKey);
   }
   if (row.status === 'completed' && row.response_json) {
     return { completedResponse: parseStoredResponse(row.response_json) };
   }
   if (row.status === 'failed') {
-    throw new OrderProjectLinkIdempotencyFailedError(command.dto.idempotencyKey);
+    throw new OrderGroupLinkIdempotencyFailedError(command.dto.idempotencyKey);
   }
-  throw new OrderProjectLinkIdempotencyInProgressError(command.dto.idempotencyKey);
+  throw new OrderGroupLinkIdempotencyInProgressError(command.dto.idempotencyKey);
 }
 
 async function completeIdempotency(
@@ -544,9 +544,9 @@ async function completeIdempotency(
 }
 
 function normalizeProjectLinks(
-  projects: ReplaceOrderProjectLinkDto[],
+  projects: ReplaceOrderGroupLinkDto[],
   primaryProjectId: string | null,
-): ReplaceOrderProjectLinkDto[] {
+): ReplaceOrderGroupLinkDto[] {
   const seen = new Set<string>();
   const canonicalPrimaryProjectId = primaryProjectId ? canonicalizeUuid(primaryProjectId) : null;
   const normalized = projects.map((project) => ({
@@ -612,11 +612,11 @@ function linkKey(row: ProjectLinkRow): string {
   return `${row.group_id}:${row.relation_type}:${row.is_primary ? '1' : '0'}`;
 }
 
-function linkInputKey(row: ReplaceOrderProjectLinkDto): string {
+function linkInputKey(row: ReplaceOrderGroupLinkDto): string {
   return `${row.projectId}:${row.relationType}:${row.isPrimary ? '1' : '0'}`;
 }
 
-function duplicateLinkInputKey(row: ReplaceOrderProjectLinkDto): string {
+function duplicateLinkInputKey(row: ReplaceOrderGroupLinkDto): string {
   return `${row.projectId}:${row.relationType}`;
 }
 
@@ -705,7 +705,7 @@ function orderScopeDenied(requiredPermissions: string[]): ApiError {
   });
 }
 
-class OrderProjectLinkIdempotencyKeyReusedError extends ApiError {
+class OrderGroupLinkIdempotencyKeyReusedError extends ApiError {
   constructor(idempotencyKey: string) {
     super(409, 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key was reused with a different request', {
       idempotencyKey,
@@ -713,7 +713,7 @@ class OrderProjectLinkIdempotencyKeyReusedError extends ApiError {
   }
 }
 
-class OrderProjectLinkIdempotencyInProgressError extends ApiError {
+class OrderGroupLinkIdempotencyInProgressError extends ApiError {
   constructor(idempotencyKey: string) {
     super(409, 'IDEMPOTENCY_IN_PROGRESS', 'Idempotent command is still processing', {
       idempotencyKey,
@@ -721,7 +721,7 @@ class OrderProjectLinkIdempotencyInProgressError extends ApiError {
   }
 }
 
-class OrderProjectLinkIdempotencyFailedError extends ApiError {
+class OrderGroupLinkIdempotencyFailedError extends ApiError {
   constructor(idempotencyKey: string) {
     super(409, 'IDEMPOTENCY_FAILED', 'Idempotent command previously failed', {
       idempotencyKey,
@@ -729,13 +729,13 @@ class OrderProjectLinkIdempotencyFailedError extends ApiError {
   }
 }
 
-class OrderProjectLinkProjectNotFoundError extends ApiError {
+class OrderGroupLinkProjectNotFoundError extends ApiError {
   constructor(projectId: string) {
     super(404, 'PROJECT_NOT_FOUND', 'Project not found', { projectId });
   }
 }
 
-class OrderProjectLinkProjectArchivedError extends ApiError {
+class OrderGroupLinkProjectArchivedError extends ApiError {
   constructor(projectId: string) {
     super(422, 'PROJECT_ARCHIVED', 'Archived projects cannot be linked to orders', { projectId });
   }

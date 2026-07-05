@@ -3,20 +3,20 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import manifestLib from './projects-live-backfill-manifest-lib.js';
+import manifestLib from './groups-live-backfill-manifest-lib.js';
 
 const {
-  buildProjectsLiveBackfillProofSql,
-  buildProjectsLiveBackfillPlan,
-  parseProjectsLiveBackfillManifest,
-  validateProjectsLiveBackfillDryRunResponse,
+  buildGroupsLiveBackfillProofSql,
+  buildGroupsLiveBackfillPlan,
+  parseGroupsLiveBackfillManifest,
+  validateGroupsLiveBackfillDryRunResponse,
 } = manifestLib;
 
-describe('projects live backfill manifest tooling', () => {
+describe('groups live backfill manifest tooling', () => {
   it('builds dry-run and write payload chunks from explicit selected ids', () => {
-    const manifest = parseProjectsLiveBackfillManifest({
-      fixtureKey: 'projects-live-backfill-2026-06-15',
-      projectId: '11111111-1111-4111-8111-111111111111',
+    const manifest = parseGroupsLiveBackfillManifest({
+      fixtureKey: 'groups-live-backfill-2026-06-15',
+      groupId: '11111111-1111-4111-8111-111111111111',
       entityType: 'order',
       relationType: 'manual_backfill',
       source: {
@@ -26,17 +26,17 @@ describe('projects live backfill manifest tooling', () => {
       items: [
         {
           entityId: '11195',
-          reason: 'operator selected order for project backfill',
+          reason: 'operator selected order for group backfill',
           confidence: 'manual',
           sourceRow: 'manifest-row-1',
         },
       ],
     });
 
-    const plan = buildProjectsLiveBackfillPlan(manifest);
+    const plan = buildGroupsLiveBackfillPlan(manifest);
 
     expect(plan.summary).toEqual({
-      projectId: '11111111-1111-4111-8111-111111111111',
+      groupId: '11111111-1111-4111-8111-111111111111',
       entityType: 'order',
       itemCount: 1,
       chunkCount: 1,
@@ -44,9 +44,9 @@ describe('projects live backfill manifest tooling', () => {
     expect(plan.chunks).toHaveLength(1);
     expect(plan.chunks[0].dryRunPayload).toMatchObject({
       mode: 'dry-run',
-      fixtureKey: 'projects-live-backfill-2026-06-15',
+      fixtureKey: 'groups-live-backfill-2026-06-15',
       idempotencyKey:
-        'projects-live-backfill-dry-run-2026-06-15-project-11111111-1111-4111-8111-111111111111-chunk-001',
+        'groups-live-backfill-dry-run-2026-06-15-group-11111111-1111-4111-8111-111111111111-chunk-001',
       entityType: 'order',
       relationType: 'manual_backfill',
       items: [{ entityId: '11195' }],
@@ -54,17 +54,17 @@ describe('projects live backfill manifest tooling', () => {
     expect(plan.chunks[0].writePayload).toMatchObject({
       mode: 'write',
       writeIntent: 'explicit-selected-ids',
-      fixtureKey: 'projects-live-backfill-2026-06-15',
+      fixtureKey: 'groups-live-backfill-2026-06-15',
       idempotencyKey:
-        'projects-live-backfill-write-2026-06-15-project-11111111-1111-4111-8111-111111111111-chunk-001',
+        'groups-live-backfill-write-2026-06-15-group-11111111-1111-4111-8111-111111111111-chunk-001',
       items: [{ entityId: '11195' }],
     });
   });
 
   it('chunks manifests above 500 selected ids with stable chunk ids', () => {
-    const manifest = parseProjectsLiveBackfillManifest({
-      fixtureKey: 'projects-live-backfill-2026-06-15',
-      projectId: '11111111-1111-4111-8111-111111111111',
+    const manifest = parseGroupsLiveBackfillManifest({
+      fixtureKey: 'groups-live-backfill-2026-06-15',
+      groupId: '11111111-1111-4111-8111-111111111111',
       entityType: 'order',
       relationType: 'manual_backfill',
       source: {
@@ -73,13 +73,13 @@ describe('projects live backfill manifest tooling', () => {
       },
       items: Array.from({ length: 501 }, (_, index) => ({
         entityId: String(index + 1),
-        reason: 'operator selected order for project backfill',
+        reason: 'operator selected order for group backfill',
         confidence: 'manual',
         sourceRow: `manifest-row-${index + 1}`,
       })),
     });
 
-    const plan = buildProjectsLiveBackfillPlan(manifest);
+    const plan = buildGroupsLiveBackfillPlan(manifest);
 
     expect(plan.summary.chunkCount).toBe(2);
     expect(plan.chunks[0].dryRunPayload.items).toHaveLength(500);
@@ -89,9 +89,9 @@ describe('projects live backfill manifest tooling', () => {
   });
 
   it('rejects inference-shaped or unsafe manifests', () => {
-    expect(() => parseProjectsLiveBackfillManifest({
-      fixtureKey: 'projects-live-backfill-2026-06-15',
-      projectId: '11111111-1111-4111-8111-111111111111',
+    expect(() => parseGroupsLiveBackfillManifest({
+      fixtureKey: 'groups-live-backfill-2026-06-15',
+      groupId: '11111111-1111-4111-8111-111111111111',
       entityType: 'order',
       relationType: 'manual_backfill',
       source: {
@@ -101,9 +101,9 @@ describe('projects live backfill manifest tooling', () => {
       items: [{ entityId: '11195', reason: 'guessed', confidence: 'inferred' }],
     })).toThrow(/manual_selected_ids/);
 
-    expect(() => parseProjectsLiveBackfillManifest({
-      fixtureKey: 'projects-live-backfill-2026-06-15',
-      projectId: '11111111-1111-4111-8111-111111111111',
+    expect(() => parseGroupsLiveBackfillManifest({
+      fixtureKey: 'groups-live-backfill-2026-06-15',
+      groupId: '11111111-1111-4111-8111-111111111111',
       entityType: 'order',
       relationType: 'manual_backfill',
       source: {
@@ -113,17 +113,17 @@ describe('projects live backfill manifest tooling', () => {
       items: [],
     })).toThrow(/at least one selected item/);
 
-    expect(() => parseProjectsLiveBackfillManifest({
+    expect(() => parseGroupsLiveBackfillManifest({
       ...validManifest(),
       fixtureKey: 'manual-backfill-2026-06-15',
-    })).toThrow(/projects-live-backfill/);
+    })).toThrow(/groups-live-backfill/);
   });
 
   it('validates dry-run evidence responses and rejects accidental writes', () => {
-    const chunk = buildProjectsLiveBackfillPlan(parseProjectsLiveBackfillManifest(validManifest())).chunks[0];
+    const chunk = buildGroupsLiveBackfillPlan(parseGroupsLiveBackfillManifest(validManifest())).chunks[0];
 
-    expect(validateProjectsLiveBackfillDryRunResponse(chunk, {
-      projectId: '11111111-1111-4111-8111-111111111111',
+    expect(validateGroupsLiveBackfillDryRunResponse(chunk, {
+      groupId: '11111111-1111-4111-8111-111111111111',
       mode: 'dry-run',
       summary: { proposed: 1, skipped: 0, conflicts: 0, sampledEvidenceRows: 1 },
       proposals: [{ entityId: '11195' }],
@@ -131,15 +131,15 @@ describe('projects live backfill manifest tooling', () => {
       sampleEvidence: [{ entityId: '11195' }],
       writeEnabled: false,
     })).toEqual({
-      projectId: '11111111-1111-4111-8111-111111111111',
+      groupId: '11111111-1111-4111-8111-111111111111',
       mode: 'dry-run',
       proposed: 1,
       skipped: 0,
       sampleEvidenceRows: 1,
     });
 
-    expect(() => validateProjectsLiveBackfillDryRunResponse(chunk, {
-      projectId: '11111111-1111-4111-8111-111111111111',
+    expect(() => validateGroupsLiveBackfillDryRunResponse(chunk, {
+      groupId: '11111111-1111-4111-8111-111111111111',
       mode: 'write',
       summary: { proposed: 1, skipped: 0, conflicts: 0, sampledEvidenceRows: 1 },
       proposals: [],
@@ -150,11 +150,11 @@ describe('projects live backfill manifest tooling', () => {
   });
 
   it('prints a plan from a manifest file without network side effects', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'projects-live-backfill-'));
+    const dir = mkdtempSync(join(tmpdir(), 'groups-live-backfill-'));
     const manifestPath = join(dir, 'manifest.json');
     writeFileSync(manifestPath, `${JSON.stringify(validManifest())}\n`, 'utf8');
 
-    const output = execFileSync(process.execPath, ['scripts/projects-live-backfill-manifest.js', manifestPath], {
+    const output = execFileSync(process.execPath, ['scripts/groups-live-backfill-manifest.js', manifestPath], {
       cwd: process.cwd(),
       encoding: 'utf8',
     });
@@ -166,7 +166,7 @@ describe('projects live backfill manifest tooling', () => {
   });
 
   it('builds SQL proof queries from an approved manifest', () => {
-    const proofSql = buildProjectsLiveBackfillProofSql({
+    const proofSql = buildGroupsLiveBackfillProofSql({
       ...validManifest(),
       items: [
         {
@@ -183,39 +183,39 @@ describe('projects live backfill manifest tooling', () => {
     });
 
     expect(proofSql.summary).toMatchObject({
-      projectId: '11111111-1111-4111-8111-111111111111',
+      groupId: '11111111-1111-4111-8111-111111111111',
       entityType: 'order',
       itemCount: 2,
       chunkCount: 1,
       firstWriteIdempotencyKey:
-        'projects-live-backfill-write-2026-06-15-project-11111111-1111-4111-8111-111111111111-chunk-001',
+        'groups-live-backfill-write-2026-06-15-group-11111111-1111-4111-8111-111111111111-chunk-001',
     });
     expect(proofSql.queries.links).toContain("entity_id_text in ('101', '102')");
-    expect(proofSql.queries.audit).toContain("source='projects-batch-link'");
-    expect(proofSql.queries.outbox).toContain(':project_entity_links_changed');
+    expect(proofSql.queries.audit).toContain("source='groups-batch-link'");
+    expect(proofSql.queries.outbox).toContain(':group_entity_links_changed');
     expect(proofSql.queries.privacyScan).toContain('authorization|bearer|password');
   });
 
   it('prints SQL proof queries from a manifest file without database side effects', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'projects-live-backfill-proof-'));
+    const dir = mkdtempSync(join(tmpdir(), 'groups-live-backfill-proof-'));
     const manifestPath = join(dir, 'manifest.json');
     writeFileSync(manifestPath, `${JSON.stringify(validManifest())}\n`, 'utf8');
 
-    const output = execFileSync(process.execPath, ['scripts/projects-live-backfill-proof-sql.js', manifestPath], {
+    const output = execFileSync(process.execPath, ['scripts/groups-live-backfill-proof-sql.js', manifestPath], {
       cwd: process.cwd(),
       encoding: 'utf8',
     });
     const parsed = JSON.parse(output);
 
-    expect(parsed.queries.project).toContain('project_projects');
+    expect(parsed.queries.group).toContain('group_groups');
     expect(parsed.queries.idempotency).toContain('command_idempotency_keys');
   });
 });
 
 function validManifest() {
   return {
-    fixtureKey: 'projects-live-backfill-2026-06-15',
-    projectId: '11111111-1111-4111-8111-111111111111',
+    fixtureKey: 'groups-live-backfill-2026-06-15',
+    groupId: '11111111-1111-4111-8111-111111111111',
     entityType: 'order',
     relationType: 'manual_backfill',
     source: {
@@ -225,7 +225,7 @@ function validManifest() {
     items: [
       {
         entityId: '11195',
-        reason: 'operator selected order for project backfill',
+        reason: 'operator selected order for group backfill',
         confidence: 'manual',
         sourceRow: 'manifest-row-1',
       },

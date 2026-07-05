@@ -197,7 +197,7 @@ interface OrderDowelingLinkRow extends QueryResultRow {
   ref_key_1c: string | null;
 }
 
-interface OrderProjectLinkRow extends QueryResultRow {
+interface OrderGroupLinkRow extends QueryResultRow {
   group_id: string;
   code: string;
   name: string;
@@ -588,7 +588,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       `,
       [command.orderId],
     );
-    const projectLinks = await this.database.query<OrderProjectLinkRow>(
+    const projectLinks = await this.database.query<OrderGroupLinkRow>(
       `
       SELECT
         p.id::text AS group_id,
@@ -1199,7 +1199,7 @@ function mapDowelingLink(row: OrderDowelingLinkRow) {
   };
 }
 
-function mapProjectLinkRow(row: OrderProjectLinkRow): OrderProjectSummaryDto {
+function mapProjectLinkRow(row: OrderGroupLinkRow): OrderProjectSummaryDto {
   return {
     id: row.group_id,
     code: row.code,

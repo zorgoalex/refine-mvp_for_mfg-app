@@ -19,7 +19,7 @@
 - Frontend: React + Vite + Refine + Ant Design.
 - Backend data API: Hasura GraphQL.
 - Serverless API: Vercel Functions в каталоге `api/`.
-- Stage-1 NestJS backend: versioned `/api/v1/*` endpoints for auth/session, users, orders (read/write, export, JSON snapshot), payments, production actions/calendar moves, client phones, VLM, deadlines, projects and notifications, behind feature flags.
+- Stage-1 NestJS backend: versioned `/api/v1/*` endpoints for auth/session, users, orders (read/write, export, JSON snapshot), payments, production actions/calendar moves, client phones, VLM, deadlines, groups and notifications, behind feature flags.
 - Локальный dev server: `http://localhost:5173`.
 - Локальный Hasura GraphQL по умолчанию: `http://localhost:8585/v1/graphql`.
 - Актуальная схема БД: v14.
@@ -40,7 +40,7 @@
 - JWT-аутентификация с refresh token rotation и Hasura role-based permissions.
 - Управление пользователями, ролями и ключевыми справочниками.
 - Уведомления: backend-backed колокол и панель уведомлений в шапке через `/api/v1/notifications` (список, отметка прочитанным, удаление).
-- Проекты (за feature flag): страница `/projects`, привязка заказов к проектам, фильтр и колонка проектов в списке заказов, редактор связей на карточке заказа.
+- Группы (за feature flag): страница `/groups`, привязка заказов к группам, фильтр и колонка групп в списке заказов, редактор связей на карточке заказа.
 
 ## Стек
 
@@ -73,7 +73,7 @@
 - `src/types/` — типы доменных сущностей.
 - `src/utils/excel/` — подготовка и отправка данных для Excel/Google Drive.
 - `api/` — Vercel Functions: auth, users, refresh, VLM, export.
-- `backend/` — NestJS backend stage-1: `/api/v1/*` + `/health/live`/`/health/ready`; модули auth/session, users, orders (read/write, export, JSON snapshot), payments, production actions, client phones, VLM, deadlines, projects, notifications, cut-jobs.
+- `backend/` — NestJS backend stage-1: `/api/v1/*` + `/health/live`/`/health/ready`; модули auth/session, users, orders (read/write, export, JSON snapshot), payments, production actions, client phones, VLM, deadlines, groups, notifications, cut-jobs.
 - `ops/` — VPS bootstrap/deploy scripts and tracked Docker Compose templates.
 - `public/templates/order_template.xlsx` — шаблон Excel.
 - `vercel.json` — rewrites, headers и настройки функций.
@@ -130,7 +130,7 @@ VITE_USE_BACKEND_USERS=false
 VITE_USE_BACKEND_ORDER_EXPORT=false
 VITE_USE_BACKEND_VLM=false
 VITE_USE_BACKEND_DEADLINES=false
-VITE_USE_BACKEND_PROJECTS=false
+VITE_USE_BACKEND_GROUPS=false
 VITE_USE_BACKEND_REFERENCES=false
 VITE_SHEET_MATERIALS_READS=false
 VITE_ENABLE_LEGACY_HASURA=true
@@ -226,12 +226,12 @@ Backend payments/production/client-phones cutover mode за `VITE_USE_BACKEND_PA
 order-scoped production/calendar/status/payment-status actions на `/api/v1/orders/:id/*`
 и `/api/v1/client-phones`.
 
-Backend projects mode за `VITE_USE_BACKEND_PROJECTS=true` (требует
-`VITE_USE_BACKEND_ORDERS_READ=true`) включает страницу `/projects` и привязку заказов к
-проектам через `/api/v1/projects` и `GET/PUT /api/v1/orders/:id/projects`. На backend
-нужны `BACKEND_ENABLE_PROJECTS=true` и (для записи) `BACKEND_PROJECTS_READ_ONLY=false`.
-Назначение проекта не входит в order-save payload — связи меняются только отдельной
-project-link командой.
+Backend groups mode за `VITE_USE_BACKEND_GROUPS=true` (требует
+`VITE_USE_BACKEND_ORDERS_READ=true`) включает страницу `/groups` и привязку заказов к
+группам через `/api/v1/groups` и `GET/PUT /api/v1/orders/:id/groups`. На backend
+нужны `BACKEND_ENABLE_GROUPS=true` и (для записи) `BACKEND_GROUPS_READ_ONLY=false`.
+Назначение группы не входит в order-save payload: связи меняются только отдельной
+group-link командой.
 
 Backend deadlines read mode за `VITE_USE_BACKEND_DEADLINES=true` (требует backend auth и
 orders read) показывает read-only deadline-панель заказа через `/api/v1/orders/:id/deadline-summary`,
@@ -487,11 +487,11 @@ npm run dev:full
 - `npm run test:e2e:deadline-engine-stage-canary` - opt-in read-only smoke for deployed Deadline Engine frontend/API stage acceptance.
 - `npm run test:e2e:deadline-create-override-stage-canary` - opt-in write canary for deployed Deadline Engine create/override command acceptance on stage only.
 - `npm run test:e2e:deadline-status-transition-stage-canary` - opt-in write canary for Deadline Engine `change_order_status` transition rules on backend-test only.
-- `npm run test:e2e:notification-rules-project-scope-stage-canary` — opt-in write canary for project-scoped notification rules on backend-test only; requires explicit fixture key, credentials from external `.env`, and restore enabled.
-- `npm run projects-live-backfill:manifest -- <manifest.json>` — local Projects live-backfill manifest validator and dry-run/write payload generator; does not call backend or mutate data.
-- `npm run projects-live-backfill:proof-sql -- <manifest.json>` — local SQL proof query generator for a Projects live-backfill manifest; does not connect to the database.
-- `npm run projects-live-backfill:run -- --manifest <manifest.json> --mode dry-run|write --target-env backend-test` — guarded Projects live-backfill runner for backend-test; write mode also requires `--approve-write` or `PROJECTS_LIVE_BACKFILL_APPROVE_WRITE=true`.
-- `npm run test:e2e:projects-live-backfill-dry-run-stage-canary` — opt-in dry-run-only canary for an explicit Projects backfill manifest on backend-test; requires credentials from external `.env` and does not run write mode.
+- `npm run test:e2e:notification-rules-group-scope-stage-canary` — opt-in write canary for group-scoped notification rules on backend-test only; requires explicit fixture key, credentials from external `.env`, and restore enabled.
+- `npm run groups-live-backfill:manifest -- <manifest.json>` — local Groups live-backfill manifest validator and dry-run/write payload generator; does not call backend or mutate data.
+- `npm run groups-live-backfill:proof-sql -- <manifest.json>` — local SQL proof query generator for a Groups live-backfill manifest; does not connect to the database.
+- `npm run groups-live-backfill:run -- --manifest <manifest.json> --mode dry-run|write --target-env backend-test` — guarded Groups live-backfill runner for backend-test; write mode also requires `--approve-write` or `GROUPS_LIVE_BACKFILL_APPROVE_WRITE=true`.
+- `npm run test:e2e:groups-live-backfill-dry-run-stage-canary` — opt-in dry-run-only canary for an explicit Groups backfill manifest on backend-test; requires credentials from external `.env` and does not run write mode.
 - `npm run test:e2e:order-ui-full-coverage` — opt-in durable Playwright coverage для заказа: заполняет формы, кликает кнопки, проверяет поля, вкладки, creator history и оставляет созданный заказ.
 - `npm run test:e2e:order-created-by-stage-canary` — opt-in deployed backend canary: проверяет, что stage `/api/v1/orders/:id` отдает `createdBy/editedBy` для order UI.
 - `npm run test:e2e:vlm-cutover` — Playwright smoke для backend VLM cutover flag.
@@ -780,12 +780,12 @@ fixture rows to zero. It refuses to run unless
 contains `backend-test` (prod/production/live targets are rejected), and it
 skips locally when `NOTIFICATION_ENGINE_STAGE_CANARY` is unset.
 
-Notification rules project-scope canary is guarded by
-`NOTIFICATION_RULES_PROJECT_SCOPE_STAGE_CANARY=true`,
-`NOTIFICATION_RULES_PROJECT_SCOPE_TARGET_ENV=backend-test`,
-`NOTIFICATION_RULES_PROJECT_SCOPE_RESTORE=true`, and an explicit
-`NOTIFICATION_RULES_PROJECT_SCOPE_FIXTURE_KEY`. It creates one temporary
-project and two temporary notification rules, then restores scoped residue to
+Notification rules group-scope canary is guarded by
+`NOTIFICATION_RULES_GROUP_SCOPE_STAGE_CANARY=true`,
+`NOTIFICATION_RULES_GROUP_SCOPE_TARGET_ENV=backend-test`,
+`NOTIFICATION_RULES_GROUP_SCOPE_RESTORE=true`, and an explicit
+`NOTIFICATION_RULES_GROUP_SCOPE_FIXTURE_KEY`. It creates one temporary
+group and two temporary notification rules, then restores scoped residue to
 zero. Do not run it concurrently with other stage write canaries.
 
 ### Deadline notification action-rule stage canary

@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 const { readFileSync } = require('node:fs');
 
-const manifestLib = require('./projects-live-backfill-manifest-lib.js');
+const manifestLib = require('./groups-live-backfill-manifest-lib.js');
 
-const { buildProjectsLiveBackfillPlan } = manifestLib;
+const { buildGroupsLiveBackfillPlan } = manifestLib;
 
 function main(argv) {
   const manifestPath = argv[2];
   if (!manifestPath) {
-    throw new Error('Usage: node scripts/projects-live-backfill-manifest.js <manifest.json>');
+    throw new Error('Usage: node scripts/groups-live-backfill-manifest.js <manifest.json>');
   }
 
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  const plan = buildProjectsLiveBackfillPlan(manifest);
+  const plan = buildGroupsLiveBackfillPlan(manifest);
   process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
 }
 
