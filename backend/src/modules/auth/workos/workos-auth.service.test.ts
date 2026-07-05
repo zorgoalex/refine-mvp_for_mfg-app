@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { ApiError } from '../../../common/errors/api-error';
+import type { DatabaseService } from '../../../database/database.service';
 import { LoginMethodNotAllowedError } from '../auth.errors';
 import type { AuthUserRecord } from '../auth.types';
 import type { WorkosIdentity } from './workos-api.client';
@@ -10,6 +11,7 @@ const IDENTITY: WorkosIdentity = {
   sub: 'workos-sub-1',
   email: 'user@example.com',
   emailVerified: true,
+  authMethod: null,
   firstName: null,
   lastName: null,
   providerSessionId: 'sid-1',
@@ -39,12 +41,23 @@ interface Harness {
     identity: WorkosIdentity;
     identityError?: Error;
     linkRecord: { identityId: string; userId: string; provider: string; providerUserId: string; emailAtLink: string } | null;
+    links: Array<{
+      identityId: string;
+      authMethod: string | null;
+      emailAtLink: string;
+      linkedAt: string;
+      lastLoginAt: string | null;
+    }>;
     userById: AuthUserRecord | null;
     sessions: ReturnType<typeof vi.fn>;
     loginFailed: ReturnType<typeof vi.fn>;
     linkFailed: ReturnType<typeof vi.fn>;
     insertLink: ReturnType<typeof vi.fn>;
+    deleteOne: ReturnType<typeof vi.fn>;
     deleteLink: ReturnType<typeof vi.fn>;
+    recordDenied: ReturnType<typeof vi.fn>;
+    canUser: ReturnType<typeof vi.fn>;
+    database: DatabaseService;
     passwordValid: boolean;
     sessionActive: boolean;
   };
@@ -60,6 +73,7 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
       providerUserId: IDENTITY.sub,
       emailAtLink: IDENTITY.email,
     },
+    links: [],
     userById: USER,
     sessions: vi.fn(async () => ({
       sessionId: 'session-1',
@@ -79,7 +93,17 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
         emailAtLink: IDENTITY.email,
       },
     })),
+    deleteOne: vi.fn(async () => 'unlinked' as const),
     deleteLink: vi.fn(async () => 'unlinked' as const),
+    recordDenied: vi.fn(async () => 'audit-1'),
+    canUser: vi.fn((user: CurrentUser | null | undefined, permission: string) => Boolean(user?.permissions.includes(permission))),
+    database: {
+      query: vi.fn(),
+      transaction: vi.fn(),
+      ping: vi.fn(),
+      onModuleDestroy: vi.fn(),
+      isConfigured: true,
+    } as DatabaseService,
     passwordValid: true,
     sessionActive: true,
     ...overrides,
@@ -100,7 +124,9 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
     identities: {
       findByProviderSub: async () => state.linkRecord,
       findByUserId: async () => state.linkRecord,
+      listLinks: async () => state.links,
       insertLinkWithAudit: state.insertLink,
+      deleteOneLinkWithAudit: state.deleteOne,
       deleteLinkWithAudit: state.deleteLink,
       writeLinkFailed: state.linkFailed,
       touchLastLogin: async () => undefined,
@@ -112,6 +138,9 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
     },
     audit: { writeLoginFailed: state.loginFailed },
     passwords: { verify: async () => state.passwordValid },
+    permissions: { canUser: state.canUser } as WorkosAuthServicePorts['permissions'],
+    deniedAudit: { recordDenied: state.recordDenied },
+    database: state.database,
     loadUserById: async () => state.userById,
   };
 
@@ -448,6 +477,208 @@ describe('WorkosAuthService.unlink', () => {
       code: 'UNLINK_FORBIDDEN_EXTERNAL_POLICY',
     });
     expect(harness.ports.deleteLink).not.toHaveBeenCalled();
+  });
+});
+
+describe('WorkosAuthService.multilink task 5', () => {
+  it('lists own links', async () => {
+    const harness = createHarness({
+      links: [{ identityId: '1', authMethod: 'GoogleOAuth', emailAtLink: 'a@c', linkedAt: 'x', lastLoginAt: null }],
+    });
+    await expect(harness.service.listOwnLinks(CURRENT_USER)).resolves.toHaveLength(1);
+  });
+
+  it('self AND admin unlink fail-fast 401 when currentUser.sessionId is absent (R12-MINOR)', async () => {
+    const harness = createHarness({});
+    const noSession = { ...CURRENT_USER, sessionId: undefined };
+    await expect(
+      harness.service.unlinkOwn({ currentUser: noSession, identityId: '1', password: 'x' }),
+    ).rejects.toMatchObject({ code: 'SESSION_INACTIVE', statusCode: 401 });
+    const adminNoSession = {
+      ...noSession,
+      id: '7',
+      role: 'admin' as const,
+      roleId: 1,
+      permissions: ['users.manage_sso'] as const,
+    };
+    await expect(
+      harness.service.adminUnlink({ currentUser: adminNoSession, targetUserId: '42', identityId: '1' }),
+    ).rejects.toMatchObject({ code: 'SESSION_INACTIVE', statusCode: 401 });
+    expect(harness.ports.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('admin list returns 404 for a nonexistent target user, 200 [] for an existing one (R7-MINOR)', async () => {
+    const admin = {
+      ...CURRENT_USER,
+      id: '7',
+      username: 'admin',
+      role: 'admin' as const,
+      roleId: 1,
+      permissions: ['users.manage_sso'] as const,
+      sessionId: 'as',
+    };
+    const missing = createHarness({ userById: null });
+    await expect(
+      missing.service.adminListLinks({ currentUser: admin, targetUserId: '99' }),
+    ).rejects.toMatchObject({ code: 'USER_NOT_FOUND', statusCode: 404 });
+    const empty = createHarness({ userById: { ...USER, id: '99' }, links: [] });
+    await expect(empty.service.adminListLinks({ currentUser: admin, targetUserId: '99' })).resolves.toEqual([]);
+  });
+
+  it('unlinks own link after password check via deleteOne (actorSessionId = own)', async () => {
+    const harness = createHarness({ deleteOne: vi.fn(async () => 'unlinked' as const) });
+    await expect(
+      harness.service.unlinkOwn({ currentUser: CURRENT_USER, identityId: '1', password: 'secret' }),
+    ).resolves.toEqual({ unlinked: true });
+    expect(harness.ports.deleteOne).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'self_serve', identityId: '1', targetUserId: '42', actorSessionId: 'session-1' }),
+    );
+  });
+
+  it('maps deleteOne external_policy to 409 on self unlink', async () => {
+    const harness = createHarness({ deleteOne: vi.fn(async () => 'external_policy' as const) });
+    await expect(
+      harness.service.unlinkOwn({ currentUser: CURRENT_USER, identityId: '1', password: 'secret' }),
+    ).rejects.toMatchObject({ code: 'UNLINK_FORBIDDEN_EXTERNAL_POLICY' });
+  });
+
+  it('maps deleteOne not_found to 404', async () => {
+    const harness = createHarness({ deleteOne: vi.fn(async () => 'not_found' as const) });
+    await expect(
+      harness.service.unlinkOwn({ currentUser: CURRENT_USER, identityId: '9', password: 'secret' }),
+    ).rejects.toMatchObject({ code: 'IDENTITY_NOT_FOUND' });
+  });
+
+  it('admin list/unlink deny writes a denied-audit BEFORE the 403 (canUser on permissions claim)', async () => {
+    const harness = createHarness({});
+    const noPerm = { ...CURRENT_USER, role: 'worker' as const, permissions: [] as const };
+    await expect(
+      harness.service.adminListLinks({ currentUser: noPerm, targetUserId: '99' }),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    await expect(
+      harness.service.adminUnlink({ currentUser: noPerm, targetUserId: '99', identityId: '1' }),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    const fullDenied = (event: string) =>
+      expect.objectContaining({
+        event,
+        entityType: 'user',
+        entityId: '99',
+        relatedUserId: 99,
+        actorUserId: noPerm.id,
+        actorUsername: noPerm.username,
+        actorRole: noPerm.role,
+        requestId: expect.anything(),
+        source: 'workos',
+        reason: 'PERMISSION_DENIED',
+        requiredPermissions: ['users.manage_sso'],
+        metadata: expect.objectContaining({ mode: 'admin' }),
+      });
+    expect(harness.ports.recordDenied).toHaveBeenCalledWith(expect.anything(), fullDenied('auth.identity.list_denied'));
+    expect(harness.ports.recordDenied).toHaveBeenCalledWith(expect.anything(), fullDenied('auth.identity.unlink_denied'));
+    expect(harness.ports.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('enforces the PERMISSIONS CLAIM, not the role (R7-MAJOR anti-bypass)', async () => {
+    const strippedAdmin = createHarness({});
+    const admin0 = {
+      ...CURRENT_USER,
+      id: '7',
+      username: 'admin',
+      role: 'admin' as const,
+      roleId: 1,
+      permissions: [] as const,
+    };
+    await expect(
+      strippedAdmin.service.adminUnlink({ currentUser: admin0, targetUserId: '42', identityId: '1' }),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    expect(strippedAdmin.ports.recordDenied).toHaveBeenCalled();
+    expect(strippedAdmin.ports.deleteOne).not.toHaveBeenCalled();
+
+    const granted = createHarness({ deleteOne: vi.fn(async () => 'unlinked' as const) });
+    const worker1 = {
+      ...CURRENT_USER,
+      id: '5',
+      username: 'w',
+      role: 'worker' as const,
+      roleId: 6,
+      permissions: ['users.manage_sso'] as const,
+      sessionId: 'ws',
+    };
+    await expect(
+      granted.service.adminUnlink({ currentUser: worker1, targetUserId: '42', identityId: '1' }),
+    ).resolves.toEqual({ unlinked: true });
+  });
+
+  it('a failing denied-audit sink STILL yields 403, not 500 (R6-MAJOR best-effort)', async () => {
+    const harness = createHarness({ recordDenied: vi.fn(async () => { throw new Error('audit sink down'); }) });
+    const noPerm = { ...CURRENT_USER, role: 'worker' as const, permissions: [] as const };
+    await expect(
+      harness.service.adminListLinks({ currentUser: noPerm, targetUserId: '99' }),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    await expect(
+      harness.service.adminUnlink({ currentUser: noPerm, targetUserId: '99', identityId: '1' }),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+  });
+
+  it('admin unlink passes actor≠target, reason, and the ADMIN session to deleteOne', async () => {
+    const harness = createHarness({ deleteOne: vi.fn(async () => 'unlinked' as const) });
+    const admin = {
+      ...CURRENT_USER,
+      id: '7',
+      username: 'admin',
+      role: 'admin' as const,
+      roleId: 1,
+      permissions: ['users.manage_sso'] as const,
+      sessionId: 'admin-session',
+    };
+    await expect(
+      harness.service.adminUnlink({
+        currentUser: admin,
+        targetUserId: '42',
+        identityId: '1',
+        reason: 'уволен',
+      }),
+    ).resolves.toEqual({ unlinked: true });
+    expect(harness.ports.deleteOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'admin',
+        targetUserId: '42',
+        identityId: '1',
+        reason: 'уволен',
+        actorSessionId: 'admin-session',
+        actor: expect.objectContaining({ userId: '7' }),
+      }),
+    );
+  });
+
+  it('admin unlink maps deleteOne not_found→404, external_policy→409, session_inactive→401', async () => {
+    const admin = {
+      ...CURRENT_USER,
+      id: '7',
+      username: 'admin',
+      role: 'admin' as const,
+      roleId: 1,
+      permissions: ['users.manage_sso'] as const,
+      sessionId: 'admin-session',
+    };
+    const notFound = createHarness({ deleteOne: vi.fn(async () => 'not_found' as const) });
+    await expect(
+      notFound.service.adminUnlink({ currentUser: admin, targetUserId: '42', identityId: '9' }),
+    ).rejects.toMatchObject({ code: 'IDENTITY_NOT_FOUND', statusCode: 404 });
+    const external = createHarness({ deleteOne: vi.fn(async () => 'external_policy' as const) });
+    await expect(
+      external.service.adminUnlink({ currentUser: admin, targetUserId: '42', identityId: '1' }),
+    ).rejects.toMatchObject({ code: 'UNLINK_FORBIDDEN_EXTERNAL_POLICY', statusCode: 409 });
+    const revoked = createHarness({ deleteOne: vi.fn(async () => 'session_inactive' as const) });
+    await expect(
+      revoked.service.adminUnlink({ currentUser: admin, targetUserId: '42', identityId: '1' }),
+    ).rejects.toMatchObject({ code: 'SESSION_INACTIVE', statusCode: 401 });
+  });
+
+  it('links propagate identity.authMethod into insertLinkWithAudit (BLOCKER1)', async () => {
+    const harness = createHarness({ linkRecord: null, identity: { ...IDENTITY, authMethod: 'GoogleOAuth' } });
+    await harness.service.linkWithCode({ code: 'c', currentUser: CURRENT_USER, requestId: 'r' });
+    expect(harness.ports.insertLink).toHaveBeenCalledWith(expect.objectContaining({ authMethod: 'GoogleOAuth' }));
   });
 });
 

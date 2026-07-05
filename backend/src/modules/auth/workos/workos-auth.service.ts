@@ -1,6 +1,9 @@
+import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
+import { DatabaseService } from '../../../database/database.service';
 import { getPermissionsForRole, mapRoleIdToRole } from '../../../permissions/permissions';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { PermissionsService } from '../../../permissions/permissions.service';
 import {
   InvalidCredentialsError,
   LoginMethodNotAllowedError,
@@ -17,10 +20,16 @@ import type {
   PasswordVerifierPort,
   SessionManagerPort,
 } from '../auth.types';
-import type { PgUserIdentityRepository, UserIdentityRecord } from './pg-user-identity-repository';
+import type {
+  DeleteOneOutcome,
+  PgUserIdentityRepository,
+  UserIdentityListItem,
+  UserIdentityRecord,
+} from './pg-user-identity-repository';
 import type { WorkosApiClient, WorkosIdentity } from './workos-api.client';
 
 export const WORKOS_PROVIDER = 'workos';
+const MANAGE_SSO_PERMISSION: Parameters<PermissionsService['canUser']>[1] = 'users.manage_sso';
 
 export interface WorkosLoginCommand {
   code: string;
@@ -41,6 +50,23 @@ export interface WorkosUnlinkCommand {
   requestId?: string;
 }
 
+export interface WorkosUnlinkOwnCommand extends WorkosUnlinkCommand {
+  identityId: string;
+}
+
+export interface WorkosAdminListLinksCommand {
+  currentUser: CurrentUser;
+  targetUserId: string;
+  requestId?: string;
+}
+
+export interface WorkosAdminUnlinkCommand extends WorkosAdminListLinksCommand {
+  identityId: string;
+  reason?: string;
+  userAgent?: string;
+  ipAddress?: string;
+}
+
 export interface WorkosAuthServicePorts {
   workos: WorkosApiClient;
   users: AuthUserRepositoryPort;
@@ -49,6 +75,9 @@ export interface WorkosAuthServicePorts {
   tokens: AccessTokenIssuerPort;
   audit: AuthAuditPort;
   passwords: PasswordVerifierPort;
+  permissions: PermissionsService;
+  deniedAudit: Pick<typeof auditService, 'recordDenied'>;
+  database: DatabaseService;
   /** Loads a user by internal id; used to re-check is_active at link time. */
   loadUserById: (userId: string) => Promise<AuthUserRecord | null>;
 }
@@ -225,6 +254,7 @@ export class WorkosAuthService {
       providerUserId: identity.sub,
       emailAtLink: identity.email,
       emailVerified: identity.emailVerified,
+      authMethod: identity.authMethod,
       mode: 'self_serve',
       sessionId,
     });
@@ -260,6 +290,84 @@ export class WorkosAuthService {
         });
         throw new UserInactiveError();
     }
+  }
+
+  async listOwnLinks(currentUser: CurrentUser): Promise<UserIdentityListItem[]> {
+    return this.ports.identities.listLinks(currentUser.id, WORKOS_PROVIDER);
+  }
+
+  async unlinkOwn(command: WorkosUnlinkOwnCommand): Promise<{ unlinked: boolean }> {
+    const sessionId = command.currentUser.sessionId;
+
+    if (!sessionId) {
+      throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+    }
+
+    const user = await this.ports.loadUserById(command.currentUser.id);
+
+    if (!user || !user.isActive) {
+      throw new UserInactiveError();
+    }
+
+    const passwordValid = await this.ports.passwords.verify(command.password, user.passwordHash);
+
+    if (!passwordValid) {
+      await this.ports.audit.writeLoginFailed({
+        username: user.username,
+        user,
+        reason: 'invalid_password',
+        requestId: command.requestId,
+        userAgent: command.userAgent,
+        ipAddress: command.ipAddress,
+        metadata: { context: 'workos_unlink' },
+      });
+      throw new InvalidCredentialsError();
+    }
+
+    return this.mapDeleteOneOutcome(
+      await this.ports.identities.deleteOneLinkWithAudit({
+        identityId: command.identityId,
+        targetUserId: command.currentUser.id,
+        actor: this.toActor(command),
+        actorSessionId: sessionId,
+        provider: WORKOS_PROVIDER,
+        mode: 'self_serve',
+      }),
+    );
+  }
+
+  async adminListLinks(command: WorkosAdminListLinksCommand): Promise<UserIdentityListItem[]> {
+    await this.requireManageSso(command, 'auth.identity.list_denied');
+
+    const user = await this.ports.loadUserById(command.targetUserId);
+
+    if (!user) {
+      throw new ApiError(404, 'USER_NOT_FOUND', 'Пользователь не найден');
+    }
+
+    return this.ports.identities.listLinks(command.targetUserId, WORKOS_PROVIDER);
+  }
+
+  async adminUnlink(command: WorkosAdminUnlinkCommand): Promise<{ unlinked: boolean }> {
+    const sessionId = command.currentUser.sessionId;
+
+    if (!sessionId) {
+      throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+    }
+
+    await this.requireManageSso(command, 'auth.identity.unlink_denied');
+
+    return this.mapDeleteOneOutcome(
+      await this.ports.identities.deleteOneLinkWithAudit({
+        identityId: command.identityId,
+        targetUserId: command.targetUserId,
+        actor: this.toActor(command),
+        actorSessionId: sessionId,
+        provider: WORKOS_PROVIDER,
+        mode: 'admin',
+        reason: command.reason,
+      }),
+    );
   }
 
   /** Unlink requires password confirmation: after unlink only the password remains. */
@@ -351,6 +459,57 @@ export class WorkosAuthService {
 
   buildProviderLogoutUrl(providerSessionId: string): string {
     return this.ports.workos.buildLogoutUrl(providerSessionId);
+  }
+
+  private async requireManageSso(
+    command: Pick<WorkosAdminUnlinkCommand, 'currentUser' | 'targetUserId' | 'requestId'>,
+    event: 'auth.identity.list_denied' | 'auth.identity.unlink_denied',
+  ): Promise<void> {
+    if (this.ports.permissions.canUser(command.currentUser, MANAGE_SSO_PERMISSION)) {
+      return;
+    }
+
+    try {
+      await this.ports.deniedAudit.recordDenied(this.ports.database, {
+        event,
+        entityType: 'user',
+        entityId: command.targetUserId,
+        actorUserId: command.currentUser.id,
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        relatedUserId: Number(command.targetUserId),
+        requiredPermissions: [MANAGE_SSO_PERMISSION],
+        requestId: command.requestId ?? '',
+        source: 'workos',
+        reason: 'PERMISSION_DENIED',
+        metadata: { mode: 'admin' },
+      });
+    } catch {
+      // best-effort: sink failure must not change the denial outcome
+    }
+
+    throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+      requiredPermissions: [MANAGE_SSO_PERMISSION],
+    });
+  }
+
+  private mapDeleteOneOutcome(outcome: DeleteOneOutcome): { unlinked: true } {
+    switch (outcome) {
+      case 'unlinked':
+        return { unlinked: true };
+      case 'not_found':
+        throw new ApiError(404, 'IDENTITY_NOT_FOUND', 'Привязка SSO не найдена');
+      case 'session_inactive':
+        throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+      case 'user_inactive':
+        throw new UserInactiveError();
+      case 'external_policy':
+        throw new ApiError(
+          409,
+          'UNLINK_FORBIDDEN_EXTERNAL_POLICY',
+          'Нельзя отвязать SSO: вход по паролю для пользователя отключён',
+        );
+    }
   }
 
   private toActor(command: { currentUser: CurrentUser } & Pick<WorkosLoginCommand, 'requestId' | 'userAgent' | 'ipAddress'>) {
