@@ -8,8 +8,10 @@ import { actorId } from '../application/labels.service';
 import { buildLabelRows, hashLabelRows, type LabelRow } from '../application/label-row-builder';
 import { renderLabelsZip, renderSvgPages } from '../application/label-renderer';
 import type {
+  CreateLabelOcrTemplateCommand,
   CreateLabelQrTemplateCommand,
   CreateLabelTemplateCommand,
+  DeleteLabelOcrTemplateCommand,
   DeleteLabelQrTemplateCommand,
   DeleteLabelTemplateCommand,
   ExportOrderLabelsQuery,
@@ -19,6 +21,7 @@ import type {
   GetOrderLabelDataQuery,
   GetLabelTemplateQuery,
   LabelExportFormat,
+  LabelOcrTemplateDto,
   LabelQrTemplateDto,
   LabelTemplateDto,
   LabelTemplateElementDto,
@@ -27,6 +30,7 @@ import type {
   LabelsPort,
   DetailLabelsPreviewDto,
   LatestOrderLabelsPreviewDto,
+  ListLabelOcrTemplatesQuery,
   ListLabelQrTemplatesQuery,
   ListLabelTemplatesQuery,
   OrderLabelDataDetailDto,
@@ -37,12 +41,16 @@ import type {
   PreviewOrderLabelsCommand,
   ScanCandidateRow,
   ScanSearchInput,
+  UpdateLabelOcrTemplateCommand,
   UpdateLabelQrTemplateCommand,
   UpdateOrderLabelDataCommand,
   UpdateLabelTemplateCommand,
 } from '../application/labels.types';
+import type { OcrTemplateForMatch, OcrTemplateRule } from '../application/scan/ocr-template-matcher';
 import {
   LabelCustomFieldSchemaStaleError,
+  LabelOcrTemplateNotFoundError,
+  LabelOcrTemplateStaleVersionError,
   LabelQrTemplateNotFoundError,
   LabelQrTemplateStaleVersionError,
   LabelTemplateNotFoundError,
@@ -169,6 +177,44 @@ function qrAuditShape(dto: LabelQrTemplateDto): Record<string, unknown> {
     errorCorrection: dto.errorCorrection,
     defaultSizeMm: dto.defaultSizeMm,
     isActive: dto.isActive,
+  };
+}
+
+const OCR_TEMPLATE_COLUMNS = `label_ocr_template_id, name, rules, sample_lines, is_active, version`;
+
+interface OcrTemplateRow extends QueryResultRow {
+  label_ocr_template_id: string | number;
+  name: string;
+  rules: OcrTemplateRule[];
+  sample_lines: string[];
+  is_active: boolean;
+  version: string | number;
+}
+
+interface OcrTemplateForMatchRow extends QueryResultRow {
+  id: string | number;
+  name: string;
+  rules: OcrTemplateRule[];
+}
+
+function mapOcrTemplateRow(row: OcrTemplateRow): LabelOcrTemplateDto {
+  return {
+    labelOcrTemplateId: toNumber(row.label_ocr_template_id),
+    name: row.name,
+    rules: row.rules ?? [],
+    sampleLines: row.sample_lines ?? [],
+    isActive: row.is_active,
+    version: toNumber(row.version),
+  };
+}
+
+function ocrAuditShape(dto: LabelOcrTemplateDto): Record<string, unknown> {
+  return {
+    name: dto.name,
+    isActive: dto.isActive,
+    version: dto.version,
+    fieldCodes: dto.rules.map((rule) => rule.field),
+    rulesCount: dto.rules.length,
   };
 }
 
@@ -546,6 +592,201 @@ export class PgLabelsRepository implements LabelsPort {
       });
       await completeIdempotency(tx, command.idempotencyKey, { deleted: true });
     });
+  }
+
+  async listOcrTemplates(query: ListLabelOcrTemplatesQuery): Promise<LabelOcrTemplateDto[]> {
+    const result = await this.database.query<OcrTemplateRow>(
+      `SELECT ${OCR_TEMPLATE_COLUMNS} FROM label_ocr_templates
+       WHERE ($1::boolean IS TRUE OR is_active = true)
+       ORDER BY lower(name), label_ocr_template_id`,
+      [query.includeInactive ?? false],
+    );
+    return result.rows.map(mapOcrTemplateRow);
+  }
+
+  async createOcrTemplate(command: CreateLabelOcrTemplateCommand): Promise<LabelOcrTemplateDto> {
+    return this.database.transaction(async (tx) => {
+      const input = command.input;
+      const requestHash = hashRequest({ command: 'label_ocr_template.create', input });
+      const existing = await claimIdempotency<LabelOcrTemplateDto>(
+        tx, input.idempotencyKey, 'label_ocr_template.create',
+        actorId(command.currentUser), 'label_ocr_template', 'pending', requestHash,
+      );
+      if (existing) return existing;
+      let inserted;
+      try {
+        inserted = await tx.query<OcrTemplateRow>(
+          `INSERT INTO label_ocr_templates
+            (name, rules, sample_lines, is_active, created_by, updated_by)
+           VALUES ($1,$2::jsonb,$3::jsonb,$4,$5,$5)
+           RETURNING ${OCR_TEMPLATE_COLUMNS}`,
+          [
+            input.name,
+            JSON.stringify(input.rules),
+            JSON.stringify(input.sampleLines),
+            input.isActive,
+            actorId(command.currentUser),
+          ],
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code === '23505') {
+          throw new ApiError(409, 'LABEL_OCR_TEMPLATE_NAME_TAKEN', 'OCR template name already exists', { field: 'name' });
+        }
+        throw error;
+      }
+      const dto = mapOcrTemplateRow(inserted.rows[0]);
+      await auditService.record(tx, {
+        event: 'label_ocr_template.created',
+        entityType: 'label_ocr_template',
+        entityId: dto.labelOcrTemplateId,
+        actorUserId: actorId(command.currentUser),
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        requestId: command.requestId,
+        source: 'backend.labels',
+        before: null,
+        after: ocrAuditShape(dto),
+        diff: ocrAuditShape(dto),
+        metadata: { idempotencyKey: input.idempotencyKey },
+        relatedEntities: [{ entityType: 'label_ocr_template', entityId: dto.labelOcrTemplateId }],
+      });
+      await completeIdempotency(tx, input.idempotencyKey, dto);
+      return dto;
+    });
+  }
+
+  async updateOcrTemplate(command: UpdateLabelOcrTemplateCommand): Promise<LabelOcrTemplateDto> {
+    return this.database.transaction(async (tx) => {
+      const requestHash = hashRequest({
+        command: 'label_ocr_template.update',
+        id: command.id,
+        expectedVersion: command.expectedVersion,
+        input: command.input,
+      });
+      const existing = await claimIdempotency<LabelOcrTemplateDto>(
+        tx,
+        command.input.idempotencyKey,
+        'label_ocr_template.update',
+        actorId(command.currentUser),
+        'label_ocr_template',
+        String(command.id),
+        requestHash,
+      );
+      if (existing) {
+        return existing;
+      }
+      const before = await this.readOcrTemplate(tx, command.id, true);
+      if (before.version !== command.expectedVersion) {
+        throw new LabelOcrTemplateStaleVersionError(command.expectedVersion, before.version);
+      }
+      const input = command.input;
+      let updated;
+      try {
+        updated = await tx.query<OcrTemplateRow>(
+          `UPDATE label_ocr_templates SET
+             name=$2, rules=$3::jsonb, sample_lines=$4::jsonb, is_active=$5,
+             version=version+1, updated_by=$6, updated_at=now()
+           WHERE label_ocr_template_id=$1
+           RETURNING ${OCR_TEMPLATE_COLUMNS}`,
+          [
+            command.id,
+            input.name,
+            JSON.stringify(input.rules),
+            JSON.stringify(input.sampleLines),
+            input.isActive,
+            actorId(command.currentUser),
+          ],
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code === '23505') {
+          throw new ApiError(409, 'LABEL_OCR_TEMPLATE_NAME_TAKEN', 'OCR template name already exists', { field: 'name' });
+        }
+        throw error;
+      }
+      if (updated.rowCount === 0) {
+        throw new LabelOcrTemplateNotFoundError(command.id);
+      }
+      const dto = mapOcrTemplateRow(updated.rows[0]);
+      await auditService.record(tx, {
+        event: 'label_ocr_template.updated',
+        entityType: 'label_ocr_template',
+        entityId: command.id,
+        actorUserId: actorId(command.currentUser),
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        requestId: command.requestId,
+        source: 'backend.labels',
+        before: ocrAuditShape(before),
+        after: ocrAuditShape(dto),
+        diff: ocrAuditShape(dto),
+        metadata: { idempotencyKey: input.idempotencyKey },
+        relatedEntities: [{ entityType: 'label_ocr_template', entityId: command.id }],
+      });
+      await completeIdempotency(tx, input.idempotencyKey, dto);
+      return dto;
+    });
+  }
+
+  async deleteOcrTemplate(command: DeleteLabelOcrTemplateCommand): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const requestHash = hashRequest({
+        command: 'label_ocr_template.delete',
+        id: command.id,
+        expectedVersion: command.expectedVersion,
+      });
+      const existing = await claimIdempotency<{ deleted: true }>(
+        tx,
+        command.idempotencyKey,
+        'label_ocr_template.delete',
+        actorId(command.currentUser),
+        'label_ocr_template',
+        String(command.id),
+        requestHash,
+      );
+      if (existing) {
+        return;
+      }
+      const before = await this.readOcrTemplate(tx, command.id, true);
+      if (before.version !== command.expectedVersion) {
+        throw new LabelOcrTemplateStaleVersionError(command.expectedVersion, before.version);
+      }
+      await tx.query(
+        `UPDATE label_ocr_templates
+         SET is_active=false, version=version+1, updated_by=$2, updated_at=now()
+         WHERE label_ocr_template_id=$1`,
+        [command.id, actorId(command.currentUser)],
+      );
+      await auditService.record(tx, {
+        event: 'label_ocr_template.deleted',
+        entityType: 'label_ocr_template',
+        entityId: command.id,
+        actorUserId: actorId(command.currentUser),
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        requestId: command.requestId,
+        source: 'backend.labels',
+        before: ocrAuditShape(before),
+        after: { isActive: false },
+        diff: { isActive: false },
+        metadata: { idempotencyKey: command.idempotencyKey },
+        relatedEntities: [{ entityType: 'label_ocr_template', entityId: command.id }],
+      });
+      await completeIdempotency(tx, command.idempotencyKey, { deleted: true });
+    });
+  }
+
+  async listActiveOcrTemplatesForMatch(): Promise<OcrTemplateForMatch[]> {
+    const result = await this.database.query<OcrTemplateForMatchRow>(
+      `SELECT label_ocr_template_id AS id, name, rules
+         FROM label_ocr_templates
+        WHERE is_active
+        ORDER BY lower(name), label_ocr_template_id`,
+    );
+    return result.rows.map((row) => ({
+      id: toNumber(row.id),
+      name: row.name,
+      rules: (row.rules ?? []) as OcrTemplateRule[],
+    }));
   }
 
   async getOrderLabelData(query: GetOrderLabelDataQuery): Promise<OrderLabelDataDto> {
@@ -996,7 +1237,9 @@ export class PgLabelsRepository implements LabelsPort {
         ? 'order_labels.permission_denied'
         : entityType === 'label_qr_template'
           ? 'label_qr_template.permission_denied'
-          : 'label_template.permission_denied';
+          : entityType === 'label_ocr_template'
+            ? 'label_ocr_template.permission_denied'
+            : 'label_template.permission_denied';
     await auditService.recordDenied(this.database, {
       event,
       entityType,
@@ -1048,6 +1291,24 @@ export class PgLabelsRepository implements LabelsPort {
       throw new LabelQrTemplateNotFoundError(id);
     }
     return mapQrTemplateRow(result.rows[0]);
+  }
+
+  private async readOcrTemplate(
+    client: DatabaseClient,
+    id: number,
+    lock = false,
+  ): Promise<LabelOcrTemplateDto> {
+    const result = await client.query<OcrTemplateRow>(
+      `SELECT ${OCR_TEMPLATE_COLUMNS}
+       FROM label_ocr_templates
+       WHERE label_ocr_template_id = $1
+       ${lock ? 'FOR UPDATE' : ''}`,
+      [id],
+    );
+    if (result.rowCount === 0) {
+      throw new LabelOcrTemplateNotFoundError(id);
+    }
+    return mapOcrTemplateRow(result.rows[0]);
   }
 
   private async loadElementsByTemplateIds(

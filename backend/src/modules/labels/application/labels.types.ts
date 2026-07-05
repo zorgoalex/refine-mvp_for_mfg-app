@@ -1,6 +1,6 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { LabelTextFields } from './scan/label-text-extraction';
-import type { OcrTemplateRule } from './scan/ocr-template-matcher';
+import type { OcrTemplateForMatch, OcrTemplateRule } from './scan/ocr-template-matcher';
 
 export type LabelElementKind = 'text' | 'line' | 'rect' | 'qr';
 export type LabelExportFormat = 'bmp' | 'png' | 'emf';
@@ -411,5 +411,10 @@ export interface LabelsPort {
   updateQrTemplate(command: UpdateLabelQrTemplateCommand): Promise<LabelQrTemplateDto>;
   deleteQrTemplate(command: DeleteLabelQrTemplateCommand): Promise<void>;
   listActiveQrTemplateStrings(): Promise<string[]>;
+  listOcrTemplates(query: ListLabelOcrTemplatesQuery): Promise<LabelOcrTemplateDto[]>;
+  createOcrTemplate(command: CreateLabelOcrTemplateCommand): Promise<LabelOcrTemplateDto>;
+  updateOcrTemplate(command: UpdateLabelOcrTemplateCommand): Promise<LabelOcrTemplateDto>;
+  deleteOcrTemplate(command: DeleteLabelOcrTemplateCommand): Promise<void>;
+  listActiveOcrTemplatesForMatch(): Promise<OcrTemplateForMatch[]>;
   findScanCandidates(input: ScanSearchInput): Promise<ScanCandidateRow[]>;
 }
