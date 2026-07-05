@@ -24,6 +24,7 @@ import {
   qrTemplateOf,
 } from './labelQrHelpers';
 import { collectDuplicateQrNames, qrDraftFromElement, qrElementFromLibrary, rowsToTemplate, sanitizeQrText, templateToRows, uniqueQrName, type QrRow } from './labelQrLibrary';
+import { OcrTemplatesConfig } from './OcrTemplatesConfig';
 
 const { Text } = Typography;
 const { Panel } = Collapse;
@@ -1005,6 +1006,10 @@ export const LabelsConfigTab: React.FC = () => {
           />
         </Panel>
       </Collapse>
+
+      <Card size="small" title="OCR-шаблоны бирок">
+        <OcrTemplatesConfig canManage={can('labels.manage_templates')} />
+      </Card>
 
       <Form form={form} layout="vertical" onFinish={saveTemplate} disabled={!canManage || saving}>
         <Row gutter={16} align="top">

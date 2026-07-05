@@ -194,3 +194,65 @@ export interface ScanResolveResult {
   /** Present only for scanResolveImage (OCR fallback) responses. */
   ocr?: { lineCount: number; durationMs: number };
 }
+
+export type OcrFieldCode =
+  | 'order_number'
+  | 'order_name'
+  | 'detail_number'
+  | 'dimensions'
+  | 'material'
+  | 'quantity'
+  | 'date'
+  | 'detail_name'
+  | 'ignore';
+
+export interface OcrTemplateRule {
+  field: OcrFieldCode;
+  sampleText?: string;
+  anchor?: string | null;
+}
+
+export interface LabelOcrTemplate {
+  labelOcrTemplateId: number;
+  name: string;
+  rules: OcrTemplateRule[];
+  sampleLines: string[];
+  isActive: boolean;
+  version: number;
+  createdAt: string;
+  createdBy: number | null;
+  updatedAt: string;
+  updatedBy: number | null;
+}
+
+export interface LabelOcrTemplateInput {
+  name: string;
+  rules: OcrTemplateRule[];
+  sampleLines: string[];
+  isActive: boolean;
+  idempotencyKey: string;
+}
+
+export interface UpdateLabelOcrTemplateInput extends LabelOcrTemplateInput {
+  version: number;
+}
+
+export interface OcrLabelTextFields {
+  orderName?: string;
+  detailNumber?: number;
+  width?: number;
+  height?: number;
+  date?: string;
+  material?: string;
+}
+
+export interface OcrPreviewResult {
+  lines: { text: string; score: number }[];
+  durationMs: number;
+}
+
+export interface OcrTestResult {
+  lines: { text: string; score: number }[];
+  matched: { templateWon: boolean; score: number; fields: OcrLabelTextFields };
+  fallbackFields: OcrLabelTextFields;
+}

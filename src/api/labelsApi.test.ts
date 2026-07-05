@@ -165,4 +165,81 @@ describe('labelsApi', () => {
     const formData = post.mock.calls[0][1] as FormData;
     expect(formData.get('file')).toBe(file);
   });
+
+  it('listOcrTemplates GETs with includeInactive query param', async () => {
+    const get = vi.spyOn(httpClient, 'get').mockResolvedValue([]);
+    await labelsApi.listOcrTemplates(true);
+    expect(get).toHaveBeenCalledWith(`${apiRoutes.labels.ocrTemplates}?includeInactive=true`);
+  });
+
+  it('createOcrTemplate POSTs input', async () => {
+    const post = vi.spyOn(httpClient, 'post').mockResolvedValue({});
+    const input = {
+      name: 'Шаблон бирки',
+      rules: [{ field: 'order_number', sampleText: '123' }],
+      sampleLines: ['123'],
+      isActive: true,
+      idempotencyKey: 'ocr-key-123456',
+    };
+    await labelsApi.createOcrTemplate(input as any);
+    expect(post).toHaveBeenCalledWith(apiRoutes.labels.ocrTemplates, input);
+  });
+
+  it('updateOcrTemplate PUTs input with version and idempotency', async () => {
+    const put = vi.spyOn(httpClient, 'put').mockResolvedValue({});
+    const input = {
+      name: 'Шаблон бирки',
+      rules: [{ field: 'order_number', sampleText: '123' }],
+      sampleLines: ['123'],
+      isActive: true,
+      idempotencyKey: 'ocr-key-123456',
+      version: 1,
+    };
+    await labelsApi.updateOcrTemplate(5, input as any);
+    expect(put).toHaveBeenCalledWith(apiRoutes.labels.ocrTemplate(5), input);
+  });
+
+  it('deleteOcrTemplate DELETEs with version + key body', async () => {
+    const del = vi.spyOn(httpClient, 'delete').mockResolvedValue(undefined);
+    await labelsApi.deleteOcrTemplate(5, 2, 'ocr-key-123456');
+    expect(del).toHaveBeenCalledWith(apiRoutes.labels.ocrTemplate(5), {
+      body: JSON.stringify({ version: 2, idempotencyKey: 'ocr-key-123456' }),
+    });
+  });
+
+  it('previewOcrLabel POSTs the file as multipart FormData to the preview route', async () => {
+    const post = vi.spyOn(httpClient, 'post').mockResolvedValue({ lines: [], durationMs: 10 });
+    const file = new File(['fake-bytes'], 'label.jpg', { type: 'image/jpeg' });
+
+    await labelsApi.previewOcrLabel(file);
+
+    expect(post).toHaveBeenCalledWith(
+      apiRoutes.labels.ocrTemplatePreview(),
+      expect.any(FormData),
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+    const formData = post.mock.calls[0][1] as FormData;
+    expect(formData.get('file')).toBe(file);
+  });
+
+  it('testOcrTemplate POSTs file + rules as multipart FormData to the test route', async () => {
+    const post = vi.spyOn(httpClient, 'post').mockResolvedValue({
+      lines: [],
+      matched: { templateWon: true, score: 1, fields: {} },
+      fallbackFields: {},
+    });
+    const file = new File(['fake-bytes'], 'label.jpg', { type: 'image/jpeg' });
+    const rules = [{ field: 'order_number', sampleText: '123' }];
+
+    await labelsApi.testOcrTemplate(file, rules as any);
+
+    expect(post).toHaveBeenCalledWith(
+      apiRoutes.labels.ocrTemplateTest(),
+      expect.any(FormData),
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+    const formData = post.mock.calls[0][1] as FormData;
+    expect(formData.get('file')).toBe(file);
+    expect(formData.get('rules')).toBe(JSON.stringify(rules));
+  });
 });

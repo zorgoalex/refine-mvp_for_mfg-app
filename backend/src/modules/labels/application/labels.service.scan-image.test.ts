@@ -15,6 +15,7 @@ function makeService(overrides: { repo?: Partial<LabelsPort>; ocr?: Partial<OcrP
   const repo: Partial<LabelsPort> = {
     recordPermissionDenied: vi.fn().mockResolvedValue(undefined),
     findScanCandidates: vi.fn().mockResolvedValue([]),
+    listActiveOcrTemplatesForMatch: vi.fn().mockResolvedValue([]),
     ...overrides.repo,
   };
   const ocr: Partial<OcrPort> = {
@@ -242,5 +243,106 @@ describe('LabelsService.scanResolveImage', () => {
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0].matchedBy).toBe('ocr-fields');
     expect(result.ocr).toEqual({ lineCount: 2, durationMs: 123 });
+  });
+
+  it('an active OCR template match drives field extraction (over the legacy fallback parser)', async () => {
+    const { service, repo } = makeService({
+      repo: {
+        findScanCandidates: vi.fn().mockResolvedValue([liveCandidate]),
+        listActiveOcrTemplatesForMatch: vi.fn().mockResolvedValue([
+          {
+            id: 7,
+            name: 'Реализация',
+            rules: [{ field: 'order_number' }, { field: 'material' }, { field: 'dimensions' }],
+          },
+        ]),
+      },
+      ocr: {
+        // These lines would NOT extract via the legacy extractLabelFields() fallback
+        // (no "Заказ№:"/"Поз" markers) but DO match the configured template's rules.
+        recognize: vi.fn().mockResolvedValue({
+          lines: [
+            { text: '11380', score: 0.95 },
+            { text: 'лДСп Дуб Гарден 16мм', score: 0.85 },
+            { text: '649 X 238', score: 0.9 },
+          ],
+          durationMs: 66,
+        }),
+      },
+    });
+    const result = await service.scanResolveImage({
+      currentUser: manager,
+      requestId: 'req-6',
+      image: Buffer.from('x'),
+      contentType: 'image/png',
+    });
+    // Template-derived orderName came from the order_number rule ('11380').
+    expect(repo.findScanCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ orderName: '11380' }),
+    );
+    expect(result.candidates).toHaveLength(1);
+    expect(result.ocr).toEqual({ lineCount: 3, durationMs: 66 });
+  });
+
+  it('no active templates -> falls back to extractLabelFields (existing behaviour unchanged)', async () => {
+    const { service, repo } = makeService({
+      repo: {
+        findScanCandidates: vi.fn().mockResolvedValue([liveCandidate]),
+        listActiveOcrTemplatesForMatch: vi.fn().mockResolvedValue([]),
+      },
+      ocr: {
+        recognize: vi.fn().mockResolvedValue({
+          lines: [
+            { text: 'Заказ№: импорт 68 Поз.1', score: 0.9 },
+            { text: '500х300 МДФ 16мм', score: 0.8 },
+          ],
+          durationMs: 123,
+        }),
+      },
+    });
+    const result = await service.scanResolveImage({
+      currentUser: manager,
+      requestId: 'req-7',
+      image: Buffer.from('x'),
+      contentType: 'image/jpeg',
+    });
+    expect(repo.findScanCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ orderName: 'импорт 68', detailNumber: 1 }),
+    );
+    expect(result.candidates).toHaveLength(1);
+    expect(result.ocr).toEqual({ lineCount: 2, durationMs: 123 });
+  });
+
+  it('active templates present but none match (matcher miss) -> falls back to extractLabelFields', async () => {
+    const { service, repo } = makeService({
+      repo: {
+        findScanCandidates: vi.fn().mockResolvedValue([liveCandidate]),
+        listActiveOcrTemplatesForMatch: vi.fn().mockResolvedValue([
+          {
+            id: 9,
+            name: 'Другой формат',
+            rules: [{ field: 'order_number' }, { field: 'material' }, { field: 'dimensions' }],
+          },
+        ]),
+      },
+      ocr: {
+        // Only one recognizable line -> can't satisfy the template's 2-strong-field threshold,
+        // matchOcrTemplates returns null, so extractLabelFields legacy parsing takes over.
+        recognize: vi.fn().mockResolvedValue({
+          lines: [{ text: 'Заказ№: импорт 68 Поз.1', score: 0.9 }],
+          durationMs: 12,
+        }),
+      },
+    });
+    const result = await service.scanResolveImage({
+      currentUser: manager,
+      requestId: 'req-8',
+      image: Buffer.from('x'),
+      contentType: 'image/png',
+    });
+    expect(repo.findScanCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ orderName: 'импорт 68', detailNumber: 1 }),
+    );
+    expect(result.candidates).toHaveLength(1);
   });
 });

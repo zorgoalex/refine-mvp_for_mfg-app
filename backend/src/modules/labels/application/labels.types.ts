@@ -1,5 +1,6 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { LabelTextFields } from './scan/label-text-extraction';
+import type { OcrTemplateForMatch, OcrTemplateRule } from './scan/ocr-template-matcher';
 
 export type LabelElementKind = 'text' | 'line' | 'rect' | 'qr';
 export type LabelExportFormat = 'bmp' | 'png' | 'emf';
@@ -236,6 +237,47 @@ export interface DeleteLabelQrTemplateCommand extends LabelsContext {
   idempotencyKey: string;
 }
 
+export interface LabelOcrTemplateDto {
+  labelOcrTemplateId: number;
+  name: string;
+  rules: OcrTemplateRule[];
+  sampleLines: string[];
+  isActive: boolean;
+  version: number;
+  createdAt: string;
+  createdBy: number | null;
+  updatedAt: string;
+  updatedBy: number | null;
+}
+
+export interface LabelOcrTemplateInput {
+  name: string;
+  rules: OcrTemplateRule[];
+  sampleLines: string[];
+  isActive: boolean;
+  idempotencyKey: string;
+}
+
+export interface ListLabelOcrTemplatesQuery extends LabelsContext {
+  includeInactive?: boolean;
+}
+
+export interface CreateLabelOcrTemplateCommand extends LabelsContext {
+  input: LabelOcrTemplateInput;
+}
+
+export interface UpdateLabelOcrTemplateCommand extends LabelsContext {
+  id: number;
+  expectedVersion: number;
+  input: LabelOcrTemplateInput;
+}
+
+export interface DeleteLabelOcrTemplateCommand extends LabelsContext {
+  id: number;
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
 export interface GetOrderLabelDataQuery extends LabelsContext {
   orderId: number;
   templateId: number;
@@ -334,7 +376,7 @@ export interface LabelsPermissionDeniedInput {
   requiredPermissions: string[];
   requestId: string;
   targetId?: number;
-  targetEntityType?: 'label_template' | 'order' | 'label_qr_template';
+  targetEntityType?: 'label_template' | 'order' | 'label_qr_template' | 'label_ocr_template';
 }
 
 /** One recognized text line from ocr-service (recognition box intentionally dropped — backend has no use for it). */
@@ -373,5 +415,10 @@ export interface LabelsPort {
   updateQrTemplate(command: UpdateLabelQrTemplateCommand): Promise<LabelQrTemplateDto>;
   deleteQrTemplate(command: DeleteLabelQrTemplateCommand): Promise<void>;
   listActiveQrTemplateStrings(): Promise<string[]>;
+  listOcrTemplates(query: ListLabelOcrTemplatesQuery): Promise<LabelOcrTemplateDto[]>;
+  createOcrTemplate(command: CreateLabelOcrTemplateCommand): Promise<LabelOcrTemplateDto>;
+  updateOcrTemplate(command: UpdateLabelOcrTemplateCommand): Promise<LabelOcrTemplateDto>;
+  deleteOcrTemplate(command: DeleteLabelOcrTemplateCommand): Promise<void>;
+  listActiveOcrTemplatesForMatch(): Promise<OcrTemplateForMatch[]>;
   findScanCandidates(input: ScanSearchInput): Promise<ScanCandidateRow[]>;
 }

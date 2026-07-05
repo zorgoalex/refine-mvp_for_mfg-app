@@ -66,6 +66,21 @@ export class UnavailableLabelsRepository implements LabelsPort {
   async listActiveQrTemplateStrings() {
     return unavailable();
   }
+  async listOcrTemplates() {
+    return unavailable();
+  }
+  async createOcrTemplate() {
+    return unavailable();
+  }
+  async updateOcrTemplate() {
+    return unavailable();
+  }
+  async deleteOcrTemplate() {
+    return unavailable();
+  }
+  async listActiveOcrTemplatesForMatch() {
+    return unavailable();
+  }
   async findScanCandidates() {
     return unavailable();
   }

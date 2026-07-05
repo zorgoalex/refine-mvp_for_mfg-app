@@ -69,3 +69,18 @@ export class LabelQrTemplateStaleVersionError extends ApiError {
     });
   }
 }
+
+export class LabelOcrTemplateNotFoundError extends ApiError {
+  constructor(id: number) {
+    super(404, 'LABEL_OCR_TEMPLATE_NOT_FOUND', 'OCR template not found', { id });
+  }
+}
+
+export class LabelOcrTemplateStaleVersionError extends ApiError {
+  constructor(expectedVersion: number, currentVersion: number) {
+    super(409, 'LABEL_OCR_TEMPLATE_VERSION_STALE', 'OCR template version is stale', {
+      expectedVersion,
+      currentVersion,
+    });
+  }
+}

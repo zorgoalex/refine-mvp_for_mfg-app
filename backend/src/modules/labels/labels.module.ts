@@ -8,6 +8,7 @@ import { UnavailableLabelsRepository } from './adapters/unavailable-labels-repos
 import { createOcrClientFromEnv } from './adapters/http-ocr-client';
 import { LabelsService } from './application/labels.service';
 import { LabelFieldsController } from './http/label-fields.controller';
+import { LabelOcrTemplatesController } from './http/label-ocr-templates.controller';
 import { LabelQrTemplatesController } from './http/label-qr-templates.controller';
 import { LabelScanController } from './http/label-scan.controller';
 import { LabelTemplatesController } from './http/label-templates.controller';
@@ -20,6 +21,7 @@ import { LabelsRuntimeConfigService } from './http/labels-runtime-config.service
     LabelFieldsController,
     LabelTemplatesController,
     LabelQrTemplatesController,
+    LabelOcrTemplatesController,
     LabelScanController,
     OrderLabelsController,
     OrderLabelActionsController,
