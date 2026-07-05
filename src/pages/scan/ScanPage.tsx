@@ -258,6 +258,8 @@ export const ScanPage: React.FC = () => {
           setScanError('Сканер занят, попробуйте через минуту');
         } else if (err.code === 'UNSUPPORTED_IMAGE_TYPE') {
           setScanError('Формат изображения не поддерживается');
+        } else if (err.code === 'OCR_IMAGE_UNREADABLE') {
+          setScanError('Не удалось прочитать изображение. Попробуйте другое фото.');
         } else if (err.status === 403 || err.status === 401) {
           setScanError('Нет доступа к сканеру бирок. Обратитесь к администратору.');
         } else {

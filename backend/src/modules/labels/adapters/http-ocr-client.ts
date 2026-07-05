@@ -49,6 +49,22 @@ export class HttpOcrClient implements OcrPort {
     if (res.status === 429) {
       throw new ApiError(503, 'OCR_SERVICE_BUSY', 'OCR service is busy');
     }
+    if (res.status === 400) {
+      // ocr-service 400 = input problem (unreadable image / image-bomb dimensions
+      // guard), not a service outage. Surface as a client-fixable 422 instead of
+      // collapsing it into the generic 503 UNAVAILABLE — the raw service detail
+      // goes in `details`, never interpolated into the message shown to users.
+      let detail: string | undefined;
+      try {
+        const body = (await res.json()) as { detail?: unknown } | null;
+        detail = typeof body?.detail === 'string' ? body.detail : undefined;
+      } catch {
+        detail = undefined;
+      }
+      throw new ApiError(422, 'OCR_IMAGE_UNREADABLE', 'Could not read the label image', {
+        ocrServiceDetail: detail,
+      });
+    }
     if (!res.ok) {
       throw new ApiError(503, 'OCR_SERVICE_UNAVAILABLE', 'OCR service is unavailable');
     }

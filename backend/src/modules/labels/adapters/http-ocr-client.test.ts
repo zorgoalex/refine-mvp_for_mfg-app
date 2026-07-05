@@ -60,6 +60,28 @@ describe('HttpOcrClient', () => {
     });
   });
 
+  it('400 unreadable image → ApiError(422, OCR_IMAGE_UNREADABLE), not collapsed into 503', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(false, 400, { detail: 'unreadable image' }));
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    await expect(client.recognize(image, 'image/jpeg')).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'OCR_IMAGE_UNREADABLE',
+    });
+  });
+
+  it('400 image dimensions too large → same ApiError(422, OCR_IMAGE_UNREADABLE) code', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(false, 400, { detail: 'image dimensions too large' }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    await expect(client.recognize(image, 'image/jpeg')).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'OCR_IMAGE_UNREADABLE',
+    });
+  });
+
   it('500 → ApiError(503, OCR_SERVICE_UNAVAILABLE)', async () => {
     const mockFetch = vi.fn().mockResolvedValue(makeResponse(false, 500, 'boom'));
     const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });

@@ -102,6 +102,12 @@ describe('ScanPage', () => {
     expect(src).toContain('OCR_SERVICE_BUSY');
     expect(src).toContain('UNSUPPORTED_IMAGE_TYPE');
   });
+
+  it('maps OCR_IMAGE_UNREADABLE (400 unreadable/oversize image) to a distinct retry-photo message', () => {
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('OCR_IMAGE_UNREADABLE');
+    expect(src).toContain('Не удалось прочитать изображение. Попробуйте другое фото.');
+  });
 });
 
 describe('scan surface gating', () => {
