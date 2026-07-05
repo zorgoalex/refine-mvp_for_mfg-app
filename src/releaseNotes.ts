@@ -30,6 +30,19 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-05",
+    title: "Сканер бирок: распознавание бирок без QR-кода",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "Если на фото не найден QR-код, появляется кнопка «Распознать текст бирки».",
+      "Система прочитает текст с фотографии и найдёт деталь по номеру заказа и позиции.",
+      "Распознавание работает и для старых бирок, напечатанных без QR-кода.",
+      "Обработка фотографии может занять несколько секунд.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-03",
     title: "Сканер бирок: поиск деталей по QR-коду",
     services: ["ERP"],
