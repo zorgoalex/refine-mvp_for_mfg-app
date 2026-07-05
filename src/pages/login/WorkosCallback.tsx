@@ -61,19 +61,40 @@ export const WorkosCallbackPage: React.FC = () => {
       sessionStorage.removeItem(LINK_INTENT_KEY);
     }
 
-    // Set once the single-use code has actually been sent to the backend:
-    // failures BEFORE that (e.g. the link-mode refresh) have not burned the
-    // code, so the same callback URL may retry in place — and must retry as
-    // a LINK again, so the matched intent is kept until the exchange starts.
+    // The code is promoted to 'settled' (and the link intent cleared) ONLY
+    // once a backend response was observed — an ApiError means the backend
+    // consumed the code; a transport-level failure (offline, abort, DNS)
+    // means the code and the state cookie are still valid, so the same
+    // callback URL must stay retryable and a link retry must stay a link.
     let exchangeStarted = false;
+
+    const settleAfterBackendResponse = (error?: unknown) => {
+      if (error === undefined || error instanceof ApiError) {
+        consumedCodes.set(code, "settled");
+        if (isLink) {
+          sessionStorage.removeItem(LINK_INTENT_KEY);
+        }
+        return;
+      }
+      // Transport fault: nothing reached the backend — release the code.
+      consumedCodes.delete(code);
+    };
+
+    const exchange = async (call: () => Promise<unknown>) => {
+      exchangeStarted = true;
+      try {
+        await call();
+      } catch (error) {
+        settleAfterBackendResponse(error);
+        throw error;
+      }
+      settleAfterBackendResponse();
+    };
 
     const run = async () => {
       if (isLink) {
         await authApi.refresh();
-        exchangeStarted = true;
-        consumedCodes.set(code, "settled");
-        sessionStorage.removeItem(LINK_INTENT_KEY);
-        await authApi.workosLinkCallback(code, state);
+        await exchange(() => authApi.workosLinkCallback(code, state));
         navigate("/profile?sso=linked", { replace: true });
         return;
       }
@@ -82,15 +103,14 @@ export const WorkosCallbackPage: React.FC = () => {
       // in-memory only and a reload would discard it, forcing an extra
       // /auth/refresh round-trip (POC race #5). me() rehydrates the user
       // before entering the app.
-      exchangeStarted = true;
-      consumedCodes.set(code, "settled");
-      await authApi.workosCallback(code, state);
+      await exchange(() => authApi.workosCallback(code, state));
       await authApi.me().catch(() => undefined);
       navigate("/", { replace: true });
     };
 
     run().catch((exchangeError: unknown) => {
       if (!exchangeStarted) {
+        // Pre-exchange failure (link-mode refresh): the code was never sent.
         consumedCodes.delete(code);
       }
       setError(describeError(exchangeError));

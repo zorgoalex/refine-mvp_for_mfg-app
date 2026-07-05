@@ -22,6 +22,10 @@ const LOGIN_RESPONSE = {
     user: MOCK_USER,
 };
 
+// The first test pays the Vite cold-start (module transform can exceed the
+// default 30s budget together with the warm-up reload).
+test.setTimeout(90_000);
+
 test.describe('WorkOS hybrid auth (mocked)', () => {
     test.beforeEach(async ({ page, context }) => {
         await context.clearCookies();
@@ -123,6 +127,44 @@ test.describe('WorkOS hybrid auth (mocked)', () => {
         await expect(page.getByRole('link', { name: 'Вернуться на страницу входа' })).toBeVisible();
     });
 
+    test('transport failure during the login exchange keeps the code retryable', async ({ page }) => {
+        await mockRuntimeConfig(page, { backendAuth: true, workosAuth: true });
+
+        let abortNext = true;
+        const callbackBodies: unknown[] = [];
+        await page.route(/\/api\/v1\/auth\/workos\/callback$/, async (route) => {
+            if (abortNext) {
+                abortNext = false;
+                await route.abort('connectionfailed');
+                return;
+            }
+            callbackBodies.push(JSON.parse(route.request().postData() || '{}'));
+            await fulfillJson(route, LOGIN_RESPONSE);
+        });
+        await page.route(/\/api\/v1\/auth\/refresh$/, async (route) => {
+            await fulfillJson(route, { error: { code: 'AUTH_REQUIRED', message: 'x' } }, 401);
+        });
+        await page.route(/\/api\/v1\/me$/, async (route) => {
+            await fulfillJson(route, { user: MOCK_USER });
+        });
+        await page.route(/\/api\/v1\/me\/preferences$/, async (route) => {
+            await fulfillJson(route, { preferences: { themeMode: 'light' } });
+        });
+        await page.route(/\/v1\/graphql$/, async (route) => {
+            await fulfillJson(route, { data: {} });
+        });
+
+        // The request never reached the backend: the code is NOT burned and
+        // the same callback URL must recover on retry (reload).
+        await page.goto('/auth/workos/callback?code=e2e-net-code&state=e2e-net-state');
+        await expect(page.getByText('Ошибка входа через SSO')).toBeVisible({ timeout: 15000 });
+
+        await page.reload();
+        await expect(page).not.toHaveURL(/auth\/workos\/callback/, { timeout: 15000 });
+        await expect(page).not.toHaveURL(/\/login/);
+        expect(callbackBodies).toHaveLength(1);
+    });
+
     test('401 from callback shows the error and never replays the single-use code', async ({ page }) => {
         await mockRuntimeConfig(page, { backendAuth: true, workosAuth: true });
 
@@ -216,6 +258,59 @@ test.describe('WorkOS link retry (mocked, own storage lifecycle)', () => {
         // Retry the SAME callback URL with a working session: it must still
         // route into the LINK callback, not the login exchange.
         refreshShouldFail = false;
+        await page.reload();
+        await expect(page).toHaveURL(/\/profile\?sso=linked/, { timeout: 15000 });
+        expect(linkCallbackCalls).toBe(1);
+    });
+
+    test('link intent survives a transport failure DURING the exchange', async ({ page, context }) => {
+        await context.clearCookies();
+        await mockRuntimeConfig(page, { backendAuth: true, workosAuth: true });
+
+        await page.addInitScript(() => {
+            if (!window.name.includes('e2e-intent2-seeded')) {
+                window.name += 'e2e-intent2-seeded';
+                localStorage.clear();
+                sessionStorage.clear();
+                sessionStorage.setItem('erp_workos_link_intent', 'e2e-net-link-state');
+            }
+        });
+
+        let abortNext = true;
+        let linkCallbackCalls = 0;
+        await page.route(/\/api\/v1\/auth\/refresh$/, async (route) => {
+            await fulfillJson(route, LOGIN_RESPONSE);
+        });
+        await page.route(/\/api\/v1\/auth\/workos\/link\/callback$/, async (route) => {
+            if (abortNext) {
+                abortNext = false;
+                await route.abort('connectionfailed');
+                return;
+            }
+            linkCallbackCalls += 1;
+            await fulfillJson(route, { linked: true });
+        });
+        await page.route(/\/api\/v1\/me$/, async (route) => {
+            await fulfillJson(route, { user: MOCK_USER });
+        });
+        await page.route(/\/api\/v1\/me\/preferences$/, async (route) => {
+            await fulfillJson(route, { preferences: { themeMode: 'light' } });
+        });
+        await page.route(/\/api\/v1\/auth\/workos\/link$/, async (route) => {
+            await fulfillJson(route, { linked: true });
+        });
+        await page.route(/\/v1\/graphql$/, async (route) => {
+            await fulfillJson(route, { data: {} });
+        });
+
+        // The exchange died on the wire AFTER refresh succeeded: the code was
+        // not consumed and the intent must survive so the retry stays a LINK.
+        await page.goto('/auth/workos/callback?code=e2e-net-link-code&state=e2e-net-link-state');
+        await expect(page.getByText('Ошибка входа через SSO')).toBeVisible({ timeout: 15000 });
+        expect(
+            await page.evaluate(() => sessionStorage.getItem('erp_workos_link_intent')),
+        ).toBe('e2e-net-link-state');
+
         await page.reload();
         await expect(page).toHaveURL(/\/profile\?sso=linked/, { timeout: 15000 });
         expect(linkCallbackCalls).toBe(1);

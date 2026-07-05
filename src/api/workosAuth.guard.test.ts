@@ -89,16 +89,20 @@ describe('workos callback helpers contract', () => {
     expect(callbackSource).toContain('exchangeStarted');
   });
 
-  it('keeps the matched link intent until the exchange starts (pre-exchange retry stays a link)', () => {
-    const linkBranch = callbackSource.split('if (isLink)')[1]?.split('// SPA navigation')[0] ?? '';
-    // refresh (pre-exchange) comes BEFORE the intent removal: a failed
-    // refresh leaves the intent in place so the retried callback routes as
-    // a link again.
-    expect(linkBranch).toContain('await authApi.refresh()');
-    expect(linkBranch).toContain('sessionStorage.removeItem(LINK_INTENT_KEY)');
-    expect(linkBranch.indexOf('authApi.refresh()')).toBeLessThan(
-      linkBranch.indexOf('sessionStorage.removeItem(LINK_INTENT_KEY)'),
-    );
+  it('settles the code and clears the link intent only after a BACKEND response', () => {
+    // An ApiError means the backend consumed the code; a transport failure
+    // (offline/abort) leaves code + state cookie valid, so the callback URL
+    // must stay retryable and a link retry must stay a link.
+    const settle = callbackSource.split('const settleAfterBackendResponse')[1]?.split('const exchange')[0] ?? '';
+    expect(settle).toContain('error instanceof ApiError');
+    expect(settle).toContain('consumedCodes.set(code, "settled")');
+    expect(settle).toContain('sessionStorage.removeItem(LINK_INTENT_KEY)');
+    expect(settle).toContain('consumedCodes.delete(code)');
+
+    // No eager settle/intent-clear anywhere in the run path before the call.
+    const runBody = callbackSource.split('const run =')[1]?.split('run().catch')[0] ?? '';
+    expect(runBody).not.toContain('sessionStorage.removeItem(LINK_INTENT_KEY)');
+    expect(runBody).toContain('await authApi.refresh()');
   });
 
   it('binds the link intent to the exact flow state, never a stale boolean', () => {
@@ -123,10 +127,10 @@ describe('workos callback helpers contract', () => {
   });
 
   it('restores the session from the refresh cookie before finishing a link', () => {
-    const linkBranch = callbackSource.split('if (isLink)')[1] ?? '';
-    expect(linkBranch).toContain('await authApi.refresh()');
-    expect(linkBranch.indexOf('authApi.refresh()')).toBeLessThan(
-      linkBranch.indexOf('workosLinkCallback'),
+    const runBody = callbackSource.split('const run =')[1] ?? '';
+    expect(runBody).toContain('await authApi.refresh()');
+    expect(runBody.indexOf('authApi.refresh()')).toBeLessThan(
+      runBody.indexOf('workosLinkCallback'),
     );
   });
 });
