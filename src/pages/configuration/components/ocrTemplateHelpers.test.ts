@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { OcrFieldCode, OcrTemplateRule } from '../../../api/types/labelsApi.types';
-import { fieldLabelRu, isStrongFieldFe, summarizeFieldTags, validateOcrRulesFe } from './ocrTemplateHelpers';
+import {
+  buildOcrTemplateInput,
+  fieldLabelRu,
+  isStrongFieldFe,
+  suggestAnchor,
+  summarizeFieldTags,
+  validateOcrRulesFe,
+} from './ocrTemplateHelpers';
 
 const ALL_FIELDS: OcrFieldCode[] = [
   'order_number',
@@ -99,6 +106,65 @@ describe('ocrTemplateHelpers', () => {
     it('returns an empty array when there are no non-ignore fields', () => {
       expect(summarizeFieldTags([{ field: 'ignore' }])).toEqual([]);
       expect(summarizeFieldTags([])).toEqual([]);
+    });
+  });
+
+  describe('suggestAnchor', () => {
+    it('extracts the leading non-digit run before the first digit, trimmed', () => {
+      expect(suggestAnchor('Р.Р. 649 X238')).toBe('Р.Р.');
+    });
+
+    it('returns empty string for a whole-numeric line', () => {
+      expect(suggestAnchor('671')).toBe('');
+    });
+
+    it('extracts a label-style anchor ending right before the number', () => {
+      expect(suggestAnchor('Заказ№ 5001')).toBe('Заказ№');
+    });
+
+    it('returns empty string when the line has no digit at all', () => {
+      expect(suggestAnchor('Верх')).toBe('');
+    });
+  });
+
+  describe('buildOcrTemplateInput', () => {
+    it('maps editor state to the create/update payload shape', () => {
+      const rules: OcrTemplateRule[] = [
+        { field: 'order_number', anchor: 'Заказ№' },
+        { field: 'dimensions', anchor: '' },
+        { field: 'ignore' },
+      ];
+      const input = buildOcrTemplateInput({
+        name: 'Тест',
+        isActive: true,
+        rules,
+        sampleLines: ['Заказ№ 5001', '649x238', 'служебная строка'],
+        idempotencyKey: 'idem-key-1',
+      });
+
+      expect(input).toEqual({
+        name: 'Тест',
+        isActive: true,
+        idempotencyKey: 'idem-key-1',
+        sampleLines: ['Заказ№ 5001', '649x238', 'служебная строка'],
+        rules: [
+          { field: 'order_number', sampleText: undefined, anchor: 'Заказ№' },
+          { field: 'dimensions', sampleText: undefined, anchor: null },
+          { field: 'ignore', sampleText: undefined, anchor: null },
+        ],
+      });
+    });
+
+    it('preserves rule order (the matcher is order-sensitive)', () => {
+      const rules: OcrTemplateRule[] = [{ field: 'ignore' }, { field: 'material' }, { field: 'dimensions' }];
+      const input = buildOcrTemplateInput({
+        name: 'Тест',
+        isActive: false,
+        rules,
+        sampleLines: ['a', 'b', 'c'],
+        idempotencyKey: 'idem-key-2',
+      });
+      expect(input.rules.map((r) => r.field)).toEqual(['ignore', 'material', 'dimensions']);
     });
   });
 });

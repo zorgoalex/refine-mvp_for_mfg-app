@@ -1,4 +1,4 @@
-import type { OcrFieldCode, OcrTemplateRule } from '../../../api/types/labelsApi.types';
+import type { LabelOcrTemplateInput, OcrFieldCode, OcrTemplateRule } from '../../../api/types/labelsApi.types';
 
 /** RU labels for the OCR field picker/list — mirrors backend field semantics, no business logic. */
 export const OCR_FIELD_LABELS_RU: Record<OcrFieldCode, string> = {
@@ -65,6 +65,46 @@ export function validateOcrRulesFe(rules: OcrTemplateRule[]): string | null {
   }
 
   return null;
+}
+
+/**
+ * Suggests an anchor string from a recognized line: the leading non-digit run
+ * before the first digit, trimmed. Used to prefill the "Якорь" input when the
+ * user opts a rule into anchor-matching — still editable afterwards.
+ * Returns '' when the line has no digit at all, or starts with one (nothing
+ * to anchor on before the numeric part).
+ */
+export function suggestAnchor(line: string): string {
+  const match = line.match(/\d/);
+  if (!match || match.index === undefined || match.index === 0) {
+    return '';
+  }
+  return line.slice(0, match.index).trim();
+}
+
+/**
+ * Builds the create/update payload from editor form state. Anchor is
+ * normalized to null when blank so the backend always sees a nullish anchor
+ * rather than an empty string (matches the DTO's nullable-anchor contract).
+ */
+export function buildOcrTemplateInput(state: {
+  name: string;
+  isActive: boolean;
+  rules: OcrTemplateRule[];
+  sampleLines: string[];
+  idempotencyKey: string;
+}): LabelOcrTemplateInput {
+  return {
+    name: state.name,
+    isActive: state.isActive,
+    idempotencyKey: state.idempotencyKey,
+    sampleLines: state.sampleLines,
+    rules: state.rules.map((rule) => ({
+      field: rule.field,
+      sampleText: rule.sampleText,
+      anchor: rule.anchor && rule.anchor.trim().length > 0 ? rule.anchor : null,
+    })),
+  };
 }
 
 /** Distinct non-ignore field RU labels, in first-occurrence order — for the list column. */

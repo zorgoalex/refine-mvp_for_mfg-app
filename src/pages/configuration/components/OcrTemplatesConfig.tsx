@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Drawer, Empty, Space, Table, Tag, message } from 'antd';
+import { Button, Empty, Space, Table, Tag, message } from 'antd';
 import { EditOutlined, PlusOutlined, StopOutlined } from '@ant-design/icons';
 import { ApiError } from '../../../api/apiError';
 import { labelsApi } from '../../../api/labelsApi';
 import type { LabelOcrTemplate } from '../../../api/types/labelsApi.types';
+import { OcrTemplateEditor } from './OcrTemplateEditor';
 import { summarizeFieldTags } from './ocrTemplateHelpers';
 
 interface OcrTemplatesConfigProps {
@@ -25,10 +26,8 @@ function reportError(error: unknown, fallback: string): void {
 
 /**
  * List view for configurable OCR label templates. Self-contained (own load/loading/error
- * state) so the host LabelsConfigTab only needs a single additive mount point.
- *
- * The editor is a stub for now: it opens a Drawer placeholder that Task 9 will replace
- * with the real OcrTemplateEditor (rule builder + preview/test against a sample photo).
+ * state) so the host LabelsConfigTab only needs a single additive mount point. The editor
+ * (rule builder + preview/test against a sample photo) lives in OcrTemplateEditor.
  */
 export const OcrTemplatesConfig: React.FC<OcrTemplatesConfigProps> = ({ canManage }) => {
   const [templates, setTemplates] = useState<LabelOcrTemplate[]>([]);
@@ -140,16 +139,16 @@ export const OcrTemplatesConfig: React.FC<OcrTemplatesConfigProps> = ({ canManag
         />
       </Space>
 
-      {/* Placeholder editor slot — Task 9 replaces this Drawer body with the real
-          OcrTemplateEditor (rule builder + preview/test against a sample photo). */}
-      <Drawer
-        title={editorTemplate ? `OCR-шаблон: ${editorTemplate.name}` : 'Новый OCR-шаблон'}
-        width={520}
+      <OcrTemplateEditor
         open={editorOpen}
+        template={editorTemplate}
+        canManage={canManage}
         onClose={() => setEditorOpen(false)}
-      >
-        <Empty description="Редактор OCR-шаблонов появится в следующем этапе" />
-      </Drawer>
+        onSaved={() => {
+          setEditorOpen(false);
+          void loadTemplates();
+        }}
+      />
     </div>
   );
 };
