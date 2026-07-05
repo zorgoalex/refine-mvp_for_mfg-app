@@ -293,6 +293,11 @@ export class WorkosAuthService {
   }
 
   async listOwnLinks(currentUser: CurrentUser): Promise<UserIdentityListItem[]> {
+    // Fail fast on a sid-less/legacy bearer before touching the repo: a token
+    // without a sessionId claim must not enumerate identity emails/auth methods.
+    if (!currentUser.sessionId) {
+      throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+    }
     return this.ports.identities.listLinks(currentUser.id, WORKOS_PROVIDER);
   }
 
@@ -337,6 +342,12 @@ export class WorkosAuthService {
   }
 
   async adminListLinks(command: WorkosAdminListLinksCommand): Promise<UserIdentityListItem[]> {
+    // Same sid-less fail-fast as adminUnlink: a token without a live session
+    // must not read another user's linked identities.
+    if (!command.currentUser.sessionId) {
+      throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+    }
+
     await this.requireManageSso(command, 'auth.identity.list_denied');
 
     const user = await this.ports.loadUserById(command.targetUserId);

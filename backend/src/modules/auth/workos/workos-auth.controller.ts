@@ -4,6 +4,7 @@ import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
+import { InvalidCredentialsError } from '../auth.errors';
 import { createCorsRuntimeOptions, isOriginAllowed } from '../../../config/cors';
 import type { BackendEnv } from '../../../config/env.validation';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -246,17 +247,28 @@ export class WorkosAuthController {
     };
     await this.rateLimits.assertAllowed(unlinkLimit);
 
-    const result = await service.unlinkOwn({
-      currentUser,
-      identityId,
-      password: body.password,
-      userAgent: request.get('user-agent') ?? undefined,
-      ipAddress: request.ip,
-      requestId: request.requestId,
-    });
-    await this.rateLimits.refund(unlinkLimit);
-
-    return result;
+    try {
+      const result = await service.unlinkOwn({
+        currentUser,
+        identityId,
+        password: body.password,
+        userAgent: request.get('user-agent') ?? undefined,
+        ipAddress: request.ip,
+        requestId: request.requestId,
+      });
+      await this.rateLimits.refund(unlinkLimit);
+      return result;
+    } catch (error) {
+      // Only failed PASSWORD confirmations should accumulate against the
+      // brute-force budget. A correct password that still fails for a
+      // non-credential reason (link already removed → 404, external policy →
+      // 409, dead session → 401) must be refunded so a benign retry is not
+      // throttled toward the 10/hour cap.
+      if (!(error instanceof InvalidCredentialsError)) {
+        await this.rateLimits.refund(unlinkLimit);
+      }
+      throw error;
+    }
   }
 
   @ApiBearerAuth()

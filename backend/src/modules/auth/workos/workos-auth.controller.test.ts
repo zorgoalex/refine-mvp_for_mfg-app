@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
+import { InvalidCredentialsError } from '../auth.errors';
 import { WorkosAuthController } from './workos-auth.controller';
 
 describe('WorkosAuthController.linkStart', () => {
@@ -122,6 +123,36 @@ describe('WorkosAuthController self identity routes', () => {
         subject: { route: 'auth/workos/unlink', userId: '42' },
       },
     ]);
+  });
+
+  it('refunds the self-unlink budget on a NON-password failure (link already gone → 404)', async () => {
+    const harness = createHarness({
+      unlinkOwnError: new ApiError(404, 'IDENTITY_NOT_FOUND', 'gone'),
+    });
+
+    await expect(
+      harness.controller.unlinkOne(createRequest(), '17', { password: 'correct' }),
+    ).rejects.toMatchObject({ statusCode: 404, code: 'IDENTITY_NOT_FOUND' });
+
+    expect(harness.rateLimitConsumes).toHaveLength(1);
+    // non-credential failure must be refunded — only bad passwords accumulate.
+    expect(harness.rateLimitRefunds).toEqual([
+      {
+        rule: { feature: 'auth_workos_unlink', maxRequests: 10, windowMs: 3_600_000 },
+        subject: { route: 'auth/workos/unlink', userId: '42' },
+      },
+    ]);
+  });
+
+  it('does NOT refund the self-unlink budget on an invalid-password failure', async () => {
+    const harness = createHarness({ unlinkOwnError: new InvalidCredentialsError() });
+
+    await expect(
+      harness.controller.unlinkOne(createRequest(), '17', { password: 'wrong' }),
+    ).rejects.toBeInstanceOf(InvalidCredentialsError);
+
+    expect(harness.rateLimitConsumes).toHaveLength(1);
+    expect(harness.rateLimitRefunds).toEqual([]); // bad password consumes budget
   });
 });
 

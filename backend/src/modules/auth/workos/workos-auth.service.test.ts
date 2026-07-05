@@ -488,6 +488,27 @@ describe('WorkosAuthService.multilink task 5', () => {
     await expect(harness.service.listOwnLinks(CURRENT_USER)).resolves.toHaveLength(1);
   });
 
+  it('self AND admin LIST fail-fast 401 when currentUser.sessionId is absent (before repo)', async () => {
+    const harness = createHarness({ links: [] });
+    const noSession = { ...CURRENT_USER, sessionId: undefined };
+    await expect(harness.service.listOwnLinks(noSession)).rejects.toMatchObject({
+      code: 'SESSION_INACTIVE',
+      statusCode: 401,
+    });
+    const adminNoSession = {
+      ...noSession,
+      id: '7',
+      role: 'admin' as const,
+      roleId: 1,
+      permissions: ['users.manage_sso'] as const,
+    };
+    await expect(
+      harness.service.adminListLinks({ currentUser: adminNoSession, targetUserId: '42' }),
+    ).rejects.toMatchObject({ code: 'SESSION_INACTIVE', statusCode: 401 });
+    // A reached repo listLinks would RESOLVE with the (empty) list, so a 401
+    // rejection proves the fail-fast fires before any repo/permission work.
+  });
+
   it('self AND admin unlink fail-fast 401 when currentUser.sessionId is absent (R12-MINOR)', async () => {
     const harness = createHarness({});
     const noSession = { ...CURRENT_USER, sessionId: undefined };
