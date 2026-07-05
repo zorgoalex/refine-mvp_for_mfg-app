@@ -72,6 +72,15 @@ describe('ScanPage', () => {
     expect(src).toContain('matchedByLabel');
   });
 
+  it('OCR request has a hard client timeout and a timeout error branch', () => {
+    // без клиентского таймаута зависший аплоад = вечный спиннер (живой баг 2026-07-05)
+    const api = readFileSync(join(__dirname, '..', '..', 'api', 'labelsApi.ts'), 'utf8');
+    expect(api).toContain('AbortSignal.timeout');
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('TimeoutError');
+    expect(src).toContain('Не удалось распознать за отведённое время');
+  });
+
   it('offers photo-file scanning wired to the same resolve flow', () => {
     const src = read('ScanPage.tsx');
     expect(src).toContain('Скан из фото');

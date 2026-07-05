@@ -127,7 +127,11 @@ export const labelsApi = {
   scanResolveImage(file: File | Blob): Promise<ScanResolveResult> {
     const formData = new FormData();
     formData.append('file', file);
-    return httpClient.post<ScanResolveResult>(apiRoutes.labels.scanResolveImage(), formData);
+    // Жёсткий клиентский таймаут: без него зависший аплоад/прокси = вечный
+    // спиннер (пойман на живом фото 2026-07-05). 30с > серверных 20с.
+    return httpClient.post<ScanResolveResult>(apiRoutes.labels.scanResolveImage(), formData, {
+      signal: AbortSignal.timeout(30_000),
+    });
   },
 };
 

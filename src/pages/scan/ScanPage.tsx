@@ -265,6 +265,8 @@ export const ScanPage: React.FC = () => {
         } else {
           setScanError('Сервис сканера временно недоступен. Попробуйте позже.');
         }
+      } else if ((err as { name?: string } | null)?.name === 'TimeoutError' || (err as { name?: string } | null)?.name === 'AbortError') {
+        setScanError('Не удалось распознать за отведённое время. Попробуйте ещё раз или сфотографируйте бирку крупнее.');
       } else {
         setScanError('Ошибка сети. Проверьте подключение и попробуйте ещё раз.');
       }

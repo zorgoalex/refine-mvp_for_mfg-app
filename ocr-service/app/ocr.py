@@ -85,9 +85,11 @@ def run_ocr(image_bytes: bytes) -> dict:
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("unreadable image")
-    # Даунскейл больших фото: длинная сторона > 2000px -> в 2000 (латентность).
+    # Даунскейл: длинная сторона > 1600px -> в 1600. Реальное ФОТО бирки (не скан)
+    # на 2000px давало 11с OCR (шумный фон = много det-регионов); бирка читается
+    # с запасом и на 1600 (прототип работал на 684px).
     h, w = img.shape[:2]
-    scale = 2000 / max(h, w)
+    scale = 1600 / max(h, w)
     if scale < 1:
         img = cv2.resize(img, (int(w * scale), int(h * scale)))
     t0 = time.time()

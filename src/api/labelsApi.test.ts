@@ -157,7 +157,11 @@ describe('labelsApi', () => {
 
     await labelsApi.scanResolveImage(file);
 
-    expect(post).toHaveBeenCalledWith(apiRoutes.labels.scanResolveImage(), expect.any(FormData));
+    expect(post).toHaveBeenCalledWith(
+      apiRoutes.labels.scanResolveImage(),
+      expect.any(FormData),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }), // жёсткий клиентский таймаут
+    );
     const formData = post.mock.calls[0][1] as FormData;
     expect(formData.get('file')).toBe(file);
   });

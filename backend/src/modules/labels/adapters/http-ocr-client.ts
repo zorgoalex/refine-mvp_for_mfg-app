@@ -3,7 +3,7 @@ import type { OcrLine, OcrPort } from '../application/labels.types';
 
 export type OcrFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
-const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_TIMEOUT_MS = 20_000;
 
 export interface HttpOcrClientOptions {
   /** Request timeout in ms (AbortSignal.timeout). Default 10000. Injectable for tests. */
