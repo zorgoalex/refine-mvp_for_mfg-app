@@ -251,16 +251,17 @@ probe_file() {
     006_*) probe_all "$(q_col notifications idempotency_key)" ;;
     007_*) probe_all "$(q_col deadline_instances idempotency_key)" ;;
     008_*) probe_all "$(q_tbl deadline_order_overrides)" "$(q_col deadline_action_executions rule_version_id)" ;;
-    009_*) probe_all "$(q_tbl project_projects)" ;;
-    010_*) probe_all "$(q_tbl project_order_projects)" ;;
-    011_*) probe_all "$(q_tbl project_members)" ;;
+    # After rename-migration 054, project_* objects no longer exist; create-migration probes check END-state group_*.
+    009_*) probe_all "$(q_tbl group_groups)" ;;
+    010_*) probe_all "$(q_tbl group_order_groups)" ;;
+    011_*) probe_all "$(q_tbl group_members)" ;;
     012_*) probe_all "$(q_col audit_log related_payment_id)" "$(q_col audit_log related_deadline_id)" ;;
-    013_*) probe_all "$(q_tbl project_entity_links)" "$(q_tbl project_participants)" ;;
+    013_*) probe_all "$(q_tbl group_entity_types)" "$(q_tbl group_entity_links)" "$(q_tbl group_participant_roles)" "$(q_tbl group_participants)" ;;
     014_*) probe_all "$(q_tbl notification_rules)" ;;
     015_*) probe_all "$(q_tbl notification_rules)" "SELECT EXISTS (SELECT 1 FROM notification_rules WHERE rule_code='deadline-expired-notify-manager');" ;;
     016_*) probe_all "$(q_tbl directions)" "$(q_tbl direction_heads)" ;;
     017_*) probe_all "$(q_col audit_log related_user_id)" ;;
-    018_*) probe_all "$(q_col notification_rules project_id)" ;;
+    018_*) probe_all "$(q_col notification_rules group_id)" ;;
     019_*) probe_all "$(q_tbl notification_rules)" "SELECT EXISTS (SELECT 1 FROM notification_rules WHERE rule_code='deadline-final-order-expired-manager');" ;;
     020_*) probe_all "$(q_tbl audit_log_related_entity)" ;;
     021_*) probe_all "$(q_tbl sheet_material_types)" "$(q_col materials sheet_material_type_id)" ;;
@@ -321,6 +322,11 @@ probe_file() {
     049_*) probe_all "$(q_col cut_pdf_templates layout)" ;;
     050_*) probe_all "$(q_col cut_job pdf_template_code)" "$(q_col cut_group pdf_template_code)" ;;
     051_*) probe_all "$(q_tbl label_qr_templates)" ;;
+    052_*) probe_all "$(q_tbl user_identities)" "$(q_idx idx_user_identities_user)" \
+                     "$(q_col users login_policy)" "$(q_col auth_sessions provider_session_id)" \
+                     "$(q_col auth_sessions auth_source)" ;;
+    053_*) probe_all "$(q_tbl label_ocr_templates)" "$(q_idx label_ocr_templates_name_active_uniq)" ;;
+    054_*) probe_all "$(q_tbl group_groups)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
