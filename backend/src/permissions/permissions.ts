@@ -100,6 +100,7 @@ export const PERMISSIONS = [
   'users.change_password',
   'users.deactivate',
   'users.activate',
+  'users.manage_sso',
   'employees.view',
   'employees.manage',
 

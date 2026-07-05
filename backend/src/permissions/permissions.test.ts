@@ -29,6 +29,12 @@ describe('permissions foundation', () => {
     expect(can('admin', 'permissions.manage')).toBe(false);
   });
 
+  it('grants users.manage_sso to admin and superadmin, denies worker', () => {
+    expect(can('superadmin', 'users.manage_sso')).toBe(true);
+    expect(can('admin', 'users.manage_sso')).toBe(true);
+    expect(can('worker', 'users.manage_sso')).toBe(false);
+  });
+
   it('grants superadmin every registered permission', () => {
     expect(getPermissionsForRole('superadmin')).toHaveLength(PERMISSIONS.length);
 

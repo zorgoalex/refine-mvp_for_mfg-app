@@ -26,6 +26,7 @@ export type PermissionName =
   | 'users.change_password'
   | 'users.deactivate'
   | 'users.activate'
+  | 'users.manage_sso'
   | 'references.view'
   | 'references.manage'
   | 'analytics.view'
