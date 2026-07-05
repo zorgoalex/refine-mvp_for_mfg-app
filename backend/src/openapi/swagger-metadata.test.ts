@@ -66,34 +66,34 @@ describe('Swagger controller metadata', () => {
     }
   });
 
-  it('documents Projects order status report response filter as a strict oneOf schema in Swagger metadata', () => {
+  it('documents Groups order status report response filter as a strict oneOf schema in Swagger metadata', () => {
     const controllerSource = readFileSync(
-      resolve(backendRoot(), 'src/modules/projects/reporting/project-order-status-report.controller.ts'),
+      resolve(backendRoot(), 'src/modules/groups/reporting/group-order-status-report.controller.ts'),
       'utf8',
     );
 
     expect(controllerSource).toContain('filter: {');
     expect(controllerSource).toContain('oneOf: [');
-    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode']");
-    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode', 'asOf']");
-    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode', 'from', 'to']");
+    expect(controllerSource).toContain("required: ['groupMode', 'groupIds', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['groupMode', 'groupIds', 'temporalMode', 'asOf']");
+    expect(controllerSource).toContain("required: ['groupMode', 'groupIds', 'temporalMode', 'from', 'to']");
     expect(controllerSource).toContain('additionalProperties: false');
     expect(controllerSource).toContain("orderCount: { type: 'integer', minimum: 0 }");
     expect(controllerSource).toContain("schema: swaggerSchema(dateTimeQuerySwaggerSchema)");
   });
 
-  it('documents Projects order relation counts response as a strict oneOf schema in Swagger metadata', () => {
+  it('documents Groups order relation counts response as a strict oneOf schema in Swagger metadata', () => {
     const controllerSource = readFileSync(
-      resolve(backendRoot(), 'src/modules/projects/reporting/project-order-relation-counts-report.controller.ts'),
+      resolve(backendRoot(), 'src/modules/groups/reporting/group-order-relation-counts-report.controller.ts'),
       'utf8',
     );
 
     expect(controllerSource).toContain('additionalProperties: false');
     expect(controllerSource).toContain('filter: {');
     expect(controllerSource).toContain('oneOf: [');
-    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode']");
-    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode', 'asOf']");
-    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode', 'from', 'to']");
+    expect(controllerSource).toContain("required: ['groupMode', 'groupIds', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['groupMode', 'groupIds', 'temporalMode', 'asOf']");
+    expect(controllerSource).toContain("required: ['groupMode', 'groupIds', 'temporalMode', 'from', 'to']");
     expect(controllerSource).toContain("required: ['relationType', 'isPrimary', 'orderCount']");
     expect(controllerSource).toContain("relationType: { type: 'string', enum: ['main', 'secondary', 'reporting', 'billing', 'derived'] }");
     expect(controllerSource).toContain("isPrimary: { type: 'boolean' }");
@@ -101,14 +101,14 @@ describe('Swagger controller metadata', () => {
     expect(controllerSource).toContain("schema: swaggerSchema(dateTimeQuerySwaggerSchema)");
     expect(controllerSource).toContain("schema: { default: 'any' }");
     expect(controllerSource).toContain("schema: { default: 'current' }");
-    expect(controllerSource).toContain('Comma-separated project UUIDs. Required unless projectMode is none.');
-    expect(controllerSource).toContain('Returns only project-order relation aggregate counts and applied project report filter metadata.');
+    expect(controllerSource).toContain('Comma-separated group UUIDs. Required unless groupMode is none.');
+    expect(controllerSource).toContain('Returns only group-order relation aggregate counts and applied group report filter metadata.');
     expect(controllerSource).toContain("@ApiBearerAuth('bearerAuth')");
   });
 
-  it('documents Projects production status counts response as a strict current-only schema in Swagger metadata', () => {
+  it('documents Groups production status counts response as a strict current-only schema in Swagger metadata', () => {
     const controllerSource = readFileSync(
-      resolve(backendRoot(), 'src/modules/projects/reporting/project-production-status-counts-report.controller.ts'),
+      resolve(backendRoot(), 'src/modules/groups/reporting/group-production-status-counts-report.controller.ts'),
       'utf8',
     );
 
@@ -116,8 +116,8 @@ describe('Swagger controller metadata', () => {
     expect(controllerSource).toContain('additionalProperties: false');
     expect(controllerSource).toContain('filter: {');
     expect(controllerSource).toContain('oneOf: [');
-    expect(controllerSource).toContain("required: ['projectMode', 'temporalMode']");
-    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['groupMode', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['groupMode', 'groupIds', 'temporalMode']");
     expect(controllerSource).toContain("schema: { default: 'any' }");
     expect(controllerSource).toContain("schema: { default: 'current' }");
     expect(controllerSource).toContain("enum: ['current']");
@@ -128,25 +128,25 @@ describe('Swagger controller metadata', () => {
       "required: ['productionStatusId', 'productionStatusCode', 'productionStatusName', 'orderCount']",
     );
     expect(controllerSource).toContain(
-      'Returns only current orders.production_status_id aggregate counts and applied current project report filter metadata.',
+      'Returns only current orders.production_status_id aggregate counts and applied current group report filter metadata.',
     );
     expect(controllerSource).toContain("productionStatusId: { type: 'integer', nullable: true }");
     expect(controllerSource).toContain("productionStatusCode: { type: 'string', nullable: true }");
   });
 
-  it('documents Projects deadline status counts response as a strict current-only schema in Swagger metadata', () => {
+  it('documents Groups deadline status counts response as a strict current-only schema in Swagger metadata', () => {
     const controllerSource = readFileSync(
-      resolve(backendRoot(), 'src/modules/projects/reporting/project-deadline-status-counts-report.controller.ts'),
+      resolve(backendRoot(), 'src/modules/groups/reporting/group-deadline-status-counts-report.controller.ts'),
       'utf8',
     );
 
     expect(controllerSource).toContain("@ApiBearerAuth('bearerAuth')");
-    expect(controllerSource).toContain("@Controller('projects/reports/deadline-status-counts')");
+    expect(controllerSource).toContain("@Controller('groups/reports/deadline-status-counts')");
     expect(controllerSource).toContain('additionalProperties: false');
     expect(controllerSource).toContain('filter: {');
     expect(controllerSource).toContain('oneOf: [');
-    expect(controllerSource).toContain("required: ['projectMode', 'temporalMode']");
-    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['groupMode', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['groupMode', 'groupIds', 'temporalMode']");
     expect(controllerSource).toContain("schema: { default: 'any' }");
     expect(controllerSource).toContain("schema: { default: 'current' }");
     expect(controllerSource).toContain("enum: ['current']");
@@ -156,24 +156,24 @@ describe('Swagger controller metadata', () => {
     expect(controllerSource).not.toContain("name: 'to'");
     expect(controllerSource).toContain("required: ['deadlineStatus', 'deadlineCount']");
     expect(controllerSource).toContain(
-      'Returns only current deadline_instances.status aggregate counts and the applied current project report filter.',
+      'Returns only current deadline_instances.status aggregate counts and the applied current group report filter.',
     );
     expect(controllerSource).toContain("deadlineStatus: { type: 'string', enum: DEADLINE_STATUSES }");
     expect(controllerSource).toContain("deadlineCount: { type: 'integer', minimum: 0 }");
   });
 
-  it('documents Projects order created month counts response as a strict oneOf schema in Swagger metadata', () => {
+  it('documents Groups order created month counts response as a strict oneOf schema in Swagger metadata', () => {
     const controllerSource = readFileSync(
-      resolve(backendRoot(), 'src/modules/projects/reporting/project-order-created-month-counts-report.controller.ts'),
+      resolve(backendRoot(), 'src/modules/groups/reporting/group-order-created-month-counts-report.controller.ts'),
       'utf8',
     );
 
     expect(controllerSource).toContain('additionalProperties: false');
     expect(controllerSource).toContain('filter: {');
     expect(controllerSource).toContain('oneOf: [');
-    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode']");
-    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode', 'asOf']");
-    expect(controllerSource).toContain("required: ['projectMode', 'projectIds', 'temporalMode', 'from', 'to']");
+    expect(controllerSource).toContain("required: ['groupMode', 'groupIds', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['groupMode', 'groupIds', 'temporalMode', 'asOf']");
+    expect(controllerSource).toContain("required: ['groupMode', 'groupIds', 'temporalMode', 'from', 'to']");
     expect(controllerSource).toContain("required: ['month', 'orderCount']");
     expect(controllerSource).toContain("month: { type: 'string', format: 'date' }");
     expect(controllerSource).toContain("orderCount: { type: 'integer', minimum: 0 }");
@@ -182,19 +182,19 @@ describe('Swagger controller metadata', () => {
     expect(controllerSource).toContain("schema: { default: 'current' }");
     expect(controllerSource).toContain("name: 'createdFrom'");
     expect(controllerSource).toContain("name: 'createdTo'");
-    expect(controllerSource).toContain('Returns only monthly order-created aggregate counts and applied project report filter metadata.');
+    expect(controllerSource).toContain('Returns only monthly order-created aggregate counts and applied group report filter metadata.');
     expect(controllerSource).toContain("@ApiBearerAuth('bearerAuth')");
   });
 
-  it('documents Projects overview response and query metadata without projectIds in Swagger metadata', () => {
+  it('documents Groups overview response and query metadata without groupIds in Swagger metadata', () => {
     const controllerSource = readFileSync(
-      resolve(backendRoot(), 'src/modules/projects/overview/project-overview.controller.ts'),
+      resolve(backendRoot(), 'src/modules/groups/overview/group-overview.controller.ts'),
       'utf8',
     );
 
-    expect(controllerSource).toContain("@Controller('projects/:projectId/overview')");
+    expect(controllerSource).toContain("@Controller('groups/:groupId/overview')");
     expect(controllerSource).toContain("@ApiBearerAuth('bearerAuth')");
-    expect(controllerSource).toContain("operationId: 'getProjectOverview'");
+    expect(controllerSource).toContain("operationId: 'getGroupOverview'");
     expect(controllerSource).toContain("name: 'temporalMode'");
     expect(controllerSource).toContain("schema: { default: 'current' }");
     expect(controllerSource).toContain("name: 'asOf'");
@@ -202,12 +202,12 @@ describe('Swagger controller metadata', () => {
     expect(controllerSource).toContain("name: 'to'");
     expect(controllerSource).toContain("name: 'createdFrom'");
     expect(controllerSource).toContain("name: 'createdTo'");
-    expect(controllerSource).not.toContain("name: 'projectIds'");
+    expect(controllerSource).not.toContain("name: 'groupIds'");
     expect(controllerSource).toContain('additionalProperties: false');
-    expect(controllerSource).toContain("required: ['projectId', 'temporalMode']");
-    expect(controllerSource).toContain("required: ['projectId', 'temporalMode', 'asOf']");
-    expect(controllerSource).toContain("required: ['projectId', 'temporalMode', 'from', 'to']");
-    expect(controllerSource).toContain("items: { type: 'string', enum: PROJECT_OVERVIEW_OMITTED }");
+    expect(controllerSource).toContain("required: ['groupId', 'temporalMode']");
+    expect(controllerSource).toContain("required: ['groupId', 'temporalMode', 'asOf']");
+    expect(controllerSource).toContain("required: ['groupId', 'temporalMode', 'from', 'to']");
+    expect(controllerSource).toContain("items: { type: 'string', enum: GROUP_OVERVIEW_OMITTED }");
   });
 
   it('registers a runtime bearerAuth security scheme matching the static contract', () => {

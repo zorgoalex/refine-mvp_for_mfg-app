@@ -36,8 +36,8 @@ tags:
     description: Телефоны клиентов
   - name: Production Actions
     description: Точечные производственные действия над заказом
-  - name: Projects
-    description: Projects API
+  - name: Groups
+    description: Groups API
   - name: Order Snapshots
     description: Экспорт и импорт переносимых snapshot'ов заказа
   - name: Deadlines
@@ -584,16 +584,16 @@ paths:
           schema:
             type: boolean
             default: false
-        - name: projectIds
+        - name: groupIds
           in: query
           required: false
-          description: Comma-separated current project UUID filters.
+          description: Comma-separated current group UUID filters.
           schema:
             type: string
-        - name: projectMode
+        - name: groupMode
           in: query
           required: false
-          description: Current project filter mode.
+          description: Current group filter mode.
           schema:
             type: string
             enum: [any, all, primary, none]
@@ -840,25 +840,25 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/v1/orders/{orderId}/projects:
+  /api/v1/orders/{orderId}/groups:
     parameters:
       - $ref: '#/components/parameters/OrderId'
     get:
       tags:
         - Orders
-      operationId: getOrderProjects
+      operationId: getOrderGroups
       summary: Получить текущие проекты заказа
-      description: Возвращает только текущие Project ↔ Order links.
+      description: Возвращает только текущие Group ↔ Order links.
       security:
         - bearerAuth: []
-      x-permission: orders.view or projects.view
+      x-permission: orders.view or groups.view
       responses:
         '200':
           description: Текущие проекты заказа
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OrderProjectsResponse'
+                $ref: '#/components/schemas/OrderGroupsResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -872,28 +872,28 @@ paths:
     put:
       tags:
         - Orders
-      operationId: replaceOrderProjects
+      operationId: replaceOrderGroups
       summary: Заменить текущие проекты заказа
       description: |
         Stale-safe и retry-safe replace текущих связей заказа с проектами.
-        Использует command_idempotency_keys с command_name=projects.order_links.replace.
+        Использует command_idempotency_keys с command_name=groups.order_links.replace.
       security:
         - bearerAuth: []
-      x-permission: projects.manage_links
+      x-permission: groups.manage_links
       x-transactional: true
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReplaceOrderProjectsRequest'
+              $ref: '#/components/schemas/ReplaceOrderGroupsRequest'
       responses:
         '200':
           description: Проекты заказа заменены
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ReplaceOrderProjectsResponse'
+                $ref: '#/components/schemas/ReplaceOrderGroupsResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3146,7 +3146,7 @@ paths:
           required: false
           schema:
             type: boolean
-        - name: projectId
+        - name: groupId
           in: query
           required: false
           schema:
@@ -3499,15 +3499,15 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/v1/projects:
+  /api/v1/groups:
     get:
       tags:
-        - Projects
-      operationId: listProjects
-      summary: List projects
+        - Groups
+      operationId: listGroups
+      summary: List groups
       security:
         - bearerAuth: []
-      x-permission: projects.view
+      x-permission: groups.view
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
@@ -3536,11 +3536,11 @@ paths:
             type: boolean
       responses:
         '200':
-          description: Project list
+          description: Group list
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectListResponse'
+                $ref: '#/components/schemas/GroupListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3551,29 +3551,29 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     post:
       tags:
-        - Projects
-      operationId: createProject
-      summary: Create project
+        - Groups
+      operationId: createGroup
+      summary: Create group
       security:
         - bearerAuth: []
-      x-permission: projects.create
+      x-permission: groups.create
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateProjectRequest'
+              $ref: '#/components/schemas/CreateGroupRequest'
       responses:
         '201':
-          description: Created project
+          description: Created group
           content:
             application/json:
               schema:
                 type: object
-                required: [project]
+                required: [group]
                 properties:
-                  project:
-                    $ref: '#/components/schemas/Project'
+                  group:
+                    $ref: '#/components/schemas/Group'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3583,15 +3583,15 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/lookup:
+  /api/v1/groups/lookup:
     get:
       tags:
-        - Projects
-      operationId: lookupProjects
-      summary: Lookup projects
+        - Groups
+      operationId: lookupGroups
+      summary: Lookup groups
       security:
         - bearerAuth: []
-      x-permission: projects.view
+      x-permission: groups.view
       parameters:
         - name: search
           in: query
@@ -3608,7 +3608,7 @@ paths:
             maximum: 100
       responses:
         '200':
-          description: Project lookup
+          description: Group lookup
           content:
             application/json:
               schema:
@@ -3640,32 +3640,32 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/reports/orders:
+  /api/v1/groups/reports/orders:
     get:
       tags:
-        - Projects
-      operationId: listProjectOrderReportIds
-      summary: List order ids filtered by project membership
-      description: Returns only order ids, pagination, and applied project report filter metadata.
+        - Groups
+      operationId: listGroupOrderReportIds
+      summary: List order ids filtered by group membership
+      description: Returns only order ids, pagination, and applied group report filter metadata.
       security:
         - bearerAuth: []
       x-permissions:
-        - projects.view
+        - groups.view
         - orders.view
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
-        - name: projectMode
+        - name: groupMode
           in: query
           required: false
           schema:
             type: string
             enum: [any, all, primary, none]
             default: any
-        - name: projectIds
+        - name: groupIds
           in: query
           required: false
-          description: Comma-separated project UUIDs. Required unless projectMode is none.
+          description: Comma-separated group UUIDs. Required unless groupMode is none.
           schema:
             type: string
         - name: temporalMode
@@ -3695,11 +3695,11 @@ paths:
             format: date-time
       responses:
         '200':
-          description: Project-filtered order report ids
+          description: Group-filtered order report ids
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectOrderReportResponse'
+                $ref: '#/components/schemas/GroupOrderReportResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3709,30 +3709,30 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/reports/order-status-counts:
+  /api/v1/groups/reports/order-status-counts:
     get:
       tags:
-        - Projects
-      operationId: listProjectOrderStatusCounts
-      summary: List order status counts filtered by project membership
-      description: Returns only order status aggregate counts and applied project report filter metadata.
+        - Groups
+      operationId: listGroupOrderStatusCounts
+      summary: List order status counts filtered by group membership
+      description: Returns only order status aggregate counts and applied group report filter metadata.
       security:
         - bearerAuth: []
       x-permissions:
-        - projects.view
+        - groups.view
         - orders.view
       parameters:
-        - name: projectMode
+        - name: groupMode
           in: query
           required: false
           schema:
             type: string
             enum: [any, all, primary, none]
             default: any
-        - name: projectIds
+        - name: groupIds
           in: query
           required: false
-          description: Comma-separated project UUIDs. Required unless projectMode is none.
+          description: Comma-separated group UUIDs. Required unless groupMode is none.
           schema:
             type: string
         - name: temporalMode
@@ -3762,11 +3762,11 @@ paths:
             format: date-time
       responses:
         '200':
-          description: Project-filtered order status counts
+          description: Group-filtered order status counts
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectOrderStatusReportResponse'
+                $ref: '#/components/schemas/GroupOrderStatusReportResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3776,30 +3776,30 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/reports/production-status-counts:
+  /api/v1/groups/reports/production-status-counts:
     get:
       tags:
-        - Projects
-      operationId: listProjectProductionStatusCounts
-      summary: List current production status counts filtered by project membership
-      description: Returns only current order production status aggregate counts and applied current project report filter metadata.
+        - Groups
+      operationId: listGroupProductionStatusCounts
+      summary: List current production status counts filtered by group membership
+      description: Returns only current order production status aggregate counts and applied current group report filter metadata.
       security:
         - bearerAuth: []
       x-permissions:
-        - projects.view
+        - groups.view
         - orders.view
       parameters:
-        - name: projectMode
+        - name: groupMode
           in: query
           required: false
           schema:
             type: string
             enum: [any, all, primary, none]
             default: any
-        - name: projectIds
+        - name: groupIds
           in: query
           required: false
-          description: Comma-separated project UUIDs. Required unless projectMode is none.
+          description: Comma-separated group UUIDs. Required unless groupMode is none.
           schema:
             type: string
         - name: temporalMode
@@ -3811,11 +3811,11 @@ paths:
             default: current
       responses:
         '200':
-          description: Project-filtered current production status counts
+          description: Group-filtered current production status counts
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectProductionStatusCountsReportResponse'
+                $ref: '#/components/schemas/GroupProductionStatusCountsReportResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3825,31 +3825,31 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/reports/deadline-status-counts:
+  /api/v1/groups/reports/deadline-status-counts:
     get:
       tags:
-        - Projects
-      operationId: listProjectDeadlineStatusCounts
-      summary: List current deadline status counts filtered by effective project attribution
-      description: Returns only current deadline status aggregate counts and the applied current project report filter.
+        - Groups
+      operationId: listGroupDeadlineStatusCounts
+      summary: List current deadline status counts filtered by effective group attribution
+      description: Returns only current deadline status aggregate counts and the applied current group report filter.
       security:
         - bearerAuth: []
       x-permissions:
-        - projects.view
+        - groups.view
         - orders.view
         - deadlines.view
       parameters:
-        - name: projectMode
+        - name: groupMode
           in: query
           required: false
           schema:
             type: string
             enum: [any, all, none]
             default: any
-        - name: projectIds
+        - name: groupIds
           in: query
           required: false
-          description: Comma-separated project UUIDs. Required unless projectMode is none.
+          description: Comma-separated group UUIDs. Required unless groupMode is none.
           schema:
             type: string
         - name: temporalMode
@@ -3861,11 +3861,11 @@ paths:
             default: current
       responses:
         '200':
-          description: Project-filtered current deadline status counts
+          description: Group-filtered current deadline status counts
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectDeadlineStatusCountsReportResponse'
+                $ref: '#/components/schemas/GroupDeadlineStatusCountsReportResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3875,30 +3875,30 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/reports/order-relation-counts:
+  /api/v1/groups/reports/order-relation-counts:
     get:
       tags:
-        - Projects
-      operationId: listProjectOrderRelationCounts
-      summary: List project order relation counts filtered by project membership
-      description: Returns only project-order relation aggregate counts and applied project report filter metadata.
+        - Groups
+      operationId: listGroupOrderRelationCounts
+      summary: List group order relation counts filtered by group membership
+      description: Returns only group-order relation aggregate counts and applied group report filter metadata.
       security:
         - bearerAuth: []
       x-permissions:
-        - projects.view
+        - groups.view
         - orders.view
       parameters:
-        - name: projectMode
+        - name: groupMode
           in: query
           required: false
           schema:
             type: string
             enum: [any, all, primary, none]
             default: any
-        - name: projectIds
+        - name: groupIds
           in: query
           required: false
-          description: Comma-separated project UUIDs. Required unless projectMode is none.
+          description: Comma-separated group UUIDs. Required unless groupMode is none.
           schema:
             type: string
         - name: temporalMode
@@ -3928,11 +3928,11 @@ paths:
             format: date-time
       responses:
         '200':
-          description: Project-filtered order relation counts
+          description: Group-filtered order relation counts
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectOrderRelationCountsReportResponse'
+                $ref: '#/components/schemas/GroupOrderRelationCountsReportResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3942,30 +3942,30 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/reports/order-created-month-counts:
+  /api/v1/groups/reports/order-created-month-counts:
     get:
       tags:
-        - Projects
-      operationId: listProjectOrderCreatedMonthCounts
-      summary: List monthly project order-created counts filtered by project membership
-      description: Returns only monthly order-created aggregate counts and applied project report filter metadata.
+        - Groups
+      operationId: listGroupOrderCreatedMonthCounts
+      summary: List monthly group order-created counts filtered by group membership
+      description: Returns only monthly order-created aggregate counts and applied group report filter metadata.
       security:
         - bearerAuth: []
       x-permissions:
-        - projects.view
+        - groups.view
         - orders.view
       parameters:
-        - name: projectMode
+        - name: groupMode
           in: query
           required: false
           schema:
             type: string
             enum: [any, all, primary, none]
             default: any
-        - name: projectIds
+        - name: groupIds
           in: query
           required: false
-          description: Comma-separated project UUIDs. Required unless projectMode is none.
+          description: Comma-separated group UUIDs. Required unless groupMode is none.
           schema:
             type: string
         - name: temporalMode
@@ -4007,11 +4007,11 @@ paths:
             format: date-time
       responses:
         '200':
-          description: Project-filtered monthly order-created counts
+          description: Group-filtered monthly order-created counts
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectOrderCreatedMonthCountsReportResponse'
+                $ref: '#/components/schemas/GroupOrderCreatedMonthCountsReportResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -4021,9 +4021,9 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/{projectId}/overview:
+  /api/v1/groups/{groupId}/overview:
     parameters:
-      - name: projectId
+      - name: groupId
         in: path
         required: true
         schema:
@@ -4031,14 +4031,14 @@ paths:
           format: uuid
     get:
       tags:
-        - Projects
-      operationId: getProjectOverview
-      summary: Get project overview
-      description: Returns only project summary fields and aggregate order counts for one project.
+        - Groups
+      operationId: getGroupOverview
+      summary: Get group overview
+      description: Returns only group summary fields and aggregate order counts for one group.
       security:
         - bearerAuth: []
       x-permissions:
-        - projects.view
+        - groups.view
         - orders.view
       parameters:
         - name: temporalMode
@@ -4080,11 +4080,11 @@ paths:
             format: date-time
       responses:
         '200':
-          description: Project overview
+          description: Group overview
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectOverviewResponse'
+                $ref: '#/components/schemas/GroupOverviewResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4092,7 +4092,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          description: Project not found
+          description: Group not found
           content:
             application/json:
               schema:
@@ -4102,9 +4102,9 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/{projectId}:
+  /api/v1/groups/{groupId}:
     parameters:
-      - name: projectId
+      - name: groupId
         in: path
         required: true
         schema:
@@ -4112,23 +4112,23 @@ paths:
           format: uuid
     get:
       tags:
-        - Projects
-      operationId: getProjectById
-      summary: Get project by ID
+        - Groups
+      operationId: getGroupById
+      summary: Get group by ID
       security:
         - bearerAuth: []
-      x-permission: projects.view
+      x-permission: groups.view
       responses:
         '200':
-          description: Project
+          description: Group
           content:
             application/json:
               schema:
                 type: object
-                required: [project]
+                required: [group]
                 properties:
-                  project:
-                    $ref: '#/components/schemas/Project'
+                  group:
+                    $ref: '#/components/schemas/Group'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4136,7 +4136,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          description: Project not found
+          description: Group not found
           content:
             application/json:
               schema:
@@ -4145,29 +4145,29 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     patch:
       tags:
-        - Projects
-      operationId: updateProject
-      summary: Update project
+        - Groups
+      operationId: updateGroup
+      summary: Update group
       security:
         - bearerAuth: []
-      x-permission: projects.update
+      x-permission: groups.update
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateProjectRequest'
+              $ref: '#/components/schemas/UpdateGroupRequest'
       responses:
         '200':
-          description: Updated project
+          description: Updated group
           content:
             application/json:
               schema:
                 type: object
-                required: [project]
+                required: [group]
                 properties:
-                  project:
-                    $ref: '#/components/schemas/Project'
+                  group:
+                    $ref: '#/components/schemas/Group'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4175,7 +4175,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          description: Project not found
+          description: Group not found
           content:
             application/json:
               schema:
@@ -4186,24 +4186,24 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     delete:
       tags:
-        - Projects
-      operationId: archiveProject
-      summary: Archive project
-      description: Soft archives a project by setting status to archived and archivedAt.
+        - Groups
+      operationId: archiveGroup
+      summary: Archive group
+      description: Soft archives a group by setting status to archived and archivedAt.
       security:
         - bearerAuth: []
-      x-permission: projects.archive
+      x-permission: groups.archive
       responses:
         '200':
-          description: Archived project
+          description: Archived group
           content:
             application/json:
               schema:
                 type: object
-                required: [project]
+                required: [group]
                 properties:
-                  project:
-                    $ref: '#/components/schemas/Project'
+                  group:
+                    $ref: '#/components/schemas/Group'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4211,7 +4211,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          description: Project not found
+          description: Group not found
           content:
             application/json:
               schema:
@@ -4219,9 +4219,9 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/{projectId}/members:
+  /api/v1/groups/{groupId}/members:
     parameters:
-      - name: projectId
+      - name: groupId
         in: path
         required: true
         schema:
@@ -4229,20 +4229,20 @@ paths:
           format: uuid
     get:
       tags:
-        - Projects
-      operationId: listProjectMembers
-      summary: List current project members
-      description: Compatibility endpoint for user-only project_members. Prefer /projects/{projectId}/participants for typed user/employee participants.
+        - Groups
+      operationId: listGroupMembers
+      summary: List current group members
+      description: Compatibility endpoint for user-only group_members. Prefer /groups/{groupId}/participants for typed user/employee participants.
       security:
         - bearerAuth: []
-      x-permission: projects.members.view
+      x-permission: groups.members.view
       responses:
         '200':
-          description: Current project members
+          description: Current group members
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectMembersResponse'
+                $ref: '#/components/schemas/GroupMembersResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4253,30 +4253,30 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     put:
       tags:
-        - Projects
-      operationId: replaceProjectMembers
-      summary: Replace current project members
+        - Groups
+      operationId: replaceGroupMembers
+      summary: Replace current group members
       description: |
-        Compatibility endpoint for user-only project_members. Prefer /projects/{projectId}/participants for typed user/employee participants.
-        Replaces current project members by closing removed current rows and inserting new rows.
+        Compatibility endpoint for user-only group_members. Prefer /groups/{groupId}/participants for typed user/employee participants.
+        Replaces current group members by closing removed current rows and inserting new rows.
         Historical rows are preserved with [valid_from, valid_to) semantics.
       security:
         - bearerAuth: []
-      x-permission: projects.members.manage
+      x-permission: groups.members.manage
       x-transactional: true
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReplaceProjectMembersRequest'
+              $ref: '#/components/schemas/ReplaceGroupMembersRequest'
       responses:
         '200':
-          description: Replaced current project members
+          description: Replaced current group members
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectMembersResponse'
+                $ref: '#/components/schemas/GroupMembersResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4290,9 +4290,9 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/{projectId}/entity-links:
+  /api/v1/groups/{groupId}/entity-links:
     parameters:
-      - name: projectId
+      - name: groupId
         in: path
         required: true
         schema:
@@ -4300,19 +4300,19 @@ paths:
           format: uuid
     get:
       tags:
-        - Projects
-      operationId: listProjectEntityLinks
-      summary: List project entity links
+        - Groups
+      operationId: listGroupEntityLinks
+      summary: List group entity links
       security:
         - bearerAuth: []
       x-permissions:
-        - projects.view
+        - groups.view
       parameters:
         - name: entityType
           in: query
           required: false
           schema:
-            $ref: '#/components/schemas/ProjectEntityTypeCode'
+            $ref: '#/components/schemas/GroupEntityTypeCode'
         - name: includeClosed
           in: query
           required: false
@@ -4320,11 +4320,11 @@ paths:
             type: boolean
       responses:
         '200':
-          description: Project entity links
+          description: Group entity links
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectEntityLinksResponse'
+                $ref: '#/components/schemas/GroupEntityLinksResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4335,26 +4335,26 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     put:
       tags:
-        - Projects
-      operationId: replaceProjectEntityLinks
-      summary: Replace current project entity links
+        - Groups
+      operationId: replaceGroupEntityLinks
+      summary: Replace current group entity links
       security:
         - bearerAuth: []
-      x-permission: projects.manage_links
+      x-permission: groups.manage_links
       x-transactional: true
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReplaceProjectEntityLinksRequest'
+              $ref: '#/components/schemas/ReplaceGroupEntityLinksRequest'
       responses:
         '200':
-          description: Replaced project entity links
+          description: Replaced group entity links
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectEntityLinksResponse'
+                $ref: '#/components/schemas/GroupEntityLinksResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4369,26 +4369,26 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     post:
       tags:
-        - Projects
-      operationId: appendProjectEntityLinks
-      summary: Append project entity links
+        - Groups
+      operationId: appendGroupEntityLinks
+      summary: Append group entity links
       security:
         - bearerAuth: []
-      x-permission: projects.manage_links
+      x-permission: groups.manage_links
       x-transactional: true
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReplaceProjectEntityLinksRequest'
+              $ref: '#/components/schemas/ReplaceGroupEntityLinksRequest'
       responses:
         '201':
-          description: Appended project entity links
+          description: Appended group entity links
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectEntityLinksResponse'
+                $ref: '#/components/schemas/GroupEntityLinksResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4402,9 +4402,9 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/{projectId}/batch-link:
+  /api/v1/groups/{groupId}/batch-link:
     parameters:
-      - name: projectId
+      - name: groupId
         in: path
         required: true
         schema:
@@ -4412,29 +4412,29 @@ paths:
           format: uuid
     post:
       tags:
-        - Projects
-      operationId: executeProjectBatchLink
-      summary: Dry-run or write explicitly selected project batch links
+        - Groups
+      operationId: executeGroupBatchLink
+      summary: Dry-run or write explicitly selected group batch links
       security:
         - bearerAuth: []
-      x-permission: projects.manage_links
+      x-permission: groups.manage_links
       x-role-codes:
         - admin
         - top_manager
-      x-write-gate: BACKEND_ENABLE_PROJECTS_BATCH_LINK_WRITE
+      x-write-gate: BACKEND_ENABLE_GROUPS_BATCH_LINK_WRITE
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ProjectBatchLinkDryRunRequest'
+              $ref: '#/components/schemas/GroupBatchLinkDryRunRequest'
       responses:
         '200':
-          description: Project batch link dry-run or write result
+          description: Group batch link dry-run or write result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectBatchLinkDryRunResponse'
+                $ref: '#/components/schemas/GroupBatchLinkDryRunResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4446,9 +4446,9 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/{projectId}/participants:
+  /api/v1/groups/{groupId}/participants:
     parameters:
-      - name: projectId
+      - name: groupId
         in: path
         required: true
         schema:
@@ -4456,19 +4456,19 @@ paths:
           format: uuid
     get:
       tags:
-        - Projects
-      operationId: listProjectParticipants
-      summary: List typed project participants
+        - Groups
+      operationId: listGroupParticipants
+      summary: List typed group participants
       security:
         - bearerAuth: []
-      x-permission: projects.participants.view
+      x-permission: groups.participants.view
       responses:
         '200':
-          description: Project participants
+          description: Group participants
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectParticipantsResponse'
+                $ref: '#/components/schemas/GroupParticipantsResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4479,26 +4479,26 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     put:
       tags:
-        - Projects
-      operationId: replaceProjectParticipants
-      summary: Replace typed project participants
+        - Groups
+      operationId: replaceGroupParticipants
+      summary: Replace typed group participants
       security:
         - bearerAuth: []
-      x-permission: projects.participants.manage
+      x-permission: groups.participants.manage
       x-transactional: true
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReplaceProjectParticipantsRequest'
+              $ref: '#/components/schemas/ReplaceGroupParticipantsRequest'
       responses:
         '200':
-          description: Replaced project participants
+          description: Replaced group participants
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectParticipantsResponse'
+                $ref: '#/components/schemas/GroupParticipantsResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4512,22 +4512,22 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/projects/participant-roles:
+  /api/v1/groups/participant-roles:
     get:
       tags:
-        - Projects
-      operationId: listProjectParticipantRoles
-      summary: List project participant roles
+        - Groups
+      operationId: listGroupParticipantRoles
+      summary: List group participant roles
       security:
         - bearerAuth: []
-      x-permission: projects.view
+      x-permission: groups.view
       responses:
         '200':
-          description: Project participant roles
+          description: Group participant roles
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectParticipantRoleListResponse'
+                $ref: '#/components/schemas/GroupParticipantRoleListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -7272,7 +7272,7 @@ components:
                   code: SERVICE_UNAVAILABLE
                   message: Feature is disabled
                   details:
-                    feature: projects
+                    feature: groups
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
     OrderNotFound:
       description: Заказ не найден
@@ -7619,16 +7619,16 @@ components:
         - deadlines.audit.view
         - deadlines.worker.manage
         - deadlines.worker.schedule
-        - projects.view
-        - projects.create
-        - projects.update
-        - projects.archive
-        - projects.manage_links
-        - projects.view_history
-        - projects.members.view
-        - projects.members.manage
-        - projects.participants.view
-        - projects.participants.manage
+        - groups.view
+        - groups.create
+        - groups.update
+        - groups.archive
+        - groups.manage_links
+        - groups.view_history
+        - groups.members.view
+        - groups.members.manage
+        - groups.participants.view
+        - groups.participants.manage
         - org.view
         - org.manage
         - settings.view
@@ -7797,7 +7797,7 @@ components:
         unlinked:
           type: boolean
 
-    CreateProjectRequest:
+    CreateGroupRequest:
       type: object
       required:
         - code
@@ -7836,7 +7836,7 @@ components:
           type: object
           additionalProperties: true
 
-    UpdateProjectRequest:
+    UpdateGroupRequest:
       type: object
       minProperties: 1
       properties:
@@ -7872,7 +7872,7 @@ components:
           type: object
           additionalProperties: true
 
-    ReplaceProjectMembersRequest:
+    ReplaceGroupMembersRequest:
       type: object
       required:
         - idempotencyKey
@@ -7906,7 +7906,7 @@ components:
           maxLength: 500
           nullable: true
 
-    ProjectMember:
+    GroupMember:
       type: object
       required:
         - id
@@ -7941,20 +7941,20 @@ components:
           type: object
           additionalProperties: true
 
-    ProjectMembersResponse:
+    GroupMembersResponse:
       type: object
       required:
-        - projectId
+        - groupId
         - members
         - requestId
       properties:
-        projectId:
+        groupId:
           type: string
           format: uuid
         members:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectMember'
+            $ref: '#/components/schemas/GroupMember'
         requestId:
           type: string
         changed:
@@ -7962,7 +7962,7 @@ components:
         auditId:
           type: string
 
-    ProjectEntityTypeCode:
+    GroupEntityTypeCode:
       type: string
       enum:
         - order
@@ -7972,7 +7972,7 @@ components:
         - workshop
         - deadline_instance
 
-    ProjectBatchLinkDryRunRequest:
+    GroupBatchLinkDryRunRequest:
       type: object
       required:
         - mode
@@ -8002,7 +8002,7 @@ components:
           minLength: 1
           maxLength: 200
         entityType:
-          $ref: '#/components/schemas/ProjectEntityTypeCode'
+          $ref: '#/components/schemas/GroupEntityTypeCode'
         relationType:
           type: string
           minLength: 1
@@ -8050,10 +8050,10 @@ components:
                 minLength: 1
                 maxLength: 200
 
-    ProjectBatchLinkDryRunResponse:
+    GroupBatchLinkDryRunResponse:
       type: object
       required:
-        - projectId
+        - groupId
         - mode
         - summary
         - proposals
@@ -8062,7 +8062,7 @@ components:
         - writeEnabled
       additionalProperties: false
       properties:
-        projectId:
+        groupId:
           type: string
           format: uuid
         mode:
@@ -8111,7 +8111,7 @@ components:
             additionalProperties: false
             properties:
               entityType:
-                $ref: '#/components/schemas/ProjectEntityTypeCode'
+                $ref: '#/components/schemas/GroupEntityTypeCode'
               entityId:
                 type: string
               action:
@@ -8138,7 +8138,7 @@ components:
             additionalProperties: false
             properties:
               entityType:
-                $ref: '#/components/schemas/ProjectEntityTypeCode'
+                $ref: '#/components/schemas/GroupEntityTypeCode'
               entityId:
                 type: string
               action:
@@ -8165,7 +8165,7 @@ components:
             additionalProperties: false
             properties:
               entityType:
-                $ref: '#/components/schemas/ProjectEntityTypeCode'
+                $ref: '#/components/schemas/GroupEntityTypeCode'
               entityId:
                 type: string
               action:
@@ -8194,7 +8194,7 @@ components:
             additionalProperties: false
             properties:
               entityType:
-                $ref: '#/components/schemas/ProjectEntityTypeCode'
+                $ref: '#/components/schemas/GroupEntityTypeCode'
               entityId:
                 type: string
               source:
@@ -8218,7 +8218,7 @@ components:
           items:
             type: object
             required:
-              - projectId
+              - groupId
               - entityType
               - entityId
               - source
@@ -8232,11 +8232,11 @@ components:
               - actorUsername
             additionalProperties: false
             properties:
-              projectId:
+              groupId:
                 type: string
                 format: uuid
               entityType:
-                $ref: '#/components/schemas/ProjectEntityTypeCode'
+                $ref: '#/components/schemas/GroupEntityTypeCode'
               entityId:
                 type: string
               source:
@@ -8273,7 +8273,7 @@ components:
           type: string
           nullable: true
 
-    ReplaceProjectEntityLinksRequest:
+    ReplaceGroupEntityLinksRequest:
       type: object
       required:
         - idempotencyKey
@@ -8295,7 +8295,7 @@ components:
             additionalProperties: false
             properties:
               entityType:
-                $ref: '#/components/schemas/ProjectEntityTypeCode'
+                $ref: '#/components/schemas/GroupEntityTypeCode'
               entityId:
                 type: string
                 minLength: 1
@@ -8311,7 +8311,7 @@ components:
           maxLength: 500
           nullable: true
 
-    ProjectEntityLink:
+    GroupEntityLink:
       type: object
       required:
         - id
@@ -8328,7 +8328,7 @@ components:
           type: string
           format: uuid
         entityType:
-          $ref: '#/components/schemas/ProjectEntityTypeCode'
+          $ref: '#/components/schemas/GroupEntityTypeCode'
         entityId:
           type: string
         displayLabel:
@@ -8347,21 +8347,21 @@ components:
           type: object
           additionalProperties: true
 
-    ProjectEntityLinksResponse:
+    GroupEntityLinksResponse:
       type: object
       required:
-        - projectId
+        - groupId
         - links
         - requestId
       additionalProperties: false
       properties:
-        projectId:
+        groupId:
           type: string
           format: uuid
         links:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectEntityLink'
+            $ref: '#/components/schemas/GroupEntityLink'
         requestId:
           type: string
         changed:
@@ -8391,7 +8391,7 @@ components:
           nullable: true
           maxLength: 500
 
-    ReplaceProjectParticipantsRequest:
+    ReplaceGroupParticipantsRequest:
       type: object
       required:
         - idempotencyKey
@@ -8430,7 +8430,7 @@ components:
           maxLength: 500
           nullable: true
 
-    ProjectParticipantRole:
+    GroupParticipantRole:
       type: object
       required:
         - code
@@ -8442,7 +8442,7 @@ components:
         label:
           type: string
 
-    ProjectParticipant:
+    GroupParticipant:
       type: object
       required:
         - id
@@ -8468,7 +8468,7 @@ components:
           type: string
           nullable: true
         role:
-          $ref: '#/components/schemas/ProjectParticipantRole'
+          $ref: '#/components/schemas/GroupParticipantRole'
         validFrom:
           type: string
           format: date-time
@@ -8480,21 +8480,21 @@ components:
           type: object
           additionalProperties: true
 
-    ProjectParticipantsResponse:
+    GroupParticipantsResponse:
       type: object
       required:
-        - projectId
+        - groupId
         - participants
         - requestId
       additionalProperties: false
       properties:
-        projectId:
+        groupId:
           type: string
           format: uuid
         participants:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectParticipant'
+            $ref: '#/components/schemas/GroupParticipant'
         requestId:
           type: string
         changed:
@@ -8502,7 +8502,7 @@ components:
         auditId:
           type: string
 
-    ProjectParticipantRoleListResponse:
+    GroupParticipantRoleListResponse:
       type: object
       required:
         - roles
@@ -8512,11 +8512,11 @@ components:
         roles:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectParticipantRole'
+            $ref: '#/components/schemas/GroupParticipantRole'
         requestId:
           type: string
 
-    Project:
+    Group:
       type: object
       required:
         - id
@@ -8569,7 +8569,7 @@ components:
           type: integer
           nullable: true
 
-    ProjectListResponse:
+    GroupListResponse:
       type: object
       required:
         - data
@@ -8578,7 +8578,7 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/Project'
+            $ref: '#/components/schemas/Group'
         pagination:
           type: object
           required:
@@ -8620,7 +8620,7 @@ components:
           minimum: 0
           example: 125
 
-    ProjectOrderReportItem:
+    GroupOrderReportItem:
       type: object
       required:
         - orderId
@@ -8628,7 +8628,7 @@ components:
         orderId:
           type: integer
 
-    ProjectOrderReportPagination:
+    GroupOrderReportPagination:
       type: object
       required:
         - page
@@ -8650,7 +8650,7 @@ components:
           type: integer
           minimum: 1
 
-    ProjectOrderReportTemporalFilter:
+    GroupOrderReportTemporalFilter:
       oneOf:
         - type: object
           required:
@@ -8686,7 +8686,7 @@ components:
               type: string
               format: date-time
 
-    ProjectOrderReportFilter:
+    GroupOrderReportFilter:
       type: object
       required:
         - mode
@@ -8695,16 +8695,16 @@ components:
         mode:
           type: string
           enum: [any, all, primary, none]
-        projectIds:
+        groupIds:
           type: array
           maxItems: 50
           items:
             type: string
             format: uuid
         temporal:
-          $ref: '#/components/schemas/ProjectOrderReportTemporalFilter'
+          $ref: '#/components/schemas/GroupOrderReportTemporalFilter'
 
-    ProjectOrderReportResponse:
+    GroupOrderReportResponse:
       type: object
       required:
         - data
@@ -8714,13 +8714,13 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectOrderReportItem'
+            $ref: '#/components/schemas/GroupOrderReportItem'
         pagination:
-          $ref: '#/components/schemas/ProjectOrderReportPagination'
+          $ref: '#/components/schemas/GroupOrderReportPagination'
         filter:
-          $ref: '#/components/schemas/ProjectOrderReportFilter'
+          $ref: '#/components/schemas/GroupOrderReportFilter'
 
-    ProjectOrderStatusReportItem:
+    GroupOrderStatusReportItem:
       type: object
       required:
         - statusId
@@ -8735,7 +8735,7 @@ components:
           type: integer
           minimum: 0
 
-    ProjectOrderStatusReportResponse:
+    GroupOrderStatusReportResponse:
       type: object
       required:
         - data
@@ -8744,19 +8744,19 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectOrderStatusReportItem'
+            $ref: '#/components/schemas/GroupOrderStatusReportItem'
         filter:
-          $ref: '#/components/schemas/ProjectOrderStatusReportFilter'
+          $ref: '#/components/schemas/GroupOrderStatusReportFilter'
 
-    ProjectOrderStatusReportFilter:
+    GroupOrderStatusReportFilter:
       oneOf:
         - type: object
           required:
-            - projectMode
+            - groupMode
             - temporalMode
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [none]
             temporalMode:
@@ -8764,15 +8764,15 @@ components:
               enum: [current]
         - type: object
           required:
-            - projectMode
-            - projectIds
+            - groupMode
+            - groupIds
             - temporalMode
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [any, all, primary]
-            projectIds:
+            groupIds:
               type: array
               maxItems: 50
               items:
@@ -8783,12 +8783,12 @@ components:
               enum: [current]
         - type: object
           required:
-            - projectMode
+            - groupMode
             - temporalMode
             - asOf
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [none]
             temporalMode:
@@ -8799,16 +8799,16 @@ components:
               format: date-time
         - type: object
           required:
-            - projectMode
-            - projectIds
+            - groupMode
+            - groupIds
             - temporalMode
             - asOf
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [any, all, primary]
-            projectIds:
+            groupIds:
               type: array
               maxItems: 50
               items:
@@ -8822,13 +8822,13 @@ components:
               format: date-time
         - type: object
           required:
-            - projectMode
+            - groupMode
             - temporalMode
             - from
             - to
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [none]
             temporalMode:
@@ -8842,17 +8842,17 @@ components:
               format: date-time
         - type: object
           required:
-            - projectMode
-            - projectIds
+            - groupMode
+            - groupIds
             - temporalMode
             - from
             - to
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [any, all, primary]
-            projectIds:
+            groupIds:
               type: array
               maxItems: 50
               items:
@@ -8868,7 +8868,7 @@ components:
               type: string
               format: date-time
 
-    ProjectProductionStatusCountsReportItem:
+    GroupProductionStatusCountsReportItem:
       type: object
       required:
         - productionStatusId
@@ -8889,7 +8889,7 @@ components:
           type: integer
           minimum: 0
 
-    ProjectProductionStatusCountsReportResponse:
+    GroupProductionStatusCountsReportResponse:
       type: object
       required:
         - data
@@ -8899,19 +8899,19 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectProductionStatusCountsReportItem'
+            $ref: '#/components/schemas/GroupProductionStatusCountsReportItem'
         filter:
-          $ref: '#/components/schemas/ProjectProductionStatusCountsReportFilter'
+          $ref: '#/components/schemas/GroupProductionStatusCountsReportFilter'
 
-    ProjectProductionStatusCountsReportFilter:
+    GroupProductionStatusCountsReportFilter:
       oneOf:
         - type: object
           required:
-            - projectMode
+            - groupMode
             - temporalMode
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [none]
             temporalMode:
@@ -8919,15 +8919,15 @@ components:
               enum: [current]
         - type: object
           required:
-            - projectMode
-            - projectIds
+            - groupMode
+            - groupIds
             - temporalMode
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [any, all, primary]
-            projectIds:
+            groupIds:
               type: array
               maxItems: 50
               items:
@@ -8937,7 +8937,7 @@ components:
               type: string
               enum: [current]
 
-    ProjectDeadlineStatusCountsReportItem:
+    GroupDeadlineStatusCountsReportItem:
       type: object
       required:
         - deadlineStatus
@@ -8951,7 +8951,7 @@ components:
           type: integer
           minimum: 0
 
-    ProjectDeadlineStatusCountsReportResponse:
+    GroupDeadlineStatusCountsReportResponse:
       type: object
       required:
         - data
@@ -8961,19 +8961,19 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectDeadlineStatusCountsReportItem'
+            $ref: '#/components/schemas/GroupDeadlineStatusCountsReportItem'
         filter:
-          $ref: '#/components/schemas/ProjectDeadlineStatusCountsReportFilter'
+          $ref: '#/components/schemas/GroupDeadlineStatusCountsReportFilter'
 
-    ProjectDeadlineStatusCountsReportFilter:
+    GroupDeadlineStatusCountsReportFilter:
       oneOf:
         - type: object
           required:
-            - projectMode
+            - groupMode
             - temporalMode
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [none]
             temporalMode:
@@ -8981,15 +8981,15 @@ components:
               enum: [current]
         - type: object
           required:
-            - projectMode
-            - projectIds
+            - groupMode
+            - groupIds
             - temporalMode
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [any, all]
-            projectIds:
+            groupIds:
               type: array
               maxItems: 50
               items:
@@ -8999,7 +8999,7 @@ components:
               type: string
               enum: [current]
 
-    ProjectOrderRelationCountsReportItem:
+    GroupOrderRelationCountsReportItem:
       type: object
       required:
         - relationType
@@ -9016,7 +9016,7 @@ components:
           type: integer
           minimum: 0
 
-    ProjectOrderRelationCountsReportResponse:
+    GroupOrderRelationCountsReportResponse:
       type: object
       required:
         - data
@@ -9026,11 +9026,11 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectOrderRelationCountsReportItem'
+            $ref: '#/components/schemas/GroupOrderRelationCountsReportItem'
         filter:
-          $ref: '#/components/schemas/ProjectOrderStatusReportFilter'
+          $ref: '#/components/schemas/GroupOrderStatusReportFilter'
 
-    ProjectOrderCreatedMonthCountsReportItem:
+    GroupOrderCreatedMonthCountsReportItem:
       type: object
       required:
         - month
@@ -9044,7 +9044,7 @@ components:
           type: integer
           minimum: 0
 
-    ProjectOrderCreatedMonthCountsReportResponse:
+    GroupOrderCreatedMonthCountsReportResponse:
       type: object
       required:
         - data
@@ -9054,19 +9054,19 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectOrderCreatedMonthCountsReportItem'
+            $ref: '#/components/schemas/GroupOrderCreatedMonthCountsReportItem'
         filter:
-          $ref: '#/components/schemas/ProjectOrderCreatedMonthCountsReportFilter'
+          $ref: '#/components/schemas/GroupOrderCreatedMonthCountsReportFilter'
 
-    ProjectOrderCreatedMonthCountsReportFilter:
+    GroupOrderCreatedMonthCountsReportFilter:
       oneOf:
         - type: object
           required:
-            - projectMode
+            - groupMode
             - temporalMode
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [none]
             temporalMode:
@@ -9080,15 +9080,15 @@ components:
               format: date-time
         - type: object
           required:
-            - projectMode
-            - projectIds
+            - groupMode
+            - groupIds
             - temporalMode
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [any, all, primary]
-            projectIds:
+            groupIds:
               type: array
               maxItems: 50
               items:
@@ -9105,12 +9105,12 @@ components:
               format: date-time
         - type: object
           required:
-            - projectMode
+            - groupMode
             - temporalMode
             - asOf
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [none]
             temporalMode:
@@ -9127,16 +9127,16 @@ components:
               format: date-time
         - type: object
           required:
-            - projectMode
-            - projectIds
+            - groupMode
+            - groupIds
             - temporalMode
             - asOf
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [any, all, primary]
-            projectIds:
+            groupIds:
               type: array
               maxItems: 50
               items:
@@ -9156,13 +9156,13 @@ components:
               format: date-time
         - type: object
           required:
-            - projectMode
+            - groupMode
             - temporalMode
             - from
             - to
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [none]
             temporalMode:
@@ -9182,17 +9182,17 @@ components:
               format: date-time
         - type: object
           required:
-            - projectMode
-            - projectIds
+            - groupMode
+            - groupIds
             - temporalMode
             - from
             - to
           additionalProperties: false
           properties:
-            projectMode:
+            groupMode:
               type: string
               enum: [any, all, primary]
-            projectIds:
+            groupIds:
               type: array
               maxItems: 50
               items:
@@ -9214,10 +9214,10 @@ components:
               type: string
               format: date-time
 
-    ProjectOverviewResponse:
+    GroupOverviewResponse:
       type: object
       required:
-        - project
+        - group
         - orders
         - linkedEntityCounts
         - participants
@@ -9225,25 +9225,25 @@ components:
         - omitted
       additionalProperties: false
       properties:
-        project:
-          $ref: '#/components/schemas/ProjectOverviewProject'
+        group:
+          $ref: '#/components/schemas/GroupOverviewGroup'
         orders:
-          $ref: '#/components/schemas/ProjectOverviewOrders'
+          $ref: '#/components/schemas/GroupOverviewOrders'
         linkedEntityCounts:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectOverviewLinkedEntityCount'
+            $ref: '#/components/schemas/GroupOverviewLinkedEntityCount'
         participants:
-          $ref: '#/components/schemas/ProjectOverviewParticipants'
+          $ref: '#/components/schemas/GroupOverviewParticipants'
         filter:
-          $ref: '#/components/schemas/ProjectOverviewFilter'
+          $ref: '#/components/schemas/GroupOverviewFilter'
         omitted:
           type: array
           items:
             type: string
             enum: [finance, payments, clientPhones, audit, deadline, production, members, users, orderDetails, activityTimeline]
 
-    ProjectOverviewLinkedEntityCount:
+    GroupOverviewLinkedEntityCount:
       type: object
       required:
         - entityType
@@ -9251,12 +9251,12 @@ components:
       additionalProperties: false
       properties:
         entityType:
-          $ref: '#/components/schemas/ProjectEntityTypeCode'
+          $ref: '#/components/schemas/GroupEntityTypeCode'
         currentCount:
           type: integer
           minimum: 0
 
-    ProjectOverviewParticipants:
+    GroupOverviewParticipants:
       type: object
       required:
         - currentSummary
@@ -9280,7 +9280,7 @@ components:
                 type: integer
                 minimum: 0
 
-    ProjectOverviewProject:
+    GroupOverviewGroup:
       type: object
       required:
         - id
@@ -9331,7 +9331,7 @@ components:
           format: date-time
           nullable: true
 
-    ProjectOverviewOrders:
+    GroupOverviewOrders:
       type: object
       required:
         - totalCount
@@ -9346,17 +9346,17 @@ components:
         statusCounts:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectOverviewStatusCount'
+            $ref: '#/components/schemas/GroupOverviewStatusCount'
         relationCounts:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectOverviewRelationCount'
+            $ref: '#/components/schemas/GroupOverviewRelationCount'
         createdMonthCounts:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectOverviewCreatedMonthCount'
+            $ref: '#/components/schemas/GroupOverviewCreatedMonthCount'
 
-    ProjectOverviewStatusCount:
+    GroupOverviewStatusCount:
       type: object
       required:
         - statusId
@@ -9372,7 +9372,7 @@ components:
           type: integer
           minimum: 0
 
-    ProjectOverviewRelationCount:
+    GroupOverviewRelationCount:
       type: object
       required:
         - relationType
@@ -9389,7 +9389,7 @@ components:
           type: integer
           minimum: 0
 
-    ProjectOverviewCreatedMonthCount:
+    GroupOverviewCreatedMonthCount:
       type: object
       required:
         - month
@@ -9403,15 +9403,15 @@ components:
           type: integer
           minimum: 0
 
-    ProjectOverviewFilter:
+    GroupOverviewFilter:
       oneOf:
         - type: object
           required:
-            - projectId
+            - groupId
             - temporalMode
           additionalProperties: false
           properties:
-            projectId:
+            groupId:
               type: string
               format: uuid
             temporalMode:
@@ -9425,12 +9425,12 @@ components:
               format: date-time
         - type: object
           required:
-            - projectId
+            - groupId
             - temporalMode
             - asOf
           additionalProperties: false
           properties:
-            projectId:
+            groupId:
               type: string
               format: uuid
             temporalMode:
@@ -9447,13 +9447,13 @@ components:
               format: date-time
         - type: object
           required:
-            - projectId
+            - groupId
             - temporalMode
             - from
             - to
           additionalProperties: false
           properties:
-            projectId:
+            groupId:
               type: string
               format: uuid
             temporalMode:
@@ -9485,7 +9485,7 @@ components:
         pagination:
           $ref: '#/components/schemas/Pagination'
 
-    OrderProjectSummaryDto:
+    OrderGroupSummaryDto:
       type: object
       required:
         - id
@@ -9511,18 +9511,18 @@ components:
           type: string
           format: date-time
 
-    OrderProjectSummaryDtoNullable:
+    OrderGroupSummaryDtoNullable:
       allOf:
-        - $ref: '#/components/schemas/OrderProjectSummaryDto'
+        - $ref: '#/components/schemas/OrderGroupSummaryDto'
       nullable: true
 
-    OrderProjectsResponse:
+    OrderGroupsResponse:
       type: object
       required:
         - orderId
         - version
-        - primaryProject
-        - projects
+        - primaryGroup
+        - groups
         - requestId
       properties:
         orderId:
@@ -9531,21 +9531,21 @@ components:
         version:
           type: integer
           minimum: 1
-        primaryProject:
-          $ref: '#/components/schemas/OrderProjectSummaryDtoNullable'
-        projects:
+        primaryGroup:
+          $ref: '#/components/schemas/OrderGroupSummaryDtoNullable'
+        groups:
           type: array
           items:
-            $ref: '#/components/schemas/OrderProjectSummaryDto'
+            $ref: '#/components/schemas/OrderGroupSummaryDto'
         requestId:
           type: string
 
-    ReplaceOrderProjectsRequest:
+    ReplaceOrderGroupsRequest:
       type: object
       required:
         - idempotencyKey
         - version
-        - projects
+        - groups
       properties:
         idempotencyKey:
           type: string
@@ -9554,20 +9554,20 @@ components:
         version:
           type: integer
           minimum: 0
-        primaryProjectId:
+        primaryGroupId:
           type: string
           format: uuid
           nullable: true
-        projects:
+        groups:
           type: array
           items:
             type: object
             required:
-              - projectId
+              - groupId
               - relationType
               - isPrimary
             properties:
-              projectId:
+              groupId:
                 type: string
                 format: uuid
               relationType:
@@ -9582,9 +9582,9 @@ components:
           maxLength: 1000
           nullable: true
 
-    ReplaceOrderProjectsResponse:
+    ReplaceOrderGroupsResponse:
       allOf:
-        - $ref: '#/components/schemas/OrderProjectsResponse'
+        - $ref: '#/components/schemas/OrderGroupsResponse'
         - type: object
           required:
             - changed
@@ -9612,8 +9612,8 @@ components:
         - debtAmount
         - partsCount
         - totalArea
-        - primaryProject
-        - projects
+        - primaryGroup
+        - groups
         - updatedAt
         - version
       properties:
@@ -9704,12 +9704,12 @@ components:
           format: int64
           nullable: true
           description: "SP3/R8: header sheet material type ID fallback for header-only orders with no details."
-        primaryProject:
-          $ref: '#/components/schemas/OrderProjectSummaryDtoNullable'
-        projects:
+        primaryGroup:
+          $ref: '#/components/schemas/OrderGroupSummaryDtoNullable'
+        groups:
           type: array
           items:
-            $ref: '#/components/schemas/OrderProjectSummaryDto'
+            $ref: '#/components/schemas/OrderGroupSummaryDto'
         updatedAt:
           type: string
           format: date-time
@@ -9742,8 +9742,8 @@ components:
         - workshops
         - requirements
         - dowelingLinks
-        - primaryProject
-        - projects
+        - primaryGroup
+        - groups
         - totals
         - version
       properties:
@@ -9769,12 +9769,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OrderDowelingLinkDto'
-        primaryProject:
-          $ref: '#/components/schemas/OrderProjectSummaryDtoNullable'
-        projects:
+        primaryGroup:
+          $ref: '#/components/schemas/OrderGroupSummaryDtoNullable'
+        groups:
           type: array
           items:
-            $ref: '#/components/schemas/OrderProjectSummaryDto'
+            $ref: '#/components/schemas/OrderGroupSummaryDto'
         totals:
           $ref: '#/components/schemas/OrderTotalsDto'
         version:
@@ -11897,7 +11897,7 @@ components:
             enum:
               - order_manager
               - stage_assignee
-              - project_participants
+              - group_participants
         roleCodes:
           type: array
           items:
@@ -11913,7 +11913,7 @@ components:
         - notificationRuleId
         - ruleCode
         - eventType
-        - projectId
+        - groupId
         - isEnabled
         - priority
         - level
@@ -11931,11 +11931,11 @@ components:
           type: string
         eventType:
           type: string
-        projectId:
+        groupId:
           type: string
           format: uuid
           nullable: true
-          description: Optional project scope. Null means global rule.
+          description: Optional group scope. Null means global rule.
         isEnabled:
           type: boolean
         priority:
@@ -11978,11 +11978,11 @@ components:
           type: string
         eventType:
           type: string
-        projectId:
+        groupId:
           type: string
           format: uuid
           nullable: true
-          description: Optional project scope. Null means global rule.
+          description: Optional group scope. Null means global rule.
         level:
           type: string
           enum:
@@ -12020,11 +12020,11 @@ components:
           type: integer
         isEnabled:
           type: boolean
-        projectId:
+        groupId:
           type: string
           format: uuid
           nullable: true
-          description: Optional project scope. Null means global rule.
+          description: Optional group scope. Null means global rule.
         conditions:
           $ref: '#/components/schemas/NotificationRuleConditions'
         recipients:
@@ -12077,7 +12077,7 @@ components:
             enum:
               - order_manager
               - stage_assignee
-              - project_participants
+              - group_participants
         supportsOrderConditions:
           type: boolean
         supportsDeadlineConditions:

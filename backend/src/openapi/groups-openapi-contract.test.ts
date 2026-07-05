@@ -2,84 +2,84 @@ import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import { describe, expect, it } from 'vitest';
 
-describe('projects OpenAPI contract', () => {
-  it('declares project routes and top-level Projects tag', () => {
+describe('groups OpenAPI contract', () => {
+  it('declares group routes and top-level Groups tag', () => {
     const contract = readOpenApiContract();
     const tagsSection = sectionBetween(contract, 'tags:\n', '\npaths:');
 
-    expect(tagsSection).toContain('  - name: Projects');
-    expect(contract).toContain('  /api/v1/projects:');
-    expect(contract).toContain('  /api/v1/projects/lookup:');
-    expect(contract).toContain('  /api/v1/projects/{projectId}:');
-    expect(contract).toContain('  /api/v1/projects/{projectId}/members:');
-    expect(contract).toContain('  /api/v1/projects/reports/orders:');
-    expect(contract).toContain('  /api/v1/projects/reports/order-status-counts:');
-    expect(contract).toContain('  /api/v1/projects/reports/production-status-counts:');
-    expect(contract).toContain('  /api/v1/projects/reports/deadline-status-counts:');
-    expect(contract).toContain('  /api/v1/projects/reports/order-relation-counts:');
-    expect(contract).toContain('  /api/v1/projects/reports/order-created-month-counts:');
-    expect(contract).toContain('  /api/v1/projects/{projectId}/overview:');
-    expect(contract).toContain('  /api/v1/projects/{projectId}/batch-link:');
+    expect(tagsSection).toContain('  - name: Groups');
+    expect(contract).toContain('  /api/v1/groups:');
+    expect(contract).toContain('  /api/v1/groups/lookup:');
+    expect(contract).toContain('  /api/v1/groups/{groupId}:');
+    expect(contract).toContain('  /api/v1/groups/{groupId}/members:');
+    expect(contract).toContain('  /api/v1/groups/reports/orders:');
+    expect(contract).toContain('  /api/v1/groups/reports/order-status-counts:');
+    expect(contract).toContain('  /api/v1/groups/reports/production-status-counts:');
+    expect(contract).toContain('  /api/v1/groups/reports/deadline-status-counts:');
+    expect(contract).toContain('  /api/v1/groups/reports/order-relation-counts:');
+    expect(contract).toContain('  /api/v1/groups/reports/order-created-month-counts:');
+    expect(contract).toContain('  /api/v1/groups/{groupId}/overview:');
+    expect(contract).toContain('  /api/v1/groups/{groupId}/batch-link:');
   });
 
-  it('documents get project bad request and list pagination totalPages', () => {
+  it('documents get group bad request and list pagination totalPages', () => {
     const contract = readOpenApiContract();
     const listSection = sectionBetween(
       contract,
-      '  /api/v1/projects:',
-      '  /api/v1/projects/lookup:',
+      '  /api/v1/groups:',
+      '  /api/v1/groups/lookup:',
     );
     const getSection = sectionBetween(
       contract,
-      '  /api/v1/projects/{projectId}:',
+      '  /api/v1/groups/{groupId}:',
       '  /api/v1/users:',
     );
     const listResponseSchema = sectionBetween(
       contract,
-      '    ProjectListResponse:',
+      '    GroupListResponse:',
       '    Pagination:',
     );
 
-    expect(listSection).toContain("$ref: '#/components/schemas/ProjectListResponse'");
+    expect(listSection).toContain("$ref: '#/components/schemas/GroupListResponse'");
     expect(listResponseSchema).toContain('- totalPages');
     expect(listResponseSchema).toContain('totalPages:');
     expect(getSection).toContain("'400':");
     expect(getSection).toContain("$ref: '#/components/responses/BadRequest'");
   });
 
-  it('documents project write endpoints, permissions, and request schemas', () => {
+  it('documents group write endpoints, permissions, and request schemas', () => {
     const contract = readOpenApiContract();
-    const projectsSection = sectionBetween(
+    const groupsSection = sectionBetween(
       contract,
-      '  /api/v1/projects:',
-      '  /api/v1/projects/lookup:',
+      '  /api/v1/groups:',
+      '  /api/v1/groups/lookup:',
     );
-    const projectByIdSection = sectionBetween(
+    const groupByIdSection = sectionBetween(
       contract,
-      '  /api/v1/projects/{projectId}:',
+      '  /api/v1/groups/{groupId}:',
       '  /api/v1/users:',
     );
     const createSchema = sectionBetween(
       contract,
-      '    CreateProjectRequest:',
-      '    UpdateProjectRequest:',
+      '    CreateGroupRequest:',
+      '    UpdateGroupRequest:',
     );
     const updateSchema = sectionBetween(
       contract,
-      '    UpdateProjectRequest:',
-      '    Project:',
+      '    UpdateGroupRequest:',
+      '    Group:',
     );
 
-    expect(projectsSection).toContain('post:');
-    expect(projectsSection).toContain('operationId: createProject');
-    expect(projectsSection).toContain('x-permission: projects.create');
-    expect(projectsSection).toContain("$ref: '#/components/schemas/CreateProjectRequest'");
-    expect(projectByIdSection).toContain('patch:');
-    expect(projectByIdSection).toContain('operationId: updateProject');
-    expect(projectByIdSection).toContain('x-permission: projects.update');
-    expect(projectByIdSection).toContain('delete:');
-    expect(projectByIdSection).toContain('operationId: archiveProject');
-    expect(projectByIdSection).toContain('x-permission: projects.archive');
+    expect(groupsSection).toContain('post:');
+    expect(groupsSection).toContain('operationId: createGroup');
+    expect(groupsSection).toContain('x-permission: groups.create');
+    expect(groupsSection).toContain("$ref: '#/components/schemas/CreateGroupRequest'");
+    expect(groupByIdSection).toContain('patch:');
+    expect(groupByIdSection).toContain('operationId: updateGroup');
+    expect(groupByIdSection).toContain('x-permission: groups.update');
+    expect(groupByIdSection).toContain('delete:');
+    expect(groupByIdSection).toContain('operationId: archiveGroup');
+    expect(groupByIdSection).toContain('x-permission: groups.archive');
     expect(createSchema).toContain('- code');
     expect(createSchema).toContain('pattern: ^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$');
     expect(createSchema).toContain('maxLength: 256');
@@ -89,37 +89,37 @@ describe('projects OpenAPI contract', () => {
     expect(updateSchema).not.toContain('enum: [draft, active, paused, completed, archived]');
   });
 
-  it('documents project members GET and PUT endpoints with explicit members permissions', () => {
+  it('documents group members GET and PUT endpoints with explicit members permissions', () => {
     const contract = readOpenApiContract();
     const membersSection = sectionBetween(
       contract,
-      '  /api/v1/projects/{projectId}/members:',
+      '  /api/v1/groups/{groupId}/members:',
       '  /api/v1/users:',
     );
     const replaceMembersSchema = sectionBetween(
       contract,
-      '    ReplaceProjectMembersRequest:',
-      '    ProjectMember:',
+      '    ReplaceGroupMembersRequest:',
+      '    GroupMember:',
     );
     const memberSchema = sectionBetween(
       contract,
-      '    ProjectMember:',
-      '    ProjectMembersResponse:',
+      '    GroupMember:',
+      '    GroupMembersResponse:',
     );
     const responseSchema = sectionBetween(
       contract,
-      '    ProjectMembersResponse:',
-      '    ProjectListResponse:',
+      '    GroupMembersResponse:',
+      '    GroupListResponse:',
     );
 
     expect(membersSection).toContain('get:');
-    expect(membersSection).toContain('operationId: listProjectMembers');
-    expect(membersSection).toContain('x-permission: projects.members.view');
+    expect(membersSection).toContain('operationId: listGroupMembers');
+    expect(membersSection).toContain('x-permission: groups.members.view');
     expect(membersSection).toContain('put:');
-    expect(membersSection).toContain('operationId: replaceProjectMembers');
-    expect(membersSection).toContain('x-permission: projects.members.manage');
-    expect(membersSection).toContain("$ref: '#/components/schemas/ReplaceProjectMembersRequest'");
-    expect(membersSection).toContain("$ref: '#/components/schemas/ProjectMembersResponse'");
+    expect(membersSection).toContain('operationId: replaceGroupMembers');
+    expect(membersSection).toContain('x-permission: groups.members.manage');
+    expect(membersSection).toContain("$ref: '#/components/schemas/ReplaceGroupMembersRequest'");
+    expect(membersSection).toContain("$ref: '#/components/schemas/GroupMembersResponse'");
     expect(replaceMembersSchema).toContain('- idempotencyKey');
     expect(replaceMembersSchema).toContain('- members');
     expect(replaceMembersSchema).toContain('userId:');
@@ -130,39 +130,39 @@ describe('projects OpenAPI contract', () => {
     expect(responseSchema).toContain('auditId:');
   });
 
-  it('documents gated project batch-link dry-run and write endpoint', () => {
+  it('documents gated group batch-link dry-run and write endpoint', () => {
     const contract = readOpenApiContract();
     const batchLinkSection = sectionBetween(
       contract,
-      '  /api/v1/projects/{projectId}/batch-link:',
-      '  /api/v1/projects/{projectId}/participants:',
+      '  /api/v1/groups/{groupId}/batch-link:',
+      '  /api/v1/groups/{groupId}/participants:',
     );
     const requestSchema = sectionBetween(
       contract,
-      '    ProjectBatchLinkDryRunRequest:',
-      '    ProjectBatchLinkDryRunResponse:',
+      '    GroupBatchLinkDryRunRequest:',
+      '    GroupBatchLinkDryRunResponse:',
     );
     const responseSchema = sectionBetween(
       contract,
-      '    ProjectBatchLinkDryRunResponse:',
-      '    ReplaceProjectEntityLinksRequest:',
+      '    GroupBatchLinkDryRunResponse:',
+      '    ReplaceGroupEntityLinksRequest:',
     );
 
-    expect(batchLinkSection).toContain('operationId: executeProjectBatchLink');
-    expect(batchLinkSection).toContain('x-permission: projects.manage_links');
+    expect(batchLinkSection).toContain('operationId: executeGroupBatchLink');
+    expect(batchLinkSection).toContain('x-permission: groups.manage_links');
     expect(batchLinkSection).toContain('x-role-codes:');
     expect(batchLinkSection).toContain('- admin');
     expect(batchLinkSection).toContain('- top_manager');
-    expect(batchLinkSection).toContain('x-write-gate: BACKEND_ENABLE_PROJECTS_BATCH_LINK_WRITE');
-    expect(batchLinkSection).toContain("$ref: '#/components/schemas/ProjectBatchLinkDryRunRequest'");
-    expect(batchLinkSection).toContain("$ref: '#/components/schemas/ProjectBatchLinkDryRunResponse'");
+    expect(batchLinkSection).toContain('x-write-gate: BACKEND_ENABLE_GROUPS_BATCH_LINK_WRITE');
+    expect(batchLinkSection).toContain("$ref: '#/components/schemas/GroupBatchLinkDryRunRequest'");
+    expect(batchLinkSection).toContain("$ref: '#/components/schemas/GroupBatchLinkDryRunResponse'");
     expect(requestSchema).toContain('- mode');
     expect(requestSchema).toContain('- relationType');
     expect(requestSchema).toContain('- dry-run');
     expect(requestSchema).toContain('- write');
     expect(requestSchema).toContain('writeIntent:');
     expect(requestSchema).toContain('relationType:');
-    expect(requestSchema).toContain("$ref: '#/components/schemas/ProjectEntityTypeCode'");
+    expect(requestSchema).toContain("$ref: '#/components/schemas/GroupEntityTypeCode'");
     expect(responseSchema).toContain('writeEnabled:');
     expect(responseSchema).toContain('created:');
     expect(responseSchema).toContain('existing:');
@@ -172,144 +172,144 @@ describe('projects OpenAPI contract', () => {
     expect(responseSchema).toContain('sampleEvidence:');
   });
 
-  it('documents project report endpoints with explicit read permissions and narrow response schemas', () => {
+  it('documents group report endpoints with explicit read permissions and narrow response schemas', () => {
     const contract = readOpenApiContract();
     const orderIdsSection = sectionBetween(
       contract,
-      '  /api/v1/projects/reports/orders:',
-      '  /api/v1/projects/reports/order-status-counts:',
+      '  /api/v1/groups/reports/orders:',
+      '  /api/v1/groups/reports/order-status-counts:',
     );
     const statusCountsSection = sectionBetween(
       contract,
-      '  /api/v1/projects/reports/order-status-counts:',
-      '  /api/v1/projects/reports/production-status-counts:',
+      '  /api/v1/groups/reports/order-status-counts:',
+      '  /api/v1/groups/reports/production-status-counts:',
     );
     const productionStatusCountsSection = sectionBetween(
       contract,
-      '  /api/v1/projects/reports/production-status-counts:',
-      '  /api/v1/projects/reports/deadline-status-counts:',
+      '  /api/v1/groups/reports/production-status-counts:',
+      '  /api/v1/groups/reports/deadline-status-counts:',
     );
     const deadlineStatusCountsSection = sectionBetween(
       contract,
-      '  /api/v1/projects/reports/deadline-status-counts:',
-      '  /api/v1/projects/reports/order-relation-counts:',
+      '  /api/v1/groups/reports/deadline-status-counts:',
+      '  /api/v1/groups/reports/order-relation-counts:',
     );
     const relationCountsSection = sectionBetween(
       contract,
-      '  /api/v1/projects/reports/order-relation-counts:',
-      '  /api/v1/projects/reports/order-created-month-counts:',
+      '  /api/v1/groups/reports/order-relation-counts:',
+      '  /api/v1/groups/reports/order-created-month-counts:',
     );
     const createdMonthCountsSection = sectionBetween(
       contract,
-      '  /api/v1/projects/reports/order-created-month-counts:',
-      '  /api/v1/projects/{projectId}:',
+      '  /api/v1/groups/reports/order-created-month-counts:',
+      '  /api/v1/groups/{groupId}:',
     );
     const statusItemSchema = sectionBetween(
       contract,
-      '    ProjectOrderStatusReportItem:',
-      '    ProjectOrderStatusReportResponse:',
+      '    GroupOrderStatusReportItem:',
+      '    GroupOrderStatusReportResponse:',
     );
     const statusResponseSchema = sectionBetween(
       contract,
-      '    ProjectOrderStatusReportResponse:',
-      '    ProjectOrderStatusReportFilter:',
+      '    GroupOrderStatusReportResponse:',
+      '    GroupOrderStatusReportFilter:',
     );
     const statusFilterSchema = sectionBetween(
       contract,
-      '    ProjectOrderStatusReportFilter:',
-      '    ProjectProductionStatusCountsReportItem:',
+      '    GroupOrderStatusReportFilter:',
+      '    GroupProductionStatusCountsReportItem:',
     );
     const productionStatusItemSchema = sectionBetween(
       contract,
-      '    ProjectProductionStatusCountsReportItem:',
-      '    ProjectProductionStatusCountsReportResponse:',
+      '    GroupProductionStatusCountsReportItem:',
+      '    GroupProductionStatusCountsReportResponse:',
     );
     const productionStatusResponseSchema = sectionBetween(
       contract,
-      '    ProjectProductionStatusCountsReportResponse:',
-      '    ProjectProductionStatusCountsReportFilter:',
+      '    GroupProductionStatusCountsReportResponse:',
+      '    GroupProductionStatusCountsReportFilter:',
     );
     const productionStatusFilterSchema = sectionBetween(
       contract,
-      '    ProjectProductionStatusCountsReportFilter:',
-      '    ProjectDeadlineStatusCountsReportItem:',
+      '    GroupProductionStatusCountsReportFilter:',
+      '    GroupDeadlineStatusCountsReportItem:',
     );
     const deadlineStatusItemSchema = sectionBetween(
       contract,
-      '    ProjectDeadlineStatusCountsReportItem:',
-      '    ProjectDeadlineStatusCountsReportResponse:',
+      '    GroupDeadlineStatusCountsReportItem:',
+      '    GroupDeadlineStatusCountsReportResponse:',
     );
     const deadlineStatusResponseSchema = sectionBetween(
       contract,
-      '    ProjectDeadlineStatusCountsReportResponse:',
-      '    ProjectDeadlineStatusCountsReportFilter:',
+      '    GroupDeadlineStatusCountsReportResponse:',
+      '    GroupDeadlineStatusCountsReportFilter:',
     );
     const deadlineStatusFilterSchema = sectionBetween(
       contract,
-      '    ProjectDeadlineStatusCountsReportFilter:',
-      '    ProjectOrderRelationCountsReportItem:',
+      '    GroupDeadlineStatusCountsReportFilter:',
+      '    GroupOrderRelationCountsReportItem:',
     );
     const relationItemSchema = sectionBetween(
       contract,
-      '    ProjectOrderRelationCountsReportItem:',
-      '    ProjectOrderRelationCountsReportResponse:',
+      '    GroupOrderRelationCountsReportItem:',
+      '    GroupOrderRelationCountsReportResponse:',
     );
     const relationResponseSchema = sectionBetween(
       contract,
-      '    ProjectOrderRelationCountsReportResponse:',
-      '    ProjectOrderCreatedMonthCountsReportItem:',
+      '    GroupOrderRelationCountsReportResponse:',
+      '    GroupOrderCreatedMonthCountsReportItem:',
     );
     const createdMonthItemSchema = sectionBetween(
       contract,
-      '    ProjectOrderCreatedMonthCountsReportItem:',
-      '    ProjectOrderCreatedMonthCountsReportResponse:',
+      '    GroupOrderCreatedMonthCountsReportItem:',
+      '    GroupOrderCreatedMonthCountsReportResponse:',
     );
     const createdMonthResponseSchema = sectionBetween(
       contract,
-      '    ProjectOrderCreatedMonthCountsReportResponse:',
-      '    ProjectOrderCreatedMonthCountsReportFilter:',
+      '    GroupOrderCreatedMonthCountsReportResponse:',
+      '    GroupOrderCreatedMonthCountsReportFilter:',
     );
     const createdMonthFilterSchema = sectionBetween(
       contract,
-      '    ProjectOrderCreatedMonthCountsReportFilter:',
+      '    GroupOrderCreatedMonthCountsReportFilter:',
       '    OrderListResponse:',
     );
 
-    expect(orderIdsSection).toContain('operationId: listProjectOrderReportIds');
-    expect(orderIdsSection).toContain('- projects.view');
+    expect(orderIdsSection).toContain('operationId: listGroupOrderReportIds');
+    expect(orderIdsSection).toContain('- groups.view');
     expect(orderIdsSection).toContain('- orders.view');
-    expect(statusCountsSection).toContain('operationId: listProjectOrderStatusCounts');
-    expect(statusCountsSection).toContain('- projects.view');
+    expect(statusCountsSection).toContain('operationId: listGroupOrderStatusCounts');
+    expect(statusCountsSection).toContain('- groups.view');
     expect(statusCountsSection).toContain('- orders.view');
-    expect(statusCountsSection).toContain("$ref: '#/components/schemas/ProjectOrderStatusReportResponse'");
-    expect(productionStatusCountsSection).toContain('operationId: listProjectProductionStatusCounts');
-    expect(productionStatusCountsSection).toContain('- projects.view');
+    expect(statusCountsSection).toContain("$ref: '#/components/schemas/GroupOrderStatusReportResponse'");
+    expect(productionStatusCountsSection).toContain('operationId: listGroupProductionStatusCounts');
+    expect(productionStatusCountsSection).toContain('- groups.view');
     expect(productionStatusCountsSection).toContain('- orders.view');
-    expect(productionStatusCountsSection).toContain("$ref: '#/components/schemas/ProjectProductionStatusCountsReportResponse'");
-    expect(deadlineStatusCountsSection).toContain('operationId: listProjectDeadlineStatusCounts');
-    expect(deadlineStatusCountsSection).toContain('- projects.view');
+    expect(productionStatusCountsSection).toContain("$ref: '#/components/schemas/GroupProductionStatusCountsReportResponse'");
+    expect(deadlineStatusCountsSection).toContain('operationId: listGroupDeadlineStatusCounts');
+    expect(deadlineStatusCountsSection).toContain('- groups.view');
     expect(deadlineStatusCountsSection).toContain('- orders.view');
     expect(deadlineStatusCountsSection).toContain('- deadlines.view');
-    expect(deadlineStatusCountsSection).toContain("$ref: '#/components/schemas/ProjectDeadlineStatusCountsReportResponse'");
-    expect(relationCountsSection).toContain('operationId: listProjectOrderRelationCounts');
-    expect(relationCountsSection).toContain('- projects.view');
+    expect(deadlineStatusCountsSection).toContain("$ref: '#/components/schemas/GroupDeadlineStatusCountsReportResponse'");
+    expect(relationCountsSection).toContain('operationId: listGroupOrderRelationCounts');
+    expect(relationCountsSection).toContain('- groups.view');
     expect(relationCountsSection).toContain('- orders.view');
-    expect(relationCountsSection).toContain("$ref: '#/components/schemas/ProjectOrderRelationCountsReportResponse'");
-    expect(createdMonthCountsSection).toContain('operationId: listProjectOrderCreatedMonthCounts');
-    expect(createdMonthCountsSection).toContain('- projects.view');
+    expect(relationCountsSection).toContain("$ref: '#/components/schemas/GroupOrderRelationCountsReportResponse'");
+    expect(createdMonthCountsSection).toContain('operationId: listGroupOrderCreatedMonthCounts');
+    expect(createdMonthCountsSection).toContain('- groups.view');
     expect(createdMonthCountsSection).toContain('- orders.view');
-    expect(createdMonthCountsSection).toContain("$ref: '#/components/schemas/ProjectOrderCreatedMonthCountsReportResponse'");
+    expect(createdMonthCountsSection).toContain("$ref: '#/components/schemas/GroupOrderCreatedMonthCountsReportResponse'");
     expect(statusItemSchema).toContain('statusId:');
     expect(statusItemSchema).toContain('statusName:');
     expect(statusItemSchema).toContain('orderCount:');
-    expect(statusResponseSchema).toContain("$ref: '#/components/schemas/ProjectOrderStatusReportFilter'");
+    expect(statusResponseSchema).toContain("$ref: '#/components/schemas/GroupOrderStatusReportFilter'");
     expect(statusFilterSchema).toContain('oneOf:');
-    expect(statusFilterSchema).toContain('- projectIds');
+    expect(statusFilterSchema).toContain('- groupIds');
     expect(statusFilterSchema).toContain('- asOf');
     expect(statusFilterSchema).toContain('- from');
     expect(statusFilterSchema).toContain('- to');
     expect(statusFilterSchema).toContain('additionalProperties: false');
-    expect(statusFilterSchema).toContain('projectMode:');
+    expect(statusFilterSchema).toContain('groupMode:');
     expect(statusFilterSchema).toContain('temporalMode:');
     expect(statusResponseSchema).not.toContain('pagination:');
     expect(statusResponseSchema).not.toContain('orderId:');
@@ -324,10 +324,10 @@ describe('projects OpenAPI contract', () => {
     expect(productionStatusItemSchema).toContain('orderCount:');
     expect(productionStatusItemSchema).toContain('additionalProperties: false');
     expect(productionStatusResponseSchema).toContain('additionalProperties: false');
-    expect(productionStatusResponseSchema).toContain("$ref: '#/components/schemas/ProjectProductionStatusCountsReportFilter'");
+    expect(productionStatusResponseSchema).toContain("$ref: '#/components/schemas/GroupProductionStatusCountsReportFilter'");
     expect(productionStatusFilterSchema).toContain('oneOf:');
-    expect(productionStatusFilterSchema).toContain('- projectMode');
-    expect(productionStatusFilterSchema).toContain('- projectIds');
+    expect(productionStatusFilterSchema).toContain('- groupMode');
+    expect(productionStatusFilterSchema).toContain('- groupIds');
     expect(productionStatusFilterSchema).toContain('- temporalMode');
     expect(productionStatusFilterSchema).toContain('enum: [current]');
     expect(productionStatusFilterSchema).toContain('additionalProperties: false');
@@ -344,10 +344,10 @@ describe('projects OpenAPI contract', () => {
     expect(deadlineStatusItemSchema).toContain('deadlineCount:');
     expect(deadlineStatusItemSchema).toContain('additionalProperties: false');
     expect(deadlineStatusResponseSchema).toContain('additionalProperties: false');
-    expect(deadlineStatusResponseSchema).toContain("$ref: '#/components/schemas/ProjectDeadlineStatusCountsReportFilter'");
+    expect(deadlineStatusResponseSchema).toContain("$ref: '#/components/schemas/GroupDeadlineStatusCountsReportFilter'");
     expect(deadlineStatusFilterSchema).toContain('oneOf:');
-    expect(deadlineStatusFilterSchema).toContain('- projectMode');
-    expect(deadlineStatusFilterSchema).toContain('- projectIds');
+    expect(deadlineStatusFilterSchema).toContain('- groupMode');
+    expect(deadlineStatusFilterSchema).toContain('- groupIds');
     expect(deadlineStatusFilterSchema).toContain('- temporalMode');
     expect(deadlineStatusFilterSchema).toContain('enum: [current]');
     expect(deadlineStatusFilterSchema).toContain('additionalProperties: false');
@@ -359,20 +359,20 @@ describe('projects OpenAPI contract', () => {
     expect(deadlineStatusResponseSchema).not.toContain('pagination:');
     expect(deadlineStatusResponseSchema).not.toContain('deadlineId:');
     expect(deadlineStatusResponseSchema).not.toContain('orderId:');
-    expect(deadlineStatusResponseSchema).not.toContain('projectName:');
+    expect(deadlineStatusResponseSchema).not.toContain('groupName:');
     expect(relationItemSchema).toContain('relationType:');
     expect(relationItemSchema).toContain('enum: [main, secondary, reporting, billing, derived]');
     expect(relationItemSchema).toContain('isPrimary:');
     expect(relationItemSchema).toContain('orderCount:');
     expect(relationItemSchema).toContain('additionalProperties: false');
     expect(relationResponseSchema).toContain('additionalProperties: false');
-    expect(relationResponseSchema).toContain("$ref: '#/components/schemas/ProjectOrderStatusReportFilter'");
+    expect(relationResponseSchema).toContain("$ref: '#/components/schemas/GroupOrderStatusReportFilter'");
     expect(createdMonthItemSchema).toContain('month:');
     expect(createdMonthItemSchema).toContain('format: date');
     expect(createdMonthItemSchema).toContain('orderCount:');
     expect(createdMonthItemSchema).toContain('additionalProperties: false');
     expect(createdMonthResponseSchema).toContain('additionalProperties: false');
-    expect(createdMonthResponseSchema).toContain("$ref: '#/components/schemas/ProjectOrderCreatedMonthCountsReportFilter'");
+    expect(createdMonthResponseSchema).toContain("$ref: '#/components/schemas/GroupOrderCreatedMonthCountsReportFilter'");
     expect(createdMonthFilterSchema).toContain('oneOf:');
     expect(createdMonthFilterSchema).toContain('createdFrom:');
     expect(createdMonthFilterSchema).toContain('createdTo:');
@@ -389,7 +389,7 @@ describe('projects OpenAPI contract', () => {
       'production',
       'audit',
       'production_status_events',
-      'project_members',
+      'group_members',
       'members:',
       'employeeId',
       'displayName',
@@ -412,7 +412,7 @@ describe('projects OpenAPI contract', () => {
       'deadline',
       'audit',
       'production_status_events',
-      'project_members',
+      'group_members',
       'members:',
       'employeeId',
       'displayName',
@@ -431,7 +431,7 @@ describe('projects OpenAPI contract', () => {
       'client',
       'audit',
       'production_status_events',
-      'project_members',
+      'group_members',
       'members:',
       'employeeId',
       'displayName',
@@ -439,8 +439,8 @@ describe('projects OpenAPI contract', () => {
       'email',
       'deadlineId',
       'orderId',
-      'projectId:',
-      'projectName',
+      'groupId:',
+      'groupName',
       'metadata',
       'notification',
       'actionExecution',
@@ -451,53 +451,53 @@ describe('projects OpenAPI contract', () => {
     }
   });
 
-  it('documents project overview with narrow response schemas and no domain leaks', () => {
+  it('documents group overview with narrow response schemas and no domain leaks', () => {
     const contract = readOpenApiContract();
     const overviewSection = sectionBetween(
       contract,
-      '  /api/v1/projects/{projectId}/overview:',
-      '  /api/v1/projects/{projectId}:',
+      '  /api/v1/groups/{groupId}/overview:',
+      '  /api/v1/groups/{groupId}:',
     );
     const responseSchema = sectionBetween(
       contract,
-      '    ProjectOverviewResponse:',
-      '    ProjectOverviewProject:',
+      '    GroupOverviewResponse:',
+      '    GroupOverviewGroup:',
     );
-    const projectSchema = sectionBetween(
+    const groupSchema = sectionBetween(
       contract,
-      '    ProjectOverviewProject:',
-      '    ProjectOverviewOrders:',
+      '    GroupOverviewGroup:',
+      '    GroupOverviewOrders:',
     );
     const ordersSchema = sectionBetween(
       contract,
-      '    ProjectOverviewOrders:',
-      '    ProjectOverviewStatusCount:',
+      '    GroupOverviewOrders:',
+      '    GroupOverviewStatusCount:',
     );
     const statusCountSchema = sectionBetween(
       contract,
-      '    ProjectOverviewStatusCount:',
-      '    ProjectOverviewRelationCount:',
+      '    GroupOverviewStatusCount:',
+      '    GroupOverviewRelationCount:',
     );
     const relationCountSchema = sectionBetween(
       contract,
-      '    ProjectOverviewRelationCount:',
-      '    ProjectOverviewCreatedMonthCount:',
+      '    GroupOverviewRelationCount:',
+      '    GroupOverviewCreatedMonthCount:',
     );
     const createdMonthCountSchema = sectionBetween(
       contract,
-      '    ProjectOverviewCreatedMonthCount:',
-      '    ProjectOverviewFilter:',
+      '    GroupOverviewCreatedMonthCount:',
+      '    GroupOverviewFilter:',
     );
     const filterSchema = sectionBetween(
       contract,
-      '    ProjectOverviewFilter:',
+      '    GroupOverviewFilter:',
       '    OrderListResponse:',
     );
 
-    expect(overviewSection).toContain('operationId: getProjectOverview');
-    expect(overviewSection).toContain('- projects.view');
+    expect(overviewSection).toContain('operationId: getGroupOverview');
+    expect(overviewSection).toContain('- groups.view');
     expect(overviewSection).toContain('- orders.view');
-    expect(overviewSection).toContain("$ref: '#/components/schemas/ProjectOverviewResponse'");
+    expect(overviewSection).toContain("$ref: '#/components/schemas/GroupOverviewResponse'");
     expect(overviewSection).toContain('format: uuid');
     expect(overviewSection).toContain('enum: [current, asOf, overlap]');
     expect(overviewSection).toContain('default: current');
@@ -509,11 +509,11 @@ describe('projects OpenAPI contract', () => {
       'createdFrom',
       'createdTo',
     ]);
-    expect(overviewSection).not.toContain('name: projectIds');
+    expect(overviewSection).not.toContain('name: groupIds');
 
     for (const schema of [
       responseSchema,
-      projectSchema,
+      groupSchema,
       ordersSchema,
       statusCountSchema,
       relationCountSchema,
@@ -523,9 +523,9 @@ describe('projects OpenAPI contract', () => {
       expect(schema).toContain('additionalProperties: false');
     }
 
-    expect(projectSchema).toContain('ownerUserId:');
-    expect(projectSchema).not.toContain('metadata:');
-    expect(projectSchema).not.toContain('createdBy:');
+    expect(groupSchema).toContain('ownerUserId:');
+    expect(groupSchema).not.toContain('metadata:');
+    expect(groupSchema).not.toContain('createdBy:');
     expect(ordersSchema).toContain('totalCount:');
     expect(ordersSchema).toContain('statusCounts:');
     expect(ordersSchema).toContain('relationCounts:');
@@ -534,7 +534,7 @@ describe('projects OpenAPI contract', () => {
     expect(relationCountSchema).toContain('relationType:');
     expect(createdMonthCountSchema).toContain('format: date');
     expect(filterSchema).toContain('oneOf:');
-    expect(filterSchema).toContain('projectId:');
+    expect(filterSchema).toContain('groupId:');
     expect(filterSchema).toContain('createdFrom:');
     expect(filterSchema).toContain('createdTo:');
     expect(responseSchema).toContain('enum: [finance, payments, clientPhones, audit, deadline, production, members, users, orderDetails, activityTimeline]');
@@ -544,7 +544,7 @@ describe('projects OpenAPI contract', () => {
       'Deadline',
       'Production',
       'Audit',
-      'ProjectMember',
+      'GroupMember',
       'OrderDetails',
       'ClientPhone',
       'amount',
@@ -557,7 +557,7 @@ describe('projects OpenAPI contract', () => {
     ]) {
       expect(overviewSection).not.toContain(leakedToken);
       expect(responseSchema).not.toContain(leakedToken);
-      expect(projectSchema).not.toContain(leakedToken);
+      expect(groupSchema).not.toContain(leakedToken);
       expect(ordersSchema).not.toContain(leakedToken);
       expect(statusCountSchema).not.toContain(leakedToken);
       expect(relationCountSchema).not.toContain(leakedToken);
