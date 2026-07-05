@@ -1,6 +1,7 @@
 import type { QueryResultRow } from 'pg';
 import { DatabaseService } from '../../../database/database.service';
 import { mapRoleIdToRole } from '../../../permissions/permissions';
+import type { AuthSchemaCapabilities } from '../../auth.module';
 
 const DEFAULT_REQUEST_ID = 'auth-command';
 
@@ -28,6 +29,21 @@ export type LinkInsertOutcome =
   | { status: 'session_inactive' }
   | { status: 'user_inactive' };
 
+export type UserIdentityListItem = {
+  identityId: string;
+  authMethod: string | null;
+  emailAtLink: string;
+  linkedAt: string;
+  lastLoginAt: string | null;
+};
+
+export type DeleteOneOutcome =
+  | 'unlinked'
+  | 'not_found'
+  | 'session_inactive'
+  | 'user_inactive'
+  | 'external_policy';
+
 export type UnlinkDeleteOutcome =
   | 'unlinked'
   | 'not_linked'
@@ -52,8 +68,18 @@ interface UserIdentityRow extends QueryResultRow {
   email_at_link: string;
 }
 
+interface UserIdentityAuditRow extends QueryResultRow {
+  identity_id: string | number;
+  provider_user_id: string;
+  email_at_link: string;
+  auth_method?: string | null;
+}
+
 export class PgUserIdentityRepository {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly caps: AuthSchemaCapabilities,
+  ) {}
 
   async findByProviderSub(provider: string, providerUserId: string): Promise<UserIdentityRecord | null> {
     const result = await this.database.query<UserIdentityRow>(
@@ -83,6 +109,28 @@ export class PgUserIdentityRepository {
     return toRecord(result.rows[0]);
   }
 
+  async listLinks(userId: string, provider: string): Promise<UserIdentityListItem[]> {
+    const result = await this.database.query<{
+      identity_id: string | number;
+      auth_method?: string | null;
+      email_at_link: string;
+      linked_at: string;
+      last_login_at: string | null;
+    } & QueryResultRow>(
+      `SELECT identity_id, email_at_link, linked_at, last_login_at${this.caps.authMethod ? ', auth_method' : ''}
+       FROM user_identities WHERE user_id = $1 AND provider = $2 ORDER BY linked_at`,
+      [userId, provider],
+    );
+
+    return result.rows.map((row) => ({
+      identityId: String(row.identity_id),
+      authMethod: row.auth_method ?? null,
+      emailAtLink: row.email_at_link,
+      linkedAt: String(row.linked_at),
+      lastLoginAt: row.last_login_at ? String(row.last_login_at) : null,
+    }));
+  }
+
   /**
    * Inserts the identity link and its audit event in one transaction.
    *
@@ -103,6 +151,7 @@ export class PgUserIdentityRepository {
     mode: IdentityLinkMode;
     /** Required for self_serve; admin_bulk provisioning has no live session. */
     sessionId?: string;
+    authMethod?: string | null;
   }): Promise<LinkInsertOutcome> {
     return this.database.transaction(async (tx) => {
       const liveness = await this.lockLiveSessionAndUser(tx, input.actor.userId, input.sessionId);
@@ -116,20 +165,36 @@ export class PgUserIdentityRepository {
       // in both. Retry the insert in that (rare) case instead of failing —
       // the freed sub is simply claimable again.
       for (let attempt = 0; attempt < 3; attempt += 1) {
+        const insertColumns = this.caps.authMethod
+          ? '(user_id, provider, provider_user_id, email_at_link, email_verified_at_link, auth_method)'
+          : '(user_id, provider, provider_user_id, email_at_link, email_verified_at_link)';
+        const insertValues = this.caps.authMethod
+          ? '($1, $2, $3, $4, $5, $6)'
+          : '($1, $2, $3, $4, $5)';
+        const params = this.caps.authMethod
+          ? [
+              input.actor.userId,
+              input.provider,
+              input.providerUserId,
+              input.emailAtLink,
+              input.emailVerified,
+              input.authMethod ?? null,
+            ]
+          : [
+              input.actor.userId,
+              input.provider,
+              input.providerUserId,
+              input.emailAtLink,
+              input.emailVerified,
+            ];
         const inserted = await tx.query<UserIdentityRow>(
           `
-          INSERT INTO user_identities (user_id, provider, provider_user_id, email_at_link, email_verified_at_link)
-          VALUES ($1, $2, $3, $4, $5)
+          INSERT INTO user_identities ${insertColumns}
+          VALUES ${insertValues}
           ON CONFLICT (provider, provider_user_id) DO NOTHING
           RETURNING identity_id, user_id, provider, provider_user_id, email_at_link
           `,
-          [
-            input.actor.userId,
-            input.provider,
-            input.providerUserId,
-            input.emailAtLink,
-            input.emailVerified,
-          ],
+          params,
         );
         const record = toRecord(inserted.rows[0]);
 
@@ -159,6 +224,7 @@ export class PgUserIdentityRepository {
       emailAtLink: string;
       emailVerified: boolean;
       mode: IdentityLinkMode;
+      authMethod?: string | null;
     },
   ): Promise<void> {
     await tx.query(
@@ -182,6 +248,7 @@ export class PgUserIdentityRepository {
           provider: input.provider,
           workosSub: input.providerUserId,
           emailAtLink: input.emailAtLink,
+          authMethod: input.authMethod ?? null,
           emailVerified: input.emailVerified,
           mode: input.mode,
         }),
@@ -331,6 +398,75 @@ export class PgUserIdentityRepository {
     });
   }
 
+  async deleteOneLinkWithAudit(input: {
+    identityId: string;
+    targetUserId: string;
+    actor: IdentityActor;
+    actorSessionId: string;
+    provider: string;
+    mode: 'self_serve' | 'admin';
+    reason?: string;
+  }): Promise<DeleteOneOutcome> {
+    return this.database.transaction(async (tx) => {
+      const session = await tx.query(
+        `SELECT 1 FROM auth_sessions WHERE session_id = $1 AND status = 'active' AND expires_at > now() FOR UPDATE`,
+        [input.actorSessionId],
+      );
+      if (session.rows.length === 0) {
+        return 'session_inactive';
+      }
+
+      const user = await tx.query<{ login_policy: string | null; is_active: boolean } & QueryResultRow>(
+        `SELECT login_policy, is_active FROM users WHERE user_id = $1 FOR UPDATE`,
+        [input.targetUserId],
+      );
+      const urow = user.rows[0];
+      if (!urow) {
+        return 'not_found';
+      }
+      if (input.mode === 'self_serve' && !urow.is_active) {
+        return 'user_inactive';
+      }
+
+      const found = await tx.query<UserIdentityAuditRow>(
+        `SELECT identity_id, provider_user_id, email_at_link${this.caps.authMethod ? ', auth_method' : ''} FROM user_identities WHERE identity_id = $1 AND user_id = $2 AND provider = $3`,
+        [input.identityId, input.targetUserId, input.provider],
+      );
+      const row = found.rows[0];
+      if (!row) {
+        return 'not_found';
+      }
+
+      if ((urow.login_policy ?? 'both') === 'external') {
+        const remaining = await tx.query<{ count: string } & QueryResultRow>(
+          `SELECT count(*)::text AS count FROM user_identities WHERE user_id = $1 AND provider = $2`,
+          [input.targetUserId, input.provider],
+        );
+        if (Number(remaining.rows[0]?.count ?? '0') <= 1) {
+          return 'external_policy';
+        }
+      }
+
+      await tx.query(
+        `DELETE FROM user_identities WHERE identity_id = $1 AND user_id = $2 AND provider = $3`,
+        [input.identityId, input.targetUserId, input.provider],
+      );
+      await this.writeUnlinkedAudit(tx, {
+        actor: input.actor,
+        targetUserId: input.targetUserId,
+        provider: input.provider,
+        workosSub: row.provider_user_id,
+        emailAtLink: row.email_at_link,
+        authMethod: row.auth_method ?? null,
+        mode: input.mode,
+        identityId: input.identityId,
+        reason: input.reason,
+      });
+
+      return 'unlinked';
+    });
+  }
+
   /** Live-session proof for link/unlink at callback time (plan §4.4в). */
   async isSessionActive(sessionId: string): Promise<boolean> {
     const result = await this.database.query(
@@ -377,6 +513,50 @@ export class PgUserIdentityRepository {
           workosSub: input.providerUserId ?? null,
           emailAtIdentity: input.emailAtIdentity ?? null,
           conflictUserId: input.conflictUserId ?? null,
+        }),
+      ],
+    );
+  }
+
+  private async writeUnlinkedAudit(
+    tx: { query: DatabaseService['query'] },
+    input: {
+      actor: IdentityActor;
+      targetUserId: string;
+      provider: string;
+      workosSub: string;
+      emailAtLink: string;
+      authMethod: string | null;
+      mode: 'self_serve' | 'admin';
+      identityId: string;
+      reason?: string;
+    },
+  ): Promise<void> {
+    await tx.query(
+      `
+      INSERT INTO audit_log (
+        event, entity_type, entity_id, user_id, username, role_code, role,
+        related_user_id, request_id, ip_address, user_agent, source, metadata_json
+      )
+      VALUES ('auth.identity.unlinked', 'user', $1, $2, $3, $4, $4, $5, $6, $7::inet, $8, 'workos', $9::jsonb)
+      `,
+      [
+        input.targetUserId,
+        toNullableUserId(input.actor.userId),
+        input.actor.username,
+        mapRoleIdToRole(input.actor.roleId),
+        toNullableUserId(input.targetUserId),
+        input.actor.requestId ?? DEFAULT_REQUEST_ID,
+        input.actor.ipAddress ?? null,
+        input.actor.userAgent ?? null,
+        JSON.stringify({
+          provider: input.provider,
+          workosSub: input.workosSub,
+          emailAtLink: input.emailAtLink,
+          authMethod: input.authMethod,
+          mode: input.mode,
+          identityId: input.identityId,
+          reason: input.reason ?? null,
         }),
       ],
     );

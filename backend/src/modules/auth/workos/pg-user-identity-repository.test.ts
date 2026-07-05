@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import { PgUserIdentityRepository, type IdentityActor } from './pg-user-identity-repository';
 
+const CAPS_ON = { loginPolicy: true, providerSessions: true, userIdentities: true, authMethod: true };
+const CAPS_PRE055 = { ...CAPS_ON, authMethod: false };
+
 const ACTOR: IdentityActor = {
   userId: '42',
   username: 'manager',
@@ -26,7 +29,7 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
       { rows: [{ '?column?': 1 }] }, // user lock
       { rows: [{ identity_id: '1', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
     ]);
-    const repository = new PgUserIdentityRepository(database.service);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
 
     const outcome = await repository.insertLinkWithAudit(input);
 
@@ -49,7 +52,7 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
     const database = createTransactionalDatabase([
       { rows: [] }, // session lock finds no live row
     ]);
-    const repository = new PgUserIdentityRepository(database.service);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
 
     await expect(repository.insertLinkWithAudit(input)).resolves.toEqual({
       status: 'session_inactive',
@@ -63,7 +66,7 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
       { rows: [{ '?column?': 1 }] }, // session ok
       { rows: [] }, // user lock finds no active row
     ]);
-    const repository = new PgUserIdentityRepository(database.service);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
 
     await expect(repository.insertLinkWithAudit(input)).resolves.toEqual({
       status: 'user_inactive',
@@ -79,7 +82,7 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
       { rows: [{ identity_id: '1', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
     ]);
     await expect(
-      new PgUserIdentityRepository(sameUser.service).insertLinkWithAudit(input),
+      new PgUserIdentityRepository(sameUser.service, CAPS_ON).insertLinkWithAudit(input),
     ).resolves.toMatchObject({ status: 'already_linked' });
 
     const otherUser = createTransactionalDatabase([
@@ -89,7 +92,7 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
       { rows: [{ identity_id: '1', user_id: '99', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
     ]);
     await expect(
-      new PgUserIdentityRepository(otherUser.service).insertLinkWithAudit(input),
+      new PgUserIdentityRepository(otherUser.service, CAPS_ON).insertLinkWithAudit(input),
     ).resolves.toEqual({ status: 'conflict', conflictUserId: '99' });
   });
 
@@ -101,7 +104,7 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
       { rows: [] }, // ...which was unlinked before classification
       { rows: [{ identity_id: '2', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] }, // retry succeeds
     ]);
-    const repository = new PgUserIdentityRepository(database.service);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
 
     await expect(repository.insertLinkWithAudit(input)).resolves.toMatchObject({ status: 'linked' });
     expect(
@@ -115,13 +118,83 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
       { rows: [{ '?column?': 1 }] }, // user lock only
       { rows: [{ identity_id: '1', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
     ]);
-    const repository = new PgUserIdentityRepository(database.service);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
 
     await expect(
       repository.insertLinkWithAudit({ ...input, sessionId: undefined, mode: 'admin_bulk' }),
     ).resolves.toMatchObject({ status: 'linked' });
     expect(database.queries[0].text).not.toContain('auth_sessions');
     expect(database.queries[0].text).toContain('is_active');
+  });
+});
+
+describe('PgUserIdentityRepository.insertLinkWithAudit auth_method', () => {
+  it('writes auth_method into the identity row and linked audit', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] }, // session lock
+      { rows: [{ login_policy: 'both' }] }, // user lock
+      { rows: [{ identity_id: '1', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await repository.insertLinkWithAudit({
+      actor: ACTOR, provider: 'workos', providerUserId: 'sub-a',
+      emailAtLink: 'a@example.com', emailVerified: true, mode: 'self_serve',
+      sessionId: 'session-1', authMethod: 'GoogleOAuth',
+    });
+
+    const insert = database.queries.find((q) => q.text.includes('INSERT INTO user_identities'));
+    expect(insert?.text).toContain('auth_method');
+    expect(JSON.stringify(insert?.params)).toContain('GoogleOAuth');
+    const linkedAudit = database.queries.find((q) => q.text.includes('auth.identity.linked'));
+    expect(JSON.parse(String(linkedAudit?.params[linkedAudit.params.length - 1]))).toMatchObject({ authMethod: 'GoogleOAuth' });
+  });
+
+  it('pre-055: insert omits the auth_method column entirely', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] }, { rows: [{ login_policy: 'both' }] },
+      { rows: [{ identity_id: '1', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_PRE055);
+    await repository.insertLinkWithAudit({
+      actor: ACTOR, provider: 'workos', providerUserId: 'sub-a',
+      emailAtLink: 'a@example.com', emailVerified: true, mode: 'self_serve',
+      sessionId: 'session-1', authMethod: 'GoogleOAuth',
+    });
+    const insert = database.queries.find((q) => q.text.includes('INSERT INTO user_identities'));
+    expect(insert?.text).not.toContain('auth_method');
+  });
+});
+
+describe('PgUserIdentityRepository.listLinks', () => {
+  it('returns the provider identities of a user ordered by linked_at', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [
+        { identity_id: '1', auth_method: 'GoogleOAuth', email_at_link: 'a@company.com', linked_at: '2026-07-01T00:00:00Z', last_login_at: '2026-07-04T00:00:00Z' },
+        { identity_id: '2', auth_method: null, email_at_link: 'a@gmail.com', linked_at: '2026-07-02T00:00:00Z', last_login_at: null },
+      ] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await expect(repository.listLinks('42', 'workos')).resolves.toEqual([
+      { identityId: '1', authMethod: 'GoogleOAuth', emailAtLink: 'a@company.com', linkedAt: '2026-07-01T00:00:00Z', lastLoginAt: '2026-07-04T00:00:00Z' },
+      { identityId: '2', authMethod: null, emailAtLink: 'a@gmail.com', linkedAt: '2026-07-02T00:00:00Z', lastLoginAt: null },
+    ]);
+    expect(database.queries[0].text).toContain('WHERE user_id = $1 AND provider = $2');
+    expect(database.queries[0].text).toContain('ORDER BY linked_at');
+  });
+
+  it('pre-055: omits auth_method from the SELECT and returns authMethod null (R3-MAJOR)', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [
+        { identity_id: '1', email_at_link: 'a@company.com', linked_at: '2026-07-01T00:00:00Z', last_login_at: null },
+      ] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_PRE055);
+    await expect(repository.listLinks('42', 'workos')).resolves.toEqual([
+      { identityId: '1', authMethod: null, emailAtLink: 'a@company.com', linkedAt: '2026-07-01T00:00:00Z', lastLoginAt: null },
+    ]);
+    expect(database.queries[0].text).not.toContain('auth_method');
   });
 });
 
@@ -137,7 +210,7 @@ describe('PgUserIdentityRepository.deleteLinkWithAudit', () => {
         ],
       },
     ]);
-    const repository = new PgUserIdentityRepository(database.service);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
 
     await expect(
       repository.deleteLinkWithAudit({ actor: ACTOR, provider: 'workos', sessionId: 'session-1' }),
@@ -161,7 +234,7 @@ describe('PgUserIdentityRepository.deleteLinkWithAudit', () => {
     const database = createTransactionalDatabase([
       { rows: [] }, // session lock finds no live row
     ]);
-    const repository = new PgUserIdentityRepository(database.service);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
 
     await expect(
       repository.deleteLinkWithAudit({ actor: ACTOR, provider: 'workos', sessionId: 'session-1' }),
@@ -175,7 +248,7 @@ describe('PgUserIdentityRepository.deleteLinkWithAudit', () => {
       { rows: [{ '?column?': 1 }] }, // session lock
       { rows: [{ login_policy: 'external' }] }, // user lock sees the flip
     ]);
-    const repository = new PgUserIdentityRepository(database.service);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
 
     await expect(
       repository.deleteLinkWithAudit({ actor: ACTOR, provider: 'workos', sessionId: 'session-1' }),
@@ -189,7 +262,7 @@ describe('PgUserIdentityRepository.deleteLinkWithAudit', () => {
       { rows: [{ '?column?': 1 }] }, // user lock
       { rows: [] }, // delete found nothing
     ]);
-    const repository = new PgUserIdentityRepository(database.service);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
 
     await expect(
       repository.deleteLinkWithAudit({ actor: ACTOR, provider: 'workos', sessionId: 'session-1' }),
@@ -198,10 +271,131 @@ describe('PgUserIdentityRepository.deleteLinkWithAudit', () => {
   });
 });
 
+describe('PgUserIdentityRepository.deleteOneLinkWithAudit', () => {
+  const base = { identityId: '1', targetUserId: '42', actor: ACTOR, provider: 'workos', mode: 'self_serve' as const, actorSessionId: 'session-1' };
+
+  it('deletes a single identity of the target and writes one unlinked audit', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ login_policy: 'both', is_active: true }] },
+      { rows: [{ identity_id: '1', provider_user_id: 'sub-a', email_at_link: 'a@example.com', auth_method: 'GoogleOAuth' }] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await expect(repository.deleteOneLinkWithAudit(base)).resolves.toBe('unlinked');
+    const del = database.queries.find((q) => q.text.includes('DELETE FROM user_identities'));
+    expect(del?.text).toContain('identity_id = $1');
+    expect(del?.text).toContain('user_id = $2');
+    const audit = database.queries.find((q) => q.text.includes('auth.identity.unlinked'));
+    expect(audit?.text).toContain('related_user_id');
+    expect(audit?.params[4]).toBe(42);
+  });
+
+  it('returns not_found when the identity is not the target user’s (no audit)', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ login_policy: 'both', is_active: true }] },
+      { rows: [] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+    await expect(repository.deleteOneLinkWithAudit(base)).resolves.toBe('not_found');
+    expect(database.queries.filter((q) => q.text.includes('DELETE FROM user_identities'))).toHaveLength(0);
+    expect(database.queries.filter((q) => q.text.includes('audit_log'))).toHaveLength(0);
+  });
+
+  it('refuses to remove the LAST link of an external-only user (409), NO delete, NO audit', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ login_policy: 'external', is_active: true }] },
+      { rows: [{ identity_id: '1', provider_user_id: 'sub-a', email_at_link: 'a@example.com', auth_method: null }] },
+      { rows: [{ count: '1' }] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+    await expect(repository.deleteOneLinkWithAudit(base)).resolves.toBe('external_policy');
+    expect(database.queries.filter((q) => q.text.includes('DELETE FROM user_identities'))).toHaveLength(0);
+    expect(database.queries.filter((q) => q.text.includes('auth.identity.unlinked'))).toHaveLength(0);
+  });
+
+  it('returns not_found (404-priority) BEFORE the external-guard for a wrong identity', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ login_policy: 'external', is_active: true }] },
+      { rows: [] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+    await expect(repository.deleteOneLinkWithAudit(base)).resolves.toBe('not_found');
+    expect(database.queries.some((q) => q.text.includes('count'))).toBe(false);
+  });
+
+  it('allows admin to unlink from a DEACTIVATED target (is_active ignored on admin path)', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ login_policy: 'both', is_active: false }] },
+      { rows: [{ identity_id: '1', provider_user_id: 'sub-a', email_at_link: 'a@example.com', auth_method: 'GoogleOAuth' }] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+    await expect(repository.deleteOneLinkWithAudit({
+      ...base, mode: 'admin', actorSessionId: 'admin-session',
+      actor: { userId: '7', username: 'admin', roleId: 1 },
+    })).resolves.toBe('unlinked');
+    expect(database.queries[0].text).toContain('FROM auth_sessions');
+    expect(database.queries[0].params).toEqual(['admin-session']);
+  });
+
+  it('denies with session_inactive when the ACTOR (admin) session is revoked — no delete, no audit', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+    await expect(repository.deleteOneLinkWithAudit({
+      ...base, mode: 'admin', actorSessionId: 'revoked-admin',
+      actor: { userId: '7', username: 'admin', roleId: 1 },
+    })).resolves.toBe('session_inactive');
+    expect(database.queries.filter((q) => q.text.includes('DELETE FROM user_identities'))).toHaveLength(0);
+    expect(database.queries.filter((q) => q.text.includes('auth.identity.unlinked'))).toHaveLength(0);
+  });
+
+  it('pre-055 node: no auth_method in SELECT/INSERT, still unlinks', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ login_policy: 'both', is_active: true }] },
+      { rows: [{ identity_id: '1', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_PRE055);
+    await expect(repository.deleteOneLinkWithAudit(base)).resolves.toBe('unlinked');
+    const lookup = database.queries.find((q) => q.text.includes('FROM user_identities WHERE identity_id'));
+    expect(lookup?.text).not.toContain('auth_method');
+    const audit = database.queries.find((q) => q.text.includes('auth.identity.unlinked'));
+    expect(JSON.parse(String(audit?.params[audit.params.length - 1]))).toMatchObject({ authMethod: null });
+  });
+
+  it('writes an admin audit with actor≠target and reason (ACTOR session STILL re-proven)', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ login_policy: 'both', is_active: true }] },
+      { rows: [{ identity_id: '1', provider_user_id: 'sub-a', email_at_link: 'a@example.com', auth_method: 'Password' }] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+    await repository.deleteOneLinkWithAudit({
+      ...base, mode: 'admin', reason: 'уволен', actorSessionId: 'admin-session',
+      actor: { userId: '7', username: 'admin', roleId: 1 },
+    });
+    expect(database.queries[0].text).toContain('FROM auth_sessions');
+    expect(database.queries[0].params).toEqual(['admin-session']);
+    const audit = database.queries.find((q) => q.text.includes('auth.identity.unlinked'));
+    expect(audit?.params[0]).toBe('42');
+    expect(audit?.params[1]).toBe(7);
+    expect(audit?.params[2]).toBe('admin');
+    expect(audit?.params[4]).toBe(42);
+    const meta = JSON.parse(String(audit?.params[audit.params.length - 1]));
+    expect(meta).toMatchObject({ mode: 'admin', reason: 'уволен', identityId: '1' });
+  });
+});
+
 describe('PgUserIdentityRepository.writeLinkFailed', () => {
   it('writes the affected user into related_user_id (query-ready, plan §4.8)', async () => {
     const database = createTransactionalDatabase([{ rows: [] }]);
-    const repository = new PgUserIdentityRepository(database.service);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
 
     await repository.writeLinkFailed({
       actor: ACTOR,
@@ -223,7 +417,7 @@ describe('PgUserIdentityRepository.writeLinkFailed', () => {
 describe('PgUserIdentityRepository.isSessionActive', () => {
   it('requires an active, unexpired auth_sessions row', async () => {
     const database = createTransactionalDatabase([{ rows: [{ '?column?': 1 }] }]);
-    const repository = new PgUserIdentityRepository(database.service);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
 
     await expect(repository.isSessionActive('session-1')).resolves.toBe(true);
     const sql = database.queries[0].text;
@@ -234,7 +428,7 @@ describe('PgUserIdentityRepository.isSessionActive', () => {
 
   it('returns false for a revoked or missing session', async () => {
     const database = createTransactionalDatabase([{ rows: [] }]);
-    const repository = new PgUserIdentityRepository(database.service);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
 
     await expect(repository.isSessionActive('session-dead')).resolves.toBe(false);
   });
