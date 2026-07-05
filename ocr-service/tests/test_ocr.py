@@ -24,6 +24,8 @@ def test_ocr_reads_real_bazis_label():
     assert "548-16" in texts  # имя заказа
     assert "902" in texts and "596" in texts  # размеры
     assert body["durationMs"] > 0
+    assert body["imageWidth"] > 0 and body["imageHeight"] > 0
+    assert all("box" in l for l in body["lines"])
 
 
 def test_ocr_second_label_order_2586():

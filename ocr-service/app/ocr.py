@@ -105,4 +105,5 @@ def run_ocr(image_bytes: bytes) -> dict:
                 "score": float(score) if score is not None else 0.0,
                 "box": box.tolist() if hasattr(box, "tolist") else (box or []),
             })
-    return {"lines": lines, "durationMs": duration_ms}
+    h2, w2 = img.shape[:2]
+    return {"lines": lines, "durationMs": duration_ms, "imageWidth": int(w2), "imageHeight": int(h2)}

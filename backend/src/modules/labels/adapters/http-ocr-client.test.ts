@@ -16,7 +16,7 @@ describe('HttpOcrClient', () => {
   const BASE = 'http://ocr-service:8080';
   const image = Buffer.from([1, 2, 3]);
 
-  it('recognize() posts image bytes and parses {lines,durationMs}, dropping boxes', async () => {
+  it('recognize() posts image bytes and parses {lines,durationMs}; malformed (flat, non-pair) box → undefined', async () => {
     const mockFetch = vi.fn().mockResolvedValue(
       makeResponse(true, 200, {
         lines: [
@@ -37,6 +37,8 @@ describe('HttpOcrClient', () => {
       ],
       durationMs: 42,
     });
+    expect(result.lines[0].box).toBeUndefined();
+    expect(result.lines[1].box).toBeUndefined();
     expect(mockFetch).toHaveBeenCalledWith(
       `${BASE}/ocr`,
       expect.objectContaining({
@@ -48,6 +50,87 @@ describe('HttpOcrClient', () => {
     // signal must be present (timeout wiring), even though this mock ignores it.
     const init = mockFetch.mock.calls[0][1] as RequestInit;
     expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('recognize() parses a well-formed box (4 [x,y] pairs) and imageWidth/imageHeight through', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(true, 200, {
+        lines: [
+          {
+            text: 'ЗАКАЗ-1',
+            score: 0.98,
+            box: [
+              [0, 0],
+              [10, 0],
+              [10, 5],
+              [0, 5],
+            ],
+          },
+        ],
+        durationMs: 42,
+        imageWidth: 1600,
+        imageHeight: 1200,
+      }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    const result = await client.recognize(image, 'image/jpeg');
+
+    expect(result).toEqual({
+      lines: [
+        {
+          text: 'ЗАКАЗ-1',
+          score: 0.98,
+          box: [
+            [0, 0],
+            [10, 0],
+            [10, 5],
+            [0, 5],
+          ],
+        },
+      ],
+      durationMs: 42,
+      imageWidth: 1600,
+      imageHeight: 1200,
+    });
+  });
+
+  it('malformed box shapes (non-array-of-pairs, or an object) → box undefined, never throws', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(true, 200, {
+        lines: [
+          { text: 'A', score: 0.9, box: [['x', 'y'], [10, 0], [10, 5], [0, 5]] },
+          { text: 'B', score: 0.8, box: {} },
+          { text: 'C', score: 0.7, box: null },
+        ],
+        durationMs: 5,
+      }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    const result = await client.recognize(image, 'image/jpeg');
+
+    expect(result.lines).toEqual([
+      { text: 'A', score: 0.9 },
+      { text: 'B', score: 0.8 },
+      { text: 'C', score: 0.7 },
+    ]);
+    expect(result.lines.every((l) => l.box === undefined)).toBe(true);
+  });
+
+  it('missing imageWidth/imageHeight → both undefined, never throws', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(true, 200, {
+        lines: [{ text: 'A', score: 0.9 }],
+        durationMs: 5,
+      }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    const result = await client.recognize(image, 'image/jpeg');
+
+    expect(result.imageWidth).toBeUndefined();
+    expect(result.imageHeight).toBeUndefined();
   });
 
   it('429 → ApiError(503, OCR_SERVICE_BUSY)', async () => {

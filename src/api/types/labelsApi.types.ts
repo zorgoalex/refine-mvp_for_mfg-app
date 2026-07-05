@@ -247,12 +247,16 @@ export interface OcrLabelTextFields {
 }
 
 export interface OcrPreviewResult {
-  lines: { text: string; score: number }[];
+  lines: { text: string; score: number; box?: number[][] }[];
   durationMs: number;
+  imageWidth?: number;
+  imageHeight?: number;
 }
 
 export interface OcrTestResult {
-  lines: { text: string; score: number }[];
+  lines: { text: string; score: number; box?: number[][] }[];
   matched: { templateWon: boolean; score: number; fields: OcrLabelTextFields };
   fallbackFields: OcrLabelTextFields;
+  imageWidth?: number;
+  imageHeight?: number;
 }
