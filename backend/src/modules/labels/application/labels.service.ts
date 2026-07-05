@@ -8,6 +8,8 @@ import { validateQrTemplateElement, extractLabelTemplateFieldIds } from './label
 import { extractLabelFields, type LabelTextFields } from './scan/label-text-extraction';
 import { compileQrTemplate, parseQrPayload, parseQrPayloadRight } from './scan/qr-template-parser';
 import { scoreCandidate, rankCandidates } from './scan/scan-ranking';
+import { matchOcrTemplates, type OcrTemplateForMatch, type OcrTemplateRule } from './scan/ocr-template-matcher';
+import { DISCRIMINANT_FIELDS, isStrongField } from './scan/ocr-field-catalog';
 import type {
   CreateLabelTemplateCommand,
   DeleteLabelTemplateCommand,
@@ -38,6 +40,12 @@ import type {
   CreateLabelQrTemplateCommand,
   UpdateLabelQrTemplateCommand,
   DeleteLabelQrTemplateCommand,
+  LabelOcrTemplateDto,
+  LabelOcrTemplateInput,
+  ListLabelOcrTemplatesQuery,
+  CreateLabelOcrTemplateCommand,
+  UpdateLabelOcrTemplateCommand,
+  DeleteLabelOcrTemplateCommand,
   ScanResolveCommand,
   ScanResolveResult,
   ScanResolveFieldsCommand,
@@ -46,8 +54,31 @@ import type {
   ScanSearchInput,
   ScanCandidateRow,
   OcrPort,
+  OcrLine,
 } from './labels.types';
 import { LabelFieldBindingError } from '../errors/labels.errors';
+
+export interface PreviewOcrLabelCommand extends LabelsContext {
+  image: Buffer;
+  contentType: string;
+}
+
+export interface PreviewOcrLabelResult {
+  lines: OcrLine[];
+  durationMs: number;
+}
+
+export interface TestOcrTemplateCommand extends LabelsContext {
+  image: Buffer;
+  contentType: string;
+  rules: OcrTemplateRule[];
+}
+
+export interface TestOcrTemplateResult {
+  lines: OcrLine[];
+  matched: { templateWon: boolean; score: number; fields: LabelTextFields };
+  fallbackFields: LabelTextFields;
+}
 
 export interface LabelsServicePorts {
   repo: LabelsPort;
@@ -69,6 +100,8 @@ export class LabelsService {
   private readonly ocr: OcrPort | null;
   private qrTemplateCache: { at: number; templates: string[] } | null = null;
   private static readonly QR_TEMPLATE_CACHE_MS = 45_000;
+  private ocrTemplateCache: { at: number; templates: OcrTemplateForMatch[] } | null = null;
+  private static readonly OCR_TEMPLATE_CACHE_MS = 45_000;
 
   // Маппинг field id (semantic id из bazis-field-catalog) -> ключ ScanSearchInput.
   private static readonly SCAN_FIELD_TO_INPUT: Record<string, keyof ScanSearchInput> = {
@@ -185,6 +218,58 @@ export class LabelsService {
   async deleteQrTemplate(command: DeleteLabelQrTemplateCommand): Promise<void> {
     await this.require(command, [MANAGE_TEMPLATES], command.id, 'label_qr_template');
     return this.repo.deleteQrTemplate(command);
+  }
+
+  async listOcrTemplates(query: ListLabelOcrTemplatesQuery): Promise<LabelOcrTemplateDto[]> {
+    await this.require(query, [VIEW], undefined, 'label_ocr_template');
+    return this.repo.listOcrTemplates(query);
+  }
+
+  async createOcrTemplate(command: CreateLabelOcrTemplateCommand): Promise<LabelOcrTemplateDto> {
+    await this.require(command, [MANAGE_TEMPLATES], undefined, 'label_ocr_template');
+    validateOcrTemplateInput(command.input);
+    return this.repo.createOcrTemplate(command);
+  }
+
+  async updateOcrTemplate(command: UpdateLabelOcrTemplateCommand): Promise<LabelOcrTemplateDto> {
+    await this.require(command, [MANAGE_TEMPLATES], command.id, 'label_ocr_template');
+    validateOcrTemplateInput(command.input);
+    return this.repo.updateOcrTemplate(command);
+  }
+
+  async deleteOcrTemplate(command: DeleteLabelOcrTemplateCommand): Promise<void> {
+    await this.require(command, [MANAGE_TEMPLATES], command.id, 'label_ocr_template');
+    return this.repo.deleteOcrTemplate(command);
+  }
+
+  /** Preview-only OCR recognition for the template-config UI: runs OcrPort.recognize and returns
+   *  the raw lines so an operator can build rules against a real photo. No search, no audit. */
+  async previewOcrLabel(cmd: PreviewOcrLabelCommand): Promise<PreviewOcrLabelResult> {
+    await this.require(cmd, [MANAGE_TEMPLATES], undefined, 'label_ocr_template');
+    if (!this.ocr) {
+      throw new ApiError(503, 'OCR_SERVICE_UNAVAILABLE', 'OCR service is not configured');
+    }
+    const { lines, durationMs } = await this.ocr.recognize(cmd.image, cmd.contentType);
+    return { lines: lines.map((line) => ({ text: line.text, score: line.score })), durationMs };
+  }
+
+  /** Dry-run of a candidate rule set against a real photo (template-config UI): recognizes the
+   *  image, matches ONLY the candidate template (id:0), and also reports the legacy
+   *  extractLabelFields fallback for comparison. No search, no audit. */
+  async testOcrTemplate(cmd: TestOcrTemplateCommand): Promise<TestOcrTemplateResult> {
+    await this.require(cmd, [MANAGE_TEMPLATES], undefined, 'label_ocr_template');
+    if (!this.ocr) {
+      throw new ApiError(503, 'OCR_SERVICE_UNAVAILABLE', 'OCR service is not configured');
+    }
+    const { lines } = await this.ocr.recognize(cmd.image, cmd.contentType);
+    const lineTexts = lines.map((line) => line.text);
+    const matched = matchOcrTemplates(lineTexts, [{ id: 0, name: 'preview', rules: cmd.rules }]);
+    const fallbackFields = extractLabelFields(lineTexts);
+    return {
+      lines: lines.map((line) => ({ text: line.text, score: line.score })),
+      matched: { templateWon: matched !== null, score: matched?.score ?? 0, fields: matched?.fields ?? {} },
+      fallbackFields,
+    };
   }
 
   async scanResolve(cmd: ScanResolveCommand): Promise<ScanResolveResult> {
@@ -320,7 +405,10 @@ export class LabelsService {
       throw new ApiError(503, 'OCR_SERVICE_UNAVAILABLE', 'OCR service is not configured');
     }
     const { lines, durationMs } = await this.ocr.recognize(cmd.image, cmd.contentType);
-    const fields = extractLabelFields(lines.map((line) => line.text));
+    const lineTexts = lines.map((line) => line.text);
+    const templates = await this.getActiveOcrTemplates();
+    const matched = matchOcrTemplates(lineTexts, templates);
+    const fields = matched ? matched.fields : extractLabelFields(lineTexts);
     const ocrBlock = { lineCount: lines.length, durationMs };
 
     if (
@@ -348,6 +436,16 @@ export class LabelsService {
     return templates;
   }
 
+  private async getActiveOcrTemplates(): Promise<OcrTemplateForMatch[]> {
+    const now = Date.now();
+    if (this.ocrTemplateCache && now - this.ocrTemplateCache.at < LabelsService.OCR_TEMPLATE_CACHE_MS) {
+      return this.ocrTemplateCache.templates;
+    }
+    const templates = await this.repo.listActiveOcrTemplatesForMatch();
+    this.ocrTemplateCache = { at: now, templates };
+    return templates;
+  }
+
   private toSnapshotKey(fieldId: string): string {
     // Формат ключей bazis_fields ВЕРИФИЦИРОВАН по write-path:
     // backend/src/modules/labels/adapters/pg-labels-repository.ts:615
@@ -368,7 +466,7 @@ export class LabelsService {
     ctx: LabelsContext,
     permissions: PermissionName[],
     targetId?: number,
-    targetEntityType: 'label_template' | 'order' | 'label_qr_template' = 'label_template',
+    targetEntityType: 'label_template' | 'order' | 'label_qr_template' | 'label_ocr_template' = 'label_template',
   ): Promise<void> {
     if (this.permissions.canUserAny(ctx.currentUser, permissions)) {
       return;
@@ -405,6 +503,44 @@ export function validateQrTemplateInput(input: LabelQrTemplateInput): void {
     if (!isSupportedFieldBinding(fieldId, {})) {
       throw new LabelFieldBindingError(fieldId); // maps to 422 LABEL_FIELD_BINDING_INVALID
     }
+  }
+}
+
+/** Mirrors the label-ocr-template.dto.ts superRefine (refineRules): same three invariants,
+ *  enforced again at the service boundary in case a caller bypasses the DTO layer. */
+export function validateOcrTemplateInput(input: LabelOcrTemplateInput): void {
+  const seen = new Set<string>();
+  for (const rule of input.rules) {
+    if (rule.field === 'ignore') continue;
+    if (seen.has(rule.field)) {
+      throw new ApiError(422, 'OCR_TEMPLATE_INVALID', `Поле "${rule.field}" указано более одного раза`, {
+        field: rule.field,
+      });
+    }
+    seen.add(rule.field);
+  }
+
+  const strongCount = input.rules.filter((rule) => isStrongField(rule.field)).length;
+  if (strongCount < 2) {
+    throw new ApiError(
+      422,
+      'OCR_TEMPLATE_INVALID',
+      'Шаблону нужно ≥2 strong-поля (order_number, detail_number, dimensions, material, quantity, date)',
+      {},
+    );
+  }
+
+  const hasDiscriminant = input.rules.some((rule) => {
+    if (DISCRIMINANT_FIELDS.has(rule.field)) return true;
+    return typeof rule.anchor === 'string' && rule.anchor.trim().length > 0;
+  });
+  if (!hasDiscriminant) {
+    throw new ApiError(
+      422,
+      'OCR_TEMPLATE_INVALID',
+      'Шаблону нужен дискриминант (поле dimensions/material или anchor хотя бы у одного правила)',
+      {},
+    );
   }
 }
 
