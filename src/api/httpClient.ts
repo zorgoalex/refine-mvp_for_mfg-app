@@ -143,7 +143,18 @@ async function readResponseBody(response: Response): Promise<unknown> {
 
   const contentType = response.headers.get('Content-Type') ?? '';
   if (contentType.includes('application/json')) {
-    return JSON.parse(text);
+    try {
+      return JSON.parse(text);
+    } catch {
+      // The backend DID respond — surface this as an ApiError so callers
+      // (e.g. the SSO callback) can distinguish it from a transport failure
+      // where the request never reached the backend at all.
+      throw new ApiError({
+        code: 'RESPONSE_PARSE_ERROR',
+        message: 'Некорректный ответ сервера',
+        status: response.status,
+      });
+    }
   }
 
   try {

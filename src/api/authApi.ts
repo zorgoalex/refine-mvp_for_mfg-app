@@ -26,14 +26,15 @@ export const authApi = {
     return response;
   },
 
+  // Local state is cleared only on a CONFIRMED backend logout: on failure
+  // the HttpOnly refresh cookie is still alive, so pretending to be logged
+  // out (dropping the in-memory session) would be a lie on a shared machine.
   async logout(): Promise<LogoutResponse> {
-    try {
-      return await httpClient.post<LogoutResponse>(apiRoutes.auth.logout, undefined, {
-        skipAuthRefresh: true,
-      });
-    } finally {
-      authSession.clear();
-    }
+    const response = await httpClient.post<LogoutResponse>(apiRoutes.auth.logout, undefined, {
+      skipAuthRefresh: true,
+    });
+    authSession.clear();
+    return response;
   },
 
   async me(): Promise<MeResponse> {

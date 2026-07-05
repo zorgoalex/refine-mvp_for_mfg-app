@@ -204,6 +204,23 @@ describe('httpClient', () => {
       expect.any(Object),
     );
   });
+
+  it('maps a malformed JSON body on a 200 to an ApiError (backend DID respond)', async () => {
+    mockFetch(
+      new Response('<html>cdn error page</html>', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    // Distinguishable from a transport failure: the SSO callback settles the
+    // single-use code on any observed backend response.
+    await expect(httpClient.get('/api/v1/me')).rejects.toMatchObject({
+      name: 'ApiError',
+      code: 'RESPONSE_PARSE_ERROR',
+      status: 200,
+    });
+  });
 });
 
 function mockFetch(...responses: Response[]) {
