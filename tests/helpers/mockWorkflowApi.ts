@@ -835,8 +835,8 @@ export async function setupWorkflowMockApi(
                 workshops: [],
                 requirements: [],
                 dowelingLinks: [],
-                primaryProject: null,
-                projects: [],
+                primaryGroup: null,
+                groups: [],
                 totals: {
                     totalAmount: orderRow.total_amount,
                     finalAmount: orderRow.final_amount,
