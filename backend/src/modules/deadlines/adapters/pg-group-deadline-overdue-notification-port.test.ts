@@ -4,8 +4,8 @@ import { PgGroupDeadlineOverdueNotificationPort } from './pg-group-deadline-over
 describe('PgGroupDeadlineOverdueNotificationPort', () => {
   it('notifies groups with current generic deadline links and typed order links', async () => {
     const database = fakeDatabase([
-      { group_id: projectId('1') },
-      { group_id: projectId('2') },
+      { group_id: groupId('1') },
+      { group_id: groupId('2') },
     ]);
     const notifications = fakeNotifications();
     const port = new PgGroupDeadlineOverdueNotificationPort(database, notifications, true);
@@ -28,7 +28,7 @@ describe('PgGroupDeadlineOverdueNotificationPort', () => {
     expect(database.queries[0]?.text).toContain('pop.valid_to IS NULL');
     expect(notifications.calls).toEqual([
       {
-        groupId: projectId('1'),
+        groupId: groupId('1'),
         sourceId: 'event-1',
         actorUserId: '7',
         requestId: 'req-1',
@@ -36,7 +36,7 @@ describe('PgGroupDeadlineOverdueNotificationPort', () => {
         orderId: '42',
       },
       {
-        groupId: projectId('2'),
+        groupId: groupId('2'),
         sourceId: 'event-1',
         actorUserId: '7',
         requestId: 'req-1',
@@ -65,7 +65,7 @@ describe('PgGroupDeadlineOverdueNotificationPort', () => {
   });
 
   it('records skipped evidence when the group P8 gate is disabled', async () => {
-    const database = fakeDatabase([{ group_id: projectId('1') }]);
+    const database = fakeDatabase([{ group_id: groupId('1') }]);
     const notifications = fakeNotifications();
     const port = new PgGroupDeadlineOverdueNotificationPort(database, notifications, false);
 
@@ -86,7 +86,7 @@ describe('PgGroupDeadlineOverdueNotificationPort', () => {
   });
 
   it('records skipped evidence when there is no order visibility anchor', async () => {
-    const database = fakeDatabase([{ group_id: projectId('1') }]);
+    const database = fakeDatabase([{ group_id: groupId('1') }]);
     const notifications = fakeNotifications();
     const port = new PgGroupDeadlineOverdueNotificationPort(database, notifications, true);
 
@@ -140,7 +140,7 @@ function fakeNotifications() {
   };
 }
 
-function projectId(suffix: string = '1'): string {
+function groupId(suffix: string = '1'): string {
   return `${suffix.repeat(8)}-${suffix.repeat(4)}-4${suffix.repeat(3)}-8${suffix.repeat(3)}-${suffix.repeat(12)}`;
 }
 

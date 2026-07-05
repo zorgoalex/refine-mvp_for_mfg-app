@@ -61,7 +61,7 @@ describe('PgRecipientSourceAdapter.group_participants fanout', () => {
     expect(params).toEqual([['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']]);
   });
 
-  it('returns [] when effective project attribution is empty', async () => {
+  it('returns [] when effective group attribution is empty', async () => {
     const { client, calls } = fakeClient([{ user_id: 5 }]);
     const ctx = buildContext({ orderId: 42, deadlineInstanceId: null, groupIds: [] });
 

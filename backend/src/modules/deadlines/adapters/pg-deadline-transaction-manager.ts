@@ -30,7 +30,7 @@ class PgDeadlineUnitOfWork implements DeadlineUnitOfWork {
   readonly deadlines: PgDeadlineRepository;
   readonly statusActionPort: DeadlineUnitOfWork['statusActionPort'];
   readonly productionStatusActionPort: DeadlineUnitOfWork['productionStatusActionPort'];
-  readonly projectDeadlineOverduePort: DeadlineUnitOfWork['projectDeadlineOverduePort'];
+  readonly groupDeadlineOverduePort: DeadlineUnitOfWork['groupDeadlineOverduePort'];
 
   constructor(tx: TransactionClient, groupP8NotificationsEnabled: boolean) {
     this.deadlines = new PgDeadlineRepository(tx);
@@ -54,7 +54,7 @@ class PgDeadlineUnitOfWork implements DeadlineUnitOfWork {
         };
       },
     };
-    this.projectDeadlineOverduePort = new PgGroupDeadlineOverdueNotificationPort(
+    this.groupDeadlineOverduePort = new PgGroupDeadlineOverdueNotificationPort(
       tx,
       new GroupNotificationService({
         recipients: new PgGroupNotificationRecipientRepository(tx),

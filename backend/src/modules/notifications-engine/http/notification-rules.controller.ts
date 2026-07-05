@@ -178,7 +178,7 @@ function parseListFilter(query: Record<string, unknown>): ListNotificationRulesF
 
   const groupId = query?.['groupId'];
   if (groupId !== undefined) {
-    filter.groupId = parseProjectIdQueryParam(groupId);
+    filter.groupId = parseGroupIdQueryParam(groupId);
   }
 
   return filter;
@@ -202,7 +202,7 @@ function parseBooleanQueryParam(value: unknown): boolean {
   });
 }
 
-function parseProjectIdQueryParam(value: unknown): string | 'global' {
+function parseGroupIdQueryParam(value: unknown): string | 'global' {
   if (value === 'global') {
     return 'global';
   }

@@ -41,10 +41,10 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
   let outsiderUserId: number;
   let inactiveUserId: number;
   let orderId: number;
-  let projectParticipantUserId: number;
+  let groupParticipantUserId: number;
   let deadlineLinkedParticipantUserId: number;
-  let orderProjectId: string;
-  let deadlineProjectId: string;
+  let orderGroupId: string;
+  let deadlineGroupId: string;
   const deadlineInstanceId = randomUUID();
 
   beforeAll(async () => {
@@ -87,15 +87,15 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
       [orderId],
     );
 
-    const projectRows = await pool.query<{ id: string }>(
-      `INSERT INTO group_groups (name) VALUES ('E2E-project-1') RETURNING id`,
+    const groupRows = await pool.query<{ id: string }>(
+      `INSERT INTO group_groups (name) VALUES ('E2E-group-1') RETURNING id`,
     );
-    orderProjectId = projectRows.rows[0].id;
+    orderGroupId = groupRows.rows[0].id;
 
     await pool.query(
       `INSERT INTO group_order_groups (order_id, group_id, relation_type, is_primary, valid_from, valid_to)
        VALUES ($1::bigint, $2::uuid, 'primary', true, now(), NULL)`,
-      [orderId, orderProjectId],
+      [orderId, orderGroupId],
     );
 
     const participantRows = await pool.query<{ user_id: number }>(
@@ -105,26 +105,26 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
       RETURNING user_id
       `,
     );
-    projectParticipantUserId = Number(participantRows.rows[0].user_id);
+    groupParticipantUserId = Number(participantRows.rows[0].user_id);
 
     await pool.query(
       `INSERT INTO group_participants (group_id, participant_type, participant_id_text, role_code, valid_from, valid_to)
        VALUES ($1::uuid, 'user', $2::text, 'member', now(), NULL)`,
-      [orderProjectId, String(projectParticipantUserId)],
+      [orderGroupId, String(groupParticipantUserId)],
     );
 
-    // Second project linked to the deadline ONLY via a generic deadline-instance
+    // Second group linked to the deadline ONLY via a generic deadline-instance
     // entity link (NOT via the order) — proves the P8 convergence parity fix:
     // the engine must reach these participants too.
-    const deadlineProjectRows = await pool.query<{ id: string }>(
-      `INSERT INTO group_groups (name) VALUES ('E2E-project-deadline-only') RETURNING id`,
+    const deadlineGroupRows = await pool.query<{ id: string }>(
+      `INSERT INTO group_groups (name) VALUES ('E2E-group-deadline-only') RETURNING id`,
     );
-    deadlineProjectId = deadlineProjectRows.rows[0].id;
+    deadlineGroupId = deadlineGroupRows.rows[0].id;
 
     await pool.query(
       `INSERT INTO group_entity_links (group_id, entity_type_code, entity_id_text, relation_type, valid_from, valid_to)
        VALUES ($1::uuid, 'deadline_instance', $2::text, 'related', now(), NULL)`,
-      [deadlineProjectId, deadlineInstanceId],
+      [deadlineGroupId, deadlineInstanceId],
     );
 
     const deadlineParticipantRows = await pool.query<{ user_id: number }>(
@@ -139,7 +139,7 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
     await pool.query(
       `INSERT INTO group_participants (group_id, participant_type, participant_id_text, role_code, valid_from, valid_to)
        VALUES ($1::uuid, 'user', $2::text, 'member', now(), NULL)`,
-      [deadlineProjectId, String(deadlineLinkedParticipantUserId)],
+      [deadlineGroupId, String(deadlineLinkedParticipantUserId)],
     );
   });
 
@@ -162,14 +162,14 @@ maybe('PgRecipientSourceAdapter / PgVisibilityAdapter integration', () => {
     expect(result).toEqual([workerUserId]);
   });
 
-  it('resolves group_participants for typed user participants of projects linked to the order', async () => {
-    const ctx = buildContext({ orderId, groupIds: [orderProjectId] });
+  it('resolves group_participants for typed user participants of groups linked to the order', async () => {
+    const ctx = buildContext({ orderId, groupIds: [orderGroupId] });
     const result = await recipientSource.resolveDynamic(pool, 'group_participants', ctx);
-    expect(result).toEqual([projectParticipantUserId]);
+    expect(result).toEqual([groupParticipantUserId]);
   });
 
-  it('resolves group_participants only from effective deadline project attribution', async () => {
-    const ctx = buildContext({ orderId, deadlineInstanceId, groupIds: [deadlineProjectId] });
+  it('resolves group_participants only from effective deadline group attribution', async () => {
+    const ctx = buildContext({ orderId, deadlineInstanceId, groupIds: [deadlineGroupId] });
     const result = await recipientSource.resolveDynamic(pool, 'group_participants', ctx);
     expect(result).toEqual([deadlineLinkedParticipantUserId]);
   });

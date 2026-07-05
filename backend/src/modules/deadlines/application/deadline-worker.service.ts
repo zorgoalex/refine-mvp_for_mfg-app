@@ -6,9 +6,9 @@ import { DeadlineActionDispatcherService } from './deadline-action-dispatcher.se
 import type {
   CreateDeadlineEventInput,
   DeadlineRepositoryPort,
+  DeadlineGroupDeadlineOverdueNotificationPort,
   DeadlineNotificationPort,
   DeadlineOrderStatusActionPort,
-  DeadlineProjectDeadlineOverdueNotificationPort,
   DeadlineProductionStatusActionPort,
   DeadlineTargetResolverPort,
   DeadlineTransactionManagerPort,
@@ -21,7 +21,7 @@ export interface DeadlineWorkerServicePorts {
   notificationPort: DeadlineNotificationPort;
   statusActionPort?: DeadlineOrderStatusActionPort;
   productionStatusActionPort?: DeadlineProductionStatusActionPort;
-  projectDeadlineOverduePort?: DeadlineProjectDeadlineOverdueNotificationPort;
+  groupDeadlineOverduePort?: DeadlineGroupDeadlineOverdueNotificationPort;
   dispatcher?: DeadlineActionDispatcherService;
 }
 
@@ -103,18 +103,18 @@ export class DeadlineWorkerService {
 
         if (eventResult.created) {
           dispatchEvents.push({ event });
-          const projectDeadlineOverduePort =
-            unitOfWork.projectDeadlineOverduePort ?? this.ports.projectDeadlineOverduePort;
+          const groupDeadlineOverduePort =
+            unitOfWork.groupDeadlineOverduePort ?? this.ports.groupDeadlineOverduePort;
           const engineOwnsDeadline = command.config.engineOwnsDeadline === true;
           const engineOwnsEventType =
             withOwnerOverride(event.eventType, engineOwnsDeadline ? 'engine' : undefined)?.owner ===
             'engine';
           if (
             event.eventType === 'DEADLINE_EXPIRED'
-            && projectDeadlineOverduePort
+            && groupDeadlineOverduePort
             && !engineOwnsEventType
           ) {
-            await projectDeadlineOverduePort.notifyDeadlineOverdue({
+            await groupDeadlineOverduePort.notifyDeadlineOverdue({
               deadlineEventId: event.deadlineEventId,
               deadlineInstanceId: event.deadlineId,
               orderId: event.orderId == null ? null : String(event.orderId),
@@ -123,16 +123,16 @@ export class DeadlineWorkerService {
             });
           } else if (
             event.eventType === 'DEADLINE_EXPIRED'
-            && projectDeadlineOverduePort
+            && groupDeadlineOverduePort
             && engineOwnsEventType
           ) {
             // The notification engine owns the DEADLINE_EXPIRED event during
-            // the convergence cutover. The engine reproduces project-overdue
+            // the convergence cutover. The engine reproduces group-overdue
             // delivery via the group_participants resolver, so the inline
-            // P8 port must NOT write a project_notification. Record an outbox
+            // P8 port must NOT write a group_notification. Record an outbox
             // skip marker so the existing skip-evidence pattern is preserved
             // (mirrors `pg-group-deadline-overdue-notification-port.recordSkipped`).
-            await projectDeadlineOverduePort.recordSkipped(
+            await groupDeadlineOverduePort.recordSkipped(
               {
                 deadlineEventId: event.deadlineEventId,
                 deadlineInstanceId: event.deadlineId,

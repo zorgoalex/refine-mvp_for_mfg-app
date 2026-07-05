@@ -186,7 +186,7 @@ describe('Deadline convergence — zero double-send (engine fakes)', () => {
       }),
       rule({
         notificationRuleId: 'seed-participants',
-        ruleCode: 'deadline-expired-project-participants',
+        ruleCode: 'deadline-expired-group-participants',
         recipients: { resolvers: ['group_participants'] },
       }),
       rule({

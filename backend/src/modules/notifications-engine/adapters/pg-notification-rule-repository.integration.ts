@@ -216,7 +216,7 @@ maybe('PgNotificationRuleRepository integration', () => {
 async function applyMigration(pool: Pool): Promise<void> {
   for (const migrationFile of [
     '014_notification_rules.sql',
-    '018_notification_rules_project_scope.sql',
+    '018_notification_rules_group_scope.sql',
   ]) {
     const migrationPath = resolve(__dirname, '../../../../db/migrations', migrationFile);
     const sql = readFileSync(migrationPath, 'utf8');

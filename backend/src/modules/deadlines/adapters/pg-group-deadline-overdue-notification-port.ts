@@ -2,23 +2,23 @@ import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { GroupNotificationService } from '../../groups/notifications/group-notification.service';
 import type {
-  DeadlineProjectDeadlineOverdueNotificationInput,
-  DeadlineProjectDeadlineOverdueNotificationPort,
-  DeadlineProjectDeadlineOverdueSkipReason,
+  DeadlineGroupDeadlineOverdueNotificationInput,
+  DeadlineGroupDeadlineOverdueNotificationPort,
+  DeadlineGroupDeadlineOverdueSkipReason,
 } from '../application/deadline.types';
 
-interface ProjectLinkRow extends QueryResultRow {
+interface GroupLinkRow extends QueryResultRow {
   group_id: string;
 }
 
-export class PgGroupDeadlineOverdueNotificationPort implements DeadlineProjectDeadlineOverdueNotificationPort {
+export class PgGroupDeadlineOverdueNotificationPort implements DeadlineGroupDeadlineOverdueNotificationPort {
   constructor(
     private readonly database: DatabaseClient,
     private readonly notifications: GroupNotificationService,
     private readonly enabled: boolean,
   ) {}
 
-  async notifyDeadlineOverdue(input: DeadlineProjectDeadlineOverdueNotificationInput): Promise<void> {
+  async notifyDeadlineOverdue(input: DeadlineGroupDeadlineOverdueNotificationInput): Promise<void> {
     if (!this.enabled) {
       await this.recordSkipped(input, 'group_p8_notifications_disabled');
       return;
@@ -28,7 +28,7 @@ export class PgGroupDeadlineOverdueNotificationPort implements DeadlineProjectDe
       return;
     }
 
-    const result = await this.database.query<ProjectLinkRow>(
+    const result = await this.database.query<GroupLinkRow>(
       `
       WITH deadline_links AS (
         SELECT pel.group_id
@@ -72,8 +72,8 @@ export class PgGroupDeadlineOverdueNotificationPort implements DeadlineProjectDe
   }
 
   async recordSkipped(
-    input: DeadlineProjectDeadlineOverdueNotificationInput,
-    skipReason: DeadlineProjectDeadlineOverdueSkipReason,
+    input: DeadlineGroupDeadlineOverdueNotificationInput,
+    skipReason: DeadlineGroupDeadlineOverdueSkipReason,
   ): Promise<void> {
     await this.database.query(
       `

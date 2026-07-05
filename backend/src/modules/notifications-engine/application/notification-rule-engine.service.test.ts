@@ -120,20 +120,20 @@ describe('NotificationRuleEngineService.processEvent', () => {
     expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(3);
   });
 
-  it('matches global rules and project-scoped rules for attributed events', async () => {
+  it('matches global rules and group-scoped rules for attributed events', async () => {
     const globalRule = rule({ notificationRuleId: 'global-rule', groupId: null, recipients: { userIds: [1] } });
     const scopedRule = rule({
       notificationRuleId: 'scoped-rule',
       groupId: '11111111-1111-4111-8111-111111111111',
       recipients: { userIds: [2] },
     });
-    const otherProjectRule = rule({
+    const otherGroupRule = rule({
       notificationRuleId: 'other-rule',
       groupId: '22222222-2222-4222-8222-222222222222',
       recipients: { userIds: [3] },
     });
     const deps = fakes({
-      ruleRepo: { listEnabledByEvent: vi.fn(async () => [globalRule, scopedRule, otherProjectRule]) },
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [globalRule, scopedRule, otherGroupRule]) },
       contextBuilder: {
         buildContext: vi.fn(async () => ctx({
           groupIds: ['11111111-1111-4111-8111-111111111111'],
@@ -154,7 +154,7 @@ describe('NotificationRuleEngineService.processEvent', () => {
     ).toEqual(['global-rule', 'scoped-rule']);
   });
 
-  it('skips project-scoped rules when the event has no project attribution', async () => {
+  it('skips group-scoped rules when the event has no group attribution', async () => {
     const scopedRule = rule({
       notificationRuleId: 'scoped-rule',
       groupId: '11111111-1111-4111-8111-111111111111',

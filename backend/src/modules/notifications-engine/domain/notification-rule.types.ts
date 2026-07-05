@@ -63,8 +63,8 @@ export interface NotificationEventContext {
    */
   deadlineInstanceId: string | null;
   /**
-   * Effective project attribution for this event. Global rules ignore this;
-   * project-scoped rules match only when their project id is present here.
+   * Effective group attribution for this event. Global rules ignore this;
+   * group-scoped rules match only when their group id is present here.
    */
   groupIds: string[];
   orderStatusId: number | null;

@@ -18,7 +18,7 @@ interface DeadlineEntityTypeRow {
   entity_type: unknown;
 }
 
-interface ProjectAttributionRow {
+interface GroupAttributionRow {
   group_id: string;
 }
 
@@ -72,7 +72,7 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
 
     const deadlineInstanceId = event.aggregateType === 'deadline' ? event.aggregateId : null;
     const deadlineEntityType = await this.resolveDeadlineEntityType(client, deadlineInstanceId);
-    const groupIds = await this.resolveProjectIds(client, orderId, deadlineInstanceId);
+    const groupIds = await this.resolveGroupIds(client, orderId, deadlineInstanceId);
     const isCurrentDeadlineEvent = await this.resolveIsCurrentDeadlineEvent(client, event, orderId);
 
     return {
@@ -168,7 +168,7 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
     return result.rows.length > 0;
   }
 
-  private async resolveProjectIds(
+  private async resolveGroupIds(
     client: DatabaseClient,
     orderId: number | null,
     deadlineInstanceId: string | null,
@@ -178,31 +178,31 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
     }
 
     const result = deadlineInstanceId != null
-      ? await client.query<ProjectAttributionRow>(
+      ? await client.query<GroupAttributionRow>(
         `
-        WITH explicit_deadline_projects AS (
+        WITH explicit_deadline_groups AS (
           SELECT DISTINCT pel.group_id
           FROM public.group_entity_links pel
           WHERE pel.entity_type_code = 'deadline_instance'
             AND pel.entity_id_text = $1::text
             AND pel.valid_to IS NULL
         ),
-        derived_order_projects AS (
+        derived_order_groups AS (
           SELECT DISTINCT pop.group_id
           FROM public.group_order_groups pop
           WHERE pop.order_id = $2::bigint
             AND pop.valid_to IS NULL
         )
         SELECT group_id
-        FROM explicit_deadline_projects
+        FROM explicit_deadline_groups
         UNION
         SELECT group_id
-        FROM derived_order_projects
-        WHERE NOT EXISTS (SELECT 1 FROM explicit_deadline_projects)
+        FROM derived_order_groups
+        WHERE NOT EXISTS (SELECT 1 FROM explicit_deadline_groups)
         `,
         [deadlineInstanceId, orderId],
       )
-      : await client.query<ProjectAttributionRow>(
+      : await client.query<GroupAttributionRow>(
         `
         SELECT DISTINCT pop.group_id
         FROM public.group_order_groups pop

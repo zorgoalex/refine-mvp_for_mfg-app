@@ -90,16 +90,16 @@ describe('NotificationRulesService', () => {
       const repo = fakeRepository({ rules: [createRule()] });
       const service = buildService({ repo });
 
-      await service.create(currentUser(), 'req-project-scope-create', {
+      await service.create(currentUser(), 'req-group-scope-create', {
         ...validCreateInput(),
         groupId: '11111111-1111-4111-8111-111111111111',
       });
 
       expect(repo.created[0].groupId).toBe('11111111-1111-4111-8111-111111111111');
 
-      await service.update(currentUser(), 'req-project-scope-update', 'rule-1', {
+      await service.update(currentUser(), 'req-group-scope-update', 'rule-1', {
         patch: { groupId: null },
-        reason: 'clear project scope',
+        reason: 'clear group scope',
       });
 
       expect(repo.updated.at(-1)).toMatchObject({

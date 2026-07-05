@@ -13,7 +13,7 @@ describe('notification event registry', () => {
     expect(isEngineOwnedEvent('order.payment_status_changed')).toBe(true);
   });
 
-  it('does not own legacy-inline deadline/project events in phase 1', () => {
+  it('does not own legacy-inline deadline/group events in phase 1', () => {
     expect(isEngineOwnedEvent('DEADLINE_EXPIRED')).toBe(false);
     expect(isEngineOwnedEvent('GROUP_DEADLINE_OVERDUE')).toBe(false);
   });
@@ -46,7 +46,7 @@ describe('notification event registry', () => {
     }
   });
 
-  it('does not add head resolvers to the project-only GROUP_DEADLINE_OVERDUE event', () => {
+  it('does not add head resolvers to the group-only GROUP_DEADLINE_OVERDUE event', () => {
     const def = getEventDefinition('GROUP_DEADLINE_OVERDUE');
     expect(def?.supportedResolvers).toEqual(['group_participants']);
   });

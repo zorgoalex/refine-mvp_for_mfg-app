@@ -49,7 +49,7 @@ describe('validateNotificationRuleInput', () => {
     ).toEqual({ ok: true });
   });
 
-  it('rejects head resolvers for the project-only GROUP_DEADLINE_OVERDUE event', () => {
+  it('rejects head resolvers for the group-only GROUP_DEADLINE_OVERDUE event', () => {
     expect(
       validateNotificationRuleInput(
         {

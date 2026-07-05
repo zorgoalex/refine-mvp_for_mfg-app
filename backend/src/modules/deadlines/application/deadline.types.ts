@@ -328,7 +328,7 @@ export interface DeadlineUnitOfWork {
   deadlines: DeadlineRepositoryPort;
   statusActionPort?: DeadlineOrderStatusActionPort;
   productionStatusActionPort?: DeadlineProductionStatusActionPort;
-  projectDeadlineOverduePort?: DeadlineProjectDeadlineOverdueNotificationPort;
+  groupDeadlineOverduePort?: DeadlineGroupDeadlineOverdueNotificationPort;
 }
 
 export interface DeadlineTransactionManagerPort {
@@ -364,13 +364,13 @@ export interface DeadlineNotificationPort {
   createNotification(input: DeadlineNotificationInput): Promise<DeadlineNotificationResult>;
 }
 
-export type DeadlineProjectDeadlineOverdueSkipReason =
+export type DeadlineGroupDeadlineOverdueSkipReason =
   | 'group_p8_notifications_disabled'
   | 'no_order_visibility_anchor'
   | 'no_group_link'
   | 'owned_by_notification_engine';
 
-export interface DeadlineProjectDeadlineOverdueNotificationInput {
+export interface DeadlineGroupDeadlineOverdueNotificationInput {
   deadlineEventId: string;
   deadlineInstanceId: string;
   orderId: string | null;
@@ -378,21 +378,21 @@ export interface DeadlineProjectDeadlineOverdueNotificationInput {
   requestId: string;
 }
 
-export interface DeadlineProjectDeadlineOverdueNotificationPort {
-  notifyDeadlineOverdue(input: DeadlineProjectDeadlineOverdueNotificationInput): Promise<void>;
+export interface DeadlineGroupDeadlineOverdueNotificationPort {
+  notifyDeadlineOverdue(input: DeadlineGroupDeadlineOverdueNotificationInput): Promise<void>;
   /**
    * Records a structured skip event (mirrors the existing
    * `pg-group-deadline-overdue-notification-port.recordSkipped` private
    * helper) so the inline path leaves a query/report-ready trail when it
    * does NOT call the P8 service. Used by the convergence cutover to
-   * explain why no project_notification was written for a
+   * explain why no group_notification was written for a
    * `DEADLINE_EXPIRED` envelope: the notification engine now owns the
    * event and the engine's `group_participants` resolver handles
    * delivery.
    */
   recordSkipped(
-    input: DeadlineProjectDeadlineOverdueNotificationInput,
-    skipReason: DeadlineProjectDeadlineOverdueSkipReason,
+    input: DeadlineGroupDeadlineOverdueNotificationInput,
+    skipReason: DeadlineGroupDeadlineOverdueSkipReason,
   ): Promise<void>;
 }
 

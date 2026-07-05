@@ -81,7 +81,7 @@ describe('parseCreateNotificationRuleRequest', () => {
 
   it('parses groupId on create', () => {
     const result = parseCreateNotificationRuleRequest({
-      ruleCode: 'project-deadline-overdue',
+      ruleCode: 'group-deadline-overdue',
       eventType: 'DEADLINE_EXPIRED',
       level: 'warning',
       priority: 10,
@@ -295,7 +295,7 @@ describe('parseCreateNotificationRuleRequest', () => {
   it('rejects malformed groupId', () => {
     expectInvalidPayloadError(() =>
       parseCreateNotificationRuleRequest({
-        ruleCode: 'bad-project',
+        ruleCode: 'bad-group',
         eventType: 'DEADLINE_EXPIRED',
         groupId: 'not-a-uuid',
         recipients: { resolvers: ['group_participants'] },

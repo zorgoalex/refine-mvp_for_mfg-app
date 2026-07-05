@@ -151,7 +151,7 @@ describe('NotificationRulesController', () => {
       ]);
     });
 
-    it('delegates list with global project scope filter', async () => {
+    it('delegates list with global group scope filter', async () => {
       const calls: unknown[] = [];
       const controller = createController({
         flags: flags({ engineEnabled: true }),
