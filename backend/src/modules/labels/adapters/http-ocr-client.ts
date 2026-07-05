@@ -14,10 +14,12 @@ export interface HttpOcrClientOptions {
 
 /**
  * HTTP adapter for the standalone ocr-service (T1: POST /ocr, raw image bytes in →
- * {lines:[{text,score,box}],durationMs} out; 429 when busy).
+ * {lines:[{text,score,box}],durationMs,imageWidth,imageHeight} out; 429 when busy).
  *
- * Recognition boxes are intentionally dropped when mapping the response — the backend
- * only needs text + score for downstream matching (see OcrLine).
+ * Recognition boxes and processed-image dims are passed through (shape-safe: malformed
+ * `box`/dims are dropped, never thrown). The scan path (scanResolveImage/scanResolveFields)
+ * still only reads text/score and ignores box/dims; preview/testOcrTemplate use them to let
+ * the FE overlay boxes on the uploaded photo.
  */
 export class HttpOcrClient implements OcrPort {
   private readonly fetchFn: OcrFetchFn;
@@ -31,7 +33,10 @@ export class HttpOcrClient implements OcrPort {
     this.timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  async recognize(image: Buffer, contentType: string): Promise<{ lines: OcrLine[]; durationMs: number }> {
+  async recognize(
+    image: Buffer,
+    contentType: string,
+  ): Promise<{ lines: OcrLine[]; durationMs: number; imageWidth?: number; imageHeight?: number }> {
     let res: Response;
     try {
       res = await this.fetchFn(`${this.baseUrl}/ocr`, {
@@ -73,27 +78,57 @@ export class HttpOcrClient implements OcrPort {
     // non-array `lines`, junk line entries) must surface as the contractual
     // ApiError 503, never as a raw TypeError leaking out of the adapter.
     try {
-      const json = (await res.json()) as { lines?: unknown; durationMs?: unknown } | null;
+      const json = (await res.json()) as
+        | { lines?: unknown; durationMs?: unknown; imageWidth?: unknown; imageHeight?: unknown }
+        | null;
       if (json == null || !Array.isArray(json.lines)) {
         throw new Error('malformed ocr response shape');
       }
-      const lines: OcrLine[] = (json.lines as Array<{ text?: unknown; score?: unknown } | null>).map(
-        (line) => ({
-          text: String(line?.text ?? ''),
-          score: Number(line?.score ?? 0),
-        }),
-      );
+      const lines: OcrLine[] = (
+        json.lines as Array<{ text?: unknown; score?: unknown; box?: unknown } | null>
+      ).map((line) => ({
+        text: String(line?.text ?? ''),
+        score: Number(line?.score ?? 0),
+        box: parseBox(line?.box),
+      }));
       const durationMs = Number(json.durationMs ?? 0);
-      return { lines, durationMs: Number.isFinite(durationMs) ? durationMs : 0 };
+      // Coerce only actual JSON numbers; Number(null) === 0 and Number("") === 0 would
+      // otherwise silently turn junk/absent dims into a bogus-but-finite 0 instead of
+      // undefined, so we require typeof === 'number' before the finite check below.
+      const imageWidth = typeof json.imageWidth === 'number' ? json.imageWidth : NaN;
+      const imageHeight = typeof json.imageHeight === 'number' ? json.imageHeight : NaN;
+      return {
+        lines,
+        durationMs: Number.isFinite(durationMs) ? durationMs : 0,
+        imageWidth: Number.isFinite(imageWidth) ? imageWidth : undefined,
+        imageHeight: Number.isFinite(imageHeight) ? imageHeight : undefined,
+      };
     } catch {
       throw new ApiError(503, 'OCR_SERVICE_UNAVAILABLE', 'OCR service returned an invalid response');
     }
   }
 }
 
+/** Shape-safe `box` parse: only accept an array of EXACTLY 4 [x,y] pairs (length-2
+ *  finite-number arrays) — the true shape of a RapidOCR det quad. Anything else
+ *  (missing, wrong point count, non-numeric/NaN/Infinity entries) → undefined, never throws. */
+function parseBox(value: unknown): number[][] | undefined {
+  if (!Array.isArray(value) || value.length !== 4) return undefined;
+  const points: number[][] = [];
+  for (const point of value) {
+    if (!Array.isArray(point) || point.length !== 2) return undefined;
+    const [x, y] = point;
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) {
+      return undefined;
+    }
+    points.push([x, y]);
+  }
+  return points;
+}
+
 /** Fail-closed OcrPort used when OCR_SERVICE_BASE_URL is not configured (pattern: UnavailableLabelsRepository et al.). */
 export class UnavailableOcrClient implements OcrPort {
-  async recognize(): Promise<{ lines: OcrLine[]; durationMs: number }> {
+  async recognize(): Promise<{ lines: OcrLine[]; durationMs: number; imageWidth?: number; imageHeight?: number }> {
     throw new ApiError(503, 'OCR_SERVICE_UNAVAILABLE', 'OCR service is not configured');
   }
 }

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { OcrFieldCode, OcrTemplateRule } from '../../../api/types/labelsApi.types';
 import {
+  buildBoxOverlays,
   buildOcrTemplateInput,
   fieldLabelRu,
   isStrongFieldFe,
+  normalizeBox,
   suggestAnchor,
   summarizeFieldTags,
   validateOcrRulesFe,
@@ -165,6 +167,95 @@ describe('ocrTemplateHelpers', () => {
         idempotencyKey: 'idem-key-2',
       });
       expect(input.rules.map((r) => r.field)).toEqual(['ignore', 'material', 'dimensions']);
+    });
+  });
+
+  describe('normalizeBox', () => {
+    it('converts a 4-point pixel box into a normalized rect', () => {
+      expect(
+        normalizeBox(
+          [
+            [10, 20],
+            [110, 20],
+            [110, 60],
+            [10, 60],
+          ],
+          200,
+          100,
+        ),
+      ).toEqual({ left: 0.05, top: 0.2, width: 0.5, height: 0.4 });
+    });
+
+    it('returns null for a malformed or missing box', () => {
+      expect(normalizeBox([], 200, 100)).toBeNull();
+      expect(normalizeBox(undefined, 200, 100)).toBeNull();
+      expect(normalizeBox([[1]], 200, 100)).toBeNull();
+      expect(normalizeBox([['x', 'y'] as unknown as number[]], 200, 100)).toBeNull();
+    });
+
+    it('returns null when image dimensions are missing or non-positive', () => {
+      const box = [
+        [10, 20],
+        [110, 60],
+      ];
+      expect(normalizeBox(box, 0, 100)).toBeNull();
+      expect(normalizeBox(box, 200, 0)).toBeNull();
+      expect(normalizeBox(box, undefined, 100)).toBeNull();
+      expect(normalizeBox(box, 200, undefined)).toBeNull();
+    });
+  });
+
+  describe('buildBoxOverlays', () => {
+    const validBox = [
+      [10, 20],
+      [110, 20],
+      [110, 60],
+      [10, 60],
+    ];
+
+    it('skips lines with no usable box, keeps only the boxed line, with matching percent style', () => {
+      const lines = [{ box: validBox }, {}];
+      const rules: OcrTemplateRule[] = [{ field: 'order_number' }, { field: 'material' }];
+
+      const overlays = buildBoxOverlays(lines, rules, 200, 100, null);
+
+      expect(overlays).toHaveLength(1);
+      expect(overlays[0].index).toBe(0);
+      const nb = normalizeBox(validBox, 200, 100)!;
+      expect(overlays[0].style).toEqual({
+        left: `${nb.left * 100}%`,
+        top: `${nb.top * 100}%`,
+        width: `${nb.width * 100}%`,
+        height: `${nb.height * 100}%`,
+      });
+    });
+
+    it('marks the activeIndex entry active and leaves others inactive', () => {
+      const lines = [{ box: validBox }, { box: validBox }];
+      const rules: OcrTemplateRule[] = [{ field: 'order_number' }, { field: 'material' }];
+
+      const overlays = buildBoxOverlays(lines, rules, 200, 100, 1);
+
+      expect(overlays.find((o) => o.index === 0)?.active).toBe(false);
+      expect(overlays.find((o) => o.index === 1)?.active).toBe(true);
+    });
+
+    it('sets assigned=true for a non-ignore field and assigned=false for ignore', () => {
+      const lines = [{ box: validBox }, { box: validBox }];
+      const rules: OcrTemplateRule[] = [{ field: 'material' }, { field: 'ignore' }];
+
+      const overlays = buildBoxOverlays(lines, rules, 200, 100, null);
+
+      expect(overlays.find((o) => o.index === 0)?.assigned).toBe(true);
+      expect(overlays.find((o) => o.index === 1)?.assigned).toBe(false);
+    });
+
+    it('returns an empty array when image dimensions are invalid (0/undefined)', () => {
+      const lines = [{ box: validBox }];
+      const rules: OcrTemplateRule[] = [{ field: 'order_number' }];
+
+      expect(buildBoxOverlays(lines, rules, 0, 100, null)).toEqual([]);
+      expect(buildBoxOverlays(lines, rules, undefined, undefined, null)).toEqual([]);
     });
   });
 });

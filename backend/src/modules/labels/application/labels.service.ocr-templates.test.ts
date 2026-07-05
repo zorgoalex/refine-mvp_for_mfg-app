@@ -91,6 +91,37 @@ describe('LabelsService.previewOcrLabel', () => {
     });
   });
 
+  it('passes box + imageWidth/imageHeight through when the OcrPort returns them', async () => {
+    const box = [
+      [10, 20],
+      [90, 20],
+      [90, 40],
+      [10, 40],
+    ];
+    const { service } = makeService({
+      ocr: {
+        recognize: vi.fn().mockResolvedValue({
+          lines: [{ text: '671', score: 0.95, box }],
+          durationMs: 77,
+          imageWidth: 1600,
+          imageHeight: 1200,
+        }),
+      },
+    });
+    const result = await service.previewOcrLabel({
+      currentUser: templateManager,
+      requestId: 'req-2b',
+      image: Buffer.from('x'),
+      contentType: 'image/png',
+    });
+    expect(result).toEqual({
+      lines: [{ text: '671', score: 0.95, box }],
+      durationMs: 77,
+      imageWidth: 1600,
+      imageHeight: 1200,
+    });
+  });
+
   it('fails closed 503 when no OcrPort is configured', async () => {
     const repo: Partial<LabelsPort> = { recordPermissionDenied: vi.fn().mockResolvedValue(undefined) };
     const service = new LabelsService({ repo: repo as LabelsPort });
@@ -154,6 +185,35 @@ describe('LabelsService.testOcrTemplate', () => {
       height: 238,
     });
     expect(result.fallbackFields).toBeDefined();
+  });
+
+  it('passes box + imageWidth/imageHeight through when the OcrPort returns them', async () => {
+    const box = [
+      [5, 5],
+      [95, 5],
+      [95, 25],
+      [5, 25],
+    ];
+    const { service } = makeService({
+      ocr: {
+        recognize: vi.fn().mockResolvedValue({
+          lines: [{ text: '671', score: 0.95, box }],
+          durationMs: 55,
+          imageWidth: 1600,
+          imageHeight: 1200,
+        }),
+      },
+    });
+    const result = await service.testOcrTemplate({
+      currentUser: templateManager,
+      requestId: 'req-2c',
+      image: Buffer.from('x'),
+      contentType: 'image/png',
+      rules: [{ field: 'order_number' }, { field: 'material' }, { field: 'dimensions' }],
+    });
+    expect(result.lines).toEqual([{ text: '671', score: 0.95, box }]);
+    expect(result.imageWidth).toBe(1600);
+    expect(result.imageHeight).toBe(1200);
   });
 
   it('templateWon is false when the candidate rule set does not pass the match thresholds', async () => {

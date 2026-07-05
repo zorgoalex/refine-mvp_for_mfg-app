@@ -39,4 +39,24 @@ describe('OcrTemplateEditor wiring', () => {
     expect(src).toMatch(/canManage: boolean/);
     expect(src).toMatch(/disabled=\{!canManage/);
   });
+
+  it('renders a box overlay over the uploaded photo, keyed to the pure buildBoxOverlays helper', () => {
+    expect(src).toMatch(/buildBoxOverlays/);
+    expect(src).toMatch(/<img/);
+    expect(src).toMatch(/photoUrl/);
+  });
+
+  it('shares one activeIndex between row hover and box click for the row<->box highlight', () => {
+    expect(src).toMatch(/activeIndex/);
+    expect(src).toMatch(/onMouseEnter=\{?\(?\)? *=> *setActiveIndex/);
+  });
+
+  it('shows the rule-order hint above the per-line list', () => {
+    expect(src).toMatch(/Порядок правил/);
+  });
+
+  it('revokes the sample-photo object URL to avoid leaking it', () => {
+    expect(src).toMatch(/URL\.createObjectURL/);
+    expect(src).toMatch(/URL\.revokeObjectURL/);
+  });
 });
