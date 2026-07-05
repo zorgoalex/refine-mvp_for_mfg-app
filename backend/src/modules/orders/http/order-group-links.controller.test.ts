@@ -4,25 +4,25 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import type { OrderGroupLinkService } from '../application/order-group-link.service';
 import type {
-  OrderProjectsResponseDto,
-  ReplaceOrderProjectsResponseDto,
-} from '../dto/order-project-link.dto';
+  OrderGroupsResponseDto,
+  ReplaceOrderGroupsResponseDto,
+} from '../dto/order-group-link.dto';
 import type { GroupsRuntimeConfigService } from '../../groups/groups-runtime-config.service';
-import { OrderGroupLinksController, parseReplaceOrderProjectsRequest } from './order-group-links.controller';
+import { OrderGroupLinksController, parseReplaceOrderGroupsRequest } from './order-group-links.controller';
 import type { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 
 const PROJECT_ID = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
 
 describe('OrderGroupLinksController', () => {
-  it('normalizes primary project id before cross-field validation', () => {
-    expect(parseReplaceOrderProjectsRequest({
+  it('normalizes primary group id before cross-field validation', () => {
+    expect(parseReplaceOrderGroupsRequest({
       idempotencyKey: 'mixed-case-primary',
       version: 3,
-      primaryProjectId: PROJECT_ID.toUpperCase(),
-      projects: [{ projectId: PROJECT_ID, relationType: 'main', isPrimary: false }],
+      primaryGroupId: PROJECT_ID.toUpperCase(),
+      groups: [{ groupId: PROJECT_ID, relationType: 'main', isPrimary: false }],
     })).toMatchObject({
-      primaryProjectId: PROJECT_ID,
-      projects: [{ projectId: PROJECT_ID, relationType: 'main', isPrimary: true }],
+      primaryGroupId: PROJECT_ID,
+      groups: [{ groupId: PROJECT_ID, relationType: 'main', isPrimary: true }],
     });
   });
 
@@ -70,7 +70,7 @@ describe('OrderGroupLinksController', () => {
       links: {
         async get() {
           calls.push('get');
-          return orderProjectsResponse();
+          return orderGroupsResponse();
         },
       },
     });
@@ -83,7 +83,7 @@ describe('OrderGroupLinksController', () => {
       statusCode: 422,
       code: 'VALIDATION_ERROR',
       details: {
-        errors: [{ field: 'asOf', message: 'asOf is not supported for P1-P3 current project links' }],
+        errors: [{ field: 'asOf', message: 'asOf is not supported for P1-P3 current group links' }],
       },
     } satisfies Partial<ApiError>);
     expect(calls).toEqual([]);
@@ -97,10 +97,10 @@ function createController(options: {
 } = {}): OrderGroupLinksController {
   const links = {
     async get() {
-      return orderProjectsResponse();
+      return orderGroupsResponse();
     },
     async replace() {
-      return replaceProjectsResponse();
+      return replaceGroupsResponse();
     },
     ...options.links,
   } as unknown as OrderGroupLinkService;
@@ -130,26 +130,26 @@ function currentUser(): CurrentUser {
 
 function replaceBody() {
   return {
-    idempotencyKey: 'replace-projects-key',
+    idempotencyKey: 'replace-groups-key',
     version: 3,
-    primaryProjectId: PROJECT_ID,
-    projects: [{ projectId: PROJECT_ID, relationType: 'main', isPrimary: true }],
+    primaryGroupId: PROJECT_ID,
+    groups: [{ groupId: PROJECT_ID, relationType: 'main', isPrimary: true }],
   };
 }
 
-function orderProjectsResponse(): OrderProjectsResponseDto {
+function orderGroupsResponse(): OrderGroupsResponseDto {
   return {
     orderId: 15,
     version: 3,
-    primaryProject: null,
-    projects: [],
+    primaryGroup: null,
+    groups: [],
     requestId: 'req-1',
   };
 }
 
-function replaceProjectsResponse(): ReplaceOrderProjectsResponseDto {
+function replaceGroupsResponse(): ReplaceOrderGroupsResponseDto {
   return {
-    ...orderProjectsResponse(),
+    ...orderGroupsResponse(),
     changed: false,
   };
 }

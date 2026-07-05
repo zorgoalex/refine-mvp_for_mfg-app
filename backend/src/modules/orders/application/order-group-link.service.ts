@@ -4,10 +4,10 @@ import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type { GroupNotificationService } from '../../groups/notifications/group-notification.service';
 import type {
-  GetOrderProjectsCommand,
+  GetOrderGroupsCommand,
   OrderGroupLinkRepositoryPort,
-  ReplaceOrderProjectsCommand,
-} from './order-project-link.types';
+  ReplaceOrderGroupsCommand,
+} from './order-group-link.types';
 
 export interface OrderGroupLinkServicePorts {
   links: OrderGroupLinkRepositoryPort;
@@ -23,28 +23,28 @@ export class OrderGroupLinkService {
     this.permissions = ports.permissions ?? new PermissionsService();
   }
 
-  get(command: GetOrderProjectsCommand) {
+  get(command: GetOrderGroupsCommand) {
     this.requireAny(command.currentUser, ['orders.view', 'groups.view']);
-    return this.ports.links.getOrderProjects(command);
+    return this.ports.links.getOrderGroups(command);
   }
 
-  async replace(command: ReplaceOrderProjectsCommand) {
+  async replace(command: ReplaceOrderGroupsCommand) {
     this.requirePermission(command.currentUser, 'groups.manage_links');
     const before = this.ports.groupP8NotificationsEnabled
-      ? await this.ports.links.getOrderProjects(command)
+      ? await this.ports.links.getOrderGroups(command)
       : null;
-    const response = await this.ports.links.replaceOrderProjects(command);
+    const response = await this.ports.links.replaceOrderGroups(command);
 
     const p8NotificationFacts = internalOrderP8Facts(response);
     if (this.ports.groupP8NotificationsEnabled && response.changed) {
-      await this.notifyOrderProjectChanges(command, p8NotificationFacts, before?.projects, response.projects);
+      await this.notifyOrderGroupChanges(command, p8NotificationFacts, before?.groups, response.groups);
     }
 
-    return publicOrderProjectResponse(response);
+    return publicOrderGroupResponse(response);
   }
 
-  private async notifyOrderProjectChanges(
-    command: ReplaceOrderProjectsCommand,
+  private async notifyOrderGroupChanges(
+    command: ReplaceOrderGroupsCommand,
     persistedFacts: Array<{ orderId: string; groupId: string; action: 'added' | 'removed' }>,
     before: Array<{ id: string }> | undefined,
     after: Array<{ id: string }>,
@@ -53,7 +53,7 @@ export class OrderGroupLinkService {
 
     const facts = persistedFacts.length > 0 || !before
       ? persistedFacts
-      : orderProjectFactsFromDiff(command.orderId, before, after);
+      : orderGroupFactsFromDiff(command.orderId, before, after);
 
     if (facts.length === 0) return;
 
@@ -82,22 +82,22 @@ export class OrderGroupLinkService {
   }
 }
 
-function orderProjectFactsFromDiff(
+function orderGroupFactsFromDiff(
   orderId: number,
   before: Array<{ id: string }>,
   after: Array<{ id: string }>,
 ): Array<{ orderId: string; groupId: string; action: 'added' | 'removed' }> {
-  const beforeIds = new Set(before.map((project) => project.id));
-  const afterIds = new Set(after.map((project) => project.id));
+  const beforeIds = new Set(before.map((group) => group.id));
+  const afterIds = new Set(after.map((group) => group.id));
   return [
-    ...after.filter((project) => !beforeIds.has(project.id)).map((project) => ({
+    ...after.filter((group) => !beforeIds.has(group.id)).map((group) => ({
       orderId: String(orderId),
-      groupId: project.id,
+      groupId: group.id,
       action: 'added' as const,
     })),
-    ...before.filter((project) => !afterIds.has(project.id)).map((project) => ({
+    ...before.filter((group) => !afterIds.has(group.id)).map((group) => ({
       orderId: String(orderId),
-      groupId: project.id,
+      groupId: group.id,
       action: 'removed' as const,
     })),
   ];
@@ -117,7 +117,7 @@ function isOrderP8Fact(value: unknown): value is { orderId: string; groupId: str
     && (fact.action === 'added' || fact.action === 'removed');
 }
 
-function publicOrderProjectResponse<T extends object>(response: T): T {
+function publicOrderGroupResponse<T extends object>(response: T): T {
   const { p8NotificationFacts: _p8NotificationFacts, ...publicResponse } = response as T & { p8NotificationFacts?: unknown };
   return publicResponse as T;
 }

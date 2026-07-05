@@ -392,7 +392,7 @@ const orderDowelingLinkResponseSwaggerSchema = {
   },
 } as const;
 
-const orderProjectSummarySwaggerSchema = {
+const orderGroupSummarySwaggerSchema = {
   type: 'object',
   required: ['id', 'code', 'name', 'relationType', 'isPrimary', 'validFrom'],
   properties: {
@@ -512,7 +512,7 @@ const saveOrderRequestSwaggerSchema = {
 
 const orderSwaggerSchema = {
   type: 'object',
-  required: ['header', 'details', 'payments', 'workshops', 'requirements', 'dowelingLinks', 'primaryProject', 'projects', 'totals', 'version', 'createdAt', 'updatedAt'],
+  required: ['header', 'details', 'payments', 'workshops', 'requirements', 'dowelingLinks', 'primaryGroup', 'groups', 'totals', 'version', 'createdAt', 'updatedAt'],
   properties: {
     header: orderHeaderResponseSwaggerSchema,
     details: { type: 'array', items: orderDetailResponseSwaggerSchema },
@@ -520,8 +520,8 @@ const orderSwaggerSchema = {
     workshops: { type: 'array', items: orderWorkshopResponseSwaggerSchema },
     requirements: { type: 'array', items: orderRequirementResponseSwaggerSchema },
     dowelingLinks: { type: 'array', items: orderDowelingLinkResponseSwaggerSchema },
-    primaryProject: { ...orderProjectSummarySwaggerSchema, nullable: true },
-    projects: { type: 'array', items: orderProjectSummarySwaggerSchema },
+    primaryGroup: { ...orderGroupSummarySwaggerSchema, nullable: true },
+    groups: { type: 'array', items: orderGroupSummarySwaggerSchema },
     totals: {
       type: 'object',
       required: ['totalAmount', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea'],
@@ -558,7 +558,7 @@ const orderResponseSwaggerSchema = {
 
 const orderListItemSwaggerSchema = {
   type: 'object',
-  required: ['orderId', 'orderName', 'clientId', 'clientName', 'orderDate', 'plannedCompletionDate', 'completionDate', 'issueDate', 'paymentDate', 'orderStatusId', 'orderStatusName', 'paymentStatusId', 'paymentStatusName', 'productionStatusId', 'productionStatusName', 'priority', 'totalAmount', 'discount', 'surcharge', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea', 'managerId', 'notes', 'materialIds', 'materialNames', 'millingTypeId', 'millingTypeName', 'dowelingOrderId', 'dowelingOrderName', 'designEngineerId', 'passedProductionStatusCodes', 'primaryProject', 'projects', 'createdBy', 'editedBy', 'updatedAt', 'version'],
+  required: ['orderId', 'orderName', 'clientId', 'clientName', 'orderDate', 'plannedCompletionDate', 'completionDate', 'issueDate', 'paymentDate', 'orderStatusId', 'orderStatusName', 'paymentStatusId', 'paymentStatusName', 'productionStatusId', 'productionStatusName', 'priority', 'totalAmount', 'discount', 'surcharge', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea', 'managerId', 'notes', 'materialIds', 'materialNames', 'millingTypeId', 'millingTypeName', 'dowelingOrderId', 'dowelingOrderName', 'designEngineerId', 'passedProductionStatusCodes', 'primaryGroup', 'groups', 'createdBy', 'editedBy', 'updatedAt', 'version'],
   properties: {
     orderId: { type: 'integer' },
     orderName: { type: 'string' },
@@ -596,8 +596,8 @@ const orderListItemSwaggerSchema = {
     dowelingOrderName: nullableStringSwaggerSchema,
     designEngineerId: nullableIntegerSwaggerSchema,
     passedProductionStatusCodes: { type: 'array', items: { type: 'string' } },
-    primaryProject: { ...orderProjectSummarySwaggerSchema, nullable: true },
-    projects: { type: 'array', items: orderProjectSummarySwaggerSchema },
+    primaryGroup: { ...orderGroupSummarySwaggerSchema, nullable: true },
+    groups: { type: 'array', items: orderGroupSummarySwaggerSchema },
     createdBy: nullableIntegerSwaggerSchema,
     editedBy: nullableIntegerSwaggerSchema,
     updatedAt: { type: 'string', format: 'date-time' },
@@ -769,8 +769,8 @@ export class OrdersController {
   @ApiQuery({ name: 'dateFrom', required: false, type: String, description: 'Start date filter', schema: swaggerSchema(dateOnlySwaggerSchema) })
   @ApiQuery({ name: 'dateTo', required: false, type: String, description: 'End date filter', schema: swaggerSchema(dateOnlySwaggerSchema) })
   @ApiQuery({ name: 'onlyMyOrders', required: false, type: Boolean, description: 'Only orders assigned to the current user' })
-  @ApiQuery({ name: 'projectIds', required: false, type: String, description: 'Comma-separated current project UUID filters' })
-  @ApiQuery({ name: 'projectMode', required: false, enum: ['any', 'all', 'primary', 'none'], description: 'Project filter mode' })
+  @ApiQuery({ name: 'groupIds', required: false, type: String, description: 'Comma-separated current group UUID filters' })
+  @ApiQuery({ name: 'groupMode', required: false, enum: ['any', 'all', 'primary', 'none'], description: 'Group filter mode' })
   @ApiResponse({ status: 200, description: 'Order list', schema: swaggerSchema(orderListResponseSwaggerSchema) })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -984,7 +984,7 @@ export class OrdersController {
 export function parseOrderListQuery(
   query: Record<string, string | string[] | undefined>,
 ): OrderListQuery {
-  rejectUnsupportedProjectTemporalQuery(query);
+  rejectUnsupportedGroupTemporalQuery(query);
   return {
     page: parsePositiveInteger(query.page, 'page', 1, 1, Number.MAX_SAFE_INTEGER),
     pageSize: parsePositiveInteger(query.pageSize, 'pageSize', 25, 1, 200),
@@ -1001,17 +1001,17 @@ export function parseOrderListQuery(
     dateFrom: parseOptionalDateOnly(query.dateFrom, 'dateFrom'),
     dateTo: parseOptionalDateOnly(query.dateTo, 'dateTo'),
     onlyMyOrders: parseBoolean(query.onlyMyOrders, false),
-    projectIds: parseProjectIds(query.projectIds),
-    projectMode: parseProjectMode(query.projectMode),
+    groupIds: parseGroupIds(query.groupIds),
+    groupMode: parseGroupMode(query.groupMode),
   };
 }
 
-export function rejectUnsupportedProjectTemporalQuery(
+export function rejectUnsupportedGroupTemporalQuery(
   query: Record<string, string | string[] | undefined>,
 ): void {
   for (const field of ['asOf', 'overlap', 'factTime']) {
     if (query[field] !== undefined) {
-      throw validationError(field, `${field} is not supported for P1-P3 current project links`);
+      throw validationError(field, `${field} is not supported for P1-P3 current group links`);
     }
   }
 }
@@ -1167,29 +1167,29 @@ function parseBoolean(value: string | string[] | undefined, fallback: boolean): 
   throw validationError('onlyMyOrders', 'onlyMyOrders must be true or false');
 }
 
-function parseProjectIds(value: string | string[] | undefined): string[] | undefined {
+function parseGroupIds(value: string | string[] | undefined): string[] | undefined {
   const raw = singleValue(value)?.trim();
   if (!raw) return undefined;
 
   const values = raw.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
   if (values.length === 0) return undefined;
   if (values.length > 50) {
-    throw validationError('projectIds', 'projectIds supports at most 50 IDs');
+    throw validationError('groupIds', 'groupIds supports at most 50 IDs');
   }
 
   const invalid = values.find((item) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item));
   if (invalid) {
-    throw validationError('projectIds', 'projectIds must be comma-separated UUIDs');
+    throw validationError('groupIds', 'groupIds must be comma-separated UUIDs');
   }
 
   return [...new Set(values)];
 }
 
-function parseProjectMode(value: string | string[] | undefined): OrderListQuery['projectMode'] {
+function parseGroupMode(value: string | string[] | undefined): OrderListQuery['groupMode'] {
   const mode = singleValue(value)?.trim();
   if (!mode) return undefined;
   if (mode === 'any' || mode === 'all' || mode === 'primary' || mode === 'none') return mode;
-  throw validationError('projectMode', 'projectMode must be any, all, primary, or none');
+  throw validationError('groupMode', 'groupMode must be any, all, primary, or none');
 }
 
 function singleValue(value: string | string[] | undefined): string | undefined {

@@ -144,7 +144,7 @@ async function createStubTables(client: Client): Promise<void> {
     );
   `);
 
-  // project tables must live in public schema (repo queries them as public.*)
+  // Group-link tables must live in public schema (repo queries them as public.*)
   await client.query(`
     CREATE TABLE IF NOT EXISTS public.group_groups (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

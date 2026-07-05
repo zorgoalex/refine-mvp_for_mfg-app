@@ -209,15 +209,15 @@ describe('OrdersController read endpoints', () => {
     });
   });
 
-  it('lowercases and deduplicates projectIds before applying all-mode project filters', () => {
-    const projectId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+  it('lowercases and deduplicates groupIds before applying all-mode group filters', () => {
+    const groupId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
 
     expect(parseOrderListQuery({
-      projectIds: `${projectId.toUpperCase()},${projectId}`,
-      projectMode: 'all',
+      groupIds: `${groupId.toUpperCase()},${groupId}`,
+      groupMode: 'all',
     })).toMatchObject({
-      projectIds: [projectId],
-      projectMode: 'all',
+      groupIds: [groupId],
+      groupMode: 'all',
     });
   });
 

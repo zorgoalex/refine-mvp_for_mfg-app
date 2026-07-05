@@ -14,12 +14,12 @@ const PROJECT_ALPHA = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
 const PROJECT_ALPHA_UPPERCASE = PROJECT_ALPHA.toUpperCase();
 
 describe('PgOrderGroupLinkRepository', () => {
-  it('rejects stale versions before project validation or domain writes', async () => {
+  it('rejects stale versions before group validation or domain writes', async () => {
     const database = createDatabase();
     const repository = new PgOrderGroupLinkRepository(database.service);
 
-    await expect(repository.replaceOrderProjects(replaceCommand({
-      dto: { version: 2, projects: [{ projectId: PROJECT_1, relationType: 'main', isPrimary: true }], primaryProjectId: PROJECT_1 },
+    await expect(repository.replaceOrderGroups(replaceCommand({
+      dto: { version: 2, groups: [{ groupId: PROJECT_1, relationType: 'main', isPrimary: true }], primaryGroupId: PROJECT_1 },
     }))).rejects.toMatchObject({
       statusCode: 409,
       code: 'ORDER_VERSION_CONFLICT',
@@ -30,81 +30,81 @@ describe('PgOrderGroupLinkRepository', () => {
     expect(database.queries.some((query) => normalizeSql(query.text).includes('FROM public.group_groups'))).toBe(false);
   });
 
-  it('rejects missing submitted project ids with a controlled error before inserting links', async () => {
+  it('rejects missing submitted group ids with a controlled error before inserting links', async () => {
     const database = createDatabase();
     const repository = new PgOrderGroupLinkRepository(database.service);
 
-    await expect(repository.replaceOrderProjects(replaceCommand({
-      dto: { projects: [{ projectId: PROJECT_MISSING, relationType: 'main', isPrimary: true }], primaryProjectId: PROJECT_MISSING },
+    await expect(repository.replaceOrderGroups(replaceCommand({
+      dto: { groups: [{ groupId: PROJECT_MISSING, relationType: 'main', isPrimary: true }], primaryGroupId: PROJECT_MISSING },
     }))).rejects.toMatchObject({
       statusCode: 404,
-      code: 'PROJECT_NOT_FOUND',
-      details: { projectId: PROJECT_MISSING },
+      code: 'GROUP_NOT_FOUND',
+      details: { groupId: PROJECT_MISSING },
     });
 
     expect(database.state.order.version).toBe(3);
     expect(database.domainWrites()).toEqual([]);
   });
 
-  it('rejects archived submitted projects with a controlled error before inserting links', async () => {
+  it('rejects archived submitted groups with a controlled error before inserting links', async () => {
     const database = createDatabase();
     const repository = new PgOrderGroupLinkRepository(database.service);
 
-    await expect(repository.replaceOrderProjects(replaceCommand({
-      dto: { projects: [{ projectId: PROJECT_ARCHIVED, relationType: 'main', isPrimary: true }], primaryProjectId: PROJECT_ARCHIVED },
+    await expect(repository.replaceOrderGroups(replaceCommand({
+      dto: { groups: [{ groupId: PROJECT_ARCHIVED, relationType: 'main', isPrimary: true }], primaryGroupId: PROJECT_ARCHIVED },
     }))).rejects.toMatchObject({
       statusCode: 422,
-      code: 'PROJECT_ARCHIVED',
-      details: { projectId: PROJECT_ARCHIVED },
+      code: 'GROUP_ARCHIVED',
+      details: { groupId: PROJECT_ARCHIVED },
     });
 
     expect(database.state.order.version).toBe(3);
     expect(database.domainWrites()).toEqual([]);
   });
 
-  it('canonicalizes uppercase submitted project ids before validation and insertion', async () => {
+  it('canonicalizes uppercase submitted group ids before validation and insertion', async () => {
     const database = createDatabase();
     const repository = new PgOrderGroupLinkRepository(database.service);
 
-    const response = await repository.replaceOrderProjects(replaceCommand({
+    const response = await repository.replaceOrderGroups(replaceCommand({
       dto: {
-        idempotencyKey: 'uppercase-project-key',
-        projects: [{ projectId: PROJECT_ALPHA_UPPERCASE, relationType: 'main', isPrimary: true }],
-        primaryProjectId: PROJECT_ALPHA_UPPERCASE,
+        idempotencyKey: 'uppercase-group-key',
+        groups: [{ groupId: PROJECT_ALPHA_UPPERCASE, relationType: 'main', isPrimary: true }],
+        primaryGroupId: PROJECT_ALPHA_UPPERCASE,
       },
     }));
 
     expect(response).toMatchObject({
       version: 4,
       changed: true,
-      primaryProject: { id: PROJECT_ALPHA },
-      projects: [{ id: PROJECT_ALPHA, relationType: 'main', isPrimary: true }],
+      primaryGroup: { id: PROJECT_ALPHA },
+      groups: [{ id: PROJECT_ALPHA, relationType: 'main', isPrimary: true }],
     });
     expect(database.state.links.filter((link) => link.validTo === null)).toMatchObject([
-      { projectId: PROJECT_ALPHA, relationType: 'main', isPrimary: true },
+      { groupId: PROJECT_ALPHA, relationType: 'main', isPrimary: true },
     ]);
     expect(database.queries.find((query) => normalizeSql(query.text).includes('FROM public.group_groups'))?.params[0])
       .toEqual([PROJECT_ALPHA]);
   });
 
-  it('rejects duplicate project relation links regardless of primary flag', async () => {
+  it('rejects duplicate group relation links regardless of primary flag', async () => {
     const database = createDatabase();
     const repository = new PgOrderGroupLinkRepository(database.service);
 
-    await expect(repository.replaceOrderProjects(replaceCommand({
+    await expect(repository.replaceOrderGroups(replaceCommand({
       dto: {
         idempotencyKey: 'duplicate-primary-key',
-        projects: [
-          { projectId: PROJECT_1, relationType: 'main', isPrimary: true },
-          { projectId: PROJECT_1.toUpperCase(), relationType: 'main', isPrimary: false },
+        groups: [
+          { groupId: PROJECT_1, relationType: 'main', isPrimary: true },
+          { groupId: PROJECT_1.toUpperCase(), relationType: 'main', isPrimary: false },
         ],
-        primaryProjectId: null,
+        primaryGroupId: null,
       },
     }))).rejects.toMatchObject({
       statusCode: 422,
       code: 'VALIDATION_ERROR',
       details: {
-        errors: [{ field: 'projects', message: 'Duplicate project/relation link' }],
+        errors: [{ field: 'groups', message: 'Duplicate group/relation link' }],
       },
     });
 
@@ -116,7 +116,7 @@ describe('PgOrderGroupLinkRepository', () => {
     const database = createDatabase();
     database.state.links = [currentLink({
       id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      projectId: PROJECT_1,
+      groupId: PROJECT_1,
       relationType: 'main',
       isPrimary: true,
     })];
@@ -125,16 +125,16 @@ describe('PgOrderGroupLinkRepository', () => {
     const command = replaceCommand({
       dto: {
         idempotencyKey: 'no-op-key',
-        projects: [{ projectId: PROJECT_1, relationType: 'main', isPrimary: true }],
-        primaryProjectId: PROJECT_1,
+        groups: [{ groupId: PROJECT_1, relationType: 'main', isPrimary: true }],
+        primaryGroupId: PROJECT_1,
         reason: 'same',
       },
     });
 
-    const first = await repository.replaceOrderProjects(command);
+    const first = await repository.replaceOrderGroups(command);
     const writesAfterFirst = [...database.state.writes];
     const queryCountAfterFirst = database.queries.length;
-    const second = await repository.replaceOrderProjects(command);
+    const second = await repository.replaceOrderGroups(command);
 
     expect(first).toMatchObject({ orderId: 15, version: 3, changed: false });
     expect(second).toEqual(first);
@@ -159,16 +159,16 @@ describe('PgOrderGroupLinkRepository', () => {
       }),
       dto: {
         idempotencyKey: 'replay-scope-key',
-        projects: [{ projectId: PROJECT_1, relationType: 'main', isPrimary: true }],
-        primaryProjectId: PROJECT_1,
+        groups: [{ groupId: PROJECT_1, relationType: 'main', isPrimary: true }],
+        primaryGroupId: PROJECT_1,
       },
     });
 
-    await repository.replaceOrderProjects(command);
+    await repository.replaceOrderGroups(command);
     const writesAfterCompletion = [...database.state.writes];
     database.state.order.managerUserId = 7;
 
-    await expect(repository.replaceOrderProjects(command)).rejects.toMatchObject({
+    await expect(repository.replaceOrderGroups(command)).rejects.toMatchObject({
       statusCode: 403,
       code: 'PERMISSION_DENIED',
       details: { requiredPermissions: ['orders.update'] },
@@ -183,18 +183,18 @@ describe('PgOrderGroupLinkRepository', () => {
     const command = replaceCommand({
       dto: {
         idempotencyKey: 'reused-key',
-        projects: [{ projectId: PROJECT_1, relationType: 'main', isPrimary: true }],
-        primaryProjectId: PROJECT_1,
+        groups: [{ groupId: PROJECT_1, relationType: 'main', isPrimary: true }],
+        primaryGroupId: PROJECT_1,
       },
     });
 
-    await repository.replaceOrderProjects(command);
+    await repository.replaceOrderGroups(command);
 
-    await expect(repository.replaceOrderProjects(replaceCommand({
+    await expect(repository.replaceOrderGroups(replaceCommand({
       dto: {
         idempotencyKey: 'reused-key',
-        projects: [{ projectId: PROJECT_2, relationType: 'main', isPrimary: true }],
-        primaryProjectId: PROJECT_2,
+        groups: [{ groupId: PROJECT_2, relationType: 'main', isPrimary: true }],
+        primaryGroupId: PROJECT_2,
       },
     }))).rejects.toMatchObject({
       statusCode: 409,
@@ -206,14 +206,14 @@ describe('PgOrderGroupLinkRepository', () => {
     const processing = createDatabase({ existingIdempotencyStatus: 'processing' });
     const failed = createDatabase({ existingIdempotencyStatus: 'failed' });
 
-    await expect(new PgOrderGroupLinkRepository(processing.service).replaceOrderProjects(replaceCommand({
+    await expect(new PgOrderGroupLinkRepository(processing.service).replaceOrderGroups(replaceCommand({
       dto: { idempotencyKey: 'processing-key' },
     }))).rejects.toMatchObject({
       statusCode: 409,
       code: 'IDEMPOTENCY_IN_PROGRESS',
     });
 
-    await expect(new PgOrderGroupLinkRepository(failed.service).replaceOrderProjects(replaceCommand({
+    await expect(new PgOrderGroupLinkRepository(failed.service).replaceOrderGroups(replaceCommand({
       dto: { idempotencyKey: 'failed-key' },
     }))).rejects.toMatchObject({
       statusCode: 409,
@@ -224,11 +224,11 @@ describe('PgOrderGroupLinkRepository', () => {
     expect(failed.domainWrites()).toEqual([]);
   });
 
-  it('hands off the primary project by closing old links and inserting the new primary once', async () => {
+  it('hands off the primary group by closing old links and inserting the new primary once', async () => {
     const database = createDatabase();
     database.state.links = [currentLink({
       id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-      projectId: PROJECT_OLD,
+      groupId: PROJECT_OLD,
       relationType: 'main',
       isPrimary: true,
       validFrom: '2026-05-01T00:00:00.000Z',
@@ -237,27 +237,27 @@ describe('PgOrderGroupLinkRepository', () => {
     const command = replaceCommand({
       dto: {
         idempotencyKey: 'handoff-key',
-        projects: [{ projectId: PROJECT_1, relationType: 'main', isPrimary: true }],
-        primaryProjectId: PROJECT_1,
+        groups: [{ groupId: PROJECT_1, relationType: 'main', isPrimary: true }],
+        primaryGroupId: PROJECT_1,
         reason: 'handoff',
       },
     });
 
-    const first = await repository.replaceOrderProjects(command);
-    const second = await repository.replaceOrderProjects(command);
+    const first = await repository.replaceOrderGroups(command);
+    const second = await repository.replaceOrderGroups(command);
 
     expect(first).toMatchObject({
       orderId: 15,
       version: 4,
       changed: true,
-      primaryProject: { id: PROJECT_1 },
+      primaryGroup: { id: PROJECT_1 },
     });
     expect(second).toEqual(first);
     expect(database.state.order.version).toBe(4);
     expect(database.state.links.filter((link) => link.validTo === null)).toMatchObject([
-      { projectId: PROJECT_1, relationType: 'main', isPrimary: true },
+      { groupId: PROJECT_1, relationType: 'main', isPrimary: true },
     ]);
-    expect(database.state.links.find((link) => link.projectId === PROJECT_OLD)).toMatchObject({
+    expect(database.state.links.find((link) => link.groupId === PROJECT_OLD)).toMatchObject({
       validTo: expect.any(String),
       endedBy: 1,
       endReason: 'handoff',
@@ -269,23 +269,23 @@ describe('PgOrderGroupLinkRepository', () => {
     expect(database.state.writes.filter((write) => write === 'outbox')).toHaveLength(1);
   });
 
-  it('replaces current order project links with idempotency, audit, outbox, and version bump', async () => {
+  it('replaces current order group links with idempotency, audit, outbox, and version bump', async () => {
     const database = createDatabase();
     database.state.links = [currentLink({
       id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-      projectId: PROJECT_OLD,
+      groupId: PROJECT_OLD,
       relationType: 'main',
       isPrimary: true,
     })];
     const repository = new PgOrderGroupLinkRepository(database.service);
 
-    const response = await repository.replaceOrderProjects(replaceCommand({
+    const response = await repository.replaceOrderGroups(replaceCommand({
       dto: {
-        idempotencyKey: 'order-projects-key-1',
-        primaryProjectId: PROJECT_1,
-        projects: [
-          { projectId: PROJECT_1, relationType: 'main', isPrimary: true },
-          { projectId: PROJECT_2, relationType: 'secondary', isPrimary: false },
+        idempotencyKey: 'order-groups-key-1',
+        primaryGroupId: PROJECT_1,
+        groups: [
+          { groupId: PROJECT_1, relationType: 'main', isPrimary: true },
+          { groupId: PROJECT_2, relationType: 'secondary', isPrimary: false },
         ],
         reason: 'rebalance',
       },
@@ -295,8 +295,8 @@ describe('PgOrderGroupLinkRepository', () => {
       orderId: 15,
       version: 4,
       changed: true,
-      primaryProject: { id: PROJECT_1 },
-      projects: [
+      primaryGroup: { id: PROJECT_1 },
+      groups: [
         { id: PROJECT_1, relationType: 'main', isPrimary: true },
         { id: PROJECT_2, relationType: 'secondary', isPrimary: false },
       ],
@@ -306,7 +306,7 @@ describe('PgOrderGroupLinkRepository', () => {
     expect(database.state.outboxRows).toMatchObject([
       {
         eventType: 'GROUP_ORDER_LINKS_CHANGED',
-        idempotencyKey: 'order-projects-key-1:group_order_links_changed',
+        idempotencyKey: 'order-groups-key-1:group_order_links_changed',
       },
     ]);
     expect(database.state.outboxRows[0].payload).toMatchObject({
@@ -327,13 +327,13 @@ describe('PgOrderGroupLinkRepository', () => {
     database.state.order.managerUserId = 7;
     database.state.links = [currentLink({
       id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-      projectId: PROJECT_1,
+      groupId: PROJECT_1,
       relationType: 'main',
       isPrimary: true,
     })];
     const repository = new PgOrderGroupLinkRepository(database.service);
 
-    await expect(repository.getOrderProjects({
+    await expect(repository.getOrderGroups({
       currentUser: scopedUser({ id: '99', role: 'manager', permissions: ['orders.view'] }),
       orderId: 15,
       requestId: 'request-denied-get',
@@ -353,7 +353,7 @@ describe('PgOrderGroupLinkRepository', () => {
     database.state.order.managerUserId = 7;
     const repository = new PgOrderGroupLinkRepository(database.service);
 
-    await expect(repository.replaceOrderProjects(replaceCommand({
+    await expect(repository.replaceOrderGroups(replaceCommand({
       currentUser: scopedUser({
         id: '99',
         role: 'manager',
@@ -361,8 +361,8 @@ describe('PgOrderGroupLinkRepository', () => {
       }),
       dto: {
         idempotencyKey: 'denied-put-key',
-        projects: [{ projectId: PROJECT_1, relationType: 'main', isPrimary: true }],
-        primaryProjectId: PROJECT_1,
+        groups: [{ groupId: PROJECT_1, relationType: 'main', isPrimary: true }],
+        primaryGroupId: PROJECT_1,
       },
     }))).rejects.toMatchObject({
       statusCode: 403,
@@ -380,7 +380,7 @@ interface QueryRecord {
   params: unknown[];
 }
 
-interface ProjectState {
+interface GroupState {
   id: string;
   code: string;
   name: string;
@@ -391,7 +391,7 @@ interface ProjectState {
 interface LinkState {
   id: string;
   orderId: number;
-  projectId: string;
+  groupId: string;
   relationType: string;
   isPrimary: boolean;
   validFrom: string;
@@ -408,7 +408,7 @@ interface IdempotencyState {
 
 interface FakeState {
   order: { orderId: number; version: number; clientId: number; createdByUserId: number | null; managerUserId: number | null };
-  projects: Map<string, ProjectState>;
+  groups: Map<string, GroupState>;
   links: LinkState[];
   idempotency: Map<string, IdempotencyState>;
   auditRows: unknown[];
@@ -422,12 +422,12 @@ function createDatabase(options: { existingIdempotencyStatus?: 'processing' | 'f
   const queries: QueryRecord[] = [];
   const state: FakeState = {
     order: { orderId: 15, version: 3, clientId: 7, createdByUserId: 1, managerUserId: 1 },
-    projects: new Map([
-      [PROJECT_1, project(PROJECT_1, 'P1', 'Project 1')],
-      [PROJECT_2, project(PROJECT_2, 'P2', 'Project 2')],
-      [PROJECT_OLD, project(PROJECT_OLD, 'OLD', 'Old Project')],
-      [PROJECT_ARCHIVED, project(PROJECT_ARCHIVED, 'ARC', 'Archived Project', 'archived', '2026-05-02T00:00:00.000Z')],
-      [PROJECT_ALPHA, project(PROJECT_ALPHA, 'ALPHA', 'Alpha Project')],
+    groups: new Map([
+      [PROJECT_1, group(PROJECT_1, 'P1', 'Group 1')],
+      [PROJECT_2, group(PROJECT_2, 'P2', 'Group 2')],
+      [PROJECT_OLD, group(PROJECT_OLD, 'OLD', 'Old Group')],
+      [PROJECT_ARCHIVED, group(PROJECT_ARCHIVED, 'ARC', 'Archived Group', 'archived', '2026-05-02T00:00:00.000Z')],
+      [PROJECT_ALPHA, group(PROJECT_ALPHA, 'ALPHA', 'Alpha Group')],
     ]),
     links: [],
     idempotency: new Map(),
@@ -497,7 +497,7 @@ function createDatabase(options: { existingIdempotencyStatus?: 'processing' | 'f
       if (normalized.includes('FROM public.group_groups') && normalized.includes('WHERE id = ANY($1::uuid[])')) {
         const ids = params[0] as string[];
         return rows<T>(ids.flatMap((id) => {
-          const row = state.projects.get(id.toLowerCase());
+          const row = state.groups.get(id.toLowerCase());
           return row ? [{
             id: row.id,
             status: row.status,
@@ -509,7 +509,7 @@ function createDatabase(options: { existingIdempotencyStatus?: 'processing' | 'f
       if (normalized.includes('FROM public.group_order_groups pop')) {
         return rows<T>(state.links
           .filter((link) => link.orderId === Number(params[0]) && link.validTo === null)
-          .map((link) => linkRow(link, state.projects))
+          .map((link) => linkRow(link, state.groups))
           .sort(compareLinkRows));
       }
 
@@ -528,17 +528,17 @@ function createDatabase(options: { existingIdempotencyStatus?: 'processing' | 'f
 
       if (normalized.startsWith('INSERT INTO public.group_order_groups')) {
         state.writes.push('insert-link');
-        const projectId = String(params[1]);
+        const groupId = String(params[1]);
         const link: LinkState = currentLink({
           id: `10000000-0000-4000-8000-${String(state.nextLink).padStart(12, '0')}`,
-          projectId,
+          groupId,
           relationType: String(params[2]),
           isPrimary: Boolean(params[3]),
           validFrom: '2026-05-27T00:00:00.000Z',
         });
         state.nextLink += 1;
         state.links.push(link);
-        return rows<T>([linkRow(link, state.projects)]);
+        return rows<T>([linkRow(link, state.groups)]);
       }
 
       if (normalized.startsWith('UPDATE orders SET version = version + 1')) {
@@ -596,8 +596,8 @@ function replaceCommand(overrides: {
   dto?: {
     idempotencyKey?: string;
     version?: number;
-    primaryProjectId?: string | null;
-    projects?: Array<{ projectId: string; relationType: 'main' | 'secondary'; isPrimary: boolean }>;
+    primaryGroupId?: string | null;
+    groups?: Array<{ groupId: string; relationType: 'main' | 'secondary'; isPrimary: boolean }>;
     reason?: string | null;
   };
 } = {}) {
@@ -606,10 +606,10 @@ function replaceCommand(overrides: {
     currentUser: overrides.currentUser ?? currentUser(),
     orderId: 15,
     dto: {
-      idempotencyKey: dto.idempotencyKey ?? 'order-projects-key-1',
+      idempotencyKey: dto.idempotencyKey ?? 'order-groups-key-1',
       version: dto.version ?? 3,
-      primaryProjectId: 'primaryProjectId' in dto ? dto.primaryProjectId : PROJECT_1,
-      projects: dto.projects ?? [{ projectId: PROJECT_1, relationType: 'main', isPrimary: true }],
+      primaryGroupId: 'primaryGroupId' in dto ? dto.primaryGroupId : PROJECT_1,
+      groups: dto.groups ?? [{ groupId: PROJECT_1, relationType: 'main', isPrimary: true }],
       reason: dto.reason ?? 'rebalance',
     },
     requestId: 'request-1',
@@ -640,19 +640,19 @@ function currentUser(): CurrentUser {
   };
 }
 
-function project(
+function group(
   id: string,
   code: string,
   name: string,
   status: 'active' | 'archived' = 'active',
   archivedAt: string | null = null,
-): ProjectState {
+): GroupState {
   return { id, code, name, status, archivedAt };
 }
 
 function currentLink(input: {
   id: string;
-  projectId: string;
+  groupId: string;
   relationType: string;
   isPrimary: boolean;
   validFrom?: string;
@@ -660,7 +660,7 @@ function currentLink(input: {
   return {
     id: input.id,
     orderId: 15,
-    projectId: input.projectId,
+    groupId: input.groupId,
     relationType: input.relationType,
     isPrimary: input.isPrimary,
     validFrom: input.validFrom ?? '2026-05-10T00:00:00.000Z',
@@ -670,13 +670,13 @@ function currentLink(input: {
   };
 }
 
-function linkRow(link: LinkState, projects: Map<string, ProjectState>): QueryResultRow {
-  const projectState = projects.get(link.projectId);
+function linkRow(link: LinkState, groups: Map<string, GroupState>): QueryResultRow {
+  const groupState = groups.get(link.groupId);
   return {
     link_id: link.id,
-    group_id: link.projectId,
-    code: projectState?.code ?? 'P',
-    name: projectState?.name ?? 'Project',
+    group_id: link.groupId,
+    code: groupState?.code ?? 'P',
+    name: groupState?.name ?? 'Group',
     relation_type: link.relationType,
     is_primary: link.isPrimary,
     valid_from: link.validFrom,

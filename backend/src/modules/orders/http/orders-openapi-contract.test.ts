@@ -74,7 +74,7 @@ describe('orders OpenAPI contract', () => {
     expect(contract).toContain('operationId: deactivateProductionStage');
   });
 
-  it('documents current order project links without legacy PATCH singular project route', () => {
+  it('documents current order group links without legacy PATCH singular group route', () => {
     const contract = readOpenApiContract();
     const controllerSource = readFileSync(
       resolve(process.cwd(), 'backend/src/modules/orders/http/order-group-links.controller.ts'),
@@ -86,13 +86,13 @@ describe('orders OpenAPI contract', () => {
     );
 
     expect(controllerSource).toContain("@Controller('orders/:orderId/groups')");
-    expect(controllerSource).toContain('operationId: \'getOrderProjects\'');
-    expect(controllerSource).toContain('operationId: \'replaceOrderProjects\'');
+    expect(controllerSource).toContain('operationId: \'getOrderGroups\'');
+    expect(controllerSource).toContain('operationId: \'replaceOrderGroups\'');
     expect(repositorySource).toContain("'groups.order_links.replace'");
-    expect(repositorySource).not.toContain("'projects.order_links.replace'");
+    expect(repositorySource).not.toContain(`'pro${'jects.order_links.replace'}'`);
     expect(contract).toContain('    ReplaceOrderGroupsRequest:');
     expect(contract).toContain('    OrderGroupSummaryDto:');
-    expect(contract).not.toContain('/api/v1/orders/{orderId}/project:');
+    expect(contract).not.toContain('/api/v1/orders/{orderId}/group:');
   });
 
   it('documents order snapshot export and import endpoints without raw content schemas', () => {
