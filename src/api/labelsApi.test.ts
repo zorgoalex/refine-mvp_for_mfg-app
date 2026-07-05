@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiRoutes } from './apiRoutes';
 import { authSession } from './authSession';
 import { httpClient } from './httpClient';
@@ -8,6 +8,12 @@ describe('labelsApi', () => {
   beforeEach(() => {
     authSession.setAccessToken('token-1');
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { headers: { 'Content-Type': 'application/json' } })));
+  });
+
+  afterEach(() => {
+    // Un-spy httpClient methods between tests: a leaked vi.spyOn(httpClient, ...)
+    // otherwise accumulates mock.calls across tests in this file.
+    vi.restoreAllMocks();
   });
 
   it('sends auth JSON requests to label endpoints', async () => {
@@ -152,10 +158,7 @@ describe('labelsApi', () => {
     await labelsApi.scanResolveImage(file);
 
     expect(post).toHaveBeenCalledWith(apiRoutes.labels.scanResolveImage(), expect.any(FormData));
-    // NOTE: httpClient.post is spied (not restored) by earlier tests in this
-    // file, so mock.calls accumulates across tests — index the LAST call,
-    // not [0], or this picks up a stale call's args.
-    const formData = post.mock.calls[post.mock.calls.length - 1][1] as FormData;
+    const formData = post.mock.calls[0][1] as FormData;
     expect(formData.get('file')).toBe(file);
   });
 });

@@ -88,6 +88,14 @@ describe('ScanPage', () => {
     expect(src).toContain('Распознаём бирку');
   });
 
+  it('invalidates the pending OCR photo on any new search act (resolvePayload resets it)', () => {
+    const src = read('ScanPage.tsx');
+    // Otherwise a stale «QR не найден» Alert/retry lingers next to fresh
+    // manual/live-QR results, and the error-Alert retry re-OCRs the OLD photo.
+    const resolvePayloadBody = src.split('const resolvePayload')[1]?.split('const handleResolveOcr')[0] ?? '';
+    expect(resolvePayloadBody).toContain('setPendingOcrFile(null)');
+  });
+
   it('maps OCR ApiError codes to Russian messages, including OCR_SERVICE_BUSY', () => {
     const src = read('ScanPage.tsx');
     expect(src).toContain('OCR_SERVICE_UNAVAILABLE');

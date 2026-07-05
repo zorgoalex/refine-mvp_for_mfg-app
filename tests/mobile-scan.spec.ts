@@ -318,6 +318,36 @@ test('OCR fallback: backend 503 OCR_SERVICE_BUSY shows the busy Alert, not Empty
     await expect(page.getByText('Не найдено')).toBeHidden();
 });
 
+test('OCR fallback interleave: a new manual search invalidates the pending photo (stale fallback button hides)', async ({
+    page,
+}) => {
+    const db = createWorkflowMockDb();
+    await setupWorkflowMockApi(page, db, { runtimeConfig: { labels: true } });
+    await mockScanResolve(page, zeroCandidateBody());
+
+    await page.goto('/scan', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('button', { name: 'Скан из фото' })).toBeVisible({ timeout: 30000 });
+
+    // Photo without a QR → fallback offer appears and the photo is held.
+    await page.setInputFiles('[data-testid="scan-photo-input"]', {
+        name: 'blank.png',
+        mimeType: 'image/png',
+        buffer: blankPng,
+    });
+    const ocrButton = page.getByRole('button', { name: 'Распознать текст бирки' });
+    await expect(ocrButton).toBeVisible({ timeout: 15000 });
+
+    // User abandons the photo and searches manually instead (0 candidates):
+    // the fresh result must render WITHOUT the stale «QR не найден» Alert/button.
+    const input = page.getByPlaceholder(MANUAL_PLACEHOLDER);
+    await input.fill('нет такой детали 999');
+    await input.press('Enter');
+
+    await expect(page.getByText('Не найдено')).toBeVisible({ timeout: 10000 });
+    await expect(ocrButton).toBeHidden();
+    await expect(page.getByText('QR-код на фото не найден', { exact: false })).toBeHidden();
+});
+
 function candidate(detailId: number, detailNumber: number, score: number) {
     return {
         detailId,

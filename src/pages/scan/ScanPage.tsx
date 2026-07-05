@@ -144,6 +144,13 @@ export const ScanPage: React.FC = () => {
     async (payload: string, source: 'qr' | 'manual') => {
       setResolving(true);
       setScanError(null);
+      // Any NEW search act (manual input, live QR, photo QR) invalidates a
+      // photo held for the OCR fallback — otherwise the stale «QR-код на фото
+      // не найден» Alert/retry button would linger next to fresh results and
+      // the error-Alert's «Повторить» would silently re-OCR the OLD photo.
+      // handleResolveOcr does NOT route through here (it copies the file to a
+      // local const before its own request), so this reset never races it.
+      setPendingOcrFile(null);
       try {
         const res = await labelsApi.scanResolve(payload, source);
         handleResolved(payload, res);
@@ -218,7 +225,7 @@ export const ScanPage: React.FC = () => {
     try {
       const text = await decodeQrFromFile(file);
       if (text) {
-        setPendingOcrFile(null);
+        // pendingOcrFile is reset inside resolvePayload (single source of truth).
         await resolvePayload(text, 'qr');
       } else {
         setResult(null);
