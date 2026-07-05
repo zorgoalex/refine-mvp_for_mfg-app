@@ -15,6 +15,8 @@ export interface WorkosIdentity {
   lastName: string | null;
   /** WorkOS AuthKit session id (sid claim), used for provider-side logout. */
   providerSessionId: string | null;
+  /** WorkOS authentication_method (Password/GoogleOAuth/…), null if absent. */
+  authMethod: string | null;
 }
 
 interface WorkosAuthenticateResponse {
@@ -26,6 +28,7 @@ interface WorkosAuthenticateResponse {
     last_name?: string | null;
   };
   access_token?: string;
+  authentication_method?: string;
 }
 
 export class WorkosApiClient {
@@ -111,6 +114,8 @@ export class WorkosApiClient {
       firstName: user.first_name ?? null,
       lastName: user.last_name ?? null,
       providerSessionId: extractSessionId(payload.access_token),
+      authMethod:
+        typeof payload.authentication_method === 'string' ? payload.authentication_method : null,
     };
   }
 }

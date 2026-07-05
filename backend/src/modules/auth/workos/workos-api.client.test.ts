@@ -50,6 +50,33 @@ describe('WorkosApiClient', () => {
       firstName: 'A',
       lastName: 'B',
       providerSessionId: 'session_abc',
+      authMethod: null,
+    });
+  });
+
+  it('maps the top-level authentication_method into authMethod', async () => {
+    const client = createClient({
+      status: 200,
+      body: {
+        user: { id: 'sub-1', email: 'a@b.c', email_verified: true },
+        authentication_method: 'GoogleOAuth',
+        access_token: fakeJwt({ sid: 'session_abc' }),
+      },
+    });
+
+    await expect(client.authenticateWithCode('code')).resolves.toMatchObject({
+      authMethod: 'GoogleOAuth',
+    });
+  });
+
+  it('defaults authMethod to null when absent', async () => {
+    const client = createClient({
+      status: 200,
+      body: { user: { id: 'sub-1', email: 'a@b.c', email_verified: true } },
+    });
+
+    await expect(client.authenticateWithCode('code')).resolves.toMatchObject({
+      authMethod: null,
     });
   });
 
