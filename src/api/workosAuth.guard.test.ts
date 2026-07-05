@@ -59,6 +59,20 @@ describe('workos callback helpers contract', () => {
     }
   });
 
+  it('never refresh-replays the unlink password confirmation (one attempt = one hit)', () => {
+    const unlinkHelper = authApiSource.split('async workosUnlink')[1] ?? '';
+    expect(unlinkHelper).toContain('skipAuthRefresh: true');
+
+    // The card refreshes the session explicitly BEFORE submitting instead.
+    const linkCardSource = readFileSync(
+      new URL('../pages/profile/WorkosLinkCard.tsx', import.meta.url),
+      'utf8',
+    );
+    const confirm = linkCardSource.split('const confirmUnlink')[1] ?? '';
+    expect(confirm).toContain('authApi.refresh()');
+    expect(confirm.indexOf('authApi.refresh()')).toBeLessThan(confirm.indexOf('workosUnlink'));
+  });
+
   it('passes state alongside code to both callback endpoints', () => {
     expect(authApiSource).toContain('workosCallback(code: string, state: string)');
     expect(authApiSource).toContain('workosLinkCallback(code: string, state: string)');

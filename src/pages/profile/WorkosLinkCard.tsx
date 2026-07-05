@@ -47,6 +47,9 @@ export const WorkosLinkCard: React.FC = () => {
     setBusy(true);
     setError(null);
     try {
+      // Fresh access token up front: the unlink call itself never
+      // refresh-replays (a wrong-password 401 must stay a single attempt).
+      await authApi.refresh().catch(() => undefined);
       await authApi.workosUnlink(password);
       setLinked(false);
       setUnlinkOpen(false);

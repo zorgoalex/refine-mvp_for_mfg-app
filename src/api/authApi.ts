@@ -80,10 +80,14 @@ export const authApi = {
     return httpClient.get<{ linked: boolean }>(apiRoutes.auth.workosLink);
   },
 
+  // skipAuthRefresh: a wrong password comes back as a business 401 and the
+  // generic refresh-replay would fire a SECOND DELETE (double limiter hit).
+  // The caller refreshes the session explicitly before submitting.
   async workosUnlink(password: string): Promise<{ unlinked: boolean }> {
     return httpClient.delete<{ unlinked: boolean }>(apiRoutes.auth.workosLink, {
       body: JSON.stringify({ password }),
       headers: { 'Content-Type': 'application/json' },
+      skipAuthRefresh: true,
     });
   },
 };

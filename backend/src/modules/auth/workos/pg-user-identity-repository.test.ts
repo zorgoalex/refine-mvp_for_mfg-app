@@ -93,6 +93,23 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
     ).resolves.toEqual({ status: 'conflict', conflictUserId: '99' });
   });
 
+  it('retries the insert when the conflicting identity vanished between statements (concurrent unlink)', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] }, // session lock
+      { rows: [{ login_policy: 'both' }] }, // user lock
+      { rows: [] }, // insert lost to a conflicting row...
+      { rows: [] }, // ...which was unlinked before classification
+      { rows: [{ identity_id: '2', user_id: '42', provider: 'workos', provider_user_id: 'sub-a', email_at_link: 'a@example.com' }] }, // retry succeeds
+    ]);
+    const repository = new PgUserIdentityRepository(database.service);
+
+    await expect(repository.insertLinkWithAudit(input)).resolves.toMatchObject({ status: 'linked' });
+    expect(
+      database.queries.filter((query) => query.text.includes('INSERT INTO user_identities')),
+    ).toHaveLength(2);
+    expect(database.queries.filter((query) => query.text.includes('auth.identity.linked'))).toHaveLength(1);
+  });
+
   it('skips the session lock for admin_bulk provisioning without a session', async () => {
     const database = createTransactionalDatabase([
       { rows: [{ '?column?': 1 }] }, // user lock only

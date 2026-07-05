@@ -111,56 +111,82 @@ export class PgUserIdentityRepository {
         return liveness.deny;
       }
 
-      const inserted = await tx.query<UserIdentityRow>(
-        `
-        INSERT INTO user_identities (user_id, provider, provider_user_id, email_at_link, email_verified_at_link)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (provider, provider_user_id) DO NOTHING
-        RETURNING identity_id, user_id, provider, provider_user_id, email_at_link
-        `,
-        [
-          input.actor.userId,
-          input.provider,
-          input.providerUserId,
-          input.emailAtLink,
-          input.emailVerified,
-        ],
-      );
-      const record = toRecord(inserted.rows[0]);
+      // insert → classify is two statements; under READ COMMITTED the
+      // conflicting identity can be unlinked between them, leaving zero rows
+      // in both. Retry the insert in that (rare) case instead of failing —
+      // the freed sub is simply claimable again.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const inserted = await tx.query<UserIdentityRow>(
+          `
+          INSERT INTO user_identities (user_id, provider, provider_user_id, email_at_link, email_verified_at_link)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (provider, provider_user_id) DO NOTHING
+          RETURNING identity_id, user_id, provider, provider_user_id, email_at_link
+          `,
+          [
+            input.actor.userId,
+            input.provider,
+            input.providerUserId,
+            input.emailAtLink,
+            input.emailVerified,
+          ],
+        );
+        const record = toRecord(inserted.rows[0]);
 
-      if (!record) {
-        return this.classifyConflict(tx, input);
+        if (record) {
+          await this.writeLinkedAudit(tx, input);
+          return { status: 'linked', record };
+        }
+
+        const conflict = await this.classifyConflict(tx, input);
+
+        if (conflict) {
+          return conflict;
+        }
+        // Conflict row vanished (concurrent unlink) — retry the insert.
       }
 
-      await tx.query(
-        `
-        INSERT INTO audit_log (
-          event, entity_type, entity_id, user_id, username, role_code, role,
-          related_user_id, request_id, ip_address, user_agent, source, metadata_json
-        )
-        VALUES ('auth.identity.linked', 'user', $1, $2, $3, $4, $4, $5, $6, $7::inet, $8, 'workos', $9::jsonb)
-        `,
-        [
-          input.actor.userId,
-          toNullableUserId(input.actor.userId),
-          input.actor.username,
-          mapRoleIdToRole(input.actor.roleId),
-          toNullableUserId(input.actor.userId),
-          input.actor.requestId ?? DEFAULT_REQUEST_ID,
-          input.actor.ipAddress ?? null,
-          input.actor.userAgent ?? null,
-          JSON.stringify({
-            provider: input.provider,
-            workosSub: input.providerUserId,
-            emailAtLink: input.emailAtLink,
-            emailVerified: input.emailVerified,
-            mode: input.mode,
-          }),
-        ],
-      );
-
-      return { status: 'linked', record };
+      throw new Error('user_identities insert kept racing a concurrent unlink');
     });
+  }
+
+  private async writeLinkedAudit(
+    tx: { query: DatabaseService['query'] },
+    input: {
+      actor: IdentityActor;
+      provider: string;
+      providerUserId: string;
+      emailAtLink: string;
+      emailVerified: boolean;
+      mode: IdentityLinkMode;
+    },
+  ): Promise<void> {
+    await tx.query(
+      `
+      INSERT INTO audit_log (
+        event, entity_type, entity_id, user_id, username, role_code, role,
+        related_user_id, request_id, ip_address, user_agent, source, metadata_json
+      )
+      VALUES ('auth.identity.linked', 'user', $1, $2, $3, $4, $4, $5, $6, $7::inet, $8, 'workos', $9::jsonb)
+      `,
+      [
+        input.actor.userId,
+        toNullableUserId(input.actor.userId),
+        input.actor.username,
+        mapRoleIdToRole(input.actor.roleId),
+        toNullableUserId(input.actor.userId),
+        input.actor.requestId ?? DEFAULT_REQUEST_ID,
+        input.actor.ipAddress ?? null,
+        input.actor.userAgent ?? null,
+        JSON.stringify({
+          provider: input.provider,
+          workosSub: input.providerUserId,
+          emailAtLink: input.emailAtLink,
+          emailVerified: input.emailVerified,
+          mode: input.mode,
+        }),
+      ],
+    );
   }
 
   /**
@@ -205,11 +231,15 @@ export class PgUserIdentityRepository {
     return { deny: null, loginPolicy: row.login_policy ?? null };
   }
 
-  /** Zero-row conflict insert (liveness already proven under lock). */
+  /**
+   * Zero-row conflict insert (liveness already proven under lock). Returns
+   * null when the conflicting row vanished between the statements — the
+   * caller retries the insert.
+   */
   private async classifyConflict(
     tx: { query: DatabaseService['query'] },
     input: { actor: IdentityActor; provider: string; providerUserId: string },
-  ): Promise<LinkInsertOutcome> {
+  ): Promise<LinkInsertOutcome | null> {
     const existing = await tx.query<UserIdentityRow>(
       `
       SELECT identity_id, user_id, provider, provider_user_id, email_at_link
@@ -227,7 +257,7 @@ export class PgUserIdentityRepository {
         : { status: 'conflict', conflictUserId: record.userId };
     }
 
-    throw new Error('user_identities conflict insert returned no row and no existing identity');
+    return null;
   }
 
   /**
