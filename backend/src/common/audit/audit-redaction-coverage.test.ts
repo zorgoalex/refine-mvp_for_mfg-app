@@ -8,8 +8,9 @@ const ALLOWLIST: Record<string, number> = {
   'src/modules/auth/adapters/pg-auth-audit-repository.ts': 1,
   'src/modules/auth/adapters/pg-auth-session-manager.ts': 2,
   // WorkOS identity events share the identity insert/delete transaction and
-  // persist ip_address/user_agent like the other auth writers.
-  'src/modules/auth/workos/pg-user-identity-repository.ts': 3,
+  // persist ip_address/user_agent like the other auth writers. 4 writers:
+  // link_failed, linked, mass-unlinked, and per-identity delete-one unlinked.
+  'src/modules/auth/workos/pg-user-identity-repository.ts': 4,
   // DEFERRED Variant-B; remove each when its module is migrated.
   'src/modules/orders/adapters/pg-order-project-link-repository.ts': 1,
   'src/modules/orders/adapters/pg-order-transaction-manager.ts': 1,
