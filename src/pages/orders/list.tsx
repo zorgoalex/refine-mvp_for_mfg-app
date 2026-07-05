@@ -939,7 +939,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           width: 150,
           className: "orders-col",
           render: (groups: any[]) => {
-            const primary = groups?.find((project) => project.isPrimary) ?? groups?.[0];
+            const primary = groups?.find((group) => group.isPrimary) ?? groups?.[0];
             return primary ? (
               <span>{primary.code} · {primary.name}</span>
             ) : (

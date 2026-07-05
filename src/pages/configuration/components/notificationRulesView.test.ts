@@ -115,7 +115,7 @@ describe('notificationRulesView', () => {
       expect(payload.recipients).toEqual({ userIds: [100, 200] });
     });
 
-    it('builds create payload with project scope', () => {
+    it('builds create payload with group scope', () => {
       const payload = buildCreatePayload({
         ...emptyDraft(),
         ruleCode: 'project-deadline',
@@ -170,7 +170,7 @@ describe('notificationRulesView', () => {
       expect('conditions' in result).toBe(true);
     });
 
-    it('builds update payload that clears project scope', () => {
+    it('builds update payload that clears group scope', () => {
       const payload = buildUpdatePayload(
         {
           ...emptyDraft(),
