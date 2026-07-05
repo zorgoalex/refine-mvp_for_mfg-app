@@ -17,7 +17,7 @@ import { SheetMaterialsModule } from './modules/sheet-materials/sheet-materials.
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ProductionActionsModule } from './modules/production-actions/production-actions.module';
-import { ProjectsModule } from './modules/projects/projects.module';
+import { GroupsModule } from './modules/groups/groups.module';
 import { OrgModule } from './modules/org/org.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { UsersModule } from './modules/users/users.module';
@@ -48,7 +48,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
     OrdersModule,
     PaymentsModule,
     ProductionActionsModule,
-    ProjectsModule,
+    GroupsModule,
     OrgModule,
     ProfileModule,
     UsersModule,
