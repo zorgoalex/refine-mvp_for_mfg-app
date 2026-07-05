@@ -37,6 +37,17 @@ describe('extractLabelFields (fixtures = сырой OCR-вывод протот�
     expect(f.width).toBeUndefined();
     expect(f.date).toBe('24.06.2026');
   });
+  it('распознаёт ЛДСП как материал (с толщиной и без)', () => {
+    const f = extractLabelFields(['ЛДСП белый 16 мм']);
+    expect(f.material).toContain('ЛДСП');
+    // толщина сразу за «ЛДСП» (без слов между) — извлекается
+    const g = extractLabelFields(['ЛДСП 16 мм']);
+    expect(g.material).toBe('ЛДСП 16мм');
+    // без толщины вовсе — просто «ЛДСП»
+    const h = extractLabelFields(['ЛДСП белый']);
+    expect(h.material).toBe('ЛДСП');
+  });
+
   it('orderName обрезается до «Поз» и не тащит хвосты', () => {
     const f = extractLabelFields(['Заказ№: 548-16мм МДФ Поз. 27 МДФ 16 мм']);
     expect(f.orderName).toBe('548-16мм МДФ');

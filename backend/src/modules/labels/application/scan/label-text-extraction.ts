@@ -31,10 +31,15 @@ export function extractLabelFields(lines: string[]): LabelTextFields {
     result.date = dateMatch[0];
   }
 
-  // Extract material (МДФ with mm size)
-  const materialMatch = text.match(/МДФ\s*(\d+)\s*мм/i);
-  if (materialMatch) {
-    result.material = `МДФ ${materialMatch[1]}мм`;
+  // Extract material (МДФ with mm size, or ЛДСП with optional mm size)
+  const mdfMatch = text.match(/МДФ\s*(\d+)\s*мм/i);
+  if (mdfMatch) {
+    result.material = `МДФ ${mdfMatch[1]}мм`;
+  } else {
+    const ldspMatch = text.match(/ЛДСП(?:\s*(\d+)\s*мм)?/i);
+    if (ldspMatch) {
+      result.material = ldspMatch[1] ? `ЛДСП ${ldspMatch[1]}мм` : 'ЛДСП';
+    }
   }
 
   // Extract dimensions (width x height)
