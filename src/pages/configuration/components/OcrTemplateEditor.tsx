@@ -10,7 +10,7 @@ import type {
   OcrTemplateRule,
   OcrTestResult,
 } from '../../../api/types/labelsApi.types';
-import { OCR_FIELD_LABELS_RU, buildOcrTemplateInput, normalizeBox, suggestAnchor, validateOcrRulesFe } from './ocrTemplateHelpers';
+import { OCR_FIELD_LABELS_RU, buildBoxOverlays, buildOcrTemplateInput, suggestAnchor, validateOcrRulesFe } from './ocrTemplateHelpers';
 
 const { Text } = Typography;
 
@@ -302,60 +302,57 @@ export const OcrTemplateEditor: React.FC<OcrTemplateEditorProps> = ({ open, temp
               <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', marginTop: 8 }}>
                 <img src={photoUrl} alt="Фото бирки" style={{ display: 'block', maxWidth: '100%', height: 'auto' }} />
                 <div style={{ position: 'absolute', inset: 0 }}>
-                  {lines.map((line, index) => {
-                    const box = normalizeBox(line.box, imageWidth, imageHeight);
-                    if (!box) return null;
-                    const rule = rules[index] ?? { field: 'ignore' as OcrFieldCode, anchor: null };
-                    const isActive = activeIndex === index;
-                    const isIgnored = rule.field === 'ignore';
-                    return (
-                      <div
-                        key={index}
-                        role="button"
-                        tabIndex={0}
-                        onMouseEnter={() => setActiveIndex(index)}
-                        onClick={() => {
-                          setActiveIndex(index);
-                          rowRefs.current[index]?.scrollIntoView({ block: 'nearest' });
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            setActiveIndex(index);
-                            rowRefs.current[index]?.scrollIntoView({ block: 'nearest' });
-                          }
-                        }}
-                        title={line.text}
+                  {buildBoxOverlays(lines, rules, imageWidth, imageHeight, activeIndex).map((overlay) => (
+                    <div
+                      key={overlay.index}
+                      role="button"
+                      tabIndex={0}
+                      onMouseEnter={() => setActiveIndex(overlay.index)}
+                      onClick={() => {
+                        setActiveIndex(overlay.index);
+                        rowRefs.current[overlay.index]?.scrollIntoView({ block: 'nearest' });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          setActiveIndex(overlay.index);
+                          rowRefs.current[overlay.index]?.scrollIntoView({ block: 'nearest' });
+                        }
+                      }}
+                      title={lines[overlay.index]?.text}
+                      style={{
+                        position: 'absolute',
+                        left: overlay.style.left,
+                        top: overlay.style.top,
+                        width: overlay.style.width,
+                        height: overlay.style.height,
+                        boxSizing: 'border-box',
+                        border: overlay.active
+                          ? '2px solid #1677ff'
+                          : overlay.assigned
+                            ? '1px solid #52c41a'
+                            : '1px solid rgba(140,140,140,0.5)',
+                        background: overlay.active ? 'rgba(22,119,255,0.12)' : 'transparent',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <span
                         style={{
                           position: 'absolute',
-                          left: `${box.left * 100}%`,
-                          top: `${box.top * 100}%`,
-                          width: `${box.width * 100}%`,
-                          height: `${box.height * 100}%`,
-                          boxSizing: 'border-box',
-                          border: isActive ? '2px solid #1677ff' : isIgnored ? '1px solid rgba(140,140,140,0.5)' : '1px solid #52c41a',
-                          background: isActive ? 'rgba(22,119,255,0.12)' : 'transparent',
-                          cursor: 'pointer',
+                          top: -1,
+                          left: -1,
+                          transform: 'translateY(-100%)',
+                          fontSize: 10,
+                          lineHeight: '14px',
+                          padding: '0 3px',
+                          color: '#fff',
+                          background: overlay.active ? '#1677ff' : overlay.assigned ? '#52c41a' : 'rgba(140,140,140,0.7)',
+                          borderRadius: 2,
                         }}
                       >
-                        <span
-                          style={{
-                            position: 'absolute',
-                            top: -1,
-                            left: -1,
-                            transform: 'translateY(-100%)',
-                            fontSize: 10,
-                            lineHeight: '14px',
-                            padding: '0 3px',
-                            color: '#fff',
-                            background: isActive ? '#1677ff' : isIgnored ? 'rgba(140,140,140,0.7)' : '#52c41a',
-                            borderRadius: 2,
-                          }}
-                        >
-                          {index + 1}
-                        </span>
-                      </div>
-                    );
-                  })}
+                        {overlay.index + 1}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

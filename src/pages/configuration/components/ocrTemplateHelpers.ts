@@ -153,6 +153,51 @@ export function normalizeBox(
   };
 }
 
+export interface BoxOverlay {
+  index: number;
+  field: OcrFieldCode;
+  active: boolean;
+  /** field !== 'ignore' */
+  assigned: boolean;
+  /** Percent-string CSS box, ready to spread onto an absolutely-positioned overlay div. */
+  style: { left: string; top: string; width: string; height: string };
+}
+
+/**
+ * Builds the box-overlay data for every recognized line that has a usable box (a
+ * malformed box, or one that fails to normalize against the image dimensions, is
+ * skipped — not included in the result). Pure function: no DOM, no React — the
+ * editor maps over this to render the overlay divs, keeping the geometry/active/
+ * assigned logic unit-testable outside jsdom.
+ */
+export function buildBoxOverlays(
+  lines: { box?: number[][] }[],
+  rules: { field: OcrFieldCode }[],
+  imageWidth: number | undefined,
+  imageHeight: number | undefined,
+  activeIndex: number | null,
+): BoxOverlay[] {
+  const overlays: BoxOverlay[] = [];
+  lines.forEach((line, index) => {
+    const nb = normalizeBox(line.box, imageWidth, imageHeight);
+    if (!nb) return;
+    const field = rules[index]?.field ?? 'ignore';
+    overlays.push({
+      index,
+      field,
+      active: index === activeIndex,
+      assigned: field !== 'ignore',
+      style: {
+        left: `${nb.left * 100}%`,
+        top: `${nb.top * 100}%`,
+        width: `${nb.width * 100}%`,
+        height: `${nb.height * 100}%`,
+      },
+    });
+  });
+  return overlays;
+}
+
 /** Distinct non-ignore field RU labels, in first-occurrence order — for the list column. */
 export function summarizeFieldTags(rules: OcrTemplateRule[]): string[] {
   const seenFields = new Set<OcrFieldCode>();

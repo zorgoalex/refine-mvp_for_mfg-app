@@ -92,8 +92,11 @@ export class HttpOcrClient implements OcrPort {
         box: parseBox(line?.box),
       }));
       const durationMs = Number(json.durationMs ?? 0);
-      const imageWidth = Number(json.imageWidth);
-      const imageHeight = Number(json.imageHeight);
+      // Coerce only actual JSON numbers; Number(null) === 0 and Number("") === 0 would
+      // otherwise silently turn junk/absent dims into a bogus-but-finite 0 instead of
+      // undefined, so we require typeof === 'number' before the finite check below.
+      const imageWidth = typeof json.imageWidth === 'number' ? json.imageWidth : NaN;
+      const imageHeight = typeof json.imageHeight === 'number' ? json.imageHeight : NaN;
       return {
         lines,
         durationMs: Number.isFinite(durationMs) ? durationMs : 0,
@@ -106,10 +109,11 @@ export class HttpOcrClient implements OcrPort {
   }
 }
 
-/** Shape-safe `box` parse: only accept an array of 4 [x,y] pairs (length-2 finite-number
- *  arrays). Anything else (missing, wrong shape, non-numeric entries) → undefined, never throws. */
+/** Shape-safe `box` parse: only accept an array of EXACTLY 4 [x,y] pairs (length-2
+ *  finite-number arrays) — the true shape of a RapidOCR det quad. Anything else
+ *  (missing, wrong point count, non-numeric/NaN/Infinity entries) → undefined, never throws. */
 function parseBox(value: unknown): number[][] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || value.length !== 4) return undefined;
   const points: number[][] = [];
   for (const point of value) {
     if (!Array.isArray(point) || point.length !== 2) return undefined;
@@ -119,7 +123,7 @@ function parseBox(value: unknown): number[][] | undefined {
     }
     points.push([x, y]);
   }
-  return points.length > 0 ? points : undefined;
+  return points;
 }
 
 /** Fail-closed OcrPort used when OCR_SERVICE_BASE_URL is not configured (pattern: UnavailableLabelsRepository et al.). */

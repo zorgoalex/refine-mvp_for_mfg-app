@@ -133,6 +133,169 @@ describe('HttpOcrClient', () => {
     expect(result.imageHeight).toBeUndefined();
   });
 
+  it('junk imageWidth ("oops" string) → undefined (Number.isFinite guard), not NaN', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(true, 200, {
+        lines: [{ text: 'A', score: 0.9 }],
+        durationMs: 5,
+        imageWidth: 'oops',
+        imageHeight: 1200,
+      }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    const result = await client.recognize(image, 'image/jpeg');
+
+    expect(result.imageWidth).toBeUndefined();
+    expect(result.imageHeight).toBe(1200);
+  });
+
+  it('null imageWidth/imageHeight → undefined, not coerced to 0', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(true, 200, {
+        lines: [{ text: 'A', score: 0.9 }],
+        durationMs: 5,
+        imageWidth: null,
+        imageHeight: null,
+      }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    const result = await client.recognize(image, 'image/jpeg');
+
+    expect(result.imageWidth).toBeUndefined();
+    expect(result.imageHeight).toBeUndefined();
+  });
+
+  it('finite imageWidth/imageHeight (1600/1200) pass through unchanged', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(true, 200, {
+        lines: [{ text: 'A', score: 0.9 }],
+        durationMs: 5,
+        imageWidth: 1600,
+        imageHeight: 1200,
+      }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    const result = await client.recognize(image, 'image/jpeg');
+
+    expect(result.imageWidth).toBe(1600);
+    expect(result.imageHeight).toBe(1200);
+  });
+
+  it('parseBox: exactly 3 points → box undefined (not a valid quad)', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(true, 200, {
+        lines: [
+          {
+            text: 'A',
+            score: 0.9,
+            box: [
+              [0, 0],
+              [10, 0],
+              [10, 5],
+            ],
+          },
+        ],
+        durationMs: 1,
+      }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    const result = await client.recognize(image, 'image/jpeg');
+
+    expect(result.lines[0].box).toBeUndefined();
+  });
+
+  it('parseBox: exactly 5 points → box undefined (not a valid quad)', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(true, 200, {
+        lines: [
+          {
+            text: 'A',
+            score: 0.9,
+            box: [
+              [0, 0],
+              [10, 0],
+              [10, 5],
+              [0, 5],
+              [5, 5],
+            ],
+          },
+        ],
+        durationMs: 1,
+      }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    const result = await client.recognize(image, 'image/jpeg');
+
+    expect(result.lines[0].box).toBeUndefined();
+  });
+
+  it('parseBox: exactly 4 valid points → passes through', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(true, 200, {
+        lines: [
+          {
+            text: 'A',
+            score: 0.9,
+            box: [
+              [0, 0],
+              [10, 0],
+              [10, 5],
+              [0, 5],
+            ],
+          },
+        ],
+        durationMs: 1,
+      }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    const result = await client.recognize(image, 'image/jpeg');
+
+    expect(result.lines[0].box).toEqual([
+      [0, 0],
+      [10, 0],
+      [10, 5],
+      [0, 5],
+    ]);
+  });
+
+  it('parseBox: a 4-point box with a NaN/Infinity/non-number coord → undefined', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(true, 200, {
+        lines: [
+          { text: 'A', score: 0.9, box: [[0, 0], [10, 0], [10, Number.NaN], [0, 5]] },
+          { text: 'B', score: 0.8, box: [[0, 0], [10, 0], [10, Number.POSITIVE_INFINITY], [0, 5]] },
+          { text: 'C', score: 0.7, box: [[0, 0], [10, 0], ['x', 5], [0, 5]] },
+        ],
+        durationMs: 1,
+      }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    const result = await client.recognize(image, 'image/jpeg');
+
+    expect(result.lines.every((l) => l.box === undefined)).toBe(true);
+  });
+
+  it('parseBox: empty array → undefined', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(
+      makeResponse(true, 200, {
+        lines: [{ text: 'A', score: 0.9, box: [] }],
+        durationMs: 1,
+      }),
+    );
+    const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });
+
+    const result = await client.recognize(image, 'image/jpeg');
+
+    expect(result.lines[0].box).toBeUndefined();
+  });
+
   it('429 → ApiError(503, OCR_SERVICE_BUSY)', async () => {
     const mockFetch = vi.fn().mockResolvedValue(makeResponse(false, 429, 'busy'));
     const client = new HttpOcrClient(BASE, { fetchFn: mockFetch });

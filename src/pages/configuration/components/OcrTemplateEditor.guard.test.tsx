@@ -40,8 +40,8 @@ describe('OcrTemplateEditor wiring', () => {
     expect(src).toMatch(/disabled=\{!canManage/);
   });
 
-  it('renders a box overlay over the uploaded photo, keyed to normalized boxes', () => {
-    expect(src).toMatch(/normalizeBox/);
+  it('renders a box overlay over the uploaded photo, keyed to the pure buildBoxOverlays helper', () => {
+    expect(src).toMatch(/buildBoxOverlays/);
     expect(src).toMatch(/<img/);
     expect(src).toMatch(/photoUrl/);
   });
