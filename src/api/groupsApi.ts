@@ -3,6 +3,8 @@ import { httpClient } from './httpClient';
 import { validateOrderId, withQuery } from './ordersApi';
 import type {
   CreateGroupRequest,
+  GroupBatchLinkRequest,
+  GroupBatchLinkResponse,
   GroupDeadlineStatusCountsQuery,
   GroupDeadlineStatusCountsResponse,
   GroupDto,
@@ -16,6 +18,7 @@ import type {
   GroupParticipantRolesResponse,
   GroupParticipantsResponse,
   GroupResponse,
+  OrderGroupsResponse,
   ReplaceGroupEntityLinksRequest,
   ReplaceGroupParticipantsRequest,
   ReplaceOrderGroupsRequest,
