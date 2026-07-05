@@ -93,6 +93,18 @@ describe('orders OpenAPI contract', () => {
     expect(contract).toContain('    ReplaceOrderGroupsRequest:');
     expect(contract).toContain('    OrderGroupSummaryDto:');
     expect(contract).not.toContain('/api/v1/orders/{orderId}/group:');
+
+    // Validate the generated CONTRACT section itself (not just source), so stale
+    // contract wording cannot ship unnoticed (regression guard, critic R1).
+    expect(contract).toContain('  /api/v1/orders/{orderId}/groups:');
+    expect(contract).toContain('operationId: getOrderGroups');
+    expect(contract).toContain('operationId: replaceOrderGroups');
+    expect(contract).toContain('x-permission: orders.view or groups.view');
+    expect(contract).toContain('x-permission: groups.manage_links');
+    expect(contract).toContain('summary: Получить текущие группы заказа');
+    expect(contract).toContain('summary: Заменить текущие группы заказа');
+    expect(contract).not.toContain('проекты заказа');
+    expect(contract).not.toContain('с проектами');
   });
 
   it('documents order snapshot export and import endpoints without raw content schemas', () => {

@@ -847,14 +847,14 @@ paths:
       tags:
         - Orders
       operationId: getOrderGroups
-      summary: Получить текущие проекты заказа
+      summary: Получить текущие группы заказа
       description: Возвращает только текущие Group ↔ Order links.
       security:
         - bearerAuth: []
       x-permission: orders.view or groups.view
       responses:
         '200':
-          description: Текущие проекты заказа
+          description: Текущие группы заказа
           content:
             application/json:
               schema:
@@ -873,9 +873,9 @@ paths:
       tags:
         - Orders
       operationId: replaceOrderGroups
-      summary: Заменить текущие проекты заказа
+      summary: Заменить текущие группы заказа
       description: |
-        Stale-safe и retry-safe replace текущих связей заказа с проектами.
+        Stale-safe и retry-safe replace текущих связей заказа с группами.
         Использует command_idempotency_keys с command_name=groups.order_links.replace.
       security:
         - bearerAuth: []
