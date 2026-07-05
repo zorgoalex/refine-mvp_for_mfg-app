@@ -48,5 +48,6 @@ describe('apiRoutes', () => {
     expect(apiRoutes.users.changePassword(7)).toBe('/api/v1/users/7/change-password');
     expect(apiRoutes.vlm.analyze).toBe('/api/v1/vlm/analyze');
     expect(apiRoutes.labels.scanResolve()).toBe('/api/v1/labels/scan-resolve');
+    expect(apiRoutes.labels.scanResolveImage()).toBe('/api/v1/labels/scan-resolve-image');
   });
 });

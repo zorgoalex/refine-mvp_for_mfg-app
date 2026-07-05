@@ -77,7 +77,36 @@ describe('ScanPage', () => {
     expect(src).toContain('Скан из фото');
     expect(src).toContain('accept="image/*,.emf,.bmp"'); // .emf от Базиса = часто растр
     expect(src).toContain('decodeQrFromFile');
-    expect(src).toContain('QR-код на фото не распознан');
+  });
+
+  it('offers an OCR fallback (pendingOcrFile + "Распознать текст бирки") when no QR is decoded from the photo', () => {
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('pendingOcrFile');
+    expect(src).toContain('Распознать текст бирки');
+    expect(src).toContain('scanResolveImage');
+    // Loading label must be visible while the OCR request is in flight.
+    expect(src).toContain('Распознаём бирку');
+  });
+
+  it('invalidates the pending OCR photo on any new search act (resolvePayload resets it)', () => {
+    const src = read('ScanPage.tsx');
+    // Otherwise a stale «QR не найден» Alert/retry lingers next to fresh
+    // manual/live-QR results, and the error-Alert retry re-OCRs the OLD photo.
+    const resolvePayloadBody = src.split('const resolvePayload')[1]?.split('const handleResolveOcr')[0] ?? '';
+    expect(resolvePayloadBody).toContain('setPendingOcrFile(null)');
+  });
+
+  it('maps OCR ApiError codes to Russian messages, including OCR_SERVICE_BUSY', () => {
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('OCR_SERVICE_UNAVAILABLE');
+    expect(src).toContain('OCR_SERVICE_BUSY');
+    expect(src).toContain('UNSUPPORTED_IMAGE_TYPE');
+  });
+
+  it('maps OCR_IMAGE_UNREADABLE (400 unreadable/oversize image) to a distinct retry-photo message', () => {
+    const src = read('ScanPage.tsx');
+    expect(src).toContain('OCR_IMAGE_UNREADABLE');
+    expect(src).toContain('Не удалось прочитать изображение. Попробуйте другое фото.');
   });
 });
 

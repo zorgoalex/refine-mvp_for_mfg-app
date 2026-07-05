@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiRoutes } from './apiRoutes';
 import { authSession } from './authSession';
 import { httpClient } from './httpClient';
@@ -8,6 +8,12 @@ describe('labelsApi', () => {
   beforeEach(() => {
     authSession.setAccessToken('token-1');
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { headers: { 'Content-Type': 'application/json' } })));
+  });
+
+  afterEach(() => {
+    // Un-spy httpClient methods between tests: a leaked vi.spyOn(httpClient, ...)
+    // otherwise accumulates mock.calls across tests in this file.
+    vi.restoreAllMocks();
   });
 
   it('sends auth JSON requests to label endpoints', async () => {
@@ -143,5 +149,16 @@ describe('labelsApi', () => {
     const get = vi.spyOn(httpClient, 'get').mockResolvedValue([]);
     await labelsApi.listQrTemplates(true);
     expect(get).toHaveBeenCalledWith(`${apiRoutes.labels.qrTemplates}?includeInactive=true`);
+  });
+
+  it('scanResolveImage POSTs the file as multipart FormData to scan-resolve-image', async () => {
+    const post = vi.spyOn(httpClient, 'post').mockResolvedValue({ candidates: [], parsed: null, templatesTried: 1 });
+    const file = new File(['fake-bytes'], 'label.jpg', { type: 'image/jpeg' });
+
+    await labelsApi.scanResolveImage(file);
+
+    expect(post).toHaveBeenCalledWith(apiRoutes.labels.scanResolveImage(), expect.any(FormData));
+    const formData = post.mock.calls[0][1] as FormData;
+    expect(formData.get('file')).toBe(file);
   });
 });

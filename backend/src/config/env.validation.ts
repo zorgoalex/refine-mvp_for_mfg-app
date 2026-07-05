@@ -153,6 +153,7 @@ export const envSchema = z
     FREECUT_OPTIMIZE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
     CAD_SERVICE_BASE_URL: optionalUrlFromEnv,
     CAD_SERVICE_API_TOKEN: optionalTrimmedStringFromEnv,
+    OCR_SERVICE_BASE_URL: optionalUrlFromEnv,
     GAS_WEBAPP_URL: optionalUrlFromEnv,
     GAS_API_KEY: optionalTrimmedStringFromEnv,
     GAS_EXPORT_TIMEOUT_MS: z.coerce.number().int().positive().default(55000),

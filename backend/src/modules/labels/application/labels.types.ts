@@ -1,4 +1,5 @@
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { LabelTextFields } from './scan/label-text-extraction';
 
 export type LabelElementKind = 'text' | 'line' | 'rect' | 'qr';
 export type LabelExportFormat = 'bmp' | 'png' | 'emf';
@@ -313,12 +314,42 @@ export interface ScanResolveResult {
   templatesTried: number;
 }
 
+/** scanResolveFields (T4): OCR-extracted text fields -> ScanSearchInput -> ranked candidates. */
+export interface ScanResolveFieldsCommand extends LabelsContext {
+  fields: LabelTextFields;
+}
+
+/** scanResolveImage (T4): raw uploaded image bytes -> OcrPort.recognize -> extractLabelFields -> scanResolveFields. */
+export interface ScanResolveImageCommand extends LabelsContext {
+  image: Buffer;
+  contentType: string;
+}
+
+export interface ScanResolveImageResult extends ScanResolveResult {
+  ocr: { lineCount: number; durationMs: number };
+}
+
 export interface LabelsPermissionDeniedInput {
   currentUser: CurrentUser;
   requiredPermissions: string[];
   requestId: string;
   targetId?: number;
   targetEntityType?: 'label_template' | 'order' | 'label_qr_template';
+}
+
+/** One recognized text line from ocr-service (recognition box intentionally dropped — backend has no use for it). */
+export interface OcrLine {
+  text: string;
+  score: number;
+}
+
+/**
+ * Port to the standalone ocr-service (T1: POST /ocr, raw image bytes → {lines,durationMs}).
+ * Implementations: HttpOcrClient (adapters/http-ocr-client.ts) when OCR_SERVICE_BASE_URL is
+ * configured, UnavailableOcrClient otherwise. Not yet wired into LabelsService (see T4).
+ */
+export interface OcrPort {
+  recognize(image: Buffer, contentType: string): Promise<{ lines: OcrLine[]; durationMs: number }>;
 }
 
 export interface LabelsPort {

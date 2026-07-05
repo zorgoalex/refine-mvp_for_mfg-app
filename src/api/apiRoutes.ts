@@ -118,6 +118,7 @@ export const apiRoutes = {
     qrTemplates: backendApiPath('/label-qr-templates'),
     qrTemplate: (id: number) => backendApiPath(`/label-qr-templates/${id}`),
     scanResolve: () => backendApiPath('/labels/scan-resolve'),
+    scanResolveImage: () => backendApiPath('/labels/scan-resolve-image'),
   },
   clientPhones: {
     list: backendApiPath('/client-phones'),

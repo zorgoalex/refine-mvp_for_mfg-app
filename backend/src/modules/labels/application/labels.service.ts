@@ -5,6 +5,7 @@ import { PermissionsService } from '../../../permissions/permissions.service';
 import { isBuiltInLabelFieldId, isSupportedFieldBinding } from './bazis-field-catalog';
 import { LABEL_FIELD_CATALOG, type LabelFieldCatalogItem } from './bazis-field-catalog';
 import { validateQrTemplateElement, extractLabelTemplateFieldIds } from './label-template-fields';
+import { extractLabelFields, type LabelTextFields } from './scan/label-text-extraction';
 import { compileQrTemplate, parseQrPayload, parseQrPayloadRight } from './scan/qr-template-parser';
 import { scoreCandidate, rankCandidates } from './scan/scan-ranking';
 import type {
@@ -39,14 +40,23 @@ import type {
   DeleteLabelQrTemplateCommand,
   ScanResolveCommand,
   ScanResolveResult,
+  ScanResolveFieldsCommand,
+  ScanResolveImageCommand,
+  ScanResolveImageResult,
   ScanSearchInput,
   ScanCandidateRow,
+  OcrPort,
 } from './labels.types';
 import { LabelFieldBindingError } from '../errors/labels.errors';
 
 export interface LabelsServicePorts {
   repo: LabelsPort;
   permissions?: PermissionsService;
+  /** Optional: OCR text-recognition port for scanResolveImage (T4). Not wired for the
+   *  v1 QR-payload scanResolve flow. When omitted, scanResolveImage fails closed with
+   *  503 OCR_SERVICE_UNAVAILABLE (mirrors adapters/http-ocr-client.ts UnavailableOcrClient,
+   *  without importing the adapter into the application layer). */
+  ocr?: OcrPort;
 }
 
 const VIEW: PermissionName = 'labels.view';
@@ -56,6 +66,7 @@ const GENERATE: PermissionName = 'labels.generate';
 export class LabelsService {
   private readonly repo: LabelsPort;
   private readonly permissions: PermissionsService;
+  private readonly ocr: OcrPort | null;
   private qrTemplateCache: { at: number; templates: string[] } | null = null;
   private static readonly QR_TEMPLATE_CACHE_MS = 45_000;
 
@@ -74,6 +85,7 @@ export class LabelsService {
   constructor(ports: LabelsServicePorts) {
     this.repo = ports.repo;
     this.permissions = ports.permissions ?? new PermissionsService();
+    this.ocr = ports.ocr ?? null;
   }
 
   async listTemplates(query: ListLabelTemplatesQuery): Promise<LabelTemplateDto[]> {
@@ -255,6 +267,77 @@ export class LabelsService {
     return { candidates, parsed, templatesTried: templates.length };
   }
 
+  /**
+   * OCR-fields flow (T4): fields extracted from a printed-label photo (no QR) -> ScanSearchInput
+   * -> findScanCandidates -> ranked candidates. Distinct from scanResolve's QR-template-parse flow.
+   *
+   * bazisFields containment is deliberately built ONLY when BOTH orderName AND detailNumber were
+   * extracted (pair-containment, Codex R2) — a single stray position number must never open an
+   * unrelated stale snapshot. Candidates found via the bazisFields snapshot source get their
+   * matchedFields 'snapshot' tag retagged to 'snapshot_pair' (SCAN_FIELD_WEIGHTS: 4, strictly below
+   * order_name: 5) so a live order whose current name matches (order_name+detail_number = 8) always
+   * outranks a renamed/stale snapshot match alone (snapshot_pair+detail_number = 7) — this flow must
+   * never silently auto-route to the wrong detail. The v1 QR-payload flow is untouched: it keeps
+   * tagging bazisFields-source candidates as plain 'snapshot' (weight 7).
+   */
+  async scanResolveFields(cmd: ScanResolveFieldsCommand): Promise<ScanResolveResult> {
+    await this.require(cmd, [VIEW]);
+    const { fields } = cmd;
+
+    const input: ScanSearchInput = {};
+    if (fields.orderName) input.orderName = fields.orderName;
+    if (fields.detailNumber != null) input.detailNumber = fields.detailNumber;
+    if (fields.orderName && fields.detailNumber != null) {
+      input.bazisFields = {
+        'bazis.order_number': fields.orderName,
+        'bazis.position_in_product': String(fields.detailNumber),
+      };
+    }
+
+    const parsed = fieldsToParsed(fields);
+    if (input.orderName == null && input.detailNumber == null && input.bazisFields == null) {
+      return { candidates: [], parsed: Object.keys(parsed).length > 0 ? parsed : null, templatesTried: 0 };
+    }
+
+    const rows = await this.repo.findScanCandidates(input);
+    const scored = rows.map((row) => {
+      // Retag ONLY in this OCR-fields flow — see method docstring.
+      const matchedFields = row.matchedFields.map((tag) => (tag === 'snapshot' ? 'snapshot_pair' : tag));
+      return { ...row, matchedFields, score: scoreCandidate(matchedFields), matchedBy: 'ocr-fields' };
+    });
+    const candidates = rankCandidates(scored);
+    return { candidates, parsed, templatesTried: 0 };
+  }
+
+  /**
+   * Raw uploaded label-photo bytes (T4) -> OcrPort.recognize -> extractLabelFields -> scanResolveFields.
+   * No printed-label fields extracted -> empty result WITHOUT going to the repo (avoids a pointless
+   * full-table-ish query when OCR text carries none of the fields we can search on).
+   */
+  async scanResolveImage(cmd: ScanResolveImageCommand): Promise<ScanResolveImageResult> {
+    await this.require(cmd, [VIEW]);
+    if (!this.ocr) {
+      throw new ApiError(503, 'OCR_SERVICE_UNAVAILABLE', 'OCR service is not configured');
+    }
+    const { lines, durationMs } = await this.ocr.recognize(cmd.image, cmd.contentType);
+    const fields = extractLabelFields(lines.map((line) => line.text));
+    const ocrBlock = { lineCount: lines.length, durationMs };
+
+    if (
+      fields.orderName == null &&
+      fields.detailNumber == null &&
+      fields.width == null &&
+      fields.height == null &&
+      fields.date == null &&
+      fields.material == null
+    ) {
+      return { candidates: [], parsed: null, templatesTried: 0, ocr: ocrBlock };
+    }
+
+    const result = await this.scanResolveFields({ currentUser: cmd.currentUser, requestId: cmd.requestId, fields });
+    return { ...result, ocr: ocrBlock };
+  }
+
   private async getActiveQrTemplates(): Promise<string[]> {
     const now = Date.now();
     if (this.qrTemplateCache && now - this.qrTemplateCache.at < LabelsService.QR_TEMPLATE_CACHE_MS) {
@@ -377,4 +460,16 @@ function validateElementFieldBinding(
 export function actorId(user: CurrentUser): number | null {
   const parsed = Number(user.id);
   return Number.isInteger(parsed) ? parsed : null;
+}
+
+/** LabelTextFields -> ScanResolveResult.parsed shape: numbers stringified, absent fields dropped. */
+function fieldsToParsed(fields: LabelTextFields): Record<string, string> {
+  const parsed: Record<string, string> = {};
+  if (fields.orderName != null) parsed.orderName = fields.orderName;
+  if (fields.detailNumber != null) parsed.detailNumber = String(fields.detailNumber);
+  if (fields.width != null) parsed.width = String(fields.width);
+  if (fields.height != null) parsed.height = String(fields.height);
+  if (fields.date != null) parsed.date = fields.date;
+  if (fields.material != null) parsed.material = fields.material;
+  return parsed;
 }
