@@ -4,7 +4,10 @@ import type { OcrFieldCode } from '../application/scan/ocr-field-catalog';
 
 const ocrRuleSchema = z
   .object({
-    field: z.enum(OCR_FIELD_CODES as [string, ...string[]]),
+    // Cast to a non-empty tuple of the literal OcrFieldCode union (not `[string, ...string[]]`)
+    // so z.enum's inferred `.field` type stays `OcrFieldCode`, matching OcrTemplateRule['field']
+    // downstream (labels.service.ts / labels.types.ts) instead of widening to plain `string`.
+    field: z.enum(OCR_FIELD_CODES as [OcrFieldCode, ...OcrFieldCode[]]),
     sampleText: z.string().max(300).optional(),
     anchor: z.string().trim().max(64).nullish(),
   })
@@ -80,3 +83,10 @@ export const deleteLabelOcrTemplateSchema = z
     idempotencyKey: z.string().trim().min(8).max(200),
   })
   .strict();
+
+/** Validates the `rules` JSON payload sent alongside a multipart image upload on the
+ *  label-ocr-templates `test` route (template-config UI dry-run). Same rule shape as
+ *  createLabelOcrTemplateSchema/updateLabelOcrTemplateSchema but without the cross-field
+ *  refine() checks — a candidate rule set under test does not need to satisfy the
+ *  persisted-template invariants (strong-field count, discriminant, no dupes). */
+export const testOcrRulesSchema = z.array(ocrRuleSchema).min(1).max(30);
