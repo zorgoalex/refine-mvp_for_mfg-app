@@ -9,6 +9,14 @@ import type {
   RefreshResponse,
 } from './types/authApi.types';
 
+export type WorkosLinkItem = {
+  identityId: string;
+  authMethod: string | null;
+  emailAtLink: string;
+  linkedAt: string;
+  lastLoginAt: string | null;
+};
+
 export const authApi = {
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     const response = await httpClient.post<LoginResponse>(apiRoutes.auth.login, credentials, {
@@ -77,19 +85,40 @@ export const authApi = {
     );
   },
 
-  async workosLinkStatus(): Promise<{ linked: boolean }> {
-    return httpClient.get<{ linked: boolean }>(apiRoutes.auth.workosLink);
+  async workosListLinks(): Promise<{ links: WorkosLinkItem[] }> {
+    return httpClient.get<{ links: WorkosLinkItem[] }>(apiRoutes.auth.workosLinks);
   },
 
   // skipAuthRefresh: a wrong password comes back as a business 401 and the
   // generic refresh-replay would fire a SECOND DELETE (double limiter hit).
   // The caller refreshes the session explicitly before submitting.
-  async workosUnlink(password: string): Promise<{ unlinked: boolean }> {
-    return httpClient.delete<{ unlinked: boolean }>(apiRoutes.auth.workosLink, {
+  async workosUnlinkOne(identityId: string, password: string): Promise<{ unlinked: boolean }> {
+    return httpClient.delete<{ unlinked: boolean }>(apiRoutes.auth.workosLinkById(identityId), {
       body: JSON.stringify({ password }),
       headers: { 'Content-Type': 'application/json' },
       skipAuthRefresh: true,
     });
+  },
+
+  async workosAdminListLinks(userId: string): Promise<{ links: WorkosLinkItem[] }> {
+    return httpClient.get<{ links: WorkosLinkItem[] }>(apiRoutes.auth.workosAdminLinks(userId));
+  },
+
+  // skipAuthRefresh: admin unlink is destructive too, so a 401 must never
+  // auto-refresh and replay the DELETE for the same identity.
+  async workosAdminUnlinkOne(
+    userId: string,
+    identityId: string,
+    reason?: string,
+  ): Promise<{ unlinked: boolean }> {
+    return httpClient.delete<{ unlinked: boolean }>(
+      apiRoutes.auth.workosAdminLinkById(userId, identityId),
+      {
+        body: JSON.stringify({ reason }),
+        headers: { 'Content-Type': 'application/json' },
+        skipAuthRefresh: true,
+      },
+    );
   },
 };
 

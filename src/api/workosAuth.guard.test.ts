@@ -59,18 +59,61 @@ describe('workos callback helpers contract', () => {
     }
   });
 
-  it('never refresh-replays the unlink password confirmation (one attempt = one hit)', () => {
-    const unlinkHelper = authApiSource.split('async workosUnlink')[1] ?? '';
-    expect(unlinkHelper).toContain('skipAuthRefresh: true');
+  it('BOTH unlink helpers keep skipAuthRefresh and target one identity', () => {
+    expect(authApiSource).toContain('workosUnlinkOne(identityId: string, password: string)');
+    expect(authApiSource).toContain('workosAdminUnlinkOne(');
+    const unlinkOne = authApiSource.split('async workosUnlinkOne')[1]?.split('async ')[0] ?? '';
+    expect(unlinkOne).toContain('skipAuthRefresh: true');
+    const adminUnlinkOne =
+      authApiSource.split('async workosAdminUnlinkOne')[1]?.split('async ')[0] ?? '';
+    expect(adminUnlinkOne).toContain('skipAuthRefresh: true');
+  });
 
-    // The card refreshes the session explicitly BEFORE submitting instead.
-    const linkCardSource = readFileSync(
-      new URL('../pages/profile/WorkosLinkCard.tsx', import.meta.url),
+  it('BOTH self and admin unlink refresh the session BEFORE submit (R17/R9 invariant)', () => {
+    const card = readFileSync(new URL('../pages/profile/WorkosLinkCard.tsx', import.meta.url), 'utf8');
+    const confirm = card.split('const confirmUnlink')[1] ?? '';
+    expect(confirm).toContain('authApi.refresh()');
+    expect(confirm.indexOf('authApi.refresh()')).toBeLessThan(confirm.indexOf('workosUnlinkOne'));
+    const adminCard = readFileSync(
+      new URL('../pages/users/WorkosAdminLinksCard.tsx', import.meta.url),
       'utf8',
     );
-    const confirm = linkCardSource.split('const confirmUnlink')[1] ?? '';
-    expect(confirm).toContain('authApi.refresh()');
-    expect(confirm.indexOf('authApi.refresh()')).toBeLessThan(confirm.indexOf('workosUnlink'));
+    const adminConfirm = adminCard.split('workosAdminUnlinkOne')[0] ?? '';
+    expect(adminConfirm).toContain('authApi.refresh()');
+  });
+
+  it('profile card renders a link LIST and unlinks one, admin block is permission-gated', () => {
+    const card = readFileSync(new URL('../pages/profile/WorkosLinkCard.tsx', import.meta.url), 'utf8');
+    expect(card).toContain('workosListLinks');
+    expect(card).toContain('workosUnlinkOne');
+    const showPage = readFileSync(new URL('../pages/users/show.tsx', import.meta.url), 'utf8');
+    expect(showPage).toContain('featureFlags.workosAuth');
+    // Real carrier-based check: can("users.manage_sso", identity) — assert the
+    // permission literal, not an exact arg-less call shape.
+    expect(showPage).toContain("can(\"users.manage_sso\"");
+    // show.tsx renders the admin card; the admin API call lives inside the card.
+    expect(showPage).toContain('WorkosAdminLinksCard');
+    const adminCard = readFileSync(new URL('../pages/users/WorkosAdminLinksCard.tsx', import.meta.url), 'utf8');
+    expect(adminCard).toContain('workosAdminListLinks');
+  });
+
+  it('both cards render authMethod with a null→«неизвестно» fallback (R5-MINOR)', () => {
+    const card = readFileSync(new URL('../pages/profile/WorkosLinkCard.tsx', import.meta.url), 'utf8');
+    const adminCard = readFileSync(
+      new URL('../pages/users/WorkosAdminLinksCard.tsx', import.meta.url),
+      'utf8',
+    );
+    for (const src of [card, adminCard]) {
+      expect(src).toContain('authMethod');
+      expect(src).toContain('неизвестно');
+    }
+  });
+
+  it('guard assertions target the NEW helpers, not the retired boolean contract', () => {
+    expect(authApiSource).not.toContain('async workosUnlink(');
+    expect(authApiSource).not.toContain('workosLinkStatus');
+    expect(authApiSource).toContain('async workosListLinks(');
+    expect(authApiSource).toContain('async workosUnlinkOne(');
   });
 
   it('passes state alongside code to both callback endpoints', () => {

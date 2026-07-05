@@ -177,8 +177,11 @@ permissions по-прежнему выдаёт наш backend из PostgreSQL; �
   `VITE_WORKOS_AUTH=true` (runtime-config ключ `workosAuth`); флаг требует
   включённого backend-auth режима (`backendAuth`), иначе кнопка скрыта.
 - Привязка/отвязка SSO — в профиле пользователя. Привязка выполняется из живой
-  сессии; отвязка требует подтверждения паролем и запрещена для учётных
-  записей, которым разрешён только внешний вход.
+  сессии; один пользователь может держать несколько SSO-связок, отвязка
+  требует подтверждения паролем и запрещена для учётных записей, которым
+  разрешён только внешний вход.
+- Административное управление чужими SSO-связками доступно только при наличии
+  permission `users.manage_sso`.
 - Выход из ERP по возможности завершает и сессию провайдера (redirect на
   logout URL провайдера).
 - Каким способом можно входить конкретному пользователю, задаёт колонка
@@ -196,7 +199,10 @@ WORKOS_REDIRECT_URI=https://<frontend-domain>/auth/workos/callback
 Redirect URI должен быть зарегистрирован в WorkOS dashboard. Роуты:
 `GET /api/v1/auth/workos/authorize`, `POST /api/v1/auth/workos/callback`,
 `POST /api/v1/auth/workos/link/start`, `POST /api/v1/auth/workos/link/callback`,
-`GET|DELETE /api/v1/auth/workos/link`. Все выключены (503), пока
+`GET /api/v1/auth/workos/links`, `DELETE /api/v1/auth/workos/links/:identityId`,
+`GET /api/v1/auth/workos/admin/users/:userId/links`,
+`DELETE /api/v1/auth/workos/admin/users/:userId/links/:identityId`. Все
+выключены (503), пока
 `BACKEND_ENABLE_WORKOS_AUTH=false`; вход паролем при этом не затрагивается.
 
 Backend orders cutover mode за `VITE_USE_BACKEND_ORDERS_READ=true` и

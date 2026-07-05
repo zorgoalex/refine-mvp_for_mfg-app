@@ -1,35 +1,32 @@
 import React from "react";
 import { DateField } from "@refinedev/antd";
 import { Alert, Button, Card, Input, Modal, Space, Table, Typography } from "antd";
-import { DisconnectOutlined, LinkOutlined } from "@ant-design/icons";
+import { DisconnectOutlined } from "@ant-design/icons";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { authApi, type WorkosLinkItem } from "../../api/authApi";
 import { ApiError } from "../../api/httpClient";
-import { markWorkosLinkIntent } from "../login/WorkosCallback";
 
-/**
- * Профильный блок привязки входа через SSO (WorkOS AuthKit).
- * Рендерится только за флагом workosAuth (проверяет родитель).
- */
-export const WorkosLinkCard: React.FC = () => {
+interface WorkosAdminLinksCardProps {
+  userId: string;
+}
+
+export const WorkosAdminLinksCard: React.FC<WorkosAdminLinksCardProps> = ({ userId }) => {
   const [links, setLinks] = React.useState<WorkosLinkItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [unlinkError, setUnlinkError] = React.useState<string | null>(null);
   const [unlinkOpen, setUnlinkOpen] = React.useState(false);
-  const [password, setPassword] = React.useState("");
+  const [reason, setReason] = React.useState("");
   const [selectedLink, setSelectedLink] = React.useState<WorkosLinkItem | null>(null);
-  const justLinked = React.useMemo(
-    () => new URLSearchParams(window.location.search).get("sso") === "linked",
-    [],
-  );
 
   React.useEffect(() => {
     let active = true;
 
+    setLoading(true);
+    setError(null);
     authApi
-      .workosListLinks()
+      .workosAdminListLinks(userId)
       .then((response) => {
         if (!active) {
           return;
@@ -42,7 +39,7 @@ export const WorkosLinkCard: React.FC = () => {
           return;
         }
 
-        setError("Не удалось загрузить привязанные SSO-входы.");
+        setError("Не удалось загрузить привязанные SSO-входы пользователя.");
         setLinks([]);
       })
       .finally(() => {
@@ -54,34 +51,18 @@ export const WorkosLinkCard: React.FC = () => {
     return () => {
       active = false;
     };
-  }, []);
-
-  const startLink = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const url = await authApi.workosLinkStartUrl();
-      // Bind the intent to this flow's exact state (from the authorize URL):
-      // a stale intent must not misroute a later normal SSO login.
-      const state = new URL(url).searchParams.get("state") ?? "";
-      markWorkosLinkIntent(state);
-      window.location.assign(url);
-    } catch (linkError) {
-      setError(describeError(linkError));
-      setBusy(false);
-    }
-  };
+  }, [userId]);
 
   const openUnlinkModal = (link: WorkosLinkItem) => {
     setSelectedLink(link);
-    setPassword("");
+    setReason("");
     setUnlinkError(null);
     setUnlinkOpen(true);
   };
 
   const closeUnlinkModal = () => {
     setUnlinkOpen(false);
-    setPassword("");
+    setReason("");
     setUnlinkError(null);
     setSelectedLink(null);
   };
@@ -92,13 +73,14 @@ export const WorkosLinkCard: React.FC = () => {
     }
 
     setBusy(true);
-    setError(null);
     setUnlinkError(null);
     try {
-      // Fresh access token up front: the unlink call itself never
-      // refresh-replays (a wrong-password 401 must stay a single attempt).
       await authApi.refresh().catch(() => undefined);
-      await authApi.workosUnlinkOne(selectedLink.identityId, password);
+      await authApi.workosAdminUnlinkOne(
+        userId,
+        selectedLink.identityId,
+        reason.trim() || undefined,
+      );
       setLinks((currentLinks) =>
         currentLinks.filter((link) => link.identityId !== selectedLink.identityId),
       );
@@ -111,20 +93,9 @@ export const WorkosLinkCard: React.FC = () => {
   };
 
   return (
-    <Card
-      title="Вход через SSO"
-      extra={
-        <Button type="primary" icon={<LinkOutlined />} loading={busy} onClick={startLink}>
-          Привязать ещё
-        </Button>
-      }
-    >
-      <Space direction="vertical" style={{ width: "100%" }} size="middle">
-        {justLinked && <Alert type="success" message="SSO привязан к вашей учётной записи" showIcon />}
+    <Card title="SSO-связки пользователя">
+      <Space direction="vertical" size="middle" style={{ width: "100%" }}>
         {error && <Alert type="error" message={error} showIcon />}
-        <Typography.Text>
-          Привяжите внешний вход (пароль SSO / Google), чтобы входить без локального пароля.
-        </Typography.Text>
         <Table<WorkosLinkItem>
           dataSource={links}
           rowKey="identityId"
@@ -169,27 +140,27 @@ export const WorkosLinkCard: React.FC = () => {
       </Space>
 
       <Modal
-        title="Отвязать вход через SSO"
+        title="Отвязать SSO-вход пользователя"
         open={unlinkOpen}
         onOk={confirmUnlink}
         onCancel={closeUnlinkModal}
         okText="Отвязать"
         cancelText="Отмена"
-        okButtonProps={{ danger: true, loading: busy, disabled: password.length === 0 }}
+        okButtonProps={{ danger: true, loading: busy }}
       >
         <Space direction="vertical" style={{ width: "100%" }}>
           <Typography.Text>
-            После отвязки вход будет возможен только по паролю. Подтвердите действие паролем.
+            При необходимости оставьте причину отвязки. Поле необязательное.
           </Typography.Text>
           {selectedLink && (
             <Typography.Text type="secondary">{selectedLink.emailAtLink}</Typography.Text>
           )}
           {unlinkError && <Alert type="error" message={unlinkError} showIcon />}
-          <Input.Password
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Пароль"
-            autoComplete="current-password"
+          <Input.TextArea
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Причина отвязки"
+            autoSize={{ minRows: 2, maxRows: 4 }}
           />
         </Space>
       </Modal>
@@ -199,14 +170,11 @@ export const WorkosLinkCard: React.FC = () => {
 
 function describeError(error: unknown): string {
   if (error instanceof ApiError) {
+    if (error.status === 404) {
+      return "линк не найден";
+    }
     if (error.code === "UNLINK_FORBIDDEN_EXTERNAL_POLICY") {
-      return "Нельзя отвязать SSO: вход по паролю для вашей учётной записи отключён.";
-    }
-    if (error.code === "INVALID_CREDENTIALS") {
-      return "Неверный пароль.";
-    }
-    if (error.code === "IDENTITY_CONFLICT") {
-      return "Этот внешний аккаунт уже привязан к другому пользователю.";
+      return "Нельзя отвязать SSO: вход по паролю для этой учётной записи отключён.";
     }
   }
 

@@ -1,15 +1,21 @@
-import { IResourceComponentsProps, useShow } from "@refinedev/core";
+import { IResourceComponentsProps, useGetIdentity, useShow } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge, Row, Col, Divider } from "antd";
+import { featureFlags } from "../../config/featureFlags";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
+import type { UserIdentity } from "../../types/auth";
+import { can } from "../../utils/permissions";
+import { WorkosAdminLinksCard } from "./WorkosAdminLinksCard";
 
 const { Title } = Typography;
 
 export const UserShow: React.FC<IResourceComponentsProps> = () => {
+  const { data: identity } = useGetIdentity<UserIdentity>();
   const { queryResult } = useShow();
   const { data } = queryResult;
   const record = data?.data;
+  const canManageSso = can("users.manage_sso", identity);
 
   useCurrentRecordTabTitle(record);
 
@@ -76,6 +82,13 @@ export const UserShow: React.FC<IResourceComponentsProps> = () => {
           <DateField value={record?.updated_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
         </Col>
       </Row>
+
+      {featureFlags.workosAuth && canManageSso && record?.user_id != null && (
+        <>
+          <Divider />
+          <WorkosAdminLinksCard userId={String(record?.user_id)} />
+        </>
+      )}
     </Show>
   );
 };
