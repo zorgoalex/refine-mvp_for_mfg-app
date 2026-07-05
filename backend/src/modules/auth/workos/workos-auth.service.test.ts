@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { ApiError } from '../../../common/errors/api-error';
 import { LoginMethodNotAllowedError } from '../auth.errors';
 import type { AuthUserRecord } from '../auth.types';
 import type { WorkosIdentity } from './workos-api.client';
@@ -400,6 +401,29 @@ describe('WorkosAuthService.unlink', () => {
     await expect(harness.service.unlink(command)).rejects.toMatchObject({
       code: 'UNLINK_FORBIDDEN_EXTERNAL_POLICY',
     });
+  });
+
+  it('passes the identity link for in-transaction re-proof and audits an unlink race', async () => {
+    const happy = createHarness();
+    await happy.service.loginWithCode({ code: 'c' });
+    expect(happy.ports.sessions).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        requireLinkedIdentity: { provider: 'workos', providerUserId: IDENTITY.sub },
+      }),
+    );
+
+    const raced = createHarness({
+      sessions: vi.fn(async () => {
+        throw new ApiError(401, 'IDENTITY_NOT_LINKED', 'gone');
+      }),
+    });
+    await expect(raced.service.loginWithCode({ code: 'c' })).rejects.toMatchObject({
+      code: 'IDENTITY_NOT_LINKED',
+    });
+    expect(raced.ports.loginFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'identity_not_linked', authSource: 'workos' }),
+    );
   });
 
   it('audits an in-transaction guard denial during the session insert (policy flip mid-exchange)', async () => {

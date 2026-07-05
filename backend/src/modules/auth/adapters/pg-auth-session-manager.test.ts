@@ -102,6 +102,35 @@ describe('PgAuthSessionManager', () => {
     ).rejects.toMatchObject({ code: 'USER_INACTIVE' });
   });
 
+  it('re-proves the identity link inside the session transaction (unlink/relink race denies)', async () => {
+    const user = { id: '42', username: 'manager', roleId: 10, passwordHash: 'hash', isActive: true };
+    const requireLinkedIdentity = { provider: 'workos', providerUserId: 'sub-1' };
+
+    // Link removed (or moved to another user) between the exchange and the
+    // session insert: deny, no session row.
+    const unlinked = createDatabase({ guardLinked: false });
+    await expect(
+      createManager(unlinked.service, { supportsProviderSessions: true }).createLoginSession(user, {
+        authSource: 'workos',
+        requireLinkedIdentity,
+      }),
+    ).rejects.toMatchObject({ code: 'IDENTITY_NOT_LINKED' });
+    expect(unlinked.queries.some((query) => query.text.includes('INSERT INTO auth_sessions'))).toBe(false);
+
+    // Still linked to THIS user: the guard is a locked owner-match select.
+    const linked = createDatabase({});
+    await expect(
+      createManager(linked.service, { supportsProviderSessions: true }).createLoginSession(user, {
+        authSource: 'workos',
+        requireLinkedIdentity,
+      }),
+    ).resolves.toMatchObject({ sessionId: 'session-1' });
+    const guard = linked.queries.find((query) => query.text.includes('FROM user_identities'));
+    expect(guard?.text).toContain('FOR UPDATE');
+    expect(guard?.text).toContain('user_id = $3');
+    expect(guard?.params).toEqual(['workos', 'sub-1', '42']);
+  });
+
   it('merges caller auditMetadata (e.g. SSO email drift) into the success audit row', async () => {
     const database = createDatabase();
     const manager = createManager(database.service);
@@ -446,12 +475,17 @@ function createDatabase(
     authSource?: string | null;
     guardIsActive?: boolean;
     guardLoginPolicy?: string | null;
+    guardLinked?: boolean;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   const tx = {
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
+
+      if (text.includes('FROM user_identities')) {
+        return { rows: options.guardLinked === false ? [] : [{ '?column?': 1 }] };
+      }
 
       if (text.includes('FROM users WHERE user_id = $1 FOR UPDATE')) {
         return {

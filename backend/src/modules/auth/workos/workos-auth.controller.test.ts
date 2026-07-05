@@ -7,6 +7,21 @@ import { WorkosAuthController } from './workos-auth.controller';
  * carry its own per-user budget (consume-before-verify, refund-on-success) —
  * otherwise it is a brute-force bypass around the /auth/login limiters.
  */
+describe('WorkosAuthController.linkStart', () => {
+  it('fails fast when the bearer has no sessionId claim — never sends the user to the provider', async () => {
+    const harness = createHarness({});
+    const request = createRequest() as { user?: { sessionId?: string } };
+    if (request.user) {
+      delete request.user.sessionId;
+    }
+
+    await expect(
+      harness.controller.linkStart(request as never, { cookie: () => undefined } as never),
+    ).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+    expect(harness.calls).toEqual([]);
+  });
+});
+
 describe('WorkosAuthController.unlink rate limiting', () => {
   it('consumes the per-user budget before the password check and refunds on success', async () => {
     const harness = createHarness({ unlinkResult: { unlinked: true } });

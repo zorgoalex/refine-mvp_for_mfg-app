@@ -113,6 +113,28 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         }
       }
 
+      if (context.requireLinkedIdentity) {
+        // SSO login: the exchange proved the link on a stale snapshot; a
+        // concurrent unlink (or unlink + relink to another user) must deny
+        // at the commit boundary, not mint one more session.
+        const link = await tx.query(
+          `
+          SELECT 1 FROM user_identities
+          WHERE provider = $1 AND provider_user_id = $2 AND user_id = $3
+          FOR UPDATE
+          `,
+          [
+            context.requireLinkedIdentity.provider,
+            context.requireLinkedIdentity.providerUserId,
+            user.id,
+          ],
+        );
+
+        if (link.rows.length === 0) {
+          throw new ApiError(401, 'IDENTITY_NOT_LINKED', 'Вход через SSO не привязан');
+        }
+      }
+
       // With the 052 columns present, the auth source is ALWAYS persisted —
       // an SSO session whose provider returned no usable sid must stay
       // distinguishable at logout ('unavailable', not 'not_applicable').

@@ -127,14 +127,20 @@ export class WorkosAuthService {
         // Plan §4.3: email drift never blocks (sub is the anchor) but must be
         // queryable in the auth.login.success audit metadata, not console-only.
         auditMetadata: this.emailDriftMetadata(identity, user, link),
+        // Re-proven inside the session transaction: concurrent unlink/relink
+        // between the exchange and the insert denies instead of logging in.
+        requireLinkedIdentity: { provider: WORKOS_PROVIDER, providerUserId: identity.sub },
       });
     } catch (error) {
       // In-transaction guard denial (deactivated / policy flipped to
-      // local-only mid-exchange) — keep the audit contract.
+      // local-only mid-exchange / link removed mid-exchange) — keep the
+      // audit contract.
       if (error instanceof UserInactiveError) {
         await this.writeLoginFailed(command, identity, 'inactive_user', user);
       } else if (error instanceof LoginMethodNotAllowedError) {
         await this.writeLoginFailed(command, identity, 'login_method_not_allowed', user);
+      } else if (error instanceof ApiError && error.code === 'IDENTITY_NOT_LINKED') {
+        await this.writeLoginFailed(command, identity, 'identity_not_linked', user);
       }
       throw error;
     }

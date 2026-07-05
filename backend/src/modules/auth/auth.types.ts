@@ -46,6 +46,12 @@ export interface LoginSessionContext extends Pick<LoginCommand, 'userAgent' | 'i
   providerSessionId?: string;
   /** Extra queryable fields merged into the auth.login.success audit metadata. */
   auditMetadata?: Record<string, unknown>;
+  /**
+   * SSO login: the identity link is re-proven INSIDE the session transaction
+   * (provider+sub still owned by this user) — a concurrent unlink/relink
+   * between the exchange and the session insert must deny.
+   */
+  requireLinkedIdentity?: { provider: string; providerUserId: string };
 }
 
 export interface SessionManagerPort {

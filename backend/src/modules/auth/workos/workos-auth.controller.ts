@@ -91,6 +91,13 @@ export class WorkosAuthController {
   ): Promise<{ url: string }> {
     const service = this.assertEnabled();
     const currentUser = this.assertCurrentUser(request);
+
+    // Fail fast: without a sessionId claim the callback could never pass the
+    // state.sessionId proof — do not send the user to the provider at all.
+    if (!currentUser.sessionId) {
+      throw new ApiError(401, 'AUTH_REQUIRED', 'Сессия устарела — войдите заново и повторите привязку');
+    }
+
     await this.rateLimits.assertAllowed({
       rule: { feature: 'auth_workos_link_start', maxRequests: 10, windowMs: 60_000 },
       subject: { route: 'auth/workos/link/start', userId: currentUser.id },
