@@ -124,6 +124,10 @@ export const apiRoutes = {
     qrTemplate: (id: number) => backendApiPath(`/label-qr-templates/${id}`),
     scanResolve: () => backendApiPath('/labels/scan-resolve'),
     scanResolveImage: () => backendApiPath('/labels/scan-resolve-image'),
+    ocrTemplates: backendApiPath('/label-ocr-templates'),
+    ocrTemplate: (id: number) => backendApiPath(`/label-ocr-templates/${id}`),
+    ocrTemplatePreview: () => backendApiPath('/label-ocr-templates/preview'),
+    ocrTemplateTest: () => backendApiPath('/label-ocr-templates/test'),
   },
   clientPhones: {
     list: backendApiPath('/client-phones'),

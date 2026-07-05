@@ -5,10 +5,15 @@ import type {
   GenerateDetailLabelsInput,
   DetailLabelsPreview,
   LabelFieldCatalogItem,
+  LabelOcrTemplate,
+  LabelOcrTemplateInput,
   LabelQrTemplate,
   LabelQrTemplateInput,
   LabelTemplate,
   LabelTemplateInput,
+  OcrPreviewResult,
+  OcrTemplateRule,
+  OcrTestResult,
   OrderLabelData,
   OrderLabelGeneration,
   OrderLabelsPreview,
@@ -16,6 +21,7 @@ import type {
   LatestOrderLabelsPreview,
   PreviewOrderLabelsInput,
   ScanResolveResult,
+  UpdateLabelOcrTemplateInput,
   UpdateLabelQrTemplateInput,
   UpdateLabelTemplateInput,
   UpdateOrderLabelDataInput,
@@ -130,6 +136,43 @@ export const labelsApi = {
     // Жёсткий клиентский таймаут: без него зависший аплоад/прокси = вечный
     // спиннер (пойман на живом фото 2026-07-05). 30с > серверных 20с.
     return httpClient.post<ScanResolveResult>(apiRoutes.labels.scanResolveImage(), formData, {
+      signal: AbortSignal.timeout(30_000),
+    });
+  },
+
+  listOcrTemplates(includeInactive = false): Promise<LabelOcrTemplate[]> {
+    const query = includeInactive ? '?includeInactive=true' : '';
+    return httpClient.get<LabelOcrTemplate[]>(`${apiRoutes.labels.ocrTemplates}${query}`);
+  },
+
+  createOcrTemplate(input: LabelOcrTemplateInput): Promise<LabelOcrTemplate> {
+    return httpClient.post<LabelOcrTemplate>(apiRoutes.labels.ocrTemplates, input);
+  },
+
+  updateOcrTemplate(id: number, input: UpdateLabelOcrTemplateInput): Promise<LabelOcrTemplate> {
+    return httpClient.put<LabelOcrTemplate>(apiRoutes.labels.ocrTemplate(validateId(id, 'ocrTemplateId')), input);
+  },
+
+  deleteOcrTemplate(id: number, version: number, idempotencyKey: string): Promise<void> {
+    return httpClient.delete<void>(apiRoutes.labels.ocrTemplate(validateId(id, 'ocrTemplateId')), {
+      body: JSON.stringify({ version, idempotencyKey }),
+    });
+  },
+
+  // FormData body, same rationale as scanResolveImage above.
+  previewOcrLabel(file: File | Blob): Promise<OcrPreviewResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return httpClient.post<OcrPreviewResult>(apiRoutes.labels.ocrTemplatePreview(), formData, {
+      signal: AbortSignal.timeout(30_000),
+    });
+  },
+
+  testOcrTemplate(file: File | Blob, rules: OcrTemplateRule[]): Promise<OcrTestResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('rules', JSON.stringify(rules));
+    return httpClient.post<OcrTestResult>(apiRoutes.labels.ocrTemplateTest(), formData, {
       signal: AbortSignal.timeout(30_000),
     });
   },
