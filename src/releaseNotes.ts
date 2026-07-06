@@ -30,6 +30,18 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-06",
+    title: "Раздел «Проекты» переименован в «Группы»",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Раздел и страница «Проекты» теперь называются «Группы».",
+      "На карточке заказа вкладка «Проекты заказа» переименована в «Группы заказа».",
+      "Заказы можно связывать с группами так же, как раньше — изменилось только название.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-05",
     title: "Сканер бирок: распознавание бирок без QR-кода",
     services: ["ERP"],
