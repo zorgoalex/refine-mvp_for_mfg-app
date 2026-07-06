@@ -597,4 +597,31 @@ describe('backend env validation', () => {
       validateEnv({ NODE_ENV: 'staging', WORKOS_API_BASE: 'http://127.0.0.1:8787' }),
     ).toThrow(/staging\/production/);
   });
+
+  it('accepts empty-string WORKOS creds when WorkOS auth is disabled (compose injects ""→undefined)', () => {
+    // docker-compose.vps.yml always sets `WORKOS_API_KEY: ${WORKOS_API_KEY:-}`,
+    // so an unset var reaches the backend as "" (not undefined). With WorkOS
+    // disabled this must NOT crash env validation — regression for the
+    // deploy-blocking crash-loop after the 055 WorkOS merge.
+    const parsed = validateEnv({
+      BACKEND_ENABLE_WORKOS_AUTH: 'false',
+      WORKOS_API_KEY: '',
+      WORKOS_CLIENT_ID: '',
+      WORKOS_REDIRECT_URI: '',
+    });
+    expect(parsed.WORKOS_API_KEY).toBeUndefined();
+    expect(parsed.WORKOS_CLIENT_ID).toBeUndefined();
+    expect(parsed.WORKOS_REDIRECT_URI).toBeUndefined();
+
+    // But empty creds while WorkOS is ENABLED must still be rejected.
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_AUTH: 'true',
+        BACKEND_ENABLE_WORKOS_AUTH: 'true',
+        WORKOS_API_KEY: '',
+        WORKOS_CLIENT_ID: '',
+        WORKOS_REDIRECT_URI: '',
+      }),
+    ).toThrow(/WORKOS_API_KEY is required when BACKEND_ENABLE_WORKOS_AUTH is true/);
+  });
 });

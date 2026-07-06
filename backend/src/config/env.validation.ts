@@ -101,9 +101,13 @@ export const envSchema = z
     REFRESH_COOKIE_SAME_SITE: sameSiteFromEnv,
     BACKEND_ENABLE_AUTH: booleanFromEnv.default(false),
     BACKEND_ENABLE_WORKOS_AUTH: booleanFromEnv.default(false),
-    WORKOS_API_KEY: z.string().trim().min(1).optional(),
-    WORKOS_CLIENT_ID: z.string().trim().min(1).optional(),
-    WORKOS_REDIRECT_URI: z.string().trim().url().optional(),
+    // Compose always injects these (`${WORKOS_API_KEY:-}`), so an unset var
+    // arrives as an empty string, not undefined. Coerce ""→undefined via the
+    // shared optional helpers; superRefine still requires them when
+    // BACKEND_ENABLE_WORKOS_AUTH=true.
+    WORKOS_API_KEY: optionalTrimmedStringFromEnv,
+    WORKOS_CLIENT_ID: optionalTrimmedStringFromEnv,
+    WORKOS_REDIRECT_URI: optionalUrlFromEnv,
     // Browser redirects (authorize/logout) AND the server-side code exchange
     // (client secret in the body) go to this host — a loose value is an open
     // redirect plus a secret exfiltration channel. Pin to WorkOS over https;
