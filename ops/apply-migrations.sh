@@ -327,6 +327,7 @@ probe_file() {
                      "$(q_col auth_sessions auth_source)" ;;
     053_*) probe_all "$(q_tbl label_ocr_templates)" "$(q_idx label_ocr_templates_name_active_uniq)" ;;
     054_*) probe_all "$(q_tbl group_groups)" ;;
+    055_*) probe_all "$(q_col user_identities auth_method)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
