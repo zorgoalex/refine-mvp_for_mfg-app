@@ -62,6 +62,7 @@ ALTER TABLE public.group_participants RENAME CONSTRAINT project_participants_pke
 ALTER TABLE public.group_participants RENAME CONSTRAINT chk_project_participants_participant_id_text TO chk_group_participants_participant_id_text;
 ALTER TABLE public.group_participants RENAME CONSTRAINT chk_project_participants_participant_id_numeric TO chk_group_participants_participant_id_numeric;
 ALTER TABLE public.group_participants RENAME CONSTRAINT chk_project_participants_valid_range TO chk_group_participants_valid_range;
+ALTER TABLE public.group_participants RENAME CONSTRAINT project_participants_participant_type_check TO group_participants_participant_type_check;
 ALTER TABLE public.group_participants RENAME CONSTRAINT ex_project_participants_no_participant_overlap TO ex_group_participants_no_participant_overlap;
 ALTER TABLE public.group_participants RENAME CONSTRAINT project_participants_project_id_fkey TO group_participants_group_id_fkey;
 ALTER TABLE public.group_participants RENAME CONSTRAINT project_participants_role_code_fkey TO group_participants_role_code_fkey;
@@ -92,8 +93,10 @@ ALTER INDEX public.idx_notification_rules_project_event RENAME TO idx_notificati
 ALTER TRIGGER project_projects_updated_at ON public.group_groups RENAME TO group_groups_updated_at;
 ALTER FUNCTION public.project_projects_set_updated_at() RENAME TO group_groups_set_updated_at;
 
-UPDATE notification_rules SET resolvers = replace(resolvers::text, 'project_participants', 'group_participants')::jsonb
-WHERE resolvers::text LIKE '%project_participants%';
+-- resolver seed lives inside the recipients_json JSONB (e.g. {"resolvers": ["project_participants"]}),
+-- NOT a top-level column. Rewrite the value within recipients_json.
+UPDATE notification_rules SET recipients_json = replace(recipients_json::text, 'project_participants', 'group_participants')::jsonb
+WHERE recipients_json::text LIKE '%project_participants%';
 
 UPDATE notification_rules SET rule_code = 'deadline-expired-group-participants'
 WHERE rule_code = 'deadline-expired-project-participants';

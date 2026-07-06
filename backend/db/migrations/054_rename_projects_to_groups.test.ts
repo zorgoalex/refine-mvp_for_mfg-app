@@ -41,7 +41,7 @@ describe('054_rename_projects_to_groups migration', () => {
   });
 
   it('migrates notification_rules resolver + rule_code data', () => {
-    expect(sql).toMatch(/UPDATE notification_rules SET resolvers[\s\S]*project_participants[\s\S]*group_participants/i);
+    expect(sql).toMatch(/UPDATE notification_rules SET recipients_json[\s\S]*project_participants[\s\S]*group_participants/i);
     expect(sql).toMatch(/RENAME COLUMN project_id TO group_id/i);
   });
 
