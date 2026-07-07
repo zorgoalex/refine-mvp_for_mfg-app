@@ -24,6 +24,7 @@ import type {
 import type { CurrentUser } from '../../../permissions/current-user';
 import { OrderNotFoundError, OrderVersionConflictError } from '../errors/order.errors';
 import { prepareOrderSave } from '../domain/order-save-preparer';
+import { ProjectClientMismatchError } from '../../projects/errors/projects.errors';
 import {
   assertSheetEligibilityAndNoClear,
   orderTouchesSheet,
@@ -46,6 +47,21 @@ function numOrNull(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeProjectIdInput(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Order payload validation failed', {
+      errors: [{ field: 'header.projectId', message: 'projectId must be a positive integer' }],
+    });
+  }
+
+  return parsed;
 }
 
 function toSheetHeader(order: NormalizedSaveOrderDto): SheetValidationHeader {
@@ -115,9 +131,20 @@ export class OrderTransactionService {
 
   async create(command: CreateOrderCommand): Promise<OrderDto> {
     const prepared = prepareOrderSave(command.dto, { mode: 'create' });
+    const requestedProjectId = normalizeProjectIdInput(command.dto.header.projectId);
 
     const order = await this.ports.transactions.runInTransaction(async (unitOfWork) => {
       await unitOfWork.setSessionUser(command.currentUser.id);
+      if (command.dto.idempotencyKey) {
+        const idem = await unitOfWork.reconcileOrderCreateIdempotency({
+          idempotencyKey: command.dto.idempotencyKey,
+          currentUser: command.currentUser,
+          dto: command.dto,
+        });
+        if (idem.completedResponse) {
+          return idem.completedResponse;
+        }
+      }
       this.requirePermission(command, 'orders.create');
       this.requirePermission(command, 'orders.view_financials');
       this.requireFinancePermissionForPaymentMutations(command, prepared.order);
@@ -129,9 +156,17 @@ export class OrderTransactionService {
         detailSheetIds: [],
       });
 
+      const project = await unitOfWork.resolveProjectForCreate({
+        projectId: requestedProjectId,
+        clientId: prepared.order.header.clientId,
+        orderName: prepared.order.header.orderName,
+        currentUser: command.currentUser,
+        requestId: command.requestId ?? 'orders-create',
+      });
       const orderId = await unitOfWork.createOrderHeader({
         header: prepared.order.header,
         totals: prepared.totals,
+        projectId: project.projectId,
         currentUser: command.currentUser,
       });
 
@@ -169,7 +204,15 @@ export class OrderTransactionService {
         ),
       });
 
-      return this.readAndAssertVersion(unitOfWork, orderId, version, command);
+      const response = this.attachProjectToOrder(
+        await this.readAndAssertVersion(unitOfWork, orderId, version, command),
+        project.projectId,
+        project.code,
+      );
+      if (command.dto.idempotencyKey) {
+        await unitOfWork.completeOrderCreateIdempotency(command.dto.idempotencyKey, response);
+      }
+      return response;
     });
 
     await this.ports.deadlineSync?.syncOrderDeadlinesAfterSave({
@@ -229,6 +272,27 @@ export class OrderTransactionService {
         headerSheetId: storedHeaderSheetId,
         detailSheetIds: storedDetailSheetIds,
       });
+
+      const previousClientId = numOrNull(
+        (beforeSnapshot as Record<string, unknown> | null)?.clientId,
+      );
+      const nextClientId = prepared.order.header.clientId;
+      if (previousClientId !== null && previousClientId !== nextClientId) {
+        const project = await unitOfWork.lockProjectForOrder(command.orderId);
+        if (project.clientId !== nextClientId) {
+          const ordersInProject = await unitOfWork.countOrdersInProject(project.projectId);
+          if (ordersInProject === 1) {
+            await unitOfWork.retargetProjectClient(
+              project.projectId,
+              nextClientId,
+              command.currentUser,
+              command.requestId,
+            );
+          } else {
+            throw new ProjectClientMismatchError();
+          }
+        }
+      }
 
       await unitOfWork.assertChildOwnership(
         command.orderId,
@@ -382,6 +446,13 @@ export class OrderTransactionService {
     return {
       ...order,
       payments: [],
+    };
+  }
+
+  private attachProjectToOrder(order: OrderDto, projectId: number, projectCode: string): OrderDto {
+    return {
+      ...order,
+      header: { ...order.header, projectId, projectCode },
     };
   }
 

@@ -58,6 +58,7 @@ function validateHeader(
     errors.push({ field: 'header.orderName', message: 'orderName is required' });
   }
 
+  requirePositiveIntegerIfPresent(header.projectId, 'header.projectId', errors);
   requirePositiveInteger(header.clientId, 'header.clientId', errors);
   validateDateOnly(header.orderDate, 'header.orderDate', errors);
   requirePositiveInteger(header.orderStatusId, 'header.orderStatusId', errors);

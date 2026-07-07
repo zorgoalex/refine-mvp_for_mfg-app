@@ -72,6 +72,7 @@ export const saveOrderHeaderSwaggerSchema = {
   required: ['orderName', 'clientId', 'orderDate', 'orderStatusId'],
   properties: {
     orderId: { type: 'integer' },
+    projectId: nullableIntegerSwaggerSchema,
     orderName: { type: 'string' },
     clientId: { type: 'integer' },
     orderDate: dateOnlySwaggerSchema,

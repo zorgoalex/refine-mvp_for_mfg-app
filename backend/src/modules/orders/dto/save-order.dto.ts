@@ -20,6 +20,7 @@ export interface SaveOrderDto {
 
 export interface SaveOrderHeaderDto {
   orderId?: number;
+  projectId?: number | null;
   orderName: string;
   clientId: number;
   orderDate: string;

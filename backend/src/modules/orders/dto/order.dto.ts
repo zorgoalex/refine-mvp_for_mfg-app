@@ -142,6 +142,9 @@ export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
   // SP3: server-resolved COALESCE(sheet,material) name + durable era marker for FE picker gating.
   materialName?: string | null;
   sheetEligible?: boolean;
+  // Projects: заполняются в create-ответе (авто-созданный или выбранный корень).
+  projectId?: number;
+  projectCode?: string;
 };
 
 export type OrderDetailDto = CalculatedOrderDetailDto & {

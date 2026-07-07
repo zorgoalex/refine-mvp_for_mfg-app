@@ -53,6 +53,22 @@ export interface OrderDeleteIdempotencyResult {
   completedResponse?: DeleteOrderResponseDto;
 }
 
+export interface OrderCreateIdempotencyResult {
+  completedResponse?: OrderDto | null;
+}
+
+export interface ResolvedProjectForCreate {
+  projectId: number;
+  created: boolean;
+  code: string;
+}
+
+export interface LockedProjectRow {
+  projectId: number;
+  clientId: number;
+  code: string;
+}
+
 export type OrderChildEntityType =
   | 'detail'
   | 'payment'
@@ -148,6 +164,19 @@ export interface OrderWriteUnitOfWork {
    * payload can't smuggle a shadow material_id with a null sheet id. 422 on violation.
    */
   validateNoShadowInjection(input: SheetReferenceValidationInput): Promise<void>;
+  resolveProjectForCreate(input: {
+    projectId: number | null;
+    clientId: number;
+    orderName: string;
+    currentUser: CurrentUser;
+    requestId: string;
+  }): Promise<ResolvedProjectForCreate>;
+  reconcileOrderCreateIdempotency(input: {
+    idempotencyKey: string;
+    currentUser: CurrentUser;
+    dto: SaveOrderDto;
+  }): Promise<OrderCreateIdempotencyResult>;
+  completeOrderCreateIdempotency(idempotencyKey: string, response: OrderDto): Promise<void>;
   reconcileOrderDeleteIdempotency(command: DeleteOrderCommand): Promise<OrderDeleteIdempotencyResult>;
   completeOrderDeleteIdempotency(
     idempotencyKey: string,
@@ -160,8 +189,17 @@ export interface OrderWriteUnitOfWork {
   createOrderHeader(input: {
     header: NormalizedSaveOrderHeaderDto;
     totals: OrderTotalsDto;
+    projectId: number;
     currentUser: CurrentUser;
   }): Promise<number>;
+  lockProjectForOrder(orderId: number): Promise<LockedProjectRow>;
+  countOrdersInProject(projectId: number): Promise<number>;
+  retargetProjectClient(
+    projectId: number,
+    clientId: number,
+    currentUser: CurrentUser,
+    requestId?: string,
+  ): Promise<void>;
   updateOrderHeader(input: {
     orderId: number;
     header: NormalizedSaveOrderHeaderDto;

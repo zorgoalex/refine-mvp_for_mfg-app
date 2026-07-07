@@ -266,6 +266,14 @@ describe('orders controller Swagger schemas — Variant B shape (generated-doc a
     expect(smtProp.nullable).toBe(true);
   });
 
+  it('saveOrderHeaderSwaggerSchema: projectId present and nullable for project root binding', () => {
+    const projectIdProp = saveOrderHeaderSwaggerSchema.properties.projectId as Record<string, unknown>;
+    expect(projectIdProp).toBeDefined();
+    expect(projectIdProp.type).toBe('integer');
+    expect(projectIdProp.nullable).toBe(true);
+    expect(saveOrderHeaderSwaggerSchema.required).not.toContain('projectId');
+  });
+
   it('saveOrderHeaderSwaggerSchema: sheetMaterialTypeId description does NOT contain Variant A "shadow" text', () => {
     const smtProp = saveOrderHeaderSwaggerSchema.properties.sheetMaterialTypeId as Record<string, unknown>;
     const desc = (smtProp.description as string | undefined)?.toLowerCase() ?? '';
