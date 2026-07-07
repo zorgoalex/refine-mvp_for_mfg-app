@@ -182,10 +182,11 @@ describe('OrdersController read endpoints', () => {
       parseOrderListQuery({
         page: '2',
         pageSize: '50',
-        sortBy: 'orderDate',
+        sortBy: 'projectCode',
         sortOrder: 'asc',
         search: '  Order A ',
         clientId: '12',
+        projectId: '17',
         orderStatusId: '3',
         paymentStatusId: '4',
         productionStatusId: '5',
@@ -196,10 +197,11 @@ describe('OrdersController read endpoints', () => {
     ).toEqual({
       page: 2,
       pageSize: 50,
-      sortBy: 'orderDate',
+      sortBy: 'projectCode',
       sortOrder: 'asc',
       search: 'Order A',
       clientId: 12,
+      projectId: 17,
       orderStatusId: 3,
       paymentStatusId: 4,
       productionStatusId: 5,
@@ -207,6 +209,11 @@ describe('OrdersController read endpoints', () => {
       dateTo: '2026-04-30',
       onlyMyOrders: true,
     });
+  });
+
+  it('drops blank projectId and rejects non-positive values like other optional integer filters', () => {
+    expect(parseOrderListQuery({ projectId: '' }).projectId).toBeUndefined();
+    expect(() => parseOrderListQuery({ projectId: '0' })).toThrow(ApiError);
   });
 
   it('lowercases and deduplicates groupIds before applying all-mode group filters', () => {

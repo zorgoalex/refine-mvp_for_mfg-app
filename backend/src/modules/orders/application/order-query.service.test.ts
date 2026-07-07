@@ -713,6 +713,9 @@ function createOrderListItemForQueryTest(orderId: number): OrderListItemDto {
   return {
     orderId,
     orderName: 'Test order',
+    projectId: 2001,
+    projectCode: 'ФК26',
+    fullNumber: 'ФК26-Test order',
     clientId: 1001,
     clientName: 'Test client',
     orderDate: '2026-04-30',

@@ -78,6 +78,9 @@ export interface PaginationDto {
 export interface OrderListItemDto {
   orderId: number;
   orderName: string;
+  projectId: number;
+  projectCode: string;
+  fullNumber: string;
   clientId: number;
   clientName: string | null;
   orderDate: string;
