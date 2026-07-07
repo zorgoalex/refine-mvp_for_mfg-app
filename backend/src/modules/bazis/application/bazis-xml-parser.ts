@@ -1,0 +1,277 @@
+import { XMLParser } from 'fast-xml-parser';
+
+export interface ParsedBazisNode {
+  index: number;
+  parentIndex: number | null;
+  seq: number;
+  nodeKind: 'product' | 'assembly' | 'block' | 'object';
+  objectType: string | null;
+  name: string | null;
+  detailCode: string | null;
+  position: string | null;
+  designation: string | null;
+  quantity: number | null;
+  cumulativeQuantity: number | null;
+  lengthMm: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  thicknessMm: number | null;
+  price: number | null;
+  isRectangular: boolean | null;
+  textureOrientation: string | null;
+  mainMaterialName: string | null;
+  raw: Record<string, unknown>;
+}
+
+export interface ParsedBazisMaterialUsage {
+  name: string;
+  kindGuess: 'sheet' | 'film' | 'edge' | 'hardware';
+  usageCount: number;
+}
+
+export interface ParsedBazisRevision {
+  bazisVersion: string | null;
+  productName: string | null;
+  productPrice: number | null;
+  nodes: ParsedBazisNode[];
+  materials: ParsedBazisMaterialUsage[];
+  summary: {
+    totalNodes: number;
+    panels: number;
+    hardware: number;
+    assemblies: number;
+    blocks: number;
+    uniqueMaterials: number;
+  };
+}
+
+export class BazisXmlParseError extends Error {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+export const MAX_BAZIS_NODES = 20_000;
+
+const CONTAINER_TAGS = ['Сборка', 'Блок'] as const;
+const ARRAY_TAGS = new Set([
+  'Объект',
+  'Сборка',
+  'Блок',
+  'Кромка',
+  'Отверстие',
+  'Свойство',
+  'СопутствующийМатериал',
+  'Пласть',
+  'СдельнаяОперация',
+  'Материал',
+]);
+
+type BazisElement = Record<string, unknown>;
+
+// `fast-xml-parser` groups siblings by tag name unless preserveOrder is enabled. We keep the
+// default grouped mode for simpler tree traversal, so mixed sibling interleave is not preserved:
+// objects are walked before containers. UI can still sort meaningfully via `Позиция` and `seq`.
+export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
+  let text = Buffer.isBuffer(source) ? source.toString('utf8') : source;
+  if (text.charCodeAt(0) === 0xfeff) {
+    text = text.slice(1);
+  }
+  if (/<!DOCTYPE/i.test(text.slice(0, 4096))) {
+    throw new BazisXmlParseError('DOCTYPE запрещён');
+  }
+
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    parseTagValue: false,
+    trimValues: true,
+    isArray: (name) => ARRAY_TAGS.has(name),
+    processEntities: false,
+  });
+
+  let doc: Record<string, unknown>;
+  try {
+    doc = parser.parse(text) as Record<string, unknown>;
+  } catch (error) {
+    throw new BazisXmlParseError(`XML не распарсился: ${(error as Error).message}`);
+  }
+
+  const project = doc['Проект'] as BazisElement | undefined;
+  const product = project?.['Изделие'] as BazisElement | undefined;
+  if (!project || !product) {
+    throw new BazisXmlParseError('Не найден корень Проект/Изделие');
+  }
+
+  const nodes: ParsedBazisNode[] = [];
+  const materialUsage = new Map<
+    string,
+    { kindGuess: ParsedBazisMaterialUsage['kindGuess']; count: number }
+  >();
+
+  const pushNode = (input: Omit<ParsedBazisNode, 'index'>): number => {
+    if (nodes.length >= MAX_BAZIS_NODES) {
+      throw new BazisXmlParseError(`Слишком большой проект: более ${MAX_BAZIS_NODES} узлов`);
+    }
+
+    const index = nodes.length;
+    nodes.push({ ...input, index });
+    return index;
+  };
+
+  const toNumber = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+    const num = Number(String(value).replace(',', '.'));
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const toText = (value: unknown): string | null => {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    const str = String(value).trim();
+    return str === '' ? null : str;
+  };
+
+  const ynToBool = (value: unknown): boolean | null => {
+    if (value === 'Y') {
+      return true;
+    }
+    if (value === 'N') {
+      return false;
+    }
+    return null;
+  };
+
+  const stripChildren = (element: BazisElement): Record<string, unknown> => {
+    const copy: Record<string, unknown> = { ...element };
+    delete copy['СписокЭлементов'];
+    return copy;
+  };
+
+  const recordMaterial = (
+    name: string | null,
+    kind: ParsedBazisMaterialUsage['kindGuess'],
+  ): void => {
+    if (!name) {
+      return;
+    }
+
+    const existing = materialUsage.get(name);
+    if (existing) {
+      existing.count += 1;
+      return;
+    }
+
+    materialUsage.set(name, { kindGuess: kind, count: 1 });
+  };
+
+  const collectMaterials = (element: BazisElement, objectType: string | null): void => {
+    const main = element['ОсновнойМатериал'] as BazisElement | undefined;
+    const mainName = toText(main?.['Наименование']);
+    if (objectType === 'Панель') {
+      recordMaterial(mainName, 'sheet');
+    } else if (objectType === 'Фурнитура') {
+      recordMaterial(mainName, 'hardware');
+    }
+
+    for (const faceKey of ['ОблицовкаПласти1', 'ОблицовкаПласти2']) {
+      const face = element[faceKey] as BazisElement | undefined;
+      const plasti = (face?.['Пласть'] ?? []) as BazisElement[];
+      for (const plast of plasti) {
+        recordMaterial(toText(plast['Наименование']), 'film');
+      }
+    }
+
+    for (const edgeKey of ['СписокКромок1', 'СписокКромок2', 'СписокКромок3', 'СписокКромок4']) {
+      const list = element[edgeKey] as BazisElement | undefined;
+      const edges = (list?.['Кромка'] ?? []) as BazisElement[];
+      for (const edge of edges) {
+        recordMaterial(toText(edge['Наименование']), 'edge');
+      }
+    }
+  };
+
+  const walk = (
+    element: BazisElement,
+    kind: ParsedBazisNode['nodeKind'],
+    parentIndex: number | null,
+    seq: number,
+    parentQty: number,
+  ): void => {
+    const objectType = toText(element['ТипОбъекта']);
+    const quantity = toNumber(element['Количество']);
+    const cumulative = (quantity ?? 1) * parentQty;
+    const index = pushNode({
+      parentIndex,
+      seq,
+      nodeKind: kind,
+      objectType,
+      name: toText(element['Наименование']),
+      detailCode: toText(element['КодДетали']),
+      position: toText(element['Позиция']),
+      designation: toText(element['Обозначение']),
+      quantity,
+      cumulativeQuantity: cumulative,
+      lengthMm: toNumber(element['Длина_готовой_детали']) ?? toNumber(element['Длина']),
+      widthMm: toNumber(element['Ширина_готовой_детали']) ?? toNumber(element['Ширина']),
+      heightMm: toNumber(element['Высота']),
+      thicknessMm: toNumber(element['ОбщаяТолщина']) ?? toNumber(element['Толщина']),
+      price: toNumber(element['Цена']),
+      isRectangular: ynToBool(element['Прямоугольная']),
+      textureOrientation: toText(element['ОриентацияТекстуры']),
+      mainMaterialName: toText(
+        (element['ОсновнойМатериал'] as BazisElement | undefined)?.['Наименование'],
+      ),
+      raw: stripChildren(element),
+    });
+
+    collectMaterials(element, objectType);
+
+    const children = element['СписокЭлементов'] as BazisElement | undefined;
+    if (!children) {
+      return;
+    }
+
+    let childSeq = 0;
+    for (const child of (children['Объект'] ?? []) as BazisElement[]) {
+      walk(child, 'object', index, childSeq++, cumulative);
+    }
+    for (const tag of CONTAINER_TAGS) {
+      for (const container of (children[tag] ?? []) as BazisElement[]) {
+        walk(container, tag === 'Сборка' ? 'assembly' : 'block', index, childSeq++, cumulative);
+      }
+    }
+  };
+
+  walk(product, 'product', null, 0, 1);
+
+  const materials = [...materialUsage.entries()]
+    .map(([name, value]) => ({
+      name,
+      kindGuess: value.kindGuess,
+      usageCount: value.count,
+    }))
+    .sort((left, right) => right.usageCount - left.usageCount);
+
+  const count = (predicate: (node: ParsedBazisNode) => boolean): number =>
+    nodes.filter(predicate).length;
+
+  return {
+    bazisVersion: toText(project['@_Версия']),
+    productName: toText(product['Наименование']),
+    productPrice: toNumber(product['Цена']),
+    nodes,
+    materials,
+    summary: {
+      totalNodes: nodes.length,
+      panels: count((node) => node.objectType === 'Панель'),
+      hardware: count((node) => node.objectType === 'Фурнитура'),
+      assemblies: count((node) => node.nodeKind === 'assembly'),
+      blocks: count((node) => node.nodeKind === 'block'),
+      uniqueMaterials: materials.length,
+    },
+  };
+}

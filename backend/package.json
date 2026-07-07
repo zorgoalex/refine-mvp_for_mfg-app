@@ -20,6 +20,7 @@
     "@resvg/resvg-js": "^2.6.2",
     "bcryptjs": "^3.0.3",
     "express": "^5.2.1",
+    "fast-xml-parser": "^4.5.7",
     "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",
     "pdfkit": "^0.15.2",

@@ -1,0 +1,57 @@
+import type { CurrentUser } from '../../../permissions/current-user';
+import type { ParsedBazisRevision } from './bazis-xml-parser';
+import type {
+  BazisImportResponseDto,
+  BazisProjectCardDto,
+  BazisProjectListItemDto,
+  BazisTreeNodeDto,
+  CreateOrderFromRevisionResponseDto,
+  MaterialMappingDto,
+  UpsertMaterialMappingDto,
+} from '../dto/bazis.dto';
+
+export interface ImportRevisionCommand {
+  currentUser: CurrentUser;
+  requestId?: string;
+  projectId: number | null;
+  bazisProjectId: number | null;
+  fileName: string;
+  fileSize: number;
+  xmlSha256: string;
+  rawXmlGzip: Buffer;
+  parsed: ParsedBazisRevision;
+}
+
+export interface CreateOrderFromRevisionCommand {
+  currentUser: CurrentUser;
+  requestId?: string;
+  revisionId: number;
+  clientId: number;
+  orderName: string;
+  orderStatusId: number;
+  selectedNodeIds: number[];
+  idempotencyKey: string;
+}
+
+export interface BazisRepositoryPort {
+  importRevision(command: ImportRevisionCommand): Promise<BazisImportResponseDto>;
+  recordFailedImport(input: {
+    currentUser: CurrentUser;
+    requestId?: string;
+    fileName: string;
+    xmlSha256: string | null;
+    errorMessage: string;
+  }): Promise<void>;
+  listProjects(filter: { projectId?: number }): Promise<BazisProjectListItemDto[]>;
+  getProject(bazisProjectId: number): Promise<BazisProjectCardDto>;
+  getTreeChildren(revisionId: number, parentNodeId: number | null): Promise<BazisTreeNodeDto[]>;
+  listMaterialMappings(names?: string[]): Promise<MaterialMappingDto[]>;
+  upsertMaterialMappings(
+    currentUser: CurrentUser,
+    requestId: string | undefined,
+    items: UpsertMaterialMappingDto[],
+  ): Promise<MaterialMappingDto[]>;
+  createOrderFromRevision(
+    command: CreateOrderFromRevisionCommand,
+  ): Promise<CreateOrderFromRevisionResponseDto>;
+}
