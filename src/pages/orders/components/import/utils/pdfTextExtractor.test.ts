@@ -274,10 +274,17 @@ describe('parsePdfContent PDF fixtures', () => {
     expect(rows[0]).toMatchObject({
       basisProject: '№ 020 / Respublika',
       basisData: '1/05/Мойка. Дверь 1',
+      // "Обозн." goes to its own field; detail name holds only "Наименование".
+      basisDesignation: '05',
+      detailName: 'Мойка. Дверь 1',
     });
     expect(rows.at(-1)).toMatchObject({
       basisProject: '№ 020 / Respublika',
       basisData: '40/140/Тумба 1. Дверь',
+      basisDesignation: '140',
+      detailName: 'Тумба 1. Дверь',
     });
+    // Detail name must no longer carry the packed "position~~designation~~name".
+    expect(rows[0].detailName).not.toContain('~~');
   }, 30_000);
 });

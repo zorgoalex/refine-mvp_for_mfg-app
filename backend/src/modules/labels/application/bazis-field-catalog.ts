@@ -214,6 +214,7 @@ const DETAIL_FIELD_LABELS: Record<string, string> = {
   ref_key_1c: 'Ключ 1C детали',
   basis_project: 'Базис проект',
   basis_data: 'Базис данные',
+  basis_designation: 'Базис обозн.',
 };
 
 const ORDER_FIELD_LABELS: Record<string, string> = {

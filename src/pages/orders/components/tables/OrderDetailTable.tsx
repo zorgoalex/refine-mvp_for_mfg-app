@@ -90,6 +90,7 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'production_status_id', label: 'Статус' },
   { key: 'basis_project', label: 'Базис проект' },
   { key: 'basis_data', label: 'Базис данные' },
+  { key: 'basis_designation', label: 'Базис обозн.' },
   { key: 'detail_name', label: 'Название детали' },
   { key: 'actions', label: 'Действия', lockVisible: true },
 ];
@@ -514,6 +515,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       note: record.note ?? '',
       basis_project: record.basis_project ?? '',
       basis_data: record.basis_data ?? '',
+      basis_designation: record.basis_designation ?? '',
       priority: record.priority,
       production_status_id: record.production_status_id ?? null,
       detail_name: record.detail_name ?? '',
@@ -1191,6 +1193,24 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Form.Item>
         ) : (
           <span style={{ fontSize: '90%' }}>{d.basis_data || ''}</span>
+        );
+      },
+    },
+    {
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис обозн.</div>,
+      dataIndex: 'basis_designation',
+      key: 'basis_designation',
+      width: 90,
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
+          <Form.Item name="basis_designation" style={{ margin: 0, padding: '0 4px' }}>
+            <Input placeholder="Обозн." onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          <span style={{ fontSize: '90%' }}>{d.basis_designation || ''}</span>
         );
       },
     },

@@ -1,0 +1,45 @@
+import { describe, expect, it } from 'vitest';
+import { convertToImportRows } from './pdfTextExtractor';
+import type { PdfParsedResult } from '../types/pdfTypes';
+
+// Fixture-free unit test for the Basis PDF → import-row mapping. The full
+// parse-a-real-PDF test lives in pdfTextExtractor.test.ts and depends on a
+// binary fixture that is not present in every environment.
+function makeResult(details: PdfParsedResult['details']): PdfParsedResult {
+  return {
+    metadata: { orderNumber: '1057', orderName: 'Кухня', material: 'МДФ 16 мм' },
+    stats: { positionsCount: details.length, totalQuantity: details.length },
+    details,
+    pages: 1,
+    parseErrors: [],
+  };
+}
+
+describe('convertToImportRows Basis field split', () => {
+  it('maps "Обозн." to basisDesignation and "Наименование" to detailName only', () => {
+    const rows = convertToImportRows(
+      makeResult([
+        { designation: '11.02', name: 'Бок L', position: 1, quantity: 2, length: 700, width: 300 },
+      ]),
+    );
+
+    expect(rows[0]).toMatchObject({
+      basisDesignation: '11.02',
+      detailName: 'Бок L',
+      basisData: '1/11.02/Бок L',
+      basisProject: '№ 1057 / Кухня',
+    });
+    // The packed "position~~designation~~name" form must be gone.
+    expect(rows[0].detailName).not.toContain('~~');
+  });
+
+  it('leaves detailName null when Наименование is empty', () => {
+    const rows = convertToImportRows(
+      makeResult([
+        { designation: '36', name: '', position: 3, quantity: 1, length: 500, width: 400 },
+      ]),
+    );
+    expect(rows[0].basisDesignation).toBe('36');
+    expect(rows[0].detailName).toBeNull();
+  });
+});

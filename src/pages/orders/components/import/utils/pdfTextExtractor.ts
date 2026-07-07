@@ -823,7 +823,9 @@ export function convertToImportRows(result: PdfParsedResult): import('../types/i
     note: detail.note || null,
     basisProject,
     basisData: `${detail.position}/${detail.designation}/${detail.name}`,
-    // Format: "position~~designation~~name" (e.g., "1~~11.02~~Бок L")
-    detailName: `${detail.position}~~${detail.designation}~~${detail.name}`,
+    // PDF "Обозн." → dedicated Basis designation field.
+    basisDesignation: detail.designation || null,
+    // PDF "Наименование" → detail name (previously packed as "position~~designation~~name").
+    detailName: detail.name || null,
   }));
 }

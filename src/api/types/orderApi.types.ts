@@ -256,6 +256,7 @@ export interface SaveOrderDetailDto {
   linkPdfFile?: string | null;
   basisProject?: string | null;
   basisData?: string | null;
+  basisDesignation?: string | null;
 
   refKey1c?: string | null;
 }
@@ -416,6 +417,7 @@ export interface OrderDetailDto {
   note?: string | null;
   basisProject?: string | null;
   basisData?: string | null;
+  basisDesignation?: string | null;
   linkCuttingFile?: string | null;
   linkCuttingImageFile?: string | null;
   linkCadFile?: string | null;

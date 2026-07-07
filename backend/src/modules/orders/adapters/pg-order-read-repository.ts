@@ -133,6 +133,7 @@ interface OrderDetailRow extends QueryResultRow {
   note: string | null;
   basis_project: string | null;
   basis_data: string | null;
+  basis_designation: string | null;
   link_cutting_file: string | null;
   link_cutting_image_file: string | null;
   link_cad_file: string | null;
@@ -1116,6 +1117,7 @@ function mapDetail(row: OrderDetailRow) {
     note: row.note,
     basisProject: row.basis_project,
     basisData: row.basis_data,
+    basisDesignation: row.basis_designation,
     linkCuttingFile: row.link_cutting_file,
     linkCuttingImageFile: row.link_cutting_image_file,
     linkCadFile: row.link_cad_file,

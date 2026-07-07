@@ -82,7 +82,8 @@ export interface PdfImportRow {
   note?: string | null;
   basisProject?: string | null;
   basisData?: string | null;
-  detailName: string;        // "designation~~name" format
+  basisDesignation?: string | null;  // "Обозн." — Basis designation
+  detailName: string;                // "Наименование" — detail name only
 }
 
 // ============================================================================

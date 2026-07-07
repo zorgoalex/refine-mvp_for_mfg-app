@@ -799,6 +799,9 @@ function mapDetailSnapshot(row: AnyRow): OrderSnapshotDetailDto {
     productionStatusId: toNullableNumber(row.production_status_id),
     jointOrderId: toNullableNumber(row.joint_order_id),
     note: toNullableString(row.note),
+    basisProject: toNullableString(row.basis_project),
+    basisData: toNullableString(row.basis_data),
+    basisDesignation: toNullableString(row.basis_designation),
     linkCuttingFile: toNullableString(row.link_cutting_file),
     linkCuttingImageFile: toNullableString(row.link_cutting_image_file),
     linkCadFile: toNullableString(row.link_cad_file),
@@ -1103,7 +1106,8 @@ async function upsertDetail(
           film_id = $12, milling_cost_per_sqm = $13, detail_cost = $14, priority = $15,
           production_status_id = $16, joint_order_id = $17, note = $18,
           link_cutting_file = $19, link_cutting_image_file = $20, link_cad_file = $21,
-          link_pdf_file = $22, ref_key_1c = $23, sheet_material_type_id = $24, delete_flag = false
+          link_pdf_file = $22, ref_key_1c = $23, sheet_material_type_id = $24,
+          basis_project = $25, basis_data = $26, basis_designation = $27, delete_flag = false
       WHERE detail_id = $1 AND order_id = $2
       `,
       [effective.id, orderId, ...detailValues(effective)],
@@ -1118,9 +1122,9 @@ async function upsertDetail(
       material_id, milling_type_id, edge_type_id, film_id, milling_cost_per_sqm,
       detail_cost, priority, production_status_id, joint_order_id, note,
       link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file, ref_key_1c,
-      sheet_material_type_id
+      sheet_material_type_id, basis_project, basis_data, basis_designation
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
     RETURNING detail_id AS id
     `,
     [orderId, ...detailValues(effective)],
@@ -1152,6 +1156,9 @@ function detailValues(detail: CalculatedOrderDetailDto) {
     detail.linkPdfFile,
     detail.refKey1c,
     detail.sheetMaterialTypeId ?? null,
+    detail.basisProject ?? null,
+    detail.basisData ?? null,
+    detail.basisDesignation ?? null,
   ];
 }
 

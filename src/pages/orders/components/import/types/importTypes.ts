@@ -93,6 +93,7 @@ export interface ImportRow {
   note?: string | null;
   basisProject?: string | null;
   basisData?: string | null;
+  basisDesignation?: string | null;
   detailName?: string | null;
 }
 

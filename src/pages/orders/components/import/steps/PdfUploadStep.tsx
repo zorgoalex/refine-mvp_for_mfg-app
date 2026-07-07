@@ -61,17 +61,13 @@ export const PdfUploadStep: React.FC<PdfUploadStepProps> = ({
       key: 'detailName',
       width: 200,
       ellipsis: true,
-      render: (value: string) => {
-        // Format: "position~~designation~~name" (e.g., "1~~11.02~~Бок L")
-        const parts = (value || '').split('~~');
-        const position = parts[0];
-        const designation = parts[1];
-        const name = parts[2];
+      render: (value: string | null, record: ImportRow) => {
+        const designation = record.basisDesignation;
+        const name = value || '';
         return (
           <span>
-            <Text type="secondary">{position}. </Text>
-            <Text strong>{designation}</Text>
-            {name && <Text type="secondary"> — {name}</Text>}
+            {designation && <Text strong>{designation} </Text>}
+            {name && <Text type="secondary">{designation ? '— ' : ''}{name}</Text>}
           </span>
         );
       },

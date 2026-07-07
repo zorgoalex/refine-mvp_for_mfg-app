@@ -157,6 +157,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
         note: row.note || null,
         basis_project: row.basisProject || null,
         basis_data: row.basisData || null,
+        basis_designation: row.basisDesignation || null,
         detail_name: row.detailName || null,
       };
 
