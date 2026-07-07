@@ -26,6 +26,7 @@ describe('featureFlags', () => {
       useBackendReferences: false,
       useBackendCut: false,
       projects: false,
+      useBackendBazis: false,
       labels: false,
       sheetMaterialsReads: false,
       enableLegacyHasura: true,

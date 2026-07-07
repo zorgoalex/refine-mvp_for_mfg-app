@@ -17,6 +17,7 @@ const RUNTIME_CONFIG_ENV_KEYS = [
   'RUNTIME_CONFIG_BACKEND_USERS',
   'RUNTIME_CONFIG_BACKEND_VLM',
   'RUNTIME_CONFIG_BACKEND_REFERENCES',
+  'RUNTIME_CONFIG_BACKEND_BAZIS',
   'RUNTIME_CONFIG_ENABLE_LEGACY_HASURA',
 ];
 
@@ -55,6 +56,7 @@ describe('runtime-config handler', () => {
         backendVlm: false,
         backendReferences: false,
         backendCut: false,
+        bazisImport: false,
         enableLegacyHasura: true,
       },
     });

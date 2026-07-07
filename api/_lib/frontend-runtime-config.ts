@@ -16,6 +16,7 @@ export interface FrontendRuntimeConfigResponse {
     backendReferences: boolean;
     backendCut: boolean;
     projects: boolean;
+    bazisImport: boolean;
     labels: boolean;
     enableLegacyHasura: boolean;
     workosAuth: boolean;
@@ -58,6 +59,7 @@ export function buildFrontendRuntimeConfig(
       backendReferences: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_REFERENCES, false),
       backendCut: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_CUT, false),
       projects: readBooleanEnv(env.RUNTIME_CONFIG_PROJECTS, false),
+      bazisImport: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_BAZIS, false),
       labels: readBooleanEnv(env.RUNTIME_CONFIG_LABELS, false),
       enableLegacyHasura: readBooleanEnv(env.RUNTIME_CONFIG_ENABLE_LEGACY_HASURA, true),
       workosAuth: readBooleanEnv(env.RUNTIME_CONFIG_WORKOS_AUTH, false),

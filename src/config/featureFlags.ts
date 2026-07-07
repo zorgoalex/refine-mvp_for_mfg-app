@@ -14,6 +14,7 @@ export interface FrontendFeatureFlags {
   useBackendReferences: boolean;
   useBackendCut: boolean;
   projects: boolean;
+  useBackendBazis: boolean;
   labels: boolean;
   // Variant B: gates reads that depend on migration 034 Hasura schema
   // (sheet_material_type_id as the sole order-material reference; order_details_view
@@ -48,6 +49,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   backendReferences: string | boolean;
   backendCut: string | boolean;
   projects: string | boolean;
+  bazisImport: string | boolean;
   labels: string | boolean;
   sheetMaterialsReads: string | boolean;
   sheetMaterials: string | boolean;
@@ -87,6 +89,7 @@ export function getFeatureFlags(
     useBackendReferences: readBooleanFlag(env.VITE_USE_BACKEND_REFERENCES, false),
     useBackendCut: readBooleanFlag(env.VITE_USE_BACKEND_CUT, false),
     projects: readBooleanFlag(env.VITE_USE_PROJECTS, false),
+    useBackendBazis: readBooleanFlag(env.VITE_USE_BACKEND_BAZIS, false),
     labels: readBooleanFlag(env.VITE_USE_BACKEND_LABELS, false),
     sheetMaterialsReads: readBooleanFlag(env.VITE_SHEET_MATERIALS_READS, false),
     enableLegacyHasura: readBooleanFlag(env.VITE_ENABLE_LEGACY_HASURA, true),
@@ -136,6 +139,8 @@ export function mergeRuntimeFeatureFlags(
       readOptionalBooleanFlag(runtimeFeatures.backendReferences) ?? fallback.useBackendReferences,
     useBackendCut: readOptionalBooleanFlag(runtimeFeatures.backendCut) ?? fallback.useBackendCut,
     projects: readOptionalBooleanFlag(runtimeFeatures.projects) ?? fallback.projects,
+    useBackendBazis:
+      readOptionalBooleanFlag(runtimeFeatures.bazisImport) ?? fallback.useBackendBazis,
     labels: readOptionalBooleanFlag(runtimeFeatures.labels) ?? fallback.labels,
     sheetMaterialsReads:
       readOptionalBooleanFlag(runtimeFeatures.sheetMaterialsReads) ??
