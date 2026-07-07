@@ -942,11 +942,11 @@ const parsePostgresError = (message: string): string => {
   return message;
 };
 
-const gqlRequest = async (query: string): Promise<any> => {
+const gqlRequest = async (query: string, variables?: AnyObject): Promise<any> => {
   const res = await fetch(HASURA_URL, {
     method: "POST",
     headers: await headers(),
-    body: JSON.stringify({ query }),
+    body: JSON.stringify(variables ? { query, variables } : { query }),
   });
   const json = await res.json();
 
@@ -1099,6 +1099,46 @@ const buildWhere = (filters?: any[]) => {
     return `{ ${f.field}: { ${op}: ${escapeValue(val)} } }`;
   });
   return `, where: { _and: [${andParts.join(", ")}] }`;
+};
+
+// A column value must be passed as a GraphQL `$variable` (not inlined into the
+// query text) when it is a JSON object — or an array containing objects —
+// because its keys may not be valid GraphQL names (e.g. "cut-jobs" with a
+// hyphen). Inlining such a value forces the object-literal keys to be unquoted,
+// producing an invalid GraphQL document ("not a valid graphql query"). Scalars
+// and scalar-only arrays inline safely and keep the legacy path (no regression
+// for genuine Postgres array columns).
+const columnNeedsGqlVariable = (v: any): boolean => {
+  if (v === null || typeof v !== "object") return false;
+  if (Array.isArray(v)) {
+    return v.some((el) => el !== null && typeof el === "object");
+  }
+  return true;
+};
+
+// Build a GraphQL input object (`_set` / insert `object`) from a flat column
+// map. Scalar columns are inlined; jsonb/object columns are emitted as typed
+// `$variables` so arbitrary JSON keys survive intact.
+export const buildGqlInput = (obj: AnyObject) => {
+  const inlineParts: string[] = [];
+  const varDefs: string[] = [];
+  const varValues: AnyObject = {};
+  let i = 0;
+  for (const [key, value] of Object.entries(obj)) {
+    if (columnNeedsGqlVariable(value)) {
+      const varName = `v${i++}`;
+      varDefs.push(`$${varName}: jsonb`);
+      varValues[varName] = value;
+      inlineParts.push(`${key}: $${varName}`);
+    } else {
+      inlineParts.push(`${key}: ${escapeValue(value)}`);
+    }
+  }
+  return {
+    literal: `{ ${inlineParts.join(", ")} }`,
+    varHeader: varDefs.length ? `(${varDefs.join(", ")})` : "",
+    varValues,
+  };
 };
 
 const ORDER_SORT_FIELD_MAP: Record<string, OrderSortBy> = {
@@ -1808,16 +1848,16 @@ export const dataProvider = (_apiUrl: string) => {
           cleaned[idCol] = Date.now();
         }
       }
-      const objectLiteral = JSON.stringify(cleaned).replace(/"([^("]+)":/g, "$1:");
+      const { literal: objectLiteral, varHeader, varValues } = buildGqlInput(cleaned);
       const query = `
-        mutation {
+        mutation${varHeader} {
           insert_${resource}_one(object: ${objectLiteral}) {
             ${selection}
           }
         }
       `;
       // console.log('[dataProvider.create] GraphQL query:', query);
-      const data = await gqlRequest(query);
+      const data = await gqlRequest(query, varHeader ? varValues : undefined);
       return { data: data[`insert_${resource}_one`] };
     },
 
@@ -1854,15 +1894,17 @@ export const dataProvider = (_apiUrl: string) => {
         ...rest
       } = variables || {};
       const payloadForUpdate = rest;
-      const setLiteral = JSON.stringify(sanitizeVariables(payloadForUpdate)).replace(/"([^\(\"]+)":/g, "$1:");
+      const { literal: setLiteral, varHeader, varValues } = buildGqlInput(
+        sanitizeVariables(payloadForUpdate),
+      );
       const query = `
-        mutation {
+        mutation${varHeader} {
           update_${resource}_by_pk(pk_columns: { ${idCol}: ${escapeValue(id)} }, _set: ${setLiteral}) {
             ${fieldsFor(resource)}
           }
         }
       `;
-      const data = await gqlRequest(query);
+      const data = await gqlRequest(query, varHeader ? varValues : undefined);
       return { data: data[`update_${resource}_by_pk`] };
     },
 
