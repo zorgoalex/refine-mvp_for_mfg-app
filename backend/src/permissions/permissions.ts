@@ -140,6 +140,8 @@ export const PERMISSIONS = [
   'cut.manage',
 
   'labels.view',
+  'projects.view',
+  'projects.manage',
   'labels.manage_templates',
   'labels.generate',
 
@@ -233,6 +235,8 @@ export const ROLE_PERMISSIONS = {
     'cut.view',
     'cut.manage',
     'labels.view',
+    'projects.view',
+    'projects.manage',
     'labels.manage_templates',
     'labels.generate',
     'sheet_materials.view',
@@ -305,6 +309,8 @@ export const ROLE_PERMISSIONS = {
     'cut.view',
     'cut.manage',
     'labels.view',
+    'projects.view',
+    'projects.manage',
     'labels.generate',
     'sheet_materials.view',
     'sheet_materials.manage',
@@ -361,6 +367,8 @@ export const ROLE_PERMISSIONS = {
     'cut.view',
     'cut.manage',
     'labels.view',
+    'projects.view',
+    'projects.manage',
     'labels.generate',
     'sheet_materials.view',
     'sheet_materials.manage',
@@ -399,6 +407,7 @@ export const ROLE_PERMISSIONS = {
     'workshops.view',
     'work_centers.view',
     'cut.view',
+    'projects.view',
 
     'requirements.view',
     'doweling.view',
@@ -429,6 +438,7 @@ export const ROLE_PERMISSIONS = {
     'work_centers.view',
     'cut.view',
     'sheet_materials.view',
+    'projects.view',
 
     'requirements.view',
     'doweling.view',

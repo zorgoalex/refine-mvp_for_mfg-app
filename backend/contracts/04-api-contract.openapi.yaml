@@ -2082,6 +2082,287 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/projects:
+    get:
+      tags:
+        - Projects
+      operationId: listProjects
+      summary: Получить список проектов
+      security:
+        - bearerAuth: []
+      x-permission: projects.view
+      parameters:
+        - in: query
+          name: search
+          schema:
+            type: string
+            maxLength: 100
+        - in: query
+          name: clientId
+          schema:
+            type: integer
+        - in: query
+          name: includeArchived
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Список проектов
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                    - projectId
+                    - code
+                    - name
+                    - clientId
+                    - notes
+                    - version
+                  properties:
+                    projectId:
+                      type: integer
+                    code:
+                      type: string
+                    name:
+                      type: string
+                    clientId:
+                      type: integer
+                    clientName:
+                      type: string
+                    notes:
+                      type: string
+                      nullable: true
+                    version:
+                      type: integer
+                    ordersCount:
+                      type: integer
+                    totalFinalAmount:
+                      type: string
+                    totalPaidAmount:
+                      type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: База данных недоступна
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/projects/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+    get:
+      tags:
+        - Projects
+      operationId: getProjectById
+      summary: Получить карточку проекта
+      security:
+        - bearerAuth: []
+      x-permission: projects.view
+      responses:
+        '200':
+          description: Карточка проекта
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - projectId
+                  - code
+                  - name
+                  - clientId
+                  - notes
+                  - version
+                  - orders
+                properties:
+                  projectId:
+                    type: integer
+                  code:
+                    type: string
+                  name:
+                    type: string
+                  clientId:
+                    type: integer
+                  clientName:
+                    type: string
+                  notes:
+                    type: string
+                    nullable: true
+                  version:
+                    type: integer
+                  ordersCount:
+                    type: integer
+                  totalFinalAmount:
+                    type: string
+                  totalPaidAmount:
+                    type: string
+                  orders:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - orderId
+                        - orderName
+                        - fullNumber
+                        - finalAmount
+                        - paidAmount
+                        - orderStatusName
+                        - deleteFlag
+                      properties:
+                        orderId:
+                          type: integer
+                        orderName:
+                          type: string
+                        fullNumber:
+                          type: string
+                        finalAmount:
+                          type: string
+                          nullable: true
+                        paidAmount:
+                          type: string
+                          nullable: true
+                        orderStatusName:
+                          type: string
+                          nullable: true
+                        deleteFlag:
+                          type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: Проект не найден
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: База данных недоступна
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags:
+        - Projects
+      operationId: updateProject
+      summary: Обновить проект
+      security:
+        - bearerAuth: []
+      x-permission: projects.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - expectedVersion
+              properties:
+                code:
+                  type: string
+                  pattern: '^[0-9A-Za-zА-Яа-яЁё-]{1,20}$'
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 300
+                notes:
+                  type: string
+                  maxLength: 4000
+                  nullable: true
+                expectedVersion:
+                  type: integer
+                  minimum: 0
+      responses:
+        '200':
+          description: Проект обновлён
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - projectId
+                  - code
+                  - name
+                  - clientId
+                  - notes
+                  - version
+                properties:
+                  projectId:
+                    type: integer
+                  code:
+                    type: string
+                  name:
+                    type: string
+                  clientId:
+                    type: integer
+                  clientName:
+                    type: string
+                  notes:
+                    type: string
+                    nullable: true
+                  version:
+                    type: integer
+                  ordersCount:
+                    type: integer
+                  totalFinalAmount:
+                    type: string
+                  totalPaidAmount:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: Проект не найден
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: Версия проекта устарела или код уже занят
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: База данных недоступна
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/client-phones:
     post:
       tags:
@@ -7704,6 +7985,8 @@ components:
         - references.view
         - references.manage
         - labels.view
+        - projects.view
+        - projects.manage
         - labels.manage_templates
         - labels.generate
         - sheet_materials.view
