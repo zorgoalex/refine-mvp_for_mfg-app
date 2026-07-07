@@ -327,3 +327,21 @@ describe('org management permissions', () => {
     expect(can('manager', 'org.view')).toBe(false);
   });
 });
+
+describe('bazis permissions', () => {
+  it('registers bazis.view and bazis.manage', () => {
+    expect(PERMISSIONS).toContain('bazis.view');
+    expect(PERMISSIONS).toContain('bazis.manage');
+  });
+
+  it('grants manage only to roles that also hold orders.create + orders.view_financials', () => {
+    expect(ROLE_PERMISSIONS.superadmin).toContain('bazis.manage');
+    expect(ROLE_PERMISSIONS.admin).toContain('bazis.manage');
+    expect(ROLE_PERMISSIONS.manager).toContain('bazis.manage');
+    expect(ROLE_PERMISSIONS.top_manager).toContain('bazis.manage');
+    expect(ROLE_PERMISSIONS.operator).not.toContain('bazis.manage');
+    expect(ROLE_PERMISSIONS.operator).toContain('bazis.view');
+    expect(ROLE_PERMISSIONS.viewer).toContain('bazis.view');
+    expect(ROLE_PERMISSIONS.viewer).not.toContain('bazis.manage');
+  });
+});

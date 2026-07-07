@@ -94,6 +94,9 @@ export const PERMISSIONS = [
   'doweling.update',
   'doweling.delete',
 
+  'bazis.view',
+  'bazis.manage',
+
   'users.view',
   'users.create',
   'users.update',
@@ -253,6 +256,9 @@ export const ROLE_PERMISSIONS = {
     'doweling.create',
     'doweling.update',
 
+    'bazis.view',
+    'bazis.manage',
+
     'employees.view',
     'employees.manage',
 
@@ -324,6 +330,9 @@ export const ROLE_PERMISSIONS = {
     'doweling.create',
     'doweling.update',
 
+    'bazis.view',
+    'bazis.manage',
+
     'employees.view',
 
     'deadlines.view',
@@ -381,6 +390,8 @@ export const ROLE_PERMISSIONS = {
     'doweling.create',
     'doweling.update',
 
+    'bazis.view',
+
     'employees.view',
 
     'deadlines.view',
@@ -411,6 +422,7 @@ export const ROLE_PERMISSIONS = {
 
     'requirements.view',
     'doweling.view',
+    'bazis.view',
 
     'employees.view',
 
@@ -442,6 +454,7 @@ export const ROLE_PERMISSIONS = {
 
     'requirements.view',
     'doweling.view',
+    'bazis.view',
 
     'employees.view',
 
