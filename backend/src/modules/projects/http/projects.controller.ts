@@ -1,12 +1,12 @@
-import { Body, Controller, Get, Inject, Param, ParseIntPipe, Patch, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, ParseIntPipe, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { ProjectsService } from '../application/projects.service';
-import type { ProjectCard, ProjectDto, UpdateProjectDtoBody } from '../application/projects.types';
-import { listProjectsSchema, updateProjectSchema } from '../dto/projects.dto';
+import type { MergeResult, ProjectCard, ProjectDto, UpdateProjectDtoBody } from '../application/projects.types';
+import { listProjectsSchema, mergeSchema, updateProjectSchema } from '../dto/projects.dto';
 
 const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
@@ -63,6 +63,27 @@ const updateProjectSwaggerSchema = {
     name: { type: 'string', minLength: 1, maxLength: 300 },
     notes: { type: 'string', maxLength: 4000, nullable: true },
     expectedVersion: { type: 'integer', minimum: 0 },
+  },
+} as const;
+
+const mergeProjectSwaggerSchema = {
+  type: 'object',
+  required: ['sourceProjectId', 'idempotencyKey'],
+  properties: {
+    sourceProjectId: { type: 'integer', minimum: 1 },
+    idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
+  },
+} as const;
+
+const mergeResponseSwaggerSchema = {
+  type: 'object',
+  required: ['targetProjectId', 'sourceProjectId', 'movedOrdersCount', 'auditId', 'requestId'],
+  properties: {
+    targetProjectId: { type: 'integer' },
+    sourceProjectId: { type: 'integer' },
+    movedOrdersCount: { type: 'integer' },
+    auditId: { type: 'integer' },
+    requestId: { type: 'string' },
   },
 } as const;
 
@@ -138,6 +159,31 @@ export class ProjectsController {
       requestId: request.requestId,
     });
   }
+
+  @ApiOperation({ operationId: 'mergeProjects', summary: 'Объединить проекты' })
+  @ApiBody({ schema: swaggerSchema(mergeProjectSwaggerSchema) })
+  @ApiResponse({
+    status: 200,
+    description: 'Проекты объединены',
+    schema: swaggerSchema(mergeResponseSwaggerSchema),
+  })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  @ApiResponse({ status: 409, description: 'Idempotency conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid merge payload' })
+  @Post(':id/merge')
+  @HttpCode(200)
+  merge(@Req() request: RequestWithCurrentUser, @Param('id', ParseIntPipe) id: number, @Body() body: unknown): Promise<MergeResult> {
+    const dto = parseMergeBody(body);
+    return this.projects.merge({
+      currentUser: requireCurrentUser(request),
+      targetProjectId: id,
+      sourceProjectId: dto.sourceProjectId,
+      idempotencyKey: dto.idempotencyKey,
+      requestId: request.requestId,
+    });
+  }
 }
 
 export function parseListProjectsQuery(query: unknown) {
@@ -146,6 +192,10 @@ export function parseListProjectsQuery(query: unknown) {
 
 export function parseUpdateProjectBody(body: unknown) {
   return parseWithZod(updateProjectSchema, body);
+}
+
+export function parseMergeBody(body: unknown) {
+  return parseWithZod(mergeSchema, body);
 }
 
 function requireCurrentUser(request: RequestWithCurrentUser) {

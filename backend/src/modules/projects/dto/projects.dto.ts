@@ -28,3 +28,8 @@ export const moveOrderSchema = z
   .refine((value) => (value.targetProjectId != null) !== (value.createNew === true), {
     message: 'Укажите либо targetProjectId, либо createNew',
   });
+
+export const mergeSchema = z.object({
+  sourceProjectId: z.number().int().positive(),
+  idempotencyKey: z.string().min(8).max(200),
+});

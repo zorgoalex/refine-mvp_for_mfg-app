@@ -2450,6 +2450,92 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/projects/{id}/merge:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+    post:
+      tags:
+        - Projects
+      operationId: mergeProjects
+      summary: Объединить проекты
+      security:
+        - bearerAuth: []
+      x-permission: projects.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sourceProjectId
+                - idempotencyKey
+              properties:
+                sourceProjectId:
+                  type: integer
+                  minimum: 1
+                idempotencyKey:
+                  type: string
+                  minLength: 8
+                  maxLength: 200
+      responses:
+        '200':
+          description: Проекты объединены
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - targetProjectId
+                  - sourceProjectId
+                  - movedOrdersCount
+                  - auditId
+                  - requestId
+                properties:
+                  targetProjectId:
+                    type: integer
+                  sourceProjectId:
+                    type: integer
+                  movedOrdersCount:
+                    type: integer
+                  auditId:
+                    type: integer
+                  requestId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: Проект не найден
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: Конфликт идемпотентности
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: База данных недоступна
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/client-phones:
     post:
       tags:

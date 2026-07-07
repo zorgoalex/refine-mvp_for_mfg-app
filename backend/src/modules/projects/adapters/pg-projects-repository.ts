@@ -28,6 +28,7 @@ import {
 
 const SOURCE = 'backend-projects-command';
 const MOVE_ORDER_COMMAND = 'projects.move_order';
+const MERGE_COMMAND = 'projects.merge';
 
 interface ProjectRow extends QueryResultRow {
   project_id: number | string;
@@ -70,9 +71,11 @@ interface MoveTargetProjectRow extends QueryResultRow {
 interface IdempotencyRow extends QueryResultRow {
   idempotency_key: string;
   request_hash: string;
-  response_json: MoveOrderResult | string | null;
+  response_json: CommandResponse | string | null;
   status: 'processing' | 'completed' | 'failed';
 }
+
+type CommandResponse = MoveOrderResult | MergeResult;
 
 export class PgProjectsRepository implements ProjectsRepositoryPort {
   constructor(private readonly database: DatabaseService) {}
@@ -230,7 +233,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const requestId = requestIdOrFallback(command.requestId);
-      const idempotency = await reconcileIdempotency(tx, {
+      const idempotency = await reconcileIdempotency<MoveOrderResult>(tx, {
         idempotencyKey: command.idempotencyKey,
         commandName: MOVE_ORDER_COMMAND,
         currentUser: command.currentUser,
@@ -391,8 +394,136 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
     });
   }
 
-  merge(_command: MergeCommand): Promise<MergeResult> {
-    throw new Error('NOT_IMPLEMENTED');
+  merge(command: MergeCommand): Promise<MergeResult> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const requestId = requestIdOrFallback(command.requestId);
+      const idempotency = await reconcileIdempotency<MergeResult>(tx, {
+        idempotencyKey: command.idempotencyKey,
+        commandName: MERGE_COMMAND,
+        currentUser: command.currentUser,
+        entityType: 'project',
+        entityId: String(command.targetProjectId),
+        requestShape: { ...command },
+      });
+      if (idempotency.completedResponse) {
+        return idempotency.completedResponse;
+      }
+
+      const orderedIds = [command.sourceProjectId, command.targetProjectId].sort((left, right) => left - right);
+      const lockedProjects = new Map<number, MoveTargetProjectRow | undefined>();
+      for (const projectId of orderedIds) {
+        const project = await lockProject(tx, projectId);
+        lockedProjects.set(projectId, project);
+      }
+
+      if (command.sourceProjectId === command.targetProjectId) {
+        throw new ApiError(422, 'PROJECT_SAME', 'Нельзя объединить проект с самим собой');
+      }
+
+      const sourceProject = lockedProjects.get(command.sourceProjectId);
+      const targetProject = lockedProjects.get(command.targetProjectId);
+      if (!sourceProject) {
+        throw new ProjectNotFoundError(command.sourceProjectId);
+      }
+      if (!targetProject) {
+        throw new ProjectNotFoundError(command.targetProjectId);
+      }
+      if (targetProject.delete_flag) {
+        throw new ProjectArchivedError(command.targetProjectId);
+      }
+
+      const clientId = Number(targetProject.client_id);
+      if (Number(sourceProject.client_id) !== clientId) {
+        throw new ApiError(422, 'PROJECT_CLIENT_MISMATCH', 'Клиенты проектов не совпадают');
+      }
+
+      const movedOrders = await tx.query(
+        `
+        UPDATE orders
+        SET project_id = $1, version = version + 1, edited_by = $3, updated_at = now()
+        WHERE project_id = $2 AND delete_flag = false
+        `,
+        [command.targetProjectId, command.sourceProjectId, command.currentUser.id],
+      );
+      const movedOrdersCount = movedOrders.rowCount ?? 0;
+
+      await tx.query(
+        `
+        UPDATE projects
+        SET delete_flag = true, version = version + 1, edited_by = $2, updated_at = now()
+        WHERE project_id = $1
+        `,
+        [command.sourceProjectId, command.currentUser.id],
+      );
+
+      const remainingDeletedOrdersResult = await tx.query<{ c: number | string }>(
+        `
+        SELECT COUNT(*) AS c
+        FROM orders
+        WHERE project_id = $1 AND delete_flag = true
+        `,
+        [command.sourceProjectId],
+      );
+      const remainingDeletedOrders = Number(remainingDeletedOrdersResult.rows[0]?.c ?? 0);
+
+      const auditId = await writeMergeAudit(tx, {
+        currentUser: command.currentUser,
+        requestId,
+        sourceProjectId: command.sourceProjectId,
+        targetProjectId: command.targetProjectId,
+        clientId,
+        movedOrdersCount,
+        remainingDeletedOrders,
+      });
+      await writeMergedProjectArchivedAudit(tx, {
+        currentUser: command.currentUser,
+        requestId,
+        sourceProjectId: command.sourceProjectId,
+        targetProjectId: command.targetProjectId,
+        clientId,
+      });
+
+      await enqueueOutbox(tx, {
+        eventType: 'project.merged',
+        aggregateType: 'project',
+        aggregateId: String(command.targetProjectId),
+        payload: {
+          eventType: 'project.merged',
+          sourceProjectId: command.sourceProjectId,
+          targetProjectId: command.targetProjectId,
+          movedOrdersCount,
+          remainingDeletedOrders,
+          actorUserId: command.currentUser.id,
+          requestId,
+        },
+        idempotencyKey: command.idempotencyKey,
+      });
+      await enqueueOutbox(tx, {
+        eventType: 'project.archived',
+        aggregateType: 'project',
+        aggregateId: String(command.sourceProjectId),
+        payload: {
+          eventType: 'project.archived',
+          projectId: command.sourceProjectId,
+          reason: 'merged_into',
+          targetProjectId: command.targetProjectId,
+          actorUserId: command.currentUser.id,
+          requestId,
+        },
+        idempotencyKey: `${command.idempotencyKey}:archived`,
+      });
+
+      const response: MergeResult = {
+        targetProjectId: command.targetProjectId,
+        sourceProjectId: command.sourceProjectId,
+        movedOrdersCount,
+        auditId: Number(auditId),
+        requestId,
+      };
+      await completeIdempotency(tx, command.idempotencyKey, response);
+      return response;
+    });
   }
 }
 
@@ -507,6 +638,93 @@ async function writeMoveOrderAudit(
   });
 }
 
+async function lockProject(tx: TransactionClient, projectId: number): Promise<MoveTargetProjectRow | undefined> {
+  const result = await tx.query<MoveTargetProjectRow>(
+    `
+    SELECT project_id, client_id, delete_flag, code
+    FROM projects
+    WHERE project_id = $1
+    FOR UPDATE
+    `,
+    [projectId],
+  );
+  return result.rows[0];
+}
+
+async function writeMergeAudit(
+  tx: TransactionClient,
+  input: {
+    currentUser: CurrentUser;
+    requestId: string;
+    sourceProjectId: number;
+    targetProjectId: number;
+    clientId: number;
+    movedOrdersCount: number;
+    remainingDeletedOrders: number;
+  },
+): Promise<string> {
+  return auditService.record(tx, {
+    event: 'project.merged',
+    entityType: 'project',
+    entityId: String(input.targetProjectId),
+    actorUserId: input.currentUser.id,
+    actorUsername: input.currentUser.username,
+    actorRole: input.currentUser.role,
+    requestId: input.requestId,
+    source: SOURCE,
+    relatedClientId: input.clientId,
+    before: { sourceProjectId: input.sourceProjectId },
+    after: { targetProjectId: input.targetProjectId },
+    metadata: {
+      sourceProjectId: input.sourceProjectId,
+      targetProjectId: input.targetProjectId,
+      movedOrdersCount: input.movedOrdersCount,
+      remainingDeletedOrders: input.remainingDeletedOrders,
+      action: 'project_merge',
+    },
+    relatedEntities: [
+      { entityType: 'project', entityId: input.sourceProjectId },
+      { entityType: 'project', entityId: input.targetProjectId },
+      { entityType: 'client', entityId: input.clientId },
+    ],
+  });
+}
+
+async function writeMergedProjectArchivedAudit(
+  tx: TransactionClient,
+  input: {
+    currentUser: CurrentUser;
+    requestId: string;
+    sourceProjectId: number;
+    targetProjectId: number;
+    clientId: number;
+  },
+): Promise<string> {
+  return auditService.record(tx, {
+    event: 'project.archived',
+    entityType: 'project',
+    entityId: String(input.sourceProjectId),
+    actorUserId: input.currentUser.id,
+    actorUsername: input.currentUser.username,
+    actorRole: input.currentUser.role,
+    requestId: input.requestId,
+    source: SOURCE,
+    relatedClientId: input.clientId,
+    before: { deleteFlag: false },
+    after: { deleteFlag: true },
+    metadata: {
+      projectId: input.sourceProjectId,
+      reason: 'merged_into',
+      targetProjectId: input.targetProjectId,
+      action: 'project_archive',
+    },
+    relatedEntities: [
+      { entityType: 'project', entityId: input.sourceProjectId },
+      { entityType: 'client', entityId: input.clientId },
+    ],
+  });
+}
+
 async function enqueueOutbox(
   tx: TransactionClient,
   input: {
@@ -529,7 +747,7 @@ async function enqueueOutbox(
   );
 }
 
-async function reconcileIdempotency(
+async function reconcileIdempotency<T extends CommandResponse>(
   tx: TransactionClient,
   input: {
     idempotencyKey: string;
@@ -539,7 +757,7 @@ async function reconcileIdempotency(
     entityId: string;
     requestShape: Record<string, unknown>;
   },
-): Promise<{ completedResponse?: MoveOrderResult }> {
+): Promise<{ completedResponse?: T }> {
   const requestHash = hashRequest(input.requestShape);
   const inserted = await tx.query<IdempotencyRow>(
     `
@@ -577,7 +795,7 @@ async function reconcileIdempotency(
     });
   }
   if (row.status === 'completed' && row.response_json) {
-    return { completedResponse: parseStoredResponse(row.response_json) };
+    return { completedResponse: parseStoredResponse(row.response_json) as T };
   }
   if (row.status === 'failed') {
     throw new ApiError(409, 'IDEMPOTENCY_FAILED', 'Idempotent command previously failed', {
@@ -590,7 +808,11 @@ async function reconcileIdempotency(
   });
 }
 
-async function completeIdempotency(tx: TransactionClient, idempotencyKey: string, response: MoveOrderResult): Promise<void> {
+async function completeIdempotency<T extends CommandResponse>(
+  tx: TransactionClient,
+  idempotencyKey: string,
+  response: T,
+): Promise<void> {
   await tx.query(
     `
     UPDATE command_idempotency_keys
@@ -669,9 +891,9 @@ function numericUserId(currentUser: CurrentUser): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function parseStoredResponse(value: MoveOrderResult | string): MoveOrderResult {
+function parseStoredResponse(value: CommandResponse | string): CommandResponse {
   if (typeof value === 'string') {
-    return JSON.parse(value) as MoveOrderResult;
+    return JSON.parse(value) as CommandResponse;
   }
   return value;
 }

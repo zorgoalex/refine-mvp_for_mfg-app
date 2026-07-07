@@ -322,6 +322,186 @@ describe('PgProjectsRepository.moveOrder', () => {
   });
 });
 
+describe('PgProjectsRepository.merge', () => {
+  it('moves live source orders to target, archives source, writes two audits and two outbox rows', async () => {
+    const database = createDatabase({
+      projectRowsById: {
+        100: {
+          project_id: 100,
+          client_id: 2,
+          delete_flag: false,
+          code: 'ФК26',
+        },
+        200: {
+          project_id: 200,
+          client_id: 2,
+          delete_flag: false,
+          code: 'ФК27',
+        },
+      },
+      mergeMovedOrdersCount: 3,
+      remainingDeletedOrders: 2,
+    });
+
+    const result = await new PgProjectsRepository(database.service).merge({
+      currentUser: currentUser(),
+      targetProjectId: 200,
+      sourceProjectId: 100,
+      idempotencyKey: 'merge-project-key-1',
+      requestId: 'req-merge-1',
+    });
+
+    expect(result).toMatchObject({
+      targetProjectId: 200,
+      sourceProjectId: 100,
+      movedOrdersCount: 3,
+      requestId: 'req-merge-1',
+    });
+    expect(result.auditId).toBeTypeOf('number');
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('SELECT set_session_user($1)');
+    expect(sql).toContain('INSERT INTO command_idempotency_keys');
+    expect(sql).toContain('FROM projects WHERE project_id = $1 FOR UPDATE');
+    expect(sql).toContain('UPDATE orders SET project_id = $1, version = version + 1, edited_by = $3, updated_at = now() WHERE project_id = $2 AND delete_flag = false');
+    expect(sql).toContain('SELECT COUNT(*) AS c FROM orders WHERE project_id = $1 AND delete_flag = true');
+    expect(sql).toContain('UPDATE projects SET delete_flag = true, version = version + 1, edited_by = $2, updated_at = now() WHERE project_id = $1');
+
+    const auditEvents = database.queries
+      .filter((query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log ('))
+      .map((query) => query.params[0]);
+    expect(auditEvents).toEqual(['project.merged', 'project.archived']);
+
+    const mergeAudit = database.queries.find(
+      (query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log (') && query.params[0] === 'project.merged',
+    );
+    expect(mergeAudit?.params[2]).toBe('200');
+    expect(mergeAudit?.params[9]).toBe(2);
+    expect(mergeAudit?.params[22]).toContain('"sourceProjectId":100');
+    expect(mergeAudit?.params[22]).toContain('"targetProjectId":200');
+    expect(mergeAudit?.params[22]).toContain('"movedOrdersCount":3');
+    expect(mergeAudit?.params[22]).toContain('"remainingDeletedOrders":2');
+    expect(mergeAudit?.params[22]).toContain('"action":"project_merge"');
+
+    const archivedAudit = database.queries.find(
+      (query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log (') && query.params[0] === 'project.archived',
+    );
+    expect(archivedAudit?.params[2]).toBe('100');
+    expect(archivedAudit?.params[22]).toContain('"reason":"merged_into"');
+    expect(archivedAudit?.params[22]).toContain('"targetProjectId":200');
+    expect(archivedAudit?.params[22]).toContain('"action":"project_archive"');
+
+    expect(database.outboxRows.map((row) => row.idempotencyKey)).toEqual([
+      'merge-project-key-1',
+      'merge-project-key-1:archived',
+    ]);
+    expect(database.outboxRows.map((row) => row.eventType)).toEqual(['project.merged', 'project.archived']);
+  });
+
+  it('locks projects in ascending id order regardless of source/target order', async () => {
+    const lowerToHigherDb = createDatabase({
+      projectRowsById: {
+        100: { project_id: 100, client_id: 2, delete_flag: false, code: 'ФК26' },
+        200: { project_id: 200, client_id: 2, delete_flag: false, code: 'ФК27' },
+      },
+      mergeMovedOrdersCount: 1,
+      remainingDeletedOrders: 0,
+    });
+    await new PgProjectsRepository(lowerToHigherDb.service).merge({
+      currentUser: currentUser(),
+      targetProjectId: 200,
+      sourceProjectId: 100,
+      idempotencyKey: 'merge-project-key-asc-1',
+      requestId: 'req-merge-asc-1',
+    });
+
+    const higherToLowerDb = createDatabase({
+      projectRowsById: {
+        100: { project_id: 100, client_id: 2, delete_flag: false, code: 'ФК26' },
+        200: { project_id: 200, client_id: 2, delete_flag: false, code: 'ФК27' },
+      },
+      mergeMovedOrdersCount: 1,
+      remainingDeletedOrders: 0,
+    });
+    await new PgProjectsRepository(higherToLowerDb.service).merge({
+      currentUser: currentUser(),
+      targetProjectId: 100,
+      sourceProjectId: 200,
+      idempotencyKey: 'merge-project-key-asc-2',
+      requestId: 'req-merge-asc-2',
+    });
+
+    expect(lockQueryIds(lowerToHigherDb.queries)).toEqual([100, 200]);
+    expect(lockQueryIds(higherToLowerDb.queries)).toEqual([100, 200]);
+  });
+
+  it('maps client mismatch and self-merge to 422; replay returns cached response without second UPDATE', async () => {
+    const mismatchDb = createDatabase({
+      projectRowsById: {
+        100: { project_id: 100, client_id: 2, delete_flag: false, code: 'ФК26' },
+        200: { project_id: 200, client_id: 9, delete_flag: false, code: 'ФК27' },
+      },
+    });
+
+    await expect(
+      new PgProjectsRepository(mismatchDb.service).merge({
+        currentUser: currentUser(),
+        targetProjectId: 200,
+        sourceProjectId: 100,
+        idempotencyKey: 'merge-project-key-mismatch',
+        requestId: 'req-merge-mismatch',
+      }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'PROJECT_CLIENT_MISMATCH' });
+    expect(normalizedSql(mismatchDb.queries)).not.toContain(
+      'UPDATE orders SET project_id = $1, version = version + 1, edited_by = $3, updated_at = now() WHERE project_id = $2 AND delete_flag = false',
+    );
+
+    const sameDb = createDatabase({
+      projectRowsById: {
+        100: { project_id: 100, client_id: 2, delete_flag: false, code: 'ФК26' },
+      },
+    });
+    await expect(
+      new PgProjectsRepository(sameDb.service).merge({
+        currentUser: currentUser(),
+        targetProjectId: 100,
+        sourceProjectId: 100,
+        idempotencyKey: 'merge-project-key-same',
+        requestId: 'req-merge-same',
+      }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'PROJECT_SAME' });
+
+    const replayDb = createDatabase({
+      projectRowsById: {
+        100: { project_id: 100, client_id: 2, delete_flag: false, code: 'ФК26' },
+        200: { project_id: 200, client_id: 2, delete_flag: false, code: 'ФК27' },
+      },
+      mergeMovedOrdersCount: 4,
+      remainingDeletedOrders: 1,
+    });
+    const repo = new PgProjectsRepository(replayDb.service);
+    const command = {
+      currentUser: currentUser(),
+      targetProjectId: 200,
+      sourceProjectId: 100,
+      idempotencyKey: 'merge-project-key-replay',
+      requestId: 'req-merge-replay',
+    };
+
+    const first = await repo.merge(command);
+    const second = await repo.merge(command);
+
+    expect(second).toEqual(first);
+    expect(
+      replayDb.queries.filter((query) =>
+        normalizeSql(query.text).startsWith(
+          'UPDATE orders SET project_id = $1, version = version + 1, edited_by = $3, updated_at = now() WHERE project_id = $2 AND delete_flag = false',
+        ),
+      ),
+    ).toHaveLength(1);
+  });
+});
+
 function createDatabase(
   options: {
     beforeRow?: Record<string, unknown>;
@@ -331,6 +511,9 @@ function createDatabase(
     targetProjectRow?: Record<string, unknown> | null;
     sourceOrderCount?: number;
     autoRootRow?: Record<string, unknown>;
+    projectRowsById?: Record<number, Record<string, unknown> | null>;
+    mergeMovedOrdersCount?: number;
+    remainingDeletedOrders?: number;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -423,14 +606,16 @@ function createDatabase(
       if (
         normalized.startsWith('SELECT project_id, client_id, delete_flag, code FROM projects WHERE project_id = $1 FOR UPDATE')
       ) {
+        const projectId = Number(params[0]);
+        const mappedRow = options.projectRowsById?.[projectId];
         return {
-          rows: options.targetProjectRow === null ? [] : [options.targetProjectRow ?? {
+          rows: mappedRow === null ? [] : [mappedRow ?? options.targetProjectRow ?? {
             project_id: 200,
             client_id: 2,
             delete_flag: false,
             code: 'ФК26',
           }],
-          rowCount: options.targetProjectRow === null ? 0 : 1,
+          rowCount: mappedRow === null || options.targetProjectRow === null ? 0 : 1,
         };
       }
 
@@ -447,6 +632,14 @@ function createDatabase(
 
       if (normalized.startsWith('UPDATE orders SET project_id = $2, version = version + 1')) {
         return { rows: [], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('UPDATE orders SET project_id = $1, version = version + 1')) {
+        return { rows: [], rowCount: options.mergeMovedOrdersCount ?? 0 };
+      }
+
+      if (normalized.startsWith('SELECT COUNT(*) AS c FROM orders WHERE project_id = $1 AND delete_flag = true')) {
+        return { rows: [{ c: String(options.remainingDeletedOrders ?? 0) }], rowCount: 1 };
       }
 
       if (normalized.startsWith('SELECT COUNT(*) AS c FROM orders WHERE project_id = $1')) {
@@ -502,4 +695,10 @@ function normalizedSql(queries: Array<{ text: string }>): string {
 
 function normalizeSql(sql: string): string {
   return sql.replace(/\s+/g, ' ').trim();
+}
+
+function lockQueryIds(queries: Array<{ text: string; params: readonly unknown[] }>): number[] {
+  return queries
+    .filter((query) => normalizeSql(query.text).startsWith('SELECT project_id, client_id, delete_flag, code FROM projects WHERE project_id = $1 FOR UPDATE'))
+    .map((query) => Number(query.params[0]));
 }
