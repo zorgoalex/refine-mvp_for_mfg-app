@@ -4361,35 +4361,40 @@
                             "role": "manager",
                             "permission": {
                                 "columns": "*",
-                                "filter": {}
+                                "filter": {},
+                                "allow_aggregations": true
                             }
                         },
                         {
                             "role": "operator",
                             "permission": {
                                 "columns": "*",
-                                "filter": {}
+                                "filter": {},
+                                "allow_aggregations": true
                             }
                         },
                         {
                             "role": "superadmin",
                             "permission": {
                                 "columns": "*",
-                                "filter": {}
+                                "filter": {},
+                                "allow_aggregations": true
                             }
                         },
                         {
                             "role": "top_manager",
                             "permission": {
                                 "columns": "*",
-                                "filter": {}
+                                "filter": {},
+                                "allow_aggregations": true
                             }
                         },
                         {
                             "role": "viewer",
                             "permission": {
                                 "columns": "*",
-                                "filter": {}
+                                "filter": {},
+                                "allow_aggregations": true
                             }
                         }
                     ]
