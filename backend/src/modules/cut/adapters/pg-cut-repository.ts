@@ -1855,6 +1855,18 @@ export class PgCutRepository implements CutRepositoryPort {
     }
     const fillByOrder = createOrderFillResolver(items.rows.map((row) => toNum(row.order_id)));
 
+    // order_id -> order_name, so a piece's label line 1 shows the human order name
+    // (live orders.order_name) instead of the numeric id. Keyed by order id so the
+    // frozen-snapshot path (which carries orderId, not the name) resolves it too,
+    // without a recalc of pre-existing jobs.
+    const orderNameById = new Map<number, string>();
+    for (const row of items.rows) {
+      const name = row.order_name?.trim();
+      if (name) orderNameById.set(toNum(row.order_id), name);
+    }
+    const orderNameForOrderId = (orderId: number | null): string | null =>
+      orderId === null ? null : orderNameById.get(orderId) ?? null;
+
     // Resolve a piece's sheet-material name (live join; the frozen snapshot has no
     // material). Blank/unknown → null so no material line is added. Material is read
     // live like the FE preview overlay (which also pairs frozen placement geometry
@@ -1892,6 +1904,7 @@ export class PgCutRepository implements CutRepositoryPort {
       if (frozenLabel) {
         return composePieceLabelLines({
           orderId: frozenLabel.orderId,
+          orderName: orderNameForOrderId(frozenLabel.orderId),
           detailId: parseFreecutItemId(piece.item_id),
           detailNumber: frozenLabel.detailNumber,
           widthMm: frozenLabel.widthMm,
@@ -1908,6 +1921,7 @@ export class PgCutRepository implements CutRepositoryPort {
       const orderId = detail?.orderId ?? null;
       return composePieceLabelLines({
         orderId,
+        orderName: detail?.orderName ?? orderNameForOrderId(orderId),
         detailId,
         detailNumber: detail?.detailNumber ?? null,
         widthMm: detail?.widthMm ?? null,

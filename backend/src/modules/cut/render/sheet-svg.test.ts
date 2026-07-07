@@ -58,6 +58,29 @@ describe('composePieceLabelLines (cut preview piece label)', () => {
     ).toEqual(['12', 'поз. 7 - 2/3', '600X400']);
   });
 
+  it('shows the order name on line 1 when provided, replacing the numeric id', () => {
+    expect(
+      composePieceLabelLines({
+        orderId: 12,
+        orderName: 'Кухня Иванов',
+        detailId: 45,
+        detailNumber: 7,
+        widthMm: 600,
+        heightMm: 400,
+        itemId: 'det-45',
+        instance: 1,
+        qty: 1,
+      }),
+    ).toEqual(['Кухня Иванов', 'поз. 7', '600X400']);
+  });
+
+  it('falls back to the numeric order id when orderName is blank/absent', () => {
+    const base = { orderId: 12, detailId: 45, detailNumber: 7, widthMm: 600, heightMm: 400, itemId: 'det-45', instance: 1, qty: 1 };
+    expect(composePieceLabelLines({ ...base, orderName: '   ' })).toEqual(['12', 'поз. 7', '600X400']);
+    expect(composePieceLabelLines({ ...base, orderName: null })).toEqual(['12', 'поз. 7', '600X400']);
+    expect(composePieceLabelLines(base)).toEqual(['12', 'поз. 7', '600X400']);
+  });
+
   it('falls back to a single line when the order is unknown', () => {
     expect(
       composePieceLabelLines({ orderId: null, detailId: null, itemId: 'weird', instance: 1, qty: 1 }),

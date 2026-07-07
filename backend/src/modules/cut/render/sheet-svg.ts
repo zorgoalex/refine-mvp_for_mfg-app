@@ -24,6 +24,12 @@ export function formatPieceLabel(baseLabel: string, instance: number, qty: numbe
 export interface PieceLabelInput {
   /** order_id resolved for the piece, or null when unknown. */
   orderId: number | null;
+  /**
+   * Human order name (orders.order_name) resolved for the piece. When a non-blank
+   * name is present it REPLACES the numeric order id on label line 1; the numeric
+   * id remains the fallback for orders whose name can't be resolved.
+   */
+  orderName?: string | null;
   /** order_detail_id parsed from the freecut item id, or null when unparseable. */
   detailId: number | null;
   /** detail_number from the source order, or null when unknown. */
@@ -45,19 +51,20 @@ export interface PieceLabelInput {
 
 /**
  * Piece label lines shown inside every placed detail:
- * 1) order id (without the № prefix), 2) order detail position + instance
- * count, 3) size (width x height), 4) material name — appended ONLY when
- * `materialName` is a non-blank string (mixed-material sheet). When the
- * order can't be resolved we fall back to a single line with the raw item id so
- * the label is never empty.
+ * 1) order name (orders.order_name), falling back to the numeric order id when
+ * the name is blank/unresolved, 2) order detail position + instance count,
+ * 3) size (width x height), 4) material name — appended ONLY when `materialName`
+ * is a non-blank string (mixed-material sheet). When the order can't be resolved
+ * we fall back to a single line with the raw item id so the label is never empty.
  */
 export function composePieceLabelLines(input: PieceLabelInput): string[] {
-  const { orderId, detailId, detailNumber, widthMm, heightMm, itemId, instance, qty } = input;
+  const { orderId, orderName, detailId, detailNumber, widthMm, heightMm, itemId, instance, qty } = input;
   if (orderId === null || detailId === null) {
     return [formatPieceLabel(itemId, instance, qty)];
   }
+  const orderLabel = orderName?.trim() || String(orderId);
   const lines = [
-    String(orderId),
+    orderLabel,
     formatPositionLine(detailNumber ?? detailId, instance, qty),
     formatPieceSize(widthMm, heightMm),
   ];
