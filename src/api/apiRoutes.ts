@@ -155,6 +155,14 @@ export const apiRoutes = {
   dowelingOrders: {
     create: backendApiPath('/doweling-orders'),
   },
+  bazis: {
+    imports: backendApiPath('/bazis/imports'),
+    projects: backendApiPath('/bazis/projects'),
+    project: (id: number) => backendApiPath(`/bazis/projects/${id}`),
+    revisionTree: (id: number) => backendApiPath(`/bazis/revisions/${id}/tree`),
+    materialMappings: backendApiPath('/bazis/material-mappings'),
+    createOrder: (revisionId: number) => backendApiPath(`/bazis/revisions/${revisionId}/create-order`),
+  },
   deadlines: {
     list: backendApiPath('/deadlines'),
     byId: (deadlineId: string) => backendApiPath(`/deadlines/${deadlineId}`),
