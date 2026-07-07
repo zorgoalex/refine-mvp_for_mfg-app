@@ -15,6 +15,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
+import { TableTopScroll } from '../../../../components/TableTopScroll';
 import { formatNumber, currencySmartFormatter, numberParser } from '../../../../utils/numberFormat';
 import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { getMaterialColor, getMillingBgColor } from '../../../../config/displayColors';
@@ -1819,6 +1820,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           onChange={saveColumnSettings}
         />
       </div>
+      <TableTopScroll>
       <Table<any>
         className={`order-details-table${groupingActive ? ' details-grouped' : ''}`}
         dataSource={tableRows as any}
@@ -1944,6 +1946,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             };
           }}
         />
+      </TableTopScroll>
 
         <Dropdown
           open={!!rowContextMenu}
