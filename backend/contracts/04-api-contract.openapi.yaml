@@ -1056,6 +1056,93 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/orders/{orderId}/project:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    post:
+      tags:
+        - Projects
+      operationId: moveOrderProject
+      summary: Перенести заказ в проект
+      security:
+        - bearerAuth: []
+      x-permission: projects.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - idempotencyKey
+              properties:
+                targetProjectId:
+                  type: integer
+                  minimum: 1
+                createNew:
+                  type: boolean
+                idempotencyKey:
+                  type: string
+                  minLength: 8
+                  maxLength: 200
+      responses:
+        '200':
+          description: Заказ перенесён в проект
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - orderId
+                  - projectId
+                  - code
+                  - archivedSourceProjectId
+                  - auditId
+                  - requestId
+                properties:
+                  orderId:
+                    type: integer
+                  projectId:
+                    type: integer
+                  code:
+                    type: string
+                  archivedSourceProjectId:
+                    type: integer
+                    nullable: true
+                  auditId:
+                    type: integer
+                  requestId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: Заказ или проект не найден
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: Конфликт идемпотентности
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: База данных недоступна
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/orders/{orderId}/payment-status:
     parameters:
       - $ref: '#/components/parameters/OrderId'

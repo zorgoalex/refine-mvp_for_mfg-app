@@ -4,11 +4,12 @@ import { DatabaseService } from '../../database/database.service';
 import { PgProjectsRepository } from './adapters/pg-projects-repository';
 import { UnavailableProjectsRepository } from './adapters/unavailable-projects-repository';
 import { ProjectsService } from './application/projects.service';
+import { OrderProjectController } from './http/order-project.controller';
 import { ProjectsController } from './http/projects.controller';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [ProjectsController],
+  controllers: [ProjectsController, OrderProjectController],
   providers: [
     {
       provide: ProjectsService,

@@ -18,3 +18,13 @@ export const listProjectsSchema = z.object({
   clientId: z.coerce.number().int().positive().optional(),
   includeArchived: z.coerce.boolean().optional(),
 });
+
+export const moveOrderSchema = z
+  .object({
+    targetProjectId: z.number().int().positive().optional(),
+    createNew: z.boolean().optional(),
+    idempotencyKey: z.string().min(8).max(200),
+  })
+  .refine((value) => (value.targetProjectId != null) !== (value.createNew === true), {
+    message: 'Укажите либо targetProjectId, либо createNew',
+  });

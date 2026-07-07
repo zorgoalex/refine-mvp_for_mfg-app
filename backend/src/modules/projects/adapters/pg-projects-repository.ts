@@ -1,7 +1,11 @@
+import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
+import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
+import { insertAutoRoot } from '../../orders/adapters/pg-order-transaction-manager';
 import type {
   ListProjectsQuery,
   MergeCommand,
@@ -17,11 +21,13 @@ import type {
 import {
   ProjectArchivedError,
   ProjectCodeTakenError,
+  ProjectClientMismatchError,
   ProjectNotFoundError,
   ProjectVersionConflictError,
 } from '../errors/projects.errors';
 
 const SOURCE = 'backend-projects-command';
+const MOVE_ORDER_COMMAND = 'projects.move_order';
 
 interface ProjectRow extends QueryResultRow {
   project_id: number | string;
@@ -45,6 +51,27 @@ interface ProjectOrderRowDb extends QueryResultRow {
   paid_amount: string | null;
   order_status_name: string | null;
   delete_flag: boolean;
+}
+
+interface LockedOrderRow extends QueryResultRow {
+  order_id: number | string;
+  order_name: string;
+  client_id: number | string;
+  project_id: number | string;
+}
+
+interface MoveTargetProjectRow extends QueryResultRow {
+  project_id: number | string;
+  client_id: number | string;
+  delete_flag: boolean;
+  code: string;
+}
+
+interface IdempotencyRow extends QueryResultRow {
+  idempotency_key: string;
+  request_hash: string;
+  response_json: MoveOrderResult | string | null;
+  status: 'processing' | 'completed' | 'failed';
 }
 
 export class PgProjectsRepository implements ProjectsRepositoryPort {
@@ -199,8 +226,169 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
     });
   }
 
-  moveOrder(_command: MoveOrderCommand): Promise<MoveOrderResult> {
-    throw new Error('NOT_IMPLEMENTED');
+  moveOrder(command: MoveOrderCommand): Promise<MoveOrderResult> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const requestId = requestIdOrFallback(command.requestId);
+      const idempotency = await reconcileIdempotency(tx, {
+        idempotencyKey: command.idempotencyKey,
+        commandName: MOVE_ORDER_COMMAND,
+        currentUser: command.currentUser,
+        entityType: 'order',
+        entityId: String(command.orderId),
+        requestShape: { ...command },
+      });
+      if (idempotency.completedResponse) {
+        return idempotency.completedResponse;
+      }
+
+      const orderResult = await tx.query<LockedOrderRow>(
+        `
+        SELECT o.order_id, o.order_name, o.client_id, o.project_id
+        FROM orders o
+        WHERE o.order_id = $1 AND o.delete_flag = false
+        FOR UPDATE
+        `,
+        [command.orderId],
+      );
+      const order = orderResult.rows[0];
+      if (!order) {
+        throw new ApiError(404, 'ORDER_NOT_FOUND', `Заказ ${command.orderId} не найден`);
+      }
+
+      const fromProjectId = Number(order.project_id);
+      const clientId = Number(order.client_id);
+      let target: { id: number; code: string };
+
+      if (command.createNew) {
+        const created = await insertAutoRoot(tx, {
+          orderName: order.order_name,
+          clientId,
+          currentUser: command.currentUser,
+          requestId,
+        });
+        target = {
+          id: created.projectId,
+          code: created.code,
+        };
+      } else {
+        const targetResult = await tx.query<MoveTargetProjectRow>(
+          `
+          SELECT project_id, client_id, delete_flag, code
+          FROM projects
+          WHERE project_id = $1
+          FOR UPDATE
+          `,
+          [command.targetProjectId],
+        );
+        const row = targetResult.rows[0];
+        if (!row) {
+          throw new ProjectNotFoundError(command.targetProjectId!);
+        }
+        if (row.delete_flag) {
+          throw new ProjectArchivedError(command.targetProjectId!);
+        }
+        if (Number(row.client_id) !== clientId) {
+          throw new ProjectClientMismatchError();
+        }
+        target = {
+          id: Number(row.project_id),
+          code: row.code,
+        };
+      }
+
+      if (target.id === fromProjectId) {
+        throw new ApiError(422, 'PROJECT_SAME', 'Заказ уже в этом проекте');
+      }
+
+      await tx.query(
+        `
+        UPDATE orders
+        SET project_id = $2, version = version + 1, edited_by = $3, updated_at = now()
+        WHERE order_id = $1
+        `,
+        [command.orderId, target.id, command.currentUser.id],
+      );
+
+      const remainingResult = await tx.query<{ c: number | string }>(
+        `
+        SELECT COUNT(*) AS c
+        FROM orders
+        WHERE project_id = $1
+        `,
+        [fromProjectId],
+      );
+      const remaining = Number(remainingResult.rows[0]?.c ?? 0);
+
+      let archivedSourceProjectId: number | null = null;
+      if (remaining === 0) {
+        await tx.query(
+          `
+          UPDATE projects
+          SET delete_flag = true, version = version + 1, edited_by = $2, updated_at = now()
+          WHERE project_id = $1
+          `,
+          [fromProjectId, command.currentUser.id],
+        );
+        archivedSourceProjectId = fromProjectId;
+
+        await writeProjectArchivedAudit(tx, {
+          currentUser: command.currentUser,
+          requestId,
+          projectId: fromProjectId,
+          clientId,
+        });
+        await enqueueOutbox(tx, {
+          eventType: 'project.archived',
+          aggregateType: 'project',
+          aggregateId: String(fromProjectId),
+          payload: {
+            eventType: 'project.archived',
+            projectId: fromProjectId,
+            reason: 'emptied_by_move',
+            actorUserId: command.currentUser.id,
+            requestId,
+          },
+          idempotencyKey: `${command.idempotencyKey}:archived`,
+        });
+      }
+
+      const auditId = await writeMoveOrderAudit(tx, {
+        currentUser: command.currentUser,
+        requestId,
+        orderId: command.orderId,
+        clientId,
+        fromProjectId,
+        toProjectId: target.id,
+        archivedSourceProjectId,
+      });
+
+      await enqueueOutbox(tx, {
+        eventType: 'project.order_moved',
+        aggregateType: 'project',
+        aggregateId: String(target.id),
+        payload: {
+          eventType: 'project.order_moved',
+          orderId: command.orderId,
+          fromProjectId,
+          toProjectId: target.id,
+          actorUserId: command.currentUser.id,
+          requestId,
+        },
+        idempotencyKey: command.idempotencyKey,
+      });
+
+      const response: MoveOrderResult = {
+        orderId: command.orderId,
+        projectId: target.id,
+        code: target.code,
+        archivedSourceProjectId,
+        auditId: Number(auditId),
+        requestId,
+      };
+      await completeIdempotency(tx, command.idempotencyKey, response);
+      return response;
+    });
   }
 
   merge(_command: MergeCommand): Promise<MergeResult> {
@@ -246,6 +434,175 @@ async function writeAudit(
   });
 }
 
+async function writeProjectArchivedAudit(
+  tx: TransactionClient,
+  input: {
+    currentUser: CurrentUser;
+    requestId: string;
+    projectId: number;
+    clientId: number;
+  },
+): Promise<string> {
+  return auditService.record(tx, {
+    event: 'project.archived',
+    entityType: 'project',
+    entityId: String(input.projectId),
+    actorUserId: input.currentUser.id,
+    actorUsername: input.currentUser.username,
+    actorRole: input.currentUser.role,
+    requestId: input.requestId,
+    source: SOURCE,
+    relatedClientId: input.clientId,
+    before: { deleteFlag: false },
+    after: { deleteFlag: true },
+    metadata: {
+      projectId: input.projectId,
+      reason: 'emptied_by_move',
+      action: 'project_archive',
+    },
+    relatedEntities: [
+      { entityType: 'project', entityId: input.projectId },
+      { entityType: 'client', entityId: input.clientId },
+    ],
+  });
+}
+
+async function writeMoveOrderAudit(
+  tx: TransactionClient,
+  input: {
+    currentUser: CurrentUser;
+    requestId: string;
+    orderId: number;
+    clientId: number;
+    fromProjectId: number;
+    toProjectId: number;
+    archivedSourceProjectId: number | null;
+  },
+): Promise<string> {
+  return auditService.record(tx, {
+    event: 'project.order_moved',
+    entityType: 'order',
+    entityId: String(input.orderId),
+    actorUserId: input.currentUser.id,
+    actorUsername: input.currentUser.username,
+    actorRole: input.currentUser.role,
+    requestId: input.requestId,
+    source: SOURCE,
+    relatedOrderId: input.orderId,
+    relatedClientId: input.clientId,
+    before: { projectId: input.fromProjectId },
+    after: { projectId: input.toProjectId },
+    metadata: {
+      fromProjectId: input.fromProjectId,
+      toProjectId: input.toProjectId,
+      archivedSourceProjectId: input.archivedSourceProjectId,
+      action: 'project_move_order',
+    },
+    relatedEntities: [
+      { entityType: 'project', entityId: input.fromProjectId },
+      { entityType: 'project', entityId: input.toProjectId },
+      { entityType: 'order', entityId: input.orderId },
+      { entityType: 'client', entityId: input.clientId },
+    ],
+  });
+}
+
+async function enqueueOutbox(
+  tx: TransactionClient,
+  input: {
+    eventType: string;
+    aggregateType: string;
+    aggregateId: string;
+    payload: Record<string, unknown>;
+    idempotencyKey: string;
+  },
+): Promise<void> {
+  await tx.query(
+    `
+    INSERT INTO outbox_events (
+      event_type, aggregate_type, aggregate_id, payload_json, idempotency_key
+    )
+    VALUES ($1, $2, $3, $4::jsonb, $5)
+    ON CONFLICT (idempotency_key) DO NOTHING
+    `,
+    [input.eventType, input.aggregateType, input.aggregateId, JSON.stringify(input.payload), input.idempotencyKey],
+  );
+}
+
+async function reconcileIdempotency(
+  tx: TransactionClient,
+  input: {
+    idempotencyKey: string;
+    commandName: string;
+    currentUser: CurrentUser;
+    entityType: string;
+    entityId: string;
+    requestShape: Record<string, unknown>;
+  },
+): Promise<{ completedResponse?: MoveOrderResult }> {
+  const requestHash = hashRequest(input.requestShape);
+  const inserted = await tx.query<IdempotencyRow>(
+    `
+    INSERT INTO command_idempotency_keys (
+      idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, 'processing')
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING idempotency_key, request_hash, response_json, status
+    `,
+    [input.idempotencyKey, input.commandName, numericUserId(input.currentUser), input.entityType, input.entityId, requestHash],
+  );
+  if (inserted.rows[0]) {
+    return {};
+  }
+
+  const existing = await tx.query<IdempotencyRow>(
+    `
+    SELECT idempotency_key, request_hash, response_json, status
+    FROM command_idempotency_keys
+    WHERE idempotency_key = $1
+    FOR UPDATE
+    `,
+    [input.idempotencyKey],
+  );
+  const row = existing.rows[0];
+  if (!row) {
+    throw new ApiError(409, 'IDEMPOTENCY_IN_PROGRESS', 'Idempotent command is still processing', {
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
+  if (row.request_hash !== requestHash) {
+    throw new ApiError(409, 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key was reused with a different request', {
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
+  if (row.status === 'completed' && row.response_json) {
+    return { completedResponse: parseStoredResponse(row.response_json) };
+  }
+  if (row.status === 'failed') {
+    throw new ApiError(409, 'IDEMPOTENCY_FAILED', 'Idempotent command previously failed', {
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
+
+  throw new ApiError(409, 'IDEMPOTENCY_IN_PROGRESS', 'Idempotent command is still processing', {
+    idempotencyKey: input.idempotencyKey,
+  });
+}
+
+async function completeIdempotency(tx: TransactionClient, idempotencyKey: string, response: MoveOrderResult): Promise<void> {
+  await tx.query(
+    `
+    UPDATE command_idempotency_keys
+    SET status = 'completed',
+        response_json = $2::jsonb,
+        completed_at = now()
+    WHERE idempotency_key = $1
+    `,
+    [idempotencyKey, JSON.stringify(response)],
+  );
+}
+
 function requestIdOrFallback(requestId: string | undefined): string {
   return requestId && requestId.length > 0 ? requestId : 'projects-command';
 }
@@ -279,4 +636,42 @@ function mapProjectOrderRow(row: ProjectOrderRowDb): ProjectOrderRow {
 
 function isUniqueViolation(error: unknown): error is { code: string } {
   return Boolean(error && typeof error === 'object' && 'code' in error && (error as { code?: unknown }).code === '23505');
+}
+
+function hashRequest(value: Record<string, unknown>): string {
+  return createHash('sha256').update(stableStringify(value)).digest('hex');
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(toStableValue(value));
+}
+
+function toStableValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => toStableValue(item));
+  }
+  if (value && typeof value === 'object') {
+    return Object.keys(value as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((accumulator, key) => {
+        const next = (value as Record<string, unknown>)[key];
+        if (next !== undefined) {
+          accumulator[key] = toStableValue(next);
+        }
+        return accumulator;
+      }, {});
+  }
+  return value;
+}
+
+function numericUserId(currentUser: CurrentUser): number | null {
+  const parsed = Number(currentUser.id);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseStoredResponse(value: MoveOrderResult | string): MoveOrderResult {
+  if (typeof value === 'string') {
+    return JSON.parse(value) as MoveOrderResult;
+  }
+  return value;
 }
