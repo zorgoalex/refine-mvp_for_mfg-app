@@ -11,9 +11,8 @@ export class BazisRuntimeConfigService {
   constructor(@Inject(ConfigService) private readonly config: ConfigService<BackendEnv, true>) {}
 
   getFeatureFlags(): BazisHttpFeatureFlags {
-    const raw = this.config.get<string>('BACKEND_ENABLE_BAZIS' as never) ?? 'false';
     return {
-      bazisEnabled: ['true', '1', 'yes', 'on'].includes(raw.toLowerCase()),
+      bazisEnabled: this.config.get('BACKEND_ENABLE_BAZIS', { infer: true }),
     };
   }
 }

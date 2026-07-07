@@ -68,6 +68,22 @@ describe('parseBazisXml', () => {
     expect(parsed.summary.uniqueMaterials).toBe(5);
   });
 
+  it('keeps same material name separate per source context (sheet vs film vs edge)', () => {
+    const xml = `<Проект Версия="1"><Изделие><Наименование>Т</Наименование><Цена>1</Цена><СписокЭлементов>
+      <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>П1</Наименование>
+        <ОсновнойМатериал><Наименование>Белый</Наименование></ОсновнойМатериал>
+        <ОблицовкаПласти1><Пласть><Наименование>Белый</Наименование></Пласть></ОблицовкаПласти1>
+        <СписокКромок1><Кромка><Наименование>Белый</Наименование></Кромка></СписокКромок1>
+      </Объект>
+    </СписокЭлементов></Изделие></Проект>`;
+    const parsed = parseBazisXml(xml);
+    const named = parsed.materials.filter((material) => material.name === 'Белый');
+    expect(named).toHaveLength(3);
+    expect(new Set(named.map((material) => material.kindGuess))).toEqual(
+      new Set(['sheet', 'film', 'edge']),
+    );
+  });
+
   it('rejects DOCTYPE (XML bomb guard)', () => {
     expect(() => parseBazisXml('<!DOCTYPE foo [<!ENTITY a "b">]><Проект/>')).toThrow(
       BazisXmlParseError,
