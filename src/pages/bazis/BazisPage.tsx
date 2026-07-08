@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Drawer, Empty, Space, Table, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisProjectCard, BazisProjectListItem } from '../../api/types/bazisApi.types';
 import { can } from '../../utils/permissions';
@@ -16,6 +16,7 @@ interface ProjectRow extends BazisProjectListItem {
 }
 
 export const BazisPage: React.FC = () => {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -69,8 +70,8 @@ export const BazisPage: React.FC = () => {
     setCheckedNodeIds([]);
   }, []);
 
-  const revisionColumns = useMemo<ColumnsType<BazisProjectCard['revisions'][number]>>(
-    () => [
+  const makeRevisionColumns = useCallback(
+    (bazisProjectId: number): ColumnsType<BazisProjectCard['revisions'][number]> => [
       {
         title: 'Ревизия',
         dataIndex: 'revisionNo',
@@ -100,11 +101,17 @@ export const BazisPage: React.FC = () => {
       {
         title: 'Действия',
         key: 'actions',
-        width: 280,
+        width: 420,
         render: (_, revision) => {
           const label = `Ревизия ${revision.revisionNo}${revision.productName ? ` · ${revision.productName}` : ''}`;
           return (
             <Space wrap>
+              <Button
+                size="small"
+                onClick={() => navigate(`/bazis/projects/${bazisProjectId}?revision=${revision.bazisRevisionId}`)}
+              >
+                Форма просмотра
+              </Button>
               <Button size="small" onClick={() => openRevisionTree(revision.bazisRevisionId, label)}>
                 Открыть дерево
               </Button>
@@ -124,7 +131,7 @@ export const BazisPage: React.FC = () => {
         },
       },
     ],
-    [canManage, openRevisionTree],
+    [canManage, navigate, openRevisionTree],
   );
 
   const columns = useMemo<ColumnsType<ProjectRow>>(
@@ -133,6 +140,7 @@ export const BazisPage: React.FC = () => {
         title: 'Название',
         dataIndex: 'name',
         key: 'name',
+        render: (value: string, record) => <Link to={`/bazis/projects/${record.bazisProjectId}`}>{value}</Link>,
       },
       {
         title: 'Проект ERP',
@@ -225,7 +233,7 @@ export const BazisPage: React.FC = () => {
                       rowKey="bazisRevisionId"
                       size="small"
                       pagination={false}
-                      columns={revisionColumns}
+                      columns={makeRevisionColumns(record.bazisProjectId)}
                       dataSource={card.revisions}
                     />
                   );
