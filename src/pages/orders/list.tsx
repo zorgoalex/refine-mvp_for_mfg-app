@@ -64,7 +64,7 @@ import "./list.css";
 const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'order_id', label: 'id', lockVisible: true },
   { key: 'order_name', label: 'Заказ', lockVisible: true },
-  { key: 'project_code', label: '№ проекта' },
+  ...(featureFlags.projects ? [{ key: 'project_code', label: '№ проекта' }] : []),
   { key: 'doweling_order_name', label: 'Прис.' },
   { key: 'groups', label: 'Группа' },
   { key: 'order_date', label: 'Дата заказа' },
@@ -917,15 +917,17 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       className: "orders-col orders-col--order-name",
       render: (value) => <span style={{ letterSpacing: '0.5px' }}>{value}</span>,
     },
-    {
-      dataIndex: "project_code",
-      key: "project_code",
-      title: "№ проекта",
-      sorter: true,
-      width: 92,
-      className: "orders-col",
-      render: (value) => value || '—',
-    },
+    ...(featureFlags.projects
+      ? [{
+          dataIndex: "project_code",
+          key: "project_code",
+          title: "№ проекта",
+          sorter: true,
+          width: 92,
+          className: "orders-col",
+          render: (value: string | null) => value || '—',
+        }]
+      : []),
     {
       dataIndex: "doweling_order_name",
       key: "doweling_order_name",

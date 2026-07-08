@@ -39,11 +39,15 @@ export class ProjectsService {
 
   async moveOrder(command: MoveOrderCommand) {
     this.require(command.currentUser, 'projects.manage');
+    // Move rewrites orders.project_id — same base permission as order edit;
+    // per-order scope ('own') is enforced in the repository on locked rows.
+    this.require(command.currentUser, 'orders.update');
     return this.ports.projects.moveOrder(command);
   }
 
   async merge(command: MergeCommand) {
     this.require(command.currentUser, 'projects.manage');
+    this.require(command.currentUser, 'orders.update');
     return this.ports.projects.merge(command);
   }
 

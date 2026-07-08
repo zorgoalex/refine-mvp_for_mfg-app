@@ -63,4 +63,55 @@ describe('ProjectsService', () => {
     expect(result.code).toBe('ФК26');
     expect(projects.update).toHaveBeenCalledOnce();
   });
+
+  it('moveOrder and merge require BOTH projects.manage and orders.update', async () => {
+    const projects = repo();
+    // projects.manage alone is not enough — move/merge rewrite orders rows.
+    const svc = new ProjectsService({
+      projects,
+      permissions: {
+        canUser: (_user: CurrentUser, permission: string) => permission !== 'orders.update',
+      } as never,
+    });
+
+    await expect(
+      svc.moveOrder({
+        currentUser: user(['projects.manage']),
+        orderId: 10,
+        targetProjectId: 200,
+        idempotencyKey: 'k1234567',
+        requestId: 'r1',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    expect(projects.moveOrder).not.toHaveBeenCalled();
+
+    await expect(
+      svc.merge({
+        currentUser: user(['projects.manage']),
+        targetProjectId: 200,
+        sourceProjectId: 100,
+        idempotencyKey: 'k1234567',
+        requestId: 'r1',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    expect(projects.merge).not.toHaveBeenCalled();
+  });
+
+  it('moveOrder delegates when both permissions present', async () => {
+    const projects = repo();
+    projects.moveOrder.mockResolvedValue({ orderId: 10, projectId: 200 });
+    const svc = new ProjectsService({
+      projects,
+      permissions: { canUser: () => true } as never,
+    });
+
+    await svc.moveOrder({
+      currentUser: user(['projects.manage', 'orders.update']),
+      orderId: 10,
+      targetProjectId: 200,
+      idempotencyKey: 'k1234567',
+      requestId: 'r1',
+    });
+    expect(projects.moveOrder).toHaveBeenCalledOnce();
+  });
 });

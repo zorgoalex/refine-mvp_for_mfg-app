@@ -16,7 +16,10 @@ export const updateProjectSchema = z
 export const listProjectsSchema = z.object({
   search: z.string().trim().max(100).optional(),
   clientId: z.coerce.number().int().positive().optional(),
-  includeArchived: z.coerce.boolean().optional(),
+  // z.coerce.boolean() would turn the query string "false" into true.
+  includeArchived: z
+    .union([z.boolean(), z.enum(['true', 'false']).transform((value) => value === 'true')])
+    .optional(),
 });
 
 export const moveOrderSchema = z

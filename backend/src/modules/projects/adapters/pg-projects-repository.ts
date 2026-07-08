@@ -5,6 +5,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import { insertAutoRoot } from '../../orders/adapters/pg-order-transaction-manager';
 import type {
   ListProjectsQuery,
@@ -59,6 +60,8 @@ interface LockedOrderRow extends QueryResultRow {
   order_name: string;
   client_id: number | string;
   project_id: number | string;
+  created_by: string | number | null;
+  manager_id: string | number | null;
 }
 
 interface MoveTargetProjectRow extends QueryResultRow {
@@ -247,7 +250,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
 
       const orderResult = await tx.query<LockedOrderRow>(
         `
-        SELECT o.order_id, o.order_name, o.client_id, o.project_id
+        SELECT o.order_id, o.order_name, o.client_id, o.project_id, o.created_by, o.manager_id
         FROM orders o
         WHERE o.order_id = $1 AND o.delete_flag = false
         FOR UPDATE
@@ -258,11 +261,27 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
       if (!order) {
         throw new ApiError(404, 'ORDER_NOT_FOUND', `Заказ ${command.orderId} не найден`);
       }
+      assertOrdersUpdateScope(command.currentUser, [order]);
 
       const fromProjectId = Number(order.project_id);
       const clientId = Number(order.client_id);
-      let target: { id: number; code: string };
 
+      if (!command.createNew && command.targetProjectId === fromProjectId) {
+        throw new ApiError(422, 'PROJECT_SAME', 'Заказ уже в этом проекте');
+      }
+
+      // Lock source (and target) project rows in ascending id order — mirrors
+      // merge's anti-deadlock convention. The source lock serialises the
+      // "last order leaves -> archive" decision against concurrent moves.
+      const projectIdsToLock = command.createNew
+        ? [fromProjectId]
+        : [...new Set([fromProjectId, command.targetProjectId!])].sort((left, right) => left - right);
+      const lockedProjects = new Map<number, MoveTargetProjectRow | undefined>();
+      for (const projectId of projectIdsToLock) {
+        lockedProjects.set(projectId, await lockProject(tx, projectId));
+      }
+
+      let target: { id: number; code: string };
       if (command.createNew) {
         const created = await insertAutoRoot(tx, {
           orderName: order.order_name,
@@ -275,16 +294,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
           code: created.code,
         };
       } else {
-        const targetResult = await tx.query<MoveTargetProjectRow>(
-          `
-          SELECT project_id, client_id, delete_flag, code
-          FROM projects
-          WHERE project_id = $1
-          FOR UPDATE
-          `,
-          [command.targetProjectId],
-        );
-        const row = targetResult.rows[0];
+        const row = lockedProjects.get(command.targetProjectId!);
         if (!row) {
           throw new ProjectNotFoundError(command.targetProjectId!);
         }
@@ -438,6 +448,18 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         throw new ApiError(422, 'PROJECT_CLIENT_MISMATCH', 'Клиенты проектов не совпадают');
       }
 
+      const sourceOrders = await tx.query<LockedOrderRow>(
+        `
+        SELECT order_id, order_name, client_id, project_id, created_by, manager_id
+        FROM orders
+        WHERE project_id = $1 AND delete_flag = false
+        ORDER BY order_id
+        FOR UPDATE
+        `,
+        [command.sourceProjectId],
+      );
+      assertOrdersUpdateScope(command.currentUser, sourceOrders.rows);
+
       const movedOrders = await tx.query(
         `
         UPDATE orders
@@ -529,6 +551,26 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
 
 async function setSessionUser(tx: TransactionClient, userId: string): Promise<void> {
   await tx.query('SELECT set_session_user($1)', [userId]);
+}
+
+const orderAccessPolicy = new OrderAccessPolicy();
+
+// Move/merge mutate orders.project_id, so they must honour the same per-order
+// update scope as the regular order edit path (manager/operator = 'own').
+function assertOrdersUpdateScope(currentUser: CurrentUser, orders: readonly LockedOrderRow[]): void {
+  for (const order of orders) {
+    const allowed = orderAccessPolicy.canUpdate(currentUser, {
+      orderId: Number(order.order_id),
+      createdByUserId: order.created_by == null ? null : String(order.created_by),
+      managerUserId: order.manager_id == null ? null : String(order.manager_id),
+    });
+    if (!allowed) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: ['orders.update'],
+        orderId: Number(order.order_id),
+      });
+    }
+  }
 }
 
 async function writeAudit(

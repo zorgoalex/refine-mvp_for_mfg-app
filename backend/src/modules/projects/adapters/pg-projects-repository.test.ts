@@ -123,6 +123,8 @@ describe('PgProjectsRepository.moveOrder', () => {
         order_name: '1258',
         client_id: 2,
         project_id: 100,
+        created_by: '7',
+        manager_id: null,
       },
       targetProjectRow: {
         project_id: 200,
@@ -194,6 +196,8 @@ describe('PgProjectsRepository.moveOrder', () => {
         order_name: '1258',
         client_id: 2,
         project_id: 100,
+        created_by: '7',
+        manager_id: null,
       },
       targetProjectRow: {
         project_id: 200,
@@ -226,6 +230,8 @@ describe('PgProjectsRepository.moveOrder', () => {
         order_name: '1258',
         client_id: 2,
         project_id: 100,
+        created_by: '7',
+        manager_id: null,
       },
       sourceOrderCount: 1,
       autoRootRow: {
@@ -264,6 +270,8 @@ describe('PgProjectsRepository.moveOrder', () => {
         order_name: '1258',
         client_id: 2,
         project_id: 100,
+        created_by: '7',
+        manager_id: null,
       },
       targetProjectRow: {
         project_id: 200,
@@ -291,6 +299,8 @@ describe('PgProjectsRepository.moveOrder', () => {
         order_name: '1258',
         client_id: 2,
         project_id: 100,
+        created_by: '7',
+        manager_id: null,
       },
       targetProjectRow: {
         project_id: 200,
@@ -319,6 +329,85 @@ describe('PgProjectsRepository.moveOrder', () => {
         normalizeSql(query.text).startsWith('UPDATE orders SET project_id = $2, version = version + 1'),
       ),
     ).toHaveLength(1);
+  });
+
+  it("manager ('own' scope) moving someone else's order → 403, no writes", async () => {
+    const database = createDatabase({
+      lockedOrderRow: {
+        order_id: 10,
+        order_name: '1258',
+        client_id: 2,
+        project_id: 100,
+        created_by: '999',
+        manager_id: '999',
+      },
+    });
+
+    await expect(
+      new PgProjectsRepository(database.service).moveOrder({
+        currentUser: currentUser('manager'),
+        orderId: 10,
+        targetProjectId: 200,
+        idempotencyKey: 'move-order-key-foreign',
+        requestId: 'req-move-foreign',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('UPDATE orders SET project_id');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+  });
+
+  it("admin ('all' scope) can move someone else's order", async () => {
+    const database = createDatabase({
+      lockedOrderRow: {
+        order_id: 10,
+        order_name: '1258',
+        client_id: 2,
+        project_id: 100,
+        created_by: '999',
+        manager_id: '999',
+      },
+      targetProjectRow: {
+        project_id: 200,
+        client_id: 2,
+        delete_flag: false,
+        code: 'ФК26',
+      },
+      sourceOrderCount: 1,
+    });
+
+    const result = await new PgProjectsRepository(database.service).moveOrder({
+      currentUser: currentUser('admin'),
+      orderId: 10,
+      targetProjectId: 200,
+      idempotencyKey: 'move-order-key-admin',
+      requestId: 'req-move-admin',
+    });
+    expect(result.projectId).toBe(200);
+  });
+
+  it('locks source project row (with target, ascending) before the archive decision', async () => {
+    const database = createDatabase({
+      sourceOrderCount: 0,
+      targetProjectRow: {
+        project_id: 200,
+        client_id: 2,
+        delete_flag: false,
+        code: 'ФК26',
+      },
+    });
+
+    await new PgProjectsRepository(database.service).moveOrder({
+      currentUser: currentUser(),
+      orderId: 10,
+      targetProjectId: 200,
+      idempotencyKey: 'move-order-key-lock-source',
+      requestId: 'req-move-lock',
+    });
+
+    // Source project 100 must be locked, and lock order must be ascending ids.
+    expect(lockQueryIds(database.queries)).toEqual([100, 200]);
   });
 });
 
@@ -500,6 +589,56 @@ describe('PgProjectsRepository.merge', () => {
       ),
     ).toHaveLength(1);
   });
+
+  it("manager ('own' scope) merging a project holding someone else's live order → 403, no writes", async () => {
+    const database = createDatabase({
+      projectRowsById: {
+        100: { project_id: 100, client_id: 2, delete_flag: false, code: 'ФК26' },
+        200: { project_id: 200, client_id: 2, delete_flag: false, code: 'ФК27' },
+      },
+      sourceOrderRows: [
+        { order_id: 11, order_name: '1259', client_id: 2, project_id: 100, created_by: '7', manager_id: null },
+        { order_id: 12, order_name: '1260', client_id: 2, project_id: 100, created_by: '999', manager_id: '999' },
+      ],
+    });
+
+    await expect(
+      new PgProjectsRepository(database.service).merge({
+        currentUser: currentUser('manager'),
+        targetProjectId: 200,
+        sourceProjectId: 100,
+        idempotencyKey: 'merge-project-key-foreign',
+        requestId: 'req-merge-foreign',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).not.toContain('UPDATE orders SET project_id');
+    expect(sql).not.toContain('UPDATE projects SET delete_flag = true');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+  });
+
+  it('locks live source orders FOR UPDATE before moving them', async () => {
+    const database = createDatabase({
+      projectRowsById: {
+        100: { project_id: 100, client_id: 2, delete_flag: false, code: 'ФК26' },
+        200: { project_id: 200, client_id: 2, delete_flag: false, code: 'ФК27' },
+      },
+      mergeMovedOrdersCount: 1,
+    });
+
+    await new PgProjectsRepository(database.service).merge({
+      currentUser: currentUser(),
+      targetProjectId: 200,
+      sourceProjectId: 100,
+      idempotencyKey: 'merge-project-key-locks',
+      requestId: 'req-merge-locks',
+    });
+
+    expect(normalizedSql(database.queries)).toContain(
+      'SELECT order_id, order_name, client_id, project_id, created_by, manager_id FROM orders WHERE project_id = $1 AND delete_flag = false ORDER BY order_id FOR UPDATE',
+    );
+  });
 });
 
 function createDatabase(
@@ -509,6 +648,7 @@ function createDatabase(
     throwOnUpdate?: { code: string };
     lockedOrderRow?: Record<string, unknown> | null;
     targetProjectRow?: Record<string, unknown> | null;
+    sourceOrderRows?: Array<Record<string, unknown>>;
     sourceOrderCount?: number;
     autoRootRow?: Record<string, unknown>;
     projectRowsById?: Record<number, Record<string, unknown> | null>;
@@ -589,7 +729,7 @@ function createDatabase(
 
       if (
         normalized.startsWith(
-          'SELECT o.order_id, o.order_name, o.client_id, o.project_id FROM orders o WHERE o.order_id = $1 AND o.delete_flag = false FOR UPDATE',
+          'SELECT o.order_id, o.order_name, o.client_id, o.project_id, o.created_by, o.manager_id FROM orders o WHERE o.order_id = $1 AND o.delete_flag = false FOR UPDATE',
         )
       ) {
         return {
@@ -598,9 +738,22 @@ function createDatabase(
             order_name: '1258',
             client_id: 2,
             project_id: 100,
+            created_by: '7',
+            manager_id: null,
           }],
           rowCount: options.lockedOrderRow === null ? 0 : 1,
         };
+      }
+
+      if (
+        normalized.startsWith(
+          'SELECT order_id, order_name, client_id, project_id, created_by, manager_id FROM orders WHERE project_id = $1 AND delete_flag = false ORDER BY order_id FOR UPDATE',
+        )
+      ) {
+        const rows = options.sourceOrderRows ?? [
+          { order_id: 11, order_name: '1259', client_id: 2, project_id: Number(params[0]), created_by: '7', manager_id: null },
+        ];
+        return { rows, rowCount: rows.length };
       }
 
       if (

@@ -1665,17 +1665,25 @@ const SHEET_SCHEMA_FIELDS: Record<string, string[]> = {
   order_details: ["sheet_material_type_id"],
 };
 
+// Projects: columns that only exist once migration 056 Hasura metadata is
+// applied. Same failure mode as SHEET_SCHEMA_FIELDS — selecting them against
+// legacy Hasura fails with "field not found in type".
+const PROJECT_SCHEMA_FIELDS: Record<string, string[]> = {
+  orders_view: ["project_id", "project_code", "order_full_number"],
+};
+
 const fieldsFor = (resource: string) => {
   const fields = RESOURCE_FIELDS[resource];
   if (!fields) return "";
+  const hidden = new Set<string>();
   if (!featureFlags.sheetMaterialsReads) {
-    const sheetFields = SHEET_SCHEMA_FIELDS[resource];
-    if (sheetFields) {
-      const hidden = new Set(sheetFields);
-      return fields.filter((f) => !hidden.has(f)).join(" \n");
-    }
+    for (const field of SHEET_SCHEMA_FIELDS[resource] ?? []) hidden.add(field);
   }
-  return fields.join(" \n");
+  if (!featureFlags.projects) {
+    for (const field of PROJECT_SCHEMA_FIELDS[resource] ?? []) hidden.add(field);
+  }
+  if (hidden.size === 0) return fields.join(" \n");
+  return fields.filter((f) => !hidden.has(f)).join(" \n");
 };
 
 export const dataProvider = (_apiUrl: string) => {
