@@ -34,6 +34,20 @@ export const NodeSearch: React.FC<NodeSearchProps> = ({ revisionId, onPick }) =>
     };
   }, []);
 
+  // При смене ревизии сбрасываем результаты поиска и гасим текущий debounce/in-flight запрос,
+  // иначе клик по устаревшему item может передать node id из прошлой ревизии в revealNode.
+  useEffect(() => {
+    requestIdRef.current += 1;
+    if (timerRef.current != null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setItems([]);
+    setTotalMatched(0);
+    setErrorText(null);
+    setLoading(false);
+  }, [revisionId]);
+
   const executeSearch = useCallback(async (rawQuery: string, nextObjectType?: string) => {
     const trimmedQuery = rawQuery.trim();
     const hasType = Boolean(nextObjectType);

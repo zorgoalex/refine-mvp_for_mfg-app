@@ -168,6 +168,9 @@ export const BazisProjectViewPage: React.FC = () => {
               children: (
                 <Space direction="vertical" size="large" style={{ width: '100%' }}>
                   <NodeSearch
+                    // key заставляет пересоздать компонент при смене ревизии — гарантированно сбрасывает
+                    // внутреннее состояние поиска, не полагаясь только на internal useEffect
+                    key={selectedRevision.bazisRevisionId}
                     revisionId={selectedRevision.bazisRevisionId}
                     onPick={(item) => (
                       viewerTreeRef.current?.revealNode(item.pathNodeIds, item.bazisNodeId) ?? Promise.resolve()
