@@ -5,8 +5,12 @@ import type {
 } from '../application/bazis.types';
 import type {
   BazisImportResponseDto,
+  BazisNodeCardDto,
+  BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
+  BazisRevisionMaterialsSummaryDto,
+  BazisRevisionOrderDto,
   BazisTreeNodeDto,
   CreateOrderFromRevisionResponseDto,
   MaterialMappingDto,
@@ -59,6 +63,27 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
   createOrderFromRevision(
     _command: CreateOrderFromRevisionCommand,
   ): Promise<CreateOrderFromRevisionResponseDto> {
+    return unavailable();
+  }
+
+  getNodeCard(_nodeId: number): Promise<BazisNodeCardDto> {
+    return unavailable();
+  }
+
+  searchNodes(_input: {
+    revisionId: number;
+    q: string | null;
+    objectType: string | null;
+    limit: number;
+  }): Promise<BazisNodeSearchResponseDto> {
+    return unavailable();
+  }
+
+  getMaterialsSummary(_revisionId: number): Promise<BazisRevisionMaterialsSummaryDto> {
+    return unavailable();
+  }
+
+  listRevisionOrders(_revisionId: number): Promise<BazisRevisionOrderDto[]> {
     return unavailable();
   }
 }

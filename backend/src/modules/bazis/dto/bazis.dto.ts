@@ -53,6 +53,95 @@ export interface BazisTreeNodeDto {
   childrenCount: number;
 }
 
+export interface BazisNodeOrderLinkDto {
+  orderId: number;
+  orderDetailId: number | null;
+  mappingKind: string;
+}
+
+export interface BazisNodeCardDto {
+  bazisNodeId: number;
+  revisionId: number;
+  bazisProjectId: number;
+  projectId: number;
+  revisionNo: number;
+  parentNodeId: number | null;
+  seq: number;
+  nodeKind: string;
+  objectType: string | null;
+  name: string | null;
+  detailCode: string | null;
+  position: string | null;
+  designation: string | null;
+  quantity: number | null;
+  cumulativeQuantity: number | null;
+  lengthMm: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  thicknessMm: number | null;
+  price: number | null;
+  isRectangular: boolean | null;
+  textureOrientation: string | null;
+  mainMaterialName: string | null;
+  childrenCount: number;
+  rawJson: Record<string, unknown>;
+  orderLinks: BazisNodeOrderLinkDto[];
+}
+
+export interface BazisNodeSearchItemDto {
+  bazisNodeId: number;
+  nodeKind: string;
+  objectType: string | null;
+  name: string | null;
+  position: string | null;
+  designation: string | null;
+  mainMaterialName: string | null;
+  /** id предков от корня к родителю (без самого узла) — для раскрытия дерева */
+  pathNodeIds: number[];
+  /** имена предков в том же порядке (для подписи результата) */
+  pathTitles: Array<string | null>;
+}
+
+export interface BazisNodeSearchResponseDto {
+  items: BazisNodeSearchItemDto[];
+  totalMatched: number;
+}
+
+export interface BazisPanelsMaterialSummaryDto {
+  materialName: string | null;
+  panelCount: number;
+  totalQuantity: number;
+  totalAreaM2: number;
+  mappingTargetKind: string | null;
+  sheetMaterialTypeId: number | null;
+}
+
+export interface BazisHardwareSummaryDto {
+  name: string | null;
+  totalQuantity: number;
+}
+
+export interface BazisRawMaterialUsageDto {
+  name: string;
+  usageCount: number;
+}
+
+export interface BazisRevisionMaterialsSummaryDto {
+  summary: Record<string, number>;
+  panelsByMaterial: BazisPanelsMaterialSummaryDto[];
+  hardwareByName: BazisHardwareSummaryDto[];
+  edgesByName: BazisRawMaterialUsageDto[];
+  filmsByName: BazisRawMaterialUsageDto[];
+}
+
+export interface BazisRevisionOrderDto {
+  orderId: number;
+  orderName: string | null;
+  createdAt: string;
+  nodesMapped: number;
+  detailsCreated: number;
+}
+
 export interface MaterialMappingDto {
   bazisMaterialMappingId: number;
   sourceKind: string;

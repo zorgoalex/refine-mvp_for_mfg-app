@@ -2,8 +2,12 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { ParsedBazisRevision } from './bazis-xml-parser';
 import type {
   BazisImportResponseDto,
+  BazisNodeCardDto,
+  BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
+  BazisRevisionMaterialsSummaryDto,
+  BazisRevisionOrderDto,
   BazisTreeNodeDto,
   CreateOrderFromRevisionResponseDto,
   MaterialMappingDto,
@@ -63,4 +67,13 @@ export interface BazisRepositoryPort {
   createOrderFromRevision(
     command: CreateOrderFromRevisionCommand,
   ): Promise<CreateOrderFromRevisionResponseDto>;
+  getNodeCard(nodeId: number): Promise<BazisNodeCardDto>;
+  searchNodes(input: {
+    revisionId: number;
+    q: string | null;
+    objectType: string | null;
+    limit: number;
+  }): Promise<BazisNodeSearchResponseDto>;
+  getMaterialsSummary(revisionId: number): Promise<BazisRevisionMaterialsSummaryDto>;
+  listRevisionOrders(revisionId: number): Promise<BazisRevisionOrderDto[]>;
 }

@@ -18,6 +18,12 @@ export class BazisRevisionNotFoundError extends ApiError {
   }
 }
 
+export class BazisNodeNotFoundError extends ApiError {
+  constructor(nodeId: number) {
+    super(404, 'NOT_FOUND', `Базис-узел ${nodeId} не найден`, { nodeId });
+  }
+}
+
 export class BazisRevisionDuplicateError extends ApiError {
   constructor(revisionNo: number) {
     super(409, 'BAZIS_REVISION_DUPLICATE', `Этот файл уже импортирован (ревизия ${revisionNo})`, {
