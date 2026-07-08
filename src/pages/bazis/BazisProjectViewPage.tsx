@@ -26,6 +26,10 @@ export const BazisProjectViewPage: React.FC = () => {
   const revisionParam = searchParams.get('revision');
 
   useEffect(() => {
+    if (!can('bazis.view')) {
+      return;
+    }
+
     if (!Number.isFinite(bazisProjectId) || bazisProjectId <= 0) {
       return;
     }
