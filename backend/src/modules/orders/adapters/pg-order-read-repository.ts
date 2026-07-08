@@ -846,6 +846,11 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
 
       if (search.codePrefix !== null) {
         searchClauses.push(`mp.code ILIKE $${params.push(`${search.codePrefix}%`)}`);
+        // Dash-split of a full number is ambiguous when the order name (or the
+        // code) contains dashes — match the composed full number directly too.
+        // Numeric-only input stays out (codePrefix === null) so plain numbers
+        // keep matching order/client names only, never project codes.
+        searchClauses.push(`(mp.code || '-' || o.order_name) ILIKE $${plainIndex}`);
       }
 
       if (search.codeExact !== null && search.namePrefix !== null) {

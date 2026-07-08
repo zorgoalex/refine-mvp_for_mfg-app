@@ -89,6 +89,9 @@ describe('PgOrderReadRepository', () => {
 
     expect(countQuery?.text).toContain('JOIN projects mp ON mp.project_id = o.project_id');
     expect(listQuery?.text).toContain('mp.code ILIKE $2');
+    // Composed full-number contains-match: covers dashes inside the order name
+    // (or code) where the dash-split branch guesses the wrong boundary.
+    expect(listQuery?.text).toContain("(mp.code || '-' || o.order_name) ILIKE $1");
     expect(listQuery?.text).toContain('(mp.code = $3 AND o.order_name ILIKE $4)');
     expect(listQuery?.text).toContain('o.project_id = $5');
     expect(listQuery?.text).toContain('ORDER BY mp.code DESC');
@@ -114,6 +117,7 @@ describe('PgOrderReadRepository', () => {
     expect(listQuery?.text).toContain('(o.order_name ILIKE $1 OR c.client_name::text ILIKE $1)');
     expect(listQuery?.text).not.toContain('mp.code ILIKE');
     expect(listQuery?.text).not.toContain('mp.code = $');
+    expect(listQuery?.text).not.toContain("(mp.code || '-' || o.order_name) ILIKE");
     expect(listQuery?.params).toEqual(['%1258%', 10, 0]);
   });
 
