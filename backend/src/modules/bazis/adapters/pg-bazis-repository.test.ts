@@ -12,6 +12,7 @@ import {
   BazisNodeNotFoundError,
   BazisProjectNotFoundError,
   BazisRevisionDuplicateError,
+  BazisRevisionNotFoundError,
 } from '../errors/bazis.errors';
 import { PgBazisRepository } from './pg-bazis-repository';
 
@@ -297,6 +298,91 @@ describe('PgBazisRepository.getNodeCard', () => {
     const database = createDatabase();
     const repository = new PgBazisRepository(database.service);
     await expect(repository.getNodeCard(1)).rejects.toBeInstanceOf(BazisNodeNotFoundError);
+  });
+});
+
+describe('PgBazisRepository.searchNodes', () => {
+  it('escapes ILIKE wildcards, limits matches and returns ancestor paths root-first', async () => {
+    const database = createDatabase({
+      nodeSearch: {
+        total: 3,
+        rows: [
+          {
+            bazis_node_id: 555,
+            node_kind: 'object',
+            object_type: 'Панель',
+            name: 'Дверь',
+            position: 'A1',
+            designation: 'D-01',
+            main_material_name: 'Laminate White',
+            ancestor_id: 100,
+            ancestor_name: 'Корень',
+            depth: 2,
+          },
+          {
+            bazis_node_id: 555,
+            node_kind: 'object',
+            object_type: 'Панель',
+            name: 'Дверь',
+            position: 'A1',
+            designation: 'D-01',
+            main_material_name: 'Laminate White',
+            ancestor_id: 200,
+            ancestor_name: 'Шкаф',
+            depth: 1,
+          },
+          {
+            bazis_node_id: 555,
+            node_kind: 'object',
+            object_type: 'Панель',
+            name: 'Дверь',
+            position: 'A1',
+            designation: 'D-01',
+            main_material_name: 'Laminate White',
+            ancestor_id: 555,
+            ancestor_name: 'Дверь',
+            depth: 0,
+          },
+        ],
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.searchNodes({
+      revisionId: 82,
+      q: '50%_шкаф',
+      objectType: null,
+      limit: 50,
+    });
+
+    const searchQuery = database.queries[2];
+    expect(searchQuery.params).toContain('%50\\%\\_шкаф%');
+    const sql = normalizeSql(searchQuery.text);
+    expect(sql).toContain('WITH RECURSIVE');
+    // cycle guard + depth cap + revision-scope: мок не исполняет SQL, поэтому
+    // текст-ассертами фиксируем наличие защит (BLOCKER R1, revision-scope R2)
+    expect(sql).toContain('NOT p.bazis_node_id = ANY(a.visited)');
+    expect(sql).toContain('a.depth < 100');
+    expect(sql).toContain('p.revision_id = $1');
+    expect(response.totalMatched).toBe(3);
+    expect(response.items).toHaveLength(1);
+    expect(response.items[0].pathNodeIds).toEqual([100, 200]); // root → parent
+    expect(response.items[0].pathTitles).toEqual(['Корень', 'Шкаф']);
+  });
+
+  it('filters by objectType without q', async () => {
+    const database = createDatabase({ nodeSearch: { total: 0, rows: [] } });
+    const repository = new PgBazisRepository(database.service);
+    await repository.searchNodes({ revisionId: 82, q: null, objectType: 'Панель', limit: 50 });
+    expect(database.queries[1].params).toEqual([82, 'Панель', null]);
+  });
+
+  it('throws BazisRevisionNotFoundError for unknown revision', async () => {
+    const database = createDatabase({ nodeSearch: { revisionExists: false } });
+    const repository = new PgBazisRepository(database.service);
+    await expect(
+      repository.searchNodes({ revisionId: 1, q: 'x', objectType: null, limit: 50 }),
+    ).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
   });
 });
 
@@ -666,6 +752,11 @@ function createDatabase(
       row?: Record<string, unknown> | null;
       orderLinks?: Array<Record<string, unknown>>;
     };
+    nodeSearch?: {
+      revisionExists?: boolean;
+      total?: number;
+      rows?: Array<Record<string, unknown>>;
+    };
     createOrderState?: {
       idempotencyConflict?: boolean;
       existingIdempotencyRow?: {
@@ -798,6 +889,20 @@ function createDatabase(
       if (normalized.startsWith('SELECT n.bazis_node_id, n.revision_id')) {
         const row = options.nodeCard?.row;
         return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+      if (normalized.startsWith('SELECT 1 AS ok FROM bazis_project_revisions')) {
+        return options.nodeSearch?.revisionExists === false
+          ? { rows: [], rowCount: 0 }
+          : { rows: [{ ok: 1 }], rowCount: 1 };
+      }
+      if (normalized.startsWith('SELECT count(*)::int AS total FROM bazis_nodes n WHERE')) {
+        return { rows: [{ total: options.nodeSearch?.total ?? 0 }], rowCount: 1 };
+      }
+      if (normalized.startsWith('WITH RECURSIVE matches AS')) {
+        return {
+          rows: options.nodeSearch?.rows ?? [],
+          rowCount: options.nodeSearch?.rows?.length ?? 0,
+        };
       }
       if (normalized.startsWith('SELECT m.order_id, m.order_detail_id, m.mapping_kind')) {
         return {

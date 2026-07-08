@@ -14,6 +14,8 @@ import type {
 import type {
   BazisImportResponseDto,
   BazisNodeCardDto,
+  BazisNodeSearchItemDto,
+  BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
   BazisTreeNodeDto,
@@ -143,6 +145,19 @@ interface NodeCardRow {
   bazis_project_id: number | string;
   revision_no: number | string;
   project_id: number | string;
+}
+
+interface SearchRow {
+  bazis_node_id: number | string;
+  node_kind: string;
+  object_type: string | null;
+  name: string | null;
+  position: string | null;
+  designation: string | null;
+  main_material_name: string | null;
+  ancestor_id: number | string;
+  ancestor_name: string | null;
+  depth: number | string;
 }
 
 interface NodeOrderLinkRow {
@@ -636,6 +651,95 @@ export class PgBazisRepository implements BazisRepositoryPort {
     };
   }
 
+  async searchNodes(input: {
+    revisionId: number;
+    q: string | null;
+    objectType: string | null;
+    limit: number;
+  }): Promise<BazisNodeSearchResponseDto> {
+    await this.assertRevisionExists(input.revisionId);
+
+    const pattern = input.q == null
+      ? null
+      : `%${input.q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+
+    const matchPredicate = `
+      n.revision_id = $1
+      AND ($2::text IS NULL OR n.object_type = $2)
+      AND ($3::text IS NULL
+        OR n.name ILIKE $3 OR n.detail_code ILIKE $3 OR n.position ILIKE $3
+        OR n.designation ILIKE $3 OR n.main_material_name ILIKE $3)
+    `;
+
+    const countResult = await this.database.query<{ total: number }>(
+      `SELECT count(*)::int AS total FROM bazis_nodes n WHERE ${matchPredicate}`,
+      [input.revisionId, input.objectType, pattern],
+    );
+
+    const result = await this.database.query<SearchRow>(
+      `
+      WITH RECURSIVE matches AS (
+        SELECT n.bazis_node_id, n.node_kind, n.object_type, n.name, n.position,
+               n.designation, n.main_material_name, n.seq
+        FROM bazis_nodes n
+        WHERE ${matchPredicate}
+        ORDER BY n.bazis_node_id
+        LIMIT $4
+      ),
+      ancestry AS (
+        SELECT m.bazis_node_id AS match_id, n.bazis_node_id, n.parent_node_id,
+               n.name, n.object_type, n.node_kind, 0 AS depth,
+               ARRAY[n.bazis_node_id] AS visited
+        FROM matches m
+        JOIN bazis_nodes n ON n.bazis_node_id = m.bazis_node_id
+        UNION ALL
+        SELECT a.match_id, p.bazis_node_id, p.parent_node_id,
+               p.name, p.object_type, p.node_kind, a.depth + 1,
+               a.visited || p.bazis_node_id
+        FROM ancestry a
+        JOIN bazis_nodes p ON p.bazis_node_id = a.parent_node_id
+        WHERE p.revision_id = $1
+          AND NOT p.bazis_node_id = ANY(a.visited)
+          AND a.depth < 100
+      )
+      SELECT m.bazis_node_id, m.node_kind, m.object_type, m.name, m.position,
+             m.designation, m.main_material_name,
+             a.bazis_node_id AS ancestor_id, a.name AS ancestor_name, a.depth
+      FROM matches m
+      JOIN ancestry a ON a.match_id = m.bazis_node_id
+      ORDER BY m.bazis_node_id, a.depth DESC
+      `,
+      [input.revisionId, input.objectType, pattern, input.limit],
+    );
+
+    const itemsById = new Map<number, BazisNodeSearchItemDto>();
+    for (const row of result.rows) {
+      const matchId = Number(row.bazis_node_id);
+      let item = itemsById.get(matchId);
+      if (!item) {
+        item = {
+          bazisNodeId: matchId,
+          nodeKind: row.node_kind,
+          objectType: row.object_type,
+          name: row.name,
+          position: row.position,
+          designation: row.designation,
+          mainMaterialName: row.main_material_name,
+          pathNodeIds: [],
+          pathTitles: [],
+        };
+        itemsById.set(matchId, item);
+      }
+      // depth DESC → первым приходит корень; depth 0 — сам узел, в путь не входит
+      if (Number(row.depth) > 0) {
+        item.pathNodeIds.push(Number(row.ancestor_id));
+        item.pathTitles.push(row.ancestor_name);
+      }
+    }
+
+    return { items: [...itemsById.values()], totalMatched: Number(countResult.rows[0]?.total ?? 0) };
+  }
+
   async listMaterialMappings(names?: string[]): Promise<MaterialMappingDto[]> {
     const loweredNames = names?.map((name) => name.toLowerCase()) ?? null;
     const result = await this.database.query<MaterialMappingRow>(
@@ -794,6 +898,16 @@ export class PgBazisRepository implements BazisRepositoryPort {
     } catch (error) {
       await this.failCreateOrderIdempotency(command);
       throw error;
+    }
+  }
+
+  private async assertRevisionExists(revisionId: number): Promise<void> {
+    const result = await this.database.query<{ ok: number }>(
+      `SELECT 1 AS ok FROM bazis_project_revisions WHERE bazis_revision_id = $1`,
+      [revisionId],
+    );
+    if (result.rows.length === 0) {
+      throw new BazisRevisionNotFoundError(revisionId);
     }
   }
 
