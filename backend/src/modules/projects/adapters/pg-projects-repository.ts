@@ -242,7 +242,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         currentUser: command.currentUser,
         entityType: 'order',
         entityId: String(command.orderId),
-        requestShape: { ...command },
+        requestShape: moveOrderRequestShape(command),
       });
       if (idempotency.completedResponse) {
         return idempotency.completedResponse;
@@ -417,7 +417,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         projectId: target.id,
         code: target.code,
         archivedSourceProjectId,
-        auditId: Number(auditId),
+        auditId,
         requestId,
       };
       await completeIdempotency(tx, command.idempotencyKey, response);
@@ -435,7 +435,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         currentUser: command.currentUser,
         entityType: 'project',
         entityId: String(command.targetProjectId),
-        requestShape: { ...command },
+        requestShape: mergeRequestShape(command),
       });
       if (idempotency.completedResponse) {
         return idempotency.completedResponse;
@@ -561,7 +561,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         targetProjectId: command.targetProjectId,
         sourceProjectId: command.sourceProjectId,
         movedOrdersCount,
-        auditId: Number(auditId),
+        auditId,
         requestId,
       };
       await completeIdempotency(tx, command.idempotencyKey, response);
@@ -921,6 +921,24 @@ function mapProjectOrderRow(row: ProjectOrderRowDb): ProjectOrderRow {
 
 function isUniqueViolation(error: unknown): error is { code: string } {
   return Boolean(error && typeof error === 'object' && 'code' in error && (error as { code?: unknown }).code === '23505');
+}
+
+// Replay contract: same key + same MEANINGFUL request => cached response. The
+// per-HTTP requestId (and volatile currentUser payload) must not poison the
+// hash, or every replay 409s as "reused with a different request".
+function moveOrderRequestShape(command: MoveOrderCommand): Record<string, unknown> {
+  return {
+    orderId: command.orderId,
+    targetProjectId: command.targetProjectId ?? null,
+    createNew: command.createNew === true,
+  };
+}
+
+function mergeRequestShape(command: MergeCommand): Record<string, unknown> {
+  return {
+    sourceProjectId: command.sourceProjectId,
+    targetProjectId: command.targetProjectId,
+  };
 }
 
 function hashRequest(value: Record<string, unknown>): string {

@@ -53,7 +53,7 @@ export interface MoveOrderResult {
   projectId: number;
   code: string;
   archivedSourceProjectId: number | null;
-  auditId: number;
+  auditId: string;
   requestId: string;
 }
 
@@ -69,7 +69,7 @@ export interface MergeResult {
   targetProjectId: number;
   sourceProjectId: number;
   movedOrdersCount: number;
-  auditId: number;
+  auditId: string;
   requestId: string;
 }
 

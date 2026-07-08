@@ -150,7 +150,7 @@ describe('PgProjectsRepository.moveOrder', () => {
       archivedSourceProjectId: 100,
       requestId: 'req-move-1',
     });
-    expect(result.auditId).toBeTypeOf('number');
+    expect(result.auditId).toBeTypeOf('string');
 
     const sql = normalizedSql(database.queries);
     expect(sql).toContain('SELECT set_session_user($1)');
@@ -545,7 +545,7 @@ describe('PgProjectsRepository.merge', () => {
       movedOrdersCount: 3,
       requestId: 'req-merge-1',
     });
-    expect(result.auditId).toBeTypeOf('number');
+    expect(result.auditId).toBeTypeOf('string');
 
     const sql = normalizedSql(database.queries);
     expect(sql).toContain('SELECT set_session_user($1)');

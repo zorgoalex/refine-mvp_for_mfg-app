@@ -82,7 +82,7 @@ const mergeResponseSwaggerSchema = {
     targetProjectId: { type: 'integer' },
     sourceProjectId: { type: 'integer' },
     movedOrdersCount: { type: 'integer' },
-    auditId: { type: 'integer' },
+    auditId: { type: 'string' },
     requestId: { type: 'string' },
   },
 } as const;

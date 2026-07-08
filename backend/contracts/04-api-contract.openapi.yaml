@@ -1113,7 +1113,7 @@ paths:
                     type: integer
                     nullable: true
                   auditId:
-                    type: integer
+                    type: string
                   requestId:
                     type: string
         '401':
@@ -2506,7 +2506,7 @@ paths:
                   movedOrdersCount:
                     type: integer
                   auditId:
-                    type: integer
+                    type: string
                   requestId:
                     type: string
         '401':

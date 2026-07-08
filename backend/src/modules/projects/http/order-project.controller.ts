@@ -28,7 +28,7 @@ const moveOrderResponseSwaggerSchema = {
     projectId: { type: 'integer' },
     code: { type: 'string' },
     archivedSourceProjectId: { type: 'integer', nullable: true },
-    auditId: { type: 'integer' },
+    auditId: { type: 'string' },
     requestId: { type: 'string' },
   },
 } as const;
