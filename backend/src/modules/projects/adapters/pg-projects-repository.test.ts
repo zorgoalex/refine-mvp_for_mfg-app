@@ -377,6 +377,31 @@ describe('PgProjectsRepository.moveOrder', () => {
     ).toHaveLength(1);
   });
 
+  it('replay of the same key by a DIFFERENT user → 409, not the cached response', async () => {
+    const database = createDatabase({
+      targetProjectRow: {
+        project_id: 200,
+        client_id: 2,
+        delete_flag: false,
+        code: 'ФК26',
+      },
+      sourceOrderCount: 1,
+    });
+    const repo = new PgProjectsRepository(database.service);
+    const base = {
+      orderId: 10,
+      targetProjectId: 200,
+      idempotencyKey: 'move-order-key-actor',
+      requestId: 'req-move-actor',
+    };
+
+    await repo.moveOrder({ ...base, currentUser: currentUser('admin') });
+
+    await expect(
+      repo.moveOrder({ ...base, currentUser: { ...currentUser('admin'), id: '99' } }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
+  });
+
   it("manager ('own' scope) moving someone else's order → 403, no writes", async () => {
     const database = createDatabase({
       lockedOrderRow: {

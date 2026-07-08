@@ -933,6 +933,10 @@ function isUniqueViolation(error: unknown): error is { code: string } {
 // hash, or every replay 409s as "reused with a different request".
 function moveOrderRequestShape(command: MoveOrderCommand): Record<string, unknown> {
   return {
+    // Actor id stays in the hash: replay returns the cached response BEFORE the
+    // scope checks run, so another user reusing the key must 409, not read the
+    // first user's result.
+    actorUserId: command.currentUser.id,
     orderId: command.orderId,
     targetProjectId: command.targetProjectId ?? null,
     createNew: command.createNew === true,
@@ -941,6 +945,7 @@ function moveOrderRequestShape(command: MoveOrderCommand): Record<string, unknow
 
 function mergeRequestShape(command: MergeCommand): Record<string, unknown> {
   return {
+    actorUserId: command.currentUser.id,
     sourceProjectId: command.sourceProjectId,
     targetProjectId: command.targetProjectId,
   };
