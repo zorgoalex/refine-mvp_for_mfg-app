@@ -9,6 +9,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import {
   BazisNoPanelsSelectedError,
+  BazisNodeNotFoundError,
   BazisProjectNotFoundError,
   BazisRevisionDuplicateError,
 } from '../errors/bazis.errors';
@@ -234,6 +235,68 @@ describe('PgBazisRepository reads + mappings', () => {
     expect(audit?.params[2]).toBe('batch');
     expect(String(audit?.params[22])).toContain('"count":2');
     expect(String(audit?.params[22])).toContain('"names":["Laminate White","Laminate White"]');
+  });
+});
+
+describe('PgBazisRepository.getNodeCard', () => {
+  it('reads node with revision context and order links', async () => {
+    const database = createDatabase({
+      nodeCard: {
+        row: {
+          bazis_node_id: 555,
+          revision_id: 82,
+          parent_node_id: 10,
+          seq: 4,
+          node_kind: 'object',
+          object_type: 'Панель',
+          name: 'Дверь',
+          detail_code: 'D-1',
+          position: 'A1',
+          designation: 'D-01',
+          quantity: 1,
+          cumulative_quantity: 2,
+          length_mm: 1000,
+          width_mm: 500,
+          height_mm: null,
+          thickness_mm: 16,
+          price: 200,
+          is_rectangular: true,
+          texture_orientation: 'along',
+          main_material_name: 'Laminate White',
+          raw_json: { ТипОбъекта: 'Панель' },
+          children_count: 0,
+          bazis_project_id: 41,
+          revision_no: 3,
+          project_id: 77,
+        },
+        orderLinks: [{ order_id: 9001, order_detail_id: 501, mapping_kind: 'created' }],
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const card = await repository.getNodeCard(555);
+
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    expect(ordered[0]).toContain('FROM bazis_nodes n JOIN bazis_project_revisions r');
+    // child-count строго в границах ревизии: parent_node_id — self-FK без
+    // same-revision constraint, ручная правка БД не должна протекать (Critic R2)
+    expect(ordered[0]).toContain('c.revision_id = n.revision_id');
+    expect(ordered[1]).toContain('FROM bazis_node_order_detail_map');
+    expect(card).toMatchObject({
+      bazisNodeId: 555,
+      revisionId: 82,
+      bazisProjectId: 41,
+      projectId: 77,
+      revisionNo: 3,
+      rawJson: { ТипОбъекта: 'Панель' },
+      orderLinks: [{ orderId: 9001, orderDetailId: 501, mappingKind: 'created' }],
+    });
+  });
+
+  it('throws BazisNodeNotFoundError when node is missing', async () => {
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service);
+    await expect(repository.getNodeCard(1)).rejects.toBeInstanceOf(BazisNodeNotFoundError);
   });
 });
 
@@ -599,6 +662,10 @@ function createDatabase(
     materialMappings?: Array<{ source_kind: string; name: string }>;
     treeChildren?: Array<Record<string, unknown>>;
     upsertedMappings?: Array<Record<string, unknown>>;
+    nodeCard?: {
+      row?: Record<string, unknown> | null;
+      orderLinks?: Array<Record<string, unknown>>;
+    };
     createOrderState?: {
       idempotencyConflict?: boolean;
       existingIdempotencyRow?: {
@@ -727,6 +794,16 @@ function createDatabase(
       }
       if (normalized.startsWith('SELECT r.bazis_revision_id')) {
         return { rows: [], rowCount: 0 };
+      }
+      if (normalized.startsWith('SELECT n.bazis_node_id, n.revision_id')) {
+        const row = options.nodeCard?.row;
+        return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+      if (normalized.startsWith('SELECT m.order_id, m.order_detail_id, m.mapping_kind')) {
+        return {
+          rows: options.nodeCard?.orderLinks ?? [],
+          rowCount: options.nodeCard?.orderLinks?.length ?? 0,
+        };
       }
       if (normalized.startsWith('SELECT n.bazis_node_id')) {
         return { rows: options.treeChildren ?? [], rowCount: options.treeChildren?.length ?? 0 };

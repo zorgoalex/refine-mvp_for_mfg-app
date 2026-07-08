@@ -13,6 +13,7 @@ import type {
 } from '../application/bazis.types';
 import type {
   BazisImportResponseDto,
+  BazisNodeCardDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
   BazisTreeNodeDto,
@@ -25,6 +26,7 @@ import {
   BazisUnmappedMaterialsError,
   BazisIdempotencyInProgressError,
   BazisIdempotencyKeyReusedError,
+  BazisNodeNotFoundError,
   BazisNoPanelsSelectedError,
   BazisProjectNotFoundError,
   BazisRevisionNotFoundError,
@@ -113,6 +115,40 @@ interface SelectedPanelRow {
   width_mm: number | string | null;
   main_material_name: string | null;
   raw_json: Record<string, unknown> | null;
+}
+
+interface NodeCardRow {
+  bazis_node_id: number | string;
+  revision_id: number | string;
+  parent_node_id: number | string | null;
+  seq: number | string;
+  node_kind: string;
+  object_type: string | null;
+  name: string | null;
+  detail_code: string | null;
+  position: string | null;
+  designation: string | null;
+  quantity: number | string | null;
+  cumulative_quantity: number | string | null;
+  length_mm: number | string | null;
+  width_mm: number | string | null;
+  height_mm: number | string | null;
+  thickness_mm: number | string | null;
+  price: number | string | null;
+  is_rectangular: boolean | null;
+  texture_orientation: string | null;
+  main_material_name: string | null;
+  raw_json: Record<string, unknown> | null;
+  children_count: number | string;
+  bazis_project_id: number | string;
+  revision_no: number | string;
+  project_id: number | string;
+}
+
+interface NodeOrderLinkRow {
+  order_id: number | string;
+  order_detail_id: number | string | null;
+  mapping_kind: string;
 }
 
 interface MaterialLookupRow {
@@ -531,6 +567,73 @@ export class PgBazisRepository implements BazisRepositoryPort {
       mainMaterialName: row.main_material_name,
       childrenCount: Number(row.children_count),
     }));
+  }
+
+  async getNodeCard(nodeId: number): Promise<BazisNodeCardDto> {
+    const nodeResult = await this.database.query<NodeCardRow>(
+      `
+      SELECT n.bazis_node_id, n.revision_id, n.parent_node_id, n.seq, n.node_kind, n.object_type,
+             n.name, n.detail_code, n.position, n.designation, n.quantity, n.cumulative_quantity,
+             n.length_mm, n.width_mm, n.height_mm, n.thickness_mm, n.price, n.is_rectangular,
+             n.texture_orientation, n.main_material_name, n.raw_json,
+             (SELECT count(*) FROM bazis_nodes c
+              WHERE c.parent_node_id = n.bazis_node_id
+                AND c.revision_id = n.revision_id)::int AS children_count,
+             r.bazis_project_id, r.revision_no, bp.project_id
+      FROM bazis_nodes n
+      JOIN bazis_project_revisions r ON r.bazis_revision_id = n.revision_id
+      JOIN bazis_projects bp ON bp.bazis_project_id = r.bazis_project_id
+      WHERE n.bazis_node_id = $1
+      `,
+      [nodeId],
+    );
+    if (nodeResult.rows.length === 0) {
+      throw new BazisNodeNotFoundError(nodeId);
+    }
+
+    const links = await this.database.query<NodeOrderLinkRow>(
+      `
+      SELECT m.order_id, m.order_detail_id, m.mapping_kind
+      FROM bazis_node_order_detail_map m
+      WHERE m.node_id = $1
+      ORDER BY m.order_id DESC
+      `,
+      [nodeId],
+    );
+
+    const row = nodeResult.rows[0];
+    return {
+      bazisNodeId: Number(row.bazis_node_id),
+      revisionId: Number(row.revision_id),
+      bazisProjectId: Number(row.bazis_project_id),
+      projectId: Number(row.project_id),
+      revisionNo: Number(row.revision_no),
+      parentNodeId: nullableNumber(row.parent_node_id),
+      seq: Number(row.seq),
+      nodeKind: row.node_kind,
+      objectType: row.object_type,
+      name: row.name,
+      detailCode: row.detail_code,
+      position: row.position,
+      designation: row.designation,
+      quantity: nullableNumber(row.quantity),
+      cumulativeQuantity: nullableNumber(row.cumulative_quantity),
+      lengthMm: nullableNumber(row.length_mm),
+      widthMm: nullableNumber(row.width_mm),
+      heightMm: nullableNumber(row.height_mm),
+      thicknessMm: nullableNumber(row.thickness_mm),
+      price: nullableNumber(row.price),
+      isRectangular: row.is_rectangular ?? null,
+      textureOrientation: row.texture_orientation,
+      mainMaterialName: row.main_material_name,
+      childrenCount: Number(row.children_count),
+      rawJson: (row.raw_json ?? {}) as Record<string, unknown>,
+      orderLinks: links.rows.map((link) => ({
+        orderId: Number(link.order_id),
+        orderDetailId: nullableNumber(link.order_detail_id),
+        mappingKind: link.mapping_kind,
+      })),
+    };
   }
 
   async listMaterialMappings(names?: string[]): Promise<MaterialMappingDto[]> {
