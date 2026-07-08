@@ -7,7 +7,7 @@ import { bazisApi } from '../../api/bazisApi';
 import { projectsApi, type ProjectDto } from '../../api/projectsApi';
 import type { BazisImportResponse, BazisProjectCard, BazisProjectListItem, MaterialMapping } from '../../api/types/bazisApi.types';
 import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
-import { MaterialMappingStep, type MaterialMappingValue, type UnmappedMaterialRow } from './MaterialMappingStep';
+import { MaterialMappingStep, materialMappingKey, type MaterialMappingValue, type UnmappedMaterialRow } from './MaterialMappingStep';
 
 const { Dragger } = Upload;
 const { Text } = Typography;
@@ -296,7 +296,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     }
 
     if (currentStep === 'materials') {
-      if (unmappedMaterials.some((item) => mappingValues[item.name] == null || mappingValues[item.name].targetKind == null)) {
+      if (unmappedMaterials.some((item) => mappingValues[materialMappingKey(item)] == null || mappingValues[materialMappingKey(item)].targetKind == null)) {
         message.warning('Для каждого материала выберите соответствие или "Пропустить"');
         return;
       }
@@ -305,7 +305,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
       try {
         await bazisApi.upsertMaterialMappings(
           unmappedMaterials.map((item) => {
-            const mapping = mappingValues[item.name];
+            const mapping = mappingValues[materialMappingKey(item)];
             const sourceKind = normalizeSourceKind(item.kindGuess);
             if (mapping == null || sourceKind == null) {
               throw new Error(`Некорректное сопоставление для ${item.name}`);
@@ -471,8 +471,8 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
           <MaterialMappingStep
             items={unmappedMaterials}
             values={mappingValues}
-            onChange={(name, nextValue) => {
-              setMappingValues((prev) => ({ ...prev, [name]: nextValue }));
+            onChange={(mappingKey, nextValue) => {
+              setMappingValues((prev) => ({ ...prev, [mappingKey]: nextValue }));
             }}
           />
         ) : null}
@@ -563,7 +563,7 @@ function buildMappingValueState(items: MaterialMapping[]): Record<string, Materi
           : null;
 
     return [
-      item.bazisName,
+      materialMappingKey({ name: item.bazisName, kindGuess: item.sourceKind }),
       {
         targetKind: item.targetKind === 'ignore' || item.targetKind === 'sheet' || item.targetKind === 'film' || item.targetKind === 'edge'
           ? item.targetKind

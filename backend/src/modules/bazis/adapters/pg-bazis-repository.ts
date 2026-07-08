@@ -330,6 +330,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
         relatedEntities: [
           { entityType: 'project', entityId: projectId ?? 0 },
           { entityType: 'bazis_project', entityId: bazisProjectId },
+          { entityType: 'bazis_revision', entityId: revisionId },
         ],
         before: {},
         after: {

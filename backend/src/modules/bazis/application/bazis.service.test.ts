@@ -74,6 +74,51 @@ describe('BazisService', () => {
     expect(repository.importRevision).not.toHaveBeenCalled();
   });
 
+  it('writes a best-effort denied audit row when auditDatabase is provided', async () => {
+    const repository = createRepository();
+    const auditQuery = vi
+      .fn()
+      .mockResolvedValue({ rows: [{ audit_id: 'aud-denied-1' }], rowCount: 1 });
+    const service = new BazisService({
+      repository,
+      auditDatabase: { query: auditQuery },
+    });
+
+    await expect(
+      service.importXml({
+        currentUser: viewerUser(),
+        requestId: 'req-denied',
+        projectId: 10,
+        bazisProjectId: null,
+        fileName: 'sample.xml',
+        filePath: await writeFixtureFile(tempDir, 'sample.xml', '<Проект/>'),
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+
+    const auditInsert = auditQuery.mock.calls.find(([text]) =>
+      String(text).replace(/\s+/g, ' ').includes('INSERT INTO audit_log ('),
+    );
+    expect(auditInsert).toBeDefined();
+    const params = auditInsert?.[1] as unknown[];
+    expect(params[0]).toBe('bazis.permission_denied');
+    expect(params[1]).toBe('bazis');
+    expect(params[2]).toBe('import_xml');
+    expect(repository.importRevision).not.toHaveBeenCalled();
+  });
+
+  it('still throws 403 when the denied-audit write itself fails', async () => {
+    const repository = createRepository();
+    const service = new BazisService({
+      repository,
+      auditDatabase: { query: vi.fn().mockRejectedValue(new Error('db down')) },
+    });
+
+    await expect(
+      service.listProjects(managerUser(), {}),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    expect(repository.listProjects).not.toHaveBeenCalled();
+  });
+
   it('rejects read methods without bazis.view', async () => {
     const repository = createRepository();
     const service = new BazisService({ repository });

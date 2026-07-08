@@ -5,6 +5,8 @@ import { pipeline } from 'node:stream/promises';
 import { Transform, Writable } from 'node:stream';
 import { createGzip } from 'node:zlib';
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
+import type { DatabaseClient } from '../../../database/database.types';
 import type { PermissionName } from '../../../permissions/permissions';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PermissionsService } from '../../../permissions/permissions.service';
@@ -28,6 +30,8 @@ import { BazisXmlParseError, parseBazisXml } from './bazis-xml-parser';
 export interface BazisServicePorts {
   repository: BazisRepositoryPort;
   permissions?: PermissionsService;
+  /** Optional client for best-effort denied-audit rows (absent in unit tests without DB). */
+  auditDatabase?: DatabaseClient;
 }
 
 export class BazisService {
@@ -39,7 +43,7 @@ export class BazisService {
   }
 
   async importXml(input: ImportXmlInput): Promise<BazisImportResponseDto> {
-    this.requirePermission(input.currentUser, 'bazis.manage');
+    await this.requirePermission(input.currentUser, 'bazis.manage', 'import_xml', input.requestId);
 
     if (this.importInFlight) {
       throw new BazisImportBusyError();
@@ -88,12 +92,12 @@ export class BazisService {
     currentUser: CurrentUser,
     filter: { projectId?: number },
   ): Promise<BazisProjectListItemDto[]> {
-    this.requirePermission(currentUser, 'bazis.view');
+    await this.requirePermission(currentUser, 'bazis.view', 'list_projects');
     return this.ports.repository.listProjects(filter);
   }
 
   async getProject(currentUser: CurrentUser, id: number): Promise<BazisProjectCardDto> {
-    this.requirePermission(currentUser, 'bazis.view');
+    await this.requirePermission(currentUser, 'bazis.view', 'get_project');
     return this.ports.repository.getProject(id);
   }
 
@@ -102,7 +106,7 @@ export class BazisService {
     revisionId: number,
     parentNodeId: number | null,
   ): Promise<BazisTreeNodeDto[]> {
-    this.requirePermission(currentUser, 'bazis.view');
+    await this.requirePermission(currentUser, 'bazis.view', 'get_tree');
     return this.ports.repository.getTreeChildren(revisionId, parentNodeId);
   }
 
@@ -110,7 +114,7 @@ export class BazisService {
     currentUser: CurrentUser,
     names?: string[],
   ): Promise<MaterialMappingDto[]> {
-    this.requirePermission(currentUser, 'bazis.view');
+    await this.requirePermission(currentUser, 'bazis.view', 'list_material_mappings');
     return this.ports.repository.listMaterialMappings(names);
   }
 
@@ -119,26 +123,53 @@ export class BazisService {
     requestId: string | undefined,
     items: UpsertMaterialMappingDto[],
   ): Promise<MaterialMappingDto[]> {
-    this.requirePermission(currentUser, 'bazis.manage');
+    await this.requirePermission(currentUser, 'bazis.manage', 'upsert_material_mappings', requestId);
     return this.ports.repository.upsertMaterialMappings(currentUser, requestId, items);
   }
 
   async createOrderFromRevision(
     command: CreateOrderFromRevisionCommand,
   ): Promise<CreateOrderFromRevisionResponseDto> {
-    this.requirePermission(command.currentUser, 'bazis.manage');
+    await this.requirePermission(command.currentUser, 'bazis.manage', 'create_order', command.requestId);
     return this.ports.repository.createOrderFromRevision(command);
   }
 
-  private requirePermission(currentUser: CurrentUser, permission: PermissionName): void {
-    if (!this.permissions.canUser(currentUser, permission)) {
-      throw new ApiError(
-        403,
-        'PERMISSION_DENIED',
-        'Недостаточно прав для работы с Базис-импортом',
-        { requiredPermissions: [permission] },
-      );
+  private async requirePermission(
+    currentUser: CurrentUser,
+    permission: PermissionName,
+    action: string,
+    requestId?: string,
+  ): Promise<void> {
+    if (this.permissions.canUser(currentUser, permission)) {
+      return;
     }
+    if (this.ports.auditDatabase) {
+      // Best-effort denied trail: forensics for privileged workflow (Critic R1-3);
+      // audit failure must not mask the 403.
+      try {
+        await auditService.recordDenied(this.ports.auditDatabase, {
+          event: 'bazis.permission_denied',
+          entityType: 'bazis',
+          entityId: action,
+          actorUserId: currentUser.id,
+          actorUsername: currentUser.username,
+          actorRole: currentUser.role,
+          requestId: requestId ?? 'bazis-command',
+          source: 'backend-bazis-command',
+          reason: 'permission_denied',
+          requiredPermissions: [permission],
+          metadata: { action },
+        });
+      } catch {
+        /* best-effort */
+      }
+    }
+    throw new ApiError(
+      403,
+      'PERMISSION_DENIED',
+      'Недостаточно прав для работы с Базис-импортом',
+      { requiredPermissions: [permission] },
+    );
   }
 }
 

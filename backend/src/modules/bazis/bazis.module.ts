@@ -21,6 +21,7 @@ import { BazisRuntimeConfigService } from './http/bazis-runtime-config.service';
           repository: database.isConfigured
             ? new PgBazisRepository(database, orderTransactions)
             : new UnavailableBazisRepository(),
+          auditDatabase: database.isConfigured ? database : undefined,
         }),
       inject: [DatabaseService, OrderTransactionService],
     },

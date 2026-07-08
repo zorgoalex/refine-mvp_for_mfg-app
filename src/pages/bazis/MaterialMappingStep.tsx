@@ -17,10 +17,20 @@ export interface UnmappedMaterialRow {
   usageCount: number;
 }
 
+/**
+ * Ключ строки/state — пара (контекст, имя), как ключ маппинга в БД
+ * (source_kind, lower(bazis_name)): одинаковое имя в разных контекстах
+ * маппится независимо (Critic 2026-07-08 finding 1).
+ */
+export function materialMappingKey(row: Pick<UnmappedMaterialRow, 'name' | 'kindGuess'>): string {
+  return `${row.kindGuess}:${row.name.toLowerCase()}`;
+}
+
 interface MaterialMappingStepProps {
   items: UnmappedMaterialRow[];
+  /** Keyed by materialMappingKey(row) — НЕ по одному имени. */
   values: Record<string, MaterialMappingValue>;
-  onChange: (name: string, nextValue: MaterialMappingValue) => void;
+  onChange: (mappingKey: string, nextValue: MaterialMappingValue) => void;
 }
 
 interface SheetMaterialRecord {
@@ -132,7 +142,7 @@ export const MaterialMappingStep: React.FC<MaterialMappingStepProps> = ({
               : sourceKind === 'edge'
                 ? edgeOptions
                 : [];
-          const currentValue = values[record.name];
+          const currentValue = values[materialMappingKey(record)];
 
           if (sourceKind == null) {
             return <Text type="warning">Неизвестный kindGuess: {record.kindGuess}</Text>;
@@ -151,12 +161,12 @@ export const MaterialMappingStep: React.FC<MaterialMappingStepProps> = ({
               ]}
               onChange={(value) => {
                 if (value === 'ignore') {
-                  onChange(record.name, { targetKind: 'ignore', targetId: null });
+                  onChange(materialMappingKey(record), { targetKind: 'ignore', targetId: null });
                   return;
                 }
 
                 const numericValue = Number(value);
-                onChange(record.name, {
+                onChange(materialMappingKey(record), {
                   targetKind: sourceKind,
                   targetId: Number.isInteger(numericValue) ? numericValue : null,
                 });
@@ -181,7 +191,7 @@ export const MaterialMappingStep: React.FC<MaterialMappingStepProps> = ({
         message="Сопоставьте материалы Базиса со справочниками ERP или явно пропустите ненужные позиции."
       />
       <Table
-        rowKey="name"
+        rowKey={(record) => materialMappingKey(record)}
         pagination={false}
         columns={columns}
         dataSource={items}

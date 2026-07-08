@@ -32,7 +32,17 @@ describe('PgBazisRepository.importRevision', () => {
     expect(ordered.filter((sql) => sql.startsWith('INSERT INTO bazis_nodes'))).toHaveLength(2);
     expect(ordered).toContain('UPDATE bazis_projects SET current_revision_id = $1 WHERE bazis_project_id = $2');
     expect(ordered).toContain('INSERT INTO audit_log ( event, entity_type, entity_id, user_id, username, role_code, role, request_id, source, related_order_id, related_client_id, related_payment_id, related_production_event_id, related_deadline_id, related_user_id, status_field, status_id, status_name, status_code, stage_code, before_json, after_json, diff_json, metadata_json ) VALUES ( $1, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20::jsonb, $21::jsonb, $22::jsonb, $23::jsonb ) RETURNING audit_id');
-    expect(ordered.filter((sql) => sql.startsWith('INSERT INTO audit_log_related_entity'))).toHaveLength(4);
+    const relatedPairs = database.queries
+      .filter((query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log_related_entity'))
+      .map((query) => [query.params?.[1], query.params?.[2]]);
+    // project_created: project + bazis_project; revision_imported: project + bazis_project + bazis_revision
+    expect(relatedPairs).toEqual([
+      ['project', 77],
+      ['bazis_project', 41],
+      ['project', 77],
+      ['bazis_project', 41],
+      ['bazis_revision', 82],
+    ]);
     expect(ordered).toContain('INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key) VALUES ($1,$2,$3,$4::jsonb,$5) ON CONFLICT (idempotency_key) DO NOTHING');
     expect(ordered).toContain("INSERT INTO bazis_import_runs (file_name, xml_sha256, status, revision_id, imported_by, request_id) VALUES ($1,$2,'parsed',$3,$4,$5)");
   });
