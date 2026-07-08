@@ -364,6 +364,8 @@ describe('PgBazisRepository.searchNodes', () => {
     expect(sql).toContain('NOT p.bazis_node_id = ANY(a.visited)');
     expect(sql).toContain('a.depth < 100');
     expect(sql).toContain('p.revision_id = $1');
+    // root-first порядок держится на этом ORDER BY — текстовый пин против регрессии
+    expect(sql).toContain('ORDER BY m.bazis_node_id, a.depth DESC');
     expect(response.totalMatched).toBe(3);
     expect(response.items).toHaveLength(1);
     expect(response.items[0].pathNodeIds).toEqual([100, 200]); // root → parent
