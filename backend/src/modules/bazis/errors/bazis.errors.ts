@@ -32,6 +32,12 @@ export class BazisParseFailedError extends ApiError {
   }
 }
 
+export class BazisImportBusyError extends ApiError {
+  constructor() {
+    super(429, 'BAZIS_IMPORT_BUSY', 'Другой импорт уже выполняется, повторите позже');
+  }
+}
+
 export class BazisNoPanelsSelectedError extends ApiError {
   constructor() {
     super(422, 'BAZIS_NO_PANELS', 'В выбранных узлах нет панелей');

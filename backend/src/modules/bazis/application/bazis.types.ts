@@ -22,6 +22,15 @@ export interface ImportRevisionCommand {
   parsed: ParsedBazisRevision;
 }
 
+export interface ImportXmlInput {
+  currentUser: CurrentUser;
+  requestId?: string;
+  projectId: number | null;
+  bazisProjectId: number | null;
+  fileName: string;
+  filePath: string;
+}
+
 export interface CreateOrderFromRevisionCommand {
   currentUser: CurrentUser;
   requestId?: string;

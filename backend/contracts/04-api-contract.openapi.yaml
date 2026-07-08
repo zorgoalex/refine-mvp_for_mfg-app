@@ -2169,6 +2169,538 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/bazis/imports:
+    post:
+      tags:
+        - Bazis
+      operationId: importBazisXml
+      summary: Import a Bazis XML revision
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                projectId:
+                  type: integer
+                bazisProjectId:
+                  type: integer
+      responses:
+        '201':
+          description: Imported Bazis revision
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - bazisProject
+                  - revision
+                  - unmappedMaterials
+                  - warnings
+                  - requestId
+                properties:
+                  bazisProject:
+                    type: object
+                    required:
+                      - bazisProjectId
+                      - projectId
+                      - name
+                    properties:
+                      bazisProjectId:
+                        type: integer
+                      projectId:
+                        type: integer
+                      name:
+                        type: string
+                  revision:
+                    type: object
+                    required:
+                      - bazisRevisionId
+                      - revisionNo
+                      - xmlSha256
+                      - summary
+                    properties:
+                      bazisRevisionId:
+                        type: integer
+                      revisionNo:
+                        type: integer
+                      xmlSha256:
+                        type: string
+                      summary:
+                        type: object
+                        additionalProperties:
+                          type: integer
+                  unmappedMaterials:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - name
+                        - kindGuess
+                        - usageCount
+                      properties:
+                        name:
+                          type: string
+                        kindGuess:
+                          type: string
+                        usageCount:
+                          type: integer
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+                  requestId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/bazis/projects:
+    get:
+      tags:
+        - Bazis
+      operationId: listBazisProjects
+      summary: List Bazis projects
+      security:
+        - bearerAuth: []
+      x-permission: bazis.view
+      parameters:
+        - in: query
+          name: projectId
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Bazis projects
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                    - bazisProjectId
+                    - projectId
+                    - name
+                    - revisionsCount
+                    - linkedOrderIds
+                  properties:
+                    bazisProjectId:
+                      type: integer
+                    projectId:
+                      type: integer
+                    name:
+                      type: string
+                    revisionsCount:
+                      type: integer
+                    lastRevisionNo:
+                      type: integer
+                      nullable: true
+                    lastImportedAt:
+                      type: string
+                      format: date-time
+                      nullable: true
+                    linkedOrderIds:
+                      type: array
+                      items:
+                        type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/bazis/projects/{id}:
+    get:
+      tags:
+        - Bazis
+      operationId: getBazisProject
+      summary: Get Bazis project card
+      security:
+        - bearerAuth: []
+      x-permission: bazis.view
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Bazis project card
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - bazisProjectId
+                  - projectId
+                  - name
+                  - revisionsCount
+                  - linkedOrderIds
+                  - revisions
+                properties:
+                  bazisProjectId:
+                    type: integer
+                  projectId:
+                    type: integer
+                  name:
+                    type: string
+                  revisionsCount:
+                    type: integer
+                  lastRevisionNo:
+                    type: integer
+                    nullable: true
+                  lastImportedAt:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  linkedOrderIds:
+                    type: array
+                    items:
+                      type: integer
+                  revisions:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - bazisRevisionId
+                        - revisionNo
+                        - xmlSha256
+                        - summary
+                        - importedAt
+                      properties:
+                        bazisRevisionId:
+                          type: integer
+                        revisionNo:
+                          type: integer
+                        fileName:
+                          type: string
+                          nullable: true
+                        fileSize:
+                          type: integer
+                          nullable: true
+                        xmlSha256:
+                          type: string
+                        productName:
+                          type: string
+                          nullable: true
+                        productPrice:
+                          type: number
+                          nullable: true
+                        summary:
+                          type: object
+                          additionalProperties:
+                            type: integer
+                        importedAt:
+                          type: string
+                          format: date-time
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/bazis/revisions/{id}/tree:
+    get:
+      tags:
+        - Bazis
+      operationId: getBazisRevisionTree
+      summary: Get Bazis revision tree level
+      security:
+        - bearerAuth: []
+      x-permission: bazis.view
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: parentNodeId
+          schema:
+            type: integer
+            nullable: true
+      responses:
+        '200':
+          description: Bazis tree nodes
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                    - bazisNodeId
+                    - parentNodeId
+                    - seq
+                    - nodeKind
+                    - childrenCount
+                  properties:
+                    bazisNodeId:
+                      type: integer
+                    parentNodeId:
+                      type: integer
+                      nullable: true
+                    seq:
+                      type: integer
+                    nodeKind:
+                      type: string
+                    objectType:
+                      type: string
+                      nullable: true
+                    name:
+                      type: string
+                      nullable: true
+                    detailCode:
+                      type: string
+                      nullable: true
+                    position:
+                      type: string
+                      nullable: true
+                    quantity:
+                      type: number
+                      nullable: true
+                    cumulativeQuantity:
+                      type: number
+                      nullable: true
+                    lengthMm:
+                      type: number
+                      nullable: true
+                    widthMm:
+                      type: number
+                      nullable: true
+                    thicknessMm:
+                      type: number
+                      nullable: true
+                    mainMaterialName:
+                      type: string
+                      nullable: true
+                    childrenCount:
+                      type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis revision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/bazis/material-mappings:
+    get:
+      tags:
+        - Bazis
+      operationId: listBazisMaterialMappings
+      summary: List Bazis material mappings
+      security:
+        - bearerAuth: []
+      x-permission: bazis.view
+      parameters:
+        - in: query
+          name: names
+          schema:
+            type: string
+          description: Comma-separated Bazis names.
+      responses:
+        '200':
+          description: Bazis material mappings
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                    - bazisMaterialMappingId
+                    - sourceKind
+                    - bazisName
+                    - targetKind
+                  properties:
+                    bazisMaterialMappingId:
+                      type: integer
+                    sourceKind:
+                      type: string
+                    bazisName:
+                      type: string
+                    targetKind:
+                      type: string
+                    sheetMaterialTypeId:
+                      type: integer
+                      nullable: true
+                    filmId:
+                      type: integer
+                      nullable: true
+                    edgeTypeId:
+                      type: integer
+                      nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags:
+        - Bazis
+      operationId: upsertBazisMaterialMappings
+      summary: Upsert Bazis material mappings
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - items
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - sourceKind
+                      - bazisName
+                      - targetKind
+                    properties:
+                      sourceKind:
+                        type: string
+                        enum:
+                          - sheet
+                          - film
+                          - edge
+                      bazisName:
+                        type: string
+                        minLength: 1
+                        maxLength: 255
+                      targetKind:
+                        type: string
+                        enum:
+                          - sheet
+                          - film
+                          - edge
+                          - ignore
+                      sheetMaterialTypeId:
+                        type: integer
+                        nullable: true
+                      filmId:
+                        type: integer
+                        nullable: true
+                      edgeTypeId:
+                        type: integer
+                        nullable: true
+      responses:
+        '200':
+          description: Saved Bazis material mappings
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                    - bazisMaterialMappingId
+                    - sourceKind
+                    - bazisName
+                    - targetKind
+                  properties:
+                    bazisMaterialMappingId:
+                      type: integer
+                    sourceKind:
+                      type: string
+                    bazisName:
+                      type: string
+                    targetKind:
+                      type: string
+                    sheetMaterialTypeId:
+                      type: integer
+                      nullable: true
+                    filmId:
+                      type: integer
+                      nullable: true
+                    edgeTypeId:
+                      type: integer
+                      nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/projects:
     get:
       tags:
