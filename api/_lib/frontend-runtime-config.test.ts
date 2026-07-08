@@ -21,6 +21,7 @@ describe('frontend runtime config delivery', () => {
         backendReferences: false,
         backendCut: false,
         labels: false,
+        projects: false,
         enableLegacyHasura: true,
         workosAuth: false,
       },
@@ -65,6 +66,7 @@ describe('frontend runtime config delivery', () => {
         backendReferences: false,
         backendCut: false,
         labels: false,
+        projects: false,
         enableLegacyHasura: false,
         workosAuth: false,
       },
@@ -86,6 +88,11 @@ describe('frontend runtime config delivery', () => {
   it('maps labels runtime flag default-off and true', () => {
     expect(buildFrontendRuntimeConfig({}).features.labels).toBe(false);
     expect(buildFrontendRuntimeConfig({ RUNTIME_CONFIG_LABELS: 'true' }).features.labels).toBe(true);
+  });
+
+  it('maps projects runtime flag default-off and true', () => {
+    expect(buildFrontendRuntimeConfig({}).features.projects).toBe(false);
+    expect(buildFrontendRuntimeConfig({ RUNTIME_CONFIG_PROJECTS: 'true' }).features.projects).toBe(true);
   });
 
   it('fails closed for backend client phones until production actions are enabled', () => {
