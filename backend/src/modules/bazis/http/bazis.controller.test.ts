@@ -10,6 +10,7 @@ import {
   parseBazisImportFields,
   parseMaterialMappingsQuery,
   parseRevisionTreeQuery,
+  parseUpsertMaterialMappingsBody,
 } from './bazis.controller';
 import type { BazisRuntimeConfigService } from './bazis-runtime-config.service';
 
@@ -116,6 +117,30 @@ describe('BazisController', () => {
     expect(parseMaterialMappingsQuery({ names: 'oak%20white,edge-1' })).toEqual({
       names: ['oak white', 'edge-1'],
     });
+  });
+
+  it('rejects cross-kind material mappings (targetKind must match sourceKind or be ignore)', () => {
+    expect(() =>
+      parseUpsertMaterialMappingsBody({
+        items: [{ sourceKind: 'sheet', bazisName: 'ЛДСП Белый', targetKind: 'film', filmId: 3 }],
+      }),
+    ).toThrowError(ApiError);
+
+    expect(() =>
+      parseUpsertMaterialMappingsBody({
+        items: [{ sourceKind: 'edge', bazisName: 'Кромка 2мм', targetKind: 'sheet', sheetMaterialTypeId: 1 }],
+      }),
+    ).toThrowError(ApiError);
+
+    // Валидные формы проходят: совпадающий контекст и ignore.
+    expect(
+      parseUpsertMaterialMappingsBody({
+        items: [
+          { sourceKind: 'film', bazisName: 'Плёнка ПВХ', targetKind: 'film', filmId: 3 },
+          { sourceKind: 'sheet', bazisName: 'Стекло', targetKind: 'ignore' },
+        ],
+      }).items,
+    ).toHaveLength(2);
   });
 
   it('coerces create-order body and delegates to the service', async () => {

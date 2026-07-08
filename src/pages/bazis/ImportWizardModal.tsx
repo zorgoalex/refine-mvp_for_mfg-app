@@ -344,6 +344,13 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     }
 
     if (currentStep === 'materials') {
+      // Возврат к привязке = новая попытка импорта: импорт-эффект гейтится
+      // summary != null, без сброса шаг import застревает на прошлом состоянии
+      // (Critic R2 finding 2).
+      setSummary(null);
+      setUnmappedMaterials([]);
+      setMappingValues({});
+      setImportErrorText(null);
       setCurrentStep('binding');
       return;
     }

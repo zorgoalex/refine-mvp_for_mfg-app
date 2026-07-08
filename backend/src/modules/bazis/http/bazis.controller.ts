@@ -51,6 +51,18 @@ const materialMappingItemSchema = z
     edgeTypeId: optionalNumericIdSchema.nullish(),
   })
   .superRefine((item, ctx) => {
+    // Кросс-контекстный маппинг (sheet→film и т.п.) семантически невозможен:
+    // buildOrderCreateDto читает sheet-маппинги только для sheet-контекста и
+    // film — для film; такая строка молча no-op'ится (Critic R2 finding 1).
+    if (item.targetKind !== 'ignore' && item.targetKind !== item.sourceKind) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['targetKind'],
+        message: `targetKind must be '${item.sourceKind}' or 'ignore' for sourceKind=${item.sourceKind}`,
+      });
+      return;
+    }
+
     const present = {
       sheetMaterialTypeId: item.sheetMaterialTypeId ?? null,
       filmId: item.filmId ?? null,
