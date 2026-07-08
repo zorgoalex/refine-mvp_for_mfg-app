@@ -61,6 +61,93 @@ export interface BazisTreeNode {
   childrenCount: number;
 }
 
+export interface BazisNodeOrderLink {
+  orderId: number;
+  orderDetailId: number | null;
+  mappingKind: string;
+}
+
+export interface BazisNodeCard {
+  bazisNodeId: number;
+  revisionId: number;
+  bazisProjectId: number;
+  projectId: number;
+  revisionNo: number;
+  parentNodeId: number | null;
+  seq: number;
+  nodeKind: string;
+  objectType: string | null;
+  name: string | null;
+  detailCode: string | null;
+  position: string | null;
+  designation: string | null;
+  quantity: number | null;
+  cumulativeQuantity: number | null;
+  lengthMm: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  thicknessMm: number | null;
+  price: number | null;
+  isRectangular: boolean | null;
+  textureOrientation: string | null;
+  mainMaterialName: string | null;
+  childrenCount: number;
+  rawJson: Record<string, unknown>;
+  orderLinks: BazisNodeOrderLink[];
+}
+
+export interface BazisNodeSearchItem {
+  bazisNodeId: number;
+  nodeKind: string;
+  objectType: string | null;
+  name: string | null;
+  position: string | null;
+  designation: string | null;
+  mainMaterialName: string | null;
+  pathNodeIds: number[];
+  pathTitles: Array<string | null>;
+}
+
+export interface BazisNodeSearchResponse {
+  items: BazisNodeSearchItem[];
+  totalMatched: number;
+}
+
+export interface BazisPanelsMaterialSummary {
+  materialName: string | null;
+  panelCount: number;
+  totalQuantity: number;
+  totalAreaM2: number;
+  mappingTargetKind: string | null;
+  sheetMaterialTypeId: number | null;
+}
+
+export interface BazisHardwareSummary {
+  name: string | null;
+  totalQuantity: number;
+}
+
+export interface BazisRawMaterialUsage {
+  name: string;
+  usageCount: number;
+}
+
+export interface BazisRevisionMaterialsSummary {
+  summary: Record<string, number>;
+  panelsByMaterial: BazisPanelsMaterialSummary[];
+  hardwareByName: BazisHardwareSummary[];
+  edgesByName: BazisRawMaterialUsage[];
+  filmsByName: BazisRawMaterialUsage[];
+}
+
+export interface BazisRevisionOrder {
+  orderId: number;
+  orderName: string | null;
+  createdAt: string;
+  nodesMapped: number;
+  detailsCreated: number;
+}
+
 export interface MaterialMapping {
   bazisMaterialMappingId: number;
   sourceKind: string;
