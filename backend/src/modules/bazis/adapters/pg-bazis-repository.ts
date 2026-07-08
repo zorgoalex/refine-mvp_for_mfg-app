@@ -22,6 +22,7 @@ import type {
 } from '../dto/bazis.dto';
 import {
   BazisIdempotencyFailedError,
+  BazisUnmappedMaterialsError,
   BazisIdempotencyInProgressError,
   BazisIdempotencyKeyReusedError,
   BazisNoPanelsSelectedError,
@@ -658,6 +659,11 @@ export class PgBazisRepository implements BazisRepositoryPort {
       }
 
       const mappings = await this.loadMaterialMappingsForPanels(panels);
+      const unmappedSheetNames = collectUnmappedSheetNames(panels, mappings);
+      if (unmappedSheetNames.length > 0) {
+        await this.failCreateOrderIdempotency(command);
+        throw new BazisUnmappedMaterialsError(unmappedSheetNames);
+      }
       const dto = buildOrderCreateDto(command, revision, panels, mappings);
       let response: CreateOrderFromRevisionResponseDto | null = null;
 
@@ -988,6 +994,29 @@ function isForeignKeyViolation(error: unknown): boolean {
 
 function clientKeyForNode(bazisNodeId: number): string {
   return `bazis-node-${bazisNodeId}`;
+}
+
+/**
+ * Variant B: sheet_material_type_id обязателен у каждой детали. Панель без
+ * действующего sheet-маппинга (нет строки, target=ignore, нет имени материала)
+ * не может стать деталью заказа — собираем имена для 422 до create.
+ */
+function collectUnmappedSheetNames(
+  panels: ReadonlyArray<{ mainMaterialName: string | null }>,
+  mappings: Map<string, MaterialLookupRow>,
+): string[] {
+  const names = new Set<string>();
+  for (const panel of panels) {
+    if (!panel.mainMaterialName) {
+      names.add('(панель без материала)');
+      continue;
+    }
+    const mapping = mappings.get(`sheet:${panel.mainMaterialName.toLowerCase()}`);
+    if (mapping?.target_kind !== 'sheet' || mapping.sheet_material_type_id == null) {
+      names.add(panel.mainMaterialName);
+    }
+  }
+  return [...names];
 }
 
 function buildOrderCreateDto(

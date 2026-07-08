@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import type { OrderDto } from '../../orders/dto/order.dto';
 import type { OrderTransactionService } from '../../orders/application/order-transaction.service';
@@ -294,6 +294,14 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
             film_id: 601,
             edge_type_id: null,
           },
+          {
+            source_kind: 'sheet',
+            name: 'unknown sheet',
+            target_kind: 'sheet',
+            sheet_material_type_id: 502,
+            film_id: null,
+            edge_type_id: null,
+          },
         ],
       },
     });
@@ -326,7 +334,7 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
         expect(details[1]).toMatchObject({
           clientKey: 'bazis-node-102',
           basisData: '8/S-02/Полка',
-          sheetMaterialTypeId: null,
+          sheetMaterialTypeId: 502,
           filmId: null,
           millingTypeId: 1,
           edgeTypeId: 1,
@@ -511,7 +519,16 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
             raw_json: {},
           },
         ],
-        mappingRows: [],
+        mappingRows: [
+          {
+            source_kind: 'sheet',
+            name: 'laminate white',
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+            film_id: null,
+            edge_type_id: null,
+          },
+        ],
       },
     });
     const orderTransactions: Pick<OrderTransactionService, 'create'> = {
@@ -531,6 +548,46 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
       normalizeSql(query.text).startsWith('INSERT INTO bazis_node_order_detail_map'),
     );
     expect(nodeMapInsert?.params).toEqual([101, 7001, 9001, 'created']);
+    expect(normalizedSql(database.queries)).toContain("UPDATE command_idempotency_keys SET status = 'failed'");
+  });
+
+  it('rejects panels without an effective sheet mapping before calling create (Variant B: sheet id required)', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+        },
+        panelRows: [
+          {
+            bazis_node_id: 101,
+            object_type: 'Панель',
+            name: 'Фасад',
+            position: '7',
+            designation: 'D-01',
+            cumulative_quantity: 2,
+            length_mm: 1200,
+            width_mm: 450,
+            main_material_name: 'Неизвестный лист',
+            raw_json: {},
+          },
+        ],
+        mappingRows: [],
+      },
+    });
+    const create = vi.fn();
+    const repository = new PgBazisRepository(database.service, { create });
+
+    await expect(repository.createOrderFromRevision(createOrderCommand())).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'BAZIS_UNMAPPED_MATERIALS',
+      details: { unmappedMaterials: ['Неизвестный лист'] },
+    });
+
+    expect(create).not.toHaveBeenCalled();
     expect(normalizedSql(database.queries)).toContain("UPDATE command_idempotency_keys SET status = 'failed'");
   });
 });

@@ -44,6 +44,20 @@ export class BazisNoPanelsSelectedError extends ApiError {
   }
 }
 
+export class BazisUnmappedMaterialsError extends ApiError {
+  constructor(names: string[]) {
+    // Variant B: у каждой детали заказа sheet_material_type_id ОБЯЗАТЕЛЕН
+    // (order-validation.ts requirePositiveInteger) — панель без sheet-маппинга
+    // не может стать деталью; отбиваем до create понятным списком.
+    super(
+      422,
+      'BAZIS_UNMAPPED_MATERIALS',
+      `Сначала сопоставьте материалы листов: ${names.join(', ')}`,
+      { unmappedMaterials: names },
+    );
+  }
+}
+
 export class BazisReferenceNotFoundError extends ApiError {
   constructor(what: string) {
     super(404, 'BAZIS_REFERENCE_NOT_FOUND', `Связанная запись не найдена: ${what}`);
