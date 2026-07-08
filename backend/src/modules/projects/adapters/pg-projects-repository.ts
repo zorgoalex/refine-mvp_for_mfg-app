@@ -248,6 +248,38 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         return idempotency.completedResponse;
       }
 
+      // Global lock order across move/merge: project rows (ascending) first,
+      // order rows after. Read the order's current project without a lock,
+      // lock the projects, then lock the order and re-verify its project —
+      // taking the order lock first would invert merge's order and deadlock.
+      const preReadResult = await tx.query<{ project_id: number | string }>(
+        `
+        SELECT project_id
+        FROM orders
+        WHERE order_id = $1 AND delete_flag = false
+        `,
+        [command.orderId],
+      );
+      const preRead = preReadResult.rows[0];
+      if (!preRead) {
+        throw new ApiError(404, 'ORDER_NOT_FOUND', `Заказ ${command.orderId} не найден`);
+      }
+      const fromProjectId = Number(preRead.project_id);
+
+      if (!command.createNew && command.targetProjectId === fromProjectId) {
+        throw new ApiError(422, 'PROJECT_SAME', 'Заказ уже в этом проекте');
+      }
+
+      // The source lock also serialises the "last order leaves -> archive"
+      // decision against concurrent moves.
+      const projectIdsToLock = command.createNew
+        ? [fromProjectId]
+        : [...new Set([fromProjectId, command.targetProjectId!])].sort((left, right) => left - right);
+      const lockedProjects = new Map<number, MoveTargetProjectRow | undefined>();
+      for (const projectId of projectIdsToLock) {
+        lockedProjects.set(projectId, await lockProject(tx, projectId));
+      }
+
       const orderResult = await tx.query<LockedOrderRow>(
         `
         SELECT o.order_id, o.order_name, o.client_id, o.project_id, o.created_by, o.manager_id
@@ -261,25 +293,15 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
       if (!order) {
         throw new ApiError(404, 'ORDER_NOT_FOUND', `Заказ ${command.orderId} не найден`);
       }
+      if (Number(order.project_id) !== fromProjectId) {
+        // A concurrent move/merge re-parented the order between our unlocked
+        // pre-read and the lock — the project locks we hold are the wrong
+        // ones. Client retries with a fresh read.
+        throw new ApiError(409, 'ORDER_PROJECT_CONFLICT', 'Заказ перемещён параллельной операцией, повторите');
+      }
       assertOrdersUpdateScope(command.currentUser, [order]);
 
-      const fromProjectId = Number(order.project_id);
       const clientId = Number(order.client_id);
-
-      if (!command.createNew && command.targetProjectId === fromProjectId) {
-        throw new ApiError(422, 'PROJECT_SAME', 'Заказ уже в этом проекте');
-      }
-
-      // Lock source (and target) project rows in ascending id order — mirrors
-      // merge's anti-deadlock convention. The source lock serialises the
-      // "last order leaves -> archive" decision against concurrent moves.
-      const projectIdsToLock = command.createNew
-        ? [fromProjectId]
-        : [...new Set([fromProjectId, command.targetProjectId!])].sort((left, right) => left - right);
-      const lockedProjects = new Map<number, MoveTargetProjectRow | undefined>();
-      for (const projectId of projectIdsToLock) {
-        lockedProjects.set(projectId, await lockProject(tx, projectId));
-      }
 
       let target: { id: number; code: string };
       if (command.createNew) {

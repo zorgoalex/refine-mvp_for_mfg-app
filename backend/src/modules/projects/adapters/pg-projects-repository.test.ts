@@ -408,6 +408,52 @@ describe('PgProjectsRepository.moveOrder', () => {
 
     // Source project 100 must be locked, and lock order must be ascending ids.
     expect(lockQueryIds(database.queries)).toEqual([100, 200]);
+
+    // Global anti-deadlock order shared with merge: ALL project locks must be
+    // taken before the order row lock.
+    const normalized = database.queries.map((query) => normalizeSql(query.text));
+    const lastProjectLockIdx = normalized.reduce(
+      (last, sql, idx) =>
+        sql.startsWith('SELECT project_id, client_id, delete_flag, code FROM projects WHERE project_id = $1 FOR UPDATE') ? idx : last,
+      -1,
+    );
+    const orderLockIdx = normalized.findIndex((sql) =>
+      sql.startsWith('SELECT o.order_id, o.order_name, o.client_id, o.project_id, o.created_by, o.manager_id FROM orders o'),
+    );
+    expect(lastProjectLockIdx).toBeGreaterThanOrEqual(0);
+    expect(orderLockIdx).toBeGreaterThan(lastProjectLockIdx);
+  });
+
+  it('409 when the order was re-parented between the unlocked pre-read and the row lock', async () => {
+    const database = createDatabase({
+      preReadProjectId: 150,
+      lockedOrderRow: {
+        order_id: 10,
+        order_name: '1258',
+        client_id: 2,
+        project_id: 100,
+        created_by: '7',
+        manager_id: null,
+      },
+      targetProjectRow: {
+        project_id: 200,
+        client_id: 2,
+        delete_flag: false,
+        code: 'ФК26',
+      },
+    });
+
+    await expect(
+      new PgProjectsRepository(database.service).moveOrder({
+        currentUser: currentUser(),
+        orderId: 10,
+        targetProjectId: 200,
+        idempotencyKey: 'move-order-key-conflict',
+        requestId: 'req-move-conflict',
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'ORDER_PROJECT_CONFLICT' });
+
+    expect(normalizedSql(database.queries)).not.toContain('UPDATE orders SET project_id');
   });
 });
 
@@ -647,6 +693,7 @@ function createDatabase(
     updatedRow?: Record<string, unknown>;
     throwOnUpdate?: { code: string };
     lockedOrderRow?: Record<string, unknown> | null;
+    preReadProjectId?: number;
     targetProjectRow?: Record<string, unknown> | null;
     sourceOrderRows?: Array<Record<string, unknown>>;
     sourceOrderCount?: number;
@@ -725,6 +772,14 @@ function createDatabase(
           row.responseJson = JSON.parse(String(params[1]));
         }
         return { rows: [], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('SELECT project_id FROM orders WHERE order_id = $1 AND delete_flag = false')) {
+        if (options.lockedOrderRow === null) {
+          return { rows: [], rowCount: 0 };
+        }
+        const projectId = options.preReadProjectId ?? (options.lockedOrderRow ?? { project_id: 100 }).project_id;
+        return { rows: [{ project_id: projectId }], rowCount: 1 };
       }
 
       if (
