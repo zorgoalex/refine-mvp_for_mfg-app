@@ -186,6 +186,12 @@ export const apiRoutes = {
     eventTypes: backendApiPath('/notification-event-types'),
   },
   groups: groupsRoutes,
+  projects: {
+    list: backendApiPath('/projects'),
+    byId: (id: number | string) => backendApiPath(`/projects/${id}`),
+    merge: (id: number | string) => backendApiPath(`/projects/${id}/merge`),
+    moveOrder: (orderId: number | string) => backendApiPath(`/orders/${orderId}/project`),
+  },
   org: {
     directions: backendApiPath('/org/directions'),
     directionById: (directionId: number) => backendApiPath(`/org/directions/${directionId}`),

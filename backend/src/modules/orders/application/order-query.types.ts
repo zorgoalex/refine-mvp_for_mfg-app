@@ -9,6 +9,7 @@ export const ORDER_LIST_SORT_FIELDS = [
   'plannedCompletionDate',
   'completionDate',
   'issueDate',
+  'projectCode',
   'clientName',
   'orderStatusName',
   'paymentStatusName',
@@ -30,6 +31,7 @@ export interface OrderListQuery {
   sortOrder: SortOrder;
   search?: string;
   clientId?: number;
+  projectId?: number;
   orderStatusId?: number;
   paymentStatusId?: number;
   productionStatusId?: number;

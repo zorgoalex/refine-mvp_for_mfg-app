@@ -328,6 +328,9 @@ probe_file() {
     053_*) probe_all "$(q_tbl label_ocr_templates)" "$(q_idx label_ocr_templates_name_active_uniq)" ;;
     054_*) probe_all "$(q_tbl group_groups)" ;;
     055_*) probe_all "$(q_col user_identities auth_method)" ;;
+    056_*)
+      probe_applied_when "$(psql_scalar "SELECT 1 FROM information_schema.columns
+        WHERE table_name='orders' AND column_name='project_id'")" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

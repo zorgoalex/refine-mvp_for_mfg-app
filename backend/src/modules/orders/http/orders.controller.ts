@@ -72,6 +72,7 @@ export const saveOrderHeaderSwaggerSchema = {
   required: ['orderName', 'clientId', 'orderDate', 'orderStatusId'],
   properties: {
     orderId: { type: 'integer' },
+    projectId: nullableIntegerSwaggerSchema,
     orderName: { type: 'string' },
     clientId: { type: 'integer' },
     orderDate: dateOnlySwaggerSchema,
@@ -561,10 +562,13 @@ const orderResponseSwaggerSchema = {
 
 const orderListItemSwaggerSchema = {
   type: 'object',
-  required: ['orderId', 'orderName', 'clientId', 'clientName', 'orderDate', 'plannedCompletionDate', 'completionDate', 'issueDate', 'paymentDate', 'orderStatusId', 'orderStatusName', 'paymentStatusId', 'paymentStatusName', 'productionStatusId', 'productionStatusName', 'priority', 'totalAmount', 'discount', 'surcharge', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea', 'managerId', 'notes', 'materialIds', 'materialNames', 'millingTypeId', 'millingTypeName', 'dowelingOrderId', 'dowelingOrderName', 'designEngineerId', 'passedProductionStatusCodes', 'primaryGroup', 'groups', 'createdBy', 'editedBy', 'updatedAt', 'version'],
+  required: ['orderId', 'orderName', 'projectId', 'projectCode', 'fullNumber', 'clientId', 'clientName', 'orderDate', 'plannedCompletionDate', 'completionDate', 'issueDate', 'paymentDate', 'orderStatusId', 'orderStatusName', 'paymentStatusId', 'paymentStatusName', 'productionStatusId', 'productionStatusName', 'priority', 'totalAmount', 'discount', 'surcharge', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea', 'managerId', 'notes', 'materialIds', 'materialNames', 'millingTypeId', 'millingTypeName', 'dowelingOrderId', 'dowelingOrderName', 'designEngineerId', 'passedProductionStatusCodes', 'primaryGroup', 'groups', 'createdBy', 'editedBy', 'updatedAt', 'version'],
   properties: {
     orderId: { type: 'integer' },
     orderName: { type: 'string' },
+    projectId: { type: 'integer' },
+    projectCode: { type: 'string' },
+    fullNumber: { type: 'string' },
     clientId: { type: 'integer' },
     clientName: nullableStringSwaggerSchema,
     orderDate: dateOnlySwaggerSchema,
@@ -766,6 +770,7 @@ export class OrdersController {
   @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'], description: 'Sort direction' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search text' })
   @ApiQuery({ name: 'clientId', required: false, type: Number, description: 'Client ID filter' })
+  @ApiQuery({ name: 'projectId', required: false, type: Number, description: 'Project ID filter' })
   @ApiQuery({ name: 'orderStatusId', required: false, type: Number, description: 'Order status ID filter' })
   @ApiQuery({ name: 'paymentStatusId', required: false, type: Number, description: 'Payment status ID filter' })
   @ApiQuery({ name: 'productionStatusId', required: false, type: Number, description: 'Production status ID filter' })
@@ -995,6 +1000,7 @@ export function parseOrderListQuery(
     sortOrder: parseSortOrder(query.sortOrder),
     search: parseSearch(query.search),
     clientId: parseOptionalPositiveInteger(query.clientId, 'clientId'),
+    projectId: parseOptionalPositiveInteger(query.projectId, 'projectId'),
     orderStatusId: parseOptionalPositiveInteger(query.orderStatusId, 'orderStatusId'),
     paymentStatusId: parseOptionalPositiveInteger(query.paymentStatusId, 'paymentStatusId'),
     productionStatusId: parseOptionalPositiveInteger(

@@ -11,6 +11,7 @@ export interface SaveOrderDto {
   requirements: SaveOrderRequirementDto[];
   dowelingLinks: SaveOrderDowelingLinkDto[];
   deleted: DeletedOrderChildrenDto;
+  idempotencyKey?: string;
   version?: number;
 }
 
@@ -45,6 +46,7 @@ export type OrderSortBy =
   | 'orderStatusName'
   | 'paymentStatusName'
   | 'productionStatusName'
+  | 'projectCode'
   | 'finalAmount'
   | 'paidAmount'
   | 'debtAmount'
@@ -59,6 +61,7 @@ export interface OrderListQuery {
   sortOrder?: SortOrder;
   search?: string;
   clientId?: number;
+  projectId?: number;
   orderStatusId?: number;
   paymentStatusId?: number;
   productionStatusId?: number;
@@ -190,6 +193,7 @@ export interface OrderFormDataResponse {
 export interface SaveOrderHeaderDto {
   orderName: string;
   clientId: number;
+  projectId?: number | null;
   orderDate: DateOnlyString;
   priority: number;
 
@@ -355,6 +359,8 @@ export interface OrderHeaderDto {
   orderName: string;
   clientId: number;
   clientName?: string | null;
+  projectId?: number | null;
+  projectCode?: string | null;
   orderDate: DateOnlyString;
   managerId?: number | null;
   priority?: number | null;
@@ -510,6 +516,9 @@ export interface OrderListItemDto {
   orderName: string;
   clientId: number;
   clientName?: string | null;
+  projectId: number;
+  projectCode: string;
+  fullNumber: string;
   orderDate: DateOnlyString;
   plannedCompletionDate?: DateOnlyString | null;
   completionDate?: DateOnlyString | null;

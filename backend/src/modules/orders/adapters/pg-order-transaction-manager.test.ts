@@ -3,6 +3,11 @@ import type { DatabaseService } from '../../../database/database.service';
 import { PgOrderTransactionManager } from './pg-order-transaction-manager';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
+import {
+  ProjectArchivedError,
+  ProjectClientMismatchError,
+  ProjectNotFoundError,
+} from '../../projects/errors/projects.errors';
 import type {
   CalculatedOrderDetailDto,
   NormalizedSaveOrderDowelingLinkDto,
@@ -11,6 +16,7 @@ import type {
   NormalizedSaveOrderRequirementDto,
   NormalizedSaveOrderWorkshopDto,
   OrderTotalsDto,
+  SaveOrderDto,
 } from '../dto/save-order.dto';
 
 describe('PgOrderTransactionManager', () => {
@@ -30,6 +36,7 @@ describe('PgOrderTransactionManager', () => {
       const orderId = await uow.createOrderHeader({
         header: header(),
         totals: totals(),
+        projectId: 501,
         currentUser: currentUser(),
       });
       await uow.upsertDetails(orderId, [detail()]);
@@ -54,6 +61,7 @@ describe('PgOrderTransactionManager', () => {
     expect(sql).toContain('SELECT set_session_user($1)');
     expect(sql).toContain('SELECT order_id, version, created_by, manager_id FROM orders');
     expect(sql).toContain('INSERT INTO orders');
+    expect(sql).toContain('project_id');
     expect(sql).toContain('INSERT INTO order_details');
     expect(sql).toContain('INSERT INTO payments');
     expect(sql).toContain('DELETE FROM order_details');
@@ -270,6 +278,7 @@ describe('PgOrderTransactionManager', () => {
       uow.createOrderHeader({
         header: headerWithFlag,
         totals: totals(),
+        projectId: 501,
         currentUser: currentUser(),
       }),
     );
@@ -280,8 +289,131 @@ describe('PgOrderTransactionManager', () => {
 
     expect(insertQuery).toBeDefined();
     expect(normalizeSql(insertQuery!.text)).toContain('production_status_from_details_enabled');
+    expect(normalizeSql(insertQuery!.text)).toContain('project_id');
     // Flag is at $9 in the INSERT, bind index 8
     expect(insertQuery!.params[8]).toBe(true);
+  });
+
+  it('auto-creates a project root when create-order omits projectId', async () => {
+    const database = createDatabase();
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await manager.runInTransaction(async (uow) => {
+      await expect(
+        uow.resolveProjectForCreate({
+          projectId: null,
+          clientId: 5,
+          orderName: 'Тестовый заказ',
+          currentUser: currentUser(),
+          requestId: 'req-project-auto-1',
+        }),
+      ).resolves.toEqual({
+        projectId: 501,
+        created: true,
+        code: 'МП-501',
+      });
+    });
+
+    const sql = normalizedSql(database.queries);
+    const projectInsert = database.queries.find((query) =>
+      normalizeSql(query.text).includes('INSERT INTO projects'),
+    );
+    expect(projectInsert).toBeDefined();
+    expect(projectInsert?.params[0]).toBe('Тестовый заказ');
+    expect(sql).toContain('INSERT INTO projects');
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).toContain('INSERT INTO outbox_events');
+    expect(sql).toContain('ON CONFLICT (idempotency_key) DO NOTHING');
+    const outboxQuery = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+    );
+    expect(outboxQuery?.params[0]).toBe('project.created');
+  });
+
+  it('validates an explicit project on create-order and surfaces not found/archived/client mismatch', async () => {
+    const managerNotFound = new PgOrderTransactionManager(createDatabase({ projectRow: null }).service);
+    await expect(
+      managerNotFound.runInTransaction((uow) =>
+        uow.resolveProjectForCreate({
+          projectId: 77,
+          clientId: 5,
+          orderName: 'Order 77',
+          currentUser: currentUser(),
+          requestId: 'req-project-77',
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ProjectNotFoundError);
+
+    const managerArchived = new PgOrderTransactionManager(
+      createDatabase({
+        projectRow: { project_id: 78, client_id: 5, delete_flag: true, code: 'МП-78' },
+      }).service,
+    );
+    await expect(
+      managerArchived.runInTransaction((uow) =>
+        uow.resolveProjectForCreate({
+          projectId: 78,
+          clientId: 5,
+          orderName: 'Order 78',
+          currentUser: currentUser(),
+          requestId: 'req-project-78',
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ProjectArchivedError);
+
+    const managerMismatch = new PgOrderTransactionManager(
+      createDatabase({
+        projectRow: { project_id: 79, client_id: 9, delete_flag: false, code: 'МП-79' },
+      }).service,
+    );
+    await expect(
+      managerMismatch.runInTransaction((uow) =>
+        uow.resolveProjectForCreate({
+          projectId: 79,
+          clientId: 5,
+          orderName: 'Order 79',
+          currentUser: currentUser(),
+          requestId: 'req-project-79',
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ProjectClientMismatchError);
+  });
+
+  it('countOrdersInProject counts soft-deleted orders too (retarget guard vs FK cascade)', async () => {
+    const database = createDatabase({ childCount: 3 });
+    const manager = new PgOrderTransactionManager(database.service);
+    const count = await manager.runInTransaction((uow) => uow.countOrdersInProject(100));
+    expect(count).toBe(3);
+    const countQuery = database.queries.find((query) =>
+      query.text.includes('COUNT(*)::int AS count'),
+    );
+    expect(countQuery).toBeDefined();
+    expect(countQuery?.text).not.toMatch(/delete_flag/);
+  });
+
+  it('replays cached create-idempotency responses without inserting orders or projects', async () => {
+    const cachedOrder = createStoredOrderResponse();
+    const database = createDatabase({
+      idempotencyConflict: true,
+      existingIdempotencyResponse: cachedOrder,
+    });
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await manager.runInTransaction(async (uow) => {
+      await expect(
+        uow.reconcileOrderCreateIdempotency({
+          idempotencyKey: 'create-key-1',
+          currentUser: currentUser(),
+          dto: createSaveOrderDto(),
+        }),
+      ).resolves.toEqual({ completedResponse: cachedOrder });
+    });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('INSERT INTO command_idempotency_keys');
+    expect(sql).toContain('SELECT idempotency_key, request_hash');
+    expect(sql).not.toContain('INSERT INTO orders');
+    expect(sql).not.toContain('INSERT INTO projects');
   });
 
   it('soft-deletes orders with idempotency, queryable audit, outbox and completion', async () => {
@@ -643,7 +775,17 @@ function createDatabase(
   options: {
     childCount?: number;
     dowelingEngineerRowCount?: number;
+    existingIdempotencyResponse?: OrderDto;
+    idempotencyConflict?: boolean;
     idempotencyHashMismatch?: boolean;
+    projectRow?:
+      | {
+          project_id: number;
+          client_id: number;
+          delete_flag: boolean;
+          code: string;
+        }
+      | null;
     restoredRowCount?: number;
   } = {},
 ) {
@@ -656,7 +798,7 @@ function createDatabase(
 
       if (normalized.startsWith('INSERT INTO command_idempotency_keys')) {
         lastRequestHash = params[3];
-        return options.idempotencyHashMismatch
+        return options.idempotencyHashMismatch || options.idempotencyConflict
           ? { rows: [], rowCount: 0 }
           : {
               rows: [
@@ -677,11 +819,23 @@ function createDatabase(
             {
               idempotency_key: params[0],
               request_hash: options.idempotencyHashMismatch ? 'different-hash' : lastRequestHash,
-              response_json: null,
+              response_json: options.existingIdempotencyResponse ?? null,
               status: 'completed',
             },
           ],
           rowCount: 1,
+        };
+      }
+
+      if (normalized.startsWith('SELECT project_id, client_id, delete_flag, code FROM projects')) {
+        return {
+          rows: options.projectRow === null ? [] : [options.projectRow ?? {
+            project_id: 501,
+            client_id: 5,
+            delete_flag: false,
+            code: 'МП-501',
+          }],
+          rowCount: options.projectRow === null ? 0 : 1,
         };
       }
 
@@ -742,6 +896,10 @@ function createDatabase(
 
       if (text.includes('COUNT(*)::int AS count')) {
         return { rows: [{ count: options.childCount ?? 1 }], rowCount: 1 };
+      }
+
+      if (normalized.includes('INSERT INTO projects')) {
+        return { rows: [{ project_id: 501, code: 'МП-501' }], rowCount: 1 };
       }
 
       if (text.includes('RETURNING order_id')) {
@@ -829,6 +987,69 @@ function totals(): OrderTotalsDto {
     debtAmount: 70,
     paymentDate: '2026-05-01',
     paymentStatusId: 2,
+  };
+}
+
+function createSaveOrderDto(): SaveOrderDto {
+  return {
+    header: {
+      orderName: 'Replay order',
+      clientId: 5,
+      orderDate: '2026-05-01',
+      orderStatusId: 1,
+      discount: 0,
+      surcharge: 0,
+    },
+    details: [],
+    payments: [],
+    workshops: [],
+    requirements: [],
+    dowelingLinks: [],
+    deleted: {},
+    idempotencyKey: 'create-key-1',
+  };
+}
+
+function createStoredOrderResponse(): OrderDto {
+  return {
+    header: {
+      ...header(),
+      orderId: 100,
+      projectId: 501,
+      projectCode: 'МП-501',
+      clientName: 'ООО Ромашка',
+      paymentStatusId: 2,
+      totalAmount: 120,
+      finalAmount: 120,
+      paidAmount: 50,
+      partsCount: 2,
+      totalArea: 1,
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+      createdBy: 42,
+      editedBy: 42,
+      version: 1,
+    },
+    details: [],
+    payments: [],
+    workshops: [],
+    requirements: [],
+    dowelingLinks: [],
+    primaryGroup: null,
+    groups: [],
+    totals: {
+      totalAmount: 120,
+      finalAmount: 120,
+      paidAmount: 50,
+      debtAmount: 70,
+      partsCount: 2,
+      totalArea: 1,
+    },
+    version: 1,
+    createdAt: '2026-05-01T00:00:00.000Z',
+    updatedAt: '2026-05-01T00:00:00.000Z',
+    createdBy: 42,
+    editedBy: 42,
   };
 }
 

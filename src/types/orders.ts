@@ -11,6 +11,9 @@ export interface Order {
   order_id?: number;
   order_name: string;
   client_id: number;
+  project_id?: number | null;
+  project_code?: string | null;
+  order_full_number?: string | null;
   client_name?: string | null;
   order_date: Date | string;
   priority: number;
@@ -297,6 +300,7 @@ export interface OrderFormValues {
   // Form metadata
   isDirty?: boolean;
   version?: number;
+  idempotencyKey?: string;
 }
 
 // ============================================================================

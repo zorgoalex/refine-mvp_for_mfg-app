@@ -25,6 +25,7 @@ const SORT_COLUMNS: Record<OrderListSortBy, string> = {
   plannedCompletionDate: 'o.planned_completion_date',
   completionDate: 'o.completion_date',
   issueDate: 'o.issue_date',
+  projectCode: 'mp.code',
   clientName: 'c.client_name',
   orderStatusName: 'os.order_status_name',
   paymentStatusName: 'pay_s.payment_status_name',
@@ -42,6 +43,7 @@ const PAGE_SORT_COLUMNS: Record<OrderListSortBy, string> = {
   plannedCompletionDate: 'o.planned_completion_date',
   completionDate: 'o.completion_date',
   issueDate: 'o.issue_date',
+  projectCode: 'o.project_code',
   clientName: 'o.client_name',
   orderStatusName: 'o.order_status_name',
   paymentStatusName: 'o.payment_status_name',
@@ -55,6 +57,9 @@ const PAGE_SORT_COLUMNS: Record<OrderListSortBy, string> = {
 interface OrderHeaderRow extends QueryResultRow {
   order_id: string | number;
   order_name: string;
+  project_id: string | number;
+  project_code: string;
+  full_number: string;
   client_id: string | number;
   client_name: string | null;
   order_date: string | Date;
@@ -211,6 +216,28 @@ interface CountRow extends QueryResultRow {
   total: string | number;
 }
 
+export function parseOrderSearchInput(raw: string): {
+  plain: string;
+  codePrefix: string | null;
+  codeExact: string | null;
+  namePrefix: string | null;
+} {
+  const trimmed = raw.trim();
+  const lastDash = trimmed.lastIndexOf('-');
+  const tail = lastDash > 0 ? trimmed.slice(lastDash + 1) : '';
+  const isFullNumber = lastDash > 0 && /^\d+$/.test(tail);
+  const isPlainNumeric = /^\d+$/.test(trimmed);
+
+  return {
+    plain: trimmed,
+    // Чисто числовой ввод ищет только по названию заказа/клиента.
+    // Иначе числовой запрос начнет матчить коды проектов и ломать текущее поведение.
+    codePrefix: isPlainNumeric ? null : trimmed,
+    codeExact: isFullNumber ? trimmed.slice(0, lastDash) : null,
+    namePrefix: isFullNumber ? tail : null,
+  };
+}
+
 interface AuditLogRow extends QueryResultRow {
   audit_id: string;
   entity_type: string | null;
@@ -327,6 +354,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       `
       SELECT COUNT(*)::int AS total
       FROM orders o
+      JOIN projects mp ON mp.project_id = o.project_id
       LEFT JOIN clients c ON c.client_id = o.client_id
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
       LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
@@ -339,7 +367,9 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       `
       WITH page_orders AS (
         SELECT
-          o.order_id, o.order_name, o.client_id, c.client_name,
+          o.order_id, o.order_name, o.project_id, mp.code AS project_code,
+          (mp.code || '-' || o.order_name) AS full_number,
+          o.client_id, c.client_name,
           o.order_date, o.priority,
           o.order_status_id, os.order_status_name,
           o.payment_status_id, pay_s.payment_status_name,
@@ -352,6 +382,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
           ${headerSheetSelect}
         FROM orders o
+        JOIN projects mp ON mp.project_id = o.project_id
         LEFT JOIN clients c ON c.client_id = o.client_id
         LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
         LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
@@ -806,12 +837,32 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     const clauses = ['o.delete_flag = false'];
 
     if (command.query.search) {
-      const index = params.push(`%${command.query.search}%`);
-      clauses.push(`(o.order_name ILIKE $${index} OR c.client_name::text ILIKE $${index})`);
+      const search = parseOrderSearchInput(command.query.search);
+      const plainIndex = params.push(`%${search.plain}%`);
+      const searchClauses = [
+        `o.order_name ILIKE $${plainIndex}`,
+        `c.client_name::text ILIKE $${plainIndex}`,
+      ];
+
+      if (search.codePrefix !== null) {
+        searchClauses.push(`mp.code ILIKE $${params.push(`${search.codePrefix}%`)}`);
+      }
+
+      if (search.codeExact !== null && search.namePrefix !== null) {
+        const codeExactIndex = params.push(search.codeExact);
+        const namePrefixIndex = params.push(`${search.namePrefix}%`);
+        searchClauses.push(`(mp.code = $${codeExactIndex} AND o.order_name ILIKE $${namePrefixIndex})`);
+      }
+
+      clauses.push(`(${searchClauses.join(' OR ')})`);
     }
 
     if (command.query.clientId) {
       clauses.push(`o.client_id = $${params.push(command.query.clientId)}`);
+    }
+
+    if (command.query.projectId) {
+      clauses.push(`o.project_id = $${params.push(command.query.projectId)}`);
     }
 
     if (command.query.orderStatusId) {
@@ -1046,6 +1097,9 @@ function mapListItem(row: OrderHeaderRow): OrderListItemDto {
   return {
     orderId: toNumber(row.order_id),
     orderName: row.order_name,
+    projectId: toNumber(row.project_id),
+    projectCode: row.project_code,
+    fullNumber: row.full_number,
     clientId: toNumber(row.client_id),
     clientName: row.client_name,
     orderDate: toDateOnly(row.order_date) ?? '',

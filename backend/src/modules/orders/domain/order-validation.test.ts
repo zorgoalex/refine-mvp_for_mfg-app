@@ -151,6 +151,43 @@ describe('validateSaveOrderDto', () => {
     expect(validationErrors(thrown)).toContain('header.orderDate');
   });
 
+  it('validates header.projectId as a positive integer when provided', () => {
+    const invalidOrder = normalizeSaveOrderDto(
+      createOrder({
+        header: {
+          orderName: 'Test order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+        },
+      }),
+    );
+    Object.assign(invalidOrder.header as Record<string, unknown>, { projectId: 0 });
+
+    let thrown: unknown;
+    try {
+      validateSaveOrderDto(invalidOrder, { mode: 'create' });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(validationErrors(thrown)).toContain('header.projectId');
+
+    const validOrder = normalizeSaveOrderDto(
+      createOrder({
+        header: {
+          orderName: 'Test order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+        },
+      }),
+    );
+    Object.assign(validOrder.header as Record<string, unknown>, { projectId: 77 });
+
+    expect(() => validateSaveOrderDto(validOrder, { mode: 'create' })).not.toThrow();
+  });
+
   it('enforces update version and path order id match', () => {
     const order = normalizeSaveOrderDto(
       createOrder({

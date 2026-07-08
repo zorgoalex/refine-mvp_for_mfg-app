@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  mapOrderListItemToLegacyRow,
   mapOrderDtoToFormValues,
   mapOrderFormToSaveOrderDto,
   normalizeDateOnly,
@@ -270,6 +271,54 @@ describe('orderMapper', () => {
     expect(dto.version).toBe(0);
   });
 
+  it('passes projectId and idempotencyKey to SaveOrderDto', () => {
+    const values = createFormValues();
+    values.header.project_id = 42;
+    values.idempotencyKey = 'k-123456789';
+
+    const dto = mapOrderFormToSaveOrderDto(values);
+
+    expect(dto.header.projectId).toBe(42);
+    expect(dto.idempotencyKey).toBe('k-123456789');
+  });
+
+  it('omits projectId when project is not chosen', () => {
+    const valuesWithNull = createFormValues();
+    valuesWithNull.header.project_id = null;
+
+    const dtoWithNull = mapOrderFormToSaveOrderDto(valuesWithNull);
+
+    expect(dtoWithNull.header.projectId).toBeNull();
+
+    const valuesWithUndefined = createFormValues();
+    delete valuesWithUndefined.header.project_id;
+
+    const dtoWithUndefined = mapOrderFormToSaveOrderDto(valuesWithUndefined);
+
+    expect(dtoWithUndefined.header.projectId).toBeNull();
+  });
+
+  it('maps project fields and full order number into LegacyOrderListRow', () => {
+    const row = mapOrderListItemToLegacyRow({
+      orderId: 1258,
+      orderName: '1258',
+      clientId: 10,
+      clientName: 'Клиент',
+      orderDate: '2026-07-05',
+      orderStatusId: 1,
+      paymentStatusId: 2,
+      productionStatusId: 3,
+      projectId: 7,
+      projectCode: 'ФК26',
+      fullNumber: 'ФК26-1258',
+      version: 4,
+    });
+
+    expect(row.project_id).toBe(7);
+    expect(row.project_code).toBe('ФК26');
+    expect(row.order_full_number).toBe('ФК26-1258');
+  });
+
   it('maps OrderDto back to OrderFormValues and restores stable temp ids', () => {
     const dto: OrderDto = {
       header: {
@@ -502,6 +551,7 @@ function createFormValues(): OrderFormValues {
       order_id: 10,
       order_name: '  Order A  ',
       client_id: '12' as unknown as number,
+      project_id: undefined,
       order_date: new Date('2026-04-29T00:00:00.000Z'),
       priority: '' as unknown as number,
       order_status_id: '3' as unknown as number,
@@ -678,5 +728,6 @@ function createFormValues(): OrderFormValues {
     deletedDowelingLinks: [91],
     isDirty: true,
     version: 9,
+    idempotencyKey: undefined,
   };
 }

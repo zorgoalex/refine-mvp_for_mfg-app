@@ -25,6 +25,8 @@ const CalendarList = lazy(async () => ({ default: (await import("./pages/calenda
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const ScanPage = lazy(async () => ({ default: (await import("./pages/scan/ScanPage")).ScanPage }));
 const GroupsPage = lazy(async () => ({ default: (await import("./pages/groups/GroupsPage")).GroupsPage }));
+const ProjectsList = lazy(async () => ({ default: (await import("./pages/projects/ProjectsList")).ProjectsList }));
+const ProjectShow = lazy(async () => ({ default: (await import("./pages/projects/ProjectShow")).ProjectShow }));
 const DowelOrderEdit = lazy(async () => ({ default: (await import("./pages/doweling_orders/edit")).DowelOrderEdit }));
 const DowelOrderShow = lazy(async () => ({ default: (await import("./pages/doweling_orders/show")).DowelOrderShow }));
 const ConfigurationPage = lazy(async () => ({ default: (await import("./pages/configuration")).ConfigurationPage }));
@@ -248,6 +250,19 @@ const ThemedApp = () => {
                         meta: {
                           idColumnName: "id",
                           label: "Группы",
+                        },
+                      },
+                    ]
+                  : []),
+                ...(featureFlags.projects
+                  ? [
+                      {
+                        name: "projects",
+                        list: "/projects",
+                        show: "/projects/show/:id",
+                        meta: {
+                          idColumnName: "projectId",
+                          label: "Проекты",
                         },
                       },
                     ]
@@ -596,6 +611,12 @@ const ThemedApp = () => {
                   {featureFlags.useBackendGroups && (
                     <Route path="/groups">
                       <Route index element={<GroupsPage />} />
+                    </Route>
+                  )}
+                  {featureFlags.projects && (
+                    <Route path="/projects">
+                      <Route index element={<ProjectsList />} />
+                      <Route path="show/:id" element={<ProjectShow />} />
                     </Route>
                   )}
                   {featureFlags.useBackendCut && (

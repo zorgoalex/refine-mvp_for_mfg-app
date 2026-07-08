@@ -2,8 +2,8 @@
 // Master-Detail form with Tabs for child entities
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { Card, Tabs, Button, Space, Spin, notification, Modal } from 'antd';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Card, Tabs, Button, Space, Spin, notification, Modal, Form, Select, Tooltip } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
 import {
@@ -20,6 +20,7 @@ import { useDefaultStatuses } from '../../../hooks/useDefaultStatuses';
 import { loadOrderViaBackend } from '../../../hooks/useOrderBackendRead';
 import { useOrderSave } from '../../../hooks/useOrderSave';
 import { useOrderExport } from '../../../hooks/useOrderExport';
+import { projectsApi, type ProjectDto } from '../../../api/projectsApi';
 import { OrderFormMode } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
 import { featureFlags } from '../../../config/featureFlags';
@@ -50,6 +51,18 @@ interface OrderFormProps {
   onCancel?: () => void;
 }
 
+function createOrderSaveIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function computeOrderSaveSignature(values: unknown): string {
+  return JSON.stringify(values);
+}
+
 export const OrderForm: React.FC<OrderFormProps> = ({
   mode,
   orderId,
@@ -65,6 +78,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     header,
     details,
     payments,
+    workshops,
+    requirements,
+    dowelingLinks,
+    deletedDetails,
+    deletedPayments,
+    deletedWorkshops,
+    deletedRequirements,
+    deletedDowelingLinks,
     setHeader,
     updateHeaderField,
     isDirty,
@@ -82,6 +103,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   // Refs for tabs to apply current edits before save
   const detailsTabRef = useRef<OrderDetailsTabRef>(null);
   const paymentsTabRef = useRef<OrderPaymentsTabRef>(null);
+  const saveKeyRef = useRef<string | undefined>(undefined);
+  const saveKeySignatureRef = useRef<string | undefined>(undefined);
+  const projectClientRef = useRef<number | undefined>(undefined);
+  const projectRequestIdRef = useRef(0);
+  const [projectOptions, setProjectOptions] = useState<Array<{ label: string; value: number }>>(
+    [],
+  );
+  const [projectsLoading, setProjectsLoading] = useState(false);
 
   const {
     defaultOrderStatus,
@@ -91,6 +120,41 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   } =
     useDefaultStatuses();
   const { saveOrder, isSaving } = useOrderSave(orderKey);
+  const normalizedClientId =
+    typeof header.client_id === 'number' && Number.isFinite(header.client_id)
+      ? header.client_id
+      : Number(header.client_id) > 0
+        ? Number(header.client_id)
+        : undefined;
+  const currentSaveSignature = useMemo(
+    () =>
+      computeOrderSaveSignature({
+        header,
+        details,
+        payments,
+        workshops,
+        requirements,
+        dowelingLinks,
+        deletedDetails,
+        deletedPayments,
+        deletedWorkshops,
+        deletedRequirements,
+        deletedDowelingLinks,
+      }),
+    [
+      header,
+      details,
+      payments,
+      workshops,
+      requirements,
+      dowelingLinks,
+      deletedDetails,
+      deletedPayments,
+      deletedWorkshops,
+      deletedRequirements,
+      deletedDowelingLinks,
+    ],
+  );
 
   // Bridge dirty state into the workspace tab registry (single dirty contract).
   useTabDirty(tabKey, isDirty);
@@ -114,6 +178,89 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const useBackendOrderRead = featureFlags.useBackendOrdersRead;
   const labelsEnabled = featureFlags.labels && can('labels.view');
   const cutTabEnabled = featureFlags.useBackendCut && can('cut.view');
+
+  useEffect(() => {
+    if (
+      saveKeyRef.current &&
+      saveKeySignatureRef.current &&
+      currentSaveSignature !== saveKeySignatureRef.current
+    ) {
+      saveKeyRef.current = undefined;
+      saveKeySignatureRef.current = undefined;
+    }
+  }, [currentSaveSignature]);
+
+  useEffect(() => {
+    if (!featureFlags.projects || mode !== 'create') {
+      return;
+    }
+
+    if (!normalizedClientId) {
+      projectClientRef.current = undefined;
+      setProjectOptions([]);
+      if (header.project_id !== undefined && header.project_id !== null) {
+        updateHeaderField('project_id', undefined as never);
+      }
+      return;
+    }
+
+    if (
+      projectClientRef.current !== undefined &&
+      projectClientRef.current !== normalizedClientId &&
+      header.project_id !== undefined &&
+      header.project_id !== null
+    ) {
+      updateHeaderField('project_id', undefined as never);
+    }
+
+    projectClientRef.current = normalizedClientId;
+  }, [mode, normalizedClientId, header.project_id, updateHeaderField]);
+
+  const loadProjectOptions = async (search = '') => {
+    if (!featureFlags.projects || !normalizedClientId) {
+      setProjectOptions([]);
+      return;
+    }
+
+    const requestId = ++projectRequestIdRef.current;
+    setProjectsLoading(true);
+
+    try {
+      const response = await projectsApi.list({
+        clientId: normalizedClientId,
+        search: search.trim() || undefined,
+      });
+      if (requestId !== projectRequestIdRef.current) {
+        return;
+      }
+      setProjectOptions(
+        response.map((project: ProjectDto) => ({
+          value: project.projectId,
+          label: `${project.code} — ${project.name}`,
+        })),
+      );
+    } catch (error) {
+      if (requestId === projectRequestIdRef.current) {
+        notification.error({
+          message: 'Не удалось загрузить проекты',
+          description:
+            error instanceof Error ? error.message : 'Проверьте подключение и повторите попытку',
+        });
+      }
+    } finally {
+      if (requestId === projectRequestIdRef.current) {
+        setProjectsLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!featureFlags.projects || mode !== 'create' || !normalizedClientId) {
+      return;
+    }
+
+    void loadProjectOptions();
+  }, [mode, normalizedClientId]);
 
   // React to deep-link/sub-tab jumps into an already-open order tab.
   useEffect(() => {
@@ -174,6 +321,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         'edited_by',
         'created_at',
         'updated_at',
+        ...(featureFlags.projects ? ['project_id'] : []),
         {
           order_doweling_links: [
             'order_doweling_link_id',
@@ -222,9 +370,16 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const { data: headerNameData, isLoading: headerNameLoading } = useOne({
     resource: 'orders_view',
     id: orderId,
-    meta: { fields: ['order_id', 'material_name', 'sheet_material_type_id'] },
+    meta: {
+      fields: [
+        'order_id',
+        'material_name',
+        'sheet_material_type_id',
+        ...(featureFlags.projects ? ['project_id', 'project_code', 'order_full_number'] : []),
+      ],
+    },
     queryOptions: {
-      enabled: shouldLoadOrder && featureFlags.sheetMaterialsReads,
+      enabled: shouldLoadOrder && (featureFlags.sheetMaterialsReads || featureFlags.projects),
     },
   });
 
@@ -397,6 +552,12 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           doweling_links: dowelingLinks,
           // SP3: server-resolved header material name (COALESCE sheet/material).
           material_name_resolved: (headerNameData?.data as any)?.material_name ?? undefined,
+          project_id:
+            orderDataWithoutRelationship.project_id ??
+            (headerNameData?.data as any)?.project_id ??
+            null,
+          project_code: (headerNameData?.data as any)?.project_code ?? null,
+          order_full_number: (headerNameData?.data as any)?.order_full_number ?? null,
         };
 
         loadOrder({
@@ -851,11 +1012,20 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         return;
       }
 
+      const saveSignature = computeOrderSaveSignature(formValues);
+      if (!saveKeyRef.current) {
+        saveKeyRef.current = createOrderSaveIdempotencyKey();
+      }
+      saveKeySignatureRef.current = saveSignature;
+      formValues.idempotencyKey = saveKeyRef.current;
+
         console.log('[OrderForm] handleSave - calling saveOrder...');
         const savedOrderId = await saveOrder(formValues, mode === 'edit');
         console.log('[OrderForm] handleSave - saveOrder returned:', savedOrderId);
 
       if (savedOrderId) {
+        saveKeyRef.current = undefined;
+        saveKeySignatureRef.current = undefined;
         console.log('[OrderForm] handleSave - save SUCCESS, processing result...');
         console.log('[OrderForm] handleSave - mode:', mode);
         console.log('[OrderForm] handleSave - header.order_id:', header.order_id);
@@ -1108,6 +1278,56 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     mode === 'create'
       ? `Создание заказа${orderName ? ` «${orderName}»` : ''}`
       : `Редактирование заказа${orderName ? ` «${orderName}»` : ''}`;
+  const projectCode = header.project_code?.trim() || null;
+  const projectLink =
+    header.project_id && projectCode ? `/projects/show/${header.project_id}` : null;
+  const projectField =
+    !featureFlags.projects ? null : mode === 'create' ? (
+      <Card size="small" title="Проект">
+        <Form layout="vertical">
+          <Form.Item
+            label={(
+              <Space size={4}>
+                <span>Проект</span>
+                <Tooltip title="Пусто — проект создастся автоматически (МП-N)">
+                  <span style={{ cursor: 'help', color: 'var(--app-text-muted)' }}>?</span>
+                </Tooltip>
+              </Space>
+            )}
+            name={['header', 'project_id']}
+          >
+            <Select
+              allowClear
+              showSearch
+              filterOption={false}
+              disabled={!normalizedClientId}
+              loading={projectsLoading}
+              placeholder="Новый проект (авто)"
+              value={header.project_id ?? undefined}
+              onChange={(value) => updateHeaderField('project_id', value ?? undefined)}
+              onSearch={(value) => {
+                void loadProjectOptions(value);
+              }}
+              onFocus={() => {
+                void loadProjectOptions();
+              }}
+              options={projectOptions}
+              notFoundContent={
+                normalizedClientId
+                  ? projectsLoading
+                    ? 'Загрузка проектов...'
+                    : 'Проекты не найдены'
+                  : 'Сначала выберите клиента'
+              }
+            />
+          </Form.Item>
+        </Form>
+      </Card>
+    ) : projectCode ? (
+      <Card size="small" title="Проект">
+        {projectLink ? <Link to={projectLink}>{projectCode}</Link> : <span>{projectCode}</span>}
+      </Card>
+    ) : null;
 
   return (
     <OrderDraftStoreProvider orderKey={orderKey}>
@@ -1147,6 +1367,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     >
       {/* Read-only header with order summary (both create and edit modes) */}
       <OrderHeaderSummary />
+      {projectField}
 
       {/* Editable tabs */}
       <Tabs

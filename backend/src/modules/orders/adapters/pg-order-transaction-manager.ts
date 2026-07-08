@@ -8,8 +8,10 @@ import { computeDiff } from '../../../common/audit/audit-diff';
 import { PgOrderReadRepository } from './pg-order-read-repository';
 import type {
   DeleteOrderCommand,
+  LockedProjectRow,
   LockedOrderRow,
   LockedOrderDeleteRow,
+  OrderCreateIdempotencyResult,
   OrderChildReference,
   OrderDeleteAuditInput,
   OrderDeleteOutboxInput,
@@ -42,6 +44,12 @@ import {
   OrderDeleteIdempotencyInProgressError,
   OrderDeleteIdempotencyKeyReusedError,
 } from '../errors/order.errors';
+import type { SaveOrderDto } from '../dto/save-order.dto';
+import {
+  ProjectArchivedError,
+  ProjectClientMismatchError,
+  ProjectNotFoundError,
+} from '../../projects/errors/projects.errors';
 
 const CHILD_TABLES = {
   detail: { table: 'order_details', pk: 'detail_id' },
@@ -56,7 +64,7 @@ const SOURCE = 'backend-orders-command';
 interface IdempotencyRow {
   idempotency_key: string;
   request_hash: string;
-  response_json: DeleteOrderResponseDto | string | null;
+  response_json: OrderDto | DeleteOrderResponseDto | string | null;
   status: string;
 }
 
@@ -144,6 +152,66 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     await this.tx.query('SELECT set_session_user($1)', [userId]);
   }
 
+  async resolveProjectForCreate(input: {
+    projectId: number | null;
+    clientId: number;
+    orderName: string;
+    currentUser: CurrentUser;
+    requestId: string;
+  }) {
+    if (input.projectId !== null) {
+      const result = await this.tx.query<{
+        project_id: string | number;
+        client_id: string | number;
+        delete_flag: boolean;
+        code: string;
+      }>(
+        `
+        SELECT project_id, client_id, delete_flag, code
+        FROM projects
+        WHERE project_id = $1
+        FOR UPDATE
+        `,
+        [input.projectId],
+      );
+      const row = result.rows[0];
+      if (!row) {
+        throw new ProjectNotFoundError(input.projectId);
+      }
+      if (row.delete_flag) {
+        throw new ProjectArchivedError(input.projectId);
+      }
+      if (Number(row.client_id) !== input.clientId) {
+        throw new ProjectClientMismatchError();
+      }
+
+      return {
+        projectId: Number(row.project_id),
+        created: false,
+        code: row.code,
+      };
+    }
+
+    return insertAutoRoot(this.tx, {
+      orderName: input.orderName,
+      clientId: input.clientId,
+      currentUser: input.currentUser,
+      requestId: input.requestId,
+    });
+  }
+
+  async reconcileOrderCreateIdempotency(input: {
+    idempotencyKey: string;
+    currentUser: CurrentUser;
+    dto: SaveOrderDto;
+  }): Promise<OrderCreateIdempotencyResult> {
+    return reconcileOrderCreateIdempotency(this.tx, input);
+  }
+
+  async completeOrderCreateIdempotency(idempotencyKey: string, response: OrderDto): Promise<void> {
+    await completeOrderCreateIdempotency(this.tx, idempotencyKey, response);
+  }
+
   async reconcileOrderDeleteIdempotency(
     command: DeleteOrderCommand,
   ): Promise<OrderDeleteIdempotencyResult> {
@@ -208,10 +276,151 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       : null;
   }
 
+  async readOrderClientProject(
+    orderId: number,
+  ): Promise<{ clientId: number | null; projectId: number } | null> {
+    const result = await this.tx.query<{
+      client_id: string | number | null;
+      project_id: string | number;
+    }>(
+      `
+      SELECT client_id, project_id
+      FROM orders
+      WHERE order_id = $1 AND delete_flag = false
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          clientId: row.client_id === null ? null : Number(row.client_id),
+          projectId: Number(row.project_id),
+        }
+      : null;
+  }
+
+  async lockProjectById(projectId: number): Promise<void> {
+    await this.tx.query(
+      `
+      SELECT project_id
+      FROM projects
+      WHERE project_id = $1
+      FOR UPDATE
+      `,
+      [projectId],
+    );
+  }
+
+  async lockProjectForOrder(orderId: number): Promise<LockedProjectRow> {
+    const result = await this.tx.query<{
+      project_id: string | number;
+      client_id: string | number;
+      code: string;
+    }>(
+      `
+      SELECT p.project_id, p.client_id, p.code
+      FROM projects p
+      JOIN orders o USING (project_id)
+      WHERE o.order_id = $1
+      FOR UPDATE
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new ApiError(500, 'ORDER_PROJECT_NOT_FOUND', 'Не найден проект заказа');
+    }
+
+    return {
+      projectId: Number(row.project_id),
+      clientId: Number(row.client_id),
+      code: row.code,
+    };
+  }
+
+  async countOrdersInProject(projectId: number): Promise<number> {
+    const result = await this.tx.query<{ count: string | number }>(
+      `
+      -- ВСЕ заказы, включая soft-deleted: composite FK ON UPDATE CASCADE при retarget
+      -- перезаписал бы client_id и архивным заказам — deleted удерживают клиента корня.
+      SELECT COUNT(*)::int AS count
+      FROM orders
+      WHERE project_id = $1
+      `,
+      [projectId],
+    );
+    return Number(result.rows[0]?.count ?? 0);
+  }
+
+  async retargetProjectClient(
+    projectId: number,
+    clientId: number,
+    currentUser: CurrentUser,
+    requestId?: string,
+  ): Promise<void> {
+    const beforeResult = await this.tx.query<{
+      client_id: string | number;
+      code: string;
+      version: string | number;
+    }>(
+      `
+      SELECT client_id, code, version
+      FROM projects
+      WHERE project_id = $1
+      FOR UPDATE
+      `,
+      [projectId],
+    );
+    const before = beforeResult.rows[0];
+    if (!before) {
+      throw new ProjectNotFoundError(projectId);
+    }
+
+    await this.tx.query(
+      `
+      UPDATE projects
+      SET client_id = $2,
+          version = version + 1,
+          edited_by = $3,
+          updated_at = now()
+      WHERE project_id = $1
+      `,
+      [projectId, clientId, Number(currentUser.id)],
+    );
+
+    await auditService.record(this.tx, {
+      event: 'project.updated',
+      entityType: 'project',
+      entityId: projectId,
+      actorUserId: currentUser.id,
+      actorUsername: currentUser.username,
+      actorRole: currentUser.role,
+      requestId: requestId ?? 'orders-update-project-retarget',
+      source: SOURCE,
+      relatedClientId: clientId,
+      before: { projectId, clientId: Number(before.client_id), code: before.code },
+      after: { projectId, clientId, code: before.code },
+      diff: {
+        clientId: { from: Number(before.client_id), to: clientId },
+        version: { from: Number(before.version), to: Number(before.version) + 1 },
+      },
+      metadata: {
+        action: 'project_client_retarget',
+        projectId,
+      },
+      relatedEntities: [
+        { entityType: 'project', entityId: projectId },
+        { entityType: 'client', entityId: clientId },
+      ],
+    });
+  }
+
   async loadOrderHeaderSnapshot(orderId: number): Promise<Record<string, unknown> | null> {
     const result = await this.tx.query<Record<string, unknown>>(
       `
-      SELECT order_name AS "orderName", client_id AS "clientId", order_date AS "orderDate",
+      SELECT order_name AS "orderName", client_id AS "clientId", project_id AS "projectId",
+             (SELECT code FROM projects WHERE project_id = orders.project_id) AS "projectCode",
+             order_date AS "orderDate",
              priority, manager_id AS "managerId", order_status_id AS "orderStatusId",
              production_status_id AS "productionStatusId",
              planned_completion_date AS "plannedCompletionDate",
@@ -262,6 +471,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   async createOrderHeader(input: {
     header: NormalizedSaveOrderHeaderDto;
     totals: OrderTotalsDto;
+    projectId: number;
     currentUser: CurrentUser;
   }): Promise<number> {
     const result = await this.tx.query<{ order_id: string | number }>(
@@ -274,7 +484,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         discount, surcharge, total_amount, final_amount, paid_amount, parts_count, total_area,
         link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file,
         notes, material_id, milling_type_id, edge_type_id, film_id, ref_key_1c,
-        sheet_material_type_id, version
+        sheet_material_type_id, project_id, version
       )
       VALUES (
         $1, $2, $3, $4, $5,
@@ -283,7 +493,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         $10, $11, $12, $13,
         $14, $15, $16, $17, $18, $19, $20,
         $21, $22, $23, $24,
-        $25, $26, $27, $28, $29, $30, $31, 1
+        $25, $26, $27, $28, $29, $30, $31, $32, 1
       )
       RETURNING order_id
       `,
@@ -320,6 +530,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.filmId ?? null,
         input.header.refKey1c ?? null,
         input.header.sheetMaterialTypeId ?? null,
+        input.projectId,
       ],
     );
 
@@ -792,6 +1003,162 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   }
 }
 
+export async function insertAutoRoot(
+  tx: TransactionClient,
+  input: {
+    orderName: string;
+    clientId: number;
+    currentUser: CurrentUser;
+    requestId: string;
+  },
+): Promise<{ projectId: number; created: true; code: string }> {
+  const created = await tx.query<{ project_id: string | number; code: string }>(
+    `
+    WITH next_project AS (
+      SELECT nextval(pg_get_serial_sequence('public.projects', 'project_id')) AS project_id
+    )
+    INSERT INTO projects (project_id, code, name, client_id, created_by)
+    SELECT
+      next_project.project_id,
+      'МП-' || next_project.project_id,
+      LEFT($1, 300),
+      $2,
+      $3
+    FROM next_project
+    RETURNING project_id, code
+    `,
+    [input.orderName, input.clientId, Number(input.currentUser.id)],
+  );
+  const row = created.rows[0];
+  if (!row) {
+    throw new ApiError(500, 'PROJECT_AUTO_CREATE_FAILED', 'Не удалось создать проект');
+  }
+
+  const projectId = Number(row.project_id);
+  const code = row.code;
+  await auditService.record(tx, {
+    event: 'project.created',
+    entityType: 'project',
+    entityId: projectId,
+    actorUserId: input.currentUser.id,
+    actorUsername: input.currentUser.username,
+    actorRole: input.currentUser.role,
+    requestId: input.requestId,
+    source: SOURCE,
+    relatedClientId: input.clientId,
+    before: null,
+    after: { projectId, code, clientId: input.clientId },
+    metadata: {
+      projectId,
+      action: 'project_auto_create',
+      origin: 'auto',
+    },
+    relatedEntities: [
+      { entityType: 'project', entityId: projectId },
+      { entityType: 'client', entityId: input.clientId },
+    ],
+  });
+  await tx.query(
+    `
+    INSERT INTO outbox_events (
+      event_type, aggregate_type, aggregate_id, payload_json, idempotency_key
+    )
+    VALUES ($1, 'project', $2, $3::jsonb, $4)
+    ON CONFLICT (idempotency_key) DO NOTHING
+    `,
+    [
+      'project.created',
+      String(projectId),
+      JSON.stringify({
+        eventType: 'project.created',
+        projectId,
+        code,
+        clientId: input.clientId,
+        actorUserId: input.currentUser.id,
+        requestId: input.requestId,
+      }),
+      `project.created:${projectId}`,
+    ],
+  );
+
+  return { projectId, created: true, code };
+}
+
+async function reconcileOrderCreateIdempotency(
+  tx: TransactionClient,
+  input: {
+    idempotencyKey: string;
+    currentUser: CurrentUser;
+    dto: SaveOrderDto;
+  },
+): Promise<OrderCreateIdempotencyResult> {
+  const requestShape = {
+    actorUserId: input.currentUser.id,
+    commandName: 'orders.create',
+    entityId: 'pending',
+    dto: input.dto,
+  };
+  const requestHash = hashRequest(requestShape);
+  const inserted = await tx.query<IdempotencyRow>(
+    `
+    INSERT INTO command_idempotency_keys (
+      idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status
+    )
+    VALUES ($1, 'orders.create', $2, 'order', $3, $4, 'processing')
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING idempotency_key, request_hash, response_json, status
+    `,
+    [input.idempotencyKey, Number(input.currentUser.id), 'pending', requestHash],
+  );
+
+  if (inserted.rows[0]) {
+    return {};
+  }
+
+  const existing = await tx.query<IdempotencyRow>(
+    `
+    SELECT idempotency_key, request_hash, response_json, status
+    FROM command_idempotency_keys
+    WHERE idempotency_key = $1
+    FOR UPDATE
+    `,
+    [input.idempotencyKey],
+  );
+  const row = existing.rows[0];
+
+  if (!row) {
+    throw new OrderDeleteIdempotencyInProgressError(input.idempotencyKey);
+  }
+  if (row.request_hash !== requestHash) {
+    throw new OrderDeleteIdempotencyKeyReusedError(input.idempotencyKey);
+  }
+  if (row.status === 'completed' && row.response_json) {
+    return { completedResponse: parseStoredCreateResponse(row.response_json) };
+  }
+  if (row.status === 'failed') {
+    throw new OrderDeleteIdempotencyFailedError(input.idempotencyKey);
+  }
+
+  throw new OrderDeleteIdempotencyInProgressError(input.idempotencyKey);
+}
+
+async function completeOrderCreateIdempotency(
+  tx: TransactionClient,
+  idempotencyKey: string,
+  response: OrderDto,
+): Promise<void> {
+  await tx.query(
+    `
+    UPDATE command_idempotency_keys
+    SET status = 'completed',
+        response_json = $2::jsonb,
+        completed_at = now()
+    WHERE idempotency_key = $1
+    `,
+    [idempotencyKey, JSON.stringify(response)],
+  );
+}
+
 async function reconcileOrderDeleteIdempotency(
   tx: TransactionClient,
   command: DeleteOrderCommand,
@@ -998,12 +1365,19 @@ function stableStringify(value: unknown): string {
     .join(',')}}`;
 }
 
+// row выбирается по command_name конкретной команды — union сужается контрактом ключа.
 function parseStoredDeleteResponse(
-  responseJson: DeleteOrderResponseDto | string,
+  responseJson: OrderDto | DeleteOrderResponseDto | string,
 ): DeleteOrderResponseDto {
   return typeof responseJson === 'string'
     ? (JSON.parse(responseJson) as DeleteOrderResponseDto)
-    : responseJson;
+    : (responseJson as DeleteOrderResponseDto);
+}
+
+function parseStoredCreateResponse(
+  responseJson: OrderDto | DeleteOrderResponseDto | string,
+): OrderDto {
+  return typeof responseJson === 'string' ? (JSON.parse(responseJson) as OrderDto) : (responseJson as OrderDto);
 }
 
 function groupChildReferences(refs: readonly OrderChildReference[]) {

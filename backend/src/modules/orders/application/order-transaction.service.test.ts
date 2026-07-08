@@ -18,6 +18,7 @@ import {
   ChildEntityNotOwnedError,
   OrderVersionConflictError,
 } from '../errors/order.errors';
+import { ProjectClientMismatchError } from '../../projects/errors/projects.errors';
 import type {
   LockedOrderRow,
   LockedOrderDeleteRow,
@@ -34,6 +35,15 @@ import type {
 } from './order-transaction.types';
 import { collectChildReferences, OrderTransactionService } from './order-transaction.service';
 
+interface FakeProjectRecord {
+  projectId: number;
+  code: string;
+  clientId: number;
+  deleteFlag: boolean;
+  version: number;
+  editedByUserId: string | null;
+}
+
 interface FakeOrderRecord {
   orderId: number;
   header: NormalizedSaveOrderHeaderDto;
@@ -46,18 +56,22 @@ interface FakeOrderRecord {
   version: number;
   createdByUserId: string | null;
   managerUserId: string | null;
+  projectId: number | null;
+  projectCode: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 interface FakeState {
   nextOrderId: number;
+  nextProjectId: number;
   nextDetailId: number;
   nextPaymentId: number;
   nextWorkshopId: number;
   nextRequirementId: number;
   nextDowelingLinkId: number;
   orders: Map<number, FakeOrderRecord>;
+  projects: Map<number, FakeProjectRecord>;
   auditEvents: Array<OrderSaveAuditEvent | { action: 'orders.delete'; orderId: number; actorUserId: string; requestId: string; nextVersion: number }>;
   outboxEvents: Array<{ eventType: string; orderId: number; requestId: string }>;
 }
@@ -69,16 +83,21 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
   failAt?: string;
   state: FakeState = {
     nextOrderId: 100,
+    nextProjectId: 500,
     nextDetailId: 1000,
     nextPaymentId: 2000,
     nextWorkshopId: 3000,
     nextRequirementId: 4000,
     nextDowelingLinkId: 5000,
     orders: new Map(),
+    projects: new Map(),
     auditEvents: [],
     outboxEvents: [],
   };
   completedDeleteResponse?: DeleteOrderResponseDto;
+  completedCreateResponse?: OrderDto;
+  /** Simulates a stale unlocked pre-read diverging from the locked snapshot. */
+  preReadClientProjectOverride?: { clientId: number | null; projectId: number };
 
   async runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T> {
     this.calls.push('begin');
@@ -117,9 +136,15 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
       version: record.version,
       createdByUserId: record.createdByUserId ?? 'user_manager',
       managerUserId: record.managerUserId ?? 'user_manager',
+      projectId: record.projectId ?? null,
+      projectCode: record.projectCode ?? null,
       createdAt: record.createdAt ?? '2026-04-30T00:00:00.000Z',
       updatedAt: record.updatedAt ?? '2026-04-30T00:00:00.000Z',
     });
+  }
+
+  seedProject(record: FakeProjectRecord): void {
+    this.state.projects.set(record.projectId, { ...record });
   }
 }
 
@@ -164,6 +189,44 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       : {};
   }
 
+  async resolveProjectForCreate(input: {
+    projectId: number | null;
+    clientId: number;
+  }): Promise<{ projectId: number; created: boolean; code: string }> {
+    this.call('resolveProjectForCreate');
+
+    if (input.projectId !== null) {
+      const project = this.state.projects.get(input.projectId);
+      if (!project) {
+        throw new Error(`Missing fake project ${input.projectId}`);
+      }
+
+      return { projectId: project.projectId, created: false, code: project.code };
+    }
+
+    const projectId = this.state.nextProjectId++;
+    const projectCode = `МП-${projectId}`;
+    this.state.projects.set(projectId, {
+      projectId,
+      code: projectCode,
+      clientId: input.clientId,
+      deleteFlag: false,
+      version: 0,
+      editedByUserId: null,
+    });
+    return { projectId, created: true, code: projectCode };
+  }
+
+  async reconcileOrderCreateIdempotency(): Promise<{ completedResponse: OrderDto | null }> {
+    this.call('reconcileOrderCreateIdempotency');
+    return { completedResponse: this.owner.completedCreateResponse ?? null };
+  }
+
+  async completeOrderCreateIdempotency(_idempotencyKey: string, response: OrderDto): Promise<void> {
+    this.call('completeOrderCreateIdempotency');
+    this.owner.completedCreateResponse = response;
+  }
+
   async completeOrderDeleteIdempotency(): Promise<void> {
     this.call('completeOrderDeleteIdempotency');
   }
@@ -196,6 +259,67 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       : null;
   }
 
+  async readOrderClientProject(
+    orderId: number,
+  ): Promise<{ clientId: number | null; projectId: number } | null> {
+    this.call('readOrderClientProject');
+    if (this.owner.preReadClientProjectOverride !== undefined) {
+      return this.owner.preReadClientProjectOverride;
+    }
+    const order = this.state.orders.get(orderId);
+    if (!order) return null;
+    // Legacy fake orders may carry no project; -1 keeps them working as long as
+    // the flow does not actually need the project lock (no client change).
+    return { clientId: order.header.clientId ?? null, projectId: order.projectId ?? -1 };
+  }
+
+  async lockProjectById(projectId: number): Promise<void> {
+    this.call('lockProjectById');
+    if (!this.state.projects.get(projectId)) {
+      throw new Error(`Missing fake project ${projectId}`);
+    }
+  }
+
+  async lockProjectForOrder(orderId: number): Promise<{
+    projectId: number;
+    clientId: number;
+    code: string;
+  }> {
+    this.call('lockProjectForOrder');
+    const order = this.getOrder(orderId);
+    if (order.projectId === null) {
+      throw new Error(`Order ${orderId} has no fake project`);
+    }
+
+    const project = this.state.projects.get(order.projectId);
+    if (!project) {
+      throw new Error(`Missing fake project ${order.projectId}`);
+    }
+
+    return { projectId: project.projectId, clientId: project.clientId, code: project.code };
+  }
+
+  async countOrdersInProject(projectId: number): Promise<number> {
+    this.call('countOrdersInProject');
+    return [...this.state.orders.values()].filter((order) => order.projectId === projectId).length;
+  }
+
+  async retargetProjectClient(
+    projectId: number,
+    clientId: number,
+    currentUser: CurrentUser,
+  ): Promise<void> {
+    this.call('retargetProjectClient');
+    const project = this.state.projects.get(projectId);
+    if (!project) {
+      throw new Error(`Missing fake project ${projectId}`);
+    }
+
+    project.clientId = clientId;
+    project.version += 1;
+    project.editedByUserId = currentUser.id;
+  }
+
   async assertChildOwnership(orderId: number, refs: readonly OrderChildReference[]): Promise<void> {
     this.call('assertChildOwnership');
     const order = this.getOrder(orderId);
@@ -222,6 +346,8 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
   async createOrderHeader(input: {
     header: NormalizedSaveOrderHeaderDto;
     totals: OrderTotalsDto;
+    projectId: number;
+    projectCode?: string;
   }): Promise<number> {
     this.call('createOrderHeader');
     const orderId = this.state.nextOrderId++;
@@ -239,6 +365,8 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       version: 0,
       createdByUserId: 'user_manager',
       managerUserId: input.header.managerId === null ? null : String(input.header.managerId),
+      projectId: input.projectId,
+      projectCode: input.projectCode ?? `МП-${input.projectId}`,
       createdAt: now,
       updatedAt: now,
     });
@@ -393,6 +521,8 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       plannedCompletionDate: order.header.plannedCompletionDate ?? null,
       completionDate: order.header.completionDate ?? null,
       issueDate: order.header.issueDate ?? null,
+      projectId: order.projectId,
+      projectCode: order.projectCode,
       discount: order.totals.discount,
       surcharge: order.totals.surcharge,
       totalAmount: order.totals.totalAmount,
@@ -469,10 +599,13 @@ describe('OrderTransactionService', () => {
     const createAuditEvent = transactions.state.auditEvents[0] as typeof transactions.state.auditEvents[0] & { before?: unknown; after?: unknown };
     expect(createAuditEvent).toMatchObject({ before: null });
     expect((createAuditEvent.after as Record<string, unknown>)?.orderName).toBe('Test order');
+    expect((result.header as Record<string, unknown>).projectId).toBe(500);
+    expect((result.header as Record<string, unknown>).projectCode).toBe('МП-500');
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
       'validateSheetReferences',
+      'resolveProjectForCreate',
       'createOrderHeader',
       'upsertDetails',
       'deleteDetails',
@@ -490,6 +623,62 @@ describe('OrderTransactionService', () => {
       'readOrder',
       'commit',
     ]);
+  });
+
+  it('returns cached create response for a repeated idempotency key before any inserts', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.completedCreateResponse = toOrderDto({
+      orderId: 222,
+      header: createHeader({ orderName: 'Cached order' }),
+      details: [],
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+      totals: createTotals(),
+      version: 1,
+      createdByUserId: 'user_manager',
+      managerUserId: 'user_manager',
+      projectId: 901,
+      projectCode: 'МП-901',
+      createdAt: '2026-04-30T00:00:00.000Z',
+      updatedAt: '2026-04-30T00:00:00.000Z',
+    });
+
+    const result = await new OrderTransactionService({ transactions }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({ idempotencyKey: 'create-key-1' }),
+    });
+
+    expect(result.header.orderId).toBe(222);
+    expect((result.header as Record<string, unknown>).projectId).toBe(901);
+    expect(transactions.calls).toEqual([
+      'begin',
+      'setSessionUser',
+      'reconcileOrderCreateIdempotency',
+      'commit',
+    ]);
+  });
+
+  it('runs normal create flow and completes create idempotency for a fresh key', async () => {
+    const transactions = new FakeOrderTransactions();
+
+    const result = await new OrderTransactionService({ transactions }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({ idempotencyKey: 'create-key-2' }),
+      requestId: 'req-create-2',
+    });
+
+    expect(result.header.orderId).toBe(100);
+    expect((result.header as Record<string, unknown>).projectId).toBe(500);
+    expect(transactions.calls).toContain('reconcileOrderCreateIdempotency');
+    expect(transactions.calls).toContain('completeOrderCreateIdempotency');
+    expect(transactions.calls.indexOf('resolveProjectForCreate')).toBeLessThan(
+      transactions.calls.indexOf('createOrderHeader'),
+    );
+    expect(transactions.calls.indexOf('completeOrderCreateIdempotency')).toBeGreaterThan(
+      transactions.calls.indexOf('readOrder'),
+    );
   });
 
   it('does not sync deadlines after order save unless a deadline sync port is wired', async () => {
@@ -587,9 +776,10 @@ describe('OrderTransactionService', () => {
     expect(updateAuditEvent1.after).toBeTruthy();
     // after reflects the updated orderName
     expect((updateAuditEvent1.after as Record<string, unknown>)?.orderName).toBe('Updated order');
-    expect(transactions.calls.slice(0, 8)).toEqual([
+    expect(transactions.calls.slice(0, 9)).toEqual([
       'begin',
       'setSessionUser',
+      'readOrderClientProject',
       'loadOrderForUpdate',
       'loadOrderHeaderSnapshot',
       // VARIANT B: storedEligible=true (sheetEligible in snapshot) → loadStoredOrderSheetState runs
@@ -824,6 +1014,184 @@ describe('OrderTransactionService', () => {
     expect(result.details[0].quantity).toBe(4);
   });
 
+  it('retargets the project client when the order is the only child in its project', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedProject({
+      projectId: 700,
+      code: 'МП-700',
+      clientId: 1001,
+      deleteFlag: false,
+      version: 2,
+      editedByUserId: null,
+    });
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      projectId: 700,
+      projectCode: 'МП-700',
+      details: [calculatedDetail({ id: 11, detailCost: 5000 })],
+    });
+
+    const result = await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Updated order',
+          clientId: 2002,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 2,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 5000,
+          },
+        ],
+        payments: [],
+        version: 3,
+      }),
+    });
+
+    expect(result.header.clientId).toBe(2002);
+    expect(transactions.state.projects.get(700)?.clientId).toBe(2002);
+    expect(transactions.calls).toContain('lockProjectForOrder');
+    expect(transactions.calls).toContain('countOrdersInProject');
+    expect(transactions.calls).toContain('retargetProjectClient');
+    expect(transactions.calls.indexOf('retargetProjectClient')).toBeLessThan(
+      transactions.calls.indexOf('updateOrderHeader'),
+    );
+    // Global anti-deadlock order shared with projects move/merge: the project
+    // row lock must precede the order row lock.
+    expect(transactions.calls.indexOf('lockProjectById')).toBeGreaterThanOrEqual(0);
+    expect(transactions.calls.indexOf('lockProjectById')).toBeLessThan(
+      transactions.calls.indexOf('loadOrderForUpdate'),
+    );
+  });
+
+  it('409 when the unlocked pre-read diverges from the locked snapshot on a client change', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedProject({
+      projectId: 700,
+      code: 'МП-700',
+      clientId: 1001,
+      deleteFlag: false,
+      version: 2,
+      editedByUserId: null,
+    });
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      projectId: 700,
+      projectCode: 'МП-700',
+      details: [calculatedDetail({ id: 11, detailCost: 5000 })],
+    });
+    // Pre-read claims the client already equals the requested one (so no project
+    // lock is taken upfront), but the locked snapshot still shows the old client:
+    // proceeding would need the project lock AFTER the order lock — must 409.
+    transactions.preReadClientProjectOverride = { clientId: 2002, projectId: 700 };
+
+    await expect(
+      new OrderTransactionService({ transactions }).update({
+        currentUser: currentUser('manager'),
+        orderId: 42,
+        dto: createSaveDto({
+          header: {
+            orderId: 42,
+            orderName: 'Updated order',
+            clientId: 2002,
+            orderDate: '2026-04-30',
+            orderStatusId: 1001,
+            discount: 0,
+            surcharge: 0,
+          },
+          details: [],
+          payments: [],
+          version: 3,
+        }),
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'ORDER_PROJECT_CONFLICT' });
+
+    expect(transactions.calls).not.toContain('lockProjectForOrder');
+    expect(transactions.calls).not.toContain('retargetProjectClient');
+    expect(transactions.calls).not.toContain('updateOrderHeader');
+  });
+
+  it('blocks client change when the project has multiple orders', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedProject({
+      projectId: 701,
+      code: 'МП-701',
+      clientId: 1001,
+      deleteFlag: false,
+      version: 0,
+      editedByUserId: null,
+    });
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      projectId: 701,
+      projectCode: 'МП-701',
+      details: [calculatedDetail({ id: 11, detailCost: 5000 })],
+    });
+    transactions.seedOrder({
+      orderId: 43,
+      version: 1,
+      projectId: 701,
+      projectCode: 'МП-701',
+      details: [calculatedDetail({ id: 12, detailCost: 2000 })],
+    });
+
+    await expect(
+      new OrderTransactionService({ transactions }).update({
+        currentUser: currentUser('manager'),
+        orderId: 42,
+        dto: createSaveDto({
+          header: {
+            orderId: 42,
+            orderName: 'Updated order',
+            clientId: 2002,
+            orderDate: '2026-04-30',
+            orderStatusId: 1001,
+            discount: 0,
+            surcharge: 0,
+          },
+          details: [
+            {
+              id: 11,
+              height: 550,
+              width: 200,
+              quantity: 2,
+              materialId: null,
+              sheetMaterialTypeId: 1001,
+              millingTypeId: 1001,
+              edgeTypeId: 1001,
+              detailCost: 5000,
+            },
+          ],
+          payments: [],
+          version: 3,
+        }),
+      }),
+    ).rejects.toBeInstanceOf(ProjectClientMismatchError);
+
+    expect(transactions.state.projects.get(701)?.clientId).toBe(1001);
+    expect(transactions.calls).toContain('lockProjectForOrder');
+    expect(transactions.calls).toContain('countOrdersInProject');
+    expect(transactions.calls).not.toContain('retargetProjectClient');
+    expect(transactions.calls).not.toContain('updateOrderHeader');
+  });
+
   it('soft-deletes an order with stale check, audit, outbox and idempotency completion', async () => {
     const transactions = new FakeOrderTransactions();
     transactions.seedOrder({ orderId: 42, version: 3 });
@@ -988,6 +1356,7 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
+      'readOrderClientProject',
       'loadOrderForUpdate',
       'rollback',
     ]);
@@ -1091,7 +1460,7 @@ describe('OrderTransactionService', () => {
 
     expect(transactions.state.orders.get(42)?.payments).toHaveLength(1);
     expect(transactions.state.auditEvents).toEqual([]);
-    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'loadOrderForUpdate', 'rollback']);
+    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'readOrderClientProject', 'loadOrderForUpdate', 'rollback']);
   });
 
   it('omits payment rows from save responses when actor cannot view payments', async () => {
@@ -1219,6 +1588,7 @@ describe('OrderTransactionService', () => {
       'begin',
       'setSessionUser',
       'validateSheetReferences',
+      'resolveProjectForCreate',
       'createOrderHeader',
       'upsertDetails',
       'deleteDetails',
@@ -1561,8 +1931,13 @@ function cloneState(state: FakeState): FakeState {
           requirements: order.requirements.map((item) => ({ ...item })),
           dowelingLinks: order.dowelingLinks.map((item) => ({ ...item })),
           totals: { ...order.totals },
+          projectId: order.projectId,
+          projectCode: order.projectCode,
         },
       ]),
+    ),
+    projects: new Map(
+      [...state.projects.entries()].map(([projectId, project]) => [projectId, { ...project }]),
     ),
     auditEvents: state.auditEvents.map((event) => ({ ...event })),
     outboxEvents: state.outboxEvents.map((event) => ({ ...event })),
@@ -1607,6 +1982,8 @@ function toOrderDto(order: FakeOrderRecord): OrderDto {
     header: {
       ...order.header,
       orderId: order.orderId,
+      projectId: order.projectId,
+      projectCode: order.projectCode,
       paymentDate: order.totals.paymentDate,
       paymentStatusId: order.totals.paymentStatusId,
       totalAmount: order.totals.totalAmount,

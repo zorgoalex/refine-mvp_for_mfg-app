@@ -110,6 +110,9 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "order_name",
     "order_name_numeric",
     "client_id",
+    "project_id",
+    "project_code",
+    "order_full_number",
     "client_name",
     "order_date",
     "priority",
@@ -1151,6 +1154,7 @@ const ORDER_SORT_FIELD_MAP: Record<string, OrderSortBy> = {
   completion_date: 'completionDate',
   issue_date: 'issueDate',
   client_name: 'clientName',
+  project_code: 'projectCode',
   order_status_name: 'orderStatusName',
   payment_status_name: 'paymentStatusName',
   production_status_name: 'productionStatusName',
@@ -1209,6 +1213,9 @@ function mapOrdersViewQueryToBackend(
         break;
       case 'client_id':
         query.clientId = Number(value);
+        break;
+      case 'project_id':
+        query.projectId = Number(value);
         break;
       case 'order_status_id':
         query.orderStatusId = Number(value);
@@ -1660,17 +1667,25 @@ const SHEET_SCHEMA_FIELDS: Record<string, string[]> = {
   order_details: ["sheet_material_type_id"],
 };
 
+// Projects: columns that only exist once migration 056 Hasura metadata is
+// applied. Same failure mode as SHEET_SCHEMA_FIELDS — selecting them against
+// legacy Hasura fails with "field not found in type".
+const PROJECT_SCHEMA_FIELDS: Record<string, string[]> = {
+  orders_view: ["project_id", "project_code", "order_full_number"],
+};
+
 const fieldsFor = (resource: string) => {
   const fields = RESOURCE_FIELDS[resource];
   if (!fields) return "";
+  const hidden = new Set<string>();
   if (!featureFlags.sheetMaterialsReads) {
-    const sheetFields = SHEET_SCHEMA_FIELDS[resource];
-    if (sheetFields) {
-      const hidden = new Set(sheetFields);
-      return fields.filter((f) => !hidden.has(f)).join(" \n");
-    }
+    for (const field of SHEET_SCHEMA_FIELDS[resource] ?? []) hidden.add(field);
   }
-  return fields.join(" \n");
+  if (!featureFlags.projects) {
+    for (const field of PROJECT_SCHEMA_FIELDS[resource] ?? []) hidden.add(field);
+  }
+  if (hidden.size === 0) return fields.join(" \n");
+  return fields.filter((f) => !hidden.has(f)).join(" \n");
 };
 
 export const dataProvider = (_apiUrl: string) => {

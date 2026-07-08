@@ -1,6 +1,6 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space } from "antd";
+import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -29,6 +29,8 @@ import { AddToCutModal } from "./components/AddToCutModal";
 import { can, canAny } from "../../utils/permissions";
 import { cutApi } from "../../api/cutApi";
 import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.types";
+import { projectsApi } from "../../api/projectsApi";
+import type { ProjectDto } from "../../api/projectsApi";
 import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
@@ -76,14 +78,25 @@ const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
 
 const ORDER_DETAIL_SHOW_DEFAULT_ORDER = ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS.map((definition) => definition.key);
 
+function createProjectMoveIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
 
-
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [searchParams] = useSearchParams();
   const highlightDetail = Number(searchParams.get('highlightDetail')) || null;
   const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(null);
+  const [moveModalOpen, setMoveModalOpen] = useState(false);
+  const [moveCandidates, setMoveCandidates] = useState<ProjectDto[]>([]);
+  const [moveCandidatesLoading, setMoveCandidatesLoading] = useState(false);
+  const [moveSubmitting, setMoveSubmitting] = useState(false);
+  const [moveTargetProjectId, setMoveTargetProjectId] = useState<number | undefined>(undefined);
+  const [moveCreateNew, setMoveCreateNew] = useState(false);
 
   const { queryResult } = useShow({
     meta: {
@@ -126,6 +139,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         "updated_at",
         "created_by",
         "edited_by",
+        ...(featureFlags.projects ? ["project_id", "project_code", "order_full_number"] : []),
       ],
     },
   });
@@ -135,15 +149,23 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
   const backendOrder = useBackendOrdersRead ? record?.__backendOrder : null;
   const labelsEnabled = featureFlags.labels && canAny(['labels.view', 'labels.generate']);
+  const showTitle = record?.order_full_number
+    ? `Заказ ${record.order_full_number}`
+    : 'Просмотр заказа';
 
   // Enrich the workspace tab label once the order record is loaded.
   const location = useLocation();
   const setTabTitle = useTabStore((s) => s.setTabTitle);
   useEffect(() => {
+    if (record?.order_full_number) {
+      setTabTitle(location.pathname, `Заказ ${record.order_full_number}`);
+      return;
+    }
+
     if (record?.order_name) {
       setTabTitle(location.pathname, `Заказ #${record.order_id} · ${record.order_name}`);
     }
-  }, [record?.order_id, record?.order_name, location.pathname, setTabTitle]);
+  }, [record?.order_id, record?.order_name, record?.order_full_number, location.pathname, setTabTitle]);
 
   const { data: clientData, isLoading: clientLoading } = useOne({
     resource: "clients",
@@ -156,6 +178,55 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const resolvedClientName = resolveOrderExportClientName(record, backendOrder, clientData?.data);
   const exportClient = toOrderExportClient(resolvedClientName);
   const isClientResolving = !!record?.client_id && !resolvedClientName && clientLoading;
+  const projectCode = typeof record?.project_code === 'string' ? record.project_code : null;
+  const projectId =
+    typeof record?.project_id === 'number' && Number.isFinite(record.project_id)
+      ? record.project_id
+      : null;
+  const projectLabel = projectCode || '—';
+
+  useEffect(() => {
+    if (!featureFlags.projects || !moveModalOpen || !record?.client_id) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadMoveCandidates = async () => {
+      setMoveCandidatesLoading(true);
+      try {
+        const response = await projectsApi.list({ clientId: record.client_id });
+        if (!cancelled) {
+          setMoveCandidates(
+            response.filter((candidate) => candidate.projectId !== projectId),
+          );
+        }
+      } catch (error) {
+        if (!cancelled) {
+          message.error(error instanceof Error ? error.message : 'Не удалось загрузить проекты');
+        }
+      } finally {
+        if (!cancelled) {
+          setMoveCandidatesLoading(false);
+        }
+      }
+    };
+
+    void loadMoveCandidates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [moveModalOpen, projectId, record?.client_id]);
+
+  const moveProjectOptions = useMemo(
+    () =>
+      moveCandidates.map((candidate) => ({
+        value: candidate.projectId,
+        label: `${candidate.code} — ${candidate.name}`,
+      })),
+    [moveCandidates],
+  );
 
   // Загрузка деталей заказа
   const { data: detailsData, isLoading: detailsLoading } = useList({
@@ -629,6 +700,35 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     }
   };
 
+  const handleMoveProject = useCallback(async () => {
+    if (!record?.order_id) {
+      return;
+    }
+
+    if (!moveCreateNew && moveTargetProjectId === undefined) {
+      message.warning('Выберите проект назначения или создайте новый');
+      return;
+    }
+
+    setMoveSubmitting(true);
+    try {
+      await projectsApi.move(record.order_id, {
+        targetProjectId: moveCreateNew ? undefined : moveTargetProjectId,
+        createNew: moveCreateNew,
+        idempotencyKey: createProjectMoveIdempotencyKey(),
+      });
+      setMoveModalOpen(false);
+      setMoveCreateNew(false);
+      setMoveTargetProjectId(undefined);
+      await queryResult.refetch();
+      message.success('Заказ перенесён в другой проект');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось перенести заказ');
+    } finally {
+      setMoveSubmitting(false);
+    }
+  }, [moveCreateNew, moveTargetProjectId, queryResult, record?.order_id]);
+
   // Unwrap a GroupedRow to the underlying detail, or null for separator rows.
   // Declared at component scope (NOT inside JSX) — statements inside JSX are invalid TSX.
   const asDetail = (row: any) => (row?.kind === 'detail' ? row.detail : row?.kind === 'separator' ? null : row);
@@ -794,7 +894,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   return (
     <Show
       isLoading={showLoading}
-      title="Просмотр заказа"
+      title={showTitle}
       breadcrumb={
         <Breadcrumb>
           <Breadcrumb.Item>
@@ -812,6 +912,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         isMobile ? (
           <>
             <EditButton>Изменить</EditButton>
+            {featureFlags.projects && record?.order_id && record?.client_id ? (
+              <Button onClick={() => setMoveModalOpen(true)}>Перенести в другой проект</Button>
+            ) : null}
             <Dropdown
               trigger={['click']}
               menu={{
@@ -863,6 +966,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         ) : (
           <>
             <EditButton>Изменить</EditButton>
+            {featureFlags.projects && record?.order_id && record?.client_id ? (
+              <Button onClick={() => setMoveModalOpen(true)}>
+                Перенести в другой проект
+              </Button>
+            ) : null}
             <Button
               icon={<ReloadOutlined />}
               onClick={handleRefreshPaymentStatus}
@@ -940,6 +1048,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               headerMaterialName={headerMaterialName}
             />
           </div>
+
+          {featureFlags.projects && projectId && (
+            <div style={{ marginBottom: 12 }}>
+              Проект:{' '}
+              <Link to={`/projects/show/${projectId}`}>{projectLabel}</Link>
+            </div>
+          )}
 
           <div style={{ marginBottom: 16 }}>
             <div
@@ -1407,6 +1522,46 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 setCutSelectedDetailIds([]);
               }}
             />
+          )}
+          {featureFlags.projects && record?.order_id && record?.client_id && (
+            <Modal
+              title="Перенести в другой проект"
+              open={moveModalOpen}
+              onCancel={() => {
+                setMoveModalOpen(false);
+                setMoveCreateNew(false);
+                setMoveTargetProjectId(undefined);
+              }}
+              onOk={() => void handleMoveProject()}
+              okText="Перенести"
+              cancelText="Отмена"
+              okButtonProps={{ loading: moveSubmitting }}
+            >
+              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                <Checkbox
+                  checked={moveCreateNew}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setMoveCreateNew(checked);
+                    if (checked) {
+                      setMoveTargetProjectId(undefined);
+                    }
+                  }}
+                >
+                  Создать новый
+                </Checkbox>
+                <Select
+                  showSearch
+                  disabled={moveCreateNew}
+                  loading={moveCandidatesLoading}
+                  placeholder="Выберите проект"
+                  value={moveTargetProjectId}
+                  onChange={(value) => setMoveTargetProjectId(value)}
+                  options={moveProjectOptions}
+                  optionFilterProp="label"
+                />
+              </Space>
+            </Modal>
           )}
         </>
       )}

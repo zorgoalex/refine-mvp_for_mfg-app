@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
-import { PgOrderReadRepository } from './pg-order-read-repository';
+import { parseOrderSearchInput, PgOrderReadRepository } from './pg-order-read-repository';
 
 describe('PgOrderReadRepository', () => {
   it('lists orders with pagination, whitelist sort and soft-delete filter', async () => {
@@ -27,6 +27,9 @@ describe('PgOrderReadRepository', () => {
         {
           orderId: 100,
           orderName: 'A-100',
+          projectId: 77,
+          projectCode: 'МП-1024',
+          fullNumber: 'МП-1024-A-100',
           debtAmount: 70,
           notes: 'List note',
           materialIds: [10, 11],
@@ -53,12 +56,65 @@ describe('PgOrderReadRepository', () => {
 
     const listQuery = database.queries.find((query) => query.text.includes('LIMIT'))?.text ?? '';
     expect(listQuery).toContain('o.delete_flag = false');
+    expect(listQuery).toContain('JOIN projects mp ON mp.project_id = o.project_id');
+    expect(listQuery).toContain('mp.code AS project_code');
+    expect(listQuery).toContain("(mp.code || '-' || o.order_name) AS full_number");
     expect(listQuery).toContain('LEFT JOIN LATERAL');
     expect(listQuery).toContain('FROM order_details od');
     expect(listQuery).toContain('FROM order_doweling_links odl');
     expect(listQuery).toContain('FROM production_status_events pse');
     expect(listQuery).toContain('ORDER BY (o.final_amount - o.paid_amount) ASC');
-    expect(database.queries.at(-1)?.params).toEqual(['%client%', '2026-05-01', 42, 10, 10]);
+    // search «client» биндит и contains-ветку, и code-prefix ветку (mp.code ILIKE 'client%')
+    expect(database.queries.at(-1)?.params).toEqual(['%client%', 'client%', '2026-05-01', 42, 10, 10]);
+  });
+
+  it('adds project search branches, projectId filter and projectCode sort for full numbers', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service);
+
+    await repository.listOrders({
+      currentUser: currentUser('42'),
+      query: {
+        page: 1,
+        pageSize: 10,
+        sortBy: 'projectCode',
+        sortOrder: 'desc',
+        search: 'МП-1024-77',
+        projectId: 77,
+      },
+    });
+
+    const countQuery = database.queries.find((query) => query.text.includes('COUNT(*)::int'));
+    const listQuery = database.queries.find((query) => query.text.includes('LIMIT'));
+
+    expect(countQuery?.text).toContain('JOIN projects mp ON mp.project_id = o.project_id');
+    expect(listQuery?.text).toContain('mp.code ILIKE $2');
+    expect(listQuery?.text).toContain('(mp.code = $3 AND o.order_name ILIKE $4)');
+    expect(listQuery?.text).toContain('o.project_id = $5');
+    expect(listQuery?.text).toContain('ORDER BY mp.code DESC');
+    expect(listQuery?.text).toContain("(mp.code || '-' || o.order_name) AS full_number");
+    expect(listQuery?.params).toEqual(['%МП-1024-77%', 'МП-1024-77%', 'МП-1024', '77%', 77, 10, 0]);
+  });
+
+  it('keeps plain numeric search out of project-code branches', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service);
+
+    await repository.listOrders({
+      currentUser: currentUser('42'),
+      query: {
+        page: 1,
+        pageSize: 10,
+        search: '1258',
+      },
+    });
+
+    const listQuery = database.queries.find((query) => query.text.includes('LIMIT'));
+
+    expect(listQuery?.text).toContain('(o.order_name ILIKE $1 OR c.client_name::text ILIKE $1)');
+    expect(listQuery?.text).not.toContain('mp.code ILIKE');
+    expect(listQuery?.text).not.toContain('mp.code = $');
+    expect(listQuery?.params).toEqual(['%1258%', 10, 0]);
   });
 
   it('loads full order aggregate from base tables', async () => {
@@ -277,6 +333,44 @@ describe('PgOrderReadRepository Variant B (sheet-only reads)', () => {
     expect(result.data[0].sheetMaterialTypeIds).toEqual([5, 6]);
     expect(result.data[0].materialIds).toEqual([]);
     expect(result.data[0].filmNames).toEqual(['Пленка A', 'Пленка B']);
+  });
+});
+
+describe('parseOrderSearchInput', () => {
+  it('keeps plain numeric search out of project-code mode', () => {
+    expect(parseOrderSearchInput('1258')).toEqual({
+      plain: '1258',
+      codePrefix: null,
+      codeExact: null,
+      namePrefix: null,
+    });
+  });
+
+  it('treats code-only input as project-code prefix', () => {
+    expect(parseOrderSearchInput('ФК26')).toEqual({
+      plain: 'ФК26',
+      codePrefix: 'ФК26',
+      codeExact: null,
+      namePrefix: null,
+    });
+  });
+
+  it('splits full number by the last dash', () => {
+    expect(parseOrderSearchInput('ФК26-1258')).toEqual({
+      plain: 'ФК26-1258',
+      codePrefix: 'ФК26-1258',
+      codeExact: 'ФК26',
+      namePrefix: '1258',
+    });
+  });
+
+  it('preserves dashes inside project code before the last segment', () => {
+    expect(parseOrderSearchInput('МП-1024-77')).toEqual({
+      plain: 'МП-1024-77',
+      codePrefix: 'МП-1024-77',
+      codeExact: 'МП-1024',
+      namePrefix: '77',
+    });
   });
 });
 
@@ -586,6 +680,9 @@ function orderRow() {
   return {
     order_id: 100,
     order_name: 'A-100',
+    project_id: 77,
+    project_code: 'МП-1024',
+    full_number: 'МП-1024-A-100',
     client_id: 5,
     client_name: 'Client',
     order_date: '2026-05-01',
