@@ -23,6 +23,7 @@ const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/sho
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
+const BazisPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisPage")).BazisPage }));
 const ScanPage = lazy(async () => ({ default: (await import("./pages/scan/ScanPage")).ScanPage }));
 const GroupsPage = lazy(async () => ({ default: (await import("./pages/groups/GroupsPage")).GroupsPage }));
 const ProjectsList = lazy(async () => ({ default: (await import("./pages/projects/ProjectsList")).ProjectsList }));
@@ -274,6 +275,17 @@ const ThemedApp = () => {
                         list: "/cut",
                         meta: {
                           label: "Раскрой",
+                        },
+                      },
+                    ]
+                  : []),
+                ...(featureFlags.useBackendBazis
+                  ? [
+                      {
+                        name: "bazis",
+                        list: "/bazis",
+                        meta: {
+                          label: "Базис-проекты",
                         },
                       },
                     ]
@@ -622,6 +634,11 @@ const ThemedApp = () => {
                   {featureFlags.useBackendCut && (
                     <Route path="/cut">
                       <Route index element={<CutPage />} />
+                    </Route>
+                  )}
+                  {featureFlags.useBackendBazis && (
+                    <Route path="/bazis">
+                      <Route index element={<BazisPage />} />
                     </Route>
                   )}
                   {featureFlags.labels && (

@@ -118,6 +118,7 @@ const RESOURCE_ICONS: Record<string, React.ReactNode> = {
   configuration: <SettingOutlined />,
   audit: <AuditOutlined />,
   sheet_material_types: <BorderOutlined />,
+  bazis: <FileSearchOutlined />,
 };
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -142,6 +143,7 @@ const CATEGORY_MAP: Record<string, string> = {
   workshops: "Производство",
   work_centers: "Производство",
   doweling_orders_view: "Производство",
+  bazis: "Производство",
   films: "Материалы",
   materials: "Материалы",
   sheet_material_types: "Материалы",

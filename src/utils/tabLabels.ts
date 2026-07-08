@@ -36,6 +36,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   audit: 'Аудит',
   sheet_material_types: 'Листовые материалы',
   cut: 'Раскрой',
+  bazis: 'Базис-проекты',
   scan: 'Сканер бирок',
 };
 
