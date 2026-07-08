@@ -10,8 +10,12 @@ import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { BazisService } from '../application/bazis.service';
 import type {
   BazisImportResponseDto,
+  BazisNodeCardDto,
+  BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
+  BazisRevisionMaterialsSummaryDto,
+  BazisRevisionOrderDto,
   BazisTreeNodeDto,
   CreateOrderFromRevisionResponseDto,
   MaterialMappingDto,
@@ -36,6 +40,17 @@ const listProjectsQuerySchema = z.object({
 const treeQuerySchema = z.object({
   parentNodeId: optionalNumericIdSchema,
 });
+
+const nodeSearchQuerySchema = z
+  .object({
+    q: z.string().trim().min(1).max(200).optional(),
+    objectType: z.string().trim().min(1).max(100).optional(),
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+  })
+  .refine((value) => value.q != null || value.objectType != null, {
+    message: 'Нужен q или objectType',
+    path: ['q'],
+  });
 
 const materialMappingsQuerySchema = z.object({
   names: z.string().trim().min(1).optional(),
@@ -291,6 +306,71 @@ export class BazisController {
     return this.bazis.getTree(currentUser, parseNumericPathParam(id, 'id'), parsed.parentNodeId);
   }
 
+  @ApiOperation({ operationId: 'getBazisNodeCard', summary: 'Get Bazis node card with raw payload' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis node not found' })
+  @ApiResponse({ status: 422, description: 'Invalid node id' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Get('nodes/:id')
+  async getNodeCard(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+  ): Promise<BazisNodeCardDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.bazis.getNodeCard(currentUser, parseNumericPathParam(id, 'id'));
+  }
+
+  @ApiOperation({ operationId: 'searchBazisRevisionNodes', summary: 'Search nodes within a Bazis revision' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 422, description: 'Invalid node search query' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Get('revisions/:id/nodes/search')
+  async searchNodes(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+    @Query() query: Record<string, string | string[] | undefined>,
+  ): Promise<BazisNodeSearchResponseDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.bazis.searchNodes(currentUser, parseNumericPathParam(id, 'id'), parseNodeSearchQuery(query));
+  }
+
+  @ApiOperation({ operationId: 'getBazisRevisionMaterialsSummary', summary: 'Get materials summary for a Bazis revision' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 422, description: 'Invalid revision id' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Get('revisions/:id/materials-summary')
+  async getMaterialsSummary(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+  ): Promise<BazisRevisionMaterialsSummaryDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.bazis.getMaterialsSummary(currentUser, parseNumericPathParam(id, 'id'));
+  }
+
+  @ApiOperation({ operationId: 'listBazisRevisionOrders', summary: 'List ERP orders created from a Bazis revision' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 422, description: 'Invalid revision id' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Get('revisions/:id/orders')
+  async listRevisionOrders(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+  ): Promise<BazisRevisionOrderDto[]> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.bazis.listRevisionOrders(currentUser, parseNumericPathParam(id, 'id'));
+  }
+
   @ApiOperation({ operationId: 'createOrderFromBazisRevision', summary: 'Create ERP order from a Bazis revision selection' })
   @ApiBody({ schema: swaggerSchema(createOrderFromRevisionRequestSwaggerSchema) })
   @ApiResponse({ status: 201, description: 'ERP order created from Bazis revision' })
@@ -386,6 +466,17 @@ export function parseRevisionTreeQuery(
 ): { parentNodeId: number | null } {
   const parsed = parseWithZod(treeQuerySchema, flattenQuery(query), 'Bazis tree query validation failed');
   return { parentNodeId: parsed.parentNodeId ?? null };
+}
+
+export function parseNodeSearchQuery(
+  query: Record<string, string | string[] | undefined>,
+): { q: string | null; objectType: string | null; limit: number } {
+  const parsed = parseWithZod(
+    nodeSearchQuerySchema,
+    flattenQuery(query),
+    'Bazis node search query validation failed',
+  );
+  return { q: parsed.q ?? null, objectType: parsed.objectType ?? null, limit: parsed.limit ?? 50 };
 }
 
 export function parseMaterialMappingsQuery(

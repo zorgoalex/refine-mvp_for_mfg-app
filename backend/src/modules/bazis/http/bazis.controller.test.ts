@@ -9,6 +9,7 @@ import {
   BazisController,
   parseBazisImportFields,
   parseMaterialMappingsQuery,
+  parseNodeSearchQuery,
   parseRevisionTreeQuery,
   parseUpsertMaterialMappingsBody,
 } from './bazis.controller';
@@ -119,6 +120,30 @@ describe('BazisController', () => {
     });
   });
 
+  it('parseNodeSearchQuery accepts q, objectType, and explicit limit', () => {
+    expect(parseNodeSearchQuery({ q: '  шкаф  ', objectType: '  panel  ', limit: '25' })).toEqual({
+      q: 'шкаф',
+      objectType: 'panel',
+      limit: 25,
+    });
+  });
+
+  it('parseNodeSearchQuery rejects missing q and objectType', () => {
+    expect(() => parseNodeSearchQuery({})).toThrowError(ApiError);
+  });
+
+  it('parseNodeSearchQuery rejects limit above the maximum', () => {
+    expect(() => parseNodeSearchQuery({ q: 'шкаф', limit: '999' })).toThrowError(ApiError);
+  });
+
+  it('parseNodeSearchQuery defaults limit to 50', () => {
+    expect(parseNodeSearchQuery({ objectType: 'panel' })).toEqual({
+      q: null,
+      objectType: 'panel',
+      limit: 50,
+    });
+  });
+
   it('rejects cross-kind material mappings (targetKind must match sourceKind or be ignore)', () => {
     expect(() =>
       parseUpsertMaterialMappingsBody({
@@ -205,6 +230,10 @@ function createController(input: {
     listProjects: vi.fn().mockResolvedValue([]),
     getProject: vi.fn(),
     getTree: vi.fn(),
+    getNodeCard: vi.fn(),
+    searchNodes: vi.fn(),
+    getMaterialsSummary: vi.fn(),
+    listRevisionOrders: vi.fn(),
     listMaterialMappings: vi.fn(),
     upsertMaterialMappings: vi.fn(),
     createOrderFromRevision: vi.fn(),

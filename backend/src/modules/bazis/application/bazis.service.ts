@@ -17,8 +17,12 @@ import type {
 } from './bazis.types';
 import {
   type BazisImportResponseDto,
+  type BazisNodeCardDto,
+  type BazisNodeSearchResponseDto,
   type BazisProjectCardDto,
   type BazisProjectListItemDto,
+  type BazisRevisionMaterialsSummaryDto,
+  type BazisRevisionOrderDto,
   type BazisTreeNodeDto,
   type CreateOrderFromRevisionResponseDto,
   type MaterialMappingDto,
@@ -108,6 +112,36 @@ export class BazisService {
   ): Promise<BazisTreeNodeDto[]> {
     await this.requirePermission(currentUser, 'bazis.view', 'get_tree');
     return this.ports.repository.getTreeChildren(revisionId, parentNodeId);
+  }
+
+  async getNodeCard(currentUser: CurrentUser, nodeId: number): Promise<BazisNodeCardDto> {
+    await this.requirePermission(currentUser, 'bazis.view', 'get_node_card');
+    return this.ports.repository.getNodeCard(nodeId);
+  }
+
+  async searchNodes(
+    currentUser: CurrentUser,
+    revisionId: number,
+    input: { q: string | null; objectType: string | null; limit: number },
+  ): Promise<BazisNodeSearchResponseDto> {
+    await this.requirePermission(currentUser, 'bazis.view', 'search_nodes');
+    return this.ports.repository.searchNodes({ revisionId, ...input });
+  }
+
+  async getMaterialsSummary(
+    currentUser: CurrentUser,
+    revisionId: number,
+  ): Promise<BazisRevisionMaterialsSummaryDto> {
+    await this.requirePermission(currentUser, 'bazis.view', 'get_materials_summary');
+    return this.ports.repository.getMaterialsSummary(revisionId);
+  }
+
+  async listRevisionOrders(
+    currentUser: CurrentUser,
+    revisionId: number,
+  ): Promise<BazisRevisionOrderDto[]> {
+    await this.requirePermission(currentUser, 'bazis.view', 'list_revision_orders');
+    return this.ports.repository.listRevisionOrders(revisionId);
   }
 
   async listMaterialMappings(
