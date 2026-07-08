@@ -57,6 +57,10 @@ export const ViewerTree = forwardRef<ViewerTreeHandle, ViewerTreeProps>(({
       .finally(() => {
         if (epochRef.current === epoch) setLoading(false);
       });
+    return () => {
+      // unmount/re-run: инвалидирует in-flight континуации (epoch-guard)
+      epochRef.current += 1;
+    };
   }, [revisionId]);
 
   const findNode = useCallback((nodes: BazisTreeDataNode[], nodeId: number): BazisTreeDataNode | null => {
