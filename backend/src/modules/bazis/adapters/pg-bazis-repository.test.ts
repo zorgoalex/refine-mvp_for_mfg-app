@@ -815,6 +815,9 @@ describe('PgBazisRepository.listRevisionOrders', () => {
     expect(sql).toContain('JOIN orders o ON o.order_id = bol.order_id');
     // счётчик деталей — по order_detail_id, НЕ по mapping_kind (см. семантику выше)
     expect(sql).toContain('FILTER (WHERE map.order_detail_id IS NOT NULL)');
+    // скоуп агрегата границей ревизии — пин против cross-revision утечки счётчиков
+    expect(sql).toContain('JOIN bazis_nodes n ON n.bazis_node_id = map.node_id');
+    expect(sql).toContain('WHERE n.revision_id = $1');
     expect(orders).toEqual([{
       orderId: 9001, orderName: 'Тест-заказ 1', createdAt: '2026-07-08 10:00:00+00',
       nodesMapped: 12, detailsCreated: 10,
