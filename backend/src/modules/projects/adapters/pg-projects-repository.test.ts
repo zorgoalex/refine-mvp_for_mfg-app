@@ -4,6 +4,52 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import { PgProjectsRepository } from './pg-projects-repository';
 
+describe('PgProjectsRepository.getById', () => {
+  it('reads card orders from the orders TABLE (orders_view hides delete_flag and filters deleted)', async () => {
+    const queries: string[] = [];
+    const service = {
+      async query(text: string) {
+        queries.push(normalizeSql(text));
+        if (text.includes('FROM projects_view')) {
+          return {
+            rows: [{ project_id: 5, code: 'ФК26', name: 'Кухня', client_id: 9, notes: null, version: 1 }],
+            rowCount: 1,
+          };
+        }
+        return {
+          rows: [{
+            order_id: 10,
+            order_name: '1258',
+            order_full_number: 'ФК26-1258',
+            final_amount: '100.00',
+            paid_amount: '0.00',
+            order_status_name: 'Новый',
+            delete_flag: true,
+          }],
+          rowCount: 1,
+        };
+      },
+    } as unknown as DatabaseService;
+
+    const card = await new PgProjectsRepository(service).getById(5);
+    expect(card.orders).toEqual([
+      {
+        orderId: 10,
+        orderName: '1258',
+        fullNumber: 'ФК26-1258',
+        finalAmount: '100.00',
+        paidAmount: '0.00',
+        orderStatusName: 'Новый',
+        deleteFlag: true,
+      },
+    ]);
+    const ordersSql = queries.find((sql) => sql.includes('WHERE o.project_id = $1'));
+    expect(ordersSql).toBeDefined();
+    expect(ordersSql).toContain('FROM orders o');
+    expect(ordersSql).not.toContain('FROM orders_view');
+  });
+});
+
 describe('PgProjectsRepository.update', () => {
   it('locks the project row FOR UPDATE, writes exactly one audit row, and returns the updated dto', async () => {
     const database = createDatabase({

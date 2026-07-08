@@ -133,19 +133,24 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
       throw new ProjectNotFoundError(projectId);
     }
 
+    // Not orders_view: it filters delete_flag=false and does not expose the
+    // column, while the project card must also list archived (deleted) orders
+    // that stay parented to the project.
     const orders = await this.database.query<ProjectOrderRowDb>(
       `
       SELECT
-        order_id,
-        order_name,
-        order_full_number,
-        final_amount,
-        paid_amount,
-        order_status_name,
-        delete_flag
-      FROM orders_view
-      WHERE project_id = $1
-      ORDER BY order_id ASC
+        o.order_id,
+        o.order_name,
+        (p.code || '-' || o.order_name) AS order_full_number,
+        o.final_amount,
+        o.paid_amount,
+        os.order_status_name,
+        o.delete_flag
+      FROM orders o
+      JOIN projects p ON p.project_id = o.project_id
+      LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
+      WHERE o.project_id = $1
+      ORDER BY o.order_id ASC
       `,
       [projectId],
     );
