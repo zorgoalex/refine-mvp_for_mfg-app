@@ -117,6 +117,58 @@ describe('BazisController', () => {
       names: ['oak white', 'edge-1'],
     });
   });
+
+  it('coerces create-order body and delegates to the service', async () => {
+    const createOrderFromRevision = vi.fn().mockResolvedValue({
+      orderId: 501,
+      orderName: 'Новый заказ',
+      detailsCreated: 2,
+      mappedNodes: 2,
+      requestId: 'req-order',
+      auditId: 'audit-1',
+    });
+    const controller = createController({
+      bazisEnabled: true,
+      service: { createOrderFromRevision },
+    });
+
+    const result = await controller.createOrderFromRevision(request(), '12', {
+      clientId: '77',
+      orderName: '  Новый заказ  ',
+      orderStatusId: '3',
+      selectedNodeIds: ['101', '102'],
+      idempotencyKey: 'bazis-key-001',
+    });
+
+    expect(createOrderFromRevision).toHaveBeenCalledWith({
+      currentUser: request().user,
+      requestId: 'req-1',
+      revisionId: 12,
+      clientId: 77,
+      orderName: 'Новый заказ',
+      orderStatusId: 3,
+      selectedNodeIds: [101, 102],
+      idempotencyKey: 'bazis-key-001',
+    });
+    expect(result.orderId).toBe(501);
+  });
+
+  it('validates create-order request body', async () => {
+    const controller = createController({ bazisEnabled: true });
+
+    await expect(
+      controller.createOrderFromRevision(request(), '12', {
+        clientId: '0',
+        orderName: '   ',
+        orderStatusId: '0',
+        selectedNodeIds: [],
+        idempotencyKey: 'short',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+    } satisfies Partial<ApiError>);
+  });
 });
 
 function createController(input: {

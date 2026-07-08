@@ -28,7 +28,7 @@ describe('label row builder', () => {
       details: [
         detail({
           basisProject: 'Project A',
-          basisData: '7 D-01 - Parsed name',
+          basisData: '7/D-01/Фасад/левая створка',
           detailName: 'ERP name',
           bazisFields: { 'bazis.comment': 'manual comment' },
           customFields: { 'custom.operator_note': 'ok' },
@@ -46,6 +46,27 @@ describe('label row builder', () => {
       'custom.operator_note': 'ok',
     });
     expect(hashLabelRows([row])).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('extracts Bazis designation and name from the frozen slash basis_data sample', () => {
+    const [row] = buildLabelRows({
+      orderName: '548',
+      today: '2026-06-24',
+      template: { customFieldSchema: {} },
+      details: [
+        detail({
+          basisProject: 'Project A',
+          detailName: null,
+          basisData: '7/D-01/Фасад/левая створка',
+        }),
+      ],
+    });
+
+    expect(row.values).toMatchObject({
+      'bazis.position': '7',
+      'bazis.designation': 'D-01',
+      'bazis.name': 'Фасад/левая створка',
+    });
   });
 
   it('can ignore Basis project/data columns and use ordinary order detail fields', () => {

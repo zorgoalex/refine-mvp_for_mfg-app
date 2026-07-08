@@ -105,6 +105,10 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     private readonly sheetOrdersReads: boolean = true,
   ) {}
 
+  getTransactionClient(): TransactionClient {
+    return this.tx;
+  }
+
   // VARIANT B: dead after shadow removal — delete in follow-up (no-op; no longer read by upsertDetails)
   setSaveContext(context: SaveContext): void {
     this.saveContext = context;
@@ -629,7 +633,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           detailParams(effective.id, orderId, effective),
         );
       } else {
-        await this.tx.query(
+        const inserted = await this.tx.query<{ detail_id: string | number }>(
           `
           INSERT INTO order_details (
             order_id, detail_number, detail_name, height, width, quantity, area,
@@ -639,9 +643,11 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
             sheet_material_type_id, basis_project, basis_data, basis_designation
           )
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+          RETURNING detail_id
           `,
           detailParamsForInsert(orderId, effective),
         );
+        detail.id = Number(inserted.rows[0]?.detail_id);
       }
     }
   }

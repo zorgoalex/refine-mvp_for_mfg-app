@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, type PermissionName, type UserRole } from '../../../permissions/permissions';
+import type { TransactionClient } from '../../../database/database.types';
 import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
@@ -98,6 +99,7 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
   completedCreateResponse?: OrderDto;
   /** Simulates a stale unlocked pre-read diverging from the locked snapshot. */
   preReadClientProjectOverride?: { clientId: number | null; projectId: number };
+  readonly transactionClient = { query: async () => ({ rows: [], rowCount: 0 }), raw: {} } as TransactionClient;
 
   async runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T> {
     this.calls.push('begin');
@@ -156,6 +158,11 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
 
   async setSessionUser(): Promise<void> {
     this.call('setSessionUser');
+  }
+
+  getTransactionClient(): TransactionClient {
+    this.call('getTransactionClient');
+    return this.owner.transactionClient;
   }
 
   setSaveContext(_context: SaveContext): void {
@@ -389,6 +396,15 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     this.call('upsertDetails');
     const order = this.getOrder(orderId);
     order.details = upsertRows(order.details, details, () => this.state.nextDetailId++);
+    for (const detail of details) {
+      if (detail.id || !detail.clientKey) {
+        continue;
+      }
+      const persisted = order.details.find((candidate) => candidate.clientKey === detail.clientKey);
+      if (persisted?.id) {
+        detail.id = persisted.id;
+      }
+    }
   }
 
   async deleteDetails(orderId: number, ids: readonly number[]): Promise<void> {
@@ -623,6 +639,76 @@ describe('OrderTransactionService', () => {
       'readOrder',
       'commit',
     ]);
+  });
+
+  it('passes unit of work and persisted detail ids by clientKey to postPersistHook', async () => {
+    const transactions = new FakeOrderTransactions();
+    const hook = vi.fn().mockResolvedValue(undefined);
+
+    await new OrderTransactionService({ transactions }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({
+        details: [
+          {
+            clientKey: 'bazis-node-101',
+            height: 550,
+            width: 200,
+            quantity: 2,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 10000,
+          },
+          {
+            clientKey: 'bazis-node-102',
+            height: 650,
+            width: 250,
+            quantity: 1,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 5000,
+          },
+        ],
+      }),
+      postPersistHook: hook,
+    });
+
+    expect(hook).toHaveBeenCalledTimes(1);
+    const [uow, created] = hook.mock.calls[0] as [OrderWriteUnitOfWork, {
+      orderId: number;
+      detailIdsByClientKey: Map<string, number>;
+    }];
+    expect(created.orderId).toBe(100);
+    expect(created.detailIdsByClientKey).toEqual(
+      new Map([
+        ['bazis-node-101', 1000],
+        ['bazis-node-102', 1001],
+      ]),
+    );
+    expect(uow.getTransactionClient()).toBe(transactions.transactionClient);
+  });
+
+  it('rolls back the whole create transaction when postPersistHook throws', async () => {
+    const transactions = new FakeOrderTransactions();
+
+    await expect(
+      new OrderTransactionService({ transactions }).create({
+        currentUser: currentUser('manager'),
+        dto: createSaveDto(),
+        postPersistHook: async () => {
+          throw new Error('hook failed');
+        },
+      }),
+    ).rejects.toThrow('hook failed');
+
+    expect(transactions.committed).toBe(0);
+    expect(transactions.rolledBack).toBe(1);
+    expect(transactions.state.orders.size).toBe(0);
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.calls).toContain('writeAuditEvent');
   });
 
   it('returns cached create response for a repeated idempotency key before any inserts', async () => {

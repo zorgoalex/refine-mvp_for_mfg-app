@@ -36,6 +36,15 @@ describe('parseBasisData', () => {
     });
   });
 
+  it('parses Bazis slash grammar and preserves slashes inside the name', () => {
+    expect(parseBasisData('7/D-01/Фасад/левая створка')).toEqual({
+      raw: '7/D-01/Фасад/левая створка',
+      position: '7',
+      designation: 'D-01',
+      name: 'Фасад/левая створка',
+    });
+  });
+
   it('preserves unknown text without throwing', () => {
     expect(parseBasisData('неизвестный формат без структуры')).toEqual({
       raw: 'неизвестный формат без структуры',

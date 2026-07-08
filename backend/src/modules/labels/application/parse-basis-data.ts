@@ -11,6 +11,15 @@ export function parseBasisData(value: string | null | undefined): ParsedBasisDat
     return { raw: '' };
   }
 
+  const firstSlash = raw.indexOf('/');
+  const secondSlash = firstSlash >= 0 ? raw.indexOf('/', firstSlash + 1) : -1;
+  if (firstSlash > 0 && secondSlash > firstSlash + 1) {
+    const position = raw.slice(0, firstSlash);
+    const designation = raw.slice(firstSlash + 1, secondSlash);
+    const name = raw.slice(secondSlash + 1);
+    return { raw, position, designation, name };
+  }
+
   const withPosition = /^(?<position>\d+(?:[.,]\d+)?|[A-Za-zА-Яа-я]\d+(?:[.-]\d+)?)\s+(.+)$/.exec(raw);
   const withoutPosition = withPosition?.[2] ?? raw;
   const result: ParsedBasisData = { raw };

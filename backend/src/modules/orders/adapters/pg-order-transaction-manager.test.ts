@@ -68,6 +68,15 @@ describe('PgOrderTransactionManager', () => {
     expect(sql).toContain('INSERT INTO audit_log');
   });
 
+  it('exposes the same transaction client through getTransactionClient()', async () => {
+    const database = createDatabase();
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await manager.runInTransaction(async (uow) => {
+      expect(uow.getTransactionClient()).toBe(database.tx);
+    });
+  });
+
   it('persists operational child workflow rows and doweling engineer side effect', async () => {
     const database = createDatabase({ restoredRowCount: 0 });
     const manager = new PgOrderTransactionManager(database.service);
@@ -906,6 +915,10 @@ function createDatabase(
         return { rows: [{ order_id: 100 }], rowCount: 1 };
       }
 
+      if (normalized.startsWith('INSERT INTO order_details')) {
+        return { rows: [{ detail_id: 200 }], rowCount: 1 };
+      }
+
       if (normalized.startsWith('UPDATE orders SET delete_flag')) {
         return { rows: [{ version: params[1] }], rowCount: 1 };
       }
@@ -932,6 +945,7 @@ function createDatabase(
 
   return {
     queries,
+    tx,
     service: {
       async transaction<T>(handler: (client: typeof tx) => Promise<T>) {
         return handler(tx);

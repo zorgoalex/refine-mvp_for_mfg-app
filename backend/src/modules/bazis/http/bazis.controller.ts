@@ -13,6 +13,7 @@ import type {
   BazisProjectCardDto,
   BazisProjectListItemDto,
   BazisTreeNodeDto,
+  CreateOrderFromRevisionResponseDto,
   MaterialMappingDto,
   UpsertMaterialMappingDto,
 } from '../dto/bazis.dto';
@@ -109,6 +110,14 @@ const upsertMappingsBodySchema = z.object({
   items: z.array(materialMappingItemSchema),
 });
 
+const createOrderFromRevisionBodySchema = z.object({
+  clientId: z.coerce.number().int().positive(),
+  orderName: z.string().trim().min(1).max(200),
+  orderStatusId: z.coerce.number().int().positive(),
+  selectedNodeIds: z.array(z.coerce.number().int().positive()).min(1),
+  idempotencyKey: z.string().min(8).max(200),
+});
+
 const importRequestSwaggerSchema = {
   type: 'object',
   required: ['file'],
@@ -138,6 +147,22 @@ const upsertMappingsRequestSwaggerSchema = {
         },
       },
     },
+  },
+} as const;
+
+const createOrderFromRevisionRequestSwaggerSchema = {
+  type: 'object',
+  required: ['clientId', 'orderName', 'orderStatusId', 'selectedNodeIds', 'idempotencyKey'],
+  properties: {
+    clientId: { type: 'integer' },
+    orderName: { type: 'string', minLength: 1, maxLength: 200 },
+    orderStatusId: { type: 'integer' },
+    selectedNodeIds: {
+      type: 'array',
+      minItems: 1,
+      items: { type: 'integer' },
+    },
+    idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
   },
 } as const;
 
@@ -254,6 +279,36 @@ export class BazisController {
     return this.bazis.getTree(currentUser, parseNumericPathParam(id, 'id'), parsed.parentNodeId);
   }
 
+  @ApiOperation({ operationId: 'createOrderFromBazisRevision', summary: 'Create ERP order from a Bazis revision selection' })
+  @ApiBody({ schema: swaggerSchema(createOrderFromRevisionRequestSwaggerSchema) })
+  @ApiResponse({ status: 201, description: 'ERP order created from Bazis revision' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 409, description: 'Idempotency conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid create-order payload' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Post('revisions/:id/create-order')
+  @HttpCode(201)
+  async createOrderFromRevision(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<CreateOrderFromRevisionResponseDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const parsed = parseCreateOrderFromRevisionBody(body);
+    return this.bazis.createOrderFromRevision({
+      currentUser,
+      requestId: request.requestId,
+      revisionId: parseNumericPathParam(id, 'id'),
+      clientId: parsed.clientId,
+      orderName: parsed.orderName,
+      orderStatusId: parsed.orderStatusId,
+      selectedNodeIds: parsed.selectedNodeIds,
+      idempotencyKey: parsed.idempotencyKey,
+    });
+  }
+
   @ApiOperation({ operationId: 'listBazisMaterialMappings', summary: 'List Bazis material mappings' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -347,6 +402,20 @@ export function parseUpsertMaterialMappingsBody(body: unknown): { items: UpsertM
     upsertMappingsBodySchema,
     body,
     'Bazis material mappings payload validation failed',
+  );
+}
+
+export function parseCreateOrderFromRevisionBody(body: unknown): {
+  clientId: number;
+  orderName: string;
+  orderStatusId: number;
+  selectedNodeIds: number[];
+  idempotencyKey: string;
+} {
+  return parseWithZod(
+    createOrderFromRevisionBodySchema,
+    body,
+    'Bazis create-order payload validation failed',
   );
 }
 

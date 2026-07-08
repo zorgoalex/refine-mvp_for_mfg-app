@@ -168,5 +168,6 @@ export function shouldEnableOrderDeadlineSync(input: {
       inject: [DatabaseService],
     },
   ],
+  exports: [OrderTransactionService],
 })
 export class OrdersModule {}

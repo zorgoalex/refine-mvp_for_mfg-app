@@ -1,10 +1,17 @@
 import type { PoolClient } from 'pg';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
+import type { OrderDto } from '../../orders/dto/order.dto';
+import type { OrderTransactionService } from '../../orders/application/order-transaction.service';
 import type { ParsedBazisRevision } from '../application/bazis-xml-parser';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
-import { BazisProjectNotFoundError, BazisRevisionDuplicateError } from '../errors/bazis.errors';
+import {
+  BazisNoPanelsSelectedError,
+  BazisProjectNotFoundError,
+  BazisRevisionDuplicateError,
+} from '../errors/bazis.errors';
 import { PgBazisRepository } from './pg-bazis-repository';
 
 describe('PgBazisRepository.importRevision', () => {
@@ -220,6 +227,304 @@ describe('PgBazisRepository reads + mappings', () => {
   });
 });
 
+describe('PgBazisRepository.createOrderFromRevision', () => {
+  it('expands selected nodes into distinct panels and builds order details with the frozen basis_data string', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+        },
+        panelRows: [
+          {
+            bazis_node_id: 101,
+            object_type: 'Панель',
+            name: 'Фасад/левая створка',
+            position: '7',
+            designation: 'D-01',
+            cumulative_quantity: 2,
+            length_mm: 1200,
+            width_mm: 450,
+            main_material_name: 'Laminate White',
+            raw_json: {
+              ОблицовкаПласти1: { Пласть: [{ Наименование: 'Snow Film' }] },
+              ОблицовкаПласти2: { Пласть: [{ Наименование: 'Snow Film' }] },
+            },
+          },
+          {
+            bazis_node_id: 102,
+            object_type: 'Панель',
+            name: 'Полка',
+            position: '8',
+            designation: 'S-02',
+            cumulative_quantity: 1,
+            length_mm: 800,
+            width_mm: 300,
+            main_material_name: 'Unknown Sheet',
+            raw_json: {},
+          },
+        ],
+        mappingRows: [
+          {
+            source_kind: 'sheet',
+            name: 'laminate white',
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+            film_id: null,
+            edge_type_id: null,
+          },
+          {
+            source_kind: 'film',
+            name: 'snow film',
+            target_kind: 'film',
+            sheet_material_type_id: null,
+            film_id: 601,
+            edge_type_id: null,
+          },
+        ],
+      },
+    });
+    const orderTransactions: Pick<OrderTransactionService, 'create'> = {
+      create: async (command: Parameters<OrderTransactionService['create']>[0]) => {
+        expect(command.dto).toMatchObject({
+          header: {
+            projectId: 77,
+            clientId: 5,
+            orderName: 'ERP order',
+            orderStatusId: 3,
+          },
+        });
+        const details = (command.dto.details ?? []) as Array<Record<string, unknown>>;
+        expect(details).toHaveLength(2);
+        expect(details[0]).toMatchObject({
+          clientKey: 'bazis-node-101',
+          detailName: 'Фасад/левая створка',
+          height: 1200,
+          width: 450,
+          quantity: 2,
+          basisProject: 'Шкаф Nova',
+          basisDesignation: 'D-01',
+          basisData: '7/D-01/Фасад/левая створка',
+          sheetMaterialTypeId: 501,
+          filmId: 601,
+          millingTypeId: 1,
+          edgeTypeId: 1,
+        });
+        expect(details[1]).toMatchObject({
+          clientKey: 'bazis-node-102',
+          basisData: '8/S-02/Полка',
+          sheetMaterialTypeId: null,
+          filmId: null,
+          millingTypeId: 1,
+          edgeTypeId: 1,
+        });
+        expect(command.dto.idempotencyKey).toBeUndefined();
+
+        await command.postPersistHook?.(
+          { getTransactionClient: () => database.tx },
+          {
+            orderId: 9001,
+            detailIdsByClientKey: new Map([
+              ['bazis-node-101', 7001],
+              ['bazis-node-102', 7002],
+            ]),
+          },
+        );
+
+        return buildOrderDto(9001, 'ERP order');
+      },
+    };
+    const repository = new PgBazisRepository(database.service, orderTransactions);
+
+    const result = await repository.createOrderFromRevision(createOrderCommand());
+
+    expect(result).toEqual({
+      orderId: 9001,
+      orderName: 'ERP order',
+      detailsCreated: 2,
+      mappedNodes: 2,
+      requestId: 'req-create-order',
+      auditId: 'audit-1',
+    });
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('WITH RECURSIVE sel AS');
+    expect(sql).toContain('INSERT INTO bazis_node_order_detail_map');
+    expect(sql).toContain('ON CONFLICT (node_id, order_id) DO NOTHING');
+    expect(sql).toContain('INSERT INTO bazis_order_links');
+    expect(sql).toContain('ON CONFLICT (bazis_project_id, order_id) DO NOTHING');
+  });
+
+  it('replays a completed bazis idempotency response without creating another order', async () => {
+    const response = {
+      orderId: 77,
+      orderName: 'Existing order',
+      detailsCreated: 3,
+      mappedNodes: 3,
+      requestId: 'req-replay',
+      auditId: 'audit-existing',
+    };
+    const database = createDatabase({
+      createOrderState: {
+        idempotencyConflict: true,
+        existingIdempotencyRow: {
+          request_hash: hashCreateOrderRequestShape(createOrderCommand()),
+          response_json: response,
+          status: 'completed',
+          created_at: isoMinutesAgo(30),
+        },
+      },
+    });
+    const orderTransactions: Pick<OrderTransactionService, 'create'> = {
+      create: async () => buildOrderDto(1, 'should-not-run'),
+    };
+    const repository = new PgBazisRepository(database.service, orderTransactions);
+
+    await expect(repository.createOrderFromRevision(createOrderCommand())).resolves.toEqual(response);
+    expect(normalizedSql(database.queries)).not.toContain('WITH RECURSIVE sel AS');
+  });
+
+  it('rejects reused idempotency keys with a different payload hash', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        idempotencyConflict: true,
+        existingIdempotencyRow: {
+          request_hash: 'different-hash',
+          response_json: null,
+          status: 'processing',
+          created_at: isoMinutesAgo(1),
+        },
+      },
+    });
+    const repository = new PgBazisRepository(database.service, {
+      create: async () => buildOrderDto(1, 'never'),
+    });
+
+    await expect(repository.createOrderFromRevision(createOrderCommand())).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'BAZIS_IDEMPOTENCY_REUSED',
+    });
+  });
+
+  it('rejects in-progress idempotency keys newer than ten minutes', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        idempotencyConflict: true,
+        existingIdempotencyRow: {
+          request_hash: hashCreateOrderRequestShape(createOrderCommand()),
+          response_json: null,
+          status: 'processing',
+          created_at: isoMinutesAgo(1),
+        },
+      },
+    });
+    const repository = new PgBazisRepository(database.service, {
+      create: async () => buildOrderDto(1, 'never'),
+    });
+
+    await expect(repository.createOrderFromRevision(createOrderCommand())).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'BAZIS_IDEMPOTENCY_IN_PROGRESS',
+    });
+  });
+
+  it('marks stale processing idempotency as failed and asks for a new key', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        idempotencyConflict: true,
+        existingIdempotencyRow: {
+          request_hash: hashCreateOrderRequestShape(createOrderCommand()),
+          response_json: null,
+          status: 'processing',
+          created_at: isoMinutesAgo(20),
+        },
+      },
+    });
+    const repository = new PgBazisRepository(database.service, {
+      create: async () => buildOrderDto(1, 'never'),
+    });
+
+    await expect(repository.createOrderFromRevision(createOrderCommand())).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'BAZIS_IDEMPOTENCY_FAILED',
+      message: expect.stringContaining('повторите с новым ключом'),
+    });
+    expect(normalizedSql(database.queries)).toContain("UPDATE command_idempotency_keys SET status = 'failed'");
+  });
+
+  it('marks the key failed and throws when selection expands to zero panels', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+        },
+        panelRows: [],
+      },
+    });
+    const repository = new PgBazisRepository(database.service, {
+      create: async () => buildOrderDto(1, 'never'),
+    });
+
+    await expect(repository.createOrderFromRevision(createOrderCommand())).rejects.toBeInstanceOf(
+      BazisNoPanelsSelectedError,
+    );
+    expect(normalizedSql(database.queries)).toContain("UPDATE command_idempotency_keys SET status = 'failed'");
+  });
+
+  it('uses hook correlation ids for map rows and marks idempotency failed when order creation fails', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+        },
+        panelRows: [
+          {
+            bazis_node_id: 101,
+            object_type: 'Панель',
+            name: 'Фасад',
+            position: '7',
+            designation: 'D-01',
+            cumulative_quantity: 2,
+            length_mm: 1200,
+            width_mm: 450,
+            main_material_name: 'Laminate White',
+            raw_json: {},
+          },
+        ],
+        mappingRows: [],
+      },
+    });
+    const orderTransactions: Pick<OrderTransactionService, 'create'> = {
+      create: async (command: Parameters<OrderTransactionService['create']>[0]) => {
+        await command.postPersistHook?.(
+          { getTransactionClient: () => database.tx },
+          { orderId: 9001, detailIdsByClientKey: new Map([['bazis-node-101', 7001]]) },
+        );
+        throw new Error('fk mismatch');
+      },
+    };
+    const repository = new PgBazisRepository(database.service, orderTransactions);
+
+    await expect(repository.createOrderFromRevision(createOrderCommand())).rejects.toThrow('fk mismatch');
+
+    const nodeMapInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_node_order_detail_map'),
+    );
+    expect(nodeMapInsert?.params).toEqual([101, 7001, 9001, 'created']);
+    expect(normalizedSql(database.queries)).toContain("UPDATE command_idempotency_keys SET status = 'failed'");
+  });
+});
+
 function createDatabase(
   options: {
     duplicateRevisionNo?: number;
@@ -227,17 +532,95 @@ function createDatabase(
     materialMappings?: Array<{ source_kind: string; name: string }>;
     treeChildren?: Array<Record<string, unknown>>;
     upsertedMappings?: Array<Record<string, unknown>>;
+    createOrderState?: {
+      idempotencyConflict?: boolean;
+      existingIdempotencyRow?: {
+        request_hash: string;
+        response_json: Record<string, unknown> | null;
+        status: string;
+        created_at: string;
+      };
+      revisionRow?: Record<string, unknown>;
+      panelRows?: Array<Record<string, unknown>>;
+      mappingRows?: Array<Record<string, unknown>>;
+      nowIso?: string;
+    };
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   let auditId = 0;
   let nodeId = 500;
   let mappingIndex = 0;
+  let createOrderRequestHash: unknown = null;
   const tx = {
     raw: {} as PoolClient,
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
       const normalized = normalizeSql(text);
+
+      if (normalized.startsWith('INSERT INTO command_idempotency_keys')) {
+        if (String(params[1]) === 'bazis.create_order') {
+          createOrderRequestHash = params[5];
+          return options.createOrderState?.idempotencyConflict
+            ? { rows: [], rowCount: 0 }
+            : {
+                rows: [
+                  {
+                    idempotency_key: params[0],
+                    request_hash: params[5],
+                    response_json: null,
+                    status: 'processing',
+                    created_at: options.createOrderState?.nowIso ?? '2026-07-08T12:00:00.000Z',
+                  },
+                ],
+                rowCount: 1,
+              };
+        }
+      }
+
+      if (normalized.startsWith('SELECT idempotency_key, request_hash, response_json, status, created_at FROM command_idempotency_keys')) {
+        const row = options.createOrderState?.existingIdempotencyRow;
+        return row
+          ? { rows: [row], rowCount: 1 }
+          : {
+              rows: [{
+                idempotency_key: params[0],
+                request_hash: createOrderRequestHash,
+                response_json: null,
+                status: 'processing',
+                created_at: options.createOrderState?.nowIso ?? '2026-07-08T12:00:00.000Z',
+              }],
+              rowCount: 1,
+            };
+      }
+
+      if (normalized.startsWith("UPDATE command_idempotency_keys SET status = 'completed'")) {
+        return { rows: [], rowCount: 1 };
+      }
+
+      if (normalized.startsWith("UPDATE command_idempotency_keys SET status = 'failed'")) {
+        return { rows: [], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('SELECT r.bazis_revision_id')) {
+        return options.createOrderState?.revisionRow
+          ? { rows: [options.createOrderState.revisionRow], rowCount: 1 }
+          : { rows: [], rowCount: 0 };
+      }
+
+      if (normalized.startsWith('WITH RECURSIVE sel AS')) {
+        return {
+          rows: options.createOrderState?.panelRows ?? [],
+          rowCount: options.createOrderState?.panelRows?.length ?? 0,
+        };
+      }
+
+      if (normalized.startsWith('SELECT source_kind, lower(bazis_name) AS name, target_kind')) {
+        return {
+          rows: options.createOrderState?.mappingRows ?? [],
+          rowCount: options.createOrderState?.mappingRows?.length ?? 0,
+        };
+      }
 
       if (normalized.startsWith('INSERT INTO bazis_projects')) {
         return { rows: [{ bazis_project_id: 41 }], rowCount: 1 };
@@ -296,6 +679,7 @@ function createDatabase(
 
   return {
     queries,
+    tx,
     service: {
       async transaction<T>(handler: (client: typeof tx) => Promise<T>) {
         return handler(tx);
@@ -321,6 +705,29 @@ function importCommand(overrides: Partial<{ parsed: ParsedBazisRevision }> = {})
     xmlSha256: 'sha-001',
     rawXmlGzip: Buffer.from('gz'),
     parsed: overrides.parsed ?? parsedRevision(),
+  };
+}
+
+function createOrderCommand(
+  overrides: Partial<{
+    revisionId: number;
+    clientId: number;
+    orderName: string;
+    orderStatusId: number;
+    selectedNodeIds: number[];
+    idempotencyKey: string;
+    requestId: string;
+  }> = {},
+) {
+  return {
+    currentUser: currentUser(),
+    requestId: overrides.requestId ?? 'req-create-order',
+    revisionId: overrides.revisionId ?? 82,
+    clientId: overrides.clientId ?? 5,
+    orderName: overrides.orderName ?? 'ERP order',
+    orderStatusId: overrides.orderStatusId ?? 3,
+    selectedNodeIds: overrides.selectedNodeIds ?? [11],
+    idempotencyKey: overrides.idempotencyKey ?? 'bazis-create-order-001',
   };
 }
 
@@ -397,4 +804,111 @@ function currentUser(role: CurrentUser['role'] = 'manager'): CurrentUser {
 
 function normalizeSql(sql: string): string {
   return sql.replace(/\s+/g, ' ').trim();
+}
+
+function normalizedSql(queries: Array<{ text: string }>): string {
+  return queries.map((query) => normalizeSql(query.text)).join('\n');
+}
+
+function hashCreateOrderRequestShape(command: ReturnType<typeof createOrderCommand>): string {
+  return createHash('sha256')
+    .update(
+      stableStringify({
+        revisionId: command.revisionId,
+        clientId: command.clientId,
+        orderName: command.orderName,
+        orderStatusId: command.orderStatusId,
+        selectedNodeIds: [...command.selectedNodeIds].sort((left, right) => left - right),
+        actorUserId: Number(command.currentUser.id),
+        commandName: 'bazis.create_order',
+      }),
+    )
+    .digest('hex');
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(object[key])}`)
+    .join(',')}}`;
+}
+
+function buildOrderDto(orderId: number, orderName: string): OrderDto {
+  return {
+    header: {
+      orderId,
+      orderName,
+      clientId: 5,
+      clientName: 'Client',
+      orderDate: '2026-07-08',
+      priority: 100,
+      managerId: 1,
+      orderStatusId: 3,
+      paymentStatusId: 1,
+      productionStatusId: null,
+      productionStatusFromDetailsEnabled: true,
+      plannedCompletionDate: null,
+      completionDate: null,
+      issueDate: null,
+      paymentDate: null,
+      discount: 0,
+      surcharge: 0,
+      totalAmount: 0,
+      finalAmount: 0,
+      paidAmount: 0,
+      partsCount: 0,
+      totalArea: 0,
+      createdAt: '2026-07-08T12:00:00.000Z',
+      updatedAt: '2026-07-08T12:00:00.000Z',
+      createdBy: 1,
+      editedBy: 1,
+      version: 1,
+      linkCuttingFile: null,
+      linkCuttingImageFile: null,
+      linkCadFile: null,
+      linkPdfFile: null,
+      notes: null,
+      refKey1c: null,
+      materialId: null,
+      sheetMaterialTypeId: null,
+      millingTypeId: null,
+      edgeTypeId: null,
+      filmId: null,
+      projectId: 77,
+      projectCode: 'МП-77',
+    },
+    details: [],
+    payments: [],
+    workshops: [],
+    requirements: [],
+    dowelingLinks: [],
+    primaryGroup: null,
+    groups: [],
+    totals: {
+      totalAmount: 0,
+      finalAmount: 0,
+      paidAmount: 0,
+      debtAmount: 0,
+      partsCount: 0,
+      totalArea: 0,
+    },
+    version: 1,
+    createdAt: '2026-07-08T12:00:00.000Z',
+    updatedAt: '2026-07-08T12:00:00.000Z',
+    createdBy: 1,
+    editedBy: 1,
+  };
+}
+
+function isoMinutesAgo(minutes: number): string {
+  return new Date(Date.now() - minutes * 60_000).toISOString();
 }

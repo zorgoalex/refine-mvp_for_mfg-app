@@ -1,5 +1,6 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
+import type { TransactionClient } from '../../../database/database.types';
 import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
@@ -16,6 +17,10 @@ export interface CreateOrderCommand {
   currentUser: CurrentUser;
   dto: SaveOrderDto;
   requestId?: string;
+  postPersistHook?: (
+    uow: OrderWriteUnitOfWork,
+    created: { orderId: number; detailIdsByClientKey: Map<string, number> },
+  ) => Promise<void>;
 }
 
 export interface UpdateOrderCommand {
@@ -153,6 +158,7 @@ export interface OrderDeleteOutboxInput extends OrderDeleteAuditInput {
 
 export interface OrderWriteUnitOfWork {
   setSessionUser(userId: string): Promise<void>;
+  getTransactionClient(): TransactionClient;
   /** SP3: transaction-scoped context for shadow-material audit attribution. */
   setSaveContext(context: SaveContext): void;
   /** SP3: stored sheet state of an existing order (new-only/no-clear + permission gate). */

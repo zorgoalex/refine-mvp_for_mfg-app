@@ -250,6 +250,34 @@ describe('BazisService', () => {
 
     expect(repository.createOrderFromRevision).not.toHaveBeenCalled();
   });
+
+  it('delegates createOrderFromRevision when bazis.manage is present', async () => {
+    const repository = createRepository();
+    const service = new BazisService({ repository });
+
+    const result = await service.createOrderFromRevision({
+      currentUser: bazisManager(),
+      requestId: 'req-order',
+      revisionId: 1,
+      clientId: 2,
+      orderName: 'Order',
+      orderStatusId: 3,
+      selectedNodeIds: [4, 5],
+      idempotencyKey: 'bazis-order-001',
+    });
+
+    expect(repository.createOrderFromRevision).toHaveBeenCalledWith({
+      currentUser: bazisManager(),
+      requestId: 'req-order',
+      revisionId: 1,
+      clientId: 2,
+      orderName: 'Order',
+      orderStatusId: 3,
+      selectedNodeIds: [4, 5],
+      idempotencyKey: 'bazis-order-001',
+    });
+    expect(result.orderId).toBe(1);
+  });
 });
 
 function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {

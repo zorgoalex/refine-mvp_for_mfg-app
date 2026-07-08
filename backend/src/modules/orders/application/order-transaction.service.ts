@@ -170,7 +170,7 @@ export class OrderTransactionService {
         currentUser: command.currentUser,
       });
 
-      await this.persistChildren(unitOfWork, orderId, prepared);
+      const detailIdsByClientKey = await this.persistChildren(unitOfWork, orderId, prepared);
       const version = await unitOfWork.updateOrderTotalsAndVersion({
         orderId,
         totals: prepared.totals,
@@ -203,6 +203,9 @@ export class OrderTransactionService {
           prepared.details,
         ),
       });
+      if (command.postPersistHook) {
+        await command.postPersistHook(unitOfWork, { orderId, detailIdsByClientKey });
+      }
 
       const response = this.attachProjectToOrder(
         await this.readAndAssertVersion(unitOfWork, orderId, version, command),
@@ -445,7 +448,7 @@ export class OrderTransactionService {
     unitOfWork: OrderWriteUnitOfWork,
     orderId: number,
     prepared: PreparedOrderSave,
-  ): Promise<void> {
+  ): Promise<Map<string, number>> {
     await unitOfWork.upsertDetails(orderId, prepared.details);
     await unitOfWork.deleteDetails(orderId, prepared.order.deleted.detailIds);
     await unitOfWork.upsertPayments(orderId, prepared.order.payments);
@@ -456,6 +459,11 @@ export class OrderTransactionService {
     await unitOfWork.upsertRequirements(orderId, prepared.order.requirements);
     await unitOfWork.deleteDowelingLinks(orderId, prepared.order.deleted.dowelingLinkIds);
     await unitOfWork.upsertDowelingLinks(orderId, prepared.order.dowelingLinks);
+    return new Map(
+      prepared.details
+        .filter((detail) => detail.clientKey && detail.id)
+        .map((detail) => [detail.clientKey as string, detail.id as number]),
+    );
   }
 
   private async readAndAssertVersion(
