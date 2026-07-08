@@ -231,6 +231,23 @@ export class OrderTransactionService {
       this.requirePermission(command, 'orders.update');
       this.requirePermission(command, 'orders.view_financials');
 
+      // Global lock order shared with projects move/merge: project rows BEFORE
+      // order rows. A client change retargets the order's root project, so when
+      // this update will need the project lock it must be taken before the
+      // order row lock — taking it after inverts moveOrder's order and can
+      // deadlock. Pre-read is unlocked; the client-change block below re-checks
+      // against the locked snapshot and 409s if the world moved in between.
+      const requestedClientId = numOrNull(command.dto.header?.clientId);
+      const preRead = await unitOfWork.readOrderClientProject(command.orderId);
+      if (!preRead) {
+        throw new OrderNotFoundError(command.orderId);
+      }
+      const projectLockedUpfront =
+        requestedClientId !== null && preRead.clientId !== null && preRead.clientId !== requestedClientId;
+      if (projectLockedUpfront) {
+        await unitOfWork.lockProjectById(preRead.projectId);
+      }
+
       const lockedOrder = await unitOfWork.loadOrderForUpdate(command.orderId);
 
       if (!lockedOrder) {
@@ -278,6 +295,20 @@ export class OrderTransactionService {
       );
       const nextClientId = prepared.order.header.clientId;
       if (previousClientId !== null && previousClientId !== nextClientId) {
+        // The project row must already be held from the pre-lock above, for the
+        // same project the order belongs to NOW. If the pre-read missed the
+        // client change or the order was re-parented in between, locking the
+        // project here would invert the global lock order — fail retriable.
+        const snapshotProjectId = numOrNull(
+          (beforeSnapshot as Record<string, unknown> | null)?.projectId,
+        );
+        if (!projectLockedUpfront || snapshotProjectId !== preRead.projectId) {
+          throw new ApiError(
+            409,
+            'ORDER_PROJECT_CONFLICT',
+            'Заказ или его проект изменён параллельной операцией, повторите',
+          );
+        }
         const project = await unitOfWork.lockProjectForOrder(command.orderId);
         if (project.clientId !== nextClientId) {
           const ordersInProject = await unitOfWork.countOrdersInProject(project.projectId);

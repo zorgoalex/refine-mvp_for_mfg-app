@@ -96,6 +96,8 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
   };
   completedDeleteResponse?: DeleteOrderResponseDto;
   completedCreateResponse?: OrderDto;
+  /** Simulates a stale unlocked pre-read diverging from the locked snapshot. */
+  preReadClientProjectOverride?: { clientId: number | null; projectId: number };
 
   async runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T> {
     this.calls.push('begin');
@@ -255,6 +257,27 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
           managerUserId: order.header.managerId === null ? null : String(order.header.managerId),
         }
       : null;
+  }
+
+  async readOrderClientProject(
+    orderId: number,
+  ): Promise<{ clientId: number | null; projectId: number } | null> {
+    this.call('readOrderClientProject');
+    if (this.owner.preReadClientProjectOverride !== undefined) {
+      return this.owner.preReadClientProjectOverride;
+    }
+    const order = this.state.orders.get(orderId);
+    if (!order) return null;
+    // Legacy fake orders may carry no project; -1 keeps them working as long as
+    // the flow does not actually need the project lock (no client change).
+    return { clientId: order.header.clientId ?? null, projectId: order.projectId ?? -1 };
+  }
+
+  async lockProjectById(projectId: number): Promise<void> {
+    this.call('lockProjectById');
+    if (!this.state.projects.get(projectId)) {
+      throw new Error(`Missing fake project ${projectId}`);
+    }
   }
 
   async lockProjectForOrder(orderId: number): Promise<{
@@ -753,9 +776,10 @@ describe('OrderTransactionService', () => {
     expect(updateAuditEvent1.after).toBeTruthy();
     // after reflects the updated orderName
     expect((updateAuditEvent1.after as Record<string, unknown>)?.orderName).toBe('Updated order');
-    expect(transactions.calls.slice(0, 8)).toEqual([
+    expect(transactions.calls.slice(0, 9)).toEqual([
       'begin',
       'setSessionUser',
+      'readOrderClientProject',
       'loadOrderForUpdate',
       'loadOrderHeaderSnapshot',
       // VARIANT B: storedEligible=true (sheetEligible in snapshot) → loadStoredOrderSheetState runs
@@ -1047,6 +1071,60 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls.indexOf('retargetProjectClient')).toBeLessThan(
       transactions.calls.indexOf('updateOrderHeader'),
     );
+    // Global anti-deadlock order shared with projects move/merge: the project
+    // row lock must precede the order row lock.
+    expect(transactions.calls.indexOf('lockProjectById')).toBeGreaterThanOrEqual(0);
+    expect(transactions.calls.indexOf('lockProjectById')).toBeLessThan(
+      transactions.calls.indexOf('loadOrderForUpdate'),
+    );
+  });
+
+  it('409 when the unlocked pre-read diverges from the locked snapshot on a client change', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedProject({
+      projectId: 700,
+      code: 'МП-700',
+      clientId: 1001,
+      deleteFlag: false,
+      version: 2,
+      editedByUserId: null,
+    });
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      projectId: 700,
+      projectCode: 'МП-700',
+      details: [calculatedDetail({ id: 11, detailCost: 5000 })],
+    });
+    // Pre-read claims the client already equals the requested one (so no project
+    // lock is taken upfront), but the locked snapshot still shows the old client:
+    // proceeding would need the project lock AFTER the order lock — must 409.
+    transactions.preReadClientProjectOverride = { clientId: 2002, projectId: 700 };
+
+    await expect(
+      new OrderTransactionService({ transactions }).update({
+        currentUser: currentUser('manager'),
+        orderId: 42,
+        dto: createSaveDto({
+          header: {
+            orderId: 42,
+            orderName: 'Updated order',
+            clientId: 2002,
+            orderDate: '2026-04-30',
+            orderStatusId: 1001,
+            discount: 0,
+            surcharge: 0,
+          },
+          details: [],
+          payments: [],
+          version: 3,
+        }),
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'ORDER_PROJECT_CONFLICT' });
+
+    expect(transactions.calls).not.toContain('lockProjectForOrder');
+    expect(transactions.calls).not.toContain('retargetProjectClient');
+    expect(transactions.calls).not.toContain('updateOrderHeader');
   });
 
   it('blocks client change when the project has multiple orders', async () => {
@@ -1278,6 +1356,7 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
+      'readOrderClientProject',
       'loadOrderForUpdate',
       'rollback',
     ]);
@@ -1381,7 +1460,7 @@ describe('OrderTransactionService', () => {
 
     expect(transactions.state.orders.get(42)?.payments).toHaveLength(1);
     expect(transactions.state.auditEvents).toEqual([]);
-    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'loadOrderForUpdate', 'rollback']);
+    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'readOrderClientProject', 'loadOrderForUpdate', 'rollback']);
   });
 
   it('omits payment rows from save responses when actor cannot view payments', async () => {

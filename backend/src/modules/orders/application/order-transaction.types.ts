@@ -192,6 +192,10 @@ export interface OrderWriteUnitOfWork {
     projectId: number;
     currentUser: CurrentUser;
   }): Promise<number>;
+  /** Unlocked pre-read for the projects-before-orders lock ordering in update. */
+  readOrderClientProject(orderId: number): Promise<{ clientId: number | null; projectId: number } | null>;
+  /** Lock a project row ahead of the order row (global lock order with move/merge). */
+  lockProjectById(projectId: number): Promise<void>;
   lockProjectForOrder(orderId: number): Promise<LockedProjectRow>;
   countOrdersInProject(projectId: number): Promise<number>;
   retargetProjectClient(

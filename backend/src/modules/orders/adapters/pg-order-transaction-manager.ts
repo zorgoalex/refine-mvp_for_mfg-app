@@ -276,6 +276,41 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       : null;
   }
 
+  async readOrderClientProject(
+    orderId: number,
+  ): Promise<{ clientId: number | null; projectId: number } | null> {
+    const result = await this.tx.query<{
+      client_id: string | number | null;
+      project_id: string | number;
+    }>(
+      `
+      SELECT client_id, project_id
+      FROM orders
+      WHERE order_id = $1 AND delete_flag = false
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          clientId: row.client_id === null ? null : Number(row.client_id),
+          projectId: Number(row.project_id),
+        }
+      : null;
+  }
+
+  async lockProjectById(projectId: number): Promise<void> {
+    await this.tx.query(
+      `
+      SELECT project_id
+      FROM projects
+      WHERE project_id = $1
+      FOR UPDATE
+      `,
+      [projectId],
+    );
+  }
+
   async lockProjectForOrder(orderId: number): Promise<LockedProjectRow> {
     const result = await this.tx.query<{
       project_id: string | number;

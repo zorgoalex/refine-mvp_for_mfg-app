@@ -424,6 +424,59 @@ describe('PgProjectsRepository.moveOrder', () => {
     expect(orderLockIdx).toBeGreaterThan(lastProjectLockIdx);
   });
 
+  it("foreign order + target == its current project → 403, not 422 (no project-membership probe)", async () => {
+    const database = createDatabase({
+      lockedOrderRow: {
+        order_id: 10,
+        order_name: '1258',
+        client_id: 2,
+        project_id: 100,
+        created_by: '999',
+        manager_id: '999',
+      },
+    });
+
+    await expect(
+      new PgProjectsRepository(database.service).moveOrder({
+        currentUser: currentUser('manager'),
+        orderId: 10,
+        targetProjectId: 100,
+        idempotencyKey: 'move-order-key-probe',
+        requestId: 'req-move-probe',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+  });
+
+  it('409 (not stale 422) when target equals the pre-read project but the locked row moved on', async () => {
+    const database = createDatabase({
+      preReadProjectId: 200,
+      lockedOrderRow: {
+        order_id: 10,
+        order_name: '1258',
+        client_id: 2,
+        project_id: 100,
+        created_by: '7',
+        manager_id: null,
+      },
+      targetProjectRow: {
+        project_id: 200,
+        client_id: 2,
+        delete_flag: false,
+        code: 'ФК26',
+      },
+    });
+
+    await expect(
+      new PgProjectsRepository(database.service).moveOrder({
+        currentUser: currentUser(),
+        orderId: 10,
+        targetProjectId: 200,
+        idempotencyKey: 'move-order-key-stale-same',
+        requestId: 'req-move-stale-same',
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'ORDER_PROJECT_CONFLICT' });
+  });
+
   it('409 when the order was re-parented between the unlocked pre-read and the row lock', async () => {
     const database = createDatabase({
       preReadProjectId: 150,

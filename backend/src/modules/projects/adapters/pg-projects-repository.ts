@@ -265,10 +265,9 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         throw new ApiError(404, 'ORDER_NOT_FOUND', `Заказ ${command.orderId} не найден`);
       }
       const fromProjectId = Number(preRead.project_id);
-
-      if (!command.createNew && command.targetProjectId === fromProjectId) {
-        throw new ApiError(422, 'PROJECT_SAME', 'Заказ уже в этом проекте');
-      }
+      // No PROJECT_SAME check here: the pre-read is unlocked (stale 422 would
+      // mask the retriable 409) and it must not fire before the row-scope
+      // check, or a probing 422-vs-403 would leak a foreign order's project.
 
       // The source lock also serialises the "last order leaves -> archive"
       // decision against concurrent moves.
