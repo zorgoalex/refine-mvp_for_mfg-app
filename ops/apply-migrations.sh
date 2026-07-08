@@ -329,6 +329,7 @@ probe_file() {
     054_*) probe_all "$(q_tbl group_groups)" ;;
     055_*) probe_all "$(q_col user_identities auth_method)" ;;
     056_*) probe_all "$(q_tbl projects)" "$(q_col orders project_id)" ;;
+    058_*) probe_all "$(q_tbl bazis_projects)" "$(q_tbl bazis_import_runs)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
