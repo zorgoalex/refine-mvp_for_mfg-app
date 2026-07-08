@@ -229,6 +229,21 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/labelTemplateElementId: _labelTemplateElementId/);
   });
 
+  it('keeps the just-saved template selected after save instead of resetting to a blank new template', () => {
+    const saveBody = tabSrc.slice(
+      tabSrc.indexOf('const saveTemplate ='),
+      tabSrc.indexOf('const openSaveAs ='),
+    );
+    // After a successful save the editor must re-select the saved template
+    // (update and create both return the saved LabelTemplate), not reset the
+    // form to the blank "new template" scaffold via startNew().
+    expect(saveBody).not.toMatch(/startNew\(\)/);
+    expect(saveBody).toMatch(/setSelectedTemplate\(saved\)/);
+    expect(saveBody).toMatch(/setElements\(saved\.elements\)/);
+    expect(saveBody).toMatch(/saved = await labelsApi\.updateTemplate/);
+    expect(saveBody).toMatch(/saved = await labelsApi\.createTemplate/);
+  });
+
   it('can create a copy from the current edited template through Save As', () => {
     expect(tabSrc).toMatch(/Сохранить как/);
     expect(tabSrc).toMatch(/Сохранить шаблон как/);

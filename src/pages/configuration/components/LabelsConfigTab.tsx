@@ -411,15 +411,21 @@ export const LabelsConfigTab: React.FC = () => {
     setSaving(true);
     try {
       const payload = buildTemplatePayload(values);
+      let saved: LabelTemplate;
       if (selectedTemplate) {
-        await labelsApi.updateTemplate(selectedTemplate.labelTemplateId, { ...payload, version: selectedTemplate.version });
+        saved = await labelsApi.updateTemplate(selectedTemplate.labelTemplateId, { ...payload, version: selectedTemplate.version });
         message.success('Шаблон обновлён');
       } else {
-        await labelsApi.createTemplate(payload);
+        saved = await labelsApi.createTemplate(payload);
         message.success('Шаблон создан');
       }
       await load();
-      startNew();
+      // Keep the just-saved template open in the editor (mirrors saveTemplateAs).
+      // Resetting to the blank new-template scaffold here read as "switched to
+      // another template" after every save.
+      setSelectedTemplate(saved);
+      setElements(saved.elements);
+      setCustomSchemaText(JSON.stringify(saved.customFieldSchema ?? {}, null, 2));
     } catch (error) {
       message.error(describeSaveError(error, 'Не удалось сохранить шаблон'));
     } finally {
