@@ -743,6 +743,55 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
   });
 });
 
+describe('PgBazisRepository.getMaterialsSummary', () => {
+  it('aggregates panels by material with mapping status, hardware, edges and films', async () => {
+    const database = createDatabase({
+      materialsSummary: {
+        summaryRow: { summary_json: { totalNodes: 20, panels: 10, hardware: 3, assemblies: 1, blocks: 0, uniqueMaterials: 2 } },
+        panelRows: [
+          {
+            main_material_name: 'ЛДСП Белый',
+            panel_count: 10,
+            total_quantity: 10,
+            total_area_m2: 12.5,
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+          },
+        ],
+        hardwareRows: [{ name: 'Петля', total_quantity: 8 }],
+        edgeRows: [{ name: 'ABS 2mm Белый', usage_count: 6 }],
+        filmRows: [{ name: 'Snow Film', usage_count: 4 }],
+      },
+    });
+    // responder 1: summary_json ревизии; 2: panels; 3: hardware; 4: edges; 5: films
+    const repository = new PgBazisRepository(database.service);
+
+    const summary = await repository.getMaterialsSummary(82);
+
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    expect(ordered[0]).toContain('FROM bazis_project_revisions');
+    expect(ordered[1]).toContain("n.object_type = 'Панель'");
+    expect(ordered[1]).toContain("mm.source_kind = 'sheet'");
+    expect(ordered[3]).toContain('СписокКромок1');
+    // raw_json без shape-constraint: каждая array-источник обязана быть под jsonb_typeof-guard (Critic R1)
+    expect(ordered[3]).toContain('jsonb_typeof');
+    expect(ordered[4]).toContain('jsonb_typeof');
+    expect(summary.panelsByMaterial[0]).toMatchObject({
+      materialName: 'ЛДСП Белый', panelCount: 10, totalAreaM2: 12.5, mappingTargetKind: 'sheet',
+    });
+    expect(summary.hardwareByName).toEqual([{ name: 'Петля', totalQuantity: 8 }]);
+    expect(summary.edgesByName).toEqual([{ name: 'ABS 2mm Белый', usageCount: 6 }]);
+    expect(summary.filmsByName).toEqual([{ name: 'Snow Film', usageCount: 4 }]);
+    expect(summary.summary).toMatchObject({ totalNodes: 20, panels: 10 });
+  });
+
+  it('throws BazisRevisionNotFoundError for unknown revision', async () => {
+    const database = createDatabase(); // responder 1: пустой rows
+    const repository = new PgBazisRepository(database.service);
+    await expect(repository.getMaterialsSummary(1)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+});
+
 function createDatabase(
   options: {
     duplicateRevisionNo?: number;
@@ -771,6 +820,13 @@ function createDatabase(
       panelRows?: Array<Record<string, unknown>>;
       mappingRows?: Array<Record<string, unknown>>;
       nowIso?: string;
+    };
+    materialsSummary?: {
+      summaryRow?: Record<string, unknown> | null;
+      panelRows?: Array<Record<string, unknown>>;
+      hardwareRows?: Array<Record<string, unknown>>;
+      edgeRows?: Array<Record<string, unknown>>;
+      filmRows?: Array<Record<string, unknown>>;
     };
   } = {},
 ) {
@@ -922,6 +978,35 @@ function createDatabase(
       }
       if (normalized.startsWith('SELECT bazis_material_mapping_id')) {
         return { rows: [], rowCount: 0 };
+      }
+      if (normalized.startsWith('SELECT summary_json FROM bazis_project_revisions')) {
+        return options.materialsSummary?.summaryRow
+          ? { rows: [options.materialsSummary.summaryRow], rowCount: 1 }
+          : { rows: [], rowCount: 0 };
+      }
+      if (normalized.startsWith('SELECT n.main_material_name,')) {
+        return {
+          rows: options.materialsSummary?.panelRows ?? [],
+          rowCount: options.materialsSummary?.panelRows?.length ?? 0,
+        };
+      }
+      if (normalized.startsWith('SELECT n.name,')) {
+        return {
+          rows: options.materialsSummary?.hardwareRows ?? [],
+          rowCount: options.materialsSummary?.hardwareRows?.length ?? 0,
+        };
+      }
+      if (normalized.includes('СписокКромок1')) {
+        return {
+          rows: options.materialsSummary?.edgeRows ?? [],
+          rowCount: options.materialsSummary?.edgeRows?.length ?? 0,
+        };
+      }
+      if (normalized.includes('ОблицовкаПласти1')) {
+        return {
+          rows: options.materialsSummary?.filmRows ?? [],
+          rowCount: options.materialsSummary?.filmRows?.length ?? 0,
+        };
       }
 
       return { rows: [], rowCount: 1 };

@@ -18,6 +18,7 @@ import type {
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
+  BazisRevisionMaterialsSummaryDto,
   BazisTreeNodeDto,
   CreateOrderFromRevisionResponseDto,
   MaterialMappingDto,
@@ -173,6 +174,25 @@ interface MaterialLookupRow {
   sheet_material_type_id: number | string | null;
   film_id: number | string | null;
   edge_type_id: number | string | null;
+}
+
+interface PanelsSummaryRow {
+  main_material_name: string | null;
+  panel_count: number | string;
+  total_quantity: number | string;
+  total_area_m2: number | string;
+  target_kind: string | null;
+  sheet_material_type_id: number | string | null;
+}
+
+interface HardwareSummaryRow {
+  name: string | null;
+  total_quantity: number | string;
+}
+
+interface RawUsageRow {
+  name: string;
+  usage_count: number | string;
 }
 
 export class PgBazisRepository implements BazisRepositoryPort {
@@ -738,6 +758,107 @@ export class PgBazisRepository implements BazisRepositoryPort {
     }
 
     return { items: [...itemsById.values()], totalMatched: Number(countResult.rows[0]?.total ?? 0) };
+  }
+
+  async getMaterialsSummary(revisionId: number): Promise<BazisRevisionMaterialsSummaryDto> {
+    const revision = await this.database.query<{ summary_json: Record<string, number> | null }>(
+      `SELECT summary_json FROM bazis_project_revisions WHERE bazis_revision_id = $1`,
+      [revisionId],
+    );
+    if (revision.rows.length === 0) {
+      throw new BazisRevisionNotFoundError(revisionId);
+    }
+
+    const panels = await this.database.query<PanelsSummaryRow>(
+      `
+      SELECT n.main_material_name,
+             count(*)::int AS panel_count,
+             COALESCE(SUM(COALESCE(n.cumulative_quantity, n.quantity, 1)), 0)::float8 AS total_quantity,
+             (COALESCE(SUM(COALESCE(n.length_mm, 0) * COALESCE(n.width_mm, 0)
+               * COALESCE(n.cumulative_quantity, n.quantity, 1)), 0) / 1000000.0)::float8 AS total_area_m2,
+             mm.target_kind, mm.sheet_material_type_id
+      FROM bazis_nodes n
+      LEFT JOIN bazis_material_mappings mm
+        ON mm.source_kind = 'sheet' AND lower(mm.bazis_name) = lower(n.main_material_name)
+      WHERE n.revision_id = $1 AND n.object_type = 'Панель'
+      GROUP BY n.main_material_name, mm.target_kind, mm.sheet_material_type_id
+      ORDER BY panel_count DESC, n.main_material_name
+      `,
+      [revisionId],
+    );
+
+    const hardware = await this.database.query<HardwareSummaryRow>(
+      `
+      SELECT n.name,
+             COALESCE(SUM(COALESCE(n.cumulative_quantity, n.quantity, 1)), 0)::float8 AS total_quantity
+      FROM bazis_nodes n
+      WHERE n.revision_id = $1 AND n.object_type = 'Фурнитура'
+      GROUP BY n.name
+      ORDER BY total_quantity DESC, n.name
+      `,
+      [revisionId],
+    );
+
+    // raw_json — plain jsonb без shape-constraint: legacy/битая строка не должна
+    // валить весь endpoint (Critic R1). Каждый источник — под jsonb_typeof-guard.
+    const jsonArrayOrEmpty = (expression: string): string =>
+      `CASE WHEN jsonb_typeof(${expression}) = 'array' THEN ${expression} ELSE '[]'::jsonb END`;
+
+    const edges = await this.database.query<RawUsageRow>(
+      `
+      SELECT e.elem->>'Наименование' AS name, count(*)::int AS usage_count
+      FROM bazis_nodes n
+      CROSS JOIN LATERAL (
+        SELECT jsonb_array_elements(
+          ${jsonArrayOrEmpty(`n.raw_json->'СписокКромок1'->'Кромка'`)}
+          || ${jsonArrayOrEmpty(`n.raw_json->'СписокКромок2'->'Кромка'`)}
+          || ${jsonArrayOrEmpty(`n.raw_json->'СписокКромок3'->'Кромка'`)}
+          || ${jsonArrayOrEmpty(`n.raw_json->'СписокКромок4'->'Кромка'`)}
+        ) AS elem
+      ) e
+      WHERE n.revision_id = $1
+        AND COALESCE(e.elem->>'Наименование', '') <> ''
+      GROUP BY 1
+      ORDER BY usage_count DESC, name
+      `,
+      [revisionId],
+    );
+
+    const films = await this.database.query<RawUsageRow>(
+      `
+      SELECT e.elem->>'Наименование' AS name, count(*)::int AS usage_count
+      FROM bazis_nodes n
+      CROSS JOIN LATERAL (
+        SELECT jsonb_array_elements(
+          ${jsonArrayOrEmpty(`n.raw_json->'ОблицовкаПласти1'->'Пласть'`)}
+          || ${jsonArrayOrEmpty(`n.raw_json->'ОблицовкаПласти2'->'Пласть'`)}
+        ) AS elem
+      ) e
+      WHERE n.revision_id = $1
+        AND COALESCE(e.elem->>'Наименование', '') <> ''
+      GROUP BY 1
+      ORDER BY usage_count DESC, name
+      `,
+      [revisionId],
+    );
+
+    return {
+      summary: revision.rows[0].summary_json ?? {},
+      panelsByMaterial: panels.rows.map((row) => ({
+        materialName: row.main_material_name,
+        panelCount: Number(row.panel_count),
+        totalQuantity: Number(row.total_quantity),
+        totalAreaM2: Number(row.total_area_m2),
+        mappingTargetKind: row.target_kind ?? null,
+        sheetMaterialTypeId: nullableNumber(row.sheet_material_type_id),
+      })),
+      hardwareByName: hardware.rows.map((row) => ({
+        name: row.name,
+        totalQuantity: Number(row.total_quantity),
+      })),
+      edgesByName: edges.rows.map((row) => ({ name: row.name, usageCount: Number(row.usage_count) })),
+      filmsByName: films.rows.map((row) => ({ name: row.name, usageCount: Number(row.usage_count) })),
+    };
   }
 
   async listMaterialMappings(names?: string[]): Promise<MaterialMappingDto[]> {
