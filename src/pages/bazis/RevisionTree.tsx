@@ -3,19 +3,12 @@ import { Alert, Spin, Tree } from 'antd';
 import type { DataNode, EventDataNode } from 'antd/es/tree';
 import type { Key } from 'rc-tree/lib/interface';
 import { bazisApi } from '../../api/bazisApi';
-import type { BazisTreeNode } from '../../api/types/bazisApi.types';
+import { attachChildren, mapTreeNode, type BazisTreeDataNode } from './bazisTreeUtils';
 
 interface RevisionTreeProps {
   revisionId: number;
   checkedKeys: number[];
   onCheckedKeysChange: (keys: number[]) => void;
-}
-
-interface BazisTreeDataNode extends DataNode {
-  key: number;
-  bazisNodeId: number;
-  objectType: string | null;
-  childrenCount: number;
 }
 
 export const RevisionTree: React.FC<RevisionTreeProps> = ({
@@ -100,65 +93,3 @@ export const RevisionTree: React.FC<RevisionTreeProps> = ({
     />
   );
 };
-
-function mapTreeNode(node: BazisTreeNode): BazisTreeDataNode {
-  const objectType = node.objectType ?? null;
-
-  return {
-    key: node.bazisNodeId,
-    bazisNodeId: node.bazisNodeId,
-    objectType,
-    childrenCount: node.childrenCount,
-    title: buildNodeTitle(node),
-    isLeaf: node.childrenCount === 0,
-    disableCheckbox: objectType === 'Фурнитура',
-  };
-}
-
-function attachChildren(
-  nodes: BazisTreeDataNode[],
-  parentNodeId: number,
-  children: BazisTreeDataNode[],
-): BazisTreeDataNode[] {
-  return nodes.map((node) => {
-    if (node.bazisNodeId === parentNodeId) {
-      return {
-        ...node,
-        children,
-      };
-    }
-
-    if (!node.children) {
-      return node;
-    }
-
-    return {
-      ...node,
-      children: attachChildren(node.children as BazisTreeDataNode[], parentNodeId, children),
-    };
-  });
-}
-
-function buildNodeTitle(node: BazisTreeNode): string {
-  const name = node.name?.trim() || node.objectType || node.nodeKind;
-  if (node.objectType !== 'Панель') {
-    return name;
-  }
-
-  const size = formatPanelSize(node.lengthMm, node.widthMm);
-  const quantity = node.quantity ?? node.cumulativeQuantity ?? null;
-  const parts = [size, quantity != null ? `qty ${stripDecimal(quantity)}` : null].filter(Boolean);
-  return parts.length > 0 ? `${name} — ${parts.join(', ')}` : name;
-}
-
-function formatPanelSize(lengthMm: number | null, widthMm: number | null): string | null {
-  if (lengthMm == null || widthMm == null) {
-    return null;
-  }
-
-  return `${stripDecimal(lengthMm)}x${stripDecimal(widthMm)}`;
-}
-
-function stripDecimal(value: number): string {
-  return Number.isInteger(value) ? String(value) : String(value);
-}
