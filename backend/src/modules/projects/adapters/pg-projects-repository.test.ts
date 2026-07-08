@@ -50,6 +50,92 @@ describe('PgProjectsRepository.getById', () => {
   });
 });
 
+describe('PgProjectsRepository.create', () => {
+  it('creates an empty project with auto «МП-N» code, audit project.created (manual) and outbox', async () => {
+    const database = createDatabase({ autoRootRow: { project_id: 700, code: 'МП-700' } });
+
+    const result = await new PgProjectsRepository(database.service).create({
+      currentUser: currentUser(),
+      dto: { clientId: 9, name: 'Тест-пустой-проект' },
+      idempotencyKey: 'create-project-key-1',
+      requestId: 'req-create-1',
+    });
+
+    expect(result).toMatchObject({
+      projectId: 700,
+      code: 'МП-700',
+      name: 'Тест-пустой-проект',
+      clientId: 9,
+      notes: null,
+      version: 0,
+      requestId: 'req-create-1',
+    });
+    expect(result.auditId).toBeTypeOf('string');
+
+    const audit = database.queries.find((query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log ('));
+    expect(audit?.params[0]).toBe('project.created');
+    expect(audit?.params[22]).toContain('"origin":"manual"');
+    expect(database.outboxRows.map((row) => row.eventType)).toEqual(['project.created']);
+    expect(database.outboxRows[0]?.idempotencyKey).toBe('create-project-key-1');
+  });
+
+  it('creates with an explicit code; duplicate code → 409 PROJECT_CODE_TAKEN', async () => {
+    const okDb = createDatabase();
+    const result = await new PgProjectsRepository(okDb.service).create({
+      currentUser: currentUser(),
+      dto: { clientId: 9, name: 'Кухня', code: 'ФК27' },
+      idempotencyKey: 'create-project-key-code',
+      requestId: 'req-create-code',
+    });
+    expect(result).toMatchObject({ projectId: 555, code: 'ФК27' });
+
+    const dupDb = createDatabase({ throwOnCreateInsert: { code: '23505' } });
+    await expect(
+      new PgProjectsRepository(dupDb.service).create({
+        currentUser: currentUser(),
+        dto: { clientId: 9, name: 'Кухня', code: 'ФК27' },
+        idempotencyKey: 'create-project-key-dup',
+        requestId: 'req-create-dup',
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'PROJECT_CODE_TAKEN' });
+  });
+
+  it('unknown client → 422 CLIENT_NOT_FOUND, no insert', async () => {
+    const database = createDatabase({ clientExists: false });
+    await expect(
+      new PgProjectsRepository(database.service).create({
+        currentUser: currentUser(),
+        dto: { clientId: 404404, name: 'Тест' },
+        idempotencyKey: 'create-project-key-noclient',
+        requestId: 'req-create-noclient',
+      }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'CLIENT_NOT_FOUND' });
+    expect(normalizedSql(database.queries)).not.toContain('INSERT INTO projects');
+  });
+
+  it('replay same key+actor returns cached response; different actor → 409', async () => {
+    const database = createDatabase({ autoRootRow: { project_id: 701, code: 'МП-701' } });
+    const repo = new PgProjectsRepository(database.service);
+    const command = {
+      currentUser: currentUser('admin'),
+      dto: { clientId: 9, name: 'Тест-идемпотентный' },
+      idempotencyKey: 'create-project-key-replay',
+      requestId: 'req-create-replay',
+    };
+
+    const first = await repo.create(command);
+    const second = await repo.create(command);
+    expect(second).toEqual(first);
+    expect(
+      database.queries.filter((query) => normalizeSql(query.text).includes('INSERT INTO projects')).length,
+    ).toBe(1);
+
+    await expect(
+      repo.create({ ...command, currentUser: { ...currentUser('admin'), id: '99' } }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
+  });
+});
+
 describe('PgProjectsRepository.update', () => {
   it('locks the project row FOR UPDATE, writes exactly one audit row, and returns the updated dto', async () => {
     const database = createDatabase({
@@ -818,6 +904,8 @@ function createDatabase(
     throwOnUpdate?: { code: string };
     lockedOrderRow?: Record<string, unknown> | null;
     preReadProjectId?: number;
+    clientExists?: boolean;
+    throwOnCreateInsert?: { code: string };
     targetProjectRow?: Record<string, unknown> | null;
     sourceOrderRows?: Array<Record<string, unknown>>;
     sourceOrderCount?: number;
@@ -896,6 +984,19 @@ function createDatabase(
           row.responseJson = JSON.parse(String(params[1]));
         }
         return { rows: [], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('SELECT client_id FROM clients WHERE client_id = $1')) {
+        return options.clientExists === false
+          ? { rows: [], rowCount: 0 }
+          : { rows: [{ client_id: params[0] }], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('INSERT INTO projects (code, name, client_id, notes, created_by)')) {
+        if (options.throwOnCreateInsert) {
+          throw options.throwOnCreateInsert;
+        }
+        return { rows: [{ project_id: 555, code: String(params[0]) }], rowCount: 1 };
       }
 
       if (normalized.startsWith('SELECT project_id FROM orders WHERE order_id = $1 AND delete_flag = false')) {

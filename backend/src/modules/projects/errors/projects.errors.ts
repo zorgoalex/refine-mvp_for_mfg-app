@@ -18,6 +18,12 @@ export class ProjectClientMismatchError extends ApiError {
   }
 }
 
+export class ProjectClientNotFoundError extends ApiError {
+  constructor(clientId: number) {
+    super(422, 'CLIENT_NOT_FOUND', `Клиент ${clientId} не найден`);
+  }
+}
+
 export class ProjectCodeTakenError extends ApiError {
   constructor(code: string) {
     super(409, 'PROJECT_CODE_TAKEN', `Код «${code}» уже занят`);

@@ -36,3 +36,11 @@ export const mergeSchema = z.object({
   sourceProjectId: z.number().int().positive(),
   idempotencyKey: z.string().min(8).max(200),
 });
+
+export const createProjectSchema = z.object({
+  clientId: z.number().int().positive(),
+  name: z.string().trim().min(1).max(300),
+  code: z.string().regex(CODE_RE, 'Код: буквы/цифры/дефис, до 20 символов').optional(),
+  notes: z.string().max(4000).nullable().optional(),
+  idempotencyKey: z.string().min(8).max(200),
+});

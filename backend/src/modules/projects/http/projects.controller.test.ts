@@ -2,7 +2,7 @@ import { HTTP_CODE_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { describe, expect, it, vi } from 'vitest';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import type { ProjectsService } from '../application/projects.service';
-import { ProjectsController, parseListProjectsQuery, parseMergeBody, parseUpdateProjectBody } from './projects.controller';
+import { ProjectsController, parseCreateProjectBody, parseListProjectsQuery, parseMergeBody, parseUpdateProjectBody } from './projects.controller';
 
 describe('ProjectsController', () => {
   it('rejects unauthenticated list requests with 401', async () => {
@@ -28,6 +28,48 @@ describe('ProjectsController', () => {
       includeArchived: true,
       search: 'ФК',
     });
+  });
+
+  it('parseCreateProjectBody validates payload', () => {
+    expect(() => parseCreateProjectBody({ clientId: 9 })).toThrow(
+      expect.objectContaining({ statusCode: 422, code: 'VALIDATION_ERROR' }),
+    );
+    expect(() => parseCreateProjectBody({ clientId: 9, name: 'Тест', idempotencyKey: 'short' })).toThrow(
+      expect.objectContaining({ statusCode: 422 }),
+    );
+    expect(parseCreateProjectBody({ clientId: 9, name: ' Тест ', code: 'ФК27', idempotencyKey: 'k1234567' })).toMatchObject({
+      clientId: 9,
+      name: 'Тест',
+      code: 'ФК27',
+    });
+  });
+
+  it('delegates POST create with parsed dto and requestId', async () => {
+    const create = vi.fn().mockResolvedValue({
+      projectId: 700,
+      code: 'МП-700',
+      name: 'Тест',
+      clientId: 9,
+      notes: null,
+      version: 0,
+      auditId: 'a-1',
+      requestId: 'req-1',
+    });
+    const controller = createController({ create });
+
+    const result = await controller.create(request(), {
+      clientId: 9,
+      name: 'Тест',
+      idempotencyKey: 'k1234567',
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      currentUser: request().user,
+      dto: { clientId: 9, name: 'Тест', code: undefined, notes: undefined },
+      idempotencyKey: 'k1234567',
+      requestId: 'req-1',
+    });
+    expect(result.code).toBe('МП-700');
   });
 
   it('delegates PATCH with parsed dto and requestId', async () => {
@@ -97,11 +139,14 @@ describe('ProjectsController', () => {
   });
 });
 
-function createController(service?: Partial<Record<'list' | 'getById' | 'update' | 'merge', unknown>>) {
+function createController(service?: Partial<Record<'list' | 'getById' | 'create' | 'update' | 'merge', unknown>>) {
   const projects = {
     list: async () => [],
     getById: async () => {
       throw new Error('getById should not be called');
+    },
+    create: async () => {
+      throw new Error('create should not be called');
     },
     update: async () => {
       throw new Error('update should not be called');

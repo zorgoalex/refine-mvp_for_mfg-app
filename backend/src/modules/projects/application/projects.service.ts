@@ -3,6 +3,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
+  CreateProjectCommand,
   ListProjectsQuery,
   MergeCommand,
   MoveOrderCommand,
@@ -30,6 +31,11 @@ export class ProjectsService {
   async getById(command: { currentUser: CurrentUser; projectId: number }) {
     this.require(command.currentUser, 'projects.view');
     return this.ports.projects.getById(command.projectId);
+  }
+
+  async create(command: CreateProjectCommand) {
+    this.require(command.currentUser, 'projects.manage');
+    return this.ports.projects.create(command);
   }
 
   async update(command: UpdateProjectCommand) {

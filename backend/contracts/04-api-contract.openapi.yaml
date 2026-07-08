@@ -2872,6 +2872,100 @@ paths:
           description: База данных недоступна
         '500':
           $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Projects
+      operationId: createProject
+      summary: Создать проект без заказа
+      security:
+        - bearerAuth: []
+      x-permission: projects.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - clientId
+                - name
+                - idempotencyKey
+              properties:
+                clientId:
+                  type: integer
+                  minimum: 1
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 300
+                code:
+                  type: string
+                  pattern: '^[0-9A-Za-zА-Яа-яЁё-]{1,20}$'
+                notes:
+                  type: string
+                  maxLength: 4000
+                  nullable: true
+                idempotencyKey:
+                  type: string
+                  minLength: 8
+                  maxLength: 200
+      responses:
+        '201':
+          description: Проект создан
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - projectId
+                  - code
+                  - name
+                  - clientId
+                  - notes
+                  - version
+                  - auditId
+                  - requestId
+                properties:
+                  projectId:
+                    type: integer
+                  code:
+                    type: string
+                  name:
+                    type: string
+                  clientId:
+                    type: integer
+                  notes:
+                    type: string
+                    nullable: true
+                  version:
+                    type: integer
+                  auditId:
+                    type: string
+                  requestId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: Код занят или конфликт идемпотентности
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+          description: База данных недоступна
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/projects/{id}:
     parameters:

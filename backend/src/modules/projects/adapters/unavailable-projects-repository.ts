@@ -1,4 +1,6 @@
 import type {
+  CreateProjectCommand,
+  CreateProjectResult,
   ListProjectsQuery,
   MergeCommand,
   MergeResult,
@@ -17,6 +19,10 @@ export class UnavailableProjectsRepository implements ProjectsRepositoryPort {
   }
 
   getById(_projectId: number): Promise<ProjectCard> {
+    return Promise.reject(new ProjectDatabaseUnavailableError());
+  }
+
+  create(_command: CreateProjectCommand): Promise<CreateProjectResult> {
     return Promise.reject(new ProjectDatabaseUnavailableError());
   }
 

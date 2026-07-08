@@ -8,6 +8,8 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import { insertAutoRoot } from '../../orders/adapters/pg-order-transaction-manager';
 import type {
+  CreateProjectCommand,
+  CreateProjectResult,
   ListProjectsQuery,
   MergeCommand,
   MergeResult,
@@ -21,6 +23,7 @@ import type {
 } from '../application/projects.types';
 import {
   ProjectArchivedError,
+  ProjectClientNotFoundError,
   ProjectCodeTakenError,
   ProjectClientMismatchError,
   ProjectNotFoundError,
@@ -29,6 +32,7 @@ import {
 
 const SOURCE = 'backend-projects-command';
 const MOVE_ORDER_COMMAND = 'projects.move_order';
+const CREATE_PROJECT_COMMAND = 'projects.create';
 const MERGE_COMMAND = 'projects.merge';
 
 interface ProjectRow extends QueryResultRow {
@@ -78,7 +82,7 @@ interface IdempotencyRow extends QueryResultRow {
   status: 'processing' | 'completed' | 'failed';
 }
 
-type CommandResponse = MoveOrderResult | MergeResult;
+type CommandResponse = MoveOrderResult | MergeResult | CreateProjectResult;
 
 export class PgProjectsRepository implements ProjectsRepositoryPort {
   constructor(private readonly database: DatabaseService) {}
@@ -159,6 +163,120 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
       ...mapProjectRow(row),
       orders: orders.rows.map(mapProjectOrderRow),
     };
+  }
+
+  create(command: CreateProjectCommand): Promise<CreateProjectResult> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const requestId = requestIdOrFallback(command.requestId);
+      const idempotency = await reconcileIdempotency<CreateProjectResult>(tx, {
+        idempotencyKey: command.idempotencyKey,
+        commandName: CREATE_PROJECT_COMMAND,
+        currentUser: command.currentUser,
+        entityType: 'project',
+        // project_id ещё не существует — ключ и есть идентичность команды
+        entityId: command.idempotencyKey,
+        requestShape: createProjectRequestShape(command),
+      });
+      if (idempotency.completedResponse) {
+        return idempotency.completedResponse;
+      }
+
+      const client = await tx.query(
+        `SELECT client_id FROM clients WHERE client_id = $1`,
+        [command.dto.clientId],
+      );
+      if (!client.rows[0]) {
+        throw new ProjectClientNotFoundError(command.dto.clientId);
+      }
+
+      let row: { project_id: string | number; code: string };
+      try {
+        if (command.dto.code !== undefined) {
+          const inserted = await tx.query<{ project_id: string | number; code: string }>(
+            `
+            INSERT INTO projects (code, name, client_id, notes, created_by)
+            VALUES ($1, LEFT($2, 300), $3, $4, $5)
+            RETURNING project_id, code
+            `,
+            [command.dto.code, command.dto.name, command.dto.clientId, command.dto.notes ?? null, Number(command.currentUser.id)],
+          );
+          row = inserted.rows[0];
+        } else {
+          // Тот же авто-код «МП-<id>», что у корня, создаваемого заказом.
+          const inserted = await tx.query<{ project_id: string | number; code: string }>(
+            `
+            WITH next_project AS (
+              SELECT nextval(pg_get_serial_sequence('public.projects', 'project_id')) AS project_id
+            )
+            INSERT INTO projects (project_id, code, name, client_id, notes, created_by)
+            SELECT next_project.project_id, 'МП-' || next_project.project_id, LEFT($1, 300), $2, $3, $4
+            FROM next_project
+            RETURNING project_id, code
+            `,
+            [command.dto.name, command.dto.clientId, command.dto.notes ?? null, Number(command.currentUser.id)],
+          );
+          row = inserted.rows[0];
+        }
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          throw new ProjectCodeTakenError(command.dto.code ?? '');
+        }
+        throw error;
+      }
+
+      const projectId = Number(row.project_id);
+      const auditId = await auditService.record(tx, {
+        event: 'project.created',
+        entityType: 'project',
+        entityId: String(projectId),
+        actorUserId: command.currentUser.id,
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        requestId,
+        source: SOURCE,
+        relatedClientId: command.dto.clientId,
+        before: null,
+        after: { projectId, code: row.code, name: command.dto.name, clientId: command.dto.clientId },
+        metadata: {
+          projectId,
+          action: 'project_create',
+          origin: 'manual',
+        },
+        relatedEntities: [
+          { entityType: 'project', entityId: projectId },
+          { entityType: 'client', entityId: command.dto.clientId },
+        ],
+      });
+      await enqueueOutbox(tx, {
+        eventType: 'project.created',
+        aggregateType: 'project',
+        aggregateId: String(projectId),
+        payload: {
+          eventType: 'project.created',
+          projectId,
+          code: row.code,
+          clientId: command.dto.clientId,
+          origin: 'manual',
+          actorUserId: command.currentUser.id,
+          requestId,
+        },
+        idempotencyKey: command.idempotencyKey,
+      });
+
+      const response: CreateProjectResult = {
+        projectId,
+        code: row.code,
+        name: command.dto.name,
+        clientId: command.dto.clientId,
+        notes: command.dto.notes ?? null,
+        version: 0,
+        auditId: String(auditId),
+        requestId,
+      };
+      await completeIdempotency(tx, command.idempotencyKey, response);
+      return response;
+    });
   }
 
   async update(command: UpdateProjectCommand): Promise<ProjectDto> {
@@ -940,6 +1058,16 @@ function moveOrderRequestShape(command: MoveOrderCommand): Record<string, unknow
     orderId: command.orderId,
     targetProjectId: command.targetProjectId ?? null,
     createNew: command.createNew === true,
+  };
+}
+
+function createProjectRequestShape(command: CreateProjectCommand): Record<string, unknown> {
+  return {
+    actorUserId: command.currentUser.id,
+    clientId: command.dto.clientId,
+    name: command.dto.name,
+    code: command.dto.code ?? null,
+    notes: command.dto.notes ?? null,
   };
 }
 

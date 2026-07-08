@@ -34,7 +34,7 @@ export interface MoveOrderResult {
   projectId: number;
   code: string;
   archivedSourceProjectId: number | null;
-  auditId: number;
+  auditId: string;
   requestId: string;
 }
 
@@ -42,7 +42,7 @@ export interface MergeResult {
   targetProjectId: number;
   sourceProjectId: number;
   movedOrdersCount: number;
-  auditId: number;
+  auditId: string;
   requestId: string;
 }
 
@@ -69,9 +69,26 @@ export interface MergeProjectsRequest {
   idempotencyKey: string;
 }
 
+export interface CreateProjectRequest {
+  clientId: number;
+  name: string;
+  code?: string;
+  notes?: string | null;
+  idempotencyKey: string;
+}
+
+export interface CreateProjectResult extends ProjectDto {
+  auditId: string;
+  requestId: string;
+}
+
 export const projectsApi = {
   list(params: ListProjectsParams = {}): Promise<ProjectDto[]> {
     return httpClient.get<ProjectDto[]>(withQuery(apiRoutes.projects.list, params));
+  },
+
+  create(dto: CreateProjectRequest): Promise<CreateProjectResult> {
+    return httpClient.post<CreateProjectResult>(apiRoutes.projects.list, dto);
   },
 
   getById(projectId: number): Promise<ProjectCard> {

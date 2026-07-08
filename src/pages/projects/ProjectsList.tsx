@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelect } from '@refinedev/antd';
-import { Input, Select, Space, Table, Typography, message } from 'antd';
+import { Button, Form, Input, Modal, Select, Space, Table, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useNavigate } from 'react-router-dom';
 import { projectsApi } from '../../api/projectsApi';
@@ -16,6 +16,9 @@ export const ProjectsList: React.FC = () => {
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedClientId, setSelectedClientId] = useState<number | undefined>(undefined);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createForm] = Form.useForm<{ clientId: number; name: string; code?: string; notes?: string }>();
 
   const { selectProps: clientSelectProps } = useSelect({
     resource: 'clients',
@@ -50,6 +53,28 @@ export const ProjectsList: React.FC = () => {
   useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
+
+  const handleCreate = useCallback(async () => {
+    const values = await createForm.validateFields();
+    setCreating(true);
+    try {
+      const created = await projectsApi.create({
+        clientId: values.clientId,
+        name: values.name.trim(),
+        code: values.code?.trim() || undefined,
+        notes: values.notes?.trim() ? values.notes.trim() : undefined,
+        idempotencyKey: `project-create-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      });
+      message.success(`Проект ${created.code} создан`);
+      setCreateOpen(false);
+      createForm.resetFields();
+      navigate(`/projects/show/${created.projectId}`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось создать проект');
+    } finally {
+      setCreating(false);
+    }
+  }, [createForm, navigate]);
 
   const columns = useMemo<ColumnsType<ProjectRow>>(
     () => [
@@ -99,6 +124,9 @@ export const ProjectsList: React.FC = () => {
         </Title>
 
         <Space wrap>
+          <Button type="primary" onClick={() => setCreateOpen(true)}>
+            Создать проект
+          </Button>
           <Input
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
@@ -127,6 +155,37 @@ export const ProjectsList: React.FC = () => {
             style: { cursor: 'pointer' },
           })}
         />
+
+        <Modal
+          title="Новый проект"
+          open={createOpen}
+          onOk={() => void handleCreate()}
+          confirmLoading={creating}
+          onCancel={() => setCreateOpen(false)}
+          okText="Создать"
+          cancelText="Отмена"
+          destroyOnClose
+        >
+          <Form form={createForm} layout="vertical" preserve={false}>
+            <Form.Item name="clientId" label="Клиент" rules={[{ required: true, message: 'Выберите клиента' }]}>
+              <Select {...clientSelectProps} placeholder="Клиент" showSearch allowClear />
+            </Form.Item>
+            <Form.Item name="name" label="Имя проекта" rules={[{ required: true, whitespace: true, message: 'Укажите имя' }, { max: 300 }]}>
+              <Input placeholder="Например: Кухня Фрунзе 26" />
+            </Form.Item>
+            <Form.Item
+              name="code"
+              label="Код (необязательно)"
+              tooltip="Пусто — присвоится автоматический «МП-N»"
+              rules={[{ pattern: /^[0-9A-Za-zА-Яа-яЁё-]{1,20}$/u, message: 'Буквы/цифры/дефис, до 20 символов' }]}
+            >
+              <Input placeholder="ФК26" maxLength={20} />
+            </Form.Item>
+            <Form.Item name="notes" label="Заметки" rules={[{ max: 4000 }]}>
+              <Input.TextArea rows={3} />
+            </Form.Item>
+          </Form>
+        </Modal>
       </Space>
     </div>
   );

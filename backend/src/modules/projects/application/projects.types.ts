@@ -81,9 +81,30 @@ export interface UpdateProjectCommand {
   requestId?: string;
 }
 
+export interface CreateProjectDtoBody {
+  clientId: number;
+  name: string;
+  /** Без кода — авто «МП-N» (как у корня, создаваемого заказом). */
+  code?: string;
+  notes?: string | null;
+}
+
+export interface CreateProjectCommand {
+  currentUser: CurrentUser;
+  dto: CreateProjectDtoBody;
+  idempotencyKey: string;
+  requestId?: string;
+}
+
+export interface CreateProjectResult extends ProjectDto {
+  auditId: string;
+  requestId: string;
+}
+
 export interface ProjectsRepositoryPort {
   list(query: ListProjectsQuery): Promise<ProjectDto[]>;
   getById(projectId: number): Promise<ProjectCard>;
+  create(command: CreateProjectCommand): Promise<CreateProjectResult>;
   update(command: UpdateProjectCommand): Promise<ProjectDto>;
   moveOrder(command: MoveOrderCommand): Promise<MoveOrderResult>;
   merge(command: MergeCommand): Promise<MergeResult>;

@@ -14,6 +14,7 @@ const user = (permissions: readonly PermissionName[]): CurrentUser => ({
 const repo = () => ({
   list: vi.fn().mockResolvedValue([]),
   getById: vi.fn(),
+  create: vi.fn(),
   update: vi.fn(),
   moveOrder: vi.fn(),
   merge: vi.fn(),
@@ -62,6 +63,36 @@ describe('ProjectsService', () => {
 
     expect(result.code).toBe('ФК26');
     expect(projects.update).toHaveBeenCalledOnce();
+  });
+
+  it('create requires projects.manage and delegates', async () => {
+    const projects = repo();
+    projects.create.mockResolvedValue({ projectId: 7, code: 'МП-7' });
+    const denied = new ProjectsService({
+      projects,
+      permissions: { canUser: () => false } as never,
+    });
+    await expect(
+      denied.create({
+        currentUser: user([]),
+        dto: { clientId: 2, name: 'Тест' },
+        idempotencyKey: 'k1234567',
+        requestId: 'r1',
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    expect(projects.create).not.toHaveBeenCalled();
+
+    const allowed = new ProjectsService({
+      projects,
+      permissions: { canUser: (_u: CurrentUser, p: string) => p === 'projects.manage' } as never,
+    });
+    await allowed.create({
+      currentUser: user(['projects.manage']),
+      dto: { clientId: 2, name: 'Тест' },
+      idempotencyKey: 'k1234567',
+      requestId: 'r1',
+    });
+    expect(projects.create).toHaveBeenCalledOnce();
   });
 
   it('moveOrder and merge require BOTH projects.manage and orders.update', async () => {

@@ -5,8 +5,8 @@ import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { ProjectsService } from '../application/projects.service';
-import type { MergeResult, ProjectCard, ProjectDto, UpdateProjectDtoBody } from '../application/projects.types';
-import { listProjectsSchema, mergeSchema, updateProjectSchema } from '../dto/projects.dto';
+import type { CreateProjectResult, MergeResult, ProjectCard, ProjectDto, UpdateProjectDtoBody } from '../application/projects.types';
+import { createProjectSchema, listProjectsSchema, mergeSchema, updateProjectSchema } from '../dto/projects.dto';
 
 const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
 
@@ -64,6 +64,32 @@ const updateProjectSwaggerSchema = {
     notes: { type: 'string', maxLength: 4000, nullable: true },
     expectedVersion: { type: 'integer', minimum: 0 },
   },
+} as const;
+
+const createProjectSwaggerSchema = {
+  type: 'object',
+  required: ['clientId', 'name', 'idempotencyKey'],
+  properties: {
+    clientId: { type: 'integer', minimum: 1 },
+    name: { type: 'string', minLength: 1, maxLength: 300 },
+    code: { type: 'string', pattern: '^[0-9A-Za-zА-Яа-яЁё-]{1,20}$' },
+    notes: { type: 'string', maxLength: 4000, nullable: true },
+    idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
+  },
+} as const;
+
+const createProjectResponseSwaggerSchema = {
+  allOf: [
+    projectSwaggerSchema,
+    {
+      type: 'object',
+      required: ['auditId', 'requestId'],
+      properties: {
+        auditId: { type: 'string' },
+        requestId: { type: 'string' },
+      },
+    },
+  ],
 } as const;
 
 const mergeProjectSwaggerSchema = {
@@ -127,6 +153,34 @@ export class ProjectsController {
     return this.projects.getById({
       currentUser: requireCurrentUser(request),
       projectId: id,
+    });
+  }
+
+  @ApiOperation({ operationId: 'createProject', summary: 'Создать проект без заказа' })
+  @ApiBody({ schema: swaggerSchema(createProjectSwaggerSchema) })
+  @ApiResponse({
+    status: 201,
+    description: 'Проект создан',
+    schema: swaggerSchema(createProjectResponseSwaggerSchema),
+  })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 409, description: 'Duplicate code or idempotency conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid payload or unknown client' })
+  @Post()
+  @HttpCode(201)
+  create(@Req() request: RequestWithCurrentUser, @Body() body: unknown): Promise<CreateProjectResult> {
+    const parsed = parseCreateProjectBody(body);
+    return this.projects.create({
+      currentUser: requireCurrentUser(request),
+      dto: {
+        clientId: parsed.clientId,
+        name: parsed.name,
+        code: parsed.code,
+        notes: parsed.notes,
+      },
+      idempotencyKey: parsed.idempotencyKey,
+      requestId: request.requestId,
     });
   }
 
@@ -196,6 +250,10 @@ export function parseUpdateProjectBody(body: unknown) {
 
 export function parseMergeBody(body: unknown) {
   return parseWithZod(mergeSchema, body);
+}
+
+export function parseCreateProjectBody(body: unknown) {
+  return parseWithZod(createProjectSchema, body);
 }
 
 function requireCurrentUser(request: RequestWithCurrentUser) {
