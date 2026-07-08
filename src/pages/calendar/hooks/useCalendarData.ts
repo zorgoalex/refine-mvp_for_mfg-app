@@ -5,7 +5,6 @@ import { groupOrdersByDate } from '../utils/groupOrdersByDate';
 import { formatDateForApi } from '../utils/dateUtils';
 import { useAppSettings, SETTING_KEYS } from '../../../hooks/useAppSettings';
 import { resolveDetailMaterialName } from '../../../utils/materialDisplayName';
-import { featureFlags } from '../../../config/featureFlags';
 import { buildProductionStagesDisplayConfig } from '../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../types/productionWorkflow';
 
@@ -89,16 +88,17 @@ export const useCalendarData = (
     },
   });
 
-  // SP3: server-resolved per-detail material name = COALESCE(sheet name, material
-  // name) from order_details_view. Additive fetch; an empty/untracked view falls
-  // back to the materials map below → legacy calendar display unchanged.
+  // Variant B: server-resolved per-detail material name = COALESCE(sheet name,
+  // material name) from order_details_view. Calendar cards still fetch base
+  // order_details for status/milling ids, so this view fetch is what restores
+  // the material tags after material_id stopped being the order material source.
   const { data: detailNamesData } = useList({
     resource: 'order_details_view',
     filters: [{ field: 'order_id', operator: 'in', value: orderIds }],
     pagination: { pageSize: 10000 },
     meta: { fields: ['detail_id', 'material_name'] },
     queryOptions: {
-      enabled: orderIds.length > 0 && featureFlags.sheetMaterialsReads,
+      enabled: orderIds.length > 0,
       staleTime: 30000,
     },
   });
