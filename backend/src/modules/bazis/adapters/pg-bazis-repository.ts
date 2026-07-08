@@ -19,6 +19,7 @@ import type {
   BazisProjectCardDto,
   BazisProjectListItemDto,
   BazisRevisionMaterialsSummaryDto,
+  BazisRevisionOrderDto,
   BazisTreeNodeDto,
   CreateOrderFromRevisionResponseDto,
   MaterialMappingDto,
@@ -193,6 +194,14 @@ interface HardwareSummaryRow {
 interface RawUsageRow {
   name: string;
   usage_count: number | string;
+}
+
+interface RevisionOrderRow {
+  order_id: number | string;
+  order_name: string | null;
+  created_at: string;
+  nodes_mapped: number | string;
+  details_created: number | string;
 }
 
 export class PgBazisRepository implements BazisRepositoryPort {
@@ -859,6 +868,42 @@ export class PgBazisRepository implements BazisRepositoryPort {
       edgesByName: edges.rows.map((row) => ({ name: row.name, usageCount: Number(row.usage_count) })),
       filmsByName: films.rows.map((row) => ({ name: row.name, usageCount: Number(row.usage_count) })),
     };
+  }
+
+  async listRevisionOrders(revisionId: number): Promise<BazisRevisionOrderDto[]> {
+    await this.assertRevisionExists(revisionId);
+
+    const result = await this.database.query<RevisionOrderRow>(
+      `
+      SELECT bol.order_id,
+             o.order_name,
+             bol.created_at::text AS created_at,
+             COALESCE(m.nodes_mapped, 0)::int AS nodes_mapped,
+             COALESCE(m.details_created, 0)::int AS details_created
+      FROM bazis_order_links bol
+      JOIN orders o ON o.order_id = bol.order_id
+      LEFT JOIN (
+        SELECT map.order_id,
+               count(*)::int AS nodes_mapped,
+               count(*) FILTER (WHERE map.order_detail_id IS NOT NULL)::int AS details_created
+        FROM bazis_node_order_detail_map map
+        JOIN bazis_nodes n ON n.bazis_node_id = map.node_id
+        WHERE n.revision_id = $1
+        GROUP BY map.order_id
+      ) m ON m.order_id = bol.order_id
+      WHERE bol.revision_id = $1
+      ORDER BY bol.order_id DESC
+      `,
+      [revisionId],
+    );
+
+    return result.rows.map((row) => ({
+      orderId: Number(row.order_id),
+      orderName: row.order_name ?? null,
+      createdAt: row.created_at,
+      nodesMapped: Number(row.nodes_mapped),
+      detailsCreated: Number(row.details_created),
+    }));
   }
 
   async listMaterialMappings(names?: string[]): Promise<MaterialMappingDto[]> {

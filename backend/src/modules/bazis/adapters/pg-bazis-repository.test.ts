@@ -792,6 +792,42 @@ describe('PgBazisRepository.getMaterialsSummary', () => {
   });
 });
 
+describe('PgBazisRepository.listRevisionOrders', () => {
+  it('joins bazis_order_links with orders and per-order node counts', async () => {
+    const database = createDatabase({
+      revisionOrders: [
+        {
+          order_id: 9001,
+          order_name: 'Тест-заказ 1',
+          created_at: '2026-07-08 10:00:00+00',
+          nodes_mapped: 12,
+          details_created: 10,
+        },
+      ],
+    });
+    // responder 1 (revision exists): [{ ok: 1 }]; responder 2: одна строка order 9001
+    const repository = new PgBazisRepository(database.service);
+
+    const orders = await repository.listRevisionOrders(82);
+
+    const sql = normalizeSql(database.queries[1].text);
+    expect(sql).toContain('FROM bazis_order_links bol');
+    expect(sql).toContain('JOIN orders o ON o.order_id = bol.order_id');
+    // счётчик деталей — по order_detail_id, НЕ по mapping_kind (см. семантику выше)
+    expect(sql).toContain('FILTER (WHERE map.order_detail_id IS NOT NULL)');
+    expect(orders).toEqual([{
+      orderId: 9001, orderName: 'Тест-заказ 1', createdAt: '2026-07-08 10:00:00+00',
+      nodesMapped: 12, detailsCreated: 10,
+    }]);
+  });
+
+  it('throws BazisRevisionNotFoundError for unknown revision', async () => {
+    const database = createDatabase({ nodeSearch: { revisionExists: false } }); // responder 1: пустой rows
+    const repository = new PgBazisRepository(database.service);
+    await expect(repository.listRevisionOrders(1)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+});
+
 function createDatabase(
   options: {
     duplicateRevisionNo?: number;
@@ -828,6 +864,7 @@ function createDatabase(
       edgeRows?: Array<Record<string, unknown>>;
       filmRows?: Array<Record<string, unknown>>;
     };
+    revisionOrders?: Array<Record<string, unknown>>;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -1006,6 +1043,12 @@ function createDatabase(
         return {
           rows: options.materialsSummary?.filmRows ?? [],
           rowCount: options.materialsSummary?.filmRows?.length ?? 0,
+        };
+      }
+      if (normalized.startsWith('SELECT bol.order_id,')) {
+        return {
+          rows: options.revisionOrders ?? [],
+          rowCount: options.revisionOrders?.length ?? 0,
         };
       }
 
