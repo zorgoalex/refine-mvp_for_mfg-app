@@ -64,6 +64,7 @@ import "./list.css";
 const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'order_id', label: 'id', lockVisible: true },
   { key: 'order_name', label: 'Заказ', lockVisible: true },
+  { key: 'project_code', label: '№ проекта' },
   { key: 'doweling_order_name', label: 'Прис.' },
   { key: 'groups', label: 'Группа' },
   { key: 'order_date', label: 'Дата заказа' },
@@ -917,6 +918,15 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       render: (value) => <span style={{ letterSpacing: '0.5px' }}>{value}</span>,
     },
     {
+      dataIndex: "project_code",
+      key: "project_code",
+      title: "№ проекта",
+      sorter: true,
+      width: 92,
+      className: "orders-col",
+      render: (value) => value || '—',
+    },
+    {
       dataIndex: "doweling_order_name",
       key: "doweling_order_name",
       title: "Прис.",
@@ -1077,7 +1087,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             )}
             <Space.Compact style={{ marginRight: 8 }}>
               <Input
-                placeholder="Поиск по номеру заказа"
+                placeholder="Поиск: номер, ФК26 или ФК26-1258"
                 value={searchOrderId}
                 onChange={(e) => setSearchOrderId(e.target.value)}
                 onPressEnter={handleSearchOrder}

@@ -68,6 +68,7 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
     header: {
       orderName: requiredString(header.order_name, 'header.order_name'),
       clientId: requiredNumber(header.client_id, 'header.client_id'),
+      projectId: optionalNumber(header.project_id),
       orderDate: requiredDateOnly(header.order_date, 'header.order_date'),
       priority: normalizeNumber(header.priority, 100),
 
@@ -117,6 +118,7 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
       requirementIds: normalizeDeletedIds(values.deletedRequirements),
       dowelingLinkIds: normalizeDeletedIds(values.deletedDowelingLinks),
     },
+    idempotencyKey: values.idempotencyKey,
   };
 
   if (version !== undefined) {
@@ -131,6 +133,11 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     order_id: order.header.orderId,
     order_name: order.header.orderName,
     client_id: order.header.clientId,
+    project_id: optionalNumber(order.header.projectId),
+    project_code: order.header.projectCode ?? null,
+    order_full_number: order.header.projectCode
+      ? `${order.header.projectCode}-${order.header.orderName}`
+      : null,
     client_name: order.header.clientName ?? null,
     order_date: order.header.orderDate,
     priority: normalizeNumber(order.header.priority, 100),
@@ -217,6 +224,9 @@ export function mapOrderListItemToLegacyRow(item: OrderListItemDto): LegacyOrder
     order_id: item.orderId,
     order_name: item.orderName,
     client_id: item.clientId,
+    project_id: item.projectId,
+    project_code: item.projectCode,
+    order_full_number: item.fullNumber,
     client_name: item.clientName ?? null,
     order_date: item.orderDate,
     planned_completion_date: item.plannedCompletionDate ?? null,

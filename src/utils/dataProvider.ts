@@ -110,6 +110,9 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "order_name",
     "order_name_numeric",
     "client_id",
+    "project_id",
+    "project_code",
+    "order_full_number",
     "client_name",
     "order_date",
     "priority",
@@ -1149,6 +1152,7 @@ const ORDER_SORT_FIELD_MAP: Record<string, OrderSortBy> = {
   completion_date: 'completionDate',
   issue_date: 'issueDate',
   client_name: 'clientName',
+  project_code: 'projectCode',
   order_status_name: 'orderStatusName',
   payment_status_name: 'paymentStatusName',
   production_status_name: 'productionStatusName',
@@ -1207,6 +1211,9 @@ function mapOrdersViewQueryToBackend(
         break;
       case 'client_id':
         query.clientId = Number(value);
+        break;
+      case 'project_id':
+        query.projectId = Number(value);
         break;
       case 'order_status_id':
         query.orderStatusId = Number(value);

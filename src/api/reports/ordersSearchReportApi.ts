@@ -8,9 +8,14 @@ export interface OrderSearchRow {
 }
 
 const FIND_ORDER_QUERY = `
-              query FindOrder($orderNamePattern: String!) {
+              query FindOrder($orderNamePattern: String!, $fullNumberPattern: String!) {
                 orders_view(
-                  where: { order_name: { _ilike: $orderNamePattern } }
+                  where: {
+                    _or: [
+                      { order_name: { _ilike: $orderNamePattern } }
+                      { order_full_number: { _ilike: $fullNumberPattern } }
+                    ]
+                  }
                   order_by: [{ order_date: desc }, { order_name_numeric: desc }]
                   limit: 1
                 ) {
@@ -47,6 +52,7 @@ const COUNT_ORDERS_QUERY = `
 export async function findOrderByName(orderName: string): Promise<OrderSearchRow | null> {
   const data = await hasuraReportQuery<{ orders_view: OrderSearchRow[] }>(FIND_ORDER_QUERY, {
     orderNamePattern: `%${orderName}%`,
+    fullNumberPattern: `${orderName}%`,
   });
   return data.orders_view[0] ?? null;
 }
