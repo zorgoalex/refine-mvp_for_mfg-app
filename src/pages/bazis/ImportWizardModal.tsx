@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { InboxOutlined, LinkOutlined, LoadingOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { Alert, Button, Descriptions, Modal, Radio, Select, Space, Spin, Steps, Typography, Upload, message } from 'antd';
 import { ApiError } from '../../api/apiError';
@@ -51,6 +51,10 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   const [selectedBazisProjectId, setSelectedBazisProjectId] = useState<number | undefined>(undefined);
   const [selectedProjectId, setSelectedProjectId] = useState<number | undefined>(undefined);
   const [importLoading, setImportLoading] = useState(false);
+  // Гейт повторного запуска импорта БЕЗ участия в deps: importLoading в deps
+  // самого эффекта отменял (cancelled=true) собственный запрос сразу после
+  // setImportLoading(true) → ответ выбрасывался, спиннер зависал навсегда.
+  const importLoadingRef = useRef(false);
   const [importErrorText, setImportErrorText] = useState<string | null>(null);
   const [summary, setSummary] = useState<SummaryState | null>(null);
   const [unmappedMaterials, setUnmappedMaterials] = useState<UnmappedMaterialRow[]>([]);
@@ -80,6 +84,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     setBindingMode('bazis');
     setSelectedBazisProjectId(undefined);
     setSelectedProjectId(undefined);
+    importLoadingRef.current = false;
     setImportLoading(false);
     setImportErrorText(null);
     setSummary(null);
@@ -128,8 +133,13 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     };
   }, [open, resetState]);
 
+  // onImported приходит инлайн-лямбдой от родителя (новая ссылка на каждый рендер) —
+  // через ref, чтобы не входить в deps импорт-эффекта и не отменять запрос re-run'ом.
+  const onImportedRef = useRef(onImported);
+  onImportedRef.current = onImported;
+
   useEffect(() => {
-    if (!open || currentStep !== 'import' || importLoading || summary != null || xmlFile == null) {
+    if (!open || currentStep !== 'import' || importLoadingRef.current || summary != null || xmlFile == null) {
       return;
     }
 
@@ -149,6 +159,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     let cancelled = false;
 
     const runImport = async () => {
+      importLoadingRef.current = true;
       setImportLoading(true);
       setImportErrorText(null);
 
@@ -164,7 +175,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
         }
 
         applyImportResponse(response);
-        onImported();
+        onImportedRef.current();
       } catch (error) {
         if (cancelled) {
           return;
@@ -188,9 +199,8 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
 
         setImportErrorText(formatImportError(error));
       } finally {
-        if (!cancelled) {
-          setImportLoading(false);
-        }
+        importLoadingRef.current = false;
+        setImportLoading(false);
       }
     };
 
@@ -199,11 +209,11 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     return () => {
       cancelled = true;
     };
+    // importLoading/onImported сознательно НЕ в deps: собственный setState не должен
+    // перезапускать эффект и отменять in-flight импорт (deadlock вечного спиннера).
   }, [
     bindingMode,
     currentStep,
-    importLoading,
-    onImported,
     open,
     selectedBazisProjectId,
     selectedProjectId,
