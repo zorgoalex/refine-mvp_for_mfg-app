@@ -100,17 +100,22 @@ export function buildTreeFromFlat(nodes: BazisTreeNode[]): BazisTreeDataNode[] {
   return roots;
 }
 
-/** Ключи всех нелистовых узлов — для раскрытия дерева по умолчанию. */
-export function collectExpandableKeys(nodes: BazisTreeDataNode[]): number[] {
+/**
+ * Ключи нелистовых узлов для раскрытия дерева по умолчанию.
+ * maxDepth ограничивает глубину раскрытия (1 = только корни,
+ * 2 = корни и их дети); Infinity — раскрыть всё.
+ */
+export function collectExpandableKeys(nodes: BazisTreeDataNode[], maxDepth: number = Infinity): number[] {
   const keys: number[] = [];
-  const walk = (items: BazisTreeDataNode[]) => {
+  const walk = (items: BazisTreeDataNode[], depth: number) => {
+    if (depth > maxDepth) return;
     for (const item of items) {
       if (item.children && item.children.length > 0) {
         keys.push(item.bazisNodeId);
-        walk(item.children as BazisTreeDataNode[]);
+        walk(item.children as BazisTreeDataNode[], depth + 1);
       }
     }
   };
-  walk(nodes);
+  walk(nodes, 1);
   return keys;
 }

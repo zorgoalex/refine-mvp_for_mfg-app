@@ -33,7 +33,7 @@ export const RevisionTree: React.FC<RevisionTreeProps> = ({
         if (!cancelled) {
           const tree = buildTreeFromFlat(nodes);
           setTreeData(tree);
-          setExpandedKeys(collectExpandableKeys(tree));
+          setExpandedKeys(collectExpandableKeys(tree, 2));
         }
       } catch (error) {
         if (!cancelled) {

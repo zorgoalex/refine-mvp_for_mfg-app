@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { ApiError } from '../../api/apiError';
 import { bazisApi } from '../../api/bazisApi';
 import { ordersApi } from '../../api/ordersApi';
+import { projectsApi } from '../../api/projectsApi';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
 import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
 import { createBackendSelectProps, useOrderFormData, type ReferenceOption } from '../../hooks/useOrderFormData';
@@ -248,17 +249,26 @@ async function suggestClientFromProject(
   }
 
   try {
-    // Клиент последнего заказа ERP-проекта — обычный кейс: ревизия импортируется
-    // в проект, созданный из заказа этого клиента.
-    const response = await ordersApi.list({
-      page: 1,
-      pageSize: 1,
-      projectId,
-      sortBy: 'orderDate',
-      sortOrder: 'desc',
-    });
+    // Клиент самого ERP-проекта (обязательное поле проекта) — работает и для
+    // свежесозданных проектов без заказов. Fallback — клиент последнего заказа.
+    let clientId: number | undefined;
+    try {
+      clientId = (await projectsApi.getById(projectId)).clientId ?? undefined;
+    } catch {
+      clientId = undefined;
+    }
 
-    const clientId = response.data[0]?.clientId;
+    if (clientId == null) {
+      const response = await ordersApi.list({
+        page: 1,
+        pageSize: 1,
+        projectId,
+        sortBy: 'orderDate',
+        sortOrder: 'desc',
+      });
+      clientId = response.data[0]?.clientId;
+    }
+
     if (clientId == null) {
       return;
     }

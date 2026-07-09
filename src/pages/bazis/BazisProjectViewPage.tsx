@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Card, Col, Empty, Row, Select, Space, Spin, Tabs, Typography } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Col, Empty, Row, Select, Space, Spin, Tabs, Typography } from 'antd';
 import type { BazisProjectCard } from '../../api/types/bazisApi.types';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
@@ -138,9 +139,14 @@ export const BazisProjectViewPage: React.FC = () => {
     <Card
       title={(
         <Space direction="vertical" size={4}>
-          <Title level={3} style={{ margin: 0 }}>
-            {projectCard.name}
-          </Title>
+          <Space align="center" size={12}>
+            <Link to="/bazis">
+              <Button size="small" icon={<ArrowLeftOutlined />}>К списку</Button>
+            </Link>
+            <Title level={3} style={{ margin: 0 }}>
+              {projectCard.name}
+            </Title>
+          </Space>
           <Link to={`/projects/show/${projectCard.projectId}`}>Проект ERP #{projectCard.projectId}</Link>
         </Space>
       )}
