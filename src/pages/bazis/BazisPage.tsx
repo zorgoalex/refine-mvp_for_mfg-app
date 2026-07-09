@@ -23,6 +23,7 @@ export const BazisPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [importRestoreSignal, setImportRestoreSignal] = useState(0);
   const [expandedProjectIds, setExpandedProjectIds] = useState<number[]>([]);
   const [projectCards, setProjectCards] = useState<Record<number, BazisProjectCard>>({});
   const [projectCardsLoading, setProjectCardsLoading] = useState<Record<number, boolean>>({});
@@ -207,7 +208,15 @@ export const BazisPage: React.FC = () => {
         <Card
           title={<Title level={3} style={{ margin: 0 }}>Базис-проекты</Title>}
           extra={(
-            <Button type="primary" onClick={() => setImportOpen(true)} disabled={!canManage}>
+            <Button
+              type="primary"
+              onClick={() => {
+                setImportOpen(true);
+                // если визард свёрнут — разворачиваем вместо «ничего не произошло»
+                setImportRestoreSignal((value) => value + 1);
+              }}
+              disabled={!canManage}
+            >
               Импорт XML
             </Button>
           )}
@@ -261,6 +270,7 @@ export const BazisPage: React.FC = () => {
 
       <ImportWizardModal
         open={importOpen}
+        restoreSignal={importRestoreSignal}
         onClose={() => setImportOpen(false)}
         onImported={() => {
           void loadProjects();

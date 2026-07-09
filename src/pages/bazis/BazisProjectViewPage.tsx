@@ -4,9 +4,11 @@ import { Alert, Button, Card, Col, Empty, Row, Select, Space, Spin, Tabs, Typogr
 import type { BazisProjectCard } from '../../api/types/bazisApi.types';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
+import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
 import { MaterialsSummaryTab } from './MaterialsSummaryTab';
 import { NodeCard } from './NodeCard';
+import { PanelsTab } from './PanelsTab';
 import { NodeSearch } from './NodeSearch';
 import { RevisionOrdersTab } from './RevisionOrdersTab';
 import { ViewerTree, type ViewerTreeHandle } from './ViewerTree';
@@ -17,6 +19,14 @@ export const BazisProjectViewPage: React.FC = () => {
   const { bazisProjectId: bazisProjectIdParam } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [projectCard, setProjectCard] = useState<BazisProjectCard | null>(null);
+  const setTabTitle = useTabStore((state) => state.setTabTitle);
+
+  useEffect(() => {
+    if (projectCard?.name) {
+      // Название базис-проекта в заголовок workspace-вкладки
+      setTabTitle(`/bazis/projects/${projectCard.bazisProjectId}`, projectCard.name);
+    }
+  }, [projectCard, setTabTitle]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
@@ -168,6 +178,11 @@ export const BazisProjectViewPage: React.FC = () => {
         <Tabs
           destroyInactiveTabPane
           items={[
+            {
+              key: 'panels',
+              label: 'Панели',
+              children: <PanelsTab revisionId={selectedRevision.bazisRevisionId} />,
+            },
             {
               key: 'tree',
               label: 'Дерево',

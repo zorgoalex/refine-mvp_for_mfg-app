@@ -52,6 +52,8 @@ const { Text } = Typography;
 
 interface ImportWizardModalProps {
   open: boolean;
+  /** Инкремент = запрос развернуть свёрнутую модалку (кнопка «Импорт XML») */
+  restoreSignal?: number;
   onClose: () => void;
   onImported: () => void;
   onOpenTree: (revisionId: number, label: string, projectId: number | null) => void;
@@ -75,6 +77,7 @@ type StepKey = 'file' | 'binding' | 'import' | 'materials' | 'summary';
 
 export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   open,
+  restoreSignal = 0,
   onClose,
   onImported,
   onOpenTree,
@@ -144,6 +147,12 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
       setMinimized(true);
     }
   }, [isTabActive, minimized, open]);
+
+  useEffect(() => {
+    if (restoreSignal > 0) {
+      setMinimized(false);
+    }
+  }, [restoreSignal]);
 
   const resetState = useCallback(() => {
     setMinimized(false);
