@@ -4,6 +4,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisNodeCard as BazisNodeCardData, BazisNodeOrderLink } from '../../api/types/bazisApi.types';
+import { PanelDiagram } from './PanelDiagram';
 import { parseNodeRaw, type RawEdgeEntry, type RawFaceEntry, type RawKeyValue } from './parseNodeRaw';
 
 const { Text } = Typography;
@@ -125,6 +126,10 @@ export const NodeCard: React.FC<NodeCardProps> = ({ nodeId }) => {
         </Space>
       ) : null}
 
+      {card.objectType === 'Панель' && card.lengthMm != null && card.widthMm != null ? (
+        <PanelDiagram lengthMm={card.lengthMm} widthMm={card.widthMm} holes={sections.holesGeometry} />
+      ) : null}
+
       <Collapse>
         <Collapse.Panel key="edges" header={`Кромки (${sections.edges.length})`}>
           {renderGroupedSideEntries(sections.edges, 'Сторона')}
@@ -134,6 +139,9 @@ export const NodeCard: React.FC<NodeCardProps> = ({ nodeId }) => {
         </Collapse.Panel>
         <Collapse.Panel key="holes" header={`Отверстия (${sections.holes.length})`}>
           {renderIndexedTables(sections.holes, 'Отверстие')}
+        </Collapse.Panel>
+        <Collapse.Panel key="grooves" header={`Пазы (${sections.grooves.length})`}>
+          {renderIndexedTables(sections.grooves, 'Паз')}
         </Collapse.Panel>
         <Collapse.Panel key="properties" header={`Свойства (${sections.properties.length})`}>
           {renderSingleTable(sections.properties)}

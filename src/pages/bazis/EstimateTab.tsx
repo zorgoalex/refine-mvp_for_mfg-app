@@ -16,7 +16,7 @@ interface EstimateTabProps {
 interface EstimateRow {
   key: string;
   kind: 'material' | 'operation';
-  nodeId: number;
+  nodeId: number | null;
   /** Панель для перехода: сам узел, если он панель, или панель-предок */
   panelNodeId: number | null;
   name: string;
@@ -27,6 +27,8 @@ interface EstimateRow {
   price: number | null;
   total: number | null;
   pathTitle: string;
+  /** Вхождения группы (одинаковые материал/операция по разным узлам) */
+  children?: EstimateRow[];
 }
 
 export const EstimateTab: React.FC<EstimateTabProps> = ({ data, onGoToTree, onGoToPanel }) => {
@@ -70,10 +72,47 @@ export const EstimateTab: React.FC<EstimateTabProps> = ({ data, onGoToTree, onGo
       pathTitle: nodePathTitle(ancestorsOf(operation.nodeId)),
     }));
 
-    return [...materialRows, ...operationRows];
+    // Группировка одинаковых позиций (Excel-стиль): родитель с суммами,
+    // вхождения — вложенные строки, по умолчанию схлопнуты.
+    const grouped = new Map<string, EstimateRow[]>();
+    for (const row of [...materialRows, ...operationRows]) {
+      const groupKey = [row.kind, row.name, row.code ?? '', row.unit ?? '', row.price ?? ''].join('|');
+      const bucket = grouped.get(groupKey);
+      if (bucket) bucket.push(row);
+      else grouped.set(groupKey, [row]);
+    }
+
+    const result: EstimateRow[] = [];
+    for (const [groupKey, bucket] of grouped) {
+      if (bucket.length === 1) {
+        result.push(bucket[0]);
+        continue;
+      }
+      const first = bucket[0];
+      const sum = (pick: (row: EstimateRow) => number | null) =>
+        bucket.reduce((acc, row) => acc + (pick(row) ?? 0), 0);
+      const materialIds = new Set(bucket.map((row) => row.materialId ?? ''));
+      result.push({
+        key: `g-${groupKey}`,
+        kind: first.kind,
+        nodeId: null,
+        panelNodeId: null,
+        name: first.name,
+        code: first.code,
+        materialId: materialIds.size === 1 ? first.materialId : null,
+        unit: first.unit,
+        quantity: sum((row) => row.quantity),
+        price: first.price,
+        total: sum((row) => row.total),
+        pathTitle: `${bucket.length} вхождений`,
+        children: bucket.map((row, index) => ({ ...row, key: `${row.key}-c${index}` })),
+      });
+    }
+    return result;
   }, [ancestorsOf, byId, estimate]);
 
   const totals = useMemo(() => {
+    // rows — уже верхний уровень (группы содержат суммы, одиночные — сами по себе)
     const sum = (kind: EstimateRow['kind']) =>
       rows.filter((row) => row.kind === kind).reduce((acc, row) => acc + (row.total ?? 0), 0);
     const materials = sum('material');
@@ -116,26 +155,28 @@ export const EstimateTab: React.FC<EstimateTabProps> = ({ data, onGoToTree, onGo
         key: 'actions',
         width: 90,
         render: (_, row) => (
-          <Space size={0}>
-            {row.panelNodeId != null ? (
-              <Tooltip title="К панели">
+          row.nodeId == null ? null : (
+            <Space size={0}>
+              {row.panelNodeId != null ? (
+                <Tooltip title="К панели">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<TableOutlined />}
+                    onClick={() => onGoToPanel(row.panelNodeId as number)}
+                  />
+                </Tooltip>
+              ) : null}
+              <Tooltip title="Показать в дереве">
                 <Button
                   type="text"
                   size="small"
-                  icon={<TableOutlined />}
-                  onClick={() => onGoToPanel(row.panelNodeId as number)}
+                  icon={<ApartmentOutlined />}
+                  onClick={() => onGoToTree(row.nodeId as number)}
                 />
               </Tooltip>
-            ) : null}
-            <Tooltip title="Показать в дереве">
-              <Button
-                type="text"
-                size="small"
-                icon={<ApartmentOutlined />}
-                onClick={() => onGoToTree(row.nodeId)}
-              />
-            </Tooltip>
-          </Space>
+            </Space>
+          )
         ),
       },
     ],

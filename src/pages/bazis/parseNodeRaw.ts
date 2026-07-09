@@ -13,10 +13,25 @@ export interface RawFaceEntry {
   fields: RawKeyValue[];
 }
 
+export interface HoleGeometry {
+  x: number;
+  y: number;
+  z: number | null;
+  diameter: number;
+  depth: number | null;
+  type: string | null;
+  dirX: number;
+  dirY: number;
+  dirZ: number;
+}
+
 export interface NodeRawSections {
   edges: RawEdgeEntry[];
   faces: RawFaceEntry[];
   holes: RawKeyValue[][];
+  /** Геометрия отверстий для схемы панели (только записи с валидными числами) */
+  holesGeometry: HoleGeometry[];
+  grooves: RawKeyValue[][];
   properties: RawKeyValue[];
   operations: RawKeyValue[][];
   scalars: RawKeyValue[];
@@ -24,7 +39,7 @@ export interface NodeRawSections {
 
 const EDGE_KEYS = ['СписокКромок1', 'СписокКромок2', 'СписокКромок3', 'СписокКромок4'] as const;
 const FACE_KEYS = ['ОблицовкаПласти1', 'ОблицовкаПласти2'] as const;
-const SECTION_KEYS = new Set<string>([...EDGE_KEYS, ...FACE_KEYS, 'Отверстие', 'Отверстия', 'Свойство', 'СдельнаяОперация', 'СписокОпераций']);
+const SECTION_KEYS = new Set<string>([...EDGE_KEYS, ...FACE_KEYS, 'Отверстие', 'Отверстия', 'Свойство', 'СдельнаяОперация', 'СписокОпераций', 'СписокПазов', 'Паз']);
 
 function toKeyValues(entry: unknown): RawKeyValue[] {
   if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -34,6 +49,12 @@ function toKeyValues(entry: unknown): RawKeyValue[] {
   return Object.entries(entry as Record<string, unknown>)
     .filter(([, value]) => value == null || ['string', 'number', 'boolean'].includes(typeof value))
     .map(([key, value]) => ({ key, value: value == null ? '' : String(value) }));
+}
+
+function toNumber(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const parsed = Number(String(value).replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function entryList(container: unknown, itemKey: string): unknown[] {
@@ -71,6 +92,32 @@ export function parseNodeRaw(rawJson: Record<string, unknown>): NodeRawSections 
   const holes = holesSource.map(toKeyValues);
   const operations = operationsSource.map(toKeyValues);
 
+  const groovesSource = Array.isArray(rawJson['Паз'])
+    ? (rawJson['Паз'] as unknown[])
+    : entryList(rawJson['СписокПазов'], 'Паз');
+  const grooves = groovesSource.map(toKeyValues);
+
+  const holesGeometry: HoleGeometry[] = [];
+  for (const hole of holesSource) {
+    if (hole == null || typeof hole !== 'object' || Array.isArray(hole)) continue;
+    const record = hole as Record<string, unknown>;
+    const x = toNumber(record['ПозицияX']);
+    const y = toNumber(record['ПозицияY']);
+    const diameter = toNumber(record['Диаметр']);
+    if (x == null || y == null || diameter == null || diameter <= 0) continue;
+    holesGeometry.push({
+      x,
+      y,
+      z: toNumber(record['ПозицияZ']),
+      diameter,
+      depth: toNumber(record['Глубина']),
+      type: typeof record['Тип'] === 'string' ? (record['Тип'] as string) : null,
+      dirX: toNumber(record['НаправлениеX']) ?? 0,
+      dirY: toNumber(record['НаправлениеY']) ?? 0,
+      dirZ: toNumber(record['НаправлениеZ']) ?? 0,
+    });
+  }
+
   const properties: RawKeyValue[] = (Array.isArray(rawJson['Свойство']) ? rawJson['Свойство'] : [])
     .map((property) => {
       const fields = toKeyValues(property);
@@ -85,5 +132,5 @@ export function parseNodeRaw(rawJson: Record<string, unknown>): NodeRawSections 
       && (value == null || ['string', 'number', 'boolean'].includes(typeof value)))
     .map(([key, value]) => ({ key, value: value == null ? '' : String(value) }));
 
-  return { edges, faces, holes, properties, operations, scalars };
+  return { edges, faces, holes, holesGeometry, grooves, properties, operations, scalars };
 }
