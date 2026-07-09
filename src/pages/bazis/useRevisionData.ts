@@ -93,3 +93,63 @@ export function nodePathTitle(ancestors: BazisTreeNode[]): string {
     .reverse()
     .join(' / ');
 }
+
+export interface SubtreeSummary {
+  panels: string[];
+  hardware: string[];
+  materials: string[];
+}
+
+/**
+ * Пост-ордер агрегация по поддеревьям: для каждого узла — имена панелей,
+ * фурнитуры и уникальные материалы (основные + сопутствующие из сметы),
+ * входящие в узел на любой глубине.
+ */
+export function buildSubtreeSummaries(
+  nodes: BazisTreeNode[],
+  estimate: BazisRevisionEstimate | null,
+): Map<number, SubtreeSummary> {
+  const childrenOf = new Map<number, BazisTreeNode[]>();
+  const roots: BazisTreeNode[] = [];
+  for (const node of nodes) {
+    if (node.parentNodeId == null) {
+      roots.push(node);
+      continue;
+    }
+    const bucket = childrenOf.get(node.parentNodeId);
+    if (bucket) bucket.push(node);
+    else childrenOf.set(node.parentNodeId, [node]);
+  }
+
+  const materialsByNode = new Map<number, string[]>();
+  for (const material of estimate?.materials ?? []) {
+    const bucket = materialsByNode.get(material.nodeId);
+    if (bucket) bucket.push(material.name);
+    else materialsByNode.set(material.nodeId, [material.name]);
+  }
+
+  const result = new Map<number, SubtreeSummary>();
+
+  const visit = (node: BazisTreeNode): { panels: string[]; hardware: string[]; materials: Set<string> } => {
+    const panels: string[] = [];
+    const hardware: string[] = [];
+    const materials = new Set<string>(materialsByNode.get(node.bazisNodeId) ?? []);
+
+    const title = node.name?.trim() || node.objectType || node.nodeKind;
+    if (node.objectType === 'Панель') panels.push(title);
+    if (node.objectType === 'Фурнитура') hardware.push(title);
+
+    for (const child of childrenOf.get(node.bazisNodeId) ?? []) {
+      const childAgg = visit(child);
+      panels.push(...childAgg.panels);
+      hardware.push(...childAgg.hardware);
+      for (const material of childAgg.materials) materials.add(material);
+    }
+
+    result.set(node.bazisNodeId, { panels, hardware, materials: [...materials] });
+    return { panels, hardware, materials };
+  };
+
+  for (const root of roots) visit(root);
+  return result;
+}

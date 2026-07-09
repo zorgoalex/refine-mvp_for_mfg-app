@@ -3,7 +3,9 @@ import { Alert, Spin, Tree } from 'antd';
 import type { DataNode, EventDataNode } from 'antd/es/tree';
 import type RcTree from 'rc-tree';
 import { bazisApi } from '../../api/bazisApi';
+import { Dropdown, Tag } from 'antd';
 import { attachChildren, mapTreeNode, type BazisTreeDataNode } from './bazisTreeUtils';
+import type { SubtreeSummary } from './useRevisionData';
 
 export interface ViewerTreeHandle {
   /** Догружает недостающие уровни по пути предков, раскрывает их, выделяет и скроллит к узлу */
@@ -15,10 +17,12 @@ export interface ViewerTreeProps {
   height: number;
   selectedNodeId: number | null;
   onSelectNode: (nodeId: number | null) => void;
+  /** Счётчики поддерева для бейджей у контейнерных узлов (глубина ≥ 2) */
+  getNodeSummary?: (nodeId: number) => SubtreeSummary | null;
 }
 
 export const ViewerTree = forwardRef<ViewerTreeHandle, ViewerTreeProps>(({
-  revisionId, height, selectedNodeId, onSelectNode,
+  revisionId, height, selectedNodeId, onSelectNode, getNodeSummary,
 }, ref) => {
   const [treeData, setTreeData] = useState<BazisTreeDataNode[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
@@ -122,8 +126,73 @@ export const ViewerTree = forwardRef<ViewerTreeHandle, ViewerTreeProps>(({
       onSelect={(keys) => onSelectNode(keys.length > 0 ? Number(keys[0]) : null)}
       expandedKeys={expandedKeys}
       onExpand={(keys) => setExpandedKeys(keys)}
+      titleRender={(node) => {
+        const dataNode = node as BazisTreeDataNode;
+        // счётчики только у контейнеров глубже корня (root parent = null → depth 1)
+        const summary = !dataNode.isLeaf && getNodeSummary ? getNodeSummary(dataNode.bazisNodeId) : null;
+        const showBadges = summary != null
+          && (summary.panels.length > 0 || summary.hardware.length > 0 || summary.materials.length > 0);
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span>{dataNode.title as React.ReactNode}</span>
+            {showBadges ? (
+              <span
+                style={{ display: 'inline-flex', gap: 2 }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <SummaryBadge label="П" color="blue" title="Панели" items={summary.panels} />
+                <SummaryBadge label="Ф" color="green" title="Фурнитура" items={summary.hardware} />
+                <SummaryBadge label="М" color="orange" title="Материалы" items={summary.materials} />
+              </span>
+            ) : null}
+          </span>
+        );
+      }}
     />
   );
 });
 
 ViewerTree.displayName = 'ViewerTree';
+
+interface SummaryBadgeProps {
+  label: string;
+  color: string;
+  title: string;
+  items: string[];
+}
+
+/** Бейдж-счётчик с выпадающим перечнем записей поддерева */
+const SummaryBadge: React.FC<SummaryBadgeProps> = ({ label, color, title, items }) => {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <Dropdown
+      trigger={['click']}
+      dropdownRender={() => (
+        <div
+          style={{
+            maxHeight: 320,
+            maxWidth: 420,
+            overflow: 'auto',
+            background: '#fff',
+            border: '1px solid #d9d9d9',
+            borderRadius: 8,
+            boxShadow: '0 6px 16px rgba(0,0,0,0.12)',
+            padding: '6px 10px',
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{title} ({items.length})</div>
+          {items.map((item, index) => (
+            <div key={index} style={{ whiteSpace: 'nowrap', lineHeight: '20px' }}>{item}</div>
+          ))}
+        </div>
+      )}
+    >
+      <Tag color={color} style={{ cursor: 'pointer', marginInlineEnd: 0, lineHeight: '16px', fontSize: 11 }}>
+        {label} {items.length}
+      </Tag>
+    </Dropdown>
+  );
+};

@@ -14,7 +14,7 @@ import { OperationsTab } from './OperationsTab';
 import { PanelsTab } from './PanelsTab';
 import { NodeSearch } from './NodeSearch';
 import { RevisionOrdersTab } from './RevisionOrdersTab';
-import { useRevisionData } from './useRevisionData';
+import { buildSubtreeSummaries, useRevisionData } from './useRevisionData';
 import { ViewerTree, type ViewerTreeHandle } from './ViewerTree';
 
 const { Title, Text } = Typography;
@@ -153,6 +153,20 @@ export const BazisProjectViewPage: React.FC = () => {
 
     return () => window.clearInterval(timer);
   }, [activeTab, pendingTreeNodeId, revisionData]);
+
+  const subtreeSummaries = useMemo(
+    () => buildSubtreeSummaries(revisionData.nodes, revisionData.estimate),
+    [revisionData.estimate, revisionData.nodes],
+  );
+
+  // Бейджи-счётчики: со 2-го уровня (корень-изделие без них)
+  const getNodeSummary = (nodeId: number) => {
+    const node = revisionData.byId.get(nodeId);
+    if (!node || node.parentNodeId == null) {
+      return null;
+    }
+    return subtreeSummaries.get(nodeId) ?? null;
+  };
 
   const goToTree = (nodeId: number) => {
     setPendingTreeNodeId(nodeId);
@@ -297,6 +311,7 @@ export const BazisProjectViewPage: React.FC = () => {
                         height={treeHeight}
                         selectedNodeId={selectedNodeId}
                         onSelectNode={setSelectedNodeId}
+                        getNodeSummary={getNodeSummary}
                       />
                     </Col>
                     <Col span={10} xs={24} lg={10}>
