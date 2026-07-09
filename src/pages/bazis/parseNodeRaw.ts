@@ -24,7 +24,7 @@ export interface NodeRawSections {
 
 const EDGE_KEYS = ['СписокКромок1', 'СписокКромок2', 'СписокКромок3', 'СписокКромок4'] as const;
 const FACE_KEYS = ['ОблицовкаПласти1', 'ОблицовкаПласти2'] as const;
-const SECTION_KEYS = new Set<string>([...EDGE_KEYS, ...FACE_KEYS, 'Отверстие', 'Свойство', 'СдельнаяОперация']);
+const SECTION_KEYS = new Set<string>([...EDGE_KEYS, ...FACE_KEYS, 'Отверстие', 'Отверстия', 'Свойство', 'СдельнаяОперация', 'СписокОпераций']);
 
 function toKeyValues(entry: unknown): RawKeyValue[] {
   if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -60,8 +60,16 @@ export function parseNodeRaw(rawJson: Record<string, unknown>): NodeRawSections 
     }
   });
 
-  const holes = (Array.isArray(rawJson['Отверстие']) ? rawJson['Отверстие'] : []).map(toKeyValues);
-  const operations = (Array.isArray(rawJson['СдельнаяОперация']) ? rawJson['СдельнаяОперация'] : []).map(toKeyValues);
+  // Реальный Bazis-XML кладёт их в контейнеры <Отверстия> и <СписокОпераций>;
+  // прямые массивы поддерживаем как fallback
+  const holesSource = Array.isArray(rawJson['Отверстие'])
+    ? (rawJson['Отверстие'] as unknown[])
+    : entryList(rawJson['Отверстия'], 'Отверстие');
+  const operationsSource = Array.isArray(rawJson['СдельнаяОперация'])
+    ? (rawJson['СдельнаяОперация'] as unknown[])
+    : entryList(rawJson['СписокОпераций'], 'СдельнаяОперация');
+  const holes = holesSource.map(toKeyValues);
+  const operations = operationsSource.map(toKeyValues);
 
   const properties: RawKeyValue[] = (Array.isArray(rawJson['Свойство']) ? rawJson['Свойство'] : [])
     .map((property) => {

@@ -9,6 +9,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { BazisService } from '../application/bazis.service';
 import type {
+  BazisRevisionEstimateDto,
   BazisImportResponseDto,
   BazisNodeCardDto,
   BazisNodeSearchResponseDto,
@@ -367,6 +368,22 @@ export class BazisController {
     this.assertBazisEnabled();
     const currentUser = this.requireCurrentUser(request);
     return this.bazis.getMaterialsSummary(currentUser, parseNumericPathParam(id, 'id'));
+  }
+
+  @ApiOperation({ operationId: 'getBazisRevisionEstimate', summary: 'Get materials/operations estimate for a Bazis revision' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 422, description: 'Invalid revision id' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Get('revisions/:id/estimate')
+  async getRevisionEstimate(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+  ): Promise<BazisRevisionEstimateDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.bazis.getRevisionEstimate(currentUser, parseNumericPathParam(id, 'id'));
   }
 
   @ApiOperation({ operationId: 'listBazisRevisionOrders', summary: 'List ERP orders created from a Bazis revision' })

@@ -2,6 +2,7 @@ import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
+  BazisRevisionEstimate,
   BazisImportResponse,
   BazisNodeCard,
   BazisNodeSearchResponse,
@@ -80,6 +81,12 @@ export const bazisApi = {
   getFullTree(revisionId: number): Promise<BazisTreeNode[]> {
     return httpClient.get<BazisTreeNode[]>(
       withQuery(apiRoutes.bazis.revisionTree(validateId(revisionId, 'revisionId')), { all: 'true' }),
+    );
+  },
+
+  getRevisionEstimate(revisionId: number): Promise<BazisRevisionEstimate> {
+    return httpClient.get<BazisRevisionEstimate>(
+      apiRoutes.bazis.revisionEstimate(validateId(revisionId, 'revisionId')),
     );
   },
 

@@ -134,6 +134,40 @@ export interface BazisRevisionMaterialsSummaryDto {
   filmsByName: BazisRawMaterialUsageDto[];
 }
 
+export interface BazisEstimateMaterialDto {
+  /** Узел-владелец материала */
+  nodeId: number;
+  nodeName: string | null;
+  nodeObjectType: string | null;
+  /** Код на самом узле (у фурнитуры — артикул позиции) */
+  nodeCode: string | null;
+  /** ID материала из Базиса (ОсновнойМатериал.ID) */
+  materialId: string | null;
+  code: string | null;
+  name: string;
+  unit: string | null;
+  quantity: number | null;
+  price: number | null;
+  total: number | null;
+}
+
+export interface BazisEstimateOperationDto {
+  /** Узел (панель), к которому привязана операция */
+  nodeId: number;
+  nodeName: string | null;
+  name: string;
+  code: string | null;
+  unit: string | null;
+  quantity: number | null;
+  price: number | null;
+  total: number | null;
+}
+
+export interface BazisRevisionEstimateDto {
+  materials: BazisEstimateMaterialDto[];
+  operations: BazisEstimateOperationDto[];
+}
+
 export interface BazisRevisionOrderDto {
   orderId: number;
   orderName: string | null;

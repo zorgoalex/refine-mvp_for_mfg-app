@@ -4,6 +4,7 @@ import type {
   ImportRevisionCommand,
 } from '../application/bazis.types';
 import type {
+  BazisRevisionEstimateDto,
   BazisImportResponseDto,
   BazisNodeCardDto,
   BazisNodeSearchResponseDto,
@@ -49,6 +50,10 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
   }
 
   listAllTreeNodes(_revisionId: number): Promise<BazisTreeNodeDto[]> {
+    return unavailable();
+  }
+
+  getRevisionEstimate(_revisionId: number): Promise<BazisRevisionEstimateDto> {
     return unavailable();
   }
 

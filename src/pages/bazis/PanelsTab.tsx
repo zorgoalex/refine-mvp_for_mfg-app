@@ -3,25 +3,22 @@
 // (развёрнута по умолчанию) и спойлеры всех блоков/сборок, в которые она
 // входит (свёрнуты; карточка предка грузится лениво при раскрытии).
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Collapse, Empty, Space, Spin, Table, Typography } from 'antd';
+import React, { useMemo } from 'react';
+import { ApartmentOutlined } from '@ant-design/icons';
+import { Button, Collapse, Empty, Space, Table, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { bazisApi } from '../../api/bazisApi';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
 import { NodeCard } from './NodeCard';
+import { NODE_KIND_LABELS_RU, nodePathTitle, type RevisionData } from './useRevisionData';
 
 const { Panel } = Collapse;
 const { Text } = Typography;
 
-const NODE_KIND_LABELS_RU: Record<string, string> = {
-  product: 'Изделие',
-  assembly: 'Сборка',
-  block: 'Блок',
-  object: 'Объект',
-};
-
 interface PanelsTabProps {
-  revisionId: number;
+  data: RevisionData;
+  selectedId: number | null;
+  onSelect: (nodeId: number | null) => void;
+  onGoToTree: (nodeId: number) => void;
 }
 
 interface PanelRow extends BazisTreeNode {
@@ -29,55 +26,8 @@ interface PanelRow extends BazisTreeNode {
   pathTitle: string;
 }
 
-export const PanelsTab: React.FC<PanelsTabProps> = ({ revisionId }) => {
-  const [nodes, setNodes] = useState<BazisTreeNode[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [errorText, setErrorText] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setErrorText(null);
-    setSelectedId(null);
-
-    bazisApi.getFullTree(revisionId)
-      .then((response) => {
-        if (!cancelled) setNodes(response);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setErrorText(error instanceof Error ? error.message : 'Не удалось загрузить панели');
-          setNodes([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [revisionId]);
-
-  const byId = useMemo(() => new Map(nodes.map((node) => [node.bazisNodeId, node])), [nodes]);
-
-  /** Предки от ближайшего родителя к корню изделия */
-  const ancestorsOf = useMemo(() => {
-    return (nodeId: number): BazisTreeNode[] => {
-      const chain: BazisTreeNode[] = [];
-      let current = byId.get(nodeId);
-      const guard = new Set<number>();
-      while (current?.parentNodeId != null && !guard.has(current.parentNodeId)) {
-        guard.add(current.parentNodeId);
-        const parent = byId.get(current.parentNodeId);
-        if (!parent) break;
-        chain.push(parent);
-        current = parent;
-      }
-      return chain;
-    };
-  }, [byId]);
+export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, onSelect, onGoToTree }) => {
+  const { nodes, byId, ancestorsOf } = data;
 
   const panelRows = useMemo<PanelRow[]>(() => {
     return nodes
@@ -85,10 +35,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ revisionId }) => {
       .map((node) => ({
         ...node,
         key: node.bazisNodeId,
-        pathTitle: ancestorsOf(node.bazisNodeId)
-          .map((ancestor) => ancestor.name?.trim() || NODE_KIND_LABELS_RU[ancestor.nodeKind] || ancestor.nodeKind)
-          .reverse()
-          .join(' / '),
+        pathTitle: nodePathTitle(ancestorsOf(node.bazisNodeId)),
       }));
   }, [ancestorsOf, nodes]);
 
@@ -103,20 +50,20 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ revisionId }) => {
       {
         title: 'Размеры, мм',
         key: 'size',
-        width: 160,
+        width: 150,
         render: (_, row) => formatSize(row),
       },
       {
         title: 'Кол-во',
         key: 'quantity',
-        width: 90,
+        width: 80,
         render: (_, row) => row.quantity ?? row.cumulativeQuantity ?? '—',
       },
       {
         title: 'Материал',
         dataIndex: 'mainMaterialName',
         key: 'material',
-        width: 220,
+        width: 210,
         render: (value: string | null) => value || '—',
       },
       {
@@ -125,17 +72,27 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ revisionId }) => {
         key: 'path',
         ellipsis: true,
       },
+      {
+        title: '',
+        key: 'actions',
+        width: 56,
+        render: (_, row) => (
+          <Tooltip title="Показать в дереве">
+            <Button
+              type="text"
+              size="small"
+              icon={<ApartmentOutlined />}
+              onClick={(event) => {
+                event.stopPropagation();
+                onGoToTree(row.bazisNodeId);
+              }}
+            />
+          </Tooltip>
+        ),
+      },
     ],
-    [],
+    [onGoToTree],
   );
-
-  if (errorText) {
-    return <Alert type="warning" showIcon message={errorText} />;
-  }
-
-  if (loading) {
-    return <Spin />;
-  }
 
   if (panelRows.length === 0) {
     return <Empty description="В ревизии нет панелей" />;
@@ -155,7 +112,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ revisionId }) => {
         scroll={{ y: 390 }}
         rowClassName={(row) => (row.bazisNodeId === selectedId ? 'ant-table-row-selected' : '')}
         onRow={(row) => ({
-          onClick: () => setSelectedId(row.bazisNodeId),
+          onClick: () => onSelect(row.bazisNodeId),
           style: { cursor: 'pointer' },
         })}
       />

@@ -7,6 +7,7 @@ import type {
   BazisProjectCardDto,
   BazisProjectListItemDto,
   BazisRevisionMaterialsSummaryDto,
+  BazisRevisionEstimateDto,
   BazisRevisionOrderDto,
   BazisTreeNodeDto,
   CreateOrderFromRevisionResponseDto,
@@ -77,4 +78,5 @@ export interface BazisRepositoryPort {
   }): Promise<BazisNodeSearchResponseDto>;
   getMaterialsSummary(revisionId: number): Promise<BazisRevisionMaterialsSummaryDto>;
   listRevisionOrders(revisionId: number): Promise<BazisRevisionOrderDto[]>;
+  getRevisionEstimate(revisionId: number): Promise<BazisRevisionEstimateDto>;
 }

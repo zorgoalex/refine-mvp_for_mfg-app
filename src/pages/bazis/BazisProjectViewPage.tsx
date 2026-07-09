@@ -6,11 +6,15 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
+import { EstimateTab } from './EstimateTab';
+import { HardwareTab } from './HardwareTab';
 import { MaterialsSummaryTab } from './MaterialsSummaryTab';
 import { NodeCard } from './NodeCard';
+import { OperationsTab } from './OperationsTab';
 import { PanelsTab } from './PanelsTab';
 import { NodeSearch } from './NodeSearch';
 import { RevisionOrdersTab } from './RevisionOrdersTab';
+import { useRevisionData } from './useRevisionData';
 import { ViewerTree, type ViewerTreeHandle } from './ViewerTree';
 
 const { Title, Text } = Typography;
@@ -32,6 +36,9 @@ export const BazisProjectViewPage: React.FC = () => {
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
   const [treeHeight] = useState(() => Math.max(400, window.innerHeight - 360));
   const viewerTreeRef = useRef<ViewerTreeHandle>(null);
+  const [activeTab, setActiveTab] = useState('panels');
+  const [selectedPanelId, setSelectedPanelId] = useState<number | null>(null);
+  const [pendingTreeNodeId, setPendingTreeNodeId] = useState<number | null>(null);
 
   const bazisProjectId = Number(bazisProjectIdParam);
   const revisionParam = searchParams.get('revision');
@@ -111,7 +118,51 @@ export const BazisProjectViewPage: React.FC = () => {
 
   useEffect(() => {
     setSelectedNodeId(null);
+    setSelectedPanelId(null);
+    setPendingTreeNodeId(null);
+    setActiveTab('panels');
   }, [selectedRevisionId]);
+
+  const revisionData = useRevisionData(selectedRevisionId ?? 0);
+
+  // «Показать в дереве» из любых вкладок: переключаем вкладку и, когда
+  // ViewerTree смонтирован (ref может появиться на следующих кадрах),
+  // раскрываем путь к узлу.
+  useEffect(() => {
+    if (activeTab !== 'tree' || pendingTreeNodeId == null) {
+      return;
+    }
+
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      const handle = viewerTreeRef.current;
+      if (handle) {
+        window.clearInterval(timer);
+        const path = revisionData
+          .ancestorsOf(pendingTreeNodeId)
+          .map((ancestor) => ancestor.bazisNodeId)
+          .reverse(); // root-first для revealNode
+        void handle.revealNode(path, pendingTreeNodeId);
+        setPendingTreeNodeId(null);
+      } else if (attempts > 30) {
+        window.clearInterval(timer);
+        setPendingTreeNodeId(null);
+      }
+    }, 100);
+
+    return () => window.clearInterval(timer);
+  }, [activeTab, pendingTreeNodeId, revisionData]);
+
+  const goToTree = (nodeId: number) => {
+    setPendingTreeNodeId(nodeId);
+    setActiveTab('tree');
+  };
+
+  const goToPanel = (panelNodeId: number) => {
+    setSelectedPanelId(panelNodeId);
+    setActiveTab('panels');
+  };
 
   if (!can('bazis.view')) {
     return <Alert type="error" message="Недостаточно прав" showIcon />;
@@ -176,12 +227,45 @@ export const BazisProjectViewPage: React.FC = () => {
         <Empty description="У проекта пока нет ревизий" />
       ) : (
         <Tabs
-          destroyInactiveTabPane
+          activeKey={activeTab}
+          onChange={setActiveTab}
           items={[
             {
               key: 'panels',
               label: 'Панели',
-              children: <PanelsTab revisionId={selectedRevision.bazisRevisionId} />,
+              children: revisionData.errorText ? (
+                <Alert type="warning" showIcon message={revisionData.errorText} />
+              ) : revisionData.loading ? (
+                <Spin />
+              ) : (
+                <PanelsTab
+                  data={revisionData}
+                  selectedId={selectedPanelId}
+                  onSelect={setSelectedPanelId}
+                  onGoToTree={goToTree}
+                />
+              ),
+            },
+            {
+              key: 'hardware',
+              label: 'Фурнитура',
+              children: revisionData.loading ? <Spin /> : (
+                <HardwareTab data={revisionData} onGoToTree={goToTree} onGoToPanel={goToPanel} />
+              ),
+            },
+            {
+              key: 'operations',
+              label: 'Операции',
+              children: revisionData.loading ? <Spin /> : (
+                <OperationsTab data={revisionData} onGoToTree={goToTree} onGoToPanel={goToPanel} />
+              ),
+            },
+            {
+              key: 'estimate',
+              label: 'Смета',
+              children: revisionData.loading ? <Spin /> : (
+                <EstimateTab data={revisionData} onGoToTree={goToTree} onGoToPanel={goToPanel} />
+              ),
             },
             {
               key: 'tree',

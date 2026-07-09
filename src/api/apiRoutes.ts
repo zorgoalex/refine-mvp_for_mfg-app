@@ -164,6 +164,7 @@ export const apiRoutes = {
     revisionNodesSearch: (id: number) => backendApiPath(`/bazis/revisions/${id}/nodes/search`),
     revisionMaterialsSummary: (id: number) => backendApiPath(`/bazis/revisions/${id}/materials-summary`),
     revisionOrders: (id: number) => backendApiPath(`/bazis/revisions/${id}/orders`),
+    revisionEstimate: (id: number) => backendApiPath(`/bazis/revisions/${id}/estimate`),
     materialMappings: backendApiPath('/bazis/material-mappings'),
     createOrder: (revisionId: number) => backendApiPath(`/bazis/revisions/${revisionId}/create-order`),
   },

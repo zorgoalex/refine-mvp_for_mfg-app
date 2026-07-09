@@ -260,6 +260,31 @@ describe('PgBazisRepository.listAllTreeNodes', () => {
   });
 });
 
+describe('PgBazisRepository.getRevisionEstimate', () => {
+  it('extracts materials and operations from raw_json with jsonb guards', async () => {
+    const database = createDatabase({ nodeSearch: { total: 0, rows: [] } });
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.getRevisionEstimate(82);
+
+    const materialsSql = normalizeSql(database.queries[1].text);
+    expect(materialsSql).toContain("jsonb_typeof(n.raw_json->'ОсновнойМатериал') = 'object'");
+    expect(materialsSql).toContain("m.value->>'ID' AS material_id");
+    expect(materialsSql).toContain("n.raw_json->>'Код' AS node_code");
+    const operationsSql = normalizeSql(database.queries[2].text);
+    expect(operationsSql).toContain("n.raw_json->'СписокОпераций'->'СдельнаяОперация'");
+    expect(operationsSql).toContain('jsonb_typeof');
+    expect(database.queries[1].params).toEqual([82]);
+    expect(database.queries[2].params).toEqual([82]);
+  });
+
+  it('throws BazisRevisionNotFoundError for unknown revision', async () => {
+    const database = createDatabase({ nodeSearch: { revisionExists: false } });
+    const repository = new PgBazisRepository(database.service);
+    await expect(repository.getRevisionEstimate(1)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+});
+
 describe('PgBazisRepository.getNodeCard', () => {
   it('reads node with revision context and order links', async () => {
     const database = createDatabase({

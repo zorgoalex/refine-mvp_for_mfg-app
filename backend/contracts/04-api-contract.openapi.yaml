@@ -2908,6 +2908,69 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/bazis/revisions/{id}/estimate:
+    get:
+      tags:
+        - Bazis
+      operationId: getBazisRevisionEstimate
+      summary: Get materials/operations estimate for a Bazis revision
+      security:
+        - bearerAuth: []
+      x-permission: bazis.view
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Estimate rows extracted from the revision raw payload
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [materials, operations]
+                properties:
+                  materials:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        nodeId: { type: integer }
+                        nodeName: { type: string, nullable: true }
+                        nodeObjectType: { type: string, nullable: true }
+                        nodeCode: { type: string, nullable: true }
+                        materialId: { type: string, nullable: true }
+                        code: { type: string, nullable: true }
+                        name: { type: string }
+                        unit: { type: string, nullable: true }
+                        quantity: { type: number, nullable: true }
+                        price: { type: number, nullable: true }
+                        total: { type: number, nullable: true }
+                  operations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        nodeId: { type: integer }
+                        nodeName: { type: string, nullable: true }
+                        name: { type: string }
+                        code: { type: string, nullable: true }
+                        unit: { type: string, nullable: true }
+                        quantity: { type: number, nullable: true }
+                        price: { type: number, nullable: true }
+                        total: { type: number, nullable: true }
+        '401':
+          description: Authentication required
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: Bazis revision not found
+        '422':
+          description: Invalid revision id
+        '503':
+          description: Bazis API is disabled
   /api/v1/bazis/revisions/{id}/orders:
     get:
       tags:

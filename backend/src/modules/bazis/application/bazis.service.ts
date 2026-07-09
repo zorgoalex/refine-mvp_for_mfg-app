@@ -22,6 +22,7 @@ import {
   type BazisProjectCardDto,
   type BazisProjectListItemDto,
   type BazisRevisionMaterialsSummaryDto,
+  type BazisRevisionEstimateDto,
   type BazisRevisionOrderDto,
   type BazisTreeNodeDto,
   type CreateOrderFromRevisionResponseDto,
@@ -117,6 +118,11 @@ export class BazisService {
   async getFullTree(currentUser: CurrentUser, revisionId: number): Promise<BazisTreeNodeDto[]> {
     await this.requirePermission(currentUser, 'bazis.view', 'get_full_tree');
     return this.ports.repository.listAllTreeNodes(revisionId);
+  }
+
+  async getRevisionEstimate(currentUser: CurrentUser, revisionId: number): Promise<BazisRevisionEstimateDto> {
+    await this.requirePermission(currentUser, 'bazis.view', 'get_revision_estimate');
+    return this.ports.repository.getRevisionEstimate(revisionId);
   }
 
   async getNodeCard(currentUser: CurrentUser, nodeId: number): Promise<BazisNodeCardDto> {

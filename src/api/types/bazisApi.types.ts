@@ -175,3 +175,33 @@ export interface CreateOrderFromRevisionResponse {
   requestId: string;
   auditId?: string;
 }
+
+export interface BazisEstimateMaterial {
+  nodeId: number;
+  nodeName: string | null;
+  nodeObjectType: string | null;
+  nodeCode: string | null;
+  materialId: string | null;
+  code: string | null;
+  name: string;
+  unit: string | null;
+  quantity: number | null;
+  price: number | null;
+  total: number | null;
+}
+
+export interface BazisEstimateOperation {
+  nodeId: number;
+  nodeName: string | null;
+  name: string;
+  code: string | null;
+  unit: string | null;
+  quantity: number | null;
+  price: number | null;
+  total: number | null;
+}
+
+export interface BazisRevisionEstimate {
+  materials: BazisEstimateMaterial[];
+  operations: BazisEstimateOperation[];
+}

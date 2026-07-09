@@ -12,6 +12,7 @@ import type {
   ImportRevisionCommand,
 } from '../application/bazis.types';
 import type {
+  BazisRevisionEstimateDto,
   BazisImportResponseDto,
   BazisNodeCardDto,
   BazisNodeSearchItemDto,
@@ -911,6 +912,81 @@ export class PgBazisRepository implements BazisRepositoryPort {
     }));
   }
 
+  async getRevisionEstimate(revisionId: number): Promise<BazisRevisionEstimateDto> {
+    await this.assertRevisionExists(revisionId);
+
+    // Материалы: ОсновнойМатериал каждого узла (jsonb без shape-constraint —
+    // объект проверяем через jsonb_typeof, битые строки не должны 500-ить)
+    const materials = await this.database.query<EstimateMaterialRow>(
+      `
+      SELECT n.bazis_node_id, n.name AS node_name, n.object_type,
+             n.raw_json->>'Код' AS node_code,
+             m.value->>'ID' AS material_id,
+             m.value->>'Код' AS code,
+             m.value->>'Наименование' AS name,
+             m.value->>'ЕдИзм' AS unit,
+             m.value->>'Количество' AS quantity,
+             m.value->>'Цена' AS price,
+             m.value->>'Стоимость' AS total
+      FROM bazis_nodes n
+      CROSS JOIN LATERAL (SELECT n.raw_json->'ОсновнойМатериал' AS value) m
+      WHERE n.revision_id = $1
+        AND jsonb_typeof(n.raw_json->'ОсновнойМатериал') = 'object'
+        AND COALESCE(m.value->>'Наименование', '') <> ''
+      ORDER BY n.bazis_node_id
+      `,
+      [revisionId],
+    );
+
+    const operations = await this.database.query<EstimateOperationRow>(
+      `
+      SELECT n.bazis_node_id, n.name AS node_name,
+             o.value->>'Наименование' AS name,
+             o.value->>'Код' AS code,
+             o.value->>'ЕдИзм' AS unit,
+             o.value->>'Количество' AS quantity,
+             o.value->>'Цена' AS price,
+             o.value->>'Стоимость' AS total
+      FROM bazis_nodes n
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(n.raw_json->'СписокОпераций'->'СдельнаяОперация') = 'array'
+             THEN n.raw_json->'СписокОпераций'->'СдельнаяОперация'
+             ELSE '[]'::jsonb END
+      ) AS o(value)
+      WHERE n.revision_id = $1
+        AND COALESCE(o.value->>'Наименование', '') <> ''
+      ORDER BY n.bazis_node_id
+      `,
+      [revisionId],
+    );
+
+    return {
+      materials: materials.rows.map((row) => ({
+        nodeId: Number(row.bazis_node_id),
+        nodeName: row.node_name,
+        nodeObjectType: row.object_type,
+        nodeCode: emptyToNull(row.node_code),
+        materialId: emptyToNull(row.material_id),
+        code: emptyToNull(row.code),
+        name: row.name ?? '',
+        unit: emptyToNull(row.unit),
+        quantity: parseNumeric(row.quantity),
+        price: parseNumeric(row.price),
+        total: parseNumeric(row.total),
+      })),
+      operations: operations.rows.map((row) => ({
+        nodeId: Number(row.bazis_node_id),
+        nodeName: row.node_name,
+        name: row.name ?? '',
+        code: emptyToNull(row.code),
+        unit: emptyToNull(row.unit),
+        quantity: parseNumeric(row.quantity),
+        price: parseNumeric(row.price),
+        total: parseNumeric(row.total),
+      })),
+    };
+  }
+
   async listMaterialMappings(names?: string[]): Promise<MaterialMappingDto[]> {
     const loweredNames = names?.map((name) => name.toLowerCase()) ?? null;
     const result = await this.database.query<MaterialMappingRow>(
@@ -1350,6 +1426,45 @@ function nullableNumber(value: number | string | null | undefined): number | nul
     return null;
   }
   return Number(value);
+}
+
+interface EstimateMaterialRow {
+  bazis_node_id: number | string;
+  node_name: string | null;
+  object_type: string | null;
+  node_code: string | null;
+  material_id: string | null;
+  code: string | null;
+  name: string | null;
+  unit: string | null;
+  quantity: string | null;
+  price: string | null;
+  total: string | null;
+}
+
+interface EstimateOperationRow {
+  bazis_node_id: number | string;
+  node_name: string | null;
+  name: string | null;
+  code: string | null;
+  unit: string | null;
+  quantity: string | null;
+  price: string | null;
+  total: string | null;
+}
+
+function emptyToNull(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+/** Числа из XML-текста ('13800', '0.15', '1 234,5') → number | null */
+function parseNumeric(value: string | null | undefined): number | null {
+  if (value == null || value.trim() === '') {
+    return null;
+  }
+  const parsed = Number(value.replace(/\s+/g, '').replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
