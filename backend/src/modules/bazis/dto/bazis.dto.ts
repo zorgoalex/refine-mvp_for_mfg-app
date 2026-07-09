@@ -114,6 +114,8 @@ export interface BazisPanelsMaterialSummaryDto {
   totalAreaM2: number;
   mappingTargetKind: string | null;
   sheetMaterialTypeId: number | null;
+  /** Название сматченного ERP-листового материала */
+  sheetMaterialTypeName: string | null;
 }
 
 export interface BazisHardwareSummaryDto {
@@ -124,6 +126,8 @@ export interface BazisHardwareSummaryDto {
 export interface BazisRawMaterialUsageDto {
   name: string;
   usageCount: number;
+  /** Суммарная длина (мм) — заполняется для кромок */
+  totalLengthMm: number | null;
 }
 
 export interface BazisRevisionMaterialsSummaryDto {
@@ -137,6 +141,8 @@ export interface BazisRevisionMaterialsSummaryDto {
 export interface BazisEstimateMaterialDto {
   /** Узел-владелец материала */
   nodeId: number;
+  /** main = ОсновнойМатериал, related = СопутствующийМатериал (кромки и т.п.) */
+  source: 'main' | 'related';
   nodeName: string | null;
   nodeObjectType: string | null;
   /** Код на самом узле (у фурнитуры — артикул позиции) */

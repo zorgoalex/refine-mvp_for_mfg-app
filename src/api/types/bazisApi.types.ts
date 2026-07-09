@@ -120,6 +120,7 @@ export interface BazisPanelsMaterialSummary {
   totalAreaM2: number;
   mappingTargetKind: string | null;
   sheetMaterialTypeId: number | null;
+  sheetMaterialTypeName: string | null;
 }
 
 export interface BazisHardwareSummary {
@@ -130,6 +131,7 @@ export interface BazisHardwareSummary {
 export interface BazisRawMaterialUsage {
   name: string;
   usageCount: number;
+  totalLengthMm: number | null;
 }
 
 export interface BazisRevisionMaterialsSummary {
@@ -178,6 +180,7 @@ export interface CreateOrderFromRevisionResponse {
 
 export interface BazisEstimateMaterial {
   nodeId: number;
+  source: 'main' | 'related';
   nodeName: string | null;
   nodeObjectType: string | null;
   nodeCode: string | null;

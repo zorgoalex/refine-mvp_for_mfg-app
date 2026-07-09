@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Col, Empty, Row, Select, Space, Spin, Tabs, Typography } from 'antd';
+import { Alert, Button, Card, Col, Descriptions, Empty, Row, Select, Space, Spin, Tabs, Typography } from 'antd';
 import type { BazisProjectCard } from '../../api/types/bazisApi.types';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
@@ -272,6 +272,14 @@ export const BazisProjectViewPage: React.FC = () => {
               label: 'Дерево',
               children: (
                 <Space direction="vertical" size="large" style={{ width: '100%' }}>
+                  <Descriptions bordered size="small" column={6}>
+                    <Descriptions.Item label="Всего узлов">{selectedRevision.summary.totalNodes ?? '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Панели">{selectedRevision.summary.panels ?? '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Фурнитура">{selectedRevision.summary.hardware ?? '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Сборки">{selectedRevision.summary.assemblies ?? '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Блоки">{selectedRevision.summary.blocks ?? '—'}</Descriptions.Item>
+                    <Descriptions.Item label="Уникальных материалов">{selectedRevision.summary.uniqueMaterials ?? '—'}</Descriptions.Item>
+                  </Descriptions>
                   <NodeSearch
                     // key заставляет пересоздать компонент при смене ревизии — гарантированно сбрасывает
                     // внутреннее состояние поиска, не полагаясь только на internal useEffect

@@ -826,8 +826,8 @@ describe('PgBazisRepository.getMaterialsSummary', () => {
       materialName: 'ЛДСП Белый', panelCount: 10, totalAreaM2: 12.5, mappingTargetKind: 'sheet',
     });
     expect(summary.hardwareByName).toEqual([{ name: 'Петля', totalQuantity: 8 }]);
-    expect(summary.edgesByName).toEqual([{ name: 'ABS 2mm Белый', usageCount: 6 }]);
-    expect(summary.filmsByName).toEqual([{ name: 'Snow Film', usageCount: 4 }]);
+    expect(summary.edgesByName).toEqual([{ name: 'ABS 2mm Белый', usageCount: 6, totalLengthMm: null }]);
+    expect(summary.filmsByName).toEqual([{ name: 'Snow Film', usageCount: 4, totalLengthMm: null }]);
     expect(summary.summary).toMatchObject({ totalNodes: 20, panels: 10 });
   });
 

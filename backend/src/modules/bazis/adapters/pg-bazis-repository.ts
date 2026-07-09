@@ -179,6 +179,7 @@ interface MaterialLookupRow {
 }
 
 interface PanelsSummaryRow {
+  sheet_material_type_name?: string | null;
   main_material_name: string | null;
   panel_count: number | string;
   total_quantity: number | string;
@@ -193,6 +194,7 @@ interface HardwareSummaryRow {
 }
 
 interface RawUsageRow {
+  total_length_mm?: string | number | null;
   name: string;
   usage_count: number | string;
 }
@@ -791,12 +793,15 @@ export class PgBazisRepository implements BazisRepositoryPort {
              COALESCE(SUM(COALESCE(n.cumulative_quantity, n.quantity, 1)), 0)::float8 AS total_quantity,
              (COALESCE(SUM(COALESCE(n.length_mm, 0) * COALESCE(n.width_mm, 0)
                * COALESCE(n.cumulative_quantity, n.quantity, 1)), 0) / 1000000.0)::float8 AS total_area_m2,
-             mm.target_kind, mm.sheet_material_type_id
+             mm.target_kind, mm.sheet_material_type_id,
+             smt.sheet_material_type_name
       FROM bazis_nodes n
       LEFT JOIN bazis_material_mappings mm
         ON mm.source_kind = 'sheet' AND lower(mm.bazis_name) = lower(n.main_material_name)
+      LEFT JOIN sheet_material_types smt
+        ON smt.sheet_material_type_id = mm.sheet_material_type_id
       WHERE n.revision_id = $1 AND n.object_type = 'Панель'
-      GROUP BY n.main_material_name, mm.target_kind, mm.sheet_material_type_id
+      GROUP BY n.main_material_name, mm.target_kind, mm.sheet_material_type_id, smt.sheet_material_type_name
       ORDER BY panel_count DESC, n.main_material_name
       `,
       [revisionId],
@@ -821,7 +826,12 @@ export class PgBazisRepository implements BazisRepositoryPort {
 
     const edges = await this.database.query<RawUsageRow>(
       `
-      SELECT e.elem->>'Наименование' AS name, count(*)::int AS usage_count
+      SELECT e.elem->>'Наименование' AS name, count(*)::int AS usage_count,
+             SUM(
+               CASE WHEN e.elem->>'Длина' ~ '^[0-9]+([.,][0-9]+)?$'
+                    THEN replace(e.elem->>'Длина', ',', '.')::numeric
+                    ELSE 0 END
+             )::float8 AS total_length_mm
       FROM bazis_nodes n
       CROSS JOIN LATERAL (
         SELECT jsonb_array_elements(
@@ -866,13 +876,18 @@ export class PgBazisRepository implements BazisRepositoryPort {
         totalAreaM2: Number(row.total_area_m2),
         mappingTargetKind: row.target_kind ?? null,
         sheetMaterialTypeId: nullableNumber(row.sheet_material_type_id),
+        sheetMaterialTypeName: row.sheet_material_type_name ?? null,
       })),
       hardwareByName: hardware.rows.map((row) => ({
         name: row.name,
         totalQuantity: Number(row.total_quantity),
       })),
-      edgesByName: edges.rows.map((row) => ({ name: row.name, usageCount: Number(row.usage_count) })),
-      filmsByName: films.rows.map((row) => ({ name: row.name, usageCount: Number(row.usage_count) })),
+      edgesByName: edges.rows.map((row) => ({
+        name: row.name,
+        usageCount: Number(row.usage_count),
+        totalLengthMm: row.total_length_mm != null ? Number(row.total_length_mm) : null,
+      })),
+      filmsByName: films.rows.map((row) => ({ name: row.name, usageCount: Number(row.usage_count), totalLengthMm: null })),
     };
   }
 
@@ -921,6 +936,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       `
       SELECT n.bazis_node_id, n.name AS node_name, n.object_type,
              n.raw_json->>'Код' AS node_code,
+             'main' AS source,
              m.value->>'ID' AS material_id,
              m.value->>'Код' AS code,
              m.value->>'Наименование' AS name,
@@ -933,7 +949,26 @@ export class PgBazisRepository implements BazisRepositoryPort {
       WHERE n.revision_id = $1
         AND jsonb_typeof(n.raw_json->'ОсновнойМатериал') = 'object'
         AND COALESCE(m.value->>'Наименование', '') <> ''
-      ORDER BY n.bazis_node_id
+      UNION ALL
+      SELECT n.bazis_node_id, n.name AS node_name, n.object_type,
+             n.raw_json->>'Код' AS node_code,
+             'related' AS source,
+             r.value->>'ID' AS material_id,
+             r.value->>'Код' AS code,
+             r.value->>'Наименование' AS name,
+             r.value->>'ЕдИзм' AS unit,
+             r.value->>'Количество' AS quantity,
+             r.value->>'Цена' AS price,
+             r.value->>'Стоимость' AS total
+      FROM bazis_nodes n
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(n.raw_json->'СопутствующийМатериал') = 'array'
+             THEN n.raw_json->'СопутствующийМатериал'
+             ELSE '[]'::jsonb END
+      ) AS r(value)
+      WHERE n.revision_id = $1
+        AND COALESCE(r.value->>'Наименование', '') <> ''
+      ORDER BY 1
       `,
       [revisionId],
     );
@@ -965,6 +1000,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
         nodeId: Number(row.bazis_node_id),
         nodeName: row.node_name,
         nodeObjectType: row.object_type,
+        source: row.source === 'related' ? 'related' as const : 'main' as const,
         nodeCode: emptyToNull(row.node_code),
         materialId: emptyToNull(row.material_id),
         code: emptyToNull(row.code),
@@ -1432,6 +1468,7 @@ interface EstimateMaterialRow {
   bazis_node_id: number | string;
   node_name: string | null;
   object_type: string | null;
+  source: string;
   node_code: string | null;
   material_id: string | null;
   code: string | null;
