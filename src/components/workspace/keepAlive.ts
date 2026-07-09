@@ -2,7 +2,10 @@ const CALENDAR_KEY = '/calendar';
 // /cut holds rich in-page state (the open job + its loaded details) that an
 // operator builds up; keep it mounted so navigating to an order card and back
 // restores that state instead of remounting to a collapsed list.
-const ALWAYS_KEEP = new Set(['/orders', '/cut']);
+// /bazis: минимизируемые модалки (визард импорта / создание заказа) держат
+// state на странице; ремаунт при dirty-переключении закрывал бы их — страница
+// должна быть eligible ВСЕГДА, чтобы not-eligible→eligible ремаунта не было.
+const ALWAYS_KEEP = new Set(['/orders', '/cut', '/bazis']);
 
 export const isKeepAliveEligible = (key: string, { dirty }: { dirty: boolean }): boolean => {
   if (key === CALENDAR_KEY) return false;            // B7: global-class hack ⇒ remount only

@@ -7,6 +7,10 @@ describe('keep-alive policy', () => {
     expect(isKeepAliveEligible('/calendar', { dirty: false })).toBe(false);
     expect(isKeepAliveEligible('/calendar', { dirty: true })).toBe(false); // calendar excluded even if dirty
   });
+  it('keeps /bazis always so minimized wizard modals survive navigation', () => {
+    expect(isKeepAliveEligible('/bazis', { dirty: false })).toBe(true);
+  });
+
   it('keeps /cut always so the open job survives navigating to an order and back', () => {
     expect(isKeepAliveEligible('/cut', { dirty: false })).toBe(true);
     const cache = new Set(['/cut']);
