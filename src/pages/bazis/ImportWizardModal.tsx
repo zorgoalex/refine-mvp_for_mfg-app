@@ -12,7 +12,7 @@ import { MinimizedModalChip } from '../../components/MinimizedModalChip';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import { createBackendSelectProps, useOrderFormData } from '../../hooks/useOrderFormData';
 import { MaterialMappingStep, materialMappingKey, type MaterialMappingValue, type UnmappedMaterialRow } from './MaterialMappingStep';
-import { parseXmlPreview, XmlPreviewError, type XmlPreviewNode, type XmlPreviewResult } from './parseXmlPreview';
+import { parseXmlPreview, XmlPreviewError, type XmlPreviewBreakdown, type XmlPreviewNode, type XmlPreviewResult } from './parseXmlPreview';
 
 const { Dragger } = Upload;
 
@@ -38,6 +38,15 @@ const SUMMARY_LABELS_RU: Record<string, string> = {
   assemblies: 'Сборки',
   blocks: 'Блоки',
   uniqueMaterials: 'Уникальных материалов',
+};
+
+const SUMMARY_BREAKDOWN_KEYS: Record<string, keyof XmlPreviewBreakdown> = {
+  totalNodes: 'allNodes',
+  panels: 'panels',
+  hardware: 'hardware',
+  assemblies: 'assemblies',
+  blocks: 'blocks',
+  uniqueMaterials: 'materials',
 };
 const { Text } = Typography;
 
