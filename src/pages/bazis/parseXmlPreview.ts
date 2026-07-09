@@ -13,10 +13,22 @@ export interface XmlPreviewNode {
   children?: XmlPreviewNode[];
 }
 
+export interface XmlPreviewBreakdown {
+  /** Имена всех узлов (в порядке обхода) */
+  allNodes: string[];
+  panels: string[];
+  hardware: string[];
+  assemblies: string[];
+  blocks: string[];
+  /** Уникальные материалы в паре с контекстом, как их считает backend */
+  materials: string[];
+}
+
 export interface XmlPreviewResult {
   productName: string | null;
   totalNodes: number;
   tree: XmlPreviewNode[];
+  breakdown: XmlPreviewBreakdown;
 }
 
 export class XmlPreviewError extends Error {}
@@ -45,11 +57,61 @@ export function parseXmlPreview(xmlText: string): XmlPreviewResult {
     return counter;
   };
 
-  const walk = (element: Element, fallbackTitle: string): XmlPreviewNode => {
+  const breakdown: XmlPreviewBreakdown = {
+    allNodes: [],
+    panels: [],
+    hardware: [],
+    assemblies: [],
+    blocks: [],
+    materials: [],
+  };
+  // Уникальность материалов — по паре (контекст, имя), как в backend-парсере.
+  const materialKeys = new Set<string>();
+  const recordMaterial = (kindLabel: string, name: string | null): void => {
+    if (!name) return;
+    const key = `${kindLabel}:${name.toLowerCase()}`;
+    if (materialKeys.has(key)) return;
+    materialKeys.add(key);
+    breakdown.materials.push(`${name} (${kindLabel})`);
+  };
+
+  const collectMaterials = (element: Element, objectType: string | null): void => {
+    const main = childByTag(element, 'ОсновнойМатериал');
+    const mainName = main ? textOfChild(main, 'Наименование') : null;
+    if (objectType === 'Панель') recordMaterial('лист', mainName);
+    if (objectType === 'Фурнитура') recordMaterial('фурнитура', mainName);
+
+    for (const faceKey of ['ОблицовкаПласти1', 'ОблицовкаПласти2']) {
+      const face = childByTag(element, faceKey);
+      if (!face) continue;
+      for (const plast of directChildren(face, 'Пласть')) {
+        recordMaterial('плёнка', textOfChild(plast, 'Наименование'));
+      }
+    }
+
+    for (const edgeKey of ['СписокКромок1', 'СписокКромок2', 'СписокКромок3', 'СписокКромок4']) {
+      const list = childByTag(element, edgeKey);
+      if (!list) continue;
+      for (const edge of directChildren(list, 'Кромка')) {
+        recordMaterial('кромка', textOfChild(edge, 'Наименование'));
+      }
+    }
+  };
+
+  const walk = (element: Element, fallbackTitle: string, kind: 'product' | 'assembly' | 'block' | 'object'): XmlPreviewNode => {
+    const title = buildTitle(element, fallbackTitle);
     const node: XmlPreviewNode = {
       key: next(),
-      title: buildTitle(element, fallbackTitle),
+      title,
     };
+
+    breakdown.allNodes.push(title);
+    const objectType = textOfChild(element, 'ТипОбъекта');
+    if (objectType === 'Панель') breakdown.panels.push(title);
+    if (objectType === 'Фурнитура') breakdown.hardware.push(title);
+    if (kind === 'assembly') breakdown.assemblies.push(title);
+    if (kind === 'block') breakdown.blocks.push(title);
+    collectMaterials(element, objectType);
 
     const list = childByTag(element, 'СписокЭлементов');
     if (!list) {
@@ -58,11 +120,11 @@ export function parseXmlPreview(xmlText: string): XmlPreviewResult {
 
     const children: XmlPreviewNode[] = [];
     for (const child of directChildren(list, 'Объект')) {
-      children.push(walk(child, 'Объект'));
+      children.push(walk(child, 'Объект', 'object'));
     }
     for (const tag of CONTAINER_TAGS) {
       for (const container of directChildren(list, tag)) {
-        children.push(walk(container, tag));
+        children.push(walk(container, tag, tag === 'Сборка' ? 'assembly' : 'block'));
       }
     }
 
@@ -72,11 +134,12 @@ export function parseXmlPreview(xmlText: string): XmlPreviewResult {
     return node;
   };
 
-  const root = walk(product, 'Изделие');
+  const root = walk(product, 'Изделие', 'product');
   return {
     productName: textOfChild(product, 'Наименование'),
     totalNodes: counter,
     tree: [root],
+    breakdown,
   };
 }
 

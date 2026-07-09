@@ -662,11 +662,29 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
               <Descriptions.Item label="Базис-проект">{summary.bazisProjectName}</Descriptions.Item>
               <Descriptions.Item label="ERP-проект">#{summary.projectId}</Descriptions.Item>
               <Descriptions.Item label="Ревизия">#{summary.revisionNo}</Descriptions.Item>
-              {Object.entries(summary.summary).map(([key, value]) => (
-                <Descriptions.Item key={key} label={SUMMARY_LABELS_RU[key] ?? key}>
-                  {value}
-                </Descriptions.Item>
-              ))}
+              {Object.entries(summary.summary).map(([key, value]) => {
+                const breakdownKey = SUMMARY_BREAKDOWN_KEYS[key];
+                const items = breakdownKey ? preview?.breakdown?.[breakdownKey] ?? [] : [];
+                return (
+                  <Descriptions.Item key={key} label={SUMMARY_LABELS_RU[key] ?? key}>
+                    <Space size={12}>
+                      <span>{value}</span>
+                      {items.length > 0 ? (
+                        <Select
+                          size="small"
+                          style={{ minWidth: 260, maxWidth: 420 }}
+                          placeholder={`Показать (${items.length})`}
+                          value={null}
+                          showSearch
+                          optionFilterProp="label"
+                          virtual
+                          options={items.map((item, index) => ({ value: `${index}`, label: item }))}
+                        />
+                      ) : null}
+                    </Space>
+                  </Descriptions.Item>
+                );
+              })}
             </Descriptions>
 
             <Space wrap>
