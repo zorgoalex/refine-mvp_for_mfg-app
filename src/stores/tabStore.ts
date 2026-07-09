@@ -45,7 +45,9 @@ export const useTabStore = create<TabState>()(
           const idx = state.tabs.findIndex((x) => x.key === t.key);
           if (idx >= 0) {
             const tabs = state.tabs.slice();
-            tabs[idx] = { ...tabs[idx], path: t.path, label: t.label || tabs[idx].label };
+            // label существующей вкладки сохраняем: setTabTitle (например, имя
+            // Базис-проекта) не должен затираться повторным location-sync
+            tabs[idx] = { ...tabs[idx], path: t.path, label: tabs[idx].label || t.label };
             return { tabs };
           }
           return { tabs: [...state.tabs, { ...t, dirty: false }] };

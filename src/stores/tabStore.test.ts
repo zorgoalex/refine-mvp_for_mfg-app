@@ -10,6 +10,16 @@ describe('tabStore', () => {
   afterEach(() => mod.useTabStore.setState({ tabs: [] }, false));
   afterAll(() => vi.unstubAllGlobals());
 
+  it('openTab keeps a custom label set via setTabTitle (location re-sync must not clobber it)', () => {
+    const s = mod.useTabStore.getState();
+    s.openTab({ key: '/bazis/projects/6', path: '/bazis/projects/6', label: 'Базис-проекты', resource: 'bazis' });
+    s.setTabTitle('/bazis/projects/6', 'Шкаф');
+    s.openTab({ key: '/bazis/projects/6', path: '/bazis/projects/6?revision=7', label: 'Базис-проекты', resource: 'bazis' });
+    const tab = mod.useTabStore.getState().tabs.find((t) => t.key === '/bazis/projects/6');
+    expect(tab?.label).toBe('Шкаф');
+    expect(tab?.path).toBe('/bazis/projects/6?revision=7');
+  });
+
   it('openTab dedupes by key but updates path (query preserved)', () => {
     const s = mod.useTabStore.getState();
     s.openTab({ key: '/orders', path: '/orders?status=1', label: 'Заказы', resource: 'orders_view' });
