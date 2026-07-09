@@ -351,6 +351,17 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     onClose();
   };
 
+  // Клик по маске / Esc НЕ должны терять работу визарда — сворачиваем.
+  // Полное закрытие — только крестик и кнопка «Отмена».
+  const handleCancelEvent = (event: React.MouseEvent | React.KeyboardEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest?.('.ant-modal-close')) {
+      handleClose();
+      return;
+    }
+    setMinimized(true);
+  };
+
   const handleNext = async () => {
     if (currentStep === 'file') {
       if (!xmlFile) {
@@ -472,7 +483,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     <>
       <Modal
       open={open && !minimized}
-      onCancel={handleClose}
+      onCancel={handleCancelEvent}
       footer={footer}
       destroyOnClose
       width={920}

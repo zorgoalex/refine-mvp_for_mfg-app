@@ -168,11 +168,20 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     }
   };
 
+  const handleCancelEvent = (event: React.MouseEvent | React.KeyboardEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest?.('.ant-modal-close')) {
+      onClose();
+      return;
+    }
+    setMinimized(true);
+  };
+
   return (
     <>
       <Modal
       open={open && !minimized}
-      onCancel={onClose}
+      onCancel={handleCancelEvent}
       destroyOnClose={false}
       width={980}
       title={(
