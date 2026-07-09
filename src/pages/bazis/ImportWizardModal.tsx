@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { InboxOutlined, LinkOutlined, LoadingOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { Alert, Button, Descriptions, Modal, Radio, Select, Space, Spin, Steps, Typography, Upload, message } from 'antd';
-import type { UploadChangeParam, UploadFile } from 'antd/es/upload';
 import { ApiError } from '../../api/apiError';
 import { bazisApi } from '../../api/bazisApi';
 import { projectsApi, type ProjectDto } from '../../api/projectsApi';
@@ -261,13 +260,6 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     onClose();
   };
 
-  const handleFileChange = (info: UploadChangeParam<UploadFile>) => {
-    const nextFile = info.file.originFileObj;
-    if (nextFile instanceof File) {
-      setXmlFile(nextFile);
-    }
-  };
-
   const handleNext = async () => {
     if (currentStep === 'file') {
       if (!xmlFile) {
@@ -398,8 +390,12 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
               accept=".xml"
               multiple={false}
               showUploadList={false}
-              beforeUpload={() => false}
-              onChange={handleFileChange}
+              beforeUpload={(file) => {
+                // antd 5.0.5: при `beforeUpload → false` onChange получает КЛОН File
+                // без originFileObj — файл забираем прямо здесь (паттерн OcrTemplateEditor)
+                setXmlFile(file);
+                return false;
+              }}
             >
               <p className="ant-upload-drag-icon">
                 <InboxOutlined />
