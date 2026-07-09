@@ -2,6 +2,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   orders_view: 'Заказы',
   calendar: 'Календарь',
   groups: 'Группы',
+  projects: 'Проекты',
   clients: 'Клиенты',
   clients_analytics_view: '+Клиенты',
   suppliers: 'Поставщики',

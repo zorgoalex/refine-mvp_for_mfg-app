@@ -22,6 +22,13 @@ export interface UnmappedMaterialRow {
  * (source_kind, lower(bazis_name)): одинаковое имя в разных контекстах
  * маппится независимо (Critic 2026-07-08 finding 1).
  */
+const KIND_GUESS_LABELS_RU: Record<string, string> = {
+  sheet: 'Лист',
+  film: 'Плёнка',
+  edge: 'Кромка',
+  hardware: 'Фурнитура',
+};
+
 export function materialMappingKey(row: Pick<UnmappedMaterialRow, 'name' | 'kindGuess'>): string {
   return `${row.kindGuess}:${row.name.toLowerCase()}`;
 }
@@ -119,10 +126,11 @@ export const MaterialMappingStep: React.FC<MaterialMappingStepProps> = ({
         key: 'name',
       },
       {
-        title: 'kindGuess',
+        title: 'Тип',
         dataIndex: 'kindGuess',
         key: 'kindGuess',
         width: 110,
+        render: (value: string) => KIND_GUESS_LABELS_RU[value] ?? value,
       },
       {
         title: 'Использований',
