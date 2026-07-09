@@ -801,7 +801,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       LEFT JOIN sheet_material_types smt
         ON smt.sheet_material_type_id = mm.sheet_material_type_id
       WHERE n.revision_id = $1 AND n.object_type = 'Панель'
-      GROUP BY n.main_material_name, mm.target_kind, mm.sheet_material_type_id, smt.sheet_material_type_name
+      GROUP BY n.main_material_name, mm.target_kind, mm.sheet_material_type_id, smt.name
       ORDER BY panel_count DESC, n.main_material_name
       `,
       [revisionId],
