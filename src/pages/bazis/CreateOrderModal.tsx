@@ -1,13 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { MinusOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { Alert, Button, Form, Input, Modal, Select, Space, Typography, message } from 'antd';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ApiError } from '../../api/apiError';
 import { bazisApi } from '../../api/bazisApi';
 import { ordersApi } from '../../api/ordersApi';
 import { projectsApi } from '../../api/projectsApi';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
 import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
+import { MinimizedModalChip } from '../../components/MinimizedModalChip';
+import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import { createBackendSelectProps, useOrderFormData, type ReferenceOption } from '../../hooks/useOrderFormData';
 import { RevisionTree } from './RevisionTree';
 
@@ -36,6 +39,9 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   onClose,
 }) => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { isActive: isTabActive } = useKeepAlive();
+  const [minimized, setMinimized] = useState(false);
   const [form] = Form.useForm<CreateOrderFormValues>();
   const [checkedKeys, setCheckedKeys] = useState<number[]>([]);
   const [submitLoading, setSubmitLoading] = useState(false);
@@ -74,7 +80,14 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     : firstNumericOptionValue(orderStatusSelectProps.options);
 
   useEffect(() => {
+    if (!isTabActive && open && !minimized) {
+      setMinimized(true);
+    }
+  }, [isTabActive, minimized, open]);
+
+  useEffect(() => {
     if (open && !prevOpenRef.current) {
+      setMinimized(false);
       setCheckedKeys(selectedNodeIds);
       setIdempotencyKey(createUuid());
       form.resetFields();
@@ -156,13 +169,25 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   };
 
   return (
-    <Modal
-      open={open}
+    <>
+      <Modal
+      open={open && !minimized}
       onCancel={onClose}
       destroyOnClose={false}
       width={980}
-      title="Создать заказ из ревизии"
-      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
+      title={(
+        <Space size={8}>
+          <span>Создать заказ из ревизии</span>
+          <Button
+            type="text"
+            size="small"
+            icon={<MinusOutlined />}
+            title="Свернуть"
+            onClick={() => setMinimized(true)}
+          />
+        </Space>
+      )}
+      modalRender={(modal) => <DraggableModalWrapper open={open && !minimized}>{modal}</DraggableModalWrapper>}
       footer={(
         <Space>
           <Button onClick={onClose}>Закрыть</Button>
@@ -237,6 +262,20 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
         )}
       </Space>
     </Modal>
+      {open && minimized ? (
+        <MinimizedModalChip
+          title="Создать заказ из ревизии"
+          slot={1}
+          onRestore={() => {
+            if (location.pathname !== '/bazis') {
+              navigate('/bazis');
+            }
+            setMinimized(false);
+          }}
+          onClose={onClose}
+        />
+      ) : null}
+    </>
   );
 };
 

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { InboxOutlined, LinkOutlined, LoadingOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { InboxOutlined, LinkOutlined, LoadingOutlined, CheckCircleOutlined, MinusOutlined } from '@ant-design/icons';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useSelect } from '@refinedev/antd';
 import { Alert, Button, Descriptions, Input, Modal, Radio, Select, Space, Spin, Steps, Tree, Typography, Upload, message } from 'antd';
 import { ApiError } from '../../api/apiError';
@@ -7,6 +8,8 @@ import { bazisApi } from '../../api/bazisApi';
 import { projectsApi, type ProjectDto } from '../../api/projectsApi';
 import type { BazisImportResponse, BazisProjectCard, BazisProjectListItem, MaterialMapping } from '../../api/types/bazisApi.types';
 import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
+import { MinimizedModalChip } from '../../components/MinimizedModalChip';
+import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import { createBackendSelectProps, useOrderFormData } from '../../hooks/useOrderFormData';
 import { MaterialMappingStep, materialMappingKey, type MaterialMappingValue, type UnmappedMaterialRow } from './MaterialMappingStep';
 import { parseXmlPreview, XmlPreviewError, type XmlPreviewNode, type XmlPreviewResult } from './parseXmlPreview';
@@ -69,6 +72,10 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   onCreateOrder,
 }) => {
   const [currentStep, setCurrentStep] = useState<StepKey>('file');
+  const [minimized, setMinimized] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { isActive: isTabActive } = useKeepAlive();
   const [xmlFile, setXmlFile] = useState<File | null>(null);
   const [bindingMode, setBindingMode] = useState<BindingMode>('bazis');
   const [bazisProjects, setBazisProjects] = useState<BazisProjectListItem[]>([]);
@@ -123,7 +130,14 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
 
   const currentStepIndex = steps.findIndex((step) => step.key === currentStep);
 
+  useEffect(() => {
+    if (!isTabActive && open && !minimized) {
+      setMinimized(true);
+    }
+  }, [isTabActive, minimized, open]);
+
   const resetState = useCallback(() => {
+    setMinimized(false);
     setCurrentStep('file');
     setXmlFile(null);
     setBindingMode('bazis');
@@ -455,14 +469,26 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     );
 
   return (
-    <Modal
-      open={open}
+    <>
+      <Modal
+      open={open && !minimized}
       onCancel={handleClose}
       footer={footer}
       destroyOnClose
       width={920}
-      title="Импорт Bazis XML"
-      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
+      title={(
+        <Space size={8}>
+          <span>Импорт Bazis XML</span>
+          <Button
+            type="text"
+            size="small"
+            icon={<MinusOutlined />}
+            title="Свернуть"
+            onClick={() => setMinimized(true)}
+          />
+        </Space>
+      )}
+      modalRender={(modal) => <DraggableModalWrapper open={open && !minimized}>{modal}</DraggableModalWrapper>}
     >
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
         <Steps current={currentStepIndex} items={steps} />
@@ -645,6 +671,20 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
         ) : null}
       </Space>
     </Modal>
+      {open && minimized ? (
+        <MinimizedModalChip
+          title={`Импорт Bazis XML · ${steps[currentStepIndex]?.title ?? ''}`}
+          slot={0}
+          onRestore={() => {
+            if (location.pathname !== '/bazis') {
+              navigate('/bazis');
+            }
+            setMinimized(false);
+          }}
+          onClose={handleClose}
+        />
+      ) : null}
+    </>
   );
 };
 

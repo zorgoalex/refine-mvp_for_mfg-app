@@ -4,6 +4,8 @@ import type { ColumnsType } from 'antd/es/table';
 import { Link, useNavigate } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisProjectCard, BazisProjectListItem } from '../../api/types/bazisApi.types';
+import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
+import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
 import { CreateOrderModal } from './CreateOrderModal';
 import { ImportWizardModal } from './ImportWizardModal';
@@ -30,6 +32,17 @@ export const BazisPage: React.FC = () => {
   const [checkedNodeIds, setCheckedNodeIds] = useState<number[]>([]);
   const [createOrderOpen, setCreateOrderOpen] = useState(false);
   const canManage = can('bazis.manage');
+  const { isActive: isTabActive } = useKeepAlive();
+  const setTabDirty = useTabStore((state) => state.setDirty);
+
+  // Открытая модалка/дерево = незавершённая работа: помечаем вкладку dirty,
+  // чтобы keep-alive не размонтировал страницу при навигации (иначе state
+  // визарда/выбора узлов пропадёт).
+  useEffect(() => {
+    const hasPendingWork = importOpen || createOrderOpen || treeRevisionId != null;
+    setTabDirty('/bazis', hasPendingWork);
+    return () => setTabDirty('/bazis', false);
+  }, [createOrderOpen, importOpen, setTabDirty, treeRevisionId]);
 
   const loadProjects = useCallback(async () => {
     setLoading(true);
@@ -264,7 +277,7 @@ export const BazisPage: React.FC = () => {
       />
 
       <Drawer
-        open={treeRevisionId != null}
+        open={treeRevisionId != null && isTabActive}
         onClose={() => setTreeRevisionId(null)}
         width={720}
         title={treeRevisionLabel || 'Дерево ревизии'}
