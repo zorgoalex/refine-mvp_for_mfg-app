@@ -9,14 +9,23 @@ import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
 import { MaterialMappingStep, materialMappingKey, type MaterialMappingValue, type UnmappedMaterialRow } from './MaterialMappingStep';
 
 const { Dragger } = Upload;
+
+const SUMMARY_LABELS_RU: Record<string, string> = {
+  totalNodes: 'Всего узлов',
+  panels: 'Панели',
+  hardware: 'Фурнитура',
+  assemblies: 'Сборки',
+  blocks: 'Блоки',
+  uniqueMaterials: 'Уникальных материалов',
+};
 const { Text } = Typography;
 
 interface ImportWizardModalProps {
   open: boolean;
   onClose: () => void;
   onImported: () => void;
-  onOpenTree: (revisionId: number, label: string) => void;
-  onCreateOrder: (revisionId: number, label: string) => void;
+  onOpenTree: (revisionId: number, label: string, projectId: number | null) => void;
+  onCreateOrder: (revisionId: number, label: string, projectId: number | null) => void;
 }
 
 type BindingMode = 'bazis' | 'erp' | 'new';
@@ -504,17 +513,17 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
               <Descriptions.Item label="ERP-проект">#{summary.projectId}</Descriptions.Item>
               <Descriptions.Item label="Ревизия">#{summary.revisionNo}</Descriptions.Item>
               {Object.entries(summary.summary).map(([key, value]) => (
-                <Descriptions.Item key={key} label={key}>
+                <Descriptions.Item key={key} label={SUMMARY_LABELS_RU[key] ?? key}>
                   {value}
                 </Descriptions.Item>
               ))}
             </Descriptions>
 
             <Space wrap>
-              <Button onClick={() => onOpenTree(summary.revisionId, buildRevisionLabel(summary))}>
+              <Button onClick={() => onOpenTree(summary.revisionId, buildRevisionLabel(summary), summary.projectId)}>
                 Открыть дерево
               </Button>
-              <Button type="primary" onClick={() => onCreateOrder(summary.revisionId, buildRevisionLabel(summary))}>
+              <Button type="primary" onClick={() => onCreateOrder(summary.revisionId, buildRevisionLabel(summary), summary.projectId)}>
                 Создать заказ
               </Button>
               <Button onClick={handleClose}>Закрыть</Button>

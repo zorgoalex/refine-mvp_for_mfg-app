@@ -239,6 +239,27 @@ describe('PgBazisRepository reads + mappings', () => {
   });
 });
 
+describe('PgBazisRepository.listAllTreeNodes', () => {
+  it('reads the whole revision in one revision-scoped query ordered parents-first', async () => {
+    const database = createDatabase({ nodeSearch: { total: 0, rows: [] } });
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.listAllTreeNodes(82);
+
+    const sql = normalizeSql(database.queries[1].text);
+    expect(sql).toContain('FROM bazis_nodes n WHERE n.revision_id = $1');
+    expect(sql).toContain('c.revision_id = n.revision_id');
+    expect(sql).toContain('ORDER BY n.parent_node_id NULLS FIRST, n.seq');
+    expect(database.queries[1].params).toEqual([82]);
+  });
+
+  it('throws BazisRevisionNotFoundError for unknown revision', async () => {
+    const database = createDatabase({ nodeSearch: { revisionExists: false } });
+    const repository = new PgBazisRepository(database.service);
+    await expect(repository.listAllTreeNodes(1)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+});
+
 describe('PgBazisRepository.getNodeCard', () => {
   it('reads node with revision context and order links', async () => {
     const database = createDatabase({

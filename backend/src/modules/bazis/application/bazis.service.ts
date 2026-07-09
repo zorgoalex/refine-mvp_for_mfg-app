@@ -114,6 +114,11 @@ export class BazisService {
     return this.ports.repository.getTreeChildren(revisionId, parentNodeId);
   }
 
+  async getFullTree(currentUser: CurrentUser, revisionId: number): Promise<BazisTreeNodeDto[]> {
+    await this.requirePermission(currentUser, 'bazis.view', 'get_full_tree');
+    return this.ports.repository.listAllTreeNodes(revisionId);
+  }
+
   async getNodeCard(currentUser: CurrentUser, nodeId: number): Promise<BazisNodeCardDto> {
     await this.requirePermission(currentUser, 'bazis.view', 'get_node_card');
     return this.ports.repository.getNodeCard(nodeId);

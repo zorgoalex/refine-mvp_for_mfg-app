@@ -48,6 +48,10 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
     return unavailable();
   }
 
+  listAllTreeNodes(_revisionId: number): Promise<BazisTreeNodeDto[]> {
+    return unavailable();
+  }
+
   listMaterialMappings(_names?: string[]): Promise<MaterialMappingDto[]> {
     return unavailable();
   }

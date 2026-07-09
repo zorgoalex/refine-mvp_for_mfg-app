@@ -15,6 +15,8 @@ const { Text } = Typography;
 interface CreateOrderModalProps {
   open: boolean;
   revisionId: number | null;
+  /** ERP-проект ревизии — для предзаполнения клиента по существующим заказам проекта */
+  projectId?: number | null;
   selectedNodeIds: number[];
   onClose: () => void;
 }
@@ -28,6 +30,7 @@ interface CreateOrderFormValues {
 export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   open,
   revisionId,
+  projectId,
   selectedNodeIds,
   onClose,
 }) => {
@@ -78,6 +81,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
         orderStatusId: orderFormData.references.defaultOrderStatus ?? fallbackOrderStatus,
       });
       void suggestNextOrderName(form, setDefaultOrderNameLoading);
+      void suggestClientFromProject(form, projectId);
     }
 
     prevOpenRef.current = open;
@@ -85,6 +89,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     fallbackOrderStatus,
     form,
     open,
+    projectId,
     orderFormData.references.defaultOrderStatus,
     selectedNodeIds,
   ]);
@@ -233,6 +238,38 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     </Modal>
   );
 };
+
+async function suggestClientFromProject(
+  form: ReturnType<typeof Form.useForm<CreateOrderFormValues>>[0],
+  projectId: number | null | undefined,
+): Promise<void> {
+  if (projectId == null) {
+    return;
+  }
+
+  try {
+    // Клиент последнего заказа ERP-проекта — обычный кейс: ревизия импортируется
+    // в проект, созданный из заказа этого клиента.
+    const response = await ordersApi.list({
+      page: 1,
+      pageSize: 1,
+      projectId,
+      sortBy: 'orderDate',
+      sortOrder: 'desc',
+    });
+
+    const clientId = response.data[0]?.clientId;
+    if (clientId == null) {
+      return;
+    }
+
+    if (form.getFieldValue('clientId') == null) {
+      form.setFieldsValue({ clientId });
+    }
+  } catch {
+    // Non-blocking hint only.
+  }
+}
 
 async function suggestNextOrderName(
   form: ReturnType<typeof Form.useForm<CreateOrderFormValues>>[0],

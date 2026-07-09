@@ -110,8 +110,14 @@ describe('BazisController', () => {
   });
 
   it('parseRevisionTreeQuery accepts optional parentNodeId', () => {
-    expect(parseRevisionTreeQuery({})).toEqual({ parentNodeId: null });
-    expect(parseRevisionTreeQuery({ parentNodeId: '4' })).toEqual({ parentNodeId: 4 });
+    expect(parseRevisionTreeQuery({})).toEqual({ parentNodeId: null, all: false });
+    expect(parseRevisionTreeQuery({ parentNodeId: '4' })).toEqual({ parentNodeId: 4, all: false });
+  });
+
+  it('parseRevisionTreeQuery parses all=true and rejects it with parentNodeId', () => {
+    expect(parseRevisionTreeQuery({ all: 'true' })).toEqual({ parentNodeId: null, all: true });
+    expect(parseRevisionTreeQuery({ all: 'false' })).toEqual({ parentNodeId: null, all: false });
+    expect(() => parseRevisionTreeQuery({ all: 'true', parentNodeId: '4' })).toThrow();
   });
 
   it('parseMaterialMappingsQuery splits comma-separated names', () => {

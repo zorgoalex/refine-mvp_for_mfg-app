@@ -58,6 +58,7 @@ export interface BazisRepositoryPort {
   listProjects(filter: { projectId?: number }): Promise<BazisProjectListItemDto[]>;
   getProject(bazisProjectId: number): Promise<BazisProjectCardDto>;
   getTreeChildren(revisionId: number, parentNodeId: number | null): Promise<BazisTreeNodeDto[]>;
+  listAllTreeNodes(revisionId: number): Promise<BazisTreeNodeDto[]>;
   listMaterialMappings(names?: string[]): Promise<MaterialMappingDto[]>;
   upsertMaterialMappings(
     currentUser: CurrentUser,

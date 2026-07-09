@@ -594,23 +594,28 @@ export class PgBazisRepository implements BazisRepositoryPort {
       [revisionId, parentNodeId],
     );
 
-    return result.rows.map((row) => ({
-      bazisNodeId: Number(row.bazis_node_id),
-      parentNodeId: nullableNumber(row.parent_node_id),
-      seq: Number(row.seq),
-      nodeKind: row.node_kind,
-      objectType: row.object_type,
-      name: row.name,
-      detailCode: row.detail_code,
-      position: row.position,
-      quantity: nullableNumber(row.quantity),
-      cumulativeQuantity: nullableNumber(row.cumulative_quantity),
-      lengthMm: nullableNumber(row.length_mm),
-      widthMm: nullableNumber(row.width_mm),
-      thicknessMm: nullableNumber(row.thickness_mm),
-      mainMaterialName: row.main_material_name,
-      childrenCount: Number(row.children_count),
-    }));
+    return result.rows.map(mapTreeNodeRow);
+  }
+
+  async listAllTreeNodes(revisionId: number): Promise<BazisTreeNodeDto[]> {
+    await this.assertRevisionExists(revisionId);
+
+    const result = await this.database.query<TreeNodeRow>(
+      `
+      SELECT n.bazis_node_id, n.parent_node_id, n.seq, n.node_kind, n.object_type, n.name,
+             n.detail_code, n.position, n.quantity, n.cumulative_quantity,
+             n.length_mm, n.width_mm, n.thickness_mm, n.main_material_name,
+             (SELECT count(*) FROM bazis_nodes c
+              WHERE c.parent_node_id = n.bazis_node_id
+                AND c.revision_id = n.revision_id)::int AS children_count
+      FROM bazis_nodes n
+      WHERE n.revision_id = $1
+      ORDER BY n.parent_node_id NULLS FIRST, n.seq
+      `,
+      [revisionId],
+    );
+
+    return result.rows.map(mapTreeNodeRow);
   }
 
   async getNodeCard(nodeId: number): Promise<BazisNodeCardDto> {
@@ -1345,6 +1350,26 @@ function nullableNumber(value: number | string | null | undefined): number | nul
     return null;
   }
   return Number(value);
+}
+
+function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
+  return {
+    bazisNodeId: Number(row.bazis_node_id),
+    parentNodeId: nullableNumber(row.parent_node_id),
+    seq: Number(row.seq),
+    nodeKind: row.node_kind,
+    objectType: row.object_type,
+    name: row.name,
+    detailCode: row.detail_code,
+    position: row.position,
+    quantity: nullableNumber(row.quantity),
+    cumulativeQuantity: nullableNumber(row.cumulative_quantity),
+    lengthMm: nullableNumber(row.length_mm),
+    widthMm: nullableNumber(row.width_mm),
+    thicknessMm: nullableNumber(row.thickness_mm),
+    mainMaterialName: row.main_material_name,
+    childrenCount: Number(row.children_count),
+  };
 }
 
 function mapProjectListRow(row: ProjectListRow): BazisProjectListItemDto {

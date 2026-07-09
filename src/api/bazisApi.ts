@@ -77,6 +77,12 @@ export const bazisApi = {
     );
   },
 
+  getFullTree(revisionId: number): Promise<BazisTreeNode[]> {
+    return httpClient.get<BazisTreeNode[]>(
+      withQuery(apiRoutes.bazis.revisionTree(validateId(revisionId, 'revisionId')), { all: 'true' }),
+    );
+  },
+
   listMaterialMappings(names?: string[]): Promise<MaterialMapping[]> {
     const normalizedNames = names?.map((name) => name.trim()).filter(Boolean) ?? [];
     return httpClient.get<MaterialMapping[]>(

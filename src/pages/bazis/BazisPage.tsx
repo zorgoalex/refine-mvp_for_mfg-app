@@ -25,6 +25,7 @@ export const BazisPage: React.FC = () => {
   const [projectCards, setProjectCards] = useState<Record<number, BazisProjectCard>>({});
   const [projectCardsLoading, setProjectCardsLoading] = useState<Record<number, boolean>>({});
   const [treeRevisionId, setTreeRevisionId] = useState<number | null>(null);
+  const [treeProjectId, setTreeProjectId] = useState<number | null>(null);
   const [treeRevisionLabel, setTreeRevisionLabel] = useState<string>('');
   const [checkedNodeIds, setCheckedNodeIds] = useState<number[]>([]);
   const [createOrderOpen, setCreateOrderOpen] = useState(false);
@@ -64,14 +65,15 @@ export const BazisPage: React.FC = () => {
     }
   }, [projectCards, projectCardsLoading]);
 
-  const openRevisionTree = useCallback((revisionId: number, label: string) => {
+  const openRevisionTree = useCallback((revisionId: number, label: string, projectId: number | null = null) => {
     setTreeRevisionId(revisionId);
+    setTreeProjectId(projectId);
     setTreeRevisionLabel(label);
     setCheckedNodeIds([]);
   }, []);
 
   const makeRevisionColumns = useCallback(
-    (bazisProjectId: number): ColumnsType<BazisProjectCard['revisions'][number]> => [
+    (bazisProjectId: number, projectId: number | null): ColumnsType<BazisProjectCard['revisions'][number]> => [
       {
         title: 'Ревизия',
         dataIndex: 'revisionNo',
@@ -112,7 +114,7 @@ export const BazisPage: React.FC = () => {
               >
                 Форма просмотра
               </Button>
-              <Button size="small" onClick={() => openRevisionTree(revision.bazisRevisionId, label)}>
+              <Button size="small" onClick={() => openRevisionTree(revision.bazisRevisionId, label, projectId)}>
                 Открыть дерево
               </Button>
               <Button
@@ -120,7 +122,7 @@ export const BazisPage: React.FC = () => {
                 type="primary"
                 disabled={!canManage}
                 onClick={() => {
-                  openRevisionTree(revision.bazisRevisionId, label);
+                  openRevisionTree(revision.bazisRevisionId, label, projectId);
                   setCreateOrderOpen(true);
                 }}
               >
@@ -233,7 +235,7 @@ export const BazisPage: React.FC = () => {
                       rowKey="bazisRevisionId"
                       size="small"
                       pagination={false}
-                      columns={makeRevisionColumns(record.bazisProjectId)}
+                      columns={makeRevisionColumns(record.bazisProjectId, record.projectId)}
                       dataSource={card.revisions}
                     />
                   );
@@ -250,12 +252,12 @@ export const BazisPage: React.FC = () => {
         onImported={() => {
           void loadProjects();
         }}
-        onOpenTree={(revisionId, label) => {
-          openRevisionTree(revisionId, label);
+        onOpenTree={(revisionId, label, projectId) => {
+          openRevisionTree(revisionId, label, projectId);
           setImportOpen(false);
         }}
-        onCreateOrder={(revisionId, label) => {
-          openRevisionTree(revisionId, label);
+        onCreateOrder={(revisionId, label, projectId) => {
+          openRevisionTree(revisionId, label, projectId);
           setCreateOrderOpen(true);
           setImportOpen(false);
         }}
@@ -284,6 +286,7 @@ export const BazisPage: React.FC = () => {
       <CreateOrderModal
         open={createOrderOpen}
         revisionId={treeRevisionId}
+        projectId={treeProjectId}
         selectedNodeIds={checkedNodeIds}
         onClose={() => setCreateOrderOpen(false)}
       />

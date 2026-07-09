@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Spin, Tree } from 'antd';
-import type { DataNode, EventDataNode } from 'antd/es/tree';
 import type { Key } from 'rc-tree/lib/interface';
 import { bazisApi } from '../../api/bazisApi';
-import { attachChildren, mapTreeNode, type BazisTreeDataNode } from './bazisTreeUtils';
+import { buildTreeFromFlat, collectExpandableKeys, type BazisTreeDataNode } from './bazisTreeUtils';
 
 interface RevisionTreeProps {
   revisionId: number;
@@ -17,28 +16,30 @@ export const RevisionTree: React.FC<RevisionTreeProps> = ({
   onCheckedKeysChange,
 }) => {
   const [treeData, setTreeData] = useState<BazisTreeDataNode[]>([]);
+  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
-
-  const loadLevel = useCallback(async (parentNodeId?: number) => {
-    return bazisApi.getTree(revisionId, parentNodeId);
-  }, [revisionId]);
 
   useEffect(() => {
     let cancelled = false;
 
-    const loadRoot = async () => {
+    const loadTree = async () => {
       setLoading(true);
       setErrorText(null);
       try {
-        const nodes = await loadLevel();
+        // Полное дерево одним запросом (tree?all=true): дерево выбора узлов
+        // раскрыто по умолчанию, lazy-подгрузка уровней не нужна.
+        const nodes = await bazisApi.getFullTree(revisionId);
         if (!cancelled) {
-          setTreeData(nodes.map(mapTreeNode));
+          const tree = buildTreeFromFlat(nodes);
+          setTreeData(tree);
+          setExpandedKeys(collectExpandableKeys(tree));
         }
       } catch (error) {
         if (!cancelled) {
           setErrorText(error instanceof Error ? error.message : 'Не удалось загрузить дерево ревизии');
           setTreeData([]);
+          setExpandedKeys([]);
         }
       } finally {
         if (!cancelled) {
@@ -47,22 +48,12 @@ export const RevisionTree: React.FC<RevisionTreeProps> = ({
       }
     };
 
-    void loadRoot();
+    void loadTree();
 
     return () => {
       cancelled = true;
     };
-  }, [loadLevel]);
-
-  const handleLoadData = useCallback(async (treeNode: EventDataNode<DataNode>) => {
-    const node = treeNode as EventDataNode<BazisTreeDataNode>;
-    if (node.children || node.isLeaf) {
-      return;
-    }
-
-    const children = await loadLevel(node.bazisNodeId);
-    setTreeData((prev) => attachChildren(prev, node.bazisNodeId, children.map(mapTreeNode)));
-  }, [loadLevel]);
+  }, [revisionId]);
 
   const handleCheck = useCallback((nextCheckedKeys: Key[] | { checked: Key[]; halfChecked: Key[] }) => {
     const keys = Array.isArray(nextCheckedKeys) ? nextCheckedKeys : nextCheckedKeys.checked;
@@ -85,10 +76,12 @@ export const RevisionTree: React.FC<RevisionTreeProps> = ({
       checkable
       checkedKeys={checkedKeys}
       onCheck={handleCheck}
-      loadData={handleLoadData}
       treeData={treeData}
+      expandedKeys={expandedKeys}
+      onExpand={(keys) => setExpandedKeys(keys)}
       selectable={false}
       height={560}
+      virtual
       blockNode
     />
   );

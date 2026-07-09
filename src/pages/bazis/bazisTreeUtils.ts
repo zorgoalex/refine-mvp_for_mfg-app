@@ -69,3 +69,48 @@ function formatPanelSize(lengthMm: number | null, widthMm: number | null): strin
 function stripDecimal(value: number): string {
   return Number.isInteger(value) ? String(value) : String(value);
 }
+
+/**
+ * Строит дерево из плоского списка узлов ревизии (GET tree?all=true).
+ * Родители приходят раньше детей (ORDER BY parent_node_id NULLS FIRST, seq);
+ * на всякий случай узлы с неизвестным родителем поднимаются в корень.
+ */
+export function buildTreeFromFlat(nodes: BazisTreeNode[]): BazisTreeDataNode[] {
+  const byId = new Map<number, BazisTreeDataNode>();
+  const roots: BazisTreeDataNode[] = [];
+
+  for (const node of nodes) {
+    byId.set(node.bazisNodeId, mapTreeNode(node));
+  }
+
+  for (const node of nodes) {
+    const mapped = byId.get(node.bazisNodeId);
+    if (!mapped) continue;
+    const parent = node.parentNodeId != null ? byId.get(node.parentNodeId) : undefined;
+    if (!parent) {
+      roots.push(mapped);
+      continue;
+    }
+    if (!parent.children) {
+      parent.children = [];
+    }
+    (parent.children as BazisTreeDataNode[]).push(mapped);
+  }
+
+  return roots;
+}
+
+/** Ключи всех нелистовых узлов — для раскрытия дерева по умолчанию. */
+export function collectExpandableKeys(nodes: BazisTreeDataNode[]): number[] {
+  const keys: number[] = [];
+  const walk = (items: BazisTreeDataNode[]) => {
+    for (const item of items) {
+      if (item.children && item.children.length > 0) {
+        keys.push(item.bazisNodeId);
+        walk(item.children as BazisTreeDataNode[]);
+      }
+    }
+  };
+  walk(nodes);
+  return keys;
+}

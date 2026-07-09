@@ -2589,7 +2589,7 @@ paths:
       tags:
         - Bazis
       operationId: getBazisRevisionTree
-      summary: Get Bazis revision tree level
+      summary: Get Bazis revision tree level (or full tree with all=true)
       security:
         - bearerAuth: []
       x-permission: bazis.view
@@ -2604,6 +2604,11 @@ paths:
           schema:
             type: integer
             nullable: true
+        - in: query
+          name: all
+          description: Вернуть все узлы ревизии одним списком (несовместим с parentNodeId)
+          schema:
+            type: boolean
       responses:
         '200':
           description: Bazis tree nodes

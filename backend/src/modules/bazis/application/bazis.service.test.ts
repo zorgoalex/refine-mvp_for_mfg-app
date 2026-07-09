@@ -162,6 +162,8 @@ describe('BazisService', () => {
         service.getMaterialsSummary(user, 82)],
       ['listRevisionOrders', (service: BazisService, user: CurrentUser) =>
         service.listRevisionOrders(user, 82)],
+      ['getFullTree', (service: BazisService, user: CurrentUser) =>
+        service.getFullTree(user, 82)],
     ])('%s requires bazis.view', async (_name, call) => {
       await expect(call(createService(), managerUser())).rejects.toMatchObject({ statusCode: 403 });
       await expect(call(createService(), viewerUser())).resolves.toBeDefined();
@@ -362,6 +364,7 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
       revisions: [],
     }),
     getTreeChildren: vi.fn().mockResolvedValue([]),
+    listAllTreeNodes: vi.fn().mockResolvedValue([]),
     getNodeCard: vi.fn().mockResolvedValue({
       bazisNodeId: 555,
       revisionId: 82,

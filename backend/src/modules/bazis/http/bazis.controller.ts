@@ -37,9 +37,18 @@ const listProjectsQuerySchema = z.object({
   projectId: optionalNumericIdSchema,
 });
 
-const treeQuerySchema = z.object({
-  parentNodeId: optionalNumericIdSchema,
-});
+const treeQuerySchema = z
+  .object({
+    parentNodeId: optionalNumericIdSchema,
+    all: z
+      .string()
+      .optional()
+      .transform((value) => value === 'true'),
+  })
+  .refine((value) => !(value.all && value.parentNodeId != null), {
+    message: 'all=true несовместим с parentNodeId',
+    path: ['all'],
+  });
 
 const nodeSearchQuerySchema = z
   .object({
@@ -289,9 +298,10 @@ export class BazisController {
     return this.bazis.getProject(currentUser, parseNumericPathParam(id, 'id'));
   }
 
-  @ApiOperation({ operationId: 'getBazisRevisionTree', summary: 'Get Bazis revision tree level' })
+  @ApiOperation({ operationId: 'getBazisRevisionTree', summary: 'Get Bazis revision tree level (or full tree with all=true)' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found (all=true)' })
   @ApiResponse({ status: 422, description: 'Invalid tree query' })
   @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
   @Get('revisions/:id/tree')
@@ -303,7 +313,11 @@ export class BazisController {
     this.assertBazisEnabled();
     const currentUser = this.requireCurrentUser(request);
     const parsed = parseRevisionTreeQuery(query);
-    return this.bazis.getTree(currentUser, parseNumericPathParam(id, 'id'), parsed.parentNodeId);
+    const revisionId = parseNumericPathParam(id, 'id');
+    if (parsed.all) {
+      return this.bazis.getFullTree(currentUser, revisionId);
+    }
+    return this.bazis.getTree(currentUser, revisionId, parsed.parentNodeId);
   }
 
   @ApiOperation({ operationId: 'getBazisNodeCard', summary: 'Get Bazis node card with raw payload' })
@@ -463,9 +477,9 @@ export function parseListProjectsQuery(
 
 export function parseRevisionTreeQuery(
   query: Record<string, string | string[] | undefined>,
-): { parentNodeId: number | null } {
+): { parentNodeId: number | null; all: boolean } {
   const parsed = parseWithZod(treeQuerySchema, flattenQuery(query), 'Bazis tree query validation failed');
-  return { parentNodeId: parsed.parentNodeId ?? null };
+  return { parentNodeId: parsed.parentNodeId ?? null, all: parsed.all };
 }
 
 export function parseNodeSearchQuery(
