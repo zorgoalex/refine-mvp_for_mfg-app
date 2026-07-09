@@ -794,7 +794,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
              (COALESCE(SUM(COALESCE(n.length_mm, 0) * COALESCE(n.width_mm, 0)
                * COALESCE(n.cumulative_quantity, n.quantity, 1)), 0) / 1000000.0)::float8 AS total_area_m2,
              mm.target_kind, mm.sheet_material_type_id,
-             smt.sheet_material_type_name
+             smt.name AS sheet_material_type_name
       FROM bazis_nodes n
       LEFT JOIN bazis_material_mappings mm
         ON mm.source_kind = 'sheet' AND lower(mm.bazis_name) = lower(n.main_material_name)
@@ -962,8 +962,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
              r.value->>'Стоимость' AS total
       FROM bazis_nodes n
       CROSS JOIN LATERAL jsonb_array_elements(
-        CASE WHEN jsonb_typeof(n.raw_json->'СопутствующийМатериал') = 'array'
-             THEN n.raw_json->'СопутствующийМатериал'
+        CASE WHEN jsonb_typeof(n.raw_json->'СопутствующиеМатериалы'->'СопутствующийМатериал') = 'array'
+             THEN n.raw_json->'СопутствующиеМатериалы'->'СопутствующийМатериал'
              ELSE '[]'::jsonb END
       ) AS r(value)
       WHERE n.revision_id = $1
