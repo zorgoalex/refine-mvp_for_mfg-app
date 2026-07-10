@@ -9,4 +9,8 @@ describe('calendar material badges CSS', () => {
     expect(css).toContain('[data-theme="dark"] .order-card__material-tag');
     expect(css).toMatch(/\[data-theme="dark"\]\s+\.order-card__material-tag\s*\{[^}]*color:\s*#111318\s*!important;/s);
   });
+
+  it('keeps brief-view material codes readable in dark theme', () => {
+    expect(css).toMatch(/\[data-theme="dark"\]\s+\.day-column-brief__material-code\s*\{[^}]*color:\s*#f3f4f6\s*!important;/s);
+  });
 });

@@ -20,11 +20,35 @@ describe('calendar material card tags', () => {
   it('keeps hiding default MDF 16mm from standard calendar cards', () => {
     const details = [
       { material: { material_name: 'МДФ 16мм' } },
+      { material: { material_name: 'МДФ 16 мм' } },
       { material: { material_name: 'МДФ 8мм' } },
     ];
 
     expect(getMaterialsForCard(details, true)).toEqual([
       { name: '8мм', fullName: 'МДФ 8мм' },
+    ]);
+  });
+
+  it('shows draft MDF 16mm because it is not the default hidden material', () => {
+    const details = [
+      { material: { material_name: 'Черновой МДФ 16мм' } },
+      { material: { material_name: 'МДФ 16мм' } },
+    ];
+
+    expect(getMaterialsForCard(details, true)).toEqual([
+      { name: 'Черн. 16мм', fullName: 'Черновой МДФ 16мм' },
+    ]);
+  });
+
+  it('renders every plywood variant with the lowercase plywood code', () => {
+    const details = [
+      { material: { material_name: 'Фанера 2500*1250 10мм' } },
+      { material: { material_name: 'ФАНЕРА' } },
+    ];
+
+    expect(getMaterialsForCard(details, true)).toEqual([
+      { name: 'фанера', fullName: 'Фанера 2500*1250 10мм' },
+      { name: 'фанера', fullName: 'ФАНЕРА' },
     ]);
   });
 

@@ -231,6 +231,15 @@ export function getShortMaterialName(material: string): string {
   const mat = material.trim();
   const matLower = mat.toLowerCase();
 
+  if (matLower.includes('чернов')) {
+    const match = mat.match(/(\d+)\s*мм/i) ?? mat.match(/(\d+)/);
+    return match ? `Черн. ${match[1]}мм` : 'Черн.';
+  }
+
+  if (matLower.includes('фанера')) {
+    return 'фанера';
+  }
+
   // ЛДСП — всегда сокращаем до "ЛДСП"
   if (matLower.includes('лдсп')) {
     return 'ЛДСП';
@@ -278,9 +287,7 @@ export function getMaterialsForCard(
   // Фильтруем "МДФ 16мм" если нужно
   const filtered = excludeMdf16
     ? uniqueMaterials.filter(m => {
-        const lower = m.toLowerCase();
-        // Исключаем если это МДФ 16мм
-        return !(lower.includes('мдф') && lower.includes('16'));
+        return !isDefaultMdf16Material(m);
       })
     : uniqueMaterials;
 
@@ -288,6 +295,16 @@ export function getMaterialsForCard(
     name: getShortMaterialName(fullName),
     fullName,
   }));
+}
+
+function isDefaultMdf16Material(material: string): boolean {
+  const normalized = material
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/\s*мм$/u, 'мм')
+    .trim();
+
+  return /^мдф\s*16мм$/.test(normalized);
 }
 
 /**
