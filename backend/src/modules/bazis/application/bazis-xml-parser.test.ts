@@ -84,6 +84,80 @@ describe('parseBazisXml', () => {
     );
   });
 
+  describe('multi-product project (несколько Изделие в Проект)', () => {
+    const multiXml = `<Проект Наименование="1471" Версия="1">
+      <Изделие><Наименование>санузел</Наименование><Цена>100.5</Цена><Количество>1</Количество><СписокЭлементов>
+        <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>П1</Наименование>
+          <ОсновнойМатериал><Наименование>ЛДСП белый</Наименование></ОсновнойМатериал>
+        </Объект>
+      </СписокЭлементов></Изделие>
+      <Изделие><Наименование>шкаф</Наименование><Цена>200</Цена><Количество>1</Количество><СписокЭлементов>
+        <Сборка><Наименование>Секция</Наименование><Количество>2</Количество><СписокЭлементов>
+          <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>П2</Наименование><Количество>1</Количество>
+            <ОсновнойМатериал><Наименование>МДФ 16</Наименование></ОсновнойМатериал>
+          </Объект>
+        </СписокЭлементов></Сборка>
+      </СписокЭлементов></Изделие>
+    </Проект>`;
+
+    it('creates one root node per product', () => {
+      const parsed = parseBazisXml(multiXml);
+      const roots = parsed.nodes.filter((node) => node.parentIndex === null);
+      expect(roots).toHaveLength(2);
+      expect(roots.map((node) => node.nodeKind)).toEqual(['product', 'product']);
+      expect(roots.map((node) => node.name)).toEqual(['санузел', 'шкаф']);
+      expect(roots.map((node) => node.seq)).toEqual([0, 1]);
+    });
+
+    it('walks children of every product, not only the first', () => {
+      const parsed = parseBazisXml(multiXml);
+      const panels = parsed.nodes.filter((node) => node.objectType === 'Панель');
+      expect(panels.map((node) => node.name)).toEqual(['П1', 'П2']);
+      const secondRoot = parsed.nodes.find((node) => node.name === 'шкаф');
+      const assembly = parsed.nodes.find((node) => node.name === 'Секция');
+      expect(assembly?.parentIndex).toBe(secondRoot?.index);
+      const nested = parsed.nodes.find((node) => node.name === 'П2');
+      expect(nested?.parentIndex).toBe(assembly?.index);
+      expect(nested?.cumulativeQuantity).toBe(2);
+      expect(parsed.summary.totalNodes).toBe(5);
+      expect(parsed.summary.panels).toBe(2);
+      expect(parsed.summary.assemblies).toBe(1);
+    });
+
+    it('joins product names and sums prices in revision header', () => {
+      const parsed = parseBazisXml(multiXml);
+      expect(parsed.productName).toBe('санузел + шкаф');
+      expect(parsed.productPrice).toBeCloseTo(300.5);
+    });
+
+    it('collects materials from every product', () => {
+      const parsed = parseBazisXml(multiXml);
+      expect(parsed.materials.map((material) => material.name).sort()).toEqual([
+        'ЛДСП белый',
+        'МДФ 16',
+      ]);
+    });
+
+    it('keeps single-product header semantics unchanged (no join artifacts)', () => {
+      const parsed = parseBazisXml(fixture);
+      expect(parsed.productName).toBe('Кухня');
+      expect(parsed.productPrice).toBeCloseTo(91750.53);
+    });
+
+    it('sums prices treating missing product price as zero, all-missing stays null', () => {
+      const withNullPrice = `<Проект Версия="1">
+        <Изделие><Наименование>А</Наименование><СписокЭлементов/></Изделие>
+        <Изделие><Наименование>Б</Наименование><Цена>50</Цена><СписокЭлементов/></Изделие>
+      </Проект>`;
+      expect(parseBazisXml(withNullPrice).productPrice).toBeCloseTo(50);
+      const allNull = `<Проект Версия="1">
+        <Изделие><Наименование>А</Наименование><СписокЭлементов/></Изделие>
+        <Изделие><Наименование>Б</Наименование><СписокЭлементов/></Изделие>
+      </Проект>`;
+      expect(parseBazisXml(allNull).productPrice).toBeNull();
+    });
+  });
+
   it('rejects DOCTYPE (XML bomb guard)', () => {
     expect(() => parseBazisXml('<!DOCTYPE foo [<!ENTITY a "b">]><Проект/>')).toThrow(
       BazisXmlParseError,

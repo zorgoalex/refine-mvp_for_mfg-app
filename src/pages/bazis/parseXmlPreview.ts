@@ -43,8 +43,10 @@ export function parseXmlPreview(xmlText: string): XmlPreviewResult {
   }
 
   const project = childByTag(doc, 'Проект');
-  const product = project ? childByTag(project, 'Изделие') : null;
-  if (!project || !product) {
+  // Проект может содержать несколько Изделие — каждое отдельный корень дерева
+  // (зеркало backend bazis-xml-parser).
+  const products = project ? directChildren(project, 'Изделие') : [];
+  if (!project || products.length === 0) {
     throw new XmlPreviewError('Не найден корень Проект/Изделие');
   }
 
@@ -134,11 +136,14 @@ export function parseXmlPreview(xmlText: string): XmlPreviewResult {
     return node;
   };
 
-  const root = walk(product, 'Изделие', 'product');
+  const roots = products.map((product) => walk(product, 'Изделие', 'product'));
+  const productNames = products
+    .map((product) => textOfChild(product, 'Наименование'))
+    .filter((name): name is string => name !== null);
   return {
-    productName: textOfChild(product, 'Наименование'),
+    productName: productNames.length > 0 ? productNames.join(' + ') : null,
     totalNodes: counter,
-    tree: [root],
+    tree: roots,
     breakdown,
   };
 }
