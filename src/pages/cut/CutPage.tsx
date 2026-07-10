@@ -1498,6 +1498,16 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               description={job.failureReason}
             />
           )}
+          {job.autoLayoutValidation?.valid === false && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message="Требуется пересчёт раскроя"
+              description="Раскрой создан старой версией оптимизатора и содержит некорректные зазоры. Пересчитайте задание перед ручным редактированием."
+              data-testid="legacy-auto-layout-warning"
+            />
+          )}
           {(() => {
             const activeOptions = profiles
               .filter((p) => p.isActive)
@@ -1737,7 +1747,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           isEditingGroup ||
           (group.manualLayout != null && showAlt !== persistedActive);
         // Edit is blocked when editorParams are absent or a recalc is required.
-        const editDisabled = !(job.editorParams) || (job.requiresRecalc ?? false);
+        const legacyAutoLayoutInvalid = job.autoLayoutValidation?.valid === false;
+        const editDisabled = !(job.editorParams) || (job.requiresRecalc ?? false) || legacyAutoLayoutInvalid;
         // Preview sheets: honour displayVariant so count/overlays follow the
         // manual layout when the operator has switched to the manual view.
         const previewSheets = selectVariantSheets(group, displayVariant);
@@ -1795,7 +1806,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 {canManage && !isArchivedJob && (
                   <Tooltip
                     title={
-                      (job.requiresRecalc ?? false)
+                      legacyAutoLayoutInvalid
+                        ? 'Раскрой содержит некорректные зазоры — требуется пересчёт'
+                        : (job.requiresRecalc ?? false)
                         ? 'Требуется пересчёт'
                         : !(job.editorParams)
                         ? 'Редактор недоступен'
@@ -1867,7 +1880,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                     <Button
                       type="primary"
                       size="small"
-                      disabled={violations.length > 0 || (job.requiresRecalc ?? false) || busy}
+                      disabled={violations.length > 0 || (job.requiresRecalc ?? false) || legacyAutoLayoutInvalid || busy}
                       onClick={() => void saveManualLayoutForGroup(group)}
                       loading={busy}
                       data-testid="save-manual-layout-btn"

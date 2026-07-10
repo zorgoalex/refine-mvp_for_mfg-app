@@ -47,6 +47,13 @@ describe('CutPage manual-layout guard', () => {
     expect(src).toMatch(/requiresRecalc/);
   });
 
+  it('warns about invalid legacy auto geometry and blocks manual editing until recalculation', () => {
+    expect(src).toContain('legacy-auto-layout-warning');
+    expect(src).toContain('Раскрой создан старой версией оптимизатора');
+    expect(src).toMatch(/legacyAutoLayoutInvalid.*autoLayoutValidation\?\.valid === false/);
+    expect(src).toMatch(/editDisabled.*legacyAutoLayoutInvalid/);
+  });
+
   it('disables the alternative-view checkbox with tooltip when manualLayout is stale (prevents variant=manual 409)', () => {
     // The stale-disable tooltip must be present.
     expect(src).toContain('Ручной раскрой устарел — пересчитайте');

@@ -251,7 +251,7 @@ sudo ops/setup-vps.sh --yes
 ## Freecut Optimization Service
 
 `freecut` is the Rust 2D cut-optimization service. It is built from the sibling
-`repo_freecut` checkout (set `FREECUT_BUILD_CONTEXT`, default `./repo_freecut`)
+verified `repo_freecut` checkout (fixed build-context `./repo_freecut`; overrides are rejected)
 and comes up automatically with the rest of the stack. It is **internal-only**:
 attached to the `back` network with no Traefik route and no public domain, so it
 is not reachable from the browser. A backend integration can later call it at

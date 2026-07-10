@@ -260,6 +260,92 @@ export interface FreecutOptimizeResponse {
   unplaced_items?: Array<{ item_id: string; instance: number; reason: string }>;
 }
 
+export interface FreecutResponseContractViolation {
+  code: string;
+  path: string;
+}
+
+/** Runtime trust boundary for the external optimizer response. Geometry checks
+ * run separately; this verifies that the response is a lossless, well-formed
+ * partition of the exact request instances before any DB persistence. */
+export function validateFreecutResponseContract(
+  request: OptimizeRequest,
+  response: unknown,
+): FreecutResponseContractViolation[] {
+  const out: FreecutResponseContractViolation[] = [];
+  const fail = (code: string, path: string) => out.push({ code, path });
+  const finiteNonNegative = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  const sameNumber = (a: unknown, b: number) => finiteNonNegative(a) && Math.abs((a as number) - b) <= 1e-6;
+  if (response === null || typeof response !== 'object') return [{ code: 'invalid_response', path: '$' }];
+  const raw = response as Record<string, unknown>;
+  if (raw.status !== 'ok') fail('invalid_status', 'status');
+  if (!Array.isArray(raw.solutions)) return [{ code: 'invalid_solutions', path: 'solutions' }];
+  const unplaced = raw.unplaced_items === undefined ? [] : raw.unplaced_items;
+  if (!Array.isArray(unplaced)) fail('invalid_unplaced_items', 'unplaced_items');
+
+  const stock = request.stock[0];
+  const expected = new Map<string, FreecutItem>();
+  for (const item of request.items) {
+    for (let instance = 1; instance <= item.qty; instance += 1) expected.set(`${item.id}:${instance}`, item);
+  }
+  const seen = new Set<string>();
+  const sheetIndices = new Set<number>();
+
+  raw.solutions.forEach((rawSolution, solutionPos) => {
+    const path = `solutions[${solutionPos}]`;
+    if (rawSolution === null || typeof rawSolution !== 'object') { fail('invalid_solution', path); return; }
+    const solution = rawSolution as Record<string, unknown>;
+    if (solution.stock_id !== stock.id) fail('stock_id_mismatch', `${path}.stock_id`);
+    if (!Number.isInteger(solution.index) || (solution.index as number) < 0) fail('invalid_sheet_index', `${path}.index`);
+    else if (sheetIndices.has(solution.index as number)) fail('duplicate_sheet_index', `${path}.index`);
+    else sheetIndices.add(solution.index as number);
+    if (!sameNumber(solution.width_mm, stock.width_mm)) fail('sheet_width_mismatch', `${path}.width_mm`);
+    if (!sameNumber(solution.height_mm, stock.height_mm)) fail('sheet_height_mismatch', `${path}.height_mm`);
+    const trim = solution.trim_mm;
+    if (trim === null || typeof trim !== 'object') fail('invalid_trim', `${path}.trim_mm`);
+    else for (const side of ['left', 'right', 'top', 'bottom'] as const) {
+      if (!sameNumber((trim as Record<string, unknown>)[side], request.params.trim_mm[side])) fail('trim_mismatch', `${path}.trim_mm.${side}`);
+    }
+    if (!Array.isArray(solution.placements)) { fail('invalid_placements', `${path}.placements`); return; }
+    solution.placements.forEach((rawPlacement, placementPos) => {
+      const placementPath = `${path}.placements[${placementPos}]`;
+      if (rawPlacement === null || typeof rawPlacement !== 'object') { fail('invalid_placement', placementPath); return; }
+      const placement = rawPlacement as Record<string, unknown>;
+      if (typeof placement.item_id !== 'string') fail('invalid_item_id', `${placementPath}.item_id`);
+      if (!Number.isInteger(placement.instance) || (placement.instance as number) <= 0) fail('invalid_instance', `${placementPath}.instance`);
+      const key = `${placement.item_id as string}:${placement.instance as number}`;
+      const item = expected.get(key);
+      if (!item) fail('unknown_instance', placementPath);
+      if (seen.has(key)) fail('duplicate_instance', placementPath); else seen.add(key);
+      for (const field of ['x_mm', 'y_mm', 'width_mm', 'height_mm'] as const) {
+        if (!finiteNonNegative(placement[field])) fail('invalid_number', `${placementPath}.${field}`);
+      }
+      if (typeof placement.rotated !== 'boolean') fail('invalid_rotated', `${placementPath}.rotated`);
+      if (item && typeof placement.rotated === 'boolean') {
+        if (placement.rotated && item.rotation === 'forbid') fail('rotation_forbidden', `${placementPath}.rotated`);
+        const expectedWidth = placement.rotated ? item.height_mm : item.width_mm;
+        const expectedHeight = placement.rotated ? item.width_mm : item.height_mm;
+        if (!sameNumber(placement.width_mm, expectedWidth)) fail('piece_width_mismatch', `${placementPath}.width_mm`);
+        if (!sameNumber(placement.height_mm, expectedHeight)) fail('piece_height_mismatch', `${placementPath}.height_mm`);
+      }
+    });
+  });
+
+  if (Array.isArray(unplaced)) unplaced.forEach((rawItem, pos) => {
+    const path = `unplaced_items[${pos}]`;
+    if (rawItem === null || typeof rawItem !== 'object') { fail('invalid_unplaced_item', path); return; }
+    const item = rawItem as Record<string, unknown>;
+    if (typeof item.item_id !== 'string') fail('invalid_item_id', `${path}.item_id`);
+    if (!Number.isInteger(item.instance) || (item.instance as number) <= 0) fail('invalid_instance', `${path}.instance`);
+    const key = `${item.item_id as string}:${item.instance as number}`;
+    if (!expected.has(key)) fail('unknown_instance', path);
+    if (seen.has(key)) fail('duplicate_instance', path); else seen.add(key);
+    if (typeof item.reason !== 'string') fail('invalid_unplaced_reason', `${path}.reason`);
+  });
+  for (const key of expected.keys()) if (!seen.has(key)) fail('missing_instance', key);
+  return out;
+}
+
 /**
  * Persisted placement piece type. Extends FreecutPlacement with an optional
  * display label snapshot (Codex R13 MAJOR #4). The label field is populated

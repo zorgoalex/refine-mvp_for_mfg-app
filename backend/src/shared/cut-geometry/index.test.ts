@@ -91,6 +91,59 @@ describe('validateSheetPlacements', () => {
     expect(validateSheetPlacements({ sheetIndex: 0, placements: base, gap: { kerfMm: 2, spacingMm: 1 }, filmTextureByItemId: new Map() })).toEqual([]);
   });
 
+  it('can stop after the first violation for bounded legacy read checks', () => {
+    const repeated = Array.from({ length: 100 }, (_, instance) => ({
+      item_id: 'det-1', instance: instance + 1, x_mm: 0, y_mm: 0,
+      width_mm: 100, height_mm: 100, rotated: false,
+    }));
+    const violations = validateSheetPlacements({
+      sheetIndex: 0,
+      placements: { ...sheet, pieces: repeated },
+      gap: { kerfMm: 6.5, spacingMm: 0 },
+      filmTextureByItemId: new Map(),
+      stopAfterFirst: true,
+    });
+    expect(violations).toHaveLength(1);
+  });
+
+  it('handles a maximum-size valid row through the X sweep', () => {
+    const pieces = Array.from({ length: 5000 }, (_, instance) => ({
+      item_id: 'det-1', instance: instance + 1, x_mm: instance * 11, y_mm: 0,
+      width_mm: 10, height_mm: 10, rotated: false,
+    }));
+    expect(validateSheetPlacements({
+      sheetIndex: 0,
+      placements: {
+        trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
+        sheet_width_mm: 55_000,
+        sheet_height_mm: 10,
+        pieces,
+      },
+      gap: { kerfMm: 1, spacingMm: 0 },
+      filmTextureByItemId: new Map(),
+      stopAfterFirst: true,
+    })).toEqual([]);
+  });
+
+  it('handles a maximum-size valid column through the adaptive Y sweep', () => {
+    const pieces = Array.from({ length: 5000 }, (_, instance) => ({
+      item_id: 'det-1', instance: instance + 1, x_mm: 0, y_mm: instance * 11,
+      width_mm: 10, height_mm: 10, rotated: false,
+    }));
+    expect(validateSheetPlacements({
+      sheetIndex: 0,
+      placements: {
+        trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
+        sheet_width_mm: 10,
+        sheet_height_mm: 55_000,
+        pieces,
+      },
+      gap: { kerfMm: 1, spacingMm: 0 },
+      filmTextureByItemId: new Map(),
+      stopAfterFirst: true,
+    })).toEqual([]);
+  });
+
   it('returns overlap violation when gap is insufficient', () => {
     const tight = { ...base, pieces: [base.pieces[0], { ...base.pieces[1], x_mm: 601 }] };
     const codes = validateSheetPlacements({ sheetIndex: 0, placements: tight, gap: { kerfMm: 2, spacingMm: 1 }, filmTextureByItemId: new Map() }).map((v) => v.code);

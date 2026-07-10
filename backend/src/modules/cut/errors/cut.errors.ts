@@ -97,3 +97,14 @@ export class CutSheetMaterialNotCuttableError extends ApiError {
     });
   }
 }
+
+/** Defense-in-depth: Freecut returned a layout that violates ERP's frozen
+ * geometry contract. This is an optimizer/service failure, never client input. */
+export class CutOptimizerInvalidGeometryError extends ApiError {
+  constructor(violationCount: number, violations: unknown[]) {
+    super(502, 'CUT_OPTIMIZER_INVALID_GEOMETRY', 'Оптимизатор вернул некорректную геометрию раскроя', {
+      violationCount,
+      violations,
+    });
+  }
+}

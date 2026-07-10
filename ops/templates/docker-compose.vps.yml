@@ -254,7 +254,9 @@ services:
 
   freecut:
     build:
-      context: ${FREECUT_BUILD_CONTEXT:-./repo_freecut}
+      # Fixed path: deployment scripts verify this exact checkout immediately
+      # before build. An override would allow stale, unverified source.
+      context: ./repo_freecut
       dockerfile: Dockerfile
     restart: unless-stopped
     expose:

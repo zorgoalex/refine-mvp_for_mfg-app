@@ -58,7 +58,7 @@ install_docker() {
 
   log "Installing Docker using official convenience script"
   "${SUDO[@]}" apt-get update
-  "${SUDO[@]}" apt-get install -y ca-certificates curl gnupg git ufw
+  "${SUDO[@]}" apt-get install -y ca-certificates curl gnupg git jq ufw
   curl -fsSL https://get.docker.com | "${SUDO[@]}" sh
 
   if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
@@ -70,6 +70,7 @@ install_docker() {
 configure_firewall() {
   [[ "$SKIP_FIREWALL" == "0" ]] || return 0
   need_cmd ufw || "${SUDO[@]}" apt-get install -y ufw
+  need_cmd jq || "${SUDO[@]}" apt-get install -y jq
 
   log "Configuring ufw for SSH/HTTP/HTTPS"
   "${SUDO[@]}" ufw allow OpenSSH
