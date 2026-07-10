@@ -331,7 +331,7 @@ export const CustomSider: React.FC = () => {
           min-height: 40px;
           padding-top: 6px !important;
           padding-bottom: 6px !important;
-          font-size: 0.49em;
+          font-size: 0.64em;
           line-height: 1.25 !important;
           color: #E0E0E0 !important;
           letter-spacing: 1px !important;
@@ -345,6 +345,7 @@ export const CustomSider: React.FC = () => {
           white-space: normal;
           overflow-wrap: normal;
           word-break: normal;
+          text-wrap: pretty;
         }
         .sidebar-collapse .ant-menu-item:hover { color: #90CAF9 !important; }
         .sidebar-collapse .ant-menu-item-selected { background-color: rgba(144, 202, 249, 0.2) !important; color: #90CAF9 !important; }
