@@ -2,6 +2,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { ParsedBazisRevision } from './bazis-xml-parser';
 import type {
   BazisImportResponseDto,
+  BazisProjectDeleteResponseDto,
   BazisNodeCardDto,
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
@@ -47,6 +48,12 @@ export interface CreateOrderFromRevisionCommand {
   idempotencyKey: string;
 }
 
+export interface DeleteBazisProjectInput {
+  currentUser: CurrentUser;
+  requestId?: string;
+  bazisProjectId: number;
+}
+
 export interface BazisRepositoryPort {
   importRevision(command: ImportRevisionCommand): Promise<BazisImportResponseDto>;
   recordFailedImport(input: {
@@ -79,4 +86,5 @@ export interface BazisRepositoryPort {
   getMaterialsSummary(revisionId: number): Promise<BazisRevisionMaterialsSummaryDto>;
   listRevisionOrders(revisionId: number): Promise<BazisRevisionOrderDto[]>;
   getRevisionEstimate(revisionId: number): Promise<BazisRevisionEstimateDto>;
+  deleteProject(input: DeleteBazisProjectInput): Promise<BazisProjectDeleteResponseDto>;
 }

@@ -7,6 +7,7 @@ import type {
   BazisNodeCard,
   BazisNodeSearchResponse,
   BazisProjectCard,
+  BazisProjectDeleteResponse,
   BazisProjectListItem,
   BazisRevisionMaterialsSummary,
   BazisRevisionOrder,
@@ -40,6 +41,12 @@ export const bazisApi = {
 
   getProject(id: number): Promise<BazisProjectCard> {
     return httpClient.get<BazisProjectCard>(apiRoutes.bazis.project(validateId(id, 'bazisProjectId')));
+  },
+
+  deleteProject(id: number): Promise<BazisProjectDeleteResponse> {
+    return httpClient.delete<BazisProjectDeleteResponse>(
+      apiRoutes.bazis.project(validateId(id, 'bazisProjectId')),
+    );
   },
 
   getTree(revisionId: number, parentNodeId?: number): Promise<BazisTreeNode[]> {

@@ -9,11 +9,13 @@ import type { SaveOrderDetailDto, SaveOrderDto } from '../../orders/dto/save-ord
 import type {
   BazisRepositoryPort,
   CreateOrderFromRevisionCommand,
+  DeleteBazisProjectInput,
   ImportRevisionCommand,
 } from '../application/bazis.types';
 import type {
   BazisRevisionEstimateDto,
   BazisImportResponseDto,
+  BazisProjectDeleteResponseDto,
   BazisNodeCardDto,
   BazisNodeSearchItemDto,
   BazisNodeSearchResponseDto,
@@ -33,6 +35,7 @@ import {
   BazisIdempotencyKeyReusedError,
   BazisNodeNotFoundError,
   BazisNoPanelsSelectedError,
+  BazisProjectHasOrdersError,
   BazisProjectNotFoundError,
   BazisRevisionNotFoundError,
   BazisReferenceNotFoundError,
@@ -502,6 +505,125 @@ export class PgBazisRepository implements BazisRepositoryPort {
           requestIdOrFallback(input.requestId, 'bazis-import'),
         ],
       );
+    });
+  }
+
+  async deleteProject(input: DeleteBazisProjectInput): Promise<BazisProjectDeleteResponseDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, input.currentUser.id);
+      const requestId = requestIdOrFallback(input.requestId, 'bazis-delete');
+      const bazisProjectId = input.bazisProjectId;
+
+      const existing = await tx.query<{ bazis_project_id: number | string; project_id: number | string; name: string }>(
+        `
+        SELECT bazis_project_id, project_id, name
+        FROM bazis_projects
+        WHERE bazis_project_id = $1
+        FOR UPDATE
+        `,
+        [bazisProjectId],
+      );
+      if (existing.rows.length === 0) {
+        throw new BazisProjectNotFoundError(bazisProjectId);
+      }
+      const projectId = Number(existing.rows[0].project_id);
+      const name = existing.rows[0].name;
+
+      const links = await tx.query<{ order_id: number | string }>(
+        `
+        SELECT order_id
+        FROM bazis_order_links
+        WHERE bazis_project_id = $1
+        ORDER BY order_id
+        `,
+        [bazisProjectId],
+      );
+      if (links.rows.length > 0) {
+        throw new BazisProjectHasOrdersError(links.rows.map((row) => Number(row.order_id)));
+      }
+
+      const counts = await tx.query<{ revisions_count: number | string; nodes_count: number | string }>(
+        `
+        SELECT (SELECT count(*) FROM bazis_project_revisions WHERE bazis_project_id = $1)::int AS revisions_count,
+               (SELECT count(*)
+                FROM bazis_nodes n
+                JOIN bazis_project_revisions r ON r.bazis_revision_id = n.revision_id
+                WHERE r.bazis_project_id = $1)::int AS nodes_count
+        `,
+        [bazisProjectId],
+      );
+      const revisionsDeleted = Number(counts.rows[0]?.revisions_count ?? 0);
+      const nodesDeleted = Number(counts.rows[0]?.nodes_count ?? 0);
+
+      // bazis_import_runs.revision_id без CASCADE — снять до ревизий.
+      await tx.query(
+        `
+        DELETE FROM bazis_import_runs
+        WHERE revision_id IN (SELECT bazis_revision_id FROM bazis_project_revisions WHERE bazis_project_id = $1)
+        `,
+        [bazisProjectId],
+      );
+      // bazis_nodes и bazis_node_order_detail_map уходят каскадом от ревизий.
+      await tx.query(
+        `
+        DELETE FROM bazis_project_revisions
+        WHERE bazis_project_id = $1
+        `,
+        [bazisProjectId],
+      );
+      await tx.query(
+        `
+        DELETE FROM bazis_projects
+        WHERE bazis_project_id = $1
+        `,
+        [bazisProjectId],
+      );
+
+      await auditService.record(tx, {
+        event: 'bazis.project_deleted',
+        entityType: 'bazis_project',
+        entityId: String(bazisProjectId),
+        actorUserId: input.currentUser.id,
+        actorUsername: input.currentUser.username,
+        actorRole: input.currentUser.role,
+        requestId,
+        source: SOURCE,
+        relatedEntities: [
+          { entityType: 'project', entityId: projectId },
+          { entityType: 'bazis_project', entityId: bazisProjectId },
+        ],
+        before: { bazisProjectId, projectId, name, revisionsDeleted, nodesDeleted },
+        after: {},
+        metadata: {
+          source: SOURCE,
+          action: 'bazis_project_delete',
+          requestId,
+        },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1,$2,$3,$4::jsonb,$5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          'bazis.project_deleted',
+          'bazis_project',
+          String(bazisProjectId),
+          JSON.stringify({
+            eventType: 'bazis.project_deleted',
+            bazisProjectId,
+            projectId,
+            name,
+            actorUserId: input.currentUser.id,
+            requestId,
+          }),
+          `bazis-project-deleted-${bazisProjectId}`,
+        ],
+      );
+
+      return { bazisProjectId, projectId, name, revisionsDeleted, nodesDeleted };
     });
   }
 

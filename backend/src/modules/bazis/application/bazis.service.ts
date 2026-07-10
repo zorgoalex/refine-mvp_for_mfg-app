@@ -20,6 +20,7 @@ import {
   type BazisNodeCardDto,
   type BazisNodeSearchResponseDto,
   type BazisProjectCardDto,
+  type BazisProjectDeleteResponseDto,
   type BazisProjectListItemDto,
   type BazisRevisionMaterialsSummaryDto,
   type BazisRevisionEstimateDto,
@@ -153,6 +154,15 @@ export class BazisService {
   ): Promise<BazisRevisionOrderDto[]> {
     await this.requirePermission(currentUser, 'bazis.view', 'list_revision_orders');
     return this.ports.repository.listRevisionOrders(revisionId);
+  }
+
+  async deleteProject(
+    currentUser: CurrentUser,
+    requestId: string | undefined,
+    bazisProjectId: number,
+  ): Promise<BazisProjectDeleteResponseDto> {
+    await this.requirePermission(currentUser, 'bazis.manage', 'delete_project', requestId);
+    return this.ports.repository.deleteProject({ currentUser, requestId, bazisProjectId });
   }
 
   async listMaterialMappings(

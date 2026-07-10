@@ -1,6 +1,6 @@
 import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
@@ -14,6 +14,7 @@ import type {
   BazisNodeCardDto,
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
+  BazisProjectDeleteResponseDto,
   BazisProjectListItemDto,
   BazisRevisionMaterialsSummaryDto,
   BazisRevisionOrderDto,
@@ -282,6 +283,24 @@ export class BazisController {
     this.assertBazisEnabled();
     const currentUser = this.requireCurrentUser(request);
     return this.bazis.listProjects(currentUser, parseListProjectsQuery(query));
+  }
+
+  @ApiOperation({ operationId: 'deleteBazisProject', summary: 'Delete a Bazis project (hard, gated by created orders)' })
+  @ApiResponse({ status: 200, description: 'Deleted Bazis project summary' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis project not found' })
+  @ApiResponse({ status: 409, description: 'Orders were created from this Bazis project' })
+  @ApiResponse({ status: 422, description: 'Invalid project id' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Delete('projects/:id')
+  async deleteProject(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+  ): Promise<BazisProjectDeleteResponseDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.bazis.deleteProject(currentUser, request.requestId, parseNumericPathParam(id, 'id'));
   }
 
   @ApiOperation({ operationId: 'getBazisProject', summary: 'Get Bazis project card' })

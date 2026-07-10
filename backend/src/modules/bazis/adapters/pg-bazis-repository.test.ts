@@ -1340,3 +1340,126 @@ function buildOrderDto(orderId: number, orderName: string): OrderDto {
 function isoMinutesAgo(minutes: number): string {
   return new Date(Date.now() - minutes * 60_000).toISOString();
 }
+
+describe('PgBazisRepository.deleteProject', () => {
+  it('deletes runs, revisions (nodes cascade) and project, writes audit + outbox, returns summary', async () => {
+    const database = createDeleteDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.deleteProject({
+      currentUser: currentUser('admin'),
+      requestId: 'req-delete-1',
+      bazisProjectId: 41,
+    });
+
+    expect(response).toEqual({
+      bazisProjectId: 41,
+      projectId: 77,
+      name: 'Шкаф Nova',
+      revisionsDeleted: 2,
+      nodesDeleted: 639,
+    });
+
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    expect(ordered[0]).toBe('SELECT set_session_user($1)');
+    const lockIdx = ordered.findIndex((sql) => sql.includes('FROM bazis_projects') && sql.includes('FOR UPDATE'));
+    const linksIdx = ordered.findIndex((sql) => sql.includes('FROM bazis_order_links'));
+    const runsIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_import_runs'));
+    const revisionsIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_project_revisions'));
+    const projectIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_projects'));
+    expect(lockIdx).toBeGreaterThan(-1);
+    expect(linksIdx).toBeGreaterThan(lockIdx);
+    expect(runsIdx).toBeGreaterThan(linksIdx);
+    expect(revisionsIdx).toBeGreaterThan(runsIdx);
+    expect(projectIdx).toBeGreaterThan(revisionsIdx);
+
+    const audit = database.queries.find((query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log ('));
+    expect(audit?.params?.[0]).toBe('bazis.project_deleted');
+    const relatedPairs = database.queries
+      .filter((query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log_related_entity'))
+      .map((query) => [query.params?.[1], query.params?.[2]]);
+    expect(relatedPairs).toEqual([
+      ['project', 77],
+      ['bazis_project', 41],
+    ]);
+
+    const outbox = database.queries.find((query) => normalizeSql(query.text).startsWith('INSERT INTO outbox_events'));
+    expect(outbox?.params?.[0]).toBe('bazis.project_deleted');
+    expect(outbox?.params?.[4]).toBe('bazis-project-deleted-41');
+  });
+
+  it('throws BazisProjectNotFoundError when the project is missing', async () => {
+    const database = createDeleteDatabase({ projectRow: null });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(
+      repository.deleteProject({ currentUser: currentUser('admin'), bazisProjectId: 404 }),
+    ).rejects.toBeInstanceOf(BazisProjectNotFoundError);
+  });
+
+  it('rejects with 409 BAZIS_PROJECT_HAS_ORDERS and deletes nothing when order links exist', async () => {
+    const database = createDeleteDatabase({ linkedOrderIds: [11384, 11390] });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(
+      repository.deleteProject({ currentUser: currentUser('admin'), bazisProjectId: 41 }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'BAZIS_PROJECT_HAS_ORDERS',
+      details: { orderIds: [11384, 11390] },
+    });
+
+    const deletes = database.queries.filter((query) => normalizeSql(query.text).startsWith('DELETE FROM'));
+    expect(deletes).toEqual([]);
+  });
+});
+
+function createDeleteDatabase(
+  options: {
+    projectRow?: { bazis_project_id: number; project_id: number; name: string } | null;
+    linkedOrderIds?: number[];
+  } = {},
+) {
+  const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  let auditId = 900;
+  const projectRow =
+    options.projectRow === null
+      ? null
+      : options.projectRow ?? { bazis_project_id: 41, project_id: 77, name: 'Шкаф Nova' };
+
+  const tx = {
+    raw: {} as PoolClient,
+    async query(text: string, params: readonly unknown[] = []) {
+      queries.push({ text, params });
+      const normalized = normalizeSql(text);
+
+      if (normalized.includes('FROM bazis_projects') && normalized.includes('FOR UPDATE')) {
+        return projectRow ? { rows: [projectRow], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+      if (normalized.includes('FROM bazis_order_links')) {
+        const rows = (options.linkedOrderIds ?? []).map((orderId) => ({ order_id: orderId }));
+        return { rows, rowCount: rows.length };
+      }
+      if (normalized.includes('AS revisions_count')) {
+        return { rows: [{ revisions_count: 2, nodes_count: 639 }], rowCount: 1 };
+      }
+      if (normalized.startsWith('INSERT INTO audit_log (')) {
+        auditId += 1;
+        return { rows: [{ audit_id: auditId }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    },
+  };
+
+  return {
+    queries,
+    service: {
+      async transaction<T>(handler: (client: typeof tx) => Promise<T>) {
+        return handler(tx);
+      },
+      async query(text: string, params: readonly unknown[] = []) {
+        return tx.query(text, params);
+      },
+    } as unknown as DatabaseService,
+  };
+}

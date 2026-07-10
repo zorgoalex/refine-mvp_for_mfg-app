@@ -291,6 +291,35 @@ describe('BazisService', () => {
     expect(repository.importRevision).not.toHaveBeenCalled();
   });
 
+  it('requires bazis.manage for deleteProject', async () => {
+    const repository = createRepository();
+    const service = new BazisService({ repository });
+
+    await expect(
+      service.deleteProject(viewerUser(), 'req-delete', 41),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['bazis.manage'] },
+    } satisfies Partial<ApiError>);
+
+    expect(repository.deleteProject).not.toHaveBeenCalled();
+  });
+
+  it('delegates deleteProject when bazis.manage is present', async () => {
+    const repository = createRepository();
+    const service = new BazisService({ repository });
+
+    const result = await service.deleteProject(bazisManager(), 'req-delete', 41);
+
+    expect(result).toMatchObject({ bazisProjectId: 41, revisionsDeleted: 2 });
+    expect(repository.deleteProject).toHaveBeenCalledWith({
+      currentUser: bazisManager(),
+      requestId: 'req-delete',
+      bazisProjectId: 41,
+    });
+  });
+
   it('requires bazis.manage for createOrderFromRevision', async () => {
     const repository = createRepository();
     const service = new BazisService({ repository });
@@ -416,6 +445,13 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
       detailsCreated: 0,
       mappedNodes: 0,
       requestId: 'req-order',
+    }),
+    deleteProject: vi.fn().mockResolvedValue({
+      bazisProjectId: 41,
+      projectId: 77,
+      name: 'Шкаф Nova',
+      revisionsDeleted: 2,
+      nodesDeleted: 639,
     }),
     ...overrides,
   };

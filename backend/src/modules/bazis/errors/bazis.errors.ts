@@ -64,6 +64,19 @@ export class BazisUnmappedMaterialsError extends ApiError {
   }
 }
 
+export class BazisProjectHasOrdersError extends ApiError {
+  constructor(orderIds: number[]) {
+    // Гейт удаления: из проекта созданы ERP-заказы (bazis_order_links) —
+    // жёсткое удаление снесло бы provenance-связи узлов с деталями.
+    super(
+      409,
+      'BAZIS_PROJECT_HAS_ORDERS',
+      `Из Базис-проекта созданы заказы (${orderIds.join(', ')}) — удаление запрещено`,
+      { orderIds },
+    );
+  }
+}
+
 export class BazisReferenceNotFoundError extends ApiError {
   constructor(what: string) {
     super(404, 'BAZIS_REFERENCE_NOT_FOUND', `Связанная запись не найдена: ${what}`);

@@ -2342,6 +2342,59 @@ paths:
           $ref: '#/components/responses/InternalError'
 
   /api/v1/bazis/projects/{id}:
+    delete:
+      tags:
+        - Bazis
+      operationId: deleteBazisProject
+      summary: Delete a Bazis project (hard delete, gated by created orders)
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Deleted Bazis project summary
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - bazisProjectId
+                  - projectId
+                  - name
+                  - revisionsDeleted
+                  - nodesDeleted
+                properties:
+                  bazisProjectId:
+                    type: integer
+                  projectId:
+                    type: integer
+                  name:
+                    type: string
+                  revisionsDeleted:
+                    type: integer
+                  nodesDeleted:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis project not found
+        '409':
+          description: Orders were created from this Bazis project (BAZIS_PROJECT_HAS_ORDERS)
+        '422':
+          description: Invalid project id
+        '503':
+          description: Bazis API is disabled
     get:
       tags:
         - Bazis

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Drawer, Empty, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Drawer, Empty, Popconfirm, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link, useNavigate } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
@@ -78,6 +78,27 @@ export const BazisPage: React.FC = () => {
       setProjectCardsLoading((prev) => ({ ...prev, [bazisProjectId]: false }));
     }
   }, [projectCards, projectCardsLoading]);
+
+  const [deletingProjectIds, setDeletingProjectIds] = useState<Record<number, boolean>>({});
+
+  const handleDeleteProject = useCallback(async (bazisProjectId: number) => {
+    setDeletingProjectIds((prev) => ({ ...prev, [bazisProjectId]: true }));
+    try {
+      const response = await bazisApi.deleteProject(bazisProjectId);
+      message.success(`Базис-проект «${response.name}» удалён (ревизий: ${response.revisionsDeleted})`);
+      setExpandedProjectIds((prev) => prev.filter((id) => id !== bazisProjectId));
+      setProjectCards((prev) => {
+        const next = { ...prev };
+        delete next[bazisProjectId];
+        return next;
+      });
+      await loadProjects();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось удалить Базис-проект');
+    } finally {
+      setDeletingProjectIds((prev) => ({ ...prev, [bazisProjectId]: false }));
+    }
+  }, [loadProjects]);
 
   const openRevisionTree = useCallback((revisionId: number, label: string, projectId: number | null = null) => {
     setTreeRevisionId(revisionId);
@@ -194,8 +215,43 @@ export const BazisPage: React.FC = () => {
           ) : '—'
         ),
       },
+      {
+        title: 'Действия',
+        key: 'actions',
+        width: 120,
+        render: (_, record) => (
+          <Tooltip
+            title={
+              !canManage
+                ? 'Нужно право bazis.manage'
+                : record.linkedOrderIds.length > 0
+                  ? 'Из проекта созданы заказы — удаление запрещено'
+                  : undefined
+            }
+          >
+            <Popconfirm
+              title="Удалить Базис-проект?"
+              description={`«${record.name}» и все его ревизии будут удалены безвозвратно.`}
+              okText="Удалить"
+              okButtonProps={{ danger: true }}
+              cancelText="Отмена"
+              onConfirm={() => void handleDeleteProject(record.bazisProjectId)}
+              disabled={!canManage || record.linkedOrderIds.length > 0}
+            >
+              <Button
+                size="small"
+                danger
+                loading={Boolean(deletingProjectIds[record.bazisProjectId])}
+                disabled={!canManage || record.linkedOrderIds.length > 0}
+              >
+                Удалить
+              </Button>
+            </Popconfirm>
+          </Tooltip>
+        ),
+      },
     ],
-    [],
+    [canManage, deletingProjectIds, handleDeleteProject],
   );
 
   if (!can('bazis.view')) {

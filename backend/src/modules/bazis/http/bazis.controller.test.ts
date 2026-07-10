@@ -263,3 +263,39 @@ function request(): RequestWithCurrentUser {
     requestId: 'req-1',
   };
 }
+
+describe('BazisController.deleteProject', () => {
+  it('parses the id and delegates to the service', async () => {
+    const deleteProject = vi.fn().mockResolvedValue({
+      bazisProjectId: 41,
+      projectId: 77,
+      name: 'Шкаф Nova',
+      revisionsDeleted: 2,
+      nodesDeleted: 639,
+    });
+    const controller = createController({ bazisEnabled: true, service: { deleteProject } });
+
+    const result = await controller.deleteProject(request(), '41');
+
+    expect(result).toMatchObject({ bazisProjectId: 41, revisionsDeleted: 2 });
+    expect(deleteProject).toHaveBeenCalledWith(expect.anything(), expect.anything(), 41);
+  });
+
+  it('rejects a non-numeric id with 422', async () => {
+    const controller = createController({ bazisEnabled: true });
+
+    await expect(controller.deleteProject(request(), 'abc')).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+    } satisfies Partial<ApiError>);
+  });
+
+  it('fails closed with 503 when the flag is off', async () => {
+    const controller = createController({ bazisEnabled: false });
+
+    await expect(controller.deleteProject(request(), '41')).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
+    } satisfies Partial<ApiError>);
+  });
+});

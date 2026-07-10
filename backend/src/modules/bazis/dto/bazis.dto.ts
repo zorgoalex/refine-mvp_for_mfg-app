@@ -209,3 +209,11 @@ export interface CreateOrderFromRevisionResponseDto {
   requestId: string;
   auditId?: string;
 }
+
+export interface BazisProjectDeleteResponseDto {
+  bazisProjectId: number;
+  projectId: number;
+  name: string;
+  revisionsDeleted: number;
+  nodesDeleted: number;
+}

@@ -1,11 +1,13 @@
 import type {
   BazisRepositoryPort,
   CreateOrderFromRevisionCommand,
+  DeleteBazisProjectInput,
   ImportRevisionCommand,
 } from '../application/bazis.types';
 import type {
   BazisRevisionEstimateDto,
   BazisImportResponseDto,
+  BazisProjectDeleteResponseDto,
   BazisNodeCardDto,
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
@@ -93,6 +95,10 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
   }
 
   listRevisionOrders(_revisionId: number): Promise<BazisRevisionOrderDto[]> {
+    return unavailable();
+  }
+
+  deleteProject(_input: DeleteBazisProjectInput): Promise<BazisProjectDeleteResponseDto> {
     return unavailable();
   }
 }

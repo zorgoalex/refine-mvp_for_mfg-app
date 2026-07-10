@@ -29,6 +29,14 @@ export interface BazisProjectListItem {
   linkedOrderIds: number[];
 }
 
+export interface BazisProjectDeleteResponse {
+  bazisProjectId: number;
+  projectId: number;
+  name: string;
+  revisionsDeleted: number;
+  nodesDeleted: number;
+}
+
 export interface BazisProjectCard extends BazisProjectListItem {
   revisions: Array<{
     bazisRevisionId: number;
