@@ -326,8 +326,26 @@ export const CustomSider: React.FC = () => {
         .sidebar-collapse .ant-collapse-header { color: #E0E0E0 !important; font-weight: 500; letter-spacing: 1px !important; }
         .sidebar-collapse .ant-collapse-header:hover { color: #90CAF9 !important; }
         .sidebar-collapse .ant-collapse-expand-icon { color: #E0E0E0 !important; }
-        .sidebar-collapse .ant-menu-item { font-size: 0.98em; color: #E0E0E0 !important; letter-spacing: 1px !important; }
-        .sidebar-menu-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sidebar-collapse .ant-menu-item {
+          height: auto !important;
+          min-height: 40px;
+          padding-top: 6px !important;
+          padding-bottom: 6px !important;
+          font-size: 0.49em;
+          line-height: 1.25 !important;
+          color: #E0E0E0 !important;
+          letter-spacing: 1px !important;
+          white-space: normal;
+        }
+        .sidebar-collapse .ant-menu-title-content { overflow: visible; white-space: normal; }
+        .sidebar-menu-label {
+          display: block;
+          overflow: visible;
+          text-overflow: clip;
+          white-space: normal;
+          overflow-wrap: normal;
+          word-break: normal;
+        }
         .sidebar-collapse .ant-menu-item:hover { color: #90CAF9 !important; }
         .sidebar-collapse .ant-menu-item-selected { background-color: rgba(144, 202, 249, 0.2) !important; color: #90CAF9 !important; }
         .sidebar-collapse .ant-collapse-content { background: transparent !important; }

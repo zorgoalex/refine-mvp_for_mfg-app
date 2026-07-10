@@ -67,6 +67,39 @@ describe('navigation permissions', () => {
     );
   });
 
+  it('uses backend analytics permissions for analytics menu resources', () => {
+    expect(
+      canViewNavigationResource(
+        'clients_analytics_view',
+        { permissions: ['clients.analytics.view'] },
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      canViewNavigationResource(
+        'clients_analytics_view',
+        { permissions: ['finance.analytics.view'] },
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      canViewNavigationResource(
+        'payments_view',
+        { permissions: ['finance.analytics.view'] },
+        true,
+      ),
+    ).toBe(true);
+  });
+
+  it('uses employees.view rather than users.view for the employees menu resource', () => {
+    expect(
+      canViewNavigationResource('employees', { permissions: ['employees.view'] }, true),
+    ).toBe(true);
+    expect(
+      canViewNavigationResource('employees', { permissions: ['users.view'] }, true),
+    ).toBe(false);
+  });
+
   it('hides unknown resources in backend mode even when the user has references.view', () => {
     expect(
       canViewNavigationResource(
