@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-11",
+    title: "Боковое меню: иконки для всех разделов",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "У всех доступных пунктов бокового меню теперь отображаются понятные иконки, включая «Раскрой» и мобильное меню.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-11",
     title: "Базис-проекты: хранятся только 3 последние ревизии",
     services: ["ERP"],
     repositories: ["repo_erp"],

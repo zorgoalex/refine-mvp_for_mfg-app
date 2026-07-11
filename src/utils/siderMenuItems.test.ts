@@ -200,10 +200,19 @@ describe('buildFlatMenuItems', () => {
       Справочники: [],
       Настройки: [],
     };
-    const items = buildFlatMenuItems(categories, Object.keys(categories), {}, navigate);
+    const clientsIcon = { type: 'clients-icon' } as unknown as React.ReactNode;
+    const paymentsIcon = { type: 'payments-icon' } as unknown as React.ReactNode;
+    const items = buildFlatMenuItems(
+      categories,
+      Object.keys(categories),
+      { clients: clientsIcon, payments: paymentsIcon },
+      navigate,
+    );
     expect(items).toHaveLength(2);
     expect(items?.[0]).toMatchObject({ key: 'clients', title: 'Клиенты' });
     expect(items?.[1]).toMatchObject({ key: 'payments', title: 'Платежи' });
+    expect((items?.[0] as { icon?: React.ReactNode }).icon).toBe(clientsIcon);
+    expect((items?.[1] as { icon?: React.ReactNode }).icon).toBe(paymentsIcon);
 
     (items?.[0] as { onClick?: () => void }).onClick?.();
     expect(navigate).toHaveBeenCalledWith('/clients');

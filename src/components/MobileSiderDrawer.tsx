@@ -17,6 +17,7 @@ import {
   getCurrentUserRoleKey,
   normalizeRoleVisibilityMatrix,
 } from "../utils/resourceVisibility";
+import { SIDER_RESOURCE_ICONS } from "./siderResourceIcons";
 
 const { Title } = Typography;
 
@@ -108,7 +109,7 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
     categoryOrder: CATEGORY_ORDER,
     categoryMap: CATEGORY_MAP,
     resourceLabels: RESOURCE_LABELS,
-    resourceIcons: {},
+    resourceIcons: SIDER_RESOURCE_ICONS,
     canViewNavigation: (name) =>
       canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
       canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
