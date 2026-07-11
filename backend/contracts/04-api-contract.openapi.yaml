@@ -2342,6 +2342,59 @@ paths:
           $ref: '#/components/responses/InternalError'
 
   /api/v1/bazis/projects/{id}:
+    delete:
+      tags:
+        - Bazis
+      operationId: deleteBazisProject
+      summary: Delete a Bazis project (hard delete, gated by created orders)
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Deleted Bazis project summary
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - bazisProjectId
+                  - projectId
+                  - name
+                  - revisionsDeleted
+                  - nodesDeleted
+                properties:
+                  bazisProjectId:
+                    type: integer
+                  projectId:
+                    type: integer
+                  name:
+                    type: string
+                  revisionsDeleted:
+                    type: integer
+                  nodesDeleted:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis project not found
+        '409':
+          description: Orders were created from this Bazis project (BAZIS_PROJECT_HAS_ORDERS)
+        '422':
+          description: Invalid project id
+        '503':
+          description: Bazis API is disabled
     get:
       tags:
         - Bazis
@@ -2446,12 +2499,150 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/bazis/nodes/{id}:
+    get:
+      tags:
+        - Bazis
+      operationId: getBazisNodeCard
+      summary: Get Bazis node card with raw payload
+      security:
+        - bearerAuth: []
+      x-permission: bazis.view
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Bazis node card
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - bazisNodeId
+                  - revisionId
+                  - bazisProjectId
+                  - projectId
+                  - revisionNo
+                  - parentNodeId
+                  - seq
+                  - nodeKind
+                  - childrenCount
+                  - rawJson
+                  - orderLinks
+                properties:
+                  bazisNodeId:
+                    type: integer
+                  revisionId:
+                    type: integer
+                  bazisProjectId:
+                    type: integer
+                  projectId:
+                    type: integer
+                  revisionNo:
+                    type: integer
+                  parentNodeId:
+                    type: integer
+                    nullable: true
+                  seq:
+                    type: integer
+                  nodeKind:
+                    type: string
+                  objectType:
+                    type: string
+                    nullable: true
+                  name:
+                    type: string
+                    nullable: true
+                  detailCode:
+                    type: string
+                    nullable: true
+                  position:
+                    type: string
+                    nullable: true
+                  designation:
+                    type: string
+                    nullable: true
+                  quantity:
+                    type: number
+                    nullable: true
+                  cumulativeQuantity:
+                    type: number
+                    nullable: true
+                  lengthMm:
+                    type: number
+                    nullable: true
+                  widthMm:
+                    type: number
+                    nullable: true
+                  heightMm:
+                    type: number
+                    nullable: true
+                  thicknessMm:
+                    type: number
+                    nullable: true
+                  price:
+                    type: number
+                    nullable: true
+                  isRectangular:
+                    type: boolean
+                    nullable: true
+                  textureOrientation:
+                    type: string
+                    nullable: true
+                  mainMaterialName:
+                    type: string
+                    nullable: true
+                  childrenCount:
+                    type: integer
+                  rawJson:
+                    type: object
+                    additionalProperties: true
+                  orderLinks:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - orderId
+                        - orderDetailId
+                        - mappingKind
+                      properties:
+                        orderId:
+                          type: integer
+                        orderDetailId:
+                          type: integer
+                          nullable: true
+                        mappingKind:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis node not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/bazis/revisions/{id}/tree:
     get:
       tags:
         - Bazis
       operationId: getBazisRevisionTree
-      summary: Get Bazis revision tree level
+      summary: Get Bazis revision tree level (or full tree with all=true)
       security:
         - bearerAuth: []
       x-permission: bazis.view
@@ -2466,6 +2657,11 @@ paths:
           schema:
             type: integer
             nullable: true
+        - in: query
+          name: all
+          description: Вернуть все узлы ревизии одним списком (несовместим с parentNodeId)
+          schema:
+            type: boolean
       responses:
         '200':
           description: Bazis tree nodes
@@ -2525,6 +2721,354 @@ paths:
                       type: string
                       nullable: true
                     childrenCount:
+                      type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis revision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/bazis/revisions/{id}/nodes/search:
+    get:
+      tags:
+        - Bazis
+      operationId: searchBazisRevisionNodes
+      summary: Search nodes within a Bazis revision
+      security:
+        - bearerAuth: []
+      x-permission: bazis.view
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: q
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - in: query
+          name: objectType
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: Bazis revision node search results
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                  - totalMatched
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - bazisNodeId
+                        - nodeKind
+                        - pathNodeIds
+                        - pathTitles
+                      properties:
+                        bazisNodeId:
+                          type: integer
+                        nodeKind:
+                          type: string
+                        objectType:
+                          type: string
+                          nullable: true
+                        name:
+                          type: string
+                          nullable: true
+                        position:
+                          type: string
+                          nullable: true
+                        designation:
+                          type: string
+                          nullable: true
+                        mainMaterialName:
+                          type: string
+                          nullable: true
+                        pathNodeIds:
+                          type: array
+                          items:
+                            type: integer
+                        pathTitles:
+                          type: array
+                          items:
+                            type: string
+                            nullable: true
+                  totalMatched:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis revision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/bazis/revisions/{id}/materials-summary:
+    get:
+      tags:
+        - Bazis
+      operationId: getBazisRevisionMaterialsSummary
+      summary: Get materials summary for a Bazis revision
+      security:
+        - bearerAuth: []
+      x-permission: bazis.view
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Bazis revision materials summary
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - summary
+                  - panelsByMaterial
+                  - hardwareByName
+                  - edgesByName
+                  - filmsByName
+                properties:
+                  summary:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                  panelsByMaterial:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - materialName
+                        - panelCount
+                        - totalQuantity
+                        - totalAreaM2
+                        - mappingTargetKind
+                        - sheetMaterialTypeId
+                      properties:
+                        materialName:
+                          type: string
+                          nullable: true
+                        panelCount:
+                          type: integer
+                        totalQuantity:
+                          type: number
+                        totalAreaM2:
+                          type: number
+                        mappingTargetKind:
+                          type: string
+                          nullable: true
+                        sheetMaterialTypeId:
+                          type: integer
+                          nullable: true
+                  hardwareByName:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - name
+                        - totalQuantity
+                      properties:
+                        name:
+                          type: string
+                          nullable: true
+                        totalQuantity:
+                          type: number
+                  edgesByName:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - name
+                        - usageCount
+                      properties:
+                        name:
+                          type: string
+                        usageCount:
+                          type: integer
+                  filmsByName:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - name
+                        - usageCount
+                      properties:
+                        name:
+                          type: string
+                        usageCount:
+                          type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis revision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/bazis/revisions/{id}/estimate:
+    get:
+      tags:
+        - Bazis
+      operationId: getBazisRevisionEstimate
+      summary: Get materials/operations estimate for a Bazis revision
+      security:
+        - bearerAuth: []
+      x-permission: bazis.view
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Estimate rows extracted from the revision raw payload
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [materials, operations]
+                properties:
+                  materials:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        nodeId: { type: integer }
+                        nodeName: { type: string, nullable: true }
+                        nodeObjectType: { type: string, nullable: true }
+                        nodeCode: { type: string, nullable: true }
+                        materialId: { type: string, nullable: true }
+                        code: { type: string, nullable: true }
+                        name: { type: string }
+                        unit: { type: string, nullable: true }
+                        quantity: { type: number, nullable: true }
+                        price: { type: number, nullable: true }
+                        total: { type: number, nullable: true }
+                  operations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        nodeId: { type: integer }
+                        nodeName: { type: string, nullable: true }
+                        name: { type: string }
+                        code: { type: string, nullable: true }
+                        unit: { type: string, nullable: true }
+                        quantity: { type: number, nullable: true }
+                        price: { type: number, nullable: true }
+                        total: { type: number, nullable: true }
+        '401':
+          description: Authentication required
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: Bazis revision not found
+        '422':
+          description: Invalid revision id
+        '503':
+          description: Bazis API is disabled
+  /api/v1/bazis/revisions/{id}/orders:
+    get:
+      tags:
+        - Bazis
+      operationId: listBazisRevisionOrders
+      summary: List ERP orders created from a Bazis revision
+      security:
+        - bearerAuth: []
+      x-permission: bazis.view
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: ERP orders created from a Bazis revision
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                    - orderId
+                    - orderName
+                    - createdAt
+                    - nodesMapped
+                    - detailsCreated
+                  properties:
+                    orderId:
+                      type: integer
+                    orderName:
+                      type: string
+                      nullable: true
+                    createdAt:
+                      type: string
+                      format: date-time
+                    nodesMapped:
+                      type: integer
+                    detailsCreated:
                       type: integer
         '401':
           $ref: '#/components/responses/Unauthorized'

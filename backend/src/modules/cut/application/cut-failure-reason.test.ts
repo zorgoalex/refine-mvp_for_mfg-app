@@ -44,6 +44,12 @@ describe('describeCutFailure', () => {
     expect(info.reason).toMatch(/недоступен/i);
   });
 
+  it('maps invalid optimizer geometry to a recalculate/update reason', () => {
+    const info = describeCutFailure(new ApiError(502, 'CUT_OPTIMIZER_INVALID_GEOMETRY', 'bad geometry'));
+    expect(info.code).toBe('CUT_OPTIMIZER_INVALID_GEOMETRY');
+    expect(info.reason).toMatch(/нарушением|не сохранён/i);
+  });
+
   it('falls back to a generic reason + sentinel code for an unknown ApiError code', () => {
     const info = describeCutFailure(new ApiError(500, 'SOME_OTHER_CODE', 'weird'));
     expect(info.code).toBe(CUT_FAILURE_FALLBACK_CODE);

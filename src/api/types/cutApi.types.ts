@@ -192,6 +192,9 @@ export interface CutJobDto {
    * the editor can save again. Present on single-job GET, absent on list.
    */
   requiresRecalc?: boolean;
+  /** Geometry check of stored automatic sheets; invalid legacy layouts require
+   * recalculation before manual editing. Present on single-job GET. */
+  autoLayoutValidation?: { valid: boolean };
   /** Opaque render token for cache-busting render endpoints (present on single-job GET). */
   renderToken?: string;
 }

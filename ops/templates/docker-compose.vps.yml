@@ -205,6 +205,7 @@ services:
       BACKEND_ENABLE_CUT_JOBS: ${BACKEND_ENABLE_CUT_JOBS:-false}
       BACKEND_ENABLE_DOWELING_COMMANDS: ${BACKEND_ENABLE_DOWELING_COMMANDS:-false}
       BACKEND_ENABLE_LABELS: ${BACKEND_ENABLE_LABELS:-false}
+      BACKEND_ENABLE_BAZIS: ${BACKEND_ENABLE_BAZIS:-false}
       BACKEND_ENABLE_WORKOS_AUTH: ${BACKEND_ENABLE_WORKOS_AUTH:-false}
       WORKOS_API_KEY: ${WORKOS_API_KEY:-}
       WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:-}
@@ -253,7 +254,9 @@ services:
 
   freecut:
     build:
-      context: ${FREECUT_BUILD_CONTEXT:-./repo_freecut}
+      # Fixed path: deployment scripts verify this exact checkout immediately
+      # before build. An override would allow stale, unverified source.
+      context: ./repo_freecut
       dockerfile: Dockerfile
     restart: unless-stopped
     expose:

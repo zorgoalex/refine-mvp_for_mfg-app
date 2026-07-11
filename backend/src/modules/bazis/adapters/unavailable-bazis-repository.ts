@@ -1,12 +1,19 @@
 import type {
   BazisRepositoryPort,
   CreateOrderFromRevisionCommand,
+  DeleteBazisProjectInput,
   ImportRevisionCommand,
 } from '../application/bazis.types';
 import type {
+  BazisRevisionEstimateDto,
   BazisImportResponseDto,
+  BazisProjectDeleteResponseDto,
+  BazisNodeCardDto,
+  BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
+  BazisRevisionMaterialsSummaryDto,
+  BazisRevisionOrderDto,
   BazisTreeNodeDto,
   CreateOrderFromRevisionResponseDto,
   MaterialMappingDto,
@@ -44,6 +51,14 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
     return unavailable();
   }
 
+  listAllTreeNodes(_revisionId: number): Promise<BazisTreeNodeDto[]> {
+    return unavailable();
+  }
+
+  getRevisionEstimate(_revisionId: number): Promise<BazisRevisionEstimateDto> {
+    return unavailable();
+  }
+
   listMaterialMappings(_names?: string[]): Promise<MaterialMappingDto[]> {
     return unavailable();
   }
@@ -59,6 +74,31 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
   createOrderFromRevision(
     _command: CreateOrderFromRevisionCommand,
   ): Promise<CreateOrderFromRevisionResponseDto> {
+    return unavailable();
+  }
+
+  getNodeCard(_nodeId: number): Promise<BazisNodeCardDto> {
+    return unavailable();
+  }
+
+  searchNodes(_input: {
+    revisionId: number;
+    q: string | null;
+    objectType: string | null;
+    limit: number;
+  }): Promise<BazisNodeSearchResponseDto> {
+    return unavailable();
+  }
+
+  getMaterialsSummary(_revisionId: number): Promise<BazisRevisionMaterialsSummaryDto> {
+    return unavailable();
+  }
+
+  listRevisionOrders(_revisionId: number): Promise<BazisRevisionOrderDto[]> {
+    return unavailable();
+  }
+
+  deleteProject(_input: DeleteBazisProjectInput): Promise<BazisProjectDeleteResponseDto> {
     return unavailable();
   }
 }

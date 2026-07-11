@@ -2,8 +2,14 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { ParsedBazisRevision } from './bazis-xml-parser';
 import type {
   BazisImportResponseDto,
+  BazisProjectDeleteResponseDto,
+  BazisNodeCardDto,
+  BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
+  BazisRevisionMaterialsSummaryDto,
+  BazisRevisionEstimateDto,
+  BazisRevisionOrderDto,
   BazisTreeNodeDto,
   CreateOrderFromRevisionResponseDto,
   MaterialMappingDto,
@@ -42,6 +48,12 @@ export interface CreateOrderFromRevisionCommand {
   idempotencyKey: string;
 }
 
+export interface DeleteBazisProjectInput {
+  currentUser: CurrentUser;
+  requestId?: string;
+  bazisProjectId: number;
+}
+
 export interface BazisRepositoryPort {
   importRevision(command: ImportRevisionCommand): Promise<BazisImportResponseDto>;
   recordFailedImport(input: {
@@ -54,6 +66,7 @@ export interface BazisRepositoryPort {
   listProjects(filter: { projectId?: number }): Promise<BazisProjectListItemDto[]>;
   getProject(bazisProjectId: number): Promise<BazisProjectCardDto>;
   getTreeChildren(revisionId: number, parentNodeId: number | null): Promise<BazisTreeNodeDto[]>;
+  listAllTreeNodes(revisionId: number): Promise<BazisTreeNodeDto[]>;
   listMaterialMappings(names?: string[]): Promise<MaterialMappingDto[]>;
   upsertMaterialMappings(
     currentUser: CurrentUser,
@@ -63,4 +76,15 @@ export interface BazisRepositoryPort {
   createOrderFromRevision(
     command: CreateOrderFromRevisionCommand,
   ): Promise<CreateOrderFromRevisionResponseDto>;
+  getNodeCard(nodeId: number): Promise<BazisNodeCardDto>;
+  searchNodes(input: {
+    revisionId: number;
+    q: string | null;
+    objectType: string | null;
+    limit: number;
+  }): Promise<BazisNodeSearchResponseDto>;
+  getMaterialsSummary(revisionId: number): Promise<BazisRevisionMaterialsSummaryDto>;
+  listRevisionOrders(revisionId: number): Promise<BazisRevisionOrderDto[]>;
+  getRevisionEstimate(revisionId: number): Promise<BazisRevisionEstimateDto>;
+  deleteProject(input: DeleteBazisProjectInput): Promise<BazisProjectDeleteResponseDto>;
 }

@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Drawer, Empty, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Drawer, Empty, Popconfirm, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisProjectCard, BazisProjectListItem } from '../../api/types/bazisApi.types';
+import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
+import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
 import { CreateOrderModal } from './CreateOrderModal';
 import { ImportWizardModal } from './ImportWizardModal';
@@ -16,18 +18,32 @@ interface ProjectRow extends BazisProjectListItem {
 }
 
 export const BazisPage: React.FC = () => {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [importRestoreSignal, setImportRestoreSignal] = useState(0);
   const [expandedProjectIds, setExpandedProjectIds] = useState<number[]>([]);
   const [projectCards, setProjectCards] = useState<Record<number, BazisProjectCard>>({});
   const [projectCardsLoading, setProjectCardsLoading] = useState<Record<number, boolean>>({});
   const [treeRevisionId, setTreeRevisionId] = useState<number | null>(null);
+  const [treeProjectId, setTreeProjectId] = useState<number | null>(null);
   const [treeRevisionLabel, setTreeRevisionLabel] = useState<string>('');
   const [checkedNodeIds, setCheckedNodeIds] = useState<number[]>([]);
   const [createOrderOpen, setCreateOrderOpen] = useState(false);
   const canManage = can('bazis.manage');
+  const { isActive: isTabActive } = useKeepAlive();
+  const setTabDirty = useTabStore((state) => state.setDirty);
+
+  // Открытая модалка/дерево = незавершённая работа: помечаем вкладку dirty,
+  // чтобы keep-alive не размонтировал страницу при навигации (иначе state
+  // визарда/выбора узлов пропадёт).
+  useEffect(() => {
+    const hasPendingWork = importOpen || createOrderOpen || treeRevisionId != null;
+    setTabDirty('/bazis', hasPendingWork);
+    return () => setTabDirty('/bazis', false);
+  }, [createOrderOpen, importOpen, setTabDirty, treeRevisionId]);
 
   const loadProjects = useCallback(async () => {
     setLoading(true);
@@ -63,14 +79,36 @@ export const BazisPage: React.FC = () => {
     }
   }, [projectCards, projectCardsLoading]);
 
-  const openRevisionTree = useCallback((revisionId: number, label: string) => {
+  const [deletingProjectIds, setDeletingProjectIds] = useState<Record<number, boolean>>({});
+
+  const handleDeleteProject = useCallback(async (bazisProjectId: number) => {
+    setDeletingProjectIds((prev) => ({ ...prev, [bazisProjectId]: true }));
+    try {
+      const response = await bazisApi.deleteProject(bazisProjectId);
+      message.success(`Базис-проект «${response.name}» удалён (ревизий: ${response.revisionsDeleted})`);
+      setExpandedProjectIds((prev) => prev.filter((id) => id !== bazisProjectId));
+      setProjectCards((prev) => {
+        const next = { ...prev };
+        delete next[bazisProjectId];
+        return next;
+      });
+      await loadProjects();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось удалить Базис-проект');
+    } finally {
+      setDeletingProjectIds((prev) => ({ ...prev, [bazisProjectId]: false }));
+    }
+  }, [loadProjects]);
+
+  const openRevisionTree = useCallback((revisionId: number, label: string, projectId: number | null = null) => {
     setTreeRevisionId(revisionId);
+    setTreeProjectId(projectId);
     setTreeRevisionLabel(label);
     setCheckedNodeIds([]);
   }, []);
 
-  const revisionColumns = useMemo<ColumnsType<BazisProjectCard['revisions'][number]>>(
-    () => [
+  const makeRevisionColumns = useCallback(
+    (bazisProjectId: number, projectId: number | null): ColumnsType<BazisProjectCard['revisions'][number]> => [
       {
         title: 'Ревизия',
         dataIndex: 'revisionNo',
@@ -100,12 +138,18 @@ export const BazisPage: React.FC = () => {
       {
         title: 'Действия',
         key: 'actions',
-        width: 280,
+        width: 420,
         render: (_, revision) => {
           const label = `Ревизия ${revision.revisionNo}${revision.productName ? ` · ${revision.productName}` : ''}`;
           return (
             <Space wrap>
-              <Button size="small" onClick={() => openRevisionTree(revision.bazisRevisionId, label)}>
+              <Button
+                size="small"
+                onClick={() => navigate(`/bazis/projects/${bazisProjectId}?revision=${revision.bazisRevisionId}`)}
+              >
+                Форма просмотра
+              </Button>
+              <Button size="small" onClick={() => openRevisionTree(revision.bazisRevisionId, label, projectId)}>
                 Открыть дерево
               </Button>
               <Button
@@ -113,7 +157,7 @@ export const BazisPage: React.FC = () => {
                 type="primary"
                 disabled={!canManage}
                 onClick={() => {
-                  openRevisionTree(revision.bazisRevisionId, label);
+                  openRevisionTree(revision.bazisRevisionId, label, projectId);
                   setCreateOrderOpen(true);
                 }}
               >
@@ -124,7 +168,7 @@ export const BazisPage: React.FC = () => {
         },
       },
     ],
-    [canManage, openRevisionTree],
+    [canManage, navigate, openRevisionTree],
   );
 
   const columns = useMemo<ColumnsType<ProjectRow>>(
@@ -133,6 +177,7 @@ export const BazisPage: React.FC = () => {
         title: 'Название',
         dataIndex: 'name',
         key: 'name',
+        render: (value: string, record) => <Link to={`/bazis/projects/${record.bazisProjectId}`}>{value}</Link>,
       },
       {
         title: 'Проект ERP',
@@ -170,8 +215,43 @@ export const BazisPage: React.FC = () => {
           ) : '—'
         ),
       },
+      {
+        title: 'Действия',
+        key: 'actions',
+        width: 120,
+        render: (_, record) => (
+          <Tooltip
+            title={
+              !canManage
+                ? 'Нужно право bazis.manage'
+                : record.linkedOrderIds.length > 0
+                  ? 'Из проекта созданы заказы — удаление запрещено'
+                  : undefined
+            }
+          >
+            <Popconfirm
+              title="Удалить Базис-проект?"
+              description={`«${record.name}» и все его ревизии будут удалены безвозвратно.`}
+              okText="Удалить"
+              okButtonProps={{ danger: true }}
+              cancelText="Отмена"
+              onConfirm={() => void handleDeleteProject(record.bazisProjectId)}
+              disabled={!canManage || record.linkedOrderIds.length > 0}
+            >
+              <Button
+                size="small"
+                danger
+                loading={Boolean(deletingProjectIds[record.bazisProjectId])}
+                disabled={!canManage || record.linkedOrderIds.length > 0}
+              >
+                Удалить
+              </Button>
+            </Popconfirm>
+          </Tooltip>
+        ),
+      },
     ],
-    [],
+    [canManage, deletingProjectIds, handleDeleteProject],
   );
 
   if (!can('bazis.view')) {
@@ -184,7 +264,15 @@ export const BazisPage: React.FC = () => {
         <Card
           title={<Title level={3} style={{ margin: 0 }}>Базис-проекты</Title>}
           extra={(
-            <Button type="primary" onClick={() => setImportOpen(true)} disabled={!canManage}>
+            <Button
+              type="primary"
+              onClick={() => {
+                setImportOpen(true);
+                // если визард свёрнут — разворачиваем вместо «ничего не произошло»
+                setImportRestoreSignal((value) => value + 1);
+              }}
+              disabled={!canManage}
+            >
               Импорт XML
             </Button>
           )}
@@ -225,7 +313,7 @@ export const BazisPage: React.FC = () => {
                       rowKey="bazisRevisionId"
                       size="small"
                       pagination={false}
-                      columns={revisionColumns}
+                      columns={makeRevisionColumns(record.bazisProjectId, record.projectId)}
                       dataSource={card.revisions}
                     />
                   );
@@ -238,23 +326,24 @@ export const BazisPage: React.FC = () => {
 
       <ImportWizardModal
         open={importOpen}
+        restoreSignal={importRestoreSignal}
         onClose={() => setImportOpen(false)}
         onImported={() => {
           void loadProjects();
         }}
-        onOpenTree={(revisionId, label) => {
-          openRevisionTree(revisionId, label);
+        onOpenTree={(revisionId, label, projectId) => {
+          openRevisionTree(revisionId, label, projectId);
           setImportOpen(false);
         }}
-        onCreateOrder={(revisionId, label) => {
-          openRevisionTree(revisionId, label);
+        onCreateOrder={(revisionId, label, projectId) => {
+          openRevisionTree(revisionId, label, projectId);
           setCreateOrderOpen(true);
           setImportOpen(false);
         }}
       />
 
       <Drawer
-        open={treeRevisionId != null}
+        open={treeRevisionId != null && isTabActive}
         onClose={() => setTreeRevisionId(null)}
         width={720}
         title={treeRevisionLabel || 'Дерево ревизии'}
@@ -276,6 +365,7 @@ export const BazisPage: React.FC = () => {
       <CreateOrderModal
         open={createOrderOpen}
         revisionId={treeRevisionId}
+        projectId={treeProjectId}
         selectedNodeIds={checkedNodeIds}
         onClose={() => setCreateOrderOpen(false)}
       />

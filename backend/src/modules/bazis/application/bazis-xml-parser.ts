@@ -55,6 +55,7 @@ export const MAX_BAZIS_NODES = 20_000;
 
 const CONTAINER_TAGS = ['Сборка', 'Блок'] as const;
 const ARRAY_TAGS = new Set([
+  'Изделие',
   'Объект',
   'Сборка',
   'Блок',
@@ -98,8 +99,10 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
   }
 
   const project = doc['Проект'] as BazisElement | undefined;
-  const product = project?.['Изделие'] as BazisElement | undefined;
-  if (!project || !product) {
+  // Проект может содержать несколько Изделие (экспорт проекта целиком, не одного изделия);
+  // каждое становится отдельным root-узлом (parentIndex=null).
+  const products = (project?.['Изделие'] ?? []) as BazisElement[];
+  if (!project || products.length === 0) {
     throw new BazisXmlParseError('Не найден корень Проект/Изделие');
   }
 
@@ -249,7 +252,9 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
     }
   };
 
-  walk(product, 'product', null, 0, 1);
+  products.forEach((product, productSeq) => {
+    walk(product, 'product', null, productSeq, 1);
+  });
 
   const materials = [...materialUsage.values()]
     .map((value) => ({
@@ -262,10 +267,20 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
   const count = (predicate: (node: ParsedBazisNode) => boolean): number =>
     nodes.filter(predicate).length;
 
+  const productNames = products
+    .map((product) => toText(product['Наименование']))
+    .filter((name): name is string => name !== null);
+  const productPrices = products
+    .map((product) => toNumber(product['Цена']))
+    .filter((price): price is number => price !== null);
+
   return {
     bazisVersion: toText(project['@_Версия']),
-    productName: toText(product['Наименование']),
-    productPrice: toNumber(product['Цена']),
+    productName: productNames.length > 0 ? productNames.join(' + ') : null,
+    productPrice:
+      productPrices.length > 0
+        ? productPrices.reduce((sum, price) => sum + price, 0)
+        : null,
     nodes,
     materials,
     summary: {

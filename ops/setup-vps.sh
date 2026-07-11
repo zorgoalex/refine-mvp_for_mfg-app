@@ -264,15 +264,36 @@ ensure_templates_if_missing() {
 
 FREECUT_REPO_URL="${FREECUT_REPO_URL:-https://github.com/zorgoalex/freecut_api.git}"
 FREECUT_REPO_DIR_NAME="${FREECUT_REPO_DIR_NAME:-repo_freecut}"
+FREECUT_REPO_BRANCH="${FREECUT_REPO_BRANCH:-main}"
+[[ "$FREECUT_REPO_DIR_NAME" == "repo_freecut" ]] || fail "FREECUT_REPO_DIR_NAME override is unsupported: compose verifies ./repo_freecut"
 
-# The compose freecut service builds from a sibling checkout next to repo_erp
-# (FREECUT_BUILD_CONTEXT, default ./repo_freecut). Clone it if missing so a
-# fresh VPS can build the whole stack in one pass.
+freecut_git() {
+  if [[ "$(id -u)" -eq 0 && -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    sudo -u "$SUDO_USER" git "$@"
+  else
+    git "$@"
+  fi
+}
+
+# The compose freecut service builds from the fixed sibling checkout
+# ./repo_freecut. Clone it if missing so a fresh VPS can build in one pass.
 ensure_freecut_repo_if_missing() {
   local freecut_dir="$PROJECT_DIR/$FREECUT_REPO_DIR_NAME"
 
   if [[ -d "$freecut_dir/.git" ]]; then
-    log "Freecut repo already present at $freecut_dir"
+    local actual_url
+    actual_url="$(freecut_git -C "$freecut_dir" remote get-url origin 2>/dev/null || true)"
+    [[ "$actual_url" == "$FREECUT_REPO_URL" ]] || fail "Freecut origin is '$actual_url', expected '$FREECUT_REPO_URL'"
+    [[ -z "$(freecut_git -C "$freecut_dir" status --porcelain)" ]] || fail "Freecut repo has local changes; refusing to update: $freecut_dir"
+    local current_branch
+    current_branch="$(freecut_git -C "$freecut_dir" branch --show-current)"
+    [[ "$current_branch" == "$FREECUT_REPO_BRANCH" ]] || fail "Freecut repo is on '$current_branch', expected '$FREECUT_REPO_BRANCH': $freecut_dir"
+    log "Updating Freecut from origin/$FREECUT_REPO_BRANCH"
+    freecut_git -C "$freecut_dir" fetch origin "$FREECUT_REPO_BRANCH"
+    freecut_git -C "$freecut_dir" merge --ff-only "origin/$FREECUT_REPO_BRANCH"
+    [[ "$(freecut_git -C "$freecut_dir" rev-parse HEAD)" == "$(freecut_git -C "$freecut_dir" rev-parse "origin/$FREECUT_REPO_BRANCH")" ]] \
+      || fail "Freecut HEAD does not match origin/$FREECUT_REPO_BRANCH after update"
+    log "Freecut verified at $(freecut_git -C "$freecut_dir" rev-parse HEAD)"
     return 0
   fi
   if [[ -e "$freecut_dir" ]]; then
@@ -281,10 +302,11 @@ ensure_freecut_repo_if_missing() {
 
   log "Cloning freecut repo into $freecut_dir"
   if [[ "$(id -u)" -eq 0 && -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    sudo -u "$SUDO_USER" git clone "$FREECUT_REPO_URL" "$freecut_dir"
+    sudo -u "$SUDO_USER" git clone --branch "$FREECUT_REPO_BRANCH" --single-branch "$FREECUT_REPO_URL" "$freecut_dir"
   else
-    git clone "$FREECUT_REPO_URL" "$freecut_dir"
+    git clone --branch "$FREECUT_REPO_BRANCH" --single-branch "$FREECUT_REPO_URL" "$freecut_dir"
   fi
+  log "Freecut verified at $(freecut_git -C "$freecut_dir" rev-parse HEAD)"
 }
 
 run_check_env() {
@@ -298,8 +320,11 @@ run_check_env() {
 }
 
 run_deploy() {
+  local mode="${1:-all}"
   local args=(--project-dir "$PROJECT_DIR" --env-file "$ENV_FILE" --compose-file "$COMPOSE_FILE")
-  [[ "$FORCE_RECREATE" == "1" ]] && args+=(--force-recreate)
+  if [[ "$mode" == "build" ]]; then args+=(--build-only)
+  elif [[ "$mode" == "start" ]]; then args+=(--no-build --no-pull); fi
+  [[ "$mode" != "build" && "$FORCE_RECREATE" == "1" ]] && args+=(--force-recreate)
 
   "$REPO_DIR/ops/deploy-stack.sh" "${args[@]}"
 }
@@ -490,7 +515,10 @@ else
 fi
 
 ensure_templates_if_missing
+exec 9>"$PROJECT_DIR/.freecut-deploy.lock"
+flock 9
 ensure_freecut_repo_if_missing
+FREECUT_DEPLOY_SHA="$(freecut_git -C "$PROJECT_DIR/repo_freecut" rev-parse HEAD)"
 
 if needs_env_edit; then
   print_next_env_steps
@@ -500,6 +528,14 @@ fi
 log "Validating environment"
 run_check_env
 
+# Existing installations may carry an older/custom docker-compose.yml. Resolve
+# it without printing (rendered config contains secrets) and fail closed unless
+# Freecut builds from the exact checkout verified above.
+expected_freecut_context="$(readlink -f "$PROJECT_DIR/repo_freecut")"
+docker compose --project-directory "$PROJECT_DIR" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config --format json \
+  | "$REPO_DIR/ops/verify-freecut-compose-context.sh" "$expected_freecut_context" \
+  || fail "Resolved services.freecut.build.context is not the verified checkout"
+
 if [[ "$SKIP_DEPLOY" == "1" ]]; then
   log "Skipping deploy by request"
   exit 0
@@ -508,7 +544,14 @@ fi
 confirm_deploy
 
 log "Deploying stack"
-run_deploy
+run_deploy build
+[[ -z "$(freecut_git -C "$PROJECT_DIR/repo_freecut" status --porcelain)" ]] \
+  || fail "Freecut checkout changed during build"
+[[ "$(freecut_git -C "$PROJECT_DIR/repo_freecut" rev-parse HEAD)" == "$FREECUT_DEPLOY_SHA" ]] \
+  || fail "Freecut HEAD changed during build"
+log "Freecut build source verified at $FREECUT_DEPLOY_SHA"
+run_deploy start
+flock -u 9
 
 run_restore_backup_if_requested
 apply_standalone_hasura_metadata_if_requested

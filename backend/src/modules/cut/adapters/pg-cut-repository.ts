@@ -31,6 +31,7 @@ import {
   type FreecutParams,
   type FreecutPlacement,
   type SheetPlacementsJson,
+  validateFreecutResponseContract,
 } from '../application/cut-freecut-mapping';
 import { computeRequestHash } from '../application/cut-request-hash';
 import {
@@ -96,6 +97,7 @@ import {
   CutNoSheetSpecError,
   CutOrderDetailNotFoundError,
   CutParamProfileNotFoundError,
+  CutOptimizerInvalidGeometryError,
   CutSheetMaterialNotCuttableError,
   CutStaleVersionError,
 } from '../errors/cut.errors';
@@ -731,7 +733,27 @@ export class PgCutRepository implements CutRepositoryPort {
     const responses: Array<{ group: (typeof prep.groupPreps)[number]['group']; response: Awaited<ReturnType<FreecutClientLike['optimize']>> }> = [];
     try {
       for (const groupPrep of prep.groupPreps) {
-        responses.push({ group: groupPrep.group, response: await this.freecut.optimize(groupPrep.request) });
+        const response = await this.freecut.optimize(groupPrep.request);
+        const contractViolations = validateFreecutResponseContract(groupPrep.request, response);
+        if (contractViolations.length > 0) {
+          throw new CutOptimizerInvalidGeometryError(contractViolations.length, contractViolations.slice(0, 20));
+        }
+        const filmTextureByItemId = new Map(
+          groupPrep.group.items.map((item) => [freecutItemId(item.orderDetailId), item.filmTexture === true]),
+        );
+        const violations = backMapSolutions(response).flatMap((sheet) =>
+          validateSheetPlacements({
+            sheetIndex: sheet.sheetIndex,
+            placements: sheet.placements,
+            gap: { kerfMm: prep.params.kerf_mm, spacingMm: prep.params.spacing_mm },
+            filmTextureByItemId,
+            stopAfterFirst: true,
+          }),
+        );
+        if (violations.length > 0) {
+          throw new CutOptimizerInvalidGeometryError(violations.length, violations.slice(0, 20));
+        }
+        responses.push({ group: groupPrep.group, response });
       }
     } catch (error) {
       // A freecut failure fails the WHOLE job. Guard the status write on THIS
@@ -1045,6 +1067,20 @@ export class PgCutRepository implements CutRepositoryPort {
       ? { kerfMm: lastCalcParamsRaw.kerf_mm, spacingMm: lastCalcParamsRaw.spacing_mm }
       : null;
 
+    const autoLayoutValidation = editorParams
+      ? {
+          valid: !base.groups.some((group) => group.sheets.some((sheet) => validateSheetPlacements({
+                sheetIndex: sheet.sheetIndex,
+                placements: sheet.placements,
+                gap: editorParams,
+                // The migration boundary is for stored spatial geometry. Grain
+                // remains enforced authoritatively during calculate/manual save.
+                filmTextureByItemId: new Map(),
+                stopAfterFirst: true,
+              }).length > 0)),
+        }
+      : undefined;
+
     // Read group_key for each cut_group (extra query scoped to single job).
     const groupKeyResult = await this.database.query<{ cut_group_id: string | number; group_key: string | null }>(
       `SELECT cut_group_id, group_key FROM cut_group WHERE cut_job_id = $1`,
@@ -1087,7 +1123,7 @@ export class PgCutRepository implements CutRepositoryPort {
       })
       .join(',')}`;
 
-    return { ...base, groups: enrichedGroupsWithTokens, editorParams, requiresRecalc, renderToken: jobRenderToken };
+    return { ...base, groups: enrichedGroupsWithTokens, editorParams, requiresRecalc, autoLayoutValidation, renderToken: jobRenderToken };
   }
 
   // ── Task 4: manual-layout read/persist/invalidate ────────────────────────

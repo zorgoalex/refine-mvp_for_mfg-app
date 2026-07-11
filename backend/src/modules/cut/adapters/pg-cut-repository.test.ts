@@ -137,8 +137,8 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('INSERT INTO audit_log_related_entity')) return { rows: [], rowCount: 1 };
 
     // loadJob reads
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, combine_films, split_by_material FROM cut_job WHERE cut_job_id = $1')) {
-      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 1, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, combine_films: false, split_by_material: true }], rowCount: 1 };
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material FROM cut_job WHERE cut_job_id = $1')) {
+      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 1, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, pdf_template_code: 'default', combine_films: false, split_by_material: true }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT i.cut_job_id')) {
       return { rows: [{ cut_job_id: 42, positions: 0, details: 0, area: 0 }], rowCount: 1 };
@@ -332,6 +332,48 @@ describe('PgCutRepository', () => {
     expect(String(outbox?.params[4])).toMatch(/^cut_job\.calculated:/);
     const audit = db.queries.find((q) => /INSERT INTO audit_log\b/i.test(q.text) && JSON.stringify(q.params).includes('cut_job.calculated'));
     expect(audit).toBeDefined();
+  });
+
+  it('calculate: rejects an optimizer layout below kerf before persisting any group', async () => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [{
+        cut_job_item_id: 501, order_detail_id: 1, order_id: 9, qty: 2,
+        width_mm: 100, height_mm: 50, sheet_material_type_id: 9, film_id: null,
+        film_texture: null, smt_width_mm: 1000, smt_height_mm: 500,
+      }],
+    });
+    const params = {
+      kerf_mm: 6.5, spacing_mm: 0,
+      trim_mm: { left: 10, right: 10, top: 10, bottom: 10 },
+      objective: 'min_waste' as const,
+    };
+    const client = {
+      optimize: vi.fn().mockResolvedValue({
+        status: 'ok',
+        solutions: [{
+          stock_id: 'smt-9', index: 0, width_mm: 1000, height_mm: 500,
+          trim_mm: params.trim_mm,
+          placements: [
+            { item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 100, height_mm: 50, rotated: false },
+            { item_id: 'det-1', instance: 2, x_mm: 105.5, y_mm: 0, width_mm: 100, height_mm: 50, rotated: false },
+          ],
+        }],
+        unplaced_items: [],
+      }),
+    } as unknown as FreecutClient;
+    const config = new StaticCutConfig();
+    vi.spyOn(config, 'getDefaultParams').mockResolvedValue(params);
+    const repo = new PgCutRepository(db.service, client, config);
+
+    await expect(repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: 'r' }))
+      .rejects.toMatchObject({ code: 'CUT_OPTIMIZER_INVALID_GEOMETRY' });
+
+    const sql = db.queries.map((q) => normalize(q.text));
+    expect(sql.some((s) => s.startsWith('INSERT INTO cut_group ('))).toBe(false);
+    expect(sql.some((s) => s.startsWith('INSERT INTO cut_group_sheet ('))).toBe(false);
+    const failedUpdate = db.queries.find((q) => /failure_code = \$3/i.test(q.text));
+    expect(failedUpdate?.params).toContain('CUT_OPTIMIZER_INVALID_GEOMETRY');
   });
 
   it('calculate: multi-material fans out to N groups (one freecut call + cut_group per cuttable key)', async () => {

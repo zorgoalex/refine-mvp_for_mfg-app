@@ -102,7 +102,10 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
                 {hasMaterials ? (
                   materials.map((mat, idx) => (
                     <span key={mat.fullName}>
-                      <span style={{ color: getMaterialTextColor(mat.fullName), fontWeight: 500 }}>
+                      <span
+                        className="day-column-brief__material-code"
+                        style={{ color: getMaterialTextColor(mat.fullName), fontWeight: 500 }}
+                      >
                         {mat.name}
                       </span>
                       {idx < materials.length - 1 ? ', ' : ''}

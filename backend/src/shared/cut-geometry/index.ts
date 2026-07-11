@@ -267,8 +267,10 @@ export function validateSheetPlacements(args: {
   gap: GapParams;
   filmTextureByItemId: Map<string, boolean>;
   eps?: number;
+  /** Read-path guard: return immediately after the first violation. */
+  stopAfterFirst?: boolean;
 }): ManualViolation[] {
-  const { sheetIndex, placements, gap, filmTextureByItemId, eps = DEFAULT_EPS } = args;
+  const { sheetIndex, placements, gap, filmTextureByItemId, eps = DEFAULT_EPS, stopAfterFirst = false } = args;
   const effGap = gap.kerfMm + gap.spacingMm;
   const { usableW, usableH } = usableExtent(placements);
   const rects = placements.pieces.map((p) => ({
@@ -286,6 +288,7 @@ export function validateSheetPlacements(args: {
         code: 'off_sheet',
         message: 'Деталь выходит за рабочую область листа',
       });
+      if (stopAfterFirst) return out;
     }
     if (p.rotated && filmTextureByItemId.get(p.item_id) === true) {
       out.push({
@@ -295,13 +298,27 @@ export function validateSheetPlacements(args: {
         code: 'grain_rotation',
         message: 'Поворот запрещён: текстура плёнки закреплена',
       });
+      if (stopAfterFirst) return out;
     }
   }
 
-  for (let i = 0; i < rects.length; i++) {
-    for (let j = i + 1; j < rects.length; j++) {
-      if (!piecesClear(rects[i].r, rects[j].r, effGap, eps)) {
-        const p = rects[j].p;
+  // Adaptive axis sweep: use the axis with the wider distribution so both long
+  // rows and long columns avoid an unconditional O(n²) read. The break is
+  // deliberately conservative (no epsilon): axis clearance >= required gap is
+  // sufficient for the exact Euclidean predicate in piecesClear.
+  const minX = Math.min(...rects.map(({ r }) => r.x), 0);
+  const maxX = Math.max(...rects.map(({ r }) => r.x + r.w), 0);
+  const minY = Math.min(...rects.map(({ r }) => r.y), 0);
+  const maxY = Math.max(...rects.map(({ r }) => r.y + r.h), 0);
+  const sweepX = maxX - minX >= maxY - minY;
+  const swept = [...rects].sort((a, b) => (sweepX ? a.r.x - b.r.x : a.r.y - b.r.y));
+  const start = ({ r }: (typeof swept)[number]) => sweepX ? r.x : r.y;
+  const end = ({ r }: (typeof swept)[number]) => sweepX ? r.x + r.w : r.y + r.h;
+  for (let i = 0; i < swept.length; i++) {
+    for (let j = i + 1; j < swept.length; j++) {
+      if (end(swept[i]) + effGap <= start(swept[j])) break;
+      if (!piecesClear(swept[i].r, swept[j].r, effGap, eps)) {
+        const p = swept[j].p;
         out.push({
           sheetIndex,
           itemId: p.item_id,
@@ -309,6 +326,7 @@ export function validateSheetPlacements(args: {
           code: 'overlap',
           message: 'Недостаточный зазор между деталями (пропил + зазор)',
         });
+        if (stopAfterFirst) return out;
       }
     }
   }

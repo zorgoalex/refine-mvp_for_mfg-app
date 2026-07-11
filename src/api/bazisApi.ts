@@ -2,9 +2,15 @@ import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
+  BazisRevisionEstimate,
   BazisImportResponse,
+  BazisNodeCard,
+  BazisNodeSearchResponse,
   BazisProjectCard,
+  BazisProjectDeleteResponse,
   BazisProjectListItem,
+  BazisRevisionMaterialsSummary,
+  BazisRevisionOrder,
   BazisTreeNode,
   CreateOrderFromRevisionResponse,
   MaterialMapping,
@@ -37,10 +43,57 @@ export const bazisApi = {
     return httpClient.get<BazisProjectCard>(apiRoutes.bazis.project(validateId(id, 'bazisProjectId')));
   },
 
+  deleteProject(id: number): Promise<BazisProjectDeleteResponse> {
+    return httpClient.delete<BazisProjectDeleteResponse>(
+      apiRoutes.bazis.project(validateId(id, 'bazisProjectId')),
+    );
+  },
+
   getTree(revisionId: number, parentNodeId?: number): Promise<BazisTreeNode[]> {
     const path = apiRoutes.bazis.revisionTree(validateId(revisionId, 'revisionId'));
     return httpClient.get<BazisTreeNode[]>(
       parentNodeId == null ? path : withQuery(path, { parentNodeId: validateId(parentNodeId, 'parentNodeId') }),
+    );
+  },
+
+  getNodeCard(nodeId: number): Promise<BazisNodeCard> {
+    return httpClient.get<BazisNodeCard>(apiRoutes.bazis.node(validateId(nodeId, 'nodeId')));
+  },
+
+  searchNodes(
+    revisionId: number,
+    params: { q?: string; objectType?: string; limit?: number },
+  ): Promise<BazisNodeSearchResponse> {
+    const query: Record<string, string | number> = {};
+    if (params.q) query.q = params.q;
+    if (params.objectType) query.objectType = params.objectType;
+    if (params.limit != null) query.limit = params.limit;
+    return httpClient.get<BazisNodeSearchResponse>(
+      withQuery(apiRoutes.bazis.revisionNodesSearch(validateId(revisionId, 'revisionId')), query),
+    );
+  },
+
+  getMaterialsSummary(revisionId: number): Promise<BazisRevisionMaterialsSummary> {
+    return httpClient.get<BazisRevisionMaterialsSummary>(
+      apiRoutes.bazis.revisionMaterialsSummary(validateId(revisionId, 'revisionId')),
+    );
+  },
+
+  listRevisionOrders(revisionId: number): Promise<BazisRevisionOrder[]> {
+    return httpClient.get<BazisRevisionOrder[]>(
+      apiRoutes.bazis.revisionOrders(validateId(revisionId, 'revisionId')),
+    );
+  },
+
+  getFullTree(revisionId: number): Promise<BazisTreeNode[]> {
+    return httpClient.get<BazisTreeNode[]>(
+      withQuery(apiRoutes.bazis.revisionTree(validateId(revisionId, 'revisionId')), { all: 'true' }),
+    );
+  },
+
+  getRevisionEstimate(revisionId: number): Promise<BazisRevisionEstimate> {
+    return httpClient.get<BazisRevisionEstimate>(
+      apiRoutes.bazis.revisionEstimate(validateId(revisionId, 'revisionId')),
     );
   },
 

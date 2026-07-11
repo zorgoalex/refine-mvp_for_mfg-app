@@ -24,6 +24,7 @@ const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edi
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const BazisPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisPage")).BazisPage }));
+const BazisProjectViewPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisProjectViewPage")).BazisProjectViewPage }));
 const ScanPage = lazy(async () => ({ default: (await import("./pages/scan/ScanPage")).ScanPage }));
 const GroupsPage = lazy(async () => ({ default: (await import("./pages/groups/GroupsPage")).GroupsPage }));
 const ProjectsList = lazy(async () => ({ default: (await import("./pages/projects/ProjectsList")).ProjectsList }));
@@ -639,6 +640,7 @@ const ThemedApp = () => {
                   {featureFlags.useBackendBazis && (
                     <Route path="/bazis">
                       <Route index element={<BazisPage />} />
+                      <Route path="projects/:bazisProjectId" element={<BazisProjectViewPage />} />
                     </Route>
                   )}
                   {featureFlags.labels && (

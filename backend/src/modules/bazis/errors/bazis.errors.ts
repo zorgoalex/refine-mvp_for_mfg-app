@@ -18,6 +18,12 @@ export class BazisRevisionNotFoundError extends ApiError {
   }
 }
 
+export class BazisNodeNotFoundError extends ApiError {
+  constructor(nodeId: number) {
+    super(404, 'NOT_FOUND', `Базис-узел ${nodeId} не найден`, { nodeId });
+  }
+}
+
 export class BazisRevisionDuplicateError extends ApiError {
   constructor(revisionNo: number) {
     super(409, 'BAZIS_REVISION_DUPLICATE', `Этот файл уже импортирован (ревизия ${revisionNo})`, {
@@ -54,6 +60,19 @@ export class BazisUnmappedMaterialsError extends ApiError {
       'BAZIS_UNMAPPED_MATERIALS',
       `Сначала сопоставьте материалы листов: ${names.join(', ')}`,
       { unmappedMaterials: names },
+    );
+  }
+}
+
+export class BazisProjectHasOrdersError extends ApiError {
+  constructor(orderIds: number[]) {
+    // Гейт удаления: из проекта созданы ERP-заказы (bazis_order_links) —
+    // жёсткое удаление снесло бы provenance-связи узлов с деталями.
+    super(
+      409,
+      'BAZIS_PROJECT_HAS_ORDERS',
+      `Из Базис-проекта созданы заказы (${orderIds.join(', ')}) — удаление запрещено`,
+      { orderIds },
     );
   }
 }

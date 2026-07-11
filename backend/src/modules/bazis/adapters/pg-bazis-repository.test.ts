@@ -9,8 +9,10 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import {
   BazisNoPanelsSelectedError,
+  BazisNodeNotFoundError,
   BazisProjectNotFoundError,
   BazisRevisionDuplicateError,
+  BazisRevisionNotFoundError,
 } from '../errors/bazis.errors';
 import { PgBazisRepository } from './pg-bazis-repository';
 
@@ -59,6 +61,74 @@ describe('PgBazisRepository.importRevision', () => {
     const response = await repository.importRevision(importCommand());
 
     expect(response.warnings).toEqual(['Такой же файл уже импортирован в Базис-проект «Другой проект»']);
+  });
+
+  it('prunes revisions beyond the last 3 after import: lock, link re-check, deletes, rich audit + outbox + warning', async () => {
+    const database = createDatabase({ pruneCandidates: [pruneCandidateRow(50, 1)] });
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.importRevision(importCommand());
+
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    const insertRevisionIdx = ordered.findIndex((sql) => sql.startsWith('INSERT INTO bazis_project_revisions'));
+    const pruneSelectIdx = ordered.findIndex((sql) => sql.includes('prune_keep'));
+    const linkRecheckIdx = ordered.findIndex((sql) =>
+      sql.includes('FROM bazis_order_links') && sql.includes('ANY'));
+    const pruneRunsIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_import_runs'));
+    const pruneRevisionsIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_project_revisions'));
+
+    // Кандидаты лочатся FOR UPDATE (единый порядок локов revision→nodes с create-order),
+    // затем перепроверка links свежим снапшотом, и только потом удаления.
+    expect(ordered[pruneSelectIdx]).toContain('FOR UPDATE');
+    expect(pruneSelectIdx).toBeGreaterThan(insertRevisionIdx);
+    expect(linkRecheckIdx).toBeGreaterThan(pruneSelectIdx);
+    expect(pruneRunsIdx).toBeGreaterThan(linkRecheckIdx);
+    expect(pruneRevisionsIdx).toBeGreaterThan(pruneRunsIdx);
+
+    const audit = database.queries.find(
+      (query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log (') && query.params?.[0] === 'bazis.revision_pruned',
+    );
+    expect(audit).toBeDefined();
+    // before-снапшот несёт полные метаданные удаляемой ревизии (hard delete).
+    const before = String(audit?.params?.[19] ?? '');
+    expect(before).toContain('"fileName":"old.xml"');
+    expect(before).toContain('"xmlSha256":"sha-old"');
+    expect(before).toContain('"nodesCount":25');
+    expect(before).toContain('"revisionNo":1');
+
+    const outboxKeys = database.queries
+      .filter((query) => normalizeSql(query.text).startsWith('INSERT INTO outbox_events'))
+      .map((query) => query.params?.[4]);
+    expect(outboxKeys).toContain('bazis-revision-pruned-50');
+
+    expect(response.warnings.some((warning) => warning.includes('Ревизия №1'))).toBe(true);
+  });
+
+  it('skips candidates that acquired order links between selection and the re-check', async () => {
+    const database = createDatabase({
+      pruneCandidates: [pruneCandidateRow(50, 1), pruneCandidateRow(51, 2)],
+      pruneProtectedRevisionIds: [50],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.importRevision(importCommand());
+
+    const revisionDelete = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('DELETE FROM bazis_project_revisions'));
+    expect(revisionDelete?.params?.[0]).toEqual([51]);
+    expect(response.warnings.some((warning) => warning.includes('Ревизия №2'))).toBe(true);
+    expect(response.warnings.some((warning) => warning.includes('Ревизия №1'))).toBe(false);
+  });
+
+  it('does not prune anything when all revisions fit the retention window', async () => {
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.importRevision(importCommand());
+
+    const deletes = database.queries.filter((query) => normalizeSql(query.text).startsWith('DELETE FROM'));
+    expect(deletes).toEqual([]);
+    expect(response.warnings).toEqual([]);
   });
 
   it('maps parsed node parentIndex to inserted ids (parent id resolved)', async () => {
@@ -237,6 +307,201 @@ describe('PgBazisRepository reads + mappings', () => {
   });
 });
 
+describe('PgBazisRepository.listAllTreeNodes', () => {
+  it('reads the whole revision in one revision-scoped query ordered parents-first', async () => {
+    const database = createDatabase({ nodeSearch: { total: 0, rows: [] } });
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.listAllTreeNodes(82);
+
+    const sql = normalizeSql(database.queries[1].text);
+    expect(sql).toContain('FROM bazis_nodes n WHERE n.revision_id = $1');
+    expect(sql).toContain('c.revision_id = n.revision_id');
+    expect(sql).toContain('ORDER BY n.parent_node_id NULLS FIRST, n.seq');
+    expect(database.queries[1].params).toEqual([82]);
+  });
+
+  it('throws BazisRevisionNotFoundError for unknown revision', async () => {
+    const database = createDatabase({ nodeSearch: { revisionExists: false } });
+    const repository = new PgBazisRepository(database.service);
+    await expect(repository.listAllTreeNodes(1)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+});
+
+describe('PgBazisRepository.getRevisionEstimate', () => {
+  it('extracts materials and operations from raw_json with jsonb guards', async () => {
+    const database = createDatabase({ nodeSearch: { total: 0, rows: [] } });
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.getRevisionEstimate(82);
+
+    const materialsSql = normalizeSql(database.queries[1].text);
+    expect(materialsSql).toContain("jsonb_typeof(n.raw_json->'ОсновнойМатериал') = 'object'");
+    expect(materialsSql).toContain("m.value->>'ID' AS material_id");
+    expect(materialsSql).toContain("n.raw_json->>'Код' AS node_code");
+    const operationsSql = normalizeSql(database.queries[2].text);
+    expect(operationsSql).toContain("n.raw_json->'СписокОпераций'->'СдельнаяОперация'");
+    expect(operationsSql).toContain('jsonb_typeof');
+    expect(database.queries[1].params).toEqual([82]);
+    expect(database.queries[2].params).toEqual([82]);
+  });
+
+  it('throws BazisRevisionNotFoundError for unknown revision', async () => {
+    const database = createDatabase({ nodeSearch: { revisionExists: false } });
+    const repository = new PgBazisRepository(database.service);
+    await expect(repository.getRevisionEstimate(1)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+});
+
+describe('PgBazisRepository.getNodeCard', () => {
+  it('reads node with revision context and order links', async () => {
+    const database = createDatabase({
+      nodeCard: {
+        row: {
+          bazis_node_id: 555,
+          revision_id: 82,
+          parent_node_id: 10,
+          seq: 4,
+          node_kind: 'object',
+          object_type: 'Панель',
+          name: 'Дверь',
+          detail_code: 'D-1',
+          position: 'A1',
+          designation: 'D-01',
+          quantity: 1,
+          cumulative_quantity: 2,
+          length_mm: 1000,
+          width_mm: 500,
+          height_mm: null,
+          thickness_mm: 16,
+          price: 200,
+          is_rectangular: true,
+          texture_orientation: 'along',
+          main_material_name: 'Laminate White',
+          raw_json: { ТипОбъекта: 'Панель' },
+          children_count: 0,
+          bazis_project_id: 41,
+          revision_no: 3,
+          project_id: 77,
+        },
+        orderLinks: [{ order_id: 9001, order_detail_id: 501, mapping_kind: 'created' }],
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const card = await repository.getNodeCard(555);
+
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    expect(ordered[0]).toContain('FROM bazis_nodes n JOIN bazis_project_revisions r');
+    // child-count строго в границах ревизии: parent_node_id — self-FK без
+    // same-revision constraint, ручная правка БД не должна протекать (Critic R2)
+    expect(ordered[0]).toContain('c.revision_id = n.revision_id');
+    expect(ordered[1]).toContain('FROM bazis_node_order_detail_map');
+    expect(card).toMatchObject({
+      bazisNodeId: 555,
+      revisionId: 82,
+      bazisProjectId: 41,
+      projectId: 77,
+      revisionNo: 3,
+      rawJson: { ТипОбъекта: 'Панель' },
+      orderLinks: [{ orderId: 9001, orderDetailId: 501, mappingKind: 'created' }],
+    });
+  });
+
+  it('throws BazisNodeNotFoundError when node is missing', async () => {
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service);
+    await expect(repository.getNodeCard(1)).rejects.toBeInstanceOf(BazisNodeNotFoundError);
+  });
+});
+
+describe('PgBazisRepository.searchNodes', () => {
+  it('escapes ILIKE wildcards, limits matches and returns ancestor paths root-first', async () => {
+    const database = createDatabase({
+      nodeSearch: {
+        total: 3,
+        rows: [
+          {
+            bazis_node_id: 555,
+            node_kind: 'object',
+            object_type: 'Панель',
+            name: 'Дверь',
+            position: 'A1',
+            designation: 'D-01',
+            main_material_name: 'Laminate White',
+            ancestor_id: 100,
+            ancestor_name: 'Корень',
+            depth: 2,
+          },
+          {
+            bazis_node_id: 555,
+            node_kind: 'object',
+            object_type: 'Панель',
+            name: 'Дверь',
+            position: 'A1',
+            designation: 'D-01',
+            main_material_name: 'Laminate White',
+            ancestor_id: 200,
+            ancestor_name: 'Шкаф',
+            depth: 1,
+          },
+          {
+            bazis_node_id: 555,
+            node_kind: 'object',
+            object_type: 'Панель',
+            name: 'Дверь',
+            position: 'A1',
+            designation: 'D-01',
+            main_material_name: 'Laminate White',
+            ancestor_id: 555,
+            ancestor_name: 'Дверь',
+            depth: 0,
+          },
+        ],
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.searchNodes({
+      revisionId: 82,
+      q: '50%_шкаф',
+      objectType: null,
+      limit: 50,
+    });
+
+    const searchQuery = database.queries[2];
+    expect(searchQuery.params).toContain('%50\\%\\_шкаф%');
+    const sql = normalizeSql(searchQuery.text);
+    expect(sql).toContain('WITH RECURSIVE');
+    // cycle guard + depth cap + revision-scope: мок не исполняет SQL, поэтому
+    // текст-ассертами фиксируем наличие защит (BLOCKER R1, revision-scope R2)
+    expect(sql).toContain('NOT p.bazis_node_id = ANY(a.visited)');
+    expect(sql).toContain('a.depth < 100');
+    expect(sql).toContain('p.revision_id = $1');
+    // root-first порядок держится на этом ORDER BY — текстовый пин против регрессии
+    expect(sql).toContain('ORDER BY m.bazis_node_id, a.depth DESC');
+    expect(response.totalMatched).toBe(3);
+    expect(response.items).toHaveLength(1);
+    expect(response.items[0].pathNodeIds).toEqual([100, 200]); // root → parent
+    expect(response.items[0].pathTitles).toEqual(['Корень', 'Шкаф']);
+  });
+
+  it('filters by objectType without q', async () => {
+    const database = createDatabase({ nodeSearch: { total: 0, rows: [] } });
+    const repository = new PgBazisRepository(database.service);
+    await repository.searchNodes({ revisionId: 82, q: null, objectType: 'Панель', limit: 50 });
+    expect(database.queries[1].params).toEqual([82, 'Панель', null]);
+  });
+
+  it('throws BazisRevisionNotFoundError for unknown revision', async () => {
+    const database = createDatabase({ nodeSearch: { revisionExists: false } });
+    const repository = new PgBazisRepository(database.service);
+    await expect(
+      repository.searchNodes({ revisionId: 1, q: 'x', objectType: null, limit: 50 }),
+    ).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+});
+
 describe('PgBazisRepository.createOrderFromRevision', () => {
   it('expands selected nodes into distinct panels and builds order details with the frozen basis_data string', async () => {
     const database = createDatabase({
@@ -369,6 +634,13 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
     });
     const sql = normalizedSql(database.queries);
     expect(sql).toContain('WITH RECURSIVE sel AS');
+    // Единый порядок локов с prune: сначала KEY SHARE на строку ревизии,
+    // потом FK-локи на nodes через map-инсерты.
+    const orderedHook = database.queries.map((query) => normalizeSql(query.text));
+    const revisionLockIdx = orderedHook.findIndex((sqlText) => sqlText.includes('FOR KEY SHARE'));
+    const mapInsertIdx = orderedHook.findIndex((sqlText) => sqlText.startsWith('INSERT INTO bazis_node_order_detail_map'));
+    expect(revisionLockIdx).toBeGreaterThan(-1);
+    expect(revisionLockIdx).toBeLessThan(mapInsertIdx);
     expect(sql).toContain('INSERT INTO bazis_node_order_detail_map');
     expect(sql).toContain('ON CONFLICT (node_id, order_id) DO NOTHING');
     expect(sql).toContain('INSERT INTO bazis_order_links');
@@ -592,6 +864,203 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
   });
 });
 
+describe('PgBazisRepository.getMaterialsSummary', () => {
+  it('aggregates panels by material with mapping status, hardware, edges and films', async () => {
+    const database = createDatabase({
+      materialsSummary: {
+        summaryRow: { summary_json: { totalNodes: 20, panels: 10, hardware: 3, assemblies: 1, blocks: 0, uniqueMaterials: 2 } },
+        panelRows: [
+          {
+            main_material_name: 'ЛДСП Белый',
+            panel_count: 10,
+            total_quantity: 10,
+            total_area_m2: 12.5,
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+          },
+        ],
+        hardwareRows: [{ name: 'Петля', total_quantity: 8 }],
+        edgeRows: [{ name: 'ABS 2mm Белый', usage_count: 6 }],
+        filmRows: [{ name: 'Snow Film', usage_count: 4 }],
+      },
+    });
+    // responder 1: summary_json ревизии; 2: panels; 3: hardware; 4: edges; 5: films
+    const repository = new PgBazisRepository(database.service);
+
+    const summary = await repository.getMaterialsSummary(82);
+
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    expect(ordered[0]).toContain('FROM bazis_project_revisions');
+    expect(ordered[1]).toContain("n.object_type = 'Панель'");
+    expect(ordered[1]).toContain("mm.source_kind = 'sheet'");
+    expect(ordered[3]).toContain('СписокКромок1');
+    // raw_json без shape-constraint: каждая array-источник обязана быть под jsonb_typeof-guard (Critic R1)
+    expect(ordered[3]).toContain('jsonb_typeof');
+    expect(ordered[4]).toContain('jsonb_typeof');
+    expect(summary.panelsByMaterial[0]).toMatchObject({
+      materialName: 'ЛДСП Белый', panelCount: 10, totalAreaM2: 12.5, mappingTargetKind: 'sheet',
+    });
+    expect(summary.hardwareByName).toEqual([{ name: 'Петля', totalQuantity: 8 }]);
+    expect(summary.edgesByName).toEqual([{ name: 'ABS 2mm Белый', usageCount: 6, totalLengthMm: null }]);
+    expect(summary.filmsByName).toEqual([{ name: 'Snow Film', usageCount: 4, totalLengthMm: null }]);
+    expect(summary.summary).toMatchObject({ totalNodes: 20, panels: 10 });
+  });
+
+  it('throws BazisRevisionNotFoundError for unknown revision', async () => {
+    const database = createDatabase(); // responder 1: пустой rows
+    const repository = new PgBazisRepository(database.service);
+    await expect(repository.getMaterialsSummary(1)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+});
+
+describe('PgBazisRepository.listRevisionOrders', () => {
+  it('joins bazis_order_links with orders and per-order node counts', async () => {
+    const database = createDatabase({
+      revisionOrders: [
+        {
+          order_id: 9001,
+          order_name: 'Тест-заказ 1',
+          created_at: '2026-07-08 10:00:00+00',
+          nodes_mapped: 12,
+          details_created: 10,
+        },
+      ],
+    });
+    // responder 1 (revision exists): [{ ok: 1 }]; responder 2: одна строка order 9001
+    const repository = new PgBazisRepository(database.service);
+
+    const orders = await repository.listRevisionOrders(82);
+
+    const sql = normalizeSql(database.queries[1].text);
+    expect(sql).toContain('FROM bazis_order_links bol');
+    expect(sql).toContain('JOIN orders o ON o.order_id = bol.order_id');
+    // счётчик деталей — по order_detail_id, НЕ по mapping_kind (см. семантику выше)
+    expect(sql).toContain('FILTER (WHERE map.order_detail_id IS NOT NULL)');
+    // скоуп агрегата границей ревизии — пин против cross-revision утечки счётчиков
+    expect(sql).toContain('JOIN bazis_nodes n ON n.bazis_node_id = map.node_id');
+    expect(sql).toContain('WHERE n.revision_id = $1');
+    expect(orders).toEqual([{
+      orderId: 9001, orderName: 'Тест-заказ 1', createdAt: '2026-07-08 10:00:00+00',
+      nodesMapped: 12, detailsCreated: 10,
+    }]);
+  });
+
+  it('throws BazisRevisionNotFoundError for unknown revision', async () => {
+    const database = createDatabase({ nodeSearch: { revisionExists: false } }); // responder 1: пустой rows
+    const repository = new PgBazisRepository(database.service);
+    await expect(repository.listRevisionOrders(1)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+});
+
+describe('PgBazisRepository.createOrderFromRevision revision lock', () => {
+  it('fails the hook with BazisRevisionNotFoundError when the revision was pruned concurrently', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionGoneAtHook: true,
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+        },
+        panelRows: [
+          {
+            bazis_node_id: 101,
+            object_type: 'Панель',
+            name: 'Фасад',
+            position: '7',
+            designation: 'D-01',
+            cumulative_quantity: 1,
+            length_mm: 100,
+            width_mm: 50,
+            main_material_name: 'ЛДСП',
+            raw_json: {},
+          },
+        ],
+        mappingRows: [
+          {
+            source_kind: 'sheet',
+            name: 'лдсп',
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+            film_id: null,
+            edge_type_id: null,
+          },
+        ],
+      },
+    });
+    const orderTransactions: Pick<OrderTransactionService, 'create'> = {
+      async create(command) {
+        await expect(
+          command.postPersistHook?.(
+            { getTransactionClient: () => database.tx },
+            { orderId: 9001, detailIdsByClientKey: new Map([['bazis-node-101', 7001]]) },
+          ),
+        ).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+        throw new BazisRevisionNotFoundError(82);
+      },
+    };
+    const repository = new PgBazisRepository(database.service, orderTransactions);
+
+    await expect(repository.createOrderFromRevision(createOrderCommand())).rejects.toBeInstanceOf(
+      BazisRevisionNotFoundError,
+    );
+    // Доказательство, что reject пришёл именно из hook-лока, а не раньше.
+    const lockQueries = database.queries.filter((query) => normalizeSql(query.text).includes('FOR KEY SHARE'));
+    expect(lockQueries).toHaveLength(1);
+  });
+});
+
+describe('PgBazisRepository.getTreeChildren', () => {
+  it('throws BazisRevisionNotFoundError when the read returns nothing and the revision is gone (pruned)', async () => {
+    const database = createDatabase({ nodeSearch: { revisionExists: false } });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(repository.getTreeChildren(5, null)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+
+    // Существование проверяется ПОСЛЕ чтения nodes (закрытие TOCTOU-окна):
+    // порядок statement'ов — сначала SELECT nodes, затем SELECT 1 AS ok.
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    const nodesIdx = ordered.findIndex((sql) => sql.startsWith('SELECT n.bazis_node_id'));
+    const existsIdx = ordered.findIndex((sql) => sql.startsWith('SELECT 1 AS ok FROM bazis_project_revisions'));
+    expect(nodesIdx).toBeGreaterThan(-1);
+    expect(existsIdx).toBeGreaterThan(nodesIdx);
+  });
+
+  it('does not run the existence probe when the read returns children (hot path)', async () => {
+    const database = createDatabase({
+      treeChildren: [
+        {
+          bazis_node_id: 1,
+          parent_node_id: null,
+          seq: 0,
+          node_kind: 'product',
+          object_type: 'Модель',
+          name: 'Шкаф',
+          detail_code: null,
+          position: null,
+          quantity: 1,
+          cumulative_quantity: 1,
+          length_mm: null,
+          width_mm: null,
+          thickness_mm: null,
+          main_material_name: null,
+          children_count: 4,
+        },
+      ],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const nodes = await repository.getTreeChildren(5, null);
+
+    expect(nodes).toHaveLength(1);
+    const probes = database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('SELECT 1 AS ok FROM bazis_project_revisions'));
+    expect(probes).toEqual([]);
+  });
+});
+
 function createDatabase(
   options: {
     duplicateRevisionNo?: number;
@@ -599,6 +1068,15 @@ function createDatabase(
     materialMappings?: Array<{ source_kind: string; name: string }>;
     treeChildren?: Array<Record<string, unknown>>;
     upsertedMappings?: Array<Record<string, unknown>>;
+    nodeCard?: {
+      row?: Record<string, unknown> | null;
+      orderLinks?: Array<Record<string, unknown>>;
+    };
+    nodeSearch?: {
+      revisionExists?: boolean;
+      total?: number;
+      rows?: Array<Record<string, unknown>>;
+    };
     createOrderState?: {
       idempotencyConflict?: boolean;
       existingIdempotencyRow?: {
@@ -608,10 +1086,21 @@ function createDatabase(
         created_at: string;
       };
       revisionRow?: Record<string, unknown>;
+      revisionGoneAtHook?: boolean;
       panelRows?: Array<Record<string, unknown>>;
       mappingRows?: Array<Record<string, unknown>>;
       nowIso?: string;
     };
+    materialsSummary?: {
+      summaryRow?: Record<string, unknown> | null;
+      panelRows?: Array<Record<string, unknown>>;
+      hardwareRows?: Array<Record<string, unknown>>;
+      edgeRows?: Array<Record<string, unknown>>;
+      filmRows?: Array<Record<string, unknown>>;
+    };
+    revisionOrders?: Array<Record<string, unknown>>;
+    pruneCandidates?: Array<Record<string, unknown>>;
+    pruneProtectedRevisionIds?: number[];
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -728,6 +1217,30 @@ function createDatabase(
       if (normalized.startsWith('SELECT r.bazis_revision_id')) {
         return { rows: [], rowCount: 0 };
       }
+      if (normalized.startsWith('SELECT n.bazis_node_id, n.revision_id')) {
+        const row = options.nodeCard?.row;
+        return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+      if (normalized.startsWith('SELECT 1 AS ok FROM bazis_project_revisions')) {
+        return options.nodeSearch?.revisionExists === false
+          ? { rows: [], rowCount: 0 }
+          : { rows: [{ ok: 1 }], rowCount: 1 };
+      }
+      if (normalized.startsWith('SELECT count(*)::int AS total FROM bazis_nodes n WHERE')) {
+        return { rows: [{ total: options.nodeSearch?.total ?? 0 }], rowCount: 1 };
+      }
+      if (normalized.startsWith('WITH RECURSIVE matches AS')) {
+        return {
+          rows: options.nodeSearch?.rows ?? [],
+          rowCount: options.nodeSearch?.rows?.length ?? 0,
+        };
+      }
+      if (normalized.startsWith('SELECT m.order_id, m.order_detail_id, m.mapping_kind')) {
+        return {
+          rows: options.nodeCard?.orderLinks ?? [],
+          rowCount: options.nodeCard?.orderLinks?.length ?? 0,
+        };
+      }
       if (normalized.startsWith('SELECT n.bazis_node_id')) {
         return { rows: options.treeChildren ?? [], rowCount: options.treeChildren?.length ?? 0 };
       }
@@ -738,6 +1251,57 @@ function createDatabase(
       }
       if (normalized.startsWith('SELECT bazis_material_mapping_id')) {
         return { rows: [], rowCount: 0 };
+      }
+      if (normalized.startsWith('SELECT summary_json FROM bazis_project_revisions')) {
+        return options.materialsSummary?.summaryRow
+          ? { rows: [options.materialsSummary.summaryRow], rowCount: 1 }
+          : { rows: [], rowCount: 0 };
+      }
+      if (normalized.startsWith('SELECT n.main_material_name,')) {
+        return {
+          rows: options.materialsSummary?.panelRows ?? [],
+          rowCount: options.materialsSummary?.panelRows?.length ?? 0,
+        };
+      }
+      if (normalized.startsWith('SELECT n.name,')) {
+        return {
+          rows: options.materialsSummary?.hardwareRows ?? [],
+          rowCount: options.materialsSummary?.hardwareRows?.length ?? 0,
+        };
+      }
+      if (normalized.includes('СписокКромок1')) {
+        return {
+          rows: options.materialsSummary?.edgeRows ?? [],
+          rowCount: options.materialsSummary?.edgeRows?.length ?? 0,
+        };
+      }
+      if (normalized.includes('ОблицовкаПласти1')) {
+        return {
+          rows: options.materialsSummary?.filmRows ?? [],
+          rowCount: options.materialsSummary?.filmRows?.length ?? 0,
+        };
+      }
+      if (normalized.startsWith('SELECT bol.order_id,')) {
+        return {
+          rows: options.revisionOrders ?? [],
+          rowCount: options.revisionOrders?.length ?? 0,
+        };
+      }
+
+      if (normalized.includes('FOR KEY SHARE')) {
+        return options.createOrderState?.revisionGoneAtHook
+          ? { rows: [], rowCount: 0 }
+          : { rows: [{ bazis_revision_id: 82 }], rowCount: 1 };
+      }
+
+      if (normalized.includes('prune_keep')) {
+        const rows = options.pruneCandidates ?? [];
+        return { rows, rowCount: rows.length };
+      }
+
+      if (normalized.includes('FROM bazis_order_links') && normalized.includes('ANY')) {
+        const rows = (options.pruneProtectedRevisionIds ?? []).map((revisionId) => ({ revision_id: revisionId }));
+        return { rows, rowCount: rows.length };
       }
 
       return { rows: [], rowCount: 1 };
@@ -978,4 +1542,145 @@ function buildOrderDto(orderId: number, orderName: string): OrderDto {
 
 function isoMinutesAgo(minutes: number): string {
   return new Date(Date.now() - minutes * 60_000).toISOString();
+}
+
+describe('PgBazisRepository.deleteProject', () => {
+  it('deletes runs, revisions (nodes cascade) and project, writes audit + outbox, returns summary', async () => {
+    const database = createDeleteDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.deleteProject({
+      currentUser: currentUser('admin'),
+      requestId: 'req-delete-1',
+      bazisProjectId: 41,
+    });
+
+    expect(response).toEqual({
+      bazisProjectId: 41,
+      projectId: 77,
+      name: 'Шкаф Nova',
+      revisionsDeleted: 2,
+      nodesDeleted: 639,
+    });
+
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    expect(ordered[0]).toBe('SELECT set_session_user($1)');
+    const lockIdx = ordered.findIndex((sql) => sql.includes('FROM bazis_projects') && sql.includes('FOR UPDATE'));
+    const linksIdx = ordered.findIndex((sql) => sql.includes('FROM bazis_order_links'));
+    const runsIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_import_runs'));
+    const revisionsIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_project_revisions'));
+    const projectIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_projects'));
+    expect(lockIdx).toBeGreaterThan(-1);
+    expect(linksIdx).toBeGreaterThan(lockIdx);
+    expect(runsIdx).toBeGreaterThan(linksIdx);
+    expect(revisionsIdx).toBeGreaterThan(runsIdx);
+    expect(projectIdx).toBeGreaterThan(revisionsIdx);
+
+    const audit = database.queries.find((query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log ('));
+    expect(audit?.params?.[0]).toBe('bazis.project_deleted');
+    const relatedPairs = database.queries
+      .filter((query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log_related_entity'))
+      .map((query) => [query.params?.[1], query.params?.[2]]);
+    expect(relatedPairs).toEqual([
+      ['project', 77],
+      ['bazis_project', 41],
+    ]);
+
+    const outbox = database.queries.find((query) => normalizeSql(query.text).startsWith('INSERT INTO outbox_events'));
+    expect(outbox?.params?.[0]).toBe('bazis.project_deleted');
+    expect(outbox?.params?.[4]).toBe('bazis-project-deleted-41');
+  });
+
+  it('throws BazisProjectNotFoundError when the project is missing', async () => {
+    const database = createDeleteDatabase({ projectRow: null });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(
+      repository.deleteProject({ currentUser: currentUser('admin'), bazisProjectId: 404 }),
+    ).rejects.toBeInstanceOf(BazisProjectNotFoundError);
+  });
+
+  it('rejects with 409 BAZIS_PROJECT_HAS_ORDERS and deletes nothing when order links exist', async () => {
+    const database = createDeleteDatabase({ linkedOrderIds: [11384, 11390] });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(
+      repository.deleteProject({ currentUser: currentUser('admin'), bazisProjectId: 41 }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'BAZIS_PROJECT_HAS_ORDERS',
+      details: { orderIds: [11384, 11390] },
+    });
+
+    const deletes = database.queries.filter((query) => normalizeSql(query.text).startsWith('DELETE FROM'));
+    expect(deletes).toEqual([]);
+  });
+});
+
+function createDeleteDatabase(
+  options: {
+    projectRow?: { bazis_project_id: number; project_id: number; name: string } | null;
+    linkedOrderIds?: number[];
+  } = {},
+) {
+  const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  let auditId = 900;
+  const projectRow =
+    options.projectRow === null
+      ? null
+      : options.projectRow ?? { bazis_project_id: 41, project_id: 77, name: 'Шкаф Nova' };
+
+  const tx = {
+    raw: {} as PoolClient,
+    async query(text: string, params: readonly unknown[] = []) {
+      queries.push({ text, params });
+      const normalized = normalizeSql(text);
+
+      if (normalized.includes('FROM bazis_projects') && normalized.includes('FOR UPDATE')) {
+        return projectRow ? { rows: [projectRow], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+      if (normalized.includes('FROM bazis_order_links')) {
+        const rows = (options.linkedOrderIds ?? []).map((orderId) => ({ order_id: orderId }));
+        return { rows, rowCount: rows.length };
+      }
+      if (normalized.includes('AS revisions_count')) {
+        return { rows: [{ revisions_count: 2, nodes_count: 639 }], rowCount: 1 };
+      }
+      if (normalized.startsWith('INSERT INTO audit_log (')) {
+        auditId += 1;
+        return { rows: [{ audit_id: auditId }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    },
+  };
+
+  return {
+    queries,
+    service: {
+      async transaction<T>(handler: (client: typeof tx) => Promise<T>) {
+        return handler(tx);
+      },
+      async query(text: string, params: readonly unknown[] = []) {
+        return tx.query(text, params);
+      },
+    } as unknown as DatabaseService,
+  };
+}
+
+function pruneCandidateRow(bazisRevisionId: number, revisionNo: number): Record<string, unknown> {
+  return {
+    bazis_revision_id: bazisRevisionId,
+    revision_no: revisionNo,
+    file_name: 'old.xml',
+    file_size: 1000,
+    xml_sha256: 'sha-old',
+    bazis_version: '2022.12.21.36090',
+    product_name: 'Старое изделие',
+    product_price: 10,
+    summary_json: { totalNodes: 25 },
+    imported_by: 1,
+    imported_at: '2026-07-01T10:00:00.000Z',
+    request_id: 'req-old',
+    nodes_count: 25,
+  };
 }

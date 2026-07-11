@@ -12,7 +12,46 @@ import {
   orientItemsForVacuumDirection,
   resolveVacuumDirection,
   validateGrainRule,
+  validateFreecutResponseContract,
 } from './cut-freecut-mapping';
+
+describe('Freecut response runtime contract', () => {
+  const request = buildOptimizeRequest({
+    stock: { id: 'stock-1', width_mm: 1000, height_mm: 500 },
+    items: [{ id: 'det-1', width_mm: 100, height_mm: 50, qty: 2, rotation: 'allow_90', pattern_direction: 'none' }],
+    params: { kerf_mm: 6.5, spacing_mm: 0, trim_mm: { left: 10, right: 10, top: 10, bottom: 10 }, objective: 'min_waste' },
+  });
+  const valid = () => ({
+    status: 'ok',
+    solutions: [{
+      stock_id: 'stock-1', index: 0, width_mm: 1000, height_mm: 500,
+      trim_mm: { left: 10, right: 10, top: 10, bottom: 10 },
+      placements: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 100, height_mm: 50, rotated: false }],
+    }],
+    unplaced_items: [{ item_id: 'det-1', instance: 2, reason: 'not_fit' }],
+  });
+
+  it('accepts an exact placed/unplaced partition', () => {
+    expect(validateFreecutResponseContract(request, valid())).toEqual([]);
+  });
+
+  it.each([
+    ['unknown instance', (r: ReturnType<typeof valid>) => { r.solutions[0].placements[0].item_id = 'det-999'; }, 'unknown_instance'],
+    ['duplicate instance', (r: ReturnType<typeof valid>) => { r.unplaced_items[0].instance = 1; }, 'duplicate_instance'],
+    ['missing instance', (r: ReturnType<typeof valid>) => { r.unplaced_items = []; }, 'missing_instance'],
+    ['wrong rotated dimensions', (r: ReturnType<typeof valid>) => { r.solutions[0].placements[0].rotated = true; }, 'piece_width_mismatch'],
+    ['non-finite number', (r: ReturnType<typeof valid>) => { r.solutions[0].placements[0].x_mm = Number.NaN; }, 'invalid_number'],
+    ['wrong sheet dimensions', (r: ReturnType<typeof valid>) => { r.solutions[0].width_mm = 999; }, 'sheet_width_mismatch'],
+    ['wrong trim', (r: ReturnType<typeof valid>) => { r.solutions[0].trim_mm.left = 9; }, 'trim_mismatch'],
+    ['duplicate sheet index', (r: ReturnType<typeof valid>) => { r.solutions.push({ ...r.solutions[0], placements: [], trim_mm: { ...r.solutions[0].trim_mm } }); }, 'duplicate_sheet_index'],
+    ['non-ok status', (r: ReturnType<typeof valid>) => { r.status = 'error'; }, 'invalid_status'],
+    ['string instance', (r: ReturnType<typeof valid>) => { (r.solutions[0].placements[0] as unknown as { instance: string }).instance = '1'; }, 'invalid_instance'],
+  ])('rejects %s', (_name, mutate, code) => {
+    const response = valid();
+    mutate(response);
+    expect(validateFreecutResponseContract(request, response).map((v) => v.code)).toContain(code);
+  });
+});
 
 describe('film grain -> rotation/pattern mapping (§6)', () => {
   it('textured film forbids rotation and pins pattern along height', () => {

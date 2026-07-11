@@ -161,6 +161,10 @@ export interface CutJobDto {
   editorParams?: CutEditorParamsDto | null;
   /** true when calc inputs changed since last calculate (Codex R4 BLOCKER #1). Absent on list. */
   requiresRecalc?: boolean;
+  /** Geometry check of stored automatic sheets. Present on single-job GET when
+   * frozen calculation params are available; invalid legacy layouts must be
+   * recalculated before entering manual editing. */
+  autoLayoutValidation?: { valid: boolean };
   /** Opaque browser-cache token for render endpoints; absent on list. */
   renderToken?: string;
 }

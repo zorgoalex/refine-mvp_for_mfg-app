@@ -1,23 +1,63 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { InboxOutlined, LinkOutlined, LoadingOutlined, CheckCircleOutlined } from '@ant-design/icons';
-import { Alert, Button, Descriptions, Modal, Radio, Select, Space, Spin, Steps, Typography, Upload, message } from 'antd';
-import type { UploadChangeParam, UploadFile } from 'antd/es/upload';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { InboxOutlined, LinkOutlined, LoadingOutlined, CheckCircleOutlined, MinusOutlined } from '@ant-design/icons';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useSelect } from '@refinedev/antd';
+import { Alert, Button, Descriptions, Input, Modal, Radio, Select, Space, Spin, Steps, Tree, Typography, Upload, message } from 'antd';
 import { ApiError } from '../../api/apiError';
 import { bazisApi } from '../../api/bazisApi';
 import { projectsApi, type ProjectDto } from '../../api/projectsApi';
 import type { BazisImportResponse, BazisProjectCard, BazisProjectListItem, MaterialMapping } from '../../api/types/bazisApi.types';
 import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
+import { MinimizedModalChip } from '../../components/MinimizedModalChip';
+import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
+import { createBackendSelectProps, useOrderFormData } from '../../hooks/useOrderFormData';
 import { MaterialMappingStep, materialMappingKey, type MaterialMappingValue, type UnmappedMaterialRow } from './MaterialMappingStep';
+import { parseXmlPreview, XmlPreviewError, type XmlPreviewBreakdown, type XmlPreviewNode, type XmlPreviewResult } from './parseXmlPreview';
 
 const { Dragger } = Upload;
+
+function collectPreviewExpandKeys(nodes: XmlPreviewNode[], maxDepth: number, depth = 1): number[] {
+  if (depth > maxDepth) return [];
+  return nodes.flatMap((node) =>
+    node.children && node.children.length > 0
+      ? [node.key, ...collectPreviewExpandKeys(node.children, maxDepth, depth + 1)]
+      : []);
+}
+
+function createWizardUuid(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+const SUMMARY_LABELS_RU: Record<string, string> = {
+  totalNodes: 'Всего узлов',
+  panels: 'Панели',
+  hardware: 'Фурнитура',
+  assemblies: 'Сборки',
+  blocks: 'Блоки',
+  uniqueMaterials: 'Уникальных материалов',
+};
+
+const SUMMARY_BREAKDOWN_KEYS: Record<string, keyof XmlPreviewBreakdown> = {
+  totalNodes: 'allNodes',
+  panels: 'panels',
+  hardware: 'hardware',
+  assemblies: 'assemblies',
+  blocks: 'blocks',
+  uniqueMaterials: 'materials',
+};
 const { Text } = Typography;
 
 interface ImportWizardModalProps {
   open: boolean;
+  /** Инкремент = запрос развернуть свёрнутую модалку (кнопка «Импорт XML») */
+  restoreSignal?: number;
   onClose: () => void;
   onImported: () => void;
-  onOpenTree: (revisionId: number, label: string) => void;
-  onCreateOrder: (revisionId: number, label: string) => void;
+  onOpenTree: (revisionId: number, label: string, projectId: number | null) => void;
+  onCreateOrder: (revisionId: number, label: string, projectId: number | null) => void;
 }
 
 type BindingMode = 'bazis' | 'erp' | 'new';
@@ -37,12 +77,17 @@ type StepKey = 'file' | 'binding' | 'import' | 'materials' | 'summary';
 
 export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   open,
+  restoreSignal = 0,
   onClose,
   onImported,
   onOpenTree,
   onCreateOrder,
 }) => {
   const [currentStep, setCurrentStep] = useState<StepKey>('file');
+  const [minimized, setMinimized] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { isActive: isTabActive } = useKeepAlive();
   const [xmlFile, setXmlFile] = useState<File | null>(null);
   const [bindingMode, setBindingMode] = useState<BindingMode>('bazis');
   const [bazisProjects, setBazisProjects] = useState<BazisProjectListItem[]>([]);
@@ -51,12 +96,34 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   const [erpProjectsLoading, setErpProjectsLoading] = useState(false);
   const [selectedBazisProjectId, setSelectedBazisProjectId] = useState<number | undefined>(undefined);
   const [selectedProjectId, setSelectedProjectId] = useState<number | undefined>(undefined);
+  const [preview, setPreview] = useState<XmlPreviewResult | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectClientId, setNewProjectClientId] = useState<number | undefined>(undefined);
+  const [createProjectKey, setCreateProjectKey] = useState<string>(createWizardUuid);
   const [importLoading, setImportLoading] = useState(false);
+  // Гейт повторного запуска импорта БЕЗ участия в deps: importLoading в deps
+  // самого эффекта отменял (cancelled=true) собственный запрос сразу после
+  // setImportLoading(true) → ответ выбрасывался, спиннер зависал навсегда.
+  const importLoadingRef = useRef(false);
   const [importErrorText, setImportErrorText] = useState<string | null>(null);
   const [summary, setSummary] = useState<SummaryState | null>(null);
   const [unmappedMaterials, setUnmappedMaterials] = useState<UnmappedMaterialRow[]>([]);
   const [mappingValues, setMappingValues] = useState<Record<string, MaterialMappingValue>>({});
   const [mappingLoading, setMappingLoading] = useState(false);
+
+  const orderFormData = useOrderFormData();
+  const useBackendReferences = orderFormData.enabled;
+  const { selectProps: legacyClientSelectProps } = useSelect({
+    resource: 'clients',
+    optionLabel: 'client_name',
+    optionValue: 'client_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    queryOptions: { enabled: open && !useBackendReferences && bindingMode === 'new' },
+  });
+  const resolvedClientProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.clients, orderFormData.isLoading)
+    : legacyClientSelectProps;
 
   const steps = useMemo(() => {
     const items: Array<{ key: StepKey; title: string; icon: React.ReactNode }> = [
@@ -75,12 +142,31 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
 
   const currentStepIndex = steps.findIndex((step) => step.key === currentStep);
 
+  useEffect(() => {
+    if (!isTabActive && open && !minimized) {
+      setMinimized(true);
+    }
+  }, [isTabActive, minimized, open]);
+
+  useEffect(() => {
+    if (restoreSignal > 0) {
+      setMinimized(false);
+    }
+  }, [restoreSignal]);
+
   const resetState = useCallback(() => {
+    setMinimized(false);
     setCurrentStep('file');
     setXmlFile(null);
     setBindingMode('bazis');
     setSelectedBazisProjectId(undefined);
     setSelectedProjectId(undefined);
+    setPreview(null);
+    setPreviewError(null);
+    setNewProjectName('');
+    setNewProjectClientId(undefined);
+    setCreateProjectKey(createWizardUuid());
+    importLoadingRef.current = false;
     setImportLoading(false);
     setImportErrorText(null);
     setSummary(null);
@@ -129,8 +215,13 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     };
   }, [open, resetState]);
 
+  // onImported приходит инлайн-лямбдой от родителя (новая ссылка на каждый рендер) —
+  // через ref, чтобы не входить в deps импорт-эффекта и не отменять запрос re-run'ом.
+  const onImportedRef = useRef(onImported);
+  onImportedRef.current = onImported;
+
   useEffect(() => {
-    if (!open || currentStep !== 'import' || importLoading || summary != null || xmlFile == null) {
+    if (!open || currentStep !== 'import' || importLoadingRef.current || summary != null || xmlFile == null) {
       return;
     }
 
@@ -142,30 +233,45 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
       return;
     }
 
-    if (bindingMode === 'new') {
-      setImportErrorText('Создание нового ERP-проекта недоступно в текущем API');
+    if (bindingMode === 'new' && (newProjectClientId == null || !newProjectName.trim())) {
       return;
     }
 
     let cancelled = false;
 
     const runImport = async () => {
+      importLoadingRef.current = true;
       setImportLoading(true);
       setImportErrorText(null);
 
       try {
+        let targetProjectId = selectedProjectId;
+        if (bindingMode === 'new') {
+          // idempotencyKey фиксируется на open: ретрай после падения импорта
+          // не создаст второй проект
+          const created = await projectsApi.create({
+            clientId: newProjectClientId as number,
+            name: newProjectName.trim(),
+            idempotencyKey: createProjectKey,
+          });
+          if (cancelled) {
+            return;
+          }
+          targetProjectId = created.projectId;
+        }
+
         const response = await bazisApi.import(
           xmlFile,
           bindingMode === 'bazis'
             ? { bazisProjectId: selectedBazisProjectId }
-            : { projectId: selectedProjectId },
+            : { projectId: targetProjectId },
         );
         if (cancelled) {
           return;
         }
 
         applyImportResponse(response);
-        onImported();
+        onImportedRef.current();
       } catch (error) {
         if (cancelled) {
           return;
@@ -189,9 +295,8 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
 
         setImportErrorText(formatImportError(error));
       } finally {
-        if (!cancelled) {
-          setImportLoading(false);
-        }
+        importLoadingRef.current = false;
+        setImportLoading(false);
       }
     };
 
@@ -200,11 +305,14 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     return () => {
       cancelled = true;
     };
+    // importLoading/onImported сознательно НЕ в deps: собственный setState не должен
+    // перезапускать эффект и отменять in-flight импорт (deadlock вечного спиннера).
   }, [
     bindingMode,
+    createProjectKey,
     currentStep,
-    importLoading,
-    onImported,
+    newProjectClientId,
+    newProjectName,
     open,
     selectedBazisProjectId,
     selectedProjectId,
@@ -261,11 +369,15 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     onClose();
   };
 
-  const handleFileChange = (info: UploadChangeParam<UploadFile>) => {
-    const nextFile = info.file.originFileObj;
-    if (nextFile instanceof File) {
-      setXmlFile(nextFile);
+  // Клик по маске / Esc НЕ должны терять работу визарда — сворачиваем.
+  // Полное закрытие — только крестик и кнопка «Отмена».
+  const handleCancelEvent = (event: React.MouseEvent | React.KeyboardEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest?.('.ant-modal-close')) {
+      handleClose();
+      return;
     }
+    setMinimized(true);
   };
 
   const handleNext = async () => {
@@ -288,8 +400,14 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
         return;
       }
       if (bindingMode === 'new') {
-        message.error('Создание нового ERP-проекта недоступно в текущем API');
-        return;
+        if (newProjectClientId == null) {
+          message.warning('Выберите клиента нового проекта');
+          return;
+        }
+        if (!newProjectName.trim()) {
+          message.warning('Укажите название проекта');
+          return;
+        }
       }
       setCurrentStep('import');
       return;
@@ -380,14 +498,26 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     );
 
   return (
-    <Modal
-      open={open}
-      onCancel={handleClose}
+    <>
+      <Modal
+      open={open && !minimized}
+      onCancel={handleCancelEvent}
       footer={footer}
       destroyOnClose
       width={920}
-      title="Импорт Bazis XML"
-      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
+      title={(
+        <Space size={8}>
+          <span>Импорт Bazis XML</span>
+          <Button
+            type="text"
+            size="small"
+            icon={<MinusOutlined />}
+            title="Свернуть"
+            onClick={() => setMinimized(true)}
+          />
+        </Space>
+      )}
+      modalRender={(modal) => <DraggableModalWrapper open={open && !minimized}>{modal}</DraggableModalWrapper>}
     >
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
         <Steps current={currentStepIndex} items={steps} />
@@ -398,8 +528,24 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
               accept=".xml"
               multiple={false}
               showUploadList={false}
-              beforeUpload={() => false}
-              onChange={handleFileChange}
+              beforeUpload={(file) => {
+                // antd 5.0.5: при `beforeUpload → false` onChange получает КЛОН File
+                // без originFileObj — файл забираем прямо здесь (паттерн OcrTemplateEditor)
+                setXmlFile(file);
+                setPreview(null);
+                setPreviewError(null);
+                void file.text().then(
+                  (text) => {
+                    try {
+                      setPreview(parseXmlPreview(text));
+                    } catch (error) {
+                      setPreviewError(error instanceof XmlPreviewError ? error.message : 'Не удалось построить предпросмотр');
+                    }
+                  },
+                  () => setPreviewError('Не удалось прочитать файл'),
+                );
+                return false;
+              }}
             >
               <p className="ant-upload-drag-icon">
                 <InboxOutlined />
@@ -407,12 +553,37 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
               <p className="ant-upload-text">Перетащите XML сюда или нажмите для выбора файла</p>
             </Dragger>
             {xmlFile ? <Alert type="success" showIcon message={`Файл выбран: ${xmlFile.name}`} /> : null}
+            {previewError ? <Alert type="warning" showIcon message={previewError} /> : null}
+            {preview ? (
+              <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                <Text strong>
+                  Состав проекта{preview.productName ? ` «${preview.productName}»` : ''} · узлов: {preview.totalNodes}
+                </Text>
+                <Tree<XmlPreviewNode>
+                  treeData={preview.tree}
+                  defaultExpandedKeys={collectPreviewExpandKeys(preview.tree, 2)}
+                  selectable={false}
+                  height={360}
+                  virtual
+                  blockNode
+                />
+              </Space>
+            ) : null}
           </Space>
         ) : null}
 
         {currentStep === 'binding' ? (
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Radio.Group value={bindingMode} onChange={(event) => setBindingMode(event.target.value as BindingMode)}>
+            <Radio.Group
+              value={bindingMode}
+              onChange={(event) => {
+                const mode = event.target.value as BindingMode;
+                setBindingMode(mode);
+                if (mode === 'new' && !newProjectName && preview?.productName) {
+                  setNewProjectName(preview.productName);
+                }
+              }}
+            >
               <Space direction="vertical">
                 <Radio value="bazis">Существующий Базис-проект</Radio>
                 <Radio value="erp">Существующий ERP-проект</Radio>
@@ -453,12 +624,24 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
             ) : null}
 
             {bindingMode === 'new' ? (
-              <Alert
-                type="warning"
-                showIcon
-                message="Создание нового ERP-проекта недоступно"
-                description="В текущем backend-контракте нет POST /api/v1/projects, поэтому этот сценарий нельзя реализовать только фронтендом."
-              />
+              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                <Select
+                  {...resolvedClientProps}
+                  showSearch
+                  allowClear
+                  optionFilterProp="label"
+                  placeholder="Клиент нового проекта"
+                  value={newProjectClientId}
+                  onChange={(value) => setNewProjectClientId(value as number | undefined)}
+                  style={{ width: '100%' }}
+                />
+                <Input
+                  placeholder="Название проекта"
+                  value={newProjectName}
+                  onChange={(event) => setNewProjectName(event.target.value)}
+                  maxLength={300}
+                />
+              </Space>
             ) : null}
           </Space>
         ) : null}
@@ -497,18 +680,36 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
               <Descriptions.Item label="Базис-проект">{summary.bazisProjectName}</Descriptions.Item>
               <Descriptions.Item label="ERP-проект">#{summary.projectId}</Descriptions.Item>
               <Descriptions.Item label="Ревизия">#{summary.revisionNo}</Descriptions.Item>
-              {Object.entries(summary.summary).map(([key, value]) => (
-                <Descriptions.Item key={key} label={key}>
-                  {value}
-                </Descriptions.Item>
-              ))}
+              {Object.entries(summary.summary).map(([key, value]) => {
+                const breakdownKey = SUMMARY_BREAKDOWN_KEYS[key];
+                const items = breakdownKey ? preview?.breakdown?.[breakdownKey] ?? [] : [];
+                return (
+                  <Descriptions.Item key={key} label={SUMMARY_LABELS_RU[key] ?? key}>
+                    <Space size={12}>
+                      <span>{value}</span>
+                      {items.length > 0 ? (
+                        <Select
+                          size="small"
+                          style={{ minWidth: 260, maxWidth: 420 }}
+                          placeholder={`Показать (${items.length})`}
+                          value={null}
+                          showSearch
+                          optionFilterProp="label"
+                          virtual
+                          options={items.map((item, index) => ({ value: `${index}`, label: item }))}
+                        />
+                      ) : null}
+                    </Space>
+                  </Descriptions.Item>
+                );
+              })}
             </Descriptions>
 
             <Space wrap>
-              <Button onClick={() => onOpenTree(summary.revisionId, buildRevisionLabel(summary))}>
+              <Button onClick={() => onOpenTree(summary.revisionId, buildRevisionLabel(summary), summary.projectId)}>
                 Открыть дерево
               </Button>
-              <Button type="primary" onClick={() => onCreateOrder(summary.revisionId, buildRevisionLabel(summary))}>
+              <Button type="primary" onClick={() => onCreateOrder(summary.revisionId, buildRevisionLabel(summary), summary.projectId)}>
                 Создать заказ
               </Button>
               <Button onClick={handleClose}>Закрыть</Button>
@@ -517,6 +718,20 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
         ) : null}
       </Space>
     </Modal>
+      {open && minimized ? (
+        <MinimizedModalChip
+          title={`Импорт Bazis XML · ${steps[currentStepIndex]?.title ?? ''}`}
+          slot={0}
+          onRestore={() => {
+            if (location.pathname !== '/bazis') {
+              navigate('/bazis');
+            }
+            setMinimized(false);
+          }}
+          onClose={handleClose}
+        />
+      ) : null}
+    </>
   );
 };
 

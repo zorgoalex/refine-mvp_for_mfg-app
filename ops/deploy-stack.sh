@@ -9,6 +9,7 @@ PULL=1
 BUILD=1
 FORCE_RECREATE=0
 SKIP_CHECK=0
+BUILD_ONLY=0
 ENV_FILE_ARG_SET=0
 COMPOSE_FILE_ARG_SET=0
 
@@ -20,7 +21,7 @@ Deploy or update the ERP VPS Docker stack.
 
 Usage:
   ops/deploy-stack.sh [--project-dir PATH] [--env-file PATH] [--compose-file PATH] [--no-pull]
-                      [--no-build] [--force-recreate] [--skip-check]
+                      [--no-build] [--build-only] [--force-recreate] [--skip-check]
 EOF
 }
 
@@ -40,6 +41,7 @@ while [[ $# -gt 0 ]]; do
     --compose-file) COMPOSE_FILE="$2"; COMPOSE_FILE_ARG_SET=1; shift 2 ;;
     --no-pull) PULL=0; shift ;;
     --no-build) BUILD=0; shift ;;
+    --build-only) BUILD_ONLY=1; shift ;;
     --force-recreate) FORCE_RECREATE=1; shift ;;
     --skip-check) SKIP_CHECK=1; shift ;;
     --help|-h) usage; exit 0 ;;
@@ -82,6 +84,13 @@ cd "$PROJECT_DIR"
 if [[ "$PULL" == "1" ]]; then
   log "Pulling base images"
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull traefik postgresdb hasura_metadata_db hasura
+fi
+
+if [[ "$BUILD_ONLY" == "1" ]]; then
+  [[ "$BUILD" == "1" ]] || fail "--build-only cannot be combined with --no-build"
+  log "Building source images"
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build
+  exit 0
 fi
 
 up_args=(up -d)

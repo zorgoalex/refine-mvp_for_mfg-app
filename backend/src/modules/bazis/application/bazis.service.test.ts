@@ -153,6 +153,25 @@ describe('BazisService', () => {
     expect(repository.listMaterialMappings).not.toHaveBeenCalled();
   });
 
+  describe('viewer reads', () => {
+    it.each([
+      ['getNodeCard', (service: BazisService, user: CurrentUser) => service.getNodeCard(user, 555)],
+      ['searchNodes', (service: BazisService, user: CurrentUser) =>
+        service.searchNodes(user, 82, { q: 'шкаф', objectType: null, limit: 50 })],
+      ['getMaterialsSummary', (service: BazisService, user: CurrentUser) =>
+        service.getMaterialsSummary(user, 82)],
+      ['listRevisionOrders', (service: BazisService, user: CurrentUser) =>
+        service.listRevisionOrders(user, 82)],
+      ['getFullTree', (service: BazisService, user: CurrentUser) =>
+        service.getFullTree(user, 82)],
+      ['getRevisionEstimate', (service: BazisService, user: CurrentUser) =>
+        service.getRevisionEstimate(user, 82)],
+    ])('%s requires bazis.view', async (_name, call) => {
+      await expect(call(createService(), managerUser())).rejects.toMatchObject({ statusCode: 403 });
+      await expect(call(createService(), viewerUser())).resolves.toBeDefined();
+    });
+  });
+
   it('streams sha256 and gzip from disk, parses once, and delegates importRevision', async () => {
     const repository = createRepository();
     const service = new BazisService({ repository });
@@ -272,6 +291,35 @@ describe('BazisService', () => {
     expect(repository.importRevision).not.toHaveBeenCalled();
   });
 
+  it('requires bazis.manage for deleteProject', async () => {
+    const repository = createRepository();
+    const service = new BazisService({ repository });
+
+    await expect(
+      service.deleteProject(viewerUser(), 'req-delete', 41),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['bazis.manage'] },
+    } satisfies Partial<ApiError>);
+
+    expect(repository.deleteProject).not.toHaveBeenCalled();
+  });
+
+  it('delegates deleteProject when bazis.manage is present', async () => {
+    const repository = createRepository();
+    const service = new BazisService({ repository });
+
+    const result = await service.deleteProject(bazisManager(), 'req-delete', 41);
+
+    expect(result).toMatchObject({ bazisProjectId: 41, revisionsDeleted: 2 });
+    expect(repository.deleteProject).toHaveBeenCalledWith({
+      currentUser: bazisManager(),
+      requestId: 'req-delete',
+      bazisProjectId: 41,
+    });
+  });
+
   it('requires bazis.manage for createOrderFromRevision', async () => {
     const repository = createRepository();
     const service = new BazisService({ repository });
@@ -347,6 +395,48 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
       revisions: [],
     }),
     getTreeChildren: vi.fn().mockResolvedValue([]),
+    listAllTreeNodes: vi.fn().mockResolvedValue([]),
+    getRevisionEstimate: vi.fn().mockResolvedValue({ materials: [], operations: [] }),
+    getNodeCard: vi.fn().mockResolvedValue({
+      bazisNodeId: 555,
+      revisionId: 82,
+      bazisProjectId: 1,
+      projectId: 1,
+      revisionNo: 2,
+      parentNodeId: null,
+      seq: 1,
+      nodeKind: 'detail',
+      objectType: 'Шкаф',
+      name: 'Узел',
+      detailCode: null,
+      position: null,
+      designation: null,
+      quantity: 1,
+      cumulativeQuantity: 1,
+      lengthMm: null,
+      widthMm: null,
+      heightMm: null,
+      thicknessMm: null,
+      price: null,
+      isRectangular: null,
+      textureOrientation: null,
+      mainMaterialName: null,
+      childrenCount: 0,
+      rawJson: {},
+      orderLinks: [],
+    }),
+    searchNodes: vi.fn().mockResolvedValue({
+      items: [],
+      totalMatched: 0,
+    }),
+    getMaterialsSummary: vi.fn().mockResolvedValue({
+      summary: {},
+      panelsByMaterial: [],
+      hardwareByName: [],
+      edgesByName: [],
+      filmsByName: [],
+    }),
+    listRevisionOrders: vi.fn().mockResolvedValue([]),
     listMaterialMappings: vi.fn().mockResolvedValue([]),
     upsertMaterialMappings: vi.fn().mockResolvedValue([]),
     createOrderFromRevision: vi.fn().mockResolvedValue({
@@ -356,8 +446,19 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
       mappedNodes: 0,
       requestId: 'req-order',
     }),
+    deleteProject: vi.fn().mockResolvedValue({
+      bazisProjectId: 41,
+      projectId: 77,
+      name: 'Шкаф Nova',
+      revisionsDeleted: 2,
+      nodesDeleted: 639,
+    }),
     ...overrides,
   };
+}
+
+function createService(repository: BazisRepositoryPort = createRepository()): BazisService {
+  return new BazisService({ repository });
 }
 
 async function writeFixtureFile(dir: string, name: string, contents: string): Promise<string> {

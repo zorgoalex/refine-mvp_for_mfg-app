@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const script = resolve(__dirname, 'up-all.sh');
+const source = readFileSync(script, 'utf8');
+const setupSource = readFileSync(resolve(__dirname, 'setup-vps.sh'), 'utf8');
+const composeSource = readFileSync(resolve(__dirname, 'templates/docker-compose.vps.yml'), 'utf8');
 function run(args: string[]) {
   return execFileSync('bash', [script, ...args], { encoding: 'utf8' });
 }
@@ -10,7 +14,7 @@ function run(args: string[]) {
 describe('up-all.sh provision', () => {
   it('--dry-run prints the ordered plan and runs nothing destructive', () => {
     const out = run(['provision', '--dry-run']);
-    expect(out).toMatch(/ensure-build-repos/);
+    expect(out).toMatch(/update-build-repos/);
     expect(out).toMatch(/check-env/);
     expect(out).toMatch(/server-storage/);
     expect(out).toMatch(/compose up/);
@@ -31,5 +35,28 @@ describe('up-all.sh provision', () => {
 
   it('rejects an unknown provision flag', () => {
     expect(() => run(['provision', '--bogus', '--dry-run'])).toThrow();
+  });
+
+  it('updates and verifies build repositories before provision builds', () => {
+    expect(source).toMatch(/ensure-build-repos\.sh" --update[\s\S]*compose up -d --build/);
+  });
+
+  it('updates Freecut before rebuilding it, including a multi-service rebuild', () => {
+    expect(source).toMatch(/for service in "\$@"[\s\S]*--update --only repo_freecut[\s\S]*compose build "\$@"[\s\S]*verify_freecut_sha[\s\S]*compose up -d --no-build --no-deps/);
+  });
+
+  it('holds a deployment lock and re-verifies Freecut after build', () => {
+    expect(source).toContain('.freecut-deploy.lock');
+    expect(source).toMatch(/flock 9[\s\S]*compose build[\s\S]*verify_freecut_sha/);
+  });
+
+  it('setup-vps updates and verifies Freecut under the same deployment lock', () => {
+    expect(setupSource).toMatch(/flock 9[\s\S]*ensure_freecut_repo_if_missing[\s\S]*run_deploy[\s\S]*Freecut build source verified/);
+    expect(setupSource).toMatch(/remote get-url origin[\s\S]*FREECUT_REPO_URL/);
+  });
+
+  it('fixes compose Freecut build context to the verified checkout', () => {
+    expect(composeSource).toMatch(/freecut:[\s\S]*build:[\s\S]*context: \.\/repo_freecut/);
+    expect(composeSource).not.toContain('FREECUT_BUILD_CONTEXT');
   });
 });

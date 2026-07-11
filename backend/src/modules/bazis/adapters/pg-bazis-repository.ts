@@ -9,12 +9,20 @@ import type { SaveOrderDetailDto, SaveOrderDto } from '../../orders/dto/save-ord
 import type {
   BazisRepositoryPort,
   CreateOrderFromRevisionCommand,
+  DeleteBazisProjectInput,
   ImportRevisionCommand,
 } from '../application/bazis.types';
 import type {
+  BazisRevisionEstimateDto,
   BazisImportResponseDto,
+  BazisProjectDeleteResponseDto,
+  BazisNodeCardDto,
+  BazisNodeSearchItemDto,
+  BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
+  BazisRevisionMaterialsSummaryDto,
+  BazisRevisionOrderDto,
   BazisTreeNodeDto,
   CreateOrderFromRevisionResponseDto,
   MaterialMappingDto,
@@ -25,7 +33,9 @@ import {
   BazisUnmappedMaterialsError,
   BazisIdempotencyInProgressError,
   BazisIdempotencyKeyReusedError,
+  BazisNodeNotFoundError,
   BazisNoPanelsSelectedError,
+  BazisProjectHasOrdersError,
   BazisProjectNotFoundError,
   BazisRevisionNotFoundError,
   BazisReferenceNotFoundError,
@@ -33,8 +43,25 @@ import {
 } from '../errors/bazis.errors';
 
 const SOURCE = 'backend-bazis-command';
+export const MAX_BAZIS_REVISIONS_PER_PROJECT = 3;
 const COMMAND_NAME = 'bazis.create_order';
 const STALE_PROCESSING_MS = 10 * 60 * 1000;
+
+interface PruneCandidateRow {
+  bazis_revision_id: number | string;
+  revision_no: number | string;
+  file_name: string | null;
+  file_size: number | string | null;
+  xml_sha256: string;
+  bazis_version: string | null;
+  product_name: string | null;
+  product_price: number | string | null;
+  summary_json: Record<string, unknown> | null;
+  imported_by: number | string | null;
+  imported_at: string | null;
+  request_id: string | null;
+  nodes_count: number | string;
+}
 
 interface ProjectListRow {
   bazis_project_id: number | string;
@@ -115,6 +142,53 @@ interface SelectedPanelRow {
   raw_json: Record<string, unknown> | null;
 }
 
+interface NodeCardRow {
+  bazis_node_id: number | string;
+  revision_id: number | string;
+  parent_node_id: number | string | null;
+  seq: number | string;
+  node_kind: string;
+  object_type: string | null;
+  name: string | null;
+  detail_code: string | null;
+  position: string | null;
+  designation: string | null;
+  quantity: number | string | null;
+  cumulative_quantity: number | string | null;
+  length_mm: number | string | null;
+  width_mm: number | string | null;
+  height_mm: number | string | null;
+  thickness_mm: number | string | null;
+  price: number | string | null;
+  is_rectangular: boolean | null;
+  texture_orientation: string | null;
+  main_material_name: string | null;
+  raw_json: Record<string, unknown> | null;
+  children_count: number | string;
+  bazis_project_id: number | string;
+  revision_no: number | string;
+  project_id: number | string;
+}
+
+interface SearchRow {
+  bazis_node_id: number | string;
+  node_kind: string;
+  object_type: string | null;
+  name: string | null;
+  position: string | null;
+  designation: string | null;
+  main_material_name: string | null;
+  ancestor_id: number | string;
+  ancestor_name: string | null;
+  depth: number | string;
+}
+
+interface NodeOrderLinkRow {
+  order_id: number | string;
+  order_detail_id: number | string | null;
+  mapping_kind: string;
+}
+
 interface MaterialLookupRow {
   source_kind: string;
   name: string;
@@ -122,6 +196,35 @@ interface MaterialLookupRow {
   sheet_material_type_id: number | string | null;
   film_id: number | string | null;
   edge_type_id: number | string | null;
+}
+
+interface PanelsSummaryRow {
+  sheet_material_type_name?: string | null;
+  main_material_name: string | null;
+  panel_count: number | string;
+  total_quantity: number | string;
+  total_area_m2: number | string;
+  target_kind: string | null;
+  sheet_material_type_id: number | string | null;
+}
+
+interface HardwareSummaryRow {
+  name: string | null;
+  total_quantity: number | string;
+}
+
+interface RawUsageRow {
+  total_length_mm?: string | number | null;
+  name: string;
+  usage_count: number | string;
+}
+
+interface RevisionOrderRow {
+  order_id: number | string;
+  order_name: string | null;
+  created_at: string;
+  nodes_mapped: number | string;
+  details_created: number | string;
 }
 
 export class PgBazisRepository implements BazisRepositoryPort {
@@ -378,6 +481,139 @@ export class PgBazisRepository implements BazisRepositoryPort {
         [command.fileName, command.xmlSha256, revisionId, numericUserId(command.currentUser), requestId],
       );
 
+      // Retention: храним максимум MAX_BAZIS_REVISIONS_PER_PROJECT последних
+      // ревизий; более старые удаляются жёстко, КРОМЕ ревизий, из которых
+      // созданы заказы (provenance деталей не разрушаем). Порядок локов
+      // общий с create-order-хуком: revision (FOR UPDATE) → nodes (cascade);
+      // links перепроверяются ПОСЛЕ захвата локов свежим снапшотом — окно
+      // «link появился между выборкой и удалением» закрыто (Critic R1-1).
+      const pruneCandidates = await tx.query<PruneCandidateRow>(
+        `
+        WITH prune_keep AS (
+          SELECT bazis_revision_id
+          FROM bazis_project_revisions
+          WHERE bazis_project_id = $1
+          ORDER BY revision_no DESC
+          LIMIT ${MAX_BAZIS_REVISIONS_PER_PROJECT}
+        )
+        SELECT r.bazis_revision_id, r.revision_no, r.file_name, r.file_size,
+               r.xml_sha256, r.bazis_version, r.product_name, r.product_price,
+               r.summary_json, r.imported_by, r.imported_at, r.request_id,
+               (SELECT count(*) FROM bazis_nodes n
+                WHERE n.revision_id = r.bazis_revision_id)::int AS nodes_count
+        FROM bazis_project_revisions r
+        WHERE r.bazis_project_id = $1
+          AND r.bazis_revision_id NOT IN (SELECT bazis_revision_id FROM prune_keep)
+        ORDER BY r.revision_no
+        FOR UPDATE OF r
+        `,
+        [bazisProjectId],
+      );
+
+      if (pruneCandidates.rows.length > 0) {
+        const candidateIds = pruneCandidates.rows.map((row) => Number(row.bazis_revision_id));
+        const linked = await tx.query<{ revision_id: number | string }>(
+          `
+          SELECT DISTINCT revision_id
+          FROM bazis_order_links
+          WHERE revision_id = ANY($1::bigint[])
+          `,
+          [candidateIds],
+        );
+        const protectedIds = new Set(linked.rows.map((row) => Number(row.revision_id)));
+        const prunable = pruneCandidates.rows.filter(
+          (row) => !protectedIds.has(Number(row.bazis_revision_id)),
+        );
+
+        if (prunable.length > 0) {
+          const prunedIds = prunable.map((row) => Number(row.bazis_revision_id));
+          await tx.query(
+            `
+            DELETE FROM bazis_import_runs
+            WHERE revision_id = ANY($1::bigint[])
+            `,
+            [prunedIds],
+          );
+          await tx.query(
+            `
+            DELETE FROM bazis_project_revisions
+            WHERE bazis_revision_id = ANY($1::bigint[])
+            `,
+            [prunedIds],
+          );
+
+          for (const row of prunable) {
+            const prunedRevisionId = Number(row.bazis_revision_id);
+            const prunedRevisionNo = Number(row.revision_no);
+            await auditService.record(tx, {
+              event: 'bazis.revision_pruned',
+              entityType: 'bazis_revision',
+              entityId: String(prunedRevisionId),
+              actorUserId: command.currentUser.id,
+              actorUsername: command.currentUser.username,
+              actorRole: command.currentUser.role,
+              requestId,
+              source: SOURCE,
+              relatedEntities: [
+                { entityType: 'project', entityId: projectId ?? 0 },
+                { entityType: 'bazis_project', entityId: bazisProjectId },
+                { entityType: 'bazis_revision', entityId: prunedRevisionId },
+              ],
+              // Hard delete: before-снапшот несёт все метаданные ревизии,
+              // кроме raw_xml (мегабайты gzip в diff_json не кладём).
+              before: {
+                revisionId: prunedRevisionId,
+                revisionNo: prunedRevisionNo,
+                fileName: row.file_name,
+                fileSize: nullableNumber(row.file_size),
+                xmlSha256: row.xml_sha256,
+                bazisVersion: row.bazis_version,
+                productName: row.product_name,
+                productPrice: nullableNumber(row.product_price),
+                summary: row.summary_json ?? {},
+                importedBy: nullableNumber(row.imported_by),
+                importedAt: row.imported_at,
+                importRequestId: row.request_id,
+                nodesCount: Number(row.nodes_count ?? 0),
+              },
+              after: {},
+              metadata: {
+                source: SOURCE,
+                action: 'bazis_revision_prune',
+                requestId,
+                keepLast: MAX_BAZIS_REVISIONS_PER_PROJECT,
+                triggeredByRevisionId: revisionId,
+              },
+            });
+            await tx.query(
+              `
+              INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+              VALUES ($1,$2,$3,$4::jsonb,$5)
+              ON CONFLICT (idempotency_key) DO NOTHING
+              `,
+              [
+                'bazis.revision_pruned',
+                'bazis_revision',
+                String(prunedRevisionId),
+                JSON.stringify({
+                  eventType: 'bazis.revision_pruned',
+                  revisionId: prunedRevisionId,
+                  revisionNo: prunedRevisionNo,
+                  bazisProjectId,
+                  projectId,
+                  actorUserId: command.currentUser.id,
+                  requestId,
+                }),
+                `bazis-revision-pruned-${prunedRevisionId}`,
+              ],
+            );
+            warnings.push(
+              `Ревизия №${prunedRevisionNo} удалена: хранятся только ${MAX_BAZIS_REVISIONS_PER_PROJECT} последних ревизии`,
+            );
+          }
+        }
+      }
+
       return {
         bazisProject: {
           bazisProjectId,
@@ -419,6 +655,125 @@ export class PgBazisRepository implements BazisRepositoryPort {
           requestIdOrFallback(input.requestId, 'bazis-import'),
         ],
       );
+    });
+  }
+
+  async deleteProject(input: DeleteBazisProjectInput): Promise<BazisProjectDeleteResponseDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, input.currentUser.id);
+      const requestId = requestIdOrFallback(input.requestId, 'bazis-delete');
+      const bazisProjectId = input.bazisProjectId;
+
+      const existing = await tx.query<{ bazis_project_id: number | string; project_id: number | string; name: string }>(
+        `
+        SELECT bazis_project_id, project_id, name
+        FROM bazis_projects
+        WHERE bazis_project_id = $1
+        FOR UPDATE
+        `,
+        [bazisProjectId],
+      );
+      if (existing.rows.length === 0) {
+        throw new BazisProjectNotFoundError(bazisProjectId);
+      }
+      const projectId = Number(existing.rows[0].project_id);
+      const name = existing.rows[0].name;
+
+      const links = await tx.query<{ order_id: number | string }>(
+        `
+        SELECT order_id
+        FROM bazis_order_links
+        WHERE bazis_project_id = $1
+        ORDER BY order_id
+        `,
+        [bazisProjectId],
+      );
+      if (links.rows.length > 0) {
+        throw new BazisProjectHasOrdersError(links.rows.map((row) => Number(row.order_id)));
+      }
+
+      const counts = await tx.query<{ revisions_count: number | string; nodes_count: number | string }>(
+        `
+        SELECT (SELECT count(*) FROM bazis_project_revisions WHERE bazis_project_id = $1)::int AS revisions_count,
+               (SELECT count(*)
+                FROM bazis_nodes n
+                JOIN bazis_project_revisions r ON r.bazis_revision_id = n.revision_id
+                WHERE r.bazis_project_id = $1)::int AS nodes_count
+        `,
+        [bazisProjectId],
+      );
+      const revisionsDeleted = Number(counts.rows[0]?.revisions_count ?? 0);
+      const nodesDeleted = Number(counts.rows[0]?.nodes_count ?? 0);
+
+      // bazis_import_runs.revision_id без CASCADE — снять до ревизий.
+      await tx.query(
+        `
+        DELETE FROM bazis_import_runs
+        WHERE revision_id IN (SELECT bazis_revision_id FROM bazis_project_revisions WHERE bazis_project_id = $1)
+        `,
+        [bazisProjectId],
+      );
+      // bazis_nodes и bazis_node_order_detail_map уходят каскадом от ревизий.
+      await tx.query(
+        `
+        DELETE FROM bazis_project_revisions
+        WHERE bazis_project_id = $1
+        `,
+        [bazisProjectId],
+      );
+      await tx.query(
+        `
+        DELETE FROM bazis_projects
+        WHERE bazis_project_id = $1
+        `,
+        [bazisProjectId],
+      );
+
+      await auditService.record(tx, {
+        event: 'bazis.project_deleted',
+        entityType: 'bazis_project',
+        entityId: String(bazisProjectId),
+        actorUserId: input.currentUser.id,
+        actorUsername: input.currentUser.username,
+        actorRole: input.currentUser.role,
+        requestId,
+        source: SOURCE,
+        relatedEntities: [
+          { entityType: 'project', entityId: projectId },
+          { entityType: 'bazis_project', entityId: bazisProjectId },
+        ],
+        before: { bazisProjectId, projectId, name, revisionsDeleted, nodesDeleted },
+        after: {},
+        metadata: {
+          source: SOURCE,
+          action: 'bazis_project_delete',
+          requestId,
+        },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1,$2,$3,$4::jsonb,$5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          'bazis.project_deleted',
+          'bazis_project',
+          String(bazisProjectId),
+          JSON.stringify({
+            eventType: 'bazis.project_deleted',
+            bazisProjectId,
+            projectId,
+            name,
+            actorUserId: input.currentUser.id,
+            requestId,
+          }),
+          `bazis-project-deleted-${bazisProjectId}`,
+        ],
+      );
+
+      return { bazisProjectId, projectId, name, revisionsDeleted, nodesDeleted };
     });
   }
 
@@ -514,8 +869,78 @@ export class PgBazisRepository implements BazisRepositoryPort {
       [revisionId, parentNodeId],
     );
 
-    return result.rows.map((row) => ({
+    if (result.rows.length === 0) {
+      // Пустой результат ПОСЛЕ чтения: либо легитимно пустой контейнер, либо
+      // ревизию удалил retention-prune. Проверка существования вторым
+      // statement'ом (свежий снапшот READ COMMITTED) закрывает TOCTOU: prune,
+      // закоммитившийся между чтениями, даёт 404, а не тихое пустое дерево
+      // (Critic R1-3/R2). Непустой результат существование доказывает сам.
+      await this.assertRevisionExists(revisionId);
+    }
+
+    return result.rows.map(mapTreeNodeRow);
+  }
+
+  async listAllTreeNodes(revisionId: number): Promise<BazisTreeNodeDto[]> {
+    await this.assertRevisionExists(revisionId);
+
+    const result = await this.database.query<TreeNodeRow>(
+      `
+      SELECT n.bazis_node_id, n.parent_node_id, n.seq, n.node_kind, n.object_type, n.name,
+             n.detail_code, n.position, n.quantity, n.cumulative_quantity,
+             n.length_mm, n.width_mm, n.thickness_mm, n.main_material_name,
+             (SELECT count(*) FROM bazis_nodes c
+              WHERE c.parent_node_id = n.bazis_node_id
+                AND c.revision_id = n.revision_id)::int AS children_count
+      FROM bazis_nodes n
+      WHERE n.revision_id = $1
+      ORDER BY n.parent_node_id NULLS FIRST, n.seq
+      `,
+      [revisionId],
+    );
+
+    return result.rows.map(mapTreeNodeRow);
+  }
+
+  async getNodeCard(nodeId: number): Promise<BazisNodeCardDto> {
+    const nodeResult = await this.database.query<NodeCardRow>(
+      `
+      SELECT n.bazis_node_id, n.revision_id, n.parent_node_id, n.seq, n.node_kind, n.object_type,
+             n.name, n.detail_code, n.position, n.designation, n.quantity, n.cumulative_quantity,
+             n.length_mm, n.width_mm, n.height_mm, n.thickness_mm, n.price, n.is_rectangular,
+             n.texture_orientation, n.main_material_name, n.raw_json,
+             (SELECT count(*) FROM bazis_nodes c
+              WHERE c.parent_node_id = n.bazis_node_id
+                AND c.revision_id = n.revision_id)::int AS children_count,
+             r.bazis_project_id, r.revision_no, bp.project_id
+      FROM bazis_nodes n
+      JOIN bazis_project_revisions r ON r.bazis_revision_id = n.revision_id
+      JOIN bazis_projects bp ON bp.bazis_project_id = r.bazis_project_id
+      WHERE n.bazis_node_id = $1
+      `,
+      [nodeId],
+    );
+    if (nodeResult.rows.length === 0) {
+      throw new BazisNodeNotFoundError(nodeId);
+    }
+
+    const links = await this.database.query<NodeOrderLinkRow>(
+      `
+      SELECT m.order_id, m.order_detail_id, m.mapping_kind
+      FROM bazis_node_order_detail_map m
+      WHERE m.node_id = $1
+      ORDER BY m.order_id DESC
+      `,
+      [nodeId],
+    );
+
+    const row = nodeResult.rows[0];
+    return {
       bazisNodeId: Number(row.bazis_node_id),
+      revisionId: Number(row.revision_id),
+      bazisProjectId: Number(row.bazis_project_id),
+      projectId: Number(row.project_id),
+      revisionNo: Number(row.revision_no),
       parentNodeId: nullableNumber(row.parent_node_id),
       seq: Number(row.seq),
       nodeKind: row.node_kind,
@@ -523,14 +948,360 @@ export class PgBazisRepository implements BazisRepositoryPort {
       name: row.name,
       detailCode: row.detail_code,
       position: row.position,
+      designation: row.designation,
       quantity: nullableNumber(row.quantity),
       cumulativeQuantity: nullableNumber(row.cumulative_quantity),
       lengthMm: nullableNumber(row.length_mm),
       widthMm: nullableNumber(row.width_mm),
+      heightMm: nullableNumber(row.height_mm),
       thicknessMm: nullableNumber(row.thickness_mm),
+      price: nullableNumber(row.price),
+      isRectangular: row.is_rectangular ?? null,
+      textureOrientation: row.texture_orientation,
       mainMaterialName: row.main_material_name,
       childrenCount: Number(row.children_count),
+      rawJson: (row.raw_json ?? {}) as Record<string, unknown>,
+      orderLinks: links.rows.map((link) => ({
+        orderId: Number(link.order_id),
+        orderDetailId: nullableNumber(link.order_detail_id),
+        mappingKind: link.mapping_kind,
+      })),
+    };
+  }
+
+  async searchNodes(input: {
+    revisionId: number;
+    q: string | null;
+    objectType: string | null;
+    limit: number;
+  }): Promise<BazisNodeSearchResponseDto> {
+    await this.assertRevisionExists(input.revisionId);
+
+    const pattern = input.q == null
+      ? null
+      : `%${input.q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+
+    const matchPredicate = `
+      n.revision_id = $1
+      AND ($2::text IS NULL OR n.object_type = $2)
+      AND ($3::text IS NULL
+        OR n.name ILIKE $3 OR n.detail_code ILIKE $3 OR n.position ILIKE $3
+        OR n.designation ILIKE $3 OR n.main_material_name ILIKE $3)
+    `;
+
+    const countResult = await this.database.query<{ total: number }>(
+      `SELECT count(*)::int AS total FROM bazis_nodes n WHERE ${matchPredicate}`,
+      [input.revisionId, input.objectType, pattern],
+    );
+
+    const result = await this.database.query<SearchRow>(
+      `
+      WITH RECURSIVE matches AS (
+        SELECT n.bazis_node_id, n.node_kind, n.object_type, n.name, n.position,
+               n.designation, n.main_material_name, n.seq
+        FROM bazis_nodes n
+        WHERE ${matchPredicate}
+        ORDER BY n.bazis_node_id
+        LIMIT $4
+      ),
+      ancestry AS (
+        SELECT m.bazis_node_id AS match_id, n.bazis_node_id, n.parent_node_id,
+               n.name, n.object_type, n.node_kind, 0 AS depth,
+               ARRAY[n.bazis_node_id] AS visited
+        FROM matches m
+        JOIN bazis_nodes n ON n.bazis_node_id = m.bazis_node_id
+        UNION ALL
+        SELECT a.match_id, p.bazis_node_id, p.parent_node_id,
+               p.name, p.object_type, p.node_kind, a.depth + 1,
+               a.visited || p.bazis_node_id
+        FROM ancestry a
+        JOIN bazis_nodes p ON p.bazis_node_id = a.parent_node_id
+        WHERE p.revision_id = $1
+          AND NOT p.bazis_node_id = ANY(a.visited)
+          AND a.depth < 100
+      )
+      SELECT m.bazis_node_id, m.node_kind, m.object_type, m.name, m.position,
+             m.designation, m.main_material_name,
+             a.bazis_node_id AS ancestor_id, a.name AS ancestor_name, a.depth
+      FROM matches m
+      JOIN ancestry a ON a.match_id = m.bazis_node_id
+      ORDER BY m.bazis_node_id, a.depth DESC
+      `,
+      [input.revisionId, input.objectType, pattern, input.limit],
+    );
+
+    const itemsById = new Map<number, BazisNodeSearchItemDto>();
+    for (const row of result.rows) {
+      const matchId = Number(row.bazis_node_id);
+      let item = itemsById.get(matchId);
+      if (!item) {
+        item = {
+          bazisNodeId: matchId,
+          nodeKind: row.node_kind,
+          objectType: row.object_type,
+          name: row.name,
+          position: row.position,
+          designation: row.designation,
+          mainMaterialName: row.main_material_name,
+          pathNodeIds: [],
+          pathTitles: [],
+        };
+        itemsById.set(matchId, item);
+      }
+      // depth DESC → первым приходит корень; depth 0 — сам узел, в путь не входит
+      if (Number(row.depth) > 0) {
+        item.pathNodeIds.push(Number(row.ancestor_id));
+        item.pathTitles.push(row.ancestor_name);
+      }
+    }
+
+    return { items: [...itemsById.values()], totalMatched: Number(countResult.rows[0]?.total ?? 0) };
+  }
+
+  async getMaterialsSummary(revisionId: number): Promise<BazisRevisionMaterialsSummaryDto> {
+    const revision = await this.database.query<{ summary_json: Record<string, number> | null }>(
+      `SELECT summary_json FROM bazis_project_revisions WHERE bazis_revision_id = $1`,
+      [revisionId],
+    );
+    if (revision.rows.length === 0) {
+      throw new BazisRevisionNotFoundError(revisionId);
+    }
+
+    const panels = await this.database.query<PanelsSummaryRow>(
+      `
+      SELECT n.main_material_name,
+             count(*)::int AS panel_count,
+             COALESCE(SUM(COALESCE(n.cumulative_quantity, n.quantity, 1)), 0)::float8 AS total_quantity,
+             (COALESCE(SUM(COALESCE(n.length_mm, 0) * COALESCE(n.width_mm, 0)
+               * COALESCE(n.cumulative_quantity, n.quantity, 1)), 0) / 1000000.0)::float8 AS total_area_m2,
+             mm.target_kind, mm.sheet_material_type_id,
+             smt.name AS sheet_material_type_name
+      FROM bazis_nodes n
+      LEFT JOIN bazis_material_mappings mm
+        ON mm.source_kind = 'sheet' AND lower(mm.bazis_name) = lower(n.main_material_name)
+      LEFT JOIN sheet_material_types smt
+        ON smt.sheet_material_type_id = mm.sheet_material_type_id
+      WHERE n.revision_id = $1 AND n.object_type = 'Панель'
+      GROUP BY n.main_material_name, mm.target_kind, mm.sheet_material_type_id, smt.name
+      ORDER BY panel_count DESC, n.main_material_name
+      `,
+      [revisionId],
+    );
+
+    const hardware = await this.database.query<HardwareSummaryRow>(
+      `
+      SELECT n.name,
+             COALESCE(SUM(COALESCE(n.cumulative_quantity, n.quantity, 1)), 0)::float8 AS total_quantity
+      FROM bazis_nodes n
+      WHERE n.revision_id = $1 AND n.object_type = 'Фурнитура'
+      GROUP BY n.name
+      ORDER BY total_quantity DESC, n.name
+      `,
+      [revisionId],
+    );
+
+    // raw_json — plain jsonb без shape-constraint: legacy/битая строка не должна
+    // валить весь endpoint (Critic R1). Каждый источник — под jsonb_typeof-guard.
+    const jsonArrayOrEmpty = (expression: string): string =>
+      `CASE WHEN jsonb_typeof(${expression}) = 'array' THEN ${expression} ELSE '[]'::jsonb END`;
+
+    const edges = await this.database.query<RawUsageRow>(
+      `
+      SELECT e.elem->>'Наименование' AS name, count(*)::int AS usage_count,
+             SUM(
+               CASE WHEN e.elem->>'Длина' ~ '^[0-9]+([.,][0-9]+)?$'
+                    THEN replace(e.elem->>'Длина', ',', '.')::numeric
+                    ELSE 0 END
+             )::float8 AS total_length_mm
+      FROM bazis_nodes n
+      CROSS JOIN LATERAL (
+        SELECT jsonb_array_elements(
+          ${jsonArrayOrEmpty(`n.raw_json->'СписокКромок1'->'Кромка'`)}
+          || ${jsonArrayOrEmpty(`n.raw_json->'СписокКромок2'->'Кромка'`)}
+          || ${jsonArrayOrEmpty(`n.raw_json->'СписокКромок3'->'Кромка'`)}
+          || ${jsonArrayOrEmpty(`n.raw_json->'СписокКромок4'->'Кромка'`)}
+        ) AS elem
+      ) e
+      WHERE n.revision_id = $1
+        AND COALESCE(e.elem->>'Наименование', '') <> ''
+      GROUP BY 1
+      ORDER BY usage_count DESC, name
+      `,
+      [revisionId],
+    );
+
+    const films = await this.database.query<RawUsageRow>(
+      `
+      SELECT e.elem->>'Наименование' AS name, count(*)::int AS usage_count
+      FROM bazis_nodes n
+      CROSS JOIN LATERAL (
+        SELECT jsonb_array_elements(
+          ${jsonArrayOrEmpty(`n.raw_json->'ОблицовкаПласти1'->'Пласть'`)}
+          || ${jsonArrayOrEmpty(`n.raw_json->'ОблицовкаПласти2'->'Пласть'`)}
+        ) AS elem
+      ) e
+      WHERE n.revision_id = $1
+        AND COALESCE(e.elem->>'Наименование', '') <> ''
+      GROUP BY 1
+      ORDER BY usage_count DESC, name
+      `,
+      [revisionId],
+    );
+
+    return {
+      summary: revision.rows[0].summary_json ?? {},
+      panelsByMaterial: panels.rows.map((row) => ({
+        materialName: row.main_material_name,
+        panelCount: Number(row.panel_count),
+        totalQuantity: Number(row.total_quantity),
+        totalAreaM2: Number(row.total_area_m2),
+        mappingTargetKind: row.target_kind ?? null,
+        sheetMaterialTypeId: nullableNumber(row.sheet_material_type_id),
+        sheetMaterialTypeName: row.sheet_material_type_name ?? null,
+      })),
+      hardwareByName: hardware.rows.map((row) => ({
+        name: row.name,
+        totalQuantity: Number(row.total_quantity),
+      })),
+      edgesByName: edges.rows.map((row) => ({
+        name: row.name,
+        usageCount: Number(row.usage_count),
+        totalLengthMm: row.total_length_mm != null ? Number(row.total_length_mm) : null,
+      })),
+      filmsByName: films.rows.map((row) => ({ name: row.name, usageCount: Number(row.usage_count), totalLengthMm: null })),
+    };
+  }
+
+  async listRevisionOrders(revisionId: number): Promise<BazisRevisionOrderDto[]> {
+    await this.assertRevisionExists(revisionId);
+
+    const result = await this.database.query<RevisionOrderRow>(
+      `
+      SELECT bol.order_id,
+             o.order_name,
+             bol.created_at::text AS created_at,
+             COALESCE(m.nodes_mapped, 0)::int AS nodes_mapped,
+             COALESCE(m.details_created, 0)::int AS details_created
+      FROM bazis_order_links bol
+      JOIN orders o ON o.order_id = bol.order_id
+      LEFT JOIN (
+        SELECT map.order_id,
+               count(*)::int AS nodes_mapped,
+               count(*) FILTER (WHERE map.order_detail_id IS NOT NULL)::int AS details_created
+        FROM bazis_node_order_detail_map map
+        JOIN bazis_nodes n ON n.bazis_node_id = map.node_id
+        WHERE n.revision_id = $1
+        GROUP BY map.order_id
+      ) m ON m.order_id = bol.order_id
+      WHERE bol.revision_id = $1
+      ORDER BY bol.order_id DESC
+      `,
+      [revisionId],
+    );
+
+    return result.rows.map((row) => ({
+      orderId: Number(row.order_id),
+      orderName: row.order_name ?? null,
+      createdAt: row.created_at,
+      nodesMapped: Number(row.nodes_mapped),
+      detailsCreated: Number(row.details_created),
     }));
+  }
+
+  async getRevisionEstimate(revisionId: number): Promise<BazisRevisionEstimateDto> {
+    await this.assertRevisionExists(revisionId);
+
+    // Материалы: ОсновнойМатериал каждого узла (jsonb без shape-constraint —
+    // объект проверяем через jsonb_typeof, битые строки не должны 500-ить)
+    const materials = await this.database.query<EstimateMaterialRow>(
+      `
+      SELECT n.bazis_node_id, n.name AS node_name, n.object_type,
+             n.raw_json->>'Код' AS node_code,
+             'main' AS source,
+             m.value->>'ID' AS material_id,
+             m.value->>'Код' AS code,
+             m.value->>'Наименование' AS name,
+             m.value->>'ЕдИзм' AS unit,
+             m.value->>'Количество' AS quantity,
+             m.value->>'Цена' AS price,
+             m.value->>'Стоимость' AS total
+      FROM bazis_nodes n
+      CROSS JOIN LATERAL (SELECT n.raw_json->'ОсновнойМатериал' AS value) m
+      WHERE n.revision_id = $1
+        AND jsonb_typeof(n.raw_json->'ОсновнойМатериал') = 'object'
+        AND COALESCE(m.value->>'Наименование', '') <> ''
+      UNION ALL
+      SELECT n.bazis_node_id, n.name AS node_name, n.object_type,
+             n.raw_json->>'Код' AS node_code,
+             'related' AS source,
+             r.value->>'ID' AS material_id,
+             r.value->>'Код' AS code,
+             r.value->>'Наименование' AS name,
+             r.value->>'ЕдИзм' AS unit,
+             r.value->>'Количество' AS quantity,
+             r.value->>'Цена' AS price,
+             r.value->>'Стоимость' AS total
+      FROM bazis_nodes n
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(n.raw_json->'СопутствующиеМатериалы'->'СопутствующийМатериал') = 'array'
+             THEN n.raw_json->'СопутствующиеМатериалы'->'СопутствующийМатериал'
+             ELSE '[]'::jsonb END
+      ) AS r(value)
+      WHERE n.revision_id = $1
+        AND COALESCE(r.value->>'Наименование', '') <> ''
+      ORDER BY 1
+      `,
+      [revisionId],
+    );
+
+    const operations = await this.database.query<EstimateOperationRow>(
+      `
+      SELECT n.bazis_node_id, n.name AS node_name,
+             o.value->>'Наименование' AS name,
+             o.value->>'Код' AS code,
+             o.value->>'ЕдИзм' AS unit,
+             o.value->>'Количество' AS quantity,
+             o.value->>'Цена' AS price,
+             o.value->>'Стоимость' AS total
+      FROM bazis_nodes n
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(n.raw_json->'СписокОпераций'->'СдельнаяОперация') = 'array'
+             THEN n.raw_json->'СписокОпераций'->'СдельнаяОперация'
+             ELSE '[]'::jsonb END
+      ) AS o(value)
+      WHERE n.revision_id = $1
+        AND COALESCE(o.value->>'Наименование', '') <> ''
+      ORDER BY n.bazis_node_id
+      `,
+      [revisionId],
+    );
+
+    return {
+      materials: materials.rows.map((row) => ({
+        nodeId: Number(row.bazis_node_id),
+        nodeName: row.node_name,
+        nodeObjectType: row.object_type,
+        source: row.source === 'related' ? 'related' as const : 'main' as const,
+        nodeCode: emptyToNull(row.node_code),
+        materialId: emptyToNull(row.material_id),
+        code: emptyToNull(row.code),
+        name: row.name ?? '',
+        unit: emptyToNull(row.unit),
+        quantity: parseNumeric(row.quantity),
+        price: parseNumeric(row.price),
+        total: parseNumeric(row.total),
+      })),
+      operations: operations.rows.map((row) => ({
+        nodeId: Number(row.bazis_node_id),
+        nodeName: row.node_name,
+        name: row.name ?? '',
+        code: emptyToNull(row.code),
+        unit: emptyToNull(row.unit),
+        quantity: parseNumeric(row.quantity),
+        price: parseNumeric(row.price),
+        total: parseNumeric(row.total),
+      })),
+    };
   }
 
   async listMaterialMappings(names?: string[]): Promise<MaterialMappingDto[]> {
@@ -694,6 +1465,16 @@ export class PgBazisRepository implements BazisRepositoryPort {
     }
   }
 
+  private async assertRevisionExists(revisionId: number): Promise<void> {
+    const result = await this.database.query<{ ok: number }>(
+      `SELECT 1 AS ok FROM bazis_project_revisions WHERE bazis_revision_id = $1`,
+      [revisionId],
+    );
+    if (result.rows.length === 0) {
+      throw new BazisRevisionNotFoundError(revisionId);
+    }
+  }
+
   private async loadRevisionProject(revisionId: number): Promise<{
     revisionId: number;
     bazisProjectId: number;
@@ -846,6 +1627,22 @@ export class PgBazisRepository implements BazisRepositoryPort {
     panels: ReadonlyArray<{ bazisNodeId: number }>;
     created: { orderId: number; detailIdsByClientKey: Map<string, number> };
   }): Promise<CreateOrderFromRevisionResponseDto> {
+    // Единый порядок локов с retention-prune (revision → nodes): сначала
+    // KEY SHARE на строку ревизии, потом FK-локи на nodes через map-инсерты.
+    // Ревизия исчезла (конкурентный prune) → 404, а не FK-ошибка/deadlock.
+    const revisionLock = await input.tx.query<{ bazis_revision_id: number | string }>(
+      `
+      SELECT bazis_revision_id
+      FROM bazis_project_revisions
+      WHERE bazis_revision_id = $1
+      FOR KEY SHARE
+      `,
+      [input.revision.revisionId],
+    );
+    if (revisionLock.rows.length === 0) {
+      throw new BazisRevisionNotFoundError(input.revision.revisionId);
+    }
+
     for (const panel of input.panels) {
       await input.tx.query(
         `
@@ -962,6 +1759,66 @@ function nullableNumber(value: number | string | null | undefined): number | nul
     return null;
   }
   return Number(value);
+}
+
+interface EstimateMaterialRow {
+  bazis_node_id: number | string;
+  node_name: string | null;
+  object_type: string | null;
+  source: string;
+  node_code: string | null;
+  material_id: string | null;
+  code: string | null;
+  name: string | null;
+  unit: string | null;
+  quantity: string | null;
+  price: string | null;
+  total: string | null;
+}
+
+interface EstimateOperationRow {
+  bazis_node_id: number | string;
+  node_name: string | null;
+  name: string | null;
+  code: string | null;
+  unit: string | null;
+  quantity: string | null;
+  price: string | null;
+  total: string | null;
+}
+
+function emptyToNull(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+/** Числа из XML-текста ('13800', '0.15', '1 234,5') → number | null */
+function parseNumeric(value: string | null | undefined): number | null {
+  if (value == null || value.trim() === '') {
+    return null;
+  }
+  const parsed = Number(value.replace(/\s+/g, '').replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
+  return {
+    bazisNodeId: Number(row.bazis_node_id),
+    parentNodeId: nullableNumber(row.parent_node_id),
+    seq: Number(row.seq),
+    nodeKind: row.node_kind,
+    objectType: row.object_type,
+    name: row.name,
+    detailCode: row.detail_code,
+    position: row.position,
+    quantity: nullableNumber(row.quantity),
+    cumulativeQuantity: nullableNumber(row.cumulative_quantity),
+    lengthMm: nullableNumber(row.length_mm),
+    widthMm: nullableNumber(row.width_mm),
+    thicknessMm: nullableNumber(row.thickness_mm),
+    mainMaterialName: row.main_material_name,
+    childrenCount: Number(row.children_count),
+  };
 }
 
 function mapProjectListRow(row: ProjectListRow): BazisProjectListItemDto {

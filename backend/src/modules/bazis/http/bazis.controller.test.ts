@@ -9,6 +9,7 @@ import {
   BazisController,
   parseBazisImportFields,
   parseMaterialMappingsQuery,
+  parseNodeSearchQuery,
   parseRevisionTreeQuery,
   parseUpsertMaterialMappingsBody,
 } from './bazis.controller';
@@ -109,13 +110,43 @@ describe('BazisController', () => {
   });
 
   it('parseRevisionTreeQuery accepts optional parentNodeId', () => {
-    expect(parseRevisionTreeQuery({})).toEqual({ parentNodeId: null });
-    expect(parseRevisionTreeQuery({ parentNodeId: '4' })).toEqual({ parentNodeId: 4 });
+    expect(parseRevisionTreeQuery({})).toEqual({ parentNodeId: null, all: false });
+    expect(parseRevisionTreeQuery({ parentNodeId: '4' })).toEqual({ parentNodeId: 4, all: false });
+  });
+
+  it('parseRevisionTreeQuery parses all=true and rejects it with parentNodeId', () => {
+    expect(parseRevisionTreeQuery({ all: 'true' })).toEqual({ parentNodeId: null, all: true });
+    expect(parseRevisionTreeQuery({ all: 'false' })).toEqual({ parentNodeId: null, all: false });
+    expect(() => parseRevisionTreeQuery({ all: 'true', parentNodeId: '4' })).toThrow();
   });
 
   it('parseMaterialMappingsQuery splits comma-separated names', () => {
     expect(parseMaterialMappingsQuery({ names: 'oak%20white,edge-1' })).toEqual({
       names: ['oak white', 'edge-1'],
+    });
+  });
+
+  it('parseNodeSearchQuery accepts q, objectType, and explicit limit', () => {
+    expect(parseNodeSearchQuery({ q: '  шкаф  ', objectType: '  panel  ', limit: '25' })).toEqual({
+      q: 'шкаф',
+      objectType: 'panel',
+      limit: 25,
+    });
+  });
+
+  it('parseNodeSearchQuery rejects missing q and objectType', () => {
+    expect(() => parseNodeSearchQuery({})).toThrowError(ApiError);
+  });
+
+  it('parseNodeSearchQuery rejects limit above the maximum', () => {
+    expect(() => parseNodeSearchQuery({ q: 'шкаф', limit: '999' })).toThrowError(ApiError);
+  });
+
+  it('parseNodeSearchQuery defaults limit to 50', () => {
+    expect(parseNodeSearchQuery({ objectType: 'panel' })).toEqual({
+      q: null,
+      objectType: 'panel',
+      limit: 50,
     });
   });
 
@@ -205,6 +236,10 @@ function createController(input: {
     listProjects: vi.fn().mockResolvedValue([]),
     getProject: vi.fn(),
     getTree: vi.fn(),
+    getNodeCard: vi.fn(),
+    searchNodes: vi.fn(),
+    getMaterialsSummary: vi.fn(),
+    listRevisionOrders: vi.fn(),
     listMaterialMappings: vi.fn(),
     upsertMaterialMappings: vi.fn(),
     createOrderFromRevision: vi.fn(),
@@ -228,3 +263,39 @@ function request(): RequestWithCurrentUser {
     requestId: 'req-1',
   };
 }
+
+describe('BazisController.deleteProject', () => {
+  it('parses the id and delegates to the service', async () => {
+    const deleteProject = vi.fn().mockResolvedValue({
+      bazisProjectId: 41,
+      projectId: 77,
+      name: 'Шкаф Nova',
+      revisionsDeleted: 2,
+      nodesDeleted: 639,
+    });
+    const controller = createController({ bazisEnabled: true, service: { deleteProject } });
+
+    const result = await controller.deleteProject(request(), '41');
+
+    expect(result).toMatchObject({ bazisProjectId: 41, revisionsDeleted: 2 });
+    expect(deleteProject).toHaveBeenCalledWith(expect.anything(), expect.anything(), 41);
+  });
+
+  it('rejects a non-numeric id with 422', async () => {
+    const controller = createController({ bazisEnabled: true });
+
+    await expect(controller.deleteProject(request(), 'abc')).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+    } satisfies Partial<ApiError>);
+  });
+
+  it('fails closed with 503 when the flag is off', async () => {
+    const controller = createController({ bazisEnabled: false });
+
+    await expect(controller.deleteProject(request(), '41')).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
+    } satisfies Partial<ApiError>);
+  });
+});

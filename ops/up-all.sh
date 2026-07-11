@@ -52,6 +52,13 @@ err()  { printf 'up-all: %s\n' "$*" >&2; }
 die()  { err "$*"; exit 1; }
 warn() { printf 'up-all: WARN: %s\n' "$*" >&2; }
 
+verify_freecut_sha() {
+  local expected="$1" dir="$ROOT/repo_freecut"
+  [ -z "$(git -C "$dir" status --porcelain)" ] || die "repo_freecut changed during build"
+  [ "$(git -C "$dir" rev-parse HEAD)" = "$expected" ] || die "repo_freecut HEAD changed during build"
+  echo "up-all: Freecut build source verified at $expected"
+}
+
 # --- Base compose invocation -------------------------------------------------
 # Every operation funnels through here so the fixed flags can never be omitted.
 compose() {
@@ -111,7 +118,20 @@ case "$cmd" in
   rebuild)
     [ $# -ge 1 ] || die "rebuild needs a service name (e.g. backend, freecut, cad-service)"
     preflight
-    compose up -d --build --no-deps "$@"
+    has_freecut=0
+    for service in "$@"; do [ "$service" = freecut ] && has_freecut=1; done
+    if [ "$has_freecut" -eq 1 ]; then
+      exec 9>"$ROOT/.freecut-deploy.lock"
+      flock 9
+      bash "$SCRIPT_PATH/ensure-build-repos.sh" --update --only repo_freecut
+      freecut_sha="$(git -C "$ROOT/repo_freecut" rev-parse HEAD)"
+      compose build "$@"
+      verify_freecut_sha "$freecut_sha"
+      compose up -d --no-build --no-deps "$@"
+      flock -u 9
+    else
+      compose up -d --build --no-deps "$@"
+    fi
     ;;
 
   ps)
@@ -164,7 +184,7 @@ case "$cmd" in
     case "$MIGRATE" in apply|baseline|auto|skip) ;; *) die "invalid --migrate '$MIGRATE' (apply|baseline|auto|skip)" ;; esac
     case "$HASURA" in bundled|track|skip|apply:*) ;; *) die "invalid --hasura '$HASURA' (bundled|track|apply:PATH|skip)" ;; esac
     echo "provision plan (project $PROJECT, root $ROOT):"
-    echo "  1. ensure-build-repos (freecut + svgdxf)"
+    echo "  1. update-build-repos (freecut + svgdxf; verified fast-forward)"
     echo "  2. check-env$([ $DO_CHECK -eq 0 ] && echo ' (skipped)')"
     echo "  3. twenty preflight (data/twenty/server-storage, uid 1000)"
     echo "  4. compose up -d --build (whole complex; builds source images)"
@@ -174,7 +194,10 @@ case "$cmd" in
     if [ $DRY -eq 1 ]; then echo; echo "(dry-run: nothing executed)"; exit 0; fi
     if [ $YES -ne 1 ]; then read -r -p "Proceed? [y/N] " a; [ "$a" = "y" ] || die "aborted"; fi
 
-    bash "$SCRIPT_PATH/ensure-build-repos.sh"
+    exec 9>"$ROOT/.freecut-deploy.lock"
+    flock 9
+    bash "$SCRIPT_PATH/ensure-build-repos.sh" --update
+    freecut_sha="$(git -C "$ROOT/repo_freecut" rev-parse HEAD)"
     if [ $DO_CHECK -eq 1 ]; then bash "$SCRIPT_PATH/check-env.sh" --env-file "$ENV_FILE" --compose-file "$VPS_FILE"; fi
     twenty_preflight
     preflight
@@ -182,7 +205,10 @@ case "$cmd" in
     # cad-service). cad-service has an explicit `image: cad-service:local`, so a
     # plain `up` would try to PULL that tag (registry has no cad-service:local →
     # "pull access denied") instead of building it.
-    compose up -d --build
+    compose build
+    verify_freecut_sha "$freecut_sha"
+    compose up -d --no-build
+    flock -u 9
 
     case "$MIGRATE" in
       apply|baseline|auto) bash "$SCRIPT_PATH/apply-migrations.sh" "$MIGRATE" --yes ;;

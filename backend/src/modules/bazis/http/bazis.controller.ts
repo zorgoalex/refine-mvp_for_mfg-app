@@ -1,6 +1,6 @@
 import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
@@ -9,9 +9,15 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { BazisService } from '../application/bazis.service';
 import type {
+  BazisRevisionEstimateDto,
   BazisImportResponseDto,
+  BazisNodeCardDto,
+  BazisNodeSearchResponseDto,
   BazisProjectCardDto,
+  BazisProjectDeleteResponseDto,
   BazisProjectListItemDto,
+  BazisRevisionMaterialsSummaryDto,
+  BazisRevisionOrderDto,
   BazisTreeNodeDto,
   CreateOrderFromRevisionResponseDto,
   MaterialMappingDto,
@@ -33,9 +39,29 @@ const listProjectsQuerySchema = z.object({
   projectId: optionalNumericIdSchema,
 });
 
-const treeQuerySchema = z.object({
-  parentNodeId: optionalNumericIdSchema,
-});
+const treeQuerySchema = z
+  .object({
+    parentNodeId: optionalNumericIdSchema,
+    all: z
+      .string()
+      .optional()
+      .transform((value) => value === 'true'),
+  })
+  .refine((value) => !(value.all && value.parentNodeId != null), {
+    message: 'all=true несовместим с parentNodeId',
+    path: ['all'],
+  });
+
+const nodeSearchQuerySchema = z
+  .object({
+    q: z.string().trim().min(1).max(200).optional(),
+    objectType: z.string().trim().min(1).max(100).optional(),
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+  })
+  .refine((value) => value.q != null || value.objectType != null, {
+    message: 'Нужен q или objectType',
+    path: ['q'],
+  });
 
 const materialMappingsQuerySchema = z.object({
   names: z.string().trim().min(1).optional(),
@@ -259,6 +285,24 @@ export class BazisController {
     return this.bazis.listProjects(currentUser, parseListProjectsQuery(query));
   }
 
+  @ApiOperation({ operationId: 'deleteBazisProject', summary: 'Delete a Bazis project (hard, gated by created orders)' })
+  @ApiResponse({ status: 200, description: 'Deleted Bazis project summary' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis project not found' })
+  @ApiResponse({ status: 409, description: 'Orders were created from this Bazis project' })
+  @ApiResponse({ status: 422, description: 'Invalid project id' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Delete('projects/:id')
+  async deleteProject(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+  ): Promise<BazisProjectDeleteResponseDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.bazis.deleteProject(currentUser, request.requestId, parseNumericPathParam(id, 'id'));
+  }
+
   @ApiOperation({ operationId: 'getBazisProject', summary: 'Get Bazis project card' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -274,9 +318,10 @@ export class BazisController {
     return this.bazis.getProject(currentUser, parseNumericPathParam(id, 'id'));
   }
 
-  @ApiOperation({ operationId: 'getBazisRevisionTree', summary: 'Get Bazis revision tree level' })
+  @ApiOperation({ operationId: 'getBazisRevisionTree', summary: 'Get Bazis revision tree level (or full tree with all=true)' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found (all=true)' })
   @ApiResponse({ status: 422, description: 'Invalid tree query' })
   @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
   @Get('revisions/:id/tree')
@@ -288,7 +333,92 @@ export class BazisController {
     this.assertBazisEnabled();
     const currentUser = this.requireCurrentUser(request);
     const parsed = parseRevisionTreeQuery(query);
-    return this.bazis.getTree(currentUser, parseNumericPathParam(id, 'id'), parsed.parentNodeId);
+    const revisionId = parseNumericPathParam(id, 'id');
+    if (parsed.all) {
+      return this.bazis.getFullTree(currentUser, revisionId);
+    }
+    return this.bazis.getTree(currentUser, revisionId, parsed.parentNodeId);
+  }
+
+  @ApiOperation({ operationId: 'getBazisNodeCard', summary: 'Get Bazis node card with raw payload' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis node not found' })
+  @ApiResponse({ status: 422, description: 'Invalid node id' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Get('nodes/:id')
+  async getNodeCard(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+  ): Promise<BazisNodeCardDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.bazis.getNodeCard(currentUser, parseNumericPathParam(id, 'id'));
+  }
+
+  @ApiOperation({ operationId: 'searchBazisRevisionNodes', summary: 'Search nodes within a Bazis revision' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 422, description: 'Invalid node search query' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Get('revisions/:id/nodes/search')
+  async searchNodes(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+    @Query() query: Record<string, string | string[] | undefined>,
+  ): Promise<BazisNodeSearchResponseDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.bazis.searchNodes(currentUser, parseNumericPathParam(id, 'id'), parseNodeSearchQuery(query));
+  }
+
+  @ApiOperation({ operationId: 'getBazisRevisionMaterialsSummary', summary: 'Get materials summary for a Bazis revision' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 422, description: 'Invalid revision id' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Get('revisions/:id/materials-summary')
+  async getMaterialsSummary(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+  ): Promise<BazisRevisionMaterialsSummaryDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.bazis.getMaterialsSummary(currentUser, parseNumericPathParam(id, 'id'));
+  }
+
+  @ApiOperation({ operationId: 'getBazisRevisionEstimate', summary: 'Get materials/operations estimate for a Bazis revision' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 422, description: 'Invalid revision id' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Get('revisions/:id/estimate')
+  async getRevisionEstimate(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+  ): Promise<BazisRevisionEstimateDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.bazis.getRevisionEstimate(currentUser, parseNumericPathParam(id, 'id'));
+  }
+
+  @ApiOperation({ operationId: 'listBazisRevisionOrders', summary: 'List ERP orders created from a Bazis revision' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 422, description: 'Invalid revision id' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Get('revisions/:id/orders')
+  async listRevisionOrders(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+  ): Promise<BazisRevisionOrderDto[]> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.bazis.listRevisionOrders(currentUser, parseNumericPathParam(id, 'id'));
   }
 
   @ApiOperation({ operationId: 'createOrderFromBazisRevision', summary: 'Create ERP order from a Bazis revision selection' })
@@ -383,9 +513,20 @@ export function parseListProjectsQuery(
 
 export function parseRevisionTreeQuery(
   query: Record<string, string | string[] | undefined>,
-): { parentNodeId: number | null } {
+): { parentNodeId: number | null; all: boolean } {
   const parsed = parseWithZod(treeQuerySchema, flattenQuery(query), 'Bazis tree query validation failed');
-  return { parentNodeId: parsed.parentNodeId ?? null };
+  return { parentNodeId: parsed.parentNodeId ?? null, all: parsed.all };
+}
+
+export function parseNodeSearchQuery(
+  query: Record<string, string | string[] | undefined>,
+): { q: string | null; objectType: string | null; limit: number } {
+  const parsed = parseWithZod(
+    nodeSearchQuerySchema,
+    flattenQuery(query),
+    'Bazis node search query validation failed',
+  );
+  return { q: parsed.q ?? null, objectType: parsed.objectType ?? null, limit: parsed.limit ?? 50 };
 }
 
 export function parseMaterialMappingsQuery(
