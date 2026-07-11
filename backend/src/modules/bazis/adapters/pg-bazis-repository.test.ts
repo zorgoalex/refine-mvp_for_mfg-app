@@ -1013,11 +1013,51 @@ describe('PgBazisRepository.createOrderFromRevision revision lock', () => {
 });
 
 describe('PgBazisRepository.getTreeChildren', () => {
-  it('throws BazisRevisionNotFoundError when the revision no longer exists (pruned)', async () => {
+  it('throws BazisRevisionNotFoundError when the read returns nothing and the revision is gone (pruned)', async () => {
     const database = createDatabase({ nodeSearch: { revisionExists: false } });
     const repository = new PgBazisRepository(database.service);
 
     await expect(repository.getTreeChildren(5, null)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+
+    // Существование проверяется ПОСЛЕ чтения nodes (закрытие TOCTOU-окна):
+    // порядок statement'ов — сначала SELECT nodes, затем SELECT 1 AS ok.
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    const nodesIdx = ordered.findIndex((sql) => sql.startsWith('SELECT n.bazis_node_id'));
+    const existsIdx = ordered.findIndex((sql) => sql.startsWith('SELECT 1 AS ok FROM bazis_project_revisions'));
+    expect(nodesIdx).toBeGreaterThan(-1);
+    expect(existsIdx).toBeGreaterThan(nodesIdx);
+  });
+
+  it('does not run the existence probe when the read returns children (hot path)', async () => {
+    const database = createDatabase({
+      treeChildren: [
+        {
+          bazis_node_id: 1,
+          parent_node_id: null,
+          seq: 0,
+          node_kind: 'product',
+          object_type: 'Модель',
+          name: 'Шкаф',
+          detail_code: null,
+          position: null,
+          quantity: 1,
+          cumulative_quantity: 1,
+          length_mm: null,
+          width_mm: null,
+          thickness_mm: null,
+          main_material_name: null,
+          children_count: 4,
+        },
+      ],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const nodes = await repository.getTreeChildren(5, null);
+
+    expect(nodes).toHaveLength(1);
+    const probes = database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('SELECT 1 AS ok FROM bazis_project_revisions'));
+    expect(probes).toEqual([]);
   });
 });
 

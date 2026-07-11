@@ -856,10 +856,6 @@ export class PgBazisRepository implements BazisRepositoryPort {
   }
 
   async getTreeChildren(revisionId: number, parentNodeId: number | null): Promise<BazisTreeNodeDto[]> {
-    // Ревизия могла быть удалена retention-prune'ом: пустое дерево без ошибки
-    // маскировало бы исчезновение (Critic R1-3).
-    await this.assertRevisionExists(revisionId);
-
     const result = await this.database.query<TreeNodeRow>(
       `
       SELECT n.bazis_node_id, n.parent_node_id, n.seq, n.node_kind, n.object_type, n.name,
@@ -872,6 +868,15 @@ export class PgBazisRepository implements BazisRepositoryPort {
       `,
       [revisionId, parentNodeId],
     );
+
+    if (result.rows.length === 0) {
+      // Пустой результат ПОСЛЕ чтения: либо легитимно пустой контейнер, либо
+      // ревизию удалил retention-prune. Проверка существования вторым
+      // statement'ом (свежий снапшот READ COMMITTED) закрывает TOCTOU: prune,
+      // закоммитившийся между чтениями, даёт 404, а не тихое пустое дерево
+      // (Critic R1-3/R2). Непустой результат существование доказывает сам.
+      await this.assertRevisionExists(revisionId);
+    }
 
     return result.rows.map(mapTreeNodeRow);
   }
