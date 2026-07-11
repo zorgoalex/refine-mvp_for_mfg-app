@@ -18,6 +18,7 @@ const node = (over: Partial<BazisTreeNode>): BazisTreeNode => ({
   thicknessMm: 16,
   mainMaterialName: 'ЛДСП',
   childrenCount: 0,
+  orderIds: [],
   ...over,
 });
 
@@ -26,6 +27,11 @@ describe('bazisTreeUtils', () => {
     expect(mapTreeNode(node({ childrenCount: 0 })).isLeaf).toBe(true);
     expect(mapTreeNode(node({ childrenCount: 3 })).isLeaf).toBe(false);
     expect(mapTreeNode(node({ objectType: 'Фурнитура' })).disableCheckbox).toBe(true);
+  });
+
+  it('mapTreeNode: прокидывает orderIds (провенанс «в каком ERP-заказе»)', () => {
+    expect(mapTreeNode(node({ orderIds: [11385] })).orderIds).toEqual([11385]);
+    expect(mapTreeNode(node({})).orderIds).toEqual([]);
   });
 
   it('buildNodeTitle: панель — размер и qty; не-панель — имя как есть', () => {

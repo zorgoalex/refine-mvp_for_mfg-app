@@ -100,6 +100,7 @@ interface TreeNodeRow {
   width_mm: number | string | null;
   thickness_mm: number | string | null;
   main_material_name: string | null;
+  order_ids: Array<number | string> | null;
   children_count: number | string;
 }
 
@@ -861,6 +862,10 @@ export class PgBazisRepository implements BazisRepositoryPort {
       SELECT n.bazis_node_id, n.parent_node_id, n.seq, n.node_kind, n.object_type, n.name,
              n.detail_code, n.position, n.quantity, n.cumulative_quantity,
              n.length_mm, n.width_mm, n.thickness_mm, n.main_material_name,
+             (SELECT array_agg(DISTINCT m.order_id ORDER BY m.order_id)
+              FROM bazis_node_order_detail_map m
+              WHERE m.node_id = n.bazis_node_id
+                AND m.order_detail_id IS NOT NULL) AS order_ids,
              (SELECT count(*) FROM bazis_nodes c WHERE c.parent_node_id = n.bazis_node_id)::int AS children_count
       FROM bazis_nodes n
       WHERE n.revision_id = $1 AND n.parent_node_id IS NOT DISTINCT FROM $2
@@ -889,6 +894,10 @@ export class PgBazisRepository implements BazisRepositoryPort {
       SELECT n.bazis_node_id, n.parent_node_id, n.seq, n.node_kind, n.object_type, n.name,
              n.detail_code, n.position, n.quantity, n.cumulative_quantity,
              n.length_mm, n.width_mm, n.thickness_mm, n.main_material_name,
+             (SELECT array_agg(DISTINCT m.order_id ORDER BY m.order_id)
+              FROM bazis_node_order_detail_map m
+              WHERE m.node_id = n.bazis_node_id
+                AND m.order_detail_id IS NOT NULL) AS order_ids,
              (SELECT count(*) FROM bazis_nodes c
               WHERE c.parent_node_id = n.bazis_node_id
                 AND c.revision_id = n.revision_id)::int AS children_count
@@ -1818,6 +1827,7 @@ function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
     thicknessMm: nullableNumber(row.thickness_mm),
     mainMaterialName: row.main_material_name,
     childrenCount: Number(row.children_count),
+    orderIds: (row.order_ids ?? []).map((value) => Number(value)),
   };
 }
 

@@ -230,6 +230,7 @@ describe('PgBazisRepository reads + mappings', () => {
         thicknessMm: null,
         mainMaterialName: null,
         childrenCount: 2,
+        orderIds: [],
       },
     ]);
   });
@@ -1009,6 +1010,81 @@ describe('PgBazisRepository.createOrderFromRevision revision lock', () => {
     // Доказательство, что reject пришёл именно из hook-лока, а не раньше.
     const lockQueries = database.queries.filter((query) => normalizeSql(query.text).includes('FOR KEY SHARE'));
     expect(lockQueries).toHaveLength(1);
+  });
+});
+
+describe('PgBazisRepository tree order provenance', () => {
+  it('exposes orderIds on tree nodes from the node-order map (created details only)', async () => {
+    const database = createDatabase({
+      treeChildren: [
+        {
+          bazis_node_id: 101,
+          parent_node_id: null,
+          seq: 0,
+          node_kind: 'object',
+          object_type: 'Панель',
+          name: 'Фасад',
+          detail_code: null,
+          position: '7',
+          quantity: 1,
+          cumulative_quantity: 1,
+          length_mm: 100,
+          width_mm: 50,
+          thickness_mm: 16,
+          main_material_name: 'ЛДСП',
+          children_count: 0,
+          order_ids: [11385, 11390],
+        },
+        {
+          bazis_node_id: 102,
+          parent_node_id: null,
+          seq: 1,
+          node_kind: 'assembly',
+          object_type: null,
+          name: 'Секция',
+          detail_code: null,
+          position: null,
+          quantity: 1,
+          cumulative_quantity: 1,
+          length_mm: null,
+          width_mm: null,
+          thickness_mm: null,
+          main_material_name: null,
+          children_count: 3,
+          order_ids: null,
+        },
+      ],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const nodes = await repository.getTreeChildren(5, null);
+
+    expect(nodes[0].orderIds).toEqual([11385, 11390]);
+    expect(nodes[1].orderIds).toEqual([]);
+
+    // Агрегат считает только реально созданные детали (order_detail_id NOT NULL),
+    // а не любые map-строки (mapping_kind='ignored' не «добавлен в заказ»).
+    const treeSql = database.queries
+      .map((query) => normalizeSql(query.text))
+      .find((sql) => sql.startsWith('SELECT n.bazis_node_id, n.parent_node_id'));
+    expect(treeSql).toContain('bazis_node_order_detail_map');
+    expect(treeSql).toContain('order_detail_id IS NOT NULL');
+  });
+
+  it('exposes orderIds on the full-tree read as well', async () => {
+    const database = createDatabase({ treeChildren: [] });
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.listAllTreeNodes(5);
+
+    const fullTreeSql = database.queries
+      .map((query) => normalizeSql(query.text))
+      .filter((sql) => sql.startsWith('SELECT n.bazis_node_id, n.parent_node_id'));
+    expect(fullTreeSql.length).toBeGreaterThan(0);
+    for (const sql of fullTreeSql) {
+      expect(sql).toContain('bazis_node_order_detail_map');
+      expect(sql).toContain('order_detail_id IS NOT NULL');
+    }
   });
 });
 

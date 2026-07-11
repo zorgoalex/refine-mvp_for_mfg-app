@@ -6,6 +6,7 @@ export interface BazisTreeDataNode extends DataNode {
   bazisNodeId: number;
   objectType: string | null;
   childrenCount: number;
+  orderIds: number[];
 }
 
 export function mapTreeNode(node: BazisTreeNode): BazisTreeDataNode {
@@ -16,6 +17,7 @@ export function mapTreeNode(node: BazisTreeNode): BazisTreeDataNode {
     bazisNodeId: node.bazisNodeId,
     objectType,
     childrenCount: node.childrenCount,
+    orderIds: node.orderIds ?? [],
     title: buildNodeTitle(node),
     isLeaf: node.childrenCount === 0,
     disableCheckbox: objectType === 'Фурнитура',

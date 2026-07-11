@@ -51,6 +51,8 @@ export interface BazisTreeNodeDto {
   thicknessMm: number | null;
   mainMaterialName: string | null;
   childrenCount: number;
+  /** ERP-заказы, в которые узел добавлен реально созданной деталью. */
+  orderIds: number[];
 }
 
 export interface BazisNodeOrderLinkDto {
