@@ -2722,6 +2722,11 @@ paths:
                       nullable: true
                     childrenCount:
                       type: integer
+                    orderIds:
+                      type: array
+                      items:
+                        type: integer
+                      description: ERP orders the node was added to (created details only)
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
