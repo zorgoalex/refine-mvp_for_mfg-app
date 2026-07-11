@@ -30,6 +30,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-11",
+    title: "Базис-проекты: хранятся только 3 последние ревизии",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "При импорте новой ревизии Bazis XML старые ревизии сверх трёх последних удаляются автоматически, чтобы база не разрасталась; об удалении сообщается предупреждением в визарде импорта.",
+      "Ревизии, из которых уже созданы заказы ERP, не удаляются никогда — связь деталей заказа с деревом Базиса сохраняется.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-10",
     title: "Боковое меню: возвращена аналитика клиентов",
     services: ["ERP"],

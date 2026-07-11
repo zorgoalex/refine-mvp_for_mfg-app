@@ -63,6 +63,43 @@ describe('PgBazisRepository.importRevision', () => {
     expect(response.warnings).toEqual(['Такой же файл уже импортирован в Базис-проект «Другой проект»']);
   });
 
+  it('prunes revisions beyond the last 3 (no order links) after import: runs+revisions deleted, audit+outbox+warning', async () => {
+    const database = createDatabase({ pruneCandidates: [{ bazis_revision_id: 50, revision_no: 1 }] });
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.importRevision(importCommand());
+
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    const insertRevisionIdx = ordered.findIndex((sql) => sql.startsWith('INSERT INTO bazis_project_revisions'));
+    const pruneRunsIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_import_runs'));
+    const pruneRevisionsIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_project_revisions'));
+    expect(pruneRunsIdx).toBeGreaterThan(insertRevisionIdx);
+    expect(pruneRevisionsIdx).toBeGreaterThan(pruneRunsIdx);
+
+    const auditEvents = database.queries
+      .filter((query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log ('))
+      .map((query) => query.params?.[0]);
+    expect(auditEvents).toContain('bazis.revision_pruned');
+
+    const outboxKeys = database.queries
+      .filter((query) => normalizeSql(query.text).startsWith('INSERT INTO outbox_events'))
+      .map((query) => query.params?.[4]);
+    expect(outboxKeys).toContain('bazis-revision-pruned-50');
+
+    expect(response.warnings.some((warning) => warning.includes('Ревизия №1'))).toBe(true);
+  });
+
+  it('does not prune anything when all revisions fit the retention window', async () => {
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.importRevision(importCommand());
+
+    const deletes = database.queries.filter((query) => normalizeSql(query.text).startsWith('DELETE FROM'));
+    expect(deletes).toEqual([]);
+    expect(response.warnings).toEqual([]);
+  });
+
   it('maps parsed node parentIndex to inserted ids (parent id resolved)', async () => {
     const database = createDatabase();
     const repository = new PgBazisRepository(database.service);
@@ -914,6 +951,7 @@ function createDatabase(
       filmRows?: Array<Record<string, unknown>>;
     };
     revisionOrders?: Array<Record<string, unknown>>;
+    pruneCandidates?: Array<{ bazis_revision_id: number; revision_no: number }>;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -1099,6 +1137,11 @@ function createDatabase(
           rows: options.revisionOrders ?? [],
           rowCount: options.revisionOrders?.length ?? 0,
         };
+      }
+
+      if (normalized.includes('prune_keep')) {
+        const rows = options.pruneCandidates ?? [];
+        return { rows, rowCount: rows.length };
       }
 
       return { rows: [], rowCount: 1 };
