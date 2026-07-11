@@ -34,6 +34,12 @@ describe('bazisTreeUtils', () => {
     expect(mapTreeNode(node({})).orderIds).toEqual([]);
   });
 
+  it('mapTreeNode: legacy-ответ без orderIds (старый backend в окно раскатки) даёт [], не краш', () => {
+    const legacy = node({});
+    delete (legacy as Partial<BazisTreeNode>).orderIds;
+    expect(mapTreeNode(legacy).orderIds).toEqual([]);
+  });
+
   it('buildNodeTitle: панель — размер и qty; не-панель — имя как есть', () => {
     expect(buildNodeTitle(node({}))).toBe('Стенка — 600x400, qty 2');
     expect(buildNodeTitle(node({ objectType: 'Сборка', name: 'Корпус' }))).toBe('Корпус');

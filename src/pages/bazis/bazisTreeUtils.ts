@@ -17,6 +17,8 @@ export function mapTreeNode(node: BazisTreeNode): BazisTreeDataNode {
     bazisNodeId: node.bazisNodeId,
     objectType,
     childrenCount: node.childrenCount,
+    // `?? []` намеренно: во время раскатки FE может говорить со старым
+    // backend без orderIds — дерево не должно падать (см. unit-тест legacy).
     orderIds: node.orderIds ?? [],
     title: buildNodeTitle(node),
     isLeaf: node.childrenCount === 0,

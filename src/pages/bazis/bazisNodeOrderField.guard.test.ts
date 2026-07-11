@@ -14,6 +14,8 @@ describe('bazis node order-provenance UI guards', () => {
     expect(panelsTab).toContain("title: 'Заказ'");
     expect(panelsTab).toMatch(/orderIds/);
     expect(panelsTab).toContain('/orders/show/');
+    // Клик по ссылке не должен триггерить выбор строки (row onClick)
+    expect(panelsTab).toMatch(/RouterLink[\s\S]*?stopPropagation/);
   });
 
   it('ViewerTree marks nodes that are already in an ERP order', () => {

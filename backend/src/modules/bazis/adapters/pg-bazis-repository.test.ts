@@ -1071,11 +1071,35 @@ describe('PgBazisRepository tree order provenance', () => {
     expect(treeSql).toContain('order_detail_id IS NOT NULL');
   });
 
-  it('exposes orderIds on the full-tree read as well', async () => {
-    const database = createDatabase({ treeChildren: [] });
+  it('returns populated orderIds from the full-tree read (behavior, not just SQL shape)', async () => {
+    const database = createDatabase({
+      treeChildren: [
+        {
+          bazis_node_id: 201,
+          parent_node_id: null,
+          seq: 0,
+          node_kind: 'object',
+          object_type: 'Панель',
+          name: 'Полка',
+          detail_code: null,
+          position: '3',
+          quantity: 1,
+          cumulative_quantity: 1,
+          length_mm: 800,
+          width_mm: 300,
+          thickness_mm: 16,
+          main_material_name: 'ЛДСП',
+          children_count: 0,
+          order_ids: [11385],
+        },
+      ],
+    });
     const repository = new PgBazisRepository(database.service);
 
-    await repository.listAllTreeNodes(5);
+    const nodes = await repository.listAllTreeNodes(5);
+
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].orderIds).toEqual([11385]);
 
     const fullTreeSql = database.queries
       .map((query) => normalizeSql(query.text))
