@@ -107,6 +107,9 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   const [selectedProjectId, setSelectedProjectId] = useState<number | undefined>(undefined);
   const [erpClientId, setErpClientId] = useState<number | undefined>(undefined);
   const [erpOrderId, setErpOrderId] = useState<number | undefined>(undefined);
+  // Пин выбранного заказа ОБЪЕКТОМ: перезагрузка страницы списка (search/фильтры)
+  // может выкинуть выбранный заказ из erpOrders — label и связи не должны теряться.
+  const [erpSelectedOrder, setErpSelectedOrder] = useState<OrderListItemDto | undefined>(undefined);
   const [erpOrders, setErpOrders] = useState<OrderListItemDto[]>([]);
   const [erpOrdersLoading, setErpOrdersLoading] = useState(false);
   const [erpOrderSearch, setErpOrderSearch] = useState('');
@@ -177,6 +180,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     setSelectedProjectId(undefined);
     setErpClientId(undefined);
     setErpOrderId(undefined);
+    setErpSelectedOrder(undefined);
     setErpOrders([]);
     setErpOrderSearch('');
     setPreview(null);
@@ -665,11 +669,14 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
 
             {bindingMode === 'erp' ? (() => {
               const bindingState = { clientId: erpClientId, projectId: selectedProjectId, orderId: erpOrderId };
-              const selectedOrder = erpOrders.find((order) => order.orderId === erpOrderId);
+              const selectedOrder = erpSelectedOrder;
               const applyBinding = (next: { clientId?: number; projectId?: number; orderId?: number }) => {
                 setErpClientId(next.clientId);
                 setSelectedProjectId(next.projectId);
                 setErpOrderId(next.orderId);
+                if (next.orderId === undefined) {
+                  setErpSelectedOrder(undefined);
+                }
               };
               const projectOptions = filterProjectOptions(erpProjects, bindingState)
                 .filter((project) => (selectedOrder ? project.projectId === selectedOrder.projectId : true));
@@ -726,14 +733,16 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                     value={erpOrderId}
                     filterOption={false}
                     onSearch={(value) => setErpOrderSearch(value)}
-                    onChange={(value) =>
-                      applyBinding(
-                        nextBindingOnOrderPick(
-                          bindingState,
-                          erpOrders.find((order) => order.orderId === value),
-                        ),
-                      )}
-                    options={erpOrders.map((order) => ({
+                    onChange={(value) => {
+                      const picked = erpOrders.find((order) => order.orderId === value);
+                      setErpSelectedOrder(picked);
+                      applyBinding(nextBindingOnOrderPick(bindingState, picked));
+                    }}
+                    options={(
+                      erpSelectedOrder && !erpOrders.some((order) => order.orderId === erpSelectedOrder.orderId)
+                        ? [erpSelectedOrder, ...erpOrders]
+                        : erpOrders
+                    ).map((order) => ({
                       value: order.orderId,
                       label: `${order.fullNumber} · ${order.orderName}${order.clientName ? ` · ${order.clientName}` : ''}`,
                     }))}
