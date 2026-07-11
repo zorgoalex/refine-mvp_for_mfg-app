@@ -19,6 +19,13 @@ describe('import wizard erp-binding guards', () => {
     expect(wizard).toMatch(/ordersApi\.list\(\{\s*clientId: erpClientId,\s*projectId: selectedProjectId,\s*search:/);
   });
 
+  it('picked order is pinned as an object and injected into options when off-page', () => {
+    // Server-filtered список: выбранный заказ может выпасть из текущей
+    // страницы — пин объекта сохраняет label и связи проект/клиент.
+    expect(wizard).toContain('setErpSelectedOrder(picked)');
+    expect(wizard).toMatch(/erpSelectedOrder && !erpOrders\.some/);
+  });
+
   it('order search input does not use client-side option filtering', () => {
     expect(wizard).toContain('filterOption={false}');
     expect(wizard).toContain('onSearch={(value) => setErpOrderSearch(value)}');

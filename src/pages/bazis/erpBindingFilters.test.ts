@@ -67,6 +67,22 @@ describe('erpBindingFilters', () => {
     expect(next).toEqual({ clientId: 10, projectId: 1, orderId: 555 });
   });
 
+  it('drops a stale order when the picked order object is unavailable (fell off the server page)', () => {
+    // Страховочная семантика: если объект выбранного заказа недоступен,
+    // связь проверить нельзя — при выборе проекта/клиента заказ сбрасывается.
+    const state: ErpBindingState = { clientId: undefined, projectId: undefined, orderId: 555 };
+    expect(nextBindingOnProjectPick(state, projects[0], undefined)).toEqual({
+      clientId: 10,
+      projectId: 1,
+      orderId: undefined,
+    });
+    expect(nextBindingOnClientPick(state, 10, projects, undefined)).toEqual({
+      clientId: 10,
+      projectId: undefined,
+      orderId: undefined,
+    });
+  });
+
   it('clearing a field (undefined) only clears that field', () => {
     const state: ErpBindingState = { clientId: 10, projectId: 1, orderId: 555 };
     expect(nextBindingOnClientPick(state, undefined, projects, order({}))).toEqual({
