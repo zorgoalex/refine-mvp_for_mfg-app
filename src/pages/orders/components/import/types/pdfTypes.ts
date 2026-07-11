@@ -42,6 +42,7 @@ export interface PdfOrderMetadata {
 // ============================================================================
 
 export interface PdfDetailRaw {
+  projectReference?: string;  // "Обозн. проект" or "№ Заказа"
   designation: string;       // "Обозн." - e.g., "11.02", "36", "01.04"
   name: string;              // "Наименование" - e.g., "Бок L", "Фасад Лапша"
   position: number;          // position number in PDF (1, 2, 3...)
@@ -81,6 +82,7 @@ export interface PdfImportRow {
   filmName?: string | null;
   note?: string | null;
   basisProject?: string | null;
+  basisProduct?: string | null;
   basisData?: string | null;
   basisDesignation?: string | null;  // "Обозн." — Basis designation
   detailName: string;                // "Наименование" — detail name only

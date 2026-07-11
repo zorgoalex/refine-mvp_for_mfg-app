@@ -259,6 +259,7 @@ export interface SaveOrderDetailDto {
   linkCadFile?: string | null;
   linkPdfFile?: string | null;
   basisProject?: string | null;
+  basisProduct?: string | null;
   basisData?: string | null;
   basisDesignation?: string | null;
 
@@ -422,6 +423,7 @@ export interface OrderDetailDto {
   jointOrderId?: number | null;
   note?: string | null;
   basisProject?: string | null;
+  basisProduct?: string | null;
   basisData?: string | null;
   basisDesignation?: string | null;
   linkCuttingFile?: string | null;

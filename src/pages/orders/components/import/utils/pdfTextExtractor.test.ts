@@ -179,6 +179,7 @@ describe('parsePdfContent table geometry parser', () => {
 });
 
 describe('parsePdfContent PDF fixtures', () => {
+  const bazisReportFixtureDir = path.resolve(PDF_FIXTURE_DIR, 'artifacts_test/pdf_Bazis');
   const fixtureCases = [
     { fixture: 'mdf_ex1.pdf', positionsCount: 4, totalQuantity: 4, expectedTotalCount: 4 },
     { fixture: 'mdf_ex2.pdf', positionsCount: 33, totalQuantity: 39, expectedTotalCount: 39 },
@@ -267,19 +268,21 @@ describe('parsePdfContent PDF fixtures', () => {
     expect(wrong2Rows[firstMdf16Index].materialName).toBe('МДФ 16 мм');
   }, 30_000);
 
-  it('fills Basis project and data fields from a Basis PDF', async () => {
+  (fs.existsSync(path.resolve(PDF_FIXTURE_DIR, 'teststaff/МДФ-4pages.pdf')) ? it : it.skip)('fills Basis project and data fields from a Basis PDF', async () => {
     const result = await parseFixturePdf('teststaff/МДФ-4pages.pdf');
     const rows = convertToImportRows(result);
 
     expect(rows[0]).toMatchObject({
-      basisProject: '№ 020 / Respublika',
+      basisProject: '020',
+      basisProduct: null,
       basisData: '1/05/Мойка. Дверь 1',
       // "Обозн." goes to its own field; detail name holds only "Наименование".
       basisDesignation: '05',
       detailName: 'Мойка. Дверь 1',
     });
     expect(rows.at(-1)).toMatchObject({
-      basisProject: '№ 020 / Respublika',
+      basisProject: '020',
+      basisProduct: null,
       basisData: '40/140/Тумба 1. Дверь',
       basisDesignation: '140',
       detailName: 'Тумба 1. Дверь',
@@ -287,4 +290,51 @@ describe('parsePdfContent PDF fixtures', () => {
     // Detail name must no longer carry the packed "position~~designation~~name".
     expect(rows[0].detailName).not.toContain('~~');
   }, 30_000);
+
+  it.each([
+    {
+      fixture: 'проект отчет.pdf',
+      positionsCount: 30,
+      totalQuantity: 38,
+      expectedFirstProject: '1319',
+      expectedFirstProduct: 'Прихожка',
+      expectedLastProduct: 'Сан.узел',
+    },
+    {
+      fixture: 'изделие отчет.pdf',
+      positionsCount: 4,
+      totalQuantity: 9,
+      expectedFirstProject: '1319',
+      expectedFirstProduct: null,
+      expectedLastProduct: null,
+    },
+  ])(
+    'parses new Basis report template $fixture',
+    async ({ fixture, positionsCount, totalQuantity, expectedFirstProject, expectedFirstProduct, expectedLastProduct }) => {
+      const result = await parseFixturePdf(path.resolve(bazisReportFixtureDir, fixture));
+      const rows = convertToImportRows(result);
+
+      expect(result.parseErrors).toEqual([]);
+      expect(result.stats).toEqual({ positionsCount, totalQuantity });
+      expect(rows[0]).toMatchObject({
+        basisProject: expectedFirstProject,
+        basisProduct: expectedFirstProduct,
+      });
+      expect(rows.at(-1)).toMatchObject({
+        basisProject: '1319',
+        basisProduct: expectedLastProduct,
+      });
+      expect(rows.every(row => row.basisProject === '1319')).toBe(true);
+      if (fixture === 'проект отчет.pdf') {
+        expect([...new Set(rows.map(row => row.basisProduct))]).toEqual([
+          'Прихожка',
+          'Кухня',
+          'Сан.узел',
+        ]);
+      } else {
+        expect(rows.every(row => row.basisProduct === null)).toBe(true);
+      }
+    },
+    30_000,
+  );
 });

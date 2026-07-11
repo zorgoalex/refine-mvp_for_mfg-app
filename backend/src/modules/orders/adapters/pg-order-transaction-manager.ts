@@ -627,7 +627,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
               production_status_id = $16, joint_order_id = $17, note = $18,
               link_cutting_file = $19, link_cutting_image_file = $20, link_cad_file = $21,
               link_pdf_file = $22, ref_key_1c = $23, sheet_material_type_id = $24,
-              basis_project = $25, basis_data = $26, basis_designation = $27
+              basis_project = $25, basis_data = $26, basis_designation = $27,
+              basis_product = $28
           WHERE detail_id = $1 AND order_id = $2
           `,
           detailParams(effective.id, orderId, effective),
@@ -640,9 +641,9 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
             material_id, milling_type_id, edge_type_id, film_id, milling_cost_per_sqm,
             detail_cost, priority, production_status_id, joint_order_id, note,
             link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file, ref_key_1c,
-            sheet_material_type_id, basis_project, basis_data, basis_designation
+            sheet_material_type_id, basis_project, basis_data, basis_designation, basis_product
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
           RETURNING detail_id
           `,
           detailParamsForInsert(orderId, effective),
@@ -1431,6 +1432,7 @@ function detailParamsForInsertValues(detail: CalculatedOrderDetailDto) {
     detail.basisProject,
     detail.basisData,
     detail.basisDesignation,
+    detail.basisProduct,
   ];
 }
 

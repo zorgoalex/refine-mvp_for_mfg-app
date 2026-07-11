@@ -137,6 +137,7 @@ interface OrderDetailRow extends QueryResultRow {
   joint_order_id: string | number | null;
   note: string | null;
   basis_project: string | null;
+  basis_product: string | null;
   basis_data: string | null;
   basis_designation: string | null;
   link_cutting_file: string | null;
@@ -1175,6 +1176,7 @@ function mapDetail(row: OrderDetailRow) {
     jointOrderId: toNullableNumber(row.joint_order_id),
     note: row.note,
     basisProject: row.basis_project,
+    basisProduct: row.basis_product,
     basisData: row.basis_data,
     basisDesignation: row.basis_designation,
     linkCuttingFile: row.link_cutting_file,

@@ -30,6 +30,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-11",
+    title: "Импорт PDF Базис: отчёты проекта и изделия",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "Импорт деталей распознаёт новые PDF-отчёты Базис для всего проекта и отдельного изделия.",
+      "В детали добавлено поле «Базис изделие»; номер проекта и название изделия теперь хранятся раздельно.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-08",
     title: "Календарь: материалы снова видны в карточках заказов",
     services: ["ERP"],

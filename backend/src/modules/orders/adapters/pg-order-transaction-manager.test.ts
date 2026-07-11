@@ -63,6 +63,8 @@ describe('PgOrderTransactionManager', () => {
     expect(sql).toContain('INSERT INTO orders');
     expect(sql).toContain('project_id');
     expect(sql).toContain('INSERT INTO order_details');
+    const detailInsert = database.queries.find((query) => normalizeSql(query.text).startsWith('INSERT INTO order_details'));
+    expect(detailInsert?.params.at(-1)).toBe('Прихожка');
     expect(sql).toContain('INSERT INTO payments');
     expect(sql).toContain('DELETE FROM order_details');
     expect(sql).toContain('INSERT INTO audit_log');
@@ -1091,6 +1093,10 @@ function detail(): CalculatedOrderDetailDto {
     linkCadFile: null,
     linkPdfFile: null,
     refKey1c: null,
+    basisProject: '1319',
+    basisProduct: 'Прихожка',
+    basisData: '1/04/Фасад',
+    basisDesignation: '04',
   };
 }
 

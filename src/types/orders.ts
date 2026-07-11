@@ -122,6 +122,7 @@ export interface OrderDetail {
   // Additional
   note?: string | null;
   basis_project?: string | null;
+  basis_product?: string | null;
   basis_data?: string | null;
   basis_designation?: string | null;
   detail_name?: string | null;

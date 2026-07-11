@@ -77,7 +77,9 @@ test.describe('Order UI full form coverage', () => {
         await expect(detailsCard.getByRole('button', { name: /Пересчитать суммы/ })).toBeDisabled();
         const importButton = detailsCard.getByRole('button', { name: /Импорт/ });
         await importButton.click();
-        await expect(page.locator('.ant-dropdown-menu:visible')).toBeVisible();
+        const importMenu = page.locator('.ant-dropdown-menu:visible');
+        await expect(importMenu).toBeVisible();
+        await expect(importMenu.getByText(/PDF/)).toBeVisible();
         await importButton.click();
         await expect(page.locator('.ant-dropdown-menu:visible')).toHaveCount(0);
         const refreshedDetailsCard = orderDialog.locator('.ant-card').filter({ hasText: 'Всего позиций' }).first();

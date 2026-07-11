@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convertToImportRows } from './pdfTextExtractor';
+import { convertToImportRows, splitBasisProjectReference } from './pdfTextExtractor';
 import type { PdfParsedResult } from '../types/pdfTypes';
 
 // Fixture-free unit test for the Basis PDF → import-row mapping. The full
@@ -16,6 +16,15 @@ function makeResult(details: PdfParsedResult['details']): PdfParsedResult {
 }
 
 describe('convertToImportRows Basis field split', () => {
+  it.each([
+    ['1319Прихожка', { basisProject: '1319', basisProduct: 'Прихожка' }],
+    ['1319Сан.узел', { basisProject: '1319', basisProduct: 'Сан.узел' }],
+    ['1319', { basisProject: '1319', basisProduct: null }],
+    ['', { basisProject: null, basisProduct: null }],
+  ])('splits project reference %j', (value, expected) => {
+    expect(splitBasisProjectReference(value)).toEqual(expected);
+  });
+
   it('maps "Обозн." to basisDesignation and "Наименование" to detailName only', () => {
     const rows = convertToImportRows(
       makeResult([
@@ -27,7 +36,8 @@ describe('convertToImportRows Basis field split', () => {
       basisDesignation: '11.02',
       detailName: 'Бок L',
       basisData: '1/11.02/Бок L',
-      basisProject: '№ 1057 / Кухня',
+      basisProject: '1057',
+      basisProduct: null,
     });
     // The packed "position~~designation~~name" form must be gone.
     expect(rows[0].detailName).not.toContain('~~');

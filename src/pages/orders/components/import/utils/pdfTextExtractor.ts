@@ -177,6 +177,7 @@ interface DetailBlock {
 
 type PdfTableColumnKey =
   | 'position'
+  | 'projectReference'
   | 'designation'
   | 'name'
   | 'quantity'
@@ -224,7 +225,7 @@ function isTableHeaderLine(line: PdfTextLine): boolean {
   return (
     line.text.includes('№') &&
     line.text.includes('Обозн.') &&
-    line.text.includes('Наименование') &&
+    line.text.includes('Наим') &&
     line.text.includes('Кол-во') &&
     line.text.includes('Размер')
   );
@@ -255,8 +256,9 @@ function findHeaderX(line: PdfTextLine, pattern: RegExp): number | null {
 
 function getTableColumns(headerLine: PdfTextLine): PdfTableColumn[] {
   const positionX = findHeaderX(headerLine, /^№$/);
-  const designationX = findHeaderX(headerLine, /^Обозн\./);
-  const nameX = findHeaderX(headerLine, /^Наименование/);
+  const projectReferenceX = findHeaderX(headerLine, /^(?:Обозн\. проект|№ Заказа)$/);
+  const designationX = findHeaderX(headerLine, /^Обозн\.$/);
+  const nameX = findHeaderX(headerLine, /^Наим/);
   const quantityX = findHeaderX(headerLine, /^Кол-во/);
   const sizeX = findHeaderX(headerLine, /^Размер/);
   const millingX = findHeaderX(headerLine, /^Фрезировка/);
@@ -279,9 +281,19 @@ function getTableColumns(headerLine: PdfTextLine): PdfTableColumn[] {
   const sizeWidthSplit = sizeX + Math.max(25, (millingX - sizeX) * 0.28);
   const sizeEnd = midpoint(sizeX, millingX);
 
+  const leadingColumns: PdfTableColumn[] = projectReferenceX === null
+    ? [
+        { key: 'position', minX: Math.max(0, positionX - 12), maxX: midpoint(positionX, designationX) },
+        { key: 'designation', minX: midpoint(positionX, designationX), maxX: midpoint(designationX, nameX) },
+      ]
+    : [
+        { key: 'position', minX: Math.max(0, positionX - 12), maxX: midpoint(positionX, projectReferenceX) },
+        { key: 'projectReference', minX: midpoint(positionX, projectReferenceX), maxX: midpoint(projectReferenceX, designationX) },
+        { key: 'designation', minX: midpoint(projectReferenceX, designationX), maxX: midpoint(designationX, nameX) },
+      ];
+
   return [
-    { key: 'position', minX: Math.max(0, positionX - 12), maxX: midpoint(positionX, designationX) },
-    { key: 'designation', minX: midpoint(positionX, designationX), maxX: midpoint(designationX, nameX) },
+    ...leadingColumns,
     { key: 'name', minX: midpoint(designationX, nameX), maxX: midpoint(nameX, quantityX) },
     { key: 'quantity', minX: midpoint(nameX, quantityX), maxX: midpoint(quantityX, sizeX) },
     { key: 'length', minX: midpoint(quantityX, sizeX), maxX: sizeWidthSplit },
@@ -299,6 +311,7 @@ function getColumnForItem(item: PdfTextItem, columns: PdfTableColumn[]): PdfTabl
 function getEmptyTableCells(): PdfTableRowCells {
   return {
     position: '',
+    projectReference: '',
     designation: '',
     name: '',
     quantity: '',
@@ -432,6 +445,7 @@ function extractTableRowsForHeader(
 
     details.push({
       position,
+      projectReference: normalizeWhitespace(cells.projectReference) || undefined,
       designation,
       name: normalizeWhitespace(cells.name) || 'Деталь',
       quantity,
@@ -808,11 +822,11 @@ export function convertToImportRows(result: PdfParsedResult): import('../types/i
     ? result.metadata.material.split(',').map(material => material.trim()).filter(Boolean)
     : [];
   const fallbackMaterial = metadataMaterials.length === 1 ? metadataMaterials[0] : null;
-  const basisProject = [result.metadata.orderNumber ? `№ ${result.metadata.orderNumber}` : '', result.metadata.orderName]
-    .filter(Boolean)
-    .join(' / ') || null;
+  const basisProject = splitBasisProjectReference(result.metadata.orderNumber).basisProject;
 
-  return result.details.map((detail, index) => ({
+  return result.details.map((detail, index) => {
+    const splitReference = splitBasisProjectReference(detail.projectReference);
+    return ({
     sourceRowIndex: index,
     height: detail.length,
     width: detail.width,
@@ -821,11 +835,25 @@ export function convertToImportRows(result: PdfParsedResult): import('../types/i
     millingTypeName: detail.milling || null,
     filmName: detail.film || null,
     note: detail.note || null,
-    basisProject,
+    basisProject: splitReference.basisProject ?? basisProject,
+    basisProduct: splitReference.basisProduct,
     basisData: `${detail.position}/${detail.designation}/${detail.name}`,
     // PDF "Обозн." → dedicated Basis designation field.
     basisDesignation: detail.designation || null,
     // PDF "Наименование" → detail name (previously packed as "position~~designation~~name").
     detailName: detail.name || null,
-  }));
+    });
+  });
+}
+
+export function splitBasisProjectReference(value: string | null | undefined): {
+  basisProject: string | null;
+  basisProduct: string | null;
+} {
+  const normalized = normalizeWhitespace(value ?? '');
+  if (!normalized) return { basisProject: null, basisProduct: null };
+
+  const basisProject = (normalized.match(/\d+/g) ?? []).join('') || null;
+  const basisProduct = normalizeWhitespace(normalized.replace(/\d+/g, '')) || null;
+  return { basisProject, basisProduct };
 }

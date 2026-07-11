@@ -31,6 +31,8 @@ function createRawOrder(overrides: Partial<SaveOrderDto> = {}): SaveOrderDto {
         filmId: '',
         detailCost: '10000.25' as unknown as number,
         note: '',
+        basisProject: ' 1319 ',
+        basisProduct: ' Прихожка ',
       },
       {
         height: 0,
@@ -86,6 +88,8 @@ describe('normalizeSaveOrderDto', () => {
       filmId: null,
       detailCost: 10000.25,
       note: null,
+      basisProject: '1319',
+      basisProduct: 'Прихожка',
     });
     expect(normalized.payments).toHaveLength(1);
     expect(normalized.payments[0]).toMatchObject({

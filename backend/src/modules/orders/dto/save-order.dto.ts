@@ -71,6 +71,7 @@ export interface SaveOrderDetailDto {
   jointOrderId?: number | null;
   note?: string | null;
   basisProject?: string | null;
+  basisProduct?: string | null;
   basisData?: string | null;
   basisDesignation?: string | null;
   linkCuttingFile?: string | null;
@@ -195,6 +196,7 @@ export type NormalizedSaveOrderDetailDto = Omit<
   | 'jointOrderId'
   | 'note'
   | 'basisProject'
+  | 'basisProduct'
   | 'basisData'
   | 'basisDesignation'
   | 'linkCuttingFile'
@@ -214,6 +216,7 @@ export type NormalizedSaveOrderDetailDto = Omit<
   jointOrderId: number | null;
   note: string | null;
   basisProject?: string | null;
+  basisProduct?: string | null;
   basisData?: string | null;
   basisDesignation?: string | null;
   linkCuttingFile: string | null;

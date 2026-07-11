@@ -402,6 +402,7 @@ function normalizeDetails(details: OrderDetail[]): SaveOrderDetailDto[] {
       productionStatusId: optionalNumber(detail.production_status_id),
       jointOrderId: optionalNumber(detail.joint_order_id),
       basisProject: normalizeOptionalString(detail.basis_project),
+      basisProduct: normalizeOptionalString(detail.basis_product),
       basisData: normalizeOptionalString(detail.basis_data),
       basisDesignation: normalizeOptionalString(detail.basis_designation),
 
@@ -515,6 +516,7 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     production_status_id: detail.productionStatusId ?? null,
     joint_order_id: detail.jointOrderId ?? null,
     basis_project: detail.basisProject ?? null,
+    basis_product: detail.basisProduct ?? null,
     basis_data: detail.basisData ?? null,
     basis_designation: detail.basisDesignation ?? null,
     link_cutting_file: detail.linkCuttingFile ?? null,
