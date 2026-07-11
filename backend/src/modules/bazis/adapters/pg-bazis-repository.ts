@@ -47,6 +47,22 @@ export const MAX_BAZIS_REVISIONS_PER_PROJECT = 3;
 const COMMAND_NAME = 'bazis.create_order';
 const STALE_PROCESSING_MS = 10 * 60 * 1000;
 
+interface PruneCandidateRow {
+  bazis_revision_id: number | string;
+  revision_no: number | string;
+  file_name: string | null;
+  file_size: number | string | null;
+  xml_sha256: string;
+  bazis_version: string | null;
+  product_name: string | null;
+  product_price: number | string | null;
+  summary_json: Record<string, unknown> | null;
+  imported_by: number | string | null;
+  imported_at: string | null;
+  request_id: string | null;
+  nodes_count: number | string;
+}
+
 interface ProjectListRow {
   bazis_project_id: number | string;
   project_id: number | string;
@@ -467,9 +483,11 @@ export class PgBazisRepository implements BazisRepositoryPort {
 
       // Retention: храним максимум MAX_BAZIS_REVISIONS_PER_PROJECT последних
       // ревизий; более старые удаляются жёстко, КРОМЕ ревизий, из которых
-      // созданы заказы (bazis_order_links.revision_id — FK без CASCADE,
-      // provenance деталей не разрушаем).
-      const pruneCandidates = await tx.query<{ bazis_revision_id: number | string; revision_no: number | string }>(
+      // созданы заказы (provenance деталей не разрушаем). Порядок локов
+      // общий с create-order-хуком: revision (FOR UPDATE) → nodes (cascade);
+      // links перепроверяются ПОСЛЕ захвата локов свежим снапшотом — окно
+      // «link появился между выборкой и удалением» закрыто (Critic R1-1).
+      const pruneCandidates = await tx.query<PruneCandidateRow>(
         `
         WITH prune_keep AS (
           SELECT bazis_revision_id
@@ -478,87 +496,121 @@ export class PgBazisRepository implements BazisRepositoryPort {
           ORDER BY revision_no DESC
           LIMIT ${MAX_BAZIS_REVISIONS_PER_PROJECT}
         )
-        SELECT r.bazis_revision_id, r.revision_no
+        SELECT r.bazis_revision_id, r.revision_no, r.file_name, r.file_size,
+               r.xml_sha256, r.bazis_version, r.product_name, r.product_price,
+               r.summary_json, r.imported_by, r.imported_at, r.request_id,
+               (SELECT count(*) FROM bazis_nodes n
+                WHERE n.revision_id = r.bazis_revision_id)::int AS nodes_count
         FROM bazis_project_revisions r
         WHERE r.bazis_project_id = $1
           AND r.bazis_revision_id NOT IN (SELECT bazis_revision_id FROM prune_keep)
-          AND NOT EXISTS (
-            SELECT 1 FROM bazis_order_links l WHERE l.revision_id = r.bazis_revision_id
-          )
         ORDER BY r.revision_no
+        FOR UPDATE OF r
         `,
         [bazisProjectId],
       );
 
       if (pruneCandidates.rows.length > 0) {
-        const prunedIds = pruneCandidates.rows.map((row) => Number(row.bazis_revision_id));
-        await tx.query(
+        const candidateIds = pruneCandidates.rows.map((row) => Number(row.bazis_revision_id));
+        const linked = await tx.query<{ revision_id: number | string }>(
           `
-          DELETE FROM bazis_import_runs
+          SELECT DISTINCT revision_id
+          FROM bazis_order_links
           WHERE revision_id = ANY($1::bigint[])
           `,
-          [prunedIds],
+          [candidateIds],
         );
-        await tx.query(
-          `
-          DELETE FROM bazis_project_revisions
-          WHERE bazis_revision_id = ANY($1::bigint[])
-          `,
-          [prunedIds],
+        const protectedIds = new Set(linked.rows.map((row) => Number(row.revision_id)));
+        const prunable = pruneCandidates.rows.filter(
+          (row) => !protectedIds.has(Number(row.bazis_revision_id)),
         );
 
-        for (const row of pruneCandidates.rows) {
-          const prunedRevisionId = Number(row.bazis_revision_id);
-          const prunedRevisionNo = Number(row.revision_no);
-          await auditService.record(tx, {
-            event: 'bazis.revision_pruned',
-            entityType: 'bazis_revision',
-            entityId: String(prunedRevisionId),
-            actorUserId: command.currentUser.id,
-            actorUsername: command.currentUser.username,
-            actorRole: command.currentUser.role,
-            requestId,
-            source: SOURCE,
-            relatedEntities: [
-              { entityType: 'project', entityId: projectId ?? 0 },
-              { entityType: 'bazis_project', entityId: bazisProjectId },
-              { entityType: 'bazis_revision', entityId: prunedRevisionId },
-            ],
-            before: { revisionId: prunedRevisionId, revisionNo: prunedRevisionNo },
-            after: {},
-            metadata: {
-              source: SOURCE,
-              action: 'bazis_revision_prune',
-              requestId,
-              keepLast: MAX_BAZIS_REVISIONS_PER_PROJECT,
-              triggeredByRevisionId: revisionId,
-            },
-          });
+        if (prunable.length > 0) {
+          const prunedIds = prunable.map((row) => Number(row.bazis_revision_id));
           await tx.query(
             `
-            INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
-            VALUES ($1,$2,$3,$4::jsonb,$5)
-            ON CONFLICT (idempotency_key) DO NOTHING
+            DELETE FROM bazis_import_runs
+            WHERE revision_id = ANY($1::bigint[])
             `,
-            [
-              'bazis.revision_pruned',
-              'bazis_revision',
-              String(prunedRevisionId),
-              JSON.stringify({
-                eventType: 'bazis.revision_pruned',
+            [prunedIds],
+          );
+          await tx.query(
+            `
+            DELETE FROM bazis_project_revisions
+            WHERE bazis_revision_id = ANY($1::bigint[])
+            `,
+            [prunedIds],
+          );
+
+          for (const row of prunable) {
+            const prunedRevisionId = Number(row.bazis_revision_id);
+            const prunedRevisionNo = Number(row.revision_no);
+            await auditService.record(tx, {
+              event: 'bazis.revision_pruned',
+              entityType: 'bazis_revision',
+              entityId: String(prunedRevisionId),
+              actorUserId: command.currentUser.id,
+              actorUsername: command.currentUser.username,
+              actorRole: command.currentUser.role,
+              requestId,
+              source: SOURCE,
+              relatedEntities: [
+                { entityType: 'project', entityId: projectId ?? 0 },
+                { entityType: 'bazis_project', entityId: bazisProjectId },
+                { entityType: 'bazis_revision', entityId: prunedRevisionId },
+              ],
+              // Hard delete: before-снапшот несёт все метаданные ревизии,
+              // кроме raw_xml (мегабайты gzip в diff_json не кладём).
+              before: {
                 revisionId: prunedRevisionId,
                 revisionNo: prunedRevisionNo,
-                bazisProjectId,
-                projectId,
-                actorUserId: command.currentUser.id,
+                fileName: row.file_name,
+                fileSize: nullableNumber(row.file_size),
+                xmlSha256: row.xml_sha256,
+                bazisVersion: row.bazis_version,
+                productName: row.product_name,
+                productPrice: nullableNumber(row.product_price),
+                summary: row.summary_json ?? {},
+                importedBy: nullableNumber(row.imported_by),
+                importedAt: row.imported_at,
+                importRequestId: row.request_id,
+                nodesCount: Number(row.nodes_count ?? 0),
+              },
+              after: {},
+              metadata: {
+                source: SOURCE,
+                action: 'bazis_revision_prune',
                 requestId,
-              }),
-              `bazis-revision-pruned-${prunedRevisionId}`,
-            ],
-          );
-          warnings.push(
-            `Ревизия №${prunedRevisionNo} удалена: хранятся только ${MAX_BAZIS_REVISIONS_PER_PROJECT} последних ревизии`,
-          );
+                keepLast: MAX_BAZIS_REVISIONS_PER_PROJECT,
+                triggeredByRevisionId: revisionId,
+              },
+            });
+            await tx.query(
+              `
+              INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+              VALUES ($1,$2,$3,$4::jsonb,$5)
+              ON CONFLICT (idempotency_key) DO NOTHING
+              `,
+              [
+                'bazis.revision_pruned',
+                'bazis_revision',
+                String(prunedRevisionId),
+                JSON.stringify({
+                  eventType: 'bazis.revision_pruned',
+                  revisionId: prunedRevisionId,
+                  revisionNo: prunedRevisionNo,
+                  bazisProjectId,
+                  projectId,
+                  actorUserId: command.currentUser.id,
+                  requestId,
+                }),
+                `bazis-revision-pruned-${prunedRevisionId}`,
+              ],
+            );
+            warnings.push(
+              `Ревизия №${prunedRevisionNo} удалена: хранятся только ${MAX_BAZIS_REVISIONS_PER_PROJECT} последних ревизии`,
+            );
+          }
         }
       }
 
@@ -804,6 +856,10 @@ export class PgBazisRepository implements BazisRepositoryPort {
   }
 
   async getTreeChildren(revisionId: number, parentNodeId: number | null): Promise<BazisTreeNodeDto[]> {
+    // Ревизия могла быть удалена retention-prune'ом: пустое дерево без ошибки
+    // маскировало бы исчезновение (Critic R1-3).
+    await this.assertRevisionExists(revisionId);
+
     const result = await this.database.query<TreeNodeRow>(
       `
       SELECT n.bazis_node_id, n.parent_node_id, n.seq, n.node_kind, n.object_type, n.name,
@@ -1566,6 +1622,22 @@ export class PgBazisRepository implements BazisRepositoryPort {
     panels: ReadonlyArray<{ bazisNodeId: number }>;
     created: { orderId: number; detailIdsByClientKey: Map<string, number> };
   }): Promise<CreateOrderFromRevisionResponseDto> {
+    // Единый порядок локов с retention-prune (revision → nodes): сначала
+    // KEY SHARE на строку ревизии, потом FK-локи на nodes через map-инсерты.
+    // Ревизия исчезла (конкурентный prune) → 404, а не FK-ошибка/deadlock.
+    const revisionLock = await input.tx.query<{ bazis_revision_id: number | string }>(
+      `
+      SELECT bazis_revision_id
+      FROM bazis_project_revisions
+      WHERE bazis_revision_id = $1
+      FOR KEY SHARE
+      `,
+      [input.revision.revisionId],
+    );
+    if (revisionLock.rows.length === 0) {
+      throw new BazisRevisionNotFoundError(input.revision.revisionId);
+    }
+
     for (const panel of input.panels) {
       await input.tx.query(
         `

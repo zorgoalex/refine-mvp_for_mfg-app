@@ -63,23 +63,38 @@ describe('PgBazisRepository.importRevision', () => {
     expect(response.warnings).toEqual(['Такой же файл уже импортирован в Базис-проект «Другой проект»']);
   });
 
-  it('prunes revisions beyond the last 3 (no order links) after import: runs+revisions deleted, audit+outbox+warning', async () => {
-    const database = createDatabase({ pruneCandidates: [{ bazis_revision_id: 50, revision_no: 1 }] });
+  it('prunes revisions beyond the last 3 after import: lock, link re-check, deletes, rich audit + outbox + warning', async () => {
+    const database = createDatabase({ pruneCandidates: [pruneCandidateRow(50, 1)] });
     const repository = new PgBazisRepository(database.service);
 
     const response = await repository.importRevision(importCommand());
 
     const ordered = database.queries.map((query) => normalizeSql(query.text));
     const insertRevisionIdx = ordered.findIndex((sql) => sql.startsWith('INSERT INTO bazis_project_revisions'));
+    const pruneSelectIdx = ordered.findIndex((sql) => sql.includes('prune_keep'));
+    const linkRecheckIdx = ordered.findIndex((sql) =>
+      sql.includes('FROM bazis_order_links') && sql.includes('ANY'));
     const pruneRunsIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_import_runs'));
     const pruneRevisionsIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_project_revisions'));
-    expect(pruneRunsIdx).toBeGreaterThan(insertRevisionIdx);
+
+    // Кандидаты лочатся FOR UPDATE (единый порядок локов revision→nodes с create-order),
+    // затем перепроверка links свежим снапшотом, и только потом удаления.
+    expect(ordered[pruneSelectIdx]).toContain('FOR UPDATE');
+    expect(pruneSelectIdx).toBeGreaterThan(insertRevisionIdx);
+    expect(linkRecheckIdx).toBeGreaterThan(pruneSelectIdx);
+    expect(pruneRunsIdx).toBeGreaterThan(linkRecheckIdx);
     expect(pruneRevisionsIdx).toBeGreaterThan(pruneRunsIdx);
 
-    const auditEvents = database.queries
-      .filter((query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log ('))
-      .map((query) => query.params?.[0]);
-    expect(auditEvents).toContain('bazis.revision_pruned');
+    const audit = database.queries.find(
+      (query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log (') && query.params?.[0] === 'bazis.revision_pruned',
+    );
+    expect(audit).toBeDefined();
+    // before-снапшот несёт полные метаданные удаляемой ревизии (hard delete).
+    const before = String(audit?.params?.[19] ?? '');
+    expect(before).toContain('"fileName":"old.xml"');
+    expect(before).toContain('"xmlSha256":"sha-old"');
+    expect(before).toContain('"nodesCount":25');
+    expect(before).toContain('"revisionNo":1');
 
     const outboxKeys = database.queries
       .filter((query) => normalizeSql(query.text).startsWith('INSERT INTO outbox_events'))
@@ -87,6 +102,22 @@ describe('PgBazisRepository.importRevision', () => {
     expect(outboxKeys).toContain('bazis-revision-pruned-50');
 
     expect(response.warnings.some((warning) => warning.includes('Ревизия №1'))).toBe(true);
+  });
+
+  it('skips candidates that acquired order links between selection and the re-check', async () => {
+    const database = createDatabase({
+      pruneCandidates: [pruneCandidateRow(50, 1), pruneCandidateRow(51, 2)],
+      pruneProtectedRevisionIds: [50],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.importRevision(importCommand());
+
+    const revisionDelete = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('DELETE FROM bazis_project_revisions'));
+    expect(revisionDelete?.params?.[0]).toEqual([51]);
+    expect(response.warnings.some((warning) => warning.includes('Ревизия №2'))).toBe(true);
+    expect(response.warnings.some((warning) => warning.includes('Ревизия №1'))).toBe(false);
   });
 
   it('does not prune anything when all revisions fit the retention window', async () => {
@@ -603,6 +634,13 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
     });
     const sql = normalizedSql(database.queries);
     expect(sql).toContain('WITH RECURSIVE sel AS');
+    // Единый порядок локов с prune: сначала KEY SHARE на строку ревизии,
+    // потом FK-локи на nodes через map-инсерты.
+    const orderedHook = database.queries.map((query) => normalizeSql(query.text));
+    const revisionLockIdx = orderedHook.findIndex((sqlText) => sqlText.includes('FOR KEY SHARE'));
+    const mapInsertIdx = orderedHook.findIndex((sqlText) => sqlText.startsWith('INSERT INTO bazis_node_order_detail_map'));
+    expect(revisionLockIdx).toBeGreaterThan(-1);
+    expect(revisionLockIdx).toBeLessThan(mapInsertIdx);
     expect(sql).toContain('INSERT INTO bazis_node_order_detail_map');
     expect(sql).toContain('ON CONFLICT (node_id, order_id) DO NOTHING');
     expect(sql).toContain('INSERT INTO bazis_order_links');
@@ -914,6 +952,75 @@ describe('PgBazisRepository.listRevisionOrders', () => {
   });
 });
 
+describe('PgBazisRepository.createOrderFromRevision revision lock', () => {
+  it('fails the hook with BazisRevisionNotFoundError when the revision was pruned concurrently', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionGoneAtHook: true,
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+        },
+        panelRows: [
+          {
+            bazis_node_id: 101,
+            object_type: 'Панель',
+            name: 'Фасад',
+            position: '7',
+            designation: 'D-01',
+            cumulative_quantity: 1,
+            length_mm: 100,
+            width_mm: 50,
+            main_material_name: 'ЛДСП',
+            raw_json: {},
+          },
+        ],
+        mappingRows: [
+          {
+            source_kind: 'sheet',
+            name: 'лдсп',
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+            film_id: null,
+            edge_type_id: null,
+          },
+        ],
+      },
+    });
+    const orderTransactions: Pick<OrderTransactionService, 'create'> = {
+      async create(command) {
+        await expect(
+          command.postPersistHook?.(
+            { getTransactionClient: () => database.tx },
+            { orderId: 9001, detailIdsByClientKey: new Map([['bazis-node-101', 7001]]) },
+          ),
+        ).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+        throw new BazisRevisionNotFoundError(82);
+      },
+    };
+    const repository = new PgBazisRepository(database.service, orderTransactions);
+
+    await expect(repository.createOrderFromRevision(createOrderCommand())).rejects.toBeInstanceOf(
+      BazisRevisionNotFoundError,
+    );
+    // Доказательство, что reject пришёл именно из hook-лока, а не раньше.
+    const lockQueries = database.queries.filter((query) => normalizeSql(query.text).includes('FOR KEY SHARE'));
+    expect(lockQueries).toHaveLength(1);
+  });
+});
+
+describe('PgBazisRepository.getTreeChildren', () => {
+  it('throws BazisRevisionNotFoundError when the revision no longer exists (pruned)', async () => {
+    const database = createDatabase({ nodeSearch: { revisionExists: false } });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(repository.getTreeChildren(5, null)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+});
+
 function createDatabase(
   options: {
     duplicateRevisionNo?: number;
@@ -939,6 +1046,7 @@ function createDatabase(
         created_at: string;
       };
       revisionRow?: Record<string, unknown>;
+      revisionGoneAtHook?: boolean;
       panelRows?: Array<Record<string, unknown>>;
       mappingRows?: Array<Record<string, unknown>>;
       nowIso?: string;
@@ -951,7 +1059,8 @@ function createDatabase(
       filmRows?: Array<Record<string, unknown>>;
     };
     revisionOrders?: Array<Record<string, unknown>>;
-    pruneCandidates?: Array<{ bazis_revision_id: number; revision_no: number }>;
+    pruneCandidates?: Array<Record<string, unknown>>;
+    pruneProtectedRevisionIds?: number[];
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -1139,8 +1248,19 @@ function createDatabase(
         };
       }
 
+      if (normalized.includes('FOR KEY SHARE')) {
+        return options.createOrderState?.revisionGoneAtHook
+          ? { rows: [], rowCount: 0 }
+          : { rows: [{ bazis_revision_id: 82 }], rowCount: 1 };
+      }
+
       if (normalized.includes('prune_keep')) {
         const rows = options.pruneCandidates ?? [];
+        return { rows, rowCount: rows.length };
+      }
+
+      if (normalized.includes('FROM bazis_order_links') && normalized.includes('ANY')) {
+        const rows = (options.pruneProtectedRevisionIds ?? []).map((revisionId) => ({ revision_id: revisionId }));
         return { rows, rowCount: rows.length };
       }
 
@@ -1504,5 +1624,23 @@ function createDeleteDatabase(
         return tx.query(text, params);
       },
     } as unknown as DatabaseService,
+  };
+}
+
+function pruneCandidateRow(bazisRevisionId: number, revisionNo: number): Record<string, unknown> {
+  return {
+    bazis_revision_id: bazisRevisionId,
+    revision_no: revisionNo,
+    file_name: 'old.xml',
+    file_size: 1000,
+    xml_sha256: 'sha-old',
+    bazis_version: '2022.12.21.36090',
+    product_name: 'Старое изделие',
+    product_price: 10,
+    summary_json: { totalNodes: 25 },
+    imported_by: 1,
+    imported_at: '2026-07-01T10:00:00.000Z',
+    request_id: 'req-old',
+    nodes_count: 25,
   };
 }
