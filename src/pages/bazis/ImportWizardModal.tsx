@@ -6,6 +6,15 @@ import { Alert, Button, Descriptions, Input, Modal, Radio, Select, Space, Spin, 
 import { ApiError } from '../../api/apiError';
 import { bazisApi } from '../../api/bazisApi';
 import { projectsApi, type ProjectDto } from '../../api/projectsApi';
+import { ordersApi } from '../../api/ordersApi';
+import type { OrderListItemDto } from '../../api/types/orderApi.types';
+import {
+  clientOptionsFromProjects,
+  filterProjectOptions,
+  nextBindingOnClientPick,
+  nextBindingOnOrderPick,
+  nextBindingOnProjectPick,
+} from './erpBindingFilters';
 import type { BazisImportResponse, BazisProjectCard, BazisProjectListItem, MaterialMapping } from '../../api/types/bazisApi.types';
 import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
 import { MinimizedModalChip } from '../../components/MinimizedModalChip';
@@ -96,6 +105,11 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   const [erpProjectsLoading, setErpProjectsLoading] = useState(false);
   const [selectedBazisProjectId, setSelectedBazisProjectId] = useState<number | undefined>(undefined);
   const [selectedProjectId, setSelectedProjectId] = useState<number | undefined>(undefined);
+  const [erpClientId, setErpClientId] = useState<number | undefined>(undefined);
+  const [erpOrderId, setErpOrderId] = useState<number | undefined>(undefined);
+  const [erpOrders, setErpOrders] = useState<OrderListItemDto[]>([]);
+  const [erpOrdersLoading, setErpOrdersLoading] = useState(false);
+  const [erpOrderSearch, setErpOrderSearch] = useState('');
   const [preview, setPreview] = useState<XmlPreviewResult | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [newProjectName, setNewProjectName] = useState('');
@@ -161,6 +175,10 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     setBindingMode('bazis');
     setSelectedBazisProjectId(undefined);
     setSelectedProjectId(undefined);
+    setErpClientId(undefined);
+    setErpOrderId(undefined);
+    setErpOrders([]);
+    setErpOrderSearch('');
     setPreview(null);
     setPreviewError(null);
     setNewProjectName('');
@@ -214,6 +232,44 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
       cancelled = true;
     };
   }, [open, resetState]);
+
+  // Заказы для взаимосвязанного поиска на шаге привязки (режим ERP-проекта):
+  // сервер сужает по выбранным клиенту/проекту и строке поиска. Debounce —
+  // через отложенный setTimeout; loading НЕ в deps (урок self-cancel бага).
+  useEffect(() => {
+    if (!open || bindingMode !== 'erp') {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setErpOrdersLoading(true);
+      try {
+        const response = await ordersApi.list({
+          clientId: erpClientId,
+          projectId: selectedProjectId,
+          search: erpOrderSearch.trim() || undefined,
+          pageSize: 50,
+        });
+        if (!cancelled) {
+          setErpOrders(response.data);
+        }
+      } catch {
+        if (!cancelled) {
+          setErpOrders([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setErpOrdersLoading(false);
+        }
+      }
+    }, erpOrderSearch ? 300 : 0);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [open, bindingMode, erpClientId, selectedProjectId, erpOrderSearch]);
 
   // onImported приходит инлайн-лямбдой от родителя (новая ссылка на каждый рендер) —
   // через ref, чтобы не входить в deps импорт-эффекта и не отменять запрос re-run'ом.
@@ -607,21 +663,84 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
               />
             ) : null}
 
-            {bindingMode === 'erp' ? (
-              <Select
-                showSearch
-                allowClear
-                optionFilterProp="label"
-                loading={erpProjectsLoading}
-                placeholder="Выберите ERP-проект"
-                value={selectedProjectId}
-                onChange={(value) => setSelectedProjectId(value)}
-                options={erpProjects.map((item) => ({
-                  value: item.projectId,
-                  label: `${item.code} · ${item.name}`,
-                }))}
-              />
-            ) : null}
+            {bindingMode === 'erp' ? (() => {
+              const bindingState = { clientId: erpClientId, projectId: selectedProjectId, orderId: erpOrderId };
+              const selectedOrder = erpOrders.find((order) => order.orderId === erpOrderId);
+              const applyBinding = (next: { clientId?: number; projectId?: number; orderId?: number }) => {
+                setErpClientId(next.clientId);
+                setSelectedProjectId(next.projectId);
+                setErpOrderId(next.orderId);
+              };
+              const projectOptions = filterProjectOptions(erpProjects, bindingState)
+                .filter((project) => (selectedOrder ? project.projectId === selectedOrder.projectId : true));
+              const clientOptions = clientOptionsFromProjects(
+                selectedProjectId != null
+                  ? erpProjects.filter((project) => project.projectId === selectedProjectId)
+                  : erpProjects,
+              );
+              return (
+                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                  <Text type="secondary">
+                    Поиск проекта по трём взаимосвязанным полям: выбор в любом сужает остальные.
+                  </Text>
+                  <Select
+                    showSearch
+                    allowClear
+                    optionFilterProp="label"
+                    placeholder="Клиент"
+                    style={{ width: '100%' }}
+                    value={erpClientId}
+                    onChange={(value) =>
+                      applyBinding(
+                        nextBindingOnClientPick(bindingState, value ?? undefined, erpProjects, selectedOrder),
+                      )}
+                    options={clientOptions}
+                  />
+                  <Select
+                    showSearch
+                    allowClear
+                    optionFilterProp="label"
+                    loading={erpProjectsLoading}
+                    placeholder="Выберите ERP-проект"
+                    style={{ width: '100%' }}
+                    value={selectedProjectId}
+                    onChange={(value) =>
+                      applyBinding(
+                        nextBindingOnProjectPick(
+                          bindingState,
+                          erpProjects.find((project) => project.projectId === value),
+                          selectedOrder,
+                        ),
+                      )}
+                    options={projectOptions.map((item) => ({
+                      value: item.projectId,
+                      label: `${item.code} · ${item.name}`,
+                    }))}
+                  />
+                  <Select
+                    showSearch
+                    allowClear
+                    loading={erpOrdersLoading}
+                    placeholder="ERP-заказ (поиск по номеру или названию)"
+                    style={{ width: '100%' }}
+                    value={erpOrderId}
+                    filterOption={false}
+                    onSearch={(value) => setErpOrderSearch(value)}
+                    onChange={(value) =>
+                      applyBinding(
+                        nextBindingOnOrderPick(
+                          bindingState,
+                          erpOrders.find((order) => order.orderId === value),
+                        ),
+                      )}
+                    options={erpOrders.map((order) => ({
+                      value: order.orderId,
+                      label: `${order.fullNumber} · ${order.orderName}${order.clientName ? ` · ${order.clientName}` : ''}`,
+                    }))}
+                  />
+                </Space>
+              );
+            })() : null}
 
             {bindingMode === 'new' ? (
               <Space direction="vertical" size="middle" style={{ width: '100%' }}>
