@@ -25,7 +25,7 @@ export const OrderWorkshopList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="order_workshop_id" title="id" sorter />
-        <Table.Column dataIndex="order_id" title="Заказ" sorter />
+        <Table.Column dataIndex="order_id" title="ID заказа" sorter />
         <Table.Column dataIndex="workshop_id" title="Цех" sorter />
         <Table.Column dataIndex="production_status_id" title="Статус производства" sorter />
         <Table.Column dataIndex="sequence_order" title="Последовательный номер этапа" sorter />

@@ -1260,7 +1260,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
     () => [
       { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detail' },
-      { title: 'Заказ', dataIndex: 'orderId', key: 'order' },
+      { title: 'ID заказа', dataIndex: 'orderId', key: 'order' },
       { title: 'Кол-во', dataIndex: 'quantity', key: 'qty' },
       {
         title: 'Статус',
@@ -1291,7 +1291,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       { title: 'Поз.', key: 'pos', width: 60, fixed: 'left', render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.detailNumber) },
       { title: 'Наименование', key: 'name', width: 180, fixed: 'left', render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.detailName) },
       {
-        title: 'Заказ',
+        title: 'ID заказа',
         dataIndex: 'orderId',
         key: 'order',
         width: 80,

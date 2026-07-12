@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-12",
+    title: "Честные заголовки колонок с ID заказа",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Во всех списках, где в колонке показывается номер (ID) заказа, а не его название, заголовок колонки теперь называется «ID заказа»: список Базис-проектов, вкладки «Панели» и «Заказы» Базис-проекта, таблицы раскроя, «Заказы по цехам», «Потребности заказов» и колонка id в списке заказов.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-11",
     title: "Импорт Базис: поиск ERP-проекта по клиенту и заказу",
     services: ["ERP"],

@@ -74,7 +74,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, onSelect
         ellipsis: true,
       },
       {
-        title: 'Заказ',
+        title: 'ID заказа',
         key: 'orders',
         width: 110,
         render: (_, row) =>

@@ -11,7 +11,7 @@ const viewerTree = readFileSync(new URL('./ViewerTree.tsx', import.meta.url), 'u
 
 describe('bazis node order-provenance UI guards', () => {
   it('PanelsTab has an order column linking to /orders/show/:id', () => {
-    expect(panelsTab).toContain("title: 'Заказ'");
+    expect(panelsTab).toContain("title: 'ID заказа'");
     expect(panelsTab).toMatch(/orderIds/);
     expect(panelsTab).toContain('/orders/show/');
     // Клик по ссылке не должен триггерить выбор строки (row onClick)

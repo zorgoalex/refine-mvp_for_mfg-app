@@ -27,7 +27,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
         })}
       >
         <Table.Column dataIndex="requirement_id" title="id" sorter />
-        <Table.Column dataIndex="order_id" title="Заказ" sorter />
+        <Table.Column dataIndex="order_id" title="ID заказа" sorter />
         <Table.Column dataIndex="resource_type" title="Тип ресурса" sorter />
         <Table.Column dataIndex="material_id" title="Материал" />
         <Table.Column dataIndex="film_id" title="Пленка" />

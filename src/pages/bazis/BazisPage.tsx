@@ -200,7 +200,7 @@ export const BazisPage: React.FC = () => {
         render: (value: string | null) => value ? formatDateTime(value) : '—',
       },
       {
-        title: 'Заказы',
+        title: 'ID заказа',
         dataIndex: 'linkedOrderIds',
         key: 'linkedOrderIds',
         render: (value: number[]) => (
