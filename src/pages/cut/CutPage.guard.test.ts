@@ -192,8 +192,12 @@ describe('CutPage source guards', () => {
     expect(body).toContain('saveSheetAxisOrigin');
     expect(body).toContain('resetSheetViews()');
     expect(source).toContain("useState<CutAxisOrigin>('bottom-left')");
-    expect(source).toContain("{ label: 'Слева снизу', value: 'bottom-left' }");
-    expect(source).toContain("{ label: 'Слева сверху', value: 'top-left' }");
+    expect(source).toContain('<Radio.Button value="bottom-left" aria-label="Точка отсчёта слева снизу">');
+    expect(source).toContain('<Radio.Button value="top-left" aria-label="Точка отсчёта слева сверху">');
+    expect(source).toContain('<SheetOriginIcon axisOrigin="bottom-left" />');
+    expect(source).toContain('<SheetOriginIcon axisOrigin="top-left" />');
+    expect(source).toContain('<Radio.Button value={true} aria-label="Книжная ориентация">');
+    expect(source).toContain('<Radio.Button value={false} aria-label="Альбомная ориентация">');
     expect(source).toContain('axisOrigin={sheetAxisOrigin}');
     expect(source).toContain('buildSheetPieceOverlays(sheet.placements, job.items, rotate90, originTopLeft, sheetAxisOrigin)');
     expect(source).toContain('renderVersion, originTopLeft, sheetAxisOrigin');
