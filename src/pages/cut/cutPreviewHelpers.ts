@@ -195,8 +195,8 @@ export function buildSheetPieceOverlays(
           detailNumber: item.detail?.detailNumber ?? null,
           instance: piece.instance,
           qty: item.qty ?? null,
-          widthMm: piece.width_mm,
-          heightMm: piece.height_mm,
+          widthMm: piece.label?.widthMm ?? piece.width_mm,
+          heightMm: piece.label?.heightMm ?? piece.height_mm,
           // 4th line only on mixed-material sheets.
           materialName: sheetMixesMaterials ? item.detail?.materialName ?? null : null,
         }),

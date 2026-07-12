@@ -26,6 +26,7 @@ describe('backend feature flags', () => {
       cutJobs: false,
       cutJobsReadOnly: true,
       cutAutoTrigger: false,
+      cutNativePortrait: false,
       labels: false,
       sheetOrdersReads: false,
       dowelingCommands: false,
@@ -55,6 +56,7 @@ describe('backend feature flags', () => {
           BACKEND_ENABLE_CUT_JOBS: 'true',
           BACKEND_CUT_JOBS_READ_ONLY: 'false',
           BACKEND_CUT_AUTO_TRIGGER: 'true',
+          BACKEND_CUT_NATIVE_PORTRAIT: 'true',
           BACKEND_ENABLE_LABELS: 'true',
           BACKEND_SHEET_ORDERS_READS: 'true',
           FREECUT_BASE_URL: 'http://freecut:8088',
@@ -77,6 +79,7 @@ describe('backend feature flags', () => {
       cutJobs: true,
       cutJobsReadOnly: false,
       cutAutoTrigger: true,
+      cutNativePortrait: true,
       labels: true,
       sheetOrdersReads: true,
     });

@@ -195,7 +195,8 @@ function num(value: number): string {
 }
 
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
-  const { sheet, labelFor, fillFor, rotate90 = false, originTopLeft = false, showLabels = true } = input;
+  const { sheet, labelFor, fillFor, rotate90 = false, showLabels = true } = input;
+  const originTopLeft = sheet.coordinate_contract === 'native_portrait_v1' ? false : (input.originTopLeft ?? false);
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 40));
@@ -253,7 +254,8 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
 }
 
 export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
-  const { sheet, labelFor, fillFor, rotate90 = false, originTopLeft = false } = input;
+  const { sheet, labelFor, fillFor, rotate90 = false } = input;
+  const originTopLeft = sheet.coordinate_contract === 'native_portrait_v1' ? false : (input.originTopLeft ?? false);
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 42));
