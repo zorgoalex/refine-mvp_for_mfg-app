@@ -21,6 +21,9 @@ const { Text } = Typography;
 interface PanelsTabProps {
   data: RevisionData;
   selectedId: number | null;
+  /** Инкрементируется на каждый внешний goToPanel — форсирует авто-раскрытие
+   * группы даже при повторной навигации на ту же панель. */
+  focusToken: number;
   onSelect: (nodeId: number | null) => void;
   onGoToTree: (nodeId: number) => void;
 }
@@ -37,7 +40,7 @@ interface PanelGroupTableRow extends Omit<PanelGroupRow, 'children'> {
 
 type PanelsTableRow = PanelGroupTableRow | PanelChildRow;
 
-export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, onSelect, onGoToTree }) => {
+export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusToken, onSelect, onGoToTree }) => {
   const { nodes, byId, ancestorsOf } = data;
   const [expandedKeys, setExpandedKeys] = useState<readonly React.Key[]>([]);
 
@@ -61,7 +64,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, onSelect
 
   // Выбор панели может прийти извне (goToPanel из вкладок Фурнитура/Операции/
   // Смета) — авто-раскрываем группу выбранной панели, иначе она останется
-  // скрытой в свёрнутой группе.
+  // скрытой в свёрнутой группе. focusToken в deps: повторный goToPanel на ту же
+  // панель после ручного сворачивания группы тоже должен её раскрыть.
   useEffect(() => {
     if (selectedId == null) {
       return;
@@ -70,7 +74,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, onSelect
     if (groupKey != null) {
       setExpandedKeys((keys) => (keys.includes(groupKey) ? keys : [...keys, groupKey]));
     }
-  }, [groupRows, selectedId]);
+  }, [focusToken, groupRows, selectedId]);
 
   const columns = useMemo<ColumnsType<PanelsTableRow>>(
     () => [
