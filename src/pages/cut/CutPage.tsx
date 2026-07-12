@@ -151,6 +151,23 @@ function sheetPreviewRotate90(widthMm: number, heightMm: number, portrait: boole
   return portrait ? widthMm > heightMm : widthMm < heightMm;
 }
 
+function SheetOrientationIcon({ portrait }: { portrait: boolean }): React.ReactElement {
+  return (
+    <span
+      className={`cut-sheet-control-icon cut-sheet-control-icon--${portrait ? 'portrait' : 'landscape'}`}
+      aria-hidden="true"
+    />
+  );
+}
+
+function SheetOriginIcon({ axisOrigin }: { axisOrigin: CutAxisOrigin }): React.ReactElement {
+  return (
+    <span className="cut-sheet-origin-icon" aria-hidden="true">
+      <span className={`cut-sheet-origin-dot cut-sheet-origin-dot--${axisOrigin}`} />
+    </span>
+  );
+}
+
 function effectiveSheetOrigin(
   placements: SheetPlacements | undefined,
   legacyOriginTopLeft: boolean,
@@ -1729,21 +1746,43 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       )}
 
       {job && job.groups.length > 0 && (
-        <Space size={16} wrap>
-          <Checkbox checked={sheetPortrait} onChange={(e) => toggleSheetPortrait(e.target.checked)}>
-            Книжная ориентация листа (вертикально) — снимите для альбомной
-          </Checkbox>
+        <Space size={12} wrap className="cut-sheet-view-controls">
           <Radio.Group
+            className="cut-sheet-icon-radio"
+            value={sheetPortrait}
+            onChange={(event) => toggleSheetPortrait(event.target.value as boolean)}
+            buttonStyle="solid"
+            aria-label="Ориентация листа"
+          >
+            <Tooltip title="Книжная ориентация">
+              <Radio.Button value={true} aria-label="Книжная ориентация">
+                <SheetOrientationIcon portrait />
+              </Radio.Button>
+            </Tooltip>
+            <Tooltip title="Альбомная ориентация">
+              <Radio.Button value={false} aria-label="Альбомная ориентация">
+                <SheetOrientationIcon portrait={false} />
+              </Radio.Button>
+            </Tooltip>
+          </Radio.Group>
+          <Radio.Group
+            className="cut-sheet-icon-radio"
             value={sheetAxisOrigin}
             onChange={(event) => changeSheetAxisOrigin(event.target.value as CutAxisOrigin)}
-            optionType="button"
             buttonStyle="solid"
-            options={[
-              { label: 'Слева снизу', value: 'bottom-left' },
-              { label: 'Слева сверху', value: 'top-left' },
-            ]}
             aria-label="Точка отсчёта"
-          />
+          >
+            <Tooltip title="Точка отсчёта слева снизу">
+              <Radio.Button value="bottom-left" aria-label="Точка отсчёта слева снизу">
+                <SheetOriginIcon axisOrigin="bottom-left" />
+              </Radio.Button>
+            </Tooltip>
+            <Tooltip title="Точка отсчёта слева сверху">
+              <Radio.Button value="top-left" aria-label="Точка отсчёта слева сверху">
+                <SheetOriginIcon axisOrigin="top-left" />
+              </Radio.Button>
+            </Tooltip>
+          </Radio.Group>
         </Space>
       )}
 
