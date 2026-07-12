@@ -2310,6 +2310,7 @@ paths:
                     - name
                     - revisionsCount
                     - linkedOrderIds
+                    - linkedOrders
                   properties:
                     bazisProjectId:
                       type: integer
@@ -2330,6 +2331,18 @@ paths:
                       type: array
                       items:
                         type: integer
+                    linkedOrders:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - orderId
+                          - orderName
+                        properties:
+                          orderId:
+                            type: integer
+                          orderName:
+                            type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2425,6 +2438,7 @@ paths:
                   - name
                   - revisionsCount
                   - linkedOrderIds
+                  - linkedOrders
                   - revisions
                 properties:
                   bazisProjectId:
