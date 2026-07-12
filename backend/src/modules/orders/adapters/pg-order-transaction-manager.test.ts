@@ -65,9 +65,12 @@ describe('PgOrderTransactionManager', () => {
 
     const dupQuery = database.queries.find((query) => normalizeSql(query.text).includes('lower(trim(order_name))'));
     expect(dupQuery?.params).toEqual(['2558', 42]);
-    // Предложение считается по ЧИСЛОВЫМ именам с защитой от bigint-переполнения.
+    // Предложение считается по ЧИСЛОВЫМ именам с защитой от bigint-переполнения
+    // и ТОЛЬКО по продакшн-эпохе (order_date >= 2025-12-01): легаси-имена вида
+    // 230725 (даты до go-live) не должны задирать следующий номер серии.
     const suggestQuery = database.queries.find((query) => normalizeSql(query.text).includes('AS next'));
     expect(suggestQuery?.text).toContain("^\\d{1,15}$");
+    expect(suggestQuery?.text).toContain("2025-12-01");
   });
 
   it('runs order writes through the Postgres unit of work', async () => {

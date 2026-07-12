@@ -260,11 +260,17 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       return;
     }
 
+    // Подсказка следующего номера — только продакшн-эпоха нумерации
+    // (order_date >= 2025-12-01, решение пользователя 2026-07-13): легаси-имена
+    // вида 230725 (до go-live) не должны задирать серию. Сама проверка
+    // занятости выше НЕ фильтруется по дате — легаси-номер переиспользовать нельзя.
     const suggestion = await this.tx.query<{ next: string | null }>(
       `
       SELECT (COALESCE(MAX(order_name::bigint), 0) + 1)::text AS next
       FROM orders
-      WHERE order_name ~ '^\\d{1,15}$' AND delete_flag = false
+      WHERE order_name ~ '^\\d{1,15}$'
+        AND delete_flag = false
+        AND order_date >= DATE '2025-12-01'
       `,
     );
     throw new OrderNameDuplicateError({
