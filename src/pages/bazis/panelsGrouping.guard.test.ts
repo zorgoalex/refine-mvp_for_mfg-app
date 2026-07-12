@@ -57,6 +57,12 @@ describe('bazis panels grouping UI guards', () => {
     expect(panelsTab).toContain('Table.Summary');
     expect(panelsTab).toContain('Итого');
     expect(panelsTab).toContain('позиций');
+    // Индексы Summary.Cell рассчитаны на 8 колонок БЕЗ инжектированной
+    // expand-колонки: rc-table вставляет её только при expandedRowRender
+    // (rc-table/lib/Table.js: expandable: !!expandedRowRender); nest-режим
+    // (children) рисует иконку внутри первой ячейки. Появится
+    // expandedRowRender — пересчитать colSpan/index в summary.
+    expect(panelsTab).not.toContain('expandedRowRender');
   });
 
   it('вложенные строки визуально отличаются фоном от групповых', () => {
