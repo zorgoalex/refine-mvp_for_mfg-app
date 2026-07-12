@@ -29,4 +29,9 @@ describe('bazis panels grouping UI guards', () => {
   it('групповая строка показывает порядковый номер позиции, дети — нет', () => {
     expect(panelsTab).toContain('groupSeq');
   });
+
+  it('выбор панели извне (goToPanel) авто-раскрывает её группу', () => {
+    expect(panelsTab).toContain('findGroupKeyByPanelId');
+    expect(panelsTab).toMatch(/useEffect\(\(\) => \{[\s\S]*?findGroupKeyByPanelId[\s\S]*?setExpandedKeys/);
+  });
 });

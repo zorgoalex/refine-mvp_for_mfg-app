@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
-import { groupPanelRows } from './panelGrouping';
+import { findGroupKeyByPanelId, groupPanelRows } from './panelGrouping';
 
 let nextId = 1;
 
@@ -109,6 +109,16 @@ describe('groupPanelRows', () => {
     const groups = groupPanelRows(rows);
     expect(groups[0].children.map((c) => c.bazisNodeId)).toEqual([10, 12]);
     expect(groups[1].children.map((c) => c.bazisNodeId)).toEqual([11]);
+  });
+
+  it('findGroupKeyByPanelId находит ключ группы выбранной панели', () => {
+    const groups = groupPanelRows([
+      panel({ bazisNodeId: 10, thicknessMm: 16 }),
+      panel({ bazisNodeId: 11, thicknessMm: 18 }),
+    ]);
+    expect(findGroupKeyByPanelId(groups, 11)).toBe(groups[1].key);
+    expect(findGroupKeyByPanelId(groups, 999)).toBeNull();
+    expect(findGroupKeyByPanelId(groups, null)).toBeNull();
   });
 
   it('дробные размеры сравниваются по миллиметру после округления', () => {

@@ -33,6 +33,19 @@ function groupKeyOf(panel: PanelLike): string {
   return [material, sizeKeyPart(panel.lengthMm), sizeKeyPart(panel.widthMm), sizeKeyPart(panel.thicknessMm)].join('|');
 }
 
+/** Ключ группы, содержащей панель (для авто-раскрытия выбранной панели). */
+export function findGroupKeyByPanelId(groups: PanelGroupRow[], bazisNodeId: number | null): string | null {
+  if (bazisNodeId == null) {
+    return null;
+  }
+  for (const group of groups) {
+    if (group.children.some((child) => child.bazisNodeId === bazisNodeId)) {
+      return group.key;
+    }
+  }
+  return null;
+}
+
 export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
   const groups = new Map<string, PanelGroupRow>();
 

@@ -5,14 +5,14 @@
 // (развёрнута по умолчанию) и спойлеры всех блоков/сборок, в которые она
 // входит (свёрнуты; карточка предка грузится лениво при раскрытии).
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { ApartmentOutlined } from '@ant-design/icons';
 import { Button, Collapse, Empty, Space, Table, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
 import { NodeCard } from './NodeCard';
-import { groupPanelRows, type PanelGroupRow, type PanelLike } from './panelGrouping';
+import { findGroupKeyByPanelId, groupPanelRows, type PanelGroupRow, type PanelLike } from './panelGrouping';
 import { NODE_KIND_LABELS_RU, nodePathTitle, type RevisionData } from './useRevisionData';
 
 const { Panel } = Collapse;
@@ -58,6 +58,19 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, onSelect
       })),
     }));
   }, [ancestorsOf, nodes]);
+
+  // Выбор панели может прийти извне (goToPanel из вкладок Фурнитура/Операции/
+  // Смета) — авто-раскрываем группу выбранной панели, иначе она останется
+  // скрытой в свёрнутой группе.
+  useEffect(() => {
+    if (selectedId == null) {
+      return;
+    }
+    const groupKey = findGroupKeyByPanelId(groupRows, selectedId);
+    if (groupKey != null) {
+      setExpandedKeys((keys) => (keys.includes(groupKey) ? keys : [...keys, groupKey]));
+    }
+  }, [groupRows, selectedId]);
 
   const columns = useMemo<ColumnsType<PanelsTableRow>>(
     () => [
