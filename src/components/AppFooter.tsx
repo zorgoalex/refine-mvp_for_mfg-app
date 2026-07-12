@@ -76,7 +76,7 @@ export const AppFooter: React.FC = () => {
         <Space size={12} wrap style={{ marginLeft: "auto" }}>
           <Typography.Text type="secondary" className="app-footer__meta">Сессия: {sessionLabel}</Typography.Text>
           <Typography.Text type="secondary">v{APP_VERSION}</Typography.Text>
-          <Tooltip title="Журнал изменений">
+          <Tooltip title="Журнал изменений" placement="topRight">
             <Button
               aria-label="Открыть журнал изменений"
               icon={<NotificationOutlined />}

@@ -57,12 +57,16 @@ describe('buildCategorizedResources', () => {
   const categoryMap: Record<string, string> = {
     clients: 'Контрагенты',
     payments: 'Финансы',
+    'cut-jobs': 'Производство',
+    scan: 'Производство',
     materials: 'Материалы',
     configuration: 'Настройки',
   };
   const labels: Record<string, string> = {
     clients: 'Клиенты',
     payments: 'Платежи',
+    'cut-jobs': 'Раскрой',
+    scan: 'Сканер бирок',
     materials: 'Материалы',
     configuration: 'Конфигурация',
   };
@@ -84,6 +88,23 @@ describe('buildCategorizedResources', () => {
     expect(result['Финансы'].map((i) => i.name)).toEqual(['payments']);
     expect(result['Контрагенты'].map((i) => i.name)).toEqual(['clients']);
     expect(result['Материалы'].map((i) => i.name)).toEqual(['materials']);
+  });
+
+  it('places cutting and label scanning under Производство', () => {
+    const result = buildCategorizedResources({
+      resources: [
+        makeResource('cut-jobs', '/cut'),
+        makeResource('scan', '/scan'),
+      ],
+      categoryOrder: categories,
+      categoryMap,
+      resourceLabels: labels,
+      canViewNavigation: () => true,
+      canViewSettings: true,
+    });
+
+    expect(result['Производство'].map((item) => item.name)).toEqual(['cut-jobs', 'scan']);
+    expect(result['Справочники']).toEqual([]);
   });
 
   it('excludes resources the user cannot navigate to', () => {

@@ -88,7 +88,7 @@ export const TableTopScroll: React.FC<{ children: React.ReactNode; className?: s
   }, []);
 
   return (
-    <div ref={wrapRef} className={className}>
+    <div ref={wrapRef} className={className} data-table-top-scroll-managed="true">
       <div
         ref={topRef}
         aria-hidden

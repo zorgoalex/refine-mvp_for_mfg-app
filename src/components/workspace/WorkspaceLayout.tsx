@@ -9,6 +9,7 @@ import { WorkspaceTabs } from './WorkspaceTabs';
 import { KeepAliveOutlet } from './KeepAliveOutlet';
 import { useTabSync } from '../../hooks/useTabSync';
 import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
+import { GlobalTableTopScrollbars } from '../GlobalTableTopScrollbars';
 
 export const WorkspaceLayout: React.FC = () => {
   const [isSiderOpen, setIsSiderOpen] = React.useState(false);
@@ -44,6 +45,7 @@ export const WorkspaceLayout: React.FC = () => {
       Sider={isMobile ? undefined : CustomSider}
     >
       <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column' }}>
+        <GlobalTableTopScrollbars />
         <WorkspaceTabs />
         <div style={{ flex: 1 }}>
           <KeepAliveOutlet />

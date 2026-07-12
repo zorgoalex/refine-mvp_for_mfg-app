@@ -76,6 +76,8 @@ const CATEGORY_MAP: Record<string, string> = {
   work_centers: "Производство",
   doweling_orders_view: "Производство",
   bazis: "Производство",
+  "cut-jobs": "Производство",
+  scan: "Производство",
   films: "Материалы",
   materials: "Материалы",
   sheet_material_types: "Материалы",

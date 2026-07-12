@@ -91,7 +91,7 @@ const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'edge_type_name', label: 'Обкат' },
   { key: 'film_name', label: 'Пленка' },
   { key: 'created_by', label: 'Создано' },
-  { key: 'actions', label: 'Действия', lockVisible: true },
+  { key: 'actions', label: 'Действия', lockVisible: true, lockPosition: 'end' },
 ];
 
 const ORDER_LIST_DEFAULT_ORDER = ORDER_LIST_COLUMN_DEFINITIONS.map((definition) => definition.key);

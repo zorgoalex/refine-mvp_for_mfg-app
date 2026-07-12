@@ -516,6 +516,23 @@ html {
   background: #5cdbd3 !important;
 }
 
+/* Wide lists keep their native bottom scrollbar and gain a synchronized one
+   above the table, so columns remain reachable from either end of the list. */
+.app-table-top-scrollbar {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-bottom: 4px;
+}
+
+.app-table-top-scrollbar[hidden] {
+  display: none;
+}
+
+.app-table-top-scrollbar__spacer {
+  height: 1px;
+}
+
 /* ============================================================
    Workspace top tab-bar (WorkspaceTabs): compact (~half height)
    + wrap onto multiple rows instead of horizontal scrolling.

@@ -10,17 +10,26 @@ const definitions: OrderDetailColumnDefinition[] = [
   { key: 'a', label: 'A', lockVisible: true },
   { key: 'b', label: 'B' },
   { key: 'c', label: 'C' },
+  { key: 'actions', label: 'Actions', lockVisible: true, lockPosition: 'end' },
 ];
 
 describe('OrderDetailColumnSettings', () => {
   it('normalizes order and keeps locked columns visible', () => {
-    expect(normalizeOrderDetailColumnSettings(['a', 'b', 'c'], definitions, {
+    expect(normalizeOrderDetailColumnSettings(['a', 'b', 'c', 'actions'], definitions, {
       order: ['c', 'missing', 'b', 'c'],
       hidden: ['a', 'b', 'missing'],
     })).toEqual({
-      order: ['c', 'b', 'a'],
+      order: ['c', 'b', 'a', 'actions'],
       hidden: ['b'],
     });
+  });
+
+  it('keeps an end-pinned action column last when old preferences precede new columns', () => {
+    expect(normalizeOrderDetailColumnSettings(
+      ['a', 'b', 'c', 'actions'],
+      definitions,
+      { order: ['a', 'actions', 'b'], hidden: [] },
+    ).order).toEqual(['a', 'b', 'c', 'actions']);
   });
 
   it('applies visibility and order to table columns', () => {
