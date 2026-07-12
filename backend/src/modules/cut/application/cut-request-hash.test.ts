@@ -52,6 +52,13 @@ describe('cut request_hash idempotency anchor (§12)', () => {
     expect(computeRequestHash({ items, params })).not.toBe(computeRequestHash({ items, params: { ...params, kerf_mm: 3 } }));
   });
 
+  it('changes for the native coordinate writer revision', () => {
+    const items = [item({ detailId: 1 })];
+    expect(computeRequestHash({ items, params })).not.toBe(
+      computeRequestHash({ items, params: { ...params, coordinateContract: 'native_portrait_v1' } }),
+    );
+  });
+
   it('produces a hex digest', () => {
     expect(computeRequestHash({ items: [item({ detailId: 1 })], params })).toMatch(/^[0-9a-f]{64}$/);
   });

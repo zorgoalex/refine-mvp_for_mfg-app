@@ -1090,6 +1090,51 @@ describeIntegration('PgCutRepository (integration)', () => {
     expect(paramsAfter.rows[0].params?.kerf_mm).not.toBe(DISTINCT_KERF); // snapshot NOT rewritten
   });
 
+  it('expand/contract: native writer marks portrait rows; disabled writer keeps them readable and writes legacy rows', async () => {
+    await seedDetail(pool, { detailId: 201, area: 0.24, quantity: 1 });
+    await seedDetail(pool, { detailId: 202, area: 0.24, quantity: 1 });
+    const respondFromRequest = (req: ReturnType<typeof import('../application/cut-freecut-mapping').buildOptimizeRequest>): FreecutOptimizeResponse => ({
+      status: 'ok',
+      solutions: [{
+        stock_id: req.stock[0].id,
+        index: 0,
+        width_mm: req.stock[0].width_mm,
+        height_mm: req.stock[0].height_mm,
+        trim_mm: req.params.trim_mm,
+        placements: req.items.flatMap((item, itemIndex) => Array.from({ length: item.qty }, (_, instanceIndex) => ({
+          item_id: item.id,
+          instance: instanceIndex + 1,
+          x_mm: itemIndex * 620,
+          y_mm: 0,
+          width_mm: item.width_mm,
+          height_mm: item.height_mm,
+          rotated: false,
+        }))),
+      }],
+    });
+    const freecut = { optimize: (req: ReturnType<typeof import('../application/cut-freecut-mapping').buildOptimizeRequest>) => Promise.resolve(respondFromRequest(req)) } as never;
+    const nativeRepo = new PgCutRepository(database, freecut, undefined, { nativePortraitWriter: true });
+    const nativeJob = await nativeRepo.createJob({ currentUser: currentUser(), dto: { name: 'native', detailIds: [201] }, requestId: 'native-create' });
+    const nativeReady = await nativeRepo.calculate({ currentUser: currentUser(), cutJobId: nativeJob.cutJobId, version: nativeJob.version });
+    const nativeRows = await pool.query<{ placements: SheetPlacementsJson }>(
+      `SELECT placements FROM cut_group_sheet cgs JOIN cut_group cg USING (cut_group_id) WHERE cg.cut_job_id = $1`,
+      [nativeJob.cutJobId],
+    );
+    expect(nativeRows.rows[0].placements).toMatchObject({ coordinate_contract: 'native_portrait_v1', sheet_width_mm: 2070, sheet_height_mm: 2800 });
+    expect(nativeRows.rows[0].placements.pieces[0].rotation_forbidden).toBeTypeOf('boolean');
+
+    const legacyRepo = new PgCutRepository(database, freecut, undefined, { nativePortraitWriter: false });
+    await expect(legacyRepo.getJob({ currentUser: currentUser(), cutJobId: nativeReady.cutJobId })).resolves.toMatchObject({ cutJobId: nativeReady.cutJobId });
+    const legacyJob = await legacyRepo.createJob({ currentUser: currentUser(), dto: { name: 'legacy', detailIds: [202] }, requestId: 'legacy-create' });
+    await legacyRepo.calculate({ currentUser: currentUser(), cutJobId: legacyJob.cutJobId, version: legacyJob.version });
+    const legacyRows = await pool.query<{ placements: SheetPlacementsJson }>(
+      `SELECT placements FROM cut_group_sheet cgs JOIN cut_group cg USING (cut_group_id) WHERE cg.cut_job_id = $1`,
+      [legacyJob.cutJobId],
+    );
+    expect(legacyRows.rows[0].placements.coordinate_contract).toBeUndefined();
+    expect(legacyRows.rows[0].placements).toMatchObject({ sheet_width_mm: 2800, sheet_height_mm: 2070 });
+  });
+
   it('calculate REJECTS 422 when the chosen profile was deactivated after selection', async () => {
     const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
     const created = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Тест gone', detailIds: [1, 2] }, requestId: 'g1' });

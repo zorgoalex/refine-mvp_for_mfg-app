@@ -14,6 +14,7 @@ import {
   manualSetMatchesAuto,
   reconstructManualSheets,
   validateSheetPlacements,
+  validateSheetGroupInvariant,
 } from '../../../shared/cut-geometry';
 import { buildCutAuditEvent, buildCutDeniedEvent, CUT_AUDIT_EVENTS, type CutAuditActor } from '../application/cut-audit';
 import {
@@ -26,6 +27,7 @@ import {
   backMapSolutions,
   buildOptimizeRequest,
   freecutItemId,
+  NATIVE_PORTRAIT_COORDINATE_CONTRACT,
   parseFreecutItemId,
   type FreecutItem,
   type FreecutParams,
@@ -351,13 +353,16 @@ export function resolveEffectiveVariant(
 
 export class PgCutRepository implements CutRepositoryPort {
   private readonly config: CutConfigPort;
+  private readonly nativePortraitWriter: boolean;
 
   constructor(
     private readonly database: DatabaseService,
     private readonly freecut: FreecutClientLike,
     config?: CutConfigPort,
+    options?: { nativePortraitWriter?: boolean },
   ) {
     this.config = config ?? new PgCutConfigRepository(database);
+    this.nativePortraitWriter = options?.nativePortraitWriter === true;
   }
 
   /** Audited RBAC denial (plan §11). Best-effort for generic denials (fire-and-
@@ -655,6 +660,7 @@ export class PgCutRepository implements CutRepositoryPort {
           items: freecutItems,
           params,
           includeSvg: false,
+          nativePortrait: this.nativePortraitWriter,
         });
         // Per-group pre-call guards (a fan-out group can independently exceed limits).
         assertWithinInstanceLimit(freecutItems);
@@ -730,7 +736,11 @@ export class PgCutRepository implements CutRepositoryPort {
     // + cut_job.calculate_failed). All-or-nothing — no group is persisted on a
     // partial failure, so the operator never sees a half-cut job. (Sequential so
     // a failure short-circuits the remaining optimize calls.)
-    const responses: Array<{ group: (typeof prep.groupPreps)[number]['group']; response: Awaited<ReturnType<FreecutClientLike['optimize']>> }> = [];
+    const responses: Array<{
+      group: (typeof prep.groupPreps)[number]['group'];
+      request: ReturnType<typeof buildOptimizeRequest>;
+      response: Awaited<ReturnType<FreecutClientLike['optimize']>>;
+    }> = [];
     try {
       for (const groupPrep of prep.groupPreps) {
         const response = await this.freecut.optimize(groupPrep.request);
@@ -738,10 +748,11 @@ export class PgCutRepository implements CutRepositoryPort {
         if (contractViolations.length > 0) {
           throw new CutOptimizerInvalidGeometryError(contractViolations.length, contractViolations.slice(0, 20));
         }
-        const filmTextureByItemId = new Map(
-          groupPrep.group.items.map((item) => [freecutItemId(item.orderDetailId), item.filmTexture === true]),
-        );
-        const violations = backMapSolutions(response).flatMap((sheet) =>
+        const filmTextureByItemId = new Map(groupPrep.request.items.map((item) => [item.id, item.rotation === 'forbid']));
+        const violations = backMapSolutions(response, {
+          requestItems: groupPrep.request.items,
+          ...(this.nativePortraitWriter ? { coordinateContract: NATIVE_PORTRAIT_COORDINATE_CONTRACT } : {}),
+        }).flatMap((sheet) =>
           validateSheetPlacements({
             sheetIndex: sheet.sheetIndex,
             placements: sheet.placements,
@@ -753,7 +764,7 @@ export class PgCutRepository implements CutRepositoryPort {
         if (violations.length > 0) {
           throw new CutOptimizerInvalidGeometryError(violations.length, violations.slice(0, 20));
         }
-        responses.push({ group: groupPrep.group, response });
+        responses.push({ group: groupPrep.group, request: groupPrep.request, response });
       }
     } catch (error) {
       // A freecut failure fails the WHOLE job. Guard the status write on THIS
@@ -776,7 +787,7 @@ export class PgCutRepository implements CutRepositoryPort {
       const cutGroupIds: number[] = [];
       let totalSheets = 0;
       let totalUnplaced = 0;
-      for (const { group, response } of responses) {
+      for (const { group, request, response } of responses) {
         // Compute the stable group key (written to cut_group.group_key so manual
         // layouts survive recalculations that keep the same logical grouping).
         const gKey = logicalGroupKey({
@@ -824,7 +835,10 @@ export class PgCutRepository implements CutRepositoryPort {
           ]),
         );
 
-        for (const sheet of backMapSolutions(response)) {
+        for (const sheet of backMapSolutions(response, {
+          requestItems: request.items,
+          ...(this.nativePortraitWriter ? { coordinateContract: NATIVE_PORTRAIT_COORDINATE_CONTRACT } : {}),
+        })) {
           const placementsWithLabels: SheetPlacementsJson = {
             ...sheet.placements,
             pieces: sheet.placements.pieces.map((piece) => ({
@@ -864,7 +878,12 @@ export class PgCutRepository implements CutRepositoryPort {
         // Fold the job-level combine-films flag into the hashed params so toggling
         // it re-cuts (emits a fresh outbox row) even when the resolved groups would
         // otherwise hash identically (e.g. one film per material).
-        params: { ...(prep.params as unknown as Record<string, unknown>), combineFilms: job.combineFilms, splitByMaterial: job.splitByMaterial },
+        params: {
+          ...(prep.params as unknown as Record<string, unknown>),
+          combineFilms: job.combineFilms,
+          splitByMaterial: job.splitByMaterial,
+          ...(this.nativePortraitWriter ? { coordinateContract: NATIVE_PORTRAIT_COORDINATE_CONTRACT } : {}),
+        },
       });
       await tx.query(
         `
@@ -1823,6 +1842,11 @@ export class PgCutRepository implements CutRepositoryPort {
       rawSheets = autoSheets.rows.map((row) => ({ sheetIndex: toNum(row.sheet_index), placements: row.placements }));
     }
 
+    const groupInvariantError = validateSheetGroupInvariant(rawSheets);
+    if (groupInvariantError) {
+      throw new ApiError(500, 'CUT_LAYOUT_INCONSISTENT', `Несовместимые листы в группе: ${groupInvariantError}`);
+    }
+
     const quantities = computeGroupItemQuantities(
       rawSheets.map((s) => ({ sheetIndex: s.sheetIndex, placements: s.placements })),
     );
@@ -2568,10 +2592,22 @@ export class PgCutRepository implements CutRepositoryPort {
       let sharedTrim: GeomSheet['trim_mm'] | null = null;
       const autoSheets: AutoSheetSpec[] = [];
       const autoPieceMap = new Map<string, AutoPieceSpec>();
+      const filmTextureByItemId = new Map<string, boolean>();
+      let sharedContract: SheetPlacementsJson['coordinate_contract'] | undefined;
+      let sharedDimensions: string | undefined;
 
       for (const sheetRow of sheetsRes.rows) {
         const pl = sheetRow.placements;
         const sheetIndex = toNum(sheetRow.sheet_index);
+        const dimensions = `${pl.sheet_width_mm}x${pl.sheet_height_mm}`;
+        if (sharedDimensions === undefined) sharedDimensions = dimensions;
+        else if (sharedDimensions !== dimensions) {
+          throw new ApiError(500, 'CUT_LAYOUT_INCONSISTENT', 'Несовместимые размеры листов в группе');
+        }
+        if (autoSheets.length === 0) sharedContract = pl.coordinate_contract;
+        else if (sharedContract !== pl.coordinate_contract) {
+          throw new ApiError(500, 'CUT_LAYOUT_INCONSISTENT', 'Несовместимые системы координат листов в группе');
+        }
 
         if (sharedTrim === null) {
           sharedTrim = pl.trim_mm;
@@ -2589,9 +2625,13 @@ export class PgCutRepository implements CutRepositoryPort {
           sheet_width_mm: pl.sheet_width_mm,
           sheet_height_mm: pl.sheet_height_mm,
           trim_mm: pl.trim_mm,
+          ...(pl.coordinate_contract ? { coordinate_contract: pl.coordinate_contract } : {}),
         });
 
         for (const piece of pl.pieces) {
+          if (piece.rotation_forbidden !== undefined) {
+            filmTextureByItemId.set(piece.item_id, piece.rotation_forbidden);
+          }
           const key = `${piece.item_id}#${piece.instance}`;
           if (!autoPieceMap.has(key)) {
             // Base dims are the UNROTATED intrinsic size.
@@ -2608,6 +2648,7 @@ export class PgCutRepository implements CutRepositoryPort {
                 widthMm: piece.width_mm,
                 heightMm: piece.height_mm,
               },
+              rotationForbidden: piece.rotation_forbidden,
             });
           }
         }
@@ -2626,10 +2667,9 @@ export class PgCutRepository implements CutRepositoryPort {
         [command.cutGroupId],
       );
 
-      const filmTextureByItemId = new Map<string, boolean>();
       for (const r of itemsRes.rows) {
         const itemId = freecutItemId(toNum(r.order_detail_id));
-        if (r.film_texture !== null) {
+        if (!filmTextureByItemId.has(itemId) && r.film_texture !== null) {
           filmTextureByItemId.set(itemId, r.film_texture);
         }
       }

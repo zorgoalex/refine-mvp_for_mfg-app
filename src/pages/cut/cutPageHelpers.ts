@@ -9,13 +9,17 @@ import { parseCutPieceDetailId } from './cutPreviewHelpers';
  * Keyed by piece.item_id.
  */
 export function buildFilmTextureMap(
-  sheets: ReadonlyArray<{ placements: { pieces: ReadonlyArray<{ item_id: string }> } }>,
+  sheets: ReadonlyArray<{ placements: { pieces: ReadonlyArray<{ item_id: string; rotation_forbidden?: boolean }> } }>,
   items: ReadonlyArray<{ orderDetailId: number; detail: { filmTexture: boolean | null } | null }>,
 ): Map<string, boolean> {
   const map = new Map<string, boolean>();
   for (const sheet of sheets) {
     for (const piece of sheet.placements.pieces) {
       if (map.has(piece.item_id)) continue;
+      if (piece.rotation_forbidden !== undefined) {
+        map.set(piece.item_id, piece.rotation_forbidden);
+        continue;
+      }
       const detailId = parseCutPieceDetailId(piece.item_id);
       if (detailId === null) {
         map.set(piece.item_id, false);
