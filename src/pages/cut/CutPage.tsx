@@ -151,7 +151,12 @@ function sheetPreviewRotate90(widthMm: number, heightMm: number, portrait: boole
   return portrait ? widthMm > heightMm : widthMm < heightMm;
 }
 
-function effectiveSheetOrigin(placements: SheetPlacements | undefined, legacyOriginTopLeft: boolean): boolean {
+function effectiveSheetOrigin(
+  placements: SheetPlacements | undefined,
+  legacyOriginTopLeft: boolean,
+  axisOrigin: CutAxisOrigin,
+): boolean {
+  if (axisOrigin === 'bottom-left') return false;
   return placements?.coordinate_contract === 'native_portrait_v1' ? false : legacyOriginTopLeft;
 }
 
@@ -834,7 +839,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
         : sheetPortrait;
-      const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft);
+      const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft, sheetAxisOrigin);
       const epoch = viewEpochRef.current;
       try {
         const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin);
@@ -872,7 +877,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
         : sheetPortrait;
-      const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft);
+      const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft, sheetAxisOrigin);
       const epoch = viewEpochRef.current;
       try {
         const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin);
@@ -914,7 +919,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         const rotate90 = sheet
           ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
           : sheetPortrait;
-        const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft);
+        const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft, sheetAxisOrigin);
         const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin);
         // Filename uses the displayed sheet number (dense 1..N) so it matches the
         // "Лист N" the operator sees, not the possibly-sparse real sheetIndex.
@@ -938,7 +943,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       try {
         // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
         const pdfTemplate = pdfTemplateByGroup[group.cutGroupId] ?? 'standard';
-        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetOriginTopLeft, pdfTemplate, sheetAxisOrigin));
+        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetAxisOrigin === 'bottom-left' ? false : sheetOriginTopLeft, pdfTemplate, sheetAxisOrigin));
         if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
         const url = URL.createObjectURL(result.blob);
         pdfPreviewUrlRef.current = url;
@@ -989,7 +994,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     });
     try {
       // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
-      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetOriginTopLeft, pdfTemplateForJob, sheetAxisOrigin));
+      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetAxisOrigin === 'bottom-left' ? false : sheetOriginTopLeft, pdfTemplateForJob, sheetAxisOrigin));
       if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
       const url = URL.createObjectURL(result.blob);
       pdfPreviewUrlRef.current = url;
@@ -1955,7 +1960,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                       ? sheetPreviewRotate90(p.sheet_width_mm, p.sheet_height_mm, sheetPortrait)
                       : !sheetPortrait;
                   })()}
-                  originTopLeft={effectiveSheetOrigin(workingSheets[0]?.placements, sheetOriginTopLeft)}
+                  originTopLeft={effectiveSheetOrigin(workingSheets[0]?.placements, sheetOriginTopLeft, sheetAxisOrigin)}
                   axisOrigin={sheetAxisOrigin}
                   onChange={handleEditorChange}
                   violations={violations}
@@ -1995,7 +2000,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   const widthMm = sheet.placements.sheet_width_mm;
                   const heightMm = sheet.placements.sheet_height_mm;
                   const rotate90 = sheetPreviewRotate90(widthMm, heightMm, sheetPortrait);
-                  const originTopLeft = effectiveSheetOrigin(sheet.placements, sheetOriginTopLeft);
+                  const originTopLeft = effectiveSheetOrigin(sheet.placements, sheetOriginTopLeft, sheetAxisOrigin);
                   const displayWidthMm = rotate90 ? heightMm : widthMm;
                   const displayHeightMm = rotate90 ? widthMm : heightMm;
                   const isPortraitPreview = displayHeightMm > displayWidthMm;

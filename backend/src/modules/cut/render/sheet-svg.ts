@@ -215,7 +215,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const y = sheet.trim_mm.top + piece.y_mm;
       const pw = piece.width_mm;
       const ph = piece.height_mm;
-      const rect = applyAxisOrigin(orientPieceRect({ x, y, w: pw, h: ph }, w, h, rotate90, originTopLeft), axisOrigin);
+      const rect = applyAxisOrigin(orientPieceRect({ x, y, w: pw, h: ph }, w, h, rotate90, originTopLeft), axisOrigin, rotate90);
       const cx = rect.x + rect.w / 2;
       const cy = rect.y + rect.h / 2;
       const fill = fillFor?.(piece) ?? DEFAULT_PIECE_FILL;
@@ -269,7 +269,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
     .map((piece) => {
       const x = sheet.trim_mm.left + piece.x_mm;
       const y = sheet.trim_mm.top + piece.y_mm;
-      const rect = applyAxisOrigin(orientPieceRect({ x, y, w: piece.width_mm, h: piece.height_mm }, w, h, rotate90, originTopLeft), axisOrigin);
+      const rect = applyAxisOrigin(orientPieceRect({ x, y, w: piece.width_mm, h: piece.height_mm }, w, h, rotate90, originTopLeft), axisOrigin, rotate90);
       const cx = rect.x + rect.w / 2;
       const cy = rect.y + rect.h / 2;
       const fill = fillFor?.(piece) ?? DEFAULT_PIECE_FILL;

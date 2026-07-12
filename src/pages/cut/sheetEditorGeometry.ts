@@ -7,7 +7,7 @@
  * canonical `orientPieceRect`; the inverse mirrors it exactly here.
  */
 import type { SheetPlacements, SheetPlacementPiece } from '../../api/types/cutApi.types';
-import { applyAxisOrigin, orientPieceRect, undoAxisOriginY, type CutAxisOrigin } from './cutLayoutGeometry';
+import { applyAxisOrigin, orientPieceRect, undoAxisOriginX, undoAxisOriginY, type CutAxisOrigin } from './cutLayoutGeometry';
 
 /**
  * Get the oriented SVG top-left corner of a piece using the shared
@@ -32,7 +32,7 @@ export function orientedOrigin(
     placements.sheet_height_mm,
     landscape,
     originTopLeft,
-  ), axisOrigin);
+  ), axisOrigin, landscape);
   return { x: r.x, y: r.y };
 }
 
@@ -63,11 +63,14 @@ export function svgToUsable(
   pieceWidthMm?: number,
 ): { x_mm: number; y_mm: number } {
   // Piece oriented top-left in SVG space = pointer position minus stored offset
-  const ox = svgX - svgOffsetX;
+  const displayOx = svgX - svgOffsetX;
   const displayOy = svgY - svgOffsetY;
+  const orientedWidth = landscape ? pieceHeightMm : (pieceWidthMm ?? pieceHeightMm);
   const orientedHeight = landscape ? (pieceWidthMm ?? pieceHeightMm) : pieceHeightMm;
+  const viewWidth = landscape ? placements.sheet_height_mm : placements.sheet_width_mm;
   const viewHeight = landscape ? placements.sheet_width_mm : placements.sheet_height_mm;
-  const oy = undoAxisOriginY(displayOy, orientedHeight, viewHeight, axisOrigin);
+  const ox = undoAxisOriginX(displayOx, orientedWidth, viewWidth, axisOrigin, landscape);
+  const oy = undoAxisOriginY(displayOy, orientedHeight, viewHeight, axisOrigin, landscape);
   const trim = placements.trim_mm;
   if (landscape) {
     if (originTopLeft) {

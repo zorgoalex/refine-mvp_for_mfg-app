@@ -271,10 +271,10 @@ describe('cutPreviewHelpers', () => {
       expect(overlay.leftPct).not.toBe(((2070 - (15 + 400)) / 2070) * 100);
     });
 
-    it('applies bottom-left reflection after landscape transpose', () => {
-      const overlay = buildSheetPieceOverlays(placements, [item], true, true, 'bottom-left')[0];
+    it('rotates the bottom-left preview clockwise into landscape', () => {
+      const overlay = buildSheetPieceOverlays(placements, [item], true, false, 'bottom-left')[0];
       expect(overlay.leftPct).toBe((15 / 2070) * 100);
-      expect(overlay.topPct).toBe(((2800 - 10 - 600) / 2800) * 100);
+      expect(overlay.topPct).toBe((10 / 2800) * 100);
     });
 
     it('builds tooltip rows like the order detail table with resolved names, not bare ids', () => {

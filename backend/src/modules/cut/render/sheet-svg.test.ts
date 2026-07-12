@@ -314,11 +314,13 @@ describe('bottom-left display axis', () => {
     expect(svg).toMatch(/<text x="310" y="1855"/);
   });
 
-  it('reflects Y after landscape transpose', () => {
+  it('rotates right when switching a bottom-left sheet to landscape', () => {
     const svg = buildSheetSvg({
-      sheet, labelFor: () => 'X', rotate90: true, originTopLeft: true, axisOrigin: 'bottom-left',
+      sheet, labelFor: () => 'X', rotate90: true, originTopLeft: false, axisOrigin: 'bottom-left',
     });
-    expect(svg).toMatch(/<rect x="15" y="2190" width="400" height="600"/);
+    // Portrait bottom-left piece starts at the lower-left. Clockwise rotation
+    // places it at landscape upper-left: (x,y) = (15,10), not lower-right.
+    expect(svg).toMatch(/<rect x="15" y="10" width="400" height="600"/);
   });
 
   it('uses the same reflected geometry in the bath PDF SVG', () => {
