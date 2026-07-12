@@ -273,6 +273,13 @@ describe('buildSheetSvg rotate90 (landscape, upright labels)', () => {
 });
 
 describe('buildSheetSvg rotate90 + originTopLeft (transpose, dense cluster top-left)', () => {
+  it('ignores the legacy origin preference for explicitly native sheets', () => {
+    const native = { ...sheet, coordinate_contract: 'native_portrait_v1' as const };
+    expect(buildSheetSvg({ sheet: native, labelFor: () => 'X', rotate90: true, originTopLeft: true }))
+      .toBe(buildSheetSvg({ sheet: native, labelFor: () => 'X', rotate90: true, originTopLeft: false }));
+    expect(buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true, originTopLeft: true }))
+      .not.toBe(buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true, originTopLeft: false }));
+  });
   it('keeps the same h×w viewBox as the 90° CW path', () => {
     const svg = buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true, originTopLeft: true });
     expect(svg).toContain('viewBox="0 0 2070 2800"');

@@ -13,7 +13,19 @@ import {
   rotatePiece,
   snapDraggedPiece,
   moveAllowed,
+  validateSheetGroupInvariant,
 } from './index';
+
+describe('validateSheetGroupInvariant', () => {
+  const placements = { sheet_width_mm: 2070, sheet_height_mm: 2800, coordinate_contract: 'native_portrait_v1' as const };
+  it('accepts homogeneous groups', () => {
+    expect(validateSheetGroupInvariant([{ placements }, { placements: { ...placements } }])).toBeNull();
+  });
+  it('rejects mixed dimensions and contracts', () => {
+    expect(validateSheetGroupInvariant([{ placements }, { placements: { ...placements, sheet_width_mm: 2000 } }])).toBe('mixed_dimensions');
+    expect(validateSheetGroupInvariant([{ placements }, { placements: { ...placements, coordinate_contract: undefined } }])).toBe('mixed_coordinate_contract');
+  });
+});
 
 const sheet = {
   sheet_width_mm: 2800,

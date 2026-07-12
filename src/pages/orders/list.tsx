@@ -899,7 +899,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     {
       dataIndex: "order_id",
       key: "order_id",
-      title: <span style={{ fontSize: '42%' }}>id</span>,
+      title: <span style={{ fontSize: '42%' }}>ID заказа</span>,
       sorter: true,
       fixed: "left",
       width: 39,

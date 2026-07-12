@@ -158,6 +158,7 @@ export const envSchema = z
     BACKEND_ENABLE_CUT_JOBS: booleanFromEnv.default(false),
     BACKEND_CUT_JOBS_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_CUT_AUTO_TRIGGER: booleanFromEnv.default(false),
+    BACKEND_CUT_NATIVE_PORTRAIT: booleanFromEnv.default(false),
     BACKEND_ENABLE_LABELS: booleanFromEnv.default(false),
     BACKEND_ENABLE_SHEET_MATERIALS: booleanFromEnv.default(false),
     // SP3: gate the migration-029-dependent sheet columns in backend ORDER reads

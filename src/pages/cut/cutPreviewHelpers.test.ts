@@ -113,6 +113,16 @@ describe('cutPreviewHelpers', () => {
         { item_id: 'det-42', instance: 1, x_mm: 0, y_mm: 0, width_mm: 600, height_mm: 400, rotated: false },
       ],
     };
+
+    it('uses frozen original dimensions in native portrait labels', () => {
+      const native = {
+        ...placements,
+        coordinate_contract: 'native_portrait_v1' as const,
+        pieces: [{ ...placements.pieces[0], width_mm: 400, height_mm: 600, label: { orderId: 777, detailNumber: 3, widthMm: 600, heightMm: 400 } }],
+      };
+      const overlay = buildSheetPieceOverlays(native, [item], false)[0];
+      expect(overlay.labelLines).toContain('600*400');
+    });
     const item: CutJobItemDto = {
       cutJobItemId: 1,
       orderDetailId: 42,

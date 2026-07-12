@@ -29,7 +29,11 @@ import { CutConfigController } from './http/cut-config.controller';
           baseUrl: runtimeConfig.getFreecutBaseUrl() ?? '',
           timeoutMs: runtimeConfig.getFreecutTimeoutMs(),
         });
-        return new CutService({ cut: new PgCutRepository(database, freecut) });
+        return new CutService({
+          cut: new PgCutRepository(database, freecut, undefined, {
+            nativePortraitWriter: runtimeConfig.isNativePortraitWriterEnabled(),
+          }),
+        });
       },
       inject: [DatabaseService, CutRuntimeConfigService],
     },

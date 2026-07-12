@@ -137,6 +137,69 @@ describe('freecut optimize request builder (§6)', () => {
     expect(request.params.layout_mode).toBe('vacuum_table');
     expect(request.params.vacuum?.direction).toBe('optimal');
   });
+
+  it('normalizes landscape stock, items, grain and asymmetric trim to portrait axes', () => {
+    const request = buildOptimizeRequest({
+      stock,
+      items: [{ ...items[0], pattern_direction: 'along_width' }],
+      params: { ...params, trim_mm: { left: 1, right: 2, top: 3, bottom: 4 } },
+      nativePortrait: true,
+    });
+    expect(request.stock[0]).toMatchObject({ width_mm: 2070, height_mm: 2800 });
+    expect(request.items[0]).toMatchObject({ width_mm: 400, height_mm: 600, pattern_direction: 'along_height' });
+    expect(request.params.trim_mm).toEqual({ left: 3, right: 4, top: 1, bottom: 2 });
+    expect(stock).toEqual({ id: 'smt-9', width_mm: 2800, height_mm: 2070 });
+  });
+
+  it('leaves already portrait stock byte-equivalent apart from include_svg', () => {
+    const portraitStock = { ...stock, width_mm: 2070, height_mm: 2800 };
+    expect(buildOptimizeRequest({ stock: portraitStock, items, params, nativePortrait: true }))
+      .toEqual(buildOptimizeRequest({ stock: portraitStock, items, params }));
+  });
+
+  it.each([
+    ['width', 'height', 400, 600],
+    ['height', 'width', 600, 400],
+    ['optimal', 'optimal', 400, 600],
+  ] as const)('preserves vacuum %s physical intent after portrait transpose', (intent, expectedAxis, expectedW, expectedH) => {
+    const request = buildOptimizeRequest({
+      stock,
+      items,
+      params: { ...params, layout_mode: 'vacuum_table', vacuum: { direction: intent } },
+      nativePortrait: true,
+    });
+    expect(request.params.vacuum?.direction).toBe(expectedAxis);
+    expect(request.items[0]).toMatchObject({ width_mm: expectedW, height_mm: expectedH });
+  });
+
+  it('keeps transposed textured grain authoritative over vacuum orientation', () => {
+    const request = buildOptimizeRequest({
+      stock,
+      items: [{ ...items[0], rotation: 'forbid', pattern_direction: 'along_height' }],
+      params: { ...params, layout_mode: 'vacuum_table', vacuum: { direction: 'height' } },
+      nativePortrait: true,
+    });
+    expect(request.items[0]).toMatchObject({ width_mm: 400, height_mm: 600, rotation: 'forbid', pattern_direction: 'along_width' });
+  });
+});
+
+describe('native portrait persistence metadata', () => {
+  const response = {
+    status: 'ok',
+    solutions: [{ stock_id: 's', index: 0, width_mm: 2070, height_mm: 2800,
+      trim_mm: { left: 3, right: 4, top: 1, bottom: 2 },
+      placements: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 400, height_mm: 600, rotated: false }] }],
+  };
+  const requestItems = [{ id: 'det-1', width_mm: 400, height_mm: 600, qty: 1, rotation: 'forbid' as const, pattern_direction: 'along_width' as const }];
+
+  it('writes marker and frozen rotation rule only when explicitly requested', () => {
+    const native = backMapSolutions(response, { coordinateContract: 'native_portrait_v1', requestItems })[0].placements;
+    expect(native.coordinate_contract).toBe('native_portrait_v1');
+    expect(native.pieces[0].rotation_forbidden).toBe(true);
+    const legacy = backMapSolutions(response)[0].placements;
+    expect(legacy.coordinate_contract).toBeUndefined();
+    expect(legacy.pieces[0].rotation_forbidden).toBeUndefined();
+  });
 });
 
 describe('pre-call guards (BLOCKER-3 / MAJOR-6)', () => {

@@ -554,6 +554,25 @@ describe('PgCutRepository', () => {
     expect(result.noSheetSpecCount).toBe(1);
   });
 
+  it('listEligibleDetails carries the order name (users think in names, not ids)', async () => {
+    const db = createDatabase({
+      readyStatusIds: [1],
+      eligibleRows: [
+        { detail_id: 7, order_id: 9, order_name: 'Кухня Ивановых', quantity: 1, sheet_material_type_id: 9, film_id: null, production_status_id: 1, delete_flag: false },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    const result = await repo.listEligibleDetails({ currentUser: currentUser(), criteria: { orderIds: [9] }, requestId: 'r-name' });
+
+    expect(result.details[0].orderName).toBe('Кухня Ивановых');
+    const eligibleSql = db.queries
+      .map((query) => query.text.replace(/\s+/g, ' ').trim())
+      .find((sql) => sql.includes('FROM order_details od'));
+    expect(eligibleSql).toContain('JOIN orders');
+    expect(eligibleSql).toContain('order_name');
+  });
+
   it('Variant B: treats a sheet detail with NULL material_id as eligible (no mandatory materials JOIN)', async () => {
     // Post-034: order_details.material_id IS NULL; sheet_material_type_id is authoritative.
     // The inner JOIN materials m ON m.material_id = od.material_id would drop every row.

@@ -862,8 +862,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                   detailNumber: labelInfo?.detailNumber ?? piece.label?.detailNumber ?? null,
                   instance: piece.instance,
                   qty: labelInfo?.qty ?? null,
-                  widthMm: piece.width_mm,
-                  heightMm: piece.height_mm,
+                  widthMm: piece.label?.widthMm ?? piece.width_mm,
+                  heightMm: piece.label?.heightMm ?? piece.height_mm,
                 });
                 // Base font capped to fit the piece; auto-shrink further if needed.
                 // line1Scale accounts for the order-name line being LINE1_SCALE× larger.

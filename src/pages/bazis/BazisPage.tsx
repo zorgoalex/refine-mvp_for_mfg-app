@@ -201,8 +201,24 @@ export const BazisPage: React.FC = () => {
       },
       {
         title: 'Заказы',
+        key: 'linkedOrders',
+        render: (_, record) => (
+          record.linkedOrders.length > 0 ? (
+            <Space wrap>
+              {record.linkedOrders.map((order) => (
+                <Link key={order.orderId} to={`/orders/show/${order.orderId}`}>
+                  {order.orderName?.trim() || `#${order.orderId}`}
+                </Link>
+              ))}
+            </Space>
+          ) : '—'
+        ),
+      },
+      {
+        title: 'ID заказа',
         dataIndex: 'linkedOrderIds',
         key: 'linkedOrderIds',
+        width: 110,
         render: (value: number[]) => (
           value.length > 0 ? (
             <Space wrap>

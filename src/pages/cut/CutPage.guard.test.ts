@@ -198,7 +198,8 @@ describe('CutPage source guards', () => {
     expect(source).toContain('useState(true)');
     // Threaded into the render fetches, overlays, and the editor.
     expect(source).toContain('sheetOriginTopLeft');
-    expect(source).toContain('originTopLeft={sheetOriginTopLeft}');
+    expect(source).toContain('originTopLeft={effectiveSheetOrigin(workingSheets[0]?.placements, sheetOriginTopLeft)}');
+    expect(source).toContain("placements?.coordinate_contract === 'native_portrait_v1' ? false : legacyOriginTopLeft");
     // Editor rotate decision aligned with the preview (sheetPreviewRotate90), not bare !sheetPortrait.
     expect(source).not.toContain('landscape={!sheetPortrait}');
     // origin is a blob cache-key dimension: a RAW-pref job opening with the stale

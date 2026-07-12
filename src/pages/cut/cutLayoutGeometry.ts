@@ -21,6 +21,7 @@ export {
   snapDraggedPiece,
   rotatePiece,
   moveAllowed,
+  validateSheetGroupInvariant,
 } from '@shared/cut-geometry';
 
 export type {

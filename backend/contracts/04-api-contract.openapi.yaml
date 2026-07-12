@@ -2310,6 +2310,7 @@ paths:
                     - name
                     - revisionsCount
                     - linkedOrderIds
+                    - linkedOrders
                   properties:
                     bazisProjectId:
                       type: integer
@@ -2330,6 +2331,18 @@ paths:
                       type: array
                       items:
                         type: integer
+                    linkedOrders:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - orderId
+                          - orderName
+                        properties:
+                          orderId:
+                            type: integer
+                          orderName:
+                            type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2425,6 +2438,7 @@ paths:
                   - name
                   - revisionsCount
                   - linkedOrderIds
+                  - linkedOrders
                   - revisions
                 properties:
                   bazisProjectId:
@@ -2446,6 +2460,18 @@ paths:
                     type: array
                     items:
                       type: integer
+                  linkedOrders:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - orderId
+                        - orderName
+                      properties:
+                        orderId:
+                          type: integer
+                        orderName:
+                          type: string
                   revisions:
                     type: array
                     items:
@@ -2722,6 +2748,24 @@ paths:
                       nullable: true
                     childrenCount:
                       type: integer
+                    orders:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - orderId
+                          - orderName
+                        properties:
+                          orderId:
+                            type: integer
+                          orderName:
+                            type: string
+                      description: ERP orders (with names) the node was added to (created details only)
+                    orderIds:
+                      type: array
+                      items:
+                        type: integer
+                      description: Derived from orders; kept for rollout compatibility
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

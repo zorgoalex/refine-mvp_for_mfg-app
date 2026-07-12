@@ -4,6 +4,7 @@
 // входит (свёрнуты; карточка предка грузится лениво при раскрытии).
 
 import React, { useMemo } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import { ApartmentOutlined } from '@ant-design/icons';
 import { Button, Collapse, Empty, Space, Table, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -71,6 +72,27 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, onSelect
         dataIndex: 'pathTitle',
         key: 'path',
         ellipsis: true,
+      },
+      {
+        title: 'Заказ',
+        key: 'orders',
+        width: 160,
+        render: (_, row) =>
+          row.orders.length > 0 ? (
+            <Space wrap size={4}>
+              {row.orders.map((order) => (
+                <RouterLink
+                  key={order.orderId}
+                  to={`/orders/show/${order.orderId}`}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {order.orderName?.trim() || `#${order.orderId}`}
+                </RouterLink>
+              ))}
+            </Space>
+          ) : (
+            '—'
+          ),
       },
       {
         title: '',
