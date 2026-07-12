@@ -250,7 +250,9 @@ export class OrderTransactionService {
       // одновременной сменой клиента (project-лок) и переименованием иначе
       // инвертирует порядок против create и даёт deadlock (Critic R1-1).
       // Без переименования лок избыточен, но безвреден (self-serialization).
-      await unitOfWork.lockOrderName(command.dto.header?.orderName ?? '');
+      // String(...) — та же коэрсия, что в order-normalizer: raw @Body может
+      // принести не-строку, TypeError до валидации недопустим (Critic R2).
+      await unitOfWork.lockOrderName(String(command.dto.header?.orderName ?? ''));
 
       const requestedClientId = numOrNull(command.dto.header?.clientId);
       const preRead = await unitOfWork.readOrderClientProject(command.orderId);

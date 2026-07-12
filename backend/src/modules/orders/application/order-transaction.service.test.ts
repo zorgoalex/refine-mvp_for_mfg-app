@@ -674,6 +674,26 @@ describe('OrderTransactionService order-name uniqueness', () => {
     expect(first.header.orderId).not.toBe(second.header.orderId);
   });
 
+  it('does not crash on a non-string orderName in the raw body (coerced before the lock)', async () => {
+    const transactions = new FakeOrderTransactions();
+    const service = new OrderTransactionService({ transactions });
+    const created = await service.create({
+      currentUser: currentUser('manager'),
+      dto: dtoWithOrderName('2558'),
+    });
+
+    const dto = createSaveDto({ version: created.version });
+    (dto.header as Record<string, unknown>).orderName = 2558;
+
+    // Не TypeError/500 до нормализации: лок получает коэрснутую строку, дальше
+    // обычный normalizer-путь коэрсит 2558 → '2558' (имя не меняется) и
+    // сохранение проходит.
+    await expect(
+      service.update({ currentUser: currentUser('manager'), orderId: created.header.orderId, dto }),
+    ).resolves.toBeDefined();
+    expect(transactions.calls).toContain('lockOrderName');
+  });
+
   it('saving an order WITHOUT renaming skips the uniqueness check (legacy duplicates stay editable)', async () => {
     const transactions = new FakeOrderTransactions();
     const service = new OrderTransactionService({ transactions });
