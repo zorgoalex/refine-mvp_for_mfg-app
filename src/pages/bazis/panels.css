@@ -1,0 +1,6 @@
+/* Вкладка «Панели» Базис-проекта: вложенные строки группы визуально
+   отличаются фоном от родительских (тема-переменная — работает в light/dark).
+   Селекция и hover остаются приоритетнее. */
+.bazis-panels-table .bazis-panel-child-row:not(.ant-table-row-selected) > td {
+  background-color: var(--app-surface-soft);
+}

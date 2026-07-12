@@ -12,8 +12,16 @@ import { Button, Collapse, Empty, Space, Table, Tooltip, Typography } from 'antd
 import type { ColumnsType } from 'antd/es/table';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
 import { NodeCard } from './NodeCard';
-import { findGroupKeyByPanelId, groupPanelRows, type PanelGroupRow, type PanelLike } from './panelGrouping';
+import {
+  findGroupKeyByPanelId,
+  groupPanelRows,
+  panelComparators,
+  summarizePanelGroups,
+  type PanelGroupRow,
+  type PanelLike,
+} from './panelGrouping';
 import { NODE_KIND_LABELS_RU, nodePathTitle, type RevisionData } from './useRevisionData';
+import './panels.css';
 
 const { Panel } = Collapse;
 const { Text } = Typography;
@@ -88,12 +96,14 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
         title: 'Размеры, мм',
         key: 'size',
         width: 150,
+        sorter: panelComparators.size,
         render: (_, row) => formatSize(row),
       },
       {
         title: 'Кол-во',
         key: 'quantity',
         width: 80,
+        sorter: panelComparators.quantity,
         render: (_, row) =>
           row.rowType === 'group' ? (
             <Text strong>{row.totalQuantity ?? '—'}</Text>
@@ -105,12 +115,14 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
         title: 'Материал',
         key: 'material',
         width: 210,
+        sorter: panelComparators.material,
         render: (_, row) => row.mainMaterialName || '—',
       },
       {
         title: 'Наименование',
         key: 'name',
         ellipsis: true,
+        sorter: panelComparators.name,
         render: (_, row) =>
           row.rowType === 'group' ? row.names.join(' / ') || '—' : row.name?.trim() || '—',
       },
@@ -118,6 +130,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
         title: 'Расположение',
         key: 'path',
         ellipsis: true,
+        sorter: panelComparators.location,
         render: (_, row) =>
           row.rowType === 'group' ? (
             <Text type="secondary">{`вхождений: ${row.children.length}`}</Text>
@@ -129,6 +142,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
         title: 'Заказ',
         key: 'orders',
         width: 160,
+        sorter: panelComparators.order,
         render: (_, row) =>
           row.orders.length > 0 ? (
             <Space wrap size={4}>
@@ -169,6 +183,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
     [onGoToTree],
   );
 
+  const totals = useMemo(() => summarizePanelGroups(groupRows), [groupRows]);
+
   if (groupRows.length === 0) {
     return <Empty description="В ревизии нет панелей" />;
   }
@@ -179,6 +195,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Table<PanelsTableRow>
+        className="bazis-panels-table"
         size="small"
         columns={columns}
         dataSource={groupRows}
@@ -190,8 +207,23 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
           onExpandedRowsChange: setExpandedKeys,
           indentSize: 24,
         }}
+        summary={() => (
+          <Table.Summary fixed>
+            <Table.Summary.Row>
+              <Table.Summary.Cell index={0} colSpan={2}>
+                <Text strong>{`Итого позиций: ${totals.positions}`}</Text>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={2}>
+                <Text strong>{totals.totalQuantity ?? '—'}</Text>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={3} colSpan={5} />
+            </Table.Summary.Row>
+          </Table.Summary>
+        )}
         rowClassName={(row) =>
-          row.rowType === 'panel' && row.bazisNodeId === selectedId ? 'ant-table-row-selected' : ''
+          row.rowType === 'panel'
+            ? `bazis-panel-child-row${row.bazisNodeId === selectedId ? ' ant-table-row-selected' : ''}`
+            : ''
         }
         onRow={(row) => ({
           onClick: () => {

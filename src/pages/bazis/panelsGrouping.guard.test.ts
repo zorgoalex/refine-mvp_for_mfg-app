@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
  */
 const panelsTab = readFileSync(new URL('./PanelsTab.tsx', import.meta.url), 'utf8');
 const viewPage = readFileSync(new URL('./BazisProjectViewPage.tsx', import.meta.url), 'utf8');
+const panelsCss = readFileSync(new URL('./panels.css', import.meta.url), 'utf8');
 
 describe('bazis panels grouping UI guards', () => {
   it('PanelsTab группирует панели через groupPanelRows и отдаёт детей таблице', () => {
@@ -49,5 +50,26 @@ describe('bazis panels grouping UI guards', () => {
     // critic R2 MINOR: expandedKeys не должны переживать смену ревизии —
     // групповые ключи (материал+размеры) могут совпасть в другой ревизии
     expect(viewPage).toMatch(/<PanelsTab[^>]*key=\{selectedRevision\.bazisRevisionId\}/);
+  });
+
+  it('внизу таблицы итоговая строка: количество позиций и общая сумма панелей', () => {
+    expect(panelsTab).toContain('summarizePanelGroups');
+    expect(panelsTab).toContain('Table.Summary');
+    expect(panelsTab).toContain('Итого');
+    expect(panelsTab).toContain('позиций');
+  });
+
+  it('вложенные строки визуально отличаются фоном от групповых', () => {
+    expect(panelsTab).toContain('bazis-panel-child-row');
+    expect(panelsTab).toContain("import './panels.css'");
+    // фон через тему-переменную (light/dark), селекция не перекрывается
+    expect(panelsCss).toMatch(/\.bazis-panel-child-row:not\(\.ant-table-row-selected\)\s*>\s*td/);
+    expect(panelsCss).toContain('var(--app-surface-soft)');
+  });
+
+  it('колонки сортируются кликом по заголовку (sorter → стрелки AntD)', () => {
+    expect(panelsTab).toContain('panelComparators');
+    const sorterCount = (panelsTab.match(/sorter:/g) ?? []).length;
+    expect(sorterCount).toBeGreaterThanOrEqual(5);
   });
 });

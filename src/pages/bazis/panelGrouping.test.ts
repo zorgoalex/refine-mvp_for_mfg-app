@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
-import { findGroupKeyByPanelId, groupPanelRows } from './panelGrouping';
+import { findGroupKeyByPanelId, groupPanelRows, panelComparators, summarizePanelGroups } from './panelGrouping';
 
 let nextId = 1;
 
@@ -121,11 +121,63 @@ describe('groupPanelRows', () => {
     expect(findGroupKeyByPanelId(groups, null)).toBeNull();
   });
 
+  it('summarizePanelGroups считает позиции и общее количество панелей', () => {
+    const groups = groupPanelRows([
+      panel({ quantity: 2, thicknessMm: 16 }),
+      panel({ quantity: 3, thicknessMm: 16 }),
+      panel({ quantity: null, cumulativeQuantity: 4, thicknessMm: 18 }),
+    ]);
+    expect(summarizePanelGroups(groups)).toEqual({ positions: 2, totalQuantity: 9 });
+  });
+
+  it('summarizePanelGroups: количества нет ни у одной панели — totalQuantity null', () => {
+    const groups = groupPanelRows([
+      panel({ quantity: null, cumulativeQuantity: null }),
+    ]);
+    expect(summarizePanelGroups(groups)).toEqual({ positions: 1, totalQuantity: null });
+    expect(summarizePanelGroups([])).toEqual({ positions: 0, totalQuantity: null });
+  });
+
   it('дробные размеры сравниваются по миллиметру после округления', () => {
     const rows = [
       panel({ lengthMm: 719.6 }),
       panel({ lengthMm: 720.4 }),
     ];
     expect(groupPanelRows(rows)).toHaveLength(1);
+  });
+
+  it('panelComparators: размеры по длине→ширине→толщине, null в конец', () => {
+    const big = groupPanelRows([panel({ lengthMm: 900, widthMm: 400 })])[0];
+    const small = groupPanelRows([panel({ lengthMm: 500, widthMm: 700 })])[0];
+    const noSize = groupPanelRows([panel({ lengthMm: null, widthMm: null, thicknessMm: null })])[0];
+    expect(panelComparators.size(small, big)).toBeLessThan(0);
+    expect(panelComparators.size(noSize, small)).toBeGreaterThan(0);
+  });
+
+  it('panelComparators: количество — у группы сумма, у ребёнка своё', () => {
+    const g2 = groupPanelRows([panel({ quantity: 1 }), panel({ quantity: 1 })])[0];
+    const g5 = groupPanelRows([panel({ quantity: 5 })])[0];
+    expect(panelComparators.quantity(g2, g5)).toBeLessThan(0);
+    const childA = { ...panel({ quantity: 2 }), rowType: 'panel' as const };
+    const childB = { ...panel({ quantity: null, cumulativeQuantity: 7 }), rowType: 'panel' as const };
+    expect(panelComparators.quantity(childA, childB)).toBeLessThan(0);
+  });
+
+  it('panelComparators: материал и наименование — ru localeCompare, пустые в конец', () => {
+    const a = groupPanelRows([panel({ mainMaterialName: 'ЛДСП', name: 'Бок' })])[0];
+    const b = groupPanelRows([panel({ mainMaterialName: 'МДФ', name: 'Полка' })])[0];
+    const empty = groupPanelRows([panel({ mainMaterialName: null, name: null })])[0];
+    expect(panelComparators.material(a, b)).toBeLessThan(0);
+    expect(panelComparators.material(empty, a)).toBeGreaterThan(0);
+    expect(panelComparators.name(a, b)).toBeLessThan(0);
+    expect(panelComparators.name(empty, b)).toBeGreaterThan(0);
+  });
+
+  it('panelComparators: заказ — по первому имени заказа', () => {
+    const a = groupPanelRows([panel({ orders: [{ orderId: 1, orderName: '2500' }] })])[0];
+    const b = groupPanelRows([panel({ orders: [{ orderId: 2, orderName: '2600' }] })])[0];
+    const none = groupPanelRows([panel({ orders: [] })])[0];
+    expect(panelComparators.order(a, b)).toBeLessThan(0);
+    expect(panelComparators.order(none, a)).toBeGreaterThan(0);
   });
 });
