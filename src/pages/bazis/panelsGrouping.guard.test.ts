@@ -68,9 +68,13 @@ describe('bazis panels grouping UI guards', () => {
   it('вложенные строки визуально отличаются фоном от групповых', () => {
     expect(panelsTab).toContain('bazis-panel-child-row');
     expect(panelsTab).toContain("import './panels.css'");
-    // фон через тему-переменную (light/dark), селекция не перекрывается
-    expect(panelsCss).toMatch(/\.bazis-panel-child-row:not\(\.ant-table-row-selected\)\s*>\s*td/);
-    expect(panelsCss).toContain('var(--app-surface-soft)');
+    // фон через СВОЮ тему-переменную (light+dark override): глобальная zebra
+    // app.css красит чётные строки --app-surface-soft, а dark-блок бьёт
+    // !important — поэтому отдельный цвет и !important обязательны
+    expect(panelsCss).toMatch(/tr\.bazis-panel-child-row:not\(\.ant-table-row-selected\)\s*>\s*td/);
+    expect(panelsCss).toContain('var(--bazis-panel-child-bg)');
+    expect(panelsCss).toContain('!important');
+    expect(panelsCss).toMatch(/\[data-theme="dark"\][\s\S]*--bazis-panel-child-bg/);
   });
 
   it('колонки сортируются кликом по заголовку (sorter → стрелки AntD)', () => {
