@@ -74,17 +74,30 @@ describe('SheetEditor source contract', () => {
     expect(src).toMatch(/scrollableParents\(editorRootRef\.current\)/);
     expect(src).toMatch(/updateDragFromClient\(pointer\.clientX,\s*pointer\.clientY\)/);
   });
-  it('supports group zoom and per-sheet 360-degree view rotation while editing', () => {
-    expect(src).toMatch(/MIN_VIEW_ZOOM\s*=\s*0\.25/);
-    expect(src).toMatch(/MAX_VIEW_ZOOM\s*=\s*1\.5/);
-    expect(src).toMatch(/sheet-editor-zoom-controls/);
-    expect(src).toMatch(/MinusOutlined/);
-    expect(src).toMatch(/PlusOutlined/);
+  it('accepts sticky-toolbar group zoom and supports per-sheet 360-degree view rotation', () => {
+    expect(src).toMatch(/viewZoom\?: number/);
+    expect(src).toMatch(/viewZoom = 1/);
     expect(src).toMatch(/RotateLeftOutlined/);
     expect(src).toMatch(/RotateRightOutlined/);
     expect(src).toMatch(/% 360 \+ 360\) % 360/);
     expect(src).toMatch(/svgMmPerScreenPx/);
     expect(src).toMatch(/Math\.hypot\(ctm\.a, ctm\.b\)/);
+  });
+  it('supports horizontal and vertical sheet mirroring with a milling warning', () => {
+    expect(src).toMatch(/sheetMirrors/);
+    expect(src).toMatch(/SwapOutlined/);
+    expect(src).toMatch(/ColumnHeightOutlined/);
+    expect(src).toMatch(/scaleX\(\$\{viewMirror\.horizontal \? -1 : 1\}\)/);
+    expect(src).toMatch(/scaleY\(\$\{viewMirror\.vertical \? -1 : 1\}\)/);
+    expect(src).toContain('Зеркальное отражение может исказить рисунок фрезеровки');
+    expect(src).toMatch(/aria-pressed=\{viewMirror\.horizontal\}/);
+    expect(src).toMatch(/aria-pressed=\{viewMirror\.vertical\}/);
+  });
+  it('counter-transforms detail labels so rotation and mirroring never affect text readability', () => {
+    expect(src).toMatch(/counterViewMatrix/);
+    expect(src).toMatch(/transform=\{`matrix\(\$\{labelMatrix\.join\(' '\)\}\)`\}/);
+    expect(src).toMatch(/swapsViewAxes \? r\.h : r\.w/);
+    expect(src).toMatch(/swapsViewAxes \? r\.w : r\.h/);
   });
   it('clips SVG labels to the oriented piece rect and allows strong shrink for long order names', () => {
     expect(src).toMatch(/SVG_LABEL_MIN_SCALE\s*=\s*0\.05/);

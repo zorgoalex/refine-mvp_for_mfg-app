@@ -1,6 +1,34 @@
 import { describe, it, expect } from 'vitest';
 import type { SheetPlacements, SheetPlacementPiece } from '../../api/types/cutApi.types';
-import { orientedOrigin, svgToUsable } from './sheetEditorGeometry';
+import { counterViewMatrix, orientedOrigin, svgToUsable } from './sheetEditorGeometry';
+
+function applyMatrix(matrix: ReturnType<typeof counterViewMatrix>, x: number, y: number): [number, number] {
+  const [a, b, c, d, e, f] = matrix;
+  return [a * x + c * y + e, b * x + d * y + f];
+}
+
+describe('counterViewMatrix', () => {
+  it.each([
+    [0, false, false],
+    [90, false, false],
+    [180, true, false],
+    [270, false, true],
+    [90, true, true],
+  ] as const)('keeps the label centre fixed at %i° with mirrors %s/%s', (rotation, horizontal, vertical) => {
+    const center: [number, number] = [125, 75];
+    expect(applyMatrix(counterViewMatrix(rotation, horizontal, vertical, ...center), ...center)).toEqual(center);
+  });
+
+  it('cancels a horizontal mirror so text is not backwards', () => {
+    const matrix = counterViewMatrix(0, true, false, 100, 50);
+    expect(applyMatrix(matrix, 110, 50)).toEqual([90, 50]);
+  });
+
+  it('cancels a 90-degree view rotation so text remains horizontal on screen', () => {
+    const matrix = counterViewMatrix(90, false, false, 100, 50);
+    expect(applyMatrix(matrix, 110, 50)).toEqual([100, 40]);
+  });
+});
 
 /**
  * Manual-editor forward/inverse round-trip. A piece grabbed at its own oriented

@@ -10,6 +10,36 @@ import type { SheetPlacements, SheetPlacementPiece } from '../../api/types/cutAp
 import { applyAxisOrigin, orientPieceRect, undoAxisOriginX, undoAxisOriginY, type CutAxisOrigin } from './cutLayoutGeometry';
 
 /**
+ * Inverse linear view transform around a point. Applied to labels inside a sheet
+ * whose outer SVG is rotated/mirrored, keeping text horizontal and readable.
+ */
+export function counterViewMatrix(
+  rotationDeg: number,
+  mirrorHorizontal: boolean,
+  mirrorVertical: boolean,
+  centerX: number,
+  centerY: number,
+): [number, number, number, number, number, number] {
+  const radians = rotationDeg * Math.PI / 180;
+  const cos = Math.round(Math.cos(radians));
+  const sin = Math.round(Math.sin(radians));
+  const mx = mirrorHorizontal ? -1 : 1;
+  const my = mirrorVertical ? -1 : 1;
+  const a = mx * cos;
+  const b = -my * sin;
+  const c = mx * sin;
+  const d = my * cos;
+  return [
+    a,
+    b,
+    c,
+    d,
+    centerX - a * centerX - c * centerY,
+    centerY - b * centerX - d * centerY,
+  ];
+}
+
+/**
  * Get the oriented SVG top-left corner of a piece using the shared
  * orientPieceRect transform (Codex R4 MAJOR #4: single canonical transform).
  * Coordinates are in full-sheet space (trim already added).

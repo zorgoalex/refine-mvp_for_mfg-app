@@ -16,7 +16,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button, Menu, Space, Tooltip, message } from 'antd';
-import { MinusOutlined, PlusOutlined, RotateLeftOutlined, RotateRightOutlined } from '@ant-design/icons';
+import {
+  ColumnHeightOutlined,
+  RotateLeftOutlined,
+  RotateRightOutlined,
+  SwapOutlined,
+} from '@ant-design/icons';
 import type { SheetPlacements, SheetPlacementPiece } from '../../api/types/cutApi.types';
 import {
   snapDraggedPiece,
@@ -27,7 +32,7 @@ import {
   moveAllowed,
 } from './cutLayoutGeometry';
 import type { CutAxisOrigin, ManualViolation } from './cutLayoutGeometry';
-import { orientedOrigin, svgToUsable } from './sheetEditorGeometry';
+import { counterViewMatrix, orientedOrigin, svgToUsable } from './sheetEditorGeometry';
 import { buildPieceLabelLines, fitLabelScale, splitDimsLine, LINE1_SCALE } from './pieceLabel';
 import { sheetMaterialFilmNames } from './cutPageHelpers';
 
@@ -65,6 +70,8 @@ export interface SheetEditorProps {
   pieceSheetInfoByItemId: Map<string, { materialName: string | null; filmName: string | null }>;
   /** Show per-sheet film name(s) — true when the job splits by film (combineFilms off). */
   showFilm: boolean;
+  /** Group view scale controlled by the sticky group toolbar. */
+  viewZoom?: number;
 }
 
 // ── Internal types ─────────────────────────────────────────────────────────
@@ -99,10 +106,6 @@ interface DragState {
 
 /** Maximum display width (px) of a single sheet SVG. */
 const MAX_SVG_WIDTH_PX = 700;
-
-const MIN_VIEW_ZOOM = 0.25;
-const MAX_VIEW_ZOOM = 1.5;
-const VIEW_ZOOM_STEP = 0.25;
 
 /** Snap threshold (px): snap engages when the nearest candidate is within this many screen pixels. */
 const SNAP_THRESHOLD_PX = 10;
@@ -301,12 +304,13 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     pieceMetaByItemId,
     pieceSheetInfoByItemId,
     showFilm,
+    viewZoom = 1,
   } = props;
 
   const [selected, setSelected] = useState<SelectedPiece | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
-  const [viewZoom, setViewZoom] = useState(1);
   const [sheetRotations, setSheetRotations] = useState<Record<number, number>>({});
+  const [sheetMirrors, setSheetMirrors] = useState<Record<number, { horizontal: boolean; vertical: boolean }>>({});
   const [menu, setMenu] = useState<{
     clientX: number;
     clientY: number;
@@ -317,16 +321,24 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   const closeMenu = useCallback(() => setMenu(null), []);
   const editorRootRef = useRef<HTMLDivElement | null>(null);
 
-  const changeViewZoom = useCallback((delta: number) => {
-    setViewZoom((current) => Math.max(MIN_VIEW_ZOOM, Math.min(MAX_VIEW_ZOOM, current + delta)));
-  }, []);
-
   const rotateSheetView = useCallback((sheetIndex: number, direction: -1 | 1) => {
     setSheetRotations((current) => ({
       ...current,
       [sheetIndex]: (((current[sheetIndex] ?? 0) + direction * 90) % 360 + 360) % 360,
     }));
   }, []);
+
+  const toggleSheetMirror = useCallback((sheetIndex: number, axis: 'horizontal' | 'vertical') => {
+    const previous = sheetMirrors[sheetIndex] ?? { horizontal: false, vertical: false };
+    const enabled = !previous[axis];
+    if (enabled) {
+      void message.warning('Зеркальное отражение может исказить рисунок фрезеровки. Проверьте результат перед сохранением.');
+    }
+    setSheetMirrors({
+      ...sheetMirrors,
+      [sheetIndex]: { ...previous, [axis]: enabled },
+    });
+  }, [sheetMirrors]);
 
   // ── Stable refs for window-level event handlers (avoid re-subscription on every state change) ──
   const dragRef = useRef<DragState | null>(null);
@@ -696,34 +708,9 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div ref={editorRootRef} data-testid="sheet-editor">
-      <Space size={4} style={{ marginBottom: 12 }} data-testid="sheet-editor-zoom-controls">
-        <Tooltip title="Уменьшить масштаб группы раскроя">
-          <Button
-            aria-label="Уменьшить масштаб группы раскроя"
-            icon={<MinusOutlined />}
-            style={{ width: 40, height: 40 }}
-            disabled={viewZoom <= MIN_VIEW_ZOOM}
-            onClick={() => changeViewZoom(-VIEW_ZOOM_STEP)}
-          />
-        </Tooltip>
-        <span
-          data-testid="sheet-editor-zoom-value"
-          style={{ minWidth: 52, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}
-        >
-          {Math.round(viewZoom * 100)}%
-        </span>
-        <Tooltip title="Увеличить масштаб группы раскроя">
-          <Button
-            aria-label="Увеличить масштаб группы раскроя"
-            icon={<PlusOutlined />}
-            style={{ width: 40, height: 40 }}
-            disabled={viewZoom >= MAX_VIEW_ZOOM}
-            onClick={() => changeViewZoom(VIEW_ZOOM_STEP)}
-          />
-        </Tooltip>
-      </Space>
-      <div
+    <div
+      ref={editorRootRef}
+      data-testid="sheet-editor"
       // Disable native text selection / drag-image. Grabbing a piece must not let
       // the browser start a text selection over the SVG <text> labels — that
       // produced a translucent "phantom" layer of all the sheet's label text
@@ -761,6 +748,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
         const isDropTarget = drag !== null && drag.targetSheetIndex === sheetIndex;
         const viewRotation = sheetRotations[sheetIndex] ?? 0;
+        const viewMirror = sheetMirrors[sheetIndex] ?? { horizontal: false, vertical: false };
         const swapsViewAxes = viewRotation % 180 !== 0;
         const rotatedViewportW = swapsViewAxes ? svgDisplayH : svgDisplayW;
         const rotatedViewportH = swapsViewAxes ? svgDisplayW : svgDisplayH;
@@ -821,6 +809,26 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                         onClick={() => rotateSheetView(sheetIndex, 1)}
                       />
                     </Tooltip>
+                    <Tooltip title="Отразить лист по горизонтали">
+                      <Button
+                        type={viewMirror.horizontal ? 'primary' : 'default'}
+                        aria-label={`Отразить лист ${sheetPos + 1} по горизонтали`}
+                        aria-pressed={viewMirror.horizontal}
+                        icon={<SwapOutlined />}
+                        style={{ width: 40, height: 40 }}
+                        onClick={() => toggleSheetMirror(sheetIndex, 'horizontal')}
+                      />
+                    </Tooltip>
+                    <Tooltip title="Отразить лист по вертикали">
+                      <Button
+                        type={viewMirror.vertical ? 'primary' : 'default'}
+                        aria-label={`Отразить лист ${sheetPos + 1} по вертикали`}
+                        aria-pressed={viewMirror.vertical}
+                        icon={<ColumnHeightOutlined />}
+                        style={{ width: 40, height: 40 }}
+                        onClick={() => toggleSheetMirror(sheetIndex, 'vertical')}
+                      />
+                    </Tooltip>
                   </Space>
                 </div>
               );
@@ -851,7 +859,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 position: 'absolute',
                 left: '50%',
                 top: '50%',
-                transform: `translate(-50%, -50%) rotate(${viewRotation}deg)`,
+                transform: `translate(-50%, -50%) rotate(${viewRotation}deg) scaleX(${viewMirror.horizontal ? -1 : 1}) scaleY(${viewMirror.vertical ? -1 : 1})`,
                 transitionProperty: 'transform, width, height',
                 transitionDuration: drag ? '0ms' : '160ms',
               }}
@@ -972,8 +980,10 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 // line1Scale accounts for the order-name line being LINE1_SCALE× larger.
                 const baseFont = Math.max(4, Math.min(r.w, r.h) * 0.25);
                 const labelPad = Math.max(mmPerPx * 2, Math.min(r.w, r.h) * 0.03);
-                const labelBoxW = Math.max(1, r.w - labelPad * 2);
-                const labelBoxH = Math.max(1, r.h - labelPad * 2);
+                // The outer sheet view may swap screen axes. Fit the label against
+                // the final on-screen detail bounds, then counter-transform it below.
+                const labelBoxW = Math.max(1, (swapsViewAxes ? r.h : r.w) - labelPad * 2);
+                const labelBoxH = Math.max(1, (swapsViewAxes ? r.w : r.h) - labelPad * 2);
                 const labelScale = fitLabelScale({
                   lines: labelLines,
                   boxW: labelBoxW,
@@ -1051,6 +1061,13 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       const cx = r.x + r.w / 2;
                       const cy = r.y + r.h / 2;
                       const labelClipId = clipIdForPiece(sheetIndex, piece.item_id, piece.instance);
+                      const labelMatrix = counterViewMatrix(
+                        viewRotation,
+                        viewMirror.horizontal,
+                        viewMirror.vertical,
+                        cx,
+                        cy,
+                      );
                       const textFill = isViolating ? '#cf1322' : '#1d3557';
                       // Block height = (LINE1_SCALE + 1 + 1) * lineH.
                       // Vertical centers derived from block being centered at cy:
@@ -1071,10 +1088,13 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       return (
                         <>
                           <clipPath id={labelClipId} clipPathUnits="userSpaceOnUse">
-                            <rect x={r.x + labelPad} y={r.y + labelPad} width={labelBoxW} height={labelBoxH} />
+                            <rect x={cx - labelBoxW / 2} y={cy - labelBoxH / 2} width={labelBoxW} height={labelBoxH} />
                           </clipPath>
                           {/* L0: order name — large + bold */}
-                          <g clipPath={`url(#${labelClipId})`}>
+                          <g
+                            clipPath={`url(#${labelClipId})`}
+                            transform={`matrix(${labelMatrix.join(' ')})`}
+                          >
                             <text {...sharedProps} x={cx} y={y0} fontSize={font0} fontWeight={600}>
                               {labelLines[0]}
                             </text>
@@ -1163,7 +1183,6 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
           </div>,
           document.body,
         )}
-      </div>
     </div>
   );
 }

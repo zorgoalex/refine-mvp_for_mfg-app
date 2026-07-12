@@ -9,6 +9,12 @@ const source = readFileSync(fileURLToPath(new URL('./CutPage.tsx', import.meta.u
 const sheetLabelSource = readFileSync(fileURLToPath(new URL('./CutSheetLabelGenerateAction.tsx', import.meta.url)), 'utf8');
 
 describe('CutPage source guards', () => {
+  it('keeps manual-editor zoom controls in the sticky group navbar', () => {
+    expect(source).toMatch(/sticky-editor-zoom-controls/);
+    expect(source).toMatch(/MinusOutlined/);
+    expect(source).toMatch(/PlusOutlined/);
+    expect(source).toMatch(/viewZoom=\{editorViewZoom\}/);
+  });
   it('drives every command/read through cutApi, never Hasura', () => {
     expect(source).toContain("from '../../api/cutApi'");
     expect(source).not.toMatch(/hasura/i);

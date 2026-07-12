@@ -20,6 +20,7 @@ import {
   theme,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
@@ -117,6 +118,9 @@ const STATUS_TAG_COLORS: Record<string, string> = {
 };
 
 const CUT_JOBS_TABLE_CONTAINER_HEIGHT = 317;
+const MIN_EDITOR_VIEW_ZOOM = 0.25;
+const MAX_EDITOR_VIEW_ZOOM = 1.5;
+const EDITOR_VIEW_ZOOM_STEP = 0.25;
 
 const sheetPreviewListStyle: React.CSSProperties = {
   display: 'flex',
@@ -406,6 +410,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [workingSheets, setWorkingSheets] = useState<{ sheetIndex: number; placements: SheetPlacements }[]>([]);
   // Current geometry violations (empty = all clear, save enabled).
   const [violations, setViolations] = useState<ManualViolation[]>([]);
+  const [editorViewZoom, setEditorViewZoom] = useState(1);
   // Per-group alternative-view toggle: true = show manual variant, false = show auto.
   // Initialised from group.manualLayout.isActive on job open; only persisted on Save.
   const [showAlternativeByGroup, setShowAlternativeByGroup] = useState<Record<number, boolean>>({});
@@ -1052,6 +1057,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       }
       setWorkingSheets(seed);
       setViolations([]);
+      setEditorViewZoom(1);
       setEditingGroupId(group.cutGroupId);
     },
     [job],
@@ -1858,6 +1864,34 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             }
             extra={
               <div style={cutActionToolbarStyle}>
+                {isEditingGroup && (
+                  <Space size={4} data-testid="sticky-editor-zoom-controls">
+                    <Tooltip title="Уменьшить масштаб группы раскроя">
+                      <Button
+                        aria-label="Уменьшить масштаб группы раскроя"
+                        icon={<MinusOutlined />}
+                        style={{ width: 40, height: 40 }}
+                        disabled={editorViewZoom <= MIN_EDITOR_VIEW_ZOOM}
+                        onClick={() => setEditorViewZoom((value) => Math.max(MIN_EDITOR_VIEW_ZOOM, value - EDITOR_VIEW_ZOOM_STEP))}
+                      />
+                    </Tooltip>
+                    <span
+                      data-testid="sheet-editor-zoom-value"
+                      style={{ minWidth: 52, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}
+                    >
+                      {Math.round(editorViewZoom * 100)}%
+                    </span>
+                    <Tooltip title="Увеличить масштаб группы раскроя">
+                      <Button
+                        aria-label="Увеличить масштаб группы раскроя"
+                        icon={<PlusOutlined />}
+                        style={{ width: 40, height: 40 }}
+                        disabled={editorViewZoom >= MAX_EDITOR_VIEW_ZOOM}
+                        onClick={() => setEditorViewZoom((value) => Math.min(MAX_EDITOR_VIEW_ZOOM, value + EDITOR_VIEW_ZOOM_STEP))}
+                      />
+                    </Tooltip>
+                  </Space>
+                )}
                 {/* «Показать альтернативный раскрой» — only shown when a manual layout exists.
                     Disabled (with tooltip) when the layout is stale: variant=manual would 409. */}
                 {group.manualLayout && (
@@ -1984,6 +2018,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 </Space>
                 <SheetEditor
                   sheets={workingSheets}
+                  viewZoom={editorViewZoom}
                   gap={{ kerfMm: job.editorParams.kerfMm, spacingMm: job.editorParams.spacingMm }}
                   filmTextureByItemId={editorFilmTextureByItemId}
                   labelInfoByItemId={editorLabelInfoByItemId}
