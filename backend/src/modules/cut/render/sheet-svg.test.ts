@@ -302,6 +302,32 @@ describe('buildSheetSvg rotate90 + originTopLeft (transpose, dense cluster top-l
   });
 });
 
+describe('bottom-left display axis', () => {
+  it('keeps absent/top-left output byte-identical', () => {
+    expect(buildSheetSvg({ sheet, labelFor: () => 'X', axisOrigin: 'top-left' }))
+      .toBe(buildSheetSvg({ sheet, labelFor: () => 'X' }));
+  });
+
+  it('reflects Y after portrait orientation', () => {
+    const svg = buildSheetSvg({ sheet, labelFor: () => 'X', axisOrigin: 'bottom-left' });
+    expect(svg).toMatch(/<rect x="10" y="1655" width="600" height="400"/);
+    expect(svg).toMatch(/<text x="310" y="1855"/);
+  });
+
+  it('reflects Y after landscape transpose', () => {
+    const svg = buildSheetSvg({
+      sheet, labelFor: () => 'X', rotate90: true, originTopLeft: true, axisOrigin: 'bottom-left',
+    });
+    expect(svg).toMatch(/<rect x="15" y="2190" width="400" height="600"/);
+  });
+
+  it('uses the same reflected geometry in the bath PDF SVG', () => {
+    const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['1', 'поз. 1', '600X400'], axisOrigin: 'bottom-left' });
+    expect(svg).toMatch(/<rect x="10" y="1655" width="600" height="400"/);
+    expect(svg).toContain('>600</text>');
+  });
+});
+
 describe('buildSheetSvg showLabels=false (on-screen PNG preview — no baked labels)', () => {
   it('omits all piece <text> elements when showLabels=false', () => {
     const svg = buildSheetSvg({ sheet, labelFor: () => ['11301', 'поз. 1', '2647X565'], showLabels: false });

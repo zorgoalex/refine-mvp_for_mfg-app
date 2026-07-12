@@ -432,6 +432,7 @@ export class CutController {
       preset: parsePreset(query.preset),
       rotate90: parseOrientation(query.orientation),
       originTopLeft: parseOriginTopLeft(query.origin),
+      axisOrigin: parseAxisOrigin(query.axisOrigin),
       variant: parseVariant(query.variant),
       showLabels: query.labels !== 'off',
       requestId: request.requestId,
@@ -460,6 +461,7 @@ export class CutController {
       sheetIndex: parseSheetIndex(sheetIndex),
       rotate90: parseOrientation(query.orientation),
       originTopLeft: parseOriginTopLeft(query.origin),
+      axisOrigin: parseAxisOrigin(query.axisOrigin),
       variant: parseVariant(query.variant),
       requestId: request.requestId,
     });
@@ -482,6 +484,7 @@ export class CutController {
     const cutGroupId = parseCutJobId(groupId);
     const rotate90 = parseOrientation(query.orientation);
     const originTopLeft = parseOriginTopLeft(query.origin);
+    const axisOrigin = parseAxisOrigin(query.axisOrigin);
     const variant = parseVariant(query.variant);
     const pdfTemplate = parsePdfTemplate(query.template);
     // Task 7 Rule 9: cache key includes the server-owned render token (layout state)
@@ -492,8 +495,8 @@ export class CutController {
     // a raw 90° CW render produce different bytes for the same layout+orientation.
     const renderToken = await this.cut.getRenderCacheToken({ cutGroupId });
     const result = this.pdfCache.ensure(
-      `group:${cutGroupId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}:${pdfTemplate}`,
-      () => this.cut.renderGroupPdf({ currentUser, cutGroupId, cutJobId: parsedJobId, rotate90, originTopLeft, variant, pdfTemplate, requestId: request.requestId }),
+      `group:${cutGroupId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}:${axisOrigin === 'bottom-left' ? 'BL' : 'TOP'}:${pdfTemplate}`,
+      () => this.cut.renderGroupPdf({ currentUser, cutGroupId, cutJobId: parsedJobId, rotate90, originTopLeft, axisOrigin, variant, pdfTemplate, requestId: request.requestId }),
     );
     this.sendPdf(response, result, `cut-group-${cutGroupId}.pdf`);
   }
@@ -510,6 +513,7 @@ export class CutController {
     const id = parseCutJobId(cutJobId);
     const rotate90 = parseOrientation(query.orientation);
     const originTopLeft = parseOriginTopLeft(query.origin);
+    const axisOrigin = parseAxisOrigin(query.axisOrigin);
     const variant = parseVariant(query.variant);
     const pdfTemplate = parsePdfTemplate(query.template);
     // getJob gives the current version + renderToken (cache discriminator for manual layouts).
@@ -517,7 +521,7 @@ export class CutController {
     // Task 7 Rule 10: renderToken aggregates job version + all per-group manual tokens;
     // any manual save or active-selector flip changes the token → busts the cache.
     const renderToken = job.renderToken ?? `v${job.version}`;
-    const result = this.ensureJobPdf(currentUser, id, renderToken, job.version, request.requestId, rotate90, variant, originTopLeft, pdfTemplate);
+    const result = this.ensureJobPdf(currentUser, id, renderToken, job.version, request.requestId, rotate90, variant, originTopLeft, axisOrigin, pdfTemplate);
     this.sendPdf(response, result, `cut-job-${id}.pdf`);
   }
 
@@ -530,6 +534,7 @@ export class CutController {
     rotate90 = false,
     variant: 'auto' | 'manual' | 'active' = 'auto',
     originTopLeft = false,
+    axisOrigin: 'top-left' | 'bottom-left' = 'top-left',
     pdfTemplate = 'standard',
   ) {
     // Task 7: cache key uses renderToken (job version + per-group manual tokens)
@@ -540,10 +545,10 @@ export class CutController {
     // UI default) — the landscape and raw-origin variants are on-demand and must
     // not write the prewarm state.
     return this.pdfCache.ensure(
-      `job:${cutJobId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}:${pdfTemplate}`,
-      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, originTopLeft, variant, pdfTemplate, requestId }),
+      `job:${cutJobId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}:${axisOrigin === 'bottom-left' ? 'BL' : 'TOP'}:${pdfTemplate}`,
+      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, originTopLeft, axisOrigin, variant, pdfTemplate, requestId }),
       (state, reason) => {
-        if (rotate90 || !originTopLeft) return;
+        if (rotate90 || !originTopLeft || axisOrigin !== 'bottom-left') return;
         void this.cut.setPdfPrewarmState({ cutJobId, version, state, reason }).catch(() => undefined);
       },
     );
@@ -575,7 +580,7 @@ export class CutController {
     void this.cut
       .getRenderCacheToken({ cutJobId })
       .then((renderToken) => {
-        this.ensureJobPdf(currentUser, cutJobId, renderToken, version, requestId, false, 'active', true);
+        this.ensureJobPdf(currentUser, cutJobId, renderToken, version, requestId, false, 'active', true, 'bottom-left');
       })
       .catch(() => undefined);
   }
@@ -669,6 +674,11 @@ export function parseOrientation(value: string | undefined): boolean {
  *  ON matches the operator-facing checkbox default. Ignored when not rotated. */
 export function parseOriginTopLeft(value: string | undefined): boolean {
   return (value ?? '').trim().toLowerCase() !== 'raw';
+}
+
+/** Final-view Y-axis origin. Absent stays top-left for old clients. */
+export function parseAxisOrigin(value: string | undefined): 'top-left' | 'bottom-left' {
+  return (value ?? '').trim().toLowerCase() === 'bottom-left' ? 'bottom-left' : 'top-left';
 }
 
 /**

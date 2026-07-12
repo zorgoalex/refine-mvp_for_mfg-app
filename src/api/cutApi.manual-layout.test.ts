@@ -83,7 +83,7 @@ describe('cutApi manual-layout', () => {
   it('fetchJobPdf without renderToken keeps plain URL', async () => {
     const fetchMock = pdfFetch();
     await cutApi.fetchJobPdf(42);
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/export.pdf?origin=tl');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/export.pdf?origin=tl&axisOrigin=bottom-left');
   });
 
   it('fetchJobPdf with landscape + renderToken composes params correctly', async () => {
@@ -141,7 +141,7 @@ describe('cutApi manual-layout', () => {
   it('fetchSheetSvg without new params keeps existing call style', async () => {
     const fetchMock = imgFetch('image/svg+xml', '<svg/>');
     await cutApi.fetchSheetSvg(42, 100, 0);
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/groups/100/sheets/0.svg?origin=tl');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/groups/100/sheets/0.svg?origin=tl&axisOrigin=bottom-left');
   });
 });
 

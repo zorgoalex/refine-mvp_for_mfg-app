@@ -172,6 +172,27 @@ export function orientPieceRect(
   return { x: r.x, y: r.y, w: r.w, h: r.h, vw: sheetW, vh: sheetH };
 }
 
+export type CutAxisOrigin = 'top-left' | 'bottom-left';
+
+/** Apply the operator-selected Y origin in the final oriented viewBox. */
+export function applyAxisOrigin<T extends { x: number; y: number; w: number; h: number; vh: number }>(
+  rect: T,
+  axisOrigin: CutAxisOrigin = 'top-left',
+): T {
+  if (axisOrigin === 'top-left') return rect;
+  return { ...rect, y: rect.vh - rect.y - rect.h };
+}
+
+/** Undo applyAxisOrigin for a final-view top-left coordinate. */
+export function undoAxisOriginY(
+  orientedY: number,
+  orientedHeight: number,
+  viewHeight: number,
+  axisOrigin: CutAxisOrigin = 'top-left',
+): number {
+  return axisOrigin === 'bottom-left' ? viewHeight - orientedY - orientedHeight : orientedY;
+}
+
 // ── Piece rotation (Codex R22 BLOCKER #2) ────────────────────────────────
 
 /**
