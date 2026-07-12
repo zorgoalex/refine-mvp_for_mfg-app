@@ -186,25 +186,24 @@ describe('CutPage source guards', () => {
     expect(source).toContain('viewEpochRef.current !== epoch');
   });
 
-  it('origin toggle: resets previews (drop stale opposite-origin blobs) and threads origin everywhere', () => {
-    // origin is NOT a local blob-cache key dimension; like the orientation toggle
-    // it must call resetSheetViews so stale opposite-origin PNGs/thumbs are dropped.
-    const toggle = source.slice(source.indexOf('const toggleSheetOriginTopLeft'));
+  it('axis-origin radio: defaults bottom-left, resets previews, and threads the option everywhere', () => {
+    const toggle = source.slice(source.indexOf('const changeSheetAxisOrigin'));
     const body = toggle.slice(0, toggle.indexOf('],'));
-    expect(body).toContain('saveSheetOriginTopLeft');
+    expect(body).toContain('saveSheetAxisOrigin');
     expect(body).toContain('resetSheetViews()');
-    // Operator-facing checkbox, default ON via the state initialiser.
-    expect(source).toContain('Точка отсчёта — верхний левый угол');
-    expect(source).toContain('useState(true)');
-    // Threaded into the render fetches, overlays, and the editor.
-    expect(source).toContain('sheetOriginTopLeft');
-    expect(source).toContain('originTopLeft={effectiveSheetOrigin(workingSheets[0]?.placements, sheetOriginTopLeft)}');
+    expect(source).toContain("useState<CutAxisOrigin>('bottom-left')");
+    expect(source).toContain("{ label: 'Слева снизу', value: 'bottom-left' }");
+    expect(source).toContain("{ label: 'Слева сверху', value: 'top-left' }");
+    expect(source).toContain('axisOrigin={sheetAxisOrigin}');
+    expect(source).toContain('buildSheetPieceOverlays(sheet.placements, job.items, rotate90, originTopLeft, sheetAxisOrigin)');
+    expect(source).toContain('renderVersion, originTopLeft, sheetAxisOrigin');
+    // Legacy layout transform remains independent from the new display-axis option.
     expect(source).toContain("placements?.coordinate_contract === 'native_portrait_v1' ? false : legacyOriginTopLeft");
     // Editor rotate decision aligned with the preview (sheetPreviewRotate90), not bare !sheetPortrait.
     expect(source).not.toContain('landscape={!sheetPortrait}');
-    // origin is a blob cache-key dimension: a RAW-pref job opening with the stale
-    // default-TL state must not dedupe to a TL thumb (code-review R1 regression).
+    // Both independent origin dimensions participate in local blob cache keys.
     expect(source).toContain("${sheetOriginTopLeft ? 'tl' : 'raw'}");
+    expect(source).toContain('${sheetAxisOrigin}');
   });
 
   it('refreshes the job after a failed calculate so the reason + fresh version show', () => {

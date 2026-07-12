@@ -1,4 +1,4 @@
-import { orientPieceRect } from '../../../shared/cut-geometry';
+import { applyAxisOrigin, orientPieceRect, type CutAxisOrigin } from '../../../shared/cut-geometry';
 import type {
   BackMappedSheet,
   FreecutPlacement,
@@ -169,6 +169,8 @@ export interface BuildSheetSvgInput {
    * `rotate90=false`. Passed straight to `orientPieceRect`.
    */
   originTopLeft?: boolean;
+  /** Final displayed Y origin; independent from the legacy landscape transform. */
+  axisOrigin?: CutAxisOrigin;
   /**
    * When false, piece label `<text>` elements are omitted entirely.
    * Piece rects, fills, and the sheet outline are always rendered.
@@ -195,7 +197,7 @@ function num(value: number): string {
 }
 
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
-  const { sheet, labelFor, fillFor, rotate90 = false, showLabels = true } = input;
+  const { sheet, labelFor, fillFor, rotate90 = false, showLabels = true, axisOrigin = 'top-left' } = input;
   const originTopLeft = sheet.coordinate_contract === 'native_portrait_v1' ? false : (input.originTopLeft ?? false);
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
@@ -213,7 +215,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const y = sheet.trim_mm.top + piece.y_mm;
       const pw = piece.width_mm;
       const ph = piece.height_mm;
-      const rect = orientPieceRect({ x, y, w: pw, h: ph }, w, h, rotate90, originTopLeft);
+      const rect = applyAxisOrigin(orientPieceRect({ x, y, w: pw, h: ph }, w, h, rotate90, originTopLeft), axisOrigin);
       const cx = rect.x + rect.w / 2;
       const cy = rect.y + rect.h / 2;
       const fill = fillFor?.(piece) ?? DEFAULT_PIECE_FILL;
@@ -254,7 +256,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
 }
 
 export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
-  const { sheet, labelFor, fillFor, rotate90 = false } = input;
+  const { sheet, labelFor, fillFor, rotate90 = false, axisOrigin = 'top-left' } = input;
   const originTopLeft = sheet.coordinate_contract === 'native_portrait_v1' ? false : (input.originTopLeft ?? false);
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
@@ -267,7 +269,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
     .map((piece) => {
       const x = sheet.trim_mm.left + piece.x_mm;
       const y = sheet.trim_mm.top + piece.y_mm;
-      const rect = orientPieceRect({ x, y, w: piece.width_mm, h: piece.height_mm }, w, h, rotate90, originTopLeft);
+      const rect = applyAxisOrigin(orientPieceRect({ x, y, w: piece.width_mm, h: piece.height_mm }, w, h, rotate90, originTopLeft), axisOrigin);
       const cx = rect.x + rect.w / 2;
       const cy = rect.y + rect.h / 2;
       const fill = fillFor?.(piece) ?? DEFAULT_PIECE_FILL;

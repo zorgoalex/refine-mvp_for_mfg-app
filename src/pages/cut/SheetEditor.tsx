@@ -21,10 +21,11 @@ import {
   snapDraggedPiece,
   rotatePiece,
   orientPieceRect,
+  applyAxisOrigin,
   usableExtent,
   moveAllowed,
 } from './cutLayoutGeometry';
-import type { ManualViolation } from './cutLayoutGeometry';
+import type { CutAxisOrigin, ManualViolation } from './cutLayoutGeometry';
 import { orientedOrigin, svgToUsable } from './sheetEditorGeometry';
 import { buildPieceLabelLines, fitLabelScale, splitDimsLine, LINE1_SCALE } from './pieceLabel';
 import { sheetMaterialFilmNames } from './cutPageHelpers';
@@ -40,6 +41,7 @@ export interface SheetEditorProps {
    *  instead of the legacy 90° CW top-right. Must match the preview/render so the
    *  editor and the sheet cards show the same orientation. Default false. */
   originTopLeft?: boolean;
+  axisOrigin?: CutAxisOrigin;
   onChange: (sheets: SheetEditorProps['sheets']) => void;
   violations: ManualViolation[];
   /**
@@ -273,6 +275,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     filmTextureByItemId,
     landscape,
     originTopLeft = false,
+    axisOrigin = 'top-left',
     onChange,
     violations,
     labelInfoByItemId,
@@ -306,6 +309,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   landscapeRef.current = landscape;
   const originTopLeftRef = useRef(originTopLeft);
   originTopLeftRef.current = originTopLeft;
+  const axisOriginRef = useRef(axisOrigin);
+  axisOriginRef.current = axisOrigin;
   const gapRef = useRef(gap);
   gapRef.current = gap;
   const filmTextureRef = useRef(filmTextureByItemId);
@@ -341,6 +346,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
       const ls = landscapeRef.current;
       const otl = originTopLeftRef.current;
+      const axis = axisOriginRef.current;
       const currentSheets = sheetsRef.current;
       const currentGap = gapRef.current;
       const gapMm = currentGap.kerfMm + currentGap.spacingMm;
@@ -397,6 +403,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         targetSheet.placements,
         ls,
         otl,
+        axis,
+        piece.width_mm,
       );
 
       // Other pieces on target (excluding the dragged piece)
@@ -770,13 +778,13 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
               {/* Usable-area boundary (dashed rectangle inside trim margins) */}
               {(() => {
-                const usableRect = orientPieceRect(
+                const usableRect = applyAxisOrigin(orientPieceRect(
                   { x: trim.left, y: trim.top, w: usableW, h: usableH },
                   W,
                   H,
                   landscape,
                   originTopLeft,
-                );
+                ), axisOrigin);
                 return (
                   <rect
                     x={usableRect.x}
@@ -798,18 +806,18 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 const guides: JSX.Element[] = [];
                 if (drag.guideXmm !== null) {
                   const gx = Math.max(0, Math.min(usableW, drag.guideXmm));
-                  const g = orientPieceRect(
+                  const g = applyAxisOrigin(orientPieceRect(
                     { x: trim.left + gx - strokeMm / 2, y: trim.top, w: strokeMm, h: usableH },
                     W, H, landscape, originTopLeft,
-                  );
+                  ), axisOrigin);
                   guides.push(<rect key="gx" x={g.x} y={g.y} width={g.w} height={g.h} fill="#1677ff" opacity={0.7} pointerEvents="none" />);
                 }
                 if (drag.guideYmm !== null) {
                   const gy = Math.max(0, Math.min(usableH, drag.guideYmm));
-                  const g = orientPieceRect(
+                  const g = applyAxisOrigin(orientPieceRect(
                     { x: trim.left, y: trim.top + gy - strokeMm / 2, w: usableW, h: strokeMm },
                     W, H, landscape, originTopLeft,
-                  );
+                  ), axisOrigin);
                   guides.push(<rect key="gy" x={g.x} y={g.y} width={g.w} height={g.h} fill="#1677ff" opacity={0.7} pointerEvents="none" />);
                 }
                 return <>{guides}</>;
@@ -818,7 +826,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
               {/* Pieces */}
               {placements.pieces.map((piece) => {
                 // Apply canonical orientation transform (shared, matches preview renderer)
-                const r = orientPieceRect(
+                const r = applyAxisOrigin(orientPieceRect(
                   {
                     x: trim.left + piece.x_mm,
                     y: trim.top + piece.y_mm,
@@ -829,7 +837,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                   H,
                   landscape,
                   originTopLeft,
-                );
+                ), axisOrigin);
 
                 const isSelected =
                   selected?.sheetIndex === sheetIndex &&
@@ -907,7 +915,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       const svgEl = svgRefsMap.current.get(sheetIndex);
                       if (!svgEl) return;
                       const pt = clientToSVG(svgEl, e.clientX, e.clientY);
-                      const origin = orientedOrigin(piece, placements, landscape, originTopLeft);
+                      const origin = orientedOrigin(piece, placements, landscape, originTopLeft, axisOrigin);
                       const sel: SelectedPiece = {
                         sheetIndex,
                         item_id: piece.item_id,

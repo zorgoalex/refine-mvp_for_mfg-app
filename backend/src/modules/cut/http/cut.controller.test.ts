@@ -17,6 +17,7 @@ import {
   parseSaveManualLayoutBody,
   parseVariant,
   parseOriginTopLeft,
+  parseAxisOrigin,
 } from './cut.controller';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import type { CutRuntimeConfigService } from './cut-runtime-config.service';
@@ -316,7 +317,7 @@ describe('CutController', () => {
     // The REAL FE export passes job.renderToken → variant=active. It must be served WARM
     // from the prewarmed slot (identical id + variant + token + orientation).
     const warm = fakeResponse();
-    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active' }, warm.res as never);
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active', axisOrigin: 'bottom-left' }, warm.res as never);
     expect(warm.headers['Content-Type']).toBe('application/pdf');
     expect(warm.state.sent).toBe(pdf);
     expect(renderJobPdf).toHaveBeenCalledTimes(1); // prewarm rendered once; export reused it
@@ -350,6 +351,15 @@ describe('CutController', () => {
     expect(parseOriginTopLeft('anything')).toBe(true);
     expect(parseOriginTopLeft('raw')).toBe(false);
     expect(parseOriginTopLeft('RAW')).toBe(false);
+  });
+
+  it('parseAxisOrigin preserves old clients as top-left and accepts only explicit bottom-left', () => {
+    expect(parseAxisOrigin(undefined)).toBe('top-left');
+    expect(parseAxisOrigin('')).toBe('top-left');
+    expect(parseAxisOrigin('top-left')).toBe('top-left');
+    expect(parseAxisOrigin('anything')).toBe('top-left');
+    expect(parseAxisOrigin('bottom-left')).toBe('bottom-left');
+    expect(parseAxisOrigin('BOTTOM-LEFT')).toBe('bottom-left');
   });
 
   // R2-round2 finding #2: the RAW half must not be silently dead — the render
@@ -394,9 +404,8 @@ describe('CutController', () => {
     expect(renderGroupPdf).toHaveBeenCalledTimes(2);
   });
 
-  // R1: the post-calculate prewarm must warm the SURFACED origin (default top-left),
-  // so the FE export (origin=tl) is served warm.
-  it('prewarm warms originTopLeft=true and the default-origin export is served warm', async () => {
+  // The current FE surfaces legacy TL layout transform plus bottom-left display axis.
+  it('prewarm warms the surfaced bottom-left axis and that export is served warm', async () => {
     const pdf = Buffer.from('%PDF-job-tl');
     const renderJobPdf = vi.fn(async () => pdf);
     const calculate = vi.fn(async () => ({ ...jobDto(), status: 'ready' as const, version: 7 }));
@@ -413,11 +422,14 @@ describe('CutController', () => {
     for (let i = 0; i < 50 && renderJobPdf.mock.calls.length === 0; i++) await Promise.resolve();
     await pdfCache.whenIdle();
 
-    expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({ originTopLeft: true }));
+    expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({
+      originTopLeft: true,
+      axisOrigin: 'bottom-left',
+    }));
 
-    // FE export with default origin (tl) reuses the prewarmed slot (no second render).
+    // FE explicitly sends bottom-left; absent axisOrigin remains top-left for old clients.
     const warm = fakeResponse();
-    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active' }, warm.res as never);
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active', axisOrigin: 'bottom-left' }, warm.res as never);
     expect(warm.state.sent).toBe(pdf);
     expect(renderJobPdf).toHaveBeenCalledTimes(1);
   });

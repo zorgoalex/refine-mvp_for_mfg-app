@@ -7,9 +7,11 @@ import {
   parseCutPieceDetailId,
   parseStoredPortrait,
   parseStoredOriginTopLeft,
+  parseStoredAxisOrigin,
   selectVariantSheets,
   sheetOrientationKey,
   sheetOriginKey,
+  sheetAxisOriginKey,
 } from './cutPreviewHelpers';
 import type { CutGroupDto, CutJobItemDto, SheetPlacements } from '../../api/types/cutApi.types';
 
@@ -104,6 +106,25 @@ describe('cutPreviewHelpers', () => {
     });
   });
 
+  describe('axis-origin preference migration', () => {
+    it('uses bottom-left for new/unknown preferences', () => {
+      expect(parseStoredAxisOrigin(null)).toBe('bottom-left');
+      expect(parseStoredAxisOrigin('bottom-left')).toBe('bottom-left');
+      expect(parseStoredAxisOrigin('garbage')).toBe('bottom-left');
+    });
+
+    it('migrates both legacy TL/RAW choices to the former top-left display axis', () => {
+      expect(parseStoredAxisOrigin('tl')).toBe('top-left');
+      expect(parseStoredAxisOrigin('raw')).toBe('top-left');
+      expect(parseStoredAxisOrigin('top-left')).toBe('top-left');
+    });
+
+    it('uses a distinct per-user per-job key', () => {
+      expect(sheetAxisOriginKey('78', 175)).toBe('cut:sheet-axis-origin:78:175');
+      expect(sheetAxisOriginKey('78', 175)).not.toBe(sheetOriginKey('78', 175));
+    });
+  });
+
   describe('cut piece overlay helpers', () => {
     const placements: SheetPlacements = {
       trim_mm: { left: 10, top: 15, right: 10, bottom: 10 },
@@ -178,6 +199,13 @@ describe('cutPreviewHelpers', () => {
       });
     });
 
+    it('reflects portrait overlay vertically for a bottom-left axis', () => {
+      const overlay = buildSheetPieceOverlays(placements, [item], false, true, 'bottom-left')[0];
+      expect(overlay.leftPct).toBe((10 / 2800) * 100);
+      expect(overlay.topPct).toBe(((2070 - 15 - 400) / 2070) * 100);
+      expect(overlay.heightPct).toBe((400 / 2070) * 100);
+    });
+
     it('single-material sheet: no 4th material line (3 label lines)', () => {
       const overlay = buildSheetPieceOverlays(placements, [item], false)[0];
       expect(overlay.labelLines).toHaveLength(3);
@@ -241,6 +269,12 @@ describe('cutPreviewHelpers', () => {
       expect(overlay.heightPct).toBe((600 / 2800) * 100);
       // distinct from the legacy 90° CW left edge
       expect(overlay.leftPct).not.toBe(((2070 - (15 + 400)) / 2070) * 100);
+    });
+
+    it('applies bottom-left reflection after landscape transpose', () => {
+      const overlay = buildSheetPieceOverlays(placements, [item], true, true, 'bottom-left')[0];
+      expect(overlay.leftPct).toBe((15 / 2070) * 100);
+      expect(overlay.topPct).toBe(((2800 - 10 - 600) / 2800) * 100);
     });
 
     it('builds tooltip rows like the order detail table with resolved names, not bare ids', () => {

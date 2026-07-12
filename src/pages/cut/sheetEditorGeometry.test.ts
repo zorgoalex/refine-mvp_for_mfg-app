@@ -31,11 +31,12 @@ function roundTrip(
   placements: SheetPlacements,
   landscape: boolean,
   originTopLeft: boolean,
+  axisOrigin: 'top-left' | 'bottom-left' = 'top-left',
 ): { x_mm: number; y_mm: number } {
   // Forward: oriented SVG top-left of the piece.
-  const o = orientedOrigin(p, placements, landscape, originTopLeft);
+  const o = orientedOrigin(p, placements, landscape, originTopLeft, axisOrigin);
   // Pointer grabs the piece exactly at its top-left → svgOffset = 0.
-  return svgToUsable(o.x, o.y, 0, 0, p.height_mm, placements, landscape, originTopLeft);
+  return svgToUsable(o.x, o.y, 0, 0, p.height_mm, placements, landscape, originTopLeft, axisOrigin, p.width_mm);
 }
 
 describe('sheetEditorGeometry round-trip (forward orientedOrigin ↔ inverse svgToUsable)', () => {
@@ -58,6 +59,22 @@ describe('sheetEditorGeometry round-trip (forward orientedOrigin ↔ inverse svg
     const r = roundTrip(p, placements, true, true);
     expect(r.x_mm).toBeCloseTo(120, 6);
     expect(r.y_mm).toBeCloseTo(240, 6);
+  });
+
+  it.each([
+    ['portrait', false, false],
+    ['landscape legacy CW', true, false],
+    ['landscape transpose', true, true],
+  ] as const)('bottom-left %s round-trips with asymmetric trims', (_name, landscape, originTopLeft) => {
+    const asymmetric = sheet({
+      trim_mm: { left: 7, top: 19, right: 23, bottom: 31 },
+      sheet_width_mm: 2440,
+      sheet_height_mm: 1220,
+    });
+    const rotatedPiece = { ...piece(213, 147, 275, 615), rotated: true };
+    const result = roundTrip(rotatedPiece, asymmetric, landscape, originTopLeft, 'bottom-left');
+    expect(result.x_mm).toBeCloseTo(rotatedPiece.x_mm, 6);
+    expect(result.y_mm).toBeCloseTo(rotatedPiece.y_mm, 6);
   });
 
   it('transpose anchors the dense (0,0) corner at the view top-left', () => {

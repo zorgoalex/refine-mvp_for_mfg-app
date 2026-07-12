@@ -31,12 +31,12 @@ describe('CutPage manual-layout guard', () => {
   it('busts the sheet-blob cache via resetSheetViews on every render-changing op; renderVersion stays in the FETCH (server bust), not the client key', () => {
     // renderVersion is still passed to the fetch for server render-cache busting.
     expect(src).toMatch(/renderVersion/);
-    // The client blob cache key is group:sheet:variant:orientation:origin (NO
+    // The client blob cache key is group:sheet:variant:orientation:legacy-origin:axis-origin (NO
     // renderVersion) so a version bump that does not recompute the layout
     // (profile/material change) re-uses the cached preview instead of
     // re-fetching/flickering; orientation AND origin are in the key so a job-switch
     // orientation/origin rehydrate re-fetches (no stale-pref dedupe).
-    expect(src).toMatch(/`\$\{group\.cutGroupId\}:\$\{sheetIndex\}:\$\{variant\}:\$\{sheetPortrait \? 'P' : 'L'\}:\$\{sheetOriginTopLeft \? 'tl' : 'raw'\}`/);
+    expect(src).toMatch(/`\$\{group\.cutGroupId\}:\$\{sheetIndex\}:\$\{variant\}:\$\{sheetPortrait \? 'P' : 'L'\}:\$\{sheetOriginTopLeft \? 'tl' : 'raw'\}:\$\{sheetAxisOrigin\}`/);
     // resetSheetViews clears blobs + the dedup set + bumps the epoch.
     expect(src).toContain('thumbReqRef.current = new Set()');
     expect(src).toMatch(/viewEpochRef\.current \+= 1/);

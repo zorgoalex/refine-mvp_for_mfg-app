@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   Modal,
+  Radio,
   Select,
   Space,
   Spin,
@@ -26,7 +27,7 @@ import type { CutParamProfile, CutPdfTemplate, CutSettingRow } from '../../api/c
 import { ApiError } from '../../api/httpClient';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
-import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, saveSheetOriginTopLeft, selectVariantSheets } from './cutPreviewHelpers';
+import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, loadSheetAxisOrigin, saveSheetAxisOrigin, selectVariantSheets } from './cutPreviewHelpers';
 import { TableTopScroll } from '../../components/TableTopScroll';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
@@ -40,7 +41,7 @@ import type {
   SheetPlacements,
 } from '../../api/types/cutApi.types';
 import { validateSheetPlacements, validateSheetGroupInvariant, movesFromSheets } from './cutLayoutGeometry';
-import type { ManualViolation } from './cutLayoutGeometry';
+import type { CutAxisOrigin, ManualViolation } from './cutLayoutGeometry';
 import {
   CUT_JOB_STATUS_FILTER_ALL,
   CUT_JOB_STATUS_FILTER_OPTIONS,
@@ -266,6 +267,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // (default) the dense cluster sits at the view's top-left (transpose); when
   // false it keeps the legacy 90° CW top-right. Persisted in localStorage.
   const [sheetOriginTopLeft, setSheetOriginTopLeft] = useState(true);
+  const [sheetAxisOrigin, setSheetAxisOrigin] = useState<CutAxisOrigin>('bottom-left');
   const [eligible, setEligible] = useState<EligibleDetailDto[] | null>(null);
   const [noSheetSpecCount, setNoSheetSpecCount] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
@@ -321,6 +323,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     const uid = authSession.getUser()?.id ?? 'anon';
     setSheetPortrait(loadSheetOrientationPortrait(uid, job.cutJobId));
     setSheetOriginTopLeft(loadSheetOriginTopLeft(uid, job.cutJobId));
+    setSheetAxisOrigin(loadSheetAxisOrigin(uid, job.cutJobId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.cutJobId]);
 
@@ -341,12 +344,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // local blob-cache key dimension, so drop ALL cached previews (revoke blobs +
   // bump epoch + clear thumb dedup) so stale opposite-origin PNGs/thumbs cannot
   // linger on screen and every sheet re-fetches with the new `origin=` URL.
-  const toggleSheetOriginTopLeft = useCallback(
-    (originTopLeft: boolean) => {
-      setSheetOriginTopLeft(originTopLeft);
+  const changeSheetAxisOrigin = useCallback(
+    (axisOrigin: CutAxisOrigin) => {
+      setSheetAxisOrigin(axisOrigin);
       if (job) {
         const uid = authSession.getUser()?.id ?? 'anon';
-        saveSheetOriginTopLeft(uid, job.cutJobId, originTopLeft);
+        saveSheetAxisOrigin(uid, job.cutJobId, axisOrigin);
       }
       resetSheetViews();
     },
@@ -826,7 +829,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       // [REGRESSION-DEBT] for origin). Layout changes still bust via
       // resetSheetViews() (clears maps + thumbReqRef + epoch); renderVersion stays
       // in the FETCH to bust the SERVER render cache.
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}`;
       const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
@@ -834,7 +837,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft);
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, rotate90, variant, renderVersion, originTopLeft);
+        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin);
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetImages((prev) => {
@@ -845,7 +848,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         handleError(error, 'Не удалось загрузить лист раскроя');
       }
     },
-    [job, preset, sheetPortrait, sheetOriginTopLeft, handleError],
+    [job, preset, sheetPortrait, sheetOriginTopLeft, sheetAxisOrigin, handleError],
   );
 
   // Small layout preview for a ready job's sheet, fetched once with the light
@@ -861,7 +864,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       // origin in the key too (same rehydration reason as orientation — a persisted
       // RAW-origin job opening with the stale default-TL state must re-fetch, not
       // dedupe to a TL thumb; Codex code-review R1 [REGRESSION-DEBT]).
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}`;
       const reqKey = `${cutJobId}:${key}`;
       if (thumbReqRef.current.has(reqKey)) return;
       thumbReqRef.current.add(reqKey);
@@ -872,7 +875,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft);
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', rotate90, variant, renderVersion, originTopLeft);
+        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin);
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetThumbs((prev) => {
@@ -884,7 +887,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         thumbReqRef.current.delete(reqKey);
       }
     },
-    [sheetPortrait, sheetOriginTopLeft],
+    [sheetPortrait, sheetOriginTopLeft, sheetAxisOrigin],
   );
 
   // Auto-load per-sheet previews when a ready job's layout is present, so an
@@ -912,7 +915,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
           : sheetPortrait;
         const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft);
-        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90, variant, renderVersion, originTopLeft);
+        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin);
         // Filename uses the displayed sheet number (dense 1..N) so it matches the
         // "Лист N" the operator sees, not the possibly-sparse real sheetIndex.
         const fileNo = displayNo ?? sheetIndex + 1;
@@ -921,7 +924,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         handleError(error, 'Не удалось выгрузить SVG');
       }
     },
-    [job, sheetPortrait, sheetOriginTopLeft, handleError],
+    [job, sheetPortrait, sheetOriginTopLeft, sheetAxisOrigin, handleError],
   );
 
   const openGroupPdfPreview = useCallback(
@@ -935,7 +938,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       try {
         // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
         const pdfTemplate = pdfTemplateByGroup[group.cutGroupId] ?? 'standard';
-        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetOriginTopLeft, pdfTemplate));
+        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetOriginTopLeft, pdfTemplate, sheetAxisOrigin));
         if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
         const url = URL.createObjectURL(result.blob);
         pdfPreviewUrlRef.current = url;
@@ -957,7 +960,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setBusy(false);
       }
     },
-    [job, sheetPortrait, sheetOriginTopLeft, pdfTemplateByGroup, handleError, revokePdfPreviewUrl],
+    [job, sheetPortrait, sheetOriginTopLeft, sheetAxisOrigin, pdfTemplateByGroup, handleError, revokePdfPreviewUrl],
   );
 
   const closeGroupPdfPreview = useCallback(() => {
@@ -986,7 +989,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     });
     try {
       // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
-      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetOriginTopLeft, pdfTemplateForJob));
+      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetOriginTopLeft, pdfTemplateForJob, sheetAxisOrigin));
       if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
       const url = URL.createObjectURL(result.blob);
       pdfPreviewUrlRef.current = url;
@@ -1007,7 +1010,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     } finally {
       setBusy(false);
     }
-  }, [job, sheetPortrait, sheetOriginTopLeft, pdfTemplateForJob, handleError, revokePdfPreviewUrl]);
+  }, [job, sheetPortrait, sheetOriginTopLeft, sheetAxisOrigin, pdfTemplateForJob, handleError, revokePdfPreviewUrl]);
 
   // ── Manual layout editor callbacks ─────────────────────────────────────────
 
@@ -1725,11 +1728,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           <Checkbox checked={sheetPortrait} onChange={(e) => toggleSheetPortrait(e.target.checked)}>
             Книжная ориентация листа (вертикально) — снимите для альбомной
           </Checkbox>
-          {job.groups.some((group) => group.sheets.some((sheet) => sheet.placements.coordinate_contract !== 'native_portrait_v1')) && (
-            <Checkbox checked={sheetOriginTopLeft} onChange={(e) => toggleSheetOriginTopLeft(e.target.checked)}>
-              Точка отсчёта — верхний левый угол
-            </Checkbox>
-          )}
+          <Radio.Group
+            value={sheetAxisOrigin}
+            onChange={(event) => changeSheetAxisOrigin(event.target.value as CutAxisOrigin)}
+            optionType="button"
+            buttonStyle="solid"
+            options={[
+              { label: 'Слева снизу', value: 'bottom-left' },
+              { label: 'Слева сверху', value: 'top-left' },
+            ]}
+            aria-label="Точка отсчёта"
+          />
         </Space>
       )}
 
@@ -1947,6 +1956,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                       : !sheetPortrait;
                   })()}
                   originTopLeft={effectiveSheetOrigin(workingSheets[0]?.placements, sheetOriginTopLeft)}
+                  axisOrigin={sheetAxisOrigin}
                   onChange={handleEditorChange}
                   violations={violations}
                   splitByMaterial={job.splitByMaterial}
@@ -1975,7 +1985,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   // switch may rehydrate a different saved orientation/origin); renderVersion
                   // stays only in the fetch (server bust). Keeps the cached preview stable
                   // across no-recalc version bumps.
-                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
+                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}`;
                   // Stable React element identity per (group, sheet) — deliberately NOT
                   // the cache key. A renderVersion bump (e.g. changing profile/material,
                   // which only marks the job stale) then refreshes the image in place
@@ -1989,7 +1999,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   const displayWidthMm = rotate90 ? heightMm : widthMm;
                   const displayHeightMm = rotate90 ? widthMm : heightMm;
                   const isPortraitPreview = displayHeightMm > displayWidthMm;
-                  const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90, originTopLeft);
+                  const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90, originTopLeft, sheetAxisOrigin);
                   const sheetDetailIds = detailIdsForSheet(sheet);
                   return (
                     <div
