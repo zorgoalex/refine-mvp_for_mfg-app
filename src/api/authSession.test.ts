@@ -29,4 +29,13 @@ describe('authSession subscriptions', () => {
 
     expect(listener).toHaveBeenCalledTimes(2);
   });
+
+  it('advances token version when an already-empty session is invalidated', () => {
+    authSession.clear();
+    const before = authSession.getAccessTokenVersion();
+
+    authSession.clear();
+
+    expect(authSession.getAccessTokenVersion()).toBe(before + 1);
+  });
 });

@@ -1,6 +1,6 @@
 import { authSession } from './authSession';
 import { apiRoutes } from './apiRoutes';
-import { httpClient } from './httpClient';
+import { httpClient, refreshAuthSession } from './httpClient';
 import type {
   LoginRequest,
   LoginResponse,
@@ -27,11 +27,7 @@ export const authApi = {
   },
 
   async refresh(): Promise<RefreshResponse> {
-    const response = await httpClient.post<RefreshResponse>(apiRoutes.auth.refresh, undefined, {
-      skipAuthRefresh: true,
-    });
-    setSessionFromAuthResponse(response);
-    return response;
+    return refreshAuthSession();
   },
 
   // Local state is cleared only on a CONFIRMED backend logout: on failure

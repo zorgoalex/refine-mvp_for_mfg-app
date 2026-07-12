@@ -1,6 +1,7 @@
 import type { UserIdentity } from '../types/auth';
 
 let accessToken: string | null = null;
+let accessTokenVersion = 0;
 let currentUser: UserIdentity | null = null;
 const listeners = new Set<() => void>();
 
@@ -16,7 +17,12 @@ export const authSession = {
   setAccessToken(token: string | null): void {
     if (accessToken === token) return;
     accessToken = token;
+    accessTokenVersion += 1;
     notifyListeners();
+  },
+
+  getAccessTokenVersion(): number {
+    return accessTokenVersion;
   },
 
   getUser(): UserIdentity | null {
@@ -30,6 +36,9 @@ export const authSession = {
   },
 
   clear(): void {
+    // Clearing is also an explicit invalidation boundary for any in-flight
+    // refresh, even when local state is already empty (cookie-only bootstrap).
+    accessTokenVersion += 1;
     if (!accessToken && !currentUser) return;
     accessToken = null;
     currentUser = null;

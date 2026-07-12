@@ -2,17 +2,13 @@ import { ApiError, createApiErrorFromBody, type BackendErrorBody } from './apiEr
 import { apiRoutes } from './apiRoutes';
 import { authSession } from './authSession';
 import { getRuntimeApiUrl } from '../config/runtimeConfig';
+import type { RefreshResponse } from './types/authApi.types';
 
 export interface RequestOptions extends RequestInit {
   skipAuthRefresh?: boolean;
 }
 
-interface RefreshResponseBody {
-  accessToken?: string;
-  user?: Parameters<typeof authSession.setUser>[0];
-}
-
-let refreshPromise: Promise<string | null> | null = null;
+let refreshPromise: Promise<RefreshResponse> | null = null;
 
 export function getApiBaseUrl(): string {
   const runtimeApiUrl = getRuntimeApiUrl();
@@ -29,8 +25,17 @@ export function buildApiUrl(path: string): string {
   return `${getApiBaseUrl()}${normalizedPath}`;
 }
 
-async function refreshAccessToken(): Promise<string | null> {
+/**
+ * Rotate the HttpOnly refresh cookie once for every group of concurrent callers.
+ *
+ * Hasura data-provider requests refresh proactively before sending an expired
+ * access token, while backend requests refresh after a 401. Both paths must
+ * share this promise: refresh-token rotation is single-use, so parallel POSTs
+ * with the same cookie make the losing request look like token reuse.
+ */
+export async function refreshAuthSession(): Promise<RefreshResponse> {
   if (!refreshPromise) {
+    const sessionVersionAtStart = authSession.getAccessTokenVersion();
     refreshPromise = fetch(buildApiUrl(apiRoutes.auth.refresh), {
       method: 'POST',
       credentials: 'include',
@@ -39,15 +44,48 @@ async function refreshAccessToken(): Promise<string | null> {
       },
     })
       .then(async (response) => {
-        if (!response.ok) return null;
+        if (!response.ok) {
+          const body = (await readJsonBody(response)) as BackendErrorBody | null;
+          throw createApiErrorFromBody(response.status, response.statusText, body);
+        }
 
-        const data = (await readJsonBody(response)) as RefreshResponseBody | null;
-        const token = data?.accessToken ?? null;
+        const data = (await readJsonBody(response)) as RefreshResponse | null;
+        if (!data?.accessToken || !data.user) {
+          throw new ApiError({
+            code: 'RESPONSE_PARSE_ERROR',
+            message: 'Некорректный ответ сервера',
+            status: response.status,
+          });
+        }
 
-        authSession.setAccessToken(token);
-        authSession.setUser(data?.user ?? null);
+        // Logout or a newer login may complete while this request is in
+        // flight. Never let the stale response resurrect or overwrite that
+        // authoritative session transition.
+        const supersedingSession = getSupersedingSession(sessionVersionAtStart);
+        if (supersedingSession) {
+          return supersedingSession;
+        }
+        if (authSession.getAccessTokenVersion() !== sessionVersionAtStart) {
+          throw refreshSupersededError();
+        }
 
-        return token;
+        authSession.setAccessToken(data.accessToken);
+        authSession.setUser(data.user);
+
+        return data;
+      })
+      .catch((error: unknown) => {
+        // A newer login wins even when this older refresh ends with 401,
+        // malformed JSON, or a transport error. A logout has no replacement
+        // session, so callers still receive the superseded error.
+        const supersedingSession = getSupersedingSession(sessionVersionAtStart);
+        if (supersedingSession) {
+          return supersedingSession;
+        }
+        if (authSession.getAccessTokenVersion() !== sessionVersionAtStart) {
+          throw refreshSupersededError();
+        }
+        throw error;
       })
       .finally(() => {
         refreshPromise = null;
@@ -57,14 +95,48 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshPromise;
 }
 
+function getSupersedingSession(sessionVersionAtStart: number): RefreshResponse | null {
+  if (authSession.getAccessTokenVersion() === sessionVersionAtStart) return null;
+
+  const accessToken = authSession.getAccessToken();
+  const user = authSession.getUser();
+  return accessToken && user ? { accessToken, user } : null;
+}
+
+function refreshSupersededError(): ApiError {
+  return new ApiError({
+    code: 'AUTH_REFRESH_SUPERSEDED',
+    message: 'Обновление сессии отменено более новым состоянием',
+    status: 409,
+  });
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  try {
+    const response = await refreshAuthSession();
+    return response.accessToken;
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'AUTH_REFRESH_SUPERSEDED') {
+      return authSession.getAccessToken();
+    }
+    return null;
+  }
+}
+
 async function request<T>(
   path: string,
   options: RequestOptions = {},
   retryOnUnauthorized = true,
 ): Promise<T> {
-  const response = await fetch(buildApiUrl(path), buildRequestInit(options));
+  const requestAccessToken = authSession.getAccessToken();
+  const response = await fetch(buildApiUrl(path), buildRequestInit(options, requestAccessToken));
 
   if (response.status === 401 && retryOnUnauthorized && !options.skipAuthRefresh) {
+    const currentAccessToken = authSession.getAccessToken();
+    if (currentAccessToken && currentAccessToken !== requestAccessToken) {
+      return request<T>(path, options, false);
+    }
+
     const newAccessToken = await refreshAccessToken();
 
     if (newAccessToken) {
@@ -92,9 +164,18 @@ async function download(
   options: RequestOptions = {},
   retryOnUnauthorized = true,
 ): Promise<{ blob: Blob; fileName: string | null; status: number }> {
-  const response = await fetch(buildApiUrl(path), buildRequestInit({ ...options, method: options.method ?? 'GET' }));
+  const requestAccessToken = authSession.getAccessToken();
+  const response = await fetch(
+    buildApiUrl(path),
+    buildRequestInit({ ...options, method: options.method ?? 'GET' }, requestAccessToken),
+  );
 
   if (response.status === 401 && retryOnUnauthorized && !options.skipAuthRefresh) {
+    const currentAccessToken = authSession.getAccessToken();
+    if (currentAccessToken && currentAccessToken !== requestAccessToken) {
+      return download(path, options, false);
+    }
+
     const newAccessToken = await refreshAccessToken();
 
     if (newAccessToken) {
@@ -116,10 +197,9 @@ async function download(
   };
 }
 
-function buildRequestInit(options: RequestOptions): RequestInit {
+function buildRequestInit(options: RequestOptions, token = authSession.getAccessToken()): RequestInit {
   const { skipAuthRefresh: _skipAuthRefresh, ...requestOptions } = options;
   const headers = new Headers(requestOptions.headers);
-  const token = authSession.getAccessToken();
   const isFormData = isFormDataBody(requestOptions.body);
 
   if (!isFormData && requestOptions.body !== undefined && !headers.has('Content-Type')) {

@@ -163,7 +163,10 @@ describe('httpClient', () => {
       if (url === '/api/v1/auth/refresh') {
         refreshCalls += 1;
         await Promise.resolve();
-        return jsonResponse(200, { accessToken: 'new-token' });
+        return jsonResponse(200, {
+          accessToken: 'new-token',
+          user: { id: '1', username: 'admin', role: 'superadmin', permissions: [] },
+        });
       }
 
       const authorization = (init?.headers as Headers).get('Authorization');
@@ -188,6 +191,90 @@ describe('httpClient', () => {
     expect(first).toEqual({ url: '/api/v1/orders/1' });
     expect(second).toEqual({ url: '/api/v1/orders/2' });
     expect(refreshCalls).toBe(1);
+  });
+
+  it('does not rotate again for a late 401 sent with the previous token', async () => {
+    let releaseLateUnauthorized!: () => void;
+    const lateUnauthorizedBlocked = new Promise<void>((resolve) => {
+      releaseLateUnauthorized = resolve;
+    });
+    let oldTokenCalls = 0;
+    let refreshCalls = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/v1/auth/refresh') {
+        refreshCalls += 1;
+        return jsonResponse(200, {
+          accessToken: 'new-token',
+          user: { id: '1', username: 'admin', role: 'superadmin', permissions: [] },
+        });
+      }
+
+      const authorization = (init?.headers as Headers).get('Authorization');
+      if (authorization === 'Bearer new-token') {
+        return jsonResponse(200, { url });
+      }
+
+      oldTokenCalls += 1;
+      if (oldTokenCalls === 2) {
+        await lateUnauthorizedBlocked;
+      }
+      return jsonResponse(
+        401,
+        { error: { code: 'AUTH_REQUIRED', message: 'Auth required' } },
+        'Unauthorized',
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    authSession.setAccessToken('old-token');
+
+    const first = httpClient.get('/api/v1/orders/1');
+    const late = httpClient.get('/api/v1/orders/2');
+    await expect(first).resolves.toEqual({ url: '/api/v1/orders/1' });
+    releaseLateUnauthorized();
+    await expect(late).resolves.toEqual({ url: '/api/v1/orders/2' });
+
+    expect(refreshCalls).toBe(1);
+  });
+
+  it('does not clear a newer login when an older automatic refresh fails', async () => {
+    let releaseRefresh!: () => void;
+    const refreshBlocked = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/v1/auth/refresh') {
+        await refreshBlocked;
+        return jsonResponse(
+          401,
+          { error: { code: 'REFRESH_TOKEN_INVALID', message: 'Invalid refresh' } },
+          'Unauthorized',
+        );
+      }
+
+      const authorization = (init?.headers as Headers).get('Authorization');
+      return authorization === 'Bearer new-login-token'
+        ? jsonResponse(200, { ok: true })
+        : jsonResponse(
+            401,
+            { error: { code: 'AUTH_REQUIRED', message: 'Auth required' } },
+            'Unauthorized',
+          );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    authSession.setAccessToken('old-token');
+    authSession.setUser({ id: '1', username: 'old-user', role: 'admin' });
+
+    const request = httpClient.get('/api/v1/orders');
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/refresh', expect.any(Object));
+    });
+    authSession.setAccessToken('new-login-token');
+    authSession.setUser({ id: '2', username: 'new-user', role: 'manager' });
+    releaseRefresh();
+
+    await expect(request).resolves.toEqual({ ok: true });
+    expect(authSession.getAccessToken()).toBe('new-login-token');
+    expect(authSession.getUser()).toMatchObject({ id: '2', username: 'new-user' });
   });
 
   it('uses runtime apiUrl before VITE_API_URL', async () => {

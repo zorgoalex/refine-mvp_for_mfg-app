@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-12",
+    title: "Сессия больше не завершается при одновременной загрузке данных",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Когда срок access token истекал во время загрузки календаря или другого экрана с несколькими параллельными запросами, ERP мог ошибочно показать «Сессия истекла». Теперь все запросы совместно выполняют одно обновление сессии.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-12",
     title: "Названия заказов вместо ID во всех списках",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
