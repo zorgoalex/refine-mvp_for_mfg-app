@@ -230,14 +230,19 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     await completeOrderDeleteIdempotency(this.tx, idempotencyKey, response);
   }
 
-  async assertOrderNameAvailable(input: { orderName: string; excludeOrderId?: number }): Promise<void> {
-    const normalized = input.orderName.trim().toLowerCase();
+  async lockOrderName(orderName: string): Promise<void> {
+    const normalized = orderName.trim().toLowerCase();
     // Advisory xact lock по нормализованному имени: два конкурентных сохранения
     // одного номера сериализуются, второй видит первого после его коммита.
+    // Хэш-коллизия имён лишь добавляет ложную сериализацию — корректность цела.
     await this.tx.query(
       `SELECT pg_advisory_xact_lock(hashtextextended('order_name:' || $1, 0))`,
       [normalized],
     );
+  }
+
+  async assertOrderNameAvailable(input: { orderName: string; excludeOrderId?: number }): Promise<void> {
+    const normalized = input.orderName.trim().toLowerCase();
     const duplicate = await this.tx.query<{ order_id: string | number; order_name: string }>(
       `
       SELECT order_id, order_name

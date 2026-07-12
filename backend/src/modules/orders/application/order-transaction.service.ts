@@ -150,7 +150,9 @@ export class OrderTransactionService {
       this.requireFinancePermissionForPaymentMutations(command, prepared.order);
 
       // Уникальность номера заказа среди живых заказов — жёсткий блок (409 с
-      // предложенным следующим номером), обхода нет by design.
+      // предложенным следующим номером), обхода нет by design. Advisory-лок
+      // имени берётся ДО project/order-локов (единый порядок во всех командах).
+      await unitOfWork.lockOrderName(prepared.order.header.orderName);
       await unitOfWork.assertOrderNameAvailable({ orderName: prepared.order.header.orderName });
 
       // New orders are SP3-era (sheet_eligible default true): eligible, no stored sheet state.
@@ -244,6 +246,12 @@ export class OrderTransactionService {
       // order row lock — taking it after inverts moveOrder's order and can
       // deadlock. Pre-read is unlocked; the client-change block below re-checks
       // against the locked snapshot and 409s if the world moved in between.
+      // Advisory-лок номера — ПЕРВЫМ, до project/order row-локов: update с
+      // одновременной сменой клиента (project-лок) и переименованием иначе
+      // инвертирует порядок против create и даёт deadlock (Critic R1-1).
+      // Без переименования лок избыточен, но безвреден (self-serialization).
+      await unitOfWork.lockOrderName(command.dto.header?.orderName ?? '');
+
       const requestedClientId = numOrNull(command.dto.header?.clientId);
       const preRead = await unitOfWork.readOrderClientProject(command.orderId);
       if (!preRead) {

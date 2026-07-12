@@ -252,6 +252,10 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       : null;
   }
 
+  async lockOrderName(_orderName: string): Promise<void> {
+    this.call('lockOrderName');
+  }
+
   async assertOrderNameAvailable(input: { orderName: string; excludeOrderId?: number }): Promise<void> {
     this.call('assertOrderNameAvailable');
     const normalized = input.orderName.trim().toLowerCase();
@@ -733,6 +737,7 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
+      'lockOrderName',
       'assertOrderNameAvailable',
       'validateSheetReferences',
       'resolveProjectForCreate',
@@ -976,9 +981,10 @@ describe('OrderTransactionService', () => {
     expect(updateAuditEvent1.after).toBeTruthy();
     // after reflects the updated orderName
     expect((updateAuditEvent1.after as Record<string, unknown>)?.orderName).toBe('Updated order');
-    expect(transactions.calls.slice(0, 10)).toEqual([
+    expect(transactions.calls.slice(0, 11)).toEqual([
       'begin',
       'setSessionUser',
+      'lockOrderName',
       'readOrderClientProject',
       'loadOrderForUpdate',
       'assertOrderNameAvailable',
@@ -1557,6 +1563,7 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
+      'lockOrderName',
       'readOrderClientProject',
       'loadOrderForUpdate',
       'rollback',
@@ -1661,7 +1668,7 @@ describe('OrderTransactionService', () => {
 
     expect(transactions.state.orders.get(42)?.payments).toHaveLength(1);
     expect(transactions.state.auditEvents).toEqual([]);
-    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'readOrderClientProject', 'loadOrderForUpdate', 'rollback']);
+    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'lockOrderName', 'readOrderClientProject', 'loadOrderForUpdate', 'rollback']);
   });
 
   it('omits payment rows from save responses when actor cannot view payments', async () => {
@@ -1788,6 +1795,7 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
+      'lockOrderName',
       'assertOrderNameAvailable',
       'validateSheetReferences',
       'resolveProjectForCreate',
