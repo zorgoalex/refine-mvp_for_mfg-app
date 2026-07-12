@@ -74,6 +74,18 @@ describe('SheetEditor source contract', () => {
     expect(src).toMatch(/scrollableParents\(editorRootRef\.current\)/);
     expect(src).toMatch(/updateDragFromClient\(pointer\.clientX,\s*pointer\.clientY\)/);
   });
+  it('supports group zoom and per-sheet 360-degree view rotation while editing', () => {
+    expect(src).toMatch(/MIN_VIEW_ZOOM\s*=\s*0\.25/);
+    expect(src).toMatch(/MAX_VIEW_ZOOM\s*=\s*1\.5/);
+    expect(src).toMatch(/sheet-editor-zoom-controls/);
+    expect(src).toMatch(/MinusOutlined/);
+    expect(src).toMatch(/PlusOutlined/);
+    expect(src).toMatch(/RotateLeftOutlined/);
+    expect(src).toMatch(/RotateRightOutlined/);
+    expect(src).toMatch(/% 360 \+ 360\) % 360/);
+    expect(src).toMatch(/svgMmPerScreenPx/);
+    expect(src).toMatch(/Math\.hypot\(ctm\.a, ctm\.b\)/);
+  });
   it('clips SVG labels to the oriented piece rect and allows strong shrink for long order names', () => {
     expect(src).toMatch(/SVG_LABEL_MIN_SCALE\s*=\s*0\.05/);
     expect(src).toMatch(/clipPathUnits="userSpaceOnUse"/);

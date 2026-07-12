@@ -15,7 +15,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Menu, message } from 'antd';
+import { Button, Menu, Space, Tooltip, message } from 'antd';
+import { MinusOutlined, PlusOutlined, RotateLeftOutlined, RotateRightOutlined } from '@ant-design/icons';
 import type { SheetPlacements, SheetPlacementPiece } from '../../api/types/cutApi.types';
 import {
   snapDraggedPiece,
@@ -99,6 +100,10 @@ interface DragState {
 /** Maximum display width (px) of a single sheet SVG. */
 const MAX_SVG_WIDTH_PX = 700;
 
+const MIN_VIEW_ZOOM = 0.25;
+const MAX_VIEW_ZOOM = 1.5;
+const VIEW_ZOOM_STEP = 0.25;
+
 /** Snap threshold (px): snap engages when the nearest candidate is within this many screen pixels. */
 const SNAP_THRESHOLD_PX = 10;
 
@@ -142,6 +147,16 @@ function clientToSVG(
     x: ((clientX - rect.left) / rect.width) * vb.width,
     y: ((clientY - rect.top) / rect.height) * vb.height,
   };
+}
+
+/** Current uniform SVG scale in viewBox millimetres per screen pixel. */
+function svgMmPerScreenPx(svgEl: SVGSVGElement, fallbackViewBoxWidth: number): number {
+  const ctm = svgEl.getScreenCTM();
+  if (ctm) {
+    const screenPxPerMm = Math.hypot(ctm.a, ctm.b);
+    if (screenPxPerMm > 0) return 1 / screenPxPerMm;
+  }
+  return fallbackViewBoxWidth / Math.max(1, svgEl.getBoundingClientRect().width);
 }
 
 function clipIdForPiece(sheetIndex: number, itemId: string, instance: number): string {
@@ -290,6 +305,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
   const [selected, setSelected] = useState<SelectedPiece | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [viewZoom, setViewZoom] = useState(1);
+  const [sheetRotations, setSheetRotations] = useState<Record<number, number>>({});
   const [menu, setMenu] = useState<{
     clientX: number;
     clientY: number;
@@ -299,6 +316,17 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const editorRootRef = useRef<HTMLDivElement | null>(null);
+
+  const changeViewZoom = useCallback((delta: number) => {
+    setViewZoom((current) => Math.max(MIN_VIEW_ZOOM, Math.min(MAX_VIEW_ZOOM, current + delta)));
+  }, []);
+
+  const rotateSheetView = useCallback((sheetIndex: number, direction: -1 | 1) => {
+    setSheetRotations((current) => ({
+      ...current,
+      [sheetIndex]: (((current[sheetIndex] ?? 0) + direction * 90) % 360 + 360) % 360,
+    }));
+  }, []);
 
   // ── Stable refs for window-level event handlers (avoid re-subscription on every state change) ──
   const dragRef = useRef<DragState | null>(null);
@@ -422,8 +450,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         ls,
         otl,
       );
-      const targetSvgDisplayW = Math.min(MAX_SVG_WIDTH_PX, targetOriented.vw);
-      const targetMmPerPx = targetOriented.vw / targetSvgDisplayW;
+      const targetMmPerPx = svgMmPerScreenPx(targetSvgEl, targetOriented.vw);
 
       // Apply snap (shared geometry — no inline math)
       const snapped = snapDraggedPiece({
@@ -669,9 +696,34 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div
-      ref={editorRootRef}
-      data-testid="sheet-editor"
+    <div ref={editorRootRef} data-testid="sheet-editor">
+      <Space size={4} style={{ marginBottom: 12 }} data-testid="sheet-editor-zoom-controls">
+        <Tooltip title="Уменьшить масштаб группы раскроя">
+          <Button
+            aria-label="Уменьшить масштаб группы раскроя"
+            icon={<MinusOutlined />}
+            style={{ width: 40, height: 40 }}
+            disabled={viewZoom <= MIN_VIEW_ZOOM}
+            onClick={() => changeViewZoom(-VIEW_ZOOM_STEP)}
+          />
+        </Tooltip>
+        <span
+          data-testid="sheet-editor-zoom-value"
+          style={{ minWidth: 52, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}
+        >
+          {Math.round(viewZoom * 100)}%
+        </span>
+        <Tooltip title="Увеличить масштаб группы раскроя">
+          <Button
+            aria-label="Увеличить масштаб группы раскроя"
+            icon={<PlusOutlined />}
+            style={{ width: 40, height: 40 }}
+            disabled={viewZoom >= MAX_VIEW_ZOOM}
+            onClick={() => changeViewZoom(VIEW_ZOOM_STEP)}
+          />
+        </Tooltip>
+      </Space>
+      <div
       // Disable native text selection / drag-image. Grabbing a piece must not let
       // the browser start a text selection over the SVG <text> labels — that
       // produced a translucent "phantom" layer of all the sheet's label text
@@ -700,7 +752,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         const vw = sheetOriented.vw;
         const vh = sheetOriented.vh;
 
-        const svgDisplayW = Math.min(MAX_SVG_WIDTH_PX, vw);
+        const svgDisplayW = Math.min(MAX_SVG_WIDTH_PX, vw) * viewZoom;
         const svgDisplayH = (svgDisplayW / vw) * vh;
         // Conversion factor: how many mm per display pixel at this sheet's scale.
         // Used to keep UI controls (rotate handle, selected stroke) at a fixed
@@ -708,6 +760,10 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         const mmPerPx = vw / svgDisplayW;
 
         const isDropTarget = drag !== null && drag.targetSheetIndex === sheetIndex;
+        const viewRotation = sheetRotations[sheetIndex] ?? 0;
+        const swapsViewAxes = viewRotation % 180 !== 0;
+        const rotatedViewportW = swapsViewAxes ? svgDisplayH : svgDisplayW;
+        const rotatedViewportH = swapsViewAxes ? svgDisplayW : svgDisplayH;
 
         return (
           <div key={sheetIndex} data-testid={`sheet-editor-sheet-${sheetIndex}`} style={{ display: 'inline-block', verticalAlign: 'top' }}>
@@ -727,25 +783,58 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                     fontSize: 12,
                     color: '#595959',
                     fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
                   }}
                 >
-                  Лист {sheetPos + 1} · дет. {placements.pieces.length}
-                  {materials.length > 0 && (
-                    <>
-                      {' · '}
-                      {materials.length > 1 ? 'Материалы' : 'Материал'}: <b>{materials.join(', ')}</b>
-                    </>
-                  )}
-                  {films.length > 0 && (
-                    <>
-                      {' · '}
-                      {films.length > 1 ? 'Плёнки' : 'Плёнка'}: <b>{films.join(', ')}</b>
-                    </>
-                  )}
+                  <span>
+                    Лист {sheetPos + 1} · дет. {placements.pieces.length}
+                    {materials.length > 0 && (
+                      <>
+                        {' · '}
+                        {materials.length > 1 ? 'Материалы' : 'Материал'}: <b>{materials.join(', ')}</b>
+                      </>
+                    )}
+                    {films.length > 0 && (
+                      <>
+                        {' · '}
+                        {films.length > 1 ? 'Плёнки' : 'Плёнка'}: <b>{films.join(', ')}</b>
+                      </>
+                    )}
+                  </span>
+                  <Space size={2}>
+                    <Tooltip title="Повернуть лист против часовой стрелки">
+                      <Button
+                        aria-label={`Повернуть лист ${sheetPos + 1} против часовой стрелки`}
+                        icon={<RotateLeftOutlined />}
+                        style={{ width: 40, height: 40 }}
+                        onClick={() => rotateSheetView(sheetIndex, -1)}
+                      />
+                    </Tooltip>
+                    <Tooltip title="Повернуть лист по часовой стрелке">
+                      <Button
+                        aria-label={`Повернуть лист ${sheetPos + 1} по часовой стрелке`}
+                        icon={<RotateRightOutlined />}
+                        style={{ width: 40, height: 40 }}
+                        onClick={() => rotateSheetView(sheetIndex, 1)}
+                      />
+                    </Tooltip>
+                  </Space>
                 </div>
               );
             })()}
 
+            <div
+              style={{
+                width: rotatedViewportW,
+                height: rotatedViewportH,
+                position: 'relative',
+                transitionProperty: 'width, height',
+                transitionDuration: '160ms',
+              }}
+            >
             <svg
               ref={(el) => {
                 if (el) svgRefsMap.current.set(sheetIndex, el);
@@ -759,6 +848,12 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 background: isDropTarget ? '#f0f5ff' : '#fff',
                 cursor: drag ? 'grabbing' : 'default',
                 display: 'block',
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                transform: `translate(-50%, -50%) rotate(${viewRotation}deg)`,
+                transitionProperty: 'transform, width, height',
+                transitionDuration: drag ? '0ms' : '160ms',
               }}
               onPointerDown={(e) => {
                 // Click on the bare svg (no overlapping element) deselects.
@@ -1037,6 +1132,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 );
               })}
             </svg>
+            </div>
           </div>
         );
       })}
@@ -1067,6 +1163,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
           </div>,
           document.body,
         )}
+      </div>
     </div>
   );
 }
