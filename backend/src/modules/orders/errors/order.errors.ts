@@ -26,6 +26,23 @@ export class OrderNotFoundError extends ApiError {
   }
 }
 
+export class OrderNameDuplicateError extends ApiError {
+  constructor(input: { existingOrderId: number; orderName: string; suggestedOrderName: string | null }) {
+    // Жёсткий блок без обхода (решение пользователя 2026-07-12): дубль номера
+    // заказа среди живых заказов не сохраняется; UI предлагает следующий номер.
+    super(
+      409,
+      'ORDER_NAME_DUPLICATE',
+      `Номер заказа «${input.orderName}» уже занят заказом #${input.existingOrderId}`,
+      {
+        existingOrderId: input.existingOrderId,
+        orderName: input.orderName,
+        suggestedOrderName: input.suggestedOrderName,
+      },
+    );
+  }
+}
+
 export class OrderVersionConflictError extends ApiError {
   constructor(currentVersion: number, clientVersion: number) {
     super(

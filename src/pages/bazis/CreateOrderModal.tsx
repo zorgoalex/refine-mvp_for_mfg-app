@@ -146,6 +146,19 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
       navigate(`/orders/edit/${response.orderId}`);
     } catch (error) {
       if (error instanceof ApiError) {
+        if (error.code === 'ORDER_NAME_DUPLICATE') {
+          const details = error.details as { existingOrderId?: number; suggestedOrderName?: string | null } | undefined;
+          const suggested = details?.suggestedOrderName;
+          // Неудачная попытка пометила idempotency-ключ failed — повтор требует нового.
+          setIdempotencyKey(createUuid());
+          if (suggested) {
+            form.setFieldsValue({ orderName: suggested });
+            message.warning(`Номер занят заказом #${details?.existingOrderId ?? '—'} — подставлен свободный номер ${suggested}, нажмите «Создать» ещё раз`);
+          } else {
+            message.warning(`Номер занят заказом #${details?.existingOrderId ?? '—'} — укажите другой номер`);
+          }
+          return;
+        }
         if (error.code === 'BAZIS_IDEMPOTENCY_IN_PROGRESS') {
           message.warning('Команда выполняется, повторите через минуту');
           return;

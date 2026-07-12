@@ -753,6 +753,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Duplicate order name (ORDER_NAME_DUPLICATE with suggestedOrderName)
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':

@@ -28,6 +28,7 @@ describe('PgOrderTransactionManager', () => {
       await uow.setSessionUser('42');
       await expect(uow.loadOrderForUpdate(100)).resolves.toEqual({
         orderId: 100,
+      orderName: 'A-100',
         version: 2,
         createdByUserId: '42',
         managerUserId: '42',
@@ -59,7 +60,7 @@ describe('PgOrderTransactionManager', () => {
 
     const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
     expect(sql).toContain('SELECT set_session_user($1)');
-    expect(sql).toContain('SELECT order_id, version, created_by, manager_id FROM orders');
+    expect(sql).toContain('SELECT order_id, order_name, version, created_by, manager_id FROM orders');
     expect(sql).toContain('INSERT INTO orders');
     expect(sql).toContain('project_id');
     expect(sql).toContain('INSERT INTO order_details');

@@ -149,6 +149,10 @@ export class OrderTransactionService {
       this.requirePermission(command, 'orders.view_financials');
       this.requireFinancePermissionForPaymentMutations(command, prepared.order);
 
+      // Уникальность номера заказа среди живых заказов — жёсткий блок (409 с
+      // предложенным следующим номером), обхода нет by design.
+      await unitOfWork.assertOrderNameAvailable({ orderName: prepared.order.header.orderName });
+
       // New orders are SP3-era (sheet_eligible default true): eligible, no stored sheet state.
       const touchesSheet = await this.enforceSheetGuards(unitOfWork, command, prepared, {
         eligible: true,
@@ -269,7 +273,20 @@ export class OrderTransactionService {
         mode: 'update',
         pathOrderId: command.orderId,
       });
+
       this.requireFinancePermissionForPaymentMutations(command, prepared.order);
+
+      // Переименование в занятый номер — блок; без смены имени проверка не
+      // выполняется (легаси-дубли остаются редактируемыми).
+      if (
+        prepared.order.header.orderName.trim().toLowerCase() !==
+        lockedOrder.orderName.trim().toLowerCase()
+      ) {
+        await unitOfWork.assertOrderNameAvailable({
+          orderName: prepared.order.header.orderName,
+          excludeOrderId: command.orderId,
+        });
+      }
       const beforeSnapshot = await unitOfWork.loadOrderHeaderSnapshot(command.orderId);
 
       // SP3 stored sheet state. Only sheet-eligible orders can carry sheet details, so

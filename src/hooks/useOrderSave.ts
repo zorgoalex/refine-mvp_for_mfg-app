@@ -682,6 +682,30 @@ export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
         }
       }
 
+      // ========== HANDLE DUPLICATE ORDER NAME ==========
+      // Жёсткий блок дублей номера (backend 409): предупреждение с предложением
+      // свободного номера; «сохранить как есть» намеренно НЕТ.
+      if (isApiError(err, 'ORDER_NAME_DUPLICATE')) {
+        const details = (err as { details?: { existingOrderId?: number; suggestedOrderName?: string | null } }).details;
+        const suggested = details?.suggestedOrderName ?? null;
+        setIsSaving(false);
+        if (suggested) {
+          Modal.confirm({
+            title: 'Номер заказа занят',
+            content: `Номер «${values.order_name}» уже используется заказом #${details?.existingOrderId ?? '—'}. Свободный номер: ${suggested}. Сохранить заказ под номером ${suggested}?`,
+            okText: `Сохранить как ${suggested}`,
+            cancelText: 'Изменить вручную',
+            onOk: () => void saveOrder({ ...values, order_name: suggested }, isEdit),
+          });
+        } else {
+          Modal.warning({
+            title: 'Номер заказа занят',
+            content: `Номер «${values.order_name}» уже используется заказом #${details?.existingOrderId ?? '—'}. Укажите другой номер заказа.`,
+          });
+        }
+        return null;
+      }
+
       // ========== HANDLE VERSION CONFLICT ==========
       if (isApiError(err, 'ORDER_VERSION_CONFLICT') || err.message === 'VERSION_CONFLICT') {
         Modal.error({
