@@ -205,7 +205,7 @@ export function buildSheetPieceOverlays(
         sheetH,
         landscape,
         originTopLeft,
-      ), axisOrigin);
+      ), axisOrigin, landscape);
 
       return {
         key: `${piece.item_id}:${piece.instance}`,

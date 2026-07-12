@@ -19,6 +19,7 @@ export {
   validateSheetPlacements,
   orientPieceRect,
   applyAxisOrigin,
+  undoAxisOriginX,
   undoAxisOriginY,
   snapDraggedPiece,
   rotatePiece,

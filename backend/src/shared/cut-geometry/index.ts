@@ -175,12 +175,29 @@ export function orientPieceRect(
 export type CutAxisOrigin = 'top-left' | 'bottom-left';
 
 /** Apply the operator-selected Y origin in the final oriented viewBox. */
-export function applyAxisOrigin<T extends { x: number; y: number; w: number; h: number; vh: number }>(
+export function applyAxisOrigin<T extends { x: number; y: number; w: number; h: number; vw: number; vh: number }>(
   rect: T,
   axisOrigin: CutAxisOrigin = 'top-left',
+  landscape = false,
 ): T {
   if (axisOrigin === 'top-left') return rect;
+  if (landscape) {
+    return { ...rect, x: rect.vw - rect.x - rect.w };
+  }
   return { ...rect, y: rect.vh - rect.y - rect.h };
+}
+
+/** Undo the final-view X reflection used by a bottom-left landscape view. */
+export function undoAxisOriginX(
+  orientedX: number,
+  orientedWidth: number,
+  viewWidth: number,
+  axisOrigin: CutAxisOrigin = 'top-left',
+  landscape = false,
+): number {
+  return axisOrigin === 'bottom-left' && landscape
+    ? viewWidth - orientedX - orientedWidth
+    : orientedX;
 }
 
 /** Undo applyAxisOrigin for a final-view top-left coordinate. */
@@ -189,8 +206,11 @@ export function undoAxisOriginY(
   orientedHeight: number,
   viewHeight: number,
   axisOrigin: CutAxisOrigin = 'top-left',
+  landscape = false,
 ): number {
-  return axisOrigin === 'bottom-left' ? viewHeight - orientedY - orientedHeight : orientedY;
+  return axisOrigin === 'bottom-left' && !landscape
+    ? viewHeight - orientedY - orientedHeight
+    : orientedY;
 }
 
 // ── Piece rotation (Codex R22 BLOCKER #2) ────────────────────────────────

@@ -25,12 +25,12 @@ describe('display axis origin', () => {
     ['landscape transpose', true, true],
   ] as const)('%s reflects after orientation and is self-inverse', (_name, landscape, originTopLeft) => {
     const oriented = orientPieceRect({ x: 17, y: 31, w: 140, h: 90 }, 1000, 800, landscape, originTopLeft);
-    const bottom = applyAxisOrigin(oriented, 'bottom-left');
-    expect(bottom.x).toBe(oriented.x);
+    const bottom = applyAxisOrigin(oriented, 'bottom-left', landscape);
+    expect(bottom.x).toBe(landscape ? oriented.vw - oriented.x - oriented.w : oriented.x);
     expect(bottom.w).toBe(oriented.w);
     expect(bottom.h).toBe(oriented.h);
-    expect(bottom.y).toBe(oriented.vh - oriented.y - oriented.h);
-    expect(undoAxisOriginY(bottom.y, bottom.h, bottom.vh, 'bottom-left')).toBe(oriented.y);
+    expect(bottom.y).toBe(landscape ? oriented.y : oriented.vh - oriented.y - oriented.h);
+    expect(undoAxisOriginY(bottom.y, bottom.h, bottom.vh, 'bottom-left', landscape)).toBe(oriented.y);
   });
 
   it('keeps top-left byte-compatible and does not mutate the input', () => {
