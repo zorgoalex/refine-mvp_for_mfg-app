@@ -1377,11 +1377,12 @@ export class PgCutRepository implements CutRepositoryPort {
 
     const result = await this.database.query<EligibleRow>(
       `
-      SELECT od.detail_id, od.order_id, od.quantity, od.material_id,
+      SELECT od.detail_id, od.order_id, ord.order_name, od.quantity, od.material_id,
              od.sheet_material_type_id,
              od.film_id, od.production_status_id, od.delete_flag,
              s.is_cuttable
       FROM order_details od
+      JOIN orders ord ON ord.order_id = od.order_id
       LEFT JOIN sheet_material_types s ON s.sheet_material_type_id = od.sheet_material_type_id
       WHERE ${conditions.join(' AND ')}
       ORDER BY od.detail_id
@@ -1419,6 +1420,7 @@ export class PgCutRepository implements CutRepositoryPort {
       return {
         orderDetailId: candidate.detailId,
         orderId: toNum(row.order_id),
+        orderName: row.order_name ?? null,
         quantity: toNum(row.quantity),
         materialId: row.material_id === null || row.material_id === undefined ? null : toNum(row.material_id),
         sheetMaterialTypeId: candidate.sheetMaterialTypeId,
@@ -2790,6 +2792,7 @@ export class PgCutRepository implements CutRepositoryPort {
 interface EligibleRow extends QueryResultRow {
   detail_id: string | number;
   order_id: string | number;
+  order_name?: string | null;
   quantity: string | number;
   material_id: string | number | null;
   sheet_material_type_id: string | number | null;

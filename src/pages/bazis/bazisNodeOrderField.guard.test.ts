@@ -10,15 +10,15 @@ const panelsTab = readFileSync(new URL('./PanelsTab.tsx', import.meta.url), 'utf
 const viewerTree = readFileSync(new URL('./ViewerTree.tsx', import.meta.url), 'utf8');
 
 describe('bazis node order-provenance UI guards', () => {
-  it('PanelsTab has an order column linking to /orders/show/:id', () => {
-    expect(panelsTab).toContain("title: 'ID заказа'");
-    expect(panelsTab).toMatch(/orderIds/);
+  it('PanelsTab has an order column with ORDER NAMES linking to /orders/show/:id', () => {
+    expect(panelsTab).toContain("title: 'Заказ'");
+    expect(panelsTab).toContain('order.orderName');
     expect(panelsTab).toContain('/orders/show/');
     // Клик по ссылке не должен триггерить выбор строки (row onClick)
     expect(panelsTab).toMatch(/RouterLink[\s\S]*?stopPropagation/);
   });
 
-  it('ViewerTree marks nodes that are already in an ERP order', () => {
-    expect(viewerTree).toMatch(/orderIds/);
+  it('ViewerTree marks nodes that are already in an ERP order with the order NAME', () => {
+    expect(viewerTree).toContain('order.orderName');
   });
 });

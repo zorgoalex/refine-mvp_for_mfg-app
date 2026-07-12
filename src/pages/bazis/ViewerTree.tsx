@@ -135,10 +135,10 @@ export const ViewerTree = forwardRef<ViewerTreeHandle, ViewerTreeProps>(({
         return (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <span>{dataNode.title as React.ReactNode}</span>
-            {dataNode.orderIds.length > 0 ? (
-              // Узел уже добавлен в ERP-заказ(ы) созданной деталью
+            {dataNode.orders.length > 0 ? (
+              // Узел уже добавлен в ERP-заказ(ы) созданной деталью — показываем названия
               <Tag color="green" style={{ marginInlineEnd: 0, lineHeight: '16px' }}>
-                {dataNode.orderIds.map((orderId) => `#${orderId}`).join(', ')}
+                {dataNode.orders.map((order) => order.orderName?.trim() || `#${order.orderId}`).join(', ')}
               </Tag>
             ) : null}
             {showBadges ? (

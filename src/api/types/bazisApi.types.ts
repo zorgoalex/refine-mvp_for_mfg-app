@@ -19,6 +19,11 @@ export interface BazisImportResponse {
   requestId: string;
 }
 
+export interface BazisOrderRef {
+  orderId: number;
+  orderName: string;
+}
+
 export interface BazisProjectListItem {
   bazisProjectId: number;
   projectId: number;
@@ -27,6 +32,7 @@ export interface BazisProjectListItem {
   lastRevisionNo: number | null;
   lastImportedAt: string | null;
   linkedOrderIds: number[];
+  linkedOrders: BazisOrderRef[];
 }
 
 export interface BazisProjectDeleteResponse {
@@ -67,7 +73,9 @@ export interface BazisTreeNode {
   thicknessMm: number | null;
   mainMaterialName: string | null;
   childrenCount: number;
-  /** ERP-заказы, в которые узел добавлен созданной деталью. */
+  /** ERP-заказы, в которые узел добавлен созданной деталью (с названиями). */
+  orders: BazisOrderRef[];
+  /** Производное от orders; rollout-совместимость. */
   orderIds: number[];
 }
 

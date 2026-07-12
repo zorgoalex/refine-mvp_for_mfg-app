@@ -230,6 +230,7 @@ describe('PgBazisRepository reads + mappings', () => {
         thicknessMm: null,
         mainMaterialName: null,
         childrenCount: 2,
+        orders: [],
         orderIds: [],
       },
     ]);
@@ -1013,6 +1014,37 @@ describe('PgBazisRepository.createOrderFromRevision revision lock', () => {
   });
 });
 
+describe('PgBazisRepository.listProjects', () => {
+  it('returns linked orders with names (id + order_name) for the projects list', async () => {
+    const database = createDatabase({
+      projectListRows: [
+        {
+          bazis_project_id: 14,
+          project_id: 10,
+          name: 'санузел + шкаф',
+          revisions_count: 1,
+          last_revision_no: 1,
+          last_imported_at: '2026-07-10T12:44:00.000Z',
+          linked_order_ids: [11385],
+          linked_orders: [{ orderId: 11385, orderName: 'санузел' }],
+        },
+      ],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const projects = await repository.listProjects({});
+
+    expect(projects[0].linkedOrders).toEqual([{ orderId: 11385, orderName: 'санузел' }]);
+    expect(projects[0].linkedOrderIds).toEqual([11385]);
+
+    const listSql = database.queries
+      .map((query) => normalizeSql(query.text))
+      .find((sql) => sql.startsWith('SELECT bp.bazis_project_id'));
+    expect(listSql).toContain('order_name');
+    expect(listSql).toContain('JOIN orders');
+  });
+});
+
 describe('PgBazisRepository tree order provenance', () => {
   it('exposes orderIds on tree nodes from the node-order map (created details only)', async () => {
     const database = createDatabase({
@@ -1033,7 +1065,10 @@ describe('PgBazisRepository tree order provenance', () => {
           thickness_mm: 16,
           main_material_name: 'ЛДСП',
           children_count: 0,
-          order_ids: [11385, 11390],
+          linked_orders: [
+            { orderId: 11385, orderName: 'санузел' },
+            { orderId: 11390, orderName: 'шкаф' },
+          ],
         },
         {
           bazis_node_id: 102,
@@ -1051,7 +1086,7 @@ describe('PgBazisRepository tree order provenance', () => {
           thickness_mm: null,
           main_material_name: null,
           children_count: 3,
-          order_ids: null,
+          linked_orders: null,
         },
       ],
     });
@@ -1059,7 +1094,14 @@ describe('PgBazisRepository tree order provenance', () => {
 
     const nodes = await repository.getTreeChildren(5, null);
 
+    // Пользователи мыслят названиями: узел несёт заказы С ИМЕНАМИ,
+    // orderIds остаётся производным (rollout-совместимость).
+    expect(nodes[0].orders).toEqual([
+      { orderId: 11385, orderName: 'санузел' },
+      { orderId: 11390, orderName: 'шкаф' },
+    ]);
     expect(nodes[0].orderIds).toEqual([11385, 11390]);
+    expect(nodes[1].orders).toEqual([]);
     expect(nodes[1].orderIds).toEqual([]);
 
     // Агрегат считает только реально созданные детали (order_detail_id NOT NULL),
@@ -1069,6 +1111,7 @@ describe('PgBazisRepository tree order provenance', () => {
       .find((sql) => sql.startsWith('SELECT n.bazis_node_id, n.parent_node_id'));
     expect(treeSql).toContain('bazis_node_order_detail_map');
     expect(treeSql).toContain('order_detail_id IS NOT NULL');
+    expect(treeSql).toContain('order_name');
   });
 
   it('returns populated orderIds from the full-tree read (behavior, not just SQL shape)', async () => {
@@ -1090,7 +1133,7 @@ describe('PgBazisRepository tree order provenance', () => {
           thickness_mm: 16,
           main_material_name: 'ЛДСП',
           children_count: 0,
-          order_ids: [11385],
+          linked_orders: [{ orderId: 11385, orderName: 'санузел' }],
         },
       ],
     });
@@ -1099,6 +1142,7 @@ describe('PgBazisRepository tree order provenance', () => {
     const nodes = await repository.listAllTreeNodes(5);
 
     expect(nodes).toHaveLength(1);
+    expect(nodes[0].orders).toEqual([{ orderId: 11385, orderName: 'санузел' }]);
     expect(nodes[0].orderIds).toEqual([11385]);
 
     const fullTreeSql = database.queries
@@ -1200,6 +1244,7 @@ function createDatabase(
     };
     revisionOrders?: Array<Record<string, unknown>>;
     pruneCandidates?: Array<Record<string, unknown>>;
+    projectListRows?: Array<Record<string, unknown>>;
     pruneProtectedRevisionIds?: number[];
   } = {},
 ) {
@@ -1312,7 +1357,8 @@ function createDatabase(
         return { rows: [{ audit_id: `audit-${auditId}` }], rowCount: 1 };
       }
       if (normalized.startsWith('SELECT bp.bazis_project_id')) {
-        return { rows: [], rowCount: 0 };
+        const rows = options.projectListRows ?? [];
+        return { rows, rowCount: rows.length };
       }
       if (normalized.startsWith('SELECT r.bazis_revision_id')) {
         return { rows: [], rowCount: 0 };

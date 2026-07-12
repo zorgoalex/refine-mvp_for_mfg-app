@@ -210,6 +210,8 @@ export interface CutJobRef {
 export interface EligibleDetailDto {
   orderDetailId: number;
   orderId: number;
+  /** orders.order_name — пользователи мыслят названиями, не ID. */
+  orderName?: string | null;
   quantity: number;
   /** NULL post-034 (Variant B: material_id sunsetted on order_details). */
   materialId: number | null;

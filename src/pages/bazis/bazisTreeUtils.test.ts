@@ -18,6 +18,7 @@ const node = (over: Partial<BazisTreeNode>): BazisTreeNode => ({
   thicknessMm: 16,
   mainMaterialName: 'ЛДСП',
   childrenCount: 0,
+  orders: [],
   orderIds: [],
   ...over,
 });
@@ -29,14 +30,18 @@ describe('bazisTreeUtils', () => {
     expect(mapTreeNode(node({ objectType: 'Фурнитура' })).disableCheckbox).toBe(true);
   });
 
-  it('mapTreeNode: прокидывает orderIds (провенанс «в каком ERP-заказе»)', () => {
-    expect(mapTreeNode(node({ orderIds: [11385] })).orderIds).toEqual([11385]);
-    expect(mapTreeNode(node({})).orderIds).toEqual([]);
+  it('mapTreeNode: прокидывает orders с названиями (провенанс «в каком ERP-заказе»)', () => {
+    const mapped = mapTreeNode(node({ orders: [{ orderId: 11385, orderName: 'санузел' }], orderIds: [11385] }));
+    expect(mapped.orders).toEqual([{ orderId: 11385, orderName: 'санузел' }]);
+    expect(mapped.orderIds).toEqual([11385]);
+    expect(mapTreeNode(node({})).orders).toEqual([]);
   });
 
-  it('mapTreeNode: legacy-ответ без orderIds (старый backend в окно раскатки) даёт [], не краш', () => {
+  it('mapTreeNode: legacy-ответ без orders/orderIds (старый backend в окно раскатки) даёт [], не краш', () => {
     const legacy = node({});
     delete (legacy as Partial<BazisTreeNode>).orderIds;
+    delete (legacy as Partial<BazisTreeNode>).orders;
+    expect(mapTreeNode(legacy).orders).toEqual([]);
     expect(mapTreeNode(legacy).orderIds).toEqual([]);
   });
 

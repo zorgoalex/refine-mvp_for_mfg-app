@@ -19,6 +19,7 @@ export interface BazisProjectListItemDto {
   lastRevisionNo: number | null;
   lastImportedAt: string | null;
   linkedOrderIds: number[];
+  linkedOrders: BazisOrderRefDto[];
 }
 
 export interface BazisProjectCardDto extends BazisProjectListItemDto {
@@ -51,8 +52,15 @@ export interface BazisTreeNodeDto {
   thicknessMm: number | null;
   mainMaterialName: string | null;
   childrenCount: number;
-  /** ERP-заказы, в которые узел добавлен реально созданной деталью. */
+  /** ERP-заказы, в которые узел добавлен реально созданной деталью (с названиями). */
+  orders: BazisOrderRefDto[];
+  /** Производное от orders; сохранено для rollout-совместимости. */
   orderIds: number[];
+}
+
+export interface BazisOrderRefDto {
+  orderId: number;
+  orderName: string;
 }
 
 export interface BazisNodeOrderLinkDto {

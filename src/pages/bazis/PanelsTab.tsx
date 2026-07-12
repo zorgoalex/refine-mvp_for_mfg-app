@@ -74,19 +74,19 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, onSelect
         ellipsis: true,
       },
       {
-        title: 'ID заказа',
+        title: 'Заказ',
         key: 'orders',
-        width: 110,
+        width: 160,
         render: (_, row) =>
-          row.orderIds.length > 0 ? (
+          row.orders.length > 0 ? (
             <Space wrap size={4}>
-              {row.orderIds.map((orderId) => (
+              {row.orders.map((order) => (
                 <RouterLink
-                  key={orderId}
-                  to={`/orders/show/${orderId}`}
+                  key={order.orderId}
+                  to={`/orders/show/${order.orderId}`}
                   onClick={(event) => event.stopPropagation()}
                 >
-                  #{orderId}
+                  {order.orderName?.trim() || `#${order.orderId}`}
                 </RouterLink>
               ))}
             </Space>

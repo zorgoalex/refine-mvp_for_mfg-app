@@ -2446,6 +2446,18 @@ paths:
                     type: array
                     items:
                       type: integer
+                  linkedOrders:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - orderId
+                        - orderName
+                      properties:
+                        orderId:
+                          type: integer
+                        orderName:
+                          type: string
                   revisions:
                     type: array
                     items:
@@ -2722,11 +2734,24 @@ paths:
                       nullable: true
                     childrenCount:
                       type: integer
+                    orders:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - orderId
+                          - orderName
+                        properties:
+                          orderId:
+                            type: integer
+                          orderName:
+                            type: string
+                      description: ERP orders (with names) the node was added to (created details only)
                     orderIds:
                       type: array
                       items:
                         type: integer
-                      description: ERP orders the node was added to (created details only)
+                      description: Derived from orders; kept for rollout compatibility
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
