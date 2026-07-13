@@ -181,6 +181,8 @@ export const envSchema = z
     BACKEND_OUTBOX_RELAY_MAX_ATTEMPTS: z.coerce.number().int().positive().max(100).default(10),
     FREECUT_BASE_URL: optionalUrlFromEnv,
     FREECUT_OPTIMIZE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+    /** Auto engine=heuristic for cut groups with >= this many item instances; 0 disables auto mode. */
+    BACKEND_CUT_HEURISTIC_AUTO_THRESHOLD: z.coerce.number().int().min(0).default(100),
     CAD_SERVICE_BASE_URL: optionalUrlFromEnv,
     CAD_SERVICE_API_TOKEN: optionalTrimmedStringFromEnv,
     OCR_SERVICE_BASE_URL: optionalUrlFromEnv,

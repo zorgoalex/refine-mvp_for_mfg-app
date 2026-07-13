@@ -86,6 +86,12 @@ export interface FreecutParams {
   seed?: number;
   layout_mode?: 'guillotine' | 'nested' | 'vacuum_table';
   vacuum?: { direction?: 'optimal' | 'width' | 'height' };
+  /** Solver engine (freecut V62). Absent = ERP auto mode: heuristic for large
+   *  groups (threshold), GA otherwise. Explicit value pins the engine. */
+  engine?: 'ga' | 'heuristic';
+  /** Heuristic post-process tier (freecut cut_quality). Only meaningful with
+   *  engine=heuristic; defaults to 'max' when ERP forces/auto-selects heuristic. */
+  cut_quality?: 'fast' | 'balanced' | 'max';
   /** Quality knobs (freecut API). Set together by the UI "Качество" control. */
   sla_profile?: 'fast' | 'balanced' | 'quality';
   ga_profile?: 'fast' | 'balanced' | 'quality';

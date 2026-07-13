@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PARAM_FORM,
   buildProfileCopyName,
+  detectEngineParamAnomalies,
   extractEligibilityCodes,
   findSetting,
   formToParams,
@@ -147,6 +148,84 @@ describe('cutConfigHelpers', () => {
     const s = summarizeParams(params);
     expect(s).toContain('Вакуумный стол');
     expect(s).toContain('авто'); // optimal -> авто
+  });
+
+  describe('engine tri-state + cut_quality round-trip', () => {
+    it('defaults to auto/max when params have no engine', () => {
+      const form = paramsToForm({});
+      expect(form.engine).toBe('auto');
+      expect(form.cutQuality).toBe('max');
+    });
+
+    it('round-trips engine=heuristic with an explicit non-max tier (no silent rewrite)', () => {
+      const form = paramsToForm({ engine: 'heuristic', cut_quality: 'balanced' });
+      expect(form.engine).toBe('heuristic');
+      expect(form.cutQuality).toBe('balanced');
+      expect(formToParams(form)).toMatchObject({ engine: 'heuristic', cut_quality: 'balanced' });
+    });
+
+    it('maps engine=heuristic without tier to cut_quality max on save', () => {
+      const form = paramsToForm({ engine: 'heuristic' });
+      expect(formToParams(form)).toMatchObject({ engine: 'heuristic', cut_quality: 'max' });
+    });
+
+    it('maps engine=ga to the form and back without cut_quality', () => {
+      const form = paramsToForm({ engine: 'ga' });
+      expect(form.engine).toBe('ga');
+      const params = formToParams(form);
+      expect(params.engine).toBe('ga');
+      expect(params).not.toHaveProperty('cut_quality');
+    });
+
+    it('auto emits neither engine nor cut_quality', () => {
+      const params = formToParams({ ...DEFAULT_PARAM_FORM, engine: 'auto' });
+      expect(params).not.toHaveProperty('engine');
+      expect(params).not.toHaveProperty('cut_quality');
+    });
+
+    it('vacuum_table never serializes engine/cut_quality even with stale form state (Critic R1 F1)', () => {
+      const params = formToParams({
+        ...DEFAULT_PARAM_FORM,
+        layout_mode: 'vacuum_table',
+        engine: 'heuristic',
+        cutQuality: 'max',
+      });
+      expect(params).not.toHaveProperty('engine');
+      expect(params).not.toHaveProperty('cut_quality');
+    });
+
+    it('summarizeParams labels a forced engine with its tier', () => {
+      expect(summarizeParams({ engine: 'heuristic', cut_quality: 'balanced' })).toContain('движок: быстрый (balanced)');
+      expect(summarizeParams({ engine: 'heuristic', cut_quality: 'max' })).toContain('движок: быстрый');
+      expect(summarizeParams({ engine: 'ga' })).toContain('движок: GA');
+      expect(summarizeParams({})).not.toContain('движок');
+    });
+  });
+
+  describe('detectEngineParamAnomalies (Critic R2: unmask raw stored anomalies instead of silent rewrite)', () => {
+    it('returns empty for consistent params', () => {
+      expect(detectEngineParamAnomalies({})).toEqual([]);
+      expect(detectEngineParamAnomalies({ engine: 'heuristic', cut_quality: 'balanced' })).toEqual([]);
+      expect(detectEngineParamAnomalies({ engine: 'ga' })).toEqual([]);
+      expect(detectEngineParamAnomalies({ layout_mode: 'vacuum_table' })).toEqual([]);
+    });
+
+    it('flags cut_quality without engine=heuristic', () => {
+      expect(detectEngineParamAnomalies({ cut_quality: 'balanced' })).toHaveLength(1);
+      expect(detectEngineParamAnomalies({ engine: 'ga', cut_quality: 'max' })).toHaveLength(1);
+    });
+
+    it('flags engine/cut_quality on a vacuum_table profile', () => {
+      expect(detectEngineParamAnomalies({ layout_mode: 'vacuum_table', engine: 'heuristic' })).toHaveLength(1);
+    });
+
+    it('flags an unknown engine value', () => {
+      expect(detectEngineParamAnomalies({ engine: 'quantum' })).toHaveLength(1);
+    });
+
+    it('flags an unknown cut_quality tier even with engine=heuristic (Crit R3 F1)', () => {
+      expect(detectEngineParamAnomalies({ engine: 'heuristic', cut_quality: 'turbo' })).toHaveLength(1);
+    });
   });
 
   describe('buildProfileCopyName', () => {
