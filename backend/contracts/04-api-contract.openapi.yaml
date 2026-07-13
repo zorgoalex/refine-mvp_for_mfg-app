@@ -2329,6 +2329,9 @@ paths:
                       type: string
                       format: date-time
                       nullable: true
+                    bazisOrderNo:
+                      type: string
+                      nullable: true
                     linkedOrderIds:
                       type: array
                       items:
@@ -2457,6 +2460,9 @@ paths:
                   lastImportedAt:
                     type: string
                     format: date-time
+                    nullable: true
+                  bazisOrderNo:
+                    type: string
                     nullable: true
                   linkedOrderIds:
                     type: array
@@ -2728,6 +2734,12 @@ paths:
                       type: string
                       nullable: true
                     position:
+                      type: string
+                      nullable: true
+                    designation:
+                      type: string
+                      nullable: true
+                    productOrderNo:
                       type: string
                       nullable: true
                     quantity:
@@ -3132,6 +3144,97 @@ paths:
           $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Bazis
+      operationId: createOrderFromBazisDraft
+      summary: Create ERP order from a saved Bazis draft
+      description: Requires `bazis.manage` and `orders.create`.
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - order
+                - nodes
+                - idempotencyKey
+              properties:
+                order:
+                  $ref: '#/components/schemas/SaveOrderDto'
+                nodes:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - clientKey
+                      - bazisNodeId
+                    properties:
+                      clientKey:
+                        type: string
+                        minLength: 1
+                      bazisNodeId:
+                        type: integer
+                idempotencyKey:
+                  type: string
+                  minLength: 1
+      responses:
+        '201':
+          description: ERP order created from Bazis draft
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - orderId
+                  - orderName
+                  - detailsCreated
+                  - mappedNodes
+                  - requestId
+                properties:
+                  orderId:
+                    type: integer
+                  orderName:
+                    type: string
+                  detailsCreated:
+                    type: integer
+                  mappedNodes:
+                    type: integer
+                  requestId:
+                    type: string
+                  auditId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis revision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/bazis/revisions/{id}/create-order:
     post:
@@ -3219,6 +3322,265 @@ paths:
                 $ref: '#/components/schemas/ApiErrorEnvelope'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/bazis/revisions/{revisionId}/add-to-order:
+    post:
+      tags:
+        - Bazis
+      operationId: addBazisPanelsToOrder
+      summary: Add selected Bazis panels to an existing ERP order
+      description: Requires `bazis.manage` and `orders.update`.
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      parameters:
+        - in: path
+          name: revisionId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - orderId
+                - adds
+                - replaces
+                - skips
+                - idempotencyKey
+              properties:
+                orderId:
+                  type: integer
+                adds:
+                  type: array
+                  items:
+                    type: integer
+                replaces:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - bazisNodeId
+                      - orderDetailId
+                    properties:
+                      bazisNodeId:
+                        type: integer
+                      orderDetailId:
+                        type: integer
+                skips:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - bazisNodeId
+                      - orderDetailId
+                    properties:
+                      bazisNodeId:
+                        type: integer
+                      orderDetailId:
+                        type: integer
+                idempotencyKey:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+      responses:
+        '200':
+          description: Selected Bazis panels added to ERP order
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - orderId
+                  - detailsAdded
+                  - detailsReplaced
+                  - requestId
+                properties:
+                  orderId:
+                    type: integer
+                  detailsAdded:
+                    type: integer
+                  detailsReplaced:
+                    type: integer
+                  requestId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis revision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/bazis/revisions/{id}/order-draft:
+    post:
+      tags:
+        - Bazis
+      operationId: buildBazisOrderDraft
+      summary: Build ERP order draft from a Bazis revision selection
+      description: Requires `bazis.view`; when `targetOrderId` is present also requires `orders.update`.
+      security:
+        - bearerAuth: []
+      x-permission: bazis.view
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [selectedNodeIds]
+              properties:
+                selectedNodeIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: integer
+                targetOrderId:
+                  type: integer
+                  nullable: true
+      responses:
+        '200':
+          description: ERP order draft built from Bazis revision
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - revisionId
+                  - projectId
+                  - clientId
+                  - clientName
+                  - bazisProjectName
+                  - bazisOrderNo
+                  - details
+                  - duplicates
+                properties:
+                  revisionId:
+                    type: integer
+                  projectId:
+                    type: integer
+                  clientId:
+                    type: integer
+                    nullable: true
+                  clientName:
+                    type: string
+                    nullable: true
+                  bazisProjectName:
+                    type: string
+                  bazisOrderNo:
+                    type: string
+                    nullable: true
+                  details:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - bazisNodeId
+                        - clientKey
+                        - detailName
+                        - height
+                        - width
+                        - quantity
+                        - sheetMaterialTypeId
+                        - filmId
+                        - millingTypeId
+                        - edgeTypeId
+                        - priority
+                        - basisProject
+                        - basisProduct
+                        - basisDesignation
+                        - basisData
+                      properties:
+                        bazisNodeId:
+                          type: integer
+                        clientKey:
+                          type: string
+                        detailName:
+                          type: string
+                          nullable: true
+                        height:
+                          type: number
+                        width:
+                          type: number
+                        quantity:
+                          type: number
+                        sheetMaterialTypeId:
+                          type: integer
+                          nullable: true
+                        filmId:
+                          type: integer
+                          nullable: true
+                        millingTypeId:
+                          type: integer
+                        edgeTypeId:
+                          type: integer
+                        priority:
+                          type: integer
+                        basisProject:
+                          type: string
+                          nullable: true
+                        basisProduct:
+                          type: string
+                          nullable: true
+                        basisDesignation:
+                          type: string
+                          nullable: true
+                        basisData:
+                          type: string
+                  duplicates:
+                    type: array
+                    items:
+                      type: object
+                      required: [bazisNodeId, orderDetailId, matchedBy]
+                      properties:
+                        bazisNodeId:
+                          type: integer
+                        orderDetailId:
+                          type: integer
+                        matchedBy:
+                          type: string
+                          enum: [node_map, basis_fields]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis revision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '422':
           $ref: '#/components/responses/ValidationError'
         '503':

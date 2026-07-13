@@ -1,3 +1,5 @@
+import type { SaveOrderDto } from './orderApi.types';
+
 export interface BazisImportResponse {
   bazisProject: {
     bazisProjectId: number;
@@ -31,6 +33,7 @@ export interface BazisProjectListItem {
   revisionsCount: number;
   lastRevisionNo: number | null;
   lastImportedAt: string | null;
+  bazisOrderNo: string | null;
   linkedOrderIds: number[];
   linkedOrders: BazisOrderRef[];
 }
@@ -66,6 +69,8 @@ export interface BazisTreeNode {
   name: string | null;
   detailCode: string | null;
   position: string | null;
+  designation: string | null;
+  productOrderNo: string | null;
   quantity: number | null;
   cumulativeQuantity: number | null;
   lengthMm: number | null;
@@ -194,6 +199,72 @@ export interface CreateOrderFromRevisionResponse {
   mappedNodes: number;
   requestId: string;
   auditId?: string;
+}
+
+export interface CreateOrderFromDraftNode {
+  clientKey: string;
+  bazisNodeId: number;
+}
+
+export interface CreateOrderFromDraftRequest {
+  order: SaveOrderDto;
+  nodes: CreateOrderFromDraftNode[];
+  idempotencyKey: string;
+}
+
+export interface BazisAddToOrderPair {
+  bazisNodeId: number;
+  orderDetailId: number;
+}
+
+export interface BazisAddToOrderRequest {
+  orderId: number;
+  adds: number[];
+  replaces: BazisAddToOrderPair[];
+  skips: BazisAddToOrderPair[];
+  idempotencyKey: string;
+}
+
+export interface BazisAddToOrderResponse {
+  orderId: number;
+  detailsAdded: number;
+  detailsReplaced: number;
+  requestId: string;
+}
+
+export interface BazisOrderDraftDetail {
+  bazisNodeId: number;
+  clientKey: string;
+  detailName: string | null;
+  height: number;
+  width: number;
+  quantity: number;
+  sheetMaterialTypeId: number | null;
+  filmId: number | null;
+  millingTypeId: number;
+  edgeTypeId: number;
+  priority: number;
+  basisProject: string | null;
+  basisProduct: string | null;
+  basisDesignation: string | null;
+  basisData: string;
+}
+
+export interface BazisOrderDraftDuplicate {
+  bazisNodeId: number;
+  orderDetailId: number;
+  matchedBy: 'node_map' | 'basis_fields';
+}
+
+export interface BazisOrderDraftResponse {
+  revisionId: number;
+  projectId: number;
+  clientId: number | null;
+  clientName: string | null;
+  bazisProjectName: string;
+  bazisOrderNo: string | null;
+  details: BazisOrderDraftDetail[];
+  duplicates: BazisOrderDraftDuplicate[];
 }
 
 export interface BazisEstimateMaterial {

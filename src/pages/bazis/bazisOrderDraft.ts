@@ -1,0 +1,93 @@
+import type {
+  BazisOrderDraftResponse,
+  CreateOrderFromDraftNode,
+} from '../../api/types/bazisApi.types';
+import type { OrderDetail } from '../../types/orders';
+
+export interface BazisDraftFormSeed {
+  header: {
+    clientId: number | null;
+    projectId: number;
+  };
+  details: Array<Omit<OrderDetail, 'temp_id'>>;
+  meta: {
+    revisionId: number;
+    clientId: number | null;
+  };
+}
+
+export function draftToFormSeed(draft: BazisOrderDraftResponse): BazisDraftFormSeed {
+  return {
+    header: {
+      clientId: draft.clientId ?? null,
+      projectId: draft.projectId,
+    },
+    details: draft.details.map((detail, index) => ({
+      bazisNodeId: detail.bazisNodeId,
+      detail_number: index + 1,
+      detail_name: detail.detailName,
+      height: detail.height,
+      width: detail.width,
+      quantity: detail.quantity,
+      area: calculateDraftArea(detail.height, detail.width, detail.quantity),
+      material_id: null,
+      sheet_material_type_id: detail.sheetMaterialTypeId,
+      film_id: detail.filmId,
+      milling_type_id: detail.millingTypeId,
+      edge_type_id: detail.edgeTypeId,
+      milling_cost_per_sqm: 0,
+      detail_cost: 0,
+      priority: detail.priority,
+      basis_project: detail.basisProject,
+      basis_product: detail.basisProduct,
+      basis_designation: detail.basisDesignation,
+      basis_data: detail.basisData,
+      delete_flag: false,
+    })),
+    meta: {
+      revisionId: draft.revisionId,
+      clientId: draft.clientId ?? null,
+    },
+  };
+}
+
+export function collectProvenanceNodes<T extends { bazisNodeId?: number | null }>(
+  rows: T[],
+  clientKeyOf: (row: T) => string | undefined,
+): CreateOrderFromDraftNode[] {
+  const seenBazisNodeIds = new Set<number>();
+  const nodes: CreateOrderFromDraftNode[] = [];
+
+  rows.forEach((row) => {
+    const bazisNodeId = row.bazisNodeId;
+    if (!Number.isInteger(bazisNodeId) || (bazisNodeId ?? 0) <= 0) {
+      return;
+    }
+
+    const clientKey = clientKeyOf(row);
+    if (!clientKey) {
+      return;
+    }
+
+    if (seenBazisNodeIds.has(bazisNodeId)) {
+      console.warn(
+        '[bazisOrderDraft] Duplicate bazisNodeId in order details, keeping first occurrence',
+        bazisNodeId,
+      );
+      return;
+    }
+
+    seenBazisNodeIds.add(bazisNodeId);
+    nodes.push({ clientKey, bazisNodeId });
+  });
+
+  return nodes;
+}
+
+function calculateDraftArea(height: number, width: number, quantity: number): number {
+  if (height <= 0 || width <= 0 || quantity <= 0) {
+    return 0;
+  }
+
+  return Math.ceil((height * width * quantity) / 10000) / 100;
+}

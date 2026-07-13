@@ -12,13 +12,27 @@ describe('parseBazisXml', () => {
     expect(parsed.productPrice).toBeCloseTo(91750.53);
   });
 
+  it('reads raw bazis order number from project attribute and product order from root product only', () => {
+    const parsed = parseBazisXml(fixture);
+    expect(parsed.bazisOrderNo).toBeNull();
+    expect(parsed.nodes[0]?.nodeKind).toBe('product');
+    expect(parsed.nodes[0]?.productOrderNo).toBeNull();
+  });
+
   it('builds tree: every parentIndex precedes child index, root is product', () => {
     const parsed = parseBazisXml(fixture);
     expect(parsed.nodes[0].nodeKind).toBe('product');
     for (const node of parsed.nodes) {
       if (node.parentIndex !== null) {
-        expect(node.parentIndex).toBeLessThan(node.index);
+      expect(node.parentIndex).toBeLessThan(node.index);
       }
+    }
+  });
+
+  it('keeps productOrderNo null for non-root nodes', () => {
+    const parsed = parseBazisXml(fixture);
+    for (const node of parsed.nodes.filter((candidate) => candidate.parentIndex !== null)) {
+      expect(node.productOrderNo).toBeNull();
     }
   });
 
@@ -85,13 +99,13 @@ describe('parseBazisXml', () => {
   });
 
   describe('multi-product project (несколько Изделие в Проект)', () => {
-    const multiXml = `<Проект Наименование="1471" Версия="1">
-      <Изделие><Наименование>санузел</Наименование><Цена>100.5</Цена><Количество>1</Количество><СписокЭлементов>
+    const multiXml = `<Проект Наименование=" 1471 " Версия="1">
+      <Изделие><Наименование>санузел</Наименование><Заказ> 1471 </Заказ><Цена>100.5</Цена><Количество>1</Количество><СписокЭлементов>
         <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>П1</Наименование>
           <ОсновнойМатериал><Наименование>ЛДСП белый</Наименование></ОсновнойМатериал>
         </Объект>
       </СписокЭлементов></Изделие>
-      <Изделие><Наименование>шкаф</Наименование><Цена>200</Цена><Количество>1</Количество><СписокЭлементов>
+      <Изделие><Наименование>шкаф</Наименование><Заказ> </Заказ><Цена>200</Цена><Количество>1</Количество><СписокЭлементов>
         <Сборка><Наименование>Секция</Наименование><Количество>2</Количество><СписокЭлементов>
           <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>П2</Наименование><Количество>1</Количество>
             <ОсновнойМатериал><Наименование>МДФ 16</Наименование></ОсновнойМатериал>
@@ -126,8 +140,18 @@ describe('parseBazisXml', () => {
 
     it('joins product names and sums prices in revision header', () => {
       const parsed = parseBazisXml(multiXml);
+      expect(parsed.bazisOrderNo).toBe('1471');
       expect(parsed.productName).toBe('санузел + шкаф');
       expect(parsed.productPrice).toBeCloseTo(300.5);
+    });
+
+    it('reads product order number only on root product nodes', () => {
+      const parsed = parseBazisXml(multiXml);
+      const roots = parsed.nodes.filter((node) => node.parentIndex === null);
+      expect(roots.map((node) => node.productOrderNo)).toEqual(['1471', null]);
+      for (const node of parsed.nodes.filter((candidate) => candidate.parentIndex !== null)) {
+        expect(node.productOrderNo).toBeNull();
+      }
     });
 
     it('collects materials from every product', () => {

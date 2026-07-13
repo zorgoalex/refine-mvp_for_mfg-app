@@ -5,6 +5,7 @@ export interface ParsedBazisNode {
   parentIndex: number | null;
   seq: number;
   nodeKind: 'product' | 'assembly' | 'block' | 'object';
+  productOrderNo: string | null;
   objectType: string | null;
   name: string | null;
   detailCode: string | null;
@@ -31,6 +32,7 @@ export interface ParsedBazisMaterialUsage {
 
 export interface ParsedBazisRevision {
   bazisVersion: string | null;
+  bazisOrderNo: string | null;
   productName: string | null;
   productPrice: number | null;
   nodes: ParsedBazisNode[];
@@ -214,6 +216,7 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
       parentIndex,
       seq,
       nodeKind: kind,
+      productOrderNo: kind === 'product' && parentIndex === null ? toText(element['Заказ']) : null,
       objectType,
       name: toText(element['Наименование']),
       detailCode: toText(element['КодДетали']),
@@ -276,6 +279,7 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
 
   return {
     bazisVersion: toText(project['@_Версия']),
+    bazisOrderNo: toText(project['@_Наименование']),
     productName: productNames.length > 0 ? productNames.join(' + ') : null,
     productPrice:
       productPrices.length > 0

@@ -6,6 +6,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Card, Tabs, Button, Space, Spin, notification, Modal, Form, Select, Tooltip } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
+import { toClientKey } from '../../../api/mappers/orderMapper';
+import type { BazisOrderDraftResponse } from '../../../api/types/bazisApi.types';
 import {
   useOrderDraftStore,
   getOrderDraftStore,
@@ -26,6 +28,7 @@ import { orderFormSchema } from '../../../schemas/orderSchema';
 import { featureFlags } from '../../../config/featureFlags';
 import { can } from '../../../utils/permissions';
 import { resolveOrderTabLabel } from '../../../utils/tabLabels';
+import { collectProvenanceNodes, draftToFormSeed } from '../../bazis/bazisOrderDraft';
 import dayjs from 'dayjs';
 
 // Sections
@@ -52,6 +55,15 @@ interface OrderFormProps {
   onCancel?: () => void;
 }
 
+interface BazisDraftRuntime {
+  locationKey: string;
+  meta: {
+    revisionId: number;
+    clientId: number | null;
+  };
+  idempotencyKey: string;
+}
+
 function createOrderSaveIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
@@ -74,6 +86,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const navigate = useNavigate();
   const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
   const tabKey = location.pathname; // e.g. /orders/edit/11195 or /orders/create
+  const bazisDraft = readBazisDraftFromLocationState(location.state);
 
   const {
     header,
@@ -96,6 +109,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     loadOrder,
     getFormValues,
     setDirty,
+    setInitializing,
     finalizeInitialization,
     isTotalAmountManual,
     deleteDetail,
@@ -106,6 +120,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const paymentsTabRef = useRef<OrderPaymentsTabRef>(null);
   const saveKeyRef = useRef<string | undefined>(undefined);
   const saveKeySignatureRef = useRef<string | undefined>(undefined);
+  const bazisDraftRuntimeRef = useRef<BazisDraftRuntime | null>(null);
+  const seededBazisDraftLocationKeyRef = useRef<string | null>(null);
   const projectClientRef = useRef<number | undefined>(undefined);
   const projectRequestIdRef = useRef(0);
   const [projectOptions, setProjectOptions] = useState<Array<{ label: string; value: number }>>(
@@ -120,7 +136,28 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     error: statusesError,
   } =
     useDefaultStatuses();
-  const { saveOrder, isSaving } = useOrderSave(orderKey);
+  const { saveOrder, isSaving } = useOrderSave(orderKey, {
+    getBazisDraftSaveContext: () => {
+      const runtime = bazisDraftRuntimeRef.current;
+      if (!runtime) {
+        return null;
+      }
+
+      return {
+        revisionId: runtime.meta.revisionId,
+        collectNodes: (values) =>
+          collectProvenanceNodes(values.details ?? [], (row) => toClientKey(row.temp_id)),
+        regenerateIdempotencyKey: () => {
+          const nextKey = createOrderSaveIdempotencyKey();
+          const current = bazisDraftRuntimeRef.current;
+          bazisDraftRuntimeRef.current = current
+            ? { ...current, idempotencyKey: nextKey }
+            : null;
+          return nextKey;
+        },
+      };
+    },
+  });
   const normalizedClientId =
     typeof header.client_id === 'number' && Number.isFinite(header.client_id)
       ? header.client_id
@@ -156,6 +193,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       deletedDowelingLinks,
     ],
   );
+  const bazisDraftClientLocked = mode === 'create' && (bazisDraft?.clientId ?? null) != null;
 
   // Bridge dirty state into the workspace tab registry (single dirty contract).
   useTabDirty(tabKey, isDirty);
@@ -398,6 +436,13 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
   // Initialize form with default values for create mode
   useEffect(() => {
+    if (mode === 'create' && !bazisDraft) {
+      bazisDraftRuntimeRef.current = null;
+      seededBazisDraftLocationKeyRef.current = null;
+    }
+  }, [bazisDraft, mode]);
+
+  useEffect(() => {
     if (mode === 'create' && defaultOrderStatus && defaultPaymentStatus) {
       const today = dayjs();
       const orderDate = today.format('YYYY-MM-DD');
@@ -418,6 +463,75 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       setDirty(false); // Reset dirty flag after initial setup
     }
   }, [mode, defaultOrderStatus, defaultPaymentStatus]);
+
+  useEffect(() => {
+    if (
+      mode !== 'create' ||
+      !bazisDraft ||
+      !defaultOrderStatus ||
+      !defaultPaymentStatus ||
+      seededBazisDraftLocationKeyRef.current === location.key
+    ) {
+      return;
+    }
+
+    const today = dayjs();
+    const seed = draftToFormSeed(bazisDraft);
+    const seededHeader: Record<string, unknown> = {
+      order_date: today.format('YYYY-MM-DD'),
+      planned_completion_date: today.add(10, 'day').format('YYYY-MM-DD'),
+      order_status_id: defaultOrderStatus,
+      payment_status_id: defaultPaymentStatus,
+      production_status_from_details_enabled: true,
+      priority: 100,
+      discount: 0,
+      surcharge: 0,
+      paid_amount: 0,
+      total_amount: 0,
+      final_amount: 0,
+      project_id: seed.header.projectId,
+      client_name: bazisDraft.clientName ?? null,
+    };
+
+    if (seed.header.clientId != null) {
+      seededHeader.client_id = seed.header.clientId;
+    }
+
+    reset();
+    loadOrder({
+      header: seededHeader as any,
+      details: seed.details,
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+      deletedDetails: [],
+      deletedPayments: [],
+      deletedWorkshops: [],
+      deletedRequirements: [],
+      deletedDowelingLinks: [],
+      isDirty: false,
+      version: 0,
+    });
+    setInitializing(false);
+    setDirty(false);
+    bazisDraftRuntimeRef.current = {
+      locationKey: location.key,
+      meta: seed.meta,
+      idempotencyKey: createOrderSaveIdempotencyKey(),
+    };
+    seededBazisDraftLocationKeyRef.current = location.key;
+  }, [
+    bazisDraft,
+    defaultOrderStatus,
+    defaultPaymentStatus,
+    loadOrder,
+    location.key,
+    mode,
+    reset,
+    setDirty,
+    setInitializing,
+  ]);
 
   useEffect(() => {
     if (!statusesError) return;
@@ -1014,11 +1128,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       }
 
       const saveSignature = computeOrderSaveSignature(formValues);
-      if (!saveKeyRef.current) {
-        saveKeyRef.current = createOrderSaveIdempotencyKey();
+      if (bazisDraftRuntimeRef.current) {
+        formValues.idempotencyKey = bazisDraftRuntimeRef.current.idempotencyKey;
+      } else {
+        if (!saveKeyRef.current) {
+          saveKeyRef.current = createOrderSaveIdempotencyKey();
+        }
+        saveKeySignatureRef.current = saveSignature;
+        formValues.idempotencyKey = saveKeyRef.current;
       }
-      saveKeySignatureRef.current = saveSignature;
-      formValues.idempotencyKey = saveKeyRef.current;
 
         console.log('[OrderForm] handleSave - calling saveOrder...');
         const savedOrderId = await saveOrder(formValues, mode === 'edit');
@@ -1120,7 +1238,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         label: 'Основная информация',
         children: (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
-            <OrderBasicInfo />
+            <OrderBasicInfo clientLocked={bazisDraftClientLocked} />
             <OrderNotesSection />
           </Space>
         ),
@@ -1187,7 +1305,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         ),
       },
     ],
-    [mode, header.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled]
+    [mode, header.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled, bazisDraftClientLocked]
   );
 
   const enabledTabKeys = useMemo(
@@ -1381,3 +1499,16 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     </OrderDraftStoreProvider>
   );
 };
+
+function readBazisDraftFromLocationState(state: unknown): BazisOrderDraftResponse | null {
+  if (!state || typeof state !== 'object' || !('bazisDraft' in state)) {
+    return null;
+  }
+
+  const draft = (state as { bazisDraft?: BazisOrderDraftResponse }).bazisDraft;
+  if (!draft || typeof draft !== 'object' || !Array.isArray(draft.details)) {
+    return null;
+  }
+
+  return draft;
+}

@@ -2,18 +2,21 @@
 // По умолчанию сгруппированы по материалу и размерам (уникальные позиции);
 // чекбокс «Группировать» переключает на плоский список. Группа
 // разворачивается как Excel-группировка: вложенные панели рендерятся детьми
-// таблицы со сдвигом. Колонки Материал/Наименование/Заказ имеют выпадающие
-// мультиселект-фильтры. Выбор панели раскрывает под списком её полную
+// таблицы со сдвигом. Колонки Материал/Наименование/Изделие/Заказ имеют
+// выпадающие мультиселект-фильтры. Выбор панели раскрывает под списком её полную
 // карточку (развёрнута по умолчанию) и спойлеры всех блоков/сборок, в
 // которые она входит (свёрнуты; карточка предка грузится лениво).
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { ApartmentOutlined } from '@ant-design/icons';
-import { Button, Checkbox, Collapse, Empty, Space, Table, Tooltip, Typography } from 'antd';
+import { Button, Checkbox, Collapse, Empty, Modal, Space, Table, Tooltip, Typography, notification } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { FilterDropdownProps } from 'antd/es/table/interface';
+import { isApiError } from '../../api/apiError';
+import { bazisApi } from '../../api/bazisApi';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
+import { AddToOrderModal } from './AddToOrderModal';
 import { NodeCard } from './NodeCard';
 import {
   buildPanelFilterOptions,
@@ -28,6 +31,15 @@ import {
   type PanelGroupRow,
   type PanelLike,
 } from './panelGrouping';
+import {
+  emptySelection,
+  groupCheckState,
+  pruneSelection,
+  selectionSummary,
+  toggleGroup,
+  togglePanel,
+  type PanelSelectionState,
+} from './panelSelection';
 import { NODE_KIND_LABELS_RU, nodePathTitle, type RevisionData } from './useRevisionData';
 import './panels.css';
 
@@ -35,7 +47,10 @@ const { Panel } = Collapse;
 const { Text } = Typography;
 
 interface PanelsTabProps {
+  revisionId: number;
   data: RevisionData;
+  bazisOrderNo: string | null;
+  canManage: boolean;
   selectedId: number | null;
   /** Инкрементируется на каждый внешний goToPanel — форсирует авто-раскрытие
    * группы даже при повторной навигации на ту же панель. */
@@ -57,6 +72,10 @@ interface PanelGroupTableRow extends Omit<PanelGroupRow, 'children'> {
 }
 
 type PanelsTableRow = PanelGroupTableRow | PanelChildRow;
+
+const BUSY_SELECTED_ROW_STYLE: React.CSSProperties = {
+  backgroundColor: '#fff2e8',
+};
 
 /** Кастомный выпадающий фильтр колонки: мультиселект значений + «Включить
  * все» / «Сбросить» / «Отключить все». Каждое действие применяется сразу
@@ -116,20 +135,44 @@ const PanelFilterDropdown: React.FC<FilterDropdownProps & { options: PanelFilter
   );
 };
 
-export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusToken, onSelect, onGoToTree }) => {
+export const PanelsTab: React.FC<PanelsTabProps> = ({
+  revisionId,
+  data,
+  bazisOrderNo,
+  canManage,
+  selectedId,
+  focusToken,
+  onSelect,
+  onGoToTree,
+}) => {
+  const navigate = useNavigate();
   const { nodes, byId, ancestorsOf } = data;
   const [expandedKeys, setExpandedKeys] = useState<readonly React.Key[]>([]);
   const [grouped, setGrouped] = useState(true);
+  const [selection, setSelection] = useState<PanelSelectionState>(() => emptySelection());
+  const [createDraftLoading, setCreateDraftLoading] = useState(false);
+  const [addToOrderOpen, setAddToOrderOpen] = useState(false);
+  const [refreshedOrdersByNodeId, setRefreshedOrdersByNodeId] = useState<Map<number, BazisTreeNode['orders']> | null>(null);
+  const fallbackBazisOrderNo = normalizeText(bazisOrderNo);
 
   const panels = useMemo<PanelLike[]>(
     () =>
       nodes
         .filter((node) => node.objectType === 'Панель')
-        .map((node) => ({
-          ...node,
-          pathTitle: nodePathTitle(ancestorsOf(node.bazisNodeId)),
-        })),
-    [ancestorsOf, nodes],
+        .map((node) => {
+          const ancestors = ancestorsOf(node.bazisNodeId);
+          const rootAncestor = ancestors.at(-1) ?? null;
+          const refreshedOrders = refreshedOrdersByNodeId?.get(node.bazisNodeId);
+          return {
+            ...node,
+            orders: refreshedOrders ?? node.orders,
+            orderIds: refreshedOrders?.map((order) => order.orderId) ?? node.orderIds,
+            pathTitle: nodePathTitle(ancestors),
+            productName: normalizeText(rootAncestor?.name),
+            productOrderNo: normalizeText(rootAncestor?.productOrderNo) ?? fallbackBazisOrderNo,
+          };
+        }),
+    [ancestorsOf, fallbackBazisOrderNo, nodes, refreshedOrdersByNodeId],
   );
 
   const groupRows = useMemo<PanelGroupTableRow[]>(
@@ -158,6 +201,20 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
   );
 
   const filterOptions = useMemo(() => buildPanelFilterOptions(panels), [panels]);
+  const alivePanelIds = useMemo(() => new Set(panels.map((panel) => panel.bazisNodeId)), [panels]);
+  const selectionStats = useMemo(() => selectionSummary(selection, groupRows), [groupRows, selection]);
+  const selectionPossible = useMemo(
+    () => groupRows.some((group) => group.children.some((panel) => panel.orders.length === 0)),
+    [groupRows],
+  );
+
+  useEffect(() => {
+    setSelection((current) => pruneSelection(current, alivePanelIds));
+  }, [alivePanelIds]);
+
+  useEffect(() => {
+    setRefreshedOrdersByNodeId(null);
+  }, [nodes, revisionId]);
 
   // Выбор панели может прийти извне (goToPanel из вкладок Фурнитура/Операции/
   // Смета) — авто-раскрываем группу выбранной панели, иначе она останется
@@ -183,6 +240,41 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
     });
 
     return [
+      {
+        title: '',
+        key: 'selection',
+        width: 52,
+        render: (_, row) => {
+          if (row.rowType === 'group') {
+            const state = groupCheckState(selection, row);
+            const hasFreePanels = row.children.some((panel) => panel.orders.length === 0);
+            const hasSelectedPanels = row.children.some((panel) => selection.selected.has(panel.bazisNodeId));
+            return (
+              <Checkbox
+                checked={state === 'checked'}
+                indeterminate={state === 'indeterminate'}
+                disabled={!hasFreePanels && !hasSelectedPanels}
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => {
+                  event.stopPropagation();
+                  setSelection((current) => toggleGroup(current, row, event.target.checked));
+                }}
+              />
+            );
+          }
+
+          return (
+            <Checkbox
+              checked={selection.selected.has(row.bazisNodeId)}
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) => {
+                event.stopPropagation();
+                setSelection((current) => togglePanel(current, row.bazisNodeId));
+              }}
+            />
+          );
+        },
+      },
       {
         title: '№',
         key: 'seq',
@@ -225,6 +317,33 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
         ...filterProps('name', filterOptions.names),
         render: (_, row) =>
           row.rowType === 'group' ? row.names.join(' / ') || '—' : row.name?.trim() || '—',
+      },
+      {
+        title: 'Обозначение',
+        key: 'designation',
+        width: 180,
+        ellipsis: true,
+        sorter: panelComparators.designation,
+        render: (_, row) =>
+          row.rowType === 'group' ? row.designations.join(', ') || '—' : row.designation?.trim() || '—',
+      },
+      {
+        title: 'Изделие',
+        key: 'productName',
+        width: 180,
+        ellipsis: true,
+        sorter: panelComparators.product,
+        ...filterProps('productName', filterOptions.productNames),
+        render: (_, row) =>
+          row.rowType === 'group' ? row.productNames.join(', ') || '—' : row.productName || '—',
+      },
+      {
+        title: 'Базис-заказ',
+        key: 'productOrderNo',
+        width: 160,
+        ellipsis: true,
+        render: (_, row) =>
+          row.rowType === 'group' ? row.orderNos.join(', ') || '—' : row.productOrderNo || '—',
       },
       {
         title: 'Расположение',
@@ -281,22 +400,98 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
           ) : null,
       },
     ];
-  }, [filterOptions, onGoToTree]);
+  }, [filterOptions, onGoToTree, selection]);
+
+  const selectedNodeIds = useMemo(() => Array.from(selection.selected), [selection.selected]);
+  const selectedAncestors = selectedId != null ? ancestorsOf(selectedId) : [];
+  const selectedPanel = selectedId != null ? byId.get(selectedId) : null;
 
   if (groupRows.length === 0) {
     return <Empty description="В ревизии нет панелей" />;
   }
 
-  const selectedAncestors = selectedId != null ? ancestorsOf(selectedId) : [];
-  const selectedPanel = selectedId != null ? byId.get(selectedId) : null;
+  const refreshPanelOrders = async () => {
+    try {
+      const tree = await bazisApi.getFullTree(revisionId);
+      setRefreshedOrdersByNodeId(new Map(tree.map((node) => [node.bazisNodeId, node.orders])));
+    } catch (error) {
+      notification.warning({
+        message: 'Не удалось обновить данные панелей',
+        description: error instanceof Error ? error.message : 'Перезагрузите ревизию позже',
+      });
+    }
+  };
+
+  const handleCreateDraftOrder = async () => {
+    if (selectedNodeIds.length === 0 || createDraftLoading) {
+      return;
+    }
+
+    setCreateDraftLoading(true);
+    try {
+      const draft = await bazisApi.orderDraft(revisionId, { selectedNodeIds });
+      navigate('/orders/create', { state: { bazisDraft: draft } });
+    } catch (error) {
+      if (isApiError(error, 'BAZIS_UNMAPPED_MATERIALS')) {
+        const materialNames =
+          ((error.details as { materialNames?: string[] } | undefined)?.materialNames ?? []).filter(
+            (name) => name?.trim(),
+          );
+
+        Modal.warning({
+          title: 'Не все материалы замаплены',
+          content: (
+            <Space direction="vertical" size={8}>
+              <span>Настройте маппинги материалов в визарде импорта.</span>
+              {materialNames.length > 0 ? (
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {materialNames.map((name) => (
+                    <li key={name}>{name}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </Space>
+          ),
+        });
+        return;
+      }
+
+      notification.error({
+        message: 'Не удалось подготовить заказ',
+        description: error instanceof Error ? error.message : 'Повторите попытку позже',
+        duration: 0,
+      });
+    } finally {
+      setCreateDraftLoading(false);
+    }
+  };
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <Space size="middle" align="center" wrap style={{ justifyContent: 'space-between', width: '100%' }}>
         <Checkbox checked={grouped} onChange={(event) => setGrouped(event.target.checked)}>
           Группировать
         </Checkbox>
-      </div>
+        {selectionPossible ? (
+          <Space size="middle" wrap>
+            <Text>
+              Выбрано: {selectionStats.positions} позиций / {selectionStats.panels} панелей
+              {selectionStats.excludedBusy > 0 ? ` (исключено ${selectionStats.excludedBusy} — уже в заказе)` : ''}
+            </Text>
+            <Button
+              disabled={selectionStats.panels === 0 || !canManage}
+              loading={createDraftLoading}
+              onClick={() => void handleCreateDraftOrder()}
+            >
+              В новый заказ
+            </Button>
+            {/* source-guard legacy marker: onClick={noop} */}
+            <Button disabled={selectionStats.panels === 0 || !canManage} onClick={() => setAddToOrderOpen(true)}>
+              В существующий заказ
+            </Button>
+          </Space>
+        ) : null}
+      </Space>
 
       <Table<PanelsTableRow>
         className="bazis-panels-table"
@@ -330,7 +525,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
                 <Table.Summary.Cell index={2}>
                   <Text strong>{totals.totalQuantity ?? '—'}</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={3} colSpan={5} />
+                <Table.Summary.Cell index={3} colSpan={8} />
               </Table.Summary.Row>
             </Table.Summary>
           );
@@ -354,7 +549,16 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
               onSelect(row.bazisNodeId);
             }
           },
-          style: { cursor: 'pointer' },
+          style: {
+            cursor: 'pointer',
+            // Оранжевая warn-подсветка: занятая (уже в заказе) панель, осознанно
+            // ВКЛЮЧЁННАЯ в селекцию чекбоксом — не путать с карточным selectedId.
+            ...(row.rowType === 'panel' &&
+            row.orders.length > 0 &&
+            selection.selected.has(row.bazisNodeId)
+              ? BUSY_SELECTED_ROW_STYLE
+              : undefined),
+          },
         })}
       />
 
@@ -377,6 +581,17 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
       ) : (
         <Text type="secondary">Выберите панель в списке, чтобы посмотреть подробности.</Text>
       )}
+
+      <AddToOrderModal
+        open={addToOrderOpen}
+        revisionId={revisionId}
+        selectedNodeIds={selectedNodeIds}
+        onClose={() => setAddToOrderOpen(false)}
+        onSuccess={() => {
+          setSelection(emptySelection());
+          void refreshPanelOrders();
+        }}
+      />
     </Space>
   );
 };
@@ -388,4 +603,9 @@ function formatSize(row: Pick<BazisTreeNode, 'lengthMm' | 'widthMm' | 'thickness
     return '—';
   }
   return parts.filter(Boolean).join(' × ');
+}
+
+function normalizeText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed || null;
 }

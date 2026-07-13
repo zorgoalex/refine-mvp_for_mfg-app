@@ -97,6 +97,7 @@ export interface OrderDetail {
   detail_id?: number;
   order_id?: number; // Will be set when saving
   detail_number: number;
+  bazisNodeId?: number | null;
 
   // Dimensions
   height: number;

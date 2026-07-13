@@ -7,11 +7,16 @@ import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
+import type { SaveOrderDto } from '../../orders/dto/save-order.dto';
 import { BazisService } from '../application/bazis.service';
 import type {
+  BazisAddToOrderRequestDto,
+  BazisAddToOrderResponseDto,
   BazisRevisionEstimateDto,
+  CreateOrderFromDraftRequestDto,
   BazisImportResponseDto,
   BazisNodeCardDto,
+  BazisOrderDraftResponseDto,
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectDeleteResponseDto,
@@ -156,6 +161,40 @@ const createOrderFromRevisionBodySchema = z.object({
   idempotencyKey: z.string().min(8).max(200),
 });
 
+const createOrderFromDraftBodySchema = z.object({
+  order: z
+    .object({
+      header: z.object({}).passthrough(),
+      details: z.array(z.object({}).passthrough()),
+    })
+    .passthrough(),
+  nodes: z.array(
+    z.object({
+      clientKey: z.string().trim().min(1).max(255),
+      bazisNodeId: z.coerce.number().int().positive(),
+    }),
+  ),
+  idempotencyKey: z.string().trim().min(1).max(200),
+});
+
+const addToOrderPairSchema = z.object({
+  bazisNodeId: z.coerce.number().int().positive(),
+  orderDetailId: z.coerce.number().int().positive(),
+});
+
+const addToOrderBodySchema = z.object({
+  orderId: z.coerce.number().int().positive(),
+  adds: z.array(z.coerce.number().int().positive()),
+  replaces: z.array(addToOrderPairSchema),
+  skips: z.array(addToOrderPairSchema),
+  idempotencyKey: z.string().trim().min(1).max(200),
+});
+
+const buildOrderDraftBodySchema = z.object({
+  selectedNodeIds: z.array(z.coerce.number().int().positive()).min(1).max(500),
+  targetOrderId: optionalNumericIdSchema.nullish(),
+});
+
 const importRequestSwaggerSchema = {
   type: 'object',
   required: ['file'],
@@ -201,6 +240,77 @@ const createOrderFromRevisionRequestSwaggerSchema = {
       items: { type: 'integer' },
     },
     idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
+  },
+} as const;
+
+const createOrderFromDraftRequestSwaggerSchema = {
+  type: 'object',
+  required: ['order', 'nodes', 'idempotencyKey'],
+  properties: {
+    order: {
+      $ref: '#/components/schemas/SaveOrderDto',
+    },
+    nodes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['clientKey', 'bazisNodeId'],
+        properties: {
+          clientKey: { type: 'string', minLength: 1, maxLength: 255 },
+          bazisNodeId: { type: 'integer' },
+        },
+      },
+    },
+    idempotencyKey: { type: 'string', minLength: 1, maxLength: 200 },
+  },
+} as const;
+
+const addToOrderRequestSwaggerSchema = {
+  type: 'object',
+  required: ['orderId', 'adds', 'replaces', 'skips', 'idempotencyKey'],
+  properties: {
+    orderId: { type: 'integer' },
+    adds: {
+      type: 'array',
+      items: { type: 'integer' },
+    },
+    replaces: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['bazisNodeId', 'orderDetailId'],
+        properties: {
+          bazisNodeId: { type: 'integer' },
+          orderDetailId: { type: 'integer' },
+        },
+      },
+    },
+    skips: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['bazisNodeId', 'orderDetailId'],
+        properties: {
+          bazisNodeId: { type: 'integer' },
+          orderDetailId: { type: 'integer' },
+        },
+      },
+    },
+    idempotencyKey: { type: 'string', minLength: 1, maxLength: 200 },
+  },
+} as const;
+
+const buildOrderDraftRequestSwaggerSchema = {
+  type: 'object',
+  required: ['selectedNodeIds'],
+  properties: {
+    selectedNodeIds: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 500,
+      items: { type: 'integer' },
+    },
+    targetOrderId: { type: 'integer', nullable: true },
   },
 } as const;
 
@@ -451,6 +561,93 @@ export class BazisController {
     });
   }
 
+  @ApiOperation({ operationId: 'createOrderFromBazisDraft', summary: 'Create ERP order from a saved Bazis draft' })
+  @ApiBody({ schema: swaggerSchema(createOrderFromDraftRequestSwaggerSchema) })
+  @ApiResponse({ status: 201, description: 'ERP order created from Bazis draft' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 409, description: 'Idempotency conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid create-order payload' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Post('revisions/:revisionId/orders')
+  @HttpCode(201)
+  async createOrderFromDraft(
+    @Req() request: RequestWithCurrentUser,
+    @Param('revisionId') revisionId: string,
+    @Body() body: unknown,
+  ): Promise<CreateOrderFromRevisionResponseDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const parsed = parseCreateOrderFromDraftBody(body);
+    return this.bazis.createOrderFromDraft({
+      currentUser,
+      requestId: request.requestId,
+      revisionId: parseNumericPathParam(revisionId, 'revisionId'),
+      order: parsed.order,
+      nodes: parsed.nodes,
+      idempotencyKey: parsed.idempotencyKey,
+    });
+  }
+
+  @ApiOperation({ operationId: 'addBazisPanelsToOrder', summary: 'Add selected Bazis panels to an existing ERP order' })
+  @ApiBody({ schema: swaggerSchema(addToOrderRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Selected Bazis panels added to ERP order' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 409, description: 'Duplicate resolution conflict or idempotency conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid add-to-order payload' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Post('revisions/:revisionId/add-to-order')
+  @HttpCode(200)
+  async addToOrder(
+    @Req() request: RequestWithCurrentUser,
+    @Param('revisionId') revisionId: string,
+    @Body() body: unknown,
+  ): Promise<BazisAddToOrderResponseDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const parsed = parseAddToOrderBody(body);
+    return this.bazis.addToOrder({
+      currentUser,
+      requestId: request.requestId,
+      revisionId: parseNumericPathParam(revisionId, 'revisionId'),
+      orderId: parsed.orderId,
+      adds: parsed.adds,
+      replaces: parsed.replaces,
+      skips: parsed.skips,
+      idempotencyKey: parsed.idempotencyKey,
+    });
+  }
+
+  @ApiOperation({ operationId: 'buildBazisOrderDraft', summary: 'Build ERP order draft from a Bazis revision selection' })
+  @ApiBody({ schema: swaggerSchema(buildOrderDraftRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'ERP order draft built from Bazis revision' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 422, description: 'Invalid draft payload' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Post('revisions/:id/order-draft')
+  @HttpCode(200)
+  async buildOrderDraft(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<BazisOrderDraftResponseDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const parsed = parseBuildOrderDraftBody(body);
+    return this.bazis.buildOrderDraft({
+      currentUser,
+      requestId: request.requestId,
+      revisionId: parseNumericPathParam(id, 'id'),
+      selectedNodeIds: parsed.selectedNodeIds,
+      targetOrderId: parsed.targetOrderId ?? null,
+    });
+  }
+
   @ApiOperation({ operationId: 'listBazisMaterialMappings', summary: 'List Bazis material mappings' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -569,6 +766,39 @@ export function parseCreateOrderFromRevisionBody(body: unknown): {
     createOrderFromRevisionBodySchema,
     body,
     'Bazis create-order payload validation failed',
+  );
+}
+
+export function parseCreateOrderFromDraftBody(body: unknown): CreateOrderFromDraftRequestDto {
+  const parsed = parseWithZod(
+    createOrderFromDraftBodySchema,
+    body,
+    'Bazis create-order-from-draft payload validation failed',
+  );
+
+  return {
+    order: parsed.order as unknown as SaveOrderDto,
+    nodes: parsed.nodes,
+    idempotencyKey: parsed.idempotencyKey,
+  };
+}
+
+export function parseAddToOrderBody(body: unknown): BazisAddToOrderRequestDto {
+  return parseWithZod(
+    addToOrderBodySchema,
+    body,
+    'Bazis add-to-order payload validation failed',
+  );
+}
+
+export function parseBuildOrderDraftBody(body: unknown): {
+  selectedNodeIds: number[];
+  targetOrderId?: number | null;
+} {
+  return parseWithZod(
+    buildOrderDraftBodySchema,
+    body,
+    'Bazis order-draft payload validation failed',
   );
 }
 

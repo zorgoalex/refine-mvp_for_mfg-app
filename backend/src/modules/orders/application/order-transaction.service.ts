@@ -359,13 +359,16 @@ export class OrderTransactionService {
         command.orderId,
         collectChildReferences(prepared.order),
       );
+      if (command.prePersistHook) {
+        await command.prePersistHook(unitOfWork, lockedOrder);
+      }
       await unitOfWork.updateOrderHeader({
         orderId: command.orderId,
         header: prepared.order.header,
         totals: prepared.totals,
         currentUser: command.currentUser,
       });
-      await this.persistChildren(unitOfWork, command.orderId, prepared);
+      const detailIdsByClientKey = await this.persistChildren(unitOfWork, command.orderId, prepared);
       const version = await unitOfWork.updateOrderTotalsAndVersion({
         orderId: command.orderId,
         totals: prepared.totals,
@@ -404,6 +407,12 @@ export class OrderTransactionService {
           storedDetailSheetIds,
         ),
       });
+      if (command.postPersistHook) {
+        await command.postPersistHook(unitOfWork, {
+          orderId: command.orderId,
+          detailIdsByClientKey,
+        });
+      }
 
       return this.readAndAssertVersion(unitOfWork, command.orderId, version, command);
     });

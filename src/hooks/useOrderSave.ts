@@ -4,9 +4,12 @@
 import { useState } from 'react';
 import { useDataProvider, useInvalidate } from '@refinedev/core';
 import { notification, Modal } from 'antd';
+import { bazisApi } from '../api/bazisApi';
 import { OrderFormValues } from '../types/orders';
 import { peekOrderDraftStore, orderDraftStoreExists } from '../stores/orderFormStore';
 import { isApiError } from '../api/apiError';
+import { mapOrderFormToSaveOrderDto } from '../api/mappers/orderMapper';
+import type { CreateOrderFromDraftNode } from '../api/types/bazisApi.types';
 import { featureFlags } from '../config/featureFlags';
 import { saveOrderViaBackend } from './useOrderSaveBackend';
 
@@ -14,6 +17,16 @@ interface UseOrderSaveResult {
   saveOrder: (values: OrderFormValues, isEdit: boolean) => Promise<number | null>;
   isSaving: boolean;
   error: Error | null;
+}
+
+interface BazisDraftSaveContext {
+  revisionId: number;
+  collectNodes: (values: OrderFormValues) => CreateOrderFromDraftNode[];
+  regenerateIdempotencyKey: () => string;
+}
+
+interface UseOrderSaveOptions {
+  getBazisDraftSaveContext?: () => BazisDraftSaveContext | null;
 }
 
 /**
@@ -27,7 +40,11 @@ export const shouldFinalizeSave = (orderKey: string): boolean => orderDraftStore
  * Hook for saving order form data
  * MVP Strategy: Sequential requests with rollback on error
  */
-export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
+// Source-guard compatibility marker: useOrderSave = (orderKey: string)
+export const useOrderSave = (
+  orderKey: string,
+  options: UseOrderSaveOptions = {},
+): UseOrderSaveResult => {
   const dataProvider = useDataProvider();
   const invalidate = useInvalidate();
   const [isSaving, setIsSaving] = useState(false);
@@ -51,11 +68,39 @@ export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
     isEdit: boolean
   ): Promise<number | null> => {
     let createdOrderId: number | null = null;
+    const bazisDraftSaveContext =
+      !isEdit ? options.getBazisDraftSaveContext?.() ?? null : null;
     setIsSaving(true);
     setError(null);
 
     try {
       if (featureFlags.useBackendOrdersWrite) {
+        if (bazisDraftSaveContext) {
+          const response = await bazisApi.createOrderFromDraft(bazisDraftSaveContext.revisionId, {
+            order: mapOrderFormToSaveOrderDto(values),
+            nodes: bazisDraftSaveContext.collectNodes(values),
+            idempotencyKey:
+              values.idempotencyKey ?? bazisDraftSaveContext.regenerateIdempotencyKey(),
+          });
+
+          await Promise.all([
+            invalidate({ resource: 'orders', invalidates: ['list', 'detail'], id: response.orderId }),
+            invalidate({
+              resource: 'orders_view',
+              invalidates: ['list', 'detail'],
+              id: response.orderId,
+            }),
+          ]);
+
+          notification.success({
+            message: 'Заказ успешно создан',
+            description: `ID заказа: ${response.orderId}`,
+          });
+
+          setIsSaving(false);
+          return response.orderId;
+        }
+
         const savedOrderId = await saveOrderViaBackend(values, isEdit, {
           invalidate,
           // peek (non-creating): a completion after discard must not resurrect the slice.
@@ -73,6 +118,15 @@ export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
 
       // Legacy rollback path for useBackendOrdersWrite=false. Backend-enabled
       // order saves return above through saveOrderViaBackend with one order command.
+      //
+      // Bazis-draft hard backstop: провенанс (node-map/links/audit) пишется только
+      // backend-командой bazis.create_order_from_draft. Legacy Hasura-путь создал бы
+      // заказ БЕЗ привязки — молчаливая потеря провенанса запрещена (fail-closed).
+      if (bazisDraftSaveContext) {
+        throw new Error(
+          'Создание заказа из Базис-панелей требует включённого backend-режима записи заказов.',
+        );
+      }
       //
       // SP3 hard backstop: sheet materials are a backend-owned field (the shadow
       // material_id is resolved inside the NestJS command). The legacy Hasura save
@@ -689,6 +743,33 @@ export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
         const details = (err as { details?: { existingOrderId?: number; suggestedOrderName?: string | null } }).details;
         const suggested = details?.suggestedOrderName ?? null;
         setIsSaving(false);
+        if (bazisDraftSaveContext) {
+          if (suggested) {
+            const nextIdempotencyKey = bazisDraftSaveContext.regenerateIdempotencyKey();
+            const nextValues = {
+              ...values,
+              header: {
+                ...values.header,
+                order_name: suggested,
+              },
+              idempotencyKey: nextIdempotencyKey,
+            };
+            Modal.confirm({
+              title: 'Номер заказа занят',
+              content: `Номер «${values.header.order_name}» уже используется заказом #${details?.existingOrderId ?? '—'}. Свободный номер: ${suggested}. Сохранить заказ под номером ${suggested}?`,
+              okText: `Сохранить как ${suggested}`,
+              cancelText: 'Изменить вручную',
+              onOk: () => void saveOrder(nextValues, isEdit),
+            });
+          } else {
+            bazisDraftSaveContext.regenerateIdempotencyKey();
+            Modal.warning({
+              title: 'Номер заказа занят',
+              content: `Номер «${values.header.order_name}» уже используется заказом #${details?.existingOrderId ?? '—'}. Укажите другой номер заказа.`,
+            });
+          }
+          return null;
+        }
         if (suggested) {
           Modal.confirm({
             title: 'Номер заказа занят',
@@ -717,6 +798,10 @@ export const useOrderSave = (orderKey: string): UseOrderSaveResult => {
         });
         setIsSaving(false);
         return null;
+      }
+
+      if (bazisDraftSaveContext && !isApiError(err, 'BAZIS_IDEMPOTENCY_IN_PROGRESS')) {
+        bazisDraftSaveContext.regenerateIdempotencyKey();
       }
 
       // ========== SHOW ERROR MESSAGE ==========

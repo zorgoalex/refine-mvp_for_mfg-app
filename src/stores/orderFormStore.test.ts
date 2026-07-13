@@ -47,6 +47,59 @@ describe('orderFormStore version sync', () => {
     expect(state.header.version).toBe(4);
     expect(state.version).toBe(4);
   });
+
+  it('preserves bazisNodeId on load and clears it on inserted copies', () => {
+    useOrderFormStore.getState().loadOrder({
+      header: {
+        order_id: 15,
+        order_name: 'E2E order',
+        client_id: 1,
+        order_date: '2026-05-10',
+        order_status_id: 1,
+        payment_status_id: 1,
+        version: 3,
+      },
+      details: [
+        {
+          detail_id: 44,
+          detail_number: 1,
+          bazisNodeId: 777,
+          height: 500,
+          width: 300,
+          quantity: 2,
+          area: 0.3,
+          material_id: null,
+          sheet_material_type_id: 5,
+          milling_type_id: 1,
+          edge_type_id: 1,
+          detail_cost: 0,
+          priority: 100,
+        },
+      ],
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+      deletedDetails: [],
+      deletedPayments: [],
+      deletedWorkshops: [],
+      deletedRequirements: [],
+      deletedDowelingLinks: [],
+      isDirty: false,
+      version: 3,
+    });
+
+    const source = useOrderFormStore.getState().details[0];
+    const sourceKey = source.temp_id ?? source.detail_id!;
+    useOrderFormStore.getState().insertDetailAfter(sourceKey, {
+      ...source,
+      bazisNodeId: source.bazisNodeId,
+    });
+
+    const details = useOrderFormStore.getState().details;
+    expect(details[0].bazisNodeId).toBe(777);
+    expect(details[1].bazisNodeId).toBeUndefined();
+  });
 });
 
 describe('orderFormStore per-order isolation', () => {

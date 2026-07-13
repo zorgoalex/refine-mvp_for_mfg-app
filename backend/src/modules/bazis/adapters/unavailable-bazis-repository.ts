@@ -1,10 +1,15 @@
 import type {
+  AddToOrderCommand,
   BazisRepositoryPort,
+  BuildOrderDraftCommand,
+  CreateOrderFromDraftCommand,
   CreateOrderFromRevisionCommand,
   DeleteBazisProjectInput,
   ImportRevisionCommand,
 } from '../application/bazis.types';
 import type {
+  BazisAddToOrderResponseDto,
+  BazisOrderDraftResponseDto,
   BazisRevisionEstimateDto,
   BazisImportResponseDto,
   BazisProjectDeleteResponseDto,
@@ -71,9 +76,23 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
     return unavailable();
   }
 
+  buildOrderDraft(_command: BuildOrderDraftCommand): Promise<BazisOrderDraftResponseDto> {
+    return unavailable();
+  }
+
   createOrderFromRevision(
     _command: CreateOrderFromRevisionCommand,
   ): Promise<CreateOrderFromRevisionResponseDto> {
+    return unavailable();
+  }
+
+  createOrderFromDraft(
+    _command: CreateOrderFromDraftCommand,
+  ): Promise<CreateOrderFromRevisionResponseDto> {
+    return unavailable();
+  }
+
+  addToOrder(_command: AddToOrderCommand): Promise<BazisAddToOrderResponseDto> {
     return unavailable();
   }
 

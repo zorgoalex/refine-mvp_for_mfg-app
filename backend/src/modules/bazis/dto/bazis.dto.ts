@@ -1,3 +1,5 @@
+import type { SaveOrderDto } from '../../orders/dto/save-order.dto';
+
 export interface BazisImportResponseDto {
   bazisProject: { bazisProjectId: number; projectId: number; name: string };
   revision: {
@@ -18,6 +20,7 @@ export interface BazisProjectListItemDto {
   revisionsCount: number;
   lastRevisionNo: number | null;
   lastImportedAt: string | null;
+  bazisOrderNo: string | null;
   linkedOrderIds: number[];
   linkedOrders: BazisOrderRefDto[];
 }
@@ -45,6 +48,8 @@ export interface BazisTreeNodeDto {
   name: string | null;
   detailCode: string | null;
   position: string | null;
+  designation: string | null;
+  productOrderNo: string | null;
   quantity: number | null;
   cumulativeQuantity: number | null;
   lengthMm: number | null;
@@ -218,6 +223,72 @@ export interface CreateOrderFromRevisionResponseDto {
   mappedNodes: number;
   requestId: string;
   auditId?: string;
+}
+
+export interface BazisAddToOrderPairDto {
+  bazisNodeId: number;
+  orderDetailId: number;
+}
+
+export interface BazisAddToOrderRequestDto {
+  orderId: number;
+  adds: number[];
+  replaces: BazisAddToOrderPairDto[];
+  skips: BazisAddToOrderPairDto[];
+  idempotencyKey: string;
+}
+
+export interface BazisAddToOrderResponseDto {
+  orderId: number;
+  detailsAdded: number;
+  detailsReplaced: number;
+  requestId: string;
+}
+
+export interface CreateOrderFromDraftNodeDto {
+  clientKey: string;
+  bazisNodeId: number;
+}
+
+export interface CreateOrderFromDraftRequestDto {
+  order: SaveOrderDto;
+  nodes: CreateOrderFromDraftNodeDto[];
+  idempotencyKey: string;
+}
+
+export interface BazisOrderDraftDetailDto {
+  bazisNodeId: number;
+  clientKey: string;
+  detailName: string | null;
+  height: number;
+  width: number;
+  quantity: number;
+  sheetMaterialTypeId: number | null;
+  filmId: number | null;
+  millingTypeId: number;
+  edgeTypeId: number;
+  priority: number;
+  basisProject: string | null;
+  basisProduct: string | null;
+  basisDesignation: string | null;
+  basisData: string;
+}
+
+export interface BazisOrderDraftDuplicateDto {
+  bazisNodeId: number;
+  orderDetailId: number;
+  matchedBy: 'node_map' | 'basis_fields';
+}
+
+export interface BazisOrderDraftResponseDto {
+  revisionId: number;
+  projectId: number;
+  clientId: number | null;
+  clientName: string | null;
+  bazisProjectName: string;
+  bazisOrderNo: string | null;
+  details: BazisOrderDraftDetailDto[];
+  duplicates: BazisOrderDraftDuplicateDto[];
 }
 
 export interface BazisProjectDeleteResponseDto {

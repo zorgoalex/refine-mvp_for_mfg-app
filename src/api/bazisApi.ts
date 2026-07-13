@@ -1,10 +1,14 @@
-import { apiRoutes } from './apiRoutes';
+import { apiRoutes, backendApiPath } from './apiRoutes';
 import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
+  BazisAddToOrderRequest,
+  BazisAddToOrderResponse,
   BazisRevisionEstimate,
+  CreateOrderFromDraftRequest,
   BazisImportResponse,
   BazisNodeCard,
+  BazisOrderDraftResponse,
   BazisNodeSearchResponse,
   BazisProjectCard,
   BazisProjectDeleteResponse,
@@ -122,6 +126,39 @@ export const bazisApi = {
   ): Promise<CreateOrderFromRevisionResponse> {
     return httpClient.post<CreateOrderFromRevisionResponse>(
       apiRoutes.bazis.createOrder(validateId(revisionId, 'revisionId')),
+      body,
+    );
+  },
+
+  createOrderFromDraft(
+    revisionId: number,
+    body: CreateOrderFromDraftRequest,
+  ): Promise<CreateOrderFromRevisionResponse> {
+    return httpClient.post<CreateOrderFromRevisionResponse>(
+      apiRoutes.bazis.revisionOrders(validateId(revisionId, 'revisionId')),
+      body,
+    );
+  },
+
+  addToOrder(
+    revisionId: number,
+    body: BazisAddToOrderRequest,
+  ): Promise<BazisAddToOrderResponse> {
+    return httpClient.post<BazisAddToOrderResponse>(
+      backendApiPath(`/bazis/revisions/${validateId(revisionId, 'revisionId')}/add-to-order`),
+      body,
+    );
+  },
+
+  orderDraft(
+    revisionId: number,
+    body: {
+      selectedNodeIds: number[];
+      targetOrderId?: number | null;
+    },
+  ): Promise<BazisOrderDraftResponse> {
+    return httpClient.post<BazisOrderDraftResponse>(
+      backendApiPath(`/bazis/revisions/${validateId(revisionId, 'revisionId')}/order-draft`),
       body,
     );
   },

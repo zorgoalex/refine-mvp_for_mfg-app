@@ -4,7 +4,11 @@
 
 import type { BazisOrderRef, BazisTreeNode } from '../../api/types/bazisApi.types';
 
-export type PanelLike = BazisTreeNode & { pathTitle: string };
+export type PanelLike = BazisTreeNode & {
+  pathTitle: string;
+  productName: string | null;
+  productOrderNo: string | null;
+};
 
 export interface PanelGroupRow {
   /** Стабильный ключ группы (материал + размеры). */
@@ -19,6 +23,12 @@ export interface PanelGroupRow {
   totalQuantity: number | null;
   /** Уникальные непустые наименования детей в порядке появления. */
   names: string[];
+  /** Уникальные непустые обозначения детей в порядке появления. */
+  designations: string[];
+  /** Уникальные непустые изделия детей в порядке появления. */
+  productNames: string[];
+  /** Уникальные непустые номера Базис-заказа детей в порядке появления. */
+  orderNos: string[];
   /** Уникальные по orderId ERP-заказы детей в порядке появления. */
   orders: BazisOrderRef[];
   children: PanelLike[];
@@ -31,6 +41,13 @@ function sizeKeyPart(value: number | null): string {
 function groupKeyOf(panel: PanelLike): string {
   const material = panel.mainMaterialName?.trim().toLowerCase() ?? '';
   return [material, sizeKeyPart(panel.lengthMm), sizeKeyPart(panel.widthMm), sizeKeyPart(panel.thicknessMm)].join('|');
+}
+
+function pushUniqueText(target: string[], value: string | null | undefined): void {
+  const trimmed = value?.trim();
+  if (trimmed && !target.includes(trimmed)) {
+    target.push(trimmed);
+  }
 }
 
 /** Ключ группы, содержащей панель (для авто-раскрытия выбранной панели). */
@@ -62,6 +79,9 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
         mainMaterialName: panel.mainMaterialName?.trim() || null,
         totalQuantity: null,
         names: [],
+        designations: [],
+        productNames: [],
+        orderNos: [],
         orders: [],
         children: [],
       };
@@ -75,10 +95,10 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
       group.totalQuantity = (group.totalQuantity ?? 0) + quantity;
     }
 
-    const name = panel.name?.trim();
-    if (name && !group.names.includes(name)) {
-      group.names.push(name);
-    }
+    pushUniqueText(group.names, panel.name);
+    pushUniqueText(group.designations, panel.designation);
+    pushUniqueText(group.productNames, panel.productName);
+    pushUniqueText(group.orderNos, panel.productOrderNo);
 
     for (const order of panel.orders) {
       if (!group.orders.some((existing) => existing.orderId === order.orderId)) {
@@ -142,6 +162,14 @@ function rowName(row: SortableRow): string | null {
   return isGroupRow(row) ? row.names.join(' / ') : row.name;
 }
 
+function rowDesignation(row: SortableRow): string | null {
+  return isGroupRow(row) ? row.designations.join(', ') : row.designation;
+}
+
+function rowProductName(row: SortableRow): string | null {
+  return isGroupRow(row) ? row.productNames.join(', ') : row.productName;
+}
+
 export const panelComparators = {
   seq(a: SortableRow, b: SortableRow): number {
     const seqOf = (row: SortableRow) => (isGroupRow(row) ? row.groupSeq : row.flatSeq ?? null);
@@ -163,6 +191,12 @@ export const panelComparators = {
   name(a: SortableRow, b: SortableRow): number {
     return cmpText(rowName(a), rowName(b));
   },
+  designation(a: SortableRow, b: SortableRow): number {
+    return cmpText(rowDesignation(a), rowDesignation(b));
+  },
+  product(a: SortableRow, b: SortableRow): number {
+    return cmpText(rowProductName(a), rowProductName(b));
+  },
   location(a: SortableRow, b: SortableRow): number {
     if (isGroupRow(a) && isGroupRow(b)) {
       return cmpNumber(a.children.length, b.children.length);
@@ -179,7 +213,7 @@ export const panelComparators = {
 
 // ---- Фильтры колонок таблицы панелей ---------------------------------------
 
-/** Значение опции «(пусто)» — панели без материала/наименования/заказа. */
+/** Значение опции «(пусто)» — панели без материала/наименования/изделия/заказа. */
 export const PANEL_FILTER_EMPTY = '__bazis_panel_filter_empty__';
 /** Сентинел «Отключить все»: пустой выбор в antd = фильтр выключен, поэтому
  * «ничего не показывать» кодируется отдельным ключом. */
@@ -190,7 +224,7 @@ export interface PanelFilterOption {
   label: string;
 }
 
-export type PanelFilterField = 'material' | 'name' | 'order';
+export type PanelFilterField = 'material' | 'name' | 'productName' | 'order';
 
 function collectOptions(values: (string | null | undefined)[]): PanelFilterOption[] {
   const unique = new Set<string>();
@@ -216,11 +250,13 @@ function collectOptions(values: (string | null | undefined)[]): PanelFilterOptio
 export function buildPanelFilterOptions(panels: PanelLike[]): {
   materials: PanelFilterOption[];
   names: PanelFilterOption[];
+  productNames: PanelFilterOption[];
   orders: PanelFilterOption[];
 } {
   return {
     materials: collectOptions(panels.map((panel) => panel.mainMaterialName)),
     names: collectOptions(panels.map((panel) => panel.name)),
+    productNames: collectOptions(panels.map((panel) => panel.productName)),
     orders: collectOptions(
       panels.flatMap((panel) => (panel.orders.length ? panel.orders.map((order) => order.orderName) : [null])),
     ),
@@ -230,7 +266,7 @@ export function buildPanelFilterOptions(panels: PanelLike[]): {
 function panelMatchesFilter(
   field: PanelFilterField,
   value: string | number | boolean,
-  panel: Pick<PanelLike, 'mainMaterialName' | 'name' | 'orders'>,
+  panel: Pick<PanelLike, 'mainMaterialName' | 'name' | 'productName' | 'orders'>,
 ): boolean {
   const wantEmpty = value === PANEL_FILTER_EMPTY;
   if (field === 'material') {
@@ -240,6 +276,10 @@ function panelMatchesFilter(
   if (field === 'name') {
     const name = panel.name?.trim() || null;
     return wantEmpty ? name == null : name === value;
+  }
+  if (field === 'productName') {
+    const productName = panel.productName?.trim() || null;
+    return wantEmpty ? productName == null : productName === value;
   }
   return wantEmpty
     ? panel.orders.length === 0

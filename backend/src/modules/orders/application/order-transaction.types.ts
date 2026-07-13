@@ -28,6 +28,11 @@ export interface UpdateOrderCommand {
   orderId: number;
   dto: SaveOrderDto;
   requestId?: string;
+  prePersistHook?: (uow: OrderWriteUnitOfWork, locked: LockedOrderRow) => Promise<void>;
+  postPersistHook?: (
+    uow: OrderWriteUnitOfWork,
+    updated: { orderId: number; detailIdsByClientKey: Map<string, number> },
+  ) => Promise<void>;
 }
 
 export interface DeleteOrderCommand {

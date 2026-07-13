@@ -336,6 +336,8 @@ probe_file() {
                      "$(q_col label_qr_templates field_catalog_snapshot)" \
                      "$(q_con chk_label_templates_field_catalog_snapshot_object)" \
                      "$(q_con chk_label_qr_templates_field_catalog_snapshot_object)" ;;
+    061_*) probe_all "$(q_col user_preferences ui_size)" ;;
+    062_*) probe_all "$(q_col bazis_project_revisions bazis_order_no)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
