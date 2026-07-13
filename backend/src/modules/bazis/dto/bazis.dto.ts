@@ -225,6 +225,26 @@ export interface CreateOrderFromRevisionResponseDto {
   auditId?: string;
 }
 
+export interface BazisAddToOrderPairDto {
+  bazisNodeId: number;
+  orderDetailId: number;
+}
+
+export interface BazisAddToOrderRequestDto {
+  orderId: number;
+  adds: number[];
+  replaces: BazisAddToOrderPairDto[];
+  skips: BazisAddToOrderPairDto[];
+  idempotencyKey: string;
+}
+
+export interface BazisAddToOrderResponseDto {
+  orderId: number;
+  detailsAdded: number;
+  detailsReplaced: number;
+  requestId: string;
+}
+
 export interface CreateOrderFromDraftNodeDto {
   clientKey: string;
   bazisNodeId: number;

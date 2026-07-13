@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
 import { OrdersModule } from '../orders/orders.module';
@@ -16,14 +17,22 @@ import { BazisRuntimeConfigService } from './http/bazis-runtime-config.service';
     BazisRuntimeConfigService,
     {
       provide: BazisService,
-      useFactory: (database: DatabaseService, orderTransactions: OrderTransactionService) =>
+      useFactory: (
+        database: DatabaseService,
+        orderTransactions: OrderTransactionService,
+        config: ConfigService,
+      ) =>
         new BazisService({
           repository: database.isConfigured
-            ? new PgBazisRepository(database, orderTransactions)
+            ? new PgBazisRepository(
+                database,
+                orderTransactions,
+                config.get('BACKEND_SHEET_ORDERS_READS') ?? true,
+              )
             : new UnavailableBazisRepository(),
           auditDatabase: database.isConfigured ? database : undefined,
         }),
-      inject: [DatabaseService, OrderTransactionService],
+      inject: [DatabaseService, OrderTransactionService, ConfigService],
     },
   ],
   exports: [BazisRuntimeConfigService, BazisService],

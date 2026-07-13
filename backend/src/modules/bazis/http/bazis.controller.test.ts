@@ -8,6 +8,7 @@ import type { BazisService } from '../application/bazis.service';
 import {
   BazisController,
   parseBazisImportFields,
+  parseAddToOrderBody,
   parseBuildOrderDraftBody,
   parseCreateOrderFromDraftBody,
   parseMaterialMappingsQuery,
@@ -260,6 +261,61 @@ describe('BazisController', () => {
     expect(result.orderId).toBe(601);
   });
 
+  it('coerces add-to-order body and delegates to the service', async () => {
+    const addToOrder = vi.fn().mockResolvedValue({
+      orderId: 9001,
+      detailsAdded: 1,
+      detailsReplaced: 1,
+      requestId: 'req-add-to-order',
+    });
+    const controller = createController({
+      bazisEnabled: true,
+      service: { addToOrder },
+    });
+
+    const result = await controller.addToOrder(request(), '12', {
+      orderId: '9001',
+      adds: ['101'],
+      replaces: [{ bazisNodeId: '102', orderDetailId: '7002' }],
+      skips: [{ bazisNodeId: '103', orderDetailId: '7003' }],
+      idempotencyKey: ' add-order-key ',
+    });
+
+    expect(addToOrder).toHaveBeenCalledWith({
+      currentUser: request().user,
+      requestId: 'req-1',
+      revisionId: 12,
+      orderId: 9001,
+      adds: [101],
+      replaces: [{ bazisNodeId: 102, orderDetailId: 7002 }],
+      skips: [{ bazisNodeId: 103, orderDetailId: 7003 }],
+      idempotencyKey: 'add-order-key',
+    });
+    expect(result).toEqual({
+      orderId: 9001,
+      detailsAdded: 1,
+      detailsReplaced: 1,
+      requestId: 'req-add-to-order',
+    });
+  });
+
+  it('validates add-to-order request body', async () => {
+    const controller = createController({ bazisEnabled: true });
+
+    await expect(
+      controller.addToOrder(request(), '12', {
+        orderId: '0',
+        adds: ['x'],
+        replaces: [{ bazisNodeId: '0', orderDetailId: '1' }],
+        skips: [{ bazisNodeId: '1', orderDetailId: '0' }],
+        idempotencyKey: '   ',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+    } satisfies Partial<ApiError>);
+  });
+
   it('validates create-order-from-draft request body', async () => {
     const controller = createController({ bazisEnabled: true });
 
@@ -334,6 +390,34 @@ describe('BazisController', () => {
     );
   });
 
+  it('parseAddToOrderBody requires a positive order id, pair arrays, and non-empty idempotencyKey', () => {
+    expect(
+      parseAddToOrderBody({
+        orderId: '9001',
+        adds: ['101'],
+        replaces: [{ bazisNodeId: '102', orderDetailId: '7002' }],
+        skips: [],
+        idempotencyKey: 'add-order-key',
+      }),
+    ).toEqual({
+      orderId: 9001,
+      adds: [101],
+      replaces: [{ bazisNodeId: 102, orderDetailId: 7002 }],
+      skips: [],
+      idempotencyKey: 'add-order-key',
+    });
+
+    expect(() =>
+      parseAddToOrderBody({
+        orderId: 0,
+        adds: [],
+        replaces: [{ bazisNodeId: 1, orderDetailId: 0 }],
+        skips: [],
+        idempotencyKey: '',
+      }),
+    ).toThrowError(ApiError);
+  });
+
   it('parseCreateOrderFromDraftBody requires an order object, node mappings and a non-empty idempotencyKey', () => {
     expect(
       parseCreateOrderFromDraftBody({
@@ -376,6 +460,7 @@ function createController(input: {
     listMaterialMappings: vi.fn(),
     upsertMaterialMappings: vi.fn(),
     buildOrderDraft: vi.fn(),
+    addToOrder: vi.fn(),
     createOrderFromDraft: vi.fn(),
     createOrderFromRevision: vi.fn(),
     ...input.service,

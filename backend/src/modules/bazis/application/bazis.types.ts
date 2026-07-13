@@ -2,6 +2,8 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { SaveOrderDto } from '../../orders/dto/save-order.dto';
 import type { ParsedBazisRevision } from './bazis-xml-parser';
 import type {
+  BazisAddToOrderResponseDto,
+  BazisAddToOrderPairDto,
   BazisImportResponseDto,
   CreateOrderFromDraftNodeDto,
   BazisProjectDeleteResponseDto,
@@ -68,6 +70,17 @@ export interface CreateOrderFromDraftCommand {
   idempotencyKey: string;
 }
 
+export interface AddToOrderCommand {
+  currentUser: CurrentUser;
+  requestId?: string;
+  revisionId: number;
+  orderId: number;
+  adds: number[];
+  replaces: BazisAddToOrderPairDto[];
+  skips: BazisAddToOrderPairDto[];
+  idempotencyKey: string;
+}
+
 export interface DeleteBazisProjectInput {
   currentUser: CurrentUser;
   requestId?: string;
@@ -98,6 +111,7 @@ export interface BazisRepositoryPort {
   createOrderFromRevision(
     command: CreateOrderFromRevisionCommand,
   ): Promise<CreateOrderFromRevisionResponseDto>;
+  addToOrder(command: AddToOrderCommand): Promise<BazisAddToOrderResponseDto>;
   getNodeCard(nodeId: number): Promise<BazisNodeCardDto>;
   searchNodes(input: {
     revisionId: number;

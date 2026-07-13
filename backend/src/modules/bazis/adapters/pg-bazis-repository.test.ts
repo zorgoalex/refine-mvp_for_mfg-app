@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseService } from '../../../database/database.service';
 import type { OrderDto } from '../../orders/dto/order.dto';
@@ -15,7 +15,22 @@ import {
   BazisRevisionDuplicateError,
   BazisRevisionNotFoundError,
 } from '../errors/bazis.errors';
+import { orderDtoToSaveDto } from './bazis-order-draft';
 import { PgBazisRepository } from './pg-bazis-repository';
+
+const { getOrderByIdMock } = vi.hoisted(() => ({
+  getOrderByIdMock: vi.fn(),
+}));
+
+vi.mock('../../orders/adapters/pg-order-read-repository', () => ({
+  PgOrderReadRepository: class {
+    getOrderById = getOrderByIdMock;
+  },
+}));
+
+beforeEach(() => {
+  getOrderByIdMock.mockReset();
+});
 
 describe('PgBazisRepository.importRevision', () => {
   it('sets session user first, then inserts project/revision/nodes/audit/outbox/run', async () => {
@@ -1525,6 +1540,463 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
   });
 });
 
+describe('PgBazisRepository.addToOrder', () => {
+  it('rejects duplicate bazisNodeId across adds/replaces/skips before idempotency', async () => {
+    const repository = new PgBazisRepository(createDatabase().service, { update: vi.fn() });
+
+    await expect(
+      repository.addToOrder(
+        createAddToOrderCommand({
+          adds: [101],
+          replaces: [{ bazisNodeId: 101, orderDetailId: 7002 }],
+        }),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+    });
+  });
+
+  it('rejects duplicate orderDetailId in replaces', async () => {
+    const repository = new PgBazisRepository(createDatabase().service, { update: vi.fn() });
+
+    await expect(
+      repository.addToOrder(
+        createAddToOrderCommand({
+          adds: [],
+          replaces: [
+            { bazisNodeId: 101, orderDetailId: 7002 },
+            { bazisNodeId: 102, orderDetailId: 7002 },
+          ],
+        }),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: { errors: [{ field: 'replaces', message: 'Повторяющиеся orderDetailId в replaces недопустимы' }] },
+    });
+  });
+
+  it('rejects empty adds+replaces payload', async () => {
+    const repository = new PgBazisRepository(createDatabase().service, { update: vi.fn() });
+
+    await expect(
+      repository.addToOrder(
+        createAddToOrderCommand({
+          adds: [],
+          replaces: [],
+          skips: [],
+        }),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+    });
+  });
+
+  it('rejects target orders from another client with 422', async () => {
+    const database = createDatabase({
+      addToOrderState: {
+        revisionRow: baseRevisionRow(),
+        targetOrderRow: { order_id: 9001, client_id: 99 },
+      },
+    });
+    const repository = new PgBazisRepository(database.service, { update: vi.fn() });
+
+    await expect(repository.addToOrder(createAddToOrderCommand())).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: { errors: [{ field: 'orderId', message: 'Заказ должен существовать и принадлежать клиенту проекта Базис' }] },
+    });
+  });
+
+  it('rejects deleted or missing target orders with 422', async () => {
+    const database = createDatabase({
+      addToOrderState: {
+        revisionRow: baseRevisionRow(),
+        targetOrderRow: null,
+      },
+    });
+    const repository = new PgBazisRepository(database.service, { update: vi.fn() });
+
+    await expect(repository.addToOrder(createAddToOrderCommand())).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: { errors: [{ field: 'orderId', message: 'Заказ должен существовать и принадлежать клиенту проекта Базис' }] },
+    });
+  });
+
+  it('rejects non-panel nodes or nodes from another revision with 422', async () => {
+    const database = createDatabase({
+      addToOrderState: {
+        revisionRow: baseRevisionRow(),
+        targetOrderRow: { order_id: 9001, client_id: 5 },
+        nodeLookupRows: [{ bazis_node_id: 101, object_type: 'Шкаф' }],
+      },
+    });
+    const repository = new PgBazisRepository(database.service, { update: vi.fn() });
+
+    await expect(repository.addToOrder(createAddToOrderCommand())).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: { errors: [{ field: 'adds', message: 'Указанные узлы должны быть панелями из выбранной ревизии' }] },
+    });
+  });
+
+  it('rejects unmapped panels before reading the current order', async () => {
+    const database = createDatabase({
+      addToOrderState: {
+        revisionRow: baseRevisionRow(),
+        targetOrderRow: { order_id: 9001, client_id: 5 },
+        nodeLookupRows: [{ bazis_node_id: 101, object_type: 'Панель' }],
+        panelRows: [panelRow101()],
+        mappingRows: [],
+      },
+    });
+    const repository = new PgBazisRepository(database.service, { update: vi.fn() });
+
+    await expect(repository.addToOrder(createAddToOrderCommand())).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'BAZIS_UNMAPPED_MATERIALS',
+    });
+    expect(getOrderByIdMock).not.toHaveBeenCalled();
+  });
+
+  it('adds new details through update, preserves full header/version, writes map upsert, links, audit bridge, and outbox', async () => {
+    const database = createDatabase({
+      addToOrderState: {
+        revisionRow: baseRevisionRow(),
+        targetOrderRow: { order_id: 9001, client_id: 5 },
+        nodeLookupRows: [{ bazis_node_id: 101, object_type: 'Панель' }],
+        panelRows: [panelRow101()],
+        mappingRows: sheetAndFilmMappings(),
+        duplicateRows: [],
+      },
+    });
+    const currentOrder = buildDetailedOrderDto(9001, 'ERP order current');
+    getOrderByIdMock.mockResolvedValue(currentOrder);
+    let dtoPassed: ReturnType<typeof orderDtoToSaveDto> | null = null;
+    const update = vi.fn(async (command: Parameters<NonNullable<OrderTransactionService['update']>>[0]) => {
+      dtoPassed = command.dto;
+      await command.prePersistHook?.(
+        { getTransactionClient: () => database.tx } as never,
+        { orderId: 9001, orderName: 'ERP order current', version: currentOrder.version, createdByUserId: '1', managerUserId: '1' },
+      );
+      await command.postPersistHook?.(
+        { getTransactionClient: () => database.tx } as never,
+        { orderId: 9001, detailIdsByClientKey: new Map([['bazis-node-101', 8001]]) },
+      );
+      return currentOrder;
+    });
+    const repository = new PgBazisRepository(database.service, { update });
+
+    const result = await repository.addToOrder(createAddToOrderCommand({ adds: [101], replaces: [], skips: [] }));
+
+    expect(result).toEqual({
+      orderId: 9001,
+      detailsAdded: 1,
+      detailsReplaced: 0,
+      requestId: 'req-add-to-order',
+    });
+    expect(getOrderByIdMock).toHaveBeenCalledWith({ currentUser: currentUser(), orderId: 9001 });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(dtoPassed?.header).toEqual(orderDtoToSaveDto(currentOrder).header);
+    expect(dtoPassed?.version).toBe(currentOrder.version);
+    expect(dtoPassed?.payments).toEqual(orderDtoToSaveDto(currentOrder).payments);
+    expect(dtoPassed?.workshops).toEqual(orderDtoToSaveDto(currentOrder).workshops);
+    expect(dtoPassed?.requirements).toEqual(orderDtoToSaveDto(currentOrder).requirements);
+    expect(dtoPassed?.dowelingLinks).toEqual(orderDtoToSaveDto(currentOrder).dowelingLinks);
+    expect(dtoPassed?.details).toHaveLength(currentOrder.details.length + 1);
+    expect(dtoPassed?.details.at(-1)).toMatchObject({
+      clientKey: 'bazis-node-101',
+      detailName: 'Фасад/левая створка',
+      height: 1200,
+      width: 450,
+      quantity: 2,
+      sheetMaterialTypeId: 501,
+      filmId: 601,
+      basisProject: '1443',
+      basisProduct: 'Шкаф',
+      basisDesignation: 'D-01',
+      basisData: '7/D-01/Фасад/левая створка',
+      materialId: null,
+    });
+    expect(normalizedSql(database.queries)).toContain(
+      "INSERT INTO bazis_node_order_detail_map (node_id, order_detail_id, order_id, mapping_kind) VALUES ($1, $2, $3, 'created') ON CONFLICT (node_id, order_id) DO UPDATE SET order_detail_id = EXCLUDED.order_detail_id, mapping_kind = 'created'",
+    );
+    const mapInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_node_order_detail_map'),
+    );
+    expect(mapInsert?.params).toEqual([101, 8001, 9001]);
+    const bridgePairs = database.queries
+      .filter((query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log_related_entity'))
+      .map((query) => [query.params?.[1], query.params?.[2]]);
+    expect(bridgePairs).toEqual([
+      ['project', 77],
+      ['bazis_project', 41],
+      ['bazis_revision', 82],
+    ]);
+    const outbox = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+    );
+    expect(outbox?.params?.[4]).toBe('bazis-order-details-added-9001-add-to-order-001');
+    expect(JSON.parse(String(outbox?.params?.[3]))).toMatchObject({
+      orderId: 9001,
+      clientId: 5,
+      bazisProjectId: 41,
+      revisionId: 82,
+      projectId: 77,
+      addedNodeIds: [101],
+      replacedPairs: [],
+    });
+  });
+
+  it('replaces only the whitelist fields and rewrites node mapping', async () => {
+    const database = createDatabase({
+      addToOrderState: {
+        revisionRow: baseRevisionRow(),
+        targetOrderRow: { order_id: 9001, client_id: 5 },
+        nodeLookupRows: [{ bazis_node_id: 102, object_type: 'Панель' }],
+        panelRows: [panelRow102()],
+        mappingRows: sheetOnlyMapping(502),
+        duplicateRows: [{ bazis_node_id: 102, order_detail_id: 7002, matched_by: 'basis_fields' }],
+      },
+    });
+    const currentOrder = buildDetailedOrderDto(9001, 'ERP order current');
+    getOrderByIdMock.mockResolvedValue(currentOrder);
+    let dtoPassed: ReturnType<typeof orderDtoToSaveDto> | null = null;
+    const update = vi.fn(async (command: Parameters<NonNullable<OrderTransactionService['update']>>[0]) => {
+      dtoPassed = command.dto;
+      await command.prePersistHook?.(
+        { getTransactionClient: () => database.tx } as never,
+        { orderId: 9001, orderName: 'ERP order current', version: currentOrder.version, createdByUserId: '1', managerUserId: '1' },
+      );
+      await command.postPersistHook?.(
+        { getTransactionClient: () => database.tx } as never,
+        { orderId: 9001, detailIdsByClientKey: new Map() },
+      );
+      return currentOrder;
+    });
+    const repository = new PgBazisRepository(database.service, { update });
+
+    const result = await repository.addToOrder(
+      createAddToOrderCommand({
+        adds: [],
+        replaces: [{ bazisNodeId: 102, orderDetailId: 7002 }],
+        skips: [],
+      }),
+    );
+
+    expect(result).toEqual({
+      orderId: 9001,
+      detailsAdded: 0,
+      detailsReplaced: 1,
+      requestId: 'req-add-to-order',
+    });
+    const replaced = dtoPassed?.details.find((detail) => detail.id === 7002);
+    expect(replaced).toMatchObject({
+      id: 7002,
+      detailName: 'Полка',
+      height: 800,
+      width: 300,
+      quantity: 1,
+      sheetMaterialTypeId: 502,
+      filmId: null,
+      basisProject: '1443',
+      basisProduct: 'Шкаф',
+      basisDesignation: 'S-02',
+      basisData: '8/S-02/Полка',
+      millingTypeId: 9,
+      edgeTypeId: 8,
+      priority: 17,
+      note: 'keep me',
+      linkCadFile: '/cad/preserved.dxf',
+    });
+    const deletes = database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('DELETE FROM bazis_node_order_detail_map'),
+    );
+    expect(deletes.map((query) => query.params)).toEqual([[9001, 7002]]);
+    const inserts = database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_node_order_detail_map'),
+    );
+    expect(inserts.map((query) => query.params)).toEqual([[102, 7002, 9001]]);
+  });
+
+  it('rejects when a replace pair is absent in the fresh duplicate set', async () => {
+    const database = createDatabase({
+      addToOrderState: {
+        revisionRow: baseRevisionRow(),
+        targetOrderRow: { order_id: 9001, client_id: 5 },
+        nodeLookupRows: [{ bazis_node_id: 102, object_type: 'Панель' }],
+        panelRows: [panelRow102()],
+        mappingRows: sheetOnlyMapping(502),
+        duplicateRows: [],
+      },
+    });
+    getOrderByIdMock.mockResolvedValue(buildDetailedOrderDto(9001, 'ERP order current'));
+    const update = vi.fn(async (command: Parameters<NonNullable<OrderTransactionService['update']>>[0]) => {
+      await command.prePersistHook?.(
+        { getTransactionClient: () => database.tx } as never,
+        { orderId: 9001, orderName: 'ERP order current', version: 7, createdByUserId: '1', managerUserId: '1' },
+      );
+      return buildOrderDto(9001, 'never');
+    });
+    const repository = new PgBazisRepository(database.service, { update });
+
+    await expect(
+      repository.addToOrder(
+        createAddToOrderCommand({
+          adds: [],
+          replaces: [{ bazisNodeId: 102, orderDetailId: 7002 }],
+          skips: [],
+        }),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'BAZIS_ADD_TO_ORDER_CONFLICT',
+      details: { missingPairs: [{ bazisNodeId: 102, orderDetailId: 7002 }] },
+    });
+  });
+
+  it('rejects adds that now duplicate existing details', async () => {
+    const database = createDatabase({
+      addToOrderState: {
+        revisionRow: baseRevisionRow(),
+        targetOrderRow: { order_id: 9001, client_id: 5 },
+        nodeLookupRows: [{ bazis_node_id: 101, object_type: 'Панель' }],
+        panelRows: [panelRow101()],
+        mappingRows: sheetAndFilmMappings(),
+        duplicateRows: [{ bazis_node_id: 101, order_detail_id: 7001, matched_by: 'node_map' }],
+      },
+    });
+    getOrderByIdMock.mockResolvedValue(buildDetailedOrderDto(9001, 'ERP order current'));
+    const update = vi.fn(async (command: Parameters<NonNullable<OrderTransactionService['update']>>[0]) => {
+      await command.prePersistHook?.(
+        { getTransactionClient: () => database.tx } as never,
+        { orderId: 9001, orderName: 'ERP order current', version: 7, createdByUserId: '1', managerUserId: '1' },
+      );
+      return buildOrderDto(9001, 'never');
+    });
+    const repository = new PgBazisRepository(database.service, { update });
+
+    await expect(repository.addToOrder(createAddToOrderCommand({ adds: [101], replaces: [], skips: [] }))).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'BAZIS_ADD_TO_ORDER_CONFLICT',
+      details: { addNodeIdsWithDuplicates: [101] },
+    });
+  });
+
+  it('rejects ambiguous duplicates in replaces but allows the same ambiguity in skips', async () => {
+    const conflictDatabase = createDatabase({
+      addToOrderState: {
+        revisionRow: baseRevisionRow(),
+        targetOrderRow: { order_id: 9001, client_id: 5 },
+        nodeLookupRows: [{ bazis_node_id: 101, object_type: 'Панель' }],
+        panelRows: [panelRow101()],
+        mappingRows: sheetAndFilmMappings(),
+        duplicateRows: [
+          { bazis_node_id: 101, order_detail_id: 7001, matched_by: 'basis_fields' },
+          { bazis_node_id: 102, order_detail_id: 7001, matched_by: 'basis_fields' },
+        ],
+      },
+    });
+    getOrderByIdMock.mockResolvedValue(buildDetailedOrderDto(9001, 'ERP order current'));
+    const conflictRepo = new PgBazisRepository(conflictDatabase.service, {
+      update: async (command) => {
+        await command.prePersistHook?.(
+          { getTransactionClient: () => conflictDatabase.tx } as never,
+          { orderId: 9001, orderName: 'ERP order current', version: 7, createdByUserId: '1', managerUserId: '1' },
+        );
+        return buildOrderDto(9001, 'never');
+      },
+    });
+
+    await expect(
+      conflictRepo.addToOrder(
+        createAddToOrderCommand({
+          adds: [],
+          replaces: [{ bazisNodeId: 101, orderDetailId: 7001 }],
+          skips: [{ bazisNodeId: 102, orderDetailId: 7001 }],
+        }),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'BAZIS_ADD_TO_ORDER_CONFLICT',
+    });
+
+    const okDatabase = createDatabase({
+      addToOrderState: {
+        revisionRow: baseRevisionRow(),
+        targetOrderRow: { order_id: 9001, client_id: 5 },
+        nodeLookupRows: [{ bazis_node_id: 104, object_type: 'Панель' }],
+        panelRows: [panelRow104()],
+        mappingRows: sheetOnlyMapping(504),
+        duplicateRows: [
+          { bazis_node_id: 101, order_detail_id: 7001, matched_by: 'basis_fields' },
+          { bazis_node_id: 102, order_detail_id: 7001, matched_by: 'basis_fields' },
+        ],
+      },
+    });
+    getOrderByIdMock.mockResolvedValue(buildDetailedOrderDto(9001, 'ERP order current'));
+    const okRepo = new PgBazisRepository(okDatabase.service, {
+      update: async (command) => {
+        await command.prePersistHook?.(
+          { getTransactionClient: () => okDatabase.tx } as never,
+          { orderId: 9001, orderName: 'ERP order current', version: 7, createdByUserId: '1', managerUserId: '1' },
+        );
+        await command.postPersistHook?.(
+          { getTransactionClient: () => okDatabase.tx } as never,
+          { orderId: 9001, detailIdsByClientKey: new Map([['bazis-node-104', 8004]]) },
+        );
+        return buildOrderDto(9001, 'ERP order current');
+      },
+    });
+
+    await expect(
+      okRepo.addToOrder(
+        createAddToOrderCommand({
+          adds: [104],
+          replaces: [],
+          skips: [
+            { bazisNodeId: 101, orderDetailId: 7001 },
+            { bazisNodeId: 102, orderDetailId: 7001 },
+          ],
+        }),
+      ),
+    ).resolves.toMatchObject({
+      orderId: 9001,
+      detailsAdded: 1,
+      detailsReplaced: 0,
+    });
+  });
+
+  it('replays a completed add-to-order idempotency response without updating the order', async () => {
+    const response = {
+      orderId: 9001,
+      detailsAdded: 2,
+      detailsReplaced: 1,
+      requestId: 'req-add-replay',
+    };
+    const database = createDatabase({
+      addToOrderState: {
+        idempotencyConflict: true,
+        existingIdempotencyRow: {
+          request_hash: hashAddToOrderRequestShape(createAddToOrderCommand()),
+          response_json: response,
+          status: 'completed',
+          created_at: isoMinutesAgo(5),
+        },
+      },
+    });
+    const update = vi.fn();
+    const repository = new PgBazisRepository(database.service, { update });
+
+    await expect(repository.addToOrder(createAddToOrderCommand())).resolves.toEqual(response);
+    expect(update).not.toHaveBeenCalled();
+    expect(getOrderByIdMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('PgBazisRepository.buildOrderDraft', () => {
   it('returns draft details with client metadata and clientKey', async () => {
     const database = createDatabase({
@@ -2463,6 +2935,22 @@ function createDatabase(
       mappingRows?: Array<Record<string, unknown>>;
       nowIso?: string;
     };
+    addToOrderState?: {
+      idempotencyConflict?: boolean;
+      existingIdempotencyRow?: {
+        request_hash: string;
+        response_json: Record<string, unknown> | null;
+        status: string;
+        created_at: string;
+      };
+      revisionRow?: Record<string, unknown>;
+      targetOrderRow?: Record<string, unknown> | null;
+      nodeLookupRows?: Array<Record<string, unknown>>;
+      panelRows?: Array<Record<string, unknown>>;
+      mappingRows?: Array<Record<string, unknown>>;
+      duplicateRows?: Array<Record<string, unknown>>;
+      nowIso?: string;
+    };
     orderDraftState?: {
       revisionRow?: Record<string, unknown>;
       panelRows?: Array<Record<string, unknown>>;
@@ -2497,10 +2985,15 @@ function createDatabase(
       if (normalized.startsWith('INSERT INTO command_idempotency_keys')) {
         if (
           String(params[1]) === 'bazis.create_order' ||
-          String(params[1]) === 'bazis.create_order_from_draft'
+          String(params[1]) === 'bazis.create_order_from_draft' ||
+          String(params[1]) === 'bazis.add_to_order'
         ) {
           createOrderRequestHash = params[5];
-          return options.createOrderState?.idempotencyConflict
+          const addToOrderConflict =
+            String(params[1]) === 'bazis.add_to_order'
+              ? options.addToOrderState?.idempotencyConflict
+              : options.createOrderState?.idempotencyConflict;
+          return addToOrderConflict
             ? { rows: [], rowCount: 0 }
             : {
                 rows: [
@@ -2509,7 +3002,10 @@ function createDatabase(
                     request_hash: params[5],
                     response_json: null,
                     status: 'processing',
-                    created_at: options.createOrderState?.nowIso ?? '2026-07-08T12:00:00.000Z',
+                    created_at:
+                      options.addToOrderState?.nowIso ??
+                      options.createOrderState?.nowIso ??
+                      '2026-07-08T12:00:00.000Z',
                   },
                 ],
                 rowCount: 1,
@@ -2518,7 +3014,7 @@ function createDatabase(
       }
 
       if (normalized.startsWith('SELECT idempotency_key, request_hash, response_json, status, created_at FROM command_idempotency_keys')) {
-        const row = options.createOrderState?.existingIdempotencyRow;
+        const row = options.addToOrderState?.existingIdempotencyRow ?? options.createOrderState?.existingIdempotencyRow;
         return row
           ? { rows: [row], rowCount: 1 }
           : {
@@ -2527,7 +3023,10 @@ function createDatabase(
                 request_hash: createOrderRequestHash,
                 response_json: null,
                 status: 'processing',
-                created_at: options.createOrderState?.nowIso ?? '2026-07-08T12:00:00.000Z',
+                created_at:
+                  options.addToOrderState?.nowIso ??
+                  options.createOrderState?.nowIso ??
+                  '2026-07-08T12:00:00.000Z',
               }],
               rowCount: 1,
             };
@@ -2542,14 +3041,21 @@ function createDatabase(
       }
 
       if (normalized.startsWith('SELECT r.bazis_revision_id, r.bazis_project_id, bp.project_id')) {
-        const row = options.orderDraftState?.revisionRow ?? options.createOrderState?.revisionRow;
+        const row =
+          options.addToOrderState?.revisionRow ??
+          options.orderDraftState?.revisionRow ??
+          options.createOrderState?.revisionRow;
         return row
           ? { rows: [row], rowCount: 1 }
           : { rows: [], rowCount: 0 };
       }
 
       if (normalized.startsWith('WITH RECURSIVE sel AS')) {
-        const rows = options.orderDraftState?.panelRows ?? options.createOrderState?.panelRows ?? [];
+        const rows =
+          options.addToOrderState?.panelRows ??
+          options.orderDraftState?.panelRows ??
+          options.createOrderState?.panelRows ??
+          [];
         return {
           rows,
           rowCount: rows.length,
@@ -2557,12 +3063,16 @@ function createDatabase(
       }
 
       if (normalized.startsWith('SELECT bazis_node_id, object_type FROM bazis_nodes')) {
-        const rows = options.createOrderState?.draftNodeRows ?? [];
+        const rows = options.addToOrderState?.nodeLookupRows ?? options.createOrderState?.draftNodeRows ?? [];
         return { rows, rowCount: rows.length };
       }
 
       if (normalized.startsWith('SELECT source_kind, lower(bazis_name) AS name, target_kind')) {
-        const rows = options.orderDraftState?.mappingRows ?? options.createOrderState?.mappingRows ?? [];
+        const rows =
+          options.addToOrderState?.mappingRows ??
+          options.orderDraftState?.mappingRows ??
+          options.createOrderState?.mappingRows ??
+          [];
         return {
           rows,
           rowCount: rows.length,
@@ -2570,12 +3080,12 @@ function createDatabase(
       }
 
       if (normalized.startsWith('SELECT order_id, client_id FROM orders')) {
-        const row = options.orderDraftState?.targetOrderRow;
+        const row = options.addToOrderState?.targetOrderRow ?? options.orderDraftState?.targetOrderRow;
         return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
       }
 
       if (normalized.startsWith('WITH sel AS (')) {
-        const rows = options.orderDraftState?.duplicateRows ?? [];
+        const rows = options.addToOrderState?.duplicateRows ?? options.orderDraftState?.duplicateRows ?? [];
         return { rows, rowCount: rows.length };
       }
 
@@ -2787,6 +3297,29 @@ function createOrderFromDraftCommand(
   };
 }
 
+function createAddToOrderCommand(
+  overrides: Partial<{
+    revisionId: number;
+    requestId: string;
+    orderId: number;
+    adds: number[];
+    replaces: Array<{ bazisNodeId: number; orderDetailId: number }>;
+    skips: Array<{ bazisNodeId: number; orderDetailId: number }>;
+    idempotencyKey: string;
+  }> = {},
+) {
+  return {
+    currentUser: currentUser(),
+    requestId: overrides.requestId ?? 'req-add-to-order',
+    revisionId: overrides.revisionId ?? 82,
+    orderId: overrides.orderId ?? 9001,
+    adds: overrides.adds ?? [101],
+    replaces: overrides.replaces ?? [],
+    skips: overrides.skips ?? [],
+    idempotencyKey: overrides.idempotencyKey ?? 'add-to-order-001',
+  };
+}
+
 function parsedRevision(overrides: Partial<ParsedBazisRevision> = {}): ParsedBazisRevision {
   return {
     bazisVersion: '11',
@@ -2906,6 +3439,25 @@ function hashCreateOrderFromDraftRequestShape(
         ),
         actorUserId: Number(command.currentUser.id),
         commandName: 'bazis.create_order_from_draft',
+      }),
+    )
+    .digest('hex');
+}
+
+function hashAddToOrderRequestShape(command: ReturnType<typeof createAddToOrderCommand>): string {
+  return createHash('sha256')
+    .update(
+      stableStringify({
+        orderId: command.orderId,
+        adds: [...command.adds].sort((left, right) => left - right),
+        replaces: [...command.replaces].sort(
+          (left, right) => left.bazisNodeId - right.bazisNodeId || left.orderDetailId - right.orderDetailId,
+        ),
+        skips: [...command.skips].sort(
+          (left, right) => left.bazisNodeId - right.bazisNodeId || left.orderDetailId - right.orderDetailId,
+        ),
+        actorUserId: Number(command.currentUser.id),
+        commandName: 'bazis.add_to_order',
       }),
     )
     .digest('hex');
@@ -3062,6 +3614,244 @@ function buildOrderDto(orderId: number, orderName: string): OrderDto {
     createdBy: 1,
     editedBy: 1,
   };
+}
+
+function buildDetailedOrderDto(orderId: number, orderName: string): OrderDto {
+  const order = buildOrderDto(orderId, orderName);
+  return {
+    ...order,
+    header: {
+      ...order.header,
+      priority: 17,
+      managerId: 3,
+      paymentStatusId: 2,
+      productionStatusId: 4,
+      productionStatusFromDetailsEnabled: false,
+      plannedCompletionDate: '2026-07-15',
+      completionDate: '2026-07-18',
+      issueDate: '2026-07-20',
+      paymentDate: '2026-07-21',
+      discount: 10,
+      surcharge: 5,
+      linkCuttingFile: '/cut/header.xlsx',
+      linkCuttingImageFile: '/cut/header.png',
+      linkCadFile: '/cad/header.dxf',
+      linkPdfFile: '/pdf/header.pdf',
+      notes: 'header note',
+      refKey1c: 'hdr-1c',
+      sheetMaterialTypeId: 777,
+      millingTypeId: 6,
+      edgeTypeId: 7,
+      filmId: 8,
+    },
+    details: [
+      {
+        id: 7001,
+        orderId,
+        detailNumber: 1,
+        detailName: 'Старая фасадная деталь',
+        height: 1111,
+        width: 444,
+        quantity: 2,
+        materialId: null,
+        sheetMaterialTypeId: 501,
+        millingTypeId: 5,
+        edgeTypeId: 6,
+        filmId: 601,
+        area: 0.9,
+        millingCostPerSqm: 11,
+        detailCost: 22,
+        priority: 15,
+        productionStatusId: 3,
+        jointOrderId: null,
+        note: 'keep old 1',
+        basisProject: 'old-project-1',
+        basisProduct: 'old-product-1',
+        basisData: 'old-data-1',
+        basisDesignation: 'OLD-1',
+        linkCuttingFile: '/cut/old-1.xlsx',
+        linkCuttingImageFile: '/cut/old-1.png',
+        linkCadFile: '/cad/old-1.dxf',
+        linkPdfFile: '/pdf/old-1.pdf',
+        refKey1c: 'detail-1c-1',
+      },
+      {
+        id: 7002,
+        orderId,
+        detailNumber: 2,
+        detailName: 'Старая полка',
+        height: 999,
+        width: 333,
+        quantity: 4,
+        materialId: null,
+        sheetMaterialTypeId: 999,
+        millingTypeId: 9,
+        edgeTypeId: 8,
+        filmId: 777,
+        area: 1.2,
+        millingCostPerSqm: 33,
+        detailCost: 44,
+        priority: 17,
+        productionStatusId: 2,
+        jointOrderId: 555,
+        note: 'keep me',
+        basisProject: 'old-project-2',
+        basisProduct: 'old-product-2',
+        basisData: 'old-data-2',
+        basisDesignation: 'OLD-2',
+        linkCuttingFile: '/cut/preserved.xlsx',
+        linkCuttingImageFile: '/cut/preserved.png',
+        linkCadFile: '/cad/preserved.dxf',
+        linkPdfFile: '/pdf/preserved.pdf',
+        refKey1c: 'detail-1c-2',
+      },
+    ],
+    payments: [{ id: 8101, orderId, typePaidId: 1, amount: 1500, paymentDate: '2026-07-13', notes: 'payment', refKey1c: 'pay-1' }],
+    workshops: [{
+      id: 8201,
+      orderId,
+      workshopId: 4,
+      productionStatusId: 2,
+      receivedDate: '2026-07-14',
+      startedDate: '2026-07-15',
+      completedDate: null,
+      plannedCompletionDate: '2026-07-18',
+      sequenceOrder: 1,
+      responsibleEmployeeId: 33,
+      notes: 'workshop',
+      refKey1c: 'ws-1',
+    }],
+    requirements: [{
+      id: 8301,
+      orderId,
+      resourceType: 'material',
+      materialId: null,
+      filmId: null,
+      edgeTypeId: 11,
+      requiredQuantity: 5,
+      unitId: 1,
+      wastePercentage: 7,
+      finalQuantity: 5.35,
+      requirementStatusId: 2,
+      supplierId: 17,
+      purchasePrice: 100,
+      requisitionId: 91,
+      warehouseId: 12,
+      reservedAt: '2026-07-15',
+      consumedAt: null,
+      notes: 'requirement',
+      calculationDetails: 'calc',
+      refKey1c: 'req-1',
+    }],
+    dowelingLinks: [{
+      id: 8401,
+      orderId,
+      dowelingOrderId: 77,
+      designEngineerId: 88,
+      refKey1c: 'dow-1',
+      dowelingOrder: { id: 77, name: 'Doweling 77', designEngineerId: 88 },
+    }],
+    version: 7,
+  };
+}
+
+function baseRevisionRow() {
+  return {
+    bazis_revision_id: 82,
+    bazis_project_id: 41,
+    project_id: 77,
+    bazis_project_name: 'Шкаф Nova',
+    revision_bazis_order_no: '1457',
+    project_client_id: 5,
+    client_name: 'ООО Клиент',
+  };
+}
+
+function panelRow101() {
+  return {
+    bazis_node_id: 101,
+    object_type: 'Панель',
+    name: 'Фасад/левая створка',
+    position: '7',
+    designation: 'D-01',
+    cumulative_quantity: 2,
+    length_mm: 1200,
+    width_mm: 450,
+    main_material_name: 'Laminate White',
+    product_name: 'Шкаф',
+    product_order_no: '1443',
+    raw_json: {
+      ОблицовкаПласти1: { Пласть: { Наименование: 'Snow Film' } },
+    },
+  };
+}
+
+function panelRow102() {
+  return {
+    bazis_node_id: 102,
+    object_type: 'Панель',
+    name: 'Полка',
+    position: '8',
+    designation: 'S-02',
+    cumulative_quantity: 1,
+    length_mm: 800,
+    width_mm: 300,
+    main_material_name: 'Unknown Sheet',
+    product_name: 'Шкаф',
+    product_order_no: '1443',
+    raw_json: {},
+  };
+}
+
+function panelRow104() {
+  return {
+    bazis_node_id: 104,
+    object_type: 'Панель',
+    name: 'Перегородка',
+    position: '10',
+    designation: 'P-04',
+    cumulative_quantity: 1,
+    length_mm: 700,
+    width_mm: 400,
+    main_material_name: 'Extra Sheet',
+    product_name: 'Шкаф',
+    product_order_no: '1443',
+    raw_json: {},
+  };
+}
+
+function sheetAndFilmMappings() {
+  return [
+    {
+      source_kind: 'sheet',
+      name: 'laminate white',
+      target_kind: 'sheet',
+      sheet_material_type_id: 501,
+      film_id: null,
+      edge_type_id: null,
+    },
+    {
+      source_kind: 'film',
+      name: 'snow film',
+      target_kind: 'film',
+      sheet_material_type_id: null,
+      film_id: 601,
+      edge_type_id: null,
+    },
+  ];
+}
+
+function sheetOnlyMapping(sheetMaterialTypeId: number) {
+  return [
+    {
+      source_kind: 'sheet',
+      name: sheetMaterialTypeId === 504 ? 'extra sheet' : 'unknown sheet',
+      target_kind: 'sheet',
+      sheet_material_type_id: sheetMaterialTypeId,
+      film_id: null,
+      edge_type_id: null,
+    },
+  ];
 }
 
 function isoMinutesAgo(minutes: number): string {

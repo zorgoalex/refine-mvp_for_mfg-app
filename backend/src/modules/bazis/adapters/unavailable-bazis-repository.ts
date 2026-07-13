@@ -1,4 +1,5 @@
 import type {
+  AddToOrderCommand,
   BazisRepositoryPort,
   BuildOrderDraftCommand,
   CreateOrderFromDraftCommand,
@@ -7,6 +8,7 @@ import type {
   ImportRevisionCommand,
 } from '../application/bazis.types';
 import type {
+  BazisAddToOrderResponseDto,
   BazisOrderDraftResponseDto,
   BazisRevisionEstimateDto,
   BazisImportResponseDto,
@@ -87,6 +89,10 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
   createOrderFromDraft(
     _command: CreateOrderFromDraftCommand,
   ): Promise<CreateOrderFromRevisionResponseDto> {
+    return unavailable();
+  }
+
+  addToOrder(_command: AddToOrderCommand): Promise<BazisAddToOrderResponseDto> {
     return unavailable();
   }
 

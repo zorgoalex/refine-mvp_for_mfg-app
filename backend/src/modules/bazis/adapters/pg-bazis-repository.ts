@@ -5,9 +5,12 @@ import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { OrderTransactionService } from '../../orders/application/order-transaction.service';
+import type { OrderDto } from '../../orders/dto/order.dto';
 import type { SaveOrderDetailDto, SaveOrderDto } from '../../orders/dto/save-order.dto';
+import { PgOrderReadRepository } from '../../orders/adapters/pg-order-read-repository';
 import type { ParsedBazisNode } from '../application/bazis-xml-parser';
 import type {
+  AddToOrderCommand,
   BazisRepositoryPort,
   BuildOrderDraftCommand,
   CreateOrderFromDraftCommand,
@@ -20,8 +23,10 @@ import {
   clientKeyForNode,
   collectUnmappedSheetNames,
   computeTargetOrderDuplicates,
+  orderDtoToSaveDto,
 } from './bazis-order-draft';
 import type {
+  BazisAddToOrderResponseDto,
   BazisRevisionEstimateDto,
   BazisImportResponseDto,
   BazisOrderDraftResponseDto,
@@ -39,6 +44,7 @@ import type {
   UpsertMaterialMappingDto,
 } from '../dto/bazis.dto';
 import {
+  BazisAddToOrderConflictError,
   BazisIdempotencyFailedError,
   BazisUnmappedMaterialsError,
   BazisIdempotencyInProgressError,
@@ -56,6 +62,7 @@ const SOURCE = 'backend-bazis-command';
 export const MAX_BAZIS_REVISIONS_PER_PROJECT = 3;
 const CREATE_ORDER_FROM_REVISION_COMMAND_NAME = 'bazis.create_order';
 const CREATE_ORDER_FROM_DRAFT_COMMAND_NAME = 'bazis.create_order_from_draft';
+const ADD_TO_ORDER_COMMAND_NAME = 'bazis.add_to_order';
 const STALE_PROCESSING_MS = 10 * 60 * 1000;
 
 interface PruneCandidateRow {
@@ -129,10 +136,10 @@ interface MaterialMappingRow {
   edge_type_id: number | string | null;
 }
 
-interface CreateOrderIdempotencyRow {
+interface BazisCommandIdempotencyRow<TResponse = unknown> {
   idempotency_key: string;
   request_hash: string;
-  response_json: CreateOrderFromRevisionResponseDto | string | null;
+  response_json: TResponse | string | null;
   status: string;
   created_at: string;
 }
@@ -257,10 +264,16 @@ interface OrderScopeRow {
   client_id: number | string | null;
 }
 
+type BazisOrderTransactions = Pick<OrderTransactionService, 'create'> &
+  Partial<Pick<OrderTransactionService, 'update'>>;
+
 export class PgBazisRepository implements BazisRepositoryPort {
   constructor(
     private readonly database: DatabaseService,
-    private readonly orderTransactions?: Pick<OrderTransactionService, 'create'>,
+    private readonly orderTransactions?: BazisOrderTransactions,
+    // Паритет с orders-модулем: SP3 sheet-колонки в read-пути гейтятся тем же
+    // BACKEND_SHEET_ORDERS_READS, а не захардкоженным default'ом.
+    private readonly sheetOrdersReads: boolean = true,
   ) {}
 
   async importRevision(command: ImportRevisionCommand): Promise<BazisImportResponseDto> {
@@ -1495,11 +1508,12 @@ export class PgBazisRepository implements BazisRepositoryPort {
     const requestId = requestIdOrFallback(command.requestId, 'bazis-create-order');
     const idempotency = await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
-      return reconcileCreateOrderIdempotency(tx, {
+      return reconcileBazisIdempotency<CreateOrderFromRevisionResponseDto>(tx, {
         currentUser: command.currentUser,
         idempotencyKey: command.idempotencyKey,
         commandName: CREATE_ORDER_FROM_REVISION_COMMAND_NAME,
         requestHash: hashCreateOrderFromRevisionRequestShape(command),
+        entityType: 'bazis_create_order',
       });
     });
     if (idempotency.completedResponse) {
@@ -1580,7 +1594,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
     const orderForHash = normalizeDraftOrderForHash(command.order);
     const idempotency = await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
-      return reconcileCreateOrderIdempotency(tx, {
+      return reconcileBazisIdempotency<CreateOrderFromRevisionResponseDto>(tx, {
         currentUser: command.currentUser,
         idempotencyKey: command.idempotencyKey,
         commandName: CREATE_ORDER_FROM_DRAFT_COMMAND_NAME,
@@ -1589,6 +1603,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
           nodes: command.nodes,
           actorUserId: numericUserId(command.currentUser),
         }),
+        entityType: 'bazis_create_order',
       });
     });
     if (idempotency.completedResponse) {
@@ -1618,7 +1633,11 @@ export class PgBazisRepository implements BazisRepositoryPort {
       assertUniqueDraftNodeMappings(command.nodes);
       assertDraftNodeClientKeys(command.nodes, order);
 
-      await this.assertDraftNodesBelongToRevision(command.revisionId, command.nodes);
+      await this.assertPanelNodesBelongToRevision(
+        command.revisionId,
+        command.nodes.map((node) => node.bazisNodeId),
+        'nodes',
+      );
       let response: CreateOrderFromRevisionResponseDto | null = null;
       const clientKeyByNodeId = new Map(command.nodes.map((node) => [node.bazisNodeId, node.clientKey]));
 
@@ -1651,6 +1670,211 @@ export class PgBazisRepository implements BazisRepositoryPort {
       return response;
     } catch (error) {
       await this.failCreateOrderIdempotency(command);
+      throw error;
+    }
+  }
+
+  async addToOrder(command: AddToOrderCommand): Promise<BazisAddToOrderResponseDto> {
+    if (!this.orderTransactions?.update) {
+      throw new ApiError(500, 'BAZIS_ADD_TO_ORDER_UNAVAILABLE', 'Order transaction service is not configured');
+    }
+
+    assertValidAddToOrderShape(command);
+
+    const requestId = requestIdOrFallback(command.requestId, 'bazis-add-to-order');
+    const idempotency = await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      return reconcileBazisIdempotency<BazisAddToOrderResponseDto>(tx, {
+        currentUser: command.currentUser,
+        idempotencyKey: command.idempotencyKey,
+        commandName: ADD_TO_ORDER_COMMAND_NAME,
+        requestHash: hashAddToOrderRequestShape(command),
+        entityType: 'bazis_add_to_order',
+      });
+    });
+    if (idempotency.completedResponse) {
+      return idempotency.completedResponse;
+    }
+
+    try {
+      const revision = await this.loadRevisionProject(command.revisionId);
+      if (!revision) {
+        await this.failBazisIdempotency(command.currentUser, command.idempotencyKey);
+        throw new BazisRevisionNotFoundError(command.revisionId);
+      }
+
+      const targetOrder = await this.loadTargetOrderScope(command.orderId);
+      if (!targetOrder || targetOrder.clientId !== revision.projectClientId) {
+        await this.failBazisIdempotency(command.currentUser, command.idempotencyKey);
+        throw validationErrorForField(
+          'orderId',
+          'Заказ должен существовать и принадлежать клиенту проекта Базис',
+        );
+      }
+
+      const selectedNodeIds = uniqueNumbers([
+        ...command.adds,
+        ...command.replaces.map((pair) => pair.bazisNodeId),
+      ]);
+      await this.assertPanelNodesBelongToRevision(command.revisionId, selectedNodeIds, 'adds');
+      const panels = await this.loadSelectedPanels(command.revisionId, selectedNodeIds);
+      const panelsByNodeId = new Map(panels.map((panel) => [panel.bazisNodeId, panel] as const));
+
+      const mappings = await this.loadMaterialMappingsForPanels(panels);
+      const unmappedSheetNames = collectUnmappedSheetNames(panels, mappings);
+      if (unmappedSheetNames.length > 0) {
+        await this.failBazisIdempotency(command.currentUser, command.idempotencyKey);
+        throw new BazisUnmappedMaterialsError(unmappedSheetNames);
+      }
+
+      const currentOrder = await this.loadOrderById(command.currentUser, command.orderId);
+      if (!currentOrder) {
+        await this.failBazisIdempotency(command.currentUser, command.idempotencyKey);
+        throw validationErrorForField(
+          'orderId',
+          'Заказ должен существовать и принадлежать клиенту проекта Базис',
+        );
+      }
+
+      const merge = buildAddToOrderSaveDto({
+        order: currentOrder,
+        revision,
+        command,
+        panelsByNodeId,
+        mappings,
+      });
+      let response: BazisAddToOrderResponseDto | null = null;
+
+      await this.orderTransactions.update({
+        currentUser: command.currentUser,
+        requestId,
+        orderId: command.orderId,
+        dto: merge.dto,
+        prePersistHook: async (uow) => {
+          const conflicts = await detectAddToOrderConflicts({
+            db: uow.getTransactionClient(),
+            bazisProjectId: revision.bazisProjectId,
+            orderId: command.orderId,
+            adds: command.adds,
+            replaces: command.replaces,
+            skips: command.skips,
+          });
+          if (conflicts) {
+            throw new BazisAddToOrderConflictError(conflicts);
+          }
+        },
+        postPersistHook: async (uow, updated) => {
+          const tx = uow.getTransactionClient();
+
+          for (const bazisNodeId of command.adds) {
+            const clientKey = clientKeyForNode(bazisNodeId);
+            const orderDetailId = updated.detailIdsByClientKey.get(clientKey);
+            if (!orderDetailId) {
+              throw new ApiError(500, 'BAZIS_ADD_TO_ORDER_FAILED', `Detail id missing for ${clientKey}`);
+            }
+            await upsertBazisNodeOrderDetailMap(tx, {
+              bazisNodeId,
+              orderDetailId,
+              orderId: command.orderId,
+            });
+          }
+
+          for (const pair of command.replaces) {
+            await tx.query(
+              `
+              DELETE FROM bazis_node_order_detail_map
+              WHERE order_id = $1
+                AND order_detail_id = $2
+              `,
+              [command.orderId, pair.orderDetailId],
+            );
+            await upsertBazisNodeOrderDetailMap(tx, {
+              bazisNodeId: pair.bazisNodeId,
+              orderDetailId: pair.orderDetailId,
+              orderId: command.orderId,
+            });
+          }
+
+          await tx.query(
+            `
+            INSERT INTO bazis_order_links (bazis_project_id, order_id, revision_id)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (bazis_project_id, order_id) DO NOTHING
+            `,
+            [revision.bazisProjectId, command.orderId, revision.revisionId],
+          );
+
+          const auditId = await auditService.record(tx, {
+            event: 'bazis.order_details_added',
+            entityType: 'order',
+            entityId: String(command.orderId),
+            actorUserId: command.currentUser.id,
+            actorUsername: command.currentUser.username,
+            actorRole: command.currentUser.role,
+            requestId,
+            source: SOURCE,
+            relatedOrderId: command.orderId,
+            relatedClientId: currentOrder.header.clientId,
+            before: { replaced: merge.replacedBefore },
+            after: {
+              addedNodeIds: command.adds,
+              replacedPairs: command.replaces,
+              detailsAdded: command.adds.length,
+              detailsReplaced: command.replaces.length,
+            },
+            metadata: {
+              revisionId: revision.revisionId,
+              bazisProjectId: revision.bazisProjectId,
+              idempotencyKey: command.idempotencyKey,
+            },
+            relatedEntities: [
+              { entityType: 'project', entityId: revision.projectId },
+              { entityType: 'bazis_project', entityId: revision.bazisProjectId },
+              { entityType: 'bazis_revision', entityId: revision.revisionId },
+            ],
+          });
+
+          await tx.query(
+            `
+            INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+            VALUES ($1, $2, $3, $4::jsonb, $5)
+            ON CONFLICT (idempotency_key) DO NOTHING
+            `,
+            [
+              'bazis.order_details_added',
+              'order',
+              String(command.orderId),
+              JSON.stringify({
+                orderId: command.orderId,
+                clientId: currentOrder.header.clientId,
+                bazisProjectId: revision.bazisProjectId,
+                revisionId: revision.revisionId,
+                projectId: revision.projectId,
+                addedNodeIds: command.adds,
+                replacedPairs: command.replaces,
+                auditId,
+              }),
+              `bazis-order-details-added-${command.orderId}-${command.idempotencyKey}`,
+            ],
+          );
+
+          response = {
+            orderId: command.orderId,
+            detailsAdded: command.adds.length,
+            detailsReplaced: command.replaces.length,
+            requestId,
+          };
+          await completeBazisIdempotency(tx, command.idempotencyKey, response);
+        },
+      });
+
+      if (!response) {
+        throw new ApiError(500, 'BAZIS_ADD_TO_ORDER_FAILED', 'Не удалось сохранить результат добавления панелей');
+      }
+
+      return response;
+    } catch (error) {
+      await this.failBazisIdempotency(command.currentUser, command.idempotencyKey);
       throw error;
     }
   }
@@ -1897,15 +2121,16 @@ export class PgBazisRepository implements BazisRepositoryPort {
     }));
   }
 
-  private async assertDraftNodesBelongToRevision(
+  private async assertPanelNodesBelongToRevision(
     revisionId: number,
-    nodes: ReadonlyArray<{ bazisNodeId: number }>,
+    nodeIds: readonly number[],
+    field: string,
   ): Promise<void> {
-    if (nodes.length === 0) {
+    if (nodeIds.length === 0) {
       return;
     }
 
-    const uniqueNodeIds = [...new Set(nodes.map((node) => node.bazisNodeId))];
+    const uniqueNodeIds = [...new Set(nodeIds)];
     const result = await this.database.query<DraftNodeLookupRow>(
       `
       SELECT bazis_node_id, object_type
@@ -1922,10 +2147,13 @@ export class PgBazisRepository implements BazisRepositoryPort {
     }));
 
     if (rows.length !== uniqueNodeIds.length || rows.some((row) => row.objectType !== 'Панель')) {
-      throw new ApiError(422, 'VALIDATION_ERROR', 'Указанные узлы должны быть панелями из выбранной ревизии', {
-        errors: [{ field: 'nodes', message: 'Указанные узлы должны быть панелями из выбранной ревизии' }],
-      });
+      throw validationErrorForField(field, 'Указанные узлы должны быть панелями из выбранной ревизии');
     }
+  }
+
+  private async loadOrderById(currentUser: CurrentUser, orderId: number): Promise<OrderDto | null> {
+    const reader = new PgOrderReadRepository(this.database, this.sheetOrdersReads);
+    return reader.getOrderById({ currentUser, orderId });
   }
 
   private async loadMaterialMappingsForPanels(
@@ -2094,16 +2322,20 @@ export class PgBazisRepository implements BazisRepositoryPort {
       ],
     );
 
-    await completeCreateOrderIdempotency(input.tx, input.command.idempotencyKey, response);
+    await completeBazisIdempotency(input.tx, input.command.idempotencyKey, response);
     return response;
   }
 
   private async failCreateOrderIdempotency(
     command: Pick<CreateOrderFromRevisionCommand, 'currentUser' | 'idempotencyKey'>,
   ): Promise<void> {
+    await this.failBazisIdempotency(command.currentUser, command.idempotencyKey);
+  }
+
+  private async failBazisIdempotency(currentUser: CurrentUser, idempotencyKey: string): Promise<void> {
     await this.database.transaction(async (tx) => {
-      await setSessionUser(tx, command.currentUser.id);
-      await markCreateOrderIdempotencyFailed(tx, command.idempotencyKey);
+      await setSessionUser(tx, currentUser.id);
+      await markBazisIdempotencyFailed(tx, idempotencyKey);
     }).catch(() => undefined);
   }
 }
@@ -2242,6 +2474,116 @@ function isForeignKeyViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === '23503';
 }
 
+function buildAddToOrderSaveDto(input: {
+  order: OrderDto;
+  revision: { bazisProjectName: string; revisionBazisOrderNo: string | null };
+  command: AddToOrderCommand;
+  panelsByNodeId: ReadonlyMap<
+    number,
+    {
+      bazisNodeId: number;
+      name: string | null;
+      position: string | null;
+      designation: string | null;
+      cumulativeQuantity: number | null;
+      lengthMm: number | null;
+      widthMm: number | null;
+      mainMaterialName: string | null;
+      productName: string | null;
+      productOrderNo: string | null;
+      rawJson: Record<string, unknown> | null;
+    }
+  >;
+  mappings: Map<string, MaterialLookupRow>;
+}): {
+  dto: SaveOrderDto;
+  replacedBefore: Array<{
+    orderDetailId: number;
+    detailName: string | null;
+    height: number;
+    width: number;
+    quantity: number;
+    sheetMaterialTypeId: number | null;
+    filmId: number | null;
+    basisProject: string | null;
+    basisProduct: string | null;
+    basisDesignation: string | null;
+    basisData: string | null;
+  }>;
+} {
+  const merged = orderDtoToSaveDto(input.order);
+  const draftDetailsByNodeId = new Map(
+    buildDraftDetails(
+      uniqueNumbers([
+        ...input.command.adds,
+        ...input.command.replaces.map((pair) => pair.bazisNodeId),
+      ]).map((nodeId) => requirePanel(input.panelsByNodeId, nodeId)),
+      input.mappings,
+      input.revision,
+    ).map((detail) => [detail.bazisNodeId, detail] as const),
+  );
+
+  const details = merged.details.map((detail) => ({ ...detail }));
+  const detailsById = new Map(
+    details
+      .filter((detail): detail is SaveOrderDetailDto & { id: number } => typeof detail.id === 'number')
+      .map((detail) => [detail.id, detail] as const),
+  );
+  const replacedBefore: Array<{
+    orderDetailId: number;
+    detailName: string | null;
+    height: number;
+    width: number;
+    quantity: number;
+    sheetMaterialTypeId: number | null;
+    filmId: number | null;
+    basisProject: string | null;
+    basisProduct: string | null;
+    basisDesignation: string | null;
+    basisData: string | null;
+  }> = [];
+
+  for (const pair of input.command.replaces) {
+    const target = detailsById.get(pair.orderDetailId);
+    if (!target) {
+      throw validationErrorForField('replaces', `Деталь заказа ${pair.orderDetailId} не найдена`);
+    }
+    const next = toSaveDetailFromDraftDetail(draftDetailsByNodeId.get(pair.bazisNodeId), pair.bazisNodeId);
+    replacedBefore.push(snapshotReplacedDetail(target));
+    target.detailName = next.detailName;
+    target.height = next.height;
+    target.width = next.width;
+    target.quantity = next.quantity;
+    target.sheetMaterialTypeId = next.sheetMaterialTypeId;
+    target.filmId = next.filmId;
+    target.basisProject = next.basisProject;
+    target.basisProduct = next.basisProduct;
+    target.basisDesignation = next.basisDesignation;
+    target.basisData = next.basisData;
+  }
+
+  details.push(
+    ...input.command.adds.map((bazisNodeId) =>
+      toSaveDetailFromDraftDetail(draftDetailsByNodeId.get(bazisNodeId), bazisNodeId),
+    ),
+  );
+
+  return {
+    dto: {
+      ...merged,
+      details,
+      deleted: {
+        detailIds: [],
+        paymentIds: [],
+        workshopIds: [],
+        requirementIds: [],
+        dowelingLinkIds: [],
+      },
+    },
+    replacedBefore,
+  };
+}
+
 function buildOrderCreateDto(
   command: CreateOrderFromRevisionCommand,
   revision: { projectId: number; bazisProjectName: string; revisionBazisOrderNo: string | null },
@@ -2302,6 +2644,56 @@ function sanitizeDraftOrder(order: SaveOrderDto, projectId: number): SaveOrderDt
   };
 }
 
+function requirePanel<T>(panelsByNodeId: ReadonlyMap<number, T>, bazisNodeId: number): T {
+  const panel = panelsByNodeId.get(bazisNodeId);
+  if (!panel) {
+    throw validationErrorForField('adds', 'Указанные узлы должны быть панелями из выбранной ревизии');
+  }
+  return panel;
+}
+
+function toSaveDetailFromDraftDetail(
+  detail: ReturnType<typeof buildDraftDetails>[number] | undefined,
+  bazisNodeId: number,
+): SaveOrderDetailDto {
+  if (!detail) {
+    throw validationErrorForField('adds', `Не найдена панель ${bazisNodeId}`);
+  }
+  const { bazisNodeId: _bazisNodeId, ...rest } = detail;
+  return {
+    ...rest,
+    materialId: null,
+  };
+}
+
+function snapshotReplacedDetail(detail: SaveOrderDetailDto & { id?: number }): {
+  orderDetailId: number;
+  detailName: string | null;
+  height: number;
+  width: number;
+  quantity: number;
+  sheetMaterialTypeId: number | null;
+  filmId: number | null;
+  basisProject: string | null;
+  basisProduct: string | null;
+  basisDesignation: string | null;
+  basisData: string | null;
+} {
+  return {
+    orderDetailId: Number(detail.id),
+    detailName: detail.detailName ?? null,
+    height: detail.height,
+    width: detail.width,
+    quantity: detail.quantity,
+    sheetMaterialTypeId: detail.sheetMaterialTypeId ?? null,
+    filmId: detail.filmId ?? null,
+    basisProject: detail.basisProject ?? null,
+    basisProduct: detail.basisProduct ?? null,
+    basisDesignation: detail.basisDesignation ?? null,
+    basisData: detail.basisData ?? null,
+  };
+}
+
 function normalizeDraftOrderForHash(order: SaveOrderDto): SaveOrderDto {
   return {
     ...order,
@@ -2359,6 +2751,129 @@ function assertDraftNodeClientKeys(
   }
 }
 
+function assertValidAddToOrderShape(command: AddToOrderCommand): void {
+  if (command.adds.length === 0 && command.replaces.length === 0) {
+    throw validationErrorForField('adds', 'Нужно указать хотя бы одну панель в adds или replaces');
+  }
+
+  const seenNodeIds = new Set<number>();
+  for (const bazisNodeId of command.adds) {
+    if (seenNodeIds.has(bazisNodeId)) {
+      throw validationErrorForField('adds', 'Повторяющиеся bazisNodeId в adds/replaces/skips недопустимы');
+    }
+    seenNodeIds.add(bazisNodeId);
+  }
+  for (const pair of command.replaces) {
+    if (seenNodeIds.has(pair.bazisNodeId)) {
+      throw validationErrorForField('replaces', 'Повторяющиеся bazisNodeId в adds/replaces/skips недопустимы');
+    }
+    seenNodeIds.add(pair.bazisNodeId);
+  }
+  for (const pair of command.skips) {
+    if (seenNodeIds.has(pair.bazisNodeId)) {
+      throw validationErrorForField('skips', 'Повторяющиеся bazisNodeId в adds/replaces/skips недопустимы');
+    }
+    seenNodeIds.add(pair.bazisNodeId);
+  }
+
+  const seenOrderDetailIds = new Set<number>();
+  for (const pair of command.replaces) {
+    if (seenOrderDetailIds.has(pair.orderDetailId)) {
+      throw validationErrorForField('replaces', 'Повторяющиеся orderDetailId в replaces недопустимы');
+    }
+    seenOrderDetailIds.add(pair.orderDetailId);
+  }
+}
+
+async function detectAddToOrderConflicts(input: {
+  db: Pick<TransactionClient, 'query'>;
+  bazisProjectId: number;
+  orderId: number;
+  adds: readonly number[];
+  replaces: ReadonlyArray<{ bazisNodeId: number; orderDetailId: number }>;
+  skips: ReadonlyArray<{ bazisNodeId: number; orderDetailId: number }>;
+}): Promise<Record<string, unknown> | null> {
+  const freshPairs = await computeTargetOrderDuplicates(input.db, {
+    bazisProjectId: input.bazisProjectId,
+    orderId: input.orderId,
+    nodeIds: uniqueNumbers([
+      ...input.adds,
+      ...input.replaces.map((pair) => pair.bazisNodeId),
+      ...input.skips.map((pair) => pair.bazisNodeId),
+    ]),
+  });
+  const actualPairKeys = new Set(freshPairs.map(pairKey));
+  const expectedPairs = [...input.replaces, ...input.skips];
+  const expectedPairKeys = new Set(expectedPairs.map(pairKey));
+  const skipPairKeys = new Set(input.skips.map(pairKey));
+  const addNodeIdsWithDuplicates = uniqueNumbers(
+    freshPairs.filter((pair) => input.adds.includes(pair.bazisNodeId)).map((pair) => pair.bazisNodeId),
+  );
+  const missingPairs = expectedPairs.filter((pair) => !actualPairKeys.has(pairKey(pair)));
+  const unexpectedPairs = freshPairs.filter(
+    (pair) => !expectedPairKeys.has(pairKey(pair)) && !input.adds.includes(pair.bazisNodeId),
+  );
+
+  const nodeCounts = new Map<number, number>();
+  const detailCounts = new Map<number, number>();
+  for (const pair of freshPairs) {
+    nodeCounts.set(pair.bazisNodeId, (nodeCounts.get(pair.bazisNodeId) ?? 0) + 1);
+    detailCounts.set(pair.orderDetailId, (detailCounts.get(pair.orderDetailId) ?? 0) + 1);
+  }
+  const ambiguousPairs = freshPairs.filter((pair) => {
+    const ambiguous = (nodeCounts.get(pair.bazisNodeId) ?? 0) > 1 || (detailCounts.get(pair.orderDetailId) ?? 0) > 1;
+    return ambiguous && !skipPairKeys.has(pairKey(pair));
+  });
+
+  if (
+    missingPairs.length === 0 &&
+    unexpectedPairs.length === 0 &&
+    addNodeIdsWithDuplicates.length === 0 &&
+    ambiguousPairs.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    missingPairs,
+    unexpectedPairs,
+    addNodeIdsWithDuplicates,
+    ambiguousPairs,
+    freshPairs,
+  };
+}
+
+async function upsertBazisNodeOrderDetailMap(
+  tx: TransactionClient,
+  input: { bazisNodeId: number; orderDetailId: number; orderId: number },
+): Promise<void> {
+  await tx.query(
+    `
+    INSERT INTO bazis_node_order_detail_map (node_id, order_detail_id, order_id, mapping_kind)
+    VALUES ($1, $2, $3, 'created')
+    ON CONFLICT (node_id, order_id)
+    DO UPDATE
+    SET order_detail_id = EXCLUDED.order_detail_id,
+        mapping_kind = 'created'
+    `,
+    [input.bazisNodeId, input.orderDetailId, input.orderId],
+  );
+}
+
+function validationErrorForField(field: string, message: string): ApiError {
+  return new ApiError(422, 'VALIDATION_ERROR', message, {
+    errors: [{ field, message }],
+  });
+}
+
+function uniqueNumbers(values: readonly number[]): number[] {
+  return [...new Set(values)];
+}
+
+function pairKey(pair: { bazisNodeId: number; orderDetailId: number }): string {
+  return `${pair.bazisNodeId}:${pair.orderDetailId}`;
+}
+
 function extractFilmNames(rawJson: Record<string, unknown> | null): string[] {
   if (!rawJson) {
     return [];
@@ -2386,16 +2901,17 @@ function extractFilmNames(rawJson: Record<string, unknown> | null): string[] {
   return result;
 }
 
-async function reconcileCreateOrderIdempotency(
+async function reconcileBazisIdempotency<TResponse>(
   tx: TransactionClient,
   input: {
     currentUser: CurrentUser;
     idempotencyKey: string;
     commandName: string;
     requestHash: string;
+    entityType: string;
   },
-): Promise<{ completedResponse?: CreateOrderFromRevisionResponseDto }> {
-  const inserted = await tx.query<CreateOrderIdempotencyRow>(
+): Promise<{ completedResponse?: TResponse }> {
+  const inserted = await tx.query<BazisCommandIdempotencyRow<TResponse>>(
     `
     INSERT INTO command_idempotency_keys (
       idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status
@@ -2408,7 +2924,7 @@ async function reconcileCreateOrderIdempotency(
       input.idempotencyKey,
       input.commandName,
       numericUserId(input.currentUser),
-      'bazis_create_order',
+      input.entityType,
       'pending',
       input.requestHash,
     ],
@@ -2418,7 +2934,7 @@ async function reconcileCreateOrderIdempotency(
     return {};
   }
 
-  const existing = await tx.query<CreateOrderIdempotencyRow>(
+  const existing = await tx.query<BazisCommandIdempotencyRow<TResponse>>(
     `
     SELECT idempotency_key, request_hash, response_json, status, created_at
     FROM command_idempotency_keys
@@ -2435,7 +2951,7 @@ async function reconcileCreateOrderIdempotency(
     throw new BazisIdempotencyKeyReusedError();
   }
   if (row.status === 'completed' && row.response_json) {
-    return { completedResponse: parseStoredCreateOrderResponse(row.response_json) };
+    return { completedResponse: parseStoredResponse<TResponse>(row.response_json) };
   }
   if (row.status === 'failed') {
     throw new BazisIdempotencyFailedError();
@@ -2443,7 +2959,7 @@ async function reconcileCreateOrderIdempotency(
   if (row.status === 'processing') {
     const ageMs = Date.now() - Date.parse(row.created_at);
     if (Number.isFinite(ageMs) && ageMs >= STALE_PROCESSING_MS) {
-      await markCreateOrderIdempotencyFailed(tx, input.idempotencyKey);
+      await markBazisIdempotencyFailed(tx, input.idempotencyKey);
       throw new ApiError(
         409,
         'BAZIS_IDEMPOTENCY_FAILED',
@@ -2483,10 +2999,25 @@ function hashCreateOrderFromDraftRequestShape(input: {
   });
 }
 
-async function completeCreateOrderIdempotency(
+function hashAddToOrderRequestShape(command: AddToOrderCommand): string {
+  return hashRequest({
+    orderId: command.orderId,
+    adds: [...command.adds].sort((left, right) => left - right),
+    replaces: [...command.replaces].sort(
+      (left, right) => left.bazisNodeId - right.bazisNodeId || left.orderDetailId - right.orderDetailId,
+    ),
+    skips: [...command.skips].sort(
+      (left, right) => left.bazisNodeId - right.bazisNodeId || left.orderDetailId - right.orderDetailId,
+    ),
+    actorUserId: numericUserId(command.currentUser),
+    commandName: ADD_TO_ORDER_COMMAND_NAME,
+  });
+}
+
+async function completeBazisIdempotency<TResponse>(
   tx: TransactionClient,
   idempotencyKey: string,
-  response: CreateOrderFromRevisionResponseDto,
+  response: TResponse,
 ): Promise<void> {
   await tx.query(
     `
@@ -2500,7 +3031,7 @@ async function completeCreateOrderIdempotency(
   );
 }
 
-async function markCreateOrderIdempotencyFailed(
+async function markBazisIdempotencyFailed(
   tx: TransactionClient,
   idempotencyKey: string,
 ): Promise<void> {
@@ -2538,10 +3069,6 @@ function stableStringify(value: unknown): string {
     .join(',')}}`;
 }
 
-function parseStoredCreateOrderResponse(
-  responseJson: CreateOrderFromRevisionResponseDto | string,
-): CreateOrderFromRevisionResponseDto {
-  return typeof responseJson === 'string'
-    ? (JSON.parse(responseJson) as CreateOrderFromRevisionResponseDto)
-    : responseJson;
+function parseStoredResponse<TResponse>(responseJson: TResponse | string): TResponse {
+  return typeof responseJson === 'string' ? (JSON.parse(responseJson) as TResponse) : responseJson;
 }

@@ -100,3 +100,14 @@ export class BazisIdempotencyFailedError extends ApiError {
     super(409, 'BAZIS_IDEMPOTENCY_FAILED', 'Предыдущее выполнение с этим ключом завершилось ошибкой');
   }
 }
+
+export class BazisAddToOrderConflictError extends ApiError {
+  constructor(details: Record<string, unknown>) {
+    super(
+      409,
+      'BAZIS_ADD_TO_ORDER_CONFLICT',
+      'Список дублей в заказе изменился, обновите замены и повторите операцию',
+      details,
+    );
+  }
+}

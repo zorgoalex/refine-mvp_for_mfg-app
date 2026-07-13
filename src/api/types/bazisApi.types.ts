@@ -212,6 +212,26 @@ export interface CreateOrderFromDraftRequest {
   idempotencyKey: string;
 }
 
+export interface BazisAddToOrderPair {
+  bazisNodeId: number;
+  orderDetailId: number;
+}
+
+export interface BazisAddToOrderRequest {
+  orderId: number;
+  adds: number[];
+  replaces: BazisAddToOrderPair[];
+  skips: BazisAddToOrderPair[];
+  idempotencyKey: string;
+}
+
+export interface BazisAddToOrderResponse {
+  orderId: number;
+  detailsAdded: number;
+  detailsReplaced: number;
+  requestId: string;
+}
+
 export interface BazisOrderDraftDetail {
   bazisNodeId: number;
   clientKey: string;

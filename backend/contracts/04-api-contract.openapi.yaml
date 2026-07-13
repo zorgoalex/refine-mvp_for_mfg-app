@@ -3328,6 +3328,111 @@ paths:
           $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/bazis/revisions/{revisionId}/add-to-order:
+    post:
+      tags:
+        - Bazis
+      operationId: addBazisPanelsToOrder
+      summary: Add selected Bazis panels to an existing ERP order
+      description: Requires `bazis.manage` and `orders.update`.
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      parameters:
+        - in: path
+          name: revisionId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - orderId
+                - adds
+                - replaces
+                - skips
+                - idempotencyKey
+              properties:
+                orderId:
+                  type: integer
+                adds:
+                  type: array
+                  items:
+                    type: integer
+                replaces:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - bazisNodeId
+                      - orderDetailId
+                    properties:
+                      bazisNodeId:
+                        type: integer
+                      orderDetailId:
+                        type: integer
+                skips:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - bazisNodeId
+                      - orderDetailId
+                    properties:
+                      bazisNodeId:
+                        type: integer
+                      orderDetailId:
+                        type: integer
+                idempotencyKey:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+      responses:
+        '200':
+          description: Selected Bazis panels added to ERP order
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - orderId
+                  - detailsAdded
+                  - detailsReplaced
+                  - requestId
+                properties:
+                  orderId:
+                    type: integer
+                  detailsAdded:
+                    type: integer
+                  detailsReplaced:
+                    type: integer
+                  requestId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis revision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/bazis/revisions/{id}/order-draft:
     post:
       tags:

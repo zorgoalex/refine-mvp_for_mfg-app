@@ -2,6 +2,8 @@ import { apiRoutes, backendApiPath } from './apiRoutes';
 import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
+  BazisAddToOrderRequest,
+  BazisAddToOrderResponse,
   BazisRevisionEstimate,
   CreateOrderFromDraftRequest,
   BazisImportResponse,
@@ -134,6 +136,16 @@ export const bazisApi = {
   ): Promise<CreateOrderFromRevisionResponse> {
     return httpClient.post<CreateOrderFromRevisionResponse>(
       apiRoutes.bazis.revisionOrders(validateId(revisionId, 'revisionId')),
+      body,
+    );
+  },
+
+  addToOrder(
+    revisionId: number,
+    body: BazisAddToOrderRequest,
+  ): Promise<BazisAddToOrderResponse> {
+    return httpClient.post<BazisAddToOrderResponse>(
+      backendApiPath(`/bazis/revisions/${validateId(revisionId, 'revisionId')}/add-to-order`),
       body,
     );
   },

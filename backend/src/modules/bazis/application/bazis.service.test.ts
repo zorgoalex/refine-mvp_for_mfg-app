@@ -560,6 +560,80 @@ describe('BazisService', () => {
     });
     expect(result.orderId).toBe(1);
   });
+
+  it('requires bazis.manage for addToOrder and writes denied-audit', async () => {
+    const repository = createRepository();
+    const auditQuery = vi
+      .fn()
+      .mockResolvedValue({ rows: [{ audit_id: 'aud-denied-add-to-order' }], rowCount: 1 });
+    const service = new BazisService({
+      repository,
+      auditDatabase: { query: auditQuery },
+    });
+
+    await expect(
+      service.addToOrder({
+        currentUser: viewerUser(),
+        requestId: 'req-add-to-order',
+        revisionId: 82,
+        orderId: 9001,
+        adds: [101],
+        replaces: [],
+        skips: [],
+        idempotencyKey: 'add-to-order-key-1',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['bazis.manage'] },
+    } satisfies Partial<ApiError>);
+
+    const auditInsert = auditQuery.mock.calls.find(([text]) =>
+      String(text).replace(/\s+/g, ' ').includes('INSERT INTO audit_log ('),
+    );
+    expect(auditInsert).toBeDefined();
+    const params = auditInsert?.[1] as unknown[];
+    expect(params[2]).toBe('add_to_order');
+    expect(params.some((param) => String(param).includes('"action":"add_to_order"'))).toBe(true);
+    expect(repository.addToOrder).not.toHaveBeenCalled();
+  });
+
+  it('requires orders.update for addToOrder after bazis.manage and writes denied-audit', async () => {
+    const repository = createRepository();
+    const auditQuery = vi
+      .fn()
+      .mockResolvedValue({ rows: [{ audit_id: 'aud-denied-orders-update' }], rowCount: 1 });
+    const service = new BazisService({
+      repository,
+      auditDatabase: { query: auditQuery },
+    });
+
+    await expect(
+      service.addToOrder({
+        currentUser: bazisManager(),
+        requestId: 'req-add-to-order',
+        revisionId: 82,
+        orderId: 9001,
+        adds: [101],
+        replaces: [],
+        skips: [],
+        idempotencyKey: 'add-to-order-key-1',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['orders.update'] },
+    } satisfies Partial<ApiError>);
+
+    const auditInsert = auditQuery.mock.calls.find(([text]) =>
+      String(text).replace(/\s+/g, ' ').includes('INSERT INTO audit_log ('),
+    );
+    expect(auditInsert).toBeDefined();
+    const params = auditInsert?.[1] as unknown[];
+    expect(params[2]).toBe('add_to_order');
+    expect(params.some((param) => String(param).includes('"action":"add_to_order"'))).toBe(true);
+    expect(repository.addToOrder).not.toHaveBeenCalled();
+  });
 });
 
 function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
@@ -651,6 +725,12 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
       detailsCreated: 0,
       mappedNodes: 0,
       requestId: 'req-order',
+    }),
+    addToOrder: vi.fn().mockResolvedValue({
+      orderId: 9001,
+      detailsAdded: 1,
+      detailsReplaced: 0,
+      requestId: 'req-add-to-order',
     }),
     deleteProject: vi.fn().mockResolvedValue({
       bazisProjectId: 41,
