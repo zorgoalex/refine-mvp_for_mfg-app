@@ -69,12 +69,14 @@ export const resourceFromPath = (pathname: string): string | undefined => {
   return seg ? resourceKeyFromSegment(seg) : undefined;
 };
 
+export const resolveOrderTabLabel = (orderName: unknown): string =>
+  typeof orderName === 'string' && orderName.trim() ? orderName.trim() : 'Заказ';
+
 export const resolveTabLabel = (pathname: string): string => {
   const segs = pathname.split('/').filter(Boolean);
-  const orderMatch = pathname.match(/^\/orders\/(edit|show)\/(\d+)/);
+  const orderMatch = pathname.match(/^\/orders\/(edit|show)\/\d+/);
   if (orderMatch) {
-    const [, action, orderId] = orderMatch;
-    return action === 'edit' ? `Заказ #${orderId} · Редактирование` : `Заказ #${orderId}`;
+    return resolveOrderTabLabel(undefined);
   }
   const resource = resourceFromPath(pathname);
   const resourceLabel = resource ? RESOURCE_LABELS[resource] : undefined;

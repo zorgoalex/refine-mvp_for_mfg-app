@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveTabLabel, RESOURCE_LABELS } from './tabLabels';
+import { resolveOrderTabLabel, resolveTabLabel, RESOURCE_LABELS } from './tabLabels';
 
 describe('resolveTabLabel', () => {
   it('maps a list route to its resource label', () => {
@@ -7,11 +7,15 @@ describe('resolveTabLabel', () => {
     expect(resolveTabLabel('/calendar')).toBe('Календарь');
     expect(resolveTabLabel('/groups')).toBe('Группы');
   });
-  it('labels an order edit route with the id and edit suffix', () => {
-    expect(resolveTabLabel('/orders/edit/11195')).toBe('Заказ #11195 · Редактирование');
+  it('does not expose an order id in an edit tab before the record loads', () => {
+    expect(resolveTabLabel('/orders/edit/11195')).toBe('Заказ');
   });
-  it('labels an order show route with the id only', () => {
-    expect(resolveTabLabel('/orders/show/11195')).toBe('Заказ #11195');
+  it('does not expose an order id in a show tab before the record loads', () => {
+    expect(resolveTabLabel('/orders/show/11195')).toBe('Заказ');
+  });
+  it('uses only the loaded order name as the tab label', () => {
+    expect(resolveOrderTabLabel('  Кухня-25  ')).toBe('Кухня-25');
+    expect(resolveOrderTabLabel(null)).toBe('Заказ');
   });
   it('distinguishes list, show, create and edit tabs for reference resources', () => {
     expect(resolveTabLabel('/sheet-material-types')).toBe('Листовые материалы');

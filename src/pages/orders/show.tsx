@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useTabStore } from "../../stores/tabStore";
+import { resolveOrderTabLabel } from "../../utils/tabLabels";
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from "../../utils/materialDisplayName";
 import { downloadOrderExcel } from "../../utils/excel/generateOrderExcel";
 import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
@@ -156,19 +157,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     ? `Заказ ${record.order_full_number}`
     : 'Просмотр заказа';
 
-  // Enrich the workspace tab label once the order record is loaded.
+  // The workspace tab shows only the user-facing order name, never its database id.
   const location = useLocation();
   const setTabTitle = useTabStore((s) => s.setTabTitle);
   useEffect(() => {
-    if (record?.order_full_number) {
-      setTabTitle(location.pathname, `Заказ ${record.order_full_number}`);
-      return;
-    }
-
     if (record?.order_name) {
-      setTabTitle(location.pathname, `Заказ #${record.order_id} · ${record.order_name}`);
+      setTabTitle(location.pathname, resolveOrderTabLabel(record.order_name));
     }
-  }, [record?.order_id, record?.order_name, record?.order_full_number, location.pathname, setTabTitle]);
+  }, [record?.order_name, location.pathname, setTabTitle]);
 
   const { data: clientData, isLoading: clientLoading } = useOne({
     resource: "clients",

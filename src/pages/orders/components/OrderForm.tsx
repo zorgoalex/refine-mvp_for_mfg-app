@@ -25,6 +25,7 @@ import { OrderFormMode } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
 import { featureFlags } from '../../../config/featureFlags';
 import { can } from '../../../utils/permissions';
+import { resolveOrderTabLabel } from '../../../utils/tabLabels';
 import dayjs from 'dayjs';
 
 // Sections
@@ -162,12 +163,12 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const setTabTitle = useTabStore((s) => s.setTabTitle);
   const closeTab = useTabStore((s) => s.closeTab);
 
-  // Enrich the tab label once the order name is known.
+  // The workspace tab shows only the user-facing order name, never its database id.
   useEffect(() => {
-    if (mode === 'edit' && orderId && header?.order_name) {
-      setTabTitle(tabKey, `Заказ #${orderId} · ${header.order_name} · Редактирование`);
+    if (mode === 'edit' && header?.order_name) {
+      setTabTitle(tabKey, resolveOrderTabLabel(header.order_name));
     }
-  }, [mode, orderId, header?.order_name, tabKey, setTabTitle]);
+  }, [mode, header?.order_name, tabKey, setTabTitle]);
   const { exportToDrive, isUploading } = useOrderExport();
 
   // Read sub-tab reactively from the URL (do NOT strip/replace it — the workspace
