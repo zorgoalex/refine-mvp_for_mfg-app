@@ -1161,6 +1161,452 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
   });
 });
 
+describe('PgBazisRepository.buildOrderDraft', () => {
+  it('returns draft details with client metadata and clientKey', async () => {
+    const database = createDatabase({
+      orderDraftState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          revision_bazis_order_no: '1457',
+          project_client_id: 5,
+          client_name: 'ООО Клиент',
+        },
+        panelRows: [
+          {
+            bazis_node_id: 101,
+            object_type: 'Панель',
+            name: 'Фасад/левая створка',
+            position: '7',
+            designation: 'D-01',
+            cumulative_quantity: 2,
+            length_mm: 1200,
+            width_mm: 450,
+            main_material_name: 'Laminate White',
+            product_name: 'Шкаф',
+            product_order_no: '1443',
+            raw_json: {
+              ОблицовкаПласти1: { Пласть: [{ Наименование: 'Snow Film' }] },
+              ОблицовкаПласти2: { Пласть: [{ Наименование: 'Snow Film' }] },
+            },
+          },
+        ],
+        mappingRows: [
+          {
+            source_kind: 'sheet',
+            name: 'laminate white',
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+            film_id: null,
+            edge_type_id: null,
+          },
+          {
+            source_kind: 'film',
+            name: 'snow film',
+            target_kind: 'film',
+            sheet_material_type_id: null,
+            film_id: 601,
+            edge_type_id: null,
+          },
+        ],
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const result = await repository.buildOrderDraft({
+      currentUser: currentUser(),
+      revisionId: 82,
+      selectedNodeIds: [101],
+    });
+
+    expect(result).toMatchObject({
+      revisionId: 82,
+      projectId: 77,
+      clientId: 5,
+      clientName: 'ООО Клиент',
+      bazisProjectName: 'Шкаф Nova',
+      bazisOrderNo: '1457',
+      duplicates: [],
+    });
+    expect(result.details).toEqual([
+      {
+        bazisNodeId: 101,
+        clientKey: 'bazis-node-101',
+        detailName: 'Фасад/левая створка',
+        height: 1200,
+        width: 450,
+        quantity: 2,
+        sheetMaterialTypeId: 501,
+        filmId: 601,
+        millingTypeId: 1,
+        edgeTypeId: 1,
+        priority: 100,
+        basisProject: '1443',
+        basisProduct: 'Шкаф',
+        basisDesignation: 'D-01',
+        basisData: '7/D-01/Фасад/левая створка',
+      },
+    ]);
+  });
+
+  it('throws BazisRevisionNotFoundError when the revision is missing', async () => {
+    const repository = new PgBazisRepository(createDatabase().service);
+
+    await expect(
+      repository.buildOrderDraft({
+        currentUser: currentUser(),
+        revisionId: 999,
+        selectedNodeIds: [101],
+      }),
+    ).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+
+  it('throws BazisNoPanelsSelectedError when the selection expands to zero panels', async () => {
+    const repository = new PgBazisRepository(
+      createDatabase({
+        orderDraftState: {
+          revisionRow: {
+            bazis_revision_id: 82,
+            bazis_project_id: 41,
+            project_id: 77,
+            bazis_project_name: 'Шкаф Nova',
+            project_client_id: 5,
+            client_name: 'ООО Клиент',
+          },
+          panelRows: [],
+        },
+      }).service,
+    );
+
+    await expect(
+      repository.buildOrderDraft({
+        currentUser: currentUser(),
+        revisionId: 82,
+        selectedNodeIds: [101],
+      }),
+    ).rejects.toBeInstanceOf(BazisNoPanelsSelectedError);
+  });
+
+  it('throws unmapped materials before producing a draft', async () => {
+    const repository = new PgBazisRepository(
+      createDatabase({
+        orderDraftState: {
+          revisionRow: {
+            bazis_revision_id: 82,
+            bazis_project_id: 41,
+            project_id: 77,
+            bazis_project_name: 'Шкаф Nova',
+            project_client_id: 5,
+            client_name: 'ООО Клиент',
+          },
+          panelRows: [
+            {
+              bazis_node_id: 101,
+              object_type: 'Панель',
+              name: 'Фасад',
+              position: '7',
+              designation: 'D-01',
+              cumulative_quantity: 1,
+              length_mm: 1200,
+              width_mm: 450,
+              main_material_name: 'Unknown Sheet',
+              raw_json: {},
+            },
+          ],
+          mappingRows: [],
+        },
+      }).service,
+    );
+
+    await expect(
+      repository.buildOrderDraft({
+        currentUser: currentUser(),
+        revisionId: 82,
+        selectedNodeIds: [101],
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'BAZIS_UNMAPPED_MATERIALS',
+      details: { unmappedMaterials: ['Unknown Sheet'] },
+    });
+  });
+
+  it('rejects targetOrderId from another client with VALIDATION_ERROR', async () => {
+    const repository = new PgBazisRepository(
+      createDatabase({
+        orderDraftState: {
+          revisionRow: {
+            bazis_revision_id: 82,
+            bazis_project_id: 41,
+            project_id: 77,
+            bazis_project_name: 'Шкаф Nova',
+            project_client_id: 5,
+            client_name: 'ООО Клиент',
+          },
+          panelRows: [
+            {
+              bazis_node_id: 101,
+              object_type: 'Панель',
+              name: 'Фасад',
+              position: '7',
+              designation: 'D-01',
+              cumulative_quantity: 1,
+              length_mm: 1200,
+              width_mm: 450,
+              main_material_name: 'Laminate White',
+              raw_json: {},
+            },
+          ],
+          mappingRows: [
+            {
+              source_kind: 'sheet',
+              name: 'laminate white',
+              target_kind: 'sheet',
+              sheet_material_type_id: 501,
+              film_id: null,
+              edge_type_id: null,
+            },
+          ],
+          targetOrderRow: { order_id: 9001, client_id: 8 },
+        },
+      }).service,
+    );
+
+    await expect(
+      repository.buildOrderDraft({
+        currentUser: currentUser(),
+        revisionId: 82,
+        selectedNodeIds: [101],
+        targetOrderId: 9001,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: {
+        errors: [{ field: 'targetOrderId', message: 'Целевой заказ должен принадлежать клиенту проекта Базис' }],
+      },
+    });
+  });
+
+  it('returns node_map duplicates for the same node already linked to the target order', async () => {
+    const repository = new PgBazisRepository(
+      createDatabase({
+        orderDraftState: {
+          revisionRow: {
+            bazis_revision_id: 82,
+            bazis_project_id: 41,
+            project_id: 77,
+            bazis_project_name: 'Шкаф Nova',
+            project_client_id: 5,
+            client_name: 'ООО Клиент',
+          },
+          panelRows: [
+            {
+              bazis_node_id: 101,
+              object_type: 'Панель',
+              name: 'Фасад',
+              position: '7',
+              designation: 'D-01',
+              cumulative_quantity: 1,
+              length_mm: 1200,
+              width_mm: 450,
+              main_material_name: 'Laminate White',
+              raw_json: {},
+            },
+          ],
+          mappingRows: [
+            {
+              source_kind: 'sheet',
+              name: 'laminate white',
+              target_kind: 'sheet',
+              sheet_material_type_id: 501,
+              film_id: null,
+              edge_type_id: null,
+            },
+          ],
+          targetOrderRow: { order_id: 9001, client_id: 5 },
+          duplicateRows: [{ bazis_node_id: 101, order_detail_id: 7001, matched_by: 'node_map' }],
+        },
+      }).service,
+    );
+
+    const result = await repository.buildOrderDraft({
+      currentUser: currentUser(),
+      revisionId: 82,
+      selectedNodeIds: [101],
+      targetOrderId: 9001,
+    });
+
+    expect(result.duplicates).toEqual([
+      { bazisNodeId: 101, orderDetailId: 7001, matchedBy: 'node_map' },
+    ]);
+  });
+
+  it('returns basis_fields duplicates across revisions of the same bazis project', async () => {
+    const database = createDatabase({
+      orderDraftState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+          client_name: 'ООО Клиент',
+        },
+        panelRows: [
+          {
+            bazis_node_id: 101,
+            object_type: 'Панель',
+            name: 'Фасад',
+            position: '7',
+            designation: 'D-01',
+            cumulative_quantity: 1,
+            length_mm: 1200,
+            width_mm: 450,
+            main_material_name: 'Laminate White',
+            raw_json: {},
+          },
+        ],
+        mappingRows: [
+          {
+            source_kind: 'sheet',
+            name: 'laminate white',
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+            film_id: null,
+            edge_type_id: null,
+          },
+        ],
+        targetOrderRow: { order_id: 9001, client_id: 5 },
+        duplicateRows: [{ bazis_node_id: 101, order_detail_id: 7002, matched_by: 'basis_fields' }],
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const result = await repository.buildOrderDraft({
+      currentUser: currentUser(),
+      revisionId: 82,
+      selectedNodeIds: [101],
+      targetOrderId: 9001,
+    });
+
+    expect(result.duplicates).toEqual([
+      { bazisNodeId: 101, orderDetailId: 7002, matchedBy: 'basis_fields' },
+    ]);
+    const duplicateSql = database.queries
+      .map((query) => normalizeSql(query.text))
+      .find((sql) => sql.startsWith('WITH sel AS ('));
+    expect(duplicateSql).toContain('r.bazis_project_id = $1');
+    expect(duplicateSql).toContain('o.revision_id');
+  });
+
+  it('does not match basis_fields when the selected node position is empty', async () => {
+    const repository = new PgBazisRepository(
+      createDatabase({
+        orderDraftState: {
+          revisionRow: {
+            bazis_revision_id: 82,
+            bazis_project_id: 41,
+            project_id: 77,
+            bazis_project_name: 'Шкаф Nova',
+            project_client_id: 5,
+            client_name: 'ООО Клиент',
+          },
+          panelRows: [
+            {
+              bazis_node_id: 101,
+              object_type: 'Панель',
+              name: 'Фасад',
+              position: '',
+              designation: 'D-01',
+              cumulative_quantity: 1,
+              length_mm: 1200,
+              width_mm: 450,
+              main_material_name: 'Laminate White',
+              raw_json: {},
+            },
+          ],
+          mappingRows: [
+            {
+              source_kind: 'sheet',
+              name: 'laminate white',
+              target_kind: 'sheet',
+              sheet_material_type_id: 501,
+              film_id: null,
+              edge_type_id: null,
+            },
+          ],
+          targetOrderRow: { order_id: 9001, client_id: 5 },
+          duplicateRows: [],
+        },
+      }).service,
+    );
+
+    const result = await repository.buildOrderDraft({
+      currentUser: currentUser(),
+      revisionId: 82,
+      selectedNodeIds: [101],
+      targetOrderId: 9001,
+    });
+
+    expect(result.duplicates).toEqual([]);
+  });
+
+  it('ignores map rows without order_detail_id when computing duplicates', async () => {
+    const repository = new PgBazisRepository(
+      createDatabase({
+        orderDraftState: {
+          revisionRow: {
+            bazis_revision_id: 82,
+            bazis_project_id: 41,
+            project_id: 77,
+            bazis_project_name: 'Шкаф Nova',
+            project_client_id: 5,
+            client_name: 'ООО Клиент',
+          },
+          panelRows: [
+            {
+              bazis_node_id: 101,
+              object_type: 'Панель',
+              name: 'Фасад',
+              position: '7',
+              designation: 'D-01',
+              cumulative_quantity: 1,
+              length_mm: 1200,
+              width_mm: 450,
+              main_material_name: 'Laminate White',
+              raw_json: {},
+            },
+          ],
+          mappingRows: [
+            {
+              source_kind: 'sheet',
+              name: 'laminate white',
+              target_kind: 'sheet',
+              sheet_material_type_id: 501,
+              film_id: null,
+              edge_type_id: null,
+            },
+          ],
+          targetOrderRow: { order_id: 9001, client_id: 5 },
+          duplicateRows: [],
+        },
+      }).service,
+    );
+
+    const result = await repository.buildOrderDraft({
+      currentUser: currentUser(),
+      revisionId: 82,
+      selectedNodeIds: [101],
+      targetOrderId: 9001,
+    });
+
+    expect(result.duplicates).toEqual([]);
+  });
+});
+
 describe('PgBazisRepository.getMaterialsSummary', () => {
   it('aggregates panels by material with mapping status, hardware, edges and films', async () => {
     const database = createDatabase({
@@ -1652,6 +2098,13 @@ function createDatabase(
       mappingRows?: Array<Record<string, unknown>>;
       nowIso?: string;
     };
+    orderDraftState?: {
+      revisionRow?: Record<string, unknown>;
+      panelRows?: Array<Record<string, unknown>>;
+      mappingRows?: Array<Record<string, unknown>>;
+      targetOrderRow?: Record<string, unknown> | null;
+      duplicateRows?: Array<Record<string, unknown>>;
+    };
     materialsSummary?: {
       summaryRow?: Record<string, unknown> | null;
       panelRows?: Array<Record<string, unknown>>;
@@ -1721,23 +2174,36 @@ function createDatabase(
       }
 
       if (normalized.startsWith('SELECT r.bazis_revision_id, r.bazis_project_id, bp.project_id')) {
-        return options.createOrderState?.revisionRow
-          ? { rows: [options.createOrderState.revisionRow], rowCount: 1 }
+        const row = options.orderDraftState?.revisionRow ?? options.createOrderState?.revisionRow;
+        return row
+          ? { rows: [row], rowCount: 1 }
           : { rows: [], rowCount: 0 };
       }
 
       if (normalized.startsWith('WITH RECURSIVE sel AS')) {
+        const rows = options.orderDraftState?.panelRows ?? options.createOrderState?.panelRows ?? [];
         return {
-          rows: options.createOrderState?.panelRows ?? [],
-          rowCount: options.createOrderState?.panelRows?.length ?? 0,
+          rows,
+          rowCount: rows.length,
         };
       }
 
       if (normalized.startsWith('SELECT source_kind, lower(bazis_name) AS name, target_kind')) {
+        const rows = options.orderDraftState?.mappingRows ?? options.createOrderState?.mappingRows ?? [];
         return {
-          rows: options.createOrderState?.mappingRows ?? [],
-          rowCount: options.createOrderState?.mappingRows?.length ?? 0,
+          rows,
+          rowCount: rows.length,
         };
+      }
+
+      if (normalized.startsWith('SELECT order_id, client_id FROM orders')) {
+        const row = options.orderDraftState?.targetOrderRow;
+        return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+
+      if (normalized.startsWith('WITH sel AS (')) {
+        const rows = options.orderDraftState?.duplicateRows ?? [];
+        return { rows, rowCount: rows.length };
       }
 
       if (normalized.startsWith('INSERT INTO bazis_projects')) {

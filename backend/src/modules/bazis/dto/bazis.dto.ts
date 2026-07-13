@@ -223,6 +223,41 @@ export interface CreateOrderFromRevisionResponseDto {
   auditId?: string;
 }
 
+export interface BazisOrderDraftDetailDto {
+  bazisNodeId: number;
+  clientKey: string;
+  detailName: string | null;
+  height: number;
+  width: number;
+  quantity: number;
+  sheetMaterialTypeId: number | null;
+  filmId: number | null;
+  millingTypeId: number;
+  edgeTypeId: number;
+  priority: number;
+  basisProject: string | null;
+  basisProduct: string | null;
+  basisDesignation: string | null;
+  basisData: string;
+}
+
+export interface BazisOrderDraftDuplicateDto {
+  bazisNodeId: number;
+  orderDetailId: number;
+  matchedBy: 'node_map' | 'basis_fields';
+}
+
+export interface BazisOrderDraftResponseDto {
+  revisionId: number;
+  projectId: number;
+  clientId: number | null;
+  clientName: string | null;
+  bazisProjectName: string;
+  bazisOrderNo: string | null;
+  details: BazisOrderDraftDetailDto[];
+  duplicates: BazisOrderDraftDuplicateDto[];
+}
+
 export interface BazisProjectDeleteResponseDto {
   bazisProjectId: number;
   projectId: number;

@@ -12,12 +12,14 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
   BazisRepositoryPort,
+  BuildOrderDraftCommand,
   CreateOrderFromRevisionCommand,
   ImportXmlInput,
 } from './bazis.types';
 import {
   type BazisImportResponseDto,
   type BazisNodeCardDto,
+  type BazisOrderDraftResponseDto,
   type BazisNodeSearchResponseDto,
   type BazisProjectCardDto,
   type BazisProjectDeleteResponseDto,
@@ -187,6 +189,14 @@ export class BazisService {
   ): Promise<CreateOrderFromRevisionResponseDto> {
     await this.requirePermission(command.currentUser, 'bazis.manage', 'create_order', command.requestId);
     return this.ports.repository.createOrderFromRevision(command);
+  }
+
+  async buildOrderDraft(command: BuildOrderDraftCommand): Promise<BazisOrderDraftResponseDto> {
+    await this.requirePermission(command.currentUser, 'bazis.view', 'order_draft', command.requestId);
+    if (command.targetOrderId != null) {
+      await this.requirePermission(command.currentUser, 'orders.update', 'order_draft', command.requestId);
+    }
+    return this.ports.repository.buildOrderDraft(command);
   }
 
   private async requirePermission(

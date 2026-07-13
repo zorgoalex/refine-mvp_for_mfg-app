@@ -8,6 +8,7 @@ import type { BazisService } from '../application/bazis.service';
 import {
   BazisController,
   parseBazisImportFields,
+  parseBuildOrderDraftBody,
   parseMaterialMappingsQuery,
   parseNodeSearchQuery,
   parseRevisionTreeQuery,
@@ -225,6 +226,65 @@ describe('BazisController', () => {
       code: 'VALIDATION_ERROR',
     } satisfies Partial<ApiError>);
   });
+
+  it('coerces order-draft body and delegates to the service', async () => {
+    const buildOrderDraft = vi.fn().mockResolvedValue({
+      revisionId: 12,
+      projectId: 77,
+      clientId: 5,
+      clientName: 'ООО Клиент',
+      bazisProjectName: 'Шкаф Nova',
+      bazisOrderNo: '1457',
+      details: [],
+      duplicates: [],
+    });
+    const controller = createController({
+      bazisEnabled: true,
+      service: { buildOrderDraft },
+    });
+
+    const result = await controller.buildOrderDraft(request(), '12', {
+      selectedNodeIds: ['101', '102'],
+      targetOrderId: '9001',
+    });
+
+    expect(buildOrderDraft).toHaveBeenCalledWith({
+      currentUser: request().user,
+      requestId: 'req-1',
+      revisionId: 12,
+      selectedNodeIds: [101, 102],
+      targetOrderId: 9001,
+    });
+    expect(result.revisionId).toBe(12);
+  });
+
+  it('validates order-draft request body', async () => {
+    const controller = createController({ bazisEnabled: true });
+
+    await expect(
+      controller.buildOrderDraft(request(), '12', {
+        selectedNodeIds: Array.from({ length: 501 }, (_, index) => String(index + 1)),
+        targetOrderId: '0',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+    } satisfies Partial<ApiError>);
+  });
+
+  it('parseBuildOrderDraftBody enforces non-empty node ids and optional positive target order id', () => {
+    expect(
+      parseBuildOrderDraftBody({ selectedNodeIds: ['1', '2'], targetOrderId: '5' }),
+    ).toEqual({
+      selectedNodeIds: [1, 2],
+      targetOrderId: 5,
+    });
+
+    expect(() => parseBuildOrderDraftBody({ selectedNodeIds: [] })).toThrowError(ApiError);
+    expect(() => parseBuildOrderDraftBody({ selectedNodeIds: ['1'], targetOrderId: '0' })).toThrowError(
+      ApiError,
+    );
+  });
 });
 
 function createController(input: {
@@ -242,6 +302,7 @@ function createController(input: {
     listRevisionOrders: vi.fn(),
     listMaterialMappings: vi.fn(),
     upsertMaterialMappings: vi.fn(),
+    buildOrderDraft: vi.fn(),
     createOrderFromRevision: vi.fn(),
     ...input.service,
   } as unknown as BazisService;

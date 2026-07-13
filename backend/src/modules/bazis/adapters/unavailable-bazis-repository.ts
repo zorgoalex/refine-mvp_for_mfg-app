@@ -1,10 +1,12 @@
 import type {
   BazisRepositoryPort,
+  BuildOrderDraftCommand,
   CreateOrderFromRevisionCommand,
   DeleteBazisProjectInput,
   ImportRevisionCommand,
 } from '../application/bazis.types';
 import type {
+  BazisOrderDraftResponseDto,
   BazisRevisionEstimateDto,
   BazisImportResponseDto,
   BazisProjectDeleteResponseDto,
@@ -68,6 +70,10 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
     _requestId: string | undefined,
     _items: UpsertMaterialMappingDto[],
   ): Promise<MaterialMappingDto[]> {
+    return unavailable();
+  }
+
+  buildOrderDraft(_command: BuildOrderDraftCommand): Promise<BazisOrderDraftResponseDto> {
     return unavailable();
   }
 

@@ -4,6 +4,7 @@ import type {
   BazisImportResponseDto,
   BazisProjectDeleteResponseDto,
   BazisNodeCardDto,
+  BazisOrderDraftResponseDto,
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
@@ -48,6 +49,14 @@ export interface CreateOrderFromRevisionCommand {
   idempotencyKey: string;
 }
 
+export interface BuildOrderDraftCommand {
+  currentUser: CurrentUser;
+  requestId?: string;
+  revisionId: number;
+  selectedNodeIds: number[];
+  targetOrderId?: number | null;
+}
+
 export interface DeleteBazisProjectInput {
   currentUser: CurrentUser;
   requestId?: string;
@@ -73,6 +82,7 @@ export interface BazisRepositoryPort {
     requestId: string | undefined,
     items: UpsertMaterialMappingDto[],
   ): Promise<MaterialMappingDto[]>;
+  buildOrderDraft(command: BuildOrderDraftCommand): Promise<BazisOrderDraftResponseDto>;
   createOrderFromRevision(
     command: CreateOrderFromRevisionCommand,
   ): Promise<CreateOrderFromRevisionResponseDto>;

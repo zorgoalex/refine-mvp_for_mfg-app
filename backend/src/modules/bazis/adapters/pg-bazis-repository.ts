@@ -9,13 +9,21 @@ import type { SaveOrderDetailDto, SaveOrderDto } from '../../orders/dto/save-ord
 import type { ParsedBazisNode } from '../application/bazis-xml-parser';
 import type {
   BazisRepositoryPort,
+  BuildOrderDraftCommand,
   CreateOrderFromRevisionCommand,
   DeleteBazisProjectInput,
   ImportRevisionCommand,
 } from '../application/bazis.types';
+import {
+  buildDraftDetails,
+  clientKeyForNode,
+  collectUnmappedSheetNames,
+  computeTargetOrderDuplicates,
+} from './bazis-order-draft';
 import type {
   BazisRevisionEstimateDto,
   BazisImportResponseDto,
+  BazisOrderDraftResponseDto,
   BazisProjectDeleteResponseDto,
   BazisNodeCardDto,
   BazisNodeSearchItemDto,
@@ -134,6 +142,7 @@ interface RevisionProjectRow {
   bazis_project_name: string;
   revision_bazis_order_no: string | null;
   project_client_id: number | string | null;
+  client_name: string | null;
 }
 
 interface SelectedPanelRow {
@@ -234,6 +243,11 @@ interface RevisionOrderRow {
   created_at: string;
   nodes_mapped: number | string;
   details_created: number | string;
+}
+
+interface OrderScopeRow {
+  order_id: number | string;
+  client_id: number | string | null;
 }
 
 export class PgBazisRepository implements BazisRepositoryPort {
@@ -1540,6 +1554,64 @@ export class PgBazisRepository implements BazisRepositoryPort {
     }
   }
 
+  async buildOrderDraft(command: BuildOrderDraftCommand): Promise<BazisOrderDraftResponseDto> {
+    const revision = await this.loadRevisionProject(command.revisionId);
+    if (!revision) {
+      throw new BazisRevisionNotFoundError(command.revisionId);
+    }
+
+    const panels = await this.loadSelectedPanels(command.revisionId, command.selectedNodeIds);
+    if (panels.length === 0) {
+      throw new BazisNoPanelsSelectedError();
+    }
+
+    const mappings = await this.loadMaterialMappingsForPanels(panels);
+    const unmappedSheetNames = collectUnmappedSheetNames(panels, mappings);
+    if (unmappedSheetNames.length > 0) {
+      throw new BazisUnmappedMaterialsError(unmappedSheetNames);
+    }
+
+    if (command.targetOrderId != null) {
+      const targetOrder = await this.loadTargetOrderScope(command.targetOrderId);
+      if (!targetOrder || targetOrder.clientId !== revision.projectClientId) {
+        throw new ApiError(
+          422,
+          'VALIDATION_ERROR',
+          'Целевой заказ должен принадлежать клиенту проекта Базис',
+          {
+            errors: [
+              {
+                field: 'targetOrderId',
+                message: 'Целевой заказ должен принадлежать клиенту проекта Базис',
+              },
+            ],
+          },
+        );
+      }
+    }
+
+    const details = buildDraftDetails(panels, mappings, revision);
+    const duplicates =
+      command.targetOrderId == null
+        ? []
+        : await computeTargetOrderDuplicates(this.database, {
+            bazisProjectId: revision.bazisProjectId,
+            orderId: command.targetOrderId,
+            nodeIds: details.map((detail) => detail.bazisNodeId),
+          });
+
+    return {
+      revisionId: revision.revisionId,
+      projectId: revision.projectId,
+      clientId: revision.projectClientId,
+      clientName: revision.clientName,
+      bazisProjectName: revision.bazisProjectName,
+      bazisOrderNo: revision.revisionBazisOrderNo,
+      details,
+      duplicates,
+    };
+  }
+
   private async assertRevisionExists(revisionId: number): Promise<void> {
     const result = await this.database.query<{ ok: number }>(
       `SELECT 1 AS ok FROM bazis_project_revisions WHERE bazis_revision_id = $1`,
@@ -1557,6 +1629,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
     bazisProjectName: string;
     revisionBazisOrderNo: string | null;
     projectClientId: number | null;
+    clientName: string | null;
   } | null> {
     const result = await this.database.query<RevisionProjectRow>(
       `
@@ -1565,10 +1638,12 @@ export class PgBazisRepository implements BazisRepositoryPort {
              bp.project_id,
              bp.name AS bazis_project_name,
              r.bazis_order_no AS revision_bazis_order_no,
-             p.client_id AS project_client_id
+             p.client_id AS project_client_id,
+             c.client_name
       FROM bazis_project_revisions r
       JOIN bazis_projects bp ON bp.bazis_project_id = r.bazis_project_id
       LEFT JOIN projects p ON p.project_id = bp.project_id
+      LEFT JOIN clients c ON c.client_id = p.client_id
       WHERE r.bazis_revision_id = $1
       `,
       [revisionId],
@@ -1587,6 +1662,27 @@ export class PgBazisRepository implements BazisRepositoryPort {
       bazisProjectName: row.bazis_project_name,
       revisionBazisOrderNo: row.revision_bazis_order_no,
       projectClientId: nullableNumber(row.project_client_id),
+      clientName: row.client_name,
+    };
+  }
+
+  private async loadTargetOrderScope(orderId: number): Promise<{ orderId: number; clientId: number | null } | null> {
+    const result = await this.database.query<OrderScopeRow>(
+      `
+      SELECT order_id, client_id
+      FROM orders
+      WHERE order_id = $1
+        AND delete_flag = false
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    return {
+      orderId: Number(row.order_id),
+      clientId: nullableNumber(row.client_id),
     };
   }
 
@@ -2002,33 +2098,6 @@ function isForeignKeyViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === '23503';
 }
 
-function clientKeyForNode(bazisNodeId: number): string {
-  return `bazis-node-${bazisNodeId}`;
-}
-
-/**
- * Variant B: sheet_material_type_id обязателен у каждой детали. Панель без
- * действующего sheet-маппинга (нет строки, target=ignore, нет имени материала)
- * не может стать деталью заказа — собираем имена для 422 до create.
- */
-function collectUnmappedSheetNames(
-  panels: ReadonlyArray<{ mainMaterialName: string | null }>,
-  mappings: Map<string, MaterialLookupRow>,
-): string[] {
-  const names = new Set<string>();
-  for (const panel of panels) {
-    if (!panel.mainMaterialName) {
-      names.add('(панель без материала)');
-      continue;
-    }
-    const mapping = mappings.get(`sheet:${panel.mainMaterialName.toLowerCase()}`);
-    if (mapping?.target_kind !== 'sheet' || mapping.sheet_material_type_id == null) {
-      names.add(panel.mainMaterialName);
-    }
-  }
-  return [...names];
-}
-
 function buildOrderCreateDto(
   command: CreateOrderFromRevisionCommand,
   revision: { projectId: number; bazisProjectName: string; revisionBazisOrderNo: string | null },
@@ -2048,34 +2117,12 @@ function buildOrderCreateDto(
   mappings: Map<string, MaterialLookupRow>,
 ): SaveOrderDto {
   const orderDate = new Date().toISOString().slice(0, 10);
-  const details: SaveOrderDetailDto[] = panels.map((panel) => {
-    const filmNames = extractFilmNames(panel.rawJson);
-    const uniqueFilmNames = [...new Set(filmNames.map((name) => name.toLowerCase()))];
-    const filmMapping =
-      uniqueFilmNames.length === 1 ? mappings.get(`film:${uniqueFilmNames[0]}`) : undefined;
-    const sheetMapping = panel.mainMaterialName
-      ? mappings.get(`sheet:${panel.mainMaterialName.toLowerCase()}`)
-      : undefined;
-
-    return {
-      clientKey: clientKeyForNode(panel.bazisNodeId),
-      detailName: panel.name,
-      height: panel.lengthMm ?? 0,
-      width: panel.widthMm ?? 0,
-      quantity: panel.cumulativeQuantity ?? 0,
+  const details: SaveOrderDetailDto[] = buildDraftDetails(panels, mappings, revision).map(
+    ({ bazisNodeId: _bazisNodeId, ...detail }) => ({
+      ...detail,
       materialId: null,
-      sheetMaterialTypeId:
-        sheetMapping?.target_kind === 'sheet' ? nullableNumber(sheetMapping.sheet_material_type_id) : null,
-      millingTypeId: 1,
-      edgeTypeId: 1,
-      filmId: filmMapping?.target_kind === 'film' ? nullableNumber(filmMapping.film_id) : null,
-      priority: 100,
-      basisProject: panel.productOrderNo ?? revision.revisionBazisOrderNo ?? revision.bazisProjectName,
-      basisProduct: panel.productName ?? null,
-      basisDesignation: panel.designation,
-      basisData: `${panel.position ?? ''}/${panel.designation ?? ''}/${panel.name ?? ''}`,
-    };
-  });
+    }),
+  );
 
   return {
     header: {

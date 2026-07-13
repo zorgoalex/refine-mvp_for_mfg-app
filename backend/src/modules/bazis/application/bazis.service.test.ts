@@ -320,6 +320,101 @@ describe('BazisService', () => {
     });
   });
 
+  it('requires bazis.view for buildOrderDraft', async () => {
+    const repository = createRepository();
+    const service = new BazisService({ repository });
+
+    await expect(
+      service.buildOrderDraft({
+        currentUser: managerUser(),
+        requestId: 'req-draft',
+        revisionId: 1,
+        selectedNodeIds: [4],
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['bazis.view'] },
+    } satisfies Partial<ApiError>);
+
+    expect(repository.buildOrderDraft).not.toHaveBeenCalled();
+  });
+
+  it('requires orders.update for buildOrderDraft when targetOrderId is present and writes denied-audit', async () => {
+    const repository = createRepository();
+    const auditQuery = vi
+      .fn()
+      .mockResolvedValue({ rows: [{ audit_id: 'aud-denied-order-draft' }], rowCount: 1 });
+    const service = new BazisService({
+      repository,
+      auditDatabase: { query: auditQuery },
+    });
+
+    await expect(
+      service.buildOrderDraft({
+        currentUser: viewerUser(),
+        requestId: 'req-draft',
+        revisionId: 1,
+        selectedNodeIds: [4],
+        targetOrderId: 55,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['orders.update'] },
+    } satisfies Partial<ApiError>);
+
+    const auditInsert = auditQuery.mock.calls.find(([text]) =>
+      String(text).replace(/\s+/g, ' ').includes('INSERT INTO audit_log ('),
+    );
+    expect(auditInsert).toBeDefined();
+    const params = auditInsert?.[1] as unknown[];
+    expect(params[2]).toBe('order_draft');
+    expect(params.some((param) => String(param).includes('"action":"order_draft"'))).toBe(true);
+    expect(repository.buildOrderDraft).not.toHaveBeenCalled();
+  });
+
+  it('delegates buildOrderDraft with bazis.view only when targetOrderId is absent', async () => {
+    const repository = createRepository();
+    const service = new BazisService({ repository });
+
+    const result = await service.buildOrderDraft({
+      currentUser: viewerUser(),
+      requestId: 'req-draft',
+      revisionId: 1,
+      selectedNodeIds: [4, 5],
+    });
+
+    expect(repository.buildOrderDraft).toHaveBeenCalledWith({
+      currentUser: viewerUser(),
+      requestId: 'req-draft',
+      revisionId: 1,
+      selectedNodeIds: [4, 5],
+    });
+    expect(result.revisionId).toBe(1);
+  });
+
+  it('delegates buildOrderDraft when both bazis.view and orders.update are present', async () => {
+    const repository = createRepository();
+    const service = new BazisService({ repository });
+
+    await service.buildOrderDraft({
+      currentUser: ordersUpdaterUser(),
+      requestId: 'req-draft',
+      revisionId: 1,
+      selectedNodeIds: [4, 5],
+      targetOrderId: 77,
+    });
+
+    expect(repository.buildOrderDraft).toHaveBeenCalledWith({
+      currentUser: ordersUpdaterUser(),
+      requestId: 'req-draft',
+      revisionId: 1,
+      selectedNodeIds: [4, 5],
+      targetOrderId: 77,
+    });
+  });
+
   it('requires bazis.manage for createOrderFromRevision', async () => {
     const repository = createRepository();
     const service = new BazisService({ repository });
@@ -439,6 +534,16 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
     listRevisionOrders: vi.fn().mockResolvedValue([]),
     listMaterialMappings: vi.fn().mockResolvedValue([]),
     upsertMaterialMappings: vi.fn().mockResolvedValue([]),
+    buildOrderDraft: vi.fn().mockResolvedValue({
+      revisionId: 1,
+      projectId: 12,
+      clientId: 2,
+      clientName: 'Client',
+      bazisProjectName: 'Проект',
+      bazisOrderNo: '1457',
+      details: [],
+      duplicates: [],
+    }),
     createOrderFromRevision: vi.fn().mockResolvedValue({
       orderId: 1,
       orderName: 'Order',
@@ -494,5 +599,15 @@ function managerUser(): CurrentUser {
     role: 'manager',
     roleId: 1,
     permissions: [],
+  };
+}
+
+function ordersUpdaterUser(): CurrentUser {
+  return {
+    id: '13',
+    username: 'order-updater',
+    role: 'manager',
+    roleId: 1,
+    permissions: ['bazis.view', 'orders.update'],
   };
 }
