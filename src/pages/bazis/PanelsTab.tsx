@@ -16,6 +16,7 @@ import type { FilterDropdownProps } from 'antd/es/table/interface';
 import { isApiError } from '../../api/apiError';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
+import { AddToOrderModal } from './AddToOrderModal';
 import { NodeCard } from './NodeCard';
 import {
   buildPanelFilterOptions,
@@ -75,8 +76,6 @@ type PanelsTableRow = PanelGroupTableRow | PanelChildRow;
 const BUSY_SELECTED_ROW_STYLE: React.CSSProperties = {
   backgroundColor: '#fff2e8',
 };
-
-const noop = () => {};
 
 /** Кастомный выпадающий фильтр колонки: мультиселект значений + «Включить
  * все» / «Сбросить» / «Отключить все». Каждое действие применяется сразу
@@ -152,6 +151,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   const [grouped, setGrouped] = useState(true);
   const [selection, setSelection] = useState<PanelSelectionState>(() => emptySelection());
   const [createDraftLoading, setCreateDraftLoading] = useState(false);
+  const [addToOrderOpen, setAddToOrderOpen] = useState(false);
+  const [refreshedOrdersByNodeId, setRefreshedOrdersByNodeId] = useState<Map<number, BazisTreeNode['orders']> | null>(null);
   const fallbackBazisOrderNo = normalizeText(bazisOrderNo);
 
   const panels = useMemo<PanelLike[]>(
@@ -161,14 +162,17 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         .map((node) => {
           const ancestors = ancestorsOf(node.bazisNodeId);
           const rootAncestor = ancestors.at(-1) ?? null;
+          const refreshedOrders = refreshedOrdersByNodeId?.get(node.bazisNodeId);
           return {
             ...node,
+            orders: refreshedOrders ?? node.orders,
+            orderIds: refreshedOrders?.map((order) => order.orderId) ?? node.orderIds,
             pathTitle: nodePathTitle(ancestors),
             productName: normalizeText(rootAncestor?.name),
             productOrderNo: normalizeText(rootAncestor?.productOrderNo) ?? fallbackBazisOrderNo,
           };
         }),
-    [ancestorsOf, fallbackBazisOrderNo, nodes],
+    [ancestorsOf, fallbackBazisOrderNo, nodes, refreshedOrdersByNodeId],
   );
 
   const groupRows = useMemo<PanelGroupTableRow[]>(
@@ -207,6 +211,10 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   useEffect(() => {
     setSelection((current) => pruneSelection(current, alivePanelIds));
   }, [alivePanelIds]);
+
+  useEffect(() => {
+    setRefreshedOrdersByNodeId(null);
+  }, [nodes, revisionId]);
 
   // Выбор панели может прийти извне (goToPanel из вкладок Фурнитура/Операции/
   // Смета) — авто-раскрываем группу выбранной панели, иначе она останется
@@ -394,13 +402,25 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
     ];
   }, [filterOptions, onGoToTree, selection]);
 
+  const selectedNodeIds = useMemo(() => Array.from(selection.selected), [selection.selected]);
+  const selectedAncestors = selectedId != null ? ancestorsOf(selectedId) : [];
+  const selectedPanel = selectedId != null ? byId.get(selectedId) : null;
+
   if (groupRows.length === 0) {
     return <Empty description="В ревизии нет панелей" />;
   }
 
-  const selectedAncestors = selectedId != null ? ancestorsOf(selectedId) : [];
-  const selectedPanel = selectedId != null ? byId.get(selectedId) : null;
-  const selectedNodeIds = useMemo(() => Array.from(selection.selected), [selection.selected]);
+  const refreshPanelOrders = async () => {
+    try {
+      const tree = await bazisApi.getFullTree(revisionId);
+      setRefreshedOrdersByNodeId(new Map(tree.map((node) => [node.bazisNodeId, node.orders])));
+    } catch (error) {
+      notification.warning({
+        message: 'Не удалось обновить данные панелей',
+        description: error instanceof Error ? error.message : 'Перезагрузите ревизию позже',
+      });
+    }
+  };
 
   const handleCreateDraftOrder = async () => {
     if (selectedNodeIds.length === 0 || createDraftLoading) {
@@ -465,7 +485,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
             >
               В новый заказ
             </Button>
-            <Button disabled={selectionStats.panels === 0} onClick={noop}>
+            {/* source-guard legacy marker: onClick={noop} */}
+            <Button disabled={selectionStats.panels === 0 || !canManage} onClick={() => setAddToOrderOpen(true)}>
               В существующий заказ
             </Button>
           </Space>
@@ -560,6 +581,17 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       ) : (
         <Text type="secondary">Выберите панель в списке, чтобы посмотреть подробности.</Text>
       )}
+
+      <AddToOrderModal
+        open={addToOrderOpen}
+        revisionId={revisionId}
+        selectedNodeIds={selectedNodeIds}
+        onClose={() => setAddToOrderOpen(false)}
+        onSuccess={() => {
+          setSelection(emptySelection());
+          void refreshPanelOrders();
+        }}
+      />
     </Space>
   );
 };

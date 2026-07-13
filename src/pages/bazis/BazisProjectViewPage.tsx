@@ -203,6 +203,7 @@ export const BazisProjectViewPage: React.FC = () => {
     return <Spin />;
   }
 
+
   const handleRevisionChange = (nextRevisionId: number) => {
     const nextSearchParams = new URLSearchParams(searchParams);
     nextSearchParams.set('revision', String(nextRevisionId));
