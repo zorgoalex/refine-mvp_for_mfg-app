@@ -82,4 +82,28 @@ describe('bazis panels grouping UI guards', () => {
     const sorterCount = (panelsTab.match(/sorter:/g) ?? []).length;
     expect(sorterCount).toBeGreaterThanOrEqual(5);
   });
+
+  it('чекбокс «Группировать» справа над списком, по дефолту включён', () => {
+    expect(panelsTab).toContain('Группировать');
+    expect(panelsTab).toMatch(/useState\(true\)/); // grouped default ON
+    expect(panelsTab).toContain('Checkbox');
+  });
+
+  it('№ сортируется, всего сортировщиков ≥6', () => {
+    expect(panelsTab).toContain('panelComparators.seq');
+    const sorterCount = (panelsTab.match(/sorter:/g) ?? []).length;
+    expect(sorterCount).toBeGreaterThanOrEqual(6);
+  });
+
+  it('фильтры Материал/Наименование/Заказ: кастомный dropdown с тремя кнопками', () => {
+    expect(panelsTab).toContain('filterDropdown');
+    expect(panelsTab).toContain('Включить все');
+    expect(panelsTab).toContain('Сбросить');
+    expect(panelsTab).toContain('Отключить все');
+    // live-apply без закрытия списка (в т.ч. после «Отключить все»)
+    expect(panelsTab).toContain('closeDropdown: false');
+    // «Отключить все» кодируется сентинелом: пустой выбор в antd = фильтр выключен
+    expect(panelsTab).toContain('PANEL_FILTER_NONE');
+    expect(panelsTab).toContain('panelFilterPredicate');
+  });
 });

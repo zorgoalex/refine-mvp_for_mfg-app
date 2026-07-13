@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
-import { findGroupKeyByPanelId, groupPanelRows, panelComparators, summarizePanelGroups } from './panelGrouping';
+import {
+  buildPanelFilterOptions,
+  findGroupKeyByPanelId,
+  groupPanelRows,
+  panelComparators,
+  panelFilterPredicate,
+  PANEL_FILTER_EMPTY,
+  PANEL_FILTER_NONE,
+  summarizePanelGroups,
+} from './panelGrouping';
 
 let nextId = 1;
 
@@ -179,5 +188,47 @@ describe('groupPanelRows', () => {
     const none = groupPanelRows([panel({ orders: [] })])[0];
     expect(panelComparators.order(a, b)).toBeLessThan(0);
     expect(panelComparators.order(none, a)).toBeGreaterThan(0);
+  });
+
+  it('panelComparators.seq: группы по groupSeq, плоские строки по flatSeq', () => {
+    const groups = groupPanelRows([panel({ thicknessMm: 16 }), panel({ thicknessMm: 18 })]);
+    expect(panelComparators.seq(groups[0], groups[1])).toBeLessThan(0);
+    const flatA = { ...panel(), rowType: 'panel' as const, flatSeq: 1 };
+    const flatB = { ...panel(), rowType: 'panel' as const, flatSeq: 2 };
+    expect(panelComparators.seq(flatB, flatA)).toBeGreaterThan(0);
+  });
+
+  it('buildPanelFilterOptions: уникальные материалы/наименования/заказы + «(пусто)»', () => {
+    const rows = [
+      panel({ mainMaterialName: 'МДФ', name: 'Полка', orders: [{ orderId: 1, orderName: '2500' }] }),
+      panel({ mainMaterialName: 'ЛДСП', name: 'Бок', orders: [{ orderId: 1, orderName: '2500' }] }),
+      panel({ mainMaterialName: 'ЛДСП ', name: null, orders: [] }),
+    ];
+    const options = buildPanelFilterOptions(rows);
+    expect(options.materials.map((o) => o.value)).toEqual(['ЛДСП', 'МДФ']);
+    expect(options.names.map((o) => o.value)).toEqual(['Бок', 'Полка', PANEL_FILTER_EMPTY]);
+    expect(options.orders.map((o) => o.value)).toEqual(['2500', PANEL_FILTER_EMPTY]);
+    expect(options.names.at(-1)?.label).toBe('(пусто)');
+  });
+
+  it('panelFilterPredicate: группа матчится по агрегатам, ребёнок — по своим полям', () => {
+    const group = groupPanelRows([
+      panel({ mainMaterialName: 'ЛДСП', name: 'Бок', orders: [{ orderId: 1, orderName: '2500' }] }),
+      panel({ mainMaterialName: 'ЛДСП', name: 'Полка', orders: [] }),
+    ])[0];
+    expect(panelFilterPredicate('material', 'ЛДСП', group)).toBe(true);
+    expect(panelFilterPredicate('material', 'МДФ', group)).toBe(false);
+    expect(panelFilterPredicate('name', 'Полка', group)).toBe(true);
+    expect(panelFilterPredicate('order', '2500', group)).toBe(true);
+    const flat = { ...panel({ name: 'Дно', mainMaterialName: null, orders: [] }), rowType: 'panel' as const };
+    expect(panelFilterPredicate('name', 'Дно', flat)).toBe(true);
+    expect(panelFilterPredicate('material', PANEL_FILTER_EMPTY, flat)).toBe(true);
+    expect(panelFilterPredicate('order', PANEL_FILTER_EMPTY, flat)).toBe(true);
+  });
+
+  it('panelFilterPredicate: сентинел «Отключить все» скрывает всё', () => {
+    const group = groupPanelRows([panel()])[0];
+    expect(panelFilterPredicate('material', PANEL_FILTER_NONE, group)).toBe(false);
+    expect(panelFilterPredicate('name', PANEL_FILTER_NONE, group)).toBe(false);
   });
 });

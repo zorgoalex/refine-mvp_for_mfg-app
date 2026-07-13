@@ -113,7 +113,7 @@ export function summarizePanelGroups(groups: PanelGroupRow[]): PanelGroupsSummar
 // применяет sorter на каждом уровне tree-data). null/пустые значения — в конец
 // при сортировке по возрастанию.
 
-type SortableRow = PanelGroupRow | (PanelLike & { rowType: 'panel' });
+type SortableRow = PanelGroupRow | (PanelLike & { rowType: 'panel'; flatSeq?: number });
 
 function isGroupRow(row: SortableRow): row is PanelGroupRow {
   return 'groupSeq' in row;
@@ -143,6 +143,10 @@ function rowName(row: SortableRow): string | null {
 }
 
 export const panelComparators = {
+  seq(a: SortableRow, b: SortableRow): number {
+    const seqOf = (row: SortableRow) => (isGroupRow(row) ? row.groupSeq : row.flatSeq ?? null);
+    return cmpNumber(seqOf(a), seqOf(b));
+  },
   size(a: SortableRow, b: SortableRow): number {
     return (
       cmpNumber(a.lengthMm, b.lengthMm) ||
@@ -172,3 +176,77 @@ export const panelComparators = {
     return cmpText(a.orders[0]?.orderName, b.orders[0]?.orderName);
   },
 };
+
+// ---- Фильтры колонок таблицы панелей ---------------------------------------
+
+/** Значение опции «(пусто)» — панели без материала/наименования/заказа. */
+export const PANEL_FILTER_EMPTY = '__bazis_panel_filter_empty__';
+/** Сентинел «Отключить все»: пустой выбор в antd = фильтр выключен, поэтому
+ * «ничего не показывать» кодируется отдельным ключом. */
+export const PANEL_FILTER_NONE = '__bazis_panel_filter_none__';
+
+export interface PanelFilterOption {
+  value: string;
+  label: string;
+}
+
+export type PanelFilterField = 'material' | 'name' | 'order';
+
+function collectOptions(values: (string | null | undefined)[]): PanelFilterOption[] {
+  const unique = new Set<string>();
+  let hasEmpty = false;
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) {
+      unique.add(trimmed);
+    } else {
+      hasEmpty = true;
+    }
+  }
+  const options = [...unique]
+    .sort((a, b) => a.localeCompare(b, 'ru', { numeric: true, sensitivity: 'base' }))
+    .map((value) => ({ value, label: value }));
+  if (hasEmpty) {
+    options.push({ value: PANEL_FILTER_EMPTY, label: '(пусто)' });
+  }
+  return options;
+}
+
+/** Уникальные значения для выпадающих фильтров (по всем панелям ревизии). */
+export function buildPanelFilterOptions(panels: PanelLike[]): {
+  materials: PanelFilterOption[];
+  names: PanelFilterOption[];
+  orders: PanelFilterOption[];
+} {
+  return {
+    materials: collectOptions(panels.map((panel) => panel.mainMaterialName)),
+    names: collectOptions(panels.map((panel) => panel.name)),
+    orders: collectOptions(
+      panels.flatMap((panel) => (panel.orders.length ? panel.orders.map((order) => order.orderName) : [null])),
+    ),
+  };
+}
+
+/** Предикат onFilter: группа матчится по агрегатам детей, плоская строка —
+ * по своим полям. antd фильтрует только верхний уровень tree-data. */
+export function panelFilterPredicate(
+  field: PanelFilterField,
+  value: string | number | boolean,
+  row: SortableRow,
+): boolean {
+  if (value === PANEL_FILTER_NONE) {
+    return false;
+  }
+  const wantEmpty = value === PANEL_FILTER_EMPTY;
+  if (field === 'material') {
+    const material = row.mainMaterialName?.trim() || null;
+    return wantEmpty ? material == null : material === value;
+  }
+  if (field === 'name') {
+    const names = isGroupRow(row) ? row.names : [row.name?.trim() || ''].filter(Boolean);
+    return wantEmpty ? names.length === 0 : names.includes(String(value));
+  }
+  return wantEmpty
+    ? row.orders.length === 0
+    : row.orders.some((order) => order.orderName?.trim() === value);
+}
