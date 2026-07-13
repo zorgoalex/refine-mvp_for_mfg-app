@@ -100,6 +100,16 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     );
   });
 
+  it('renders the engine selector in both the profile modal and default settings', () => {
+    const cardSrc = readFileSync(new URL('./CutDefaultSettingsCard.tsx', import.meta.url), 'utf8');
+    for (const src of [tabSrc, cardSrc]) {
+      expect(src).toContain('label="Движок расчёта"');
+      expect(src).toContain("value: 'heuristic', label: 'Быстрый'");
+      expect(src).toMatch(/vacuum_table.*(?:!==|hidden|display)/s);
+      expect(src).toContain('detectEngineParamAnomalies');
+    }
+  });
+
   it('exposes a PDF template editor tab with expected editor commands', () => {
     expect(tabSrc).toMatch(/Редактирование шаблонов карт раскроя PDF/);
     expect(tabSrc).toMatch(/PdfTemplateEditor/);

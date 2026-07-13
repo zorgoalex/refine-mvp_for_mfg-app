@@ -51,12 +51,15 @@ import { ApiError } from '../../../api/httpClient';
 import { can } from '../../../utils/permissions';
 import {
   DEFAULT_PARAM_FORM,
+  type FreecutCutQuality,
+  type FreecutEngineChoice,
   type FreecutLayoutMode,
   type FreecutObjective,
   type FreecutQuality,
   type FreecutRetryStrategy,
   type ParamProfileForm,
   buildProfileCopyName,
+  detectEngineParamAnomalies,
   extractEligibilityCodes,
   findSetting,
   formToParams,
@@ -67,6 +70,26 @@ import { CutDefaultSettingsCard } from './CutDefaultSettingsCard';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
+
+const ENGINE_OPTIONS: Array<{ value: FreecutEngineChoice; label: string }> = [
+  { value: 'auto', label: 'Авто' },
+  { value: 'heuristic', label: 'Быстрый' },
+  { value: 'ga', label: 'Генетический' },
+];
+
+const CUT_QUALITY_OPTIONS: Array<{ value: FreecutCutQuality; label: string }> = [
+  { value: 'fast', label: 'Fast' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'max', label: 'Max' },
+];
+
+function isEngineChoice(value: string | number): value is FreecutEngineChoice {
+  return value === 'auto' || value === 'heuristic' || value === 'ga';
+}
+
+function isCutQuality(value: string | number): value is FreecutCutQuality {
+  return value === 'fast' || value === 'balanced' || value === 'max';
+}
 
 /**
  * /configuration "Раскрой" tab (plan §4a, §5). Backend-owned config CRUD via
@@ -1547,6 +1570,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [copyName, setCopyName] = useState('');
   const [savingCopy, setSavingCopy] = useState(false);
+  const engineAnomalies = useMemo(() => (editing ? detectEngineParamAnomalies(editing.params) : []), [editing]);
 
   useEffect(() => {
     if (!open) return;
@@ -1656,6 +1680,15 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
         >
           <Switch checked={isDefault} onChange={setIsDefault} />
         </Form.Item>
+        {engineAnomalies.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="Несогласованные параметры движка в сохранённом профиле"
+            description={`${engineAnomalies.join('; ')}. При сохранении параметры будут приведены к выбранным в форме значениям.`}
+          />
+        )}
 
         <Typography.Text type="secondary">Параметры реза, мм</Typography.Text>
         <Row gutter={12}>
@@ -1751,6 +1784,43 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
             >
               <Switch checked={params.groupShift} onChange={(v) => setField('groupShift', v)} />
             </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={12}>
+          <Col span={12}>
+            {params.layout_mode !== 'vacuum_table' && (
+              <Form.Item
+                label="Движок расчёта"
+                tooltip="Авто — быстрый движок включается сам на крупных заданиях (порог настраивается на сервере), небольшие считает генетический. Быстрый — принудительно эвристический движок; уровень доупаковки задаётся полем ниже (по умолчанию Max): крупные задания считаются быстрее и обычно не хуже. Генетический — принудительно GA, как раньше."
+                extra={<Text type="secondary" style={{ display: 'block', fontSize: 12 }}>Быстрый движок экономит листы на крупных заданиях</Text>}
+                style={{ marginBottom: 12 }}
+              >
+                <Segmented
+                  value={params.engine}
+                  onChange={(v) => {
+                    if (isEngineChoice(v)) setField('engine', v);
+                  }}
+                  options={ENGINE_OPTIONS}
+                />
+              </Form.Item>
+            )}
+          </Col>
+          <Col span={12}>
+            {params.layout_mode !== 'vacuum_table' && params.engine === 'heuristic' && (
+              <Form.Item
+                label="Доупаковка (быстрый движок)"
+                tooltip="Fast — только базовая укладка, миллисекунды. Balanced — доупаковка недозаполненных листов. Max — доупаковка + итеративный поиск в пределах лимита времени; обычно экономит листы на крупных заданиях."
+                style={{ marginBottom: 12 }}
+              >
+                <Segmented
+                  value={params.cutQuality}
+                  onChange={(v) => {
+                    if (isCutQuality(v)) setField('cutQuality', v);
+                  }}
+                  options={CUT_QUALITY_OPTIONS}
+                />
+              </Form.Item>
+            )}
           </Col>
         </Row>
         <Row gutter={12}>
