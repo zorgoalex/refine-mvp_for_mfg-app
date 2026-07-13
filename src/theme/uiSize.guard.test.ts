@@ -24,6 +24,15 @@ describe('per-user uiSize preference', () => {
     expect(themeProvider).toContain('uiSize');
     expect(themeProvider).toContain('setUiSize');
     expect(themeProvider).toMatch(/preferences\.uiSize/);
+    // critic R1 (mixed deploy): старый backend стрипает uiSize из ответа —
+    // каждое чтение response.preferences.uiSize обязано идти через isUiSize
+    const readingLines = themeProvider
+      .split('\n')
+      .filter((line) => line.includes('response.preferences.uiSize'));
+    expect(readingLines.length).toBeGreaterThan(0);
+    for (const line of readingLines) {
+      expect(line).toContain('isUiSize(response.preferences.uiSize)');
+    }
   });
 
   it('App: ConfigProvider componentSize управляется uiSize', () => {

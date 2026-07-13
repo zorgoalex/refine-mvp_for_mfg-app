@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { profileApi } from '../api/profileApi';
 import { authSession } from '../api/authSession';
 import { authStorage } from '../utils/auth';
-import { getStoredThemeMode, getStoredUiSize, setStoredThemeMode, setStoredUiSize } from './themeStorage';
+import { getStoredThemeMode, getStoredUiSize, isUiSize, setStoredThemeMode, setStoredUiSize } from './themeStorage';
 import type { ThemeMode, UiSize } from './themeTypes';
 
 interface AppThemeContextValue {
@@ -55,11 +55,18 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
       .then((response) => {
         if (!active) return;
         setModeState(response.preferences.themeMode);
-        setUiSizeState(response.preferences.uiSize);
+        // Окно смешанного деплоя: старый backend стрипает uiSize из ответа —
+        // не затирать кэш/optimistic значение undefined'ом
+        const responseSize = isUiSize(response.preferences.uiSize) ? response.preferences.uiSize : null;
+        if (responseSize) {
+          setUiSizeState(responseSize);
+        }
         const refreshedUserId = getCurrentUserId();
         if (refreshedUserId) {
           setStoredThemeMode(refreshedUserId, response.preferences.themeMode);
-          setStoredUiSize(refreshedUserId, response.preferences.uiSize);
+          if (responseSize) {
+            setStoredUiSize(refreshedUserId, responseSize);
+          }
         }
       })
       .catch(() => {
@@ -105,10 +112,13 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
 
     try {
       const response = await profileApi.updatePreferences({ uiSize: nextSize });
-      setUiSizeState(response.preferences.uiSize);
+      // Старый backend может не вернуть uiSize (mixed deploy) — остаёмся на
+      // optimistic-значении nextSize
+      const confirmedSize = isUiSize(response.preferences.uiSize) ? response.preferences.uiSize : nextSize;
+      setUiSizeState(confirmedSize);
       const refreshedUserId = getCurrentUserId() ?? userId;
       if (refreshedUserId) {
-        setStoredUiSize(refreshedUserId, response.preferences.uiSize);
+        setStoredUiSize(refreshedUserId, confirmedSize);
       }
     } catch {
       // Optimistic local preference; backend retried on next explicit change.
