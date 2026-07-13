@@ -217,3 +217,22 @@ describe('toggleAll / allFreeCheckState', () => {
     expect(allFreeCheckState(togglePanel(emptySelection(), 7), busyOnly)).toBe('indeterminate');
   });
 });
+
+describe('toggleAll includeBusy (тумблер «Выбрать с пустым заказом» снят)', () => {
+  const freePanel = (id: number) => ({ bazisNodeId: id, orders: [] as never[] });
+  const busyPanel = (id: number) => ({ bazisNodeId: id, orders: [{ orderId: 1, orderName: '1' }] as never });
+  const panels = [freePanel(1), busyPanel(2), freePanel(3)];
+
+  it('includeBusy=true выбирает ВСЕ панели набора, checked-состояние требует все', () => {
+    const state = toggleAll(emptySelection(), panels, true, { includeBusy: true });
+    expect([...state.selected].sort()).toEqual([1, 2, 3]);
+    expect(allFreeCheckState(state, panels, { includeBusy: true })).toBe('checked');
+    // в free-режиме то же выделение тоже checked (все свободные выбраны)
+    expect(allFreeCheckState(state, panels)).toBe('checked');
+  });
+
+  it('free-выделение в includeBusy-режиме — indeterminate (занятая не выбрана)', () => {
+    const state = toggleAll(emptySelection(), panels, true);
+    expect(allFreeCheckState(state, panels, { includeBusy: true })).toBe('indeterminate');
+  });
+});

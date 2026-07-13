@@ -152,27 +152,29 @@ export function pruneSelection(
 export function allFreeCheckState(
   state: PanelSelectionState,
   panels: ReadonlyArray<Pick<PanelLike, 'bazisNodeId' | 'orders'>>,
+  options?: { includeBusy?: boolean },
 ): 'checked' | 'indeterminate' | 'empty' {
+  const includeBusy = options?.includeBusy ?? false;
   let selectedInSet = 0;
-  const freeIds: number[] = [];
+  const targetIds: number[] = [];
   for (const panel of panels) {
-    if (!isBusy(panel)) {
-      freeIds.push(panel.bazisNodeId);
+    if (includeBusy || !isBusy(panel)) {
+      targetIds.push(panel.bazisNodeId);
     }
     if (state.selected.has(panel.bazisNodeId)) {
       selectedInSet += 1;
     }
   }
-  if (freeIds.length === 0) {
+  if (targetIds.length === 0) {
     return selectedInSet > 0 ? 'indeterminate' : 'empty';
   }
-  let selectedFree = 0;
-  for (const nodeId of freeIds) {
+  let selectedTarget = 0;
+  for (const nodeId of targetIds) {
     if (state.selected.has(nodeId)) {
-      selectedFree += 1;
+      selectedTarget += 1;
     }
   }
-  if (selectedFree === freeIds.length) {
+  if (selectedTarget === targetIds.length) {
     return 'checked';
   }
   return selectedInSet > 0 ? 'indeterminate' : 'empty';
@@ -180,13 +182,15 @@ export function allFreeCheckState(
 
 /** Header-чекбокс работает по ПЕРЕДАННОМУ набору панелей (вызывающий передаёт
  * видимые после фильтров строки). checked=true: добавить свободные панели набора
- * (занятые не трогаем — осознанно включённые вручную остаются). checked=false:
- * снять ВСЕ панели набора (включая занятые), скрытый фильтром выбор не трогаем. */
+ * (includeBusy=true — все, включая занятые). checked=false: снять ВСЕ панели
+ * набора, скрытый фильтром выбор не трогаем. */
 export function toggleAll(
   state: PanelSelectionState,
   panels: ReadonlyArray<Pick<PanelLike, 'bazisNodeId' | 'orders'>>,
   checked: boolean,
+  options?: { includeBusy?: boolean },
 ): PanelSelectionState {
+  const includeBusy = options?.includeBusy ?? false;
   if (!checked) {
     const removable = panels
       .map((panel) => panel.bazisNodeId)
@@ -201,7 +205,7 @@ export function toggleAll(
     return { selected };
   }
   const missing = panels
-    .filter((panel) => !isBusy(panel) && !state.selected.has(panel.bazisNodeId))
+    .filter((panel) => (includeBusy || !isBusy(panel)) && !state.selected.has(panel.bazisNodeId))
     .map((panel) => panel.bazisNodeId);
   if (missing.length === 0) {
     return state;

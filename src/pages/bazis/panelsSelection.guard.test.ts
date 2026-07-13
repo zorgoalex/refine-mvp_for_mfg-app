@@ -21,9 +21,12 @@ describe('bazis panels selection UI guards', () => {
   });
 
   it('первая колонка таблицы занята чекбоксами группы и панели', () => {
-    expect(panelsTab).toMatch(/allFreeCheckState\(selection, visiblePanels\)[\s\S]*?key: 'selection'/);
+    expect(panelsTab).toMatch(/allFreeCheckState\(selection, visiblePanels,[\s\S]*?key: 'selection'/);
     // Header-чекбокс «выбрать все» работает по видимым (фильтры) строкам
-    expect(panelsTab).toContain('toggleAll(current, visiblePanels, event.target.checked)');
+    expect(panelsTab).toContain('toggleAll(current, visiblePanels, event.target.checked, { includeBusy: !selectOnlyFree })');
+    // Тумблер «Выбрать с пустым заказом» (default ON) переключает охват select-all
+    expect(panelsTab).toContain('Выбрать с пустым заказом');
+    expect(panelsTab).toContain('useState(true)');
     expect(panelsTab).toContain('setTableFilters(filters)');
     expect(panelsTab).toContain('groupCheckState');
     expect(panelsTab).toContain('indeterminate');

@@ -155,6 +155,9 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   // Активные фильтры колонок из Table.onChange — header-чекбокс «выбрать все»
   // обязан работать только по ВИДИМЫМ (отфильтрованным) строкам.
   const [tableFilters, setTableFilters] = useState<Record<string, FilterValue | null>>({});
+  // Тумблер режима header-чекбокса: ON (default) — «выбрать все» берёт только
+  // панели с пустым «Заказом»; OFF — все видимые, включая уже привязанные.
+  const [selectOnlyFree, setSelectOnlyFree] = useState(true);
   const [createDraftLoading, setCreateDraftLoading] = useState(false);
   const [addToOrderOpen, setAddToOrderOpen] = useState(false);
   const [refreshedOrdersByNodeId, setRefreshedOrdersByNodeId] = useState<Map<number, BazisTreeNode['orders']> | null>(null);
@@ -273,12 +276,16 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         // uncheck снимает только видимые, скрытый выбор не трогает)
         title: (
           <Checkbox
-            checked={allFreeCheckState(selection, visiblePanels) === 'checked'}
-            indeterminate={allFreeCheckState(selection, visiblePanels) === 'indeterminate'}
+            checked={allFreeCheckState(selection, visiblePanels, { includeBusy: !selectOnlyFree }) === 'checked'}
+            indeterminate={
+              allFreeCheckState(selection, visiblePanels, { includeBusy: !selectOnlyFree }) === 'indeterminate'
+            }
             disabled={visiblePanels.length === 0}
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => {
-              setSelection((current) => toggleAll(current, visiblePanels, event.target.checked));
+              setSelection((current) =>
+                toggleAll(current, visiblePanels, event.target.checked, { includeBusy: !selectOnlyFree }),
+              );
             }}
           />
         ),
@@ -440,7 +447,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           ) : null,
       },
     ];
-  }, [filterOptions, onGoToTree, selection, visiblePanels]);
+  }, [filterOptions, onGoToTree, selectOnlyFree, selection, visiblePanels]);
 
   const selectedNodeIds = useMemo(() => Array.from(selection.selected), [selection.selected]);
   const selectedAncestors = selectedId != null ? ancestorsOf(selectedId) : [];
@@ -509,9 +516,19 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Space size="middle" align="center" wrap style={{ justifyContent: 'space-between', width: '100%' }}>
-        <Checkbox checked={grouped} onChange={(event) => setGrouped(event.target.checked)}>
-          Группировать
-        </Checkbox>
+        <Space size="middle" wrap>
+          <Checkbox checked={grouped} onChange={(event) => setGrouped(event.target.checked)}>
+            Группировать
+          </Checkbox>
+          <Tooltip title="Влияет на верхний чекбокс «выбрать все»: включено — берутся только панели без заказа; выключено — все видимые, включая уже привязанные">
+            <Checkbox
+              checked={selectOnlyFree}
+              onChange={(event) => setSelectOnlyFree(event.target.checked)}
+            >
+              Выбрать с пустым заказом
+            </Checkbox>
+          </Tooltip>
+        </Space>
         {selectionPossible ? (
           <Space size="middle" wrap>
             <Text>
