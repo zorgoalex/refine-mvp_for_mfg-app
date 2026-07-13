@@ -9,7 +9,14 @@ import { describe, expect, it } from 'vitest';
 import { convertToImportRows, parsePdfContent } from './pdfTextExtractor';
 import type { PdfParsedResult, PdfTextItem } from '../types/pdfTypes';
 
-const PDF_FIXTURE_DIR = process.env.PDF_FIXTURE_DIR || path.resolve(process.cwd(), '../spec_erp');
+const DEFAULT_PDF_FIXTURE_DIRS = [
+  path.resolve(process.cwd(), '../spec_erp'),
+  // Isolated worktrees live under repo_erp/.worktrees/<name>.
+  path.resolve(process.cwd(), '../../../spec_erp'),
+];
+const PDF_FIXTURE_DIR = process.env.PDF_FIXTURE_DIR
+  || DEFAULT_PDF_FIXTURE_DIRS.find(candidate => fs.existsSync(candidate))
+  || DEFAULT_PDF_FIXTURE_DIRS[0];
 
 function item(text: string, x: number, y: number, width = text.length * 5): PdfTextItem {
   return {
@@ -188,13 +195,13 @@ describe('parsePdfContent PDF fixtures', () => {
     { fixture: 'mdf_wrong3.pdf', positionsCount: 38, totalQuantity: 39, expectedTotalCount: 39 },
     { fixture: 'mdf_wrong4.pdf', positionsCount: 32, totalQuantity: 36, expectedTotalCount: 36 },
     {
-      fixture: 'teststaff/мдф-5pages.pdf',
+      fixture: 'artifacts_test/pdf_Bazis/мдф-5pages.pdf',
       positionsCount: 64,
       totalQuantity: 68,
       expectedTotalCount: 68,
     },
     {
-      fixture: 'teststaff/МДФ-4pages.pdf',
+      fixture: 'artifacts_test/pdf_Bazis/МДФ-4pages.pdf',
       positionsCount: 51,
       totalQuantity: 57,
       expectedTotalCount: 57,
@@ -268,8 +275,8 @@ describe('parsePdfContent PDF fixtures', () => {
     expect(wrong2Rows[firstMdf16Index].materialName).toBe('МДФ 16 мм');
   }, 30_000);
 
-  (fs.existsSync(path.resolve(PDF_FIXTURE_DIR, 'teststaff/МДФ-4pages.pdf')) ? it : it.skip)('fills Basis project and data fields from a Basis PDF', async () => {
-    const result = await parseFixturePdf('teststaff/МДФ-4pages.pdf');
+  (fs.existsSync(path.resolve(bazisReportFixtureDir, 'МДФ-4pages.pdf')) ? it : it.skip)('fills Basis project and data fields from a legacy Basis PDF', async () => {
+    const result = await parseFixturePdf(path.resolve(bazisReportFixtureDir, 'МДФ-4pages.pdf'));
     const rows = convertToImportRows(result);
 
     expect(rows[0]).toMatchObject({
