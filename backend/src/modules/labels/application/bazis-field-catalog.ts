@@ -218,11 +218,10 @@ const DETAIL_FIELD_LABELS: Record<string, string> = {
   link_pdf_file: 'PDF файл',
   ref_key_1c: 'Ключ 1C детали',
   basis_project: 'Базис проект',
+  basis_product: 'Базис обозн. изделия',
   basis_data: 'Базис данные',
-  basis_designation: 'Базис обозн. изделия',
+  basis_designation: 'Базис обозн. детали',
 };
-
-const HIDDEN_DETAIL_FIELD_COLUMNS = new Set(['basis_product']);
 
 const ORDER_FIELD_LABELS: Record<string, string> = {
   order_id: 'ID заказа',
@@ -277,7 +276,6 @@ export const BAZIS_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = BAZIS_COLUM
 }));
 
 export const DETAIL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.entries(DETAIL_FIELD_LABELS)
-  .filter(([column]) => !HIDDEN_DETAIL_FIELD_COLUMNS.has(column))
   .map(([column, label]) => ({
     id: `detail.${column}`,
     source: 'detail',
@@ -289,7 +287,6 @@ export const DETAIL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.ent
 
 export function buildDetailFieldCatalog(columns: readonly DetailFieldColumnMetadata[]): LabelFieldCatalogItem[] {
   return columns
-    .filter(({ columnName }) => !HIDDEN_DETAIL_FIELD_COLUMNS.has(columnName))
     .map(({ columnName, dataType }) => ({
       id: `detail.${columnName}`,
       source: 'detail' as const,

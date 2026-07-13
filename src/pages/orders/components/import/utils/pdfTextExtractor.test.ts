@@ -306,6 +306,7 @@ describe('parsePdfContent PDF fixtures', () => {
       expectedFirstProject: '1319',
       expectedFirstProduct: 'Прихожка',
       expectedLastProduct: 'Сан.узел',
+      expectedReferenceSource: 'project_designation',
     },
     {
       fixture: 'изделие отчет.pdf',
@@ -314,10 +315,19 @@ describe('parsePdfContent PDF fixtures', () => {
       expectedFirstProject: '1319',
       expectedFirstProduct: null,
       expectedLastProduct: null,
+      expectedReferenceSource: 'order_number',
     },
   ])(
     'parses new Basis report template $fixture',
-    async ({ fixture, positionsCount, totalQuantity, expectedFirstProject, expectedFirstProduct, expectedLastProduct }) => {
+    async ({
+      fixture,
+      positionsCount,
+      totalQuantity,
+      expectedFirstProject,
+      expectedFirstProduct,
+      expectedLastProduct,
+      expectedReferenceSource,
+    }) => {
       const result = await parseFixturePdf(path.resolve(bazisReportFixtureDir, fixture));
       const rows = convertToImportRows(result);
 
@@ -332,6 +342,7 @@ describe('parsePdfContent PDF fixtures', () => {
         basisProduct: expectedLastProduct,
       });
       expect(rows.every(row => row.basisProject === '1319')).toBe(true);
+      expect(result.details.every(detail => detail.projectReferenceSource === expectedReferenceSource)).toBe(true);
       if (fixture === 'проект отчет.pdf') {
         expect([...new Set(rows.map(row => row.basisProduct))]).toEqual([
           'Прихожка',

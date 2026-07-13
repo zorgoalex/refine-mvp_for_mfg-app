@@ -254,6 +254,18 @@ function findHeaderX(line: PdfTextLine, pattern: RegExp): number | null {
   return item ? item.x : null;
 }
 
+function getProjectReferenceSource(
+  headerLine: PdfTextLine
+): PdfDetailRaw['projectReferenceSource'] {
+  if (headerLine.items.some(item => /^Обозн\. проект$/.test(normalizeWhitespace(item.text)))) {
+    return 'project_designation';
+  }
+  if (headerLine.items.some(item => /^№ Заказа$/.test(normalizeWhitespace(item.text)))) {
+    return 'order_number';
+  }
+  return undefined;
+}
+
 function getTableColumns(headerLine: PdfTextLine): PdfTableColumn[] {
   const positionX = findHeaderX(headerLine, /^№$/);
   const projectReferenceX = findHeaderX(headerLine, /^(?:Обозн\. проект|№ Заказа)$/);
@@ -398,9 +410,11 @@ function extractTableRowsForHeader(
   headerLine: PdfTextLine,
   tableBottomY: number,
   materialOverride?: string,
-  columnsOverride?: PdfTableColumn[]
+  columnsOverride?: PdfTableColumn[],
+  projectReferenceSourceOverride?: PdfDetailRaw['projectReferenceSource']
 ): PdfDetailRaw[] {
   const columns = columnsOverride ?? getTableColumns(headerLine);
+  const projectReferenceSource = projectReferenceSourceOverride ?? getProjectReferenceSource(headerLine);
   const sectionItems = pageItems.filter(item => item.y < headerLine.y - 4 && item.y > tableBottomY);
   const anchors = findTableRowAnchors(sectionItems, headerLine.y, columns, tableBottomY);
   if (anchors.length === 0) return [];
@@ -446,6 +460,7 @@ function extractTableRowsForHeader(
     details.push({
       position,
       projectReference: normalizeWhitespace(cells.projectReference) || undefined,
+      projectReferenceSource,
       designation,
       name: normalizeWhitespace(cells.name) || 'Деталь',
       quantity,
@@ -481,7 +496,8 @@ function extractTableRowsFromPage(lines: PdfTextLine[]): PdfDetailRaw[] {
 function extractContinuationTableRowsFromPage(
   lines: PdfTextLine[],
   material?: string,
-  inheritedColumns: PdfTableColumn[] = BASIS_TABLE_COLUMNS
+  inheritedColumns: PdfTableColumn[] = BASIS_TABLE_COLUMNS,
+  inheritedProjectReferenceSource?: PdfDetailRaw['projectReferenceSource']
 ): PdfDetailRaw[] {
   const pageItems = lines.flatMap(line => line.items);
   const anchors = findTableRowAnchors(pageItems, Number.POSITIVE_INFINITY, inheritedColumns);
@@ -494,18 +510,29 @@ function extractContinuationTableRowsFromPage(
     text: '',
   };
 
-  return extractTableRowsForHeader(lines, pageItems, syntheticHeaderLine, TABLE_FOOTER_MIN_Y, material, inheritedColumns);
+  return extractTableRowsForHeader(
+    lines,
+    pageItems,
+    syntheticHeaderLine,
+    TABLE_FOOTER_MIN_Y,
+    material,
+    inheritedColumns,
+    inheritedProjectReferenceSource
+  );
 }
 
 function parseDetailsFromTableGeometry(pageLines: PdfTextLine[][]): PdfDetailRaw[] {
   const details: PdfDetailRaw[] = [];
   let inheritedMaterial: string | undefined;
   let inheritedColumns: PdfTableColumn[] = BASIS_TABLE_COLUMNS;
+  let inheritedProjectReferenceSource: PdfDetailRaw['projectReferenceSource'];
 
   for (const lines of pageLines) {
     const headerLines = lines.filter(isTableHeaderLine).sort((a, b) => b.y - a.y);
     if (headerLines.length > 0) {
-      inheritedColumns = getTableColumns(headerLines[headerLines.length - 1]);
+      const lastHeaderLine = headerLines[headerLines.length - 1];
+      inheritedColumns = getTableColumns(lastHeaderLine);
+      inheritedProjectReferenceSource = getProjectReferenceSource(lastHeaderLine);
       const pageDetails = extractTableRowsFromPage(lines);
       details.push(...pageDetails);
       const lastMaterial = [...pageDetails].reverse().find(detail => detail.material)?.material;
@@ -515,7 +542,12 @@ function parseDetailsFromTableGeometry(pageLines: PdfTextLine[][]): PdfDetailRaw
       continue;
     }
 
-    const continuationDetails = extractContinuationTableRowsFromPage(lines, inheritedMaterial, inheritedColumns);
+    const continuationDetails = extractContinuationTableRowsFromPage(
+      lines,
+      inheritedMaterial,
+      inheritedColumns,
+      inheritedProjectReferenceSource
+    );
     details.push(...continuationDetails);
   }
 
@@ -829,6 +861,9 @@ export function convertToImportRows(result: PdfParsedResult): import('../types/i
 
   return result.details.map((detail, index) => {
     const splitReference = splitBasisProjectReference(detail.projectReference);
+    const basisProduct = detail.projectReferenceSource === 'order_number'
+      ? null
+      : splitReference.basisProduct;
     return ({
     sourceRowIndex: index,
     height: detail.length,
@@ -841,7 +876,7 @@ export function convertToImportRows(result: PdfParsedResult): import('../types/i
     // Old reports have no per-row project column. Preserve their exact
     // "№ <order> / <name>" contract; only new layouts use the split fields.
     basisProject: splitReference.basisProject ?? legacyBasisProject,
-    basisProduct: splitReference.basisProduct,
+    basisProduct,
     basisData: `${detail.position}/${detail.designation}/${detail.name}`,
     // PDF "Обозн." → dedicated Basis designation field.
     basisDesignation: detail.designation || null,

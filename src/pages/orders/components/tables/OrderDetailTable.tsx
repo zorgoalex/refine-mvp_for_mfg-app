@@ -90,10 +90,11 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'priority', label: 'Пр-т' },
   { key: 'production_status_id', label: 'Статус' },
   { key: 'basis_project', label: 'Базис проект' },
+  { key: 'basis_product', label: 'Базис обозн. изделия' },
   { key: 'basis_data', label: 'Базис данные' },
-  { key: 'basis_designation', label: 'Базис обозн. изделия' },
+  { key: 'basis_designation', label: 'Базис обозн. детали' },
   { key: 'detail_name', label: 'Название детали' },
-  { key: 'actions', label: 'Действия', lockVisible: true },
+  { key: 'actions', label: 'Действия', lockVisible: true, lockPosition: 'end' },
 ];
 
 const ORDER_DETAIL_EDIT_DEFAULT_ORDER = ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS.map((definition) => definition.key);
@@ -1181,6 +1182,24 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       },
     },
     {
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис обозн. изделия</div>,
+      dataIndex: 'basis_product',
+      key: 'basis_product',
+      width: 120,
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
+          <Form.Item name="basis_product" style={{ margin: 0, padding: '0 4px' }}>
+            <Input placeholder="Обозн. изделия" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          <span style={{ fontSize: '90%' }}>{d.basis_product || ''}</span>
+        );
+      },
+    },
+    {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис данные</div>,
       dataIndex: 'basis_data',
       key: 'basis_data',
@@ -1199,7 +1218,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       },
     },
     {
-      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис обозн. изделия</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис обозн. детали</div>,
       dataIndex: 'basis_designation',
       key: 'basis_designation',
       width: 90,
