@@ -91,3 +91,17 @@ function calculateDraftArea(height: number, width: number, quantity: number): nu
 
   return Math.ceil((height * width * quantity) / 10000) / 100;
 }
+
+/** Подсказка следующего номера заказа для draft-first формы: MAX числовых имён
+ * последних заказов + 1 (паттерн CreateOrderModal). Сервер всё равно финально
+ * гейтит уникальность (409 ORDER_NAME_DUPLICATE с точным suggested). */
+export function buildNextOrderNameFromList(orderNames: ReadonlyArray<string>): string | null {
+  const numbers = orderNames
+    .map((name) => name.trim())
+    .filter((name) => /^\d+$/.test(name))
+    .map(Number);
+  if (numbers.length === 0) {
+    return null;
+  }
+  return String(Math.max(...numbers) + 1);
+}

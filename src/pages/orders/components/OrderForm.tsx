@@ -28,7 +28,9 @@ import { orderFormSchema } from '../../../schemas/orderSchema';
 import { featureFlags } from '../../../config/featureFlags';
 import { can } from '../../../utils/permissions';
 import { resolveOrderTabLabel } from '../../../utils/tabLabels';
-import { collectProvenanceNodes, draftToFormSeed } from '../../bazis/bazisOrderDraft';
+import {
+  buildNextOrderNameFromList, collectProvenanceNodes, draftToFormSeed } from '../../bazis/bazisOrderDraft';
+import { ordersApi } from '../../../api/ordersApi';
 import dayjs from 'dayjs';
 
 // Sections
@@ -523,6 +525,29 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       idempotencyKey: createOrderSaveIdempotencyKey(),
     };
     seededBazisDraftLocationKeyRef.current = location.key;
+
+    // Подсказка номера заказа: асинхронно после seed, только если поле пусто
+    // (ручной ввод юзера не затираем). Финальная уникальность — серверный гейт.
+    void (async () => {
+      try {
+        const response = await ordersApi.list({
+          page: 1,
+          pageSize: 20,
+          sortBy: 'orderDate',
+          sortOrder: 'desc',
+        });
+        const next = buildNextOrderNameFromList(response.data.map((item) => item.orderName));
+        if (!next) {
+          return;
+        }
+        const store = getOrderDraftStore(orderKey).getState();
+        if (!store.header.order_name) {
+          store.updateHeaderField('order_name', next);
+        }
+      } catch {
+        // Non-blocking hint only.
+      }
+    })();
   }, [
     bazisDraft,
     defaultOrderStatus,
