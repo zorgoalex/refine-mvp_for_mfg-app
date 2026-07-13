@@ -28,6 +28,10 @@ export class CutRuntimeConfigService {
     return this.config.get('FREECUT_OPTIMIZE_TIMEOUT_MS', { infer: true });
   }
 
+  getHeuristicAutoThresholdInstances(): number {
+    return this.config.get('BACKEND_CUT_HEURISTIC_AUTO_THRESHOLD', { infer: true });
+  }
+
   isNativePortraitWriterEnabled(): boolean {
     return this.config.get('BACKEND_CUT_NATIVE_PORTRAIT', { infer: true });
   }
