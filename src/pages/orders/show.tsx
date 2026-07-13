@@ -60,6 +60,8 @@ const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: strin
   { key: 'additional', label: 'Дополнительная информация', color: 'var(--app-text-muted)' },
 ];
 
+const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 120;
+
 const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'detail_number', label: '№', lockVisible: true },
   { key: 'height', label: 'Высота' },
@@ -74,6 +76,7 @@ const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'detail_cost', label: 'Сумма' },
   { key: 'film', label: 'Пленка' },
   { key: 'cut_job', label: 'Раскрой' },
+  { key: 'basis_project', label: 'Базис проект' },
 ];
 
 const ORDER_DETAIL_SHOW_DEFAULT_ORDER = ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS.map((definition) => definition.key);
@@ -805,6 +808,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       title: 'Пр-е',
       dataIndex: 'note',
       key: 'note',
+      width: ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH,
       render: (value) => (
         <span style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
           {value || ''}
@@ -857,6 +861,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           },
         ]
       : []),
+    {
+      title: 'Базис проект',
+      dataIndex: 'basis_project',
+      key: 'basis_project',
+      width: ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH,
+      render: (value) => value || '—',
+    },
   ];
 
   const visibleDetailColumns = useMemo(

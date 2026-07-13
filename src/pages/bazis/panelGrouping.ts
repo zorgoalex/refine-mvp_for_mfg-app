@@ -89,3 +89,190 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
 
   return [...groups.values()];
 }
+
+export interface PanelGroupsSummary {
+  /** Число уникальных позиций (групп). */
+  positions: number;
+  /** Общее количество панелей; null, если количество не задано нигде. */
+  totalQuantity: number | null;
+}
+
+/** Итоги для нижней строки таблицы панелей. */
+export function summarizePanelGroups(groups: PanelGroupRow[]): PanelGroupsSummary {
+  let totalQuantity: number | null = null;
+  for (const group of groups) {
+    if (group.totalQuantity != null) {
+      totalQuantity = (totalQuantity ?? 0) + group.totalQuantity;
+    }
+  }
+  return { positions: groups.length, totalQuantity };
+}
+
+// ---- Сортировка колонок таблицы панелей ------------------------------------
+// Компараторы работают и для групповых строк, и для вложенных панелей (AntD
+// применяет sorter на каждом уровне tree-data). null/пустые значения — в конец
+// при сортировке по возрастанию.
+
+type SortableRow = PanelGroupRow | (PanelLike & { rowType: 'panel'; flatSeq?: number });
+
+function isGroupRow(row: SortableRow): row is PanelGroupRow {
+  return 'groupSeq' in row;
+}
+
+function cmpNumber(a: number | null, b: number | null): number {
+  const left = a ?? Number.POSITIVE_INFINITY;
+  const right = b ?? Number.POSITIVE_INFINITY;
+  return left === right ? 0 : left < right ? -1 : 1;
+}
+
+function cmpText(a: string | null | undefined, b: string | null | undefined): number {
+  const left = a?.trim() || null;
+  const right = b?.trim() || null;
+  if (left == null || right == null) {
+    return left == null && right == null ? 0 : left == null ? 1 : -1;
+  }
+  return left.localeCompare(right, 'ru', { numeric: true, sensitivity: 'base' });
+}
+
+function rowQuantity(row: SortableRow): number | null {
+  return isGroupRow(row) ? row.totalQuantity : row.quantity ?? row.cumulativeQuantity;
+}
+
+function rowName(row: SortableRow): string | null {
+  return isGroupRow(row) ? row.names.join(' / ') : row.name;
+}
+
+export const panelComparators = {
+  seq(a: SortableRow, b: SortableRow): number {
+    const seqOf = (row: SortableRow) => (isGroupRow(row) ? row.groupSeq : row.flatSeq ?? null);
+    return cmpNumber(seqOf(a), seqOf(b));
+  },
+  size(a: SortableRow, b: SortableRow): number {
+    return (
+      cmpNumber(a.lengthMm, b.lengthMm) ||
+      cmpNumber(a.widthMm, b.widthMm) ||
+      cmpNumber(a.thicknessMm, b.thicknessMm)
+    );
+  },
+  quantity(a: SortableRow, b: SortableRow): number {
+    return cmpNumber(rowQuantity(a), rowQuantity(b));
+  },
+  material(a: SortableRow, b: SortableRow): number {
+    return cmpText(a.mainMaterialName, b.mainMaterialName);
+  },
+  name(a: SortableRow, b: SortableRow): number {
+    return cmpText(rowName(a), rowName(b));
+  },
+  location(a: SortableRow, b: SortableRow): number {
+    if (isGroupRow(a) && isGroupRow(b)) {
+      return cmpNumber(a.children.length, b.children.length);
+    }
+    return cmpText(
+      isGroupRow(a) ? null : a.pathTitle,
+      isGroupRow(b) ? null : b.pathTitle,
+    );
+  },
+  order(a: SortableRow, b: SortableRow): number {
+    return cmpText(a.orders[0]?.orderName, b.orders[0]?.orderName);
+  },
+};
+
+// ---- Фильтры колонок таблицы панелей ---------------------------------------
+
+/** Значение опции «(пусто)» — панели без материала/наименования/заказа. */
+export const PANEL_FILTER_EMPTY = '__bazis_panel_filter_empty__';
+/** Сентинел «Отключить все»: пустой выбор в antd = фильтр выключен, поэтому
+ * «ничего не показывать» кодируется отдельным ключом. */
+export const PANEL_FILTER_NONE = '__bazis_panel_filter_none__';
+
+export interface PanelFilterOption {
+  value: string;
+  label: string;
+}
+
+export type PanelFilterField = 'material' | 'name' | 'order';
+
+function collectOptions(values: (string | null | undefined)[]): PanelFilterOption[] {
+  const unique = new Set<string>();
+  let hasEmpty = false;
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) {
+      unique.add(trimmed);
+    } else {
+      hasEmpty = true;
+    }
+  }
+  const options = [...unique]
+    .sort((a, b) => a.localeCompare(b, 'ru', { numeric: true, sensitivity: 'base' }))
+    .map((value) => ({ value, label: value }));
+  if (hasEmpty) {
+    options.push({ value: PANEL_FILTER_EMPTY, label: '(пусто)' });
+  }
+  return options;
+}
+
+/** Уникальные значения для выпадающих фильтров (по всем панелям ревизии). */
+export function buildPanelFilterOptions(panels: PanelLike[]): {
+  materials: PanelFilterOption[];
+  names: PanelFilterOption[];
+  orders: PanelFilterOption[];
+} {
+  return {
+    materials: collectOptions(panels.map((panel) => panel.mainMaterialName)),
+    names: collectOptions(panels.map((panel) => panel.name)),
+    orders: collectOptions(
+      panels.flatMap((panel) => (panel.orders.length ? panel.orders.map((order) => order.orderName) : [null])),
+    ),
+  };
+}
+
+function panelMatchesFilter(
+  field: PanelFilterField,
+  value: string | number | boolean,
+  panel: Pick<PanelLike, 'mainMaterialName' | 'name' | 'orders'>,
+): boolean {
+  const wantEmpty = value === PANEL_FILTER_EMPTY;
+  if (field === 'material') {
+    const material = panel.mainMaterialName?.trim() || null;
+    return wantEmpty ? material == null : material === value;
+  }
+  if (field === 'name') {
+    const name = panel.name?.trim() || null;
+    return wantEmpty ? name == null : name === value;
+  }
+  return wantEmpty
+    ? panel.orders.length === 0
+    : panel.orders.some((order) => order.orderName?.trim() === value);
+}
+
+/** Предикат onFilter (antd фильтрует только верхний уровень tree-data).
+ * Группа матчится, если матчится ЛЮБОЙ её ребёнок — агрегаты группы хранят
+ * только непустые значения, поэтому «(пусто)» по агрегатам терял группы со
+ * смешанными детьми (critic R1). Плоская строка матчится по своим полям. */
+export function panelFilterPredicate(
+  field: PanelFilterField,
+  value: string | number | boolean,
+  row: SortableRow,
+): boolean {
+  if (value === PANEL_FILTER_NONE) {
+    return false;
+  }
+  if (isGroupRow(row)) {
+    return row.children.some((child) => panelMatchesFilter(field, value, child));
+  }
+  return panelMatchesFilter(field, value, row);
+}
+
+/** Итоги для нижней строки по ВИДИМЫМ строкам таблицы (после фильтров):
+ * antd/rc-table отдаёт в summary-колбэк уже отфильтрованный верхний уровень. */
+export function summarizeVisibleRows(rows: readonly SortableRow[]): PanelGroupsSummary {
+  let totalQuantity: number | null = null;
+  for (const row of rows) {
+    const quantity = isGroupRow(row) ? row.totalQuantity : row.quantity ?? row.cumulativeQuantity;
+    if (quantity != null) {
+      totalQuantity = (totalQuantity ?? 0) + quantity;
+    }
+  }
+  return { positions: rows.length, totalQuantity };
+}

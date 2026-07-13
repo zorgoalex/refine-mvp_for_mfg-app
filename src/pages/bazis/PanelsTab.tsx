@@ -1,19 +1,35 @@
-// Главный экран Базис-проекта: панели ревизии (с любой глубины дерева),
-// сгруппированные по материалу и размерам (уникальные позиции). Группа
+// Главный экран Базис-проекта: панели ревизии (с любой глубины дерева).
+// По умолчанию сгруппированы по материалу и размерам (уникальные позиции);
+// чекбокс «Группировать» переключает на плоский список. Группа
 // разворачивается как Excel-группировка: вложенные панели рендерятся детьми
-// таблицы со сдвигом. Выбор панели раскрывает под списком её полную карточку
-// (развёрнута по умолчанию) и спойлеры всех блоков/сборок, в которые она
-// входит (свёрнуты; карточка предка грузится лениво при раскрытии).
+// таблицы со сдвигом. Колонки Материал/Наименование/Заказ имеют выпадающие
+// мультиселект-фильтры. Выбор панели раскрывает под списком её полную
+// карточку (развёрнута по умолчанию) и спойлеры всех блоков/сборок, в
+// которые она входит (свёрнуты; карточка предка грузится лениво).
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { ApartmentOutlined } from '@ant-design/icons';
-import { Button, Collapse, Empty, Space, Table, Tooltip, Typography } from 'antd';
+import { Button, Checkbox, Collapse, Empty, Space, Table, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import type { FilterDropdownProps } from 'antd/es/table/interface';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
 import { NodeCard } from './NodeCard';
-import { findGroupKeyByPanelId, groupPanelRows, type PanelGroupRow, type PanelLike } from './panelGrouping';
+import {
+  buildPanelFilterOptions,
+  findGroupKeyByPanelId,
+  groupPanelRows,
+  panelComparators,
+  panelFilterPredicate,
+  PANEL_FILTER_NONE,
+  summarizeVisibleRows,
+  type PanelFilterField,
+  type PanelFilterOption,
+  type PanelGroupRow,
+  type PanelLike,
+} from './panelGrouping';
 import { NODE_KIND_LABELS_RU, nodePathTitle, type RevisionData } from './useRevisionData';
+import './panels.css';
 
 const { Panel } = Collapse;
 const { Text } = Typography;
@@ -31,6 +47,8 @@ interface PanelsTabProps {
 interface PanelChildRow extends PanelLike {
   rowType: 'panel';
   key: number;
+  /** Порядковый номер в плоском режиме (в группировке у детей номера нет). */
+  flatSeq?: number;
 }
 
 interface PanelGroupTableRow extends Omit<PanelGroupRow, 'children'> {
@@ -40,60 +58,150 @@ interface PanelGroupTableRow extends Omit<PanelGroupRow, 'children'> {
 
 type PanelsTableRow = PanelGroupTableRow | PanelChildRow;
 
+/** Кастомный выпадающий фильтр колонки: мультиселект значений + «Включить
+ * все» / «Сбросить» / «Отключить все». Каждое действие применяется сразу
+ * (confirm с closeDropdown: false) — список остаётся развёрнутым, в т.ч.
+ * после «Отключить все» (пустой выбор в antd = фильтр выключен, поэтому
+ * «ничего не показывать» кодируется сентинелом PANEL_FILTER_NONE). */
+const PanelFilterDropdown: React.FC<FilterDropdownProps & { options: PanelFilterOption[] }> = ({
+  options,
+  selectedKeys,
+  setSelectedKeys,
+  confirm,
+  clearFilters,
+}) => {
+  const checked = selectedKeys.filter((key) => key !== PANEL_FILTER_NONE).map(String);
+
+  const apply = (keys: React.Key[]) => {
+    setSelectedKeys(keys);
+    confirm({ closeDropdown: false });
+  };
+
+  return (
+    <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 220 }}>
+      <Space size={4} wrap>
+        <Button size="small" onClick={() => apply(options.map((option) => option.value))}>
+          Включить все
+        </Button>
+        <Button
+          size="small"
+          onClick={() => {
+            clearFilters?.();
+            confirm({ closeDropdown: false });
+          }}
+        >
+          Сбросить
+        </Button>
+        <Button size="small" onClick={() => apply([PANEL_FILTER_NONE])}>
+          Отключить все
+        </Button>
+      </Space>
+      <div style={{ maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        {options.map((option) => (
+          <Checkbox
+            key={option.value}
+            checked={checked.includes(option.value)}
+            onChange={(event) => {
+              const next = event.target.checked
+                ? [...checked, option.value]
+                : checked.filter((value) => value !== option.value);
+              apply(next.length > 0 ? next : [PANEL_FILTER_NONE]);
+            }}
+          >
+            {option.label}
+          </Checkbox>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusToken, onSelect, onGoToTree }) => {
   const { nodes, byId, ancestorsOf } = data;
   const [expandedKeys, setExpandedKeys] = useState<readonly React.Key[]>([]);
+  const [grouped, setGrouped] = useState(true);
 
-  const groupRows = useMemo<PanelGroupTableRow[]>(() => {
-    const panels: PanelLike[] = nodes
-      .filter((node) => node.objectType === 'Панель')
-      .map((node) => ({
-        ...node,
-        pathTitle: nodePathTitle(ancestorsOf(node.bazisNodeId)),
-      }));
-    return groupPanelRows(panels).map((group) => ({
-      ...group,
-      rowType: 'group' as const,
-      children: group.children.map((panel) => ({
+  const panels = useMemo<PanelLike[]>(
+    () =>
+      nodes
+        .filter((node) => node.objectType === 'Панель')
+        .map((node) => ({
+          ...node,
+          pathTitle: nodePathTitle(ancestorsOf(node.bazisNodeId)),
+        })),
+    [ancestorsOf, nodes],
+  );
+
+  const groupRows = useMemo<PanelGroupTableRow[]>(
+    () =>
+      groupPanelRows(panels).map((group) => ({
+        ...group,
+        rowType: 'group' as const,
+        children: group.children.map((panel) => ({
+          ...panel,
+          rowType: 'panel' as const,
+          key: panel.bazisNodeId,
+        })),
+      })),
+    [panels],
+  );
+
+  const flatRows = useMemo<PanelChildRow[]>(
+    () =>
+      panels.map((panel, index) => ({
         ...panel,
         rowType: 'panel' as const,
         key: panel.bazisNodeId,
+        flatSeq: index + 1,
       })),
-    }));
-  }, [ancestorsOf, nodes]);
+    [panels],
+  );
+
+  const filterOptions = useMemo(() => buildPanelFilterOptions(panels), [panels]);
 
   // Выбор панели может прийти извне (goToPanel из вкладок Фурнитура/Операции/
   // Смета) — авто-раскрываем группу выбранной панели, иначе она останется
   // скрытой в свёрнутой группе. focusToken в deps: повторный goToPanel на ту же
   // панель после ручного сворачивания группы тоже должен её раскрыть.
   useEffect(() => {
-    if (selectedId == null) {
+    if (selectedId == null || !grouped) {
       return;
     }
     const groupKey = findGroupKeyByPanelId(groupRows, selectedId);
     if (groupKey != null) {
       setExpandedKeys((keys) => (keys.includes(groupKey) ? keys : [...keys, groupKey]));
     }
-  }, [focusToken, groupRows, selectedId]);
+  }, [focusToken, grouped, groupRows, selectedId]);
 
-  const columns = useMemo<ColumnsType<PanelsTableRow>>(
-    () => [
+  const columns = useMemo<ColumnsType<PanelsTableRow>>(() => {
+    const filterProps = (field: PanelFilterField, options: PanelFilterOption[]) => ({
+      filterDropdown: (props: FilterDropdownProps) => (
+        <PanelFilterDropdown {...props} options={options} />
+      ),
+      onFilter: (value: string | number | boolean, row: PanelsTableRow) =>
+        panelFilterPredicate(field, value, row),
+    });
+
+    return [
       {
         title: '№',
         key: 'seq',
         width: 70,
-        render: (_, row) => (row.rowType === 'group' ? row.groupSeq : null),
+        sorter: panelComparators.seq,
+        render: (_, row) => (row.rowType === 'group' ? row.groupSeq : row.flatSeq ?? null),
       },
       {
         title: 'Размеры, мм',
         key: 'size',
         width: 150,
+        sorter: panelComparators.size,
         render: (_, row) => formatSize(row),
       },
       {
         title: 'Кол-во',
         key: 'quantity',
         width: 80,
+        sorter: panelComparators.quantity,
         render: (_, row) =>
           row.rowType === 'group' ? (
             <Text strong>{row.totalQuantity ?? '—'}</Text>
@@ -105,12 +213,16 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
         title: 'Материал',
         key: 'material',
         width: 210,
+        sorter: panelComparators.material,
+        ...filterProps('material', filterOptions.materials),
         render: (_, row) => row.mainMaterialName || '—',
       },
       {
         title: 'Наименование',
         key: 'name',
         ellipsis: true,
+        sorter: panelComparators.name,
+        ...filterProps('name', filterOptions.names),
         render: (_, row) =>
           row.rowType === 'group' ? row.names.join(' / ') || '—' : row.name?.trim() || '—',
       },
@@ -118,6 +230,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
         title: 'Расположение',
         key: 'path',
         ellipsis: true,
+        sorter: panelComparators.location,
         render: (_, row) =>
           row.rowType === 'group' ? (
             <Text type="secondary">{`вхождений: ${row.children.length}`}</Text>
@@ -129,6 +242,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
         title: 'Заказ',
         key: 'orders',
         width: 160,
+        sorter: panelComparators.order,
+        ...filterProps('order', filterOptions.orders),
         render: (_, row) =>
           row.orders.length > 0 ? (
             <Space wrap size={4}>
@@ -165,9 +280,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
             </Tooltip>
           ) : null,
       },
-    ],
-    [onGoToTree],
-  );
+    ];
+  }, [filterOptions, onGoToTree]);
 
   if (groupRows.length === 0) {
     return <Empty description="В ревизии нет панелей" />;
@@ -177,22 +291,58 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
   const selectedPanel = selectedId != null ? byId.get(selectedId) : null;
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <Checkbox checked={grouped} onChange={(event) => setGrouped(event.target.checked)}>
+          Группировать
+        </Checkbox>
+      </div>
+
       <Table<PanelsTableRow>
+        className="bazis-panels-table"
         size="small"
         columns={columns}
-        dataSource={groupRows}
+        dataSource={grouped ? groupRows : flatRows}
         pagination={false}
         // ~10 строк по 39px + шапка; содержимое скроллится внутри блока
         scroll={{ y: 390 }}
-        expandable={{
-          expandedRowKeys: expandedKeys,
-          onExpandedRowsChange: setExpandedKeys,
-          indentSize: 24,
-        }}
-        rowClassName={(row) =>
-          row.rowType === 'panel' && row.bazisNodeId === selectedId ? 'ant-table-row-selected' : ''
+        expandable={
+          grouped
+            ? {
+                expandedRowKeys: expandedKeys,
+                onExpandedRowsChange: setExpandedKeys,
+                indentSize: 24,
+              }
+            : undefined
         }
+        summary={(visibleRows) => {
+          // rc-table отдаёт сюда УЖЕ отфильтрованный/отсортированный верхний
+          // уровень — итоги совпадают с тем, что видит пользователь (critic R1)
+          const totals = summarizeVisibleRows(visibleRows);
+          return (
+            <Table.Summary fixed>
+              <Table.Summary.Row>
+                <Table.Summary.Cell index={0} colSpan={2}>
+                  <Text strong>
+                    {grouped ? `Итого позиций: ${totals.positions}` : `Итого панелей: ${totals.positions}`}
+                  </Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={2}>
+                  <Text strong>{totals.totalQuantity ?? '—'}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={3} colSpan={5} />
+              </Table.Summary.Row>
+            </Table.Summary>
+          );
+        }}
+        rowClassName={(row) => {
+          const selectedClass =
+            row.rowType === 'panel' && row.bazisNodeId === selectedId ? 'ant-table-row-selected' : '';
+          // Фон-отличие только у ВЛОЖЕННЫХ строк группировки; в плоском
+          // режиме все строки — верхний уровень, подкраска не нужна
+          const childClass = grouped && row.rowType === 'panel' ? 'bazis-panel-child-row' : '';
+          return [childClass, selectedClass].filter(Boolean).join(' ');
+        }}
         onRow={(row) => ({
           onClick: () => {
             if (row.rowType === 'group') {
