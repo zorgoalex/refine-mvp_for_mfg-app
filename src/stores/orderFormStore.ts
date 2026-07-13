@@ -247,6 +247,7 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
                 ...detail,
                 temp_id: generateTempId(),
                 detail_number: newDetailNumber,
+                bazisNodeId: undefined,
                 priority: detail.priority || 100,
                 quantity: detail.quantity,
                 delete_flag: false,

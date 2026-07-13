@@ -8,11 +8,13 @@
 // которые она входит (свёрнуты; карточка предка грузится лениво).
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { ApartmentOutlined } from '@ant-design/icons';
-import { Button, Checkbox, Collapse, Empty, Space, Table, Tooltip, Typography } from 'antd';
+import { Button, Checkbox, Collapse, Empty, Modal, Space, Table, Tooltip, Typography, notification } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { FilterDropdownProps } from 'antd/es/table/interface';
+import { isApiError } from '../../api/apiError';
+import { bazisApi } from '../../api/bazisApi';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
 import { NodeCard } from './NodeCard';
 import {
@@ -44,8 +46,10 @@ const { Panel } = Collapse;
 const { Text } = Typography;
 
 interface PanelsTabProps {
+  revisionId: number;
   data: RevisionData;
   bazisOrderNo: string | null;
+  canManage: boolean;
   selectedId: number | null;
   /** Инкрементируется на каждый внешний goToPanel — форсирует авто-раскрытие
    * группы даже при повторной навигации на ту же панель. */
@@ -133,17 +137,21 @@ const PanelFilterDropdown: React.FC<FilterDropdownProps & { options: PanelFilter
 };
 
 export const PanelsTab: React.FC<PanelsTabProps> = ({
+  revisionId,
   data,
   bazisOrderNo,
+  canManage,
   selectedId,
   focusToken,
   onSelect,
   onGoToTree,
 }) => {
+  const navigate = useNavigate();
   const { nodes, byId, ancestorsOf } = data;
   const [expandedKeys, setExpandedKeys] = useState<readonly React.Key[]>([]);
   const [grouped, setGrouped] = useState(true);
   const [selection, setSelection] = useState<PanelSelectionState>(() => emptySelection());
+  const [createDraftLoading, setCreateDraftLoading] = useState(false);
   const fallbackBazisOrderNo = normalizeText(bazisOrderNo);
 
   const panels = useMemo<PanelLike[]>(
@@ -392,6 +400,51 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
 
   const selectedAncestors = selectedId != null ? ancestorsOf(selectedId) : [];
   const selectedPanel = selectedId != null ? byId.get(selectedId) : null;
+  const selectedNodeIds = useMemo(() => Array.from(selection.selected), [selection.selected]);
+
+  const handleCreateDraftOrder = async () => {
+    if (selectedNodeIds.length === 0 || createDraftLoading) {
+      return;
+    }
+
+    setCreateDraftLoading(true);
+    try {
+      const draft = await bazisApi.orderDraft(revisionId, { selectedNodeIds });
+      navigate('/orders/create', { state: { bazisDraft: draft } });
+    } catch (error) {
+      if (isApiError(error, 'BAZIS_UNMAPPED_MATERIALS')) {
+        const materialNames =
+          ((error.details as { materialNames?: string[] } | undefined)?.materialNames ?? []).filter(
+            (name) => name?.trim(),
+          );
+
+        Modal.warning({
+          title: 'Не все материалы замаплены',
+          content: (
+            <Space direction="vertical" size={8}>
+              <span>Настройте маппинги материалов в визарде импорта.</span>
+              {materialNames.length > 0 ? (
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {materialNames.map((name) => (
+                    <li key={name}>{name}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </Space>
+          ),
+        });
+        return;
+      }
+
+      notification.error({
+        message: 'Не удалось подготовить заказ',
+        description: error instanceof Error ? error.message : 'Повторите попытку позже',
+        duration: 0,
+      });
+    } finally {
+      setCreateDraftLoading(false);
+    }
+  };
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -405,7 +458,11 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
               Выбрано: {selectionStats.positions} позиций / {selectionStats.panels} панелей
               {selectionStats.excludedBusy > 0 ? ` (исключено ${selectionStats.excludedBusy} — уже в заказе)` : ''}
             </Text>
-            <Button disabled={selectionStats.panels === 0} onClick={noop}>
+            <Button
+              disabled={selectionStats.panels === 0 || !canManage}
+              loading={createDraftLoading}
+              onClick={() => void handleCreateDraftOrder()}
+            >
               В новый заказ
             </Button>
             <Button disabled={selectionStats.panels === 0} onClick={noop}>
