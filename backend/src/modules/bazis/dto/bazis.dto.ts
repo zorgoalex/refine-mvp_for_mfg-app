@@ -18,6 +18,7 @@ export interface BazisProjectListItemDto {
   revisionsCount: number;
   lastRevisionNo: number | null;
   lastImportedAt: string | null;
+  bazisOrderNo: string | null;
   linkedOrderIds: number[];
   linkedOrders: BazisOrderRefDto[];
 }
@@ -45,6 +46,8 @@ export interface BazisTreeNodeDto {
   name: string | null;
   detailCode: string | null;
   position: string | null;
+  designation: string | null;
+  productOrderNo: string | null;
   quantity: number | null;
   cumulativeQuantity: number | null;
   lengthMm: number | null;

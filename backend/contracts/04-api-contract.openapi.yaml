@@ -2329,6 +2329,9 @@ paths:
                       type: string
                       format: date-time
                       nullable: true
+                    bazisOrderNo:
+                      type: string
+                      nullable: true
                     linkedOrderIds:
                       type: array
                       items:
@@ -2457,6 +2460,9 @@ paths:
                   lastImportedAt:
                     type: string
                     format: date-time
+                    nullable: true
+                  bazisOrderNo:
+                    type: string
                     nullable: true
                   linkedOrderIds:
                     type: array
@@ -2728,6 +2734,12 @@ paths:
                       type: string
                       nullable: true
                     position:
+                      type: string
+                      nullable: true
+                    designation:
+                      type: string
+                      nullable: true
+                    productOrderNo:
                       type: string
                       nullable: true
                     quantity:

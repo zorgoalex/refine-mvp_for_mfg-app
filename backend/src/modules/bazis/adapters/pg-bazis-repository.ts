@@ -71,6 +71,7 @@ interface ProjectListRow {
   revisions_count: number | string;
   last_revision_no: number | string | null;
   last_imported_at: string | null;
+  bazis_order_no: string | null;
   linked_order_ids: Array<number | string> | null;
   linked_orders?: Array<{ orderId: number | string; orderName: string | null }> | null;
 }
@@ -96,6 +97,8 @@ interface TreeNodeRow {
   name: string | null;
   detail_code: string | null;
   position: string | null;
+  designation: string | null;
+  product_order_no: string | null;
   quantity: number | string | null;
   cumulative_quantity: number | string | null;
   length_mm: number | string | null;
@@ -788,9 +791,21 @@ export class PgBazisRepository implements BazisRepositoryPort {
       SELECT bp.bazis_project_id,
              bp.project_id,
              bp.name,
-             COUNT(DISTINCT r.bazis_revision_id)::int AS revisions_count,
-             MAX(r.revision_no)::int AS last_revision_no,
-             MAX(r.imported_at)::text AS last_imported_at,
+             COUNT(DISTINCT r_all.bazis_revision_id)::int AS revisions_count,
+             MAX(r_all.revision_no)::int AS last_revision_no,
+             MAX(r_all.imported_at)::text AS last_imported_at,
+             COALESCE(
+               rev.bazis_order_no,
+               (
+                 SELECT NULLIF(trim(n.raw_json->>'Заказ'), '')
+                 FROM bazis_nodes n
+                 WHERE n.revision_id = rev.bazis_revision_id
+                   AND n.parent_node_id IS NULL
+                   AND NULLIF(trim(n.raw_json->>'Заказ'), '') IS NOT NULL
+                 ORDER BY n.seq
+                 LIMIT 1
+               )
+             ) AS bazis_order_no,
              COALESCE(array_remove(array_agg(DISTINCT bol.order_id), NULL), '{}') AS linked_order_ids,
              COALESCE((
                SELECT jsonb_agg(jsonb_build_object('orderId', l.order_id, 'orderName', o.order_name) ORDER BY l.order_id)
@@ -799,10 +814,17 @@ export class PgBazisRepository implements BazisRepositoryPort {
                WHERE l.bazis_project_id = bp.bazis_project_id
              ), '[]'::jsonb) AS linked_orders
       FROM bazis_projects bp
-      LEFT JOIN bazis_project_revisions r ON r.bazis_project_id = bp.bazis_project_id
+      LEFT JOIN bazis_project_revisions r_all ON r_all.bazis_project_id = bp.bazis_project_id
+      LEFT JOIN LATERAL (
+        SELECT r_latest.bazis_revision_id, r_latest.bazis_order_no
+        FROM bazis_project_revisions r_latest
+        WHERE r_latest.bazis_project_id = bp.bazis_project_id
+        ORDER BY r_latest.revision_no DESC, r_latest.imported_at DESC, r_latest.bazis_revision_id DESC
+        LIMIT 1
+      ) rev ON TRUE
       LEFT JOIN bazis_order_links bol ON bol.bazis_project_id = bp.bazis_project_id
       WHERE ($1::bigint IS NULL OR bp.project_id = $1)
-      GROUP BY bp.bazis_project_id, bp.project_id, bp.name
+      GROUP BY bp.bazis_project_id, bp.project_id, bp.name, rev.bazis_revision_id, rev.bazis_order_no
       ORDER BY bp.bazis_project_id DESC
       `,
       [filter.projectId ?? null],
@@ -816,9 +838,21 @@ export class PgBazisRepository implements BazisRepositoryPort {
       SELECT bp.bazis_project_id,
              bp.project_id,
              bp.name,
-             COUNT(DISTINCT r.bazis_revision_id)::int AS revisions_count,
-             MAX(r.revision_no)::int AS last_revision_no,
-             MAX(r.imported_at)::text AS last_imported_at,
+             COUNT(DISTINCT r_all.bazis_revision_id)::int AS revisions_count,
+             MAX(r_all.revision_no)::int AS last_revision_no,
+             MAX(r_all.imported_at)::text AS last_imported_at,
+             COALESCE(
+               rev.bazis_order_no,
+               (
+                 SELECT NULLIF(trim(n.raw_json->>'Заказ'), '')
+                 FROM bazis_nodes n
+                 WHERE n.revision_id = rev.bazis_revision_id
+                   AND n.parent_node_id IS NULL
+                   AND NULLIF(trim(n.raw_json->>'Заказ'), '') IS NOT NULL
+                 ORDER BY n.seq
+                 LIMIT 1
+               )
+             ) AS bazis_order_no,
              COALESCE(array_remove(array_agg(DISTINCT bol.order_id), NULL), '{}') AS linked_order_ids,
              COALESCE((
                SELECT jsonb_agg(jsonb_build_object('orderId', l.order_id, 'orderName', o.order_name) ORDER BY l.order_id)
@@ -827,10 +861,17 @@ export class PgBazisRepository implements BazisRepositoryPort {
                WHERE l.bazis_project_id = bp.bazis_project_id
              ), '[]'::jsonb) AS linked_orders
       FROM bazis_projects bp
-      LEFT JOIN bazis_project_revisions r ON r.bazis_project_id = bp.bazis_project_id
+      LEFT JOIN bazis_project_revisions r_all ON r_all.bazis_project_id = bp.bazis_project_id
+      LEFT JOIN LATERAL (
+        SELECT r_latest.bazis_revision_id, r_latest.bazis_order_no
+        FROM bazis_project_revisions r_latest
+        WHERE r_latest.bazis_project_id = bp.bazis_project_id
+        ORDER BY r_latest.revision_no DESC, r_latest.imported_at DESC, r_latest.bazis_revision_id DESC
+        LIMIT 1
+      ) rev ON TRUE
       LEFT JOIN bazis_order_links bol ON bol.bazis_project_id = bp.bazis_project_id
       WHERE bp.bazis_project_id = $1
-      GROUP BY bp.bazis_project_id, bp.project_id, bp.name
+      GROUP BY bp.bazis_project_id, bp.project_id, bp.name, rev.bazis_revision_id, rev.bazis_order_no
       `,
       [bazisProjectId],
     );
@@ -876,7 +917,9 @@ export class PgBazisRepository implements BazisRepositoryPort {
     const result = await this.database.query<TreeNodeRow>(
       `
       SELECT n.bazis_node_id, n.parent_node_id, n.seq, n.node_kind, n.object_type, n.name,
-             n.detail_code, n.position, n.quantity, n.cumulative_quantity,
+             n.detail_code, n.position, n.designation,
+             CASE WHEN n.parent_node_id IS NULL THEN NULLIF(trim(n.raw_json->>'Заказ'), '') ELSE NULL END AS product_order_no,
+             n.quantity, n.cumulative_quantity,
              n.length_mm, n.width_mm, n.thickness_mm, n.main_material_name,
              (SELECT jsonb_agg(DISTINCT jsonb_build_object('orderId', m.order_id, 'orderName', o.order_name))
               FROM bazis_node_order_detail_map m
@@ -909,7 +952,9 @@ export class PgBazisRepository implements BazisRepositoryPort {
     const result = await this.database.query<TreeNodeRow>(
       `
       SELECT n.bazis_node_id, n.parent_node_id, n.seq, n.node_kind, n.object_type, n.name,
-             n.detail_code, n.position, n.quantity, n.cumulative_quantity,
+             n.detail_code, n.position, n.designation,
+             CASE WHEN n.parent_node_id IS NULL THEN NULLIF(trim(n.raw_json->>'Заказ'), '') ELSE NULL END AS product_order_no,
+             n.quantity, n.cumulative_quantity,
              n.length_mm, n.width_mm, n.thickness_mm, n.main_material_name,
              (SELECT jsonb_agg(DISTINCT jsonb_build_object('orderId', m.order_id, 'orderName', o.order_name))
               FROM bazis_node_order_detail_map m
@@ -1847,6 +1892,8 @@ function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
     name: row.name,
     detailCode: row.detail_code,
     position: row.position,
+    designation: row.designation,
+    productOrderNo: row.product_order_no,
     quantity: nullableNumber(row.quantity),
     cumulativeQuantity: nullableNumber(row.cumulative_quantity),
     lengthMm: nullableNumber(row.length_mm),
@@ -1875,6 +1922,7 @@ function mapProjectListRow(row: ProjectListRow): BazisProjectListItemDto {
     revisionsCount: Number(row.revisions_count),
     lastRevisionNo: nullableNumber(row.last_revision_no),
     lastImportedAt: row.last_imported_at,
+    bazisOrderNo: row.bazis_order_no,
     linkedOrderIds: (row.linked_order_ids ?? []).map((value) => Number(value)),
     linkedOrders,
   };

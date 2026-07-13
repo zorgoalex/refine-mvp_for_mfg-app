@@ -257,6 +257,8 @@ describe('PgBazisRepository reads + mappings', () => {
             name: 'Root',
             detail_code: null,
             position: null,
+            designation: null,
+            product_order_no: null,
             quantity: 1,
             cumulative_quantity: 1,
             length_mm: null,
@@ -279,6 +281,8 @@ describe('PgBazisRepository reads + mappings', () => {
         name: 'Root',
         detailCode: null,
         position: null,
+        designation: null,
+        productOrderNo: null,
         quantity: 1,
         cumulativeQuantity: 1,
         lengthMm: null,
@@ -296,6 +300,49 @@ describe('PgBazisRepository reads + mappings', () => {
     const repository = new PgBazisRepository(createDatabase().service);
 
     await expect(repository.getProject(999)).rejects.toBeInstanceOf(BazisProjectNotFoundError);
+  });
+
+  it('getProject returns bazisOrderNo from the latest revision column', async () => {
+    const database = createDatabase({
+      projectListRows: [
+        {
+          bazis_project_id: 14,
+          project_id: 10,
+          name: 'санузел + шкаф',
+          revisions_count: 1,
+          last_revision_no: 1,
+          last_imported_at: '2026-07-10T12:44:00.000Z',
+          bazis_order_no: '1457',
+          linked_order_ids: [11385],
+          linked_orders: [{ orderId: 11385, orderName: 'санузел' }],
+        },
+      ],
+      projectRevisionRows: [
+        {
+          bazis_revision_id: 82,
+          revision_no: 1,
+          file_name: 'nova.xml',
+          file_size: 2048,
+          xml_sha256: 'sha-001',
+          product_name: 'Шкаф Nova',
+          product_price: 1200,
+          summary_json: { panels: 1 },
+          imported_at: '2026-07-10T12:44:00.000Z',
+        },
+      ],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(repository.getProject(14)).resolves.toMatchObject({
+      bazisProjectId: 14,
+      bazisOrderNo: '1457',
+      revisions: [{ bazisRevisionId: 82 }],
+    });
+
+    const cardSql = database.queries
+      .map((query) => normalizeSql(query.text))
+      .find((sql) => sql.startsWith('SELECT bp.bazis_project_id'));
+    expect(cardSql).toContain('rev.bazis_order_no');
   });
 
   it('upsertMaterialMappings writes source_kind conflict key and one batch audit', async () => {
@@ -1081,6 +1128,7 @@ describe('PgBazisRepository.listProjects', () => {
           revisions_count: 1,
           last_revision_no: 1,
           last_imported_at: '2026-07-10T12:44:00.000Z',
+          bazis_order_no: null,
           linked_order_ids: [11385],
           linked_orders: [{ orderId: 11385, orderName: 'санузел' }],
         },
@@ -1099,9 +1147,123 @@ describe('PgBazisRepository.listProjects', () => {
     expect(listSql).toContain('order_name');
     expect(listSql).toContain('JOIN orders');
   });
+
+  it('returns bazisOrderNo from the latest revision column for list items', async () => {
+    const database = createDatabase({
+      projectListRows: [
+        {
+          bazis_project_id: 14,
+          project_id: 10,
+          name: 'санузел + шкаф',
+          revisions_count: 1,
+          last_revision_no: 1,
+          last_imported_at: '2026-07-10T12:44:00.000Z',
+          bazis_order_no: '1457',
+          linked_order_ids: [11385],
+          linked_orders: [{ orderId: 11385, orderName: 'санузел' }],
+        },
+      ],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const projects = await repository.listProjects({});
+
+    expect(projects[0]).toMatchObject({
+      bazisProjectId: 14,
+      bazisOrderNo: '1457',
+    });
+  });
+
+  it('falls back to the first root raw_json order number when the revision column is null', async () => {
+    const database = createDatabase({
+      projectListRows: [
+        {
+          bazis_project_id: 14,
+          project_id: 10,
+          name: 'санузел + шкаф',
+          revisions_count: 1,
+          last_revision_no: 1,
+          last_imported_at: '2026-07-10T12:44:00.000Z',
+          bazis_order_no: '1443',
+          linked_order_ids: [],
+          linked_orders: [],
+        },
+      ],
+      projectRevisionRows: [
+        {
+          bazis_revision_id: 82,
+          revision_no: 1,
+          file_name: 'nova.xml',
+          file_size: 2048,
+          xml_sha256: 'sha-001',
+          product_name: 'Шкаф Nova',
+          product_price: 1200,
+          summary_json: { panels: 1 },
+          imported_at: '2026-07-10T12:44:00.000Z',
+        },
+      ],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const [listItem, card] = await Promise.all([repository.listProjects({}), repository.getProject(14)]);
+
+    expect(listItem[0]?.bazisOrderNo).toBe('1443');
+    expect(card.bazisOrderNo).toBe('1443');
+
+    const projectSql = database.queries
+      .map((query) => normalizeSql(query.text))
+      .filter((sql) => sql.startsWith('SELECT bp.bazis_project_id'));
+    expect(projectSql).toHaveLength(2);
+    for (const sql of projectSql) {
+      expect(sql).toContain("NULLIF(trim(n.raw_json->>'Заказ'), '')");
+      expect(sql).toContain('n.revision_id = rev.bazis_revision_id');
+    }
+  });
 });
 
 describe('PgBazisRepository tree order provenance', () => {
+  it('returns panel designation and root productOrderNo on tree nodes', async () => {
+    const database = createDatabase({
+      treeChildren: [
+        {
+          bazis_node_id: 101,
+          parent_node_id: null,
+          seq: 0,
+          node_kind: 'object',
+          object_type: 'Панель',
+          name: 'Фасад',
+          detail_code: null,
+          position: '7',
+          designation: 'D-01',
+          product_order_no: '1443',
+          quantity: 1,
+          cumulative_quantity: 1,
+          length_mm: 100,
+          width_mm: 50,
+          thickness_mm: 16,
+          main_material_name: 'ЛДСП',
+          children_count: 0,
+          linked_orders: null,
+        },
+      ],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(repository.getTreeChildren(5, null)).resolves.toMatchObject([
+      {
+        bazisNodeId: 101,
+        designation: 'D-01',
+        productOrderNo: '1443',
+      },
+    ]);
+
+    const treeSql = database.queries
+      .map((query) => normalizeSql(query.text))
+      .find((sql) => sql.startsWith('SELECT n.bazis_node_id, n.parent_node_id'));
+    expect(treeSql).toContain('n.designation');
+    expect(treeSql).toContain("CASE WHEN n.parent_node_id IS NULL THEN NULLIF(trim(n.raw_json->>'Заказ'), '') ELSE NULL END AS product_order_no");
+  });
+
   it('exposes orderIds on tree nodes from the node-order map (created details only)', async () => {
     const database = createDatabase({
       treeChildren: [
@@ -1114,6 +1276,8 @@ describe('PgBazisRepository tree order provenance', () => {
           name: 'Фасад',
           detail_code: null,
           position: '7',
+          designation: null,
+          product_order_no: null,
           quantity: 1,
           cumulative_quantity: 1,
           length_mm: 100,
@@ -1135,6 +1299,8 @@ describe('PgBazisRepository tree order provenance', () => {
           name: 'Секция',
           detail_code: null,
           position: null,
+          designation: null,
+          product_order_no: null,
           quantity: 1,
           cumulative_quantity: 1,
           length_mm: null,
@@ -1182,6 +1348,8 @@ describe('PgBazisRepository tree order provenance', () => {
           name: 'Полка',
           detail_code: null,
           position: '3',
+          designation: null,
+          product_order_no: null,
           quantity: 1,
           cumulative_quantity: 1,
           length_mm: 800,
@@ -1277,6 +1445,7 @@ function createDatabase(
       total?: number;
       rows?: Array<Record<string, unknown>>;
     };
+    projectRevisionRows?: Array<Record<string, unknown>>;
     createOrderState?: {
       idempotencyConflict?: boolean;
       existingIdempotencyRow?: {
@@ -1359,7 +1528,7 @@ function createDatabase(
         return { rows: [], rowCount: 1 };
       }
 
-      if (normalized.startsWith('SELECT r.bazis_revision_id')) {
+      if (normalized.startsWith('SELECT r.bazis_revision_id, r.bazis_project_id, bp.project_id')) {
         return options.createOrderState?.revisionRow
           ? { rows: [options.createOrderState.revisionRow], rowCount: 1 }
           : { rows: [], rowCount: 0 };
@@ -1416,8 +1585,9 @@ function createDatabase(
         const rows = options.projectListRows ?? [];
         return { rows, rowCount: rows.length };
       }
-      if (normalized.startsWith('SELECT r.bazis_revision_id')) {
-        return { rows: [], rowCount: 0 };
+      if (normalized.startsWith('SELECT r.bazis_revision_id, r.revision_no,')) {
+        const rows = options.projectRevisionRows ?? [];
+        return { rows, rowCount: rows.length };
       }
       if (normalized.startsWith('SELECT n.bazis_node_id, n.revision_id')) {
         const row = options.nodeCard?.row;

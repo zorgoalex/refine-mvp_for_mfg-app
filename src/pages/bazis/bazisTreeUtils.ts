@@ -5,6 +5,8 @@ export interface BazisTreeDataNode extends DataNode {
   key: number;
   bazisNodeId: number;
   objectType: string | null;
+  designation: string | null;
+  productOrderNo: string | null;
   childrenCount: number;
   orders: Array<{ orderId: number; orderName: string }>;
   orderIds: number[];
@@ -17,6 +19,8 @@ export function mapTreeNode(node: BazisTreeNode): BazisTreeDataNode {
     key: node.bazisNodeId,
     bazisNodeId: node.bazisNodeId,
     objectType,
+    designation: node.designation ?? null,
+    productOrderNo: node.productOrderNo ?? null,
     childrenCount: node.childrenCount,
     // `?? []` намеренно: во время раскатки FE может говорить со старым
     // backend без orders/orderIds — дерево не должно падать (см. unit-тест legacy).
