@@ -28,6 +28,15 @@ import {
   type PanelGroupRow,
   type PanelLike,
 } from './panelGrouping';
+import {
+  emptySelection,
+  groupCheckState,
+  pruneSelection,
+  selectionSummary,
+  toggleGroup,
+  togglePanel,
+  type PanelSelectionState,
+} from './panelSelection';
 import { NODE_KIND_LABELS_RU, nodePathTitle, type RevisionData } from './useRevisionData';
 import './panels.css';
 
@@ -58,6 +67,12 @@ interface PanelGroupTableRow extends Omit<PanelGroupRow, 'children'> {
 }
 
 type PanelsTableRow = PanelGroupTableRow | PanelChildRow;
+
+const BUSY_SELECTED_ROW_STYLE: React.CSSProperties = {
+  backgroundColor: '#fff2e8',
+};
+
+const noop = () => {};
 
 /** Кастомный выпадающий фильтр колонки: мультиселект значений + «Включить
  * все» / «Сбросить» / «Отключить все». Каждое действие применяется сразу
@@ -128,6 +143,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   const { nodes, byId, ancestorsOf } = data;
   const [expandedKeys, setExpandedKeys] = useState<readonly React.Key[]>([]);
   const [grouped, setGrouped] = useState(true);
+  const [selection, setSelection] = useState<PanelSelectionState>(() => emptySelection());
   const fallbackBazisOrderNo = normalizeText(bazisOrderNo);
 
   const panels = useMemo<PanelLike[]>(
@@ -173,6 +189,16 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   );
 
   const filterOptions = useMemo(() => buildPanelFilterOptions(panels), [panels]);
+  const alivePanelIds = useMemo(() => new Set(panels.map((panel) => panel.bazisNodeId)), [panels]);
+  const selectionStats = useMemo(() => selectionSummary(selection, groupRows), [groupRows, selection]);
+  const selectionPossible = useMemo(
+    () => groupRows.some((group) => group.children.some((panel) => panel.orders.length === 0)),
+    [groupRows],
+  );
+
+  useEffect(() => {
+    setSelection((current) => pruneSelection(current, alivePanelIds));
+  }, [alivePanelIds]);
 
   // Выбор панели может прийти извне (goToPanel из вкладок Фурнитура/Операции/
   // Смета) — авто-раскрываем группу выбранной панели, иначе она останется
@@ -198,6 +224,41 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
     });
 
     return [
+      {
+        title: '',
+        key: 'selection',
+        width: 52,
+        render: (_, row) => {
+          if (row.rowType === 'group') {
+            const state = groupCheckState(selection, row);
+            const hasFreePanels = row.children.some((panel) => panel.orders.length === 0);
+            const hasSelectedPanels = row.children.some((panel) => selection.selected.has(panel.bazisNodeId));
+            return (
+              <Checkbox
+                checked={state === 'checked'}
+                indeterminate={state === 'indeterminate'}
+                disabled={!hasFreePanels && !hasSelectedPanels}
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => {
+                  event.stopPropagation();
+                  setSelection((current) => toggleGroup(current, row, event.target.checked));
+                }}
+              />
+            );
+          }
+
+          return (
+            <Checkbox
+              checked={selection.selected.has(row.bazisNodeId)}
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) => {
+                event.stopPropagation();
+                setSelection((current) => togglePanel(current, row.bazisNodeId));
+              }}
+            />
+          );
+        },
+      },
       {
         title: '№',
         key: 'seq',
@@ -323,7 +384,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           ) : null,
       },
     ];
-  }, [filterOptions, onGoToTree]);
+  }, [filterOptions, onGoToTree, selection]);
 
   if (groupRows.length === 0) {
     return <Empty description="В ревизии нет панелей" />;
@@ -334,11 +395,25 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <Space size="middle" align="center" wrap style={{ justifyContent: 'space-between', width: '100%' }}>
         <Checkbox checked={grouped} onChange={(event) => setGrouped(event.target.checked)}>
           Группировать
         </Checkbox>
-      </div>
+        {selectionPossible ? (
+          <Space size="middle" wrap>
+            <Text>
+              Выбрано: {selectionStats.positions} позиций / {selectionStats.panels} панелей
+              {selectionStats.excludedBusy > 0 ? ` (исключено ${selectionStats.excludedBusy} — уже в заказе)` : ''}
+            </Text>
+            <Button disabled={selectionStats.panels === 0} onClick={noop}>
+              В новый заказ
+            </Button>
+            <Button disabled={selectionStats.panels === 0} onClick={noop}>
+              В существующий заказ
+            </Button>
+          </Space>
+        ) : null}
+      </Space>
 
       <Table<PanelsTableRow>
         className="bazis-panels-table"
@@ -396,7 +471,16 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
               onSelect(row.bazisNodeId);
             }
           },
-          style: { cursor: 'pointer' },
+          style: {
+            cursor: 'pointer',
+            // Оранжевая warn-подсветка: занятая (уже в заказе) панель, осознанно
+            // ВКЛЮЧЁННАЯ в селекцию чекбоксом — не путать с карточным selectedId.
+            ...(row.rowType === 'panel' &&
+            row.orders.length > 0 &&
+            selection.selected.has(row.bazisNodeId)
+              ? BUSY_SELECTED_ROW_STYLE
+              : undefined),
+          },
         })}
       />
 
