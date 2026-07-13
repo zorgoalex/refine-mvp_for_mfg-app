@@ -6,6 +6,10 @@ const orderFormStore = readFileSync(new URL('../../stores/orderFormStore.ts', im
 const orderTypes = readFileSync(new URL('../../types/orders.ts', import.meta.url), 'utf8');
 const orderForm = readFileSync(new URL('../orders/components/OrderForm.tsx', import.meta.url), 'utf8');
 const useOrderSave = readFileSync(new URL('../../hooks/useOrderSave.ts', import.meta.url), 'utf8');
+const orderBasicInfo = readFileSync(
+  new URL('../orders/components/sections/OrderBasicInfo.tsx', import.meta.url),
+  'utf8',
+);
 
 describe('bazis draft order guards', () => {
   it('stores provenance in a dedicated bazisNodeId field and clears it on copied rows', () => {
@@ -33,9 +37,14 @@ describe('bazis draft order guards', () => {
     );
   });
 
-  it('order create form seeds from bazisDraft and locks the client field', () => {
+  it('order create form seeds from bazisDraft and locks the client field for real', () => {
     expect(orderForm).toContain('draftToFormSeed(bazisDraft)');
-    expect(orderForm).toContain('Клиент Базис-проекта');
     expect(orderForm).toContain('readBazisDraftFromLocationState');
+    expect(orderForm).toContain('<OrderBasicInfo clientLocked={bazisDraftClientLocked} />');
+    // Настоящий disabled + скрытое создание клиента, не DOM-косметика
+    expect(orderBasicInfo).toContain('disabled={clientLocked}');
+    expect(orderBasicInfo).toMatch(/if \(clientLocked\) \{\s*return;\s*\}/);
+    expect(orderBasicInfo).toContain("extra={clientLocked ? 'Клиент Базис-проекта' : undefined}");
+    expect(orderBasicInfo).toContain('{!clientLocked ? (');
   });
 });

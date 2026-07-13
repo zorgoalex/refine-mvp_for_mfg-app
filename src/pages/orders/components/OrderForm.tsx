@@ -122,7 +122,6 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const saveKeySignatureRef = useRef<string | undefined>(undefined);
   const bazisDraftRuntimeRef = useRef<BazisDraftRuntime | null>(null);
   const seededBazisDraftLocationKeyRef = useRef<string | null>(null);
-  const basicInfoLockRef = useRef<HTMLDivElement | null>(null);
   const projectClientRef = useRef<number | undefined>(undefined);
   const projectRequestIdRef = useRef(0);
   const [projectOptions, setProjectOptions] = useState<Array<{ label: string; value: number }>>(
@@ -533,48 +532,6 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     setDirty,
     setInitializing,
   ]);
-
-  useEffect(() => {
-    if (!bazisDraftClientLocked) {
-      return;
-    }
-
-    let frameId = 0;
-    frameId = window.requestAnimationFrame(() => {
-      const root = basicInfoLockRef.current;
-      if (!root) {
-        return;
-      }
-
-      const clientItem = Array.from(root.querySelectorAll<HTMLElement>('.ant-form-item')).find(
-        (item) => item.querySelector('.ant-form-item-label')?.textContent?.includes('Клиент'),
-      );
-      if (!clientItem) {
-        return;
-      }
-
-      const select = clientItem.querySelector<HTMLElement>('.ant-select');
-      const control = clientItem.querySelector<HTMLElement>('.ant-form-item-control');
-      let hint = clientItem.querySelector<HTMLElement>('[data-bazis-client-lock-hint]');
-
-      clientItem.setAttribute('title', 'Клиент Базис-проекта');
-      select?.setAttribute('aria-disabled', 'true');
-      if (select) {
-        select.style.pointerEvents = 'none';
-        select.style.opacity = '0.85';
-      }
-
-      if (!hint && control) {
-        hint = document.createElement('div');
-        hint.setAttribute('data-bazis-client-lock-hint', 'true');
-        hint.className = 'ant-form-item-extra';
-        hint.textContent = 'Клиент Базис-проекта';
-        control.appendChild(hint);
-      }
-    });
-
-    return () => window.cancelAnimationFrame(frameId);
-  }, [activeTab, bazisDraftClientLocked, location.key]);
 
   useEffect(() => {
     if (!statusesError) return;
@@ -1281,9 +1238,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         label: 'Основная информация',
         children: (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
-            <div ref={basicInfoLockRef}>
-              <OrderBasicInfo />
-            </div>
+            <OrderBasicInfo clientLocked={bazisDraftClientLocked} />
             <OrderNotesSection />
           </Space>
         ),

@@ -259,11 +259,6 @@ interface RevisionOrderRow {
   details_created: number | string;
 }
 
-interface OrderScopeRow {
-  order_id: number | string;
-  client_id: number | string | null;
-}
-
 type BazisOrderTransactions = Pick<OrderTransactionService, 'create'> &
   Partial<Pick<OrderTransactionService, 'update'>>;
 
@@ -1703,8 +1698,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
         throw new BazisRevisionNotFoundError(command.revisionId);
       }
 
-      const targetOrder = await this.loadTargetOrderScope(command.orderId);
-      if (!targetOrder || targetOrder.clientId !== revision.projectClientId) {
+      const currentOrder = await this.loadOrderById(command.currentUser, command.orderId);
+      if (!currentOrder || currentOrder.header.clientId !== revision.projectClientId) {
         await this.failBazisIdempotency(command.currentUser, command.idempotencyKey);
         throw validationErrorForField(
           'orderId',
@@ -1725,15 +1720,6 @@ export class PgBazisRepository implements BazisRepositoryPort {
       if (unmappedSheetNames.length > 0) {
         await this.failBazisIdempotency(command.currentUser, command.idempotencyKey);
         throw new BazisUnmappedMaterialsError(unmappedSheetNames);
-      }
-
-      const currentOrder = await this.loadOrderById(command.currentUser, command.orderId);
-      if (!currentOrder) {
-        await this.failBazisIdempotency(command.currentUser, command.idempotencyKey);
-        throw validationErrorForField(
-          'orderId',
-          'Заказ должен существовать и принадлежать клиенту проекта Базис',
-        );
       }
 
       const merge = buildAddToOrderSaveDto({
@@ -1897,8 +1883,10 @@ export class PgBazisRepository implements BazisRepositoryPort {
     }
 
     if (command.targetOrderId != null) {
-      const targetOrder = await this.loadTargetOrderScope(command.targetOrderId);
-      if (!targetOrder || targetOrder.clientId !== revision.projectClientId) {
+      // Единый read-путь с GET /orders/:id и командой add-to-order (paritет
+      // sheet-флагов/delete_flag; отдельного raw-SQL входа в orders нет).
+      const targetOrder = await this.loadOrderById(command.currentUser, command.targetOrderId);
+      if (!targetOrder || targetOrder.header.clientId !== revision.projectClientId) {
         throw new ApiError(
           422,
           'VALIDATION_ERROR',
@@ -1988,26 +1976,6 @@ export class PgBazisRepository implements BazisRepositoryPort {
       revisionBazisOrderNo: row.revision_bazis_order_no,
       projectClientId: nullableNumber(row.project_client_id),
       clientName: row.client_name,
-    };
-  }
-
-  private async loadTargetOrderScope(orderId: number): Promise<{ orderId: number; clientId: number | null } | null> {
-    const result = await this.database.query<OrderScopeRow>(
-      `
-      SELECT order_id, client_id
-      FROM orders
-      WHERE order_id = $1
-        AND delete_flag = false
-      `,
-      [orderId],
-    );
-    const row = result.rows[0];
-    if (!row) {
-      return null;
-    }
-    return {
-      orderId: Number(row.order_id),
-      clientId: nullableNumber(row.client_id),
     };
   }
 
@@ -2551,6 +2519,10 @@ function buildAddToOrderSaveDto(input: {
     const next = toSaveDetailFromDraftDetail(draftDetailsByNodeId.get(pair.bazisNodeId), pair.bazisNodeId);
     replacedBefore.push(snapshotReplacedDetail(target));
     target.detailName = next.detailName;
+    // Variant B: replace переводит деталь на sheet-режим; висящий legacy
+    // materialId валидатор заказа отвергает (material_id is not allowed) —
+    // нормализуем явно, а не «наследуем как есть».
+    target.materialId = null;
     target.height = next.height;
     target.width = next.width;
     target.quantity = next.quantity;

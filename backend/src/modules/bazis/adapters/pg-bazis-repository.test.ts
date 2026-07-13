@@ -1635,6 +1635,7 @@ describe('PgBazisRepository.addToOrder', () => {
       },
     });
     const repository = new PgBazisRepository(database.service, { update: vi.fn() });
+    getOrderByIdMock.mockResolvedValue(buildDetailedOrderDto(9001, 'ERP order current'));
 
     await expect(repository.addToOrder(createAddToOrderCommand())).rejects.toMatchObject({
       statusCode: 422,
@@ -1643,7 +1644,7 @@ describe('PgBazisRepository.addToOrder', () => {
     });
   });
 
-  it('rejects unmapped panels before reading the current order', async () => {
+  it('rejects unmapped panels with 422', async () => {
     const database = createDatabase({
       addToOrderState: {
         revisionRow: baseRevisionRow(),
@@ -1655,11 +1656,12 @@ describe('PgBazisRepository.addToOrder', () => {
     });
     const repository = new PgBazisRepository(database.service, { update: vi.fn() });
 
+    getOrderByIdMock.mockResolvedValue(buildDetailedOrderDto(9001, 'ERP order current'));
+
     await expect(repository.addToOrder(createAddToOrderCommand())).rejects.toMatchObject({
       statusCode: 422,
       code: 'BAZIS_UNMAPPED_MATERIALS',
     });
-    expect(getOrderByIdMock).not.toHaveBeenCalled();
   });
 
   it('adds new details through update, preserves full header/version, writes map upsert, links, audit bridge, and outbox', async () => {
@@ -1763,6 +1765,11 @@ describe('PgBazisRepository.addToOrder', () => {
       },
     });
     const currentOrder = buildDetailedOrderDto(9001, 'ERP order current');
+    // Critic code-R1 #1: висящий legacy material_id у заменяемой детали не должен
+    // доехать до валидатора (Variant B: material_id обязан быть null).
+    currentOrder.details = currentOrder.details.map((detail) =>
+      detail.id === 7002 ? { ...detail, materialId: 5 } : detail,
+    );
     getOrderByIdMock.mockResolvedValue(currentOrder);
     let dtoPassed: ReturnType<typeof orderDtoToSaveDto> | null = null;
     const update = vi.fn(async (command: Parameters<NonNullable<OrderTransactionService['update']>>[0]) => {
@@ -1812,6 +1819,7 @@ describe('PgBazisRepository.addToOrder', () => {
       note: 'keep me',
       linkCadFile: '/cad/preserved.dxf',
     });
+    expect(replaced?.materialId).toBeNull();
     const deletes = database.queries.filter((query) =>
       normalizeSql(query.text).startsWith('DELETE FROM bazis_node_order_detail_map'),
     );
@@ -2268,6 +2276,7 @@ describe('PgBazisRepository.buildOrderDraft', () => {
       }).service,
     );
 
+    getOrderByIdMock.mockResolvedValue(buildDetailedOrderDto(9001, 'ERP target order'));
     const result = await repository.buildOrderDraft({
       currentUser: currentUser(),
       revisionId: 82,
@@ -2321,6 +2330,7 @@ describe('PgBazisRepository.buildOrderDraft', () => {
     });
     const repository = new PgBazisRepository(database.service);
 
+    getOrderByIdMock.mockResolvedValue(buildDetailedOrderDto(9001, 'ERP target order'));
     const result = await repository.buildOrderDraft({
       currentUser: currentUser(),
       revisionId: 82,
@@ -2380,6 +2390,7 @@ describe('PgBazisRepository.buildOrderDraft', () => {
       }).service,
     );
 
+    getOrderByIdMock.mockResolvedValue(buildDetailedOrderDto(9001, 'ERP target order'));
     const result = await repository.buildOrderDraft({
       currentUser: currentUser(),
       revisionId: 82,
@@ -2432,6 +2443,7 @@ describe('PgBazisRepository.buildOrderDraft', () => {
       }).service,
     );
 
+    getOrderByIdMock.mockResolvedValue(buildDetailedOrderDto(9001, 'ERP target order'));
     const result = await repository.buildOrderDraft({
       currentUser: currentUser(),
       revisionId: 82,
