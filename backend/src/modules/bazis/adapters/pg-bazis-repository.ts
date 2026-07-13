@@ -132,6 +132,7 @@ interface RevisionProjectRow {
   bazis_project_id: number | string;
   project_id: number | string;
   bazis_project_name: string;
+  revision_bazis_order_no: string | null;
   project_client_id: number | string | null;
 }
 
@@ -145,6 +146,8 @@ interface SelectedPanelRow {
   length_mm: number | string | null;
   width_mm: number | string | null;
   main_material_name: string | null;
+  product_name: string | null;
+  product_order_no: string | null;
   raw_json: Record<string, unknown> | null;
 }
 
@@ -1552,6 +1555,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
     bazisProjectId: number;
     projectId: number;
     bazisProjectName: string;
+    revisionBazisOrderNo: string | null;
     projectClientId: number | null;
   } | null> {
     const result = await this.database.query<RevisionProjectRow>(
@@ -1560,6 +1564,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
              r.bazis_project_id,
              bp.project_id,
              bp.name AS bazis_project_name,
+             r.bazis_order_no AS revision_bazis_order_no,
              p.client_id AS project_client_id
       FROM bazis_project_revisions r
       JOIN bazis_projects bp ON bp.bazis_project_id = r.bazis_project_id
@@ -1580,6 +1585,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       bazisProjectId: Number(row.bazis_project_id),
       projectId: Number(row.project_id),
       bazisProjectName: row.bazis_project_name,
+      revisionBazisOrderNo: row.revision_bazis_order_no,
       projectClientId: nullableNumber(row.project_client_id),
     };
   }
@@ -1596,6 +1602,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
     lengthMm: number | null;
     widthMm: number | null;
     mainMaterialName: string | null;
+    productName: string | null;
+    productOrderNo: string | null;
     rawJson: Record<string, unknown> | null;
   }>> {
     const result = await this.database.query<SelectedPanelRow>(
@@ -1610,21 +1618,69 @@ export class PgBazisRepository implements BazisRepositoryPort {
         FROM bazis_nodes n
         JOIN sel s ON n.parent_node_id = s.bazis_node_id
         WHERE n.revision_id = $1
+      ),
+      panels AS (
+        SELECT DISTINCT
+               s.bazis_node_id,
+               s.parent_node_id,
+               s.object_type,
+               s.name,
+               s.position,
+               s.designation,
+               s.cumulative_quantity,
+               s.length_mm,
+               s.width_mm,
+               s.main_material_name,
+               s.raw_json
+        FROM sel s
+        WHERE s.object_type = 'Панель'
+      ),
+      panel_ancestry AS (
+        SELECT p.bazis_node_id AS panel_id,
+               p.bazis_node_id,
+               p.parent_node_id,
+               p.name,
+               p.raw_json,
+               0 AS depth,
+               ARRAY[p.bazis_node_id] AS visited
+        FROM panels p
+        UNION ALL
+        SELECT a.panel_id,
+               parent.bazis_node_id,
+               parent.parent_node_id,
+               parent.name,
+               parent.raw_json,
+               a.depth + 1,
+               a.visited || parent.bazis_node_id
+        FROM panel_ancestry a
+        JOIN bazis_nodes parent ON parent.bazis_node_id = a.parent_node_id
+        WHERE parent.revision_id = $1
+          AND NOT parent.bazis_node_id = ANY(a.visited)
+          AND a.depth < 100
+      ),
+      root_products AS (
+        SELECT DISTINCT ON (panel_id)
+               panel_id,
+               name AS product_name,
+               NULLIF(trim(raw_json->>'Заказ'), '') AS product_order_no
+        FROM panel_ancestry
+        ORDER BY panel_id, depth DESC
       )
-      SELECT DISTINCT
-             bazis_node_id,
-             object_type,
-             name,
-             position,
-             designation,
-             cumulative_quantity,
-             length_mm,
-             width_mm,
-             main_material_name,
-             raw_json
-      FROM sel
-      WHERE object_type = 'Панель'
-      ORDER BY bazis_node_id
+      SELECT p.bazis_node_id,
+             p.object_type,
+             p.name,
+             p.position,
+             p.designation,
+             p.cumulative_quantity,
+             p.length_mm,
+             p.width_mm,
+             p.main_material_name,
+             rp.product_name,
+             rp.product_order_no,
+             p.raw_json
+      FROM panels p
+      LEFT JOIN root_products rp ON rp.panel_id = p.bazis_node_id
+      ORDER BY p.bazis_node_id
       `,
       [revisionId, [...new Set(selectedNodeIds)]],
     );
@@ -1638,6 +1694,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
       lengthMm: nullableNumber(row.length_mm),
       widthMm: nullableNumber(row.width_mm),
       mainMaterialName: row.main_material_name,
+      productName: row.product_name,
+      productOrderNo: row.product_order_no,
       rawJson: row.raw_json ?? null,
     }));
   }
@@ -1973,7 +2031,7 @@ function collectUnmappedSheetNames(
 
 function buildOrderCreateDto(
   command: CreateOrderFromRevisionCommand,
-  revision: { projectId: number; bazisProjectName: string },
+  revision: { projectId: number; bazisProjectName: string; revisionBazisOrderNo: string | null },
   panels: ReadonlyArray<{
     bazisNodeId: number;
     name: string | null;
@@ -1983,6 +2041,8 @@ function buildOrderCreateDto(
     lengthMm: number | null;
     widthMm: number | null;
     mainMaterialName: string | null;
+    productName: string | null;
+    productOrderNo: string | null;
     rawJson: Record<string, unknown> | null;
   }>,
   mappings: Map<string, MaterialLookupRow>,
@@ -2010,7 +2070,8 @@ function buildOrderCreateDto(
       edgeTypeId: 1,
       filmId: filmMapping?.target_kind === 'film' ? nullableNumber(filmMapping.film_id) : null,
       priority: 100,
-      basisProject: revision.bazisProjectName,
+      basisProject: panel.productOrderNo ?? revision.revisionBazisOrderNo ?? revision.bazisProjectName,
+      basisProduct: panel.productName ?? null,
       basisDesignation: panel.designation,
       basisData: `${panel.position ?? ''}/${panel.designation ?? ''}/${panel.name ?? ''}`,
     };

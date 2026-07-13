@@ -616,6 +616,7 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
           bazis_project_id: 41,
           project_id: 77,
           bazis_project_name: 'Шкаф Nova',
+          revision_bazis_order_no: '1457',
           project_client_id: 5,
         },
         panelRows: [
@@ -629,6 +630,8 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
             length_mm: 1200,
             width_mm: 450,
             main_material_name: 'Laminate White',
+            product_name: 'Шкаф',
+            product_order_no: '1443',
             raw_json: {
               ОблицовкаПласти1: { Пласть: [{ Наименование: 'Snow Film' }] },
               ОблицовкаПласти2: { Пласть: [{ Наименование: 'Snow Film' }] },
@@ -644,6 +647,8 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
             length_mm: 800,
             width_mm: 300,
             main_material_name: 'Unknown Sheet',
+            product_name: 'Шкаф',
+            product_order_no: '1443',
             raw_json: {},
           },
         ],
@@ -693,7 +698,8 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
           height: 1200,
           width: 450,
           quantity: 2,
-          basisProject: 'Шкаф Nova',
+          basisProject: '1443',
+          basisProduct: 'Шкаф',
           basisDesignation: 'D-01',
           basisData: '7/D-01/Фасад/левая створка',
           sheetMaterialTypeId: 501,
@@ -703,6 +709,8 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
         });
         expect(details[1]).toMatchObject({
           clientKey: 'bazis-node-102',
+          basisProject: '1443',
+          basisProduct: 'Шкаф',
           basisData: '8/S-02/Полка',
           sheetMaterialTypeId: 502,
           filmId: null,
@@ -966,6 +974,190 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
 
     expect(create).not.toHaveBeenCalled();
     expect(normalizedSql(database.queries)).toContain("UPDATE command_idempotency_keys SET status = 'failed'");
+  });
+
+  it('uses revision bazis order number when product order number is empty', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          revision_bazis_order_no: '1457',
+          project_client_id: 5,
+        },
+        panelRows: [
+          {
+            bazis_node_id: 101,
+            object_type: 'Панель',
+            name: 'Фасад',
+            position: '7',
+            designation: 'D-01',
+            cumulative_quantity: 2,
+            length_mm: 1200,
+            width_mm: 450,
+            main_material_name: 'Laminate White',
+            product_name: 'Шкаф',
+            product_order_no: null,
+            raw_json: {},
+          },
+        ],
+        mappingRows: [
+          {
+            source_kind: 'sheet',
+            name: 'laminate white',
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+            film_id: null,
+            edge_type_id: null,
+          },
+        ],
+      },
+    });
+    const orderTransactions: Pick<OrderTransactionService, 'create'> = {
+      create: async (command: Parameters<OrderTransactionService['create']>[0]) => {
+        const details = (command.dto.details ?? []) as Array<Record<string, unknown>>;
+        expect(details).toHaveLength(1);
+        expect(details[0]).toMatchObject({
+          basisProject: '1457',
+          basisProduct: 'Шкаф',
+        });
+
+        await command.postPersistHook?.(
+          { getTransactionClient: () => database.tx },
+          { orderId: 9001, detailIdsByClientKey: new Map([['bazis-node-101', 7001]]) },
+        );
+
+        return buildOrderDto(9001, 'ERP order');
+      },
+    };
+    const repository = new PgBazisRepository(database.service, orderTransactions);
+
+    await repository.createOrderFromRevision(createOrderCommand());
+  });
+
+  it('falls back to bazis project name when both product and revision order numbers are empty', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          revision_bazis_order_no: null,
+          project_client_id: 5,
+        },
+        panelRows: [
+          {
+            bazis_node_id: 101,
+            object_type: 'Панель',
+            name: 'Фасад',
+            position: '7',
+            designation: 'D-01',
+            cumulative_quantity: 2,
+            length_mm: 1200,
+            width_mm: 450,
+            main_material_name: 'Laminate White',
+            product_name: 'Шкаф',
+            product_order_no: null,
+            raw_json: {},
+          },
+        ],
+        mappingRows: [
+          {
+            source_kind: 'sheet',
+            name: 'laminate white',
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+            film_id: null,
+            edge_type_id: null,
+          },
+        ],
+      },
+    });
+    const orderTransactions: Pick<OrderTransactionService, 'create'> = {
+      create: async (command: Parameters<OrderTransactionService['create']>[0]) => {
+        const details = (command.dto.details ?? []) as Array<Record<string, unknown>>;
+        expect(details).toHaveLength(1);
+        expect(details[0]).toMatchObject({
+          basisProject: 'Шкаф Nova',
+          basisProduct: 'Шкаф',
+        });
+
+        await command.postPersistHook?.(
+          { getTransactionClient: () => database.tx },
+          { orderId: 9001, detailIdsByClientKey: new Map([['bazis-node-101', 7001]]) },
+        );
+
+        return buildOrderDto(9001, 'ERP order');
+      },
+    };
+    const repository = new PgBazisRepository(database.service, orderTransactions);
+
+    await repository.createOrderFromRevision(createOrderCommand());
+  });
+
+  it('keeps basisDesignation pinned to panel designation', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          revision_bazis_order_no: '1457',
+          project_client_id: 5,
+        },
+        panelRows: [
+          {
+            bazis_node_id: 101,
+            object_type: 'Панель',
+            name: 'Фасад',
+            position: '7',
+            designation: 'PIN-77',
+            cumulative_quantity: 2,
+            length_mm: 1200,
+            width_mm: 450,
+            main_material_name: 'Laminate White',
+            product_name: 'Шкаф',
+            product_order_no: '1443',
+            raw_json: {},
+          },
+        ],
+        mappingRows: [
+          {
+            source_kind: 'sheet',
+            name: 'laminate white',
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+            film_id: null,
+            edge_type_id: null,
+          },
+        ],
+      },
+    });
+    const orderTransactions: Pick<OrderTransactionService, 'create'> = {
+      create: async (command: Parameters<OrderTransactionService['create']>[0]) => {
+        const details = (command.dto.details ?? []) as Array<Record<string, unknown>>;
+        expect(details).toHaveLength(1);
+        expect(details[0]).toMatchObject({
+          basisProject: '1443',
+          basisProduct: 'Шкаф',
+          basisDesignation: 'PIN-77',
+        });
+
+        await command.postPersistHook?.(
+          { getTransactionClient: () => database.tx },
+          { orderId: 9001, detailIdsByClientKey: new Map([['bazis-node-101', 7001]]) },
+        );
+
+        return buildOrderDto(9001, 'ERP order');
+      },
+    };
+    const repository = new PgBazisRepository(database.service, orderTransactions);
+
+    await repository.createOrderFromRevision(createOrderCommand());
   });
 });
 
