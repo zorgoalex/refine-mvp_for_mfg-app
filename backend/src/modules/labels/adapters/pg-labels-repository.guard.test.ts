@@ -20,4 +20,15 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).toMatch(/SET is_active=false, version=version\+1/);
     expect(source).not.toMatch(/deleted_at=COALESCE\(deleted_at, now\(\)\)/);
   });
+
+  it('discovers detail fields from the live order details view schema', () => {
+    expect(source).toMatch(/information_schema\.columns/);
+    expect(source).toMatch(/table_name = 'order_details_view'/);
+    expect(source).toMatch(/ORDER BY ordinal_position/);
+  });
+
+  it('persists field catalog snapshots for label and QR templates', () => {
+    expect(source).toMatch(/field_catalog_snapshot/);
+    expect(source).toMatch(/JSON\.stringify\(command\.fieldCatalogSnapshot \?\? \{\}\)/);
+  });
 });

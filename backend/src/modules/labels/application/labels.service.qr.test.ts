@@ -3,6 +3,7 @@ import { LabelsService, validateQrElementNames } from './labels.service';
 
 function fakeRepo() {
   return {
+    listDetailFieldColumns: vi.fn().mockResolvedValue([]),
     listQrTemplates: vi.fn().mockResolvedValue([]),
     createQrTemplate: vi.fn().mockResolvedValue({ labelQrTemplateId: 1 }),
     updateQrTemplate: vi.fn(),

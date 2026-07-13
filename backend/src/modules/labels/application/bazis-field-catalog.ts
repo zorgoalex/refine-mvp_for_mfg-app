@@ -9,6 +9,11 @@ export interface LabelFieldCatalogItem {
   category: string;
 }
 
+export interface DetailFieldColumnMetadata {
+  columnName: string;
+  dataType: string;
+}
+
 export const BAZIS_COLUMN_LABELS = [
   '№',
   '№ п/п',
@@ -279,6 +284,28 @@ export const DETAIL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.ent
   category: 'Деталь',
 }));
 
+export function buildDetailFieldCatalog(columns: readonly DetailFieldColumnMetadata[]): LabelFieldCatalogItem[] {
+  return columns.map(({ columnName, dataType }) => ({
+    id: `detail.${columnName}`,
+    source: 'detail' as const,
+    sourceColumn: columnName,
+    label: DETAIL_FIELD_LABELS[columnName] ?? humanizeColumnName(columnName),
+    type: inferDatabaseFieldType(dataType),
+    category: 'Деталь',
+  }));
+}
+
+export function buildRuntimeLabelFieldCatalog(
+  detailColumns: readonly DetailFieldColumnMetadata[],
+): LabelFieldCatalogItem[] {
+  return [
+    ...BAZIS_FIELD_CATALOG,
+    ...buildDetailFieldCatalog(detailColumns),
+    ...ORDER_FIELD_CATALOG,
+    ...DYNAMIC_LABEL_FIELDS,
+  ];
+}
+
 export const ORDER_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.entries(ORDER_FIELD_LABELS).map(([column, label]) => ({
   id: `order.${column}`,
   source: 'order',
@@ -297,21 +324,41 @@ export const LABEL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = [
 
 const LABEL_FIELD_IDS = new Set(LABEL_FIELD_CATALOG.map((field) => field.id));
 
-export function isBuiltInLabelFieldId(value: string): boolean {
-  return LABEL_FIELD_IDS.has(value);
+export function isBuiltInLabelFieldId(value: string, runtimeFieldIds?: ReadonlySet<string>): boolean {
+  return LABEL_FIELD_IDS.has(value) || runtimeFieldIds?.has(value) === true;
 }
 
 export function isSupportedFieldBinding(
   value: string | null | undefined,
   customFieldSchema?: unknown,
+  runtimeFieldIds?: ReadonlySet<string>,
 ): value is string {
   if (!value) {
     return false;
   }
-  if (isBuiltInLabelFieldId(value)) {
+  if (isBuiltInLabelFieldId(value, runtimeFieldIds)) {
     return true;
   }
   return getCustomFieldIds(customFieldSchema).has(value);
+}
+
+function humanizeColumnName(columnName: string): string {
+  const normalized = columnName.replaceAll('_', ' ').trim();
+  return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : columnName;
+}
+
+function inferDatabaseFieldType(dataType: string): LabelFieldType {
+  const normalized = dataType.toLowerCase();
+  if (normalized === 'boolean') return 'boolean';
+  if (normalized.includes('date') || normalized.includes('timestamp')) return 'date';
+  if (
+    normalized.includes('int') ||
+    normalized.includes('numeric') ||
+    normalized.includes('decimal') ||
+    normalized.includes('real') ||
+    normalized.includes('double')
+  ) return 'number';
+  return 'string';
 }
 
 export function getCustomFieldIds(customFieldSchema: unknown): Set<string> {

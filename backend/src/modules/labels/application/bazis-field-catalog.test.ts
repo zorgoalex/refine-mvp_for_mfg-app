@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BAZIS_COLUMN_LABELS,
   BAZIS_FIELD_CATALOG,
+  buildRuntimeLabelFieldCatalog,
   DETAIL_FIELD_CATALOG,
   DYNAMIC_LABEL_FIELDS,
   ORDER_FIELD_CATALOG,
@@ -48,6 +49,21 @@ describe('Bazis label field catalog', () => {
         expect.objectContaining({ id: 'order.client_name', source: 'order', sourceColumn: 'client_name' }),
       ]),
     );
+  });
+
+  it('builds detail fields from the live view schema without a hardcoded column entry', () => {
+    const catalog = buildRuntimeLabelFieldCatalog([
+      { columnName: 'detail_id', dataType: 'bigint' },
+      { columnName: 'future_machine_code', dataType: 'text' },
+      { columnName: 'future_metric', dataType: 'numeric' },
+    ]);
+
+    expect(catalog).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'detail.detail_id', label: 'ID детали', type: 'number' }),
+      expect.objectContaining({ id: 'detail.future_machine_code', label: 'Future machine code', type: 'string' }),
+      expect.objectContaining({ id: 'detail.future_metric', label: 'Future metric', type: 'number' }),
+    ]));
+    expect(catalog.some((field) => field.id === 'detail.width')).toBe(false);
   });
 
   it('uses one catalog source for field binding validation', () => {

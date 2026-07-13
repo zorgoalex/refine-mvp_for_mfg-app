@@ -332,6 +332,10 @@ probe_file() {
     057_*) probe_all "$(q_col order_details basis_designation)" ;;
     058_*) probe_all "$(q_tbl bazis_projects)" "$(q_tbl bazis_import_runs)" ;;
     059_*) probe_all "$(q_col order_details basis_product)" ;;
+    060_*) probe_all "$(q_col label_templates field_catalog_snapshot)" \
+                     "$(q_col label_qr_templates field_catalog_snapshot)" \
+                     "$(q_con chk_label_templates_field_catalog_snapshot_object)" \
+                     "$(q_con chk_label_qr_templates_field_catalog_snapshot_object)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

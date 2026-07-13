@@ -3,7 +3,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import { isBuiltInLabelFieldId, isSupportedFieldBinding } from './bazis-field-catalog';
-import { LABEL_FIELD_CATALOG, type LabelFieldCatalogItem } from './bazis-field-catalog';
+import { buildRuntimeLabelFieldCatalog, type LabelFieldCatalogItem } from './bazis-field-catalog';
 import { validateQrTemplateElement, extractLabelTemplateFieldIds } from './label-template-fields';
 import { extractLabelFields, type LabelTextFields } from './scan/label-text-extraction';
 import { compileQrTemplate, parseQrPayload, parseQrPayloadRight } from './scan/qr-template-parser';
@@ -22,6 +22,7 @@ import type {
   LabelsPort,
   LabelsContext,
   LabelTemplateDto,
+  LabelFieldCatalogSnapshot,
   ListLabelTemplatesQuery,
   OrderLabelDataDto,
   OrderLabelGenerationDto,
@@ -131,7 +132,7 @@ export class LabelsService {
 
   async listFields(ctx: LabelsContext): Promise<LabelFieldCatalogItem[]> {
     await this.require(ctx, [VIEW]);
-    return [...LABEL_FIELD_CATALOG];
+    return this.runtimeFieldCatalog();
   }
 
   async getTemplateById(query: GetLabelTemplateQuery): Promise<LabelTemplateDto> {
@@ -141,14 +142,24 @@ export class LabelsService {
 
   async createTemplate(command: CreateLabelTemplateCommand): Promise<LabelTemplateDto> {
     await this.require(command, [MANAGE_TEMPLATES]);
-    validateTemplateInput(command.input);
-    return this.repo.createTemplate(command);
+    const catalog = await this.runtimeFieldCatalog();
+    const runtimeFieldIds = new Set(catalog.map((field) => field.id));
+    validateTemplateInput(command.input, runtimeFieldIds);
+    return this.repo.createTemplate({
+      ...command,
+      fieldCatalogSnapshot: snapshotTemplateFields(command.input, catalog),
+    });
   }
 
   async updateTemplate(command: UpdateLabelTemplateCommand): Promise<LabelTemplateDto> {
     await this.require(command, [MANAGE_TEMPLATES], command.id);
-    validateTemplateInput(command.input);
-    return this.repo.updateTemplate(command);
+    const catalog = await this.runtimeFieldCatalog();
+    const runtimeFieldIds = new Set(catalog.map((field) => field.id));
+    validateTemplateInput(command.input, runtimeFieldIds);
+    return this.repo.updateTemplate({
+      ...command,
+      fieldCatalogSnapshot: snapshotTemplateFields(command.input, catalog),
+    });
   }
 
   async deleteTemplate(command: DeleteLabelTemplateCommand): Promise<void> {
@@ -208,14 +219,24 @@ export class LabelsService {
 
   async createQrTemplate(command: CreateLabelQrTemplateCommand): Promise<LabelQrTemplateDto> {
     await this.require(command, [MANAGE_TEMPLATES], undefined, 'label_qr_template');
-    validateQrTemplateInput(command.input);
-    return this.repo.createQrTemplate(command);
+    const catalog = await this.runtimeFieldCatalog();
+    const runtimeFieldIds = new Set(catalog.map((field) => field.id));
+    validateQrTemplateInput(command.input, runtimeFieldIds);
+    return this.repo.createQrTemplate({
+      ...command,
+      fieldCatalogSnapshot: snapshotFieldIds(extractLabelTemplateFieldIds(command.input.contentTemplate), catalog),
+    });
   }
 
   async updateQrTemplate(command: UpdateLabelQrTemplateCommand): Promise<LabelQrTemplateDto> {
     await this.require(command, [MANAGE_TEMPLATES], command.id, 'label_qr_template');
-    validateQrTemplateInput(command.input);
-    return this.repo.updateQrTemplate(command);
+    const catalog = await this.runtimeFieldCatalog();
+    const runtimeFieldIds = new Set(catalog.map((field) => field.id));
+    validateQrTemplateInput(command.input, runtimeFieldIds);
+    return this.repo.updateQrTemplate({
+      ...command,
+      fieldCatalogSnapshot: snapshotFieldIds(extractLabelTemplateFieldIds(command.input.contentTemplate), catalog),
+    });
   }
 
   async deleteQrTemplate(command: DeleteLabelQrTemplateCommand): Promise<void> {
@@ -472,6 +493,10 @@ export class LabelsService {
     return fieldId;
   }
 
+  private async runtimeFieldCatalog(): Promise<LabelFieldCatalogItem[]> {
+    return buildRuntimeLabelFieldCatalog(await this.repo.listDetailFieldColumns());
+  }
+
   private async require(
     ctx: LabelsContext,
     permissions: PermissionName[],
@@ -496,21 +521,21 @@ export class LabelsService {
   }
 }
 
-export function validateTemplateInput(input: LabelTemplateInput): void {
+export function validateTemplateInput(input: LabelTemplateInput, runtimeFieldIds?: ReadonlySet<string>): void {
   const customFieldSchema = input.customFieldSchema;
-  validateCustomFieldMappings(customFieldSchema);
+  validateCustomFieldMappings(customFieldSchema, runtimeFieldIds);
   for (const [index, element] of input.elements.entries()) {
-    validateElementFieldBinding(element, customFieldSchema, index);
+    validateElementFieldBinding(element, customFieldSchema, index, runtimeFieldIds);
   }
   validateQrElementNames(input.elements);
 }
 
-export function validateQrTemplateInput(input: LabelQrTemplateInput): void {
+export function validateQrTemplateInput(input: LabelQrTemplateInput, runtimeFieldIds?: ReadonlySet<string>): void {
   if (!input.contentTemplate.trim()) {
     throw new ApiError(422, 'LABEL_QR_TEMPLATE_EMPTY', 'QR template content is required', {});
   }
   for (const fieldId of extractLabelTemplateFieldIds(input.contentTemplate)) {
-    if (!isSupportedFieldBinding(fieldId, {})) {
+    if (!isSupportedFieldBinding(fieldId, {}, runtimeFieldIds)) {
       throw new LabelFieldBindingError(fieldId); // maps to 422 LABEL_FIELD_BINDING_INVALID
     }
   }
@@ -569,12 +594,12 @@ export function validateQrElementNames(elements: LabelTemplateElementInput[]): v
   }
 }
 
-function validateCustomFieldMappings(customFieldSchema: Record<string, unknown>): void {
+function validateCustomFieldMappings(customFieldSchema: Record<string, unknown>, runtimeFieldIds?: ReadonlySet<string>): void {
   for (const schema of Object.values(customFieldSchema)) {
     if (!schema || typeof schema !== 'object' || Array.isArray(schema)) continue;
     const sourceField = (schema as Record<string, unknown>).sourceField;
     if (sourceField == null || sourceField === '') continue;
-    if (typeof sourceField !== 'string' || !isBuiltInLabelFieldId(sourceField)) {
+    if (typeof sourceField !== 'string' || !isBuiltInLabelFieldId(sourceField, runtimeFieldIds)) {
       throw new LabelFieldBindingError(String(sourceField));
     }
   }
@@ -584,9 +609,10 @@ function validateElementFieldBinding(
   element: LabelTemplateElementInput,
   customFieldSchema: Record<string, unknown>,
   index: number,
+  runtimeFieldIds?: ReadonlySet<string>,
 ): void {
   if (element.kind === 'qr') {
-    validateQrTemplateElement(element, customFieldSchema, index);
+    validateQrTemplateElement(element, customFieldSchema, index, runtimeFieldIds);
     return;
   }
   const binding = element.sourceField?.trim();
@@ -598,9 +624,42 @@ function validateElementFieldBinding(
     }
     return;
   }
-  if (!isSupportedFieldBinding(binding, customFieldSchema)) {
+  if (!isSupportedFieldBinding(binding, customFieldSchema, runtimeFieldIds)) {
     throw new LabelFieldBindingError(binding);
   }
+}
+
+function snapshotTemplateFields(
+  input: LabelTemplateInput,
+  catalog: readonly LabelFieldCatalogItem[],
+): LabelFieldCatalogSnapshot {
+  const fieldIds = new Set<string>();
+  for (const element of input.elements) {
+    if (element.sourceField) fieldIds.add(element.sourceField);
+    if (element.kind === 'qr') {
+      for (const fieldId of extractLabelTemplateFieldIds(String(element.style?.qrTemplate ?? ''))) fieldIds.add(fieldId);
+    }
+  }
+  for (const schema of Object.values(input.customFieldSchema)) {
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) continue;
+    const sourceField = (schema as Record<string, unknown>).sourceField;
+    if (typeof sourceField === 'string' && sourceField) fieldIds.add(sourceField);
+  }
+  return snapshotFieldIds([...fieldIds], catalog);
+}
+
+function snapshotFieldIds(
+  fieldIds: readonly string[],
+  catalog: readonly LabelFieldCatalogItem[],
+): LabelFieldCatalogSnapshot {
+  const byId = new Map(catalog.map((field) => [field.id, field]));
+  const snapshot: LabelFieldCatalogSnapshot = {};
+  for (const fieldId of fieldIds) {
+    const field = byId.get(fieldId);
+    if (!field) continue;
+    snapshot[fieldId] = { type: field.type, label: field.label, sourceColumn: field.sourceColumn };
+  }
+  return snapshot;
 }
 
 export function actorId(user: CurrentUser): number | null {

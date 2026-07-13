@@ -6,6 +6,9 @@ function unavailable(): never {
 }
 
 export class UnavailableLabelsRepository implements LabelsPort {
+  async listDetailFieldColumns() {
+    return unavailable();
+  }
   async listTemplates() {
     return unavailable();
   }

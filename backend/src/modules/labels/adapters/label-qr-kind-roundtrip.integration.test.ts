@@ -130,6 +130,7 @@ describeIntegration('PgLabelsRepository qr kind roundtrip (integration)', () => 
     await sessionClient.query(`SET search_path TO ${schemaName}`);
     await createPrerequisites(sessionClient);
     await sessionClient.query(migration039);
+    await sessionClient.query("ALTER TABLE label_templates ADD COLUMN field_catalog_snapshot JSONB NOT NULL DEFAULT '{}'::JSONB");
     await sessionClient.query(migration047);
     repo = new PgLabelsRepository(makeDatabase(sessionClient));
   });

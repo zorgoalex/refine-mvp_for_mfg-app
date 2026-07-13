@@ -32,7 +32,19 @@ export interface LabelTemplateDto {
   dpi: number;
   defaultExportFormats: LabelExportFormat[];
   customFieldSchema: Record<string, unknown>;
+  fieldCatalogSnapshot: LabelFieldCatalogSnapshot;
   elements: LabelTemplateElementDto[];
+}
+
+export type LabelFieldCatalogSnapshot = Record<string, {
+  type: 'string' | 'number' | 'boolean' | 'date';
+  label: string;
+  sourceColumn: string | null;
+}>;
+
+export interface DetailFieldColumnDto {
+  columnName: string;
+  dataType: string;
 }
 
 export interface LabelTemplateElementInput {
@@ -185,12 +197,14 @@ export interface GetLabelTemplateQuery extends LabelsContext {
 
 export interface CreateLabelTemplateCommand extends LabelsContext {
   input: LabelTemplateInput;
+  fieldCatalogSnapshot?: LabelFieldCatalogSnapshot;
 }
 
 export interface UpdateLabelTemplateCommand extends LabelsContext {
   id: number;
   expectedVersion: number;
   input: LabelTemplateInput;
+  fieldCatalogSnapshot?: LabelFieldCatalogSnapshot;
 }
 
 export interface DeleteLabelTemplateCommand extends LabelsContext {
@@ -207,6 +221,7 @@ export interface LabelQrTemplateDto {
   defaultSizeMm: number;
   isActive: boolean;
   version: number;
+  fieldCatalogSnapshot: LabelFieldCatalogSnapshot;
 }
 
 export interface LabelQrTemplateInput {
@@ -223,12 +238,14 @@ export interface ListLabelQrTemplatesQuery extends LabelsContext {
 
 export interface CreateLabelQrTemplateCommand extends LabelsContext {
   input: LabelQrTemplateInput;
+  fieldCatalogSnapshot?: LabelFieldCatalogSnapshot;
 }
 
 export interface UpdateLabelQrTemplateCommand extends LabelsContext {
   id: number;
   expectedVersion: number;
   input: LabelQrTemplateInput;
+  fieldCatalogSnapshot?: LabelFieldCatalogSnapshot;
 }
 
 export interface DeleteLabelQrTemplateCommand extends LabelsContext {
@@ -402,6 +419,7 @@ export interface OcrPort {
 }
 
 export interface LabelsPort {
+  listDetailFieldColumns(): Promise<DetailFieldColumnDto[]>;
   listTemplates(query: ListLabelTemplatesQuery): Promise<LabelTemplateDto[]>;
   getTemplateById(query: GetLabelTemplateQuery): Promise<LabelTemplateDto>;
   createTemplate(command: CreateLabelTemplateCommand): Promise<LabelTemplateDto>;

@@ -120,6 +120,7 @@ describeIntegration('PgLabelsRepository QR templates (integration)', () => {
     await sessionClient.query(`SET search_path TO ${schemaName}`);
     await createPrerequisites(sessionClient);
     await sessionClient.query(migrationLabelQrTemplates);
+    await sessionClient.query("ALTER TABLE label_qr_templates ADD COLUMN field_catalog_snapshot JSONB NOT NULL DEFAULT '{}'::JSONB");
     repo = new PgLabelsRepository(makeDatabase(sessionClient));
   });
 

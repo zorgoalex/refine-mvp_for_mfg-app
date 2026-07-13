@@ -10,6 +10,12 @@ export interface LabelFieldCatalogItem {
   category: string;
 }
 
+export type LabelFieldCatalogSnapshot = Record<string, {
+  type: LabelFieldCatalogItem['type'];
+  label: string;
+  sourceColumn: string | null;
+}>;
+
 export interface LabelTemplateElement {
   labelTemplateElementId?: number;
   elementKey: string;
@@ -37,6 +43,7 @@ export interface LabelTemplate {
   dpi: number;
   defaultExportFormats: LabelExportFormat[];
   customFieldSchema: Record<string, unknown>;
+  fieldCatalogSnapshot: LabelFieldCatalogSnapshot;
   elements: LabelTemplateElement[];
 }
 
@@ -160,6 +167,7 @@ export interface LabelQrTemplate {
   defaultSizeMm: number;
   isActive: boolean;
   version: number;
+  fieldCatalogSnapshot: LabelFieldCatalogSnapshot;
 }
 
 export interface LabelQrTemplateInput {
