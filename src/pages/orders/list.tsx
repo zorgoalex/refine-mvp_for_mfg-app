@@ -1344,6 +1344,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             rows={tableProps.dataSource ?? []}
             loading={!!tableProps.loading}
             pagination={tableProps.pagination ?? false}
+            onPageChange={setCurrent}
             onOpen={(id) => show("orders_view", id, "push")}
           />
         ) : (

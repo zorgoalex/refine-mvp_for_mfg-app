@@ -8,10 +8,14 @@ export interface OrderCardListProps {
   rows: readonly Record<string, unknown>[];
   loading?: boolean;
   pagination: TablePaginationConfig | false;
+  onPageChange: (page: number) => void;
   onOpen: (id: number) => void;
 }
 
-export const buildOrderCardPagination = (pagination: TablePaginationConfig | false) => {
+export const buildOrderCardPagination = (
+  pagination: TablePaginationConfig | false,
+  onPageChange: (page: number) => void,
+) => {
   if (pagination === false) return false;
 
   // Table uses an array such as ['bottomRight']; Ant List accepts only
@@ -22,14 +26,15 @@ export const buildOrderCardPagination = (pagination: TablePaginationConfig | fal
     position: 'bottom' as const,
     simple: true,
     showSizeChanger: false,
+    onChange: onPageChange,
   };
 };
 
-export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pagination, onOpen }) => (
+export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pagination, onPageChange, onOpen }) => (
   <List
     dataSource={rows as Record<string, unknown>[]}
     loading={loading}
-    pagination={buildOrderCardPagination(pagination)}
+    pagination={buildOrderCardPagination(pagination, onPageChange)}
     rowKey={(r) => String(r.order_id)}
     renderItem={(row) => {
       const m = buildOrderCardModel(row);
