@@ -43,6 +43,7 @@ export interface PdfOrderMetadata {
 
 export interface PdfDetailRaw {
   projectReference?: string;  // "Обозн. проект" or "№ Заказа"
+  projectReferenceSource?: 'project_designation' | 'order_number';
   designation: string;       // "Обозн." - e.g., "11.02", "36", "01.04"
   name: string;              // "Наименование" - e.g., "Бок L", "Фасад Лапша"
   position: number;          // position number in PDF (1, 2, 3...)

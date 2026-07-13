@@ -81,7 +81,7 @@ export const PdfUploadStep: React.FC<PdfUploadStepProps> = ({
       render: (value: string | null) => value || <Text type="secondary">—</Text>,
     },
     {
-      title: 'Базис изделие',
+      title: 'Базис обозн. изделия',
       dataIndex: 'basisProduct',
       key: 'basisProduct',
       width: 130,

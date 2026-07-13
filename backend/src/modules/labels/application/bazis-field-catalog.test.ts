@@ -67,7 +67,7 @@ describe('Bazis label field catalog', () => {
     expect(catalog.some((field) => field.id === 'detail.width')).toBe(false);
   });
 
-  it('uses order-card labels and hides internal detail columns', () => {
+  it('uses order-card labels for separate Basis detail and product designations', () => {
     const orderDetailTableSource = readFileSync(
       new URL('../../../../../src/pages/orders/components/tables/OrderDetailTable.tsx', import.meta.url),
       'utf8',
@@ -75,6 +75,7 @@ describe('Bazis label field catalog', () => {
     const definitionsBlock = orderDetailTableSource.match(
       /const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS[^=]*= \[([\s\S]*?)\n\];/,
     )?.[1] ?? '';
+    expect(definitionsBlock).toMatch(/key: 'actions'.*lockPosition: 'end'/);
     const cardFields = [...definitionsBlock.matchAll(/\{ key: '([^']+)', label: '([^']+)'/g)]
       .map((match) => ({ key: match[1], label: match[2] }))
       .filter(({ key }) => key !== 'actions');
@@ -90,7 +91,8 @@ describe('Bazis label field catalog', () => {
     for (const { key, label } of cardFields) {
       expect(detailFields.get(key), key).toBe(label);
     }
-    expect(catalog.some((field) => field.id === 'detail.basis_product')).toBe(false);
+    expect(detailFields.get('basis_designation')).toBe('Базис обозн. детали');
+    expect(detailFields.get('basis_product')).toBe('Базис обозн. изделия');
   });
 
   it('uses one catalog source for field binding validation', () => {

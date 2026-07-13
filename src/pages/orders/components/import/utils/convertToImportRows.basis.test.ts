@@ -46,6 +46,36 @@ describe('convertToImportRows Basis field split', () => {
     expect(rows[0].detailName).not.toContain('~~');
   });
 
+  it('maps the non-numeric product suffix only from the "Обозн. проект" column', () => {
+    const rows = convertToImportRows(
+      makeResult([
+        {
+          projectReference: '1319Прихожка',
+          projectReferenceSource: 'project_designation',
+          designation: '11.02',
+          name: 'Бок L',
+          position: 1,
+          quantity: 1,
+          length: 700,
+          width: 300,
+        },
+        {
+          projectReference: '1319Прихожка',
+          projectReferenceSource: 'order_number',
+          designation: '11.03',
+          name: 'Бок R',
+          position: 2,
+          quantity: 1,
+          length: 700,
+          width: 300,
+        },
+      ]),
+    );
+
+    expect(rows[0]).toMatchObject({ basisProject: '1319', basisProduct: 'Прихожка' });
+    expect(rows[1]).toMatchObject({ basisProject: '1319', basisProduct: null });
+  });
+
   it('leaves detailName null when Наименование is empty', () => {
     const rows = convertToImportRows(
       makeResult([
