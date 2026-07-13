@@ -227,8 +227,29 @@ export function buildPanelFilterOptions(panels: PanelLike[]): {
   };
 }
 
-/** Предикат onFilter: группа матчится по агрегатам детей, плоская строка —
- * по своим полям. antd фильтрует только верхний уровень tree-data. */
+function panelMatchesFilter(
+  field: PanelFilterField,
+  value: string | number | boolean,
+  panel: Pick<PanelLike, 'mainMaterialName' | 'name' | 'orders'>,
+): boolean {
+  const wantEmpty = value === PANEL_FILTER_EMPTY;
+  if (field === 'material') {
+    const material = panel.mainMaterialName?.trim() || null;
+    return wantEmpty ? material == null : material === value;
+  }
+  if (field === 'name') {
+    const name = panel.name?.trim() || null;
+    return wantEmpty ? name == null : name === value;
+  }
+  return wantEmpty
+    ? panel.orders.length === 0
+    : panel.orders.some((order) => order.orderName?.trim() === value);
+}
+
+/** Предикат onFilter (antd фильтрует только верхний уровень tree-data).
+ * Группа матчится, если матчится ЛЮБОЙ её ребёнок — агрегаты группы хранят
+ * только непустые значения, поэтому «(пусто)» по агрегатам терял группы со
+ * смешанными детьми (critic R1). Плоская строка матчится по своим полям. */
 export function panelFilterPredicate(
   field: PanelFilterField,
   value: string | number | boolean,
@@ -237,16 +258,21 @@ export function panelFilterPredicate(
   if (value === PANEL_FILTER_NONE) {
     return false;
   }
-  const wantEmpty = value === PANEL_FILTER_EMPTY;
-  if (field === 'material') {
-    const material = row.mainMaterialName?.trim() || null;
-    return wantEmpty ? material == null : material === value;
+  if (isGroupRow(row)) {
+    return row.children.some((child) => panelMatchesFilter(field, value, child));
   }
-  if (field === 'name') {
-    const names = isGroupRow(row) ? row.names : [row.name?.trim() || ''].filter(Boolean);
-    return wantEmpty ? names.length === 0 : names.includes(String(value));
+  return panelMatchesFilter(field, value, row);
+}
+
+/** Итоги для нижней строки по ВИДИМЫМ строкам таблицы (после фильтров):
+ * antd/rc-table отдаёт в summary-колбэк уже отфильтрованный верхний уровень. */
+export function summarizeVisibleRows(rows: readonly SortableRow[]): PanelGroupsSummary {
+  let totalQuantity: number | null = null;
+  for (const row of rows) {
+    const quantity = isGroupRow(row) ? row.totalQuantity : row.quantity ?? row.cumulativeQuantity;
+    if (quantity != null) {
+      totalQuantity = (totalQuantity ?? 0) + quantity;
+    }
   }
-  return wantEmpty
-    ? row.orders.length === 0
-    : row.orders.some((order) => order.orderName?.trim() === value);
+  return { positions: rows.length, totalQuantity };
 }

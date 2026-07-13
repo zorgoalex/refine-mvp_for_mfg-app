@@ -9,6 +9,7 @@ import {
   PANEL_FILTER_EMPTY,
   PANEL_FILTER_NONE,
   summarizePanelGroups,
+  summarizeVisibleRows,
 } from './panelGrouping';
 
 let nextId = 1;
@@ -230,5 +231,36 @@ describe('groupPanelRows', () => {
     const group = groupPanelRows([panel()])[0];
     expect(panelFilterPredicate('material', PANEL_FILTER_NONE, group)).toBe(false);
     expect(panelFilterPredicate('name', PANEL_FILTER_NONE, group)).toBe(false);
+  });
+
+  it('panelFilterPredicate: «(пусто)» матчит группу со СМЕШАННЫМИ детьми (critic R1)', () => {
+    // группа: один ребёнок с именем/заказом, второй — без; агрегаты группы
+    // хранят только непустые значения, но фильтр «(пусто)» обязан показать
+    // группу, т.к. в ней есть подходящий ребёнок
+    const group = groupPanelRows([
+      panel({ name: 'Бок', orders: [{ orderId: 1, orderName: '2500' }] }),
+      panel({ name: null, orders: [] }),
+    ])[0];
+    expect(panelFilterPredicate('name', PANEL_FILTER_EMPTY, group)).toBe(true);
+    expect(panelFilterPredicate('order', PANEL_FILTER_EMPTY, group)).toBe(true);
+    expect(panelFilterPredicate('name', 'Бок', group)).toBe(true);
+    expect(panelFilterPredicate('order', '2500', group)).toBe(true);
+  });
+
+  it('summarizeVisibleRows: итоги по видимым строкам обоих режимов (critic R1)', () => {
+    const groups = groupPanelRows([
+      panel({ quantity: 2, thicknessMm: 16 }),
+      panel({ quantity: 3, thicknessMm: 18 }),
+    ]);
+    expect(summarizeVisibleRows(groups)).toEqual({ positions: 2, totalQuantity: 5 });
+    // отфильтрованный поднабор групп
+    expect(summarizeVisibleRows([groups[0]])).toEqual({ positions: 1, totalQuantity: 2 });
+    // плоские строки
+    const flat = [
+      { ...panel({ quantity: 4 }), rowType: 'panel' as const },
+      { ...panel({ quantity: null, cumulativeQuantity: 6 }), rowType: 'panel' as const },
+    ];
+    expect(summarizeVisibleRows(flat)).toEqual({ positions: 2, totalQuantity: 10 });
+    expect(summarizeVisibleRows([])).toEqual({ positions: 0, totalQuantity: null });
   });
 });

@@ -53,7 +53,10 @@ describe('bazis panels grouping UI guards', () => {
   });
 
   it('внизу таблицы итоговая строка: количество позиций и общая сумма панелей', () => {
-    expect(panelsTab).toContain('summarizePanelGroups');
+    expect(panelsTab).toContain('summarizeVisibleRows');
+    // итоги считаются из аргумента summary-колбэка (видимые строки после
+    // фильтров), не из полного датасета (critic R1)
+    expect(panelsTab).toMatch(/summary=\{\(visibleRows\)/);
     expect(panelsTab).toContain('Table.Summary');
     expect(panelsTab).toContain('Итого');
     expect(panelsTab).toContain('позиций');

@@ -22,7 +22,7 @@ import {
   panelComparators,
   panelFilterPredicate,
   PANEL_FILTER_NONE,
-  summarizePanelGroups,
+  summarizeVisibleRows,
   type PanelFilterField,
   type PanelFilterOption,
   type PanelGroupRow,
@@ -283,13 +283,6 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
     ];
   }, [filterOptions, onGoToTree]);
 
-  const totals = useMemo(() => {
-    const groupTotals = summarizePanelGroups(groupRows);
-    return grouped
-      ? groupTotals
-      : { positions: flatRows.length, totalQuantity: groupTotals.totalQuantity };
-  }, [flatRows.length, grouped, groupRows]);
-
   if (groupRows.length === 0) {
     return <Empty description="В ревизии нет панелей" />;
   }
@@ -322,21 +315,26 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
               }
             : undefined
         }
-        summary={() => (
-          <Table.Summary fixed>
-            <Table.Summary.Row>
-              <Table.Summary.Cell index={0} colSpan={2}>
-                <Text strong>
-                  {grouped ? `Итого позиций: ${totals.positions}` : `Итого панелей: ${totals.positions}`}
-                </Text>
-              </Table.Summary.Cell>
-              <Table.Summary.Cell index={2}>
-                <Text strong>{totals.totalQuantity ?? '—'}</Text>
-              </Table.Summary.Cell>
-              <Table.Summary.Cell index={3} colSpan={5} />
-            </Table.Summary.Row>
-          </Table.Summary>
-        )}
+        summary={(visibleRows) => {
+          // rc-table отдаёт сюда УЖЕ отфильтрованный/отсортированный верхний
+          // уровень — итоги совпадают с тем, что видит пользователь (critic R1)
+          const totals = summarizeVisibleRows(visibleRows);
+          return (
+            <Table.Summary fixed>
+              <Table.Summary.Row>
+                <Table.Summary.Cell index={0} colSpan={2}>
+                  <Text strong>
+                    {grouped ? `Итого позиций: ${totals.positions}` : `Итого панелей: ${totals.positions}`}
+                  </Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={2}>
+                  <Text strong>{totals.totalQuantity ?? '—'}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={3} colSpan={5} />
+              </Table.Summary.Row>
+            </Table.Summary>
+          );
+        }}
         rowClassName={(row) => {
           const selectedClass =
             row.rowType === 'panel' && row.bazisNodeId === selectedId ? 'ant-table-row-selected' : '';
