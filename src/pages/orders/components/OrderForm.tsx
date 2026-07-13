@@ -1305,7 +1305,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         ),
       },
     ],
-    [mode, header.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled]
+    [mode, header.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled, bazisDraftClientLocked]
   );
 
   const enabledTabKeys = useMemo(
