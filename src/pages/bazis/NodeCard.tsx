@@ -93,24 +93,33 @@ export const NodeCard: React.FC<NodeCardProps> = ({ nodeId }) => {
 
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
-      <Descriptions size="small" column={2} bordered>
-        <Descriptions.Item label="Тип">{card.objectType ?? '—'}</Descriptions.Item>
-        <Descriptions.Item label="Вид узла">{card.nodeKind || '—'}</Descriptions.Item>
-        <Descriptions.Item label="Наименование">{card.name ?? '—'}</Descriptions.Item>
-        <Descriptions.Item label="Обозначение">{card.designation ?? '—'}</Descriptions.Item>
-        <Descriptions.Item label="Позиция">{card.position ?? '—'}</Descriptions.Item>
-        <Descriptions.Item label="Код детали">{card.detailCode ?? '—'}</Descriptions.Item>
-        <Descriptions.Item label="Кол-во">{formatNumber(card.quantity)}</Descriptions.Item>
-        <Descriptions.Item label="Кол-во с учётом вхождений">{formatNumber(card.cumulativeQuantity)}</Descriptions.Item>
-        <Descriptions.Item label="Длина">{formatMillimeters(card.lengthMm)}</Descriptions.Item>
-        <Descriptions.Item label="Ширина">{formatMillimeters(card.widthMm)}</Descriptions.Item>
-        <Descriptions.Item label="Высота">{formatMillimeters(card.heightMm)}</Descriptions.Item>
-        <Descriptions.Item label="Толщина">{formatMillimeters(card.thicknessMm)}</Descriptions.Item>
-        <Descriptions.Item label="Цена">{formatNumber(card.price)}</Descriptions.Item>
-        <Descriptions.Item label="Прямоугольная">{formatBoolean(card.isRectangular)}</Descriptions.Item>
-        <Descriptions.Item label="Ориентация текстуры">{card.textureOrientation ?? '—'}</Descriptions.Item>
-        <Descriptions.Item label="Материал">{card.mainMaterialName ?? '—'}</Descriptions.Item>
-      </Descriptions>
+      {/* Свойства узла — под спойлером, свёрнутым по дефолту (нет
+          defaultActiveKey); SVG-схема ниже рендерится БЕЗ спойлера */}
+      <Collapse>
+        <Collapse.Panel
+          key="summary"
+          header={card.objectType === 'Панель' ? 'Данные панели' : 'Данные узла'}
+        >
+          <Descriptions size="small" column={2} bordered>
+            <Descriptions.Item label="Тип">{card.objectType ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Вид узла">{card.nodeKind || '—'}</Descriptions.Item>
+            <Descriptions.Item label="Наименование">{card.name ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Обозначение">{card.designation ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Позиция">{card.position ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Код детали">{card.detailCode ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Кол-во">{formatNumber(card.quantity)}</Descriptions.Item>
+            <Descriptions.Item label="Кол-во с учётом вхождений">{formatNumber(card.cumulativeQuantity)}</Descriptions.Item>
+            <Descriptions.Item label="Длина">{formatMillimeters(card.lengthMm)}</Descriptions.Item>
+            <Descriptions.Item label="Ширина">{formatMillimeters(card.widthMm)}</Descriptions.Item>
+            <Descriptions.Item label="Высота">{formatMillimeters(card.heightMm)}</Descriptions.Item>
+            <Descriptions.Item label="Толщина">{formatMillimeters(card.thicknessMm)}</Descriptions.Item>
+            <Descriptions.Item label="Цена">{formatNumber(card.price)}</Descriptions.Item>
+            <Descriptions.Item label="Прямоугольная">{formatBoolean(card.isRectangular)}</Descriptions.Item>
+            <Descriptions.Item label="Ориентация текстуры">{card.textureOrientation ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Материал">{card.mainMaterialName ?? '—'}</Descriptions.Item>
+          </Descriptions>
+        </Collapse.Panel>
+      </Collapse>
 
       {card.orderLinks.length > 0 ? (
         <Space direction="vertical" size="small" style={{ width: '100%' }}>

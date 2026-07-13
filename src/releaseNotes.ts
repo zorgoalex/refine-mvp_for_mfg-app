@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-13",
+    title: "Карточка панели Базис-проекта: свойства под спойлером",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В карточке выделенной панели (вкладка «Панели») список свойств спрятан под спойлер «Данные панели», по умолчанию свёрнутый; SVG-схема панели отображается сразу, без спойлера.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-13",
     title: "Панели Базис-проекта: переключатель группировки и фильтры колонок",
     services: ["ERP"],
     repositories: ["repo_erp"],
