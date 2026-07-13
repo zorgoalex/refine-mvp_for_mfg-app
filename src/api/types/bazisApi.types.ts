@@ -1,3 +1,5 @@
+import type { SaveOrderDto } from './orderApi.types';
+
 export interface BazisImportResponse {
   bazisProject: {
     bazisProjectId: number;
@@ -197,6 +199,17 @@ export interface CreateOrderFromRevisionResponse {
   mappedNodes: number;
   requestId: string;
   auditId?: string;
+}
+
+export interface CreateOrderFromDraftNode {
+  clientKey: string;
+  bazisNodeId: number;
+}
+
+export interface CreateOrderFromDraftRequest {
+  order: SaveOrderDto;
+  nodes: CreateOrderFromDraftNode[];
+  idempotencyKey: string;
 }
 
 export interface BazisOrderDraftDetail {

@@ -1,6 +1,7 @@
 import type {
   BazisRepositoryPort,
   BuildOrderDraftCommand,
+  CreateOrderFromDraftCommand,
   CreateOrderFromRevisionCommand,
   DeleteBazisProjectInput,
   ImportRevisionCommand,
@@ -79,6 +80,12 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
 
   createOrderFromRevision(
     _command: CreateOrderFromRevisionCommand,
+  ): Promise<CreateOrderFromRevisionResponseDto> {
+    return unavailable();
+  }
+
+  createOrderFromDraft(
+    _command: CreateOrderFromDraftCommand,
   ): Promise<CreateOrderFromRevisionResponseDto> {
     return unavailable();
   }

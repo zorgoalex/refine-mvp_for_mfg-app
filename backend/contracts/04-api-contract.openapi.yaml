@@ -3144,6 +3144,97 @@ paths:
           $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Bazis
+      operationId: createOrderFromBazisDraft
+      summary: Create ERP order from a saved Bazis draft
+      description: Requires `bazis.manage` and `orders.create`.
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - order
+                - nodes
+                - idempotencyKey
+              properties:
+                order:
+                  $ref: '#/components/schemas/SaveOrderDto'
+                nodes:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - clientKey
+                      - bazisNodeId
+                    properties:
+                      clientKey:
+                        type: string
+                        minLength: 1
+                      bazisNodeId:
+                        type: integer
+                idempotencyKey:
+                  type: string
+                  minLength: 1
+      responses:
+        '201':
+          description: ERP order created from Bazis draft
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - orderId
+                  - orderName
+                  - detailsCreated
+                  - mappedNodes
+                  - requestId
+                properties:
+                  orderId:
+                    type: integer
+                  orderName:
+                    type: string
+                  detailsCreated:
+                    type: integer
+                  mappedNodes:
+                    type: integer
+                  requestId:
+                    type: string
+                  auditId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis revision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/bazis/revisions/{id}/create-order:
     post:

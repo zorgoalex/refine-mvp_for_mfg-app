@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseService } from '../../../database/database.service';
 import type { OrderDto } from '../../orders/dto/order.dto';
 import type { OrderTransactionService } from '../../orders/application/order-transaction.service';
@@ -1161,6 +1162,369 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
   });
 });
 
+describe('PgBazisRepository.createOrderFromDraft', () => {
+  it('creates an order from a draft, rewrites projectId, strips nested idempotency, and maps nodes by explicit clientKey', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          revision_bazis_order_no: '1457',
+          project_client_id: 5,
+        },
+        draftNodeRows: [
+          { bazis_node_id: 101, object_type: 'Панель' },
+          { bazis_node_id: 102, object_type: 'Панель' },
+        ],
+      },
+    });
+    const orderTransactions: Pick<OrderTransactionService, 'create'> = {
+      create: async (command: Parameters<OrderTransactionService['create']>[0]) => {
+        expect(command.dto.header).toMatchObject({
+          projectId: 77,
+          clientId: 5,
+          orderName: 'ERP order draft',
+          orderStatusId: 3,
+        });
+        expect(command.dto.idempotencyKey).toBeUndefined();
+        expect(command.dto.details).toHaveLength(3);
+
+        await command.postPersistHook?.(
+          { getTransactionClient: () => database.tx },
+          {
+            orderId: 9001,
+            detailIdsByClientKey: new Map([
+              ['draft-detail-1', 7001],
+              ['draft-detail-2', 7002],
+              ['manual-detail-3', 7003],
+            ]),
+          },
+        );
+
+        return buildOrderDto(9001, 'ERP order draft');
+      },
+    };
+    const repository = new PgBazisRepository(database.service, orderTransactions);
+
+    const result = await repository.createOrderFromDraft(createOrderFromDraftCommand());
+
+    expect(result).toEqual({
+      orderId: 9001,
+      orderName: 'ERP order draft',
+      detailsCreated: 3,
+      mappedNodes: 2,
+      requestId: 'req-create-order-draft',
+      auditId: 'audit-1',
+    });
+
+    const mapInserts = database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_node_order_detail_map'),
+    );
+    expect(mapInserts.map((query) => query.params)).toEqual([
+      [101, 7001, 9001, 'created'],
+      [102, 7002, 9001, 'created'],
+    ]);
+    expect(mapInserts).toHaveLength(2);
+
+    const outbox = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+    );
+    expect(outbox?.params?.[4]).toBe('bazis-order-created-draft-9001');
+
+    const auditInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log ('),
+    );
+    expect(auditInsert?.params?.[0]).toBe('bazis.order_created');
+    expect(auditInsert?.params?.some((param) => String(param).includes('"source":"panels_draft"'))).toBe(true);
+  });
+
+  it('rejects when the draft order client does not match the bazis project client', async () => {
+    const repository = new PgBazisRepository(
+      createDatabase({
+        createOrderState: {
+          revisionRow: {
+            bazis_revision_id: 82,
+            bazis_project_id: 41,
+            project_id: 77,
+            bazis_project_name: 'Шкаф Nova',
+            project_client_id: 5,
+          },
+        },
+      }).service,
+      { create: async () => buildOrderDto(1, 'never') },
+    );
+
+    await expect(
+      repository.createOrderFromDraft(
+        createOrderFromDraftCommand({
+          order: createSaveOrderDto({ header: { clientId: 8 } }),
+        }),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: {
+        errors: [{ field: 'clientId', message: 'Клиент заказа должен совпадать с клиентом проекта Базис' }],
+      },
+    });
+  });
+
+  it('pins header.projectId to the revision project id', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+        },
+        draftNodeRows: [],
+      },
+    });
+    const orderTransactions: Pick<OrderTransactionService, 'create'> = {
+      create: async (command) => {
+        expect(command.dto.header.projectId).toBe(77);
+        await command.postPersistHook?.(
+          { getTransactionClient: () => database.tx },
+          { orderId: 9001, detailIdsByClientKey: new Map() },
+        );
+        return buildOrderDto(9001, 'ERP order draft');
+      },
+    };
+    const repository = new PgBazisRepository(database.service, orderTransactions);
+
+    await repository.createOrderFromDraft(
+      createOrderFromDraftCommand({
+        order: createSaveOrderDto({ header: { projectId: 999999 } }),
+        nodes: [],
+      }),
+    );
+  });
+
+  it('rejects nodes from another revision with VALIDATION_ERROR and marks the key failed', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+        },
+        draftNodeRows: [{ bazis_node_id: 101, object_type: 'Панель' }],
+      },
+    });
+    const repository = new PgBazisRepository(database.service, {
+      create: async () => buildOrderDto(1, 'never'),
+    });
+
+    await expect(
+      repository.createOrderFromDraft(
+        createOrderFromDraftCommand({
+          nodes: [
+            { clientKey: 'draft-detail-1', bazisNodeId: 101 },
+            { clientKey: 'draft-detail-2', bazisNodeId: 999 },
+          ],
+        }),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: { errors: [{ field: 'nodes', message: 'Указанные узлы должны быть панелями из выбранной ревизии' }] },
+    });
+    expect(normalizedSql(database.queries)).toContain("UPDATE command_idempotency_keys SET status = 'failed'");
+  });
+
+  it('rejects non-panel nodes with VALIDATION_ERROR', async () => {
+    const repository = new PgBazisRepository(
+      createDatabase({
+        createOrderState: {
+          revisionRow: {
+            bazis_revision_id: 82,
+            bazis_project_id: 41,
+            project_id: 77,
+            bazis_project_name: 'Шкаф Nova',
+            project_client_id: 5,
+          },
+          draftNodeRows: [{ bazis_node_id: 101, object_type: 'Шкаф' }],
+        },
+      }).service,
+      { create: async () => buildOrderDto(1, 'never') },
+    );
+
+    await expect(
+      repository.createOrderFromDraft(
+        createOrderFromDraftCommand({
+          nodes: [{ clientKey: 'draft-detail-1', bazisNodeId: 101 }],
+        }),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: { errors: [{ field: 'nodes', message: 'Указанные узлы должны быть панелями из выбранной ревизии' }] },
+    });
+  });
+
+  it('rejects node mappings whose clientKey is absent from order details', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+        },
+      },
+    });
+    const repository = new PgBazisRepository(database.service, {
+      create: async () => buildOrderDto(1, 'never'),
+    });
+
+    await expect(
+      repository.createOrderFromDraft(
+        createOrderFromDraftCommand({
+          nodes: [{ clientKey: 'missing-detail', bazisNodeId: 101 }],
+        }),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: {
+        errors: [{ field: 'nodes', message: 'Каждый clientKey из nodes должен присутствовать в order.details' }],
+      },
+    });
+    expect(normalizedSql(database.queries)).toContain("UPDATE command_idempotency_keys SET status = 'failed'");
+  });
+
+  it('rejects duplicate bazisNodeId in nodes before touching bazis_nodes', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+        },
+      },
+    });
+    const repository = new PgBazisRepository(database.service, {
+      create: async () => buildOrderDto(1, 'never'),
+    });
+
+    await expect(
+      repository.createOrderFromDraft(
+        createOrderFromDraftCommand({
+          nodes: [
+            { clientKey: 'draft-detail-1', bazisNodeId: 101 },
+            { clientKey: 'draft-detail-2', bazisNodeId: 101 },
+          ],
+        }),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: { errors: [{ field: 'nodes', message: 'Повторяющиеся bazisNodeId в nodes недопустимы' }] },
+    });
+    expect(
+      database.queries.some((query) => normalizeSql(query.text).startsWith('SELECT bazis_node_id, object_type FROM bazis_nodes')),
+    ).toBe(false);
+  });
+
+  it('replays a completed create-from-draft idempotency response without creating another order', async () => {
+    const response = {
+      orderId: 7001,
+      orderName: 'Existing draft order',
+      detailsCreated: 3,
+      mappedNodes: 2,
+      requestId: 'req-replay-draft',
+      auditId: 'audit-draft-existing',
+    };
+    const database = createDatabase({
+      createOrderState: {
+        idempotencyConflict: true,
+        existingIdempotencyRow: {
+          request_hash: hashCreateOrderFromDraftRequestShape(createOrderFromDraftCommand()),
+          response_json: response,
+          status: 'completed',
+          created_at: isoMinutesAgo(15),
+        },
+      },
+    });
+    const repository = new PgBazisRepository(database.service, {
+      create: async () => buildOrderDto(1, 'never'),
+    });
+
+    await expect(repository.createOrderFromDraft(createOrderFromDraftCommand())).resolves.toEqual(response);
+    expect(normalizedSql(database.queries)).not.toContain('INSERT INTO bazis_node_order_detail_map');
+  });
+
+  it('strips nested order.idempotencyKey before delegating to orderTransactions.create', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+        },
+        draftNodeRows: [],
+      },
+    });
+    const orderTransactions: Pick<OrderTransactionService, 'create'> = {
+      create: async (command) => {
+        expect(command.dto.idempotencyKey).toBeUndefined();
+        await command.postPersistHook?.(
+          { getTransactionClient: () => database.tx },
+          { orderId: 9001, detailIdsByClientKey: new Map() },
+        );
+        return buildOrderDto(9001, 'ERP order draft');
+      },
+    };
+    const repository = new PgBazisRepository(database.service, orderTransactions);
+
+    await repository.createOrderFromDraft(
+      createOrderFromDraftCommand({
+        order: createSaveOrderDto({ idempotencyKey: 'nested-idem-key' }),
+        nodes: [],
+      }),
+    );
+  });
+
+  it('marks the bazis idempotency key failed and propagates ORDER_NAME_DUPLICATE', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          project_client_id: 5,
+        },
+        draftNodeRows: [],
+      },
+    });
+    const repository = new PgBazisRepository(database.service, {
+      create: async () => {
+        throw new ApiError(409, 'ORDER_NAME_DUPLICATE', 'duplicate');
+      },
+    });
+
+    await expect(
+      repository.createOrderFromDraft(createOrderFromDraftCommand({ nodes: [] })),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'ORDER_NAME_DUPLICATE',
+    });
+    expect(normalizedSql(database.queries)).toContain("UPDATE command_idempotency_keys SET status = 'failed'");
+  });
+});
+
 describe('PgBazisRepository.buildOrderDraft', () => {
   it('returns draft details with client metadata and clientKey', async () => {
     const database = createDatabase({
@@ -2095,6 +2459,7 @@ function createDatabase(
       revisionRow?: Record<string, unknown>;
       revisionGoneAtHook?: boolean;
       panelRows?: Array<Record<string, unknown>>;
+      draftNodeRows?: Array<Record<string, unknown>>;
       mappingRows?: Array<Record<string, unknown>>;
       nowIso?: string;
     };
@@ -2130,7 +2495,10 @@ function createDatabase(
       const normalized = normalizeSql(text);
 
       if (normalized.startsWith('INSERT INTO command_idempotency_keys')) {
-        if (String(params[1]) === 'bazis.create_order') {
+        if (
+          String(params[1]) === 'bazis.create_order' ||
+          String(params[1]) === 'bazis.create_order_from_draft'
+        ) {
           createOrderRequestHash = params[5];
           return options.createOrderState?.idempotencyConflict
             ? { rows: [], rowCount: 0 }
@@ -2186,6 +2554,11 @@ function createDatabase(
           rows,
           rowCount: rows.length,
         };
+      }
+
+      if (normalized.startsWith('SELECT bazis_node_id, object_type FROM bazis_nodes')) {
+        const rows = options.createOrderState?.draftNodeRows ?? [];
+        return { rows, rowCount: rows.length };
       }
 
       if (normalized.startsWith('SELECT source_kind, lower(bazis_name) AS name, target_kind')) {
@@ -2392,6 +2765,28 @@ function createOrderCommand(
   };
 }
 
+function createOrderFromDraftCommand(
+  overrides: Partial<{
+    revisionId: number;
+    requestId: string;
+    idempotencyKey: string;
+    order: ReturnType<typeof createSaveOrderDto>;
+    nodes: Array<{ clientKey: string; bazisNodeId: number }>;
+  }> = {},
+) {
+  return {
+    currentUser: currentUser(),
+    requestId: overrides.requestId ?? 'req-create-order-draft',
+    revisionId: overrides.revisionId ?? 82,
+    order: overrides.order ?? createSaveOrderDto(),
+    nodes: overrides.nodes ?? [
+      { clientKey: 'draft-detail-1', bazisNodeId: 101 },
+      { clientKey: 'draft-detail-2', bazisNodeId: 102 },
+    ],
+    idempotencyKey: overrides.idempotencyKey ?? 'bazis-create-order-draft-001',
+  };
+}
+
 function parsedRevision(overrides: Partial<ParsedBazisRevision> = {}): ParsedBazisRevision {
   return {
     bazisVersion: '11',
@@ -2488,6 +2883,102 @@ function hashCreateOrderRequestShape(command: ReturnType<typeof createOrderComma
       }),
     )
     .digest('hex');
+}
+
+function hashCreateOrderFromDraftRequestShape(
+  command: ReturnType<typeof createOrderFromDraftCommand>,
+): string {
+  const order = {
+    ...command.order,
+    header: {
+      ...command.order.header,
+      projectId: undefined,
+    },
+    idempotencyKey: undefined,
+  };
+
+  return createHash('sha256')
+    .update(
+      stableStringify({
+        order,
+        nodes: [...command.nodes].sort(
+          (left, right) => left.bazisNodeId - right.bazisNodeId || left.clientKey.localeCompare(right.clientKey),
+        ),
+        actorUserId: Number(command.currentUser.id),
+        commandName: 'bazis.create_order_from_draft',
+      }),
+    )
+    .digest('hex');
+}
+
+function createSaveOrderDto(
+  overrides: Partial<{
+    header: Record<string, unknown>;
+    details: Array<Record<string, unknown>>;
+    idempotencyKey?: string;
+  }> = {},
+) {
+  return {
+    header: {
+      orderName: 'ERP order draft',
+      clientId: 5,
+      orderDate: '2026-07-08',
+      orderStatusId: 3,
+      projectId: 999,
+      ...(overrides.header ?? {}),
+    },
+    details: [
+      {
+        clientKey: 'draft-detail-1',
+        detailNumber: 1,
+        detailName: 'Панель 1',
+        height: 1200,
+        width: 450,
+        quantity: 1,
+        materialId: null,
+        sheetMaterialTypeId: 501,
+        millingTypeId: 1,
+        edgeTypeId: 1,
+      },
+      {
+        clientKey: 'draft-detail-2',
+        detailNumber: 2,
+        detailName: 'Панель 2',
+        height: 800,
+        width: 300,
+        quantity: 1,
+        materialId: null,
+        sheetMaterialTypeId: 502,
+        millingTypeId: 1,
+        edgeTypeId: 1,
+      },
+      {
+        clientKey: 'manual-detail-3',
+        detailNumber: 3,
+        detailName: 'Ручная деталь',
+        height: 400,
+        width: 200,
+        quantity: 1,
+        materialId: null,
+        sheetMaterialTypeId: 503,
+        millingTypeId: 1,
+        edgeTypeId: 1,
+      },
+      ...((overrides.details ?? []).map((detail) => ({ ...detail })) as Array<Record<string, unknown>>),
+    ],
+    payments: [],
+    workshops: [],
+    requirements: [],
+    dowelingLinks: [],
+    deleted: {
+      detailIds: [],
+      paymentIds: [],
+      workshopIds: [],
+      requirementIds: [],
+      dowelingLinkIds: [],
+    },
+    idempotencyKey: overrides.idempotencyKey ?? 'nested-order-key',
+  };
 }
 
 function stableStringify(value: unknown): string {

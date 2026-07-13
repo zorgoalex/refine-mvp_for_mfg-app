@@ -1,3 +1,5 @@
+import type { SaveOrderDto } from '../../orders/dto/save-order.dto';
+
 export interface BazisImportResponseDto {
   bazisProject: { bazisProjectId: number; projectId: number; name: string };
   revision: {
@@ -221,6 +223,17 @@ export interface CreateOrderFromRevisionResponseDto {
   mappedNodes: number;
   requestId: string;
   auditId?: string;
+}
+
+export interface CreateOrderFromDraftNodeDto {
+  clientKey: string;
+  bazisNodeId: number;
+}
+
+export interface CreateOrderFromDraftRequestDto {
+  order: SaveOrderDto;
+  nodes: CreateOrderFromDraftNodeDto[];
+  idempotencyKey: string;
 }
 
 export interface BazisOrderDraftDetailDto {

@@ -1,7 +1,9 @@
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { SaveOrderDto } from '../../orders/dto/save-order.dto';
 import type { ParsedBazisRevision } from './bazis-xml-parser';
 import type {
   BazisImportResponseDto,
+  CreateOrderFromDraftNodeDto,
   BazisProjectDeleteResponseDto,
   BazisNodeCardDto,
   BazisOrderDraftResponseDto,
@@ -57,6 +59,15 @@ export interface BuildOrderDraftCommand {
   targetOrderId?: number | null;
 }
 
+export interface CreateOrderFromDraftCommand {
+  currentUser: CurrentUser;
+  requestId?: string;
+  revisionId: number;
+  order: SaveOrderDto;
+  nodes: CreateOrderFromDraftNodeDto[];
+  idempotencyKey: string;
+}
+
 export interface DeleteBazisProjectInput {
   currentUser: CurrentUser;
   requestId?: string;
@@ -83,6 +94,7 @@ export interface BazisRepositoryPort {
     items: UpsertMaterialMappingDto[],
   ): Promise<MaterialMappingDto[]>;
   buildOrderDraft(command: BuildOrderDraftCommand): Promise<BazisOrderDraftResponseDto>;
+  createOrderFromDraft(command: CreateOrderFromDraftCommand): Promise<CreateOrderFromRevisionResponseDto>;
   createOrderFromRevision(
     command: CreateOrderFromRevisionCommand,
   ): Promise<CreateOrderFromRevisionResponseDto>;

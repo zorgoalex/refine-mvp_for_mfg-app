@@ -3,6 +3,7 @@ import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
   BazisRevisionEstimate,
+  CreateOrderFromDraftRequest,
   BazisImportResponse,
   BazisNodeCard,
   BazisOrderDraftResponse,
@@ -123,6 +124,16 @@ export const bazisApi = {
   ): Promise<CreateOrderFromRevisionResponse> {
     return httpClient.post<CreateOrderFromRevisionResponse>(
       apiRoutes.bazis.createOrder(validateId(revisionId, 'revisionId')),
+      body,
+    );
+  },
+
+  createOrderFromDraft(
+    revisionId: number,
+    body: CreateOrderFromDraftRequest,
+  ): Promise<CreateOrderFromRevisionResponse> {
+    return httpClient.post<CreateOrderFromRevisionResponse>(
+      apiRoutes.bazis.revisionOrders(validateId(revisionId, 'revisionId')),
       body,
     );
   },

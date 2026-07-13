@@ -7,9 +7,11 @@ import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
+import type { SaveOrderDto } from '../../orders/dto/save-order.dto';
 import { BazisService } from '../application/bazis.service';
 import type {
   BazisRevisionEstimateDto,
+  CreateOrderFromDraftRequestDto,
   BazisImportResponseDto,
   BazisNodeCardDto,
   BazisOrderDraftResponseDto,
@@ -157,6 +159,22 @@ const createOrderFromRevisionBodySchema = z.object({
   idempotencyKey: z.string().min(8).max(200),
 });
 
+const createOrderFromDraftBodySchema = z.object({
+  order: z
+    .object({
+      header: z.object({}).passthrough(),
+      details: z.array(z.object({}).passthrough()),
+    })
+    .passthrough(),
+  nodes: z.array(
+    z.object({
+      clientKey: z.string().trim().min(1).max(255),
+      bazisNodeId: z.coerce.number().int().positive(),
+    }),
+  ),
+  idempotencyKey: z.string().trim().min(1).max(200),
+});
+
 const buildOrderDraftBodySchema = z.object({
   selectedNodeIds: z.array(z.coerce.number().int().positive()).min(1).max(500),
   targetOrderId: optionalNumericIdSchema.nullish(),
@@ -207,6 +225,28 @@ const createOrderFromRevisionRequestSwaggerSchema = {
       items: { type: 'integer' },
     },
     idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
+  },
+} as const;
+
+const createOrderFromDraftRequestSwaggerSchema = {
+  type: 'object',
+  required: ['order', 'nodes', 'idempotencyKey'],
+  properties: {
+    order: {
+      $ref: '#/components/schemas/SaveOrderDto',
+    },
+    nodes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['clientKey', 'bazisNodeId'],
+        properties: {
+          clientKey: { type: 'string', minLength: 1, maxLength: 255 },
+          bazisNodeId: { type: 'integer' },
+        },
+      },
+    },
+    idempotencyKey: { type: 'string', minLength: 1, maxLength: 200 },
   },
 } as const;
 
@@ -471,6 +511,35 @@ export class BazisController {
     });
   }
 
+  @ApiOperation({ operationId: 'createOrderFromBazisDraft', summary: 'Create ERP order from a saved Bazis draft' })
+  @ApiBody({ schema: swaggerSchema(createOrderFromDraftRequestSwaggerSchema) })
+  @ApiResponse({ status: 201, description: 'ERP order created from Bazis draft' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 409, description: 'Idempotency conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid create-order payload' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Post('revisions/:revisionId/orders')
+  @HttpCode(201)
+  async createOrderFromDraft(
+    @Req() request: RequestWithCurrentUser,
+    @Param('revisionId') revisionId: string,
+    @Body() body: unknown,
+  ): Promise<CreateOrderFromRevisionResponseDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const parsed = parseCreateOrderFromDraftBody(body);
+    return this.bazis.createOrderFromDraft({
+      currentUser,
+      requestId: request.requestId,
+      revisionId: parseNumericPathParam(revisionId, 'revisionId'),
+      order: parsed.order,
+      nodes: parsed.nodes,
+      idempotencyKey: parsed.idempotencyKey,
+    });
+  }
+
   @ApiOperation({ operationId: 'buildBazisOrderDraft', summary: 'Build ERP order draft from a Bazis revision selection' })
   @ApiBody({ schema: swaggerSchema(buildOrderDraftRequestSwaggerSchema) })
   @ApiResponse({ status: 200, description: 'ERP order draft built from Bazis revision' })
@@ -617,6 +686,20 @@ export function parseCreateOrderFromRevisionBody(body: unknown): {
     body,
     'Bazis create-order payload validation failed',
   );
+}
+
+export function parseCreateOrderFromDraftBody(body: unknown): CreateOrderFromDraftRequestDto {
+  const parsed = parseWithZod(
+    createOrderFromDraftBodySchema,
+    body,
+    'Bazis create-order-from-draft payload validation failed',
+  );
+
+  return {
+    order: parsed.order as unknown as SaveOrderDto,
+    nodes: parsed.nodes,
+    idempotencyKey: parsed.idempotencyKey,
+  };
 }
 
 export function parseBuildOrderDraftBody(body: unknown): {
