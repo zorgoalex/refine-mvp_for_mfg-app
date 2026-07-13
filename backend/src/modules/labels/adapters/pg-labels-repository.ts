@@ -1221,8 +1221,9 @@ export class PgLabelsRepository implements LabelsPort {
       formats: generation.exportFormats,
       generatedAt: generation.generatedAt,
     });
+    const orderName = readOrderNameFromFields(await readOrderFields(this.database, query.orderId));
     return {
-      filename: `order-${query.orderId}-labels-${generation.generationId}.zip`,
+      filename: buildOrderLabelsArchiveFilename(orderName, generation.generationId),
       contentType: 'application/zip',
       body,
     };
@@ -1246,6 +1247,7 @@ export class PgLabelsRepository implements LabelsPort {
   }
 
   async getLatestOrderLabelsPreview(query: ExportOrderLabelsQuery): Promise<LatestOrderLabelsPreviewDto> {
+    await assertOrderExists(this.database, query.orderId);
     const generation = await readLatestGeneration(this.database, query.orderId);
     const svgPages = renderSvgPages(generation.template, generation.rows).pages;
     return {
@@ -1520,6 +1522,15 @@ async function readOrderFields(client: DatabaseClient, orderId: number): Promise
 function readOrderNameFromFields(orderFields: Record<string, unknown>): string | null {
   const value = orderFields.order_name;
   return value == null ? null : String(value);
+}
+
+export function buildOrderLabelsArchiveFilename(orderName: string | null, generationId: number): string {
+  const normalizedOrderName = (orderName?.trim() || 'без-названия')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '');
+  const safeOrderName = Array.from(normalizedOrderName).slice(0, 120).join('') || 'без-названия';
+  return `заказ-${safeOrderName}-бирки-${generationId}.zip`;
 }
 
 function filterDetails(details: OrderLabelDataDetailDto[], detailIds: number[]): OrderLabelDataDetailDto[] {

@@ -45,6 +45,19 @@ describe('labelsApi', () => {
     expect(init.body).toContain('template-create-1');
   });
 
+  it('bypasses browser cache when reloading label templates', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify([]), { headers: { 'Content-Type': 'application/json' } }),
+    );
+
+    await labelsApi.listTemplates(true);
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/label-templates?includeInactive=true',
+      expect.objectContaining({ cache: 'no-store', method: 'GET' }),
+    );
+  });
+
   it('downloads generation ZIP blobs', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(new Blob(['zip']), {
@@ -104,7 +117,13 @@ describe('labelsApi', () => {
     const result = await labelsApi.getLatest(42);
 
     expect(fetch).toHaveBeenCalledWith('/api/v1/orders/42/labels/latest', expect.any(Object));
-    expect(result.svgPages).toEqual(['<svg />']);
+    expect(result?.svgPages).toEqual(['<svg />']);
+  });
+
+  it('returns null when an order has no prior label generation', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 200 }));
+
+    await expect(labelsApi.getLatest(11370)).resolves.toBeNull();
   });
 
   it('propagates backend API errors', async () => {

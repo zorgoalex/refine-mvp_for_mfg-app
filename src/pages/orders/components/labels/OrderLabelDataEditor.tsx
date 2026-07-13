@@ -74,6 +74,10 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
     setLatestPreviewLoading(true);
     labelsApi.getLatest(orderId)
       .then(async (latest) => {
+        if (!latest) {
+          if (!cancelled) setLatestPreviewSvg(null);
+          return;
+        }
         try {
           const preview = await labelsApi.previewOrderLabels(orderId, {
             templateId: latest.templateId,

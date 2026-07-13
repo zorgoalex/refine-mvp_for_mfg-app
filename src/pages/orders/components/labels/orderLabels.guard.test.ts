@@ -87,6 +87,10 @@ describe('order labels UI wiring', () => {
     expect(generateSrc).not.toMatch(/setPreview\(null\);\s*\n\s*}\s*}\s*options/s);
   });
 
+  it('clears the previous template SVG before loading a fresh preview', () => {
+    expect(generateSrc).toMatch(/previewRequestRef\.current = requestId;\s*setPreview\(null\);\s*setLoading\(true\)/);
+  });
+
   it('lets order label generation choose whether Basis project/data columns feed the preview', () => {
     expect(generateSrc).toMatch(/Использовать поля базис проекта/);
     expect(generateSrc).toMatch(/useBasisFields/);
@@ -97,6 +101,7 @@ describe('order labels UI wiring', () => {
 
   it('shows latest generated label template preview inside the order edit labels block', () => {
     expect(dataEditorSrc).toMatch(/labelsApi\.getLatest\(orderId\)/);
+    expect(dataEditorSrc).toMatch(/if \(!latest\) \{[\s\S]*setLatestPreviewSvg\(null\);[\s\S]*return;/);
     expect(dataEditorSrc).toMatch(/labelsApi\.previewOrderLabels\(orderId,\s*\{/);
     expect(dataEditorSrc).toMatch(/data\?\.details\[0\]\?\.detailId/);
     expect(dataEditorSrc).toMatch(/Превью последней генерации: первая позиция/);
