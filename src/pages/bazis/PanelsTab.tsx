@@ -363,7 +363,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
         // состояние, раскрыта только карточка самой панели
         <Collapse key={selectedId} defaultActiveKey={['panel']}>
           <Panel key="panel" header={`Панель: ${selectedPanel.name?.trim() || '—'}`}>
-            <NodeCard nodeId={selectedId} />
+            <NodeCard nodeId={selectedId} collapsibleSummary />
           </Panel>
           {selectedAncestors.map((ancestor) => (
             <Panel
