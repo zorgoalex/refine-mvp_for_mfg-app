@@ -91,7 +91,7 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'production_status_id', label: 'Статус' },
   { key: 'basis_project', label: 'Базис проект' },
   { key: 'basis_data', label: 'Базис данные' },
-  { key: 'basis_designation', label: 'Базис обозн.' },
+  { key: 'basis_designation', label: 'Базис обозн. изделия' },
   { key: 'detail_name', label: 'Название детали' },
   { key: 'actions', label: 'Действия', lockVisible: true },
 ];
@@ -1198,7 +1198,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       },
     },
     {
-      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис обозн.</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис обозн. изделия</div>,
       dataIndex: 'basis_designation',
       key: 'basis_designation',
       width: 90,
