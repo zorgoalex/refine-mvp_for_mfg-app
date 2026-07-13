@@ -8,14 +8,33 @@ export interface OrderCardListProps {
   rows: readonly Record<string, unknown>[];
   loading?: boolean;
   pagination: TablePaginationConfig | false;
+  onPageChange: (page: number) => void;
   onOpen: (id: number) => void;
 }
 
-export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pagination, onOpen }) => (
+export const buildOrderCardPagination = (
+  pagination: TablePaginationConfig | false,
+  onPageChange: (page: number) => void,
+) => {
+  if (pagination === false) return false;
+
+  // Table uses an array such as ['bottomRight']; Ant List accepts only
+  // 'top' | 'bottom' | 'both'. Passing the table value makes List render no pager.
+  const { position: _tablePosition, ...sharedPagination } = pagination;
+  return {
+    ...sharedPagination,
+    position: 'bottom' as const,
+    simple: true,
+    showSizeChanger: false,
+    onChange: onPageChange,
+  };
+};
+
+export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pagination, onPageChange, onOpen }) => (
   <List
     dataSource={rows as Record<string, unknown>[]}
     loading={loading}
-    pagination={pagination === false ? false : { ...pagination, simple: true, showSizeChanger: false }}
+    pagination={buildOrderCardPagination(pagination, onPageChange)}
     rowKey={(r) => String(r.order_id)}
     renderItem={(row) => {
       const m = buildOrderCardModel(row);

@@ -44,6 +44,7 @@
 }
 
 .orders-table .ant-pagination {
+  align-items: center;
   margin: 6px 0;
 }
 
