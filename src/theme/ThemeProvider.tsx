@@ -45,10 +45,11 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
     if (cached) {
       setModeState(cached);
     }
+    // Смена юзера в том же браузере: state обязан сброситься на кэш ИМЕННО
+    // этого юзера (или default) — иначе новый юзер унаследует чужой компакт,
+    // если старый backend (mixed deploy) не вернёт uiSize в ответе
     const cachedSize = userId ? getStoredUiSize(String(userId)) : null;
-    if (cachedSize) {
-      setUiSizeState(cachedSize);
-    }
+    setUiSizeState(cachedSize ?? 'default');
 
     let active = true;
     profileApi.getPreferences()
