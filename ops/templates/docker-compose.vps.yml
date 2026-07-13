@@ -270,6 +270,9 @@ services:
       DEFAULT_TIME_LIMIT_MS: ${FREECUT_DEFAULT_TIME_LIMIT_MS:-1200}
       DEFAULT_RESTARTS: ${FREECUT_DEFAULT_RESTARTS:-5}
       MAX_CONCURRENT_OPTIMIZE: ${FREECUT_MAX_CONCURRENT_OPTIMIZE:-1}
+      # Must stay below the backend's FREECUT_OPTIMIZE_TIMEOUT_MS (15000):
+      # otherwise the backend aborts while the request still holds the queue.
+      OPTIMIZE_QUEUE_WAIT_MS: ${FREECUT_OPTIMIZE_QUEUE_WAIT_MS:-10000}
     cpus: ${FREECUT_CPUS:-1.5}
     mem_limit: ${FREECUT_MEM_LIMIT:-512m}
     healthcheck:

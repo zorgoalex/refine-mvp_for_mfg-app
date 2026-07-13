@@ -254,13 +254,16 @@ sudo ops/setup-vps.sh --yes
 verified `repo_freecut` checkout (fixed build-context `./repo_freecut`; overrides are rejected)
 and comes up automatically with the rest of the stack. It is **internal-only**:
 attached to the `back` network with no Traefik route and no public domain, so it
-is not reachable from the browser. A backend integration can later call it at
-`http://freecut:8088` over the internal network.
+is not reachable from the browser. The backend cut module (`modules/cut`) calls
+it at `http://freecut:8088` over the internal network (`FREECUT_BASE_URL` with
+`FREECUT_OPTIMIZE_TIMEOUT_MS` on the backend side).
 
 The service is standalone (no DB/Hasura/Valkey dependency), so it has no
 `depends_on` and starts in parallel. Tuning knobs live in `.env` as
 `FREECUT_*` (body/instance/time/restart limits, `FREECUT_MAX_CONCURRENT_OPTIMIZE`,
-`FREECUT_CPUS`, `FREECUT_MEM_LIMIT`); none are secrets.
+`FREECUT_OPTIMIZE_QUEUE_WAIT_MS` — keep it below the backend
+`FREECUT_OPTIMIZE_TIMEOUT_MS`, `FREECUT_CPUS`, `FREECUT_MEM_LIMIT`); none are
+secrets.
 
 Rebuild/recreate only freecut after a source or env change:
 
