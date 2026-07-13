@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  validateFreecutParams,
   validateParamProfileInput,
   validateRenderPresetInput,
   validateSettingValue,
@@ -140,5 +141,35 @@ describe('cut-config validation', () => {
     expect(() => validateParamProfileInput({ name: 'bad', params: { vacuum: { direction: 5 } } })).toThrow();
     // vacuum.direction as unknown string must be rejected
     expect(() => validateParamProfileInput({ name: 'bad', params: { vacuum: { direction: 'diagonal' } } })).toThrow();
+  });
+
+  describe('validateFreecutParams engine/cut_quality', () => {
+    it('accepts engine ga|heuristic and heuristic cut_quality tiers', () => {
+      expect(() => validateFreecutParams({ engine: 'heuristic', cut_quality: 'max' })).not.toThrow();
+      expect(() => validateFreecutParams({ engine: 'heuristic', cut_quality: 'balanced' })).not.toThrow();
+      expect(() => validateFreecutParams({ engine: 'ga' })).not.toThrow();
+    });
+
+    it('rejects unknown engine', () => {
+      expect(() => validateFreecutParams({ engine: 'quantum' as 'ga' })).toThrow(/engine/);
+    });
+
+    it('rejects unknown cut_quality (note: "quality" is sla-tier, not a cut_quality tier)', () => {
+      expect(() =>
+        validateFreecutParams({ engine: 'heuristic', cut_quality: 'quality' as 'fast' }),
+      ).toThrow(/cut_quality/);
+    });
+
+    it('rejects cut_quality without engine=heuristic (coupling rule)', () => {
+      expect(() => validateFreecutParams({ cut_quality: 'max' })).toThrow(/cut_quality/);
+      expect(() => validateFreecutParams({ engine: 'ga', cut_quality: 'max' })).toThrow(/cut_quality/);
+    });
+
+    it('rejects engine/cut_quality on a vacuum_table profile', () => {
+      expect(() => validateFreecutParams({ layout_mode: 'vacuum_table', engine: 'heuristic' })).toThrow(/vacuum/);
+      expect(() =>
+        validateFreecutParams({ layout_mode: 'vacuum_table', engine: 'heuristic', cut_quality: 'max' }),
+      ).toThrow(/vacuum/);
+    });
   });
 });
