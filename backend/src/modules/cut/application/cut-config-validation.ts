@@ -79,6 +79,8 @@ const LAYOUT_MODES = ['guillotine', 'nested', 'vacuum_table'];
 const OBJECTIVES = ['min_waste', 'min_sheets'];
 const RETRY_STRATEGIES = ['disabled', 'smart'];
 const QUALITY_PROFILES = ['fast', 'balanced', 'quality'];
+export const FREECUT_ENGINES = ['ga', 'heuristic'] as const;
+export const FREECUT_CUT_QUALITY_TIERS = ['fast', 'balanced', 'max'] as const;
 
 /**
  * Structural validation of the known freecut param keys so a stored profile can
@@ -110,6 +112,23 @@ export function validateFreecutParams(params: Record<string, unknown>): void {
     if (value !== undefined && !QUALITY_PROFILES.includes(value as string)) {
       invalid(`params.${key}`, `${key} должен быть одним из: ${QUALITY_PROFILES.join(', ')}`);
     }
+  }
+  if (params.engine !== undefined && !(FREECUT_ENGINES as readonly string[]).includes(params.engine as string)) {
+    invalid('params.engine', `engine должен быть одним из: ${FREECUT_ENGINES.join(', ')}`);
+  }
+  if (params.cut_quality !== undefined) {
+    if (!(FREECUT_CUT_QUALITY_TIERS as readonly string[]).includes(params.cut_quality as string)) {
+      invalid(
+        'params.cut_quality',
+        `cut_quality должен быть одним из: ${FREECUT_CUT_QUALITY_TIERS.join(', ')}`,
+      );
+    }
+    if (params.engine !== 'heuristic') {
+      invalid('params.cut_quality', 'cut_quality применим только вместе с engine=heuristic');
+    }
+  }
+  if (params.layout_mode === 'vacuum_table' && (params.engine !== undefined || params.cut_quality !== undefined)) {
+    invalid('params.engine', 'engine/cut_quality не применимы к профилю vacuum_table');
   }
   if (params.group_shift !== undefined) {
     const gs = params.group_shift;

@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-13",
+    title: "Раскрой: быстрый движок для крупных заданий",
+    services: ["Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "Раскрой: быстрый движок для крупных заданий — автоматически или принудительно через профиль параметров.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-13",
     title: "Базис «Панели»: выбор позиций и перенос в ERP-заказ",
     services: ["ERP"],
     repositories: ["repo_erp"],

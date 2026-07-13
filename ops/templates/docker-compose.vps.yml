@@ -215,6 +215,7 @@ services:
       BACKEND_CUT_NATIVE_PORTRAIT: ${BACKEND_CUT_NATIVE_PORTRAIT:-false}
       FREECUT_BASE_URL: ${FREECUT_BASE_URL:-}
       FREECUT_OPTIMIZE_TIMEOUT_MS: ${FREECUT_OPTIMIZE_TIMEOUT_MS:-15000}
+      BACKEND_CUT_HEURISTIC_AUTO_THRESHOLD: ${BACKEND_CUT_HEURISTIC_AUTO_THRESHOLD:-100}
       # CAD SVG/DXF service over the internal "back" network. Backend calls it
       # by service DNS and skips the token (trusted Docker CIDR).
       CAD_SERVICE_BASE_URL: ${CAD_SERVICE_BASE_URL:-http://cad-service:8000}

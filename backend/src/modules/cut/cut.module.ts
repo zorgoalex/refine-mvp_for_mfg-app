@@ -32,6 +32,7 @@ import { CutConfigController } from './http/cut-config.controller';
         return new CutService({
           cut: new PgCutRepository(database, freecut, undefined, {
             nativePortraitWriter: runtimeConfig.isNativePortraitWriterEnabled(),
+            heuristicAutoThresholdInstances: runtimeConfig.getHeuristicAutoThresholdInstances(),
           }),
         });
       },
