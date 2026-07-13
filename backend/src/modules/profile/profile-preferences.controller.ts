@@ -8,6 +8,7 @@ import type { UserPreferencesDto, UserPreferencesResponseDto } from './profile-p
 
 const updatePreferencesSchema = z.object({
   themeMode: z.enum(['light', 'dark']).optional(),
+  uiSize: z.enum(['default', 'small']).optional(),
   orderDetailColumns: z.record(
     z.string().min(1).max(80),
     z.object({

@@ -2,6 +2,9 @@ import type { CurrentUser } from '../../permissions/current-user';
 
 export type ThemeMode = 'light' | 'dark';
 
+/** Глобальный размер antd-компонентов: default = стандарт, small = компакт. */
+export type UiSize = 'default' | 'small';
+
 export interface OrderDetailColumnPreferenceDto {
   order: string[];
   hidden: string[];
@@ -11,6 +14,7 @@ export type OrderDetailColumnPreferencesDto = Record<string, OrderDetailColumnPr
 
 export interface UserPreferencesDto {
   themeMode: ThemeMode;
+  uiSize: UiSize;
   orderDetailColumns: OrderDetailColumnPreferencesDto;
 }
 

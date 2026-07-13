@@ -193,7 +193,7 @@ const App = () => (
 );
 
 const ThemedApp = () => {
-  const { mode } = useAppTheme();
+  const { mode, uiSize } = useAppTheme();
 
   // Configure notifications globally
   useEffect(() => {
@@ -210,6 +210,7 @@ const ThemedApp = () => {
         <RefineKbarProvider>
           <ConfigProvider
             locale={ruRU}
+            componentSize={uiSize === 'small' ? 'small' : undefined}
             theme={{
               algorithm: mode === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
               token: {

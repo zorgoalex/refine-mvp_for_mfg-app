@@ -2,12 +2,14 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { profileApi } from '../api/profileApi';
 import { authSession } from '../api/authSession';
 import { authStorage } from '../utils/auth';
-import { getStoredThemeMode, setStoredThemeMode } from './themeStorage';
-import type { ThemeMode } from './themeTypes';
+import { getStoredThemeMode, getStoredUiSize, setStoredThemeMode, setStoredUiSize } from './themeStorage';
+import type { ThemeMode, UiSize } from './themeTypes';
 
 interface AppThemeContextValue {
   mode: ThemeMode;
+  uiSize: UiSize;
   setMode: (mode: ThemeMode) => Promise<void>;
+  setUiSize: (size: UiSize) => Promise<void>;
   toggleMode: () => Promise<void>;
 }
 
@@ -18,6 +20,10 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
   const [mode, setModeState] = useState<ThemeMode>(() => {
     const userId = getCurrentUserId();
     return (userId ? getStoredThemeMode(String(userId)) : null) ?? 'light';
+  });
+  const [uiSize, setUiSizeState] = useState<UiSize>(() => {
+    const userId = getCurrentUserId();
+    return (userId ? getStoredUiSize(String(userId)) : null) ?? 'default';
   });
 
   useEffect(() => {
@@ -39,15 +45,21 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
     if (cached) {
       setModeState(cached);
     }
+    const cachedSize = userId ? getStoredUiSize(String(userId)) : null;
+    if (cachedSize) {
+      setUiSizeState(cachedSize);
+    }
 
     let active = true;
     profileApi.getPreferences()
       .then((response) => {
         if (!active) return;
         setModeState(response.preferences.themeMode);
+        setUiSizeState(response.preferences.uiSize);
         const refreshedUserId = getCurrentUserId();
         if (refreshedUserId) {
           setStoredThemeMode(refreshedUserId, response.preferences.themeMode);
+          setStoredUiSize(refreshedUserId, response.preferences.uiSize);
         }
       })
       .catch(() => {
@@ -81,14 +93,36 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
     }
   }, []);
 
+  const setUiSize = useCallback(async (nextSize: UiSize) => {
+    const token = authStorage.getAccessToken();
+    const userId = getCurrentUserId();
+    setUiSizeState(nextSize);
+    if (userId) {
+      setStoredUiSize(String(userId), nextSize);
+    }
+
+    if (!token || !userId) return;
+
+    try {
+      const response = await profileApi.updatePreferences({ uiSize: nextSize });
+      setUiSizeState(response.preferences.uiSize);
+      const refreshedUserId = getCurrentUserId() ?? userId;
+      if (refreshedUserId) {
+        setStoredUiSize(refreshedUserId, response.preferences.uiSize);
+      }
+    } catch {
+      // Optimistic local preference; backend retried on next explicit change.
+    }
+  }, []);
+
   const toggleMode = useCallback(
     () => setMode(mode === 'dark' ? 'light' : 'dark'),
     [mode, setMode],
   );
 
   const value = useMemo<AppThemeContextValue>(
-    () => ({ mode, setMode, toggleMode }),
-    [mode, setMode, toggleMode],
+    () => ({ mode, uiSize, setMode, setUiSize, toggleMode }),
+    [mode, uiSize, setMode, setUiSize, toggleMode],
   );
 
   return (
