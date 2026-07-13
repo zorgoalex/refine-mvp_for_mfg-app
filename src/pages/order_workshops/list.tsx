@@ -1,4 +1,5 @@
-import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+import { useMemo } from "react";
+import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
 import { useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
 import { Space, Table } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
@@ -13,6 +14,18 @@ export const OrderWorkshopList: React.FC<IResourceComponentsProps> = () => {
   });
   const { show } = useNavigation();
 
+  // Пользователи мыслят названиями: подтягиваем имена заказов (паттерн payments/list)
+  const orderIds = useMemo(
+    () => [...new Set((tableProps.dataSource || []).map((row: any) => row.order_id).filter(Boolean))],
+    [tableProps.dataSource],
+  );
+  const { data: ordersData } = useMany({ resource: "orders", ids: orderIds, queryOptions: { enabled: orderIds.length > 0 } });
+  const orderMap = useMemo(() => {
+    const map: Record<string | number, string> = {};
+    (ordersData?.data || []).forEach((o: any) => (map[o.order_id] = o.order_name ?? `#${o.order_id}`));
+    return map;
+  }, [ordersData]);
+
   return (
     <LocalizedList title="Заказы по цехам">
       <Table
@@ -25,7 +38,7 @@ export const OrderWorkshopList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="order_workshop_id" title="id" sorter />
-        <Table.Column dataIndex="order_id" title="Заказ" sorter />
+        <Table.Column dataIndex="order_id" title="Заказ" sorter render={(value) => (value ? orderMap[value] ?? `#${value}` : "—")} />
         <Table.Column dataIndex="workshop_id" title="Цех" sorter />
         <Table.Column dataIndex="production_status_id" title="Статус производства" sorter />
         <Table.Column dataIndex="sequence_order" title="Последовательный номер этапа" sorter />

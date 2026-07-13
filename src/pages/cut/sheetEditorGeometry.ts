@@ -7,7 +7,37 @@
  * canonical `orientPieceRect`; the inverse mirrors it exactly here.
  */
 import type { SheetPlacements, SheetPlacementPiece } from '../../api/types/cutApi.types';
-import { orientPieceRect } from './cutLayoutGeometry';
+import { applyAxisOrigin, orientPieceRect, undoAxisOriginX, undoAxisOriginY, type CutAxisOrigin } from './cutLayoutGeometry';
+
+/**
+ * Inverse linear view transform around a point. Applied to labels inside a sheet
+ * whose outer SVG is rotated/mirrored, keeping text horizontal and readable.
+ */
+export function counterViewMatrix(
+  rotationDeg: number,
+  mirrorHorizontal: boolean,
+  mirrorVertical: boolean,
+  centerX: number,
+  centerY: number,
+): [number, number, number, number, number, number] {
+  const radians = rotationDeg * Math.PI / 180;
+  const cos = Math.round(Math.cos(radians));
+  const sin = Math.round(Math.sin(radians));
+  const mx = mirrorHorizontal ? -1 : 1;
+  const my = mirrorVertical ? -1 : 1;
+  const a = mx * cos;
+  const b = -my * sin;
+  const c = mx * sin;
+  const d = my * cos;
+  return [
+    a,
+    b,
+    c,
+    d,
+    centerX - a * centerX - c * centerY,
+    centerY - b * centerX - d * centerY,
+  ];
+}
 
 /**
  * Get the oriented SVG top-left corner of a piece using the shared
@@ -19,8 +49,9 @@ export function orientedOrigin(
   placements: SheetPlacements,
   landscape: boolean,
   originTopLeft = false,
+  axisOrigin: CutAxisOrigin = 'top-left',
 ): { x: number; y: number } {
-  const r = orientPieceRect(
+  const r = applyAxisOrigin(orientPieceRect(
     {
       x: placements.trim_mm.left + piece.x_mm,
       y: placements.trim_mm.top + piece.y_mm,
@@ -31,7 +62,7 @@ export function orientedOrigin(
     placements.sheet_height_mm,
     landscape,
     originTopLeft,
-  );
+  ), axisOrigin, landscape);
   return { x: r.x, y: r.y };
 }
 
@@ -58,10 +89,18 @@ export function svgToUsable(
   placements: SheetPlacements,
   landscape: boolean,
   originTopLeft = false,
+  axisOrigin: CutAxisOrigin = 'top-left',
+  pieceWidthMm?: number,
 ): { x_mm: number; y_mm: number } {
   // Piece oriented top-left in SVG space = pointer position minus stored offset
-  const ox = svgX - svgOffsetX;
-  const oy = svgY - svgOffsetY;
+  const displayOx = svgX - svgOffsetX;
+  const displayOy = svgY - svgOffsetY;
+  const orientedWidth = landscape ? pieceHeightMm : (pieceWidthMm ?? pieceHeightMm);
+  const orientedHeight = landscape ? (pieceWidthMm ?? pieceHeightMm) : pieceHeightMm;
+  const viewWidth = landscape ? placements.sheet_height_mm : placements.sheet_width_mm;
+  const viewHeight = landscape ? placements.sheet_width_mm : placements.sheet_height_mm;
+  const ox = undoAxisOriginX(displayOx, orientedWidth, viewWidth, axisOrigin, landscape);
+  const oy = undoAxisOriginY(displayOy, orientedHeight, viewHeight, axisOrigin, landscape);
   const trim = placements.trim_mm;
   if (landscape) {
     if (originTopLeft) {

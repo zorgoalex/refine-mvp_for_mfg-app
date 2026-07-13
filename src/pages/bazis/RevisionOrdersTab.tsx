@@ -11,7 +11,7 @@ interface RevisionOrdersTabProps {
 
 const columns: ColumnsType<BazisRevisionOrder> = [
   {
-    title: 'Заказ',
+    title: 'ID заказа',
     dataIndex: 'orderId',
     key: 'orderId',
     width: 120,

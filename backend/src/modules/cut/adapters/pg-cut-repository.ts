@@ -14,6 +14,7 @@ import {
   manualSetMatchesAuto,
   reconstructManualSheets,
   validateSheetPlacements,
+  validateSheetGroupInvariant,
 } from '../../../shared/cut-geometry';
 import { buildCutAuditEvent, buildCutDeniedEvent, CUT_AUDIT_EVENTS, type CutAuditActor } from '../application/cut-audit';
 import {
@@ -26,6 +27,7 @@ import {
   backMapSolutions,
   buildOptimizeRequest,
   freecutItemId,
+  NATIVE_PORTRAIT_COORDINATE_CONTRACT,
   parseFreecutItemId,
   type FreecutItem,
   type FreecutParams,
@@ -351,13 +353,16 @@ export function resolveEffectiveVariant(
 
 export class PgCutRepository implements CutRepositoryPort {
   private readonly config: CutConfigPort;
+  private readonly nativePortraitWriter: boolean;
 
   constructor(
     private readonly database: DatabaseService,
     private readonly freecut: FreecutClientLike,
     config?: CutConfigPort,
+    options?: { nativePortraitWriter?: boolean },
   ) {
     this.config = config ?? new PgCutConfigRepository(database);
+    this.nativePortraitWriter = options?.nativePortraitWriter === true;
   }
 
   /** Audited RBAC denial (plan §11). Best-effort for generic denials (fire-and-
@@ -655,6 +660,7 @@ export class PgCutRepository implements CutRepositoryPort {
           items: freecutItems,
           params,
           includeSvg: false,
+          nativePortrait: this.nativePortraitWriter,
         });
         // Per-group pre-call guards (a fan-out group can independently exceed limits).
         assertWithinInstanceLimit(freecutItems);
@@ -730,7 +736,11 @@ export class PgCutRepository implements CutRepositoryPort {
     // + cut_job.calculate_failed). All-or-nothing — no group is persisted on a
     // partial failure, so the operator never sees a half-cut job. (Sequential so
     // a failure short-circuits the remaining optimize calls.)
-    const responses: Array<{ group: (typeof prep.groupPreps)[number]['group']; response: Awaited<ReturnType<FreecutClientLike['optimize']>> }> = [];
+    const responses: Array<{
+      group: (typeof prep.groupPreps)[number]['group'];
+      request: ReturnType<typeof buildOptimizeRequest>;
+      response: Awaited<ReturnType<FreecutClientLike['optimize']>>;
+    }> = [];
     try {
       for (const groupPrep of prep.groupPreps) {
         const response = await this.freecut.optimize(groupPrep.request);
@@ -738,10 +748,11 @@ export class PgCutRepository implements CutRepositoryPort {
         if (contractViolations.length > 0) {
           throw new CutOptimizerInvalidGeometryError(contractViolations.length, contractViolations.slice(0, 20));
         }
-        const filmTextureByItemId = new Map(
-          groupPrep.group.items.map((item) => [freecutItemId(item.orderDetailId), item.filmTexture === true]),
-        );
-        const violations = backMapSolutions(response).flatMap((sheet) =>
+        const filmTextureByItemId = new Map(groupPrep.request.items.map((item) => [item.id, item.rotation === 'forbid']));
+        const violations = backMapSolutions(response, {
+          requestItems: groupPrep.request.items,
+          ...(this.nativePortraitWriter ? { coordinateContract: NATIVE_PORTRAIT_COORDINATE_CONTRACT } : {}),
+        }).flatMap((sheet) =>
           validateSheetPlacements({
             sheetIndex: sheet.sheetIndex,
             placements: sheet.placements,
@@ -753,7 +764,7 @@ export class PgCutRepository implements CutRepositoryPort {
         if (violations.length > 0) {
           throw new CutOptimizerInvalidGeometryError(violations.length, violations.slice(0, 20));
         }
-        responses.push({ group: groupPrep.group, response });
+        responses.push({ group: groupPrep.group, request: groupPrep.request, response });
       }
     } catch (error) {
       // A freecut failure fails the WHOLE job. Guard the status write on THIS
@@ -776,7 +787,7 @@ export class PgCutRepository implements CutRepositoryPort {
       const cutGroupIds: number[] = [];
       let totalSheets = 0;
       let totalUnplaced = 0;
-      for (const { group, response } of responses) {
+      for (const { group, request, response } of responses) {
         // Compute the stable group key (written to cut_group.group_key so manual
         // layouts survive recalculations that keep the same logical grouping).
         const gKey = logicalGroupKey({
@@ -824,7 +835,10 @@ export class PgCutRepository implements CutRepositoryPort {
           ]),
         );
 
-        for (const sheet of backMapSolutions(response)) {
+        for (const sheet of backMapSolutions(response, {
+          requestItems: request.items,
+          ...(this.nativePortraitWriter ? { coordinateContract: NATIVE_PORTRAIT_COORDINATE_CONTRACT } : {}),
+        })) {
           const placementsWithLabels: SheetPlacementsJson = {
             ...sheet.placements,
             pieces: sheet.placements.pieces.map((piece) => ({
@@ -864,7 +878,12 @@ export class PgCutRepository implements CutRepositoryPort {
         // Fold the job-level combine-films flag into the hashed params so toggling
         // it re-cuts (emits a fresh outbox row) even when the resolved groups would
         // otherwise hash identically (e.g. one film per material).
-        params: { ...(prep.params as unknown as Record<string, unknown>), combineFilms: job.combineFilms, splitByMaterial: job.splitByMaterial },
+        params: {
+          ...(prep.params as unknown as Record<string, unknown>),
+          combineFilms: job.combineFilms,
+          splitByMaterial: job.splitByMaterial,
+          ...(this.nativePortraitWriter ? { coordinateContract: NATIVE_PORTRAIT_COORDINATE_CONTRACT } : {}),
+        },
       });
       await tx.query(
         `
@@ -1377,11 +1396,12 @@ export class PgCutRepository implements CutRepositoryPort {
 
     const result = await this.database.query<EligibleRow>(
       `
-      SELECT od.detail_id, od.order_id, od.quantity, od.material_id,
+      SELECT od.detail_id, od.order_id, ord.order_name, od.quantity, od.material_id,
              od.sheet_material_type_id,
              od.film_id, od.production_status_id, od.delete_flag,
              s.is_cuttable
       FROM order_details od
+      JOIN orders ord ON ord.order_id = od.order_id
       LEFT JOIN sheet_material_types s ON s.sheet_material_type_id = od.sheet_material_type_id
       WHERE ${conditions.join(' AND ')}
       ORDER BY od.detail_id
@@ -1419,6 +1439,7 @@ export class PgCutRepository implements CutRepositoryPort {
       return {
         orderDetailId: candidate.detailId,
         orderId: toNum(row.order_id),
+        orderName: row.order_name ?? null,
         quantity: toNum(row.quantity),
         materialId: row.material_id === null || row.material_id === undefined ? null : toNum(row.material_id),
         sheetMaterialTypeId: candidate.sheetMaterialTypeId,
@@ -1568,7 +1589,7 @@ export class PgCutRepository implements CutRepositoryPort {
     // PNG is NOT recalc-blocked (rule 5): only PDF endpoints enforce the print-block.
     const variant = query.variant ?? 'auto';
     const showLabels = query.showLabels ?? true;
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, variant, query.cutJobId, showLabels);
+    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, query.axisOrigin, variant, query.cutJobId, showLabels);
     // Rule 8: blank sheets are index-stable and never 404 for PNG/SVG.
     const sheet = sheets.find((s) => s.sheetIndex === query.sheetIndex);
     if (!sheet) {
@@ -1587,7 +1608,7 @@ export class PgCutRepository implements CutRepositoryPort {
   async renderSheetSvg(query: RenderSheetSvgQuery): Promise<string> {
     // SVG is NOT recalc-blocked (rule 5): only PDF endpoints enforce the print-block.
     const variant = query.variant ?? 'auto';
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, variant, query.cutJobId);
+    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, query.axisOrigin, variant, query.cutJobId);
     // Rule 8: blank sheets are index-stable and never 404 for SVG.
     const sheet = sheets.find((s) => s.sheetIndex === query.sheetIndex);
     if (!sheet) {
@@ -1604,7 +1625,9 @@ export class PgCutRepository implements CutRepositoryPort {
     // cutJobId yields 404 CUT_GROUP_NOT_FOUND, not a 409 recalc block (a missing
     // job makes checkRequiresRecalc conservatively true). This also resolves the
     // variant (manual-unavailable → 409) on the validated group.
-    const { sheets, rotate90 } = await this.loadGroupPdfLandscapeRenderContext(query.cutGroupId, variant, query.cutJobId);
+    const { sheets, rotate90 } = await this.loadGroupPdfLandscapeRenderContext(
+      query.cutGroupId, variant, query.cutJobId, query.originTopLeft, query.axisOrigin,
+    );
     // Rule 5: group PDF is blocked while the job requires recalculation.
     // PNG/SVG are NOT blocked; only PDF/print surfaces enforce this.
     if (query.cutJobId !== undefined) {
@@ -1657,7 +1680,9 @@ export class PgCutRepository implements CutRepositoryPort {
     const pdfSheets: PdfSheetInput[] = [];
     for (const groupRow of groups.rows) {
       const cutGroupId = toNum(groupRow.cut_group_id);
-      const { sheets, rotate90 } = await this.loadGroupPdfLandscapeRenderContext(cutGroupId, variant, query.cutJobId);
+      const { sheets, rotate90 } = await this.loadGroupPdfLandscapeRenderContext(
+        cutGroupId, variant, query.cutJobId, query.originTopLeft, query.axisOrigin,
+      );
       // Rule 8: skip blank sheets in PDF assembly.
       let sheetNumber = 1;
       for (const sheet of sheets) {
@@ -1685,12 +1710,14 @@ export class PgCutRepository implements CutRepositoryPort {
     cutGroupId: number,
     variant: 'auto' | 'manual' | 'active',
     cutJobId: number | undefined,
+    originTopLeft = true,
+    axisOrigin: 'top-left' | 'bottom-left' = 'top-left',
   ): Promise<{ sheets: RenderedSheetContext[]; rotate90: boolean }> {
-    const raw = await this.loadGroupRenderContext(cutGroupId, false, true, variant, cutJobId);
+    const raw = await this.loadGroupRenderContext(cutGroupId, false, originTopLeft, axisOrigin, variant, cutJobId);
     const firstSheet = raw.sheets[0]?.placements;
     const rotate90 = firstSheet !== undefined && firstSheet.sheet_height_mm > firstSheet.sheet_width_mm;
     if (!rotate90) return { sheets: raw.sheets, rotate90: false };
-    const rotated = await this.loadGroupRenderContext(cutGroupId, true, true, variant, cutJobId);
+    const rotated = await this.loadGroupRenderContext(cutGroupId, true, originTopLeft, axisOrigin, variant, cutJobId);
     return { sheets: rotated.sheets, rotate90: true };
   }
 
@@ -1763,6 +1790,7 @@ export class PgCutRepository implements CutRepositoryPort {
     cutGroupId: number,
     rotate90 = false,
     originTopLeft = false,
+    axisOrigin: 'top-left' | 'bottom-left' = 'top-left',
     variant: 'auto' | 'manual' | 'active' = 'auto',
     cutJobId?: number,
     showLabels = true,
@@ -1819,6 +1847,11 @@ export class PgCutRepository implements CutRepositoryPort {
         [cutGroupId],
       );
       rawSheets = autoSheets.rows.map((row) => ({ sheetIndex: toNum(row.sheet_index), placements: row.placements }));
+    }
+
+    const groupInvariantError = validateSheetGroupInvariant(rawSheets);
+    if (groupInvariantError) {
+      throw new ApiError(500, 'CUT_LAYOUT_INCONSISTENT', `Несовместимые листы в группе: ${groupInvariantError}`);
     }
 
     const quantities = computeGroupItemQuantities(
@@ -1987,8 +2020,8 @@ export class PgCutRepository implements CutRepositoryPort {
         return {
           sheetIndex: s.sheetIndex,
           placements: s.placements,
-          svg: buildSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90, originTopLeft, showLabels }),
-          bathSvg: buildBathProfileSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90, originTopLeft }),
+          svg: buildSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90, originTopLeft, axisOrigin, showLabels }),
+          bathSvg: buildBathProfileSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90, originTopLeft, axisOrigin }),
           pdfMeta: buildPdfSheetMeta(s.placements, detailById),
           pdfDetailRows: buildPdfDetailRows(s.placements, detailById),
         };
@@ -2566,10 +2599,22 @@ export class PgCutRepository implements CutRepositoryPort {
       let sharedTrim: GeomSheet['trim_mm'] | null = null;
       const autoSheets: AutoSheetSpec[] = [];
       const autoPieceMap = new Map<string, AutoPieceSpec>();
+      const filmTextureByItemId = new Map<string, boolean>();
+      let sharedContract: SheetPlacementsJson['coordinate_contract'] | undefined;
+      let sharedDimensions: string | undefined;
 
       for (const sheetRow of sheetsRes.rows) {
         const pl = sheetRow.placements;
         const sheetIndex = toNum(sheetRow.sheet_index);
+        const dimensions = `${pl.sheet_width_mm}x${pl.sheet_height_mm}`;
+        if (sharedDimensions === undefined) sharedDimensions = dimensions;
+        else if (sharedDimensions !== dimensions) {
+          throw new ApiError(500, 'CUT_LAYOUT_INCONSISTENT', 'Несовместимые размеры листов в группе');
+        }
+        if (autoSheets.length === 0) sharedContract = pl.coordinate_contract;
+        else if (sharedContract !== pl.coordinate_contract) {
+          throw new ApiError(500, 'CUT_LAYOUT_INCONSISTENT', 'Несовместимые системы координат листов в группе');
+        }
 
         if (sharedTrim === null) {
           sharedTrim = pl.trim_mm;
@@ -2587,9 +2632,13 @@ export class PgCutRepository implements CutRepositoryPort {
           sheet_width_mm: pl.sheet_width_mm,
           sheet_height_mm: pl.sheet_height_mm,
           trim_mm: pl.trim_mm,
+          ...(pl.coordinate_contract ? { coordinate_contract: pl.coordinate_contract } : {}),
         });
 
         for (const piece of pl.pieces) {
+          if (piece.rotation_forbidden !== undefined) {
+            filmTextureByItemId.set(piece.item_id, piece.rotation_forbidden);
+          }
           const key = `${piece.item_id}#${piece.instance}`;
           if (!autoPieceMap.has(key)) {
             // Base dims are the UNROTATED intrinsic size.
@@ -2606,6 +2655,7 @@ export class PgCutRepository implements CutRepositoryPort {
                 widthMm: piece.width_mm,
                 heightMm: piece.height_mm,
               },
+              rotationForbidden: piece.rotation_forbidden,
             });
           }
         }
@@ -2624,10 +2674,9 @@ export class PgCutRepository implements CutRepositoryPort {
         [command.cutGroupId],
       );
 
-      const filmTextureByItemId = new Map<string, boolean>();
       for (const r of itemsRes.rows) {
         const itemId = freecutItemId(toNum(r.order_detail_id));
-        if (r.film_texture !== null) {
+        if (!filmTextureByItemId.has(itemId) && r.film_texture !== null) {
           filmTextureByItemId.set(itemId, r.film_texture);
         }
       }
@@ -2790,6 +2839,7 @@ export class PgCutRepository implements CutRepositoryPort {
 interface EligibleRow extends QueryResultRow {
   detail_id: string | number;
   order_id: string | number;
+  order_name?: string | null;
   quantity: string | number;
   material_id: string | number | null;
   sheet_material_type_id: string | number | null;

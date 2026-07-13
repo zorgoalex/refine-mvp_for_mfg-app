@@ -1,4 +1,5 @@
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { CutAxisOrigin } from '../../../shared/cut-geometry';
 import type {
   AddCutItemsRequestDto,
   CreateCutJobRequestDto,
@@ -96,6 +97,7 @@ export interface RenderSheetPngQuery {
   /** when rotated, anchor the dense cluster at the view's top-left (transpose)
    *  instead of the legacy 90° CW top-right. Ignored when rotate90=false. */
   originTopLeft?: boolean;
+  axisOrigin?: CutAxisOrigin;
   variant?: 'auto' | 'manual' | 'active';
   /**
    * When false, baked piece-label `<text>` elements are omitted from the SVG
@@ -117,6 +119,7 @@ export interface RenderSheetSvgQuery {
   /** when rotated, anchor the dense cluster at the view's top-left (transpose)
    *  instead of the legacy 90° CW top-right. Ignored when rotate90=false. */
   originTopLeft?: boolean;
+  axisOrigin?: CutAxisOrigin;
   variant?: 'auto' | 'manual' | 'active';
   requestId?: string;
 }
@@ -130,6 +133,7 @@ export interface RenderGroupPdfQuery {
   /** when rotated, anchor the dense cluster at the view's top-left (transpose)
    *  instead of the legacy 90° CW top-right. Ignored when rotate90=false. */
   originTopLeft?: boolean;
+  axisOrigin?: CutAxisOrigin;
   variant?: 'auto' | 'manual' | 'active';
   pdfTemplate?: string;
   requestId?: string;
@@ -143,6 +147,7 @@ export interface RenderJobPdfQuery {
   /** when rotated, anchor the dense cluster at the view's top-left (transpose)
    *  instead of the legacy 90° CW top-right. Ignored when rotate90=false. */
   originTopLeft?: boolean;
+  axisOrigin?: CutAxisOrigin;
   variant?: 'auto' | 'manual' | 'active';
   pdfTemplate?: string;
   requestId?: string;

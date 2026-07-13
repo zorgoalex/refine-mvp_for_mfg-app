@@ -43,6 +43,7 @@ import {
   OrderDeleteIdempotencyFailedError,
   OrderDeleteIdempotencyInProgressError,
   OrderDeleteIdempotencyKeyReusedError,
+  OrderNameDuplicateError,
 } from '../errors/order.errors';
 import type { SaveOrderDto } from '../dto/save-order.dto';
 import {
@@ -229,15 +230,66 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     await completeOrderDeleteIdempotency(this.tx, idempotencyKey, response);
   }
 
+  async lockOrderName(orderName: string): Promise<void> {
+    const normalized = orderName.trim().toLowerCase();
+    // Advisory xact lock по нормализованному имени: два конкурентных сохранения
+    // одного номера сериализуются, второй видит первого после его коммита.
+    // Хэш-коллизия имён лишь добавляет ложную сериализацию — корректность цела.
+    await this.tx.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended('order_name:' || $1, 0))`,
+      [normalized],
+    );
+  }
+
+  async assertOrderNameAvailable(input: { orderName: string; excludeOrderId?: number }): Promise<void> {
+    const normalized = input.orderName.trim().toLowerCase();
+    const duplicate = await this.tx.query<{ order_id: string | number; order_name: string }>(
+      `
+      SELECT order_id, order_name
+      FROM orders
+      WHERE lower(trim(order_name)) = $1
+        AND delete_flag = false
+        AND ($2::bigint IS NULL OR order_id <> $2)
+      ORDER BY order_id
+      LIMIT 1
+      `,
+      [normalized, input.excludeOrderId ?? null],
+    );
+    const row = duplicate.rows[0];
+    if (!row) {
+      return;
+    }
+
+    // Подсказка следующего номера — только продакшн-эпоха нумерации
+    // (order_date >= 2025-12-01, решение пользователя 2026-07-13): легаси-имена
+    // вида 230725 (до go-live) не должны задирать серию. Сама проверка
+    // занятости выше НЕ фильтруется по дате — легаси-номер переиспользовать нельзя.
+    const suggestion = await this.tx.query<{ next: string | null }>(
+      `
+      SELECT (COALESCE(MAX(order_name::bigint), 0) + 1)::text AS next
+      FROM orders
+      WHERE order_name ~ '^\\d{1,15}$'
+        AND delete_flag = false
+        AND order_date >= DATE '2025-12-01'
+      `,
+    );
+    throw new OrderNameDuplicateError({
+      existingOrderId: Number(row.order_id),
+      orderName: input.orderName.trim(),
+      suggestedOrderName: suggestion.rows[0]?.next ?? null,
+    });
+  }
+
   async loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null> {
     const result = await this.tx.query<{
       order_id: string | number;
+      order_name: string;
       version: string | number;
       created_by: string | number | null;
       manager_id: string | number | null;
     }>(
       `
-      SELECT order_id, version, created_by, manager_id
+      SELECT order_id, order_name, version, created_by, manager_id
       FROM orders
       WHERE order_id = $1 AND delete_flag = false
       FOR UPDATE
@@ -249,6 +301,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     return row
       ? {
           orderId: Number(row.order_id),
+          orderName: row.order_name,
           version: Number(row.version),
           createdByUserId: toNullableString(row.created_by),
           managerUserId: toNullableString(row.manager_id),

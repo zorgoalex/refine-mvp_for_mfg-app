@@ -58,6 +58,49 @@ describe('auth refresh cutover behavior', () => {
     expect(authSession.getAccessToken()).toBe('backend-access-token');
     expect(localStorage.getItem('refresh_token')).toBeNull();
   });
+
+  it('keeps a newer login when proactive refresh of the older session fails', async () => {
+    vi.doMock('../config/featureFlags', () => ({
+      featureFlags: {
+        useBackendAuth: true,
+        useBackendPermissions: true,
+        useBackendOrdersRead: false,
+        useBackendOrdersWrite: false,
+        useBackendPayments: false,
+        useBackendClientPhones: false,
+        useBackendProductionActions: false,
+        useBackendOrderExport: false,
+        useBackendUsers: false,
+        useBackendVlm: false,
+        useBackendReferences: false,
+        enableLegacyHasura: true,
+      },
+    }));
+    let releaseRefresh!: () => void;
+    const refreshBlocked = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await refreshBlocked;
+      return new Response(
+        JSON.stringify({ error: { code: 'REFRESH_TOKEN_INVALID', message: 'Invalid refresh' } }),
+        { status: 401, statusText: 'Unauthorized', headers: { 'Content-Type': 'application/json' } },
+      );
+    }));
+    const { refreshAccessToken } = await import('./auth');
+    const { authSession } = await import('../api/authSession');
+    authSession.setAccessToken('old-token');
+    authSession.setUser({ id: '1', username: 'old-user', role: 'admin' });
+
+    const refresh = refreshAccessToken();
+    authSession.setAccessToken('new-login-token');
+    authSession.setUser({ id: '2', username: 'new-user', role: 'manager' });
+    releaseRefresh();
+
+    await expect(refresh).resolves.toBe('new-login-token');
+    expect(authSession.getAccessToken()).toBe('new-login-token');
+    expect(authSession.getUser()).toMatchObject({ id: '2', username: 'new-user' });
+  });
 });
 
 function mockFetch(body: unknown) {

@@ -27,4 +27,8 @@ export class CutRuntimeConfigService {
   getFreecutTimeoutMs(): number {
     return this.config.get('FREECUT_OPTIMIZE_TIMEOUT_MS', { infer: true });
   }
+
+  isNativePortraitWriterEnabled(): boolean {
+    return this.config.get('BACKEND_CUT_NATIVE_PORTRAIT', { infer: true });
+  }
 }

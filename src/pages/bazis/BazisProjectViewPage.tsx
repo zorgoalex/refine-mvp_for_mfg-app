@@ -38,6 +38,9 @@ export const BazisProjectViewPage: React.FC = () => {
   const viewerTreeRef = useRef<ViewerTreeHandle>(null);
   const [activeTab, setActiveTab] = useState('panels');
   const [selectedPanelId, setSelectedPanelId] = useState<number | null>(null);
+  // Счётчик внешних переходов «к панели»: PanelsTab по нему форсирует
+  // авто-раскрытие группы даже при повторном переходе на ту же панель
+  const [panelFocusToken, setPanelFocusToken] = useState(0);
   const [pendingTreeNodeId, setPendingTreeNodeId] = useState<number | null>(null);
 
   const bazisProjectId = Number(bazisProjectIdParam);
@@ -175,6 +178,7 @@ export const BazisProjectViewPage: React.FC = () => {
 
   const goToPanel = (panelNodeId: number) => {
     setSelectedPanelId(panelNodeId);
+    setPanelFocusToken((token) => token + 1);
     setActiveTab('panels');
   };
 
@@ -253,8 +257,12 @@ export const BazisProjectViewPage: React.FC = () => {
                 <Spin />
               ) : (
                 <PanelsTab
+                  // remount при смене ревизии: сбрасывает expandedRowKeys —
+                  // групповые ключи (материал+размеры) могут совпасть в другой ревизии
+                  key={selectedRevision.bazisRevisionId}
                   data={revisionData}
                   selectedId={selectedPanelId}
+                  focusToken={panelFocusToken}
                   onSelect={setSelectedPanelId}
                   onGoToTree={goToTree}
                 />

@@ -273,6 +273,13 @@ describe('buildSheetSvg rotate90 (landscape, upright labels)', () => {
 });
 
 describe('buildSheetSvg rotate90 + originTopLeft (transpose, dense cluster top-left)', () => {
+  it('ignores the legacy origin preference for explicitly native sheets', () => {
+    const native = { ...sheet, coordinate_contract: 'native_portrait_v1' as const };
+    expect(buildSheetSvg({ sheet: native, labelFor: () => 'X', rotate90: true, originTopLeft: true }))
+      .toBe(buildSheetSvg({ sheet: native, labelFor: () => 'X', rotate90: true, originTopLeft: false }));
+    expect(buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true, originTopLeft: true }))
+      .not.toBe(buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true, originTopLeft: false }));
+  });
   it('keeps the same h×w viewBox as the 90° CW path', () => {
     const svg = buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true, originTopLeft: true });
     expect(svg).toContain('viewBox="0 0 2070 2800"');
@@ -292,6 +299,34 @@ describe('buildSheetSvg rotate90 + originTopLeft (transpose, dense cluster top-l
     const svg = buildSheetSvg({ sheet, labelFor: () => 'X', rotate90: true, originTopLeft: true });
     expect(svg).toMatch(/<text x="215" y="310"[^>]*>/);
     expect(svg).not.toMatch(/rotate\(/);
+  });
+});
+
+describe('bottom-left display axis', () => {
+  it('keeps absent/top-left output byte-identical', () => {
+    expect(buildSheetSvg({ sheet, labelFor: () => 'X', axisOrigin: 'top-left' }))
+      .toBe(buildSheetSvg({ sheet, labelFor: () => 'X' }));
+  });
+
+  it('reflects Y after portrait orientation', () => {
+    const svg = buildSheetSvg({ sheet, labelFor: () => 'X', axisOrigin: 'bottom-left' });
+    expect(svg).toMatch(/<rect x="10" y="1655" width="600" height="400"/);
+    expect(svg).toMatch(/<text x="310" y="1855"/);
+  });
+
+  it('rotates right when switching a bottom-left sheet to landscape', () => {
+    const svg = buildSheetSvg({
+      sheet, labelFor: () => 'X', rotate90: true, originTopLeft: false, axisOrigin: 'bottom-left',
+    });
+    // Portrait bottom-left piece starts at the lower-left. Clockwise rotation
+    // places it at landscape upper-left: (x,y) = (15,10), not lower-right.
+    expect(svg).toMatch(/<rect x="15" y="10" width="400" height="600"/);
+  });
+
+  it('uses the same reflected geometry in the bath PDF SVG', () => {
+    const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['1', 'поз. 1', '600X400'], axisOrigin: 'bottom-left' });
+    expect(svg).toMatch(/<rect x="10" y="1655" width="600" height="400"/);
+    expect(svg).toContain('>600</text>');
   });
 });
 

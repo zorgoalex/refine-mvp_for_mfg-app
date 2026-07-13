@@ -186,6 +186,67 @@ html {
   flex-wrap: wrap;
 }
 
+.cut-sheet-view-controls {
+  align-items: center;
+}
+
+.cut-sheet-icon-radio .ant-radio-button-wrapper {
+  display: inline-flex;
+  width: 44px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 0;
+  transition-property: transform, color, background-color, border-color, box-shadow;
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.cut-sheet-icon-radio .ant-radio-button-wrapper:active {
+  transform: scale(0.96);
+}
+
+.cut-sheet-control-icon,
+.cut-sheet-origin-icon {
+  position: relative;
+  display: inline-block;
+  box-sizing: border-box;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.cut-sheet-control-icon--portrait {
+  width: 14px;
+  height: 22px;
+}
+
+.cut-sheet-control-icon--landscape {
+  width: 22px;
+  height: 14px;
+}
+
+.cut-sheet-origin-icon {
+  width: 22px;
+  height: 18px;
+}
+
+.cut-sheet-origin-dot {
+  position: absolute;
+  left: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.cut-sheet-origin-dot--bottom-left {
+  bottom: 2px;
+}
+
+.cut-sheet-origin-dot--top-left {
+  top: 2px;
+}
+
 /* Fixed sidebar with independent scrolling for content area */
 
 /* Keep large Ant Design notifications usable on small screens. Validation
@@ -514,6 +575,23 @@ html {
 /* Order details: selected row hover (teal, darker than default blue) */
 .order-details-table .ant-table-tbody > tr.ant-table-row-selected:hover > td {
   background: #5cdbd3 !important;
+}
+
+/* Wide lists keep their native bottom scrollbar and gain a synchronized one
+   above the table, so columns remain reachable from either end of the list. */
+.app-table-top-scrollbar {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-bottom: 4px;
+}
+
+.app-table-top-scrollbar[hidden] {
+  display: none;
+}
+
+.app-table-top-scrollbar__spacer {
+  height: 1px;
 }
 
 /* ============================================================

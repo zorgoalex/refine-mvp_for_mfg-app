@@ -1,5 +1,6 @@
 import type { CutGroupDto, CutJobItemDto, SheetPlacementPiece, SheetPlacements } from '../../api/types/cutApi.types';
 import { orientPieceRect } from './cutLayoutGeometry';
+import { applyAxisOrigin, type CutAxisOrigin } from './cutLayoutGeometry';
 import { buildPieceLabelLines } from './pieceLabel';
 
 /** Rounded mm side label, e.g. "2800 мм". */
@@ -76,6 +77,32 @@ export function saveSheetOriginTopLeft(userId: string, cutJobId: number, originT
   }
 }
 
+export function sheetAxisOriginKey(userId: string, cutJobId: number): string {
+  return `cut:sheet-axis-origin:${userId}:${cutJobId}`;
+}
+
+export function parseStoredAxisOrigin(raw: string | null): CutAxisOrigin {
+  return raw === 'top-left' || raw === 'tl' || raw === 'raw' ? 'top-left' : 'bottom-left';
+}
+
+export function loadSheetAxisOrigin(userId: string, cutJobId: number): CutAxisOrigin {
+  try {
+    const stored = localStorage.getItem(sheetAxisOriginKey(userId, cutJobId));
+    if (stored !== null) return parseStoredAxisOrigin(stored);
+    return parseStoredAxisOrigin(localStorage.getItem(sheetOriginKey(userId, cutJobId)));
+  } catch {
+    return 'bottom-left';
+  }
+}
+
+export function saveSheetAxisOrigin(userId: string, cutJobId: number, axisOrigin: CutAxisOrigin): void {
+  try {
+    localStorage.setItem(sheetAxisOriginKey(userId, cutJobId), axisOrigin);
+  } catch {
+    // ignore storage failures
+  }
+}
+
 export interface CutPieceTooltipRow {
   label: string;
   value: string;
@@ -132,6 +159,7 @@ export function buildSheetPieceOverlays(
   items: readonly CutJobItemDto[],
   landscape: boolean,
   originTopLeft = false,
+  axisOrigin: CutAxisOrigin = 'top-left',
 ): CutPieceOverlay[] {
   const itemByDetail = new Map(items.map((item) => [item.orderDetailId, item]));
   const sheetW = placements.sheet_width_mm;
@@ -171,13 +199,13 @@ export function buildSheetPieceOverlays(
       // Single canonical transform (Codex R4 MAJOR #4): shared orientPieceRect
       // ensures FE preview and BE render cannot drift.  Coords are in full-sheet
       // space (trim already added above) as the T1 coordinate-space contract requires.
-      const rect = orientPieceRect(
+      const rect = applyAxisOrigin(orientPieceRect(
         { x, y, w: piece.width_mm, h: piece.height_mm },
         sheetW,
         sheetH,
         landscape,
         originTopLeft,
-      );
+      ), axisOrigin, landscape);
 
       return {
         key: `${piece.item_id}:${piece.instance}`,
@@ -195,8 +223,8 @@ export function buildSheetPieceOverlays(
           detailNumber: item.detail?.detailNumber ?? null,
           instance: piece.instance,
           qty: item.qty ?? null,
-          widthMm: piece.width_mm,
-          heightMm: piece.height_mm,
+          widthMm: piece.label?.widthMm ?? piece.width_mm,
+          heightMm: piece.label?.heightMm ?? piece.height_mm,
           // 4th line only on mixed-material sheets.
           materialName: sheetMixesMaterials ? item.detail?.materialName ?? null : null,
         }),

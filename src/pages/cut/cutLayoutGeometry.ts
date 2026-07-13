@@ -18,9 +18,13 @@ export {
   pieceWithinUsable,
   validateSheetPlacements,
   orientPieceRect,
+  applyAxisOrigin,
+  undoAxisOriginX,
+  undoAxisOriginY,
   snapDraggedPiece,
   rotatePiece,
   moveAllowed,
+  validateSheetGroupInvariant,
 } from '@shared/cut-geometry';
 
 export type {
@@ -28,6 +32,7 @@ export type {
   GeomSheet,
   PieceRect,
   ManualViolation,
+  CutAxisOrigin,
   GapParams,
   PieceLabelSnapshot,
   SnapResult,

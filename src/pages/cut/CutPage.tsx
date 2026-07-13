@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   Modal,
+  Radio,
   Select,
   Space,
   Spin,
@@ -19,6 +20,7 @@ import {
   theme,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
@@ -26,7 +28,7 @@ import type { CutParamProfile, CutPdfTemplate, CutSettingRow } from '../../api/c
 import { ApiError } from '../../api/httpClient';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
-import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, saveSheetOriginTopLeft, selectVariantSheets } from './cutPreviewHelpers';
+import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, loadSheetAxisOrigin, saveSheetAxisOrigin, selectVariantSheets } from './cutPreviewHelpers';
 import { TableTopScroll } from '../../components/TableTopScroll';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
@@ -39,8 +41,8 @@ import type {
   EligibleDetailDto,
   SheetPlacements,
 } from '../../api/types/cutApi.types';
-import { validateSheetPlacements, movesFromSheets } from './cutLayoutGeometry';
-import type { ManualViolation } from './cutLayoutGeometry';
+import { validateSheetPlacements, validateSheetGroupInvariant, movesFromSheets } from './cutLayoutGeometry';
+import type { CutAxisOrigin, ManualViolation } from './cutLayoutGeometry';
 import {
   CUT_JOB_STATUS_FILTER_ALL,
   CUT_JOB_STATUS_FILTER_OPTIONS,
@@ -116,6 +118,9 @@ const STATUS_TAG_COLORS: Record<string, string> = {
 };
 
 const CUT_JOBS_TABLE_CONTAINER_HEIGHT = 317;
+const MIN_EDITOR_VIEW_ZOOM = 0.25;
+const MAX_EDITOR_VIEW_ZOOM = 1.5;
+const EDITOR_VIEW_ZOOM_STEP = 0.25;
 
 const sheetPreviewListStyle: React.CSSProperties = {
   display: 'flex',
@@ -150,6 +155,32 @@ function sheetPreviewRotate90(widthMm: number, heightMm: number, portrait: boole
   return portrait ? widthMm > heightMm : widthMm < heightMm;
 }
 
+function SheetOrientationIcon({ portrait }: { portrait: boolean }): React.ReactElement {
+  return (
+    <span
+      className={`cut-sheet-control-icon cut-sheet-control-icon--${portrait ? 'portrait' : 'landscape'}`}
+      aria-hidden="true"
+    />
+  );
+}
+
+function SheetOriginIcon({ axisOrigin }: { axisOrigin: CutAxisOrigin }): React.ReactElement {
+  return (
+    <span className="cut-sheet-origin-icon" aria-hidden="true">
+      <span className={`cut-sheet-origin-dot cut-sheet-origin-dot--${axisOrigin}`} />
+    </span>
+  );
+}
+
+function effectiveSheetOrigin(
+  placements: SheetPlacements | undefined,
+  legacyOriginTopLeft: boolean,
+  axisOrigin: CutAxisOrigin,
+): boolean {
+  if (axisOrigin === 'bottom-left') return false;
+  return placements?.coordinate_contract === 'native_portrait_v1' ? false : legacyOriginTopLeft;
+}
+
 function sheetPreviewItemStyle(widthMm: number, heightMm: number, rotate90: boolean): React.CSSProperties {
   const horizontalMm = rotate90 ? heightMm : widthMm;
   const verticalMm = rotate90 ? widthMm : heightMm;
@@ -182,6 +213,12 @@ function detailIdsForSheet(sheet: { placements: SheetPlacements }): number[] {
       return match ? Number(match[1]) : null;
     })
     .filter((value): value is number => Number.isInteger(value) && value > 0);
+}
+
+function editableSheetsForGroup(group: CutGroupDto): { sheetIndex: number; placements: SheetPlacements }[] {
+  return group.manualLayout && !group.manualLayout.isStale
+    ? group.manualLayout.sheets.map((sheet) => ({ sheetIndex: sheet.sheetIndex, placements: sheet.placements }))
+    : group.sheets.map((sheet) => ({ sheetIndex: sheet.sheetIndex, placements: sheet.placements }));
 }
 
 /** Revoke every blob object URL in a key->url map (leak guard on reset/unmount). */
@@ -256,6 +293,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // (default) the dense cluster sits at the view's top-left (transpose); when
   // false it keeps the legacy 90° CW top-right. Persisted in localStorage.
   const [sheetOriginTopLeft, setSheetOriginTopLeft] = useState(true);
+  const [sheetAxisOrigin, setSheetAxisOrigin] = useState<CutAxisOrigin>('bottom-left');
   const [eligible, setEligible] = useState<EligibleDetailDto[] | null>(null);
   const [noSheetSpecCount, setNoSheetSpecCount] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
@@ -311,6 +349,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     const uid = authSession.getUser()?.id ?? 'anon';
     setSheetPortrait(loadSheetOrientationPortrait(uid, job.cutJobId));
     setSheetOriginTopLeft(loadSheetOriginTopLeft(uid, job.cutJobId));
+    setSheetAxisOrigin(loadSheetAxisOrigin(uid, job.cutJobId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.cutJobId]);
 
@@ -331,12 +370,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // local blob-cache key dimension, so drop ALL cached previews (revoke blobs +
   // bump epoch + clear thumb dedup) so stale opposite-origin PNGs/thumbs cannot
   // linger on screen and every sheet re-fetches with the new `origin=` URL.
-  const toggleSheetOriginTopLeft = useCallback(
-    (originTopLeft: boolean) => {
-      setSheetOriginTopLeft(originTopLeft);
+  const changeSheetAxisOrigin = useCallback(
+    (axisOrigin: CutAxisOrigin) => {
+      setSheetAxisOrigin(axisOrigin);
       if (job) {
         const uid = authSession.getUser()?.id ?? 'anon';
-        saveSheetOriginTopLeft(uid, job.cutJobId, originTopLeft);
+        saveSheetAxisOrigin(uid, job.cutJobId, axisOrigin);
       }
       resetSheetViews();
     },
@@ -371,6 +410,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [workingSheets, setWorkingSheets] = useState<{ sheetIndex: number; placements: SheetPlacements }[]>([]);
   // Current geometry violations (empty = all clear, save enabled).
   const [violations, setViolations] = useState<ManualViolation[]>([]);
+  const [editorViewZoom, setEditorViewZoom] = useState(1);
   // Per-group alternative-view toggle: true = show manual variant, false = show auto.
   // Initialised from group.manualLayout.isActive on job open; only persisted on Save.
   const [showAlternativeByGroup, setShowAlternativeByGroup] = useState<Record<number, boolean>>({});
@@ -816,14 +856,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       // [REGRESSION-DEBT] for origin). Layout changes still bust via
       // resetSheetViews() (clears maps + thumbReqRef + epoch); renderVersion stays
       // in the FETCH to bust the SERVER render cache.
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}`;
       const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
         : sheetPortrait;
+      const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft, sheetAxisOrigin);
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, rotate90, variant, renderVersion, sheetOriginTopLeft);
+        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin);
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetImages((prev) => {
@@ -834,7 +875,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         handleError(error, 'Не удалось загрузить лист раскроя');
       }
     },
-    [job, preset, sheetPortrait, sheetOriginTopLeft, handleError],
+    [job, preset, sheetPortrait, sheetOriginTopLeft, sheetAxisOrigin, handleError],
   );
 
   // Small layout preview for a ready job's sheet, fetched once with the light
@@ -850,7 +891,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       // origin in the key too (same rehydration reason as orientation — a persisted
       // RAW-origin job opening with the stale default-TL state must re-fetch, not
       // dedupe to a TL thumb; Codex code-review R1 [REGRESSION-DEBT]).
-      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
+      const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}`;
       const reqKey = `${cutJobId}:${key}`;
       if (thumbReqRef.current.has(reqKey)) return;
       thumbReqRef.current.add(reqKey);
@@ -858,9 +899,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
         : sheetPortrait;
+      const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft, sheetAxisOrigin);
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', rotate90, variant, renderVersion, sheetOriginTopLeft);
+        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin);
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetThumbs((prev) => {
@@ -872,7 +914,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         thumbReqRef.current.delete(reqKey);
       }
     },
-    [sheetPortrait, sheetOriginTopLeft],
+    [sheetPortrait, sheetOriginTopLeft, sheetAxisOrigin],
   );
 
   // Auto-load per-sheet previews when a ready job's layout is present, so an
@@ -899,7 +941,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         const rotate90 = sheet
           ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
           : sheetPortrait;
-        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90, variant, renderVersion, sheetOriginTopLeft);
+        const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft, sheetAxisOrigin);
+        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin);
         // Filename uses the displayed sheet number (dense 1..N) so it matches the
         // "Лист N" the operator sees, not the possibly-sparse real sheetIndex.
         const fileNo = displayNo ?? sheetIndex + 1;
@@ -908,7 +951,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         handleError(error, 'Не удалось выгрузить SVG');
       }
     },
-    [job, sheetPortrait, sheetOriginTopLeft, handleError],
+    [job, sheetPortrait, sheetOriginTopLeft, sheetAxisOrigin, handleError],
   );
 
   const openGroupPdfPreview = useCallback(
@@ -922,7 +965,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       try {
         // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
         const pdfTemplate = pdfTemplateByGroup[group.cutGroupId] ?? 'standard';
-        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetOriginTopLeft, pdfTemplate));
+        const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetAxisOrigin === 'bottom-left' ? false : sheetOriginTopLeft, pdfTemplate, sheetAxisOrigin));
         if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
         const url = URL.createObjectURL(result.blob);
         pdfPreviewUrlRef.current = url;
@@ -944,7 +987,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setBusy(false);
       }
     },
-    [job, sheetPortrait, sheetOriginTopLeft, pdfTemplateByGroup, handleError, revokePdfPreviewUrl],
+    [job, sheetPortrait, sheetOriginTopLeft, sheetAxisOrigin, pdfTemplateByGroup, handleError, revokePdfPreviewUrl],
   );
 
   const closeGroupPdfPreview = useCallback(() => {
@@ -973,7 +1016,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     });
     try {
       // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
-      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetOriginTopLeft, pdfTemplateForJob));
+      const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetAxisOrigin === 'bottom-left' ? false : sheetOriginTopLeft, pdfTemplateForJob, sheetAxisOrigin));
       if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
       const url = URL.createObjectURL(result.blob);
       pdfPreviewUrlRef.current = url;
@@ -994,7 +1037,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     } finally {
       setBusy(false);
     }
-  }, [job, sheetPortrait, sheetOriginTopLeft, pdfTemplateForJob, handleError, revokePdfPreviewUrl]);
+  }, [job, sheetPortrait, sheetOriginTopLeft, sheetAxisOrigin, pdfTemplateForJob, handleError, revokePdfPreviewUrl]);
 
   // ── Manual layout editor callbacks ─────────────────────────────────────────
 
@@ -1007,12 +1050,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const enterEditMode = useCallback(
     (group: CutGroupDto) => {
       if (!job) return;
-      const seed =
-        group.manualLayout && !group.manualLayout.isStale
-          ? group.manualLayout.sheets.map((s) => ({ sheetIndex: s.sheetIndex, placements: s.placements }))
-          : group.sheets.map((s) => ({ sheetIndex: s.sheetIndex, placements: s.placements }));
+      const seed = editableSheetsForGroup(group);
+      if (validateSheetGroupInvariant(seed)) {
+        message.error('Повреждённая раскладка: несовместимые листы в группе');
+        return;
+      }
       setWorkingSheets(seed);
       setViolations([]);
+      setEditorViewZoom(1);
       setEditingGroupId(group.cutGroupId);
     },
     [job],
@@ -1260,7 +1305,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
     () => [
       { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detail' },
-      { title: 'Заказ', dataIndex: 'orderId', key: 'order' },
+      {
+        title: 'Заказ',
+        key: 'order',
+        render: (_: unknown, row: EligibleDetailDto) => row.orderName?.trim() || `#${row.orderId}`,
+      },
       { title: 'Кол-во', dataIndex: 'quantity', key: 'qty' },
       {
         title: 'Статус',
@@ -1294,12 +1343,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         title: 'Заказ',
         dataIndex: 'orderId',
         key: 'order',
-        width: 80,
-        // Click the order number to open its card as an in-app workspace tab
+        width: 140,
+        // Click the order name to open its card as an in-app workspace tab
         // (push = new keep-alive tab, same as the orders list double-click).
         render: (_: unknown, r: CutJobItemDto) => (
           <Button type="link" size="small" style={{ padding: 0 }} onClick={() => show('orders_view', r.orderId, 'push')}>
-            {r.orderId}
+            {r.orderName?.trim() || `#${r.orderId}`}
           </Button>
         ),
       },
@@ -1703,13 +1752,43 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       )}
 
       {job && job.groups.length > 0 && (
-        <Space size={16} wrap>
-          <Checkbox checked={sheetPortrait} onChange={(e) => toggleSheetPortrait(e.target.checked)}>
-            Книжная ориентация листа (вертикально) — снимите для альбомной
-          </Checkbox>
-          <Checkbox checked={sheetOriginTopLeft} onChange={(e) => toggleSheetOriginTopLeft(e.target.checked)}>
-            Точка отчета - верхний левый угол
-          </Checkbox>
+        <Space size={12} wrap className="cut-sheet-view-controls">
+          <Radio.Group
+            className="cut-sheet-icon-radio"
+            value={sheetPortrait}
+            onChange={(event) => toggleSheetPortrait(event.target.value as boolean)}
+            buttonStyle="solid"
+            aria-label="Ориентация листа"
+          >
+            <Tooltip title="Книжная ориентация">
+              <Radio.Button value={true} aria-label="Книжная ориентация">
+                <SheetOrientationIcon portrait />
+              </Radio.Button>
+            </Tooltip>
+            <Tooltip title="Альбомная ориентация">
+              <Radio.Button value={false} aria-label="Альбомная ориентация">
+                <SheetOrientationIcon portrait={false} />
+              </Radio.Button>
+            </Tooltip>
+          </Radio.Group>
+          <Radio.Group
+            className="cut-sheet-icon-radio"
+            value={sheetAxisOrigin}
+            onChange={(event) => changeSheetAxisOrigin(event.target.value as CutAxisOrigin)}
+            buttonStyle="solid"
+            aria-label="Точка отсчёта"
+          >
+            <Tooltip title="Точка отсчёта слева снизу">
+              <Radio.Button value="bottom-left" aria-label="Точка отсчёта слева снизу">
+                <SheetOriginIcon axisOrigin="bottom-left" />
+              </Radio.Button>
+            </Tooltip>
+            <Tooltip title="Точка отсчёта слева сверху">
+              <Radio.Button value="top-left" aria-label="Точка отсчёта слева сверху">
+                <SheetOriginIcon axisOrigin="top-left" />
+              </Radio.Button>
+            </Tooltip>
+          </Radio.Group>
         </Space>
       )}
 
@@ -1748,10 +1827,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           (group.manualLayout != null && showAlt !== persistedActive);
         // Edit is blocked when editorParams are absent or a recalc is required.
         const legacyAutoLayoutInvalid = job.autoLayoutValidation?.valid === false;
-        const editDisabled = !(job.editorParams) || (job.requiresRecalc ?? false) || legacyAutoLayoutInvalid;
         // Preview sheets: honour displayVariant so count/overlays follow the
         // manual layout when the operator has switched to the manual view.
         const previewSheets = selectVariantSheets(group, displayVariant);
+        const groupInvariantError = validateSheetGroupInvariant(previewSheets);
+        const editableInvariantError = validateSheetGroupInvariant(editableSheetsForGroup(group));
+        const editDisabled = !(job.editorParams) || (job.requiresRecalc ?? false) || legacyAutoLayoutInvalid || Boolean(editableInvariantError);
 
         return (
           <Card
@@ -1783,6 +1864,34 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             }
             extra={
               <div style={cutActionToolbarStyle}>
+                {isEditingGroup && (
+                  <Space size={4} data-testid="sticky-editor-zoom-controls">
+                    <Tooltip title="Уменьшить масштаб группы раскроя">
+                      <Button
+                        aria-label="Уменьшить масштаб группы раскроя"
+                        icon={<MinusOutlined />}
+                        style={{ width: 40, height: 40 }}
+                        disabled={editorViewZoom <= MIN_EDITOR_VIEW_ZOOM}
+                        onClick={() => setEditorViewZoom((value) => Math.max(MIN_EDITOR_VIEW_ZOOM, value - EDITOR_VIEW_ZOOM_STEP))}
+                      />
+                    </Tooltip>
+                    <span
+                      data-testid="sheet-editor-zoom-value"
+                      style={{ minWidth: 52, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}
+                    >
+                      {Math.round(editorViewZoom * 100)}%
+                    </span>
+                    <Tooltip title="Увеличить масштаб группы раскроя">
+                      <Button
+                        aria-label="Увеличить масштаб группы раскроя"
+                        icon={<PlusOutlined />}
+                        style={{ width: 40, height: 40 }}
+                        disabled={editorViewZoom >= MAX_EDITOR_VIEW_ZOOM}
+                        onClick={() => setEditorViewZoom((value) => Math.min(MAX_EDITOR_VIEW_ZOOM, value + EDITOR_VIEW_ZOOM_STEP))}
+                      />
+                    </Tooltip>
+                  </Space>
+                )}
                 {/* «Показать альтернативный раскрой» — only shown when a manual layout exists.
                     Disabled (with tooltip) when the layout is stale: variant=manual would 409. */}
                 {group.manualLayout && (
@@ -1863,6 +1972,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             }
           >
             <Text type="secondary">{formatGroupSummary(group.summary)}</Text>
+            {(groupInvariantError || editableInvariantError) && (
+              <Alert type="error" showIcon message="Повреждённая раскладка: несовместимые листы в группе" />
+            )}
             <div style={{ marginTop: 4, color: '#595959', fontSize: 13 }}>
               Материал раскроя: <b>{matName ?? 'не задан'}</b>
               {filmText && (
@@ -1873,7 +1985,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             </div>
 
             {/* ── Editor mode ────────────────────────────────────────────────── */}
-            {isEditingGroup && job.editorParams && (
+            {isEditingGroup && job.editorParams && !groupInvariantError && (
               <div style={{ marginTop: 12 }}>
                 <Space style={{ marginBottom: 8 }}>
                   <Tooltip title={violations.length > 0 ? `${violations.length} нарушений геометрии` : undefined}>
@@ -1906,6 +2018,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 </Space>
                 <SheetEditor
                   sheets={workingSheets}
+                  viewZoom={editorViewZoom}
                   gap={{ kerfMm: job.editorParams.kerfMm, spacingMm: job.editorParams.spacingMm }}
                   filmTextureByItemId={editorFilmTextureByItemId}
                   labelInfoByItemId={editorLabelInfoByItemId}
@@ -1921,7 +2034,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                       ? sheetPreviewRotate90(p.sheet_width_mm, p.sheet_height_mm, sheetPortrait)
                       : !sheetPortrait;
                   })()}
-                  originTopLeft={sheetOriginTopLeft}
+                  originTopLeft={effectiveSheetOrigin(workingSheets[0]?.placements, sheetOriginTopLeft, sheetAxisOrigin)}
+                  axisOrigin={sheetAxisOrigin}
                   onChange={handleEditorChange}
                   violations={violations}
                   splitByMaterial={job.splitByMaterial}
@@ -1950,7 +2064,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   // switch may rehydrate a different saved orientation/origin); renderVersion
                   // stays only in the fetch (server bust). Keeps the cached preview stable
                   // across no-recalc version bumps.
-                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}`;
+                  const key = `${group.cutGroupId}:${sheet.sheetIndex}:${displayVariant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}`;
                   // Stable React element identity per (group, sheet) — deliberately NOT
                   // the cache key. A renderVersion bump (e.g. changing profile/material,
                   // which only marks the job stale) then refreshes the image in place
@@ -1960,10 +2074,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   const widthMm = sheet.placements.sheet_width_mm;
                   const heightMm = sheet.placements.sheet_height_mm;
                   const rotate90 = sheetPreviewRotate90(widthMm, heightMm, sheetPortrait);
+                  const originTopLeft = effectiveSheetOrigin(sheet.placements, sheetOriginTopLeft, sheetAxisOrigin);
                   const displayWidthMm = rotate90 ? heightMm : widthMm;
                   const displayHeightMm = rotate90 ? widthMm : heightMm;
                   const isPortraitPreview = displayHeightMm > displayWidthMm;
-                  const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90, sheetOriginTopLeft);
+                  const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90, originTopLeft, sheetAxisOrigin);
                   const sheetDetailIds = detailIdsForSheet(sheet);
                   return (
                     <div

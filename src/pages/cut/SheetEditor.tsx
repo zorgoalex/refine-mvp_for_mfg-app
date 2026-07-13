@@ -15,17 +15,24 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Menu, message } from 'antd';
+import { Button, Menu, Space, Tooltip, message } from 'antd';
+import {
+  ColumnHeightOutlined,
+  RotateLeftOutlined,
+  RotateRightOutlined,
+  SwapOutlined,
+} from '@ant-design/icons';
 import type { SheetPlacements, SheetPlacementPiece } from '../../api/types/cutApi.types';
 import {
   snapDraggedPiece,
   rotatePiece,
   orientPieceRect,
+  applyAxisOrigin,
   usableExtent,
   moveAllowed,
 } from './cutLayoutGeometry';
-import type { ManualViolation } from './cutLayoutGeometry';
-import { orientedOrigin, svgToUsable } from './sheetEditorGeometry';
+import type { CutAxisOrigin, ManualViolation } from './cutLayoutGeometry';
+import { counterViewMatrix, orientedOrigin, svgToUsable } from './sheetEditorGeometry';
 import { buildPieceLabelLines, fitLabelScale, splitDimsLine, LINE1_SCALE } from './pieceLabel';
 import { sheetMaterialFilmNames } from './cutPageHelpers';
 
@@ -40,6 +47,7 @@ export interface SheetEditorProps {
    *  instead of the legacy 90° CW top-right. Must match the preview/render so the
    *  editor and the sheet cards show the same orientation. Default false. */
   originTopLeft?: boolean;
+  axisOrigin?: CutAxisOrigin;
   onChange: (sheets: SheetEditorProps['sheets']) => void;
   violations: ManualViolation[];
   /**
@@ -62,6 +70,8 @@ export interface SheetEditorProps {
   pieceSheetInfoByItemId: Map<string, { materialName: string | null; filmName: string | null }>;
   /** Show per-sheet film name(s) — true when the job splits by film (combineFilms off). */
   showFilm: boolean;
+  /** Group view scale controlled by the sticky group toolbar. */
+  viewZoom?: number;
 }
 
 // ── Internal types ─────────────────────────────────────────────────────────
@@ -140,6 +150,16 @@ function clientToSVG(
     x: ((clientX - rect.left) / rect.width) * vb.width,
     y: ((clientY - rect.top) / rect.height) * vb.height,
   };
+}
+
+/** Current uniform SVG scale in viewBox millimetres per screen pixel. */
+function svgMmPerScreenPx(svgEl: SVGSVGElement, fallbackViewBoxWidth: number): number {
+  const ctm = svgEl.getScreenCTM();
+  if (ctm) {
+    const screenPxPerMm = Math.hypot(ctm.a, ctm.b);
+    if (screenPxPerMm > 0) return 1 / screenPxPerMm;
+  }
+  return fallbackViewBoxWidth / Math.max(1, svgEl.getBoundingClientRect().width);
 }
 
 function clipIdForPiece(sheetIndex: number, itemId: string, instance: number): string {
@@ -273,6 +293,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     filmTextureByItemId,
     landscape,
     originTopLeft = false,
+    axisOrigin = 'top-left',
     onChange,
     violations,
     labelInfoByItemId,
@@ -283,10 +304,13 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     pieceMetaByItemId,
     pieceSheetInfoByItemId,
     showFilm,
+    viewZoom = 1,
   } = props;
 
   const [selected, setSelected] = useState<SelectedPiece | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [sheetRotations, setSheetRotations] = useState<Record<number, number>>({});
+  const [sheetMirrors, setSheetMirrors] = useState<Record<number, { horizontal: boolean; vertical: boolean }>>({});
   const [menu, setMenu] = useState<{
     clientX: number;
     clientY: number;
@@ -297,6 +321,25 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   const closeMenu = useCallback(() => setMenu(null), []);
   const editorRootRef = useRef<HTMLDivElement | null>(null);
 
+  const rotateSheetView = useCallback((sheetIndex: number, direction: -1 | 1) => {
+    setSheetRotations((current) => ({
+      ...current,
+      [sheetIndex]: (((current[sheetIndex] ?? 0) + direction * 90) % 360 + 360) % 360,
+    }));
+  }, []);
+
+  const toggleSheetMirror = useCallback((sheetIndex: number, axis: 'horizontal' | 'vertical') => {
+    const previous = sheetMirrors[sheetIndex] ?? { horizontal: false, vertical: false };
+    const enabled = !previous[axis];
+    if (enabled) {
+      void message.warning('Зеркальное отражение может исказить рисунок фрезеровки. Проверьте результат перед сохранением.');
+    }
+    setSheetMirrors({
+      ...sheetMirrors,
+      [sheetIndex]: { ...previous, [axis]: enabled },
+    });
+  }, [sheetMirrors]);
+
   // ── Stable refs for window-level event handlers (avoid re-subscription on every state change) ──
   const dragRef = useRef<DragState | null>(null);
   dragRef.current = drag;
@@ -306,6 +349,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   landscapeRef.current = landscape;
   const originTopLeftRef = useRef(originTopLeft);
   originTopLeftRef.current = originTopLeft;
+  const axisOriginRef = useRef(axisOrigin);
+  axisOriginRef.current = axisOrigin;
   const gapRef = useRef(gap);
   gapRef.current = gap;
   const filmTextureRef = useRef(filmTextureByItemId);
@@ -341,6 +386,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
       const ls = landscapeRef.current;
       const otl = originTopLeftRef.current;
+      const axis = axisOriginRef.current;
       const currentSheets = sheetsRef.current;
       const currentGap = gapRef.current;
       const gapMm = currentGap.kerfMm + currentGap.spacingMm;
@@ -397,6 +443,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         targetSheet.placements,
         ls,
         otl,
+        axis,
+        piece.width_mm,
       );
 
       // Other pieces on target (excluding the dragged piece)
@@ -414,8 +462,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         ls,
         otl,
       );
-      const targetSvgDisplayW = Math.min(MAX_SVG_WIDTH_PX, targetOriented.vw);
-      const targetMmPerPx = targetOriented.vw / targetSvgDisplayW;
+      const targetMmPerPx = svgMmPerScreenPx(targetSvgEl, targetOriented.vw);
 
       // Apply snap (shared geometry — no inline math)
       const snapped = snapDraggedPiece({
@@ -692,7 +739,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         const vw = sheetOriented.vw;
         const vh = sheetOriented.vh;
 
-        const svgDisplayW = Math.min(MAX_SVG_WIDTH_PX, vw);
+        const svgDisplayW = Math.min(MAX_SVG_WIDTH_PX, vw) * viewZoom;
         const svgDisplayH = (svgDisplayW / vw) * vh;
         // Conversion factor: how many mm per display pixel at this sheet's scale.
         // Used to keep UI controls (rotate handle, selected stroke) at a fixed
@@ -700,6 +747,11 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         const mmPerPx = vw / svgDisplayW;
 
         const isDropTarget = drag !== null && drag.targetSheetIndex === sheetIndex;
+        const viewRotation = sheetRotations[sheetIndex] ?? 0;
+        const viewMirror = sheetMirrors[sheetIndex] ?? { horizontal: false, vertical: false };
+        const swapsViewAxes = viewRotation % 180 !== 0;
+        const rotatedViewportW = swapsViewAxes ? svgDisplayH : svgDisplayW;
+        const rotatedViewportH = swapsViewAxes ? svgDisplayW : svgDisplayH;
 
         return (
           <div key={sheetIndex} data-testid={`sheet-editor-sheet-${sheetIndex}`} style={{ display: 'inline-block', verticalAlign: 'top' }}>
@@ -719,25 +771,78 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                     fontSize: 12,
                     color: '#595959',
                     fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
                   }}
                 >
-                  Лист {sheetPos + 1} · дет. {placements.pieces.length}
-                  {materials.length > 0 && (
-                    <>
-                      {' · '}
-                      {materials.length > 1 ? 'Материалы' : 'Материал'}: <b>{materials.join(', ')}</b>
-                    </>
-                  )}
-                  {films.length > 0 && (
-                    <>
-                      {' · '}
-                      {films.length > 1 ? 'Плёнки' : 'Плёнка'}: <b>{films.join(', ')}</b>
-                    </>
-                  )}
+                  <span>
+                    Лист {sheetPos + 1} · дет. {placements.pieces.length}
+                    {materials.length > 0 && (
+                      <>
+                        {' · '}
+                        {materials.length > 1 ? 'Материалы' : 'Материал'}: <b>{materials.join(', ')}</b>
+                      </>
+                    )}
+                    {films.length > 0 && (
+                      <>
+                        {' · '}
+                        {films.length > 1 ? 'Плёнки' : 'Плёнка'}: <b>{films.join(', ')}</b>
+                      </>
+                    )}
+                  </span>
+                  <Space size={2}>
+                    <Tooltip title="Повернуть лист против часовой стрелки">
+                      <Button
+                        aria-label={`Повернуть лист ${sheetPos + 1} против часовой стрелки`}
+                        icon={<RotateLeftOutlined />}
+                        style={{ width: 40, height: 40 }}
+                        onClick={() => rotateSheetView(sheetIndex, -1)}
+                      />
+                    </Tooltip>
+                    <Tooltip title="Повернуть лист по часовой стрелке">
+                      <Button
+                        aria-label={`Повернуть лист ${sheetPos + 1} по часовой стрелке`}
+                        icon={<RotateRightOutlined />}
+                        style={{ width: 40, height: 40 }}
+                        onClick={() => rotateSheetView(sheetIndex, 1)}
+                      />
+                    </Tooltip>
+                    <Tooltip title="Отразить лист по горизонтали">
+                      <Button
+                        type={viewMirror.horizontal ? 'primary' : 'default'}
+                        aria-label={`Отразить лист ${sheetPos + 1} по горизонтали`}
+                        aria-pressed={viewMirror.horizontal}
+                        icon={<SwapOutlined />}
+                        style={{ width: 40, height: 40 }}
+                        onClick={() => toggleSheetMirror(sheetIndex, 'horizontal')}
+                      />
+                    </Tooltip>
+                    <Tooltip title="Отразить лист по вертикали">
+                      <Button
+                        type={viewMirror.vertical ? 'primary' : 'default'}
+                        aria-label={`Отразить лист ${sheetPos + 1} по вертикали`}
+                        aria-pressed={viewMirror.vertical}
+                        icon={<ColumnHeightOutlined />}
+                        style={{ width: 40, height: 40 }}
+                        onClick={() => toggleSheetMirror(sheetIndex, 'vertical')}
+                      />
+                    </Tooltip>
+                  </Space>
                 </div>
               );
             })()}
 
+            <div
+              style={{
+                width: rotatedViewportW,
+                height: rotatedViewportH,
+                position: 'relative',
+                transitionProperty: 'width, height',
+                transitionDuration: '160ms',
+              }}
+            >
             <svg
               ref={(el) => {
                 if (el) svgRefsMap.current.set(sheetIndex, el);
@@ -751,6 +856,12 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 background: isDropTarget ? '#f0f5ff' : '#fff',
                 cursor: drag ? 'grabbing' : 'default',
                 display: 'block',
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                transform: `translate(-50%, -50%) rotate(${viewRotation}deg) scaleX(${viewMirror.horizontal ? -1 : 1}) scaleY(${viewMirror.vertical ? -1 : 1})`,
+                transitionProperty: 'transform, width, height',
+                transitionDuration: drag ? '0ms' : '160ms',
               }}
               onPointerDown={(e) => {
                 // Click on the bare svg (no overlapping element) deselects.
@@ -770,13 +881,13 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
               {/* Usable-area boundary (dashed rectangle inside trim margins) */}
               {(() => {
-                const usableRect = orientPieceRect(
+                const usableRect = applyAxisOrigin(orientPieceRect(
                   { x: trim.left, y: trim.top, w: usableW, h: usableH },
                   W,
                   H,
                   landscape,
                   originTopLeft,
-                );
+                ), axisOrigin, landscape);
                 return (
                   <rect
                     x={usableRect.x}
@@ -798,18 +909,18 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 const guides: JSX.Element[] = [];
                 if (drag.guideXmm !== null) {
                   const gx = Math.max(0, Math.min(usableW, drag.guideXmm));
-                  const g = orientPieceRect(
+                  const g = applyAxisOrigin(orientPieceRect(
                     { x: trim.left + gx - strokeMm / 2, y: trim.top, w: strokeMm, h: usableH },
                     W, H, landscape, originTopLeft,
-                  );
+                  ), axisOrigin, landscape);
                   guides.push(<rect key="gx" x={g.x} y={g.y} width={g.w} height={g.h} fill="#1677ff" opacity={0.7} pointerEvents="none" />);
                 }
                 if (drag.guideYmm !== null) {
                   const gy = Math.max(0, Math.min(usableH, drag.guideYmm));
-                  const g = orientPieceRect(
+                  const g = applyAxisOrigin(orientPieceRect(
                     { x: trim.left, y: trim.top + gy - strokeMm / 2, w: usableW, h: strokeMm },
                     W, H, landscape, originTopLeft,
-                  );
+                  ), axisOrigin, landscape);
                   guides.push(<rect key="gy" x={g.x} y={g.y} width={g.w} height={g.h} fill="#1677ff" opacity={0.7} pointerEvents="none" />);
                 }
                 return <>{guides}</>;
@@ -818,7 +929,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
               {/* Pieces */}
               {placements.pieces.map((piece) => {
                 // Apply canonical orientation transform (shared, matches preview renderer)
-                const r = orientPieceRect(
+                const r = applyAxisOrigin(orientPieceRect(
                   {
                     x: trim.left + piece.x_mm,
                     y: trim.top + piece.y_mm,
@@ -829,7 +940,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                   H,
                   landscape,
                   originTopLeft,
-                );
+                ), axisOrigin, landscape);
 
                 const isSelected =
                   selected?.sheetIndex === sheetIndex &&
@@ -862,15 +973,17 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                   detailNumber: labelInfo?.detailNumber ?? piece.label?.detailNumber ?? null,
                   instance: piece.instance,
                   qty: labelInfo?.qty ?? null,
-                  widthMm: piece.width_mm,
-                  heightMm: piece.height_mm,
+                  widthMm: piece.label?.widthMm ?? piece.width_mm,
+                  heightMm: piece.label?.heightMm ?? piece.height_mm,
                 });
                 // Base font capped to fit the piece; auto-shrink further if needed.
                 // line1Scale accounts for the order-name line being LINE1_SCALE× larger.
                 const baseFont = Math.max(4, Math.min(r.w, r.h) * 0.25);
                 const labelPad = Math.max(mmPerPx * 2, Math.min(r.w, r.h) * 0.03);
-                const labelBoxW = Math.max(1, r.w - labelPad * 2);
-                const labelBoxH = Math.max(1, r.h - labelPad * 2);
+                // The outer sheet view may swap screen axes. Fit the label against
+                // the final on-screen detail bounds, then counter-transform it below.
+                const labelBoxW = Math.max(1, (swapsViewAxes ? r.h : r.w) - labelPad * 2);
+                const labelBoxH = Math.max(1, (swapsViewAxes ? r.w : r.h) - labelPad * 2);
                 const labelScale = fitLabelScale({
                   lines: labelLines,
                   boxW: labelBoxW,
@@ -907,7 +1020,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       const svgEl = svgRefsMap.current.get(sheetIndex);
                       if (!svgEl) return;
                       const pt = clientToSVG(svgEl, e.clientX, e.clientY);
-                      const origin = orientedOrigin(piece, placements, landscape, originTopLeft);
+                      const origin = orientedOrigin(piece, placements, landscape, originTopLeft, axisOrigin);
                       const sel: SelectedPiece = {
                         sheetIndex,
                         item_id: piece.item_id,
@@ -948,6 +1061,13 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       const cx = r.x + r.w / 2;
                       const cy = r.y + r.h / 2;
                       const labelClipId = clipIdForPiece(sheetIndex, piece.item_id, piece.instance);
+                      const labelMatrix = counterViewMatrix(
+                        viewRotation,
+                        viewMirror.horizontal,
+                        viewMirror.vertical,
+                        cx,
+                        cy,
+                      );
                       const textFill = isViolating ? '#cf1322' : '#1d3557';
                       // Block height = (LINE1_SCALE + 1 + 1) * lineH.
                       // Vertical centers derived from block being centered at cy:
@@ -968,10 +1088,13 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       return (
                         <>
                           <clipPath id={labelClipId} clipPathUnits="userSpaceOnUse">
-                            <rect x={r.x + labelPad} y={r.y + labelPad} width={labelBoxW} height={labelBoxH} />
+                            <rect x={cx - labelBoxW / 2} y={cy - labelBoxH / 2} width={labelBoxW} height={labelBoxH} />
                           </clipPath>
                           {/* L0: order name — large + bold */}
-                          <g clipPath={`url(#${labelClipId})`}>
+                          <g
+                            clipPath={`url(#${labelClipId})`}
+                            transform={`matrix(${labelMatrix.join(' ')})`}
+                          >
                             <text {...sharedProps} x={cx} y={y0} fontSize={font0} fontWeight={600}>
                               {labelLines[0]}
                             </text>
@@ -1029,6 +1152,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 );
               })}
             </svg>
+            </div>
           </div>
         );
       })}

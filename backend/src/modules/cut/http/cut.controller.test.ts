@@ -17,6 +17,8 @@ import {
   parseSaveManualLayoutBody,
   parseVariant,
   parseOriginTopLeft,
+  parseAxisOrigin,
+  canonicalOriginTopLeft,
 } from './cut.controller';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import type { CutRuntimeConfigService } from './cut-runtime-config.service';
@@ -316,7 +318,7 @@ describe('CutController', () => {
     // The REAL FE export passes job.renderToken → variant=active. It must be served WARM
     // from the prewarmed slot (identical id + variant + token + orientation).
     const warm = fakeResponse();
-    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active' }, warm.res as never);
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active', axisOrigin: 'bottom-left' }, warm.res as never);
     expect(warm.headers['Content-Type']).toBe('application/pdf');
     expect(warm.state.sent).toBe(pdf);
     expect(renderJobPdf).toHaveBeenCalledTimes(1); // prewarm rendered once; export reused it
@@ -352,9 +354,25 @@ describe('CutController', () => {
     expect(parseOriginTopLeft('RAW')).toBe(false);
   });
 
+  it('parseAxisOrigin preserves old clients as top-left and accepts only explicit bottom-left', () => {
+    expect(parseAxisOrigin(undefined)).toBe('top-left');
+    expect(parseAxisOrigin('')).toBe('top-left');
+    expect(parseAxisOrigin('top-left')).toBe('top-left');
+    expect(parseAxisOrigin('anything')).toBe('top-left');
+    expect(parseAxisOrigin('bottom-left')).toBe('bottom-left');
+    expect(parseAxisOrigin('BOTTOM-LEFT')).toBe('bottom-left');
+  });
+
+  it('canonicalizes bottom-left to the RAW/CW orientation path', () => {
+    expect(canonicalOriginTopLeft(true, 'bottom-left')).toBe(false);
+    expect(canonicalOriginTopLeft(false, 'bottom-left')).toBe(false);
+    expect(canonicalOriginTopLeft(true, 'top-left')).toBe(true);
+    expect(canonicalOriginTopLeft(false, 'top-left')).toBe(false);
+  });
+
   // R2-round2 finding #2: the RAW half must not be silently dead — the render
   // endpoints forward the parsed origin into the service render call.
-  it('PNG/SVG endpoints forward originTopLeft (default true; origin=raw → false)', async () => {
+  it('PNG/SVG canonicalize bottom-left to RAW while preserving top-left clients', async () => {
     const pngCalls: Array<boolean | undefined> = [];
     const svgCalls: Array<boolean | undefined> = [];
     const renderSheetPng = vi.fn(async (q: { originTopLeft?: boolean }) => { pngCalls.push(q.originTopLeft); return Buffer.from('P'); });
@@ -366,9 +384,11 @@ describe('CutController', () => {
     await controller.renderPng({ user: currentUser() } as never, '42', '100', '0', { preset: 'screen', origin: 'raw' }, noop as never);
     await controller.renderSvg({ user: currentUser() } as never, '42', '100', '0', {}, noop as never);
     await controller.renderSvg({ user: currentUser() } as never, '42', '100', '0', { origin: 'raw' }, noop as never);
+    await controller.renderPng({ user: currentUser() } as never, '42', '100', '0', { preset: 'screen', origin: 'tl', axisOrigin: 'bottom-left' }, noop as never);
+    await controller.renderSvg({ user: currentUser() } as never, '42', '100', '0', { origin: 'tl', axisOrigin: 'bottom-left' }, noop as never);
 
-    expect(pngCalls).toEqual([true, false]);
-    expect(svgCalls).toEqual([true, false]);
+    expect(pngCalls).toEqual([true, false, false]);
+    expect(svgCalls).toEqual([true, false, false]);
   });
 
   // R1: origin (TL/RAW) is a PDF cache-key dimension — a top-left and a raw render
@@ -394,9 +414,8 @@ describe('CutController', () => {
     expect(renderGroupPdf).toHaveBeenCalledTimes(2);
   });
 
-  // R1: the post-calculate prewarm must warm the SURFACED origin (default top-left),
-  // so the FE export (origin=tl) is served warm.
-  it('prewarm warms originTopLeft=true and the default-origin export is served warm', async () => {
+  // The current FE surfaces RAW/CW layout transform plus bottom-left display axis.
+  it('prewarm warms the surfaced bottom-left axis and that export is served warm', async () => {
     const pdf = Buffer.from('%PDF-job-tl');
     const renderJobPdf = vi.fn(async () => pdf);
     const calculate = vi.fn(async () => ({ ...jobDto(), status: 'ready' as const, version: 7 }));
@@ -413,11 +432,14 @@ describe('CutController', () => {
     for (let i = 0; i < 50 && renderJobPdf.mock.calls.length === 0; i++) await Promise.resolve();
     await pdfCache.whenIdle();
 
-    expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({ originTopLeft: true }));
+    expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({
+      originTopLeft: false,
+      axisOrigin: 'bottom-left',
+    }));
 
-    // FE export with default origin (tl) reuses the prewarmed slot (no second render).
+    // FE explicitly sends bottom-left; absent axisOrigin remains top-left for old clients.
     const warm = fakeResponse();
-    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active' }, warm.res as never);
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active', axisOrigin: 'bottom-left' }, warm.res as never);
     expect(warm.state.sent).toBe(pdf);
     expect(renderJobPdf).toHaveBeenCalledTimes(1);
   });

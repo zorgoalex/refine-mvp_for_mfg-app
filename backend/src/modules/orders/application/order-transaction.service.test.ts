@@ -14,7 +14,7 @@ import type {
   OrderTotalsDto,
   SaveOrderDto,
 } from '../dto/save-order.dto';
-import {
+import { OrderNameDuplicateError,
   ChildEntityNotFoundError,
   ChildEntityNotOwnedError,
   OrderVersionConflictError,
@@ -244,11 +244,38 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     return order
       ? {
           orderId,
+          orderName: order.header.orderName,
           version: order.version,
           createdByUserId: order.createdByUserId,
           managerUserId: order.managerUserId,
         }
       : null;
+  }
+
+  async lockOrderName(_orderName: string): Promise<void> {
+    this.call('lockOrderName');
+  }
+
+  async assertOrderNameAvailable(input: { orderName: string; excludeOrderId?: number }): Promise<void> {
+    this.call('assertOrderNameAvailable');
+    const normalized = input.orderName.trim().toLowerCase();
+    const duplicate = [...this.state.orders.values()].find(
+      (order) =>
+        order.header.orderName.trim().toLowerCase() === normalized &&
+        order.orderId !== input.excludeOrderId,
+    );
+    if (!duplicate) {
+      return;
+    }
+    const numbers = [...this.state.orders.values()]
+      .map((order) => order.header.orderName.trim())
+      .filter((name) => /^\d+$/.test(name))
+      .map(Number);
+    throw new OrderNameDuplicateError({
+      existingOrderId: duplicate.orderId,
+      orderName: input.orderName.trim(),
+      suggestedOrderName: numbers.length > 0 ? String(Math.max(...numbers) + 1) : null,
+    });
   }
 
   async loadOrderForDelete(orderId: number): Promise<LockedOrderDeleteRow | null> {
@@ -583,6 +610,116 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
   }
 }
 
+function dtoWithOrderName(orderName: string, version?: number): SaveOrderDto {
+  const dto = createSaveDto(version === undefined ? {} : { version });
+  return { ...dto, header: { ...dto.header, orderName } };
+}
+
+describe('OrderTransactionService order-name uniqueness', () => {
+  it('rejects creating an order whose name is already taken by a live order (hard block, no override)', async () => {
+    const transactions = new FakeOrderTransactions();
+    const service = new OrderTransactionService({ transactions });
+    await service.create({
+      currentUser: currentUser('manager'),
+      dto: dtoWithOrderName('2558'),
+    });
+
+    await expect(
+      service.create({
+        currentUser: currentUser('manager'),
+        dto: dtoWithOrderName('2558'),
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'ORDER_NAME_DUPLICATE',
+      details: expect.objectContaining({ suggestedOrderName: '2559' }),
+    });
+  });
+
+  it('treats the duplicate check as whitespace/case-insensitive', async () => {
+    const transactions = new FakeOrderTransactions();
+    const service = new OrderTransactionService({ transactions });
+    await service.create({
+      currentUser: currentUser('manager'),
+      dto: dtoWithOrderName('Кухня Ивановых'),
+    });
+
+    await expect(
+      service.create({
+        currentUser: currentUser('manager'),
+        dto: dtoWithOrderName('  кухня ивановых '),
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'ORDER_NAME_DUPLICATE' });
+  });
+
+  it('rejects renaming an order to a name taken by another live order', async () => {
+    const transactions = new FakeOrderTransactions();
+    const service = new OrderTransactionService({ transactions });
+    const first = await service.create({
+      currentUser: currentUser('manager'),
+      dto: dtoWithOrderName('2558'),
+    });
+    const second = await service.create({
+      currentUser: currentUser('manager'),
+      dto: dtoWithOrderName('2559'),
+    });
+
+    await expect(
+      service.update({
+        currentUser: currentUser('manager'),
+        orderId: second.header.orderId,
+        dto: dtoWithOrderName('2558', second.version),
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'ORDER_NAME_DUPLICATE' });
+    expect(first.header.orderId).not.toBe(second.header.orderId);
+  });
+
+  it('does not crash on a non-string orderName in the raw body (coerced before the lock)', async () => {
+    const transactions = new FakeOrderTransactions();
+    const service = new OrderTransactionService({ transactions });
+    const created = await service.create({
+      currentUser: currentUser('manager'),
+      dto: dtoWithOrderName('2558'),
+    });
+
+    const dto = createSaveDto({ version: created.version });
+    (dto.header as Record<string, unknown>).orderName = 2558;
+
+    // Не TypeError/500 до нормализации: лок получает коэрснутую строку, дальше
+    // обычный normalizer-путь коэрсит 2558 → '2558' (имя не меняется) и
+    // сохранение проходит.
+    await expect(
+      service.update({ currentUser: currentUser('manager'), orderId: created.header.orderId, dto }),
+    ).resolves.toBeDefined();
+    expect(transactions.calls).toContain('lockOrderName');
+  });
+
+  it('saving an order WITHOUT renaming skips the uniqueness check (legacy duplicates stay editable)', async () => {
+    const transactions = new FakeOrderTransactions();
+    const service = new OrderTransactionService({ transactions });
+    const created = await service.create({
+      currentUser: currentUser('manager'),
+      dto: dtoWithOrderName('2558'),
+    });
+    // Легаси-дубль: второй живой заказ с тем же именем появился мимо команды
+    // (история до включения проверки).
+    transactions.state.orders.set(9999, {
+      ...transactions.state.orders.get(created.header.orderId)!,
+      orderId: 9999,
+    } as never);
+
+    transactions.calls = [];
+    await expect(
+      service.update({
+        currentUser: currentUser('manager'),
+        orderId: created.header.orderId,
+        dto: dtoWithOrderName('2558', created.version),
+      }),
+    ).resolves.toBeDefined();
+    expect(transactions.calls).not.toContain('assertOrderNameAvailable');
+  });
+});
+
 describe('OrderTransactionService', () => {
   it('creates an order aggregate in the PRD transaction order and writes audit after totals', async () => {
     const transactions = new FakeOrderTransactions();
@@ -620,6 +757,8 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
+      'lockOrderName',
+      'assertOrderNameAvailable',
       'validateSheetReferences',
       'resolveProjectForCreate',
       'createOrderHeader',
@@ -862,11 +1001,13 @@ describe('OrderTransactionService', () => {
     expect(updateAuditEvent1.after).toBeTruthy();
     // after reflects the updated orderName
     expect((updateAuditEvent1.after as Record<string, unknown>)?.orderName).toBe('Updated order');
-    expect(transactions.calls.slice(0, 9)).toEqual([
+    expect(transactions.calls.slice(0, 11)).toEqual([
       'begin',
       'setSessionUser',
+      'lockOrderName',
       'readOrderClientProject',
       'loadOrderForUpdate',
+      'assertOrderNameAvailable',
       'loadOrderHeaderSnapshot',
       // VARIANT B: storedEligible=true (sheetEligible in snapshot) → loadStoredOrderSheetState runs
       'loadStoredOrderSheetState',
@@ -1442,6 +1583,7 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
+      'lockOrderName',
       'readOrderClientProject',
       'loadOrderForUpdate',
       'rollback',
@@ -1546,7 +1688,7 @@ describe('OrderTransactionService', () => {
 
     expect(transactions.state.orders.get(42)?.payments).toHaveLength(1);
     expect(transactions.state.auditEvents).toEqual([]);
-    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'readOrderClientProject', 'loadOrderForUpdate', 'rollback']);
+    expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'lockOrderName', 'readOrderClientProject', 'loadOrderForUpdate', 'rollback']);
   });
 
   it('omits payment rows from save responses when actor cannot view payments', async () => {
@@ -1673,6 +1815,8 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual([
       'begin',
       'setSessionUser',
+      'lockOrderName',
+      'assertOrderNameAvailable',
       'validateSheetReferences',
       'resolveProjectForCreate',
       'createOrderHeader',

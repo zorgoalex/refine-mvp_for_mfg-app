@@ -116,6 +116,39 @@ export interface BuildOptimizeRequestInput {
   params: FreecutParams;
   /** DEBUG-only; default false. Freecut defaults include_svg true when omitted. */
   includeSvg?: boolean;
+  /** New calculations only: freeze Freecut geometry in portrait stock axes. */
+  nativePortrait?: boolean;
+}
+
+export const NATIVE_PORTRAIT_COORDINATE_CONTRACT = 'native_portrait_v1' as const;
+
+function transposePatternDirection(direction: FreecutPatternDirection): FreecutPatternDirection {
+  if (direction === 'along_width') return 'along_height';
+  if (direction === 'along_height') return 'along_width';
+  return direction;
+}
+
+export function orientOptimizeInputPortrait(input: BuildOptimizeRequestInput): BuildOptimizeRequestInput {
+  if (input.nativePortrait !== true || input.stock.width_mm <= input.stock.height_mm) return input;
+  return {
+    ...input,
+    stock: { ...input.stock, width_mm: input.stock.height_mm, height_mm: input.stock.width_mm },
+    items: input.items.map((item) => ({
+      ...item,
+      width_mm: item.height_mm,
+      height_mm: item.width_mm,
+      pattern_direction: transposePatternDirection(item.pattern_direction),
+    })),
+    params: {
+      ...input.params,
+      trim_mm: {
+        left: input.params.trim_mm.top,
+        right: input.params.trim_mm.bottom,
+        top: input.params.trim_mm.left,
+        bottom: input.params.trim_mm.right,
+      },
+    },
+  };
 }
 
 /**
@@ -171,30 +204,31 @@ export function orientItemsForVacuumDirection(
 }
 
 export function buildOptimizeRequest(input: BuildOptimizeRequestInput): OptimizeRequest {
+  const orientedInput = orientOptimizeInputPortrait(input);
   const resolvedParams =
-    input.params.layout_mode === 'vacuum_table' && input.params.vacuum
+    orientedInput.params.layout_mode === 'vacuum_table' && orientedInput.params.vacuum
       ? {
-          ...input.params,
+          ...orientedInput.params,
           vacuum: {
-            ...input.params.vacuum,
+            ...orientedInput.params.vacuum,
             direction: resolveVacuumDirection(
-              input.params.vacuum.direction,
-              input.stock.width_mm,
-              input.stock.height_mm,
+              orientedInput.params.vacuum.direction,
+              orientedInput.stock.width_mm,
+              orientedInput.stock.height_mm,
             ),
           },
         }
-      : input.params;
+      : orientedInput.params;
 
   const orientedItems =
-    input.params.layout_mode === 'vacuum_table' && input.params.vacuum
+    orientedInput.params.layout_mode === 'vacuum_table' && orientedInput.params.vacuum
       ? orientItemsForVacuumDirection(
-          input.items,
-          input.stock.width_mm,
-          input.stock.height_mm,
-          input.params.vacuum.direction,
+          orientedInput.items,
+          orientedInput.stock.width_mm,
+          orientedInput.stock.height_mm,
+          orientedInput.params.vacuum.direction,
         )
-      : [...input.items];
+      : [...orientedInput.items];
 
   return {
     units: 'mm',
@@ -203,9 +237,9 @@ export function buildOptimizeRequest(input: BuildOptimizeRequestInput): Optimize
     stock: [
       {
         id: input.stock.id,
-        width_mm: input.stock.width_mm,
-        height_mm: input.stock.height_mm,
-        qty: input.stock.qty ?? 0,
+        width_mm: orientedInput.stock.width_mm,
+        height_mm: orientedInput.stock.height_mm,
+        qty: orientedInput.stock.qty ?? 0,
       },
     ],
     items: orientedItems,
@@ -352,10 +386,15 @@ export function validateFreecutResponseContract(
  * by Task 4 (persist step) — not here. FreecutPlacement and backMapSolutions
  * are intentionally left unchanged.
  */
-export type SheetPlacementPieceJson = FreecutPlacement & { label?: PieceLabelSnapshot };
+export type SheetPlacementPieceJson = FreecutPlacement & {
+  label?: PieceLabelSnapshot;
+  /** Frozen request rule. Absent on legacy layouts. */
+  rotation_forbidden?: boolean;
+};
 
 /** Frozen per-sheet placements JSONB (plan §3). Render source of truth. */
 export interface SheetPlacementsJson {
+  coordinate_contract?: typeof NATIVE_PORTRAIT_COORDINATE_CONTRACT;
   trim_mm: TrimMm;
   sheet_width_mm: number;
   sheet_height_mm: number;
@@ -373,10 +412,15 @@ export interface BackMappedSheet {
  * `trim_mm` is carried so the renderer can offset placements (relative to the
  * usable area) onto the full sheet.
  */
-export function backMapSolutions(response: FreecutOptimizeResponse): BackMappedSheet[] {
+export function backMapSolutions(
+  response: FreecutOptimizeResponse,
+  options?: { coordinateContract?: typeof NATIVE_PORTRAIT_COORDINATE_CONTRACT; requestItems?: readonly FreecutItem[] },
+): BackMappedSheet[] {
+  const requestItemById = new Map(options?.requestItems?.map((item) => [item.id, item]));
   return response.solutions.map((solution) => ({
     sheetIndex: solution.index,
     placements: {
+      ...(options?.coordinateContract ? { coordinate_contract: options.coordinateContract } : {}),
       trim_mm: solution.trim_mm,
       sheet_width_mm: solution.width_mm,
       sheet_height_mm: solution.height_mm,
@@ -388,6 +432,9 @@ export function backMapSolutions(response: FreecutOptimizeResponse): BackMappedS
         width_mm: placement.width_mm,
         height_mm: placement.height_mm,
         rotated: placement.rotated,
+        ...(requestItemById.has(placement.item_id)
+          ? { rotation_forbidden: requestItemById.get(placement.item_id)?.rotation === 'forbid' }
+          : {}),
       })),
     },
   }));

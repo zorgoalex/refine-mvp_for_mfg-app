@@ -2,41 +2,12 @@
 import { Layout as AntLayout, Menu, Collapse, Button, Typography, Tooltip } from "antd";
 import {
   PlusOutlined,
-  FileTextOutlined,
-  CalendarOutlined,
-  UserOutlined,
-  ShopOutlined,
   DollarOutlined,
-  FileImageOutlined,
   InboxOutlined,
-  ShoppingCartOutlined,
-  TagsOutlined,
-  CalculatorOutlined,
-  AppstoreOutlined,
-  BorderOutlined,
   ToolOutlined,
-  CheckCircleOutlined,
-  DollarCircleOutlined,
-  SyncOutlined,
-  FileSearchOutlined,
-  CheckSquareOutlined,
-  HomeOutlined,
-  ApartmentOutlined,
-  CreditCardOutlined,
-  SwapOutlined,
-  TransactionOutlined,
-  IdcardOutlined,
-  ArrowsAltOutlined,
-  EnvironmentOutlined,
   TeamOutlined,
   SettingOutlined,
-  AimOutlined,
-  BarChartOutlined,
-  WalletOutlined,
-  ProjectOutlined,
-  AuditOutlined,
   ContactsOutlined,
-  QrcodeOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
@@ -61,6 +32,7 @@ import {
   normalizeRoleVisibilityMatrix,
 } from "../utils/resourceVisibility";
 import { APP_VERSION } from "../version";
+import { SIDER_RESOURCE_ICONS } from "./siderResourceIcons";
 
 const { Panel } = Collapse;
 const { Title } = Typography;
@@ -79,48 +51,6 @@ const CATEGORY_ORDER = [
   "Справочники",
   "Настройки",
 ] as const;
-
-const RESOURCE_ICONS: Record<string, React.ReactNode> = {
-  orders_view: <FileTextOutlined />,
-  calendar: <CalendarOutlined />,
-  scan: <QrcodeOutlined />,
-  groups: <ProjectOutlined />,
-  projects: <ProjectOutlined />,
-  clients: <UserOutlined />,
-  clients_analytics_view: <BarChartOutlined />,
-  suppliers: <ShopOutlined />,
-  vendors: <ShopOutlined />,
-  film_vendors: <ShopOutlined />,
-  payments: <DollarOutlined />,
-  payments_view: <WalletOutlined />,
-  films: <FileImageOutlined />,
-  materials: <InboxOutlined />,
-  order_resource_requirements: <ShoppingCartOutlined />,
-  film_types: <TagsOutlined />,
-  units: <CalculatorOutlined />,
-  material_types: <AppstoreOutlined />,
-  edge_types: <BorderOutlined />,
-  milling_types: <ToolOutlined />,
-  order_statuses: <CheckCircleOutlined />,
-  payment_statuses: <DollarCircleOutlined />,
-  production_statuses: <SyncOutlined />,
-  requisition_statuses: <FileSearchOutlined />,
-  resource_requirements_statuses: <CheckSquareOutlined />,
-  workshops: <HomeOutlined />,
-  work_centers: <ApartmentOutlined />,
-  payment_types: <CreditCardOutlined />,
-  transaction_direction: <SwapOutlined />,
-  material_transaction_types: <TransactionOutlined />,
-  employees: <IdcardOutlined />,
-  users: <UserOutlined />,
-  movements_statuses: <ArrowsAltOutlined />,
-  order_workshops: <EnvironmentOutlined />,
-  doweling_orders_view: <AimOutlined />,
-  configuration: <SettingOutlined />,
-  audit: <AuditOutlined />,
-  sheet_material_types: <BorderOutlined />,
-  bazis: <FileSearchOutlined />,
-};
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Контрагенты": <TeamOutlined />,
@@ -146,6 +76,8 @@ const CATEGORY_MAP: Record<string, string> = {
   work_centers: "Производство",
   doweling_orders_view: "Производство",
   bazis: "Производство",
+  "cut-jobs": "Производство",
+  scan: "Производство",
   films: "Материалы",
   materials: "Материалы",
   sheet_material_types: "Материалы",
@@ -199,7 +131,7 @@ export const CustomSider: React.FC = () => {
     categoryOrder: CATEGORY_ORDER,
     categoryMap: CATEGORY_MAP,
     resourceLabels: RESOURCE_LABELS,
-    resourceIcons: RESOURCE_ICONS,
+    resourceIcons: SIDER_RESOURCE_ICONS,
     canViewNavigation: (name) =>
       canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
       canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
@@ -279,7 +211,7 @@ export const CustomSider: React.FC = () => {
 
               const categoryItems: MenuProps["items"] = items.map((item) => ({
                 key: item.name,
-                icon: RESOURCE_ICONS[item.name],
+                icon: SIDER_RESOURCE_ICONS[item.name],
                 label: menuLabelWithTooltip(item.label),
                 title: item.label,
                 onClick: () => push(item.route),

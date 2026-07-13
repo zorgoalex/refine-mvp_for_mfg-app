@@ -74,11 +74,13 @@ export interface SheetPlacementPiece {
   width_mm: number;
   height_mm: number;
   rotated: boolean;
+  rotation_forbidden?: boolean;
   /** Frozen label snapshot from calculate (absent in legacy records). */
   label?: { orderId: number | null; detailNumber: number | null; widthMm: number | null; heightMm: number | null };
 }
 
 export interface SheetPlacements {
+  coordinate_contract?: 'native_portrait_v1';
   trim_mm: { left: number; right: number; top: number; bottom: number };
   sheet_width_mm: number;
   sheet_height_mm: number;
@@ -210,6 +212,8 @@ export interface CutJobRef {
 export interface EligibleDetailDto {
   orderDetailId: number;
   orderId: number;
+  /** orders.order_name — пользователи мыслят названиями, не ID. */
+  orderName?: string | null;
   quantity: number;
   /** NULL post-034 (Variant B: material_id sunsetted on order_details). */
   materialId: number | null;

@@ -10,10 +10,46 @@ import {
   pieceWithinUsable,
   validateSheetPlacements,
   orientPieceRect,
+  applyAxisOrigin,
+  undoAxisOriginY,
   rotatePiece,
   snapDraggedPiece,
   moveAllowed,
+  validateSheetGroupInvariant,
 } from './index';
+
+describe('display axis origin', () => {
+  it.each([
+    ['portrait', false, false],
+    ['landscape legacy CW', true, false],
+    ['landscape transpose', true, true],
+  ] as const)('%s reflects after orientation and is self-inverse', (_name, landscape, originTopLeft) => {
+    const oriented = orientPieceRect({ x: 17, y: 31, w: 140, h: 90 }, 1000, 800, landscape, originTopLeft);
+    const bottom = applyAxisOrigin(oriented, 'bottom-left', landscape);
+    expect(bottom.x).toBe(landscape ? oriented.vw - oriented.x - oriented.w : oriented.x);
+    expect(bottom.w).toBe(oriented.w);
+    expect(bottom.h).toBe(oriented.h);
+    expect(bottom.y).toBe(landscape ? oriented.y : oriented.vh - oriented.y - oriented.h);
+    expect(undoAxisOriginY(bottom.y, bottom.h, bottom.vh, 'bottom-left', landscape)).toBe(oriented.y);
+  });
+
+  it('keeps top-left byte-compatible and does not mutate the input', () => {
+    const rect = orientPieceRect({ x: 10, y: 20, w: 30, h: 40 }, 300, 200, false);
+    expect(applyAxisOrigin(rect, 'top-left')).toBe(rect);
+    expect(rect.y).toBe(20);
+  });
+});
+
+describe('validateSheetGroupInvariant', () => {
+  const placements = { sheet_width_mm: 2070, sheet_height_mm: 2800, coordinate_contract: 'native_portrait_v1' as const };
+  it('accepts homogeneous groups', () => {
+    expect(validateSheetGroupInvariant([{ placements }, { placements: { ...placements } }])).toBeNull();
+  });
+  it('rejects mixed dimensions and contracts', () => {
+    expect(validateSheetGroupInvariant([{ placements }, { placements: { ...placements, sheet_width_mm: 2000 } }])).toBe('mixed_dimensions');
+    expect(validateSheetGroupInvariant([{ placements }, { placements: { ...placements, coordinate_contract: undefined } }])).toBe('mixed_coordinate_contract');
+  });
+});
 
 const sheet = {
   sheet_width_mm: 2800,

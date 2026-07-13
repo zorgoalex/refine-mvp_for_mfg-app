@@ -91,7 +91,7 @@ const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'edge_type_name', label: 'Обкат' },
   { key: 'film_name', label: 'Пленка' },
   { key: 'created_by', label: 'Создано' },
-  { key: 'actions', label: 'Действия', lockVisible: true },
+  { key: 'actions', label: 'Действия', lockVisible: true, lockPosition: 'end' },
 ];
 
 const ORDER_LIST_DEFAULT_ORDER = ORDER_LIST_COLUMN_DEFINITIONS.map((definition) => definition.key);
@@ -899,7 +899,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     {
       dataIndex: "order_id",
       key: "order_id",
-      title: <span style={{ fontSize: '42%' }}>id</span>,
+      title: <span style={{ fontSize: '42%' }}>ID заказа</span>,
       sorter: true,
       fixed: "left",
       width: 39,

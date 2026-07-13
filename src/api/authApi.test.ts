@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authApi } from './authApi';
 import { authSession } from './authSession';
+import { httpClient } from './httpClient';
 
 describe('authApi', () => {
   beforeEach(() => {
@@ -71,6 +72,206 @@ describe('authApi', () => {
       }),
     );
     expect(authSession.getAccessToken()).toBe('new-access-token');
+  });
+
+  it('shares one cookie rotation across parallel explicit refresh callers', async () => {
+    let releaseRefresh!: () => void;
+    const refreshBlocked = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    const fetchMock = vi.fn(async () => {
+      await refreshBlocked;
+      return new Response(
+        JSON.stringify({
+          accessToken: 'new-access-token',
+          user: {
+            id: '1',
+            username: 'admin',
+            role: 'superadmin',
+            permissions: ['orders.view'],
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = authApi.refresh();
+    const second = authApi.refresh();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    releaseRefresh();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ accessToken: 'new-access-token' }),
+      expect.objectContaining({ accessToken: 'new-access-token' }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(authSession.getAccessToken()).toBe('new-access-token');
+  });
+
+  it('shares one cookie rotation between explicit refresh and backend 401 retry', async () => {
+    let releaseRefresh!: () => void;
+    const refreshBlocked = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let refreshCalls = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/v1/auth/refresh') {
+        refreshCalls += 1;
+        await refreshBlocked;
+        return new Response(
+          JSON.stringify({
+            accessToken: 'new-access-token',
+            user: {
+              id: '1',
+              username: 'admin',
+              role: 'superadmin',
+              permissions: ['orders.view'],
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+
+      const authorization = (init?.headers as Headers).get('Authorization');
+      return authorization === 'Bearer new-access-token'
+        ? new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        : new Response(JSON.stringify({ error: { code: 'AUTH_REQUIRED', message: 'Auth required' } }), {
+            status: 401,
+            statusText: 'Unauthorized',
+            headers: { 'Content-Type': 'application/json' },
+          });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    authSession.setAccessToken('expired-access-token');
+
+    const explicitRefresh = authApi.refresh();
+    const backendRequest = httpClient.get<{ ok: boolean }>('/api/v1/orders');
+    await vi.waitFor(() => {
+      expect(refreshCalls).toBe(1);
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/orders', expect.any(Object));
+    });
+    releaseRefresh();
+
+    await expect(Promise.all([explicitRefresh, backendRequest])).resolves.toEqual([
+      expect.objectContaining({ accessToken: 'new-access-token' }),
+      { ok: true },
+    ]);
+    expect(refreshCalls).toBe(1);
+  });
+
+  it('does not resurrect a session when logout clears it during refresh', async () => {
+    let releaseRefresh!: () => void;
+    const refreshBlocked = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await refreshBlocked;
+      return new Response(
+        JSON.stringify({
+          accessToken: 'stale-refreshed-token',
+          user: { id: '1', username: 'admin', role: 'superadmin', permissions: [] },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }));
+    authSession.setAccessToken('expired-token');
+    authSession.setUser({ id: '1', username: 'admin', role: 'superadmin' });
+
+    const refresh = authApi.refresh();
+    authSession.clear();
+    releaseRefresh();
+
+    await expect(refresh).rejects.toMatchObject({ code: 'AUTH_REFRESH_SUPERSEDED' });
+    expect(authSession.getAccessToken()).toBeNull();
+    expect(authSession.getUser()).toBeNull();
+  });
+
+  it('does not restore a cookie-only session after an empty-state logout invalidation', async () => {
+    let releaseRefresh!: () => void;
+    const refreshBlocked = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await refreshBlocked;
+      return new Response(
+        JSON.stringify({
+          accessToken: 'restored-token',
+          user: { id: '1', username: 'admin', role: 'superadmin', permissions: [] },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }));
+
+    const refresh = authApi.refresh();
+    authSession.clear();
+    releaseRefresh();
+
+    await expect(refresh).rejects.toMatchObject({ code: 'AUTH_REFRESH_SUPERSEDED' });
+    expect(authSession.getAccessToken()).toBeNull();
+    expect(authSession.getUser()).toBeNull();
+  });
+
+  it('returns a newer login session instead of applying an older refresh response', async () => {
+    let releaseRefresh!: () => void;
+    const refreshBlocked = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await refreshBlocked;
+      return new Response(
+        JSON.stringify({
+          accessToken: 'old-session-refreshed-token',
+          user: { id: '1', username: 'old-user', role: 'admin', permissions: [] },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }));
+    authSession.setAccessToken('old-session-token');
+    authSession.setUser({ id: '1', username: 'old-user', role: 'admin' });
+
+    const refresh = authApi.refresh();
+    authSession.setAccessToken('new-login-token');
+    authSession.setUser({ id: '2', username: 'new-user', role: 'manager' });
+    releaseRefresh();
+
+    await expect(refresh).resolves.toMatchObject({
+      accessToken: 'new-login-token',
+      user: { id: '2', username: 'new-user' },
+    });
+    expect(authSession.getAccessToken()).toBe('new-login-token');
+    expect(authSession.getUser()).toMatchObject({ id: '2', username: 'new-user' });
+  });
+
+  it('keeps a newer login session when the older refresh fails', async () => {
+    let releaseRefresh!: () => void;
+    const refreshBlocked = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await refreshBlocked;
+      return new Response(
+        JSON.stringify({ error: { code: 'REFRESH_TOKEN_INVALID', message: 'Invalid refresh' } }),
+        { status: 401, statusText: 'Unauthorized', headers: { 'Content-Type': 'application/json' } },
+      );
+    }));
+    authSession.setAccessToken('old-session-token');
+    authSession.setUser({ id: '1', username: 'old-user', role: 'admin' });
+
+    const refresh = authApi.refresh();
+    authSession.setAccessToken('new-login-token');
+    authSession.setUser({ id: '2', username: 'new-user', role: 'manager' });
+    releaseRefresh();
+
+    await expect(refresh).resolves.toMatchObject({
+      accessToken: 'new-login-token',
+      user: { id: '2', username: 'new-user' },
+    });
+    expect(authSession.getAccessToken()).toBe('new-login-token');
+    expect(authSession.getUser()).toMatchObject({ id: '2', username: 'new-user' });
   });
 
   it('keeps the memory session when backend logout fails (refresh cookie is still alive)', async () => {

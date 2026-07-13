@@ -149,6 +149,12 @@ export class OrderTransactionService {
       this.requirePermission(command, 'orders.view_financials');
       this.requireFinancePermissionForPaymentMutations(command, prepared.order);
 
+      // Уникальность номера заказа среди живых заказов — жёсткий блок (409 с
+      // предложенным следующим номером), обхода нет by design. Advisory-лок
+      // имени берётся ДО project/order-локов (единый порядок во всех командах).
+      await unitOfWork.lockOrderName(prepared.order.header.orderName);
+      await unitOfWork.assertOrderNameAvailable({ orderName: prepared.order.header.orderName });
+
       // New orders are SP3-era (sheet_eligible default true): eligible, no stored sheet state.
       const touchesSheet = await this.enforceSheetGuards(unitOfWork, command, prepared, {
         eligible: true,
@@ -240,6 +246,14 @@ export class OrderTransactionService {
       // order row lock — taking it after inverts moveOrder's order and can
       // deadlock. Pre-read is unlocked; the client-change block below re-checks
       // against the locked snapshot and 409s if the world moved in between.
+      // Advisory-лок номера — ПЕРВЫМ, до project/order row-локов: update с
+      // одновременной сменой клиента (project-лок) и переименованием иначе
+      // инвертирует порядок против create и даёт deadlock (Critic R1-1).
+      // Без переименования лок избыточен, но безвреден (self-serialization).
+      // String(...) — та же коэрсия, что в order-normalizer: raw @Body может
+      // принести не-строку, TypeError до валидации недопустим (Critic R2).
+      await unitOfWork.lockOrderName(String(command.dto.header?.orderName ?? ''));
+
       const requestedClientId = numOrNull(command.dto.header?.clientId);
       const preRead = await unitOfWork.readOrderClientProject(command.orderId);
       if (!preRead) {
@@ -269,7 +283,20 @@ export class OrderTransactionService {
         mode: 'update',
         pathOrderId: command.orderId,
       });
+
       this.requireFinancePermissionForPaymentMutations(command, prepared.order);
+
+      // Переименование в занятый номер — блок; без смены имени проверка не
+      // выполняется (легаси-дубли остаются редактируемыми).
+      if (
+        prepared.order.header.orderName.trim().toLowerCase() !==
+        lockedOrder.orderName.trim().toLowerCase()
+      ) {
+        await unitOfWork.assertOrderNameAvailable({
+          orderName: prepared.order.header.orderName,
+          excludeOrderId: command.orderId,
+        });
+      }
       const beforeSnapshot = await unitOfWork.loadOrderHeaderSnapshot(command.orderId);
 
       // SP3 stored sheet state. Only sheet-eligible orders can carry sheet details, so

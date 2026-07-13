@@ -9,6 +9,7 @@ export interface OrderDetailColumnDefinition {
   key: string;
   label: string;
   lockVisible?: boolean;
+  lockPosition?: 'start' | 'end';
 }
 
 export interface OrderDetailColumnSettingsButtonProps {
@@ -26,7 +27,11 @@ export function normalizeOrderDetailColumnSettings(
 ): OrderDetailColumnPreference {
   const allowed = new Set(definitions.map((definition) => definition.key));
   const locked = new Set(definitions.filter((definition) => definition.lockVisible).map((definition) => definition.key));
-  const order = uniqueKnownKeys([...(value?.order ?? []), ...defaultOrder], allowed);
+  const normalizedOrder = uniqueKnownKeys([...(value?.order ?? []), ...defaultOrder], allowed);
+  const pinnedStart = definitions.filter((definition) => definition.lockPosition === 'start').map((definition) => definition.key);
+  const pinnedEnd = definitions.filter((definition) => definition.lockPosition === 'end').map((definition) => definition.key);
+  const pinned = new Set([...pinnedStart, ...pinnedEnd]);
+  const order = [...pinnedStart, ...normalizedOrder.filter((key) => !pinned.has(key)), ...pinnedEnd];
   const hidden = uniqueKnownKeys(value?.hidden ?? [], allowed).filter((key) => !locked.has(key));
 
   return { order, hidden };
@@ -148,9 +153,10 @@ export const OrderDetailColumnSettingsButton: React.FC<OrderDetailColumnSettings
   }, [onChange]);
 
   const updateDraft = useCallback((next: OrderDetailColumnPreference) => {
-    setDraft(next);
-    void saveDraft(next);
-  }, [saveDraft]);
+    const normalized = normalizeOrderDetailColumnSettings(defaultOrder, definitions, next);
+    setDraft(normalized);
+    void saveDraft(normalized);
+  }, [defaultOrder, definitions, saveDraft]);
 
   const move = (key: string, direction: -1 | 1) => {
     const index = draft.order.indexOf(key);
@@ -230,7 +236,7 @@ export const OrderDetailColumnSettingsButton: React.FC<OrderDetailColumnSettings
           {rows.map((definition, index) => (
             <div
               key={definition.key}
-              draggable
+              draggable={!definition.lockPosition}
               onDragStart={(event) => {
                 setDragKey(definition.key);
                 event.dataTransfer.effectAllowed = 'move';
@@ -270,14 +276,14 @@ export const OrderDetailColumnSettingsButton: React.FC<OrderDetailColumnSettings
                   : '1px solid var(--app-border)',
                 borderRadius: 6,
                 background: hidden.has(definition.key) ? 'var(--app-surface-muted)' : 'var(--app-surface)',
-                cursor: 'grab',
+                cursor: definition.lockPosition ? 'default' : 'grab',
                 opacity: dragKey === definition.key ? 0.45 : 1,
               }}
             >
               <Tooltip title="Зажмите левую кнопку мыши и перетащите строку выше или ниже, чтобы изменить порядок колонок">
                 <HolderOutlined
                   aria-label="Перетащить колонку"
-                  style={{ color: 'var(--app-text-muted)', cursor: 'grab' }}
+                  style={{ color: 'var(--app-text-muted)', cursor: definition.lockPosition ? 'default' : 'grab' }}
                 />
               </Tooltip>
               <Checkbox
@@ -292,13 +298,13 @@ export const OrderDetailColumnSettingsButton: React.FC<OrderDetailColumnSettings
                 <Button
                   size="small"
                   icon={<ArrowUpOutlined />}
-                  disabled={index === 0}
+                  disabled={index === 0 || Boolean(definition.lockPosition)}
                   onClick={() => move(definition.key, -1)}
                 />
                 <Button
                   size="small"
                   icon={<ArrowDownOutlined />}
-                  disabled={index === rows.length - 1}
+                  disabled={index === rows.length - 1 || Boolean(definition.lockPosition)}
                   onClick={() => move(definition.key, 1)}
                 />
               </Space>

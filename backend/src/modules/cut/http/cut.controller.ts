@@ -424,6 +424,7 @@ export class CutController {
   ): Promise<void> {
     const currentUser = this.requireRead(request);
     const parsedJobId = parseCutJobId(cutJobId);
+    const axisOrigin = parseAxisOrigin(query.axisOrigin);
     const png = await this.cut.renderSheetPng({
       currentUser,
       cutJobId: parsedJobId,
@@ -431,7 +432,8 @@ export class CutController {
       sheetIndex: parseSheetIndex(sheetIndex),
       preset: parsePreset(query.preset),
       rotate90: parseOrientation(query.orientation),
-      originTopLeft: parseOriginTopLeft(query.origin),
+      originTopLeft: canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin),
+      axisOrigin,
       variant: parseVariant(query.variant),
       showLabels: query.labels !== 'off',
       requestId: request.requestId,
@@ -453,13 +455,15 @@ export class CutController {
   ): Promise<void> {
     const currentUser = this.requireRead(request);
     const parsedJobId = parseCutJobId(cutJobId);
+    const axisOrigin = parseAxisOrigin(query.axisOrigin);
     const svg = await this.cut.renderSheetSvg({
       currentUser,
       cutJobId: parsedJobId,
       cutGroupId: parseCutJobId(groupId),
       sheetIndex: parseSheetIndex(sheetIndex),
       rotate90: parseOrientation(query.orientation),
-      originTopLeft: parseOriginTopLeft(query.origin),
+      originTopLeft: canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin),
+      axisOrigin,
       variant: parseVariant(query.variant),
       requestId: request.requestId,
     });
@@ -481,7 +485,8 @@ export class CutController {
     const parsedJobId = parseCutJobId(cutJobId);
     const cutGroupId = parseCutJobId(groupId);
     const rotate90 = parseOrientation(query.orientation);
-    const originTopLeft = parseOriginTopLeft(query.origin);
+    const axisOrigin = parseAxisOrigin(query.axisOrigin);
+    const originTopLeft = canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin);
     const variant = parseVariant(query.variant);
     const pdfTemplate = parsePdfTemplate(query.template);
     // Task 7 Rule 9: cache key includes the server-owned render token (layout state)
@@ -492,8 +497,8 @@ export class CutController {
     // a raw 90° CW render produce different bytes for the same layout+orientation.
     const renderToken = await this.cut.getRenderCacheToken({ cutGroupId });
     const result = this.pdfCache.ensure(
-      `group:${cutGroupId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}:${pdfTemplate}`,
-      () => this.cut.renderGroupPdf({ currentUser, cutGroupId, cutJobId: parsedJobId, rotate90, originTopLeft, variant, pdfTemplate, requestId: request.requestId }),
+      `group:${cutGroupId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}:${axisOrigin === 'bottom-left' ? 'BL' : 'TOP'}:${pdfTemplate}`,
+      () => this.cut.renderGroupPdf({ currentUser, cutGroupId, cutJobId: parsedJobId, rotate90, originTopLeft, axisOrigin, variant, pdfTemplate, requestId: request.requestId }),
     );
     this.sendPdf(response, result, `cut-group-${cutGroupId}.pdf`);
   }
@@ -509,7 +514,8 @@ export class CutController {
     const currentUser = this.requireRead(request);
     const id = parseCutJobId(cutJobId);
     const rotate90 = parseOrientation(query.orientation);
-    const originTopLeft = parseOriginTopLeft(query.origin);
+    const axisOrigin = parseAxisOrigin(query.axisOrigin);
+    const originTopLeft = canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin);
     const variant = parseVariant(query.variant);
     const pdfTemplate = parsePdfTemplate(query.template);
     // getJob gives the current version + renderToken (cache discriminator for manual layouts).
@@ -517,7 +523,7 @@ export class CutController {
     // Task 7 Rule 10: renderToken aggregates job version + all per-group manual tokens;
     // any manual save or active-selector flip changes the token → busts the cache.
     const renderToken = job.renderToken ?? `v${job.version}`;
-    const result = this.ensureJobPdf(currentUser, id, renderToken, job.version, request.requestId, rotate90, variant, originTopLeft, pdfTemplate);
+    const result = this.ensureJobPdf(currentUser, id, renderToken, job.version, request.requestId, rotate90, variant, originTopLeft, axisOrigin, pdfTemplate);
     this.sendPdf(response, result, `cut-job-${id}.pdf`);
   }
 
@@ -530,20 +536,20 @@ export class CutController {
     rotate90 = false,
     variant: 'auto' | 'manual' | 'active' = 'auto',
     originTopLeft = false,
+    axisOrigin: 'top-left' | 'bottom-left' = 'top-left',
     pdfTemplate = 'standard',
   ) {
     // Task 7: cache key uses renderToken (job version + per-group manual tokens)
     // so a manual save or active-selector flip always busts the in-process cache.
     // FIX 2: `variant` is a separate key dimension (auto vs active can differ).
     // Orientation AND origin (TL/RAW) discriminate the cache. pdf_prewarm_state
-    // tracks only the default surfaced job PDF (portrait + top-left origin, the
-    // UI default) — the landscape and raw-origin variants are on-demand and must
-    // not write the prewarm state.
+    // tracks only the default surfaced job PDF (portrait + bottom-left axis,
+    // canonically RAW so landscape rotates clockwise).
     return this.pdfCache.ensure(
-      `job:${cutJobId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}:${pdfTemplate}`,
-      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, originTopLeft, variant, pdfTemplate, requestId }),
+      `job:${cutJobId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}:${axisOrigin === 'bottom-left' ? 'BL' : 'TOP'}:${pdfTemplate}`,
+      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, originTopLeft, axisOrigin, variant, pdfTemplate, requestId }),
       (state, reason) => {
-        if (rotate90 || !originTopLeft) return;
+        if (rotate90 || originTopLeft || axisOrigin !== 'bottom-left') return;
         void this.cut.setPdfPrewarmState({ cutJobId, version, state, reason }).catch(() => undefined);
       },
     );
@@ -560,11 +566,8 @@ export class CutController {
    *  Warming with the default `auto` would warm a slot the real download never
    *  reads. `active` resolves per-group `effectiveActive` — exactly the surfaced
    *  whole-job PDF. Orientation is unchanged (portrait, as before). FIX 5: it must
-   *  ALSO warm the surfaced origin dimension — the FE default checkbox is ON
-   *  (top-left), so `fetchJobPdf` requests `origin=tl` → export key
-   *  `job:{id}:active:{token}:P:TL`. Warming with the legacy RAW origin would warm
-   *  a slot the real download never reads. Matches the ensureJobPdf prewarm-state
-   *  guard (`rotate90 || !originTopLeft` → no state write).
+   *  ALSO warm the surfaced origin dimension: bottom-left is canonicalized to
+   *  RAW so landscape always rotates clockwise and prewarm/export share a key.
    */
   private prewarmJobPdf(
     currentUser: RequestWithCurrentUser['user'],
@@ -575,7 +578,7 @@ export class CutController {
     void this.cut
       .getRenderCacheToken({ cutJobId })
       .then((renderToken) => {
-        this.ensureJobPdf(currentUser, cutJobId, renderToken, version, requestId, false, 'active', true);
+        this.ensureJobPdf(currentUser, cutJobId, renderToken, version, requestId, false, 'active', false, 'bottom-left');
       })
       .catch(() => undefined);
   }
@@ -669,6 +672,19 @@ export function parseOrientation(value: string | undefined): boolean {
  *  ON matches the operator-facing checkbox default. Ignored when not rotated. */
 export function parseOriginTopLeft(value: string | undefined): boolean {
   return (value ?? '').trim().toLowerCase() !== 'raw';
+}
+
+/** Final-view Y-axis origin. Absent stays top-left for old clients. */
+export function parseAxisOrigin(value: string | undefined): 'top-left' | 'bottom-left' {
+  return (value ?? '').trim().toLowerCase() === 'bottom-left' ? 'bottom-left' : 'top-left';
+}
+
+/** Bottom-left uses the RAW/CW orientation path so portrait → landscape turns right. */
+export function canonicalOriginTopLeft(
+  originTopLeft: boolean,
+  axisOrigin: 'top-left' | 'bottom-left',
+): boolean {
+  return axisOrigin === 'bottom-left' ? false : originTopLeft;
 }
 
 /**

@@ -40,6 +40,7 @@ export interface DeleteOrderCommand {
 
 export interface LockedOrderRow {
   orderId: number;
+  orderName: string;
   version: number;
   createdByUserId: string | null;
   managerUserId: string | null;
@@ -190,6 +191,19 @@ export interface OrderWriteUnitOfWork {
   ): Promise<void>;
   loadOrderHeaderSnapshot(orderId: number): Promise<Record<string, unknown> | null>;
   loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null>;
+  /**
+   * Advisory xact lock по нормализованному номеру заказа. Берётся ПЕРВЫМ,
+   * до project/order row-локов (единый порядок advisory→project→order во всех
+   * командах — иначе create↔update deadlock, Critic R1-1); сериализует два
+   * конкурентных сохранения одного номера.
+   */
+  lockOrderName(orderName: string): Promise<void>;
+  /**
+   * Гейт уникальности номера среди живых (delete_flag=false) заказов; кидает
+   * OrderNameDuplicateError с предложенным следующим числовым номером.
+   * Вызывается ПОД уже взятым lockOrderName. Обхода нет by design.
+   */
+  assertOrderNameAvailable(input: { orderName: string; excludeOrderId?: number }): Promise<void>;
   loadOrderForDelete(orderId: number): Promise<LockedOrderDeleteRow | null>;
   assertChildOwnership(orderId: number, refs: readonly OrderChildReference[]): Promise<void>;
   createOrderHeader(input: {

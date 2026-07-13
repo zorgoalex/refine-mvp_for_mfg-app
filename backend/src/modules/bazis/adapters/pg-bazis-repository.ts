@@ -71,6 +71,7 @@ interface ProjectListRow {
   last_revision_no: number | string | null;
   last_imported_at: string | null;
   linked_order_ids: Array<number | string> | null;
+  linked_orders?: Array<{ orderId: number | string; orderName: string | null }> | null;
 }
 
 interface ProjectRevisionRow {
@@ -100,6 +101,7 @@ interface TreeNodeRow {
   width_mm: number | string | null;
   thickness_mm: number | string | null;
   main_material_name: string | null;
+  linked_orders: Array<{ orderId: number | string; orderName: string | null }> | null;
   children_count: number | string;
 }
 
@@ -786,7 +788,13 @@ export class PgBazisRepository implements BazisRepositoryPort {
              COUNT(DISTINCT r.bazis_revision_id)::int AS revisions_count,
              MAX(r.revision_no)::int AS last_revision_no,
              MAX(r.imported_at)::text AS last_imported_at,
-             COALESCE(array_remove(array_agg(DISTINCT bol.order_id), NULL), '{}') AS linked_order_ids
+             COALESCE(array_remove(array_agg(DISTINCT bol.order_id), NULL), '{}') AS linked_order_ids,
+             COALESCE((
+               SELECT jsonb_agg(jsonb_build_object('orderId', l.order_id, 'orderName', o.order_name) ORDER BY l.order_id)
+               FROM bazis_order_links l
+               JOIN orders o ON o.order_id = l.order_id
+               WHERE l.bazis_project_id = bp.bazis_project_id
+             ), '[]'::jsonb) AS linked_orders
       FROM bazis_projects bp
       LEFT JOIN bazis_project_revisions r ON r.bazis_project_id = bp.bazis_project_id
       LEFT JOIN bazis_order_links bol ON bol.bazis_project_id = bp.bazis_project_id
@@ -808,7 +816,13 @@ export class PgBazisRepository implements BazisRepositoryPort {
              COUNT(DISTINCT r.bazis_revision_id)::int AS revisions_count,
              MAX(r.revision_no)::int AS last_revision_no,
              MAX(r.imported_at)::text AS last_imported_at,
-             COALESCE(array_remove(array_agg(DISTINCT bol.order_id), NULL), '{}') AS linked_order_ids
+             COALESCE(array_remove(array_agg(DISTINCT bol.order_id), NULL), '{}') AS linked_order_ids,
+             COALESCE((
+               SELECT jsonb_agg(jsonb_build_object('orderId', l.order_id, 'orderName', o.order_name) ORDER BY l.order_id)
+               FROM bazis_order_links l
+               JOIN orders o ON o.order_id = l.order_id
+               WHERE l.bazis_project_id = bp.bazis_project_id
+             ), '[]'::jsonb) AS linked_orders
       FROM bazis_projects bp
       LEFT JOIN bazis_project_revisions r ON r.bazis_project_id = bp.bazis_project_id
       LEFT JOIN bazis_order_links bol ON bol.bazis_project_id = bp.bazis_project_id
@@ -861,6 +875,11 @@ export class PgBazisRepository implements BazisRepositoryPort {
       SELECT n.bazis_node_id, n.parent_node_id, n.seq, n.node_kind, n.object_type, n.name,
              n.detail_code, n.position, n.quantity, n.cumulative_quantity,
              n.length_mm, n.width_mm, n.thickness_mm, n.main_material_name,
+             (SELECT jsonb_agg(DISTINCT jsonb_build_object('orderId', m.order_id, 'orderName', o.order_name))
+              FROM bazis_node_order_detail_map m
+              JOIN orders o ON o.order_id = m.order_id
+              WHERE m.node_id = n.bazis_node_id
+                AND m.order_detail_id IS NOT NULL) AS linked_orders,
              (SELECT count(*) FROM bazis_nodes c WHERE c.parent_node_id = n.bazis_node_id)::int AS children_count
       FROM bazis_nodes n
       WHERE n.revision_id = $1 AND n.parent_node_id IS NOT DISTINCT FROM $2
@@ -889,6 +908,11 @@ export class PgBazisRepository implements BazisRepositoryPort {
       SELECT n.bazis_node_id, n.parent_node_id, n.seq, n.node_kind, n.object_type, n.name,
              n.detail_code, n.position, n.quantity, n.cumulative_quantity,
              n.length_mm, n.width_mm, n.thickness_mm, n.main_material_name,
+             (SELECT jsonb_agg(DISTINCT jsonb_build_object('orderId', m.order_id, 'orderName', o.order_name))
+              FROM bazis_node_order_detail_map m
+              JOIN orders o ON o.order_id = m.order_id
+              WHERE m.node_id = n.bazis_node_id
+                AND m.order_detail_id IS NOT NULL) AS linked_orders,
              (SELECT count(*) FROM bazis_nodes c
               WHERE c.parent_node_id = n.bazis_node_id
                 AND c.revision_id = n.revision_id)::int AS children_count
@@ -1818,10 +1842,20 @@ function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
     thicknessMm: nullableNumber(row.thickness_mm),
     mainMaterialName: row.main_material_name,
     childrenCount: Number(row.children_count),
+    orders: (row.linked_orders ?? [])
+      .map((entry) => ({ orderId: Number(entry.orderId), orderName: entry.orderName ?? '' }))
+      .sort((left, right) => left.orderId - right.orderId),
+    orderIds: (row.linked_orders ?? [])
+      .map((entry) => Number(entry.orderId))
+      .sort((left, right) => left - right),
   };
 }
 
 function mapProjectListRow(row: ProjectListRow): BazisProjectListItemDto {
+  const linkedOrders = (row.linked_orders ?? []).map((entry) => ({
+    orderId: Number(entry.orderId),
+    orderName: entry.orderName ?? '',
+  }));
   return {
     bazisProjectId: Number(row.bazis_project_id),
     projectId: Number(row.project_id),
@@ -1830,6 +1864,7 @@ function mapProjectListRow(row: ProjectListRow): BazisProjectListItemDto {
     lastRevisionNo: nullableNumber(row.last_revision_no),
     lastImportedAt: row.last_imported_at,
     linkedOrderIds: (row.linked_order_ids ?? []).map((value) => Number(value)),
+    linkedOrders,
   };
 }
 

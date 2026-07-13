@@ -5,6 +5,7 @@ import { AppFooter } from "./AppFooter";
 import { CustomSider } from "./CustomSider";
 import { MobileSiderDrawer } from "./MobileSiderDrawer";
 import { useIsMobile } from "../hooks/useDeviceTier";
+import { GlobalTableTopScrollbars } from "./GlobalTableTopScrollbars";
 
 export const CustomLayout: React.FC<React.PropsWithChildren> = ({ children }) => {
   const [isSiderOpen, setIsSiderOpen] = useState(false);
@@ -42,6 +43,7 @@ export const CustomLayout: React.FC<React.PropsWithChildren> = ({ children }) =>
       Sider={isMobile ? undefined : CustomSider}
     >
       <div style={{ minHeight: "100%", display: "flex", flexDirection: "column" }}>
+        <GlobalTableTopScrollbars />
         <div style={{ flex: 1 }}>{children}</div>
         <AppFooter />
       </div>

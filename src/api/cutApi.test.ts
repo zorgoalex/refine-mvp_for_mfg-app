@@ -57,12 +57,14 @@ describe('cutApi', () => {
     // origin defaults to top-left (transpose); emitted explicitly so the RAW half
     // is never silently dead and browser cache keys differ.
     expect(svgUrl).toContain('origin=tl');
+    expect(svgUrl).toContain('axisOrigin=bottom-left');
     // PNG always includes labels=off (no baked labels; HTML overlay is the sole label source)
     const pngUrl = fetchMock.mock.calls[1][0] as string;
     expect(pngUrl).toContain('/api/v1/cut-jobs/42/groups/100/sheets/0.png');
     expect(pngUrl).toContain('preset=thumb');
     expect(pngUrl).toContain('labels=off');
     expect(pngUrl).toContain('origin=tl');
+    expect(pngUrl).toContain('axisOrigin=bottom-left');
   });
 
   it('emits origin=raw on every render URL when originTopLeft is false (RAW half not dead)', async () => {
@@ -93,6 +95,22 @@ describe('cutApi', () => {
 
     for (const call of fetchMock.mock.calls) {
       expect(call[0] as string).toContain('origin=tl');
+      expect(call[0] as string).toContain('axisOrigin=bottom-left');
+    }
+  });
+
+  it('emits an explicit top-left axis on every render URL when selected', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementation(() => new Response('PNG', { status: 200, headers: { 'Content-Type': 'image/png' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cutApi.fetchSheetPng(42, 100, 0, 'screen', false, undefined, undefined, true, 'top-left');
+    await cutApi.fetchSheetSvg(42, 100, 0, false, undefined, undefined, true, 'top-left');
+    await cutApi.fetchGroupPdf(42, 100, false, undefined, true, undefined, 'top-left');
+    await cutApi.fetchJobPdf(42, false, undefined, true, undefined, 'top-left');
+
+    for (const call of fetchMock.mock.calls) {
+      expect(call[0] as string).toContain('axisOrigin=top-left');
     }
   });
 

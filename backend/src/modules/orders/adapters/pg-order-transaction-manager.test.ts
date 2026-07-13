@@ -20,6 +20,59 @@ import type {
 } from '../dto/save-order.dto';
 
 describe('PgOrderTransactionManager', () => {
+  it('lockOrderName takes the advisory lock on the normalized name (first, no data reads)', async () => {
+    const database = createDatabase();
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await manager.runInTransaction(async (uow) => {
+      await uow.lockOrderName('  2558 ');
+    });
+
+    const lockQuery = database.queries.find((query) => query.text.includes('pg_advisory_xact_lock'));
+    expect(lockQuery).toBeDefined();
+    expect(lockQuery?.params?.[0]).toBe('2558');
+  });
+
+  it('assertOrderNameAvailable passes when no live duplicate exists', async () => {
+    const database = createDatabase({ duplicateNameRow: null });
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await manager.runInTransaction(async (uow) => {
+      await expect(uow.assertOrderNameAvailable({ orderName: '2558' })).resolves.toBeUndefined();
+    });
+
+    const dupQuery = database.queries.find((query) => normalizeSql(query.text).includes('lower(trim(order_name))'));
+    expect(normalizeSql(dupQuery?.text ?? '')).toContain('delete_flag = false');
+    expect(dupQuery?.params).toEqual(['2558', null]);
+  });
+
+  it('assertOrderNameAvailable excludes the order being renamed and throws 409 with the suggestion', async () => {
+    const database = createDatabase({
+      duplicateNameRow: { order_id: 77, order_name: '2558' },
+      suggestedNextName: '2600',
+    });
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await expect(
+      manager.runInTransaction(async (uow) => {
+        await uow.assertOrderNameAvailable({ orderName: ' 2558 ', excludeOrderId: 42 });
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'ORDER_NAME_DUPLICATE',
+      details: { existingOrderId: 77, orderName: '2558', suggestedOrderName: '2600' },
+    });
+
+    const dupQuery = database.queries.find((query) => normalizeSql(query.text).includes('lower(trim(order_name))'));
+    expect(dupQuery?.params).toEqual(['2558', 42]);
+    // Предложение считается по ЧИСЛОВЫМ именам с защитой от bigint-переполнения
+    // и ТОЛЬКО по продакшн-эпохе (order_date >= 2025-12-01): легаси-имена вида
+    // 230725 (даты до go-live) не должны задирать следующий номер серии.
+    const suggestQuery = database.queries.find((query) => normalizeSql(query.text).includes('AS next'));
+    expect(suggestQuery?.text).toContain("^\\d{1,15}$");
+    expect(suggestQuery?.text).toContain("2025-12-01");
+  });
+
   it('runs order writes through the Postgres unit of work', async () => {
     const database = createDatabase();
     const manager = new PgOrderTransactionManager(database.service);
@@ -28,6 +81,7 @@ describe('PgOrderTransactionManager', () => {
       await uow.setSessionUser('42');
       await expect(uow.loadOrderForUpdate(100)).resolves.toEqual({
         orderId: 100,
+      orderName: 'A-100',
         version: 2,
         createdByUserId: '42',
         managerUserId: '42',
@@ -59,7 +113,7 @@ describe('PgOrderTransactionManager', () => {
 
     const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
     expect(sql).toContain('SELECT set_session_user($1)');
-    expect(sql).toContain('SELECT order_id, version, created_by, manager_id FROM orders');
+    expect(sql).toContain('SELECT order_id, order_name, version, created_by, manager_id FROM orders');
     expect(sql).toContain('INSERT INTO orders');
     expect(sql).toContain('project_id');
     expect(sql).toContain('INSERT INTO order_details');
@@ -798,6 +852,8 @@ function createDatabase(
         }
       | null;
     restoredRowCount?: number;
+    duplicateNameRow?: { order_id: number; order_name: string } | null;
+    suggestedNextName?: string | null;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -806,6 +862,19 @@ function createDatabase(
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
       const normalized = normalizeSql(text);
+
+      if (normalized.includes('pg_advisory_xact_lock')) {
+        return { rows: [], rowCount: 1 };
+      }
+
+      if (normalized.includes('lower(trim(order_name))')) {
+        const row = options.duplicateNameRow;
+        return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+
+      if (normalized.includes('AS next')) {
+        return { rows: [{ next: options.suggestedNextName ?? null }], rowCount: 1 };
+      }
 
       if (normalized.startsWith('INSERT INTO command_idempotency_keys')) {
         lastRequestHash = params[3];

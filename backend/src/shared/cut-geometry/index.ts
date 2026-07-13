@@ -30,15 +30,31 @@ export interface GeomPiece {
   width_mm: number;
   height_mm: number;
   rotated: boolean;
+  rotation_forbidden?: boolean;
   label?: PieceLabelSnapshot;
 }
 
 /** Full sheet geometry descriptor (mirrors SheetPlacementsJson shape). */
 export interface GeomSheet {
+  coordinate_contract?: 'native_portrait_v1';
   trim_mm: { left: number; right: number; top: number; bottom: number };
   sheet_width_mm: number;
   sheet_height_mm: number;
   pieces: GeomPiece[];
+}
+
+export function validateSheetGroupInvariant(
+  sheets: ReadonlyArray<{ placements: Pick<GeomSheet, 'sheet_width_mm' | 'sheet_height_mm' | 'coordinate_contract'> }>,
+): 'mixed_dimensions' | 'mixed_coordinate_contract' | null {
+  const first = sheets[0]?.placements;
+  if (!first) return null;
+  for (const { placements } of sheets.slice(1)) {
+    if (placements.sheet_width_mm !== first.sheet_width_mm || placements.sheet_height_mm !== first.sheet_height_mm) {
+      return 'mixed_dimensions';
+    }
+    if (placements.coordinate_contract !== first.coordinate_contract) return 'mixed_coordinate_contract';
+  }
+  return null;
 }
 
 /** Kerf + spacing parameters used for gap validation. */
@@ -154,6 +170,47 @@ export function orientPieceRect(
     return { x: sheetH - (r.y + r.h), y: r.x, w: r.h, h: r.w, vw: sheetH, vh: sheetW };
   }
   return { x: r.x, y: r.y, w: r.w, h: r.h, vw: sheetW, vh: sheetH };
+}
+
+export type CutAxisOrigin = 'top-left' | 'bottom-left';
+
+/** Apply the operator-selected Y origin in the final oriented viewBox. */
+export function applyAxisOrigin<T extends { x: number; y: number; w: number; h: number; vw: number; vh: number }>(
+  rect: T,
+  axisOrigin: CutAxisOrigin = 'top-left',
+  landscape = false,
+): T {
+  if (axisOrigin === 'top-left') return rect;
+  if (landscape) {
+    return { ...rect, x: rect.vw - rect.x - rect.w };
+  }
+  return { ...rect, y: rect.vh - rect.y - rect.h };
+}
+
+/** Undo the final-view X reflection used by a bottom-left landscape view. */
+export function undoAxisOriginX(
+  orientedX: number,
+  orientedWidth: number,
+  viewWidth: number,
+  axisOrigin: CutAxisOrigin = 'top-left',
+  landscape = false,
+): number {
+  return axisOrigin === 'bottom-left' && landscape
+    ? viewWidth - orientedX - orientedWidth
+    : orientedX;
+}
+
+/** Undo applyAxisOrigin for a final-view top-left coordinate. */
+export function undoAxisOriginY(
+  orientedY: number,
+  orientedHeight: number,
+  viewHeight: number,
+  axisOrigin: CutAxisOrigin = 'top-left',
+  landscape = false,
+): number {
+  return axisOrigin === 'bottom-left' && !landscape
+    ? viewHeight - orientedY - orientedHeight
+    : orientedY;
 }
 
 // ── Piece rotation (Codex R22 BLOCKER #2) ────────────────────────────────
@@ -363,6 +420,7 @@ export type AutoPieceSpec = {
   baseW: number;
   baseH: number;
   label: PieceLabel;
+  rotationForbidden?: boolean;
 };
 
 /**
@@ -374,6 +432,7 @@ export type AutoSheetSpec = {
   sheet_width_mm: number;
   sheet_height_mm: number;
   trim_mm: GeomSheet['trim_mm'];
+  coordinate_contract?: 'native_portrait_v1';
 };
 
 const moveKey = (id: string, inst: number) => `${id}#${inst}`;
@@ -423,6 +482,7 @@ export function reconstructManualSheets(args: {
   const byIndex = new Map<number, GeomSheet>();
   for (const a of args.autoSheets) {
     byIndex.set(a.sheetIndex, {
+      ...(a.coordinate_contract ? { coordinate_contract: a.coordinate_contract } : {}),
       trim_mm: args.trim,
       sheet_width_mm: a.sheet_width_mm,
       sheet_height_mm: a.sheet_height_mm,
@@ -449,6 +509,7 @@ export function reconstructManualSheets(args: {
       width_mm: w,
       height_mm: h,
       rotated: m.rotated,
+      ...(spec.rotationForbidden !== undefined ? { rotation_forbidden: spec.rotationForbidden } : {}),
       label: spec.label,
     });
   }

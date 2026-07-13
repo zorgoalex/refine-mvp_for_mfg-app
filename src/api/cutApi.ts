@@ -103,6 +103,7 @@ export const cutApi = {
     variant?: 'auto' | 'manual' | 'active',
     renderToken?: string,
     originTopLeft = true,
+    axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
   ): Promise<Blob> {
     const path = apiRoutes.cutJobs.sheetPng(
       validateCutJobId(cutJobId),
@@ -118,6 +119,7 @@ export const cutApi = {
     // origin top-left (transpose) is the default; emit explicitly so the RAW
     // (legacy 90° CW) half is never silently dead and browser cache keys differ.
     params.append('origin', originTopLeft ? 'tl' : 'raw');
+    params.append('axisOrigin', axisOrigin);
     if (variant) params.append('variant', variant);
     if (renderToken) params.append('renderVersion', renderToken);
     const { blob } = await httpClient.download(`${path}?${params.toString()}`);
@@ -132,6 +134,7 @@ export const cutApi = {
     variant?: 'auto' | 'manual' | 'active',
     renderToken?: string,
     originTopLeft = true,
+    axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
   ): Promise<Blob> {
     const path = apiRoutes.cutJobs.sheetSvg(
       validateCutJobId(cutJobId),
@@ -141,6 +144,7 @@ export const cutApi = {
     const params = new URLSearchParams();
     if (landscape) params.append('orientation', 'landscape');
     params.append('origin', originTopLeft ? 'tl' : 'raw');
+    params.append('axisOrigin', axisOrigin);
     if (variant) params.append('variant', variant);
     if (renderToken) params.append('renderVersion', renderToken);
     const qs = params.toString();
@@ -160,11 +164,13 @@ export const cutApi = {
     renderToken?: string,
     originTopLeft = true,
     pdfTemplate?: string,
+    axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
   ): Promise<CutPdfResult> {
     const path = apiRoutes.cutJobs.groupPdf(validateCutJobId(cutJobId), validateCutJobId(groupId));
     const params = new URLSearchParams();
     if (landscape) params.append('orientation', 'landscape');
     params.append('origin', originTopLeft ? 'tl' : 'raw');
+    params.append('axisOrigin', axisOrigin);
     if (renderToken) {
       params.append('variant', 'active');
       params.append('renderVersion', renderToken);
@@ -179,11 +185,12 @@ export const cutApi = {
    * When `renderToken` is given, appends `variant=active&renderVersion=<token>`
    * so the browser fetches the active layout and busts the render cache.
    */
-  fetchJobPdf(cutJobId: number, landscape = false, renderToken?: string, originTopLeft = true, pdfTemplate?: string): Promise<CutPdfResult> {
+  fetchJobPdf(cutJobId: number, landscape = false, renderToken?: string, originTopLeft = true, pdfTemplate?: string, axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left'): Promise<CutPdfResult> {
     const path = apiRoutes.cutJobs.jobPdf(validateCutJobId(cutJobId));
     const params = new URLSearchParams();
     if (landscape) params.append('orientation', 'landscape');
     params.append('origin', originTopLeft ? 'tl' : 'raw');
+    params.append('axisOrigin', axisOrigin);
     if (renderToken) {
       params.append('variant', 'active');
       params.append('renderVersion', renderToken);

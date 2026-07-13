@@ -57,12 +57,16 @@ describe('buildCategorizedResources', () => {
   const categoryMap: Record<string, string> = {
     clients: 'Контрагенты',
     payments: 'Финансы',
+    'cut-jobs': 'Производство',
+    scan: 'Производство',
     materials: 'Материалы',
     configuration: 'Настройки',
   };
   const labels: Record<string, string> = {
     clients: 'Клиенты',
     payments: 'Платежи',
+    'cut-jobs': 'Раскрой',
+    scan: 'Сканер бирок',
     materials: 'Материалы',
     configuration: 'Конфигурация',
   };
@@ -84,6 +88,23 @@ describe('buildCategorizedResources', () => {
     expect(result['Финансы'].map((i) => i.name)).toEqual(['payments']);
     expect(result['Контрагенты'].map((i) => i.name)).toEqual(['clients']);
     expect(result['Материалы'].map((i) => i.name)).toEqual(['materials']);
+  });
+
+  it('places cutting and label scanning under Производство', () => {
+    const result = buildCategorizedResources({
+      resources: [
+        makeResource('cut-jobs', '/cut'),
+        makeResource('scan', '/scan'),
+      ],
+      categoryOrder: categories,
+      categoryMap,
+      resourceLabels: labels,
+      canViewNavigation: () => true,
+      canViewSettings: true,
+    });
+
+    expect(result['Производство'].map((item) => item.name)).toEqual(['cut-jobs', 'scan']);
+    expect(result['Справочники']).toEqual([]);
   });
 
   it('excludes resources the user cannot navigate to', () => {
@@ -200,10 +221,19 @@ describe('buildFlatMenuItems', () => {
       Справочники: [],
       Настройки: [],
     };
-    const items = buildFlatMenuItems(categories, Object.keys(categories), {}, navigate);
+    const clientsIcon = { type: 'clients-icon' } as unknown as React.ReactNode;
+    const paymentsIcon = { type: 'payments-icon' } as unknown as React.ReactNode;
+    const items = buildFlatMenuItems(
+      categories,
+      Object.keys(categories),
+      { clients: clientsIcon, payments: paymentsIcon },
+      navigate,
+    );
     expect(items).toHaveLength(2);
     expect(items?.[0]).toMatchObject({ key: 'clients', title: 'Клиенты' });
     expect(items?.[1]).toMatchObject({ key: 'payments', title: 'Платежи' });
+    expect((items?.[0] as { icon?: React.ReactNode }).icon).toBe(clientsIcon);
+    expect((items?.[1] as { icon?: React.ReactNode }).icon).toBe(paymentsIcon);
 
     (items?.[0] as { onClick?: () => void }).onClick?.();
     expect(navigate).toHaveBeenCalledWith('/clients');
