@@ -22,5 +22,22 @@ describe('global compact collapse header', () => {
 
   it('иконка-стрелка уменьшена под новую высоту', () => {
     expect(appCss).toMatch(/^\.ant-collapse \.ant-collapse-arrow \{[\s\S]*?font-size: 10px/m);
+    // НИКАКИХ overrides сверх проверенного .compact-collapse baseline
+    // (critic: глобальный height на expand-icon — непроверенное изобретение)
+    const iconRule = appCss.match(/^\.ant-collapse \.ant-collapse-expand-icon \{[\s\S]*?\}/m);
+    expect(iconRule?.[0]).toBeTruthy();
+    expect(iconRule?.[0]).not.toContain('height');
+  });
+
+  it('глобальный стандарт = точная копия проверенного .compact-collapse', () => {
+    const globalHeader = appCss.match(/^\.ant-collapse > \.ant-collapse-item > \.ant-collapse-header \{([\s\S]*?)\}/m)?.[1];
+    const legacyHeader = appCss.match(/^\.compact-collapse \.ant-collapse-header \{([\s\S]*?)\}/m)?.[1];
+    expect(globalHeader?.trim()).toBe(legacyHeader?.trim());
+    const globalIcon = appCss.match(/^\.ant-collapse \.ant-collapse-expand-icon \{([\s\S]*?)\}/m)?.[1];
+    const legacyIcon = appCss.match(/^\.compact-collapse \.ant-collapse-expand-icon \{([\s\S]*?)\}/m)?.[1];
+    expect(globalIcon?.trim()).toBe(legacyIcon?.trim());
+    const globalArrow = appCss.match(/^\.ant-collapse \.ant-collapse-arrow \{([\s\S]*?)\}/m)?.[1];
+    const legacyArrow = appCss.match(/^\.compact-collapse \.ant-collapse-arrow \{([\s\S]*?)\}/m)?.[1];
+    expect(globalArrow?.trim()).toBe(legacyArrow?.trim());
   });
 });
