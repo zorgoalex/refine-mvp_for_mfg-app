@@ -19,7 +19,10 @@ describe('convertToImportRows Basis field split', () => {
   it.each([
     ['1319Прихожка', { basisProject: '1319', basisProduct: 'Прихожка' }],
     ['1319Сан.узел', { basisProject: '1319', basisProduct: 'Сан.узел' }],
+    ['1319Шкаф 2', { basisProject: '1319', basisProduct: 'Шкаф 2' }],
+    ['1319 / Шкаф 2', { basisProject: '1319', basisProduct: 'Шкаф 2' }],
     ['1319', { basisProject: '1319', basisProduct: null }],
+    ['Шкаф 2', { basisProject: null, basisProduct: 'Шкаф 2' }],
     ['', { basisProject: null, basisProduct: null }],
   ])('splits project reference %j', (value, expected) => {
     expect(splitBasisProjectReference(value)).toEqual(expected);
@@ -36,7 +39,7 @@ describe('convertToImportRows Basis field split', () => {
       basisDesignation: '11.02',
       detailName: 'Бок L',
       basisData: '1/11.02/Бок L',
-      basisProject: '1057',
+      basisProject: '№ 1057 / Кухня',
       basisProduct: null,
     });
     // The packed "position~~designation~~name" form must be gone.

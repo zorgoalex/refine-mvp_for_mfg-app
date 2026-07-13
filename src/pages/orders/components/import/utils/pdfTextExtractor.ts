@@ -822,7 +822,10 @@ export function convertToImportRows(result: PdfParsedResult): import('../types/i
     ? result.metadata.material.split(',').map(material => material.trim()).filter(Boolean)
     : [];
   const fallbackMaterial = metadataMaterials.length === 1 ? metadataMaterials[0] : null;
-  const basisProject = splitBasisProjectReference(result.metadata.orderNumber).basisProject;
+  const legacyBasisProject = [
+    result.metadata.orderNumber ? `№ ${result.metadata.orderNumber}` : '',
+    result.metadata.orderName,
+  ].filter(Boolean).join(' / ') || null;
 
   return result.details.map((detail, index) => {
     const splitReference = splitBasisProjectReference(detail.projectReference);
@@ -835,7 +838,9 @@ export function convertToImportRows(result: PdfParsedResult): import('../types/i
     millingTypeName: detail.milling || null,
     filmName: detail.film || null,
     note: detail.note || null,
-    basisProject: splitReference.basisProject ?? basisProject,
+    // Old reports have no per-row project column. Preserve their exact
+    // "№ <order> / <name>" contract; only new layouts use the split fields.
+    basisProject: splitReference.basisProject ?? legacyBasisProject,
     basisProduct: splitReference.basisProduct,
     basisData: `${detail.position}/${detail.designation}/${detail.name}`,
     // PDF "Обозн." → dedicated Basis designation field.
@@ -853,7 +858,12 @@ export function splitBasisProjectReference(value: string | null | undefined): {
   const normalized = normalizeWhitespace(value ?? '');
   if (!normalized) return { basisProject: null, basisProduct: null };
 
-  const basisProject = (normalized.match(/\d+/g) ?? []).join('') || null;
-  const basisProduct = normalizeWhitespace(normalized.replace(/\d+/g, '')) || null;
+  const match = normalized.match(/^(\d+)(.*)$/);
+  if (!match) {
+    return { basisProject: null, basisProduct: normalized };
+  }
+
+  const basisProject = match[1];
+  const basisProduct = normalizeWhitespace(match[2].replace(/^[\s/\\|:–—-]+/, '')) || null;
   return { basisProject, basisProduct };
 }

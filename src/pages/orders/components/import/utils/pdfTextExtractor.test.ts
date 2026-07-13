@@ -280,7 +280,7 @@ describe('parsePdfContent PDF fixtures', () => {
     const rows = convertToImportRows(result);
 
     expect(rows[0]).toMatchObject({
-      basisProject: '020',
+      basisProject: '№ 020 / Respublika',
       basisProduct: null,
       basisData: '1/05/Мойка. Дверь 1',
       // "Обозн." goes to its own field; detail name holds only "Наименование".
@@ -288,7 +288,7 @@ describe('parsePdfContent PDF fixtures', () => {
       detailName: 'Мойка. Дверь 1',
     });
     expect(rows.at(-1)).toMatchObject({
-      basisProject: '020',
+      basisProject: '№ 020 / Respublika',
       basisProduct: null,
       basisData: '40/140/Тумба 1. Дверь',
       basisDesignation: '140',
