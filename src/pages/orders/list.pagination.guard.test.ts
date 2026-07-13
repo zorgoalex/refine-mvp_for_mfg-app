@@ -9,5 +9,6 @@ describe('orders list pagination', () => {
     expect(source).toContain('ordersCompactPagination');
     expect(source).toContain("position: ['topRight', 'bottomRight']");
     expect(source).toContain("size: 'small'");
+    expect(source).toContain('simple: false');
   });
 });

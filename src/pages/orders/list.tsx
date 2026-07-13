@@ -478,6 +478,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     ...(tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination : {}),
     position: ['topRight', 'bottomRight'],
     size: 'small',
+    simple: false,
     showTotal: () => (
       <Space size={4}>
         {useBackendCut && (
