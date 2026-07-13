@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   BAZIS_COLUMN_LABELS,
@@ -64,6 +65,32 @@ describe('Bazis label field catalog', () => {
       expect.objectContaining({ id: 'detail.future_metric', label: 'Future metric', type: 'number' }),
     ]));
     expect(catalog.some((field) => field.id === 'detail.width')).toBe(false);
+  });
+
+  it('uses order-card labels and hides internal detail columns', () => {
+    const orderDetailTableSource = readFileSync(
+      new URL('../../../../../src/pages/orders/components/tables/OrderDetailTable.tsx', import.meta.url),
+      'utf8',
+    );
+    const definitionsBlock = orderDetailTableSource.match(
+      /const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS[^=]*= \[([\s\S]*?)\n\];/,
+    )?.[1] ?? '';
+    const cardFields = [...definitionsBlock.matchAll(/\{ key: '([^']+)', label: '([^']+)'/g)]
+      .map((match) => ({ key: match[1], label: match[2] }))
+      .filter(({ key }) => key !== 'actions');
+    const catalog = buildRuntimeLabelFieldCatalog([
+      ...cardFields.map(({ key }) => ({ columnName: key, dataType: 'text' })),
+      { columnName: 'basis_product', dataType: 'text' },
+    ]);
+    const detailFields = new Map(
+      catalog.filter((field) => field.source === 'detail').map((field) => [field.sourceColumn, field.label]),
+    );
+
+    expect(cardFields.length).toBeGreaterThan(0);
+    for (const { key, label } of cardFields) {
+      expect(detailFields.get(key), key).toBe(label);
+    }
+    expect(catalog.some((field) => field.id === 'detail.basis_product')).toBe(false);
   });
 
   it('uses one catalog source for field binding validation', () => {

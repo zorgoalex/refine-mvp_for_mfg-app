@@ -194,34 +194,35 @@ export const DYNAMIC_LABEL_FIELDS: readonly LabelFieldCatalogItem[] = [
 const DETAIL_FIELD_LABELS: Record<string, string> = {
   detail_id: 'ID детали',
   order_id: 'ID заказа',
-  detail_number: 'Номер/позиция детали',
+  detail_number: '№',
   detail_name: 'Название детали',
   height: 'Высота',
   width: 'Ширина',
-  quantity: 'Количество',
+  quantity: 'Кол-во',
   area: 'Площадь',
   material_id: 'ID материала',
-  sheet_material_type_id: 'ID листового материала',
+  sheet_material_type_id: 'Материал',
   material_name: 'Материал',
-  milling_type_id: 'ID фрезеровки',
-  edge_type_id: 'ID кромки',
-  film_id: 'ID пленки',
-  milling_cost_per_sqm: 'Фрезеровка за м2',
-  detail_cost: 'Стоимость детали',
-  priority: 'Приоритет',
-  production_status_id: 'ID статуса производства',
+  milling_type_id: 'Фрезеровка',
+  edge_type_id: 'Обкат',
+  film_id: 'Пленка',
+  milling_cost_per_sqm: 'Цена за кв.м.',
+  detail_cost: 'Сумма',
+  priority: 'Пр-т',
+  production_status_id: 'Статус',
   joint_order_id: 'ID объединенного заказа',
-  note: 'Примечание детали',
+  note: 'Примечание',
   link_cutting_file: 'Файл раскроя',
   link_cutting_image_file: 'Картинка раскроя',
   link_cad_file: 'CAD файл',
   link_pdf_file: 'PDF файл',
   ref_key_1c: 'Ключ 1C детали',
   basis_project: 'Базис проект',
-  basis_product: 'Базис изделие',
   basis_data: 'Базис данные',
-  basis_designation: 'Базис обозн.',
+  basis_designation: 'Базис обозн. изделия',
 };
+
+const HIDDEN_DETAIL_FIELD_COLUMNS = new Set(['basis_product']);
 
 const ORDER_FIELD_LABELS: Record<string, string> = {
   order_id: 'ID заказа',
@@ -275,24 +276,28 @@ export const BAZIS_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = BAZIS_COLUM
   category: inferCategory(label),
 }));
 
-export const DETAIL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.entries(DETAIL_FIELD_LABELS).map(([column, label]) => ({
-  id: `detail.${column}`,
-  source: 'detail',
-  sourceColumn: column,
-  label,
-  type: inferViewFieldType(column),
-  category: 'Деталь',
-}));
-
-export function buildDetailFieldCatalog(columns: readonly DetailFieldColumnMetadata[]): LabelFieldCatalogItem[] {
-  return columns.map(({ columnName, dataType }) => ({
-    id: `detail.${columnName}`,
-    source: 'detail' as const,
-    sourceColumn: columnName,
-    label: DETAIL_FIELD_LABELS[columnName] ?? humanizeColumnName(columnName),
-    type: inferDatabaseFieldType(dataType),
+export const DETAIL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.entries(DETAIL_FIELD_LABELS)
+  .filter(([column]) => !HIDDEN_DETAIL_FIELD_COLUMNS.has(column))
+  .map(([column, label]) => ({
+    id: `detail.${column}`,
+    source: 'detail',
+    sourceColumn: column,
+    label,
+    type: inferViewFieldType(column),
     category: 'Деталь',
   }));
+
+export function buildDetailFieldCatalog(columns: readonly DetailFieldColumnMetadata[]): LabelFieldCatalogItem[] {
+  return columns
+    .filter(({ columnName }) => !HIDDEN_DETAIL_FIELD_COLUMNS.has(columnName))
+    .map(({ columnName, dataType }) => ({
+      id: `detail.${columnName}`,
+      source: 'detail' as const,
+      sourceColumn: columnName,
+      label: DETAIL_FIELD_LABELS[columnName] ?? humanizeColumnName(columnName),
+      type: inferDatabaseFieldType(dataType),
+      category: 'Деталь',
+    }));
 }
 
 export function buildRuntimeLabelFieldCatalog(
