@@ -39,6 +39,9 @@ describe('per-user uiSize preference', () => {
     // critic R3: протухший PATCH-ответ (сессия сменилась в полёте) не должен
     // перезаписывать state/кэш нового юзера
     expect(themeProvider).toMatch(/if \(getCurrentUserId\(\) !== userId\) \{\s*return;/);
+    // critic R4: GET-ответ тоже применяется только под originating userId
+    expect(themeProvider).toMatch(/responseSize && getCurrentUserId\(\) === userId/);
+    expect(themeProvider).toContain('setStoredUiSize(userId, responseSize)');
   });
 
   it('App: ConfigProvider componentSize управляется uiSize', () => {

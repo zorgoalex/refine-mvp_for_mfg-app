@@ -56,18 +56,18 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
       .then((response) => {
         if (!active) return;
         setModeState(response.preferences.themeMode);
-        // Окно смешанного деплоя: старый backend стрипает uiSize из ответа —
-        // не затирать кэш/optimistic значение undefined'ом
+        // uiSize применяем только если сессия всё ещё принадлежит userId,
+        // с которым эффект стартовал: ответ юзера A не должен травить
+        // state/кэш юзера B (critic R4); mixed deploy — старый backend
+        // стрипает uiSize из ответа, undefined не затирает кэш
         const responseSize = isUiSize(response.preferences.uiSize) ? response.preferences.uiSize : null;
-        if (responseSize) {
+        if (responseSize && getCurrentUserId() === userId) {
           setUiSizeState(responseSize);
+          setStoredUiSize(userId, responseSize);
         }
         const refreshedUserId = getCurrentUserId();
         if (refreshedUserId) {
           setStoredThemeMode(refreshedUserId, response.preferences.themeMode);
-          if (responseSize) {
-            setStoredUiSize(refreshedUserId, responseSize);
-          }
         }
       })
       .catch(() => {
