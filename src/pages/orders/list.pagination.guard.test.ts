@@ -11,4 +11,10 @@ describe('orders list pagination', () => {
     expect(source).toContain("size: 'small'");
     expect(source).toContain('simple: false');
   });
+
+  it('vertically centers compact pagination controls of different heights', () => {
+    const styles = fs.readFileSync(path.resolve(__dirname, 'list.css'), 'utf8');
+
+    expect(styles).toMatch(/\.orders-table \.ant-pagination\s*\{[^}]*align-items:\s*center;/s);
+  });
 });
