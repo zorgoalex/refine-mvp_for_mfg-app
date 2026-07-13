@@ -180,6 +180,13 @@ export const BazisPage: React.FC = () => {
         render: (value: string, record) => <Link to={`/bazis/projects/${record.bazisProjectId}`}>{value}</Link>,
       },
       {
+        title: 'Заказ Базис',
+        dataIndex: 'bazisOrderNo',
+        key: 'bazisOrderNo',
+        width: 140,
+        render: (value: string | null) => value?.trim() || '—',
+      },
+      {
         title: 'Проект ERP',
         dataIndex: 'projectId',
         key: 'projectId',

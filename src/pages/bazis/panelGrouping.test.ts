@@ -14,7 +14,7 @@ import {
 
 let nextId = 1;
 
-function panel(overrides: Partial<BazisTreeNode & { pathTitle: string }> = {}) {
+function panel(overrides: Partial<BazisTreeNode & { pathTitle: string; productName: string | null }> = {}) {
   const bazisNodeId = overrides.bazisNodeId ?? nextId++;
   return {
     bazisNodeId,
@@ -25,6 +25,8 @@ function panel(overrides: Partial<BazisTreeNode & { pathTitle: string }> = {}) {
     name: 'Стенка',
     detailCode: null,
     position: null,
+    designation: null,
+    productOrderNo: null,
     quantity: 1,
     cumulativeQuantity: null,
     lengthMm: 720,
@@ -35,6 +37,7 @@ function panel(overrides: Partial<BazisTreeNode & { pathTitle: string }> = {}) {
     orders: [],
     orderIds: [],
     pathTitle: 'Шкаф',
+    productName: null,
     ...overrides,
   };
 }
@@ -110,6 +113,19 @@ describe('groupPanelRows', () => {
     expect(groups[0].orders.map((o) => o.orderId)).toEqual([5, 7]);
   });
 
+  it('собирает уникальные обозначения, изделия и номера Базис-заказов группы', () => {
+    const rows = [
+      panel({ designation: 'Деталь 10', productName: 'Шкаф А', productOrderNo: 'BZ-100' }),
+      panel({ designation: 'Деталь 10 ', productName: 'Шкаф А ', productOrderNo: 'BZ-100 ' }),
+      panel({ designation: 'Деталь 11', productName: 'Шкаф Б', productOrderNo: 'BZ-101' }),
+      panel({ designation: null, productName: null, productOrderNo: null }),
+    ];
+    const groups = groupPanelRows(rows);
+    expect(groups[0].designations).toEqual(['Деталь 10', 'Деталь 11']);
+    expect(groups[0].productNames).toEqual(['Шкаф А', 'Шкаф Б']);
+    expect(groups[0].orderNos).toEqual(['BZ-100', 'BZ-101']);
+  });
+
   it('сохраняет порядок первого появления группы и панелей внутри группы', () => {
     const rows = [
       panel({ bazisNodeId: 10, thicknessMm: 16 }),
@@ -183,6 +199,16 @@ describe('groupPanelRows', () => {
     expect(panelComparators.name(empty, b)).toBeGreaterThan(0);
   });
 
+  it('panelComparators: обозначение и изделие — localeCompare numeric, пустые в конец', () => {
+    const a = groupPanelRows([panel({ designation: 'Деталь 2', productName: 'Шкаф 2' })])[0];
+    const b = groupPanelRows([panel({ designation: 'Деталь 10', productName: 'Шкаф 10' })])[0];
+    const empty = groupPanelRows([panel({ designation: null, productName: null })])[0];
+    expect(panelComparators.designation(a, b)).toBeLessThan(0);
+    expect(panelComparators.designation(empty, a)).toBeGreaterThan(0);
+    expect(panelComparators.product(a, b)).toBeLessThan(0);
+    expect(panelComparators.product(empty, b)).toBeGreaterThan(0);
+  });
+
   it('panelComparators: заказ — по первому имени заказа', () => {
     const a = groupPanelRows([panel({ orders: [{ orderId: 1, orderName: '2500' }] })])[0];
     const b = groupPanelRows([panel({ orders: [{ orderId: 2, orderName: '2600' }] })])[0];
@@ -199,31 +225,52 @@ describe('groupPanelRows', () => {
     expect(panelComparators.seq(flatB, flatA)).toBeGreaterThan(0);
   });
 
-  it('buildPanelFilterOptions: уникальные материалы/наименования/заказы + «(пусто)»', () => {
+  it('buildPanelFilterOptions: уникальные материалы/наименования/изделия/заказы + «(пусто)»', () => {
     const rows = [
-      panel({ mainMaterialName: 'МДФ', name: 'Полка', orders: [{ orderId: 1, orderName: '2500' }] }),
-      panel({ mainMaterialName: 'ЛДСП', name: 'Бок', orders: [{ orderId: 1, orderName: '2500' }] }),
-      panel({ mainMaterialName: 'ЛДСП ', name: null, orders: [] }),
+      panel({
+        mainMaterialName: 'МДФ',
+        name: 'Полка',
+        productName: 'Шкаф А',
+        orders: [{ orderId: 1, orderName: '2500' }],
+      }),
+      panel({
+        mainMaterialName: 'ЛДСП',
+        name: 'Бок',
+        productName: 'Шкаф Б',
+        orders: [{ orderId: 1, orderName: '2500' }],
+      }),
+      panel({ mainMaterialName: 'ЛДСП ', name: null, productName: null, orders: [] }),
     ];
     const options = buildPanelFilterOptions(rows);
     expect(options.materials.map((o) => o.value)).toEqual(['ЛДСП', 'МДФ']);
     expect(options.names.map((o) => o.value)).toEqual(['Бок', 'Полка', PANEL_FILTER_EMPTY]);
+    expect(options.productNames.map((o) => o.value)).toEqual(['Шкаф А', 'Шкаф Б', PANEL_FILTER_EMPTY]);
     expect(options.orders.map((o) => o.value)).toEqual(['2500', PANEL_FILTER_EMPTY]);
     expect(options.names.at(-1)?.label).toBe('(пусто)');
   });
 
-  it('panelFilterPredicate: группа матчится по агрегатам, ребёнок — по своим полям', () => {
+  it('panelFilterPredicate: группа матчится по детям, ребёнок — по своим полям', () => {
     const group = groupPanelRows([
-      panel({ mainMaterialName: 'ЛДСП', name: 'Бок', orders: [{ orderId: 1, orderName: '2500' }] }),
-      panel({ mainMaterialName: 'ЛДСП', name: 'Полка', orders: [] }),
+      panel({
+        mainMaterialName: 'ЛДСП',
+        name: 'Бок',
+        productName: 'Шкаф А',
+        orders: [{ orderId: 1, orderName: '2500' }],
+      }),
+      panel({ mainMaterialName: 'ЛДСП', name: 'Полка', productName: 'Шкаф Б', orders: [] }),
     ])[0];
     expect(panelFilterPredicate('material', 'ЛДСП', group)).toBe(true);
     expect(panelFilterPredicate('material', 'МДФ', group)).toBe(false);
     expect(panelFilterPredicate('name', 'Полка', group)).toBe(true);
+    expect(panelFilterPredicate('productName', 'Шкаф Б', group)).toBe(true);
     expect(panelFilterPredicate('order', '2500', group)).toBe(true);
-    const flat = { ...panel({ name: 'Дно', mainMaterialName: null, orders: [] }), rowType: 'panel' as const };
+    const flat = {
+      ...panel({ name: 'Дно', mainMaterialName: null, productName: null, orders: [] }),
+      rowType: 'panel' as const,
+    };
     expect(panelFilterPredicate('name', 'Дно', flat)).toBe(true);
     expect(panelFilterPredicate('material', PANEL_FILTER_EMPTY, flat)).toBe(true);
+    expect(panelFilterPredicate('productName', PANEL_FILTER_EMPTY, flat)).toBe(true);
     expect(panelFilterPredicate('order', PANEL_FILTER_EMPTY, flat)).toBe(true);
   });
 

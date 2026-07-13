@@ -226,7 +226,12 @@ export const BazisProjectViewPage: React.FC = () => {
               {projectCard.name}
             </Title>
           </Space>
-          <Link to={`/projects/show/${projectCard.projectId}`}>Проект ERP #{projectCard.projectId}</Link>
+          <Space size={12} wrap>
+            <Link to={`/projects/show/${projectCard.projectId}`}>Проект ERP #{projectCard.projectId}</Link>
+            {projectCard.bazisOrderNo?.trim() ? (
+              <Text type="secondary">{`Заказ Базис: ${projectCard.bazisOrderNo.trim()}`}</Text>
+            ) : null}
+          </Space>
         </Space>
       )}
       extra={selectedRevision ? (
@@ -261,6 +266,7 @@ export const BazisProjectViewPage: React.FC = () => {
                   // групповые ключи (материал+размеры) могут совпасть в другой ревизии
                   key={selectedRevision.bazisRevisionId}
                   data={revisionData}
+                  bazisOrderNo={projectCard.bazisOrderNo}
                   selectedId={selectedPanelId}
                   focusToken={panelFocusToken}
                   onSelect={setSelectedPanelId}

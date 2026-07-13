@@ -2,8 +2,8 @@
 // По умолчанию сгруппированы по материалу и размерам (уникальные позиции);
 // чекбокс «Группировать» переключает на плоский список. Группа
 // разворачивается как Excel-группировка: вложенные панели рендерятся детьми
-// таблицы со сдвигом. Колонки Материал/Наименование/Заказ имеют выпадающие
-// мультиселект-фильтры. Выбор панели раскрывает под списком её полную
+// таблицы со сдвигом. Колонки Материал/Наименование/Изделие/Заказ имеют
+// выпадающие мультиселект-фильтры. Выбор панели раскрывает под списком её полную
 // карточку (развёрнута по умолчанию) и спойлеры всех блоков/сборок, в
 // которые она входит (свёрнуты; карточка предка грузится лениво).
 
@@ -36,6 +36,7 @@ const { Text } = Typography;
 
 interface PanelsTabProps {
   data: RevisionData;
+  bazisOrderNo: string | null;
   selectedId: number | null;
   /** Инкрементируется на каждый внешний goToPanel — форсирует авто-раскрытие
    * группы даже при повторной навигации на ту же панель. */
@@ -116,20 +117,34 @@ const PanelFilterDropdown: React.FC<FilterDropdownProps & { options: PanelFilter
   );
 };
 
-export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusToken, onSelect, onGoToTree }) => {
+export const PanelsTab: React.FC<PanelsTabProps> = ({
+  data,
+  bazisOrderNo,
+  selectedId,
+  focusToken,
+  onSelect,
+  onGoToTree,
+}) => {
   const { nodes, byId, ancestorsOf } = data;
   const [expandedKeys, setExpandedKeys] = useState<readonly React.Key[]>([]);
   const [grouped, setGrouped] = useState(true);
+  const fallbackBazisOrderNo = normalizeText(bazisOrderNo);
 
   const panels = useMemo<PanelLike[]>(
     () =>
       nodes
         .filter((node) => node.objectType === 'Панель')
-        .map((node) => ({
-          ...node,
-          pathTitle: nodePathTitle(ancestorsOf(node.bazisNodeId)),
-        })),
-    [ancestorsOf, nodes],
+        .map((node) => {
+          const ancestors = ancestorsOf(node.bazisNodeId);
+          const rootAncestor = ancestors.at(-1) ?? null;
+          return {
+            ...node,
+            pathTitle: nodePathTitle(ancestors),
+            productName: normalizeText(rootAncestor?.name),
+            productOrderNo: normalizeText(rootAncestor?.productOrderNo) ?? fallbackBazisOrderNo,
+          };
+        }),
+    [ancestorsOf, fallbackBazisOrderNo, nodes],
   );
 
   const groupRows = useMemo<PanelGroupTableRow[]>(
@@ -225,6 +240,33 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
         ...filterProps('name', filterOptions.names),
         render: (_, row) =>
           row.rowType === 'group' ? row.names.join(' / ') || '—' : row.name?.trim() || '—',
+      },
+      {
+        title: 'Обозначение',
+        key: 'designation',
+        width: 180,
+        ellipsis: true,
+        sorter: panelComparators.designation,
+        render: (_, row) =>
+          row.rowType === 'group' ? row.designations.join(', ') || '—' : row.designation?.trim() || '—',
+      },
+      {
+        title: 'Изделие',
+        key: 'productName',
+        width: 180,
+        ellipsis: true,
+        sorter: panelComparators.product,
+        ...filterProps('productName', filterOptions.productNames),
+        render: (_, row) =>
+          row.rowType === 'group' ? row.productNames.join(', ') || '—' : row.productName || '—',
+      },
+      {
+        title: 'Базис-заказ',
+        key: 'productOrderNo',
+        width: 160,
+        ellipsis: true,
+        render: (_, row) =>
+          row.rowType === 'group' ? row.orderNos.join(', ') || '—' : row.productOrderNo || '—',
       },
       {
         title: 'Расположение',
@@ -330,7 +372,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({ data, selectedId, focusTok
                 <Table.Summary.Cell index={2}>
                   <Text strong>{totals.totalQuantity ?? '—'}</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={3} colSpan={5} />
+                <Table.Summary.Cell index={3} colSpan={8} />
               </Table.Summary.Row>
             </Table.Summary>
           );
@@ -388,4 +430,9 @@ function formatSize(row: Pick<BazisTreeNode, 'lengthMm' | 'widthMm' | 'thickness
     return '—';
   }
   return parts.filter(Boolean).join(' × ');
+}
+
+function normalizeText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed || null;
 }

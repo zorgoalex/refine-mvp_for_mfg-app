@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest';
  * Контракт вкладки «Панели»: список сгруппирован по материалу+размерам
  * (groupPanelRows), группы разворачиваются как Excel-группировки, вложенные
  * панели рендерятся детьми таблицы со сдвигом. Порядок колонок:
- * № → Размеры → Кол-во → Материал → Наименование → остальные.
+ * № → Размеры → Кол-во → Материал → Наименование → Обозначение → Изделие
+ * → Базис-заказ → остальные.
  */
 const panelsTab = readFileSync(new URL('./PanelsTab.tsx', import.meta.url), 'utf8');
 const viewPage = readFileSync(new URL('./BazisProjectViewPage.tsx', import.meta.url), 'utf8');
@@ -21,8 +22,17 @@ describe('bazis panels grouping UI guards', () => {
     expect(panelsTab).toContain('expandable');
   });
 
-  it('колонки идут в порядке №, Размеры, Кол-во, Материал, Наименование', () => {
-    const order = ["title: '№'", "title: 'Размеры, мм'", "title: 'Кол-во'", "title: 'Материал'", "title: 'Наименование'"];
+  it('колонки идут в порядке №, Размеры, Кол-во, Материал, Наименование, Обозначение, Изделие, Базис-заказ', () => {
+    const order = [
+      "title: '№'",
+      "title: 'Размеры, мм'",
+      "title: 'Кол-во'",
+      "title: 'Материал'",
+      "title: 'Наименование'",
+      "title: 'Обозначение'",
+      "title: 'Изделие'",
+      "title: 'Базис-заказ'",
+    ];
     const positions = order.map((needle) => panelsTab.indexOf(needle));
     expect(positions.every((pos) => pos >= 0)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
@@ -44,6 +54,7 @@ describe('bazis panels grouping UI guards', () => {
     expect(panelsTab).toMatch(/\[focusToken.*?\]|\[.*?focusToken.*?\]/);
     expect(viewPage).toMatch(/goToPanel[\s\S]*?setPanelFocusToken\(\(token\) => token \+ 1\)/);
     expect(viewPage).toContain('focusToken={panelFocusToken}');
+    expect(viewPage).toContain('bazisOrderNo={projectCard.bazisOrderNo}');
   });
 
   it('смена ревизии сбрасывает состояние раскрытия (remount по key)', () => {
@@ -60,7 +71,7 @@ describe('bazis panels grouping UI guards', () => {
     expect(panelsTab).toContain('Table.Summary');
     expect(panelsTab).toContain('Итого');
     expect(panelsTab).toContain('позиций');
-    // Индексы Summary.Cell рассчитаны на 8 колонок БЕЗ инжектированной
+    // Индексы Summary.Cell рассчитаны на 11 колонок БЕЗ инжектированной
     // expand-колонки: rc-table вставляет её только при expandedRowRender
     // (rc-table/lib/Table.js: expandable: !!expandedRowRender); nest-режим
     // (children) рисует иконку внутри первой ячейки. Появится
@@ -83,7 +94,7 @@ describe('bazis panels grouping UI guards', () => {
   it('колонки сортируются кликом по заголовку (sorter → стрелки AntD)', () => {
     expect(panelsTab).toContain('panelComparators');
     const sorterCount = (panelsTab.match(/sorter:/g) ?? []).length;
-    expect(sorterCount).toBeGreaterThanOrEqual(5);
+    expect(sorterCount).toBeGreaterThanOrEqual(7);
   });
 
   it('чекбокс «Группировать» справа над списком, по дефолту включён', () => {
@@ -92,13 +103,13 @@ describe('bazis panels grouping UI guards', () => {
     expect(panelsTab).toContain('Checkbox');
   });
 
-  it('№ сортируется, всего сортировщиков ≥6', () => {
+  it('№ сортируется, всего сортировщиков ≥7', () => {
     expect(panelsTab).toContain('panelComparators.seq');
     const sorterCount = (panelsTab.match(/sorter:/g) ?? []).length;
-    expect(sorterCount).toBeGreaterThanOrEqual(6);
+    expect(sorterCount).toBeGreaterThanOrEqual(7);
   });
 
-  it('фильтры Материал/Наименование/Заказ: кастомный dropdown с тремя кнопками', () => {
+  it('фильтры Материал/Наименование/Изделие/Заказ: кастомный dropdown с тремя кнопками', () => {
     expect(panelsTab).toContain('filterDropdown');
     expect(panelsTab).toContain('Включить все');
     expect(panelsTab).toContain('Сбросить');
@@ -108,5 +119,6 @@ describe('bazis panels grouping UI guards', () => {
     // «Отключить все» кодируется сентинелом: пустой выбор в antd = фильтр выключен
     expect(panelsTab).toContain('PANEL_FILTER_NONE');
     expect(panelsTab).toContain('panelFilterPredicate');
+    expect(panelsTab).toContain("filterProps('productName', filterOptions.productNames)");
   });
 });
