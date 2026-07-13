@@ -475,7 +475,27 @@ html {
   color: var(--app-text);
 }
 
-/* Компактные Collapse панели для формы просмотра заказа */
+/* ГЛОБАЛЬНЫЙ стандарт высоты спойлеров: заголовок Collapse вдвое ниже
+   antd-дефолта (46px → ~24px). Значения = проверенный .compact-collapse
+   (форма заказа); применяется ко всем спойлерам приложения, включая новые.
+   !important — antd 5 задаёт padding через CSS-in-JS на компоненте. */
+.ant-collapse > .ant-collapse-item > .ant-collapse-header {
+  min-height: 24px !important;
+  padding: 4px 12px !important;
+  line-height: 1.2 !important;
+}
+
+.ant-collapse .ant-collapse-expand-icon {
+  padding-inline-end: 6px !important;
+  height: 20px !important;
+}
+
+.ant-collapse .ant-collapse-arrow {
+  font-size: 10px !important;
+}
+
+/* Компактные Collapse панели для формы просмотра заказа (значения совпадают
+   с глобальным стандартом; класс оставлен для совместимости) */
 .compact-collapse .ant-collapse-header {
   min-height: 24px !important;
   padding: 4px 12px !important;

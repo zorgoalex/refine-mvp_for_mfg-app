@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-13",
+    title: "Компактные спойлеры во всём приложении",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Высота заголовков всех спойлеров (разворачиваемых блоков) уменьшена в два раза — новый глобальный стандарт для существующих и будущих спойлеров.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-13",
     title: "Карточка панели Базис-проекта: свойства под спойлером",
     services: ["ERP"],
     repositories: ["repo_erp"],
