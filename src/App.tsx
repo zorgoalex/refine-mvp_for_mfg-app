@@ -21,6 +21,7 @@ import { AppThemeProvider, useAppTheme } from "./theme/ThemeProvider";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
+const OrderCreate = lazy(async () => ({ default: (await import("./pages/orders/create")).OrderCreate }));
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const BazisPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisPage")).BazisPage }));
@@ -616,6 +617,7 @@ const ThemedApp = () => {
                   />
                   <Route path="/orders" >
                     <Route index element={<OrderList />} />
+                    <Route path="create" element={<OrderCreate />} />
                     <Route path="edit/:id" element={<OrderEdit />} />
                     <Route path="show/:id" element={<OrderShow />} />
                   </Route>

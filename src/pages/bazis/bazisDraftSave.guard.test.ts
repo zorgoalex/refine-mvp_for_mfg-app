@@ -11,7 +11,14 @@ const orderBasicInfo = readFileSync(
   'utf8',
 );
 
+const appRoutes = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
+
 describe('bazis draft order guards', () => {
+  it('/orders/create зароучен — draft-first навигация не падает в пустой экран', () => {
+    expect(appRoutes).toContain('<Route path="create" element={<OrderCreate />} />');
+    expect(appRoutes).toContain('pages/orders/create');
+  });
+
   it('stores provenance in a dedicated bazisNodeId field and clears it on copied rows', () => {
     expect(orderTypes).toContain('bazisNodeId?: number | null;');
     expect(orderFormStore).toMatch(/insertDetailAfter[\s\S]*?bazisNodeId: undefined/);
