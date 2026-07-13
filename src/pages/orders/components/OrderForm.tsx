@@ -514,7 +514,9 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       version: 0,
     });
     setInitializing(false);
-    setDirty(false);
+    // Драфт из Базис-панелей = несохранённые данные by definition: кнопка
+    // «Сохранить» требует dirty, юзер должен мочь сохранить без правок.
+    setDirty(true);
     bazisDraftRuntimeRef.current = {
       locationKey: location.key,
       meta: seed.meta,
