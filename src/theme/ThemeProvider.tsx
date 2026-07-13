@@ -113,14 +113,16 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
 
     try {
       const response = await profileApi.updatePreferences({ uiSize: nextSize });
+      // Сессия могла смениться, пока PATCH летел — протухший ответ юзера A
+      // не должен перезаписать state/кэш юзера B
+      if (getCurrentUserId() !== userId) {
+        return;
+      }
       // Старый backend может не вернуть uiSize (mixed deploy) — остаёмся на
       // optimistic-значении nextSize
       const confirmedSize = isUiSize(response.preferences.uiSize) ? response.preferences.uiSize : nextSize;
       setUiSizeState(confirmedSize);
-      const refreshedUserId = getCurrentUserId() ?? userId;
-      if (refreshedUserId) {
-        setStoredUiSize(refreshedUserId, confirmedSize);
-      }
+      setStoredUiSize(userId, confirmedSize);
     } catch {
       // Optimistic local preference; backend retried on next explicit change.
     }

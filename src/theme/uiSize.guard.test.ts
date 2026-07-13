@@ -36,6 +36,9 @@ describe('per-user uiSize preference', () => {
     // critic R2: смена юзера в том же браузере не должна наследовать чужой
     // компакт — на auth-change state сбрасывается в per-user кэш ?? default
     expect(themeProvider).toContain("setUiSizeState(cachedSize ?? 'default')");
+    // critic R3: протухший PATCH-ответ (сессия сменилась в полёте) не должен
+    // перезаписывать state/кэш нового юзера
+    expect(themeProvider).toMatch(/if \(getCurrentUserId\(\) !== userId\) \{\s*return;/);
   });
 
   it('App: ConfigProvider componentSize управляется uiSize', () => {
