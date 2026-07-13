@@ -147,3 +147,68 @@ export function pruneSelection(
 
   return changed ? { selected } : state;
 }
+
+/** Состояние «выбраны все свободные панели» для header-чекбокса таблицы. */
+export function allFreeCheckState(
+  state: PanelSelectionState,
+  panels: ReadonlyArray<Pick<PanelLike, 'bazisNodeId' | 'orders'>>,
+): 'checked' | 'indeterminate' | 'empty' {
+  let selectedInSet = 0;
+  const freeIds: number[] = [];
+  for (const panel of panels) {
+    if (!isBusy(panel)) {
+      freeIds.push(panel.bazisNodeId);
+    }
+    if (state.selected.has(panel.bazisNodeId)) {
+      selectedInSet += 1;
+    }
+  }
+  if (freeIds.length === 0) {
+    return selectedInSet > 0 ? 'indeterminate' : 'empty';
+  }
+  let selectedFree = 0;
+  for (const nodeId of freeIds) {
+    if (state.selected.has(nodeId)) {
+      selectedFree += 1;
+    }
+  }
+  if (selectedFree === freeIds.length) {
+    return 'checked';
+  }
+  return selectedInSet > 0 ? 'indeterminate' : 'empty';
+}
+
+/** Header-чекбокс работает по ПЕРЕДАННОМУ набору панелей (вызывающий передаёт
+ * видимые после фильтров строки). checked=true: добавить свободные панели набора
+ * (занятые не трогаем — осознанно включённые вручную остаются). checked=false:
+ * снять ВСЕ панели набора (включая занятые), скрытый фильтром выбор не трогаем. */
+export function toggleAll(
+  state: PanelSelectionState,
+  panels: ReadonlyArray<Pick<PanelLike, 'bazisNodeId' | 'orders'>>,
+  checked: boolean,
+): PanelSelectionState {
+  if (!checked) {
+    const removable = panels
+      .map((panel) => panel.bazisNodeId)
+      .filter((nodeId) => state.selected.has(nodeId));
+    if (removable.length === 0) {
+      return state;
+    }
+    const selected = new Set(state.selected);
+    for (const nodeId of removable) {
+      selected.delete(nodeId);
+    }
+    return { selected };
+  }
+  const missing = panels
+    .filter((panel) => !isBusy(panel) && !state.selected.has(panel.bazisNodeId))
+    .map((panel) => panel.bazisNodeId);
+  if (missing.length === 0) {
+    return state;
+  }
+  const selected = new Set(state.selected);
+  for (const nodeId of missing) {
+    selected.add(nodeId);
+  }
+  return { selected };
+}

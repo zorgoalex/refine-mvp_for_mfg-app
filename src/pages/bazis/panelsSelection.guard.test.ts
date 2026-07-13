@@ -21,7 +21,10 @@ describe('bazis panels selection UI guards', () => {
   });
 
   it('первая колонка таблицы занята чекбоксами группы и панели', () => {
-    expect(panelsTab).toMatch(/title: ''[\s\S]*?key: 'selection'/);
+    expect(panelsTab).toMatch(/allFreeCheckState\(selection, visiblePanels\)[\s\S]*?key: 'selection'/);
+    // Header-чекбокс «выбрать все» работает по видимым (фильтры) строкам
+    expect(panelsTab).toContain('toggleAll(current, visiblePanels, event.target.checked)');
+    expect(panelsTab).toContain('setTableFilters(filters)');
     expect(panelsTab).toContain('groupCheckState');
     expect(panelsTab).toContain('indeterminate');
     expect(panelsTab).toContain('toggleGroup');

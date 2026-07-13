@@ -12,7 +12,7 @@ import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { ApartmentOutlined } from '@ant-design/icons';
 import { Button, Checkbox, Collapse, Empty, Modal, Space, Table, Tooltip, Typography, notification } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import type { FilterDropdownProps } from 'antd/es/table/interface';
+import type { FilterDropdownProps, FilterValue } from 'antd/es/table/interface';
 import { isApiError } from '../../api/apiError';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
@@ -32,10 +32,12 @@ import {
   type PanelLike,
 } from './panelGrouping';
 import {
+  allFreeCheckState,
   emptySelection,
   groupCheckState,
   pruneSelection,
   selectionSummary,
+  toggleAll,
   toggleGroup,
   togglePanel,
   type PanelSelectionState,
@@ -150,6 +152,9 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   const [expandedKeys, setExpandedKeys] = useState<readonly React.Key[]>([]);
   const [grouped, setGrouped] = useState(true);
   const [selection, setSelection] = useState<PanelSelectionState>(() => emptySelection());
+  // Активные фильтры колонок из Table.onChange — header-чекбокс «выбрать все»
+  // обязан работать только по ВИДИМЫМ (отфильтрованным) строкам.
+  const [tableFilters, setTableFilters] = useState<Record<string, FilterValue | null>>({});
   const [createDraftLoading, setCreateDraftLoading] = useState(false);
   const [addToOrderOpen, setAddToOrderOpen] = useState(false);
   const [refreshedOrdersByNodeId, setRefreshedOrdersByNodeId] = useState<Map<number, BazisTreeNode['orders']> | null>(null);
@@ -208,6 +213,29 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
     [groupRows],
   );
 
+  // Колонка-ключ → поле предиката (колонка «Заказ» имеет key 'orders', поле 'order')
+  const visiblePanels = useMemo<PanelLike[]>(() => {
+    const fieldByColumn: Array<[string, PanelFilterField]> = [
+      ['material', 'material'],
+      ['name', 'name'],
+      ['productName', 'productName'],
+      ['orders', 'order'],
+    ];
+    const active = fieldByColumn.filter(
+      ([column]) => (tableFilters[column]?.length ?? 0) > 0,
+    );
+    const rowVisible = (row: PanelsTableRow): boolean =>
+      active.every(([column, field]) =>
+        (tableFilters[column] as FilterValue).some((value) =>
+          panelFilterPredicate(field, value as string, row),
+        ),
+      );
+    if (grouped) {
+      return groupRows.filter(rowVisible).flatMap((group) => group.children);
+    }
+    return flatRows.filter(rowVisible);
+  }, [flatRows, grouped, groupRows, tableFilters]);
+
   useEffect(() => {
     setSelection((current) => pruneSelection(current, alivePanelIds));
   }, [alivePanelIds]);
@@ -241,7 +269,19 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
 
     return [
       {
-        title: '',
+        // Header: tri-state «выбрать все видимые свободные» (учитывает фильтры;
+        // uncheck снимает только видимые, скрытый выбор не трогает)
+        title: (
+          <Checkbox
+            checked={allFreeCheckState(selection, visiblePanels) === 'checked'}
+            indeterminate={allFreeCheckState(selection, visiblePanels) === 'indeterminate'}
+            disabled={visiblePanels.length === 0}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => {
+              setSelection((current) => toggleAll(current, visiblePanels, event.target.checked));
+            }}
+          />
+        ),
         key: 'selection',
         width: 52,
         render: (_, row) => {
@@ -400,7 +440,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           ) : null,
       },
     ];
-  }, [filterOptions, onGoToTree, selection]);
+  }, [filterOptions, onGoToTree, selection, visiblePanels]);
 
   const selectedNodeIds = useMemo(() => Array.from(selection.selected), [selection.selected]);
   const selectedAncestors = selectedId != null ? ancestorsOf(selectedId) : [];
@@ -498,6 +538,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         size="small"
         columns={columns}
         dataSource={grouped ? groupRows : flatRows}
+        onChange={(_pagination, filters) => setTableFilters(filters)}
         pagination={false}
         // ~10 строк по 39px + шапка; содержимое скроллится внутри блока
         scroll={{ y: 390 }}

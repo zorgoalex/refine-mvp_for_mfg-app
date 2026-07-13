@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { BazisTreeNode, BazisOrderRef } from '../../api/types/bazisApi.types';
 import type { PanelGroupRow } from './panelGrouping';
 import {
+  allFreeCheckState,
   emptySelection,
+  toggleAll,
   groupCheckState,
   pruneSelection,
   selectionSummary,
@@ -159,5 +161,59 @@ describe('panelSelection', () => {
 
     const pruned = pruneSelection(state, new Set([10, 11, 99]));
     expect(pruned).toBe(state);
+  });
+});
+
+describe('toggleAll / allFreeCheckState', () => {
+  const freePanel = (id: number) => ({ bazisNodeId: id, orders: [] as never[] });
+  const busyPanel = (id: number) => ({ bazisNodeId: id, orders: [{ orderId: 1, orderName: '1' }] as never });
+  const panels = [freePanel(1), busyPanel(2), freePanel(3)];
+
+  it('toggleAll(true) выбирает только свободные; повторно — no-op тот же объект', () => {
+    const first = toggleAll(emptySelection(), panels, true);
+    expect([...first.selected].sort()).toEqual([1, 3]);
+    expect(toggleAll(first, panels, true)).toBe(first);
+  });
+
+  it('toggleAll(false) снимает панели переданного набора (и занятые), чужие не трогает', () => {
+    let state = toggleAll(emptySelection(), panels, true);
+    state = togglePanel(state, 2);
+    state = togglePanel(state, 99); // «скрытая фильтром» панель вне набора
+    const cleared = toggleAll(state, panels, false);
+    expect([...cleared.selected]).toEqual([99]);
+    expect(toggleAll(cleared, panels, false)).toBe(cleared);
+  });
+
+  it('фильтрованный поднабор: select-all добавляет только его свободные, uncheck снимает только его', () => {
+    const visible = [freePanel(1), busyPanel(2)]; // панель 3 «скрыта фильтром»
+    let state = togglePanel(emptySelection(), 3);
+    state = toggleAll(state, visible, true);
+    expect([...state.selected].sort()).toEqual([1, 3]);
+    expect(allFreeCheckState(state, visible)).toBe('checked');
+    state = toggleAll(state, visible, false);
+    expect([...state.selected]).toEqual([3]);
+  });
+
+  it('allFreeCheckState: empty → indeterminate → checked; занятая вручную не ломает checked', () => {
+    let state = emptySelection();
+    expect(allFreeCheckState(state, panels)).toBe('empty');
+    state = togglePanel(state, 1);
+    expect(allFreeCheckState(state, panels)).toBe('indeterminate');
+    state = togglePanel(state, 3);
+    expect(allFreeCheckState(state, panels)).toBe('checked');
+    state = togglePanel(state, 2);
+    expect(allFreeCheckState(state, panels)).toBe('checked');
+  });
+
+  it('allFreeCheckState считает только переданный набор — выбор вне набора не даёт indeterminate', () => {
+    const visible = [freePanel(1)];
+    const state = togglePanel(emptySelection(), 3);
+    expect(allFreeCheckState(state, visible)).toBe('empty');
+  });
+
+  it('список только из занятых: empty без выбора, indeterminate при ручном выборе занятой', () => {
+    const busyOnly = [busyPanel(7)];
+    expect(allFreeCheckState(emptySelection(), busyOnly)).toBe('empty');
+    expect(allFreeCheckState(togglePanel(emptySelection(), 7), busyOnly)).toBe('indeterminate');
   });
 });
