@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { buildOrderCardPagination } from './OrderCardList';
 
 const read = (p: string) => readFileSync(join(__dirname, '..', '..', '..', p), 'utf8');
 
@@ -15,6 +16,21 @@ describe('orders list phone rendering', () => {
     expect(src).toContain('buildOrderCardModel');
     expect(src).not.toContain('<Table');
     expect(src).toContain('onOpen');
+  });
+  it('converts Table pagination position to a valid Ant List position', () => {
+    expect(buildOrderCardPagination({
+      current: 1,
+      pageSize: 20,
+      total: 4641,
+      position: ['topRight', 'bottomRight'],
+    })).toMatchObject({
+      current: 1,
+      pageSize: 20,
+      total: 4641,
+      position: 'bottom',
+      simple: true,
+      showSizeChanger: false,
+    });
   });
   it('cut-select group workflow stays desktop-only', () => {
     const src = read('pages/orders/mobile/OrderCardList.tsx');
