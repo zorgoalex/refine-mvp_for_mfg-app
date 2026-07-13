@@ -850,6 +850,235 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toContain('writeAuditEvent');
   });
 
+  it('passes unit of work and locked order to prePersistHook before header persistence in update', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      details: [calculatedDetail({ id: 11, detailCost: 5000 })],
+    });
+    const hook = vi.fn(async (uow: OrderWriteUnitOfWork, locked: LockedOrderRow) => {
+      expect(transactions.calls).not.toContain('updateOrderHeader');
+      transactions.calls.push('prePersistHook');
+      expect(uow.getTransactionClient()).toBe(transactions.transactionClient);
+      expect(locked).toEqual({
+        orderId: 42,
+        orderName: 'Seed order',
+        version: 3,
+        createdByUserId: 'user_manager',
+        managerUserId: 'user_manager',
+      });
+    });
+
+    await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Updated order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 2,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 7000,
+          },
+        ],
+        payments: [],
+        version: 3,
+      }),
+      prePersistHook: hook,
+    });
+
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(transactions.calls.indexOf('prePersistHook')).toBeGreaterThan(
+      transactions.calls.indexOf('assertChildOwnership'),
+    );
+    expect(transactions.calls.indexOf('prePersistHook')).toBeLessThan(
+      transactions.calls.indexOf('updateOrderHeader'),
+    );
+  });
+
+  it('rolls back the whole update transaction when prePersistHook throws', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      details: [calculatedDetail({ id: 11, detailCost: 5000 })],
+    });
+
+    await expect(
+      new OrderTransactionService({ transactions }).update({
+        currentUser: currentUser('manager'),
+        orderId: 42,
+        dto: createSaveDto({
+          header: {
+            orderId: 42,
+            orderName: 'Updated order',
+            clientId: 1001,
+            orderDate: '2026-04-30',
+            orderStatusId: 1001,
+            discount: 0,
+            surcharge: 0,
+          },
+          details: [
+            {
+              id: 11,
+              height: 550,
+              width: 200,
+              quantity: 2,
+              materialId: null,
+              sheetMaterialTypeId: 1001,
+              millingTypeId: 1001,
+              edgeTypeId: 1001,
+              detailCost: 7000,
+            },
+          ],
+          payments: [],
+          version: 3,
+        }),
+        prePersistHook: async () => {
+          throw new Error('pre hook failed');
+        },
+      }),
+    ).rejects.toThrow('pre hook failed');
+
+    expect(transactions.committed).toBe(0);
+    expect(transactions.rolledBack).toBe(1);
+    expect(transactions.state.orders.get(42)?.header.orderName).toBe('Seed order');
+    expect(transactions.state.orders.get(42)?.version).toBe(3);
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.calls).not.toContain('updateOrderHeader');
+  });
+
+  it('passes persisted detail ids by clientKey to postPersistHook in update', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      details: [calculatedDetail({ id: 11, detailCost: 5000 })],
+    });
+    const hook = vi.fn().mockResolvedValue(undefined);
+
+    await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Updated order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [
+          {
+            id: 11,
+            height: 550,
+            width: 200,
+            quantity: 2,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 7000,
+          },
+          {
+            clientKey: 'bazis-node-201',
+            height: 1000,
+            width: 500,
+            quantity: 1,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 3000,
+          },
+        ],
+        payments: [],
+        version: 3,
+      }),
+      postPersistHook: hook,
+    });
+
+    expect(hook).toHaveBeenCalledTimes(1);
+    const [uow, updated] = hook.mock.calls[0] as [OrderWriteUnitOfWork, {
+      orderId: number;
+      detailIdsByClientKey: Map<string, number>;
+    }];
+    expect(updated).toEqual({
+      orderId: 42,
+      detailIdsByClientKey: new Map([['bazis-node-201', 1000]]),
+    });
+    expect(uow.getTransactionClient()).toBe(transactions.transactionClient);
+  });
+
+  it('rolls back the whole update transaction when postPersistHook throws', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      details: [calculatedDetail({ id: 11, detailCost: 5000 })],
+    });
+
+    await expect(
+      new OrderTransactionService({ transactions }).update({
+        currentUser: currentUser('manager'),
+        orderId: 42,
+        dto: createSaveDto({
+          header: {
+            orderId: 42,
+            orderName: 'Updated order',
+            clientId: 1001,
+            orderDate: '2026-04-30',
+            orderStatusId: 1001,
+            discount: 0,
+            surcharge: 0,
+          },
+          details: [
+            {
+              id: 11,
+              height: 550,
+              width: 200,
+              quantity: 2,
+              materialId: null,
+              sheetMaterialTypeId: 1001,
+              millingTypeId: 1001,
+              edgeTypeId: 1001,
+              detailCost: 7000,
+            },
+          ],
+          payments: [],
+          version: 3,
+        }),
+        postPersistHook: async () => {
+          throw new Error('post hook failed');
+        },
+      }),
+    ).rejects.toThrow('post hook failed');
+
+    expect(transactions.committed).toBe(0);
+    expect(transactions.rolledBack).toBe(1);
+    expect(transactions.state.orders.get(42)?.header.orderName).toBe('Seed order');
+    expect(transactions.state.orders.get(42)?.version).toBe(3);
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.calls).toContain('writeAuditEvent');
+  });
+
   it('returns cached create response for a repeated idempotency key before any inserts', async () => {
     const transactions = new FakeOrderTransactions();
     transactions.completedCreateResponse = toOrderDto({
