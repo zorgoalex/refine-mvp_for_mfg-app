@@ -26,7 +26,11 @@ export type FreecutObjective = 'min_waste' | 'min_sheets';
 export type FreecutLayoutMode = 'guillotine' | 'nested' | 'vacuum_table';
 export type FreecutRetryStrategy = 'disabled' | 'smart';
 export type FreecutQuality = 'fast' | 'balanced' | 'quality';
+export type FreecutEngineChoice = 'auto' | 'heuristic' | 'ga';
+export type FreecutCutQuality = 'fast' | 'balanced' | 'max';
 export const FREECUT_QUALITIES: FreecutQuality[] = ['fast', 'balanced', 'quality'];
+export const FREECUT_ENGINE_CHOICES: FreecutEngineChoice[] = ['auto', 'heuristic', 'ga'];
+export const FREECUT_CUT_QUALITIES: FreecutCutQuality[] = ['fast', 'balanced', 'max'];
 
 export const FREECUT_OBJECTIVES: FreecutObjective[] = ['min_waste', 'min_sheets'];
 export const FREECUT_LAYOUT_MODES: FreecutLayoutMode[] = ['guillotine', 'nested', 'vacuum_table'];
@@ -46,6 +50,8 @@ export interface ParamProfileForm {
   layout_mode: FreecutLayoutMode;
   retry_strategy: FreecutRetryStrategy;
   quality: FreecutQuality;
+  engine: FreecutEngineChoice;
+  cutQuality: FreecutCutQuality;
   groupShift: boolean;
   vacuum?: { direction?: 'optimal' | 'width' | 'height' };
 }
@@ -64,6 +70,8 @@ export const DEFAULT_PARAM_FORM: ParamProfileForm = {
   layout_mode: 'guillotine',
   retry_strategy: 'disabled',
   quality: 'balanced',
+  engine: 'auto',
+  cutQuality: 'max',
   groupShift: false,
 };
 
@@ -106,6 +114,8 @@ export function paramsToForm(params: Record<string, unknown> | null | undefined)
     layout_mode: oneOf(p.layout_mode, FREECUT_LAYOUT_MODES, d.layout_mode),
     retry_strategy: oneOf(p.retry_strategy, FREECUT_RETRY_STRATEGIES, d.retry_strategy),
     quality: deriveQuality(p),
+    engine: p.engine === 'heuristic' ? 'heuristic' : p.engine === 'ga' ? 'ga' : 'auto',
+    cutQuality: oneOf(p.cut_quality, FREECUT_CUT_QUALITIES, 'max'),
     groupShift: isPlainObject(p.group_shift) && (p.group_shift as { enabled?: unknown }).enabled === true,
     ...(isPlainObject(p.vacuum)
       ? { vacuum: { direction: oneOf((p.vacuum as Record<string, unknown>).direction, ['optimal', 'width', 'height'] as const, 'optimal') } }
@@ -126,6 +136,10 @@ export function formToParams(form: ParamProfileForm): Record<string, unknown> {
     retry_strategy: form.retry_strategy,
     sla_profile: form.quality,
     ga_profile: form.quality,
+    ...(form.layout_mode !== 'vacuum_table' && form.engine === 'heuristic'
+      ? { engine: 'heuristic', cut_quality: form.cutQuality }
+      : {}),
+    ...(form.layout_mode !== 'vacuum_table' && form.engine === 'ga' ? { engine: 'ga' } : {}),
     ...(form.groupShift ? { group_shift: { enabled: true, min_shift_mm: 5, max_passes: 4 } } : {}),
     ...(form.layout_mode === 'vacuum_table' ? { vacuum: { direction: form.vacuum?.direction ?? 'optimal' } } : {}),
   };
@@ -194,8 +208,37 @@ export function summarizeParams(params: Record<string, unknown> | null | undefin
     `${f.time_limit_ms}мс`,
   ];
   if (f.groupShift) parts.push('сжатие групп');
+  if (f.engine === 'heuristic') {
+    parts.push(f.cutQuality === 'max' ? 'движок: быстрый' : `движок: быстрый (${f.cutQuality})`);
+  }
+  if (f.engine === 'ga') parts.push('движок: GA');
   if (f.layout_mode === 'vacuum_table' && f.vacuum?.direction) {
     parts.push(VACUUM_DIRECTION_LABEL[f.vacuum.direction]);
   }
   return parts.join(' / ');
+}
+
+/** Human-readable inconsistencies in RAW stored engine params. The admin API
+ * returns profile params as-is (no merge validation on the read path), so the
+ * form surfaces these instead of silently laundering them on save. */
+export function detectEngineParamAnomalies(params: Record<string, unknown> | null | undefined): string[] {
+  const p = params ?? {};
+  const anomalies: string[] = [];
+
+  if (p.engine !== undefined && p.engine !== 'ga' && p.engine !== 'heuristic') {
+    anomalies.push(`неизвестное значение engine: ${String(p.engine)}`);
+  }
+  if (p.cut_quality !== undefined && !(FREECUT_CUT_QUALITIES as string[]).includes(String(p.cut_quality))) {
+    // Mirrors the write-time validator: unknown tiers must be shown as-is
+    // instead of being normalized to "max" by the form fallback.
+    anomalies.push(`неизвестное значение cut_quality: ${String(p.cut_quality)}`);
+  }
+  if (p.cut_quality !== undefined && p.engine !== 'heuristic') {
+    anomalies.push('cut_quality задан без engine=heuristic');
+  }
+  if (p.layout_mode === 'vacuum_table' && (p.engine !== undefined || p.cut_quality !== undefined)) {
+    anomalies.push('engine/cut_quality не применимы к vacuum_table');
+  }
+
+  return anomalies;
 }
