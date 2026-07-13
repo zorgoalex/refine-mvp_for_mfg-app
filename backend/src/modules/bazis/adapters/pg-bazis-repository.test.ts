@@ -30,7 +30,7 @@ describe('PgBazisRepository.importRevision', () => {
     expect(ordered[0]).toBe('SELECT set_session_user($1)');
     expect(ordered).toContain('INSERT INTO bazis_projects (project_id, name, created_by) VALUES ($1, $2, $3) RETURNING bazis_project_id');
     expect(ordered).toContain('SELECT revision_no FROM bazis_project_revisions WHERE bazis_project_id = $1 AND xml_sha256 = $2');
-    expect(ordered).toContain('INSERT INTO bazis_project_revisions (bazis_project_id, revision_no, file_name, file_size, xml_sha256, raw_xml, bazis_version, product_name, product_price, summary_json, imported_by, request_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12) RETURNING bazis_revision_id');
+    expect(ordered).toContain('INSERT INTO bazis_project_revisions (bazis_project_id, revision_no, file_name, file_size, xml_sha256, raw_xml, bazis_version, bazis_order_no, product_name, product_price, summary_json, imported_by, request_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13) RETURNING bazis_revision_id');
     expect(ordered.filter((sql) => sql.startsWith('INSERT INTO bazis_nodes'))).toHaveLength(2);
     expect(ordered).toContain('UPDATE bazis_projects SET current_revision_id = $1 WHERE bazis_project_id = $2');
     expect(ordered).toContain('INSERT INTO audit_log ( event, entity_type, entity_id, user_id, username, role_code, role, request_id, source, related_order_id, related_client_id, related_payment_id, related_production_event_id, related_deadline_id, related_user_id, status_field, status_id, status_name, status_code, stage_code, before_json, after_json, diff_json, metadata_json ) VALUES ( $1, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20::jsonb, $21::jsonb, $22::jsonb, $23::jsonb ) RETURNING audit_id');
@@ -47,6 +47,62 @@ describe('PgBazisRepository.importRevision', () => {
     ]);
     expect(ordered).toContain('INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key) VALUES ($1,$2,$3,$4::jsonb,$5) ON CONFLICT (idempotency_key) DO NOTHING');
     expect(ordered).toContain("INSERT INTO bazis_import_runs (file_name, xml_sha256, status, revision_id, imported_by, request_id) VALUES ($1,$2,'parsed',$3,$4,$5)");
+  });
+
+  it('writes parsed bazisOrderNo into revision row when present', async () => {
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.importRevision(importCommand({ parsed: parsedRevision({ bazisOrderNo: '1457' }) }));
+
+    const revisionInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_project_revisions'),
+    );
+    expect(revisionInsert?.params[7]).toBe('1457');
+  });
+
+  it('falls back to first root productOrderNo when parsed bazisOrderNo is null', async () => {
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.importRevision(
+      importCommand({
+        parsed: parsedRevision({
+          bazisOrderNo: null,
+          nodes: [
+            {
+              ...parsedRevision().nodes[0],
+              productOrderNo: '1443',
+            },
+            parsedRevision().nodes[1],
+          ],
+        }),
+      }),
+    );
+
+    const revisionInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_project_revisions'),
+    );
+    expect(revisionInsert?.params[7]).toBe('1443');
+  });
+
+  it('stores null bazis_order_no when both parsed and root fallback values are absent', async () => {
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.importRevision(
+      importCommand({
+        parsed: parsedRevision({
+          bazisOrderNo: null,
+          nodes: parsedRevision().nodes.map((node) => ({ ...node, productOrderNo: null })),
+        }),
+      }),
+    );
+
+    const revisionInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_project_revisions'),
+    );
+    expect(revisionInsert?.params[7]).toBeNull();
   });
 
   it('throws BazisRevisionDuplicateError when sha256 exists in same bazis project', async () => {
@@ -1511,6 +1567,7 @@ function createOrderCommand(
 function parsedRevision(overrides: Partial<ParsedBazisRevision> = {}): ParsedBazisRevision {
   return {
     bazisVersion: '11',
+    bazisOrderNo: '1457',
     productName: 'Шкаф Nova',
     productPrice: 1200,
     nodes: [
@@ -1519,6 +1576,7 @@ function parsedRevision(overrides: Partial<ParsedBazisRevision> = {}): ParsedBaz
         parentIndex: null,
         seq: 1,
         nodeKind: 'product',
+        productOrderNo: '1443',
         objectType: null,
         name: 'Root',
         detailCode: null,
@@ -1541,6 +1599,7 @@ function parsedRevision(overrides: Partial<ParsedBazisRevision> = {}): ParsedBaz
         parentIndex: 0,
         seq: 2,
         nodeKind: 'object',
+        productOrderNo: null,
         objectType: 'Panel',
         name: 'Door',
         detailCode: 'D-1',

@@ -6,6 +6,7 @@ import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { OrderTransactionService } from '../../orders/application/order-transaction.service';
 import type { SaveOrderDetailDto, SaveOrderDto } from '../../orders/dto/save-order.dto';
+import type { ParsedBazisNode } from '../application/bazis-xml-parser';
 import type {
   BazisRepositoryPort,
   CreateOrderFromRevisionCommand,
@@ -333,13 +334,14 @@ export class PgBazisRepository implements BazisRepositoryPort {
         [bazisProjectId],
       );
       const revisionNo = Number(revisionNoRow.rows[0].next);
+      const bazisOrderNo = command.parsed.bazisOrderNo ?? firstRootProductOrderNo(command.parsed.nodes);
 
       const revisionRow = await tx.query<{ bazis_revision_id: number | string }>(
         `
         INSERT INTO bazis_project_revisions
           (bazis_project_id, revision_no, file_name, file_size, xml_sha256, raw_xml,
-           bazis_version, product_name, product_price, summary_json, imported_by, request_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)
+           bazis_version, bazis_order_no, product_name, product_price, summary_json, imported_by, request_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13)
         RETURNING bazis_revision_id
         `,
         [
@@ -350,6 +352,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
           command.xmlSha256,
           command.rawXmlGzip,
           command.parsed.bazisVersion,
+          bazisOrderNo,
           command.parsed.productName,
           command.parsed.productPrice,
           JSON.stringify(command.parsed.summary),
@@ -1768,6 +1771,15 @@ async function setSessionUser(tx: TransactionClient, userId: string): Promise<vo
 
 function requestIdOrFallback(requestId: string | undefined, fallback: string): string {
   return requestId && requestId.length > 0 ? requestId : fallback;
+}
+
+function firstRootProductOrderNo(nodes: ParsedBazisNode[]): string | null {
+  for (const node of nodes) {
+    if (node.parentIndex === null && node.productOrderNo) {
+      return node.productOrderNo;
+    }
+  }
+  return null;
 }
 
 function numericUserId(currentUser: CurrentUser): number {
