@@ -341,6 +341,8 @@ probe_file() {
     063_*) probe_all "$(q_col order_details doweling)" \
                      "$(q_col order_details_view doweling)" ;;
     064_*) probe_all "$(q_col bazis_nodes notes)" ;;
+    065_*) probe_all "$(q_col orders deleted_at)" \
+                     "$(q_col orders deleted_by)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
