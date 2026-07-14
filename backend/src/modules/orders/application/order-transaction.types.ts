@@ -321,6 +321,7 @@ export interface OrderWriteUnitOfWork {
     orderId: number;
     previousVersion: number;
     targetOrderName: string;
+    actorUserId: string;
   }): Promise<number>;
   writeAuditEvent(event: OrderSaveAuditEvent): Promise<void>;
   writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string>;
@@ -332,6 +333,7 @@ export interface OrderWriteUnitOfWork {
 
 export interface OrderTransactionManagerPort {
   runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T>;
+  markOrderRestoreIdempotencyFailed(command: RestoreOrderCommand): Promise<void>;
 }
 
 export interface OrderPermissionCheckerPort {

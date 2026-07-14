@@ -40,6 +40,7 @@ export interface OrderListQuery {
   dateTo?: string;
   onlyMyOrders: boolean;
   deleted?: boolean;
+  deletedScopeUserId?: string;
   groupIds?: string[];
   groupMode?: OrderGroupFilterMode;
 }

@@ -26,6 +26,9 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import {
   OrderNotDeletedError,
   OrderNotFoundError,
+  OrderRestoreIdempotencyFailedError,
+  OrderRestoreIdempotencyInProgressError,
+  OrderRestoreIdempotencyKeyReusedError,
   OrderVersionConflictError,
 } from '../errors/order.errors';
 import { prepareOrderSave } from '../domain/order-save-preparer';
@@ -487,89 +490,99 @@ export class OrderTransactionService {
   }
 
   async restore(command: RestoreOrderCommand): Promise<RestoreOrderResponseDto> {
-    return this.ports.transactions.runInTransaction(async (unitOfWork) => {
-      await unitOfWork.setSessionUser(command.currentUser.id);
+    const targetOrderName =
+      command.orderName === undefined ? undefined : String(command.orderName).trim();
+    const normalizedCommand =
+      targetOrderName === command.orderName ? command : { ...command, orderName: targetOrderName };
 
-      const requestId = command.requestId ?? 'order-restore-command';
-      const targetOrderName =
-        command.orderName === undefined ? undefined : String(command.orderName).trim();
-      if (targetOrderName !== undefined && targetOrderName.length === 0) {
-        throw new ApiError(422, 'VALIDATION_ERROR', 'orderName не может быть пустым', {
-          field: 'orderName',
+    try {
+      return await this.ports.transactions.runInTransaction(async (unitOfWork) => {
+        await unitOfWork.setSessionUser(command.currentUser.id);
+
+        const requestId = command.requestId ?? 'order-restore-command';
+        if (targetOrderName !== undefined && targetOrderName.length === 0) {
+          throw new ApiError(422, 'VALIDATION_ERROR', 'orderName не может быть пустым', {
+            field: 'orderName',
+          });
+        }
+        const idempotency = await unitOfWork.reconcileOrderRestoreIdempotency(normalizedCommand);
+        if (idempotency.completedResponse) {
+          return idempotency.completedResponse;
+        }
+
+        const peekedOrderName =
+          targetOrderName === undefined ? await unitOfWork.peekOrderName(command.orderId) : null;
+        if (targetOrderName === undefined && peekedOrderName === null) {
+          throw new OrderNotFoundError(command.orderId);
+        }
+
+        const lockedTargetName = targetOrderName ?? peekedOrderName!;
+        await unitOfWork.lockOrderName(lockedTargetName);
+
+        const lockedOrder = await unitOfWork.loadOrderForRestore(command.orderId);
+        if (!lockedOrder) {
+          throw new OrderNotFoundError(command.orderId);
+        }
+
+        await this.requireDeletePermission(normalizedCommand, lockedOrder, async () => {
+          await unitOfWork.recordOrderRestoreDenied({
+            currentUser: command.currentUser,
+            orderId: command.orderId,
+            requestId,
+          });
         });
-      }
 
-      const normalizedCommand =
-        targetOrderName === command.orderName ? command : { ...command, orderName: targetOrderName };
-      const idempotency = await unitOfWork.reconcileOrderRestoreIdempotency(normalizedCommand);
-      if (idempotency.completedResponse) {
-        return idempotency.completedResponse;
-      }
+        if (!lockedOrder.deleteFlag) {
+          throw new OrderNotDeletedError(command.orderId);
+        }
 
-      const peekedOrderName =
-        targetOrderName === undefined ? await unitOfWork.peekOrderName(command.orderId) : null;
-      if (targetOrderName === undefined && peekedOrderName === null) {
-        throw new OrderNotFoundError(command.orderId);
-      }
+        if (command.version !== lockedOrder.version) {
+          throw new OrderVersionConflictError(lockedOrder.version, command.version);
+        }
 
-      const lockedTargetName = targetOrderName ?? peekedOrderName!;
-      await unitOfWork.lockOrderName(lockedTargetName);
+        const effectiveTargetName = targetOrderName ?? lockedOrder.orderName;
+        if (effectiveTargetName !== lockedTargetName) {
+          throw new OrderVersionConflictError(lockedOrder.version, command.version);
+        }
 
-      const lockedOrder = await unitOfWork.loadOrderForRestore(command.orderId);
-      if (!lockedOrder) {
-        throw new OrderNotFoundError(command.orderId);
-      }
+        await unitOfWork.assertOrderNameAvailable({ orderName: effectiveTargetName });
 
-      await this.requireDeletePermission(normalizedCommand, lockedOrder, async () => {
-        await unitOfWork.recordOrderRestoreDenied({
-          currentUser: command.currentUser,
+        const nextVersion = await unitOfWork.restoreOrder({
           orderId: command.orderId,
-          requestId,
+          previousVersion: lockedOrder.version,
+          targetOrderName: effectiveTargetName,
+          actorUserId: command.currentUser.id,
         });
-      });
+        const auditId = await unitOfWork.writeOrderRestoreAudit({
+          currentUser: command.currentUser,
+          requestId,
+          order: lockedOrder,
+          targetOrderName: effectiveTargetName,
+          nextVersion,
+        });
+        await unitOfWork.enqueueOrderRestoreOutbox({
+          currentUser: command.currentUser,
+          requestId,
+          order: lockedOrder,
+          targetOrderName: effectiveTargetName,
+          nextVersion,
+          auditId,
+          idempotencyKey: command.idempotencyKey,
+        });
 
-      if (!lockedOrder.deleteFlag) {
-        throw new OrderNotDeletedError(command.orderId);
+        const order = await unitOfWork.readOrder(command.orderId);
+        const response: RestoreOrderResponseDto = { order, auditId, requestId };
+        await unitOfWork.completeOrderRestoreIdempotency(command.idempotencyKey, response);
+        return response;
+      });
+    } catch (error) {
+      if (this.shouldMarkRestoreIdempotencyFailed(error)) {
+        await this.ports.transactions
+          .markOrderRestoreIdempotencyFailed(normalizedCommand)
+          .catch(() => undefined);
       }
-
-      if (command.version !== lockedOrder.version) {
-        throw new OrderVersionConflictError(lockedOrder.version, command.version);
-      }
-
-      const effectiveTargetName = targetOrderName ?? lockedOrder.orderName;
-      if (effectiveTargetName !== lockedTargetName) {
-        throw new OrderVersionConflictError(lockedOrder.version, command.version);
-      }
-
-      await unitOfWork.assertOrderNameAvailable({ orderName: effectiveTargetName });
-
-      const nextVersion = await unitOfWork.restoreOrder({
-        orderId: command.orderId,
-        previousVersion: lockedOrder.version,
-        targetOrderName: effectiveTargetName,
-      });
-      const auditId = await unitOfWork.writeOrderRestoreAudit({
-        currentUser: command.currentUser,
-        requestId,
-        order: lockedOrder,
-        targetOrderName: effectiveTargetName,
-        nextVersion,
-      });
-      await unitOfWork.enqueueOrderRestoreOutbox({
-        currentUser: command.currentUser,
-        requestId,
-        order: lockedOrder,
-        targetOrderName: effectiveTargetName,
-        nextVersion,
-        auditId,
-        idempotencyKey: command.idempotencyKey,
-      });
-
-      const order = await unitOfWork.readOrder(command.orderId);
-      const response: RestoreOrderResponseDto = { order, auditId, requestId };
-      await unitOfWork.completeOrderRestoreIdempotency(command.idempotencyKey, response);
-      return response;
-    });
+      throw error;
+    }
   }
 
   private async persistChildren(
@@ -621,6 +634,14 @@ export class OrderTransactionService {
       ...order,
       header: { ...order.header, projectId, projectCode },
     };
+  }
+
+  private shouldMarkRestoreIdempotencyFailed(error: unknown): boolean {
+    return !(
+      error instanceof OrderRestoreIdempotencyKeyReusedError ||
+      error instanceof OrderRestoreIdempotencyInProgressError ||
+      error instanceof OrderRestoreIdempotencyFailedError
+    );
   }
 
   private extractClientVersion(version: unknown, lockedVersion: number): number {

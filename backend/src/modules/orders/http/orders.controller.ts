@@ -28,6 +28,8 @@ import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { ROLE_POLICIES, type Scope } from '../../../permissions/policies/role-policies';
+import { allowsScope } from '../../../permissions/policies/scope';
 import { OrderQueryService } from '../application/order-query.service';
 import {
   ORDER_LIST_SORT_FIELDS,
@@ -824,11 +826,19 @@ export class OrdersController {
     const currentUser = this.requireCurrentUser(request);
     const listQuery = parseOrderListQuery(query);
 
-    if (listQuery.deleted === true && !currentUser.permissions.includes('orders.delete')) {
-      await this.recordTrashDeniedAudit(currentUser, request.requestId, 'orders.list_deleted');
-      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра корзины', {
-        requiredPermissions: ['orders.delete'],
-      });
+    if (listQuery.deleted === true) {
+      const deleteScope = this.getDeletedOrderScope(currentUser);
+      if (!currentUser.permissions.includes('orders.delete') || deleteScope === undefined) {
+        await this.recordTrashDeniedAudit(currentUser, request.requestId, 'orders.list_deleted');
+        this.throwTrashPermissionDenied();
+      }
+
+      if (deleteScope === 'own') {
+        listQuery.deletedScopeUserId = currentUser.id;
+      } else if (deleteScope !== 'all') {
+        await this.recordTrashDeniedAudit(currentUser, request.requestId, 'orders.list_deleted');
+        this.throwTrashPermissionDenied();
+      }
     }
 
     return this.orderQueries.list({ currentUser, query: listQuery });
@@ -866,6 +876,7 @@ export class OrdersController {
     const currentUser = this.requireCurrentUser(request);
     const orderId = parseOrderId(orderIdParam);
     const includeDeleted = parseOptionalBoolean(query.includeDeleted, 'includeDeleted');
+    const deleteScope = includeDeleted === true ? this.getDeletedOrderScope(currentUser) : undefined;
 
     if (includeDeleted === true && !currentUser.permissions.includes('orders.delete')) {
       await this.recordTrashDeniedAudit(
@@ -874,12 +885,36 @@ export class OrdersController {
         'orders.read_deleted',
         orderId,
       );
-      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра корзины', {
-        requiredPermissions: ['orders.delete'],
-      });
+      this.throwTrashPermissionDenied();
     }
 
     const order = await this.orderQueries.getById({ currentUser, orderId, includeDeleted });
+
+    if (
+      includeDeleted === true &&
+      deleteScope !== 'all' &&
+      !(
+        deleteScope !== undefined &&
+        allowsScope(currentUser, deleteScope, {
+          createdByUserId:
+            order.header.createdBy === null || order.header.createdBy === undefined
+              ? null
+              : String(order.header.createdBy),
+          managerUserId:
+            order.header.managerId === null || order.header.managerId === undefined
+              ? null
+              : String(order.header.managerId),
+        })
+      )
+    ) {
+      await this.recordTrashDeniedAudit(
+        currentUser,
+        request.requestId,
+        'orders.read_deleted',
+        orderId,
+      );
+      this.throwTrashPermissionDenied();
+    }
 
     return { order };
   }
@@ -1128,6 +1163,16 @@ export class OrdersController {
     } catch {
       // best-effort: deny response must not depend on audit sink health
     }
+  }
+
+  private getDeletedOrderScope(currentUser: CurrentUser): Scope | undefined {
+    return ROLE_POLICIES[currentUser.role]?.orders.delete;
+  }
+
+  private throwTrashPermissionDenied(): never {
+    throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра корзины', {
+      requiredPermissions: ['orders.delete'],
+    });
   }
 }
 

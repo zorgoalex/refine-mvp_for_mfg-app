@@ -3,6 +3,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
+import { ROLE_POLICIES, type Scope } from '../../../permissions/policies/role-policies';
 import type { OrderQueryService } from '../application/order-query.service';
 import type { OrderTransactionService } from '../application/order-transaction.service';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
@@ -123,11 +124,121 @@ describe('OrdersController read endpoints', () => {
 
     await expect(
       controller.list(
-        { user: userWithExtraPermissions('manager-id', 'manager', ['orders.delete']) },
+        { user: currentUser('admin-id', 'admin') },
         { deleted: 'true', sortBy: 'deletedAt' },
       ),
     ).resolves.toEqual(response);
     expect(calls).toEqual(['list:true:deletedAt']);
+  });
+
+  it('rejects trash list access when delete scope is none even if raw permission is present', async () => {
+    const database = createDatabase();
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      database,
+    });
+
+    await withDeleteScope('viewer', 'none', async () => {
+      await expect(
+        controller.list(
+          {
+            user: userWithExtraPermissions('viewer-id', 'viewer', ['orders.delete']),
+            requestId: 'request-trash-list-scope-none',
+          },
+          { deleted: 'true' },
+        ),
+      ).rejects.toMatchObject({
+        code: 'PERMISSION_DENIED',
+        statusCode: 403,
+        details: {
+          requiredPermissions: ['orders.delete'],
+        },
+      } satisfies Partial<ApiError>);
+
+      expect(database.queries).toHaveLength(1);
+      expect(database.queries[0]?.params).toEqual(
+        expect.arrayContaining([
+          'orders.list_deleted',
+          'viewer-id',
+          'request-trash-list-scope-none',
+          'PERMISSION_DENIED',
+        ]),
+      );
+    });
+  });
+
+  it('threads deletedScopeUserId for trash list when delete scope is own', async () => {
+    const response: OrderListResponseDto = {
+      data: [],
+      pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 },
+    };
+    const calls: string[] = [];
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      queries: {
+        async list(command) {
+          calls.push(
+            `list:${String(command.query.deleted)}:${command.query.deletedScopeUserId ?? 'null'}`,
+          );
+          return response;
+        },
+      },
+    });
+
+    await withDeleteScope('manager', 'own', async () => {
+      await expect(
+        controller.list(
+          {
+            user: userWithExtraPermissions('manager-id', 'manager', ['orders.delete']),
+          },
+          { deleted: 'true', sortBy: 'deletedAt' },
+        ),
+      ).resolves.toEqual(response);
+    });
+
+    expect(calls).toEqual(['list:true:manager-id']);
+  });
+
+  it('rejects trash list access when delete scope is assigned', async () => {
+    const database = createDatabase();
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      database,
+    });
+
+    await withDeleteScope('worker', 'assigned', async () => {
+      await expect(
+        controller.list(
+          {
+            user: userWithExtraPermissions('worker-id', 'worker', ['orders.delete']),
+            requestId: 'request-trash-list-scope-assigned',
+          },
+          { deleted: 'true' },
+        ),
+      ).rejects.toMatchObject({
+        code: 'PERMISSION_DENIED',
+        statusCode: 403,
+      } satisfies Partial<ApiError>);
+
+      expect(database.queries).toHaveLength(1);
+      expect(database.queries[0]?.params).toEqual(
+        expect.arrayContaining([
+          'orders.list_deleted',
+          'worker-id',
+          'request-trash-list-scope-assigned',
+          'PERMISSION_DENIED',
+        ]),
+      );
+    });
   });
 
   it('requires authenticated current user before list query service', async () => {
@@ -228,7 +339,7 @@ describe('OrdersController read endpoints', () => {
 
     await expect(
       controller.getById(
-        { user: userWithExtraPermissions('manager-id', 'manager', ['orders.delete']) },
+        { user: currentUser('admin-id', 'admin') },
         '42',
         { includeDeleted: 'true' },
       ),
@@ -236,6 +347,125 @@ describe('OrdersController read endpoints', () => {
       order,
     });
     expect(calls).toEqual(['get:42:true']);
+  });
+
+  it('rejects includeDeleted=true when delete scope is none even if raw permission is present', async () => {
+    const database = createDatabase();
+    const order = orderWithScope({ createdBy: 91, managerId: 92 });
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      database,
+      queries: {
+        async getById() {
+          return order;
+        },
+      },
+    });
+
+    await withDeleteScope('viewer', 'none', async () => {
+      await expect(
+        controller.getById(
+          {
+            user: userWithExtraPermissions('viewer-id', 'viewer', ['orders.delete']),
+            requestId: 'request-trash-read-scope-none',
+          },
+          '42',
+          { includeDeleted: 'true' },
+        ),
+      ).rejects.toMatchObject({
+        code: 'PERMISSION_DENIED',
+        statusCode: 403,
+      } satisfies Partial<ApiError>);
+
+      expect(database.queries).toHaveLength(1);
+      expect(database.queries[0]?.params).toEqual(
+        expect.arrayContaining([
+          'orders.read_deleted',
+          '42',
+          'viewer-id',
+          'request-trash-read-scope-none',
+          42,
+          'PERMISSION_DENIED',
+        ]),
+      );
+    });
+  });
+
+  it('allows includeDeleted=true when delete scope is own and the user owns the order', async () => {
+    const order = orderWithScope({ createdBy: 77, managerId: 91 });
+    const calls: string[] = [];
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      queries: {
+        async getById(command) {
+          calls.push(`get:${command.orderId}:${String(command.includeDeleted)}`);
+          return order;
+        },
+      },
+    });
+
+    await withDeleteScope('manager', 'own', async () => {
+      await expect(
+        controller.getById(
+          { user: userWithExtraPermissions('77', 'manager', ['orders.delete']) },
+          '42',
+          { includeDeleted: 'true' },
+        ),
+      ).resolves.toEqual({ order });
+    });
+
+    expect(calls).toEqual(['get:42:true']);
+  });
+
+  it('rejects includeDeleted=true when delete scope is assigned', async () => {
+    const database = createDatabase();
+    const order = orderWithScope({ createdBy: 91, managerId: 92 });
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      database,
+      queries: {
+        async getById() {
+          return order;
+        },
+      },
+    });
+
+    await withDeleteScope('worker', 'assigned', async () => {
+      await expect(
+        controller.getById(
+          {
+            user: userWithExtraPermissions('worker-id', 'worker', ['orders.delete']),
+            requestId: 'request-trash-read-scope-assigned',
+          },
+          '42',
+          { includeDeleted: 'true' },
+        ),
+      ).rejects.toMatchObject({
+        code: 'PERMISSION_DENIED',
+        statusCode: 403,
+      } satisfies Partial<ApiError>);
+
+      expect(database.queries).toHaveLength(1);
+      expect(database.queries[0]?.params).toEqual(
+        expect.arrayContaining([
+          'orders.read_deleted',
+          '42',
+          'worker-id',
+          'request-trash-read-scope-assigned',
+          42,
+          'PERMISSION_DENIED',
+        ]),
+      );
+    });
   });
 
   it('preserves 404 behavior for getById without includeDeleted', async () => {
@@ -782,6 +1012,32 @@ function userWithExtraPermissions(
   return {
     ...currentUser(id, role),
     permissions: [...new Set([...getPermissionsForRole(role), ...extraPermissions])],
+  };
+}
+
+async function withDeleteScope(
+  role: CurrentUser['role'],
+  scope: Scope,
+  callback: () => Promise<void>,
+): Promise<void> {
+  const originalScope = ROLE_POLICIES[role].orders.delete;
+  ROLE_POLICIES[role].orders.delete = scope;
+  try {
+    await callback();
+  } finally {
+    ROLE_POLICIES[role].orders.delete = originalScope;
+  }
+}
+
+function orderWithScope(input: { createdBy: number | null; managerId: number | null }): OrderDto {
+  const order = createOrderDto({ orderId: 42 });
+  return {
+    ...order,
+    header: {
+      ...order.header,
+      createdBy: input.createdBy,
+      managerId: input.managerId,
+    },
   };
 }
 

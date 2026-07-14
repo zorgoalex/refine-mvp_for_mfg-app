@@ -109,6 +109,15 @@ export class PgOrderTransactionManager implements OrderTransactionManagerPort {
       handler(new PgOrderWriteUnitOfWork(tx, this.database, this.sheetOrdersReads)),
     );
   }
+
+  markOrderRestoreIdempotencyFailed(command: RestoreOrderCommand): Promise<void> {
+    return this.database
+      .transaction(async (tx) => {
+        await tx.query('SELECT set_session_user($1)', [command.currentUser.id]);
+        await markOrderRestoreIdempotencyFailed(tx, command);
+      })
+      .then(() => undefined);
+  }
 }
 
 class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
@@ -1107,6 +1116,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     orderId: number;
     previousVersion: number;
     targetOrderName: string;
+    actorUserId: string;
   }): Promise<number> {
     const nextVersion = input.previousVersion + 1;
     try {
@@ -1117,11 +1127,12 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
             deleted_at = NULL,
             deleted_by = NULL,
             order_name = $3,
-            version = $2
+            version = $2,
+            edited_by = $4
         WHERE order_id = $1 AND delete_flag = true
         RETURNING version
         `,
-        [input.orderId, nextVersion, input.targetOrderName],
+        [input.orderId, nextVersion, input.targetOrderName, input.actorUserId],
       );
 
       if (!result.rows[0]) {
@@ -1438,14 +1449,7 @@ async function reconcileOrderRestoreIdempotency(
   tx: TransactionClient,
   command: RestoreOrderCommand,
 ): Promise<OrderRestoreIdempotencyResult> {
-  const requestShape = {
-    actorUserId: command.currentUser.id,
-    commandName: 'orders.restore',
-    orderId: command.orderId,
-    version: command.version,
-    targetOrderName: command.orderName ?? null,
-  };
-  const requestHash = hashRequest(requestShape);
+  const requestHash = hashOrderRestoreRequest(command);
   const inserted = await tx.query<IdempotencyRow>(
     `
     INSERT INTO command_idempotency_keys (
@@ -1504,6 +1508,39 @@ async function completeOrderRestoreIdempotency(
     `,
     [idempotencyKey, JSON.stringify(response)],
   );
+}
+
+async function markOrderRestoreIdempotencyFailed(
+  tx: TransactionClient,
+  command: RestoreOrderCommand,
+): Promise<void> {
+  await tx.query(
+    `
+    INSERT INTO command_idempotency_keys (
+      idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status
+    )
+    VALUES ($1, 'orders.restore', $2, 'order', $3, $4, 'failed')
+    ON CONFLICT (idempotency_key) DO UPDATE
+    SET status = 'failed'
+    WHERE command_idempotency_keys.status = 'processing'
+    `,
+    [
+      command.idempotencyKey,
+      Number(command.currentUser.id),
+      String(command.orderId),
+      hashOrderRestoreRequest(command),
+    ],
+  );
+}
+
+function hashOrderRestoreRequest(command: RestoreOrderCommand): string {
+  return hashRequest({
+    actorUserId: command.currentUser.id,
+    commandName: 'orders.restore',
+    orderId: command.orderId,
+    version: command.version,
+    targetOrderName: command.orderName ?? null,
+  });
 }
 
 async function writeOrderDeleteAudit(

@@ -826,7 +826,12 @@ describe('PgOrderTransactionManager', () => {
 
       await manager.runInTransaction(async (uow) => {
         await expect(
-          uow.restoreOrder({ orderId: 100, previousVersion: 2, targetOrderName: '2561' }),
+          uow.restoreOrder({
+            orderId: 100,
+            previousVersion: 2,
+            targetOrderName: '2561',
+            actorUserId: '42',
+          }),
         ).resolves.toBe(3);
       });
 
@@ -837,7 +842,8 @@ describe('PgOrderTransactionManager', () => {
       expect(normalizeSql(updateQuery!.text)).toContain('deleted_at = NULL');
       expect(normalizeSql(updateQuery!.text)).toContain('deleted_by = NULL');
       expect(normalizeSql(updateQuery!.text)).toContain('order_name = $3');
-      expect(updateQuery!.params).toEqual([100, 3, '2561']);
+      expect(normalizeSql(updateQuery!.text)).toContain('edited_by = $4');
+      expect(updateQuery!.params).toEqual([100, 3, '2561', '42']);
     });
 
     it('restoreOrder maps unique violations to ORDER_RESTORE_CONFLICT', async () => {
@@ -846,7 +852,12 @@ describe('PgOrderTransactionManager', () => {
 
       await expect(
         manager.runInTransaction((uow) =>
-          uow.restoreOrder({ orderId: 100, previousVersion: 2, targetOrderName: '2561' }),
+          uow.restoreOrder({
+            orderId: 100,
+            previousVersion: 2,
+            targetOrderName: '2561',
+            actorUserId: '42',
+          }),
         ),
       ).rejects.toMatchObject({
         statusCode: 409,
@@ -981,6 +992,52 @@ describe('PgOrderTransactionManager', () => {
       expect(firstInsert!.params).toContain('100');
       expect(secondInsert!.params).toContain('100');
     });
+
+    it('reconcileOrderRestoreIdempotency surfaces failed status as IDEMPOTENCY_FAILED', async () => {
+      const database = createDatabase({ restoreIdempotencyStatus: 'failed', idempotencyConflict: true });
+      const manager = new PgOrderTransactionManager(database.service);
+
+      await expect(
+        manager.runInTransaction((uow) =>
+          uow.reconcileOrderRestoreIdempotency({
+            currentUser: currentUser(),
+            orderId: 100,
+            version: 2,
+            idempotencyKey: 'order-restore-key-failed',
+          }),
+        ),
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'IDEMPOTENCY_FAILED',
+      });
+    });
+
+    it('marks restore idempotency as failed with an upsert that preserves completed keys', async () => {
+      const database = createDatabase();
+      const manager = new PgOrderTransactionManager(database.service);
+
+      await manager.markOrderRestoreIdempotencyFailed({
+        currentUser: currentUser(),
+        orderId: 100,
+        version: 2,
+        idempotencyKey: 'order-restore-key-burn',
+        orderName: '2561',
+      });
+
+      const burnQuery = database.queries.find((query) =>
+        normalizeSql(query.text).startsWith('INSERT INTO command_idempotency_keys'),
+      );
+      expect(burnQuery).toBeDefined();
+      expect(normalizeSql(burnQuery!.text)).toContain("VALUES ($1, 'orders.restore', $2, 'order', $3, $4, 'failed')");
+      expect(normalizeSql(burnQuery!.text)).toContain('ON CONFLICT (idempotency_key) DO UPDATE SET status = \'failed\'');
+      expect(normalizeSql(burnQuery!.text)).toContain("WHERE command_idempotency_keys.status = 'processing'");
+      expect(burnQuery!.params).toEqual([
+        'order-restore-key-burn',
+        42,
+        '100',
+        expect.any(String),
+      ]);
+    });
   });
 
   it('Variant B: sheet order save writes sheet_material_type bridge rows via audit', async () => {
@@ -1056,6 +1113,7 @@ function createDatabase(
     dowelingEngineerRowCount?: number;
     existingIdempotencyResponse?: OrderDto;
     existingRestoreIdempotencyResponse?: { order: OrderDto; auditId?: string; requestId: string };
+    restoreIdempotencyStatus?: 'completed' | 'failed' | 'processing';
     idempotencyConflict?: boolean;
     idempotencyHashMismatch?: boolean;
     projectRow?:
@@ -1119,7 +1177,7 @@ function createDatabase(
                 options.existingIdempotencyResponse ??
                 options.existingRestoreIdempotencyResponse ??
                 null,
-              status: 'completed',
+              status: options.restoreIdempotencyStatus ?? 'completed',
             },
           ],
           rowCount: 1,

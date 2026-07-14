@@ -367,6 +367,9 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     const deletedJoin = command.query.deleted === true
       ? 'LEFT JOIN users deleted_by_user ON deleted_by_user.user_id = o.deleted_by'
       : '';
+    const headerListMetadataJoin = command.query.deleted === true
+      ? [headerListMaterialJoin, deletedJoin].filter((fragment) => fragment.length > 0).join('\n        ')
+      : headerListMaterialJoin;
     const count = await this.database.query<CountRow>(
       `
       SELECT COUNT(*)::int AS total
@@ -404,8 +407,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
         LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
         LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
-        ${deletedJoin}
-        ${headerListMaterialJoin}
+        ${headerListMetadataJoin}
         ${headerSheetJoin}
         ${where}
         ORDER BY ${orderBy} ${command.query.sortOrder === 'asc' ? 'ASC' : 'DESC'}, o.order_id DESC
@@ -565,6 +567,9 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     const deletedHeaderJoin = includeDeleted
       ? 'LEFT JOIN users deleted_by_user ON deleted_by_user.user_id = o.deleted_by'
       : '';
+    const headerMetadataJoin = includeDeleted
+      ? [headerMaterialJoin, deletedHeaderJoin].filter((fragment) => fragment.length > 0).join('\n      ')
+      : headerMaterialJoin;
     const headerWhere = includeDeleted
       ? 'WHERE o.order_id = $1'
       : 'WHERE o.order_id = $1 AND o.delete_flag = false';
@@ -588,8 +593,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
       LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
       LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
-      ${deletedHeaderJoin}
-      ${headerMaterialJoin}
+      ${headerMetadataJoin}
       ${headerSheetJoin}
       ${headerWhere}
       `,
@@ -868,6 +872,11 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
 
   private buildListWhere(command: ListOrdersCommand, params: unknown[]): string {
     const clauses = [command.query.deleted === true ? 'o.delete_flag = true' : 'o.delete_flag = false'];
+
+    if (command.query.deleted === true && command.query.deletedScopeUserId) {
+      const deletedScopeUserIdIndex = params.push(Number(command.query.deletedScopeUserId));
+      clauses.push(`(o.created_by = $${deletedScopeUserIdIndex} OR o.manager_id = $${deletedScopeUserIdIndex})`);
+    }
 
     if (command.query.search) {
       const search = parseOrderSearchInput(command.query.search);
