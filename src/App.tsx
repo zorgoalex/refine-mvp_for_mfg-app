@@ -22,6 +22,7 @@ import { AppThemeProvider, useAppTheme } from "./theme/ThemeProvider";
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
 const OrderCreate = lazy(async () => ({ default: (await import("./pages/orders/create")).OrderCreate }));
+const OrderTrash = lazy(async () => ({ default: (await import("./pages/orders/trash")).OrderTrash }));
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const BazisPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisPage")).BazisPage }));
@@ -239,6 +240,15 @@ const ThemedApp = () => {
                     label: "Заказы",
                   },
                 },
+                ...(featureFlags.useBackendOrdersRead
+                  ? [{
+                      name: "orders-trash",
+                      list: "/orders/trash",
+                      meta: {
+                        label: "Корзина",
+                      },
+                    }]
+                  : []),
                 {
                   name: "calendar",
                   list: "/calendar",
@@ -619,6 +629,7 @@ const ThemedApp = () => {
                     <Route index element={<OrderList />} />
                     <Route path="create" element={<OrderCreate />} />
                     <Route path="edit/:id" element={<OrderEdit />} />
+                    <Route path="trash" element={<OrderTrash />} />
                     <Route path="show/:id" element={<OrderShow />} />
                   </Route>
                   <Route path="/calendar" >

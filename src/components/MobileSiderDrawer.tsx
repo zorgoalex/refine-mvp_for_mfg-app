@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import { Drawer, Menu, Button, Typography, Space } from "antd";
-import { CloseOutlined, PlusOutlined, ContactsOutlined } from "@ant-design/icons";
+import { CloseOutlined, PlusOutlined, ContactsOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useResource, useNavigation } from "@refinedev/core";
 import { useLocation } from "react-router-dom";
 import { OrderCreateModal } from "../pages/orders/components/OrderCreateModal";
@@ -98,6 +98,12 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
     () => !featureFlags.useBackendPermissions || can("orders.create", currentUser),
     [currentUser, featureFlags.useBackendPermissions],
   );
+  const canViewNavigation = useCallback(
+    (name: string) =>
+      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
+      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
+    [currentRoleKey, currentUser, roleVisibilityMatrix],
+  );
 
   const sider = useSiderMenuItems({
     resources,
@@ -110,13 +116,14 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
     categoryMap: CATEGORY_MAP,
     resourceLabels: RESOURCE_LABELS,
     resourceIcons: SIDER_RESOURCE_ICONS,
-    canViewNavigation: (name) =>
-      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
-      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
+    canViewNavigation,
     canViewSettings,
     canCreateOrders,
     setIsCreateModalOpen,
     crm: crmMenuConfig ? { ...crmMenuConfig, icon: <ContactsOutlined /> } : null,
+    trash: canViewNavigation('orders-trash')
+      ? { icon: <DeleteOutlined />, label: 'Корзина', route: '/orders/trash' }
+      : null,
   });
 
   return (

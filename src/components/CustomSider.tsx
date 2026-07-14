@@ -1,7 +1,8 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Layout as AntLayout, Menu, Collapse, Button, Typography, Tooltip } from "antd";
 import {
   PlusOutlined,
+  DeleteOutlined,
   DollarOutlined,
   InboxOutlined,
   ToolOutlined,
@@ -123,6 +124,12 @@ export const CustomSider: React.FC = () => {
     () => !featureFlags.useBackendPermissions || can("orders.create", currentUser),
     [currentUser, featureFlags.useBackendPermissions],
   );
+  const canViewNavigation = useCallback(
+    (name: string) =>
+      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
+      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
+    [currentRoleKey, currentUser, roleVisibilityMatrix],
+  );
 
   const sider = useSiderMenuItems({
     resources,
@@ -132,13 +139,14 @@ export const CustomSider: React.FC = () => {
     categoryMap: CATEGORY_MAP,
     resourceLabels: RESOURCE_LABELS,
     resourceIcons: SIDER_RESOURCE_ICONS,
-    canViewNavigation: (name) =>
-      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
-      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
+    canViewNavigation,
     canViewSettings,
     canCreateOrders,
     setIsCreateModalOpen,
     crm: crmMenuConfig ? { ...crmMenuConfig, icon: <ContactsOutlined /> } : null,
+    trash: canViewNavigation('orders-trash')
+      ? { icon: <DeleteOutlined />, label: 'Корзина', route: '/orders/trash' }
+      : null,
   });
 
   return (
@@ -174,7 +182,7 @@ export const CustomSider: React.FC = () => {
       >
         <Menu
           mode="inline"
-          selectedKeys={sider.selectedKey === "orders_view" || sider.selectedKey === "calendar" ? [sider.selectedKey] : []}
+          selectedKeys={sider.selectedKey === "orders_view" || sider.selectedKey === "orders-trash" || sider.selectedKey === "calendar" ? [sider.selectedKey] : []}
           items={sider.topMenuItems}
           style={{ background: "transparent", border: "none", marginBottom: 0, color: "#E0E0E0" }}
           className="orders-menu"

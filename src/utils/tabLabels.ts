@@ -1,5 +1,6 @@
 export const RESOURCE_LABELS: Record<string, string> = {
   orders_view: 'Заказы',
+  'orders-trash': 'Корзина',
   calendar: 'Календарь',
   groups: 'Группы',
   projects: 'Проекты',
@@ -73,7 +74,11 @@ export const resolveOrderTabLabel = (orderName: unknown): string =>
   typeof orderName === 'string' && orderName.trim() ? orderName.trim() : 'Заказ';
 
 export const resolveTabLabel = (pathname: string): string => {
+  const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   const segs = pathname.split('/').filter(Boolean);
+  if (normalizedPath === '/orders/trash') {
+    return 'Корзина';
+  }
   const orderMatch = pathname.match(/^\/orders\/(edit|show)\/\d+/);
   if (orderMatch) {
     return resolveOrderTabLabel(undefined);
