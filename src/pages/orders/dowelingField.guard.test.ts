@@ -63,6 +63,23 @@ describe('order detail doweling field guards', () => {
     expect(detailTable).toContain('doweling: record.doweling === true,');
   });
 
+  it('detail grouping supports «по присадке» and toolbar has selection reset', () => {
+    const grouping = readFileSync(new URL('./detailGrouping.ts', import.meta.url), 'utf8');
+    const detailsTab = readFileSync(
+      new URL('./components/tabs/OrderDetailsTab.tsx', import.meta.url),
+      'utf8',
+    );
+    const showPage = readFileSync(new URL('./show.tsx', import.meta.url), 'utf8');
+    expect(grouping).toContain("{ field: 'doweling', label: 'по присадке' }");
+    expect(grouping).toMatch(/case 'doweling': return detail\.doweling === true \? 'yes' : EMPTY_GROUP_KEY;/);
+    // Оба groupLabelOf (edit-таблица и show) обязаны знать поле.
+    expect(detailTable).toContain("case 'doweling': return sample.doweling === true ? 'Присадка' : '—';");
+    expect(showPage).toContain("case 'doweling': return sample.doweling === true ? 'Присадка' : '—';");
+    // Кнопка сброса любого выделения (чекбоксы + pending drag).
+    expect(detailsTab).toContain('Сбросить выделение');
+    expect(detailsTab).toMatch(/handleClearSelection[\s\S]*?dragSelectionState\?\.cancel\(\);[\s\S]*?setSelectedRowKeys\(\[\]\)/);
+  });
+
   it('PDF import auto-sets doweling from the note', () => {
     expect(pdfExtractor).toMatch(/doweling: \/присадка\/i\.test\(detail\.note \?\? ''\)/);
     expect(pdfImportModal).toContain('doweling: row.doweling === true,');

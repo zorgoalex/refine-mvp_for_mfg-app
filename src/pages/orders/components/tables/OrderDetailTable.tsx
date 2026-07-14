@@ -1462,6 +1462,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       case 'edge': return edgeNameById.get(sample.edge_type_id) || '—';
       case 'price': return sample.milling_cost_per_sqm != null ? String(sample.milling_cost_per_sqm) : '—';
       case 'note': return (sample.note || '').trim() || '—';
+      case 'doweling': return sample.doweling === true ? 'Присадка' : '—';
       default: return '—';
     }
   }, [millingNameById, sheetNameById, filmNameById, edgeNameById]);

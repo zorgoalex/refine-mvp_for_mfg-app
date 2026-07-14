@@ -3,7 +3,7 @@
 
 import React, { useState, useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
 import { Card, Button, Space, Modal, message, Tooltip, Alert } from 'antd';
-import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined, EditOutlined, CheckOutlined, CloseOutlined, ClearOutlined } from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
 import { BulkEditModal } from '../modals/BulkEditModal';
@@ -300,6 +300,13 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
     }
   }, [dragSelectionState]);
 
+  // One-click reset of ANY selection: checked rows + pending drag selection.
+  const handleClearSelection = useCallback(() => {
+    dragSelectionState?.cancel();
+    setDragSelectionState(null);
+    setSelectedRowKeys([]);
+  }, [dragSelectionState]);
+
   // Handle copy row - duplicate the row and insert after original
   const handleCopyRow = (detail: OrderDetail) => {
     // Create copy without identifiers
@@ -524,6 +531,15 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           >
             Удалить выбранные ({selectedRowKeys.length})
           </Button>
+          <Tooltip title="Сбросить любое выделение строк">
+            <Button
+              icon={<ClearOutlined />}
+              onClick={handleClearSelection}
+              disabled={selectedRowKeys.length === 0 && !dragSelectionState}
+            >
+              Сбросить выделение
+            </Button>
+          </Tooltip>
           {cutEnabled && (
             <Button onClick={() => setAddToCutOpen(true)} disabled={eligibleCutDetailIds.length === 0}>
               Добавить выбранные в раскрой ({eligibleCutDetailIds.length})

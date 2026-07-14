@@ -474,6 +474,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       case 'edge': return edgeTypesMap.get(sample.edge_type_id) || '—';
       case 'price': return sample.milling_cost_per_sqm != null ? String(sample.milling_cost_per_sqm) : '—';
       case 'note': return (sample.note || '').trim() || '—';
+      case 'doweling': return sample.doweling === true ? 'Присадка' : '—';
       default: return '—';
     }
   }, [millingTypesMap, materialsMap, resolvedNameByDetailId, filmsMap, edgeTypesMap]);

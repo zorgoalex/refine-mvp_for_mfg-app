@@ -11,9 +11,9 @@ const d = (over: Partial<OrderDetail>): OrderDetail =>
   } as OrderDetail);
 
 describe('GROUP_FIELDS', () => {
-  it('has the six mirrored fields with RU labels', () => {
+  it('has the seven mirrored fields with RU labels', () => {
     expect(GROUP_FIELDS.map(f => f.field)).toEqual(
-      ['milling', 'material', 'film', 'edge', 'price', 'note']
+      ['milling', 'material', 'film', 'edge', 'price', 'doweling', 'note']
     );
     const byField = Object.fromEntries(GROUP_FIELDS.map(f => [f.field, f.label]));
     expect(byField.milling).toBe('по фрезеровке');
@@ -21,6 +21,7 @@ describe('GROUP_FIELDS', () => {
     expect(byField.film).toBe('по пленкам');
     expect(byField.edge).toBe('по обкату');
     expect(byField.price).toBe('по ценам');
+    expect(byField.doweling).toBe('по присадке');
     expect(byField.note).toBe('по примечанию');
   });
 });
@@ -35,6 +36,11 @@ describe('extractGroupValue', () => {
   it('treats blank / whitespace notes as empty, trims real notes', () => {
     expect(extractGroupValue(d({ note: '   ' }), 'note')).toBe('__EMPTY__');
     expect(extractGroupValue(d({ note: ' Присадка ' }), 'note')).toBe('Присадка');
+  });
+  it('doweling: true is its own group, false/absent falls into empty', () => {
+    expect(extractGroupValue(d({ doweling: true }), 'doweling')).toBe('yes');
+    expect(extractGroupValue(d({ doweling: false }), 'doweling')).toBe('__EMPTY__');
+    expect(extractGroupValue(d({}), 'doweling')).toBe('__EMPTY__');
   });
   it('treats null / NaN price as empty', () => {
     expect(extractGroupValue(d({ milling_cost_per_sqm: null }), 'price')).toBe('__EMPTY__');

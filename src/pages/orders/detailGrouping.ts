@@ -1,7 +1,7 @@
 // src/pages/orders/detailGrouping.ts
 import type { OrderDetail } from '../../types/orders';
 
-export type GroupField = 'milling' | 'material' | 'film' | 'edge' | 'price' | 'note';
+export type GroupField = 'milling' | 'material' | 'film' | 'edge' | 'price' | 'note' | 'doweling';
 
 export interface GroupFieldDef {
   field: GroupField;
@@ -14,6 +14,7 @@ export const GROUP_FIELDS: GroupFieldDef[] = [
   { field: 'film', label: 'по пленкам' },
   { field: 'edge', label: 'по обкату' },
   { field: 'price', label: 'по ценам' },
+  { field: 'doweling', label: 'по присадке' },
   { field: 'note', label: 'по примечанию' },
 ];
 
@@ -46,6 +47,9 @@ export function extractGroupValue(detail: OrderDetail, field: GroupField): strin
       const trimmed = (detail.note || '').trim();
       return trimmed === '' ? EMPTY_GROUP_KEY : trimmed;
     }
+    // Boolean: детали с присадкой — своя группа, остальные падают в «пустую»
+    // (EMPTY сортируется последней, присадочные оказываются сверху).
+    case 'doweling': return detail.doweling === true ? 'yes' : EMPTY_GROUP_KEY;
     default: return EMPTY_GROUP_KEY;
   }
 }
