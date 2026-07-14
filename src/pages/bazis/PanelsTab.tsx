@@ -449,19 +449,6 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           row.rowType === 'group' ? row.orderNos.join(', ') || '—' : row.productOrderNo || '—',
       },
       {
-        title: 'Расположение',
-        key: 'path',
-        className: 'bazis-panel-cell-sm',
-        ellipsis: true,
-        sorter: panelComparators.location,
-        render: (_, row) =>
-          row.rowType === 'group' ? (
-            <Text type="secondary">{`вхождений: ${row.children.length}`}</Text>
-          ) : (
-            row.pathTitle
-          ),
-      },
-      {
         title: 'Заказ',
         key: 'orders',
         width: 96,
@@ -524,9 +511,26 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           ) : null,
       },
       {
+        title: 'Расположение',
+        key: 'path',
+        className: 'bazis-panel-cell-sm',
+        width: 160,
+        ellipsis: true,
+        sorter: panelComparators.location,
+        render: (_, row) =>
+          row.rowType === 'group' ? (
+            <Text type="secondary">{`вхождений: ${row.children.length}`}</Text>
+          ) : (
+            row.pathTitle
+          ),
+      },
+      {
         title: '',
         key: 'actions',
         width: 40,
+        // Иконка «Показать в дереве» всегда видна: после scroll.x=max-content
+        // последнюю колонку уносило за горизонтальный скролл.
+        fixed: 'right' as const,
         render: (_, row) =>
           row.rowType === 'panel' ? (
             <Tooltip title="Показать в дереве">
