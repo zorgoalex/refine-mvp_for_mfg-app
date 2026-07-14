@@ -531,20 +531,26 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         // Иконка «Показать в дереве» всегда видна: после scroll.x=max-content
         // последнюю колонку уносило за горизонтальный скролл.
         fixed: 'right' as const,
-        render: (_, row) =>
-          row.rowType === 'panel' ? (
-            <Tooltip title="Показать в дереве">
+        render: (_, row) => {
+          // Группа ведёт к первому вхождению — иначе в группированном режиме
+          // (верхний уровень = группы) колонка выглядела совсем пустой.
+          const targetNodeId =
+            row.rowType === 'panel' ? row.bazisNodeId : row.children[0]?.bazisNodeId;
+          if (targetNodeId == null) return null;
+          return (
+            <Tooltip title={row.rowType === 'panel' ? 'Показать в дереве' : 'Показать в дереве (первое вхождение)'}>
               <Button
                 type="text"
                 size="small"
                 icon={<ApartmentOutlined />}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onGoToTree(row.bazisNodeId);
+                  onGoToTree(targetNodeId);
                 }}
               />
             </Tooltip>
-          ) : null,
+          );
+        },
       },
     ];
   }, [canManage, filterOptions, handleNotesSaved, notesEpoch, onGoToTree, selectOnlyFree, selection, visiblePanels]);
