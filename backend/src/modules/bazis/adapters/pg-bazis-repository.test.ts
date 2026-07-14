@@ -2294,6 +2294,7 @@ describe('PgBazisRepository.buildOrderDraft', () => {
         basisProduct: 'Шкаф',
         basisDesignation: 'D-01',
         basisData: '7/D-01/Фасад/левая створка',
+        doweling: false,
       },
     ]);
   });

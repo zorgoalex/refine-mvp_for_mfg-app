@@ -2608,6 +2608,7 @@ function buildAddToOrderSaveDto(input: {
     basisProduct: string | null;
     basisDesignation: string | null;
     basisData: string | null;
+    doweling: boolean;
   }>;
 } {
   const merged = orderDtoToSaveDto(input.order);
@@ -2640,6 +2641,7 @@ function buildAddToOrderSaveDto(input: {
     basisProduct: string | null;
     basisDesignation: string | null;
     basisData: string | null;
+    doweling: boolean;
   }> = [];
 
   for (const pair of input.command.replaces) {
@@ -2663,6 +2665,7 @@ function buildAddToOrderSaveDto(input: {
     target.basisProduct = next.basisProduct;
     target.basisDesignation = next.basisDesignation;
     target.basisData = next.basisData;
+    target.doweling = next.doweling;
   }
 
   details.push(
@@ -2781,6 +2784,7 @@ function snapshotReplacedDetail(detail: SaveOrderDetailDto & { id?: number }): {
   basisProduct: string | null;
   basisDesignation: string | null;
   basisData: string | null;
+  doweling: boolean;
 } {
   return {
     orderDetailId: Number(detail.id),
@@ -2794,6 +2798,7 @@ function snapshotReplacedDetail(detail: SaveOrderDetailDto & { id?: number }): {
     basisProduct: detail.basisProduct ?? null,
     basisDesignation: detail.basisDesignation ?? null,
     basisData: detail.basisData ?? null,
+    doweling: detail.doweling === true,
   };
 }
 

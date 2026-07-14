@@ -80,6 +80,23 @@ describe('order detail doweling field guards', () => {
     expect(detailsTab).toMatch(/handleClearSelection[\s\S]*?dragSelectionState\?\.cancel\(\);[\s\S]*?setSelectedRowKeys\(\[\]\)/);
   });
 
+  it('Bazis panel import carries hasDrilling into detail doweling', () => {
+    const draftBuilder = readFileSync(
+      new URL('../../../backend/src/modules/bazis/adapters/bazis-order-draft.ts', import.meta.url),
+      'utf8',
+    );
+    const bazisRepo = readFileSync(
+      new URL('../../../backend/src/modules/bazis/adapters/pg-bazis-repository.ts', import.meta.url),
+      'utf8',
+    );
+    const draftSeed = readFileSync(new URL('../bazis/bazisOrderDraft.ts', import.meta.url), 'utf8');
+    expect(draftBuilder).toContain('doweling: panelHasDrilling(panel.rawJson)');
+    // Replace при add-to-order обновляет флаг вместе с остальным whitelist.
+    expect(bazisRepo).toContain('target.doweling = next.doweling;');
+    // Draft-first: seed формы несёт флаг в строку детали.
+    expect(draftSeed).toContain('doweling: detail.doweling === true,');
+  });
+
   it('PDF import auto-sets doweling from the note', () => {
     expect(pdfExtractor).toMatch(/doweling: \/присадка\/i\.test\(detail\.note \?\? ''\)/);
     expect(pdfImportModal).toContain('doweling: row.doweling === true,');

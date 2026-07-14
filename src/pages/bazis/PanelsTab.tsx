@@ -406,6 +406,10 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: 'Наименование',
         key: 'name',
+        // Fixed width: без неё это flex-колонка, и после добавления
+        // Кромка/Присадка/Примечания остаток ширины схлопывался в ноль —
+        // колонка «исчезала» на обычных экранах.
+        width: 130,
         ellipsis: true,
         sorter: panelComparators.name,
         ...filterProps('name', filterOptions.names),
@@ -645,7 +649,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         onChange={(_pagination, filters) => setTableFilters(filters)}
         pagination={false}
         // ~10 строк по 39px + шапка; содержимое скроллится внутри блока
-        scroll={{ y: 390 }}
+        scroll={{ y: 390, x: 'max-content' }}
         expandable={
           grouped
             ? {

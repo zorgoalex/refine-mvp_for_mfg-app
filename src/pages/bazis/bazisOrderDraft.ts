@@ -42,6 +42,7 @@ export function draftToFormSeed(draft: BazisOrderDraftResponse): BazisDraftFormS
       basis_product: detail.basisProduct,
       basis_designation: detail.basisDesignation,
       basis_data: detail.basisData,
+      doweling: detail.doweling === true,
       delete_flag: false,
     })),
     meta: {

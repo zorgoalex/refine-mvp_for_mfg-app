@@ -51,6 +51,7 @@ export interface BazisDraftDetail {
   basisProduct: string | null;
   basisDesignation: string | null;
   basisData: string;
+  doweling: boolean;
 }
 
 interface TargetOrderDuplicateRow {
@@ -61,6 +62,25 @@ interface TargetOrderDuplicateRow {
 
 export function clientKeyForNode(bazisNodeId: number): string {
   return `bazis-node-${bazisNodeId}`;
+}
+
+// Присадка панели: есть записи отверстий. Зеркало HAS_DRILLING_SQL
+// (pg-bazis-repository) и FE parseNodeRaw.holes: контейнер
+// «Отверстия»->«Отверстие» + прямой массив «Отверстие».
+export function panelHasDrilling(rawJson: Record<string, unknown> | null): boolean {
+  if (!rawJson) {
+    return false;
+  }
+  const direct = rawJson['Отверстие'];
+  if (Array.isArray(direct) && direct.length > 0) {
+    return true;
+  }
+  const container = rawJson['Отверстия'];
+  if (container == null || typeof container !== 'object' || Array.isArray(container)) {
+    return false;
+  }
+  const items = (container as Record<string, unknown>)['Отверстие'];
+  return Array.isArray(items) && items.length > 0;
 }
 
 export function collectUnmappedSheetNames(
@@ -116,6 +136,7 @@ export function buildDraftDetails(
       basisProduct: panel.productName ?? null,
       basisDesignation: panel.designation,
       basisData: `${panel.position ?? ''}/${panel.designation ?? ''}/${panel.name ?? ''}`,
+      doweling: panelHasDrilling(panel.rawJson),
     };
   });
 }

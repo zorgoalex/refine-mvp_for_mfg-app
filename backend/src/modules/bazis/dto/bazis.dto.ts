@@ -284,6 +284,7 @@ export interface BazisOrderDraftDetailDto {
   basisProduct: string | null;
   basisDesignation: string | null;
   basisData: string;
+  doweling: boolean;
 }
 
 export interface BazisOrderDraftDuplicateDto {

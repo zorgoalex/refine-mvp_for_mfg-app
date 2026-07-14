@@ -260,6 +260,7 @@ export interface BazisOrderDraftDetail {
   basisProduct: string | null;
   basisDesignation: string | null;
   basisData: string;
+  doweling: boolean;
 }
 
 export interface BazisOrderDraftDuplicate {

@@ -3604,6 +3604,7 @@ paths:
                         - basisProduct
                         - basisDesignation
                         - basisData
+                        - doweling
                       properties:
                         bazisNodeId:
                           type: integer
@@ -3641,6 +3642,9 @@ paths:
                           nullable: true
                         basisData:
                           type: string
+                        doweling:
+                          type: boolean
+                          description: "Панель имеет отверстия (присадку) — деталь создаётся с признаком «Присадка»."
                   duplicates:
                     type: array
                     items:

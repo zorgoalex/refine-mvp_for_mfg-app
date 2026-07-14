@@ -28,6 +28,7 @@ describe('bazisOrderDraft', () => {
           basisProduct: 'Upper',
           basisDesignation: 'F-1',
           basisData: 'raw',
+          doweling: true,
         },
       ],
     });
@@ -58,6 +59,7 @@ describe('bazisOrderDraft', () => {
           basis_product: 'Upper',
           basis_designation: 'F-1',
           basis_data: 'raw',
+          doweling: true,
           delete_flag: false,
         }),
       ],
