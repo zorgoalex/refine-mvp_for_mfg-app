@@ -576,6 +576,37 @@ describe('PgBazisRepository.setNodeNotes', () => {
     expect(outbox?.params?.[4]).toBe('bazis-node-notes-7213-req-notes-1');
   });
 
+  it('missing requestId: outbox key is unique per change (audit-id based), not a shared constant', async () => {
+    const database = createDatabase({
+      setNodeNotesState: {
+        existingRow: {
+          bazis_node_id: 7213,
+          notes: null,
+          revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+        },
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.setNodeNotes({
+      currentUser: currentUser('admin'),
+      requestId: undefined,
+      nodeId: 7213,
+      notes: 'без request id',
+    });
+
+    const outbox = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+    );
+    const key = String(outbox?.params?.[4] ?? '');
+    // Fallback-константа requestIdOrFallback давала бы один и тот же ключ на
+    // каждое изменение узла → ON CONFLICT дропал бы последующие события.
+    expect(key).toMatch(/^bazis-node-notes-7213-audit-/);
+    expect(key).not.toBe('bazis-node-notes-7213-bazis-node-notes');
+  });
+
   it('404s on missing node', async () => {
     const database = createDatabase({
       setNodeNotesState: { existingRow: null },

@@ -2703,7 +2703,11 @@ paths:
                 notes:
                   type: string
                   nullable: true
-                  maxLength: 2000
+                  description: >-
+                    Server trims the value first; empty becomes null. The
+                    2000-character limit applies AFTER trim (422
+                    VALIDATION_FAILED beyond it), so raw payloads with outer
+                    whitespace may exceed 2000 characters and still be valid.
       responses:
         '200':
           description: Updated node notes

@@ -23,7 +23,7 @@ describe('PanelsTab derived/notes columns', () => {
     expect(notesCell).toContain('stopPropagation');
     expect(notesCell).toContain('onPressEnter');
     expect(notesCell).toContain("event.key === 'Escape'");
-    expect(notesCell).toContain('shouldSaveOnBlur');
+    expect(notesCell).toContain('makeNotesEditorHandlers');
     expect(notesCell).toContain('normalizeNotesInput');
   });
 

@@ -771,7 +771,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
         [input.nodeId, input.notes],
       );
 
-      await auditService.record(tx, {
+      const auditId = await auditService.record(tx, {
         event: 'bazis.node_notes_changed',
         entityType: 'bazis_node',
         entityId: String(input.nodeId),
@@ -794,6 +794,13 @@ export class PgBazisRepository implements BazisRepositoryPort {
         },
       });
 
+      // Без requestId fallback-константа схлопнула бы ключ в один и тот же
+      // `...-bazis-node-notes` → ON CONFLICT молча дропал бы все последующие
+      // события по узлу (code-Critic R1). auditId уникален per-change.
+      const outboxIdempotencyKey = input.requestId
+        ? `bazis-node-notes-${input.nodeId}-${input.requestId}`
+        : `bazis-node-notes-${input.nodeId}-audit-${auditId}`;
+
       await tx.query(
         `
         INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
@@ -813,7 +820,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
             actorUserId: input.currentUser.id,
             requestId,
           }),
-          `bazis-node-notes-${input.nodeId}-${requestId}`,
+          outboxIdempotencyKey,
         ],
       );
 

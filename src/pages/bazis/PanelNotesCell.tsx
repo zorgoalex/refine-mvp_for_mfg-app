@@ -9,8 +9,8 @@ import { Button, Input, Space, Tooltip, Typography, notification } from 'antd';
 import { bazisApi } from '../../api/bazisApi';
 import {
   NODE_NOTES_MAX_LENGTH,
+  makeNotesEditorHandlers,
   normalizeNotesInput,
-  shouldSaveOnBlur,
   type NotesCloseReason,
 } from './panelNotesEditor';
 
@@ -36,6 +36,7 @@ export const PanelNotesCell: React.FC<PanelNotesCellProps> = ({
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const closeReasonRef = useRef<NotesCloseReason>('none');
+  const busyRef = useRef(false);
 
   const startEdit = () => {
     closeReasonRef.current = 'none';
@@ -44,7 +45,7 @@ export const PanelNotesCell: React.FC<PanelNotesCellProps> = ({
   };
 
   const save = async () => {
-    if (busy) {
+    if (busyRef.current) {
       return;
     }
     const next = normalizeNotesInput(value);
@@ -52,6 +53,7 @@ export const PanelNotesCell: React.FC<PanelNotesCellProps> = ({
       setEditing(false);
       return;
     }
+    busyRef.current = true;
     setBusy(true);
     try {
       const saved = await bazisApi.setNodeNotes(nodeId, next);
@@ -65,9 +67,27 @@ export const PanelNotesCell: React.FC<PanelNotesCellProps> = ({
         description: error instanceof Error ? error.message : 'Повторите попытку позже',
       });
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
+
+  // Вся событийная семантика (one-shot commit/cancel, blur-после-Escape,
+  // busy-глушение) — в pure-фабрике makeNotesEditorHandlers, покрытой
+  // исполняемыми unit-тестами порядков событий.
+  const editorHandlers = makeNotesEditorHandlers({
+    getCloseReason: () => closeReasonRef.current,
+    setCloseReason: (reason) => {
+      closeReasonRef.current = reason;
+    },
+    isBusy: () => busyRef.current,
+    save: () => {
+      void save();
+    },
+    cancel: () => {
+      setEditing(false);
+    },
+  });
 
   if (editing) {
     return (
@@ -79,23 +99,12 @@ export const PanelNotesCell: React.FC<PanelNotesCellProps> = ({
         disabled={busy}
         onChange={(event) => setValue(event.target.value)}
         onClick={(event) => event.stopPropagation()}
-        onPressEnter={() => {
-          closeReasonRef.current = 'commit';
-          void save();
-        }}
-        onBlur={() => {
-          if (shouldSaveOnBlur(closeReasonRef.current, busy)) {
-            closeReasonRef.current = 'commit';
-            void save();
-          }
-        }}
+        onPressEnter={editorHandlers.onPressEnter}
+        onBlur={editorHandlers.onBlur}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             event.stopPropagation();
-            if (!busy) {
-              closeReasonRef.current = 'cancel';
-              setEditing(false);
-            }
+            editorHandlers.onEscape();
           }
         }}
       />
