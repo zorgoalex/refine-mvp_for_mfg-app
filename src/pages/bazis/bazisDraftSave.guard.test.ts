@@ -36,6 +36,11 @@ describe('bazis draft order guards', () => {
     expect(useOrderSave).toContain('regenerateIdempotencyKey');
   });
 
+  it('draft save gates unpriced details (parity with the detail modal cost rule)', () => {
+    expect(useOrderSave).toContain('Не заполнены цены деталей');
+    expect(useOrderSave).toMatch(/milling_cost_per_sqm == null \|\| detail\.milling_cost_per_sqm === 0/);
+  });
+
   it('legacy save path fail-closes when a bazis draft context is present', () => {
     // Провенанс пишется только backend-командой: legacy Hasura-путь обязан
     // отказать, а не молча создать заказ без node-map/links.

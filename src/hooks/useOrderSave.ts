@@ -76,6 +76,27 @@ export const useOrderSave = (
     try {
       if (featureFlags.useBackendOrdersWrite) {
         if (bazisDraftSaveContext) {
+          // Паритет с обычным путём: модалка добавления детали требует
+          // рассчитанную сумму (без цены деталь не добавить). Draft-строки
+          // приходят программно мимо модалки — гейтим цены здесь.
+          const unpricedRows = (values.details ?? [])
+            .map((detail, index) => ({ detail, position: index + 1 }))
+            .filter(
+              ({ detail }) =>
+                detail.milling_cost_per_sqm == null || detail.milling_cost_per_sqm === 0,
+            );
+          if (unpricedRows.length > 0) {
+            notification.error({
+              message: 'Не заполнены цены деталей',
+              description: `Укажите «Цена за кв.м.» для всех деталей (строки: ${unpricedRows
+                .map(({ position }) => position)
+                .join(', ')}). Массово — через «Групповые действия».`,
+              duration: 0,
+            });
+            setIsSaving(false);
+            return null;
+          }
+
           const response = await bazisApi.createOrderFromDraft(bazisDraftSaveContext.revisionId, {
             order: mapOrderFormToSaveOrderDto(values),
             nodes: bazisDraftSaveContext.collectNodes(values),
