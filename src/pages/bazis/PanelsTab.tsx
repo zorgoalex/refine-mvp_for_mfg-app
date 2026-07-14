@@ -592,9 +592,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
               <Table.Summary.Row>
                 {/* Сетка: 0 чекбокс, 1 №, 2 Размеры, 3 Кол-во, 4 Площадь, дальше 8 колонок */}
                 <Table.Summary.Cell index={0} colSpan={3}>
-                  <Text strong>
-                    {grouped ? `Итого позиций: ${totals.positions}` : `Итого панелей: ${totals.positions}`}
-                  </Text>
+                  <Text strong>{`Итого позиций: ${totals.positions}`}</Text>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={3}>
                   <Text strong>{totals.totalQuantity ?? '—'}</Text>
