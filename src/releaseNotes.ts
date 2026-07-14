@@ -30,6 +30,18 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-14",
+    title: "Базис «Панели»: кромка, присадка и примечания панели",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "Вкладка «Панели» Базис-проекта: колонка «Кромка» — число кромок панели из данных Базиса.",
+      "Колонка «Присадка» — отмечается автоматически, если у панели есть отверстия.",
+      "Редактируемое поле «Примечания» у каждой панели: карандаш в строке, Enter — сохранить, Esc — отмена.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-13",
     title: "Раскрой: быстрый движок для крупных заданий",
     services: ["Cutting"],
