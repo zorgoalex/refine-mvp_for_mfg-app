@@ -121,6 +121,7 @@ const CUT_JOBS_TABLE_CONTAINER_HEIGHT = 317;
 const MIN_EDITOR_VIEW_ZOOM = 0.25;
 const MAX_EDITOR_VIEW_ZOOM = 1.5;
 const EDITOR_VIEW_ZOOM_STEP = 0.25;
+const DEFAULT_EDITOR_VIEW_ZOOM = 0.25;
 
 const sheetPreviewListStyle: React.CSSProperties = {
   display: 'flex',
@@ -410,7 +411,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [workingSheets, setWorkingSheets] = useState<{ sheetIndex: number; placements: SheetPlacements }[]>([]);
   // Current geometry violations (empty = all clear, save enabled).
   const [violations, setViolations] = useState<ManualViolation[]>([]);
-  const [editorViewZoom, setEditorViewZoom] = useState(1);
+  const [editorViewZoom, setEditorViewZoom] = useState(DEFAULT_EDITOR_VIEW_ZOOM);
   // Per-group alternative-view toggle: true = show manual variant, false = show auto.
   // Initialised from group.manualLayout.isActive on job open; only persisted on Save.
   const [showAlternativeByGroup, setShowAlternativeByGroup] = useState<Record<number, boolean>>({});
@@ -1057,7 +1058,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       }
       setWorkingSheets(seed);
       setViolations([]);
-      setEditorViewZoom(1);
+      setEditorViewZoom(DEFAULT_EDITOR_VIEW_ZOOM);
       setEditingGroupId(group.cutGroupId);
     },
     [job],
