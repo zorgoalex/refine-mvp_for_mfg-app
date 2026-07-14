@@ -33,6 +33,10 @@ export interface PanelGroupRow {
   orderNos: string[];
   /** Уникальные по orderId ERP-заказы детей в порядке появления. */
   orders: BazisOrderRef[];
+  /** Число кромок, если оно одинаково у всех вхождений; иначе null. */
+  uniformEdgeCount: number | null;
+  /** Присадка по вхождениям: у всех / ни у одной / смешанно. */
+  drillingState: 'all' | 'none' | 'mixed';
   children: PanelLike[];
 }
 
@@ -97,6 +101,8 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
         productNames: [],
         orderNos: [],
         orders: [],
+        uniformEdgeCount: null,
+        drillingState: 'none',
         children: [],
       };
       groups.set(key, group);
@@ -124,6 +130,14 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
         group.orders.push(order);
       }
     }
+  }
+
+  for (const group of groups.values()) {
+    const edgeCounts = group.children.map((child) => child.edgeCount ?? 0);
+    group.uniformEdgeCount = edgeCounts.every((value) => value === edgeCounts[0]) ? edgeCounts[0] : null;
+
+    const drilled = group.children.filter((child) => child.hasDrilling ?? false).length;
+    group.drillingState = drilled === 0 ? 'none' : drilled === group.children.length ? 'all' : 'mixed';
   }
 
   return [...groups.values()];
