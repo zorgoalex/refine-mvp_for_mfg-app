@@ -291,7 +291,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           />
         ),
         key: 'selection',
-        width: 52,
+        width: 36,
         render: (_, row) => {
           if (row.rowType === 'group') {
             const state = groupCheckState(selection, row);
@@ -326,21 +326,21 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: '№',
         key: 'seq',
-        width: 70,
+        width: 44,
         sorter: panelComparators.seq,
         render: (_, row) => (row.rowType === 'group' ? row.groupSeq : row.flatSeq ?? null),
       },
       {
         title: 'Размеры, мм',
         key: 'size',
-        width: 150,
+        width: 112,
         sorter: panelComparators.size,
         render: (_, row) => formatSize(row),
       },
       {
         title: 'Кол-во',
         key: 'quantity',
-        width: 80,
+        width: 56,
         sorter: panelComparators.quantity,
         render: (_, row) =>
           row.rowType === 'group' ? (
@@ -352,7 +352,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: 'Площадь, м²',
         key: 'areaM2',
-        width: 100,
+        width: 72,
         align: 'right' as const,
         render: (_, row) => {
           const areaM2 = row.rowType === 'group' ? row.totalAreaM2 : panelAreaM2(row);
@@ -366,7 +366,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: 'Материал',
         key: 'material',
-        width: 210,
+        width: 148,
         sorter: panelComparators.material,
         ...filterProps('material', filterOptions.materials),
         render: (_, row) => row.mainMaterialName || '—',
@@ -383,7 +383,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: 'Обозначение',
         key: 'designation',
-        width: 180,
+        width: 100,
         ellipsis: true,
         sorter: panelComparators.designation,
         render: (_, row) =>
@@ -392,7 +392,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: 'Изделие',
         key: 'productName',
-        width: 180,
+        width: 96,
         ellipsis: true,
         sorter: panelComparators.product,
         ...filterProps('productName', filterOptions.productNames),
@@ -402,7 +402,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: 'Базис-заказ',
         key: 'productOrderNo',
-        width: 160,
+        width: 76,
         ellipsis: true,
         render: (_, row) =>
           row.rowType === 'group' ? row.orderNos.join(', ') || '—' : row.productOrderNo || '—',
@@ -422,7 +422,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: 'Заказ',
         key: 'orders',
-        width: 160,
+        width: 96,
         sorter: panelComparators.order,
         ...filterProps('order', filterOptions.orders),
         render: (_, row) =>
@@ -445,7 +445,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: '',
         key: 'actions',
-        width: 56,
+        width: 40,
         render: (_, row) =>
           row.rowType === 'panel' ? (
             <Tooltip title="Показать в дереве">
