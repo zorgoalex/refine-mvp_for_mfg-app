@@ -1,7 +1,7 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined } from "@ant-design/icons";
+import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select, Popconfirm } from "antd";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -44,6 +44,7 @@ import { authSession } from '../../api/authSession';
 import { useIsMobile } from '../../hooks/useDeviceTier';
 import { DetailCardList } from './mobile/DetailCardList';
 import type { DetailCardLookups } from './mobile/detailCardModel';
+import { makeOrderDeleteHandler } from './orderDeleteAction';
 import {
   applyOrderDetailColumnSettings,
   OrderDetailColumnSettingsButton,
@@ -153,6 +154,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
   const backendOrder = useBackendOrdersRead ? record?.__backendOrder : null;
   const labelsEnabled = featureFlags.labels && canAny(['labels.view', 'labels.generate']);
+  const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
   const showTitle = record?.order_full_number
     ? `Заказ ${record.order_full_number}`
     : 'Просмотр заказа';
@@ -970,6 +972,34 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             >
               <Button icon={<EllipsisOutlined />} aria-label="Ещё действия" />
             </Dropdown>
+            {featureFlags.useBackendOrdersWrite && canManageOrderTrash && record?.order_id && !record?.delete_flag ? (
+              <Popconfirm
+                title={`Удалить заказ №${record.order_name}?`}
+                description="Заказ попадёт в корзину, его можно будет восстановить."
+                okText="Удалить"
+                okButtonProps={{ danger: true }}
+                cancelText="Отмена"
+                onConfirm={makeOrderDeleteHandler({
+                  deleteFn: () => ordersApi.delete(Number(record.order_id), {
+                    version: Number(record.version ?? backendOrder?.version ?? 0),
+                  }),
+                  onSuccess: () => {
+                    message.success('Заказ перемещён в корзину');
+                    navigate('/orders');
+                  },
+                  onVersionConflict: () =>
+                    Modal.error({
+                      title: 'Конфликт версий',
+                      content: 'Заказ был изменен другим пользователем. Обновите страницу и повторите.',
+                      okText: 'Обновить страницу',
+                      onOk: () => window.location.reload(),
+                    }),
+                  onError: (m) => message.error(m),
+                })}
+              >
+                <Button danger icon={<DeleteOutlined />}>Удалить</Button>
+              </Popconfirm>
+            ) : null}
           </>
         ) : (
           <>
@@ -1039,6 +1069,34 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 />
               </Tooltip>
             </Dropdown>
+            {featureFlags.useBackendOrdersWrite && canManageOrderTrash && record?.order_id && !record?.delete_flag ? (
+              <Popconfirm
+                title={`Удалить заказ №${record.order_name}?`}
+                description="Заказ попадёт в корзину, его можно будет восстановить."
+                okText="Удалить"
+                okButtonProps={{ danger: true }}
+                cancelText="Отмена"
+                onConfirm={makeOrderDeleteHandler({
+                  deleteFn: () => ordersApi.delete(Number(record.order_id), {
+                    version: Number(record.version ?? backendOrder?.version ?? 0),
+                  }),
+                  onSuccess: () => {
+                    message.success('Заказ перемещён в корзину');
+                    navigate('/orders');
+                  },
+                  onVersionConflict: () =>
+                    Modal.error({
+                      title: 'Конфликт версий',
+                      content: 'Заказ был изменен другим пользователем. Обновите страницу и повторите.',
+                      okText: 'Обновить страницу',
+                      onOk: () => window.location.reload(),
+                    }),
+                  onError: (m) => message.error(m),
+                })}
+              >
+                <Button danger icon={<DeleteOutlined />}>Удалить</Button>
+              </Popconfirm>
+            ) : null}
           </>
         )
       )}
