@@ -878,7 +878,16 @@ export class OrdersController {
     const includeDeleted = parseOptionalBoolean(query.includeDeleted, 'includeDeleted');
     const deleteScope = includeDeleted === true ? this.getDeletedOrderScope(currentUser) : undefined;
 
-    if (includeDeleted === true && !currentUser.permissions.includes('orders.delete')) {
+    // Critic code-R2-1: решения, не зависящие от конкретного заказа, принимаются
+    // ДО fetch — иначе 404 (нет заказа) против 403 (заказ есть) образуют оракул
+    // существования удалённых заказов для не-скоупованных ролей.
+    if (
+      includeDeleted === true &&
+      (!currentUser.permissions.includes('orders.delete') ||
+        deleteScope === undefined ||
+        deleteScope === 'none' ||
+        deleteScope === 'assigned')
+    ) {
       await this.recordTrashDeniedAudit(
         currentUser,
         request.requestId,
@@ -890,22 +899,23 @@ export class OrdersController {
 
     const order = await this.orderQueries.getById({ currentUser, orderId, includeDeleted });
 
+    // Пост-fetch проверка нужна только для row-зависимого scope 'own'.
+    // Отказ отвечает 404 (не 403), чтобы own-скоупованный пользователь не мог
+    // отличить «чужой удалённый заказ существует» от «заказа нет»; denied-audit
+    // при этом пишется.
     if (
       includeDeleted === true &&
-      deleteScope !== 'all' &&
-      !(
-        deleteScope !== undefined &&
-        allowsScope(currentUser, deleteScope, {
-          createdByUserId:
-            order.header.createdBy === null || order.header.createdBy === undefined
-              ? null
-              : String(order.header.createdBy),
-          managerUserId:
-            order.header.managerId === null || order.header.managerId === undefined
-              ? null
-              : String(order.header.managerId),
-        })
-      )
+      deleteScope === 'own' &&
+      !allowsScope(currentUser, deleteScope, {
+        createdByUserId:
+          order.header.createdBy === null || order.header.createdBy === undefined
+            ? null
+            : String(order.header.createdBy),
+        managerUserId:
+          order.header.managerId === null || order.header.managerId === undefined
+            ? null
+            : String(order.header.managerId),
+      })
     ) {
       await this.recordTrashDeniedAudit(
         currentUser,
@@ -913,7 +923,7 @@ export class OrdersController {
         'orders.read_deleted',
         orderId,
       );
-      this.throwTrashPermissionDenied();
+      throw new ApiError(404, 'ORDER_NOT_FOUND', 'Заказ не найден', { orderId });
     }
 
     return { order };

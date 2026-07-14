@@ -577,6 +577,16 @@ export class OrderTransactionService {
       });
     } catch (error) {
       if (this.shouldMarkRestoreIdempotencyFailed(error)) {
+        // Порядок обязателен (Critic code-R2-2): burn ДОЖИДАЕТСЯ коммита до
+        // проброса ошибки клиенту — последовательный retry тем же ключом
+        // гарантированно получает IDEMPOTENCY_FAILED. Для ПАРАЛЛЕЛЬНОГО дубля
+        // тем же ключом гонки клоббера нет: его processing-строка не видна до
+        // коммита его tx, поэтому burn-UPSERT (ON CONFLICT ... WHERE
+        // status='processing') блокируется на PK-локе и применяется только к
+        // финальному состоянию — completed не перетирается (WHERE), rollback
+        // даёт INSERT failed. Инвариант «не более одного завершения на ключ»
+        // сохраняется; параллельное свежее выполнение дубля — допустимая
+        // семантика (это та же команда, не replay после известного отказа).
         await this.ports.transactions
           .markOrderRestoreIdempotencyFailed(normalizedCommand)
           .catch(() => undefined);

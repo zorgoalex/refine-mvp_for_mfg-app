@@ -394,6 +394,70 @@ describe('OrdersController read endpoints', () => {
     });
   });
 
+  it('scope none/assigned denies includeDeleted BEFORE fetching (no existence oracle)', async () => {
+    const database = createDatabase();
+    const fetches: number[] = [];
+    const controller = createController({
+      flags: { ordersEnabled: true, ordersReadOnly: true },
+      database,
+      queries: {
+        async getById(command) {
+          fetches.push(command.orderId);
+          return orderWithScope({ createdBy: 91, managerId: 92 });
+        },
+      },
+    });
+
+    await withDeleteScope('viewer', 'none', async () => {
+      await expect(
+        controller.getById(
+          { user: userWithExtraPermissions('viewer-id', 'viewer', ['orders.delete']) },
+          '42',
+          { includeDeleted: 'true' },
+        ),
+      ).rejects.toMatchObject({ statusCode: 403 } satisfies Partial<ApiError>);
+    });
+
+    // Оракул существования закрыт: отказ по скоупу none/assigned НЕ ходит в БД
+    expect(fetches).toEqual([]);
+  });
+
+  it('scope own returns 404 (not 403) with denied audit for a foreign deleted order', async () => {
+    const database = createDatabase();
+    const order = orderWithScope({ createdBy: 91, managerId: 92 });
+    const controller = createController({
+      flags: { ordersEnabled: true, ordersReadOnly: true },
+      database,
+      queries: {
+        async getById() {
+          return order;
+        },
+      },
+    });
+
+    await withDeleteScope('manager', 'own', async () => {
+      await expect(
+        controller.getById(
+          {
+            user: userWithExtraPermissions('77', 'manager', ['orders.delete']),
+            requestId: 'request-trash-read-own-foreign',
+          },
+          '42',
+          { includeDeleted: 'true' },
+        ),
+      ).rejects.toMatchObject({
+        code: 'ORDER_NOT_FOUND',
+        statusCode: 404,
+      } satisfies Partial<ApiError>);
+
+      // denied-audit пишется, но наружу уходит 404 — существование скрыто
+      expect(database.queries).toHaveLength(1);
+      expect(database.queries[0]?.params).toEqual(
+        expect.arrayContaining(['orders.read_deleted', '42', '77', 42, 'PERMISSION_DENIED']),
+      );
+    });
+  });
+
   it('allows includeDeleted=true when delete scope is own and the user owns the order', async () => {
     const order = orderWithScope({ createdBy: 77, managerId: 91 });
     const calls: string[] = [];

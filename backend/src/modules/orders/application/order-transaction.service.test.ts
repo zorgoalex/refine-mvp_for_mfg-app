@@ -2086,6 +2086,31 @@ describe('OrderTransactionService', () => {
       ]);
     });
 
+    it('awaits the idempotency burn commit before surfacing the restore error (sequential retry contract)', async () => {
+      const transactions = new FakeOrderTransactions();
+      let burnCommitted = false;
+      const originalBurn = transactions.markOrderRestoreIdempotencyFailed.bind(transactions);
+      transactions.markOrderRestoreIdempotencyFailed = async (command) => {
+        // имитируем сетевую/коммит-задержку отдельной burn-транзакции
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        await originalBurn(command);
+        burnCommitted = true;
+      };
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('admin'),
+          orderId: 999,
+          version: 1,
+          idempotencyKey: 'order-restore-key-burn-order',
+        }),
+      ).rejects.toMatchObject({ statusCode: 404 } satisfies Partial<ApiError>);
+
+      // Клиент видит ошибку ТОЛЬКО после завершения burn — retry тем же ключом
+      // гарантированно упрётся в IDEMPOTENCY_FAILED.
+      expect(burnCommitted).toBe(true);
+    });
+
     it('throws 409 ORDER_NOT_DELETED when order is alive', async () => {
       const transactions = new FakeOrderTransactions();
       transactions.seedOrder({ orderId: 42, version: 3, deleteFlag: false });
