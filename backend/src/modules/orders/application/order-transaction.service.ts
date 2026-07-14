@@ -579,12 +579,34 @@ export class OrderTransactionService {
     } catch (error) {
       if (this.shouldMarkRestoreIdempotencyFailed(error)) {
         // Burn is awaited before rethrow so the client's next sequential retry
-        // with the same key deterministically sees failed state.
-        await this.ports.transactions
-          .markOrderRestoreIdempotencyFailed(normalizedCommand)
-          .catch(() => undefined);
+        // with the same key deterministically sees failed state. Двухфазная
+        // схема: reserve уже ЗАКОММИЧЕН, поэтому провал burn'а оставляет
+        // строку 'processing' до stale-таймаута (retry в этом окне получает
+        // IN_PROGRESS, не FAILED) — это деградация, а не потеря данных, но она
+        // НЕ должна быть молчаливой (Critic code-R4): один повтор + громкий лог.
+        await this.burnRestoreIdempotencyLoudly(normalizedCommand);
       }
       throw error;
+    }
+  }
+
+  private async burnRestoreIdempotencyLoudly(command: RestoreOrderCommand): Promise<void> {
+    try {
+      await this.ports.transactions.markOrderRestoreIdempotencyFailed(command);
+      return;
+    } catch {
+      // одна повторная попытка: burn — отдельная короткая tx, транзиентные
+      // сбои соединения чаще всего одноразовые
+    }
+    try {
+      await this.ports.transactions.markOrderRestoreIdempotencyFailed(command);
+    } catch (burnError) {
+      console.error(
+        '[orders.restore] failed to burn idempotency key after command failure; ' +
+          `key stays 'processing' until stale timeout (orderId=${command.orderId}, ` +
+          `idempotencyKey=${command.idempotencyKey})`,
+        burnError,
+      );
     }
   }
 

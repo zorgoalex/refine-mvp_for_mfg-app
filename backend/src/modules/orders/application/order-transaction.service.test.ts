@@ -2107,6 +2107,38 @@ describe('OrderTransactionService', () => {
       expect(burnCommitted).toBe(true);
     });
 
+    it('burn failure is retried once, logged loudly, and never masks the domain error', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.failAt = 'markOrderRestoreIdempotencyFailed';
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      try {
+        await expect(
+          new OrderTransactionService({ transactions }).restore({
+            currentUser: currentUser('admin'),
+            orderId: 999,
+            version: 1,
+            idempotencyKey: 'order-restore-key-burn-fail',
+          }),
+        ).rejects.toMatchObject({
+          code: 'ORDER_NOT_FOUND',
+          statusCode: 404,
+        } satisfies Partial<ApiError>);
+
+        // retry: две попытки burn'а
+        expect(
+          transactions.calls.filter((call) => call === 'markOrderRestoreIdempotencyFailed'),
+        ).toHaveLength(2);
+        // не молчим: застрявший processing-ключ виден в логах
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('failed to burn idempotency key'),
+          expect.anything(),
+        );
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
+
     it('throws 409 ORDER_NOT_DELETED when order is alive', async () => {
       const transactions = new FakeOrderTransactions();
       transactions.seedOrder({ orderId: 42, version: 3, deleteFlag: false });
