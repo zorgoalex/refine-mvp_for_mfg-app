@@ -398,6 +398,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: 'Материал',
         key: 'material',
+        className: 'bazis-panel-cell-sm',
         width: 148,
         sorter: panelComparators.material,
         ...filterProps('material', filterOptions.materials),
@@ -422,6 +423,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: 'Обозначение',
         key: 'designation',
+        className: 'bazis-panel-cell-sm',
         width: 100,
         ellipsis: true,
         sorter: panelComparators.designation,
@@ -449,6 +451,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: 'Расположение',
         key: 'path',
+        className: 'bazis-panel-cell-sm',
         ellipsis: true,
         sorter: panelComparators.location,
         render: (_, row) =>
