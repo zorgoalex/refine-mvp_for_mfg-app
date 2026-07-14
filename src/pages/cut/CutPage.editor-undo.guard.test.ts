@@ -32,4 +32,16 @@ describe('CutPage editor undo + default zoom guard', () => {
     const resets = src.match(/setEditorHistory\(\[\]\)/g) ?? [];
     expect(resets.length).toBeGreaterThanOrEqual(4); // enter + cancel + save + job-refetch reset
   });
+
+  it('a plain selection click never reaches onChange (no undo-slot burn)', () => {
+    // Behavior of the predicate is unit-tested in editorHistory.test.ts;
+    // here we pin that SheetEditor short-circuits handleUp with it BEFORE
+    // the cross-sheet guard and onChange.
+    const editorSrc = readFileSync(fileURLToPath(new URL('./SheetEditor.tsx', import.meta.url)), 'utf8');
+    const noopIdx = editorSrc.indexOf('isNoopDrop({');
+    const guardIdx = editorSrc.indexOf('Cross-sheet move guard');
+    expect(noopIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(noopIdx).toBeLessThan(guardIdx);
+  });
 });

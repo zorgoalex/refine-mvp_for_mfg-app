@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EDITOR_UNDO_LIMIT, pushHistory } from './editorHistory';
+import { EDITOR_UNDO_LIMIT, isNoopDrop, pushHistory } from './editorHistory';
 
 describe('pushHistory', () => {
   it('appends snapshots in order', () => {
@@ -23,5 +23,28 @@ describe('pushHistory', () => {
 
   it('default limit is 50 steps', () => {
     expect(EDITOR_UNDO_LIMIT).toBe(50);
+  });
+});
+
+describe('isNoopDrop', () => {
+  it('plain click (same sheet, same position) is a no-op', () => {
+    expect(
+      isNoopDrop({ sourceSheetIndex: 2, targetSheetIndex: 2, fromXMm: 100, fromYMm: 50, toXMm: 100, toYMm: 50 }),
+    ).toBe(true);
+  });
+
+  it('same-sheet move to a new position commits', () => {
+    expect(
+      isNoopDrop({ sourceSheetIndex: 2, targetSheetIndex: 2, fromXMm: 100, fromYMm: 50, toXMm: 101, toYMm: 50 }),
+    ).toBe(false);
+    expect(
+      isNoopDrop({ sourceSheetIndex: 2, targetSheetIndex: 2, fromXMm: 100, fromYMm: 50, toXMm: 100, toYMm: 49 }),
+    ).toBe(false);
+  });
+
+  it('cross-sheet drop commits even at identical coordinates', () => {
+    expect(
+      isNoopDrop({ sourceSheetIndex: 1, targetSheetIndex: 3, fromXMm: 100, fromYMm: 50, toXMm: 100, toYMm: 50 }),
+    ).toBe(false);
   });
 });

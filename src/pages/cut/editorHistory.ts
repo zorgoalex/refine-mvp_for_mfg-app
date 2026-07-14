@@ -10,3 +10,23 @@ export function pushHistory<T>(history: readonly T[], snapshot: T, limit: number
   const next = [...history, snapshot];
   return next.length > limit ? next.slice(next.length - limit) : next;
 }
+
+/**
+ * True when a pointer-up commits NOTHING: same sheet and same position.
+ * A plain selection click reaches handleUp too — without this check it would
+ * fire onChange, burn an undo slot and re-validate a layout that didn't move.
+ */
+export function isNoopDrop(args: {
+  sourceSheetIndex: number;
+  targetSheetIndex: number;
+  fromXMm: number;
+  fromYMm: number;
+  toXMm: number;
+  toYMm: number;
+}): boolean {
+  return (
+    args.targetSheetIndex === args.sourceSheetIndex &&
+    args.toXMm === args.fromXMm &&
+    args.toYMm === args.fromYMm
+  );
+}
