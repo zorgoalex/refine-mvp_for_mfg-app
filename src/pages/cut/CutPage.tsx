@@ -20,7 +20,7 @@ import {
   theme,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { MinusOutlined, PlusOutlined, UpOutlined } from '@ant-design/icons';
+import { MinusOutlined, PlusOutlined, UndoOutlined, UpOutlined } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
@@ -33,6 +33,7 @@ import { TableTopScroll } from '../../components/TableTopScroll';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
 import { buildPieceMetaByItemId } from './cutPieceMeta';
+import { pushHistory } from './editorHistory';
 import { CutSheetLabelGenerateAction } from './CutSheetLabelGenerateAction';
 import { authSession } from '../../api/authSession';
 import type {
@@ -425,6 +426,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // Current geometry violations (empty = all clear, save enabled).
   const [violations, setViolations] = useState<ManualViolation[]>([]);
   const [editorViewZoom, setEditorViewZoom] = useState(1);
+  // Undo stack of workingSheets snapshots (one per committed drag/rotate),
+  // capped at EDITOR_UNDO_LIMIT. Cleared on enter/cancel/save.
+  const [editorHistory, setEditorHistory] = useState<{ sheetIndex: number; placements: SheetPlacements }[][]>([]);
   // Per-group alternative-view toggle: true = show manual variant, false = show auto.
   // Initialised from group.manualLayout.isActive on job open; only persisted on Save.
   const [showAlternativeByGroup, setShowAlternativeByGroup] = useState<Record<number, boolean>>({});
@@ -678,6 +682,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setEditingGroupId(null);
         setWorkingSheets([]);
         setViolations([]);
+        setEditorHistory([]);
         // Prefill the eligible-load criteria with the order(s) this job was built
         // from (the reserved items' orders) so "Загрузить подходящие детали" is
         // scoped to those orders instead of scanning everything. Material/film
@@ -1071,7 +1076,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       }
       setWorkingSheets(seed);
       setViolations([]);
-      setEditorViewZoom(1);
+      setEditorHistory([]);
+      // Open zoomed out: the operator first orients across the whole group,
+      // then zooms into the sheet they are editing.
+      setEditorViewZoom(MIN_EDITOR_VIEW_ZOOM);
       setEditingGroupId(group.cutGroupId);
     },
     [job],
@@ -1082,13 +1090,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
    * and stores both the new working sheets and the fresh violation list.
    * Trim authority: uses placements.trim_mm (not editorParams), per brief §3.
    */
-  const handleEditorChange = useCallback(
-    (nextSheets: { sheetIndex: number; placements: SheetPlacements }[]) => {
-      // Drop sheets emptied by a cross-sheet move: empty sheets are not wanted in
-      // a group. Real sheet_index is preserved for survivors (no renumber) so the
-      // moves still validate against the auto stock on save; the editor just stops
-      // rendering the blank sheet immediately. Mirrors reconstructManualSheets.
-      const effective = pruneEmptySheets(nextSheets);
+  const applyEditorSheets = useCallback(
+    (effective: { sheetIndex: number; placements: SheetPlacements }[]) => {
       setWorkingSheets(effective);
       if (!job?.editorParams) {
         setViolations([]);
@@ -1108,6 +1111,28 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     },
     [job],
   );
+
+  const handleEditorChange = useCallback(
+    (nextSheets: { sheetIndex: number; placements: SheetPlacements }[]) => {
+      // Drop sheets emptied by a cross-sheet move: empty sheets are not wanted in
+      // a group. Real sheet_index is preserved for survivors (no renumber) so the
+      // moves still validate against the auto stock on save; the editor just stops
+      // rendering the blank sheet immediately. Mirrors reconstructManualSheets.
+      const effective = pruneEmptySheets(nextSheets);
+      // One undo entry per committed gesture: snapshot the PRE-change sheets.
+      setEditorHistory((h) => pushHistory(h, workingSheets));
+      applyEditorSheets(effective);
+    },
+    [applyEditorSheets, workingSheets],
+  );
+
+  /** Undo the last committed drag/rotate (up to EDITOR_UNDO_LIMIT steps). */
+  const undoEditorStep = useCallback(() => {
+    if (editorHistory.length === 0) return;
+    const prev = editorHistory[editorHistory.length - 1];
+    setEditorHistory(editorHistory.slice(0, -1));
+    applyEditorSheets(prev);
+  }, [editorHistory, applyEditorSheets]);
 
   /**
    * Save the manual layout for a group: derives moves from workingSheets,
@@ -1136,6 +1161,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setEditingGroupId(null);
         setWorkingSheets([]);
         setViolations([]);
+        setEditorHistory([]);
       } catch (error) {
         // Surface 422 violations + 409 recalc/stale with the backend message.
         handleError(error, 'Не удалось сохранить ручной раскрой');
@@ -2029,12 +2055,30 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                       Сохранить изменения
                     </Button>
                   </Tooltip>
+                  <Tooltip
+                    title={
+                      editorHistory.length > 0
+                        ? `Отменить последнее перемещение или поворот детали (доступно шагов: ${editorHistory.length})`
+                        : 'Нет шагов для отмены'
+                    }
+                  >
+                    <Button
+                      size="small"
+                      icon={<UndoOutlined />}
+                      onClick={undoEditorStep}
+                      disabled={busy || editorHistory.length === 0}
+                      data-testid="undo-edit-step-btn"
+                    >
+                      Отменить шаг
+                    </Button>
+                  </Tooltip>
                   <Button
                     size="small"
                     onClick={() => {
                       setEditingGroupId(null);
                       setWorkingSheets([]);
                       setViolations([]);
+                      setEditorHistory([]);
                     }}
                     disabled={busy}
                     data-testid="cancel-edit-btn"

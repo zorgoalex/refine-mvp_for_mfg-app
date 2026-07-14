@@ -33,6 +33,7 @@ import {
 } from './cutLayoutGeometry';
 import type { CutAxisOrigin, ManualViolation } from './cutLayoutGeometry';
 import { counterViewMatrix, orientedOrigin, svgToUsable } from './sheetEditorGeometry';
+import { isNoopDrop } from './editorHistory';
 import { buildPieceLabelLines, fitLabelScale, splitDimsLine, LINE1_SCALE } from './pieceLabel';
 import { sheetMaterialFilmNames } from './cutPageHelpers';
 
@@ -561,6 +562,24 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
       }
 
       const updatedPiece: SheetPlacementPiece = { ...piece, x_mm: currentX_mm, y_mm: currentY_mm };
+
+      // A plain selection click (no movement, same sheet) commits nothing:
+      // selection already happened on pointer-down; firing onChange here would
+      // burn an undo slot and re-validate an unchanged layout.
+      if (
+        isNoopDrop({
+          sourceSheetIndex,
+          targetSheetIndex,
+          fromXMm: piece.x_mm,
+          fromYMm: piece.y_mm,
+          toXMm: currentX_mm,
+          toYMm: currentY_mm,
+        })
+      ) {
+        dragRef.current = null;
+        setDrag(null);
+        return;
+      }
 
       // Cross-sheet move guard: abort (snap-back) if material or film policy is violated.
       if (targetSheetIndex !== sourceSheetIndex) {
