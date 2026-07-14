@@ -140,17 +140,14 @@ const cutActionToolbarStyle: React.CSSProperties = {
   gap: 8,
 };
 
-// Sticky footer inside a group card: the «Наверх» button stays visible while
-// the operator scrolls a tall group (many sheets or the manual editor). The
-// wrapper is click-through; only the button itself takes pointer events.
-const backToTopWrapStyle: React.CSSProperties = {
-  position: 'sticky',
-  bottom: 8,
-  display: 'flex',
-  justifyContent: 'flex-end',
-  zIndex: 4,
-  pointerEvents: 'none',
-  paddingTop: 8,
+// Fixed «Наверх» button: appears as soon as the page has been scrolled
+// vertically and stays visible (view mode and manual editor alike). zIndex
+// stays below antd modals (1000).
+const backToTopFixedStyle: React.CSSProperties = {
+  position: 'fixed',
+  bottom: 24,
+  right: 24,
+  zIndex: 900,
 };
 
 const pdfTemplatePickerStyle: React.CSSProperties = {
@@ -429,6 +426,42 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // Undo stack of workingSheets snapshots (one per committed drag/rotate),
   // capped at EDITOR_UNDO_LIMIT. Cleared on enter/cancel/save.
   const [editorHistory, setEditorHistory] = useState<{ sheetIndex: number; placements: SheetPlacements }[][]>([]);
+  // «Наверх» visibility: shown as soon as the page has vertical scroll offset.
+  const [showBackToTop, setShowBackToTop] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setShowBackToTop(window.scrollY > 150);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  /**
+   * Scroll back to the relevant group header: the group being edited, else the
+   * group card the viewport is currently inside (nearest header at/above the
+   * top edge), else the page top.
+   */
+  const scrollBackToGroupTop = useCallback(() => {
+    let targetId: number | null = editingGroupId;
+    if (targetId == null) {
+      let bestTop = Number.NEGATIVE_INFINITY;
+      for (const g of job?.groups ?? []) {
+        const el = document.getElementById(`cut-group-card-${g.cutGroupId}`);
+        if (!el) continue;
+        const top = el.getBoundingClientRect().top;
+        if (top <= 80 && top > bestTop) {
+          bestTop = top;
+          targetId = g.cutGroupId;
+        }
+      }
+    }
+    const el = targetId != null ? document.getElementById(`cut-group-card-${targetId}`) : null;
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [editingGroupId, job]);
   // Per-group alternative-view toggle: true = show manual variant, false = show auto.
   // Initialised from group.manualLayout.isActive on job open; only persisted on Save.
   const [showAlternativeByGroup, setShowAlternativeByGroup] = useState<Record<number, boolean>>({});
@@ -1921,6 +1954,24 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               <div style={cutActionToolbarStyle}>
                 {isEditingGroup && (
                   <Space size={4} data-testid="sticky-editor-zoom-controls">
+                    <Tooltip
+                      title={
+                        editorHistory.length > 0
+                          ? `Отменить последнее перемещение или поворот детали (доступно шагов: ${editorHistory.length})`
+                          : 'Нет шагов для отмены'
+                      }
+                    >
+                      <Button
+                        aria-label="Отменить последний шаг редактирования"
+                        icon={<UndoOutlined />}
+                        style={{ height: 40 }}
+                        onClick={undoEditorStep}
+                        disabled={busy || editorHistory.length === 0}
+                        data-testid="undo-edit-step-btn"
+                      >
+                        Отменить шаг
+                      </Button>
+                    </Tooltip>
                     <Tooltip title="Уменьшить масштаб группы раскроя">
                       <Button
                         aria-label="Уменьшить масштаб группы раскроя"
@@ -2053,23 +2104,6 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                       data-testid="save-manual-layout-btn"
                     >
                       Сохранить изменения
-                    </Button>
-                  </Tooltip>
-                  <Tooltip
-                    title={
-                      editorHistory.length > 0
-                        ? `Отменить последнее перемещение или поворот детали (доступно шагов: ${editorHistory.length})`
-                        : 'Нет шагов для отмены'
-                    }
-                  >
-                    <Button
-                      size="small"
-                      icon={<UndoOutlined />}
-                      onClick={undoEditorStep}
-                      disabled={busy || editorHistory.length === 0}
-                      data-testid="undo-edit-step-btn"
-                    >
-                      Отменить шаг
                     </Button>
                   </Tooltip>
                   <Button
@@ -2241,27 +2275,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 })}
               </div>
             )}
-            {/* Always-visible return to the group header — works in both the
-                read-only sheet view and the manual editor (both render inside
-                this card). */}
-            <div style={backToTopWrapStyle}>
-              <Button
-                size="small"
-                icon={<UpOutlined />}
-                style={{ pointerEvents: 'auto' }}
-                onClick={() =>
-                  document
-                    .getElementById(`cut-group-card-${group.cutGroupId}`)
-                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                }
-              >
-                Наверх
-              </Button>
-            </div>
           </Card>
         );
       })}
       </Space>
+      {job && showBackToTop && (
+        <div style={backToTopFixedStyle}>
+          <Button icon={<UpOutlined />} onClick={scrollBackToGroupTop} data-testid="back-to-top-btn">
+            Наверх
+          </Button>
+        </div>
+      )}
       <Modal
         title={pdfPreview.title}
         open={pdfPreview.open}

@@ -21,11 +21,19 @@ describe('CutPage editor undo + default zoom guard', () => {
     expect(src).toMatch(/setEditorHistory\(\(h\) => pushHistory\(h, workingSheets\)\)/);
   });
 
-  it('undo button is wired and disabled with an empty history', () => {
+  it('undo button lives in the sticky zoom navbar and disables with an empty history', () => {
     expect(src).toMatch(/undoEditorStep/);
     expect(src).toMatch(/data-testid="undo-edit-step-btn"/);
     expect(src).toMatch(/disabled=\{busy \|\| editorHistory\.length === 0\}/);
     expect(src).toMatch(/Отменить шаг/);
+    // placement: inside the sticky editor controls (same navbar as zoom −/+),
+    // so it stays visible while the operator scrolls the sheets.
+    const stickyIdx = src.indexOf('data-testid="sticky-editor-zoom-controls"');
+    const undoIdx = src.indexOf('data-testid="undo-edit-step-btn"');
+    const zoomOutIdx = src.indexOf('Уменьшить масштаб группы раскроя');
+    expect(stickyIdx).toBeGreaterThan(-1);
+    expect(undoIdx).toBeGreaterThan(stickyIdx);
+    expect(undoIdx).toBeLessThan(zoomOutIdx);
   });
 
   it('history resets on enter, cancel and save', () => {
