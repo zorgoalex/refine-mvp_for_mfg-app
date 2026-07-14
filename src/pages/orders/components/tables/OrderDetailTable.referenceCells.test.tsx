@@ -20,4 +20,11 @@ describe('OrderDetailTable reference cells', () => {
     const cellBlock = source.slice(source.indexOf('const MaterialCell: React.FC'));
     expect(cellBlock).not.toMatch(/useOne\s*\(/);
   });
+
+  it('keeps narrow numeric columns readable at the right scroll edge', () => {
+    expect(source).toContain("key: 'doweling',\n      width: 52");
+    expect(source).toContain("key: 'milling_cost_per_sqm',\n      width: 100");
+    expect(source).toContain("fontSize: 11, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums'");
+    expect(source).toContain("scroll={{ x: 'max-content', y: 500 }}");
+  });
 });

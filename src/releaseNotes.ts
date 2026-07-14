@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-14",
+    title: "Читаемые крайние колонки списка деталей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В карточке заказа цена за квадратный метр и приоритет отображаются без переносов, а колонка «Прис.» полностью видна у правого края таблицы.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-14",
     title: "Присадка у деталей заказа",
     services: ["ERP"],
     repositories: ["repo_erp"],
