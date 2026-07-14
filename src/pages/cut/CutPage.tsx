@@ -20,7 +20,7 @@ import {
   theme,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
+import { MinusOutlined, PlusOutlined, UpOutlined } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
@@ -136,6 +136,19 @@ const cutActionToolbarStyle: React.CSSProperties = {
   flexWrap: 'wrap',
   alignItems: 'center',
   gap: 8,
+};
+
+// Sticky footer inside a group card: the «Наверх» button stays visible while
+// the operator scrolls a tall group (many sheets or the manual editor). The
+// wrapper is click-through; only the button itself takes pointer events.
+const backToTopWrapStyle: React.CSSProperties = {
+  position: 'sticky',
+  bottom: 8,
+  display: 'flex',
+  justifyContent: 'flex-end',
+  zIndex: 4,
+  pointerEvents: 'none',
+  paddingTop: 8,
 };
 
 const pdfTemplatePickerStyle: React.CSSProperties = {
@@ -1156,16 +1169,30 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   // Per-piece material/film map for the cross-sheet move guard in SheetEditor.
   // Keyed by piece item_id format "det-<orderDetailId>".
+  // Effective material mirrors the backend sheet-override semantics (migr 040):
+  // a chosen «Лист раскроя» forces EVERY detail onto that sheet at calculate
+  // time, so the guard compares against the override — comparing the detail's
+  // own sheet type would veto every cross-sheet move on override jobs.
   const pieceMetaByItemId = useMemo(() => {
     const m = new Map<string, { materialTypeId: number | null; filmId: number | null }>();
     for (const it of job?.items ?? []) {
       m.set(`det-${it.orderDetailId}`, {
-        materialTypeId: it.detail?.sheetMaterialTypeId ?? null,
+        materialTypeId: job?.sheetMaterialTypeId ?? it.detail?.sheetMaterialTypeId ?? null,
         filmId: it.detail?.filmId ?? null,
       });
     }
     return m;
-  }, [job?.items]);
+  }, [job?.items, job?.sheetMaterialTypeId]);
+
+  // A vacuum_table profile keeps «Разделять по материалу» editable even with a
+  // chosen «Лист раскроя»: operators pre-set the flag before clearing the
+  // override, and the frozen checkbox read as a bug. For other profiles the
+  // freeze stays — the flag is override-irrelevant at calculate time.
+  const isVacuumProfileId = useCallback(
+    (profileId: number | null) =>
+      profiles.find((p) => p.cutParamProfileId === profileId)?.params?.layout_mode === 'vacuum_table',
+    [profiles],
+  );
 
   // Per-piece sheet-material and film NAMES for the editor's per-sheet header.
   // Keyed by item_id "det-<orderDetailId>" (materialName is the sheet material,
@@ -1636,7 +1663,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                       <Checkbox
                         checked={job.splitByMaterial}
                         onChange={(e) => void setJobSplitByMaterial(e.target.checked)}
-                        disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob || job.sheetMaterialTypeId != null}
+                        disabled={
+                          !canManage ||
+                          busy ||
+                          job.status === 'calculating' ||
+                          isArchivedJob ||
+                          (job.sheetMaterialTypeId != null && !isVacuumProfileId(job.paramProfileId))
+                        }
                       >
                         Разделять по материалу
                       </Checkbox>
@@ -1837,7 +1870,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         return (
           <Card
             key={group.cutGroupId}
+            id={`cut-group-card-${group.cutGroupId}`}
             size="small"
+            // scrollMarginTop keeps the card title visible under the sticky
+            // header when the back-to-top button scrolls the card into view.
+            style={{ scrollMarginTop: stickyHeaderTop }}
             // Sticky group header: keeps the group name, «устарел» badge,
             // «Редактировать раскрой» and «Скачать PDF» on screen while the
             // operator scrolls through a tall group with many sheets.
@@ -2168,6 +2205,23 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 })}
               </div>
             )}
+            {/* Always-visible return to the group header — works in both the
+                read-only sheet view and the manual editor (both render inside
+                this card). */}
+            <div style={backToTopWrapStyle}>
+              <Button
+                size="small"
+                icon={<UpOutlined />}
+                style={{ pointerEvents: 'auto' }}
+                onClick={() =>
+                  document
+                    .getElementById(`cut-group-card-${group.cutGroupId}`)
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }
+              >
+                Наверх
+              </Button>
+            </div>
           </Card>
         );
       })}
