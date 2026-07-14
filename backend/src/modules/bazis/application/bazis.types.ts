@@ -8,6 +8,7 @@ import type {
   CreateOrderFromDraftNodeDto,
   BazisProjectDeleteResponseDto,
   BazisNodeCardDto,
+  BazisNodeNotesDto,
   BazisOrderDraftResponseDto,
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
@@ -87,6 +88,13 @@ export interface DeleteBazisProjectInput {
   bazisProjectId: number;
 }
 
+export interface SetNodeNotesInput {
+  currentUser: CurrentUser;
+  requestId?: string;
+  nodeId: number;
+  notes: string | null;
+}
+
 export interface BazisRepositoryPort {
   importRevision(command: ImportRevisionCommand): Promise<BazisImportResponseDto>;
   recordFailedImport(input: {
@@ -123,4 +131,5 @@ export interface BazisRepositoryPort {
   listRevisionOrders(revisionId: number): Promise<BazisRevisionOrderDto[]>;
   getRevisionEstimate(revisionId: number): Promise<BazisRevisionEstimateDto>;
   deleteProject(input: DeleteBazisProjectInput): Promise<BazisProjectDeleteResponseDto>;
+  setNodeNotes(input: SetNodeNotesInput): Promise<BazisNodeNotesDto>;
 }

@@ -33,6 +33,9 @@ function panel(overrides: Partial<BazisTreeNode & { pathTitle: string; productNa
     widthMm: 400,
     thicknessMm: 16,
     mainMaterialName: 'ЛДСП Белый',
+    edgeCount: 0,
+    hasDrilling: false,
+    notes: null,
     childrenCount: 0,
     orders: [],
     orderIds: [],
@@ -135,6 +138,28 @@ describe('groupPanelRows', () => {
     const groups = groupPanelRows(rows);
     expect(groups[0].children.map((c) => c.bazisNodeId)).toEqual([10, 12]);
     expect(groups[1].children.map((c) => c.bazisNodeId)).toEqual([11]);
+  });
+
+  it('uniformEdgeCount = value when all children equal, null when mixed', () => {
+    const uniform = groupPanelRows([panel({ edgeCount: 2 }), panel({ edgeCount: 2 })]);
+    expect(uniform[0].uniformEdgeCount).toBe(2);
+
+    const mixed = groupPanelRows([panel({ edgeCount: 2 }), panel({ edgeCount: 3 })]);
+    expect(mixed[0].uniformEdgeCount).toBeNull();
+  });
+
+  it('drillingState: all / none / mixed', () => {
+    expect(groupPanelRows([panel({ hasDrilling: true }), panel({ hasDrilling: true })])[0].drillingState).toBe('all');
+    expect(groupPanelRows([panel({ hasDrilling: false }), panel({ hasDrilling: false })])[0].drillingState).toBe('none');
+    expect(groupPanelRows([panel({ hasDrilling: true }), panel({ hasDrilling: false })])[0].drillingState).toBe('mixed');
+  });
+
+  it('coerces missing rollout fields: edgeCount ?? 0, hasDrilling ?? false', () => {
+    const legacy = groupPanelRows([
+      panel({ edgeCount: undefined as unknown as number, hasDrilling: undefined as unknown as boolean }),
+    ]);
+    expect(legacy[0].uniformEdgeCount).toBe(0);
+    expect(legacy[0].drillingState).toBe('none');
   });
 
   it('findGroupKeyByPanelId находит ключ группы выбранной панели', () => {

@@ -7,7 +7,7 @@
 // карточку (развёрнута по умолчанию) и спойлеры всех блоков/сборок, в
 // которые она входит (свёрнуты; карточка предка грузится лениво).
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { ApartmentOutlined } from '@ant-design/icons';
 import { Button, Checkbox, Collapse, Empty, Modal, Space, Table, Tooltip, Typography, notification } from 'antd';
@@ -18,6 +18,7 @@ import { bazisApi } from '../../api/bazisApi';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
 import { AddToOrderModal } from './AddToOrderModal';
 import { NodeCard } from './NodeCard';
+import { PanelNotesCell } from './PanelNotesCell';
 import {
   buildPanelFilterOptions,
   panelAreaM2,
@@ -43,6 +44,7 @@ import {
   togglePanel,
   type PanelSelectionState,
 } from './panelSelection';
+import { shouldApplyNotesResponse } from './panelNotesEditor';
 import { NODE_KIND_LABELS_RU, nodePathTitle, type RevisionData } from './useRevisionData';
 import './panels.css';
 
@@ -162,6 +164,21 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   const [createDraftLoading, setCreateDraftLoading] = useState(false);
   const [addToOrderOpen, setAddToOrderOpen] = useState(false);
   const [refreshedOrdersByNodeId, setRefreshedOrdersByNodeId] = useState<Map<number, BazisTreeNode['orders']> | null>(null);
+  const [notesByNodeId, setNotesByNodeId] = useState<Map<number, string | null> | null>(null);
+  // Эпоха данных: инкремент при каждой смене nodes/ревизии. Поздний PATCH-ответ
+  // из прошлой эпохи не должен воскресить override (Critic R1 F3).
+  // Бамп СИНХРОННО В РЕНДЕРЕ через useMemo (Critic R3): инкремент в useEffect
+  // оставлял окно в один committed render, где ячейки старой ревизии ещё живы
+  // со старой эпохой и поздний PATCH прошёл бы guard. useMemo бампает ref ДО
+  // рендера ячеек того же прохода — окна нет; guard в handleNotesSaved читает
+  // ref, который уже новый с первого рендера новой ревизии. Повторный прогон
+  // useMemo (StrictMode) безвреден: ячейки и ref согласованно получают
+  // последнее значение.
+  const notesEpochRef = useRef(0);
+  const notesEpoch = useMemo(() => {
+    notesEpochRef.current += 1;
+    return notesEpochRef.current;
+  }, [nodes, revisionId]);
   const fallbackBazisOrderNo = normalizeText(bazisOrderNo);
 
   const panels = useMemo<PanelLike[]>(
@@ -176,12 +193,15 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
             ...node,
             orders: refreshedOrders ?? node.orders,
             orderIds: refreshedOrders?.map((order) => order.orderId) ?? node.orderIds,
+            notes: notesByNodeId?.has(node.bazisNodeId) ? notesByNodeId.get(node.bazisNodeId) ?? null : node.notes ?? null,
+            edgeCount: node.edgeCount ?? 0,
+            hasDrilling: node.hasDrilling ?? false,
             pathTitle: nodePathTitle(ancestors),
             productName: normalizeText(rootAncestor?.name),
             productOrderNo: normalizeText(rootAncestor?.productOrderNo) ?? fallbackBazisOrderNo,
           };
         }),
-    [ancestorsOf, fallbackBazisOrderNo, nodes, refreshedOrdersByNodeId],
+    [ancestorsOf, fallbackBazisOrderNo, nodes, notesByNodeId, refreshedOrdersByNodeId],
   );
 
   const groupRows = useMemo<PanelGroupTableRow[]>(
@@ -246,6 +266,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
 
   useEffect(() => {
     setRefreshedOrdersByNodeId(null);
+    setNotesByNodeId(null);
   }, [nodes, revisionId]);
 
   // Выбор панели может прийти извне (goToPanel из вкладок Фурнитура/Операции/
@@ -261,6 +282,17 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       setExpandedKeys((keys) => (keys.includes(groupKey) ? keys : [...keys, groupKey]));
     }
   }, [focusToken, grouped, groupRows, selectedId]);
+
+  const handleNotesSaved = (nodeId: number, notes: string | null, epoch: number) => {
+    if (!shouldApplyNotesResponse(epoch, notesEpochRef.current)) {
+      return;
+    }
+    setNotesByNodeId((current) => {
+      const next = new Map(current ?? []);
+      next.set(nodeId, notes);
+      return next;
+    });
+  };
 
   const columns = useMemo<ColumnsType<PanelsTableRow>>(() => {
     const filterProps = (field: PanelFilterField, options: PanelFilterOption[]) => ({
@@ -443,6 +475,45 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           ),
       },
       {
+        title: 'Кромка',
+        key: 'edgeCount',
+        width: 60,
+        align: 'right' as const,
+        render: (_, row) =>
+          row.rowType === 'group'
+            ? (row.uniformEdgeCount != null ? <Text strong>{row.uniformEdgeCount}</Text> : '—')
+            : row.edgeCount ?? 0,
+      },
+      {
+        title: 'Присадка',
+        key: 'hasDrilling',
+        width: 68,
+        align: 'center' as const,
+        render: (_, row) => {
+          if (row.rowType === 'group') {
+            if (row.drillingState === 'all') return '✓';
+            if (row.drillingState === 'mixed') return <Text type="secondary">частично</Text>;
+            return '—';
+          }
+          return (row.hasDrilling ?? false) ? '✓' : '—';
+        },
+      },
+      {
+        title: 'Примечания',
+        key: 'notes',
+        width: 200,
+        render: (_, row) =>
+          row.rowType === 'panel' ? (
+            <PanelNotesCell
+              nodeId={row.bazisNodeId}
+              notes={row.notes ?? null}
+              canManage={canManage}
+              epoch={notesEpoch}
+              onSaved={handleNotesSaved}
+            />
+          ) : null,
+      },
+      {
         title: '',
         key: 'actions',
         width: 40,
@@ -462,7 +533,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           ) : null,
       },
     ];
-  }, [filterOptions, onGoToTree, selectOnlyFree, selection, visiblePanels]);
+  }, [canManage, filterOptions, handleNotesSaved, notesEpoch, onGoToTree, selectOnlyFree, selection, visiblePanels]);
 
   const selectedNodeIds = useMemo(() => Array.from(selection.selected), [selection.selected]);
   const selectedAncestors = selectedId != null ? ancestorsOf(selectedId) : [];
@@ -607,7 +678,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
                     {totals.totalAreaM2 != null ? `${formatAreaM2(totals.totalAreaM2)} м\u00B2` : '—'}
                   </span>
                 </Table.Summary.Cell>
-                {[5, 6, 7, 8, 9, 10, 11, 12].map((cellIndex) => (
+                {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((cellIndex) => (
                   <Table.Summary.Cell key={cellIndex} index={cellIndex} />
                 ))}
               </Table.Summary.Row>

@@ -2633,6 +2633,10 @@ paths:
                   mainMaterialName:
                     type: string
                     nullable: true
+                  notes:
+                    type: string
+                    nullable: true
+                    description: Примечание оператора
                   childrenCount:
                     type: integer
                   rawJson:
@@ -2660,6 +2664,75 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           description: Bazis node not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/bazis/nodes/{id}/notes:
+    patch:
+      tags:
+        - Bazis
+      operationId: setBazisNodeNotes
+      summary: Set operator notes on a Bazis node
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - notes
+              additionalProperties: false
+              properties:
+                notes:
+                  type: string
+                  nullable: true
+                  description: >-
+                    Server trims the value first; empty becomes null. The
+                    2000-character limit applies AFTER trim (422
+                    VALIDATION_FAILED beyond it), so raw payloads with outer
+                    whitespace may exceed 2000 characters and still be valid.
+      responses:
+        '200':
+          description: Updated node notes
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - bazisNodeId
+                  - notes
+                properties:
+                  bazisNodeId:
+                    type: integer
+                  notes:
+                    type: string
+                    nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis node not found (error code NOT_FOUND — existing BazisNodeNotFoundError)
           content:
             application/json:
               schema:
@@ -2760,6 +2833,16 @@ paths:
                     mainMaterialName:
                       type: string
                       nullable: true
+                    edgeCount:
+                      type: integer
+                      description: Число кромок (записей «Кромка» в raw_json), derived read-only
+                    hasDrilling:
+                      type: boolean
+                      description: Присадка — у узла есть отверстия в raw_json, derived read-only
+                    notes:
+                      type: string
+                      nullable: true
+                      description: Примечание оператора
                     childrenCount:
                       type: integer
                     orders:

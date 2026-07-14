@@ -1,6 +1,6 @@
 import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
@@ -16,6 +16,7 @@ import type {
   CreateOrderFromDraftRequestDto,
   BazisImportResponseDto,
   BazisNodeCardDto,
+  BazisNodeNotesDto,
   BazisOrderDraftResponseDto,
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
@@ -194,6 +195,12 @@ const buildOrderDraftBodySchema = z.object({
   selectedNodeIds: z.array(z.coerce.number().int().positive()).min(1).max(500),
   targetOrderId: optionalNumericIdSchema.nullish(),
 });
+
+const setNodeNotesSchema = z
+  .object({
+    notes: z.union([z.string(), z.null()]),
+  })
+  .strict();
 
 const importRequestSwaggerSchema = {
   type: 'object',
@@ -464,6 +471,25 @@ export class BazisController {
     this.assertBazisEnabled();
     const currentUser = this.requireCurrentUser(request);
     return this.bazis.getNodeCard(currentUser, parseNumericPathParam(id, 'id'));
+  }
+
+  @ApiOperation({ operationId: 'setBazisNodeNotes', summary: 'Set operator notes on a Bazis node' })
+  @ApiResponse({ status: 200, description: 'Updated node notes' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis node not found' })
+  @ApiResponse({ status: 422, description: 'Invalid notes payload' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Patch('nodes/:id/notes')
+  async setNodeNotes(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<BazisNodeNotesDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const parsed = parseSetNodeNotesBody(body);
+    return this.bazis.setNodeNotes(currentUser, request.requestId, parseNumericPathParam(id, 'id'), parsed.notes);
   }
 
   @ApiOperation({ operationId: 'searchBazisRevisionNodes', summary: 'Search nodes within a Bazis revision' })
@@ -800,6 +826,10 @@ export function parseBuildOrderDraftBody(body: unknown): {
     body,
     'Bazis order-draft payload validation failed',
   );
+}
+
+export function parseSetNodeNotesBody(body: unknown): { notes: string | null } {
+  return parseWithZod(setNodeNotesSchema, body, 'Bazis node notes payload validation failed');
 }
 
 function parseNumericPathParam(value: unknown, field: string): number {

@@ -281,6 +281,9 @@ describe('PgBazisRepository reads + mappings', () => {
             width_mm: null,
             thickness_mm: null,
             main_material_name: null,
+            notes: null,
+            edge_count: '0',
+            has_drilling: false,
             children_count: 2,
           },
         ],
@@ -305,6 +308,9 @@ describe('PgBazisRepository reads + mappings', () => {
         widthMm: null,
         thicknessMm: null,
         mainMaterialName: null,
+        edgeCount: 0,
+        hasDrilling: false,
+        notes: null,
         childrenCount: 2,
         orders: [],
         orderIds: [],
@@ -446,6 +452,203 @@ describe('PgBazisRepository.listAllTreeNodes', () => {
     const database = createDatabase({ nodeSearch: { revisionExists: false } });
     const repository = new PgBazisRepository(database.service);
     await expect(repository.listAllTreeNodes(1)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+});
+
+describe('PgBazisRepository tree derived fields', () => {
+  it('listAllTreeNodes selects notes and guarded edge/hole jsonb expressions', async () => {
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.listAllTreeNodes(82);
+
+    const treeQuery = database.queries.find((query) =>
+      normalizeSql(query.text).includes('FROM bazis_nodes n WHERE n.revision_id = $1'),
+    );
+    expect(treeQuery).toBeDefined();
+    expect(treeQuery!.text).toContain('n.notes');
+    expect(treeQuery!.text).toContain("jsonb_typeof(n.raw_json->'СписокКромок1'->'Кромка') = 'array'");
+    expect(treeQuery!.text).toContain("jsonb_typeof(n.raw_json->'СписокКромок4'->'Кромка') = 'array'");
+    expect(treeQuery!.text).toContain("jsonb_typeof(n.raw_json->'Отверстия'->'Отверстие') = 'array'");
+    expect(treeQuery!.text).toContain("jsonb_typeof(n.raw_json->'Отверстие') = 'array'");
+    expect(treeQuery!.text).toContain('AS edge_count');
+    expect(treeQuery!.text).toContain('AS has_drilling');
+  });
+
+  it('getTreeChildren selects the SAME derived fields (shared DTO, non-all tree path)', async () => {
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.getTreeChildren(82, null);
+
+    const childrenQuery = database.queries.find((query) =>
+      normalizeSql(query.text).includes('n.parent_node_id IS NOT DISTINCT FROM $2'),
+    );
+    expect(childrenQuery).toBeDefined();
+    expect(childrenQuery!.text).toContain('n.notes');
+    expect(childrenQuery!.text).toContain('AS edge_count');
+    expect(childrenQuery!.text).toContain('AS has_drilling');
+  });
+
+  it('maps edge_count/has_drilling/notes into the DTO', async () => {
+    const database = createDatabase({
+      treeChildren: [
+        {
+          bazis_node_id: 101,
+          parent_node_id: null,
+          seq: 0,
+          node_kind: 'object',
+          object_type: 'Панель',
+          name: 'Фасад',
+          detail_code: null,
+          position: '7',
+          designation: 'D-01',
+          product_order_no: '1443',
+          quantity: 1,
+          cumulative_quantity: 1,
+          length_mm: 100,
+          width_mm: 50,
+          thickness_mm: 16,
+          main_material_name: 'ЛДСП',
+          notes: 'торец подклеить',
+          edge_count: '3',
+          has_drilling: true,
+          children_count: 0,
+          linked_orders: null,
+        },
+      ],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const nodes = await repository.listAllTreeNodes(82);
+
+    expect(nodes[0]).toMatchObject({
+      edgeCount: 3,
+      hasDrilling: true,
+      notes: 'торец подклеить',
+    });
+  });
+});
+
+describe('PgBazisRepository.setNodeNotes', () => {
+  it('locks the node row, updates notes, writes audit + idempotent outbox in one tx', async () => {
+    const database = createDatabase({
+      setNodeNotesState: {
+        existingRow: {
+          bazis_node_id: 7213,
+          notes: null,
+          revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+        },
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const result = await repository.setNodeNotes({
+      currentUser: currentUser('admin'),
+      requestId: 'req-notes-1',
+      nodeId: 7213,
+      notes: 'торец подклеить',
+    });
+
+    expect(result).toEqual({ bazisNodeId: 7213, notes: 'торец подклеить' });
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    expect(ordered[0]).toBe('SELECT set_session_user($1)');
+    expect(ordered.some((sql) => sql.includes('FOR UPDATE OF n'))).toBe(true);
+    expect(ordered).toContain('UPDATE bazis_nodes SET notes = $2 WHERE bazis_node_id = $1');
+    const auditInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+    );
+    expect(auditInsert?.params).toContain('bazis.node_notes_changed');
+    const related = database.queries
+      .filter((query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log_related_entity'))
+      .map((query) => [query.params?.[1], query.params?.[2]]);
+    expect(related).toEqual([
+      ['project', 77],
+      ['bazis_project', 41],
+      ['bazis_revision', 82],
+    ]);
+    const outbox = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+    );
+    expect(outbox?.params?.[0]).toBe('bazis.node_notes_changed');
+    expect(outbox?.params?.[4]).toBe('bazis-node-notes-7213-req-notes-1');
+  });
+
+  it('missing requestId: outbox key is unique per change (audit-id based), not a shared constant', async () => {
+    const database = createDatabase({
+      setNodeNotesState: {
+        existingRow: {
+          bazis_node_id: 7213,
+          notes: null,
+          revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+        },
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.setNodeNotes({
+      currentUser: currentUser('admin'),
+      requestId: undefined,
+      nodeId: 7213,
+      notes: 'без request id',
+    });
+
+    const outbox = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+    );
+    const key = String(outbox?.params?.[4] ?? '');
+    // Fallback-константа requestIdOrFallback давала бы один и тот же ключ на
+    // каждое изменение узла → ON CONFLICT дропал бы последующие события.
+    expect(key).toMatch(/^bazis-node-notes-7213-audit-/);
+    expect(key).not.toBe('bazis-node-notes-7213-bazis-node-notes');
+  });
+
+  it('404s on missing node', async () => {
+    const database = createDatabase({
+      setNodeNotesState: { existingRow: null },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(
+      repository.setNodeNotes({
+        currentUser: currentUser('admin'),
+        requestId: 'r',
+        nodeId: 999,
+        notes: 'x',
+      }),
+    ).rejects.toBeInstanceOf(BazisNodeNotFoundError);
+  });
+
+  it('no-op short-circuit: same value writes no UPDATE/audit/outbox', async () => {
+    const database = createDatabase({
+      setNodeNotesState: {
+        existingRow: {
+          bazis_node_id: 7213,
+          notes: 'как было',
+          revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+        },
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const result = await repository.setNodeNotes({
+      currentUser: currentUser('admin'),
+      requestId: 'r2',
+      nodeId: 7213,
+      notes: 'как было',
+    });
+
+    expect(result).toEqual({ bazisNodeId: 7213, notes: 'как было' });
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    expect(ordered.some((sql) => sql.startsWith('UPDATE bazis_nodes'))).toBe(false);
+    expect(ordered.some((sql) => sql.startsWith('INSERT INTO audit_log'))).toBe(false);
+    expect(ordered.some((sql) => sql.startsWith('INSERT INTO outbox_events'))).toBe(false);
   });
 });
 
@@ -2977,6 +3180,9 @@ function createDatabase(
       edgeRows?: Array<Record<string, unknown>>;
       filmRows?: Array<Record<string, unknown>>;
     };
+    setNodeNotesState?: {
+      existingRow?: Record<string, unknown> | null;
+    };
     revisionOrders?: Array<Record<string, unknown>>;
     pruneCandidates?: Array<Record<string, unknown>>;
     projectListRows?: Array<Record<string, unknown>>;
@@ -3165,6 +3371,14 @@ function createDatabase(
           rows: options.nodeCard?.orderLinks ?? [],
           rowCount: options.nodeCard?.orderLinks?.length ?? 0,
         };
+      }
+      if (
+        normalized.startsWith(
+          'SELECT n.bazis_node_id, n.notes, n.revision_id, r.bazis_project_id, bp.project_id FROM bazis_nodes n',
+        )
+      ) {
+        const row = options.setNodeNotesState?.existingRow;
+        return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
       }
       if (normalized.startsWith('SELECT n.bazis_node_id')) {
         return { rows: options.treeChildren ?? [], rowCount: options.treeChildren?.length ?? 0 };
