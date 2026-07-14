@@ -50,7 +50,8 @@ export type OrderSortBy =
   | 'finalAmount'
   | 'paidAmount'
   | 'debtAmount'
-  | 'updatedAt';
+  | 'updatedAt'
+  | 'deletedAt';
 
 export type SortOrder = 'asc' | 'desc';
 
@@ -70,6 +71,8 @@ export interface OrderListQuery {
   onlyMyOrders?: boolean;
   groupIds?: string[];
   groupMode?: 'any' | 'all' | 'primary' | 'none';
+  /** true — только удалённые (корзина); требует orders.delete на backend. */
+  deleted?: boolean;
 }
 
 export interface ChangeOrderStatusRequest {
@@ -86,6 +89,18 @@ export interface DeleteOrderRequest {
 export interface DeleteOrderResponse {
   success: true;
   orderId: number;
+  auditId?: string;
+  requestId: string;
+}
+
+export interface RestoreOrderRequest {
+  version: number;
+  orderName?: string;
+  idempotencyKey?: string;
+}
+
+export interface RestoreOrderResponse {
+  order: OrderDto;
   auditId?: string;
   requestId: string;
 }
@@ -397,6 +412,10 @@ export interface OrderHeaderDto {
   createdBy?: number | null;
   editedBy?: number | null;
   version?: number;
+  /** Присутствуют только в ответе getOrder с includeDeleted=true. */
+  deleteFlag?: boolean;
+  deletedAt?: IsoDateTimeString | null;
+  deletedByName?: string | null;
 }
 
 export interface OrderDetailDto {
@@ -567,4 +586,8 @@ export interface OrderListItemDto {
   editedBy?: number | null;
   updatedAt?: IsoDateTimeString;
   version?: number;
+  /** Присутствуют только в ответе списка с deleted=true (корзина). */
+  deletedAt?: IsoDateTimeString | null;
+  deletedBy?: number | null;
+  deletedByName?: string | null;
 }
