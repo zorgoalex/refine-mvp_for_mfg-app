@@ -408,13 +408,16 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         key: 'name',
         // Fixed width: без неё это flex-колонка, и после добавления
         // Кромка/Присадка/Примечания остаток ширины схлопывался в ноль —
-        // колонка «исчезала» на обычных экранах.
-        width: 130,
-        ellipsis: true,
+        // колонка «исчезала» на обычных экранах. Узкая, содержимое
+        // переносится по словам (без ellipsis).
+        width: 65,
         sorter: panelComparators.name,
         ...filterProps('name', filterOptions.names),
-        render: (_, row) =>
-          row.rowType === 'group' ? row.names.join(' / ') || '—' : row.name?.trim() || '—',
+        render: (_, row) => (
+          <span style={{ whiteSpace: 'normal', overflowWrap: 'break-word' }}>
+            {row.rowType === 'group' ? row.names.join(' / ') || '—' : row.name?.trim() || '—'}
+          </span>
+        ),
       },
       {
         title: 'Обозначение',
