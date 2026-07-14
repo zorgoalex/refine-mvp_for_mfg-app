@@ -1,15 +1,25 @@
 // Вкладка «Материалы»: единый список всех материалов ревизии — листовые
 // (со сматченным ERP-материалом из справочника), кромки (с суммарной
 // длиной), плёнки и фурнитура. Сводка по узлам живёт на вкладке «Дерево».
+// Здесь же — ПОСТ-импортное сопоставление листов: если в визарде выбрали
+// «Пропустить» (или маппинга нет), заказ из панелей падает с 422 — чинится
+// кнопкой «Сопоставить материалы» без переимпорта.
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Empty, Spin, Table, Tag } from 'antd';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Button, Empty, Modal, Space, Spin, Table, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisRevisionMaterialsSummary } from '../../api/types/bazisApi.types';
+import {
+  MaterialMappingStep,
+  materialMappingKey,
+  type MaterialMappingValue,
+  type UnmappedMaterialRow,
+} from './MaterialMappingStep';
 
 interface MaterialsSummaryTabProps {
   revisionId: number;
+  canManage: boolean;
 }
 
 type MaterialKind = 'sheet' | 'edge' | 'film' | 'hardware';
@@ -33,12 +43,15 @@ interface MaterialRow {
   lengthM: number | null;
 }
 
-export const MaterialsSummaryTab: React.FC<MaterialsSummaryTabProps> = ({ revisionId }) => {
+export const MaterialsSummaryTab: React.FC<MaterialsSummaryTabProps> = ({ revisionId, canManage }) => {
   const [summary, setSummary] = useState<BazisRevisionMaterialsSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [mappingOpen, setMappingOpen] = useState(false);
+  const [mappingValues, setMappingValues] = useState<Record<string, MaterialMappingValue>>({});
+  const [mappingSaving, setMappingSaving] = useState(false);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     let cancelled = false;
     setLoading(true);
     setErrorText(null);
@@ -61,6 +74,8 @@ export const MaterialsSummaryTab: React.FC<MaterialsSummaryTabProps> = ({ revisi
       cancelled = true;
     };
   }, [revisionId]);
+
+  useEffect(() => reload(), [reload]);
 
   const rows = useMemo<MaterialRow[]>(() => {
     if (!summary) return [];
@@ -116,6 +131,73 @@ export const MaterialsSummaryTab: React.FC<MaterialsSummaryTabProps> = ({ revisi
 
     return [...sheets, ...edges, ...films, ...hardware];
   }, [summary]);
+
+  // Листы, требующие внимания: без ERP-соответствия ИЛИ явно пропущенные в
+  // визарде («ignore»). Оба состояния валят создание заказа из панелей 422.
+  const remappableSheets = useMemo<UnmappedMaterialRow[]>(
+    () =>
+      rows
+        .filter(
+          (row) =>
+            row.kind === 'sheet'
+            && row.name !== '—'
+            && (row.mappingTargetKind === 'ignore' || !row.erpMatch),
+        )
+        .map((row) => ({ name: row.name, kindGuess: 'sheet', usageCount: row.usage ?? 0 })),
+    [rows],
+  );
+
+  const openMapping = () => {
+    // Prefill: пропущенные в визарде показываем как «Пропустить», чтобы было
+    // видно текущее состояние; несопоставленные остаются пустыми.
+    const initial: Record<string, MaterialMappingValue> = {};
+    for (const row of rows) {
+      if (row.kind !== 'sheet' || row.name === '—') continue;
+      if (row.mappingTargetKind === 'ignore') {
+        initial[materialMappingKey({ name: row.name, kindGuess: 'sheet' })] = {
+          targetKind: 'ignore',
+          targetId: null,
+        };
+      }
+    }
+    setMappingValues(initial);
+    setMappingOpen(true);
+  };
+
+  const handleMappingSave = async () => {
+    const incomplete = remappableSheets.some((item) => {
+      const value = mappingValues[materialMappingKey(item)];
+      return value == null || value.targetKind == null || (value.targetKind !== 'ignore' && value.targetId == null);
+    });
+    if (incomplete) {
+      message.warning('Для каждого материала выберите соответствие или "Пропустить"');
+      return;
+    }
+
+    setMappingSaving(true);
+    try {
+      await bazisApi.upsertMaterialMappings(
+        remappableSheets.map((item) => {
+          const value = mappingValues[materialMappingKey(item)];
+          return {
+            sourceKind: 'sheet' as const,
+            bazisName: item.name,
+            targetKind: value.targetKind ?? 'ignore',
+            sheetMaterialTypeId: value.targetKind === 'sheet' ? value.targetId : null,
+            filmId: null,
+            edgeTypeId: null,
+          };
+        }),
+      );
+      message.success('Сопоставления сохранены');
+      setMappingOpen(false);
+      reload();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось сохранить сопоставления');
+    } finally {
+      setMappingSaving(false);
+    }
+  };
 
   const columns = useMemo<ColumnsType<MaterialRow>>(
     () => [
@@ -173,12 +255,48 @@ export const MaterialsSummaryTab: React.FC<MaterialsSummaryTabProps> = ({ revisi
   }
 
   return (
-    <Table<MaterialRow>
-      size="small"
-      columns={columns}
-      dataSource={rows}
-      pagination={rows.length > 50 ? { pageSize: 50 } : false}
-      scroll={{ y: 480 }}
-    />
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      {remappableSheets.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message={`Листовых материалов без ERP-соответствия: ${remappableSheets.length}. Пока они не сопоставлены, создать заказ из панелей с этими материалами нельзя.`}
+          action={
+            canManage ? (
+              <Button size="small" type="primary" onClick={openMapping}>
+                Сопоставить материалы
+              </Button>
+            ) : undefined
+          }
+        />
+      )}
+      <Table<MaterialRow>
+        size="small"
+        columns={columns}
+        dataSource={rows}
+        pagination={rows.length > 50 ? { pageSize: 50 } : false}
+        scroll={{ y: 480 }}
+      />
+
+      <Modal
+        title="Сопоставление материалов"
+        open={mappingOpen}
+        onOk={() => void handleMappingSave()}
+        onCancel={() => setMappingOpen(false)}
+        okText="Сохранить"
+        cancelText="Отмена"
+        confirmLoading={mappingSaving}
+        width={760}
+        destroyOnClose
+      >
+        <MaterialMappingStep
+          items={remappableSheets}
+          values={mappingValues}
+          onChange={(mappingKey, nextValue) =>
+            setMappingValues((prev) => ({ ...prev, [mappingKey]: nextValue }))
+          }
+        />
+      </Modal>
+    </Space>
   );
 };

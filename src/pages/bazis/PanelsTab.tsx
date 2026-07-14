@@ -615,16 +615,21 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       navigate('/orders/create', { state: { bazisDraft: draft } });
     } catch (error) {
       if (isApiError(error, 'BAZIS_UNMAPPED_MATERIALS')) {
-        const materialNames =
-          ((error.details as { materialNames?: string[] } | undefined)?.materialNames ?? []).filter(
-            (name) => name?.trim(),
-          );
+        const details = error.details as
+          | { unmappedMaterials?: string[]; materialNames?: string[] }
+          | undefined;
+        const materialNames = (details?.unmappedMaterials ?? details?.materialNames ?? []).filter(
+          (name) => name?.trim(),
+        );
 
         Modal.warning({
           title: 'Не все материалы замаплены',
           content: (
             <Space direction="vertical" size={8}>
-              <span>Настройте маппинги материалов в визарде импорта.</span>
+              <span>
+                Сопоставьте материалы на вкладке «Материалы» этого проекта
+                (кнопка «Сопоставить материалы») и повторите.
+              </span>
               {materialNames.length > 0 ? (
                 <ul style={{ margin: 0, paddingLeft: 20 }}>
                   {materialNames.map((name) => (

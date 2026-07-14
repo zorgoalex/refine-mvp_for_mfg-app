@@ -342,7 +342,12 @@ export const BazisProjectViewPage: React.FC = () => {
             {
               key: 'materials',
               label: 'Материалы',
-              children: <MaterialsSummaryTab revisionId={selectedRevision.bazisRevisionId} />,
+              children: (
+                <MaterialsSummaryTab
+                  revisionId={selectedRevision.bazisRevisionId}
+                  canManage={canManage}
+                />
+              ),
             },
             {
               key: 'orders',
