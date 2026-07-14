@@ -14,6 +14,7 @@ import {
   parseMaterialMappingsQuery,
   parseNodeSearchQuery,
   parseRevisionTreeQuery,
+  parseSetNodeNotesBody,
   parseUpsertMaterialMappingsBody,
 } from './bazis.controller';
 import type { BazisRuntimeConfigService } from './bazis-runtime-config.service';
@@ -442,6 +443,52 @@ describe('BazisController', () => {
       }),
     ).toThrowError(ApiError);
   });
+
+  describe('setNodeNotes', () => {
+    it('fails closed 503 when flag off', async () => {
+      const controller = createController({ bazisEnabled: false });
+
+      await expect(controller.setNodeNotes(request(), '1', { notes: 'x' })).rejects.toMatchObject({
+        statusCode: 503,
+        code: 'SERVICE_UNAVAILABLE',
+      } satisfies Partial<ApiError>);
+    });
+
+    it('requires auth', async () => {
+      const controller = createController({ bazisEnabled: true });
+
+      await expect(controller.setNodeNotes({} as RequestWithCurrentUser, '1', { notes: 'x' })).rejects.toMatchObject({
+        statusCode: 401,
+        code: 'AUTH_REQUIRED',
+      } satisfies Partial<ApiError>);
+    });
+
+    it('delegates to the service with parsed nodeId and notes', async () => {
+      const setNodeNotes = vi.fn().mockResolvedValue({ bazisNodeId: 7213, notes: 'текст' });
+      const controller = createController({
+        bazisEnabled: true,
+        service: { setNodeNotes },
+      });
+
+      const result = await controller.setNodeNotes(request(), '7213', { notes: 'текст' });
+
+      expect(result).toEqual({ bazisNodeId: 7213, notes: 'текст' });
+      expect(setNodeNotes).toHaveBeenCalledWith(request().user, 'req-1', 7213, 'текст');
+    });
+  });
+
+  describe('parseSetNodeNotesBody', () => {
+    it('accepts string and null', () => {
+      expect(parseSetNodeNotesBody({ notes: 'x' })).toEqual({ notes: 'x' });
+      expect(parseSetNodeNotesBody({ notes: null })).toEqual({ notes: null });
+    });
+
+    it('rejects missing/extra/typed-wrong payload with 422', () => {
+      expect(() => parseSetNodeNotesBody({})).toThrowError(ApiError);
+      expect(() => parseSetNodeNotesBody({ notes: 5 })).toThrowError(ApiError);
+      expect(() => parseSetNodeNotesBody({ notes: 'x', extra: 1 })).toThrowError(ApiError);
+    });
+  });
 });
 
 function createController(input: {
@@ -454,6 +501,7 @@ function createController(input: {
     getProject: vi.fn(),
     getTree: vi.fn(),
     getNodeCard: vi.fn(),
+    setNodeNotes: vi.fn(),
     searchNodes: vi.fn(),
     getMaterialsSummary: vi.fn(),
     listRevisionOrders: vi.fn(),
