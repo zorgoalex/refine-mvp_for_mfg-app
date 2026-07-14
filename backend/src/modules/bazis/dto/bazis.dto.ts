@@ -56,6 +56,12 @@ export interface BazisTreeNodeDto {
   widthMm: number | null;
   thicknessMm: number | null;
   mainMaterialName: string | null;
+  /** Число кромок (записей «Кромка» в raw_json). Derived, read-only. */
+  edgeCount: number;
+  /** Присадка: у узла есть отверстия в raw_json. Derived, read-only. */
+  hasDrilling: boolean;
+  /** Примечание оператора (migration 064). */
+  notes: string | null;
   childrenCount: number;
   /** ERP-заказы, в которые узел добавлен реально созданной деталью (с названиями). */
   orders: BazisOrderRefDto[];
@@ -98,6 +104,7 @@ export interface BazisNodeCardDto {
   isRectangular: boolean | null;
   textureOrientation: string | null;
   mainMaterialName: string | null;
+  notes: string | null;
   childrenCount: number;
   rawJson: Record<string, unknown>;
   orderLinks: BazisNodeOrderLinkDto[];

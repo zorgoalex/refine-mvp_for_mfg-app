@@ -281,6 +281,9 @@ describe('PgBazisRepository reads + mappings', () => {
             width_mm: null,
             thickness_mm: null,
             main_material_name: null,
+            notes: null,
+            edge_count: '0',
+            has_drilling: false,
             children_count: 2,
           },
         ],
@@ -305,6 +308,9 @@ describe('PgBazisRepository reads + mappings', () => {
         widthMm: null,
         thicknessMm: null,
         mainMaterialName: null,
+        edgeCount: 0,
+        hasDrilling: false,
+        notes: null,
         childrenCount: 2,
         orders: [],
         orderIds: [],
@@ -446,6 +452,81 @@ describe('PgBazisRepository.listAllTreeNodes', () => {
     const database = createDatabase({ nodeSearch: { revisionExists: false } });
     const repository = new PgBazisRepository(database.service);
     await expect(repository.listAllTreeNodes(1)).rejects.toBeInstanceOf(BazisRevisionNotFoundError);
+  });
+});
+
+describe('PgBazisRepository tree derived fields', () => {
+  it('listAllTreeNodes selects notes and guarded edge/hole jsonb expressions', async () => {
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.listAllTreeNodes(82);
+
+    const treeQuery = database.queries.find((query) =>
+      normalizeSql(query.text).includes('FROM bazis_nodes n WHERE n.revision_id = $1'),
+    );
+    expect(treeQuery).toBeDefined();
+    expect(treeQuery!.text).toContain('n.notes');
+    expect(treeQuery!.text).toContain("jsonb_typeof(n.raw_json->'СписокКромок1'->'Кромка') = 'array'");
+    expect(treeQuery!.text).toContain("jsonb_typeof(n.raw_json->'СписокКромок4'->'Кромка') = 'array'");
+    expect(treeQuery!.text).toContain("jsonb_typeof(n.raw_json->'Отверстия'->'Отверстие') = 'array'");
+    expect(treeQuery!.text).toContain("jsonb_typeof(n.raw_json->'Отверстие') = 'array'");
+    expect(treeQuery!.text).toContain('AS edge_count');
+    expect(treeQuery!.text).toContain('AS has_drilling');
+  });
+
+  it('getTreeChildren selects the SAME derived fields (shared DTO, non-all tree path)', async () => {
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.getTreeChildren(82, null);
+
+    const childrenQuery = database.queries.find((query) =>
+      normalizeSql(query.text).includes('n.parent_node_id IS NOT DISTINCT FROM $2'),
+    );
+    expect(childrenQuery).toBeDefined();
+    expect(childrenQuery!.text).toContain('n.notes');
+    expect(childrenQuery!.text).toContain('AS edge_count');
+    expect(childrenQuery!.text).toContain('AS has_drilling');
+  });
+
+  it('maps edge_count/has_drilling/notes into the DTO', async () => {
+    const database = createDatabase({
+      treeChildren: [
+        {
+          bazis_node_id: 101,
+          parent_node_id: null,
+          seq: 0,
+          node_kind: 'object',
+          object_type: 'Панель',
+          name: 'Фасад',
+          detail_code: null,
+          position: '7',
+          designation: 'D-01',
+          product_order_no: '1443',
+          quantity: 1,
+          cumulative_quantity: 1,
+          length_mm: 100,
+          width_mm: 50,
+          thickness_mm: 16,
+          main_material_name: 'ЛДСП',
+          notes: 'торец подклеить',
+          edge_count: '3',
+          has_drilling: true,
+          children_count: 0,
+          linked_orders: null,
+        },
+      ],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const nodes = await repository.listAllTreeNodes(82);
+
+    expect(nodes[0]).toMatchObject({
+      edgeCount: 3,
+      hasDrilling: true,
+      notes: 'торец подклеить',
+    });
   });
 });
 

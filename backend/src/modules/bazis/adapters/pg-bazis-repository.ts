@@ -65,6 +65,31 @@ const CREATE_ORDER_FROM_DRAFT_COMMAND_NAME = 'bazis.create_order_from_draft';
 const ADD_TO_ORDER_COMMAND_NAME = 'bazis.add_to_order';
 const STALE_PROCESSING_MS = 10 * 60 * 1000;
 
+// raw_json — plain jsonb без shape-constraint: legacy/битая строка не должна
+// валить endpoint. Каждый источник — под jsonb_typeof-guard.
+const jsonArrayOrEmpty = (expression: string): string =>
+  `CASE WHEN jsonb_typeof(${expression}) = 'array' THEN ${expression} ELSE '[]'::jsonb END`;
+
+// Число кромок панели = записи «Кромка» по 4 контейнерам (зеркало FE parseNodeRaw.edges).
+const EDGE_COUNT_SQL = `(
+    jsonb_array_length(${jsonArrayOrEmpty(`n.raw_json->'СписокКромок1'->'Кромка'`)})
+  + jsonb_array_length(${jsonArrayOrEmpty(`n.raw_json->'СписокКромок2'->'Кромка'`)})
+  + jsonb_array_length(${jsonArrayOrEmpty(`n.raw_json->'СписокКромок3'->'Кромка'`)})
+  + jsonb_array_length(${jsonArrayOrEmpty(`n.raw_json->'СписокКромок4'->'Кромка'`)})
+)::int`;
+
+// Присадка = есть записи отверстий: контейнер «Отверстия->Отверстие» + прямой
+// массив «Отверстие» (fallback, зеркало parseNodeRaw.holes).
+const HAS_DRILLING_SQL = `(
+    jsonb_array_length(${jsonArrayOrEmpty(`n.raw_json->'Отверстия'->'Отверстие'`)})
+  + jsonb_array_length(${jsonArrayOrEmpty(`n.raw_json->'Отверстие'`)})
+) > 0`;
+
+// Общий SELECT-фрагмент для ОБОИХ tree-запросов (getTreeChildren + listAllTreeNodes).
+const TREE_NODE_EXTRA_SELECT = `n.notes,
+             ${EDGE_COUNT_SQL} AS edge_count,
+             ${HAS_DRILLING_SQL} AS has_drilling`;
+
 interface PruneCandidateRow {
   bazis_revision_id: number | string;
   revision_no: number | string;
@@ -122,6 +147,9 @@ interface TreeNodeRow {
   width_mm: number | string | null;
   thickness_mm: number | string | null;
   main_material_name: string | null;
+  notes: string | null;
+  edge_count: number | string;
+  has_drilling: boolean;
   linked_orders: Array<{ orderId: number | string; orderName: string | null }> | null;
   children_count: number | string;
 }
@@ -195,6 +223,7 @@ interface NodeCardRow {
   is_rectangular: boolean | null;
   texture_orientation: string | null;
   main_material_name: string | null;
+  notes: string | null;
   raw_json: Record<string, unknown> | null;
   children_count: number | string;
   bazis_project_id: number | string;
@@ -953,6 +982,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
              CASE WHEN n.parent_node_id IS NULL THEN NULLIF(trim(n.raw_json->>'Заказ'), '') ELSE NULL END AS product_order_no,
              n.quantity, n.cumulative_quantity,
              n.length_mm, n.width_mm, n.thickness_mm, n.main_material_name,
+             ${TREE_NODE_EXTRA_SELECT},
              (SELECT jsonb_agg(DISTINCT jsonb_build_object('orderId', m.order_id, 'orderName', o.order_name))
               FROM bazis_node_order_detail_map m
               JOIN orders o ON o.order_id = m.order_id
@@ -988,6 +1018,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
              CASE WHEN n.parent_node_id IS NULL THEN NULLIF(trim(n.raw_json->>'Заказ'), '') ELSE NULL END AS product_order_no,
              n.quantity, n.cumulative_quantity,
              n.length_mm, n.width_mm, n.thickness_mm, n.main_material_name,
+             ${TREE_NODE_EXTRA_SELECT},
              (SELECT jsonb_agg(DISTINCT jsonb_build_object('orderId', m.order_id, 'orderName', o.order_name))
               FROM bazis_node_order_detail_map m
               JOIN orders o ON o.order_id = m.order_id
@@ -1012,7 +1043,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       SELECT n.bazis_node_id, n.revision_id, n.parent_node_id, n.seq, n.node_kind, n.object_type,
              n.name, n.detail_code, n.position, n.designation, n.quantity, n.cumulative_quantity,
              n.length_mm, n.width_mm, n.height_mm, n.thickness_mm, n.price, n.is_rectangular,
-             n.texture_orientation, n.main_material_name, n.raw_json,
+             n.texture_orientation, n.main_material_name, n.notes, n.raw_json,
              (SELECT count(*) FROM bazis_nodes c
               WHERE c.parent_node_id = n.bazis_node_id
                 AND c.revision_id = n.revision_id)::int AS children_count,
@@ -1063,6 +1094,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       isRectangular: row.is_rectangular ?? null,
       textureOrientation: row.texture_orientation,
       mainMaterialName: row.main_material_name,
+      notes: row.notes,
       childrenCount: Number(row.children_count),
       rawJson: (row.raw_json ?? {}) as Record<string, unknown>,
       orderLinks: links.rows.map((link) => ({
@@ -1203,11 +1235,6 @@ export class PgBazisRepository implements BazisRepositoryPort {
       `,
       [revisionId],
     );
-
-    // raw_json — plain jsonb без shape-constraint: legacy/битая строка не должна
-    // валить весь endpoint (Critic R1). Каждый источник — под jsonb_typeof-guard.
-    const jsonArrayOrEmpty = (expression: string): string =>
-      `CASE WHEN jsonb_typeof(${expression}) = 'array' THEN ${expression} ELSE '[]'::jsonb END`;
 
     const edges = await this.database.query<RawUsageRow>(
       `
@@ -2398,6 +2425,9 @@ function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
     widthMm: nullableNumber(row.width_mm),
     thicknessMm: nullableNumber(row.thickness_mm),
     mainMaterialName: row.main_material_name,
+    edgeCount: Number(row.edge_count),
+    hasDrilling: Boolean(row.has_drilling),
+    notes: row.notes,
     childrenCount: Number(row.children_count),
     orders: (row.linked_orders ?? [])
       .map((entry) => ({ orderId: Number(entry.orderId), orderName: entry.orderName ?? '' }))
