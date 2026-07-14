@@ -20,7 +20,7 @@ import {
   theme,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
+import { MinusOutlined, PlusOutlined, UndoOutlined, UpOutlined } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
@@ -32,6 +32,8 @@ import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrienta
 import { TableTopScroll } from '../../components/TableTopScroll';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
+import { buildPieceMetaByItemId } from './cutPieceMeta';
+import { pushHistory } from './editorHistory';
 import { CutSheetLabelGenerateAction } from './CutSheetLabelGenerateAction';
 import { authSession } from '../../api/authSession';
 import type {
@@ -136,6 +138,16 @@ const cutActionToolbarStyle: React.CSSProperties = {
   flexWrap: 'wrap',
   alignItems: 'center',
   gap: 8,
+};
+
+// Fixed «Наверх» button: appears as soon as the page has been scrolled
+// vertically and stays visible (view mode and manual editor alike). zIndex
+// stays below antd modals (1000).
+const backToTopFixedStyle: React.CSSProperties = {
+  position: 'fixed',
+  bottom: 24,
+  right: 24,
+  zIndex: 900,
 };
 
 const pdfTemplatePickerStyle: React.CSSProperties = {
@@ -411,6 +423,52 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // Current geometry violations (empty = all clear, save enabled).
   const [violations, setViolations] = useState<ManualViolation[]>([]);
   const [editorViewZoom, setEditorViewZoom] = useState(1);
+  // Undo stack of workingSheets snapshots (one per committed drag/rotate),
+  // capped at EDITOR_UNDO_LIMIT. Cleared on enter/cancel/save.
+  const [editorHistory, setEditorHistory] = useState<{ sheetIndex: number; placements: SheetPlacements }[][]>([]);
+  // «Наверх» visibility: shown as soon as the page has vertical scroll offset.
+  const [showBackToTop, setShowBackToTop] = useState(false);
+
+  useEffect(() => {
+    // User requirement: the button appears as soon as ANY vertical scroll is
+    // engaged (not after a threshold), and hides again at the very top.
+    const onScroll = () => setShowBackToTop(window.scrollY > 0);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  /**
+   * Scroll back to the relevant group header: the group being edited, else the
+   * group card the viewport is currently inside (nearest header at/above the
+   * top edge), else the page top.
+   */
+  const scrollBackToGroupTop = useCallback(() => {
+    let targetId: number | null = editingGroupId;
+    if (targetId == null) {
+      // A card whose header is at/above the measured sticky stack is the one
+      // the viewport is currently inside; among those take the lowest. Use the
+      // dynamic stickyHeaderTop (not a literal) + a small tolerance so the
+      // heuristic tracks whatever the workspace chrome actually occupies.
+      const viewportTopEdge = stickyHeaderTop + 16;
+      let bestTop = Number.NEGATIVE_INFINITY;
+      for (const g of job?.groups ?? []) {
+        const el = document.getElementById(`cut-group-card-${g.cutGroupId}`);
+        if (!el) continue;
+        const top = el.getBoundingClientRect().top;
+        if (top <= viewportTopEdge && top > bestTop) {
+          bestTop = top;
+          targetId = g.cutGroupId;
+        }
+      }
+    }
+    const el = targetId != null ? document.getElementById(`cut-group-card-${targetId}`) : null;
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [editingGroupId, job, stickyHeaderTop]);
   // Per-group alternative-view toggle: true = show manual variant, false = show auto.
   // Initialised from group.manualLayout.isActive on job open; only persisted on Save.
   const [showAlternativeByGroup, setShowAlternativeByGroup] = useState<Record<number, boolean>>({});
@@ -664,6 +722,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setEditingGroupId(null);
         setWorkingSheets([]);
         setViolations([]);
+        setEditorHistory([]);
         // Prefill the eligible-load criteria with the order(s) this job was built
         // from (the reserved items' orders) so "Загрузить подходящие детали" is
         // scoped to those orders instead of scanning everything. Material/film
@@ -1057,7 +1116,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       }
       setWorkingSheets(seed);
       setViolations([]);
-      setEditorViewZoom(1);
+      setEditorHistory([]);
+      // Open zoomed out: the operator first orients across the whole group,
+      // then zooms into the sheet they are editing.
+      setEditorViewZoom(MIN_EDITOR_VIEW_ZOOM);
       setEditingGroupId(group.cutGroupId);
     },
     [job],
@@ -1068,13 +1130,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
    * and stores both the new working sheets and the fresh violation list.
    * Trim authority: uses placements.trim_mm (not editorParams), per brief §3.
    */
-  const handleEditorChange = useCallback(
-    (nextSheets: { sheetIndex: number; placements: SheetPlacements }[]) => {
-      // Drop sheets emptied by a cross-sheet move: empty sheets are not wanted in
-      // a group. Real sheet_index is preserved for survivors (no renumber) so the
-      // moves still validate against the auto stock on save; the editor just stops
-      // rendering the blank sheet immediately. Mirrors reconstructManualSheets.
-      const effective = pruneEmptySheets(nextSheets);
+  const applyEditorSheets = useCallback(
+    (effective: { sheetIndex: number; placements: SheetPlacements }[]) => {
       setWorkingSheets(effective);
       if (!job?.editorParams) {
         setViolations([]);
@@ -1094,6 +1151,28 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     },
     [job],
   );
+
+  const handleEditorChange = useCallback(
+    (nextSheets: { sheetIndex: number; placements: SheetPlacements }[]) => {
+      // Drop sheets emptied by a cross-sheet move: empty sheets are not wanted in
+      // a group. Real sheet_index is preserved for survivors (no renumber) so the
+      // moves still validate against the auto stock on save; the editor just stops
+      // rendering the blank sheet immediately. Mirrors reconstructManualSheets.
+      const effective = pruneEmptySheets(nextSheets);
+      // One undo entry per committed gesture: snapshot the PRE-change sheets.
+      setEditorHistory((h) => pushHistory(h, workingSheets));
+      applyEditorSheets(effective);
+    },
+    [applyEditorSheets, workingSheets],
+  );
+
+  /** Undo the last committed drag/rotate (up to EDITOR_UNDO_LIMIT steps). */
+  const undoEditorStep = useCallback(() => {
+    if (editorHistory.length === 0) return;
+    const prev = editorHistory[editorHistory.length - 1];
+    setEditorHistory(editorHistory.slice(0, -1));
+    applyEditorSheets(prev);
+  }, [editorHistory, applyEditorSheets]);
 
   /**
    * Save the manual layout for a group: derives moves from workingSheets,
@@ -1122,6 +1201,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setEditingGroupId(null);
         setWorkingSheets([]);
         setViolations([]);
+        setEditorHistory([]);
       } catch (error) {
         // Surface 422 violations + 409 recalc/stale with the backend message.
         handleError(error, 'Не удалось сохранить ручной раскрой');
@@ -1155,17 +1235,22 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   );
 
   // Per-piece material/film map for the cross-sheet move guard in SheetEditor.
-  // Keyed by piece item_id format "det-<orderDetailId>".
-  const pieceMetaByItemId = useMemo(() => {
-    const m = new Map<string, { materialTypeId: number | null; filmId: number | null }>();
-    for (const it of job?.items ?? []) {
-      m.set(`det-${it.orderDetailId}`, {
-        materialTypeId: it.detail?.sheetMaterialTypeId ?? null,
-        filmId: it.detail?.filmId ?? null,
-      });
-    }
-    return m;
-  }, [job?.items]);
+  // Effective material mirrors the backend sheet-override semantics — see
+  // buildPieceMetaByItemId (unit-tested against moveAllowed).
+  const pieceMetaByItemId = useMemo(
+    () => buildPieceMetaByItemId(job?.items ?? [], job?.sheetMaterialTypeId ?? null),
+    [job?.items, job?.sheetMaterialTypeId],
+  );
+
+  // A vacuum_table profile keeps «Разделять по материалу» editable even with a
+  // chosen «Лист раскроя»: operators pre-set the flag before clearing the
+  // override, and the frozen checkbox read as a bug. For other profiles the
+  // freeze stays — the flag is override-irrelevant at calculate time.
+  const isVacuumProfileId = useCallback(
+    (profileId: number | null) =>
+      profiles.find((p) => p.cutParamProfileId === profileId)?.params?.layout_mode === 'vacuum_table',
+    [profiles],
+  );
 
   // Per-piece sheet-material and film NAMES for the editor's per-sheet header.
   // Keyed by item_id "det-<orderDetailId>" (materialName is the sheet material,
@@ -1636,7 +1721,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                       <Checkbox
                         checked={job.splitByMaterial}
                         onChange={(e) => void setJobSplitByMaterial(e.target.checked)}
-                        disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob || job.sheetMaterialTypeId != null}
+                        disabled={
+                          !canManage ||
+                          busy ||
+                          job.status === 'calculating' ||
+                          isArchivedJob ||
+                          (job.sheetMaterialTypeId != null && !isVacuumProfileId(job.paramProfileId))
+                        }
                       >
                         Разделять по материалу
                       </Checkbox>
@@ -1837,7 +1928,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         return (
           <Card
             key={group.cutGroupId}
+            id={`cut-group-card-${group.cutGroupId}`}
             size="small"
+            // scrollMarginTop keeps the card title visible under the sticky
+            // header when the back-to-top button scrolls the card into view.
+            style={{ scrollMarginTop: stickyHeaderTop }}
             // Sticky group header: keeps the group name, «устарел» badge,
             // «Редактировать раскрой» and «Скачать PDF» on screen while the
             // operator scrolls through a tall group with many sheets.
@@ -1866,6 +1961,24 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               <div style={cutActionToolbarStyle}>
                 {isEditingGroup && (
                   <Space size={4} data-testid="sticky-editor-zoom-controls">
+                    <Tooltip
+                      title={
+                        editorHistory.length > 0
+                          ? `Отменить последнее перемещение или поворот детали (доступно шагов: ${editorHistory.length})`
+                          : 'Нет шагов для отмены'
+                      }
+                    >
+                      <Button
+                        aria-label="Отменить последний шаг редактирования"
+                        icon={<UndoOutlined />}
+                        style={{ height: 40 }}
+                        onClick={undoEditorStep}
+                        disabled={busy || editorHistory.length === 0}
+                        data-testid="undo-edit-step-btn"
+                      >
+                        Отменить шаг
+                      </Button>
+                    </Tooltip>
                     <Tooltip title="Уменьшить масштаб группы раскроя">
                       <Button
                         aria-label="Уменьшить масштаб группы раскроя"
@@ -2006,6 +2119,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                       setEditingGroupId(null);
                       setWorkingSheets([]);
                       setViolations([]);
+                      setEditorHistory([]);
                     }}
                     disabled={busy}
                     data-testid="cancel-edit-btn"
@@ -2172,6 +2286,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         );
       })}
       </Space>
+      {job && showBackToTop && (
+        <div style={backToTopFixedStyle}>
+          <Button icon={<UpOutlined />} onClick={scrollBackToGroupTop} data-testid="back-to-top-btn">
+            Наверх
+          </Button>
+        </div>
+      )}
       <Modal
         title={pdfPreview.title}
         open={pdfPreview.open}
