@@ -258,6 +258,94 @@ test.describe('Order UI full form coverage', () => {
             });
         }
 
+        await test.step('creates, deletes, restores a separate durable trash order', async () => {
+            const trashOrderName = `E2E codex full coverage trash ${runId}`;
+            const trashOrderId = await createMinimalTrashCoverageOrder(page, trashOrderName);
+
+            await page.goto(`${frontendUrl}/orders/show/${trashOrderId}`, { waitUntil: 'domcontentloaded' });
+            await expect(page.getByText(trashOrderName, { exact: true }).first()).toBeVisible({ timeout: 30000 });
+            await expect(page.getByRole('button', { name: 'Удалить' }).first()).toBeVisible({ timeout: 30000 });
+
+            const deleteResponsePromise = page.waitForResponse(
+                (response) =>
+                    response.url().includes(`/api/v1/orders/${trashOrderId}`) &&
+                    response.request().method() === 'DELETE',
+                { timeout: 30000 },
+            );
+            await page.getByRole('button', { name: 'Удалить' }).first().click();
+            const deletePopover = page.locator('.ant-popover').filter({ hasText: `Удалить заказ №${trashOrderName}?` }).last();
+            await expect(deletePopover).toBeVisible({ timeout: 15000 });
+            await deletePopover.getByRole('button', { name: 'Удалить' }).click();
+            const deleteResponse = await deleteResponsePromise;
+            const deleteBody = await deleteResponse.json().catch(() => null);
+            expect(
+                deleteResponse.ok(),
+                `trash delete failed with HTTP ${deleteResponse.status()} ${deleteResponse.statusText()}: ${summarizeApiBody(deleteBody)}`,
+            ).toBe(true);
+            await page.waitForURL(/\/orders(?:$|\?)/, { timeout: 30000 });
+
+            await page.goto(`${frontendUrl}/orders/trash`, { waitUntil: 'domcontentloaded' });
+            const trashRow = page.getByRole('row', { name: new RegExp(trashOrderName) }).first();
+            await expect(trashRow).toBeVisible({ timeout: 30000 });
+
+            await trashRow.getByRole('button', { name: 'Восстановить' }).click();
+            const restorePopover = page.locator('.ant-popover').filter({ hasText: new RegExp(`Восстановить заказ №${trashOrderName}\\?`) }).last();
+            await expect(restorePopover).toBeVisible({ timeout: 15000 });
+            const restoreResponsePromise = page.waitForResponse(
+                (response) =>
+                    response.url().includes(`/api/v1/orders/${trashOrderId}/restore`) &&
+                    response.request().method() === 'POST',
+                { timeout: 30000 },
+            );
+            await restorePopover.getByRole('button', { name: 'Восстановить' }).click();
+
+            let restoredOrderName = trashOrderName;
+            const renameModal = page.getByRole('dialog').filter({ hasText: /Восстановить как/ });
+            const renameModalVisible = await renameModal
+                .waitFor({ state: 'visible', timeout: 5000 })
+                .then(() => true)
+                .catch(() => false);
+
+            if (renameModalVisible) {
+                const suggested = extractSuggestedRestoreName((await renameModal.textContent()) || '');
+                if (suggested) {
+                    restoredOrderName = suggested;
+                }
+                const retryRestoreResponsePromise = page.waitForResponse(
+                    (response) =>
+                        response.url().includes(`/api/v1/orders/${trashOrderId}/restore`) &&
+                        response.request().method() === 'POST' &&
+                        response.ok(),
+                    { timeout: 30000 },
+                );
+                await renameModal.getByRole('button', { name: 'Восстановить' }).click();
+                const retryRestoreResponse = await retryRestoreResponsePromise;
+                const retryRestoreBody = await retryRestoreResponse.json().catch(() => null);
+                expect(
+                    retryRestoreResponse.ok(),
+                    `trash restore retry failed with HTTP ${retryRestoreResponse.status()} ${retryRestoreResponse.statusText()}: ${summarizeApiBody(retryRestoreBody)}`,
+                ).toBe(true);
+            } else {
+                const restoreResponse = await restoreResponsePromise;
+                const restoreBody = await restoreResponse.json().catch(() => null);
+                expect(
+                    restoreResponse.ok(),
+                    `trash restore failed with HTTP ${restoreResponse.status()} ${restoreResponse.statusText()}: ${summarizeApiBody(restoreBody)}`,
+                ).toBe(true);
+            }
+
+            await expect(page.getByRole('row', { name: new RegExp(trashOrderName) })).toHaveCount(0, { timeout: 30000 });
+
+            await page.goto(`${frontendUrl}/orders`, { waitUntil: 'domcontentloaded' });
+            if (hasWorkspaceTabs) {
+                await workspaceTabs(page).getByRole('tab', { name: /Заказы/ }).first().click();
+            }
+            const orderSearch = page.getByPlaceholder('Поиск по номеру заказа').first();
+            await orderSearch.fill(restoredOrderName);
+            await page.getByRole('button', { name: /Найти/ }).first().click();
+            await expect(page.getByRole('row', { name: new RegExp(restoredOrderName) }).first()).toBeVisible({ timeout: 30000 });
+        });
+
         await page.goto(`${frontendUrl}/orders`, { waitUntil: 'domcontentloaded' });
         // Tabbed workspace: the just-created order's tab stays active after navigating, so
         // the "Заказы" list is a separate (hidden) keep-alive tab. Activate it, then assert
@@ -419,6 +507,47 @@ function summarizeApiBody(body: unknown): string {
         details: record.details,
     };
     return JSON.stringify(summary);
+}
+
+async function createMinimalTrashCoverageOrder(page: Page, orderName: string): Promise<number> {
+    await page.goto(`${frontendUrl}/orders`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('button', { name: 'Создать заказ' })).toBeVisible({ timeout: 30000 });
+    await page.getByRole('button', { name: 'Создать заказ' }).click();
+
+    const orderDialog = page.getByRole('dialog', { name: 'Создание нового заказа' });
+    await expect(orderDialog).toBeVisible({ timeout: 30000 });
+    await clickOrderTab(orderDialog, 'Основная информация');
+    await selectAntdOption(page, formItem(orderDialog, 'Клиент'));
+    await orderDialog.getByPlaceholder('Введите название заказа').fill(orderName);
+    await fillDate(formItem(orderDialog, 'Дата заказа'), '23.05.2026');
+    await selectAntdOption(page, formItem(orderDialog, 'Статус заказа'));
+    await selectAntdOption(page, formItem(orderDialog, 'Статус оплаты'));
+    await selectAntdOption(page, formItem(orderDialog, 'Менеджер'));
+    await fillNumber(formItem(orderDialog, 'Приоритет'), '66');
+
+    const saveResponsePromise = page.waitForResponse(
+        (response) =>
+            response.url().includes('/api/v1/orders') &&
+            response.request().method() === 'POST',
+        { timeout: 60000 },
+    );
+    await orderDialog.getByRole('button', { name: /Сохранить/ }).first().click();
+    const saveResponse = await saveResponsePromise;
+    const saveBody = await saveResponse.json().catch(() => null);
+    expect(
+        saveResponse.ok(),
+        `trash order create failed with HTTP ${saveResponse.status()} ${saveResponse.statusText()}: ${summarizeApiBody(saveBody)}`,
+    ).toBe(true);
+
+    const orderId = readOrderIdFromCreateResponse(saveBody);
+    expect(Number.isFinite(orderId)).toBe(true);
+    await expect(orderDialog).toBeHidden({ timeout: 30000 });
+    return orderId;
+}
+
+function extractSuggestedRestoreName(text: string): string | null {
+    const match = text.match(/Восстановить как\s+(.+?)\?/);
+    return match?.[1]?.trim() || null;
 }
 
 async function verifyEditTabs(page: Page, testInfo: TestInfo, orderName: string, detailName: string, paymentNote: string) {
