@@ -20,6 +20,7 @@ import { AddToOrderModal } from './AddToOrderModal';
 import { NodeCard } from './NodeCard';
 import {
   buildPanelFilterOptions,
+  panelAreaM2,
   findGroupKeyByPanelId,
   groupPanelRows,
   panelComparators,
@@ -349,6 +350,20 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           ),
       },
       {
+        title: 'Площадь, м²',
+        key: 'areaM2',
+        width: 100,
+        align: 'right' as const,
+        render: (_, row) => {
+          const areaM2 = row.rowType === 'group' ? row.totalAreaM2 : panelAreaM2(row);
+          return areaM2 != null ? (
+            row.rowType === 'group' ? <Text strong>{formatAreaM2(areaM2)}</Text> : formatAreaM2(areaM2)
+          ) : (
+            '—'
+          );
+        },
+      },
+      {
         title: 'Материал',
         key: 'material',
         width: 210,
@@ -575,15 +590,19 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           return (
             <Table.Summary fixed>
               <Table.Summary.Row>
-                <Table.Summary.Cell index={0} colSpan={2}>
+                {/* Сетка: 0 чекбокс, 1 №, 2 Размеры, 3 Кол-во, 4 Площадь, дальше 8 колонок */}
+                <Table.Summary.Cell index={0} colSpan={3}>
                   <Text strong>
                     {grouped ? `Итого позиций: ${totals.positions}` : `Итого панелей: ${totals.positions}`}
                   </Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={2}>
+                <Table.Summary.Cell index={3}>
                   <Text strong>{totals.totalQuantity ?? '—'}</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={3} colSpan={8} />
+                <Table.Summary.Cell index={4} align="right">
+                  <Text strong>{totals.totalAreaM2 != null ? formatAreaM2(totals.totalAreaM2) : '—'}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={5} colSpan={8} />
               </Table.Summary.Row>
             </Table.Summary>
           );
@@ -661,6 +680,10 @@ function formatSize(row: Pick<BazisTreeNode, 'lengthMm' | 'widthMm' | 'thickness
     return '—';
   }
   return parts.filter(Boolean).join(' × ');
+}
+
+function formatAreaM2(value: number): string {
+  return value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function normalizeText(value: string | null | undefined): string | null {

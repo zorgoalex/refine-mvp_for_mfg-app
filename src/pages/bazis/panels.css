@@ -15,3 +15,9 @@
 .bazis-panels-table .ant-table-tbody > tr.bazis-panel-child-row:not(.ant-table-row-selected) > td {
   background-color: var(--bazis-panel-child-bg) !important;
 }
+
+/* Заголовки таблицы панелей — в два раза мельче стандартного (просьба
+   пользователя: шапка не должна раздувать ширину колонок). */
+.bazis-panels-table .ant-table-thead > tr > th {
+  font-size: 50%;
+}

@@ -21,6 +21,8 @@ export interface PanelGroupRow {
   mainMaterialName: string | null;
   /** Сумма количеств детей; null, если количество не задано ни у одной панели. */
   totalQuantity: number | null;
+  /** Сумма площадей детей, м² (размеры × количество); null, если ни у одной не посчиталась. */
+  totalAreaM2: number | null;
   /** Уникальные непустые наименования детей в порядке появления. */
   names: string[];
   /** Уникальные непустые обозначения детей в порядке появления. */
@@ -32,6 +34,17 @@ export interface PanelGroupRow {
   /** Уникальные по orderId ERP-заказы детей в порядке появления. */
   orders: BazisOrderRef[];
   children: PanelLike[];
+}
+
+/** Площадь панели, м²: Д×Ш из размеров × количество. null при неполных размерах. */
+export function panelAreaM2(
+  panel: Pick<BazisTreeNode, 'lengthMm' | 'widthMm' | 'quantity' | 'cumulativeQuantity'>,
+): number | null {
+  if (panel.lengthMm == null || panel.widthMm == null) {
+    return null;
+  }
+  const quantity = panel.quantity ?? panel.cumulativeQuantity ?? 1;
+  return (panel.lengthMm * panel.widthMm * quantity) / 1_000_000;
 }
 
 function sizeKeyPart(value: number | null): string {
@@ -78,6 +91,7 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
         thicknessMm: panel.thicknessMm,
         mainMaterialName: panel.mainMaterialName?.trim() || null,
         totalQuantity: null,
+        totalAreaM2: null,
         names: [],
         designations: [],
         productNames: [],
@@ -93,6 +107,11 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
     const quantity = panel.quantity ?? panel.cumulativeQuantity;
     if (quantity != null) {
       group.totalQuantity = (group.totalQuantity ?? 0) + quantity;
+    }
+
+    const areaM2 = panelAreaM2(panel);
+    if (areaM2 != null) {
+      group.totalAreaM2 = (group.totalAreaM2 ?? 0) + areaM2;
     }
 
     pushUniqueText(group.names, panel.name);
@@ -115,17 +134,22 @@ export interface PanelGroupsSummary {
   positions: number;
   /** Общее количество панелей; null, если количество не задано нигде. */
   totalQuantity: number | null;
+  totalAreaM2: number | null;
 }
 
 /** Итоги для нижней строки таблицы панелей. */
 export function summarizePanelGroups(groups: PanelGroupRow[]): PanelGroupsSummary {
   let totalQuantity: number | null = null;
+  let totalAreaM2: number | null = null;
   for (const group of groups) {
     if (group.totalQuantity != null) {
       totalQuantity = (totalQuantity ?? 0) + group.totalQuantity;
     }
+    if (group.totalAreaM2 != null) {
+      totalAreaM2 = (totalAreaM2 ?? 0) + group.totalAreaM2;
+    }
   }
-  return { positions: groups.length, totalQuantity };
+  return { positions: groups.length, totalQuantity, totalAreaM2 };
 }
 
 // ---- Сортировка колонок таблицы панелей ------------------------------------
@@ -308,11 +332,16 @@ export function panelFilterPredicate(
  * antd/rc-table отдаёт в summary-колбэк уже отфильтрованный верхний уровень. */
 export function summarizeVisibleRows(rows: readonly SortableRow[]): PanelGroupsSummary {
   let totalQuantity: number | null = null;
+  let totalAreaM2: number | null = null;
   for (const row of rows) {
     const quantity = isGroupRow(row) ? row.totalQuantity : row.quantity ?? row.cumulativeQuantity;
     if (quantity != null) {
       totalQuantity = (totalQuantity ?? 0) + quantity;
     }
+    const areaM2 = isGroupRow(row) ? row.totalAreaM2 : panelAreaM2(row);
+    if (areaM2 != null) {
+      totalAreaM2 = (totalAreaM2 ?? 0) + areaM2;
+    }
   }
-  return { positions: rows.length, totalQuantity };
+  return { positions: rows.length, totalQuantity, totalAreaM2 };
 }

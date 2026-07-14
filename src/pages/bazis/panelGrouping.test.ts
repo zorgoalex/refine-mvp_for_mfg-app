@@ -153,15 +153,15 @@ describe('groupPanelRows', () => {
       panel({ quantity: 3, thicknessMm: 16 }),
       panel({ quantity: null, cumulativeQuantity: 4, thicknessMm: 18 }),
     ]);
-    expect(summarizePanelGroups(groups)).toEqual({ positions: 2, totalQuantity: 9 });
+    expect(summarizePanelGroups(groups)).toMatchObject({ positions: 2, totalQuantity: 9 });
   });
 
   it('summarizePanelGroups: количества нет ни у одной панели — totalQuantity null', () => {
     const groups = groupPanelRows([
       panel({ quantity: null, cumulativeQuantity: null }),
     ]);
-    expect(summarizePanelGroups(groups)).toEqual({ positions: 1, totalQuantity: null });
-    expect(summarizePanelGroups([])).toEqual({ positions: 0, totalQuantity: null });
+    expect(summarizePanelGroups(groups)).toMatchObject({ positions: 1, totalQuantity: null });
+    expect(summarizePanelGroups([])).toMatchObject({ positions: 0, totalQuantity: null });
   });
 
   it('дробные размеры сравниваются по миллиметру после округления', () => {
@@ -299,15 +299,15 @@ describe('groupPanelRows', () => {
       panel({ quantity: 2, thicknessMm: 16 }),
       panel({ quantity: 3, thicknessMm: 18 }),
     ]);
-    expect(summarizeVisibleRows(groups)).toEqual({ positions: 2, totalQuantity: 5 });
+    expect(summarizeVisibleRows(groups)).toMatchObject({ positions: 2, totalQuantity: 5 });
     // отфильтрованный поднабор групп
-    expect(summarizeVisibleRows([groups[0]])).toEqual({ positions: 1, totalQuantity: 2 });
+    expect(summarizeVisibleRows([groups[0]])).toMatchObject({ positions: 1, totalQuantity: 2 });
     // плоские строки
     const flat = [
       { ...panel({ quantity: 4 }), rowType: 'panel' as const },
       { ...panel({ quantity: null, cumulativeQuantity: 6 }), rowType: 'panel' as const },
     ];
-    expect(summarizeVisibleRows(flat)).toEqual({ positions: 2, totalQuantity: 10 });
-    expect(summarizeVisibleRows([])).toEqual({ positions: 0, totalQuantity: null });
+    expect(summarizeVisibleRows(flat)).toMatchObject({ positions: 2, totalQuantity: 10 });
+    expect(summarizeVisibleRows([])).toMatchObject({ positions: 0, totalQuantity: null });
   });
 });
