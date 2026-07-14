@@ -29,11 +29,18 @@ describe('CutPage cut-fixes guard', () => {
     expect(src).toMatch(/job\.sheetMaterialTypeId != null && !isVacuumProfileId\(job\.paramProfileId\)/);
   });
 
-  it('renders a sticky back-to-top button inside the group card', () => {
-    expect(src).toMatch(/backToTopWrapStyle/);
-    expect(src).toMatch(/cut-group-card-\$\{group\.cutGroupId\}/);
+  it('renders a fixed back-to-top button once the page has been scrolled', () => {
+    expect(src).toMatch(/backToTopFixedStyle/);
+    expect(src).toMatch(/position: 'fixed'/);
+    expect(src).toMatch(/window\.scrollY > 0/); // ANY vertical scroll shows the button
+    // group-detection heuristic follows the MEASURED sticky offset, not a literal
+    expect(src).toMatch(/stickyHeaderTop \+ 16/);
+    expect(src).toMatch(/top <= viewportTopEdge/);
+    expect(src).toMatch(/data-testid="back-to-top-btn"/);
     expect(src).toMatch(/scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/);
     expect(src).toMatch(/Наверх/);
     expect(src).toMatch(/scrollMarginTop: stickyHeaderTop/);
+    // target priority: the group being edited wins over viewport lookup
+    expect(src).toMatch(/let targetId: number \| null = editingGroupId/);
   });
 });
