@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+export const findTableHorizontalScroller = (root: ParentNode): HTMLElement | null =>
+  (root.querySelector('.ant-table-body') as HTMLElement | null) ??
+  (root.querySelector('.ant-table-content') as HTMLElement | null);
+
 /**
  * Wraps a horizontally-scrollable Ant Design `<Table>` and renders a SECOND
  * horizontal scrollbar pinned to the TOP of the table, kept in sync with the
@@ -29,9 +33,7 @@ export const TableTopScroll: React.FC<{ children: React.ReactNode; className?: s
     const top = topRef.current;
     if (!wrap || !top) return;
 
-    const findScroller = (): HTMLElement | null =>
-      (wrap.querySelector('.ant-table-content') as HTMLElement | null) ??
-      (wrap.querySelector('.ant-table-body') as HTMLElement | null);
+    const findScroller = (): HTMLElement | null => findTableHorizontalScroller(wrap);
 
     let scroller: HTMLElement | null = null;
     let syncingTop = false;

@@ -113,15 +113,15 @@ describe('panelSelection', () => {
     expect(toggleGroup(state, row, true)).toBe(state);
   });
 
-  it('selectionSummary считает positions, panels и excludedBusy', () => {
+  it('selectionSummary считает positions, panels, units (сумма Кол-во) и excludedBusy', () => {
     const groups = [
       group([
-        panel({ bazisNodeId: 10, orders: [] }),
+        panel({ bazisNodeId: 10, orders: [], quantity: 2 }),
         panel({ bazisNodeId: 11, orders: [order(101)] }),
         panel({ bazisNodeId: 12, orders: [order(102)] }),
       ]),
       group([
-        panel({ bazisNodeId: 20, orders: [] }),
+        panel({ bazisNodeId: 20, orders: [], quantity: null, cumulativeQuantity: 3 }),
         panel({ bazisNodeId: 21, orders: [order(201)] }),
       ]),
       group([
@@ -136,6 +136,8 @@ describe('panelSelection', () => {
     expect(selectionSummary(state, groups)).toEqual({
       positions: 2,
       panels: 3,
+      // 10: quantity 2, 20: cumulativeQuantity 3, 21: default 1
+      units: 6,
       excludedBusy: 2,
     });
   });

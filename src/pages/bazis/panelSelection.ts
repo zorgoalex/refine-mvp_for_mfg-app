@@ -94,17 +94,23 @@ export function groupCheckState(
   return 'indeterminate';
 }
 
-/** Сводка нужна для нижней панели: позиции, панели и исключённые занятые. */
+/** Сводка выбора. «Позиция» зависит от режима таблицы, поэтому отдаём оба
+ * счётчика: groupPositions (уникальные группы материал+размеры — строка
+ * группированного режима) и panels (вхождения — строка плоского режима).
+ * units — физические штуки: сумма «Кол-во» выбранных вхождений, всегда
+ * сходится с колонкой «Кол-во» итоговой строки. */
 export function selectionSummary(
   state: PanelSelectionState,
   groups: ReadonlyArray<Pick<PanelGroupRow, 'children'>>,
 ): {
   positions: number;
   panels: number;
+  units: number;
   excludedBusy: number;
 } {
   let positions = 0;
   let panels = 0;
+  let units = 0;
   let excludedBusy = 0;
 
   for (const group of groups) {
@@ -112,6 +118,7 @@ export function selectionSummary(
     for (const panel of group.children) {
       if (state.selected.has(panel.bazisNodeId)) {
         panels += 1;
+        units += panel.quantity ?? panel.cumulativeQuantity ?? 1;
         hasSelectionInGroup = true;
       }
     }
@@ -126,7 +133,7 @@ export function selectionSummary(
     }
   }
 
-  return { positions, panels, excludedBusy };
+  return { positions, panels, units, excludedBusy };
 }
 
 /** Выбрасывает из селекции панели, которых больше нет в актуальных данных. */

@@ -964,7 +964,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Прис.</div>,
       dataIndex: 'doweling',
       key: 'doweling',
-      width: 40,
+      width: 52,
       align: 'center',
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
@@ -983,7 +983,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Цена за кв.м.</div>,
       dataIndex: 'milling_cost_per_sqm',
       key: 'milling_cost_per_sqm',
-      width: 70,
+      width: 100,
       align: 'right',
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
@@ -1003,7 +1003,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             />
           </Form.Item>
         ) : (
-          <span>
+          <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
             {d.milling_cost_per_sqm !== null && d.milling_cost_per_sqm !== undefined ? formatNumber(d.milling_cost_per_sqm, 2) : '—'}
           </span>
         );
@@ -1147,7 +1147,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             />
           </Form.Item>
         ) : (
-          formatNumber(d.priority, 0)
+          <span style={{ fontSize: 11, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+            {formatNumber(d.priority, 0)}
+          </span>
         );
       },
     },
@@ -1893,7 +1895,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           onShowSizeChange: (current, size) => setPageSize(size),
           onChange: (page, size) => setPageSize(size),
         }}
-        scroll={{ x: 1780, y: 500 }}
+        scroll={{ x: 'max-content', y: 500 }}
         size="small"
         bordered
         rowClassName={(row: any) => {
