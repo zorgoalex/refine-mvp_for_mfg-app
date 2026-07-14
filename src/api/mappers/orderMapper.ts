@@ -405,6 +405,7 @@ function normalizeDetails(details: OrderDetail[]): SaveOrderDetailDto[] {
       basisProduct: normalizeOptionalString(detail.basis_product),
       basisData: normalizeOptionalString(detail.basis_data),
       basisDesignation: normalizeOptionalString(detail.basis_designation),
+      doweling: detail.doweling === true,
 
       linkCuttingFile: normalizeOptionalString(detail.link_cutting_file),
       linkCuttingImageFile: normalizeOptionalString(detail.link_cutting_image_file),
@@ -519,6 +520,7 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     basis_product: detail.basisProduct ?? null,
     basis_data: detail.basisData ?? null,
     basis_designation: detail.basisDesignation ?? null,
+    doweling: detail.doweling === true,
     link_cutting_file: detail.linkCuttingFile ?? null,
     link_cutting_image_file: detail.linkCuttingImageFile ?? null,
     link_cad_file: detail.linkCadFile ?? null,

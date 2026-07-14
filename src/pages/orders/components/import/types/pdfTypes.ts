@@ -87,6 +87,7 @@ export interface PdfImportRow {
   basisData?: string | null;
   basisDesignation?: string | null;  // "Обозн." — Basis designation
   detailName: string;                // "Наименование" — detail name only
+  doweling?: boolean;                // true когда "Примечание" содержит слово "присадка"
 }
 
 // ============================================================================

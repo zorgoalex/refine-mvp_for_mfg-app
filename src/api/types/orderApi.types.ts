@@ -262,6 +262,7 @@ export interface SaveOrderDetailDto {
   basisProduct?: string | null;
   basisData?: string | null;
   basisDesignation?: string | null;
+  doweling?: boolean;
 
   refKey1c?: string | null;
 }
@@ -426,6 +427,7 @@ export interface OrderDetailDto {
   basisProduct?: string | null;
   basisData?: string | null;
   basisDesignation?: string | null;
+  doweling?: boolean;
   linkCuttingFile?: string | null;
   linkCuttingImageFile?: string | null;
   linkCadFile?: string | null;

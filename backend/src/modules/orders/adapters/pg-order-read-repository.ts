@@ -140,6 +140,7 @@ interface OrderDetailRow extends QueryResultRow {
   basis_product: string | null;
   basis_data: string | null;
   basis_designation: string | null;
+  doweling: boolean;
   link_cutting_file: string | null;
   link_cutting_image_file: string | null;
   link_cad_file: string | null;
@@ -1179,6 +1180,7 @@ function mapDetail(row: OrderDetailRow) {
     basisProduct: row.basis_product,
     basisData: row.basis_data,
     basisDesignation: row.basis_designation,
+    doweling: row.doweling === true,
     linkCuttingFile: row.link_cutting_file,
     linkCuttingImageFile: row.link_cutting_image_file,
     linkCadFile: row.link_cad_file,

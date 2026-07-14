@@ -118,7 +118,9 @@ describe('PgOrderTransactionManager', () => {
     expect(sql).toContain('project_id');
     expect(sql).toContain('INSERT INTO order_details');
     const detailInsert = database.queries.find((query) => normalizeSql(query.text).startsWith('INSERT INTO order_details'));
-    expect(detailInsert?.params.at(-1)).toBe('Прихожка');
+    // Column tail: ..., basis_product, doweling (migration 063).
+    expect(detailInsert?.params.at(-2)).toBe('Прихожка');
+    expect(detailInsert?.params.at(-1)).toBe(false);
     expect(sql).toContain('INSERT INTO payments');
     expect(sql).toContain('DELETE FROM order_details');
     expect(sql).toContain('INSERT INTO audit_log');

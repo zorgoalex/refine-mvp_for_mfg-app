@@ -96,6 +96,7 @@ export interface ImportRow {
   basisData?: string | null;
   basisDesignation?: string | null;
   detailName?: string | null;
+  doweling?: boolean;
 }
 
 export interface ResolvedRow extends ImportRow {

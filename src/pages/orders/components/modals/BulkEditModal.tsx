@@ -38,6 +38,7 @@ interface BulkEditFields {
   milling_cost_per_sqm?: number;
   production_status_id?: number | null;
   priority?: number;
+  doweling?: boolean;
 }
 
 // Track which fields are enabled for editing
@@ -53,6 +54,7 @@ interface EnabledFields {
   milling_cost_per_sqm: boolean;
   production_status_id: boolean;
   priority: boolean;
+  doweling: boolean;
 }
 
 export const BulkEditModal: React.FC<BulkEditModalProps> = ({
@@ -76,6 +78,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     milling_cost_per_sqm: false,
     production_status_id: false,
     priority: false,
+    doweling: false,
   });
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
@@ -154,6 +157,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
         milling_cost_per_sqm: false,
         production_status_id: false,
         priority: false,
+        doweling: false,
       });
     }
   }, [open, form]);
@@ -209,6 +213,10 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
       }
       if (enabledFields.priority && values.priority !== undefined) {
         changes.priority = values.priority;
+      }
+      if (enabledFields.doweling) {
+        // Checkbox: unchecked = снять присадку со всех выбранных.
+        changes.doweling = values.doweling === true;
       }
 
       // Check if any changes were made
@@ -549,6 +557,24 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
             </Form.Item>
           </Col>
         </Row>
+
+        {/* Присадка */}
+        <Form.Item
+          label={
+            <Checkbox
+              checked={enabledFields.doweling}
+              onChange={() => toggleField('doweling')}
+            >
+              Присадка
+            </Checkbox>
+          }
+        >
+          <Form.Item name="doweling" valuePropName="checked" noStyle>
+            <Checkbox disabled={!enabledFields.doweling}>
+              Деталь требует присадки (снятый чекбокс очистит признак)
+            </Checkbox>
+          </Form.Item>
+        </Form.Item>
 
         {/* Примечание */}
         <Form.Item

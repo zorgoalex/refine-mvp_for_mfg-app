@@ -2,7 +2,7 @@
 // Modal for creating/editing order details with auto-calculation
 
 import React, { useEffect, useState } from 'react';
-import { Modal, Form, Input, InputNumber, Row, Col, Select, Space, Button, Alert } from 'antd';
+import { Modal, Form, Input, InputNumber, Row, Col, Select, Space, Button, Alert, Checkbox } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
@@ -493,6 +493,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             </Form.Item>
           </Col>
         </Row>
+
+        <Form.Item name="doweling" valuePropName="checked" style={{ marginBottom: 8 }}>
+          <Checkbox>Присадка</Checkbox>
+        </Form.Item>
 
         <Form.Item label="Примечание" name="note">
           <Input.TextArea rows={3} placeholder="Дополнительная информация" />

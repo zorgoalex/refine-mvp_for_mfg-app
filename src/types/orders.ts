@@ -127,6 +127,8 @@ export interface OrderDetail {
   basis_data?: string | null;
   basis_designation?: string | null;
   detail_name?: string | null;
+  // Присадка: деталь требует присадки (auto-set при импорте Базис-PDF по слову в примечании).
+  doweling?: boolean;
   priority: number;
   production_status_id?: number | null;
   joint_order_id?: number | null;

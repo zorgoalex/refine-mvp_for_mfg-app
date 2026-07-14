@@ -221,6 +221,7 @@ const DETAIL_FIELD_LABELS: Record<string, string> = {
   basis_product: 'Базис обозн. изделия',
   basis_data: 'Базис данные',
   basis_designation: 'Базис обозн. детали',
+  doweling: 'Присадка',
 };
 
 const ORDER_FIELD_LABELS: Record<string, string> = {

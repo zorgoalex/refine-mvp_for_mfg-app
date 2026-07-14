@@ -152,6 +152,7 @@ function normalizeDetail(detail: SaveOrderDetailDto): NormalizedSaveOrderDetailD
     basisProduct: normalizeOptionalString(raw.basisProduct),
     basisData: normalizeOptionalString(raw.basisData),
     basisDesignation: normalizeOptionalString(raw.basisDesignation),
+    doweling: optionalBoolean(raw.doweling, false),
     linkCuttingFile: normalizeOptionalString(raw.linkCuttingFile),
     linkCuttingImageFile: normalizeOptionalString(raw.linkCuttingImageFile),
     linkCadFile: normalizeOptionalString(raw.linkCadFile),

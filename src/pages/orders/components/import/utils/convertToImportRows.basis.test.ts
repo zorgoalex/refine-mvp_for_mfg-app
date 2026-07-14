@@ -76,6 +76,24 @@ describe('convertToImportRows Basis field split', () => {
     expect(rows[1]).toMatchObject({ basisProject: '1319', basisProduct: null });
   });
 
+  it.each([
+    ['Присадка:', true],
+    ['присадка', true],
+    ['ПРИСАДКА + черновой', true],
+    ['Черновой', false],
+    ['', false],
+    [undefined, false],
+  ])('sets doweling from note %j → %s', (note, expected) => {
+    const rows = convertToImportRows(
+      makeResult([
+        { designation: '11.02', name: 'Бок L', position: 1, quantity: 1, length: 700, width: 300, note },
+      ]),
+    );
+    expect(rows[0].doweling).toBe(expected);
+    // Примечание при этом сохраняется как есть (флаг его не заменяет).
+    expect(rows[0].note ?? null).toBe(note || null);
+  });
+
   it('leaves detailName null when Наименование is empty', () => {
     const rows = convertToImportRows(
       makeResult([

@@ -160,6 +160,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
         basis_data: row.basisData || null,
         basis_designation: row.basisDesignation || null,
         detail_name: row.detailName || null,
+        doweling: row.doweling === true,
       };
 
       addDetail(detail);

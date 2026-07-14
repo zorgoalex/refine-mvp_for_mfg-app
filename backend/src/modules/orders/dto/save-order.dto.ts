@@ -74,6 +74,7 @@ export interface SaveOrderDetailDto {
   basisProduct?: string | null;
   basisData?: string | null;
   basisDesignation?: string | null;
+  doweling?: boolean | null;
   linkCuttingFile?: string | null;
   linkCuttingImageFile?: string | null;
   linkCadFile?: string | null;
@@ -199,6 +200,7 @@ export type NormalizedSaveOrderDetailDto = Omit<
   | 'basisProduct'
   | 'basisData'
   | 'basisDesignation'
+  | 'doweling'
   | 'linkCuttingFile'
   | 'linkCuttingImageFile'
   | 'linkCadFile'
@@ -219,6 +221,7 @@ export type NormalizedSaveOrderDetailDto = Omit<
   basisProduct?: string | null;
   basisData?: string | null;
   basisDesignation?: string | null;
+  doweling: boolean;
   linkCuttingFile: string | null;
   linkCuttingImageFile: string | null;
   linkCadFile: string | null;

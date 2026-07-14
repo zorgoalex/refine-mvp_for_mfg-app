@@ -84,6 +84,7 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'edge_type_id', label: 'Обкат' },
   { key: 'sheet_material_type_id', label: 'Материал' },
   { key: 'note', label: 'Примечание' },
+  { key: 'doweling', label: 'Присадка' },
   { key: 'milling_cost_per_sqm', label: 'Цена за кв.м.' },
   { key: 'detail_cost', label: 'Сумма' },
   { key: 'film_id', label: 'Пленка' },
@@ -515,6 +516,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       milling_cost_per_sqm: record.milling_cost_per_sqm ?? null,
       detail_cost: record.detail_cost ?? null,
       note: record.note ?? '',
+      doweling: record.doweling === true,
       basis_project: record.basis_project ?? '',
       basis_product: record.basis_product ?? '',
       basis_data: record.basis_data ?? '',
@@ -955,6 +957,25 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Form.Item>
         ) : (
           <span style={{ fontSize: '90%' }}>{d.note || ''}</span>
+        );
+      },
+    },
+    {
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Прис.</div>,
+      dataIndex: 'doweling',
+      key: 'doweling',
+      width: 40,
+      align: 'center',
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
+          <Form.Item name="doweling" valuePropName="checked" style={{ margin: 0, padding: '0 4px' }}>
+            <Checkbox />
+          </Form.Item>
+        ) : (
+          d.doweling ? <CheckOutlined style={{ color: '#1890ff' }} /> : null
         );
       },
     },
@@ -1543,6 +1564,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         return !Number.isFinite(num);
       }),
       hasEmptyNote: sortedDetails.some(d => !(d.note || '').trim()),
+      hasDoweling: sortedDetails.some(d => d.doweling === true),
       hasPrisadka: sortedDetails.some(d => (d.note || '').includes('Присадка')),
       hasChernovoy: sortedDetails.some(d => (d.note || '').includes('Черновой')),
     };
@@ -1638,12 +1660,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       noteItems.push({ key, label: renderMenuValue(value, 44) });
     }
 
+    const dowelingItems: MenuProps['items'] = selectionAggregates.hasDoweling
+      ? [{ key: 'select:doweling:true', label: renderMenuValue('Присадка') }]
+      : [{ key: 'select:doweling:none', label: <span style={{ color: '#999' }}>Нет данных</span>, disabled: true }];
+
     const categories: MenuProps['items'] = [
       { key: 'select:category:milling', label: 'по фрезеровке', children: millingItems },
       { key: 'select:category:materials', label: 'по материалам', children: materialItems },
       { key: 'select:category:films', label: 'по пленкам', children: filmItems },
       { key: 'select:category:edges', label: 'по обкату', children: edgeItems },
       { key: 'select:category:prices', label: 'по ценам', children: priceItems },
+      { key: 'select:category:doweling', label: 'по присадке', children: dowelingItems },
       { key: 'select:category:notes', label: 'по примечанию', children: noteItems.length ? noteItems : [{ key: 'select:note:none', label: <span style={{ color: '#999' }}>Нет данных</span>, disabled: true }] },
     ];
 
@@ -1666,6 +1693,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     selectionAggregates.edgeIds,
     selectionAggregates.filmIds,
     selectionAggregates.hasChernovoy,
+    selectionAggregates.hasDoweling,
     selectionAggregates.hasEmptyEdge,
     selectionAggregates.hasEmptyFilm,
     selectionAggregates.hasEmptyMaterial,
@@ -1791,6 +1819,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
     if (key === 'select:note:empty') {
       selectRows(d => !(d.note || '').trim());
+      return;
+    }
+
+    if (key === 'select:doweling:true') {
+      selectRows(d => d.doweling === true);
       return;
     }
 

@@ -882,6 +882,8 @@ export function convertToImportRows(result: PdfParsedResult): import('../types/i
     basisDesignation: detail.designation || null,
     // PDF "Наименование" → detail name (previously packed as "position~~designation~~name").
     detailName: detail.name || null,
+    // "Примечание" со словом "присадка" → булев признак детали.
+    doweling: /присадка/i.test(detail.note ?? ''),
     });
   });
 }

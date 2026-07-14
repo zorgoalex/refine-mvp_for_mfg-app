@@ -283,6 +283,7 @@ function orderDetailToSaveDetail(detail: OrderDto['details'][number]): SaveOrder
     basisProduct: detail.basisProduct,
     basisData: detail.basisData,
     basisDesignation: detail.basisDesignation,
+    doweling: detail.doweling,
     linkCuttingFile: detail.linkCuttingFile,
     linkCuttingImageFile: detail.linkCuttingImageFile,
     linkCadFile: detail.linkCadFile,
