@@ -667,7 +667,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         {selectionPossible ? (
           <Space size="middle" wrap>
             <Text>
-              Выбрано: {selectionStats.positions} позиций / {selectionStats.panels} панелей
+              Выбрано: {selectionStats.panels} позиций / {selectionStats.units} шт.
               {selectionStats.excludedBusy > 0 ? ` (исключено ${selectionStats.excludedBusy} — уже в заказе)` : ''}
             </Text>
             <Button
