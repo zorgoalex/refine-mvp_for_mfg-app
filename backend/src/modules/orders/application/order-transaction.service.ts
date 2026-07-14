@@ -452,6 +452,7 @@ export class OrderTransactionService {
       const nextVersion = await unitOfWork.softDeleteOrder({
         orderId: command.orderId,
         previousVersion: lockedOrder.version,
+        actorUserId: command.currentUser.id,
       });
       const auditId = await unitOfWork.writeOrderDeleteAudit({
         currentUser: command.currentUser,

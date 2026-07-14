@@ -989,17 +989,23 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     return nextVersion;
   }
 
-  async softDeleteOrder(input: { orderId: number; previousVersion: number }): Promise<number> {
+  async softDeleteOrder(input: {
+    orderId: number;
+    previousVersion: number;
+    actorUserId: string;
+  }): Promise<number> {
     const nextVersion = input.previousVersion + 1;
     const result = await this.tx.query<{ version: string | number }>(
       `
       UPDATE orders
       SET delete_flag = true,
-          version = $2
+          version = $2,
+          deleted_at = now(),
+          deleted_by = $3
       WHERE order_id = $1 AND delete_flag = false
       RETURNING version
       `,
-      [input.orderId, nextVersion],
+      [input.orderId, nextVersion, input.actorUserId],
     );
 
     if (!result.rows[0]) {

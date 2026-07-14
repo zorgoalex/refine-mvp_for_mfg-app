@@ -771,6 +771,28 @@ describe('PgOrderTransactionManager', () => {
     expect(diff.deleteFlag).not.toHaveProperty('after');
   });
 
+  it('softDeleteOrder stamps deleted_at and deleted_by', async () => {
+    const database = createDatabase();
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await manager.runInTransaction(async (uow) => {
+      const nextVersion = await uow.softDeleteOrder({
+        orderId: 100,
+        previousVersion: 2,
+        actorUserId: '42',
+      });
+      expect(nextVersion).toBe(3);
+    });
+
+    const updateQuery = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('UPDATE orders SET delete_flag = true'),
+    );
+    expect(updateQuery).toBeDefined();
+    expect(normalizeSql(updateQuery!.text)).toContain('deleted_at = now()');
+    expect(normalizeSql(updateQuery!.text)).toContain('deleted_by = $3');
+    expect(updateQuery!.params).toEqual([100, 3, '42']);
+  });
+
   it('Variant B: sheet order save writes sheet_material_type bridge rows via audit', async () => {
     const { queries, service } = createDatabase();
     const manager = new PgOrderTransactionManager(service);

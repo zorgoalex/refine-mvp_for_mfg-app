@@ -260,7 +260,11 @@ export interface OrderWriteUnitOfWork {
     previousVersion: number | null;
     currentUser: CurrentUser;
   }): Promise<number>;
-  softDeleteOrder(input: { orderId: number; previousVersion: number }): Promise<number>;
+  softDeleteOrder(input: {
+    orderId: number;
+    previousVersion: number;
+    actorUserId: string;
+  }): Promise<number>;
   writeAuditEvent(event: OrderSaveAuditEvent): Promise<void>;
   writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string>;
   enqueueOrderDeleteOutbox(input: OrderDeleteOutboxInput): Promise<void>;

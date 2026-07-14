@@ -512,7 +512,11 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     return order.version;
   }
 
-  async softDeleteOrder(input: { orderId: number; previousVersion: number }): Promise<number> {
+  async softDeleteOrder(input: {
+    orderId: number;
+    previousVersion: number;
+    actorUserId: string;
+  }): Promise<number> {
     this.call('softDeleteOrder');
     const order = this.getOrder(input.orderId);
     order.version = input.previousVersion + 1;
