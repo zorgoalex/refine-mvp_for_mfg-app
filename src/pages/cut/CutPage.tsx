@@ -32,6 +32,7 @@ import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrienta
 import { TableTopScroll } from '../../components/TableTopScroll';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
+import { buildPieceMetaByItemId } from './cutPieceMeta';
 import { CutSheetLabelGenerateAction } from './CutSheetLabelGenerateAction';
 import { authSession } from '../../api/authSession';
 import type {
@@ -1168,21 +1169,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   );
 
   // Per-piece material/film map for the cross-sheet move guard in SheetEditor.
-  // Keyed by piece item_id format "det-<orderDetailId>".
-  // Effective material mirrors the backend sheet-override semantics (migr 040):
-  // a chosen «Лист раскроя» forces EVERY detail onto that sheet at calculate
-  // time, so the guard compares against the override — comparing the detail's
-  // own sheet type would veto every cross-sheet move on override jobs.
-  const pieceMetaByItemId = useMemo(() => {
-    const m = new Map<string, { materialTypeId: number | null; filmId: number | null }>();
-    for (const it of job?.items ?? []) {
-      m.set(`det-${it.orderDetailId}`, {
-        materialTypeId: job?.sheetMaterialTypeId ?? it.detail?.sheetMaterialTypeId ?? null,
-        filmId: it.detail?.filmId ?? null,
-      });
-    }
-    return m;
-  }, [job?.items, job?.sheetMaterialTypeId]);
+  // Effective material mirrors the backend sheet-override semantics — see
+  // buildPieceMetaByItemId (unit-tested against moveAllowed).
+  const pieceMetaByItemId = useMemo(
+    () => buildPieceMetaByItemId(job?.items ?? [], job?.sheetMaterialTypeId ?? null),
+    [job?.items, job?.sheetMaterialTypeId],
+  );
 
   // A vacuum_table profile keeps «Разделять по материалу» editable even with a
   // chosen «Лист раскроя»: operators pre-set the flag before clearing the

@@ -15,9 +15,12 @@ describe('CutPage cut-fixes guard', () => {
   it('move guard uses the job sheet override as the effective piece material', () => {
     // Without the override fallback every cross-sheet move on override jobs is
     // vetoed with «другой материал листа» (group carries the override id while
-    // details keep their own sheet type).
-    expect(src).toMatch(/materialTypeId:\s*job\?\.sheetMaterialTypeId\s*\?\?\s*it\.detail\?\.sheetMaterialTypeId/);
+    // details keep their own sheet type). Behavior is unit-tested in
+    // cutPieceMeta.test.ts; here we pin that CutPage actually delegates.
+    expect(src).toMatch(/buildPieceMetaByItemId\(job\?\.items \?\? \[\], job\?\.sheetMaterialTypeId \?\? null\)/);
     expect(src).toMatch(/\[job\?\.items,\s*job\?\.sheetMaterialTypeId\]/);
+    const helper = readFileSync(fileURLToPath(new URL('./cutPieceMeta.ts', import.meta.url)), 'utf8');
+    expect(helper).toMatch(/jobSheetMaterialTypeId\s*\?\?\s*it\.detail\?\.sheetMaterialTypeId/);
   });
 
   it('split-by-material checkbox stays enabled for vacuum_table profiles with a sheet override', () => {
