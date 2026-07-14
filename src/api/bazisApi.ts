@@ -4,6 +4,7 @@ import { withQuery } from './ordersApi';
 import type {
   BazisAddToOrderRequest,
   BazisAddToOrderResponse,
+  BazisNodeNotesResponse,
   BazisRevisionEstimate,
   CreateOrderFromDraftRequest,
   BazisImportResponse,
@@ -62,6 +63,13 @@ export const bazisApi = {
 
   getNodeCard(nodeId: number): Promise<BazisNodeCard> {
     return httpClient.get<BazisNodeCard>(apiRoutes.bazis.node(validateId(nodeId, 'nodeId')));
+  },
+
+  setNodeNotes(nodeId: number, notes: string | null): Promise<BazisNodeNotesResponse> {
+    return httpClient.patch<BazisNodeNotesResponse>(
+      apiRoutes.bazis.nodeNotes(validateId(nodeId, 'nodeId')),
+      { notes },
+    );
   },
 
   searchNodes(
