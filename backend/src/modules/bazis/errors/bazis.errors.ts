@@ -24,6 +24,12 @@ export class BazisNodeNotFoundError extends ApiError {
   }
 }
 
+export class BazisNodeNotesTooLongError extends ApiError {
+  constructor(maxLength: number) {
+    super(422, 'VALIDATION_FAILED', `Примечание длиннее ${maxLength} символов`, { maxLength });
+  }
+}
+
 export class BazisRevisionDuplicateError extends ApiError {
   constructor(revisionNo: number) {
     super(409, 'BAZIS_REVISION_DUPLICATE', `Этот файл уже импортирован (ревизия ${revisionNo})`, {

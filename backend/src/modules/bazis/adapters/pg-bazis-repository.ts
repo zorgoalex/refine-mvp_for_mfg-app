@@ -17,6 +17,7 @@ import type {
   CreateOrderFromRevisionCommand,
   DeleteBazisProjectInput,
   ImportRevisionCommand,
+  SetNodeNotesInput,
 } from '../application/bazis.types';
 import {
   buildDraftDetails,
@@ -32,6 +33,7 @@ import type {
   BazisOrderDraftResponseDto,
   BazisProjectDeleteResponseDto,
   BazisNodeCardDto,
+  BazisNodeNotesDto,
   BazisNodeSearchItemDto,
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
@@ -724,6 +726,98 @@ export class PgBazisRepository implements BazisRepositoryPort {
           requestIdOrFallback(input.requestId, 'bazis-import'),
         ],
       );
+    });
+  }
+
+  async setNodeNotes(input: SetNodeNotesInput): Promise<BazisNodeNotesDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, input.currentUser.id);
+      const requestId = requestIdOrFallback(input.requestId, 'bazis-node-notes');
+
+      // Лочим ТОЛЬКО строку узла (FOR UPDATE OF n): конкурентный prune ревизии
+      // каскадно удалит узел — тогда наш SELECT вернёт 0 строк → 404; глобальный
+      // порядок локов revision→nodes не нарушаем (ревизию не лочим вовсе).
+      const existing = await tx.query<{
+        bazis_node_id: number | string;
+        notes: string | null;
+        revision_id: number | string;
+        bazis_project_id: number | string;
+        project_id: number | string;
+      }>(
+        `
+        SELECT n.bazis_node_id, n.notes, n.revision_id, r.bazis_project_id, bp.project_id
+        FROM bazis_nodes n
+        JOIN bazis_project_revisions r ON r.bazis_revision_id = n.revision_id
+        JOIN bazis_projects bp ON bp.bazis_project_id = r.bazis_project_id
+        WHERE n.bazis_node_id = $1
+        FOR UPDATE OF n
+        `,
+        [input.nodeId],
+      );
+      if (existing.rows.length === 0) {
+        throw new BazisNodeNotFoundError(input.nodeId);
+      }
+      const row = existing.rows[0];
+      const before = row.notes ?? null;
+      if (before === input.notes) {
+        // No-op short-circuit: без UPDATE/audit/outbox (паттерн cut-сеттеров).
+        return { bazisNodeId: input.nodeId, notes: before };
+      }
+
+      await tx.query(
+        `
+        UPDATE bazis_nodes SET notes = $2 WHERE bazis_node_id = $1
+        `,
+        [input.nodeId, input.notes],
+      );
+
+      await auditService.record(tx, {
+        event: 'bazis.node_notes_changed',
+        entityType: 'bazis_node',
+        entityId: String(input.nodeId),
+        actorUserId: input.currentUser.id,
+        actorUsername: input.currentUser.username,
+        actorRole: input.currentUser.role,
+        requestId,
+        source: SOURCE,
+        relatedEntities: [
+          { entityType: 'project', entityId: Number(row.project_id) },
+          { entityType: 'bazis_project', entityId: Number(row.bazis_project_id) },
+          { entityType: 'bazis_revision', entityId: Number(row.revision_id) },
+        ],
+        before: { notes: before },
+        after: { notes: input.notes },
+        metadata: {
+          source: SOURCE,
+          action: 'bazis_node_set_notes',
+          requestId,
+        },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1,$2,$3,$4::jsonb,$5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          'bazis.node_notes_changed',
+          'bazis_node',
+          String(input.nodeId),
+          JSON.stringify({
+            eventType: 'bazis.node_notes_changed',
+            bazisNodeId: input.nodeId,
+            bazisRevisionId: Number(row.revision_id),
+            bazisProjectId: Number(row.bazis_project_id),
+            projectId: Number(row.project_id),
+            actorUserId: input.currentUser.id,
+            requestId,
+          }),
+          `bazis-node-notes-${input.nodeId}-${requestId}`,
+        ],
+      );
+
+      return { bazisNodeId: input.nodeId, notes: input.notes };
     });
   }
 

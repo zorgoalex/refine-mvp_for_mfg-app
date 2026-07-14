@@ -172,11 +172,21 @@ describe('BazisService', () => {
     });
   });
 
+  describe('manager writes', () => {
+    it.each([
+      ['deleteProject', (service: BazisService, user: CurrentUser) => service.deleteProject(user, 'req', 41)],
+      ['setNodeNotes', (service: BazisService, user: CurrentUser) => service.setNodeNotes(user, 'req', 1, 'x')],
+    ])('%s requires bazis.manage', async (_name, call) => {
+      await expect(call(createService(), viewerUser())).rejects.toMatchObject({ statusCode: 403 });
+      await expect(call(createService(), bazisManager())).resolves.toBeDefined();
+    });
+  });
+
   it('streams sha256 and gzip from disk, parses once, and delegates importRevision', async () => {
     const repository = createRepository();
     const service = new BazisService({ repository });
     const xml = await readFile(
-      'backend/src/modules/bazis/application/__fixtures__/bazis-sample.xml',
+      new URL('./__fixtures__/bazis-sample.xml', import.meta.url),
       'utf8',
     );
     const filePath = await writeFixtureFile(tempDir, 'bazis.xml', xml);
@@ -317,6 +327,40 @@ describe('BazisService', () => {
       currentUser: bazisManager(),
       requestId: 'req-delete',
       bazisProjectId: 41,
+    });
+  });
+
+  describe('BazisService.setNodeNotes normalization', () => {
+    it('trims and coerces empty to null', async () => {
+      const repository = createRepository();
+      repository.setNodeNotes.mockResolvedValue({ bazisNodeId: 1, notes: null });
+      const service = createService(repository);
+
+      await service.setNodeNotes(bazisManager(), 'req', 1, '   ');
+
+      expect(repository.setNodeNotes).toHaveBeenCalledWith(
+        expect.objectContaining({ nodeId: 1, notes: null }),
+      );
+    });
+
+    it('rejects notes longer than 2000 chars after trim with 422', async () => {
+      const service = createService();
+
+      await expect(
+        service.setNodeNotes(bazisManager(), 'req', 1, 'а'.repeat(2001)),
+      ).rejects.toMatchObject({ statusCode: 422, code: 'VALIDATION_FAILED' });
+    });
+
+    it('passes trimmed value through', async () => {
+      const repository = createRepository();
+      repository.setNodeNotes.mockResolvedValue({ bazisNodeId: 1, notes: 'текст' });
+      const service = createService(repository);
+
+      await service.setNodeNotes(bazisManager(), 'req', 1, '  текст  ');
+
+      expect(repository.setNodeNotes).toHaveBeenCalledWith(
+        expect.objectContaining({ notes: 'текст' }),
+      );
     });
   });
 
@@ -684,6 +728,7 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
       isRectangular: null,
       textureOrientation: null,
       mainMaterialName: null,
+      notes: null,
       childrenCount: 0,
       rawJson: {},
       orderLinks: [],
@@ -731,6 +776,10 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
       detailsAdded: 1,
       detailsReplaced: 0,
       requestId: 'req-add-to-order',
+    }),
+    setNodeNotes: vi.fn().mockResolvedValue({
+      bazisNodeId: 1,
+      notes: null,
     }),
     deleteProject: vi.fn().mockResolvedValue({
       bazisProjectId: 41,

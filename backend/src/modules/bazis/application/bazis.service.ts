@@ -22,6 +22,7 @@ import {
   type BazisAddToOrderResponseDto,
   type BazisImportResponseDto,
   type BazisNodeCardDto,
+  type BazisNodeNotesDto,
   type BazisOrderDraftResponseDto,
   type BazisNodeSearchResponseDto,
   type BazisProjectCardDto,
@@ -35,7 +36,7 @@ import {
   type MaterialMappingDto,
   type UpsertMaterialMappingDto,
 } from '../dto/bazis.dto';
-import { BazisImportBusyError, BazisParseFailedError } from '../errors/bazis.errors';
+import { BazisImportBusyError, BazisNodeNotesTooLongError, BazisParseFailedError } from '../errors/bazis.errors';
 import { BazisXmlParseError, parseBazisXml } from './bazis-xml-parser';
 
 export interface BazisServicePorts {
@@ -44,6 +45,8 @@ export interface BazisServicePorts {
   /** Optional client for best-effort denied-audit rows (absent in unit tests without DB). */
   auditDatabase?: DatabaseClient;
 }
+
+const NODE_NOTES_MAX_LENGTH = 2000;
 
 export class BazisService {
   private readonly permissions: PermissionsService;
@@ -168,6 +171,21 @@ export class BazisService {
   ): Promise<BazisProjectDeleteResponseDto> {
     await this.requirePermission(currentUser, 'bazis.manage', 'delete_project', requestId);
     return this.ports.repository.deleteProject({ currentUser, requestId, bazisProjectId });
+  }
+
+  async setNodeNotes(
+    currentUser: CurrentUser,
+    requestId: string | undefined,
+    nodeId: number,
+    rawNotes: string | null,
+  ): Promise<BazisNodeNotesDto> {
+    await this.requirePermission(currentUser, 'bazis.manage', 'set_node_notes', requestId);
+    const trimmed = rawNotes?.trim() ?? '';
+    const notes = trimmed === '' ? null : trimmed;
+    if (notes != null && notes.length > NODE_NOTES_MAX_LENGTH) {
+      throw new BazisNodeNotesTooLongError(NODE_NOTES_MAX_LENGTH);
+    }
+    return this.ports.repository.setNodeNotes({ currentUser, requestId, nodeId, notes });
   }
 
   async listMaterialMappings(

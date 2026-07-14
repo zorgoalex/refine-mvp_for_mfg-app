@@ -110,6 +110,11 @@ export interface BazisNodeCardDto {
   orderLinks: BazisNodeOrderLinkDto[];
 }
 
+export interface BazisNodeNotesDto {
+  bazisNodeId: number;
+  notes: string | null;
+}
+
 export interface BazisNodeSearchItemDto {
   bazisNodeId: number;
   nodeKind: string;
