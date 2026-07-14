@@ -430,7 +430,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [showBackToTop, setShowBackToTop] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setShowBackToTop(window.scrollY > 150);
+    // User requirement: the button appears as soon as ANY vertical scroll is
+    // engaged (not after a threshold), and hides again at the very top.
+    const onScroll = () => setShowBackToTop(window.scrollY > 0);
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
@@ -444,12 +446,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const scrollBackToGroupTop = useCallback(() => {
     let targetId: number | null = editingGroupId;
     if (targetId == null) {
+      // A card whose header is at/above the measured sticky stack is the one
+      // the viewport is currently inside; among those take the lowest. Use the
+      // dynamic stickyHeaderTop (not a literal) + a small tolerance so the
+      // heuristic tracks whatever the workspace chrome actually occupies.
+      const viewportTopEdge = stickyHeaderTop + 16;
       let bestTop = Number.NEGATIVE_INFINITY;
       for (const g of job?.groups ?? []) {
         const el = document.getElementById(`cut-group-card-${g.cutGroupId}`);
         if (!el) continue;
         const top = el.getBoundingClientRect().top;
-        if (top <= 80 && top > bestTop) {
+        if (top <= viewportTopEdge && top > bestTop) {
           bestTop = top;
           targetId = g.cutGroupId;
         }
@@ -461,7 +468,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     } else {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  }, [editingGroupId, job]);
+  }, [editingGroupId, job, stickyHeaderTop]);
   // Per-group alternative-view toggle: true = show manual variant, false = show auto.
   // Initialised from group.manualLayout.isActive on job open; only persisted on Save.
   const [showAlternativeByGroup, setShowAlternativeByGroup] = useState<Record<number, boolean>>({});
