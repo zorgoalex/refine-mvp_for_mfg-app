@@ -130,6 +130,9 @@ export interface OrderListItemDto {
   groups: OrderGroupSummaryDto[];
   createdBy: number | null;
   editedBy: number | null;
+  deletedAt?: string | null;
+  deletedBy?: number | null;
+  deletedByName?: string | null;
   updatedAt: string;
   version: number;
 }
@@ -151,6 +154,9 @@ export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
   // SP3: server-resolved COALESCE(sheet,material) name + durable era marker for FE picker gating.
   materialName?: string | null;
   sheetEligible?: boolean;
+  deleteFlag?: boolean;
+  deletedAt?: string | null;
+  deletedByName?: string | null;
   // Projects: заполняются в create-ответе (авто-созданный или выбранный корень).
   projectId?: number;
   projectCode?: string;

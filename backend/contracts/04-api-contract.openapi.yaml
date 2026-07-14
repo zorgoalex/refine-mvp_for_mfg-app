@@ -615,6 +615,8 @@ paths:
               - plannedCompletionDate
               - completionDate
               - issueDate
+              - deletedAt
+              - projectCode
               - clientName
               - orderStatusName
               - paymentStatusName
@@ -686,6 +688,12 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: deleted
+          in: query
+          required: false
+          description: true — только удалённые заказы; требует orders.delete.
+          schema:
+            type: boolean
         - name: groupIds
           in: query
           required: false
@@ -803,6 +811,13 @@ paths:
       security:
         - bearerAuth: []
       x-permission: orders.view
+      parameters:
+        - name: includeDeleted
+          in: query
+          required: false
+          description: true — разрешить чтение удалённого заказа; требует orders.delete.
+          schema:
+            type: boolean
       responses:
         '200':
           description: Полный заказ
@@ -12148,6 +12163,17 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OrderGroupSummaryDto'
+        deletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        deletedBy:
+          type: integer
+          format: int64
+          nullable: true
+        deletedByName:
+          type: string
+          nullable: true
         updatedAt:
           type: string
           format: date-time
@@ -12324,6 +12350,15 @@ components:
         filmId:
           type: integer
           format: int64
+          nullable: true
+        deleteFlag:
+          type: boolean
+        deletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        deletedByName:
+          type: string
           nullable: true
         createdAt:
           type: string

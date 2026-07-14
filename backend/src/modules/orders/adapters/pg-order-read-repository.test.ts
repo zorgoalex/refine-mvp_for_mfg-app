@@ -68,6 +68,62 @@ describe('PgOrderReadRepository', () => {
     expect(database.queries.at(-1)?.params).toEqual(['%client%', 'client%', '2026-05-01', 42, 10, 10]);
   });
 
+  it('keeps the default list SQL free of trash-only select and join fragments', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service);
+
+    await repository.listOrders({
+      currentUser: currentUser('42'),
+      query: {
+        page: 1,
+        pageSize: 10,
+      },
+    });
+
+    const listQuery = database.queries.find((query) => query.text.includes('LIMIT'))?.text ?? '';
+
+    expect(listQuery).toContain('o.delete_flag = false');
+    expect(listQuery).not.toContain('deleted_by_user');
+    expect(listQuery).not.toContain('o.deleted_at');
+    expect(listQuery).not.toContain('o.deleted_by');
+  });
+
+  it('lists only deleted orders with deleted metadata fields and trash sort support', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service);
+
+    await expect(
+      repository.listOrders({
+        currentUser: currentUser('42'),
+        query: {
+          page: 1,
+          pageSize: 10,
+          sortBy: 'deletedAt',
+          sortOrder: 'desc',
+          deleted: true,
+        },
+      }),
+    ).resolves.toMatchObject({
+      data: [
+        {
+          deletedAt: '2026-05-02T08:30:00.000Z',
+          deletedBy: 91,
+          deletedByName: 'Trash Manager',
+        },
+      ],
+    });
+
+    const listQuery = database.queries.find((query) => query.text.includes('LIMIT'))?.text ?? '';
+
+    expect(listQuery).toContain('o.delete_flag = true');
+    expect(listQuery).not.toContain('o.delete_flag = false');
+    expect(listQuery).toContain('o.deleted_at');
+    expect(listQuery).toContain('o.deleted_by');
+    expect(listQuery).toContain('LEFT JOIN users deleted_by_user ON deleted_by_user.user_id = o.deleted_by');
+    expect(listQuery).toContain('deleted_by_user.full_name AS deleted_by_name');
+    expect(listQuery).toContain('ORDER BY o.deleted_at DESC');
+  });
+
   it('adds project search branches, projectId filter and projectCode sort for full numbers', async () => {
     const database = createDatabase();
     const repository = new PgOrderReadRepository(database.service);
@@ -162,6 +218,55 @@ describe('PgOrderReadRepository', () => {
       },
       version: 3,
     });
+  });
+
+  it('keeps the default getOrderById SQL free of trash-only select and join fragments', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service);
+
+    await repository.getOrderById({
+      currentUser: currentUser('42'),
+      orderId: 100,
+    });
+
+    const headerQuery = database.queries.find(
+      (query) => query.text.includes('FROM orders o') && query.text.includes('WHERE o.order_id = $1'),
+    )?.text ?? '';
+
+    expect(headerQuery).toContain('WHERE o.order_id = $1 AND o.delete_flag = false');
+    expect(headerQuery).not.toContain('deleted_by_user');
+    expect(headerQuery).not.toContain('o.delete_flag,');
+    expect(headerQuery).not.toContain('o.deleted_at');
+  });
+
+  it('loads deleted order header when includeDeleted is true', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service);
+
+    await expect(
+      repository.getOrderById({
+        currentUser: currentUser('42'),
+        orderId: 100,
+        includeDeleted: true,
+      }),
+    ).resolves.toMatchObject({
+      header: {
+        deleteFlag: true,
+        deletedAt: '2026-05-02T08:30:00.000Z',
+        deletedByName: 'Trash Manager',
+      },
+    });
+
+    const headerQuery = database.queries.find(
+      (query) => query.text.includes('FROM orders o') && query.text.includes('WHERE o.order_id = $1'),
+    )?.text ?? '';
+
+    expect(headerQuery).toContain('WHERE o.order_id = $1');
+    expect(headerQuery).not.toContain('WHERE o.order_id = $1 AND o.delete_flag = false');
+    expect(headerQuery).toContain('o.delete_flag');
+    expect(headerQuery).toContain('o.deleted_at');
+    expect(headerQuery).toContain('LEFT JOIN users deleted_by_user ON deleted_by_user.user_id = o.deleted_by');
+    expect(headerQuery).toContain('deleted_by_user.full_name AS deleted_by_name');
   });
 
   it('loads order audit events filtered by order entity and related order id', async () => {
@@ -721,6 +826,10 @@ function orderRow() {
     edited_by: 16,
     version: 3,
     ref_key_1c: null,
+    delete_flag: true,
+    deleted_at: new Date('2026-05-02T08:30:00.000Z'),
+    deleted_by: 91,
+    deleted_by_name: 'Trash Manager',
     material_ids: [10, 11],
     material_names: ['MDF 16', 'MDF 18'],
     film_names: ['Film A', 'Film B'],

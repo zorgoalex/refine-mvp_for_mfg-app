@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
+import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import type { OrderQueryService } from '../application/order-query.service';
@@ -59,6 +60,76 @@ describe('OrdersController read endpoints', () => {
     expect(calls).toEqual(['list:viewer-id:1:20:updatedAt']);
   });
 
+  it('rejects trash list access without orders.delete and records denied audit best-effort', async () => {
+    const database = createDatabase();
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      database,
+    });
+
+    await expect(
+      controller.list(
+        { user: currentUser('viewer-id', 'viewer'), requestId: 'request-trash-list-1' },
+        { deleted: 'true' },
+      ),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: {
+        requiredPermissions: ['orders.delete'],
+      },
+    } satisfies Partial<ApiError>);
+
+    expect(database.queries).toHaveLength(1);
+    expect(database.queries[0]?.text).toContain('INSERT INTO audit_log');
+    expect(database.queries[0]?.params).toEqual(
+      expect.arrayContaining([
+        'orders.list_deleted',
+        'order',
+        'orders',
+        'viewer-id',
+        'viewer',
+        'viewer',
+        'request-trash-list-1',
+        'backend-orders-command',
+        null,
+        'denied',
+        'PERMISSION_DENIED',
+      ]),
+    );
+  });
+
+  it('passes deleted=true through to the query service for trash listing', async () => {
+    const response: OrderListResponseDto = {
+      data: [],
+      pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 },
+    };
+    const calls: string[] = [];
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      queries: {
+        async list(command) {
+          calls.push(`list:${String(command.query.deleted)}:${command.query.sortBy}`);
+          return response;
+        },
+      },
+    });
+
+    await expect(
+      controller.list(
+        { user: userWithExtraPermissions('manager-id', 'manager', ['orders.delete']) },
+        { deleted: 'true', sortBy: 'deletedAt' },
+      ),
+    ).resolves.toEqual(response);
+    expect(calls).toEqual(['list:true:deletedAt']);
+  });
+
   it('requires authenticated current user before list query service', async () => {
     const controller = createController({
       flags: {
@@ -93,6 +164,103 @@ describe('OrdersController read endpoints', () => {
       order,
     });
     expect(calls).toEqual(['get:42:manager-id']);
+  });
+
+  it('rejects includeDeleted=true without orders.delete and records denied audit best-effort', async () => {
+    const database = createDatabase();
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      database,
+    });
+
+    await expect(
+      controller.getById(
+        { user: currentUser('viewer-id', 'viewer'), requestId: 'request-trash-read-1' },
+        '42',
+        { includeDeleted: 'true' },
+      ),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: {
+        requiredPermissions: ['orders.delete'],
+      },
+    } satisfies Partial<ApiError>);
+
+    expect(database.queries).toHaveLength(1);
+    expect(database.queries[0]?.text).toContain('INSERT INTO audit_log');
+    expect(database.queries[0]?.params).toEqual(
+      expect.arrayContaining([
+        'orders.read_deleted',
+        'order',
+        '42',
+        'viewer-id',
+        'viewer',
+        'viewer',
+        'request-trash-read-1',
+        'backend-orders-command',
+        42,
+        'denied',
+        42,
+        'PERMISSION_DENIED',
+      ]),
+    );
+  });
+
+  it('passes includeDeleted=true through to the query service', async () => {
+    const order = createOrderDto({ orderId: 42 });
+    const calls: string[] = [];
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      queries: {
+        async getById(command) {
+          calls.push(`get:${command.orderId}:${String(command.includeDeleted)}`);
+          return order;
+        },
+      },
+    });
+
+    await expect(
+      controller.getById(
+        { user: userWithExtraPermissions('manager-id', 'manager', ['orders.delete']) },
+        '42',
+        { includeDeleted: 'true' },
+      ),
+    ).resolves.toEqual({
+      order,
+    });
+    expect(calls).toEqual(['get:42:true']);
+  });
+
+  it('preserves 404 behavior for getById without includeDeleted', async () => {
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      queries: {
+        async getById(command) {
+          if (command.includeDeleted === true) {
+            throw new Error('includeDeleted should stay off in default mode');
+          }
+          throw new ApiError(404, 'ORDER_NOT_FOUND', 'Заказ не найден', { orderId: command.orderId });
+        },
+      },
+    });
+
+    await expect(
+      controller.getById({ user: currentUser('manager-id', 'manager') }, '42'),
+    ).rejects.toMatchObject({
+      code: 'ORDER_NOT_FOUND',
+      statusCode: 404,
+      details: { orderId: 42 },
+    } satisfies Partial<ApiError>);
   });
 
   it('returns order audit with current user and request id', async () => {
@@ -193,6 +361,7 @@ describe('OrdersController read endpoints', () => {
         dateFrom: '2026-04-01',
         dateTo: '2026-04-30',
         onlyMyOrders: 'true',
+        deleted: 'true',
       }),
     ).toEqual({
       page: 2,
@@ -208,6 +377,7 @@ describe('OrdersController read endpoints', () => {
       dateFrom: '2026-04-01',
       dateTo: '2026-04-30',
       onlyMyOrders: true,
+      deleted: true,
     });
   });
 
@@ -232,6 +402,8 @@ describe('OrdersController read endpoints', () => {
     expect(() => parseOrderListQuery({ sortBy: 'raw_sql_injection' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ pageSize: '201' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ dateFrom: '30.04.2026' })).toThrow(ApiError);
+    expect(() => parseOrderListQuery({ deleted: 'да' })).toThrow(ApiError);
+    expect(() => parseOrderListQuery({ sortBy: 'deletedAt' })).toThrow(ApiError);
     expect(() => parseOrderAuditQuery({ pageSize: '201' })).toThrow(ApiError);
   });
 });
@@ -543,6 +715,7 @@ function createController(options: {
   flags: { ordersEnabled: boolean; ordersReadOnly: boolean };
   service?: Partial<OrderTransactionService>;
   queries?: Partial<OrderQueryService>;
+  database?: ReturnType<typeof createDatabase>;
 }): OrdersController {
   const service = {
     async create() {
@@ -579,17 +752,36 @@ function createController(options: {
       return options.flags;
     },
   } as OrdersRuntimeConfigService;
+  const database = (options.database?.service ?? {
+    async query() {
+      return { rows: [] };
+    },
+  }) as unknown as DatabaseService;
 
-  return new OrdersController(service, queries, runtimeConfig);
+  return new OrdersController(service, queries, runtimeConfig, database);
 }
 
-function currentUser(id = 'user_manager'): CurrentUser {
+function currentUser(
+  id = 'user_manager',
+  role: CurrentUser['role'] = 'manager',
+): CurrentUser {
   return {
     id,
-    username: 'manager',
-    role: 'manager',
-    roleId: 10,
-    permissions: getPermissionsForRole('manager'),
+    username: role,
+    role,
+    roleId: role === 'viewer' ? 100 : role === 'top_manager' ? 15 : 10,
+    permissions: getPermissionsForRole(role),
+  };
+}
+
+function userWithExtraPermissions(
+  id: string,
+  role: CurrentUser['role'],
+  extraPermissions: string[],
+): CurrentUser {
+  return {
+    ...currentUser(id, role),
+    permissions: [...new Set([...getPermissionsForRole(role), ...extraPermissions])],
   };
 }
 
@@ -679,4 +871,16 @@ function createOrderFormDataResponse(): OrderFormDataResponseDto {
     employees: [{ id: 11, fullName: 'Employee' }],
     units: [{ id: 12, code: 'pcs', name: 'Pieces', symbol: 'pcs' }],
   };
+}
+
+function createDatabase() {
+  const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  const service = {
+    async query(text: string, params: readonly unknown[] = []) {
+      queries.push({ text, params });
+      return { rows: [{ audit_id: 'audit-denied-1' }] };
+    },
+  } as unknown as DatabaseService;
+
+  return { service, queries };
 }

@@ -23,8 +23,11 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
+import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
+import { DatabaseService } from '../../../database/database.service';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
+import type { CurrentUser } from '../../../permissions/current-user';
 import { OrderQueryService } from '../application/order-query.service';
 import {
   ORDER_LIST_SORT_FIELDS,
@@ -488,6 +491,9 @@ export const orderHeaderResponseSwaggerSchema = {
     millingTypeId: nullableIntegerSwaggerSchema,
     edgeTypeId: nullableIntegerSwaggerSchema,
     filmId: nullableIntegerSwaggerSchema,
+    deleteFlag: { type: 'boolean' },
+    deletedAt: { type: 'string', format: 'date-time', nullable: true },
+    deletedByName: nullableStringSwaggerSchema,
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
     createdBy: nullableIntegerSwaggerSchema,
@@ -614,6 +620,9 @@ const orderListItemSwaggerSchema = {
     groups: { type: 'array', items: orderGroupSummarySwaggerSchema },
     createdBy: nullableIntegerSwaggerSchema,
     editedBy: nullableIntegerSwaggerSchema,
+    deletedAt: { type: 'string', format: 'date-time', nullable: true },
+    deletedBy: nullableIntegerSwaggerSchema,
+    deletedByName: nullableStringSwaggerSchema,
     updatedAt: { type: 'string', format: 'date-time' },
     version: { type: 'integer' },
   },
@@ -779,6 +788,8 @@ export class OrdersController {
     private readonly orderQueries: OrderQueryService,
     @Inject(OrdersRuntimeConfigService)
     private readonly runtimeConfig: OrdersRuntimeConfigService,
+    @Inject(DatabaseService)
+    private readonly database: DatabaseService,
   ) {}
 
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number' })
@@ -794,6 +805,7 @@ export class OrdersController {
   @ApiQuery({ name: 'dateFrom', required: false, type: String, description: 'Start date filter', schema: swaggerSchema(dateOnlySwaggerSchema) })
   @ApiQuery({ name: 'dateTo', required: false, type: String, description: 'End date filter', schema: swaggerSchema(dateOnlySwaggerSchema) })
   @ApiQuery({ name: 'onlyMyOrders', required: false, type: Boolean, description: 'Only orders assigned to the current user' })
+  @ApiQuery({ name: 'deleted', required: false, type: Boolean, description: 'True to list only deleted orders; requires orders.delete' })
   @ApiQuery({ name: 'groupIds', required: false, type: String, description: 'Comma-separated current group UUID filters' })
   @ApiQuery({ name: 'groupMode', required: false, enum: ['any', 'all', 'primary', 'none'], description: 'Group filter mode' })
   @ApiResponse({ status: 200, description: 'Order list', schema: swaggerSchema(orderListResponseSwaggerSchema) })
@@ -810,7 +822,16 @@ export class OrdersController {
     this.assertOrdersReadEnabled();
 
     const currentUser = this.requireCurrentUser(request);
-    return this.orderQueries.list({ currentUser, query: parseOrderListQuery(query) });
+    const listQuery = parseOrderListQuery(query);
+
+    if (listQuery.deleted === true && !currentUser.permissions.includes('orders.delete')) {
+      await this.recordTrashDeniedAudit(currentUser, request.requestId, 'orders.list_deleted');
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра корзины', {
+        requiredPermissions: ['orders.delete'],
+      });
+    }
+
+    return this.orderQueries.list({ currentUser, query: listQuery });
   }
 
   @ApiResponse({ status: 200, description: 'Order form data', schema: swaggerSchema(orderFormDataResponseSwaggerSchema) })
@@ -827,6 +848,7 @@ export class OrdersController {
   }
 
   @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiQuery({ name: 'includeDeleted', required: false, type: Boolean, description: 'True to allow reading a deleted order; requires orders.delete' })
   @ApiResponse({ status: 200, description: 'Order', schema: swaggerSchema(orderResponseSwaggerSchema) })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -837,12 +859,27 @@ export class OrdersController {
   async getById(
     @Req() request: RequestWithCurrentUser,
     @Param('orderId') orderIdParam: string,
+    @Query() query: Record<string, string | string[] | undefined> = {},
   ): Promise<OrderResponseDto> {
     this.assertOrdersReadEnabled();
 
     const currentUser = this.requireCurrentUser(request);
     const orderId = parseOrderId(orderIdParam);
-    const order = await this.orderQueries.getById({ currentUser, orderId });
+    const includeDeleted = parseOptionalBoolean(query.includeDeleted, 'includeDeleted');
+
+    if (includeDeleted === true && !currentUser.permissions.includes('orders.delete')) {
+      await this.recordTrashDeniedAudit(
+        currentUser,
+        request.requestId,
+        'orders.read_deleted',
+        orderId,
+      );
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра корзины', {
+        requiredPermissions: ['orders.delete'],
+      });
+    }
+
+    const order = await this.orderQueries.getById({ currentUser, orderId, includeDeleted });
 
     return { order };
   }
@@ -1067,13 +1104,38 @@ export class OrdersController {
 
     return request.user;
   }
+
+  private async recordTrashDeniedAudit(
+    currentUser: CurrentUser,
+    requestId: string | undefined,
+    event: string,
+    orderId?: number,
+  ): Promise<void> {
+    try {
+      await auditService.recordDenied(this.database, {
+        event,
+        entityType: 'order',
+        entityId: orderId !== undefined ? String(orderId) : 'orders',
+        actorUserId: currentUser.id,
+        actorUsername: currentUser.username ?? null,
+        actorRole: currentUser.role ?? null,
+        requestId: requestId ?? 'orders-trash-denied',
+        source: 'backend-orders-command',
+        relatedOrderId: orderId ?? null,
+        reason: 'PERMISSION_DENIED',
+        requiredPermissions: ['orders.delete'],
+      });
+    } catch {
+      // best-effort: deny response must not depend on audit sink health
+    }
+  }
 }
 
 export function parseOrderListQuery(
   query: Record<string, string | string[] | undefined>,
 ): OrderListQuery {
   rejectUnsupportedGroupTemporalQuery(query);
-  return {
+  const parsed: OrderListQuery = {
     page: parsePositiveInteger(query.page, 'page', 1, 1, Number.MAX_SAFE_INTEGER),
     pageSize: parsePositiveInteger(query.pageSize, 'pageSize', 25, 1, 200),
     sortBy: parseSortBy(query.sortBy),
@@ -1090,9 +1152,16 @@ export function parseOrderListQuery(
     dateFrom: parseOptionalDateOnly(query.dateFrom, 'dateFrom'),
     dateTo: parseOptionalDateOnly(query.dateTo, 'dateTo'),
     onlyMyOrders: parseBoolean(query.onlyMyOrders, false),
+    deleted: parseOptionalBoolean(query.deleted, 'deleted'),
     groupIds: parseGroupIds(query.groupIds),
     groupMode: parseGroupMode(query.groupMode),
   };
+
+  if (parsed.sortBy === 'deletedAt' && parsed.deleted !== true) {
+    throw validationError('sortBy', 'sortBy=deletedAt requires deleted=true');
+  }
+
+  return parsed;
 }
 
 export function rejectUnsupportedGroupTemporalQuery(
@@ -1247,13 +1316,21 @@ function parseOptionalDateOnly(
 }
 
 function parseBoolean(value: string | string[] | undefined, fallback: boolean): boolean {
+  const parsed = parseOptionalBoolean(value, 'onlyMyOrders');
+  return parsed ?? fallback;
+}
+
+function parseOptionalBoolean(
+  value: string | string[] | undefined,
+  field: string,
+): boolean | undefined {
   const raw = singleValue(value);
-  if (raw === undefined || raw === '') return fallback;
+  if (raw === undefined || raw === '') return undefined;
 
   if (raw === 'true') return true;
   if (raw === 'false') return false;
 
-  throw validationError('onlyMyOrders', 'onlyMyOrders must be true or false');
+  throw validationError(field, `${field} must be true or false`);
 }
 
 function parseGroupIds(value: string | string[] | undefined): string[] | undefined {
