@@ -1,7 +1,7 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import type { TransactionClient } from '../../../database/database.types';
-import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
+import type { DeleteOrderResponseDto, OrderDto, RestoreOrderResponseDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
   NormalizedSaveOrderDowelingLinkDto,
@@ -43,6 +43,15 @@ export interface DeleteOrderCommand {
   requestId?: string;
 }
 
+export interface RestoreOrderCommand {
+  currentUser: CurrentUser;
+  orderId: number;
+  version: number;
+  idempotencyKey: string;
+  orderName?: string;
+  requestId?: string;
+}
+
 export interface LockedOrderRow {
   orderId: number;
   orderName: string;
@@ -60,8 +69,24 @@ export interface LockedOrderDeleteRow {
   managerUserId: string | null;
 }
 
+export interface LockedOrderRestoreRow {
+  orderId: number;
+  orderName: string;
+  clientId: number | null;
+  version: number;
+  createdByUserId: string | null;
+  managerUserId: string | null;
+  deleteFlag: boolean;
+  deletedAt: string | null;
+  deletedBy: string | null;
+}
+
 export interface OrderDeleteIdempotencyResult {
   completedResponse?: DeleteOrderResponseDto;
+}
+
+export interface OrderRestoreIdempotencyResult {
+  completedResponse?: RestoreOrderResponseDto;
 }
 
 export interface OrderCreateIdempotencyResult {
@@ -162,6 +187,19 @@ export interface OrderDeleteOutboxInput extends OrderDeleteAuditInput {
   idempotencyKey: string;
 }
 
+export interface OrderRestoreAuditInput {
+  currentUser: CurrentUser;
+  requestId: string;
+  order: LockedOrderRestoreRow;
+  targetOrderName: string;
+  nextVersion: number;
+}
+
+export interface OrderRestoreOutboxInput extends OrderRestoreAuditInput {
+  auditId: string;
+  idempotencyKey: string;
+}
+
 export interface OrderWriteUnitOfWork {
   setSessionUser(userId: string): Promise<void>;
   getTransactionClient(): TransactionClient;
@@ -194,7 +232,15 @@ export interface OrderWriteUnitOfWork {
     idempotencyKey: string,
     response: DeleteOrderResponseDto,
   ): Promise<void>;
+  reconcileOrderRestoreIdempotency(
+    command: RestoreOrderCommand,
+  ): Promise<OrderRestoreIdempotencyResult>;
+  completeOrderRestoreIdempotency(
+    idempotencyKey: string,
+    response: RestoreOrderResponseDto,
+  ): Promise<void>;
   loadOrderHeaderSnapshot(orderId: number): Promise<Record<string, unknown> | null>;
+  peekOrderName(orderId: number): Promise<string | null>;
   loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null>;
   /**
    * Advisory xact lock по нормализованному номеру заказа. Берётся ПЕРВЫМ,
@@ -210,6 +256,12 @@ export interface OrderWriteUnitOfWork {
    */
   assertOrderNameAvailable(input: { orderName: string; excludeOrderId?: number }): Promise<void>;
   loadOrderForDelete(orderId: number): Promise<LockedOrderDeleteRow | null>;
+  loadOrderForRestore(orderId: number): Promise<LockedOrderRestoreRow | null>;
+  recordOrderRestoreDenied(input: {
+    currentUser: CurrentUser;
+    orderId: number;
+    requestId: string;
+  }): Promise<void>;
   assertChildOwnership(orderId: number, refs: readonly OrderChildReference[]): Promise<void>;
   createOrderHeader(input: {
     header: NormalizedSaveOrderHeaderDto;
@@ -265,9 +317,16 @@ export interface OrderWriteUnitOfWork {
     previousVersion: number;
     actorUserId: string;
   }): Promise<number>;
+  restoreOrder(input: {
+    orderId: number;
+    previousVersion: number;
+    targetOrderName: string;
+  }): Promise<number>;
   writeAuditEvent(event: OrderSaveAuditEvent): Promise<void>;
   writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string>;
   enqueueOrderDeleteOutbox(input: OrderDeleteOutboxInput): Promise<void>;
+  writeOrderRestoreAudit(input: OrderRestoreAuditInput): Promise<string>;
+  enqueueOrderRestoreOutbox(input: OrderRestoreOutboxInput): Promise<void>;
   readOrder(orderId: number): Promise<OrderDto>;
 }
 

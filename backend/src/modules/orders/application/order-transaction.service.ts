@@ -8,6 +8,7 @@ import type {
   DetailSheetAuditRef,
   OrderDeadlineSyncPort,
   OrderChildReference,
+  RestoreOrderCommand,
   OrderSaveAuditMetadata,
   LockedOrderRow,
   OrderPermissionCheckerPort,
@@ -15,14 +16,18 @@ import type {
   OrderWriteUnitOfWork,
   UpdateOrderCommand,
 } from './order-transaction.types';
-import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
+import type { DeleteOrderResponseDto, OrderDto, RestoreOrderResponseDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
   NormalizedSaveOrderDto,
   PreparedOrderSave,
 } from '../dto/save-order.dto';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { OrderNotFoundError, OrderVersionConflictError } from '../errors/order.errors';
+import {
+  OrderNotDeletedError,
+  OrderNotFoundError,
+  OrderVersionConflictError,
+} from '../errors/order.errors';
 import { prepareOrderSave } from '../domain/order-save-preparer';
 import { ProjectClientMismatchError } from '../../projects/errors/projects.errors';
 import {
@@ -443,7 +448,7 @@ export class OrderTransactionService {
         throw new OrderNotFoundError(command.orderId);
       }
 
-      this.requireDeletePermission(command, lockedOrder);
+      await this.requireDeletePermission(command, lockedOrder);
 
       if (command.version !== lockedOrder.version) {
         throw new OrderVersionConflictError(lockedOrder.version, command.version);
@@ -477,6 +482,92 @@ export class OrderTransactionService {
       };
       await unitOfWork.completeOrderDeleteIdempotency(command.idempotencyKey, response);
 
+      return response;
+    });
+  }
+
+  async restore(command: RestoreOrderCommand): Promise<RestoreOrderResponseDto> {
+    return this.ports.transactions.runInTransaction(async (unitOfWork) => {
+      await unitOfWork.setSessionUser(command.currentUser.id);
+
+      const requestId = command.requestId ?? 'order-restore-command';
+      const targetOrderName =
+        command.orderName === undefined ? undefined : String(command.orderName).trim();
+      if (targetOrderName !== undefined && targetOrderName.length === 0) {
+        throw new ApiError(422, 'VALIDATION_ERROR', 'orderName не может быть пустым', {
+          field: 'orderName',
+        });
+      }
+
+      const normalizedCommand =
+        targetOrderName === command.orderName ? command : { ...command, orderName: targetOrderName };
+      const idempotency = await unitOfWork.reconcileOrderRestoreIdempotency(normalizedCommand);
+      if (idempotency.completedResponse) {
+        return idempotency.completedResponse;
+      }
+
+      const peekedOrderName =
+        targetOrderName === undefined ? await unitOfWork.peekOrderName(command.orderId) : null;
+      if (targetOrderName === undefined && peekedOrderName === null) {
+        throw new OrderNotFoundError(command.orderId);
+      }
+
+      const lockedTargetName = targetOrderName ?? peekedOrderName!;
+      await unitOfWork.lockOrderName(lockedTargetName);
+
+      const lockedOrder = await unitOfWork.loadOrderForRestore(command.orderId);
+      if (!lockedOrder) {
+        throw new OrderNotFoundError(command.orderId);
+      }
+
+      await this.requireDeletePermission(normalizedCommand, lockedOrder, async () => {
+        await unitOfWork.recordOrderRestoreDenied({
+          currentUser: command.currentUser,
+          orderId: command.orderId,
+          requestId,
+        });
+      });
+
+      if (!lockedOrder.deleteFlag) {
+        throw new OrderNotDeletedError(command.orderId);
+      }
+
+      if (command.version !== lockedOrder.version) {
+        throw new OrderVersionConflictError(lockedOrder.version, command.version);
+      }
+
+      const effectiveTargetName = targetOrderName ?? lockedOrder.orderName;
+      if (effectiveTargetName !== lockedTargetName) {
+        throw new OrderVersionConflictError(lockedOrder.version, command.version);
+      }
+
+      await unitOfWork.assertOrderNameAvailable({ orderName: effectiveTargetName });
+
+      const nextVersion = await unitOfWork.restoreOrder({
+        orderId: command.orderId,
+        previousVersion: lockedOrder.version,
+        targetOrderName: effectiveTargetName,
+      });
+      const auditId = await unitOfWork.writeOrderRestoreAudit({
+        currentUser: command.currentUser,
+        requestId,
+        order: lockedOrder,
+        targetOrderName: effectiveTargetName,
+        nextVersion,
+      });
+      await unitOfWork.enqueueOrderRestoreOutbox({
+        currentUser: command.currentUser,
+        requestId,
+        order: lockedOrder,
+        targetOrderName: effectiveTargetName,
+        nextVersion,
+        auditId,
+        idempotencyKey: command.idempotencyKey,
+      });
+
+      const order = await unitOfWork.readOrder(command.orderId);
+      const response: RestoreOrderResponseDto = { order, auditId, requestId };
+      await unitOfWork.completeOrderRestoreIdempotency(command.idempotencyKey, response);
       return response;
     });
   }
@@ -655,14 +746,15 @@ export class OrderTransactionService {
     }
   }
 
-  private requireDeletePermission(
-    command: Pick<DeleteOrderCommand, 'currentUser'>,
+  private async requireDeletePermission(
+    command: Pick<DeleteOrderCommand | RestoreOrderCommand, 'currentUser'>,
     order: {
       orderId: number;
       createdByUserId: string | null;
       managerUserId: string | null;
     },
-  ): void {
+    onDenied?: () => Promise<void>,
+  ): Promise<void> {
     if (
       !this.orderAccessPolicy.canDelete(command.currentUser, {
         orderId: order.orderId,
@@ -670,6 +762,13 @@ export class OrderTransactionService {
         managerUserId: order.managerUserId,
       })
     ) {
+      if (onDenied) {
+        try {
+          await onDenied();
+        } catch {
+          // best-effort: denied-audit sink failures must not mask the 403
+        }
+      }
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
         requiredPermissions: ['orders.delete'],
       });

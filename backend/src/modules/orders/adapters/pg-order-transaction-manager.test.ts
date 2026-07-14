@@ -793,6 +793,196 @@ describe('PgOrderTransactionManager', () => {
     expect(updateQuery!.params).toEqual([100, 3, '42']);
   });
 
+  describe('restore path', () => {
+    it('loadOrderForRestore locks row without delete_flag filter', async () => {
+      const database = createDatabase();
+      const manager = new PgOrderTransactionManager(database.service);
+
+      await manager.runInTransaction(async (uow) => {
+        await expect(uow.loadOrderForRestore(100)).resolves.toEqual({
+          orderId: 100,
+          orderName: 'A-100',
+          clientId: 5,
+          version: 2,
+          createdByUserId: '42',
+          managerUserId: '42',
+          deleteFlag: true,
+          deletedAt: '2026-05-02T03:04:05.000Z',
+          deletedBy: '42',
+        });
+      });
+
+      const query = database.queries.find((item) =>
+        normalizeSql(item.text).includes('deleted_at, deleted_by'),
+      );
+      expect(query).toBeDefined();
+      expect(normalizeSql(query!.text)).toContain('FOR UPDATE');
+      expect(normalizeSql(query!.text)).not.toContain('delete_flag = false');
+    });
+
+    it('restoreOrder clears soft-delete state and sets target name', async () => {
+      const database = createDatabase();
+      const manager = new PgOrderTransactionManager(database.service);
+
+      await manager.runInTransaction(async (uow) => {
+        await expect(
+          uow.restoreOrder({ orderId: 100, previousVersion: 2, targetOrderName: '2561' }),
+        ).resolves.toBe(3);
+      });
+
+      const updateQuery = database.queries.find((query) =>
+        normalizeSql(query.text).startsWith('UPDATE orders SET delete_flag = false'),
+      );
+      expect(updateQuery).toBeDefined();
+      expect(normalizeSql(updateQuery!.text)).toContain('deleted_at = NULL');
+      expect(normalizeSql(updateQuery!.text)).toContain('deleted_by = NULL');
+      expect(normalizeSql(updateQuery!.text)).toContain('order_name = $3');
+      expect(updateQuery!.params).toEqual([100, 3, '2561']);
+    });
+
+    it('restoreOrder maps unique violations to ORDER_RESTORE_CONFLICT', async () => {
+      const database = createDatabase({ restoreOrderErrorCode: '23505' });
+      const manager = new PgOrderTransactionManager(database.service);
+
+      await expect(
+        manager.runInTransaction((uow) =>
+          uow.restoreOrder({ orderId: 100, previousVersion: 2, targetOrderName: '2561' }),
+        ),
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'ORDER_RESTORE_CONFLICT',
+      });
+    });
+
+    it('writeOrderRestoreAudit writes orders.restore with before after diff and metadata', async () => {
+      const database = createDatabase();
+      const manager = new PgOrderTransactionManager(database.service);
+
+      await manager.runInTransaction(async (uow) => {
+        const lockedOrder = await uow.loadOrderForRestore(100);
+        await expect(
+          uow.writeOrderRestoreAudit({
+            currentUser: currentUser(),
+            requestId: 'request-restore-1',
+            order: lockedOrder!,
+            targetOrderName: '2561',
+            nextVersion: 3,
+          }),
+        ).resolves.toBe('audit-delete-1');
+      });
+
+      const auditQuery = database.queries.find((query) =>
+        normalizeSql(query.text).startsWith('INSERT INTO audit_log'),
+      );
+      expect(auditQuery).toBeDefined();
+      expect(auditQuery!.params[0]).toBe('100');
+      expect(auditQuery!.text).toContain("'orders.restore'");
+      const beforeJson = JSON.parse(String(auditQuery!.params[6]));
+      const afterJson = JSON.parse(String(auditQuery!.params[7]));
+      const diffJson = JSON.parse(String(auditQuery!.params[8]));
+      const metadataJson = JSON.parse(String(auditQuery!.params[9]));
+      expect(beforeJson).toMatchObject({
+        orderId: 100,
+        orderName: 'A-100',
+        clientId: 5,
+        deleteFlag: true,
+        deletedAt: '2026-05-02T03:04:05.000Z',
+        deletedBy: '42',
+        version: 2,
+      });
+      expect(afterJson).toMatchObject({
+        orderId: 100,
+        orderName: '2561',
+        clientId: 5,
+        deleteFlag: false,
+        version: 3,
+      });
+      expect(diffJson).toMatchObject({
+        deleteFlag: { from: true, to: false },
+        version: { from: 2, to: 3 },
+        orderName: { from: 'A-100', to: '2561' },
+      });
+      expect(metadataJson).toMatchObject({
+        source: 'backend-orders-command',
+        commandName: 'orders.restore',
+        actorUserId: '42',
+        previousVersion: 2,
+        version: 3,
+      });
+    });
+
+    it('enqueueOrderRestoreOutbox uses idempotent key suffix order.restored', async () => {
+      const database = createDatabase();
+      const manager = new PgOrderTransactionManager(database.service);
+
+      await manager.runInTransaction(async (uow) => {
+        const lockedOrder = await uow.loadOrderForRestore(100);
+        await uow.enqueueOrderRestoreOutbox({
+          currentUser: currentUser(),
+          requestId: 'request-restore-1',
+          order: lockedOrder!,
+          targetOrderName: '2561',
+          nextVersion: 3,
+          auditId: 'audit-restore-1',
+          idempotencyKey: 'order-restore-key-1',
+        });
+      });
+
+      const outboxQuery = database.queries.find((query) => query.params[0] === 'order.restored');
+      expect(outboxQuery).toBeDefined();
+      expect(normalizeSql(outboxQuery!.text)).toContain('ON CONFLICT (idempotency_key) DO NOTHING');
+      expect(outboxQuery!.params[3]).toBe('order-restore-key-1:order.restored');
+      const payload = JSON.parse(String(outboxQuery!.params[2]));
+      expect(payload).toMatchObject({
+        eventType: 'order.restored',
+        idempotencyKey: 'order-restore-key-1',
+        outboxIdempotencyKey: 'order-restore-key-1:order.restored',
+        orderName: '2561',
+        previousOrderName: 'A-100',
+        previousVersion: 2,
+        version: 3,
+      });
+    });
+
+    it('reconcileOrderRestoreIdempotency hashes orderId version and targetName under orders.restore', async () => {
+      const first = createDatabase();
+      const second = createDatabase();
+      const managerA = new PgOrderTransactionManager(first.service);
+      const managerB = new PgOrderTransactionManager(second.service);
+
+      await managerA.runInTransaction((uow) =>
+        uow.reconcileOrderRestoreIdempotency({
+          currentUser: currentUser(),
+          orderId: 100,
+          version: 2,
+          idempotencyKey: 'order-restore-key-1',
+          orderName: '2561',
+        }),
+      );
+      await managerB.runInTransaction((uow) =>
+        uow.reconcileOrderRestoreIdempotency({
+          currentUser: currentUser(),
+          orderId: 100,
+          version: 2,
+          idempotencyKey: 'order-restore-key-2',
+          orderName: '2562',
+        }),
+      );
+
+      const firstInsert = first.queries.find((query) =>
+        normalizeSql(query.text).startsWith('INSERT INTO command_idempotency_keys'),
+      );
+      const secondInsert = second.queries.find((query) =>
+        normalizeSql(query.text).startsWith('INSERT INTO command_idempotency_keys'),
+      );
+      expect(firstInsert).toBeDefined();
+      expect(secondInsert).toBeDefined();
+      expect(firstInsert!.params[3]).not.toBe(secondInsert!.params[3]);
+      expect(firstInsert!.params).toContain('100');
+      expect(secondInsert!.params).toContain('100');
+    });
+  });
+
   it('Variant B: sheet order save writes sheet_material_type bridge rows via audit', async () => {
     const { queries, service } = createDatabase();
     const manager = new PgOrderTransactionManager(service);
@@ -865,6 +1055,7 @@ function createDatabase(
     childCount?: number;
     dowelingEngineerRowCount?: number;
     existingIdempotencyResponse?: OrderDto;
+    existingRestoreIdempotencyResponse?: { order: OrderDto; auditId?: string; requestId: string };
     idempotencyConflict?: boolean;
     idempotencyHashMismatch?: boolean;
     projectRow?:
@@ -876,6 +1067,7 @@ function createDatabase(
         }
       | null;
     restoredRowCount?: number;
+    restoreOrderErrorCode?: string;
     duplicateNameRow?: { order_id: number; order_name: string } | null;
     suggestedNextName?: string | null;
   } = {},
@@ -923,7 +1115,10 @@ function createDatabase(
             {
               idempotency_key: params[0],
               request_hash: options.idempotencyHashMismatch ? 'different-hash' : lastRequestHash,
-              response_json: options.existingIdempotencyResponse ?? null,
+              response_json:
+                options.existingIdempotencyResponse ??
+                options.existingRestoreIdempotencyResponse ??
+                null,
               status: 'completed',
             },
           ],
@@ -992,6 +1187,9 @@ function createDatabase(
               version: 2,
               created_by: 42,
               manager_id: 42,
+              delete_flag: true,
+              deleted_at: '2026-05-02T03:04:05.000Z',
+              deleted_by: 42,
             },
           ],
           rowCount: 1,
@@ -1012,6 +1210,13 @@ function createDatabase(
 
       if (normalized.startsWith('INSERT INTO order_details')) {
         return { rows: [{ detail_id: 200 }], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('UPDATE orders SET delete_flag = false')) {
+        if (options.restoreOrderErrorCode) {
+          throw Object.assign(new Error('restore failed'), { code: options.restoreOrderErrorCode });
+        }
+        return { rows: [{ version: params[1] }], rowCount: 1 };
       }
 
       if (normalized.startsWith('UPDATE orders SET delete_flag')) {

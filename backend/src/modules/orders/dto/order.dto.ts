@@ -40,6 +40,12 @@ export interface DeleteOrderResponseDto {
   requestId: string;
 }
 
+export interface RestoreOrderResponseDto {
+  order: OrderDto;
+  auditId?: string;
+  requestId: string;
+}
+
 export interface OrderListResponseDto {
   data: OrderListItemDto[];
   pagination: PaginationDto;

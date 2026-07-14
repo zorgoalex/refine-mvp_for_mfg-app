@@ -39,6 +39,7 @@ import type {
   OrderDto,
   OrderListResponseDto,
   OrderResponseDto,
+  RestoreOrderResponseDto,
 } from '../dto/order.dto';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type { SaveOrderDto } from '../dto/save-order.dto';
@@ -757,6 +758,16 @@ const deleteOrderResponseSwaggerSchema = {
   },
 } as const;
 
+const restoreOrderResponseSwaggerSchema = {
+  type: 'object',
+  required: ['order', 'requestId'],
+  properties: {
+    order: orderSwaggerSchema,
+    auditId: { type: 'string' },
+    requestId: { type: 'string' },
+  },
+} as const;
+
 @ApiTags('Orders')
 @ApiBearerAuth()
 @Controller('orders')
@@ -955,6 +966,69 @@ export class OrdersController {
       orderId: parseOrderId(orderIdParam),
       version: parseIfMatchVersion(ifMatchHeader),
       idempotencyKey: parseIdempotencyKeyHeader(idempotencyKeyHeader),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiHeader({
+    name: 'If-Match',
+    required: true,
+    description: 'Order version/ETag version is required.',
+    schema: { type: 'string' },
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description: 'Idempotency key for safe retry of the restore request.',
+    schema: { type: 'string', minLength: 8, maxLength: 200 },
+  })
+  @ApiBody({
+    schema: swaggerSchema({
+      type: 'object',
+      properties: {
+        orderName: { type: 'string' },
+      },
+    }),
+    required: false,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Restored order',
+    schema: swaggerSchema(restoreOrderResponseSwaggerSchema),
+  })
+  @ApiResponse({ status: 400, description: 'Missing or invalid restore request headers' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: 409,
+    description: 'Stale version, order not deleted, order name duplicate, or restore conflict',
+  })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 422, description: 'Invalid restore order payload' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled or read-only' })
+  @ApiOperation({ operationId: 'restoreOrder', summary: 'Восстановить удалённый заказ' })
+  @Post(':orderId/restore')
+  @HttpCode(200)
+  async restore(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Headers('if-match') ifMatchHeader: string | string[] | undefined,
+    @Headers('idempotency-key') idempotencyKeyHeader: string | string[] | undefined,
+    @Body() body: { orderName?: unknown } | undefined,
+  ): Promise<RestoreOrderResponseDto> {
+    this.assertOrdersWriteEnabled();
+
+    const currentUser = this.requireCurrentUser(request);
+    return this.orders.restore({
+      currentUser,
+      orderId: parseOrderId(orderIdParam),
+      version: parseIfMatchVersion(ifMatchHeader),
+      idempotencyKey: parseIdempotencyKeyHeader(idempotencyKeyHeader),
+      orderName:
+        body?.orderName === undefined || body.orderName === null
+          ? undefined
+          : String(body.orderName),
       requestId: request.requestId,
     });
   }

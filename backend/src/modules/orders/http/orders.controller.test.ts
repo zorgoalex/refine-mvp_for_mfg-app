@@ -5,7 +5,7 @@ import { getPermissionsForRole } from '../../../permissions/permissions';
 import type { OrderQueryService } from '../application/order-query.service';
 import type { OrderTransactionService } from '../application/order-transaction.service';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
-import type { OrderDto, OrderListResponseDto } from '../dto/order.dto';
+import type { OrderDto, OrderListResponseDto, RestoreOrderResponseDto } from '../dto/order.dto';
 import type { SaveOrderDto } from '../dto/save-order.dto';
 import {
   OrdersController,
@@ -395,6 +395,143 @@ describe('OrdersController write endpoints', () => {
     expect(parseIdempotencyKeyHeader('  order-delete-key-1  ')).toBe('order-delete-key-1');
   });
 
+  it('parses restore headers and delegates restore to OrderTransactionService', async () => {
+    const calls: string[] = [];
+    const response: RestoreOrderResponseDto = {
+      order: createOrderDto({ orderId: 42 }),
+      auditId: 'audit-restore-1',
+      requestId: 'request-restore-1',
+    };
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: false,
+      },
+      service: {
+        async restore(command) {
+          calls.push(
+            `restore:${command.orderId}:${command.currentUser.id}:${command.version}:${command.idempotencyKey}:${command.orderName}:${command.requestId}`,
+          );
+          return response;
+        },
+      },
+    });
+
+    await expect(
+      controller.restore(
+        { user: currentUser('manager-id'), requestId: 'request-restore-1' },
+        '42',
+        '"3"',
+        'order-restore-key-1',
+        { orderName: 2561 },
+      ),
+    ).resolves.toBe(response);
+    expect(calls).toEqual(['restore:42:manager-id:3:order-restore-key-1:2561:request-restore-1']);
+  });
+
+  it('requires authenticated current user before restore transaction service', async () => {
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: false,
+      },
+    });
+
+    await expect(
+      controller.restore({}, '42', '"3"', 'order-restore-key-1', {}),
+    ).rejects.toMatchObject({
+      code: 'AUTH_REQUIRED',
+      statusCode: 401,
+    } satisfies Partial<ApiError>);
+  });
+
+  it('blocks restore when orders API is read-only', async () => {
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+    });
+
+    await expect(
+      controller.restore(
+        { user: currentUser('manager-id') },
+        '42',
+        '"3"',
+        'order-restore-key-1',
+        {},
+      ),
+    ).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      statusCode: 503,
+      details: {
+        feature: 'orders',
+        mode: 'read_only',
+      },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('rejects missing restore command headers as BAD_REQUEST', async () => {
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: false,
+      },
+    });
+
+    await expect(
+      controller.restore(
+        { user: currentUser('manager-id') },
+        '42',
+        undefined,
+        'order-restore-key-1',
+        {},
+      ),
+    ).rejects.toThrow(ApiError);
+
+    await expect(
+      controller.restore(
+        { user: currentUser('manager-id') },
+        '42',
+        '"3"',
+        undefined,
+        {},
+      ),
+    ).rejects.toThrow(ApiError);
+  });
+
+  it('returns 422 for empty restore orderName after trim', async () => {
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: false,
+      },
+      service: {
+        async restore(command) {
+          if ((command.orderName ?? '').trim() === '') {
+            throw new ApiError(422, 'VALIDATION_ERROR', 'orderName не может быть пустым', {
+              field: 'orderName',
+            });
+          }
+          throw new Error('restore should not succeed');
+        },
+      },
+    });
+
+    await expect(
+      controller.restore(
+        { user: currentUser('manager-id') },
+        '42',
+        '"3"',
+        'order-restore-key-1',
+        { orderName: '   ' },
+      ),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      statusCode: 422,
+    } satisfies Partial<ApiError>);
+  });
+
   it('rejects invalid path order ids as BAD_REQUEST', () => {
     expect(() => parseOrderId('0')).toThrow(ApiError);
     expect(() => parseOrderId('raw_sql')).toThrow(ApiError);
@@ -416,6 +553,9 @@ function createController(options: {
     },
     async delete() {
       throw new Error('delete should not be called');
+    },
+    async restore() {
+      throw new Error('restore should not be called');
     },
     ...options.service,
   } as unknown as OrderTransactionService;
