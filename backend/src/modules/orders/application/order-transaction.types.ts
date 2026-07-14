@@ -232,9 +232,6 @@ export interface OrderWriteUnitOfWork {
     idempotencyKey: string,
     response: DeleteOrderResponseDto,
   ): Promise<void>;
-  reconcileOrderRestoreIdempotency(
-    command: RestoreOrderCommand,
-  ): Promise<OrderRestoreIdempotencyResult>;
   completeOrderRestoreIdempotency(
     idempotencyKey: string,
     response: RestoreOrderResponseDto,
@@ -333,6 +330,9 @@ export interface OrderWriteUnitOfWork {
 
 export interface OrderTransactionManagerPort {
   runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T>;
+  reserveOrderRestoreIdempotency(
+    command: RestoreOrderCommand,
+  ): Promise<OrderRestoreIdempotencyResult>;
   markOrderRestoreIdempotencyFailed(command: RestoreOrderCommand): Promise<void>;
 }
 

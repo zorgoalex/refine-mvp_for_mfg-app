@@ -1,5 +1,6 @@
 import { ApiError } from '../../../common/errors/api-error';
 import type {
+  OrderRestoreIdempotencyResult,
   RestoreOrderCommand,
   OrderTransactionManagerPort,
   OrderWriteUnitOfWork,
@@ -9,6 +10,14 @@ export class UnavailableOrderTransactionManager implements OrderTransactionManag
   async runInTransaction<T>(
     _handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>,
   ): Promise<T> {
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Orders DB adapter is not configured', {
+      module: 'orders',
+    });
+  }
+
+  async reserveOrderRestoreIdempotency(
+    _command: RestoreOrderCommand,
+  ): Promise<OrderRestoreIdempotencyResult> {
     throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Orders DB adapter is not configured', {
       module: 'orders',
     });

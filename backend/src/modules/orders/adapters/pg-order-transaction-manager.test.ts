@@ -955,30 +955,26 @@ describe('PgOrderTransactionManager', () => {
       });
     });
 
-    it('reconcileOrderRestoreIdempotency hashes orderId version and targetName under orders.restore', async () => {
+    it('reserveOrderRestoreIdempotency inserts processing in its own tx and hashes orderId version and targetName under orders.restore', async () => {
       const first = createDatabase();
       const second = createDatabase();
       const managerA = new PgOrderTransactionManager(first.service);
       const managerB = new PgOrderTransactionManager(second.service);
 
-      await managerA.runInTransaction((uow) =>
-        uow.reconcileOrderRestoreIdempotency({
-          currentUser: currentUser(),
-          orderId: 100,
-          version: 2,
-          idempotencyKey: 'order-restore-key-1',
-          orderName: '2561',
-        }),
-      );
-      await managerB.runInTransaction((uow) =>
-        uow.reconcileOrderRestoreIdempotency({
-          currentUser: currentUser(),
-          orderId: 100,
-          version: 2,
-          idempotencyKey: 'order-restore-key-2',
-          orderName: '2562',
-        }),
-      );
+      await managerA.reserveOrderRestoreIdempotency({
+        currentUser: currentUser(),
+        orderId: 100,
+        version: 2,
+        idempotencyKey: 'order-restore-key-1',
+        orderName: '2561',
+      });
+      await managerB.reserveOrderRestoreIdempotency({
+        currentUser: currentUser(),
+        orderId: 100,
+        version: 2,
+        idempotencyKey: 'order-restore-key-2',
+        orderName: '2562',
+      });
 
       const firstInsert = first.queries.find((query) =>
         normalizeSql(query.text).startsWith('INSERT INTO command_idempotency_keys'),
@@ -986,6 +982,8 @@ describe('PgOrderTransactionManager', () => {
       const secondInsert = second.queries.find((query) =>
         normalizeSql(query.text).startsWith('INSERT INTO command_idempotency_keys'),
       );
+      expect(first.queries[0]?.text).toContain('set_session_user');
+      expect(normalizeSql(firstInsert!.text)).toContain('ON CONFLICT (idempotency_key) DO NOTHING');
       expect(firstInsert).toBeDefined();
       expect(secondInsert).toBeDefined();
       expect(firstInsert!.params[3]).not.toBe(secondInsert!.params[3]);
@@ -993,26 +991,123 @@ describe('PgOrderTransactionManager', () => {
       expect(secondInsert!.params).toContain('100');
     });
 
-    it('reconcileOrderRestoreIdempotency surfaces failed status as IDEMPOTENCY_FAILED', async () => {
+    it('reserveOrderRestoreIdempotency returns cached response when the key already completed', async () => {
+      const database = createDatabase({
+        idempotencyConflict: true,
+        restoreIdempotencyStatus: 'completed',
+        existingRestoreIdempotencyResponse: {
+          order: createStoredOrderResponse(),
+          auditId: 'audit-restore-1',
+          requestId: 'request-restore-1',
+        },
+      });
+      const manager = new PgOrderTransactionManager(database.service);
+
+      await expect(
+        manager.reserveOrderRestoreIdempotency({
+          currentUser: currentUser(),
+          orderId: 100,
+          version: 2,
+          idempotencyKey: 'order-restore-key-completed',
+        }),
+      ).resolves.toEqual({
+        completedResponse: {
+          order: createStoredOrderResponse(),
+          auditId: 'audit-restore-1',
+          requestId: 'request-restore-1',
+        },
+      });
+    });
+
+    it('reserveOrderRestoreIdempotency surfaces failed status as IDEMPOTENCY_FAILED', async () => {
       const database = createDatabase({ restoreIdempotencyStatus: 'failed', idempotencyConflict: true });
       const manager = new PgOrderTransactionManager(database.service);
 
       await expect(
-        manager.runInTransaction((uow) =>
-          uow.reconcileOrderRestoreIdempotency({
-            currentUser: currentUser(),
-            orderId: 100,
-            version: 2,
-            idempotencyKey: 'order-restore-key-failed',
-          }),
-        ),
+        manager.reserveOrderRestoreIdempotency({
+          currentUser: currentUser(),
+          orderId: 100,
+          version: 2,
+          idempotencyKey: 'order-restore-key-failed',
+        }),
       ).rejects.toMatchObject({
         statusCode: 409,
         code: 'IDEMPOTENCY_FAILED',
       });
     });
 
-    it('marks restore idempotency as failed with an upsert that preserves completed keys', async () => {
+    it('reserveOrderRestoreIdempotency surfaces in-progress status for a live processing row', async () => {
+      const database = createDatabase({
+        idempotencyConflict: true,
+        restoreIdempotencyStatus: 'processing',
+        idempotencyCreatedAt: '2099-07-14T23:55:00.000Z',
+      });
+      const manager = new PgOrderTransactionManager(database.service);
+
+      await expect(
+        manager.reserveOrderRestoreIdempotency({
+          currentUser: currentUser(),
+          orderId: 100,
+          version: 2,
+          idempotencyKey: 'order-restore-key-processing',
+        }),
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'IDEMPOTENCY_IN_PROGRESS',
+      });
+    });
+
+    it('reserveOrderRestoreIdempotency rejects same key with a different request hash', async () => {
+      const database = createDatabase({
+        idempotencyConflict: true,
+        idempotencyHashMismatch: true,
+        restoreIdempotencyStatus: 'processing',
+      });
+      const manager = new PgOrderTransactionManager(database.service);
+
+      await expect(
+        manager.reserveOrderRestoreIdempotency({
+          currentUser: currentUser(),
+          orderId: 100,
+          version: 2,
+          idempotencyKey: 'order-restore-key-reused',
+        }),
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'IDEMPOTENCY_KEY_REUSED',
+      });
+    });
+
+    it('reserveOrderRestoreIdempotency marks stale processing as failed and throws retriable 409', async () => {
+      const database = createDatabase({
+        idempotencyConflict: true,
+        restoreIdempotencyStatus: 'processing',
+        idempotencyCreatedAt: '2000-01-01T00:00:00.000Z',
+      });
+      const manager = new PgOrderTransactionManager(database.service);
+
+      await expect(
+        manager.reserveOrderRestoreIdempotency({
+          currentUser: currentUser(),
+          orderId: 100,
+          version: 2,
+          idempotencyKey: 'order-restore-key-stale',
+        }),
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'ORDER_RESTORE_IDEMPOTENCY_FAILED',
+        message: 'Предыдущее выполнение зависло, повторите с новым ключом',
+      });
+
+      const burnQuery = database.queries.find((query) =>
+        normalizeSql(query.text).startsWith('UPDATE command_idempotency_keys SET status = \'failed\''),
+      );
+      expect(burnQuery).toBeDefined();
+      expect(normalizeSql(burnQuery!.text)).toContain("WHERE idempotency_key = $1 AND status = 'processing'");
+      expect(burnQuery!.params).toEqual(['order-restore-key-stale']);
+    });
+
+    it('marks restore idempotency as failed with a guarded update and never inserts', async () => {
       const database = createDatabase();
       const manager = new PgOrderTransactionManager(database.service);
 
@@ -1025,18 +1120,16 @@ describe('PgOrderTransactionManager', () => {
       });
 
       const burnQuery = database.queries.find((query) =>
-        normalizeSql(query.text).startsWith('INSERT INTO command_idempotency_keys'),
+        normalizeSql(query.text).startsWith('UPDATE command_idempotency_keys SET status = \'failed\''),
       );
       expect(burnQuery).toBeDefined();
-      expect(normalizeSql(burnQuery!.text)).toContain("VALUES ($1, 'orders.restore', $2, 'order', $3, $4, 'failed')");
-      expect(normalizeSql(burnQuery!.text)).toContain('ON CONFLICT (idempotency_key) DO UPDATE SET status = \'failed\'');
-      expect(normalizeSql(burnQuery!.text)).toContain("WHERE command_idempotency_keys.status = 'processing'");
-      expect(burnQuery!.params).toEqual([
-        'order-restore-key-burn',
-        42,
-        '100',
-        expect.any(String),
-      ]);
+      expect(normalizeSql(burnQuery!.text)).toContain("WHERE idempotency_key = $1 AND status = 'processing'");
+      expect(burnQuery!.params).toEqual(['order-restore-key-burn']);
+      expect(
+        database.queries.some((query) =>
+          normalizeSql(query.text).startsWith('INSERT INTO command_idempotency_keys'),
+        ),
+      ).toBe(false);
     });
   });
 
@@ -1114,6 +1207,7 @@ function createDatabase(
     existingIdempotencyResponse?: OrderDto;
     existingRestoreIdempotencyResponse?: { order: OrderDto; auditId?: string; requestId: string };
     restoreIdempotencyStatus?: 'completed' | 'failed' | 'processing';
+    idempotencyCreatedAt?: string;
     idempotencyConflict?: boolean;
     idempotencyHashMismatch?: boolean;
     projectRow?:
@@ -1178,6 +1272,7 @@ function createDatabase(
                 options.existingRestoreIdempotencyResponse ??
                 null,
               status: options.restoreIdempotencyStatus ?? 'completed',
+              created_at: options.idempotencyCreatedAt ?? '2026-07-14T23:55:00.000Z',
             },
           ],
           rowCount: 1,

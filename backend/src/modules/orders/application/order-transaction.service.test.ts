@@ -186,6 +186,26 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
     this.state.projects.set(record.projectId, { ...record });
   }
 
+  async reserveOrderRestoreIdempotency(
+    command: RestoreOrderCommand,
+  ): Promise<OrderRestoreIdempotencyResult> {
+    this.calls.push('reserveOrderRestoreIdempotency');
+    this.lastRestoreIdempotencyInput = command;
+    if (this.restoreIdempotencyError) {
+      throw this.restoreIdempotencyError;
+    }
+    if (
+      this.failedRestoreIdempotencyMarks.some(
+        (mark) => mark.idempotencyKey === command.idempotencyKey,
+      )
+    ) {
+      throw new OrderRestoreIdempotencyFailedError(command.idempotencyKey);
+    }
+    return this.completedRestoreResponse
+      ? { completedResponse: this.completedRestoreResponse }
+      : {};
+  }
+
   async markOrderRestoreIdempotencyFailed(command: RestoreOrderCommand): Promise<void> {
     this.calls.push('markOrderRestoreIdempotencyFailed');
     if (this.failAt === 'markOrderRestoreIdempotencyFailed') {
@@ -244,25 +264,6 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     this.call('reconcileOrderDeleteIdempotency');
     return this.owner.completedDeleteResponse
       ? { completedResponse: this.owner.completedDeleteResponse }
-      : {};
-  }
-
-  async reconcileOrderRestoreIdempotency(input: unknown): Promise<OrderRestoreIdempotencyResult> {
-    this.call('reconcileOrderRestoreIdempotency');
-    this.owner.lastRestoreIdempotencyInput = input;
-    if (this.owner.restoreIdempotencyError) {
-      throw this.owner.restoreIdempotencyError;
-    }
-    const command = input as RestoreOrderCommand;
-    if (
-      this.owner.failedRestoreIdempotencyMarks.some(
-        (mark) => mark.idempotencyKey === command.idempotencyKey,
-      )
-    ) {
-      throw new OrderRestoreIdempotencyFailedError(command.idempotencyKey);
-    }
-    return this.owner.completedRestoreResponse
-      ? { completedResponse: this.owner.completedRestoreResponse }
       : {};
   }
 
@@ -2011,9 +2012,9 @@ describe('OrderTransactionService', () => {
         targetOrderName: '2558',
       });
       expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
         'begin',
         'setSessionUser',
-        'reconcileOrderRestoreIdempotency',
         'peekOrderName',
         'lockOrderName',
         'loadOrderForRestore',
@@ -2045,12 +2046,7 @@ describe('OrderTransactionService', () => {
         }),
       ).resolves.toEqual(transactions.completedRestoreResponse);
 
-      expect(transactions.calls).toEqual([
-        'begin',
-        'setSessionUser',
-        'reconcileOrderRestoreIdempotency',
-        'commit',
-      ]);
+      expect(transactions.calls).toEqual(['reserveOrderRestoreIdempotency']);
     });
 
     it('throws 404 when order does not exist', async () => {
@@ -2069,9 +2065,9 @@ describe('OrderTransactionService', () => {
       } satisfies Partial<ApiError>);
 
       expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
         'begin',
         'setSessionUser',
-        'reconcileOrderRestoreIdempotency',
         'peekOrderName',
         'rollback',
         'markOrderRestoreIdempotencyFailed',
@@ -2128,9 +2124,9 @@ describe('OrderTransactionService', () => {
       } satisfies Partial<ApiError>);
 
       expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
         'begin',
         'setSessionUser',
-        'reconcileOrderRestoreIdempotency',
         'peekOrderName',
         'lockOrderName',
         'loadOrderForRestore',
@@ -2167,9 +2163,9 @@ describe('OrderTransactionService', () => {
       ).rejects.toBeInstanceOf(OrderVersionConflictError);
 
       expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
         'begin',
         'setSessionUser',
-        'reconcileOrderRestoreIdempotency',
         'peekOrderName',
         'lockOrderName',
         'loadOrderForRestore',
@@ -2218,9 +2214,9 @@ describe('OrderTransactionService', () => {
       });
 
       expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
         'begin',
         'setSessionUser',
-        'reconcileOrderRestoreIdempotency',
         'lockOrderName',
         'loadOrderForRestore',
         'assertOrderNameAvailable',
@@ -2307,9 +2303,9 @@ describe('OrderTransactionService', () => {
         deleteFlag: true,
       });
       expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
         'begin',
         'setSessionUser',
-        'reconcileOrderRestoreIdempotency',
         'peekOrderName',
         'lockOrderName',
         'loadOrderForRestore',
@@ -2413,6 +2409,17 @@ describe('OrderTransactionService', () => {
         statusCode: 409,
       } satisfies Partial<ApiError>);
 
+      expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
+        'begin',
+        'setSessionUser',
+        'lockOrderName',
+        'loadOrderForRestore',
+        'assertOrderNameAvailable',
+        'rollback',
+        'markOrderRestoreIdempotencyFailed',
+        'reserveOrderRestoreIdempotency',
+      ]);
       expect(
         transactions.calls.filter((call) => call === 'markOrderRestoreIdempotencyFailed'),
       ).toHaveLength(1);
@@ -2472,6 +2479,7 @@ describe('OrderTransactionService', () => {
 
       expect(transactions.failedRestoreIdempotencyMarks).toEqual([]);
       expect(transactions.calls).not.toContain('markOrderRestoreIdempotencyFailed');
+      expect(transactions.calls).toEqual(['reserveOrderRestoreIdempotency']);
     });
   });
 

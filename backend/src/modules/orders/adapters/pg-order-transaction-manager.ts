@@ -69,12 +69,14 @@ const CHILD_TABLES = {
 } as const;
 
 const SOURCE = 'backend-orders-command';
+const STALE_PROCESSING_MS = 10 * 60 * 1000;
 
 interface IdempotencyRow {
   idempotency_key: string;
   request_hash: string;
   response_json: OrderDto | DeleteOrderResponseDto | RestoreOrderResponseDto | string | null;
   status: string;
+  created_at?: string | Date | null;
 }
 
 interface LockedOrderDeleteDbRow {
@@ -110,11 +112,20 @@ export class PgOrderTransactionManager implements OrderTransactionManagerPort {
     );
   }
 
+  reserveOrderRestoreIdempotency(
+    command: RestoreOrderCommand,
+  ): Promise<OrderRestoreIdempotencyResult> {
+    return this.database.transaction(async (tx) => {
+      await tx.query('SELECT set_session_user($1)', [command.currentUser.id]);
+      return reserveOrderRestoreIdempotency(tx, command);
+    });
+  }
+
   markOrderRestoreIdempotencyFailed(command: RestoreOrderCommand): Promise<void> {
     return this.database
       .transaction(async (tx) => {
         await tx.query('SELECT set_session_user($1)', [command.currentUser.id]);
-        await markOrderRestoreIdempotencyFailed(tx, command);
+        await markOrderRestoreIdempotencyFailed(tx, command.idempotencyKey);
       })
       .then(() => undefined);
   }
@@ -252,12 +263,6 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     response: DeleteOrderResponseDto,
   ): Promise<void> {
     await completeOrderDeleteIdempotency(this.tx, idempotencyKey, response);
-  }
-
-  async reconcileOrderRestoreIdempotency(
-    command: RestoreOrderCommand,
-  ): Promise<OrderRestoreIdempotencyResult> {
-    return reconcileOrderRestoreIdempotency(this.tx, command);
   }
 
   async completeOrderRestoreIdempotency(
@@ -1445,11 +1450,16 @@ async function completeOrderDeleteIdempotency(
   );
 }
 
-async function reconcileOrderRestoreIdempotency(
+async function reserveOrderRestoreIdempotency(
   tx: TransactionClient,
   command: RestoreOrderCommand,
 ): Promise<OrderRestoreIdempotencyResult> {
   const requestHash = hashOrderRestoreRequest(command);
+  // Reserve in a separately committed transaction so the processing row survives
+  // any later rollback of the business transaction. A parallel same-key request
+  // therefore always sees the committed row and must take the hash/status path
+  // instead of escaping through a fresh INSERT after rollback. If the worker
+  // dies after reserve and before completion, stale-processing timeout covers it.
   const inserted = await tx.query<IdempotencyRow>(
     `
     INSERT INTO command_idempotency_keys (
@@ -1457,7 +1467,7 @@ async function reconcileOrderRestoreIdempotency(
     )
     VALUES ($1, 'orders.restore', $2, 'order', $3, $4, 'processing')
     ON CONFLICT (idempotency_key) DO NOTHING
-    RETURNING idempotency_key, request_hash, response_json, status
+    RETURNING idempotency_key, request_hash, response_json, status, created_at
     `,
     [command.idempotencyKey, Number(command.currentUser.id), String(command.orderId), requestHash],
   );
@@ -1468,7 +1478,7 @@ async function reconcileOrderRestoreIdempotency(
 
   const existing = await tx.query<IdempotencyRow>(
     `
-    SELECT idempotency_key, request_hash, response_json, status
+    SELECT idempotency_key, request_hash, response_json, status, created_at
     FROM command_idempotency_keys
     WHERE idempotency_key = $1
     FOR UPDATE
@@ -1488,6 +1498,19 @@ async function reconcileOrderRestoreIdempotency(
   }
   if (row.status === 'failed') {
     throw new OrderRestoreIdempotencyFailedError(command.idempotencyKey);
+  }
+  if (row.status === 'processing') {
+    const createdAtMs =
+      row.created_at == null ? Number.NaN : Date.parse(String(row.created_at));
+    const ageMs = Date.now() - createdAtMs;
+    if (Number.isFinite(ageMs) && ageMs >= STALE_PROCESSING_MS) {
+      await markOrderRestoreIdempotencyFailed(tx, command.idempotencyKey);
+      throw new ApiError(
+        409,
+        'ORDER_RESTORE_IDEMPOTENCY_FAILED',
+        'Предыдущее выполнение зависло, повторите с новым ключом',
+      );
+    }
   }
 
   throw new OrderRestoreIdempotencyInProgressError(command.idempotencyKey);
@@ -1512,24 +1535,18 @@ async function completeOrderRestoreIdempotency(
 
 async function markOrderRestoreIdempotencyFailed(
   tx: TransactionClient,
-  command: RestoreOrderCommand,
+  idempotencyKey: string,
 ): Promise<void> {
+  // Only processing may burn. A completed row can coexist with a late post-commit
+  // failure in the caller and must remain replayable as completed.
   await tx.query(
     `
-    INSERT INTO command_idempotency_keys (
-      idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status
-    )
-    VALUES ($1, 'orders.restore', $2, 'order', $3, $4, 'failed')
-    ON CONFLICT (idempotency_key) DO UPDATE
+    UPDATE command_idempotency_keys
     SET status = 'failed'
-    WHERE command_idempotency_keys.status = 'processing'
+    WHERE idempotency_key = $1
+      AND status = 'processing'
     `,
-    [
-      command.idempotencyKey,
-      Number(command.currentUser.id),
-      String(command.orderId),
-      hashOrderRestoreRequest(command),
-    ],
+    [idempotencyKey],
   );
 }
 
