@@ -12228,6 +12228,9 @@ components:
         note:
           type: string
           nullable: true
+        doweling:
+          type: boolean
+          description: "Присадка: деталь требует присадки (migration 063). Default false."
         linkCuttingFile:
           type: string
           nullable: true
@@ -12672,6 +12675,10 @@ components:
         note:
           type: string
           nullable: true
+        doweling:
+          type: boolean
+          nullable: true
+          description: "Присадка: деталь требует присадки. Optional; absent/null → false."
         linkCuttingFile:
           type: string
           nullable: true
