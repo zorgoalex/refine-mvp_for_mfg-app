@@ -14,6 +14,7 @@ import { Button, Checkbox, Collapse, Empty, Modal, Space, Table, Tooltip, Typogr
 import type { ColumnsType } from 'antd/es/table';
 import type { FilterDropdownProps, FilterValue } from 'antd/es/table/interface';
 import { isApiError } from '../../api/apiError';
+import { authSession } from '../../api/authSession';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
 import { AddToOrderModal } from './AddToOrderModal';
@@ -140,6 +141,29 @@ const PanelFilterDropdown: React.FC<FilterDropdownProps & { options: PanelFilter
   );
 };
 
+// Per-user память чекбокса «Группировать» (localStorage, как detailGrouping
+// в заказах). Один флаг на пользователя — общий для всех Базис-проектов.
+export function panelsGroupedKey(userId: string | number): string {
+  return `bazis-panels:grouped:${userId}`;
+}
+
+export function loadPanelsGrouped(userId: string | number): boolean {
+  try {
+    const raw = localStorage.getItem(panelsGroupedKey(userId));
+    return raw == null ? true : raw === 'true';
+  } catch {
+    return true;
+  }
+}
+
+export function savePanelsGrouped(userId: string | number, grouped: boolean): void {
+  try {
+    localStorage.setItem(panelsGroupedKey(userId), String(grouped));
+  } catch {
+    // ignore storage failures (private mode / quota)
+  }
+}
+
 export const PanelsTab: React.FC<PanelsTabProps> = ({
   revisionId,
   data,
@@ -153,7 +177,12 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   const navigate = useNavigate();
   const { nodes, byId, ancestorsOf } = data;
   const [expandedKeys, setExpandedKeys] = useState<readonly React.Key[]>([]);
-  const [grouped, setGrouped] = useState(true);
+  const groupedUserId = authSession.getUser()?.id ?? 'anon';
+  const [grouped, setGroupedState] = useState(() => loadPanelsGrouped(groupedUserId));
+  const setGrouped = (value: boolean) => {
+    setGroupedState(value);
+    savePanelsGrouped(groupedUserId, value);
+  };
   const [selection, setSelection] = useState<PanelSelectionState>(() => emptySelection());
   // Активные фильтры колонок из Table.onChange — header-чекбокс «выбрать все»
   // обязан работать только по ВИДИМЫМ (отфильтрованным) строкам.
