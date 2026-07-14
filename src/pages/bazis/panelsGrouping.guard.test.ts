@@ -69,8 +69,11 @@ describe('bazis panels grouping UI guards', () => {
     // фильтров), не из полного датасета (critic R1)
     expect(panelsTab).toMatch(/summary=\{\(visibleRows\)/);
     expect(panelsTab).toContain('Table.Summary');
-    expect(panelsTab).toContain('Итого');
-    expect(panelsTab).toContain('позиций');
+    // Паттерн итогов ERP-заказа: muted bold строка, позиции серым, кол-во/площадь синим
+    expect(panelsTab).toContain("backgroundColor: 'var(--app-surface-muted)', fontWeight: 'bold'");
+    expect(panelsTab).toContain('{totals.positions}');
+    expect(panelsTab).toContain("color: '#1890ff'");
+    expect(panelsTab).toContain('bordered');
     // Индексы Summary.Cell рассчитаны на 11 колонок БЕЗ инжектированной
     // expand-колонки: rc-table вставляет её только при expandedRowRender
     // (rc-table/lib/Table.js: expandable: !!expandedRowRender); nest-режим
