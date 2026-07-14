@@ -567,6 +567,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
 
       <Table<PanelsTableRow>
         className="bazis-panels-table"
+        bordered
         size="small"
         columns={columns}
         dataSource={grouped ? groupRows : flatRows}
@@ -589,18 +590,26 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           const totals = summarizeVisibleRows(visibleRows);
           return (
             <Table.Summary fixed>
-              <Table.Summary.Row>
-                {/* Сетка: 0 чекбокс, 1 №, 2 Размеры, 3 Кол-во, 4 Площадь, дальше 8 колонок */}
-                <Table.Summary.Cell index={0} colSpan={3}>
-                  <Text strong>{`Итого позиций: ${totals.positions}`}</Text>
+              {/* Паттерн итогов ERP-заказа (OrderDetailTable): muted-фон, bold,
+                  счётчик строк серым под №, количества/площадь синим; по ячейке
+                  на колонку — bordered рисует вертикальные линии и в итогах. */}
+              <Table.Summary.Row style={{ backgroundColor: 'var(--app-surface-muted)', fontWeight: 'bold' }}>
+                <Table.Summary.Cell index={0} />
+                <Table.Summary.Cell index={1}>
+                  <span style={{ color: '#666' }}>{totals.positions}</span>
                 </Table.Summary.Cell>
+                <Table.Summary.Cell index={2} />
                 <Table.Summary.Cell index={3}>
-                  <Text strong>{totals.totalQuantity ?? '—'}</Text>
+                  <span style={{ color: '#1890ff' }}>{totals.totalQuantity ?? '—'}</span>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={4} align="right">
-                  <Text strong>{totals.totalAreaM2 != null ? formatAreaM2(totals.totalAreaM2) : '—'}</Text>
+                  <span style={{ color: '#1890ff' }}>
+                    {totals.totalAreaM2 != null ? `${formatAreaM2(totals.totalAreaM2)} м\u00B2` : '—'}
+                  </span>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={5} colSpan={8} />
+                {[5, 6, 7, 8, 9, 10, 11, 12].map((cellIndex) => (
+                  <Table.Summary.Cell key={cellIndex} index={cellIndex} />
+                ))}
               </Table.Summary.Row>
             </Table.Summary>
           );
