@@ -200,6 +200,11 @@ export const apiRoutes = {
     byId: (ruleId: string) => backendApiPath(`/notification-rules/${encodeURIComponent(ruleId)}`),
     eventTypes: backendApiPath('/notification-event-types'),
   },
+  statusAutomation: {
+    rules: backendApiPath('/status-automation/rules'),
+    ruleById: (ruleId: number) => backendApiPath(`/status-automation/rules/${ruleId}`),
+    eventTypes: backendApiPath('/status-automation/event-types'),
+  },
   groups: groupsRoutes,
   projects: {
     list: backendApiPath('/projects'),

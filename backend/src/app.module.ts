@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { DeadlinesModule } from './modules/deadlines/deadlines.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { NotificationsEngineModule } from './modules/notifications-engine/notifications-engine.module';
+import { StatusAutomationModule } from './modules/status-automation/status-automation.module';
 import { HealthModule } from './modules/health/health.module';
 import { ClientPhonesModule } from './modules/client-phones/client-phones.module';
 import { CrmSyncModule } from './modules/crm-sync/crm-sync.module';
@@ -47,6 +48,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
     DeadlinesModule,
     NotificationsModule,
     NotificationsEngineModule,
+    StatusAutomationModule,
     HealthModule,
     OrdersModule,
     PaymentsModule,

@@ -171,6 +171,7 @@ export const envSchema = z
     BACKEND_ENABLE_DOWELING_COMMANDS: booleanFromEnv.default(false),
     // Bazis XML import module. Default OFF (fail-closed); no cross-dependency.
     BACKEND_ENABLE_BAZIS: booleanFromEnv.default(false),
+    BACKEND_STATUS_AUTOMATION: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),
     BACKEND_NOTIFICATION_RULES_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE: booleanFromEnv.default(false),

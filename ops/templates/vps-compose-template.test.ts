@@ -31,6 +31,17 @@ describe('VPS compose backend runtime flags', () => {
     expect(envExample).toContain('BACKEND_ENABLE_GROUP_P8_NOTIFICATIONS=false');
   });
 
+  it('passes status automation through and documents its default-off behavior', () => {
+    const compose = readTemplate('ops/templates/docker-compose.vps.yml');
+    const envExample = readTemplate('ops/templates/env.vps.example');
+
+    expect(compose).toContain(
+      'BACKEND_STATUS_AUTOMATION: ${BACKEND_STATUS_AUTOMATION:-false}',
+    );
+    expect(envExample).toContain('# событийные автостатусы, движок off by default');
+    expect(envExample).toContain('BACKEND_STATUS_AUTOMATION=false');
+  });
+
   it('publishes the CAD service on a public traefik subdomain with internal access', () => {
     const compose = readTemplate('ops/templates/docker-compose.vps.yml');
 

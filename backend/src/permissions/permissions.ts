@@ -156,6 +156,8 @@ export const PERMISSIONS = [
   'audit.view',
   'notifications.view_rules',
   'notifications.manage_rules',
+  'status_automation.view',
+  'status_automation.manage',
   'system.health.view',
   'system.superadmin',
 ] as const;

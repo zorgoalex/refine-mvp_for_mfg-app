@@ -28,10 +28,17 @@ describe('featureFlags', () => {
       projects: false,
       useBackendBazis: false,
       labels: false,
+      statusAutomation: false,
       sheetMaterialsReads: false,
       enableLegacyHasura: true,
       workosAuth: false,
     });
+  });
+
+  it('reads the statusAutomation flag from env and runtime config, default off', () => {
+    expect(getFeatureFlags({}).statusAutomation).toBe(false);
+    expect(getFeatureFlags({ VITE_STATUS_AUTOMATION: 'true' }).statusAutomation).toBe(true);
+    expect(getFeatureFlags({}, { statusAutomation: true }).statusAutomation).toBe(true);
   });
 
   it('reads the SP3 sheetMaterialsReads flag from env and runtime config, default off', () => {

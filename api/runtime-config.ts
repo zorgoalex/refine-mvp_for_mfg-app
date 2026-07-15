@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { buildFrontendRuntimeConfig } from './_lib/frontend-runtime-config';
+import { buildFrontendRuntimeConfig, readBooleanEnv } from './_lib/frontend-runtime-config';
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') {
@@ -12,7 +12,14 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const config = buildFrontendRuntimeConfig();
+  const baseConfig = buildFrontendRuntimeConfig();
+  const config = {
+    ...baseConfig,
+    features: {
+      ...baseConfig.features,
+      statusAutomation: readBooleanEnv(process.env.RUNTIME_CONFIG_STATUS_AUTOMATION, false),
+    },
+  };
 
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');

@@ -42,6 +42,7 @@ import type {
   SheetReferenceValidationInput,
   StoredOrderSheetState,
 } from './order-transaction.types';
+import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 import { collectChildReferences, OrderTransactionService } from './order-transaction.service';
 
 interface FakeProjectRecord {
@@ -133,6 +134,7 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
     orderId: number;
     orderName?: string;
   }> = [];
+  statusAutomationEvents: StatusAutomationEvent[] = [];
   readonly transactionClient = { query: async () => ({ rows: [], rowCount: 0 }), raw: {} } as TransactionClient;
 
   async runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T> {
@@ -656,6 +658,11 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     this.state.auditEvents.push(event);
   }
 
+  async evaluateStatusAutomation(event: StatusAutomationEvent): Promise<void> {
+    this.call('evaluateStatusAutomation');
+    this.owner.statusAutomationEvents.push(event);
+  }
+
   async writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string> {
     this.call('writeOrderDeleteAudit');
     this.state.auditEvents.push({
@@ -943,9 +950,48 @@ describe('OrderTransactionService', () => {
       'updateOrderTotalsAndVersion',
       'loadOrderHeaderSnapshot',
       'writeAuditEvent',
+      'evaluateStatusAutomation',
       'readOrder',
       'commit',
     ]);
+  });
+
+  it('emits order.created after the create audit with the source idempotency key', async () => {
+    const transactions = new FakeOrderTransactions();
+
+    await new OrderTransactionService({ transactions }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({ idempotencyKey: 'order-create-key-1' }),
+    });
+
+    expect(transactions.statusAutomationEvents).toEqual([
+      expect.objectContaining({
+        eventType: 'order.created',
+        origin: 'user',
+        orderId: 100,
+        actor: currentUser('manager'),
+        requestId: 'orders-create',
+        sourceIdempotencyKey: 'order-create-key-1',
+      }),
+    ]);
+    expect(transactions.calls.indexOf('evaluateStatusAutomation')).toBe(
+      transactions.calls.indexOf('writeAuditEvent') + 1,
+    );
+  });
+
+  it('uses an order-specific request fallback when create has neither request nor idempotency key', async () => {
+    const transactions = new FakeOrderTransactions();
+
+    await new OrderTransactionService({ transactions }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto(),
+    });
+
+    expect(transactions.statusAutomationEvents[0]).toMatchObject({
+      eventType: 'order.created',
+      orderId: 100,
+      requestId: 'orders-create-100',
+    });
   });
 
   it('passes unit of work and persisted detail ids by clientKey to postPersistHook', async () => {

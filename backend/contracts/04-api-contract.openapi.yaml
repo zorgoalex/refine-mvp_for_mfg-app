@@ -5524,6 +5524,150 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/status-automation/rules:
+    get:
+      tags:
+        - Status Automation
+      operationId: listStatusAutomationRules
+      summary: List status automation rules
+      security:
+        - bearerAuth: []
+      x-permission: status_automation.view
+      responses:
+        '200':
+          description: Status automation rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StatusAutomationRuleDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+        - Status Automation
+      operationId: createStatusAutomationRule
+      summary: Create a status automation rule
+      security:
+        - bearerAuth: []
+      x-permission: status_automation.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStatusAutomationRuleRequest'
+      responses:
+        '201':
+          description: Created status automation rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusAutomationRuleDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/status-automation/rules/{ruleId}:
+    parameters:
+      - name: ruleId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    patch:
+      tags:
+        - Status Automation
+      operationId: updateStatusAutomationRule
+      summary: Update a status automation rule
+      security:
+        - bearerAuth: []
+      x-permission: status_automation.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStatusAutomationRuleRequest'
+      responses:
+        '200':
+          description: Updated status automation rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusAutomationRuleDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags:
+        - Status Automation
+      operationId: deleteStatusAutomationRule
+      summary: Delete a status automation rule
+      security:
+        - bearerAuth: []
+      x-permission: status_automation.manage
+      responses:
+        '200':
+          description: Deleted status automation rule
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - deleted
+                properties:
+                  deleted:
+                    type: boolean
+                    enum: [true]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/status-automation/event-types:
+    get:
+      tags:
+        - Status Automation
+      operationId: listStatusAutomationEventTypes
+      summary: List status automation event types
+      security:
+        - bearerAuth: []
+      x-permission: status_automation.view
+      responses:
+        '200':
+          description: Status automation event types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StatusAutomationEventTypeDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/notification-event-types:
     get:
       tags:
@@ -10031,6 +10175,8 @@ components:
         - labels.generate
         - sheet_materials.view
         - sheet_materials.manage
+        - status_automation.view
+        - status_automation.manage
         - analytics.view
         - vlm.use
         - vlm.configure
@@ -14458,6 +14604,194 @@ components:
         updatedAt:
           type: string
           format: date-time
+
+    StatusAutomationRuleDto:
+      type: object
+      required:
+        - id
+        - name
+        - eventType
+        - actionType
+        - targetStatusId
+        - conditions
+        - priority
+        - isEnabled
+        - version
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        eventType:
+          type: string
+          enum:
+            - payment.created
+            - order.payment_status_changed
+            - order.created
+            - order.status_changed
+            - order.production_status_changed
+        actionType:
+          type: string
+          enum:
+            - change_order_status
+            - change_production_status
+            - change_details_production_status
+        targetStatusId:
+          type: integer
+          minimum: 1
+        conditions:
+          $ref: '#/components/schemas/StatusAutomationConditionsDto'
+        priority:
+          type: integer
+        isEnabled:
+          type: boolean
+        version:
+          type: integer
+
+    StatusAutomationConditionsDto:
+      type: object
+      properties:
+        currentOrderStatusIn:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+        currentPaymentStatusIn:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+        currentProductionStatusIn:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+        paidShareGte:
+          type: number
+          minimum: 0
+          maximum: 100
+        orderSourceIn:
+          type: array
+          items:
+            type: string
+            enum:
+              - manual
+              - bazis
+              - import
+        firstPaymentOnly:
+          type: boolean
+
+    StatusAutomationEventTypeDto:
+      type: object
+      required:
+        - eventType
+        - title
+        - allowedConditions
+        - allowedActions
+      properties:
+        eventType:
+          type: string
+          enum:
+            - payment.created
+            - order.payment_status_changed
+            - order.created
+            - order.status_changed
+            - order.production_status_changed
+        title:
+          type: string
+        allowedConditions:
+          type: array
+          items:
+            type: string
+            enum:
+              - currentOrderStatusIn
+              - currentPaymentStatusIn
+              - currentProductionStatusIn
+              - paidShareGte
+              - orderSourceIn
+              - firstPaymentOnly
+        allowedActions:
+          type: array
+          items:
+            type: string
+            enum:
+              - change_order_status
+              - change_production_status
+              - change_details_production_status
+
+    CreateStatusAutomationRuleRequest:
+      type: object
+      required:
+        - name
+        - eventType
+        - actionType
+        - targetStatusId
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        eventType:
+          type: string
+          enum:
+            - payment.created
+            - order.payment_status_changed
+            - order.created
+            - order.status_changed
+            - order.production_status_changed
+        actionType:
+          type: string
+          enum:
+            - change_order_status
+            - change_production_status
+            - change_details_production_status
+        targetStatusId:
+          type: integer
+          minimum: 1
+        conditions:
+          $ref: '#/components/schemas/StatusAutomationConditionsDto'
+        priority:
+          type: integer
+          default: 100
+        isEnabled:
+          type: boolean
+          default: false
+
+    UpdateStatusAutomationRuleRequest:
+      type: object
+      required:
+        - version
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        eventType:
+          type: string
+          enum:
+            - payment.created
+            - order.payment_status_changed
+            - order.created
+            - order.status_changed
+            - order.production_status_changed
+        actionType:
+          type: string
+          enum:
+            - change_order_status
+            - change_production_status
+            - change_details_production_status
+        targetStatusId:
+          type: integer
+          minimum: 1
+        conditions:
+          $ref: '#/components/schemas/StatusAutomationConditionsDto'
+        priority:
+          type: integer
+        isEnabled:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
 
     NotificationRuleListResponse:
       type: array

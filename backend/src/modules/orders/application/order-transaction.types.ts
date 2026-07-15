@@ -1,6 +1,7 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import type { TransactionClient } from '../../../database/database.types';
+import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 import type { DeleteOrderResponseDto, OrderDto, RestoreOrderResponseDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
@@ -321,6 +322,7 @@ export interface OrderWriteUnitOfWork {
     actorUserId: string;
   }): Promise<number>;
   writeAuditEvent(event: OrderSaveAuditEvent): Promise<void>;
+  evaluateStatusAutomation(event: StatusAutomationEvent): Promise<void>;
   writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string>;
   enqueueOrderDeleteOutbox(input: OrderDeleteOutboxInput): Promise<void>;
   writeOrderRestoreAudit(input: OrderRestoreAuditInput): Promise<string>;

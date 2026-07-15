@@ -217,6 +217,16 @@ export class OrderTransactionService {
           prepared.details,
         ),
       });
+      await unitOfWork.evaluateStatusAutomation({
+        eventType: 'order.created',
+        origin: 'user',
+        orderId,
+        actor: command.currentUser,
+        requestId:
+          command.requestId ??
+          (command.dto.idempotencyKey ? 'orders-create' : `orders-create-${orderId}`),
+        sourceIdempotencyKey: command.dto.idempotencyKey ?? undefined,
+      });
       if (command.postPersistHook) {
         await command.postPersistHook(unitOfWork, { orderId, detailIdsByClientKey });
       }

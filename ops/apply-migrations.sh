@@ -343,6 +343,7 @@ probe_file() {
     064_*) probe_all "$(q_col bazis_nodes notes)" ;;
     065_*) probe_all "$(q_col orders deleted_at)" \
                      "$(q_col orders deleted_by)" ;;
+    066_*) probe_all "$(q_tbl status_automation_rules)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

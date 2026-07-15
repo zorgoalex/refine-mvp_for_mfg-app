@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, type PermissionName } from '../../../permissions/permissions';
@@ -7,6 +7,16 @@ import {
   PgProductionActionRepository,
   loadOrderAssignedUserIds,
 } from './pg-production-action-repository';
+
+const evaluateStatusAutomationMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../status-automation/application/status-automation-runtime', () => ({
+  evaluateStatusAutomation: evaluateStatusAutomationMock,
+}));
+
+beforeEach(() => {
+  evaluateStatusAutomationMock.mockReset();
+});
 
 describe('PgProductionActionRepository', () => {
   it('moves calendar date with idempotency, audit, outbox, and deadline sync boundary', async () => {
@@ -224,6 +234,49 @@ describe('PgProductionActionRepository', () => {
     expect(normalizedSql(database.queries)).toContain('UPDATE orders SET order_status_id');
   });
 
+  it('emits order.status_changed after the manual status outbox with the source idempotency key', async () => {
+    const database = createDatabase();
+    const repository = new PgProductionActionRepository(database.service);
+
+    await repository.changeOrderStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { orderStatusId: 7, version: 3, idempotencyKey: 'status-automation-key-1' },
+      requestId: 'request-status-automation',
+    });
+
+    expect(evaluateStatusAutomationMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventType: 'order.status_changed',
+        origin: 'user',
+        orderId: 15,
+        actor: currentUser(),
+        requestId: 'request-status-automation',
+        sourceIdempotencyKey: 'status-automation-key-1',
+      }),
+    );
+    const sql = normalizedSql(database.queries);
+    const outboxIndex = sql.indexOf('INSERT INTO outbox_events');
+    const completeIndex = sql.indexOf('UPDATE command_idempotency_keys SET status =');
+    expect(outboxIndex).toBeGreaterThanOrEqual(0);
+    expect(completeIndex).toBeGreaterThan(outboxIndex);
+  });
+
+  it('does not emit order.status_changed for a same-status manual command', async () => {
+    const database = createDatabase({ orderStatusId: 7 });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await repository.changeOrderStatus({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: { orderStatusId: 7, version: 3, idempotencyKey: 'status-automation-noop-key' },
+      requestId: 'request-status-automation-noop',
+    });
+
+    expect(evaluateStatusAutomationMock).not.toHaveBeenCalled();
+  });
+
   it('changes order status from deadline-engine without client version or user permission path', async () => {
     const database = createDatabase();
     const repository = new PgProductionActionRepository(database.service);
@@ -274,6 +327,7 @@ describe('PgProductionActionRepository', () => {
     expect(params).toContain('rule-1');
     expect(params).toContain('sha256:rule-1');
     expect(params).toContain('deadline-status-key-1');
+    expect(evaluateStatusAutomationMock).not.toHaveBeenCalled();
 
     const idempotencyInsert = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO command_idempotency_keys'),
@@ -443,6 +497,7 @@ describe('PgProductionActionRepository', () => {
       normalizeSql(query.text).startsWith('INSERT INTO command_idempotency_keys'),
     );
     expect(idempotencyInsert?.params[2]).toBeNull();
+    expect(evaluateStatusAutomationMock).not.toHaveBeenCalled();
   });
 
   it('changes manual payment status with idempotency, audit, and outbox', async () => {
@@ -545,6 +600,17 @@ describe('PgProductionActionRepository', () => {
     expect(params).toContain('"beforeStatusDistribution":{"1":1,"3":1}');
     expect(params).toContain('"afterStatusDistribution":{"2":2}');
     expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+    expect(evaluateStatusAutomationMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventType: 'order.production_status_changed',
+        origin: 'user',
+        orderId: 15,
+        actor: currentUser(),
+        requestId: 'request-production-status',
+        sourceIdempotencyKey: 'production-status-key-1',
+      }),
+    );
   });
 
   it('changes derived production current status by switching to manual mode with detail metadata', async () => {
@@ -620,6 +686,7 @@ describe('PgProductionActionRepository', () => {
     expect(sql).not.toContain('INSERT INTO audit_log');
     expect(sql).not.toContain('INSERT INTO outbox_events');
     expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+    expect(evaluateStatusAutomationMock).not.toHaveBeenCalled();
   });
 
   it('activates a detail production stage with detail lock, event, audit, and outbox', async () => {
