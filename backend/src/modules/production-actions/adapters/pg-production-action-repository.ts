@@ -2172,6 +2172,11 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
   if (currentDetails.length === 0) {
     return { status: 'skipped', skipReason: 'no_details' };
   }
+  // Все живые детали уже в целевом статусе → no-op без version-бампа/audit/outbox
+  // (тот же same-status контракт, что у order-level automation-действий).
+  if (currentDetails.every((detail) => detail.productionStatusId === targetStatusId)) {
+    return { status: 'skipped', skipReason: 'same_status' };
+  }
 
   const status = await loadProductionStatus(tx, targetStatusId);
   const detailIds = currentDetails.map((detail) => detail.detailId);

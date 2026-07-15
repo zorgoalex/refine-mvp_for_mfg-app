@@ -114,6 +114,7 @@ describe('PgStatusAutomationRepository', () => {
     const database = createDatabase({
       responses: ({ text }) => {
         if (text.includes('SELECT id, name')) return result([before]);
+        if (text.includes('FROM order_statuses')) return result([{ order_status_id: '7' }]);
         if (/UPDATE status_automation_rules/.test(text)) return result([after]);
         if (text.includes('INSERT INTO audit_log')) return result([{ audit_id: 'audit-update-41' }]);
         return result([]);
@@ -136,6 +137,52 @@ describe('PgStatusAutomationRepository', () => {
     expect(audit?.params[0]).toBe('status_automation.rule_updated');
     expect(JSON.parse(String(audit?.params[19]))).toMatchObject({ id: 41, name: 'Старое имя' });
     expect(JSON.parse(String(audit?.params[20]))).toMatchObject({ id: 41, name: 'Новое имя' });
+  });
+
+  it('rejects an update whose merged conditions are inapplicable to the merged event type', async () => {
+    const before = ruleRow({
+      id: '41',
+      version: '1',
+      event_type: 'payment.created',
+      conditions_json: { firstPaymentOnly: true },
+    });
+    const database = createDatabase({
+      responses: ({ text }) => {
+        if (text.includes('SELECT id, name')) return result([before]);
+        if (text.includes('FROM order_statuses')) return result([{ order_status_id: '7' }]);
+        return result([]);
+      },
+    });
+
+    await expect(
+      new PgStatusAutomationRepository(database.service).updateRule({
+        currentUser: currentUser(),
+        requestId: 'request-merged-conditions',
+        ruleId: 41,
+        dto: { eventType: 'order.created', version: 1 },
+      }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'VALIDATION_ERROR' });
+    expect(database.queries.some((entry) => /UPDATE status_automation_rules/.test(entry.text))).toBe(false);
+  });
+
+  it('rejects re-enabling a rule whose persisted target status went stale', async () => {
+    const before = ruleRow({ id: '41', version: '1', is_enabled: false });
+    const database = createDatabase({
+      responses: ({ text }) => {
+        if (text.includes('SELECT id, name')) return result([before]);
+        if (text.includes('FROM order_statuses')) return result([]); // статус деактивирован
+        return result([]);
+      },
+    });
+
+    await expect(
+      new PgStatusAutomationRepository(database.service).updateRule({
+        currentUser: currentUser(),
+        requestId: 'request-stale-target',
+        ruleId: 41,
+        dto: { isEnabled: true, version: 1 },
+      }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'TARGET_STATUS_NOT_FOUND' });
   });
 
   it('returns 409 for a stale version and 404 for a missing rule', async () => {

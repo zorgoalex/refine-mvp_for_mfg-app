@@ -100,7 +100,9 @@ function buildOutboxIdempotencyKey(
   rule: StatusAutomationRule,
 ): string {
   const baseKey = event.sourceIdempotencyKey ?? `req-${event.requestId}`;
-  return `${baseKey}:automation-${rule.id}`;
+  // orderId в ключе обязателен: перенос платежа гоняет автоматику для ДВУХ
+  // заказов с одним requestId — без orderId второй outbox дропается ON CONFLICT.
+  return `${baseKey}:automation-${rule.id}:order-${event.orderId}`;
 }
 
 async function runAutomationAction(

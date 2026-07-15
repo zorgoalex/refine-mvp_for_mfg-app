@@ -68,8 +68,8 @@ describe('evaluateStatusAutomation', () => {
   });
 
   it.each([
-    { sourceIdempotencyKey: 'key', expected: 'key:automation-10' },
-    { sourceIdempotencyKey: undefined, expected: 'req-request-1:automation-10' },
+    { sourceIdempotencyKey: 'key', expected: 'key:automation-10:order-100' },
+    { sourceIdempotencyKey: undefined, expected: 'req-request-1:automation-10:order-100' },
   ])('calls an applied order rule with the $expected outbox key', async ({ sourceIdempotencyKey, expected }) => {
     const rule = makeRule({ id: 10 });
     mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
@@ -93,6 +93,24 @@ describe('evaluateStatusAutomation', () => {
         outboxIdempotencyKey: expected,
       }),
     );
+  });
+
+  it('builds distinct outbox keys for the same rule across different orders (payment transfer)', async () => {
+    const rule = makeRule({ id: 10 });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
+    mocks.changeOrderStatusFromAutomationInTransaction.mockResolvedValue({
+      status: 'executed',
+      auditId: 'command-audit-id',
+    });
+
+    await evaluateStatusAutomation(tx(), event({ orderId: 100 }));
+    await evaluateStatusAutomation(tx(), event({ orderId: 200 }));
+
+    const keys = mocks.changeOrderStatusFromAutomationInTransaction.mock.calls.map(
+      (call) => call[3].outboxIdempotencyKey,
+    );
+    expect(keys).toHaveLength(2);
+    expect(new Set(keys).size).toBe(2);
   });
 
   it('continues after a target-status-not-found error and audits the skip', async () => {

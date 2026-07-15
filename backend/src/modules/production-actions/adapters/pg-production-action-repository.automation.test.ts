@@ -65,6 +65,24 @@ describe('production-action automation in-transaction actions', () => {
     expect(database.outboxCalls).toHaveLength(0);
   });
 
+  it('skips detail automation without version bump when every live detail already has the target status', async () => {
+    const database = createAutomationTx({
+      detailRows: [
+        { detail_id: 101, production_status_id: 7 },
+        { detail_id: 102, production_status_id: 7 },
+      ],
+    });
+
+    await expect(
+      changeDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 7, automationContext()),
+    ).resolves.toEqual({ status: 'skipped', skipReason: 'same_status' });
+
+    expect(database.auditCalls).toHaveLength(0);
+    expect(database.outboxCalls).toHaveLength(0);
+    expect(database.sql.some((sql) => sql.startsWith('UPDATE orders'))).toBe(false);
+    expect(database.sql.some((sql) => sql.startsWith('UPDATE order_details'))).toBe(false);
+  });
+
   it('locks the order before details and recalculates in details auto mode', async () => {
     const database = createAutomationTx({
       productionStatusFromDetailsEnabled: true,

@@ -11,6 +11,7 @@ import type {
   StatusAutomationEventType,
   StatusAutomationRule,
 } from '../application/status-automation.types';
+import { getEventDescriptor } from '../domain/status-automation-events';
 
 export interface CreateStatusAutomationRuleDto {
   name: string;
@@ -136,11 +137,15 @@ export class PgStatusAutomationRepository {
         throw ruleNotFound(command.ruleId);
       }
       const existing = mapRuleRow(existingRow);
+      const nextEventType = command.dto.eventType ?? existing.eventType;
       const nextActionType = command.dto.actionType ?? existing.actionType;
       const nextTargetStatusId = command.dto.targetStatusId ?? existing.targetStatusId;
-      const actionChanged = command.dto.actionType !== undefined && command.dto.actionType !== existing.actionType;
-      const targetChanged = command.dto.targetStatusId !== undefined && command.dto.targetStatusId !== existing.targetStatusId;
-      if ((actionChanged || targetChanged) && existing.version === command.dto.version) {
+      const nextConditions = command.dto.conditions ?? existing.conditions;
+      if (existing.version === command.dto.version) {
+        // Валидируется СМЕРДЖЕННОЕ правило, не только дельта: смена eventType без
+        // повторной отправки conditions и «оживление» правила с протухшим целевым
+        // статусом (PATCH { isEnabled: true }) обязаны падать 422 здесь.
+        assertConditionsAllowedForEvent(nextEventType, nextConditions, command.ruleId);
         await validateTargetStatus(tx, nextActionType, nextTargetStatusId);
       }
 
@@ -296,6 +301,27 @@ function ruleSelectSql(suffix = ''): string {
     FROM status_automation_rules
     ${suffix}
   `;
+}
+
+function assertConditionsAllowedForEvent(
+  eventType: StatusAutomationEventType,
+  conditions: StatusAutomationConditions,
+  ruleId: number,
+): void {
+  const descriptor = getEventDescriptor(eventType);
+  if (!descriptor) {
+    throw new ApiError(422, 'VALIDATION_ERROR', `Неизвестное событие: ${eventType}`, { ruleId });
+  }
+  const allowed = new Set<string>(descriptor.allowedConditions as readonly string[]);
+  const invalidKeys = Object.keys(conditions).filter((key) => !allowed.has(key));
+  if (invalidKeys.length > 0) {
+    throw new ApiError(
+      422,
+      'VALIDATION_ERROR',
+      `Условия [${invalidKeys.join(', ')}] неприменимы к событию ${eventType}`,
+      { ruleId, eventType, invalidKeys },
+    );
+  }
 }
 
 async function validateTargetStatus(
