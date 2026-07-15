@@ -482,7 +482,11 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
   const orderedSelectionKeys = useCallback((sheetIndex: number, keys: Set<string>): string[] => {
     const sheet = sheetsRef.current.find((entry) => entry.sheetIndex === sheetIndex);
-    if (!sheet) return Array.from(keys);
+    // No fallback to the raw selection: when the sheet vanished (parent undo
+    // while the context menu is still open, before the reconcile effect
+    // flushes) there are NO valid survivors — returning the stale keys here
+    // would let the 'group' action mint a group of ghosts (Critic R2 MAJOR).
+    if (!sheet) return [];
     return sheet.placements.pieces
       .map((piece) => pKey(piece.item_id, piece.instance))
       .filter((key) => keys.has(key));

@@ -43,3 +43,10 @@ describe('selection reconciliation on sheets change (Critic R1)', () => {
     expect(src).toMatch(/if \(groupKeys\.length >= 2\)/);
   });
 });
+
+describe('orderedSelectionKeys hardening (Critic R2)', () => {
+  it('returns NO keys when the selected sheet is gone (no stale fallback)', () => {
+    expect(src).toMatch(/if \(!sheet\) return \[\];/);
+    expect(src).not.toMatch(/if \(!sheet\) return Array\.from\(keys\);/);
+  });
+});
