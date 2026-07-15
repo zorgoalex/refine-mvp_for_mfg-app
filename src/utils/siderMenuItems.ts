@@ -29,12 +29,6 @@ export interface TopMenuCrmInput {
   icon?: React.ReactNode;
 }
 
-export interface TopMenuTrashInput {
-  icon: React.ReactNode;
-  label: string;
-  route: string;
-}
-
 export interface UseSiderMenuItemsInput {
   resources: SiderResource[];
   pathname: string;
@@ -49,7 +43,6 @@ export interface UseSiderMenuItemsInput {
   setIsCreateModalOpen: (open: boolean) => void;
   /** Optional external CRM link shown below Calendar; omit/null to hide. */
   crm?: TopMenuCrmInput | null;
-  trash?: TopMenuTrashInput | null;
   /** Injectable external-link opener (default: window.open in a new tab). */
   openExternal?: (url: string) => void;
 }
@@ -113,7 +106,6 @@ export function buildTopMenuItems(args: {
   calendarLabel: string;
   push: (route: string) => void;
   crm?: TopMenuCrmInput | null;
-  trash?: TopMenuTrashInput | null;
   openExternal?: (url: string) => void;
 }): NonNullable<MenuProps['items']> {
   const openExternal = args.openExternal ?? defaultOpenExternal;
@@ -125,15 +117,6 @@ export function buildTopMenuItems(args: {
           label: args.ordersLabel,
           title: args.ordersLabel,
           onClick: () => args.push(args.ordersRoute),
-        }
-      : null,
-    args.trash && args.canViewNavigation('orders-trash')
-      ? {
-          key: 'orders-trash',
-          icon: args.trash.icon,
-          label: args.trash.label,
-          title: args.trash.label,
-          onClick: () => args.push(args.trash.route),
         }
       : null,
     args.canViewNavigation('calendar')
@@ -196,11 +179,7 @@ export function buildCategorizedResources(args: {
   );
 
   resources.forEach((resource) => {
-    if (
-      resource.name === 'orders_view' ||
-      resource.name === 'orders-trash' ||
-      resource.name === 'calendar'
-    ) {
+    if (resource.name === 'orders_view' || resource.name === 'calendar') {
       return;
     }
     const category = categoryMap[resource.name] || 'Справочники';
@@ -288,7 +267,6 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
     canCreateOrders,
     setIsCreateModalOpen,
     crm,
-    trash,
     openExternal,
   } = input;
 
@@ -338,7 +316,6 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
     calendarLabel,
     push,
     crm,
-    trash,
     openExternal,
   });
 

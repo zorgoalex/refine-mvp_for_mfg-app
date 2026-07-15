@@ -1090,7 +1090,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     onError: (m) => message.error(m),
                   })}
                 >
-                  <Button danger icon={<DeleteOutlined />}>Удалить</Button>
+                  <Tooltip title="Удалить заказ"><Button danger icon={<DeleteOutlined />} /></Tooltip>
                 </Popconfirm>
               ) : null}
             </>
@@ -1187,7 +1187,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     onError: (m) => message.error(m),
                   })}
                 >
-                  <Button danger icon={<DeleteOutlined />}>Удалить</Button>
+                  <Tooltip title="Удалить заказ"><Button danger icon={<DeleteOutlined />} /></Tooltip>
                 </Popconfirm>
               ) : null}
             </>

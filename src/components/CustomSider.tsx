@@ -2,7 +2,6 @@
 import { Layout as AntLayout, Menu, Collapse, Button, Typography, Tooltip } from "antd";
 import {
   PlusOutlined,
-  DeleteOutlined,
   DollarOutlined,
   InboxOutlined,
   ToolOutlined,
@@ -70,6 +69,7 @@ const CATEGORY_MAP: Record<string, string> = {
   film_vendors: "Контрагенты",
   payments: "Финансы",
   payments_view: "Финансы",
+  "orders-trash": "Производство",
   groups: "Производство",
   projects: "Производство",
   order_workshops: "Производство",
@@ -144,9 +144,6 @@ export const CustomSider: React.FC = () => {
     canCreateOrders,
     setIsCreateModalOpen,
     crm: crmMenuConfig ? { ...crmMenuConfig, icon: <ContactsOutlined /> } : null,
-    trash: canViewNavigation('orders-trash')
-      ? { icon: <DeleteOutlined />, label: 'Корзина', route: '/orders/trash' }
-      : null,
   });
 
   return (
@@ -182,7 +179,7 @@ export const CustomSider: React.FC = () => {
       >
         <Menu
           mode="inline"
-          selectedKeys={sider.selectedKey === "orders_view" || sider.selectedKey === "orders-trash" || sider.selectedKey === "calendar" ? [sider.selectedKey] : []}
+          selectedKeys={sider.selectedKey === "orders_view" || sider.selectedKey === "calendar" ? [sider.selectedKey] : []}
           items={sider.topMenuItems}
           style={{ background: "transparent", border: "none", marginBottom: 0, color: "#E0E0E0" }}
           className="orders-menu"

@@ -349,7 +349,7 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
                 ...state.payments,
                 {
                   ...payment,
-                  temp_id: Date.now(),
+                  temp_id: generateTempId(),
                 },
               ],
               isDirty: true,
@@ -405,7 +405,7 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
                 ...state.workshops,
                 {
                   ...workshop,
-                  temp_id: Date.now(),
+                  temp_id: generateTempId(),
                   delete_flag: false,
                 },
               ],
@@ -452,7 +452,7 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
                 ...state.requirements,
                 {
                   ...requirement,
-                  temp_id: Date.now(),
+                  temp_id: generateTempId(),
                   is_active: true,
                 },
               ],
@@ -497,7 +497,7 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
                 ...state.dowelingLinks,
                 {
                   ...link,
-                  temp_id: Date.now(),
+                  temp_id: generateTempId(),
                   delete_flag: false,
                 },
               ],
@@ -585,30 +585,34 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
                 // Ensure priority defaults to 100 if not set or invalid
                 priority: (order.header?.priority && order.header.priority >= 1) ? order.header.priority : 100,
               },
+              // temp_id обязан быть уникален в пределах формы: он становится
+              // clientKey для bazis create-from-draft. Date.now()+Math.random()
+              // в одной мс различает лишь ~2048 значений (мантисса double) —
+              // на больших драфтах (214 панелей) коллизии гарантированы.
               details:
                 order.details?.map((d) => ({
                   ...d,
-                  temp_id: d.detail_id || Date.now() + Math.random(),
+                  temp_id: d.detail_id || generateTempId(),
                 })) || [],
               payments:
                 order.payments?.map((p) => ({
                   ...p,
-                  temp_id: p.payment_id || Date.now() + Math.random(),
+                  temp_id: p.payment_id || generateTempId(),
                 })) || [],
               workshops:
                 order.workshops?.map((w) => ({
                   ...w,
-                  temp_id: w.order_workshop_id || Date.now() + Math.random(),
+                  temp_id: w.order_workshop_id || generateTempId(),
                 })) || [],
               requirements:
                 order.requirements?.map((r) => ({
                   ...r,
-                  temp_id: r.requirement_id || Date.now() + Math.random(),
+                  temp_id: r.requirement_id || generateTempId(),
                 })) || [],
               dowelingLinks:
                 order.dowelingLinks?.map((l) => ({
                   ...l,
-                  temp_id: l.order_doweling_link_id || Date.now() + Math.random(),
+                  temp_id: l.order_doweling_link_id || generateTempId(),
                 })) || [],
               deletedDetails: [],
               deletedPayments: [],
