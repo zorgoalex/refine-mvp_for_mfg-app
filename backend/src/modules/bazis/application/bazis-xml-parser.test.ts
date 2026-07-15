@@ -182,6 +182,76 @@ describe('parseBazisXml', () => {
     });
   });
 
+  describe('universal container walk (неизвестные контейнеры в СписокЭлементов)', () => {
+    // Формат 1491.xml: внутри СписокЭлементов появился контейнер <Полуфабрикат> с собственным
+    // СписокЭлементов; старый whitelist-обход терял такие поддеревья целиком.
+    const semiXml = `<Проект Наименование="1491" Версия="1">
+      <Изделие><Наименование>KUH</Наименование><Заказ>1491</Заказ><Количество>1</Количество><Цена>10</Цена><СписокЭлементов>
+        <Полуфабрикат><Наименование>НМУ.М.R-2Д</Наименование><ТипОбъекта>Полуфабрикат</ТипОбъекта><Количество>2</Количество><Позиция>К1</Позиция><СписокЭлементов>
+          <Сборка><Наименование>НМУ.К.М-R</Наименование><ТипОбъекта>Блок</ТипОбъекта><Количество>1</Количество><СписокЭлементов>
+            <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>Бок</Наименование><Количество>3</Количество>
+              <ОсновнойМатериал><Наименование>ЛДСП 16</Наименование></ОсновнойМатериал>
+            </Объект>
+          </СписокЭлементов></Сборка>
+          <Объект><ТипОбъекта>Фурнитура</ТипОбъекта><Наименование>Винт</Наименование><Количество>4</Количество>
+            <ОсновнойМатериал><Наименование>Винт 4х30</Наименование></ОсновнойМатериал>
+          </Объект>
+        </СписокЭлементов></Полуфабрикат>
+        <НеизвестныйКонтейнер><Наименование>Новое</Наименование><ТипОбъекта>Нечто</ТипОбъекта><Количество>1</Количество><СписокЭлементов>
+          <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>Дно</Наименование><Количество>1</Количество>
+            <ОсновнойМатериал><Наименование>ХДФ 3</Наименование></ОсновнойМатериал>
+          </Объект>
+        </СписокЭлементов></НеизвестныйКонтейнер>
+      </СписокЭлементов></Изделие>
+    </Проект>`;
+
+    it('walks Полуфабрикат subtree: nodes, parent chain, cumulative quantity', () => {
+      const parsed = parseBazisXml(semiXml);
+      const semi = parsed.nodes.find((node) => node.objectType === 'Полуфабрикат');
+      expect(semi).toBeDefined();
+      expect(semi?.nodeKind).toBe('object');
+      expect(semi?.parentIndex).toBe(0);
+      expect(semi?.cumulativeQuantity).toBe(2);
+      const assembly = parsed.nodes.find((node) => node.name === 'НМУ.К.М-R');
+      expect(assembly?.nodeKind).toBe('assembly');
+      expect(assembly?.parentIndex).toBe(semi?.index);
+      const panel = parsed.nodes.find((node) => node.name === 'Бок');
+      expect(panel?.parentIndex).toBe(assembly?.index);
+      expect(panel?.cumulativeQuantity).toBe(6);
+      const hardware = parsed.nodes.find((node) => node.name === 'Винт');
+      expect(hardware?.parentIndex).toBe(semi?.index);
+      expect(hardware?.cumulativeQuantity).toBe(8);
+    });
+
+    it('walks any future unknown container tag with СписокЭлементов', () => {
+      const parsed = parseBazisXml(semiXml);
+      const unknown = parsed.nodes.find((node) => node.name === 'Новое');
+      expect(unknown).toBeDefined();
+      expect(unknown?.nodeKind).toBe('object');
+      const panel = parsed.nodes.find((node) => node.name === 'Дно');
+      expect(panel?.parentIndex).toBe(unknown?.index);
+    });
+
+    it('counts panels/materials from dropped-before subtrees', () => {
+      const parsed = parseBazisXml(semiXml);
+      expect(parsed.summary.panels).toBe(2);
+      expect(parsed.summary.hardware).toBe(1);
+      expect(parsed.summary.totalNodes).toBe(7);
+      expect(parsed.materials.map((material) => material.name).sort()).toEqual([
+        'Винт 4х30',
+        'ЛДСП 16',
+        'ХДФ 3',
+      ]);
+    });
+
+    it('keeps raw free of СписокЭлементов for container nodes of any tag', () => {
+      const parsed = parseBazisXml(semiXml);
+      for (const node of parsed.nodes) {
+        expect(node.raw).not.toHaveProperty('СписокЭлементов');
+      }
+    });
+  });
+
   it('rejects DOCTYPE (XML bomb guard)', () => {
     expect(() => parseBazisXml('<!DOCTYPE foo [<!ENTITY a "b">]><Проект/>')).toThrow(
       BazisXmlParseError,

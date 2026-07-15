@@ -55,7 +55,6 @@ export class BazisXmlParseError extends Error {
 
 export const MAX_BAZIS_NODES = 20_000;
 
-const CONTAINER_TAGS = ['Сборка', 'Блок'] as const;
 const ARRAY_TAGS = new Set([
   'Изделие',
   'Объект',
@@ -70,11 +69,18 @@ const ARRAY_TAGS = new Set([
   'Материал',
 ]);
 
+// nodeKind по имени тега; любой другой тег (Полуфабрикат, будущие контейнеры) — 'object':
+// структура дерева от kind не зависит, реальный тип узла хранится в objectType/raw.
+const NODE_KIND_BY_TAG: Record<string, ParsedBazisNode['nodeKind']> = {
+  Сборка: 'assembly',
+  Блок: 'block',
+};
+
 type BazisElement = Record<string, unknown>;
 
 // `fast-xml-parser` groups siblings by tag name unless preserveOrder is enabled. We keep the
 // default grouped mode for simpler tree traversal, so mixed sibling interleave is not preserved:
-// objects are walked before containers. UI can still sort meaningfully via `Позиция` and `seq`.
+// siblings are walked per tag in first-occurrence order. UI can still sort via `Позиция`/`seq`.
 export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
   let text = Buffer.isBuffer(source) ? source.toString('utf8') : source;
   if (text.charCodeAt(0) === 0xfeff) {
@@ -89,7 +95,10 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
     attributeNamePrefix: '@_',
     parseTagValue: false,
     trimValues: true,
-    isArray: (name) => ARRAY_TAGS.has(name),
+    // Любой прямой ребёнок СписокЭлементов — массив узлов независимо от имени тега
+    // (универсальный обход: новые контейнеры вроде Полуфабрикат не должны теряться).
+    isArray: (name, jPath) =>
+      ARRAY_TAGS.has(name) || /(^|\.)СписокЭлементов\.[^.]+$/.test(jPath),
     processEntities: false,
   });
 
@@ -240,17 +249,23 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
     collectMaterials(element, objectType);
 
     const children = element['СписокЭлементов'] as BazisElement | undefined;
-    if (!children) {
+    if (!children || typeof children !== 'object') {
       return;
     }
 
+    // Универсальный обход: каждый элемент-ребёнок СписокЭлементов — узел дерева,
+    // независимо от имени тега; рекурсия собирает структуру от листьев вверх.
     let childSeq = 0;
-    for (const child of (children['Объект'] ?? []) as BazisElement[]) {
-      walk(child, 'object', index, childSeq++, cumulative);
-    }
-    for (const tag of CONTAINER_TAGS) {
-      for (const container of (children[tag] ?? []) as BazisElement[]) {
-        walk(container, tag === 'Сборка' ? 'assembly' : 'block', index, childSeq++, cumulative);
+    for (const [tag, value] of Object.entries(children)) {
+      if (tag.startsWith('@_') || tag === '#text' || !Array.isArray(value)) {
+        continue;
+      }
+      const childKind = NODE_KIND_BY_TAG[tag] ?? 'object';
+      for (const child of value) {
+        if (child === null || typeof child !== 'object') {
+          continue;
+        }
+        walk(child as BazisElement, childKind, index, childSeq++, cumulative);
       }
     }
   };
