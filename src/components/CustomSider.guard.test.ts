@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(new URL('./CustomSider.tsx', import.meta.url), 'utf8');
+const mobileSource = readFileSync(new URL('./MobileSiderDrawer.tsx', import.meta.url), 'utf8');
 
 describe('CustomSider expanded labels', () => {
   it('uses half-size text and wraps complete labels by words', () => {
@@ -13,7 +14,12 @@ describe('CustomSider expanded labels', () => {
     expect(source).toContain('text-wrap: pretty');
   });
 
-  it('gates the trash menu item with canViewNavigation for orders-trash', () => {
-    expect(source).toContain("canViewNavigation('orders-trash')");
+  it('places the trash item in the Производство category (both siders)', () => {
+    // Гейт видимости — общий canViewNavigation в category-раскладке
+    // (buildCategorizedResources) + navigationPermissions orders-trash→orders.delete.
+    expect(source).toContain('"orders-trash": "Производство"');
+    expect(mobileSource).toContain('"orders-trash": "Производство"');
+    // Пункт больше НЕ в top-menu:
+    expect(source).not.toContain("trash: canViewNavigation('orders-trash')");
   });
 });
