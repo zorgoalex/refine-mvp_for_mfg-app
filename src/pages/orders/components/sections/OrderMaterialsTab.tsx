@@ -7,6 +7,8 @@ import { useList } from '@refinedev/core';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { resolveDetailMaterialName } from '../../../../utils/materialDisplayName';
+import { calculateOrderTotalArea } from '../../../../utils/orderArea';
+import type { OrderDetail } from '../../../../types/orders';
 
 const { Text } = Typography;
 
@@ -15,6 +17,7 @@ interface MaterialAggregation {
   name: string;
   totalArea: number;
   detailsCount: number;
+  areaDetails: OrderDetail[];
 }
 
 interface FilmAggregation {
@@ -22,6 +25,7 @@ interface FilmAggregation {
   name: string;
   totalArea: number;
   detailsCount: number;
+  areaDetails: OrderDetail[];
 }
 
 export const OrderMaterialsTab: React.FC = () => {
@@ -65,8 +69,6 @@ export const OrderMaterialsTab: React.FC = () => {
       const sheetTypeId = detail.sheet_material_type_id;
       if (!sheetTypeId) return;
 
-      const area = detail.area || 0;
-
       if (!aggregation[sheetTypeId]) {
         aggregation[sheetTypeId] = {
           id: sheetTypeId,
@@ -75,14 +77,17 @@ export const OrderMaterialsTab: React.FC = () => {
             `ID: ${sheetTypeId}`,
           totalArea: 0,
           detailsCount: 0,
+          areaDetails: [],
         };
       }
 
-      aggregation[sheetTypeId].totalArea += area;
+      aggregation[sheetTypeId].areaDetails.push(detail);
       aggregation[sheetTypeId].detailsCount += 1;
     });
 
-    return Object.values(aggregation).sort((a, b) => a.name.localeCompare(b.name));
+    return Object.values(aggregation)
+      .map((item) => ({ ...item, totalArea: calculateOrderTotalArea(item.areaDetails) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [details, materialsMap]);
 
   // Агрегация по пленкам
@@ -93,22 +98,23 @@ export const OrderMaterialsTab: React.FC = () => {
       const filmId = detail.film_id;
       if (!filmId) return;
 
-      const area = detail.area || 0;
-
       if (!aggregation[filmId]) {
         aggregation[filmId] = {
           id: filmId,
           name: filmsMap[filmId] || `ID: ${filmId}`,
           totalArea: 0,
           detailsCount: 0,
+          areaDetails: [],
         };
       }
 
-      aggregation[filmId].totalArea += area;
+      aggregation[filmId].areaDetails.push(detail);
       aggregation[filmId].detailsCount += 1;
     });
 
-    return Object.values(aggregation).sort((a, b) => a.name.localeCompare(b.name));
+    return Object.values(aggregation)
+      .map((item) => ({ ...item, totalArea: calculateOrderTotalArea(item.areaDetails) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [details, filmsMap]);
 
   const materialsColumns = [
@@ -174,7 +180,7 @@ export const OrderMaterialsTab: React.FC = () => {
               emptyText: 'Нет данных по материалам',
             }}
             summary={(data) => {
-              const totalArea = data.reduce((sum, item) => sum + item.totalArea, 0);
+              const totalArea = calculateOrderTotalArea(details.filter((detail) => detail.sheet_material_type_id != null));
               const totalDetails = data.reduce((sum, item) => sum + item.detailsCount, 0);
 
               return (
@@ -212,7 +218,7 @@ export const OrderMaterialsTab: React.FC = () => {
               emptyText: 'Нет данных по пленкам',
             }}
             summary={(data) => {
-              const totalArea = data.reduce((sum, item) => sum + item.totalArea, 0);
+              const totalArea = calculateOrderTotalArea(details.filter((detail) => detail.film_id != null));
               const totalDetails = data.reduce((sum, item) => sum + item.detailsCount, 0);
 
               return (

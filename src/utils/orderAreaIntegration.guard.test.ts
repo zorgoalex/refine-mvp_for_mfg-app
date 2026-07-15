@@ -1,0 +1,27 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+
+const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
+
+describe('order area aggregate integration', () => {
+  it('uses raw-geometry totals in legacy save and the order form store', () => {
+    const saveSource = read('../hooks/useOrderSave.ts');
+    const storeSource = read('../stores/orderFormStore.ts');
+
+    expect(saveSource).toContain('calculateOrderTotalArea(savedDetails)');
+    expect(storeSource).toContain('total_area: calculateOrderTotalArea(state.details)');
+    expect(saveSource).not.toMatch(/totalArea\s*=\s*savedDetails\.reduce[\s\S]*?detail\.area/);
+    expect(storeSource).not.toMatch(/total_area:\s*state\.details\.reduce[\s\S]*?\.area/);
+  });
+
+  it('uses raw-geometry totals for material and film groups', () => {
+    const materialsSource = read('../pages/orders/components/sections/OrderMaterialsTab.tsx');
+    const importValidationSource = read('../pages/orders/components/import/hooks/useImportValidation.ts');
+
+    expect(materialsSource).toContain('calculateOrderTotalArea(item.areaDetails)');
+    expect(materialsSource).not.toMatch(/totalArea\s*\+=\s*area/);
+    expect(importValidationSource).toContain(
+      'totalArea: calculateOrderTotalArea(validatedRows.filter((row) => row.isValid))',
+    );
+  });
+});

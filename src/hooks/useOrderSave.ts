@@ -12,6 +12,7 @@ import { mapOrderFormToSaveOrderDto } from '../api/mappers/orderMapper';
 import type { CreateOrderFromDraftNode } from '../api/types/bazisApi.types';
 import { featureFlags } from '../config/featureFlags';
 import { saveOrderViaBackend } from './useOrderSaveBackend';
+import { calculateOrderTotalArea } from '../utils/orderArea';
 
 interface UseOrderSaveResult {
   saveOrder: (values: OrderFormValues, isEdit: boolean) => Promise<number | null>;
@@ -436,10 +437,8 @@ export const useOrderSave = (
           return sum + cost;
         }, 0);
 
-        // Calculate total_area by summing area from all details
-        const totalArea = savedDetails.reduce((sum, detail: any) => {
-          return sum + (detail.area || 0);
-        }, 0);
+        // Calculate total_area from raw geometry and round only once.
+        const totalArea = calculateOrderTotalArea(savedDetails);
 
         // Calculate parts_count by summing quantity from all details
         const partsCount = savedDetails.reduce((sum, detail: any) => {

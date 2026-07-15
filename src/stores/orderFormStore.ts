@@ -14,6 +14,7 @@ import {
   OrderFormValues,
   OrderTotals,
 } from '../types/orders';
+import { calculateOrderTotalArea } from '../utils/orderArea';
 
 // ============================================================================
 // UNIQUE ID GENERATOR
@@ -542,7 +543,7 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
           return {
             positions_count: state.details.length, // Количество позиций (записей)
             parts_count: state.details.reduce((sum, d) => sum + (d.quantity || 0), 0), // Количество деталей (сумма quantity)
-            total_area: state.details.reduce((sum, d) => sum + (d.area || 0), 0),
+            total_area: calculateOrderTotalArea(state.details),
             total_paid: state.payments.reduce((sum, p) => sum + (p.amount || 0), 0),
             total_amount: state.details.reduce((sum, d) => sum + (d.detail_cost || 0), 0), // Сумма всех detail_cost
           };

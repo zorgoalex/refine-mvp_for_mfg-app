@@ -15,6 +15,7 @@ import type {
   ImportableField,
 } from '../types/importTypes';
 import { FIELD_CONFIGS, FIELD_KEYWORDS, IMPORT_DEFAULTS } from '../types/importTypes';
+import { calculateOrderTotalArea } from '../../../../../utils/orderArea';
 
 export interface UnresolvedReference {
   originalValue: string;
@@ -153,7 +154,6 @@ export const useImportValidation = (): UseImportValidationReturn => {
 
   const stats = useMemo((): ImportStats => {
     let totalQuantity = 0;
-    let totalArea = 0;
     let validRows = 0;
     let errorRows = 0;
     let warningRows = 0;
@@ -162,10 +162,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
       if (row.isValid) {
         validRows++;
         const qty = row.quantity || 0;
-        const h = row.height || 0;
-        const w = row.width || 0;
         totalQuantity += qty;
-        totalArea += (h * w * qty) / 1000000; // mm² to m²
       } else if (row.errors.length > 0) {
         errorRows++;
       }
@@ -180,7 +177,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
       errorRows,
       warningRows,
       totalQuantity,
-      totalArea: Math.round(totalArea * 100) / 100,
+      totalArea: calculateOrderTotalArea(validatedRows.filter((row) => row.isValid)),
     };
   }, [validatedRows]);
 
