@@ -207,4 +207,12 @@ describe('pruneIncoherentGroups', () => {
       ]),
     );
   });
+
+  it('drops a singleton group even when its member still exists', () => {
+    const groups: PieceGroups = new Map([[7, [pieceKey({ item_id: 'det-1', instance: 1 })]]]);
+    const pruned = pruneIncoherentGroups(groups, [
+      { sheetIndex: 0, placements: { pieces: [piece('det-1', 1, 0, 0, 10, 10)] } },
+    ]);
+    expect(pruned.size).toBe(0);
+  });
 });
