@@ -40,6 +40,23 @@ import {
 } from '../errors/production-action.errors';
 
 const SOURCE = 'backend-production-command';
+const AUTOMATION_SOURCE = 'backend-status-automation';
+
+export interface AutomationActionContext {
+  actor: CurrentUser;
+  requestId: string;
+  ruleId: number;
+  ruleName: string;
+  eventType: string;
+  outboxIdempotencyKey: string;
+}
+
+export interface AutomationActionResult {
+  status: 'executed' | 'skipped';
+  skipReason?: string;
+  // audit_log id — UUID string (auditService.record); Number() на нём даёт NaN.
+  auditId?: string;
+}
 
 interface LockedOrderRow extends QueryResultRow {
   order_id: string | number;
@@ -1944,6 +1961,350 @@ export async function changeProductionStatusFromDeadlineInTransaction(
     response,
   });
   return { status: 'executed', response };
+}
+
+// Idempotency is intentionally inherited from the source command: these actions execute inside
+// that command's transaction and must not reserve a second reconcileIdempotency key.
+export async function changeOrderStatusFromAutomationInTransaction(
+  tx: TransactionClient,
+  orderId: number,
+  targetStatusId: number,
+  ctx: AutomationActionContext,
+): Promise<AutomationActionResult> {
+  const order = await loadOrderForUpdate(tx, orderId);
+  if (order.orderStatusId === targetStatusId) {
+    return { status: 'skipped', skipReason: 'same_status' };
+  }
+
+  const status = await loadOrderStatus(tx, targetStatusId);
+  const nextVersion = await updateOrderStatus(tx, order.orderId, status.orderStatusId);
+  const metadata = automationMetadata(ctx, order.orderId, order.clientId, {
+    orderStatusId: status.orderStatusId,
+    orderStatusName: status.orderStatusName,
+    action: 'automation_status_change',
+    statusField: 'orderStatus',
+  });
+  const auditId = await writeAudit(tx, {
+    event: 'orders.status_change',
+    currentUser: ctx.actor,
+    requestId: ctx.requestId,
+    order,
+    source: AUTOMATION_SOURCE,
+    statusField: 'orderStatus',
+    statusId: status.orderStatusId,
+    statusName: status.orderStatusName,
+    beforeJson: {
+      orderStatusId: order.orderStatusId,
+      version: order.version,
+    },
+    afterJson: {
+      orderStatusId: status.orderStatusId,
+      orderStatusName: status.orderStatusName,
+      version: nextVersion,
+    },
+    diffJson: {
+      orderStatusId: {
+        before: order.orderStatusId,
+        after: status.orderStatusId,
+      },
+    },
+    metadataJson: metadata,
+  });
+
+  await enqueueOutbox(tx, {
+    eventType: 'order.status_changed',
+    aggregateType: 'order',
+    aggregateId: String(order.orderId),
+    idempotencyKey: ctx.outboxIdempotencyKey,
+    payload: {
+      eventType: 'order.status_changed',
+      actorUserId: ctx.actor.id,
+      requestId: ctx.requestId,
+      entityType: 'order',
+      entityId: String(order.orderId),
+      orderId: order.orderId,
+      clientId: order.clientId,
+      orderStatusId: status.orderStatusId,
+      action: 'order_status_change',
+      scope: { source: 'calendar|order-header' },
+      origin: 'automation',
+      idempotencyKey: ctx.outboxIdempotencyKey,
+    },
+  });
+
+  return { status: 'executed', auditId };
+}
+
+// Idempotency is intentionally inherited from the source command: this action runs in its
+// transaction and must not create a second reconcileIdempotency reservation.
+export async function changeProductionStatusFromAutomationInTransaction(
+  tx: TransactionClient,
+  orderId: number,
+  targetStatusId: number,
+  ctx: AutomationActionContext,
+): Promise<AutomationActionResult> {
+  const order = await loadOrderForUpdate(tx, orderId);
+  if (order.productionStatusFromDetailsEnabled) {
+    return { status: 'skipped', skipReason: 'auto_mode_from_details' };
+  }
+  if (order.productionStatusId === targetStatusId) {
+    return { status: 'skipped', skipReason: 'same_status' };
+  }
+
+  const status = await loadProductionStatus(tx, targetStatusId);
+  const beforeDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
+  const nextVersion = await updateProductionStatus(tx, order.orderId, status.productionStatusId);
+  const afterDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
+  const affectedDetailIds = beforeDetails.detailIds.filter((detailId) =>
+    afterDetails.detailIds.includes(detailId),
+  );
+  const metadata = automationMetadata(ctx, order.orderId, order.clientId, {
+    productionStatusId: status.productionStatusId,
+    productionStatusCode: status.productionStatusCode,
+    productionStatusName: status.productionStatusName,
+    productionStatusFromDetailsEnabled: false,
+    previousProductionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+    affectedDetailIds,
+    affectedDetailCount: affectedDetailIds.length,
+    beforeStatusDistribution: beforeDetails.statusDistribution,
+    afterStatusDistribution: afterDetails.statusDistribution,
+    action: 'automation_status_change',
+    statusField: 'productionCurrentStatus',
+  });
+  const auditId = await writeAudit(tx, {
+    event: 'orders.production_status_change',
+    currentUser: ctx.actor,
+    requestId: ctx.requestId,
+    order,
+    source: AUTOMATION_SOURCE,
+    statusField: 'productionCurrentStatus',
+    statusId: status.productionStatusId,
+    statusName: status.productionStatusName,
+    statusCode: status.productionStatusCode,
+    beforeJson: {
+      productionStatusId: order.productionStatusId,
+      productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+      version: order.version,
+      detailStatusDistribution: beforeDetails.statusDistribution,
+    },
+    afterJson: {
+      productionStatusId: status.productionStatusId,
+      productionStatusName: status.productionStatusName,
+      productionStatusCode: status.productionStatusCode,
+      productionStatusFromDetailsEnabled: false,
+      version: nextVersion,
+      detailStatusDistribution: afterDetails.statusDistribution,
+    },
+    diffJson: {
+      productionStatusId: {
+        before: order.productionStatusId,
+        after: status.productionStatusId,
+      },
+      productionStatusFromDetailsEnabled: {
+        before: order.productionStatusFromDetailsEnabled,
+        after: false,
+      },
+      affectedDetailIds,
+      affectedDetailCount: affectedDetailIds.length,
+      beforeStatusDistribution: beforeDetails.statusDistribution,
+      afterStatusDistribution: afterDetails.statusDistribution,
+    },
+    metadataJson: metadata,
+  });
+
+  await enqueueOutbox(tx, {
+    eventType: 'order.production_status_changed',
+    aggregateType: 'order',
+    aggregateId: String(order.orderId),
+    idempotencyKey: ctx.outboxIdempotencyKey,
+    payload: {
+      eventType: 'order.production_status_changed',
+      actorUserId: ctx.actor.id,
+      requestId: ctx.requestId,
+      entityType: 'order',
+      entityId: String(order.orderId),
+      orderId: order.orderId,
+      clientId: order.clientId,
+      productionStatusId: status.productionStatusId,
+      productionStatusCode: status.productionStatusCode,
+      productionStatusFromDetailsEnabled: false,
+      affectedDetailIds,
+      affectedDetailCount: affectedDetailIds.length,
+      action: 'production_status_change',
+      scope: { source: 'order-header' },
+      origin: 'automation',
+      idempotencyKey: ctx.outboxIdempotencyKey,
+    },
+  });
+
+  return { status: 'executed', auditId };
+}
+
+// Idempotency is intentionally inherited from the source command: this action runs in its
+// transaction and must not create a second reconcileIdempotency reservation.
+export async function changeDetailsProductionStatusFromAutomationInTransaction(
+  tx: TransactionClient,
+  orderId: number,
+  targetStatusId: number,
+  ctx: AutomationActionContext,
+): Promise<AutomationActionResult> {
+  const order = await loadOrderForUpdate(tx, orderId);
+  const currentDetails = await loadOrderDetailsForBatch(tx, order.orderId);
+  if (currentDetails.length === 0) {
+    return { status: 'skipped', skipReason: 'no_details' };
+  }
+
+  const status = await loadProductionStatus(tx, targetStatusId);
+  const detailIds = currentDetails.map((detail) => detail.detailId);
+  const beforeStatusDistribution = detailStatusDistribution(currentDetails);
+  const currentById = new Map(
+    currentDetails.map((detail) => [detail.detailId, detail.productionStatusId] as const),
+  );
+  const updated = await tx.query<{ detail_id: string | number }>(
+    `
+    UPDATE order_details
+    SET production_status_id = $1
+    WHERE order_id = $2
+      AND detail_id = ANY($3::bigint[])
+      AND COALESCE(delete_flag, false) = false
+      AND production_status_id IS DISTINCT FROM $1
+    RETURNING detail_id
+    `,
+    [status.productionStatusId, order.orderId, detailIds],
+  );
+  const changedDetailIds = updated.rows.map((row) => toNumber(row.detail_id));
+  const affectedDetailCount = changedDetailIds.length;
+
+  if (order.productionStatusFromDetailsEnabled) {
+    await runRecalcOrderProductionStatus(tx, order.orderId);
+  }
+
+  const bumped = await tx.query<{
+    version: string | number;
+    production_status_id: string | number | null;
+  }>(
+    `
+    UPDATE orders
+    SET version = version + 1, updated_at = now()
+    WHERE order_id = $1
+    RETURNING version, production_status_id
+    `,
+    [order.orderId],
+  );
+  const newVersion = toNumber(bumped.rows[0].version);
+  const afterProductionStatusId =
+    bumped.rows[0].production_status_id === null
+      ? null
+      : toNumber(bumped.rows[0].production_status_id);
+  const afterStatusDistribution = projectDistributionAfterChange(
+    beforeStatusDistribution,
+    currentById,
+    changedDetailIds,
+    status.productionStatusId,
+  );
+  const metadata = automationMetadata(ctx, order.orderId, order.clientId, {
+    detailIds,
+    changedDetailIds,
+    selectedDetailCount: detailIds.length,
+    affectedDetailCount,
+    productionStatusId: status.productionStatusId,
+    productionStatusCode: status.productionStatusCode,
+    productionStatusName: status.productionStatusName,
+    productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+    action: 'automation_status_change',
+    statusField: 'productionDetailBatch',
+  });
+  const auditId = await writeAudit(tx, {
+    event: 'orders.detail_production_status_batch_change',
+    currentUser: ctx.actor,
+    requestId: ctx.requestId,
+    order,
+    source: AUTOMATION_SOURCE,
+    statusField: 'productionDetailBatch',
+    statusId: status.productionStatusId,
+    statusName: status.productionStatusName,
+    statusCode: status.productionStatusCode,
+    beforeJson: {
+      orderProductionStatusId: order.productionStatusId,
+      productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+      orderVersion: order.version,
+      detailStatusDistribution: beforeStatusDistribution,
+    },
+    afterJson: {
+      orderProductionStatusId: afterProductionStatusId,
+      productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+      orderVersion: newVersion,
+      detailStatusDistribution: afterStatusDistribution,
+    },
+    diffJson: {
+      detailIds,
+      changedDetailIds,
+      selectedDetailCount: detailIds.length,
+      affectedDetailCount,
+      productionStatusId: status.productionStatusId,
+      orderProductionStatusId: {
+        before: order.productionStatusId,
+        after: afterProductionStatusId,
+      },
+      orderVersion: { before: order.version, after: newVersion },
+      beforeStatusDistribution,
+      afterStatusDistribution,
+      statusDistributionBasis: 'command-start-snapshot',
+    },
+    metadataJson: metadata,
+  });
+
+  await enqueueOutbox(tx, {
+    eventType: 'order.detail_production_status_batch_changed',
+    aggregateType: 'order',
+    aggregateId: String(order.orderId),
+    idempotencyKey: ctx.outboxIdempotencyKey,
+    payload: {
+      eventType: 'order.detail_production_status_batch_changed',
+      actorUserId: ctx.actor.id,
+      requestId: ctx.requestId,
+      entityType: 'order',
+      entityId: String(order.orderId),
+      orderId: order.orderId,
+      clientId: order.clientId,
+      detailIds,
+      changedDetailIds,
+      selectedDetailCount: detailIds.length,
+      affectedDetailCount,
+      productionStatusId: status.productionStatusId,
+      productionStatusCode: status.productionStatusCode,
+      productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+      orderProductionStatusId: { before: order.productionStatusId, after: afterProductionStatusId },
+      orderVersion: { before: order.version, after: newVersion },
+      beforeStatusDistribution,
+      afterStatusDistribution,
+      statusDistributionBasis: 'command-start-snapshot',
+      action: 'detail_production_status_batch_change',
+      origin: 'automation',
+      idempotencyKey: ctx.outboxIdempotencyKey,
+    },
+  });
+
+  return { status: 'executed', auditId };
+}
+
+function automationMetadata(
+  ctx: AutomationActionContext,
+  orderId: number,
+  clientId: number | null,
+  fields: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    source: AUTOMATION_SOURCE,
+    origin: 'automation',
+    orderId,
+    clientId,
+    ruleId: ctx.ruleId,
+    ruleName: ctx.ruleName,
+    eventType: ctx.eventType,
+    triggerRequestId: ctx.requestId,
+    ...fields,
+  };
 }
 
 async function setSessionUser(tx: TransactionClient, userId: string): Promise<void> {
