@@ -344,6 +344,27 @@ probe_file() {
     065_*) probe_all "$(q_col orders deleted_at)" \
                      "$(q_col orders deleted_by)" ;;
     066_*) probe_all "$(q_tbl status_automation_rules)" ;;
+    067_*) probe_all "SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM order_details od
+                       WHERE od.area IS DISTINCT FROM ROUND(
+                         (od.height::numeric * od.width::numeric * od.quantity::numeric) / 1000000,
+                         2
+                       )
+                     );" \
+                     "SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM orders o
+                       WHERE o.total_area IS DISTINCT FROM (
+                         SELECT ROUND(
+                           COALESCE(SUM(od.height::numeric * od.width::numeric * od.quantity::numeric), 0) / 1000000,
+                           2
+                         )
+                         FROM order_details od
+                         WHERE od.order_id = o.order_id
+                           AND od.delete_flag = false
+                       )
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
