@@ -36,6 +36,13 @@ import { counterViewMatrix, orientedOrigin, svgToUsable } from './sheetEditorGeo
 import { isNoopDrop } from './editorHistory';
 import { buildPieceLabelLines, fitLabelScale, splitDimsLine, LINE1_SCALE } from './pieceLabel';
 import { sheetMaterialFilmNames } from './cutPageHelpers';
+import {
+  clampGroupDelta,
+  groupOfPiece,
+  pruneIncoherentGroups,
+  rotateGroup90,
+  type PieceGroups,
+} from './pieceGrouping';
 
 // ── Props contract ─────────────────────────────────────────────────────────
 
@@ -77,10 +84,11 @@ export interface SheetEditorProps {
 
 // ── Internal types ─────────────────────────────────────────────────────────
 
-interface SelectedPiece {
-  sheetIndex: number;
+interface DragMember {
   item_id: string;
   instance: number;
+  startX_mm: number;
+  startY_mm: number;
 }
 
 interface DragState {
@@ -94,9 +102,14 @@ interface DragState {
   currentX_mm: number;
   /** Piece's current y_mm within the TARGET sheet's usable area. */
   currentY_mm: number;
+  /** Shared group displacement from every member's source coordinates. */
+  currentDx_mm: number;
+  currentDy_mm: number;
   /** Offset (pointer − piece oriented top-left) in the target sheet's SVG space. */
   svgOffsetX: number;
   svgOffsetY: number;
+  /** Members that move as one unit; single-piece drag = [anchor]. */
+  members: DragMember[];
   /** Snap guide coordinate in mm along the X axis (null = no snap active on X). */
   guideXmm: number | null;
   /** Snap guide coordinate in mm along the Y axis (null = no snap active on Y). */
@@ -124,6 +137,40 @@ const SVG_LABEL_MIN_SCALE = 0.05;
 
 function pKey(item_id: string, instance: number): string {
   return `${item_id}:${instance}`;
+}
+
+function parsePieceKey(key: string): { item_id: string; instance: number } {
+  const sep = key.lastIndexOf(':');
+  return {
+    item_id: key.slice(0, sep),
+    instance: Number(key.slice(sep + 1)),
+  };
+}
+
+function exactSelectedGroup(
+  groups: PieceGroups,
+  selectedKeys: Set<string>,
+): { groupId: number; members: string[] } | null {
+  if (selectedKeys.size < 2) return null;
+  for (const [groupId, members] of groups) {
+    if (members.length !== selectedKeys.size) continue;
+    if (members.every((key) => selectedKeys.has(key))) return { groupId, members };
+  }
+  return null;
+}
+
+function piecesByKeys(
+  sheet: SheetPlacements,
+  keys: Iterable<string>,
+): SheetPlacementPiece[] | null {
+  const byKey = new Map(sheet.pieces.map((piece) => [pKey(piece.item_id, piece.instance), piece]));
+  const pieces: SheetPlacementPiece[] = [];
+  for (const key of keys) {
+    const piece = byKey.get(key);
+    if (!piece) return null;
+    pieces.push(piece);
+  }
+  return pieces;
 }
 
 /**
@@ -223,21 +270,6 @@ function edgeScrollDelta(clientY: number, bounds: { top: number; bottom: number;
   return 0;
 }
 
-/** Clamp piece origin so the piece stays within the usable area. */
-function clampToUsable(
-  x_mm: number,
-  y_mm: number,
-  pieceW: number,
-  pieceH: number,
-  placements: SheetPlacements,
-): { x_mm: number; y_mm: number } {
-  const { usableW, usableH } = usableExtent(placements);
-  return {
-    x_mm: Math.max(0, Math.min(usableW - pieceW, x_mm)),
-    y_mm: Math.max(0, Math.min(usableH - pieceH, y_mm)),
-  };
-}
-
 /**
  * Build display-only sheet placements by applying the current drag preview.
  * Never mutates props; returns the original array reference when no drag is active.
@@ -248,15 +280,23 @@ function buildDisplaySheets(
 ): SheetEditorProps['sheets'] {
   if (!drag) return sheets;
 
-  const { sourceSheetIndex, targetSheetIndex, item_id, instance, currentX_mm, currentY_mm } = drag;
-
-  // Find the canonical piece from the source sheet (for dimensions/label)
-  const sourcePiece = sheets
-    .find((s) => s.sheetIndex === sourceSheetIndex)
-    ?.placements.pieces.find((p) => p.item_id === item_id && p.instance === instance);
-  if (!sourcePiece) return sheets;
-
-  const movedPiece: SheetPlacementPiece = { ...sourcePiece, x_mm: currentX_mm, y_mm: currentY_mm };
+  const { sourceSheetIndex, targetSheetIndex, members, currentDx_mm, currentDy_mm } = drag;
+  const sourceSheet = sheets.find((s) => s.sheetIndex === sourceSheetIndex);
+  if (!sourceSheet) return sheets;
+  const sourcePieces = piecesByKeys(sourceSheet.placements, members.map((member) => pKey(member.item_id, member.instance)));
+  if (!sourcePieces) return sheets;
+  const movedByKey = new Map<string, SheetPlacementPiece>(
+    sourcePieces.map((piece) => {
+      const member = members.find((m) => m.item_id === piece.item_id && m.instance === piece.instance);
+      const movedPiece: SheetPlacementPiece = {
+        ...piece,
+        x_mm: (member?.startX_mm ?? piece.x_mm) + currentDx_mm,
+        y_mm: (member?.startY_mm ?? piece.y_mm) + currentDy_mm,
+      };
+      return [pKey(piece.item_id, piece.instance), movedPiece];
+    }),
+  );
+  const memberKeys = new Set(movedByKey.keys());
 
   return sheets.map((s) => {
     if (s.sheetIndex === sourceSheetIndex && sourceSheetIndex !== targetSheetIndex) {
@@ -265,20 +305,16 @@ function buildDisplaySheets(
         ...s,
         placements: {
           ...s.placements,
-          pieces: s.placements.pieces.filter(
-            (p) => !(p.item_id === item_id && p.instance === instance),
-          ),
+          pieces: s.placements.pieces.filter((p) => !memberKeys.has(pKey(p.item_id, p.instance))),
         },
       };
     }
     if (s.sheetIndex === targetSheetIndex) {
       // Add / update on target
-      const otherPieces = s.placements.pieces.filter(
-        (p) => !(p.item_id === item_id && p.instance === instance),
-      );
+      const otherPieces = s.placements.pieces.filter((p) => !memberKeys.has(pKey(p.item_id, p.instance)));
       return {
         ...s,
-        placements: { ...s.placements, pieces: [...otherPieces, movedPiece] },
+        placements: { ...s.placements, pieces: [...otherPieces, ...movedByKey.values()] },
       };
     }
     return s;
@@ -308,8 +344,10 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     viewZoom = 1,
   } = props;
 
-  const [selected, setSelected] = useState<SelectedPiece | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [selectedSheetIndex, setSelectedSheetIndex] = useState<number | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [pieceGroups, setPieceGroups] = useState<PieceGroups>(() => new Map());
   const [sheetRotations, setSheetRotations] = useState<Record<number, number>>({});
   const [sheetMirrors, setSheetMirrors] = useState<Record<number, { horizontal: boolean; vertical: boolean }>>({});
   const [menu, setMenu] = useState<{
@@ -321,6 +359,18 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const editorRootRef = useRef<HTMLDivElement | null>(null);
+  const nextGroupIdRef = useRef(1);
+
+  const applySelection = useCallback((sheetIndex: number, keys: Iterable<string>) => {
+    const next = new Set(keys);
+    setSelectedKeys(next);
+    setSelectedSheetIndex(next.size > 0 ? sheetIndex : null);
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedKeys(new Set());
+    setSelectedSheetIndex(null);
+  }, []);
 
   const rotateSheetView = useCallback((sheetIndex: number, direction: -1 | 1) => {
     setSheetRotations((current) => ({
@@ -358,8 +408,12 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   filmTextureRef.current = filmTextureByItemId;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
+  const selectedKeysRef = useRef(selectedKeys);
+  selectedKeysRef.current = selectedKeys;
+  const selectedSheetIndexRef = useRef(selectedSheetIndex);
+  selectedSheetIndexRef.current = selectedSheetIndex;
+  const pieceGroupsRef = useRef(pieceGroups);
+  pieceGroupsRef.current = pieceGroups;
   const lastPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const autoScrollFrameRef = useRef<number | null>(null);
 
@@ -376,8 +430,115 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     [violations],
   );
 
+  const groupIdByKey = useMemo(() => {
+    const byKey = new Map<string, number>();
+    for (const [groupId, members] of pieceGroups) {
+      for (const member of members) byKey.set(member, groupId);
+    }
+    return byKey;
+  }, [pieceGroups]);
+
   // Display sheets = props sheets with drag preview applied
   const displaySheets = useMemo(() => buildDisplaySheets(sheets, drag), [sheets, drag]);
+
+  useEffect(() => {
+    setPieceGroups((current) => pruneIncoherentGroups(current, sheets));
+  }, [sheets]);
+
+  const orderedSelectionKeys = useCallback((sheetIndex: number, keys: Set<string>): string[] => {
+    const sheet = sheetsRef.current.find((entry) => entry.sheetIndex === sheetIndex);
+    if (!sheet) return Array.from(keys);
+    return sheet.placements.pieces
+      .map((piece) => pKey(piece.item_id, piece.instance))
+      .filter((key) => keys.has(key));
+  }, []);
+
+  const selectPieceOrGroup = useCallback((sheetIndex: number, key: string) => {
+    const groupId = groupOfPiece(pieceGroupsRef.current, key);
+    const members = groupId === null ? [key] : (pieceGroupsRef.current.get(groupId) ?? [key]);
+    applySelection(sheetIndex, members);
+    return members;
+  }, [applySelection]);
+
+  const togglePieceOrGroupSelection = useCallback((sheetIndex: number, key: string) => {
+    const groupId = groupOfPiece(pieceGroupsRef.current, key);
+    const members = groupId === null ? [key] : (pieceGroupsRef.current.get(groupId) ?? [key]);
+    if (selectedSheetIndexRef.current !== sheetIndex) {
+      applySelection(sheetIndex, members);
+      return;
+    }
+    const next = new Set(selectedKeysRef.current);
+    const allSelected = members.every((member) => next.has(member));
+    if (allSelected) members.forEach((member) => next.delete(member));
+    else members.forEach((member) => next.add(member));
+    if (next.size === 0) {
+      clearSelection();
+      return;
+    }
+    setSelectedKeys(next);
+    setSelectedSheetIndex(sheetIndex);
+  }, [applySelection, clearSelection]);
+
+  const rotateActionRef = useRef<(sheetIndex: number, item_id: string, instance: number) => void>(() => {});
+  rotateActionRef.current = (sheetIndex: number, item_id: string, instance: number) => {
+    const key = pKey(item_id, instance);
+    const currentSheets = sheetsRef.current;
+    const sheet = currentSheets.find((entry) => entry.sheetIndex === sheetIndex);
+    if (!sheet) return;
+    const piece = sheet.placements.pieces.find((entry) => entry.item_id === item_id && entry.instance === instance);
+    if (!piece) return;
+    const groupId = groupOfPiece(pieceGroupsRef.current, key);
+    if (groupId !== null) {
+      const groupKeys = pieceGroupsRef.current.get(groupId) ?? [key];
+      const members = piecesByKeys(sheet.placements, groupKeys);
+      if (!members) return;
+      if (members.some((member) => filmTextureRef.current.get(member.item_id) === true)) {
+        void message.warning('Поворот запрещён: текстура плёнки закреплена');
+        return;
+      }
+      const { usableW, usableH } = usableExtent(sheet.placements);
+      const rotatedMembers = rotateGroup90({ members, usableW, usableH });
+      if (rotatedMembers === null) {
+        void message.warning('Поворот группы не помещается на лист');
+        return;
+      }
+      const rotatedByKey = new Map(rotatedMembers.map((member) => [pKey(member.item_id, member.instance), member]));
+      onChangeRef.current(
+        currentSheets.map((entry) => {
+          if (entry.sheetIndex !== sheetIndex) return entry;
+          return {
+            ...entry,
+            placements: {
+              ...entry.placements,
+              pieces: entry.placements.pieces.map((candidate) =>
+                rotatedByKey.get(pKey(candidate.item_id, candidate.instance)) ?? candidate,
+              ),
+            },
+          };
+        }),
+      );
+      return;
+    }
+    if (filmTextureRef.current.get(piece.item_id) === true) {
+      void message.warning('Поворот запрещён: текстура плёнки закреплена');
+      return;
+    }
+    const rotated = rotatePiece(piece);
+    onChangeRef.current(
+      currentSheets.map((entry) => {
+        if (entry.sheetIndex !== sheetIndex) return entry;
+        return {
+          ...entry,
+          placements: {
+            ...entry.placements,
+            pieces: entry.placements.pieces.map((candidate) =>
+              candidate.item_id === item_id && candidate.instance === instance ? rotated : candidate,
+            ),
+          },
+        };
+      }),
+    );
+  };
 
   // ── Window-level pointer handlers (registered once; state accessed via refs) ──
   useEffect(() => {
@@ -399,6 +560,14 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         (p) => p.item_id === d.item_id && p.instance === d.instance,
       );
       if (!piece) return;
+      const anchorMember = d.members.find((member) => member.item_id === d.item_id && member.instance === d.instance);
+      if (!anchorMember) return;
+      const groupPieces = piecesByKeys(
+        sourceSheet.placements,
+        d.members.map((member) => pKey(member.item_id, member.instance)),
+      );
+      if (!groupPieces) return;
+      const memberKeys = new Set(d.members.map((member) => pKey(member.item_id, member.instance)));
 
       // Determine which sheet the pointer is over for cross-sheet detection
       let targetSheetIndex = d.targetSheetIndex;
@@ -450,7 +619,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
       // Other pieces on target (excluding the dragged piece)
       const othersOnTarget = targetSheet.placements.pieces
-        .filter((p) => !(p.item_id === d.item_id && p.instance === d.instance))
+        .filter((p) => !memberKeys.has(pKey(p.item_id, p.instance)))
         .map((p) => ({ x: p.x_mm, y: p.y_mm, w: p.width_mm, h: p.height_mm }));
 
       const { usableW, usableH } = usableExtent(targetSheet.placements);
@@ -474,24 +643,29 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         gapMm,
         thresholdMm: SNAP_THRESHOLD_PX * targetMmPerPx,
       });
-
-      const clamped = clampToUsable(
-        snapped.x,
-        snapped.y,
-        piece.width_mm,
-        piece.height_mm,
-        targetSheet.placements,
-      );
+      const requestedDx = snapped.x - anchorMember.startX_mm;
+      const requestedDy = snapped.y - anchorMember.startY_mm;
+      const clampedDelta = clampGroupDelta({
+        members: groupPieces,
+        dxMm: requestedDx,
+        dyMm: requestedDy,
+        usableW,
+        usableH,
+      });
+      const anchorX = anchorMember.startX_mm + clampedDelta.dxMm;
+      const anchorY = anchorMember.startY_mm + clampedDelta.dyMm;
 
       const next: DragState = {
         ...d,
         targetSheetIndex,
-        currentX_mm: clamped.x_mm,
-        currentY_mm: clamped.y_mm,
+        currentX_mm: anchorX,
+        currentY_mm: anchorY,
+        currentDx_mm: clampedDelta.dxMm,
+        currentDy_mm: clampedDelta.dyMm,
         svgOffsetX,
         svgOffsetY,
-        guideXmm: snapped.guideX,
-        guideYmm: snapped.guideY,
+        guideXmm: clampedDelta.dxMm === requestedDx ? snapped.guideX : null,
+        guideYmm: clampedDelta.dyMm === requestedDy ? snapped.guideY : null,
       };
       dragRef.current = next;
       setDrag(next);
@@ -560,8 +734,22 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         setDrag(null);
         return;
       }
-
-      const updatedPiece: SheetPlacementPiece = { ...piece, x_mm: currentX_mm, y_mm: currentY_mm };
+      const memberKeys = d.members.map((member) => pKey(member.item_id, member.instance));
+      const movedPieces = piecesByKeys(sourceSheet.placements, memberKeys)?.map((memberPiece) => {
+        const member = d.members.find(
+          (candidate) => candidate.item_id === memberPiece.item_id && candidate.instance === memberPiece.instance,
+        );
+        return {
+          ...memberPiece,
+          x_mm: (member?.startX_mm ?? memberPiece.x_mm) + d.currentDx_mm,
+          y_mm: (member?.startY_mm ?? memberPiece.y_mm) + d.currentDy_mm,
+        };
+      });
+      if (!movedPieces || movedPieces.length !== d.members.length) {
+        dragRef.current = null;
+        setDrag(null);
+        return;
+      }
 
       // A plain selection click (no movement, same sheet) commits nothing:
       // selection already happened on pointer-down; firing onChange here would
@@ -584,16 +772,20 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
       // Cross-sheet move guard: abort (snap-back) if material or film policy is violated.
       if (targetSheetIndex !== sourceSheetIndex) {
         const g = guardRef.current;
-        const meta = g.pieceMetaByItemId.get(item_id) ?? { materialTypeId: null, filmId: null };
-        const verdict = moveAllowed({
-          pieceMaterialTypeId: meta.materialTypeId,
-          pieceFilmId: meta.filmId,
-          targetMaterialTypeId: g.groupMaterialTypeId,
-          targetFilmId: g.groupFilmId,
-          splitByMaterial: g.splitByMaterial,
-          combineFilms: g.combineFilms,
-        });
-        if (!verdict.ok) {
+        const verdict = movedPieces.reduce<ReturnType<typeof moveAllowed> | null>((blocked, movedPiece) => {
+          if (blocked) return blocked;
+          const meta = g.pieceMetaByItemId.get(movedPiece.item_id) ?? { materialTypeId: null, filmId: null };
+          const currentVerdict = moveAllowed({
+            pieceMaterialTypeId: meta.materialTypeId,
+            pieceFilmId: meta.filmId,
+            targetMaterialTypeId: g.groupMaterialTypeId,
+            targetFilmId: g.groupFilmId,
+            splitByMaterial: g.splitByMaterial,
+            combineFilms: g.combineFilms,
+          });
+          return currentVerdict.ok ? null : currentVerdict;
+        }, null);
+        if (verdict && !verdict.ok) {
           void message.warning(
             verdict.reason === 'material'
               ? 'Нельзя переместить: другой материал листа'
@@ -605,27 +797,32 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         }
       }
 
-      // Build next sheets immutably: move piece from source → target
+      const movedByKey = new Map(movedPieces.map((member) => [pKey(member.item_id, member.instance), member]));
+
+      // Build next sheets immutably: move piece/group from source → target
       const nextSheets = currentSheets.map((s) => {
-        if (s.sheetIndex === sourceSheetIndex) {
+        if (s.sheetIndex === sourceSheetIndex && sourceSheetIndex !== targetSheetIndex) {
           const filtered = s.placements.pieces.filter(
-            (p) => !(p.item_id === item_id && p.instance === instance),
+            (p) => !movedByKey.has(pKey(p.item_id, p.instance)),
           );
-          if (sourceSheetIndex === targetSheetIndex) filtered.push(updatedPiece);
           return { ...s, placements: { ...s.placements, pieces: filtered } };
         }
         if (s.sheetIndex === targetSheetIndex) {
+          const filtered = s.placements.pieces.filter(
+            (p) => !movedByKey.has(pKey(p.item_id, p.instance)),
+          );
           return {
             ...s,
             placements: {
               ...s.placements,
-              pieces: [...s.placements.pieces, updatedPiece],
+              pieces: [...filtered, ...movedByKey.values()],
             },
           };
         }
         return s;
       });
 
+      setSelectedSheetIndex(targetSheetIndex);
       onChangeRef.current(nextSheets);
       dragRef.current = null;
       setDrag(null);
@@ -644,35 +841,15 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'r' && e.key !== 'R') return;
-      const sel = selectedRef.current;
-      if (!sel) return;
-      const currentSheets = sheetsRef.current;
-      const sheet = currentSheets.find((s) => s.sheetIndex === sel.sheetIndex);
-      if (!sheet) return;
-      const piece = sheet.placements.pieces.find(
-        (p) => p.item_id === sel.item_id && p.instance === sel.instance,
-      );
-      if (!piece) return;
-      // Grain-lock guard: block rotation for film-textured pieces
-      if (filmTextureRef.current.get(piece.item_id) === true) {
-        void message.warning('Поворот запрещён: текстура плёнки закреплена');
-        return;
-      }
-      const rotated = rotatePiece(piece);
-      onChangeRef.current(
-        currentSheets.map((s) => {
-          if (s.sheetIndex !== sel.sheetIndex) return s;
-          return {
-            ...s,
-            placements: {
-              ...s.placements,
-              pieces: s.placements.pieces.map((p) =>
-                p.item_id === piece.item_id && p.instance === piece.instance ? rotated : p,
-              ),
-            },
-          };
-        }),
-      );
+      const sheetIndex = selectedSheetIndexRef.current;
+      if (sheetIndex == null || selectedKeysRef.current.size === 0) return;
+      const targetKey =
+        selectedKeysRef.current.size === 1
+          ? Array.from(selectedKeysRef.current)[0]
+          : exactSelectedGroup(pieceGroupsRef.current, selectedKeysRef.current)?.members[0] ?? null;
+      if (!targetKey) return;
+      const target = parsePieceKey(targetKey);
+      rotateActionRef.current(sheetIndex, target.item_id, target.instance);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -696,34 +873,25 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   // ── Rotate button handler ─────────────────────────────────────────────────
   const handleRotateButton = useCallback(
     (sheetIndex: number, item_id: string, instance: number) => {
-      const sheet = sheets.find((s) => s.sheetIndex === sheetIndex);
-      if (!sheet) return;
-      const piece = sheet.placements.pieces.find(
-        (p) => p.item_id === item_id && p.instance === instance,
-      );
-      if (!piece) return;
-      if (filmTextureByItemId.get(piece.item_id) === true) {
-        void message.warning('Поворот запрещён: текстура плёнки закреплена');
-        return;
-      }
-      const rotated = rotatePiece(piece);
-      onChange(
-        sheets.map((s) => {
-          if (s.sheetIndex !== sheetIndex) return s;
-          return {
-            ...s,
-            placements: {
-              ...s.placements,
-              pieces: s.placements.pieces.map((p) =>
-                p.item_id === item_id && p.instance === instance ? rotated : p,
-              ),
-            },
-          };
-        }),
-      );
+      rotateActionRef.current(sheetIndex, item_id, instance);
     },
-    [sheets, filmTextureByItemId, onChange],
+    [],
   );
+
+  const menuPieceKey = menu ? pKey(menu.item_id, menu.instance) : null;
+  const menuGroupId = menuPieceKey ? (groupIdByKey.get(menuPieceKey) ?? null) : null;
+  const menuGroupMembers = menuGroupId === null || !menuPieceKey
+    ? (menuPieceKey ? [menuPieceKey] : [])
+    : (pieceGroups.get(menuGroupId) ?? [menuPieceKey]);
+  const canGroupSelection =
+    selectedSheetIndex !== null &&
+    selectedKeys.size >= 2 &&
+    exactSelectedGroup(pieceGroups, selectedKeys) === null;
+  const menuRotateDisabled =
+    menuGroupMembers.some((memberKey) => {
+      const { item_id } = parsePieceKey(memberKey);
+      return filmTextureByItemId.get(item_id) === true;
+    });
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -884,7 +1052,10 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
               }}
               onPointerDown={(e) => {
                 // Click on the bare svg (no overlapping element) deselects.
-                if (e.target === e.currentTarget) setSelected(null);
+                if (e.target === e.currentTarget) {
+                  closeMenu();
+                  clearSelection();
+                }
               }}
             >
               {/* Sheet background — clicking empty area deselects the current piece.
@@ -895,7 +1066,10 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 width={vw}
                 height={vh}
                 fill="#fff"
-                onPointerDown={() => setSelected(null)}
+                onPointerDown={() => {
+                  closeMenu();
+                  clearSelection();
+                }}
               />
 
               {/* Usable-area boundary (dashed rectangle inside trim margins) */}
@@ -917,7 +1091,10 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                     stroke="#bfbfbf"
                     strokeWidth={0.5}
                     strokeDasharray="4 2"
-                    onPointerDown={() => setSelected(null)}
+                    onPointerDown={() => {
+                      closeMenu();
+                      clearSelection();
+                    }}
                   />
                 );
               })()}
@@ -947,6 +1124,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
               {/* Pieces */}
               {placements.pieces.map((piece) => {
+                const pieceId = pKey(piece.item_id, piece.instance);
+                const pieceGroupId = groupIdByKey.get(pieceId) ?? null;
                 // Apply canonical orientation transform (shared, matches preview renderer)
                 const r = applyAxisOrigin(orientPieceRect(
                   {
@@ -962,26 +1141,28 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 ), axisOrigin, landscape);
 
                 const isSelected =
-                  selected?.sheetIndex === sheetIndex &&
-                  selected?.item_id === piece.item_id &&
-                  selected?.instance === piece.instance;
+                  selectedSheetIndex === sheetIndex &&
+                  selectedKeys.has(pieceId);
 
                 const isDraggingThis =
                   drag !== null &&
-                  drag.item_id === piece.item_id &&
-                  drag.instance === piece.instance &&
+                  drag.members.some((member) => member.item_id === piece.item_id && member.instance === piece.instance) &&
                   drag.targetSheetIndex === sheetIndex;
 
                 const isViolating = violationSet.has(
                   `${sheetIndex}:${piece.item_id}:${piece.instance}`,
                 );
+                const isGrouped = pieceGroupId !== null;
 
-                // Visual style: violations take priority (red), then selection (blue), then default
+                // Visual style: violations take priority (red), then selection (blue), then groups (violet), then default
                 const fillColor = isViolating ? '#fff1f0' : '#e6f4ff';
-                const strokeColor = isViolating ? '#ff4d4f' : isSelected ? '#1677ff' : '#91caff';
+                const strokeColor = isViolating ? '#ff4d4f' : isSelected ? '#1677ff' : isGrouped ? '#722ed1' : '#91caff';
                 // Scale stroke width so it renders at a fixed screen pixel size.
                 // Selected/violating: ~2px on screen; default: ~0.8px.
                 const strokeWidth = (isViolating || isSelected ? 2 : 0.8) * mmPerPx;
+                const strokeDasharray = isGrouped && !isViolating && !isSelected
+                  ? `${4 * mmPerPx} ${2 * mmPerPx}`
+                  : undefined;
 
                 // 3-line auto-shrink label: resolve label info from the prop map,
                 // falling back to the frozen piece.label snapshot.
@@ -1026,7 +1207,9 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                     onContextMenu={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      setSelected({ sheetIndex, item_id: piece.item_id, instance: piece.instance });
+                      if (!(selectedSheetIndexRef.current === sheetIndex && selectedKeysRef.current.has(pieceId))) {
+                        selectPieceOrGroup(sheetIndex, pieceId);
+                      }
                       setMenu({ clientX: e.clientX, clientY: e.clientY, sheetIndex, item_id: piece.item_id, instance: piece.instance });
                     }}
                     onPointerDown={(e) => {
@@ -1036,16 +1219,17 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       // Prevent the browser from starting a native text selection /
                       // drag of the SVG label text under the pointer (phantom-text drag).
                       e.preventDefault();
+                      if (e.shiftKey) {
+                        togglePieceOrGroupSelection(sheetIndex, pieceId);
+                        return;
+                      }
                       const svgEl = svgRefsMap.current.get(sheetIndex);
                       if (!svgEl) return;
                       const pt = clientToSVG(svgEl, e.clientX, e.clientY);
                       const origin = orientedOrigin(piece, placements, landscape, originTopLeft, axisOrigin);
-                      const sel: SelectedPiece = {
-                        sheetIndex,
-                        item_id: piece.item_id,
-                        instance: piece.instance,
-                      };
-                      setSelected(sel);
+                      const dragKeys = selectPieceOrGroup(sheetIndex, pieceId);
+                      const dragPieces = piecesByKeys(placements, dragKeys);
+                      if (!dragPieces) return;
                       const newDrag: DragState = {
                         sourceSheetIndex: sheetIndex,
                         targetSheetIndex: sheetIndex,
@@ -1053,8 +1237,16 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                         instance: piece.instance,
                         currentX_mm: piece.x_mm,
                         currentY_mm: piece.y_mm,
+                        currentDx_mm: 0,
+                        currentDy_mm: 0,
                         svgOffsetX: pt.x - origin.x,
                         svgOffsetY: pt.y - origin.y,
+                        members: dragPieces.map((member) => ({
+                          item_id: member.item_id,
+                          instance: member.instance,
+                          startX_mm: member.x_mm,
+                          startY_mm: member.y_mm,
+                        })),
                         guideXmm: null,
                         guideYmm: null,
                       };
@@ -1070,6 +1262,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       fill={fillColor}
                       stroke={strokeColor}
                       strokeWidth={strokeWidth}
+                      strokeDasharray={strokeDasharray}
                       data-testid={`piece-rect-${sheetIndex}-${piece.item_id}-${piece.instance}`}
                     />
 
@@ -1139,7 +1332,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                     {/* Rotate control — shown only on the selected piece when not dragging.
                         Sized in FIXED SCREEN PIXELS via mmPerPx so it's always clickable
                         regardless of sheet zoom (a 2800mm sheet at 700px = 4mm/px scale). */}
-                    {isSelected && drag === null && (
+                    {isSelected && drag === null && selectedKeys.size === 1 && pieceGroupId === null && (
                       <g
                         transform={`translate(${r.x + r.w - 7 * mmPerPx}, ${r.y + 7 * mmPerPx})`}
                         role="button"
@@ -1189,12 +1382,40 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 {
                   key: 'rotate',
                   label: 'Поворот',
-                  disabled: filmTextureByItemId.get(menu.item_id) === true,
+                  disabled: menuRotateDisabled,
                 },
+                ...(canGroupSelection ? [{
+                  key: 'group',
+                  label: 'Группировать',
+                }] : []),
+                ...(menuGroupId !== null ? [{
+                  key: 'ungroup',
+                  label: 'Разгруппировать',
+                }] : []),
               ]}
               onClick={({ key }) => {
                 if (key === 'rotate') {
                   handleRotateButton(menu.sheetIndex, menu.item_id, menu.instance);
+                }
+                if (key === 'group' && selectedSheetIndexRef.current !== null && selectedKeysRef.current.size >= 2) {
+                  const groupKeys = orderedSelectionKeys(selectedSheetIndexRef.current, selectedKeysRef.current);
+                  setPieceGroups((current) => {
+                    const next = new Map(current);
+                    for (const [groupId, members] of current) {
+                      if (members.every((member) => selectedKeysRef.current.has(member))) next.delete(groupId);
+                    }
+                    next.set(nextGroupIdRef.current, groupKeys);
+                    nextGroupIdRef.current += 1;
+                    return next;
+                  });
+                }
+                if (key === 'ungroup' && menuGroupId !== null) {
+                  setPieceGroups((current) => {
+                    if (!current.has(menuGroupId)) return current;
+                    const next = new Map(current);
+                    next.delete(menuGroupId);
+                    return next;
+                  });
                 }
                 closeMenu();
               }}
