@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from "react";
 import { Drawer, Menu, Button, Typography, Space } from "antd";
-import { CloseOutlined, PlusOutlined, ContactsOutlined, DeleteOutlined } from "@ant-design/icons";
+import { CloseOutlined, PlusOutlined, ContactsOutlined } from "@ant-design/icons";
 import { useResource, useNavigation } from "@refinedev/core";
 import { useLocation } from "react-router-dom";
 import { OrderCreateModal } from "../pages/orders/components/OrderCreateModal";
@@ -38,6 +38,7 @@ const CATEGORY_MAP: Record<string, string> = {
   film_vendors: "Контрагенты",
   payments: "Финансы",
   payments_view: "Финансы",
+  "orders-trash": "Производство",
   groups: "Производство",
   projects: "Производство",
   order_workshops: "Производство",
@@ -121,9 +122,6 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
     canCreateOrders,
     setIsCreateModalOpen,
     crm: crmMenuConfig ? { ...crmMenuConfig, icon: <ContactsOutlined /> } : null,
-    trash: canViewNavigation('orders-trash')
-      ? { icon: <DeleteOutlined />, label: 'Корзина', route: '/orders/trash' }
-      : null,
   });
 
   return (

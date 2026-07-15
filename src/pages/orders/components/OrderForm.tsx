@@ -1517,14 +1517,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
                 onError: (m) => message.error(m),
               })}
             >
-              <Button
-                danger
-                icon={<DeleteOutlined />}
-                disabled={isSaving}
-                style={{ height: '27px', fontSize: '13px', padding: '0 12px' }}
-              >
-                Удалить
-              </Button>
+              <Tooltip title="Удалить заказ">
+                <Button
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled={isSaving}
+                  style={{ height: '27px', fontSize: '13px', padding: '0 8px' }}
+                />
+              </Tooltip>
             </Popconfirm>
           ) : null}
           <Button
