@@ -443,6 +443,41 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
 
   useEffect(() => {
     setPieceGroups((current) => pruneIncoherentGroups(current, sheets));
+    // Reconcile the selection with the new sheet contents (parent undo can
+    // remove pieces or move them across sheets): keep only keys that still
+    // exist AND all live on one sheet; anything else clears — a stale
+    // selection must never feed group creation (Critic R1 MAJOR: it could
+    // mint an illegal 1-member group).
+    const current = selectedKeysRef.current;
+    if (current.size === 0) return;
+    const keySheet = new Map<string, number>();
+    for (const sheet of sheets) {
+      for (const piece of sheet.placements.pieces) {
+        keySheet.set(pKey(piece.item_id, piece.instance), sheet.sheetIndex);
+      }
+    }
+    let sheetIndex: number | null = null;
+    let coherent = true;
+    const surviving = new Set<string>();
+    for (const key of current) {
+      const idx = keySheet.get(key);
+      if (idx === undefined) continue;
+      if (sheetIndex === null) sheetIndex = idx;
+      if (idx !== sheetIndex) {
+        coherent = false;
+        break;
+      }
+      surviving.add(key);
+    }
+    if (!coherent || surviving.size === 0) {
+      setSelectedKeys(new Set<string>());
+      setSelectedSheetIndex(null);
+      return;
+    }
+    if (surviving.size !== current.size || sheetIndex !== selectedSheetIndexRef.current) {
+      setSelectedKeys(surviving);
+      setSelectedSheetIndex(sheetIndex);
+    }
   }, [sheets]);
 
   const orderedSelectionKeys = useCallback((sheetIndex: number, keys: Set<string>): string[] => {
@@ -1399,15 +1434,20 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 }
                 if (key === 'group' && selectedSheetIndexRef.current !== null && selectedKeysRef.current.size >= 2) {
                   const groupKeys = orderedSelectionKeys(selectedSheetIndexRef.current, selectedKeysRef.current);
-                  setPieceGroups((current) => {
-                    const next = new Map(current);
-                    for (const [groupId, members] of current) {
-                      if (members.every((member) => selectedKeysRef.current.has(member))) next.delete(groupId);
-                    }
-                    next.set(nextGroupIdRef.current, groupKeys);
-                    nextGroupIdRef.current += 1;
-                    return next;
-                  });
+                  // orderedSelectionKeys intersects with the REAL sheet pieces —
+                  // never mint a group of fewer than 2 survivors (a stale
+                  // selection could otherwise create an illegal singleton group).
+                  if (groupKeys.length >= 2) {
+                    setPieceGroups((current) => {
+                      const next = new Map(current);
+                      for (const [groupId, members] of current) {
+                        if (members.every((member) => selectedKeysRef.current.has(member))) next.delete(groupId);
+                      }
+                      next.set(nextGroupIdRef.current, groupKeys);
+                      nextGroupIdRef.current += 1;
+                      return next;
+                    });
+                  }
                 }
                 if (key === 'ungroup' && menuGroupId !== null) {
                   setPieceGroups((current) => {

@@ -33,3 +33,13 @@ describe('SheetEditor grouping source guard', () => {
     expect(src).toMatch(/strokeDasharray/);
   });
 });
+
+describe('selection reconciliation on sheets change (Critic R1)', () => {
+  it('selection is intersected with real pieces on one sheet when sheets change', () => {
+    expect(src).toMatch(/selection must never feed group creation/);
+    expect(src).toMatch(/setSelectedKeys\(new Set<string>\(\)\)/);
+  });
+  it('group creation requires >= 2 surviving keys', () => {
+    expect(src).toMatch(/if \(groupKeys\.length >= 2\)/);
+  });
+});
