@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-15",
+    title: "Компактный список деталей заказа",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В карточке заказа колонки высоты, ширины, количества и площади в списке деталей стали на 25% уже.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-15",
     title: "Точная площадь заказа и связь с проектом",
     services: ["ERP"],
     repositories: ["repo_erp"],
