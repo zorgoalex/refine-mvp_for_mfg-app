@@ -447,6 +447,39 @@ Backend поддерживает одностороннюю проекцию ERP
 (`order.deleted` / `order.restored`). Перед использованием применить миграцию
 `backend/db/migrations/065_order_soft_delete_metadata.sql`.
 
+## Автостатусы (status automation)
+
+Настраиваемые правила автоматической смены статусов по бизнес-событиям.
+Вкладка «Автостатусы» на `/configuration` (право `status_automation.view`,
+редактирование — `status_automation.manage`) позволяет задать правило
+«событие → условия → целевой статус».
+
+События: `order.created`, `payment.created`, `order.payment_status_changed`,
+`order.status_changed`, `order.production_status_changed`. Условия: текущие
+статусы заказа/оплаты/производства, доля оплаты (`paidShareGte`, %), источник
+заказа (`manual`/`bazis`/`import`), «только первый платёж». Действия:
+`change_order_status`, `change_production_status`,
+`change_details_production_status`. При нескольких подходящих правилах на один
+целевой объект применяется одно — с наименьшим `priority`.
+
+Правила исполняются в транзакции команды-источника: результат виден сразу,
+системный журнал (`status_automation.rule_applied` / `rule_skipped`) и
+outbox-события (`origin: 'automation'`) пишутся атомарно с изменением. Автосмены
+не запускают другие правила (без каскадов). В авто-режиме статуса производства
+(вывод из деталей) правило уровня заказа пропускается с причиной в журнале.
+
+REST: `GET/POST /api/v1/status-automation/rules`,
+`PATCH/DELETE /api/v1/status-automation/rules/:ruleId` (optimistic `version`),
+`GET /api/v1/status-automation/event-types`. CRUD правил доступен независимо от
+движка — правила можно подготовить заранее.
+
+Включение: миграция `backend/db/migrations/066_status_automation_rules.sql`,
+backend `BACKEND_STATUS_AUTOMATION=true` (по умолчанию `false` — движок
+выключен, команды работают как раньше), frontend
+`VITE_STATUS_AUTOMATION` / runtime-config `statusAutomation` для вкладки.
+Дедлайн-правила (`DEADLINE_EXPIRED`) настраиваются в разделе «Дедлайн-события»
+той же вкладки и исполняются механизмом дедлайнов.
+
 ## Раскрой
 
 Страница `/cut` отображает список заданий раскроя. Каждое задание охватывает набор деталей, сгруппированных по материалу; рассчитанные (ready) задания содержат SVG/PDF-рендер раскладки листов. Backend-модуль `cut-jobs` обслуживает операции через `/api/v1/cut-jobs`.
