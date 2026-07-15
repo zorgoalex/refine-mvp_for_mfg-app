@@ -1,4 +1,4 @@
--- 066_order_area_geometry_backfill.sql
+-- 067_order_area_geometry_backfill.sql
 -- Приводит сохранённые площади существующих заказов к геометрической формуле.
 
 UPDATE order_details od

@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(new URL('./066_order_area_geometry_backfill.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('./067_order_area_geometry_backfill.sql', import.meta.url), 'utf8');
 
-describe('066_order_area_geometry_backfill', () => {
+describe('067_order_area_geometry_backfill', () => {
   it('standard-rounds each stored detail area from raw geometry', () => {
     expect(sql).toMatch(/UPDATE order_details od/);
     expect(sql).toContain('od.height::numeric * od.width::numeric * od.quantity::numeric');
