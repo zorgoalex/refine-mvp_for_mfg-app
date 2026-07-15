@@ -6,6 +6,7 @@ import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
+import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import type {
@@ -397,6 +398,15 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         },
       });
 
+      await evaluateStatusAutomationInTransaction(tx, {
+        eventType: 'order.status_changed',
+        origin: 'user',
+        orderId: order.orderId,
+        actor: command.currentUser,
+        requestId,
+        sourceIdempotencyKey: command.dto.idempotencyKey,
+      });
+
       const response = {
         order: {
           orderId: order.orderId,
@@ -685,6 +695,15 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           assignmentSource: access.assignmentSource,
           idempotencyKey: command.dto.idempotencyKey,
         },
+      });
+
+      await evaluateStatusAutomationInTransaction(tx, {
+        eventType: 'order.production_status_changed',
+        origin: 'user',
+        orderId: order.orderId,
+        actor: command.currentUser,
+        requestId,
+        sourceIdempotencyKey: command.dto.idempotencyKey,
       });
 
       const response = {
@@ -3094,6 +3113,16 @@ async function enqueueOutbox(
       input.idempotencyKey,
     ],
   );
+}
+
+async function evaluateStatusAutomationInTransaction(
+  tx: TransactionClient,
+  event: StatusAutomationEvent,
+): Promise<void> {
+  const { evaluateStatusAutomation } = await import(
+    '../../status-automation/application/status-automation-runtime'
+  );
+  await evaluateStatusAutomation(tx, event);
 }
 
 function requestIdOrFallback(requestId: string | undefined): string {

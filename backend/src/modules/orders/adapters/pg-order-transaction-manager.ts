@@ -28,6 +28,8 @@ import type {
   SheetReferenceValidationInput,
   StoredOrderSheetState,
 } from '../application/order-transaction.types';
+import { evaluateStatusAutomation } from '../../status-automation/application/status-automation-runtime';
+import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 // VARIANT B: dead after shadow removal — delete in follow-up
 // (shadow-material module retained as a no-op for one release; types removed here)
 import {
@@ -1182,6 +1184,10 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       >,
       relatedEntities: sheetIds.map((entityId) => ({ entityType: 'sheet_material_type', entityId })),
     });
+  }
+
+  async evaluateStatusAutomation(event: StatusAutomationEvent): Promise<void> {
+    await evaluateStatusAutomation(this.tx, event);
   }
 
   async writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string> {
