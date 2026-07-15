@@ -12,4 +12,8 @@ describe('CustomSider expanded labels', () => {
     expect(source).toContain('word-break: normal');
     expect(source).toContain('text-wrap: pretty');
   });
+
+  it('gates the trash menu item with canViewNavigation for orders-trash', () => {
+    expect(source).toContain("canViewNavigation('orders-trash')");
+  });
 });

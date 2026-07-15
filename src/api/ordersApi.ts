@@ -11,6 +11,8 @@ import type {
   OrderListQuery,
   OrderListResponse,
   OrderResponse,
+  RestoreOrderRequest,
+  RestoreOrderResponse,
   SaveOrderDto,
   SaveOrderResponse,
 } from './types/orderApi.types';
@@ -24,10 +26,10 @@ export const ordersApi = {
     return httpClient.get<OrderFormDataResponse>(apiRoutes.orders.formData);
   },
 
-  async getById(orderId: number): Promise<OrderDto> {
-    const response = await httpClient.get<OrderResponse>(
-      apiRoutes.orders.byId(validateOrderId(orderId)),
-    );
+  async getById(orderId: number, opts?: { includeDeleted?: boolean }): Promise<OrderDto> {
+    const basePath = apiRoutes.orders.byId(validateOrderId(orderId));
+    const path = opts?.includeDeleted ? withQuery(basePath, { includeDeleted: 'true' }) : basePath;
+    const response = await httpClient.get<OrderResponse>(path);
     return response.order;
   },
 
@@ -49,6 +51,22 @@ export const ordersApi = {
     return httpClient.patch<OrderResponse>(
       apiRoutes.orders.status(validateOrderId(orderId)),
       request,
+    );
+  },
+
+  restore(orderId: number, request: RestoreOrderRequest): Promise<RestoreOrderResponse> {
+    const version = validateOrderVersion(request.version);
+    return httpClient.request<RestoreOrderResponse>(
+      apiRoutes.orders.restore(validateOrderId(orderId)),
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'If-Match': `"${version}"`,
+          'Idempotency-Key': request.idempotencyKey ?? createOrderRestoreIdempotencyKey(),
+        },
+        body: JSON.stringify(request.orderName ? { orderName: request.orderName } : {}),
+      },
     );
   },
 
@@ -131,6 +149,15 @@ export function createOrderDeleteIdempotencyKey(): string {
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   return `order-delete:${uuid}`;
+}
+
+export function createOrderRestoreIdempotencyKey(): string {
+  const uuid =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  return `order-restore:${uuid}`;
 }
 
 function saveBlob(blob: Blob, fileName: string): void {

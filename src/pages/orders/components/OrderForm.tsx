@@ -3,8 +3,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Card, Tabs, Button, Space, Spin, notification, Modal, Form, Select, Tooltip } from 'antd';
-import { SaveOutlined, CloseOutlined, EyeOutlined } from '@ant-design/icons';
+import { Card, Tabs, Button, Space, Spin, notification, Modal, Form, Select, Tooltip, Popconfirm, message } from 'antd';
+import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
 import { toClientKey } from '../../../api/mappers/orderMapper';
 import type { BazisOrderDraftResponse } from '../../../api/types/bazisApi.types';
@@ -44,6 +44,7 @@ import { OrderLegacySection } from './sections/OrderLegacySection';
 import { OrderFilesSection } from './sections/OrderFilesSection';
 import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
 import { OrderLabelDataEditor } from './labels/OrderLabelDataEditor';
+import { makeOrderDeleteHandler } from '../orderDeleteAction';
 
 // Tabs
 import { OrderDetailsTab, OrderDetailsTabRef } from './tabs/OrderDetailsTab';
@@ -219,6 +220,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const useBackendOrderRead = featureFlags.useBackendOrdersRead;
   const labelsEnabled = featureFlags.labels && can('labels.view');
   const cutTabEnabled = featureFlags.useBackendCut && can('cut.view');
+  const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
 
   useEffect(() => {
     if (
@@ -1490,6 +1492,41 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               Просмотр
             </Button>
           )}
+          {featureFlags.useBackendOrdersWrite && canManageOrderTrash && mode === 'edit' && orderId && !header.delete_flag ? (
+            <Popconfirm
+              title={`Удалить заказ №${header.order_name}?`}
+              description="Заказ попадёт в корзину, его можно будет восстановить."
+              okText="Удалить"
+              okButtonProps={{ danger: true }}
+              cancelText="Отмена"
+              onConfirm={makeOrderDeleteHandler({
+                deleteFn: () => ordersApi.delete(Number(orderId), {
+                  version: Number(header.version ?? 0),
+                }),
+                onSuccess: () => {
+                  message.success('Заказ перемещён в корзину');
+                  navigate('/orders');
+                },
+                onVersionConflict: () =>
+                  Modal.error({
+                    title: 'Конфликт версий',
+                    content: 'Заказ был изменен другим пользователем. Обновите страницу и повторите.',
+                    okText: 'Обновить страницу',
+                    onOk: () => window.location.reload(),
+                  }),
+                onError: (m) => message.error(m),
+              })}
+            >
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                disabled={isSaving}
+                style={{ height: '27px', fontSize: '13px', padding: '0 12px' }}
+              >
+                Удалить
+              </Button>
+            </Popconfirm>
+          ) : null}
           <Button
             type={(isDirty || isDetailEditing || isPaymentEditing) ? "primary" : "default"}
             icon={<SaveOutlined />}

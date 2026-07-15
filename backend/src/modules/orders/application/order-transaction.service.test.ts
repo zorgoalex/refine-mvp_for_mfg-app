@@ -3,7 +3,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, type PermissionName, type UserRole } from '../../../permissions/permissions';
 import type { TransactionClient } from '../../../database/database.types';
-import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
+import type { DeleteOrderResponseDto, OrderDto, RestoreOrderResponseDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
   NormalizedSaveOrderDowelingLinkDto,
@@ -17,19 +17,27 @@ import type {
 import { OrderNameDuplicateError,
   ChildEntityNotFoundError,
   ChildEntityNotOwnedError,
+  OrderRestoreIdempotencyFailedError,
+  OrderRestoreIdempotencyInProgressError,
+  OrderRestoreIdempotencyKeyReusedError,
   OrderVersionConflictError,
 } from '../errors/order.errors';
 import { ProjectClientMismatchError } from '../../projects/errors/projects.errors';
 import type {
   LockedOrderRow,
   LockedOrderDeleteRow,
+  LockedOrderRestoreRow,
   OrderChildReference,
   OrderDeleteAuditInput,
   OrderDeleteIdempotencyResult,
   OrderDeleteOutboxInput,
+  OrderRestoreAuditInput,
+  OrderRestoreIdempotencyResult,
+  OrderRestoreOutboxInput,
   OrderSaveAuditEvent,
   OrderTransactionManagerPort,
   OrderWriteUnitOfWork,
+  RestoreOrderCommand,
   SaveContext,
   SheetReferenceValidationInput,
   StoredOrderSheetState,
@@ -61,6 +69,9 @@ interface FakeOrderRecord {
   projectCode: string | null;
   createdAt: string;
   updatedAt: string;
+  deleteFlag: boolean;
+  deletedAt: string | null;
+  deletedBy: string | null;
 }
 
 interface FakeState {
@@ -73,12 +84,25 @@ interface FakeState {
   nextDowelingLinkId: number;
   orders: Map<number, FakeOrderRecord>;
   projects: Map<number, FakeProjectRecord>;
-  auditEvents: Array<OrderSaveAuditEvent | { action: 'orders.delete'; orderId: number; actorUserId: string; requestId: string; nextVersion: number }>;
-  outboxEvents: Array<{ eventType: string; orderId: number; requestId: string }>;
+  auditEvents: Array<
+    | OrderSaveAuditEvent
+    | { action: 'orders.delete'; orderId: number; actorUserId: string; requestId: string; nextVersion: number }
+    | {
+        action: 'orders.restore';
+        orderId: number;
+        actorUserId: string;
+        requestId: string;
+        nextVersion: number;
+        targetOrderName: string;
+      }
+  >;
+  outboxEvents: Array<{ eventType: string; orderId: number; requestId: string; targetOrderName?: string }>;
+  deniedRestoreAudits: Array<{ orderId: number; requestId: string; actorUserId: string }>;
 }
 
 class FakeOrderTransactions implements OrderTransactionManagerPort {
   calls: string[] = [];
+  lockedOrderNames: string[] = [];
   committed = 0;
   rolledBack = 0;
   failAt?: string;
@@ -94,11 +118,21 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
     projects: new Map(),
     auditEvents: [],
     outboxEvents: [],
+    deniedRestoreAudits: [],
   };
   completedDeleteResponse?: DeleteOrderResponseDto;
+  completedRestoreResponse?: RestoreOrderResponseDto;
   completedCreateResponse?: OrderDto;
   /** Simulates a stale unlocked pre-read diverging from the locked snapshot. */
   preReadClientProjectOverride?: { clientId: number | null; projectId: number };
+  lastRestoreIdempotencyInput?: unknown;
+  restoreIdempotencyError?: Error;
+  failedRestoreIdempotencyMarks: Array<{
+    actorUserId: string;
+    idempotencyKey: string;
+    orderId: number;
+    orderName?: string;
+  }> = [];
   readonly transactionClient = { query: async () => ({ rows: [], rowCount: 0 }), raw: {} } as TransactionClient;
 
   async runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T> {
@@ -142,11 +176,48 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
       projectCode: record.projectCode ?? null,
       createdAt: record.createdAt ?? '2026-04-30T00:00:00.000Z',
       updatedAt: record.updatedAt ?? '2026-04-30T00:00:00.000Z',
+      deleteFlag: record.deleteFlag ?? false,
+      deletedAt: record.deletedAt ?? null,
+      deletedBy: record.deletedBy ?? null,
     });
   }
 
   seedProject(record: FakeProjectRecord): void {
     this.state.projects.set(record.projectId, { ...record });
+  }
+
+  async reserveOrderRestoreIdempotency(
+    command: RestoreOrderCommand,
+  ): Promise<OrderRestoreIdempotencyResult> {
+    this.calls.push('reserveOrderRestoreIdempotency');
+    this.lastRestoreIdempotencyInput = command;
+    if (this.restoreIdempotencyError) {
+      throw this.restoreIdempotencyError;
+    }
+    if (
+      this.failedRestoreIdempotencyMarks.some(
+        (mark) => mark.idempotencyKey === command.idempotencyKey,
+      )
+    ) {
+      throw new OrderRestoreIdempotencyFailedError(command.idempotencyKey);
+    }
+    return this.completedRestoreResponse
+      ? { completedResponse: this.completedRestoreResponse }
+      : {};
+  }
+
+  async markOrderRestoreIdempotencyFailed(command: RestoreOrderCommand): Promise<void> {
+    this.calls.push('markOrderRestoreIdempotencyFailed');
+    if (this.failAt === 'markOrderRestoreIdempotencyFailed') {
+      throw new Error('Injected failure at markOrderRestoreIdempotencyFailed');
+    }
+
+    this.failedRestoreIdempotencyMarks.push({
+      actorUserId: command.currentUser.id,
+      idempotencyKey: command.idempotencyKey,
+      orderId: command.orderId,
+      orderName: command.orderName,
+    });
   }
 }
 
@@ -238,6 +309,14 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     this.call('completeOrderDeleteIdempotency');
   }
 
+  async completeOrderRestoreIdempotency(
+    _idempotencyKey: string,
+    response: RestoreOrderResponseDto,
+  ): Promise<void> {
+    this.call('completeOrderRestoreIdempotency');
+    this.owner.completedRestoreResponse = response;
+  }
+
   async loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null> {
     this.call('loadOrderForUpdate');
     const order = this.state.orders.get(orderId);
@@ -254,6 +333,7 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
 
   async lockOrderName(_orderName: string): Promise<void> {
     this.call('lockOrderName');
+    this.owner.lockedOrderNames.push(_orderName);
   }
 
   async assertOrderNameAvailable(input: { orderName: string; excludeOrderId?: number }): Promise<void> {
@@ -262,12 +342,14 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     const duplicate = [...this.state.orders.values()].find(
       (order) =>
         order.header.orderName.trim().toLowerCase() === normalized &&
+        !order.deleteFlag &&
         order.orderId !== input.excludeOrderId,
     );
     if (!duplicate) {
       return;
     }
     const numbers = [...this.state.orders.values()]
+      .filter((order) => !order.deleteFlag)
       .map((order) => order.header.orderName.trim())
       .filter((name) => /^\d+$/.test(name))
       .map(Number);
@@ -289,6 +371,29 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
           version: order.version,
           createdByUserId: 'user_admin',
           managerUserId: order.header.managerId === null ? null : String(order.header.managerId),
+        }
+      : null;
+  }
+
+  async peekOrderName(orderId: number): Promise<string | null> {
+    this.call('peekOrderName');
+    return this.state.orders.get(orderId)?.header.orderName ?? null;
+  }
+
+  async loadOrderForRestore(orderId: number): Promise<LockedOrderRestoreRow | null> {
+    this.call('loadOrderForRestore');
+    const order = this.state.orders.get(orderId);
+    return order
+      ? {
+          orderId,
+          orderName: order.header.orderName,
+          clientId: order.header.clientId,
+          version: order.version,
+          createdByUserId: order.createdByUserId,
+          managerUserId: order.managerUserId,
+          deleteFlag: order.deleteFlag,
+          deletedAt: order.deletedAt,
+          deletedBy: order.deletedBy,
         }
       : null;
   }
@@ -403,6 +508,9 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       projectCode: input.projectCode ?? `МП-${input.projectId}`,
       createdAt: now,
       updatedAt: now,
+      deleteFlag: false,
+      deletedAt: null,
+      deletedBy: null,
     });
 
     return orderId;
@@ -512,10 +620,34 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     return order.version;
   }
 
-  async softDeleteOrder(input: { orderId: number; previousVersion: number }): Promise<number> {
+  async softDeleteOrder(input: {
+    orderId: number;
+    previousVersion: number;
+    actorUserId: string;
+  }): Promise<number> {
     this.call('softDeleteOrder');
     const order = this.getOrder(input.orderId);
     order.version = input.previousVersion + 1;
+    order.deleteFlag = true;
+    order.deletedAt = '2026-05-01T00:00:00.000Z';
+    order.deletedBy = input.actorUserId;
+    return order.version;
+  }
+
+  async restoreOrder(input: {
+    orderId: number;
+    previousVersion: number;
+    targetOrderName: string;
+    actorUserId: string;
+  }): Promise<number> {
+    this.call('restoreOrder');
+    const order = this.getOrder(input.orderId);
+    order.header = { ...order.header, orderName: input.targetOrderName };
+    order.version = input.previousVersion + 1;
+    order.deleteFlag = false;
+    order.deletedAt = null;
+    order.deletedBy = null;
+    order.updatedAt = '2026-05-02T04:05:06.000Z';
     return order.version;
   }
 
@@ -542,6 +674,42 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       eventType: 'order.deleted',
       orderId: input.order.orderId,
       requestId: input.requestId,
+    });
+  }
+
+  async writeOrderRestoreAudit(input: OrderRestoreAuditInput): Promise<string> {
+    this.call('writeOrderRestoreAudit');
+    this.state.auditEvents.push({
+      action: 'orders.restore',
+      orderId: input.order.orderId,
+      actorUserId: input.currentUser.id,
+      requestId: input.requestId,
+      nextVersion: input.nextVersion,
+      targetOrderName: input.targetOrderName,
+    });
+    return 'audit-restore-1';
+  }
+
+  async enqueueOrderRestoreOutbox(input: OrderRestoreOutboxInput): Promise<void> {
+    this.call('enqueueOrderRestoreOutbox');
+    this.state.outboxEvents.push({
+      eventType: 'order.restored',
+      orderId: input.order.orderId,
+      requestId: input.requestId,
+      targetOrderName: input.targetOrderName,
+    });
+  }
+
+  async recordOrderRestoreDenied(input: {
+    currentUser: CurrentUser;
+    orderId: number;
+    requestId: string;
+  }): Promise<void> {
+    this.call('recordOrderRestoreDenied');
+    this.owner.state.deniedRestoreAudits.push({
+      orderId: input.orderId,
+      requestId: input.requestId,
+      actorUserId: input.currentUser.id,
     });
   }
 
@@ -1795,6 +1963,558 @@ describe('OrderTransactionService', () => {
     ]);
   });
 
+  describe('restore', () => {
+    it('restores happy path: lockOrderName first, audit outbox, returns fresh order', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.seedOrder({
+        orderId: 42,
+        version: 3,
+        header: createHeader({ orderName: '2558' }),
+        deleteFlag: true,
+        deletedAt: '2026-05-02T03:04:05.000Z',
+        deletedBy: 'user_admin',
+      });
+
+      const result = await new OrderTransactionService({ transactions }).restore({
+        currentUser: currentUser('admin'),
+        orderId: 42,
+        version: 3,
+        idempotencyKey: 'order-restore-key-1',
+        requestId: 'request-restore-1',
+      });
+
+      expect(result).toMatchObject({
+        order: {
+          header: { orderId: 42, orderName: '2558' },
+          version: 4,
+        },
+        auditId: 'audit-restore-1',
+        requestId: 'request-restore-1',
+      });
+      expect(transactions.state.orders.get(42)).toMatchObject({
+        version: 4,
+        deleteFlag: false,
+        deletedAt: null,
+        deletedBy: null,
+      });
+      expect(transactions.state.auditEvents).toContainEqual({
+        action: 'orders.restore',
+        orderId: 42,
+        actorUserId: 'user_admin',
+        requestId: 'request-restore-1',
+        nextVersion: 4,
+        targetOrderName: '2558',
+      });
+      expect(transactions.state.outboxEvents).toContainEqual({
+        eventType: 'order.restored',
+        orderId: 42,
+        requestId: 'request-restore-1',
+        targetOrderName: '2558',
+      });
+      expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
+        'begin',
+        'setSessionUser',
+        'peekOrderName',
+        'lockOrderName',
+        'loadOrderForRestore',
+        'assertOrderNameAvailable',
+        'restoreOrder',
+        'writeOrderRestoreAudit',
+        'enqueueOrderRestoreOutbox',
+        'readOrder',
+        'completeOrderRestoreIdempotency',
+        'commit',
+      ]);
+    });
+
+    it('replays cached response for same idempotency key', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.completedRestoreResponse = {
+        order: createOrderDto({ orderId: 42 }),
+        auditId: 'audit-restore-1',
+        requestId: 'request-restore-1',
+      };
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('admin'),
+          orderId: 42,
+          version: 999,
+          idempotencyKey: 'order-restore-key-1',
+          requestId: 'request-restore-1',
+        }),
+      ).resolves.toEqual(transactions.completedRestoreResponse);
+
+      expect(transactions.calls).toEqual(['reserveOrderRestoreIdempotency']);
+    });
+
+    it('throws 404 when order does not exist', async () => {
+      const transactions = new FakeOrderTransactions();
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('admin'),
+          orderId: 999,
+          version: 1,
+          idempotencyKey: 'order-restore-key-2',
+        }),
+      ).rejects.toMatchObject({
+        code: 'ORDER_NOT_FOUND',
+        statusCode: 404,
+      } satisfies Partial<ApiError>);
+
+      expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
+        'begin',
+        'setSessionUser',
+        'peekOrderName',
+        'rollback',
+        'markOrderRestoreIdempotencyFailed',
+      ]);
+      expect(transactions.failedRestoreIdempotencyMarks).toEqual([
+        {
+          actorUserId: 'user_admin',
+          idempotencyKey: 'order-restore-key-2',
+          orderId: 999,
+          orderName: undefined,
+        },
+      ]);
+    });
+
+    it('awaits the idempotency burn commit before surfacing the restore error (sequential retry contract)', async () => {
+      const transactions = new FakeOrderTransactions();
+      let burnCommitted = false;
+      const originalBurn = transactions.markOrderRestoreIdempotencyFailed.bind(transactions);
+      transactions.markOrderRestoreIdempotencyFailed = async (command) => {
+        // имитируем сетевую/коммит-задержку отдельной burn-транзакции
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        await originalBurn(command);
+        burnCommitted = true;
+      };
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('admin'),
+          orderId: 999,
+          version: 1,
+          idempotencyKey: 'order-restore-key-burn-order',
+        }),
+      ).rejects.toMatchObject({ statusCode: 404 } satisfies Partial<ApiError>);
+
+      // Клиент видит ошибку ТОЛЬКО после завершения burn — retry тем же ключом
+      // гарантированно упрётся в IDEMPOTENCY_FAILED.
+      expect(burnCommitted).toBe(true);
+    });
+
+    it('burn failure is retried once, logged loudly, and never masks the domain error', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.failAt = 'markOrderRestoreIdempotencyFailed';
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      try {
+        await expect(
+          new OrderTransactionService({ transactions }).restore({
+            currentUser: currentUser('admin'),
+            orderId: 999,
+            version: 1,
+            idempotencyKey: 'order-restore-key-burn-fail',
+          }),
+        ).rejects.toMatchObject({
+          code: 'ORDER_NOT_FOUND',
+          statusCode: 404,
+        } satisfies Partial<ApiError>);
+
+        // retry: две попытки burn'а
+        expect(
+          transactions.calls.filter((call) => call === 'markOrderRestoreIdempotencyFailed'),
+        ).toHaveLength(2);
+        // не молчим: застрявший processing-ключ виден в логах
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('failed to burn idempotency key'),
+          expect.anything(),
+        );
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
+
+    it('throws 409 ORDER_NOT_DELETED when order is alive', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.seedOrder({ orderId: 42, version: 3, deleteFlag: false });
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('admin'),
+          orderId: 42,
+          version: 3,
+          idempotencyKey: 'order-restore-key-3',
+        }),
+      ).rejects.toMatchObject({
+        code: 'ORDER_NOT_DELETED',
+        statusCode: 409,
+      } satisfies Partial<ApiError>);
+
+      expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
+        'begin',
+        'setSessionUser',
+        'peekOrderName',
+        'lockOrderName',
+        'loadOrderForRestore',
+        'rollback',
+        'markOrderRestoreIdempotencyFailed',
+      ]);
+      expect(transactions.failedRestoreIdempotencyMarks).toEqual([
+        {
+          actorUserId: 'user_admin',
+          idempotencyKey: 'order-restore-key-3',
+          orderId: 42,
+          orderName: undefined,
+        },
+      ]);
+    });
+
+    it('throws 409 ORDER_VERSION_CONFLICT on stale If-Match', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.seedOrder({
+        orderId: 42,
+        version: 5,
+        deleteFlag: true,
+        deletedAt: '2026-05-02T03:04:05.000Z',
+        deletedBy: 'user_admin',
+      });
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('admin'),
+          orderId: 42,
+          version: 3,
+          idempotencyKey: 'order-restore-key-4',
+        }),
+      ).rejects.toBeInstanceOf(OrderVersionConflictError);
+
+      expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
+        'begin',
+        'setSessionUser',
+        'peekOrderName',
+        'lockOrderName',
+        'loadOrderForRestore',
+        'rollback',
+        'markOrderRestoreIdempotencyFailed',
+      ]);
+      expect(transactions.failedRestoreIdempotencyMarks).toEqual([
+        {
+          actorUserId: 'user_admin',
+          idempotencyKey: 'order-restore-key-4',
+          orderId: 42,
+          orderName: undefined,
+        },
+      ]);
+    });
+
+    it('propagates 409 ORDER_NAME_DUPLICATE with suggestedOrderName from assertOrderNameAvailable', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.seedOrder({
+        orderId: 42,
+        version: 3,
+        header: createHeader({ orderName: '2558' }),
+        deleteFlag: true,
+        deletedAt: '2026-05-02T03:04:05.000Z',
+        deletedBy: 'user_admin',
+      });
+      transactions.seedOrder({
+        orderId: 77,
+        version: 1,
+        header: createHeader({ orderName: '2561' }),
+        deleteFlag: false,
+      });
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('admin'),
+          orderId: 42,
+          version: 3,
+          idempotencyKey: 'order-restore-key-5',
+          orderName: '2561',
+        }),
+      ).rejects.toMatchObject({
+        code: 'ORDER_NAME_DUPLICATE',
+        statusCode: 409,
+        details: expect.objectContaining({ suggestedOrderName: '2562' }),
+      });
+
+      expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
+        'begin',
+        'setSessionUser',
+        'lockOrderName',
+        'loadOrderForRestore',
+        'assertOrderNameAvailable',
+        'rollback',
+        'markOrderRestoreIdempotencyFailed',
+      ]);
+      expect(transactions.failedRestoreIdempotencyMarks).toEqual([
+        {
+          actorUserId: 'user_admin',
+          idempotencyKey: 'order-restore-key-5',
+          orderId: 42,
+          orderName: '2561',
+        },
+      ]);
+    });
+
+    it('restores under body orderName override and hashes it into idempotency', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.seedOrder({
+        orderId: 42,
+        version: 3,
+        header: createHeader({ orderName: '2558' }),
+        deleteFlag: true,
+        deletedAt: '2026-05-02T03:04:05.000Z',
+        deletedBy: 'user_admin',
+      });
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('admin'),
+          orderId: 42,
+          version: 3,
+          idempotencyKey: 'order-restore-key-6',
+          orderName: '  2561  ' as unknown as string,
+        }),
+      ).resolves.toMatchObject({
+        order: { header: { orderName: '2561' } },
+      });
+
+      expect(transactions.lockedOrderNames).toEqual(['2561']);
+      expect(transactions.calls).not.toContain('peekOrderName');
+      expect(transactions.lastRestoreIdempotencyInput).toMatchObject({
+        orderName: '2561',
+      });
+    });
+
+    it('throws 403 PERMISSION_DENIED without orders.delete scope, records denied audit, and does not mutate', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.seedOrder({
+        orderId: 42,
+        version: 3,
+        deleteFlag: true,
+        deletedAt: '2026-05-02T03:04:05.000Z',
+        deletedBy: 'user_admin',
+        createdByUserId: 'user_admin',
+        managerUserId: 'user_admin',
+      });
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('viewer'),
+          orderId: 42,
+          version: 3,
+          idempotencyKey: 'order-restore-key-7',
+          requestId: 'request-restore-denied',
+        }),
+      ).rejects.toMatchObject({
+        code: 'PERMISSION_DENIED',
+        statusCode: 403,
+        details: { requiredPermissions: ['orders.delete'] },
+      } satisfies Partial<ApiError>);
+
+      expect(transactions.state.deniedRestoreAudits).toEqual([
+        {
+          orderId: 42,
+          requestId: 'request-restore-denied',
+          actorUserId: 'user_viewer',
+        },
+      ]);
+      expect(transactions.state.auditEvents).toEqual([]);
+      expect(transactions.state.outboxEvents).toEqual([]);
+      expect(transactions.state.orders.get(42)).toMatchObject({
+        version: 3,
+        deleteFlag: true,
+      });
+      expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
+        'begin',
+        'setSessionUser',
+        'peekOrderName',
+        'lockOrderName',
+        'loadOrderForRestore',
+        'recordOrderRestoreDenied',
+        'rollback',
+        'markOrderRestoreIdempotencyFailed',
+      ]);
+      expect(transactions.failedRestoreIdempotencyMarks).toEqual([
+        {
+          actorUserId: 'user_viewer',
+          idempotencyKey: 'order-restore-key-7',
+          orderId: 42,
+          orderName: undefined,
+        },
+      ]);
+    });
+
+    it('does not let denied-audit failure mask the 403', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.seedOrder({
+        orderId: 42,
+        version: 3,
+        deleteFlag: true,
+        deletedAt: '2026-05-02T03:04:05.000Z',
+        deletedBy: 'user_admin',
+        createdByUserId: 'user_admin',
+        managerUserId: 'user_admin',
+      });
+      transactions.failAt = 'recordOrderRestoreDenied';
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('viewer'),
+          orderId: 42,
+          version: 3,
+          idempotencyKey: 'order-restore-key-8',
+        }),
+      ).rejects.toMatchObject({
+        code: 'PERMISSION_DENIED',
+        statusCode: 403,
+      } satisfies Partial<ApiError>);
+    });
+
+    it('coerces orderName to trimmed string before locking', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.seedOrder({
+        orderId: 42,
+        version: 3,
+        header: createHeader({ orderName: '2558' }),
+        deleteFlag: true,
+        deletedAt: '2026-05-02T03:04:05.000Z',
+        deletedBy: 'user_admin',
+      });
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('admin'),
+          orderId: 42,
+          version: 3,
+          idempotencyKey: 'order-restore-key-9',
+          orderName: 2561 as unknown as string,
+        }),
+      ).resolves.toMatchObject({
+        order: { header: { orderName: '2561' } },
+      });
+
+      expect(transactions.lockedOrderNames.at(-1)).toBe('2561');
+    });
+
+    it('replays failed idempotency state after a burned restore key', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.seedOrder({
+        orderId: 42,
+        version: 3,
+        header: createHeader({ orderName: '2558' }),
+        deleteFlag: true,
+        deletedAt: '2026-05-02T03:04:05.000Z',
+        deletedBy: 'user_admin',
+      });
+      transactions.seedOrder({
+        orderId: 77,
+        version: 1,
+        header: createHeader({ orderName: '2561' }),
+        deleteFlag: false,
+      });
+      const service = new OrderTransactionService({ transactions });
+      const command = {
+        currentUser: currentUser('admin'),
+        orderId: 42,
+        version: 3,
+        idempotencyKey: 'order-restore-key-burned',
+        orderName: '2561',
+      } satisfies RestoreOrderCommand;
+
+      await expect(service.restore(command)).rejects.toMatchObject({
+        code: 'ORDER_NAME_DUPLICATE',
+        statusCode: 409,
+      } satisfies Partial<ApiError>);
+      await expect(service.restore(command)).rejects.toMatchObject({
+        code: 'IDEMPOTENCY_FAILED',
+        statusCode: 409,
+      } satisfies Partial<ApiError>);
+
+      expect(transactions.calls).toEqual([
+        'reserveOrderRestoreIdempotency',
+        'begin',
+        'setSessionUser',
+        'lockOrderName',
+        'loadOrderForRestore',
+        'assertOrderNameAvailable',
+        'rollback',
+        'markOrderRestoreIdempotencyFailed',
+        'reserveOrderRestoreIdempotency',
+      ]);
+      expect(
+        transactions.calls.filter((call) => call === 'markOrderRestoreIdempotencyFailed'),
+      ).toHaveLength(1);
+    });
+
+    it('does not burn a successful restore key', async () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.seedOrder({
+        orderId: 42,
+        version: 3,
+        header: createHeader({ orderName: '2558' }),
+        deleteFlag: true,
+        deletedAt: '2026-05-02T03:04:05.000Z',
+        deletedBy: 'user_admin',
+      });
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('admin'),
+          orderId: 42,
+          version: 3,
+          idempotencyKey: 'order-restore-key-success',
+        }),
+      ).resolves.toMatchObject({
+        order: { header: { orderName: '2558' } },
+      });
+
+      expect(transactions.failedRestoreIdempotencyMarks).toEqual([]);
+      expect(transactions.calls).not.toContain('markOrderRestoreIdempotencyFailed');
+    });
+
+    it.each([
+      [
+        new OrderRestoreIdempotencyKeyReusedError('order-restore-key-reused'),
+        'order-restore-key-reused',
+      ],
+      [
+        new OrderRestoreIdempotencyInProgressError('order-restore-key-processing'),
+        'order-restore-key-processing',
+      ],
+      [
+        new OrderRestoreIdempotencyFailedError('order-restore-key-failed'),
+        'order-restore-key-failed',
+      ],
+    ])('does not burn restore keys for existing idempotency state errors (%s)', async (error, idempotencyKey) => {
+      const transactions = new FakeOrderTransactions();
+      transactions.restoreIdempotencyError = error;
+
+      await expect(
+        new OrderTransactionService({ transactions }).restore({
+          currentUser: currentUser('admin'),
+          orderId: 42,
+          version: 3,
+          idempotencyKey,
+        }),
+      ).rejects.toBe(error);
+
+      expect(transactions.failedRestoreIdempotencyMarks).toEqual([]);
+      expect(transactions.calls).not.toContain('markOrderRestoreIdempotencyFailed');
+      expect(transactions.calls).toEqual(['reserveOrderRestoreIdempotency']);
+    });
+  });
+
   it('returns version conflict before child mutations and does not write audit', async () => {
     const transactions = new FakeOrderTransactions();
     transactions.seedOrder({ orderId: 42, version: 2 });
@@ -2400,6 +3120,7 @@ function cloneState(state: FakeState): FakeState {
     ),
     auditEvents: state.auditEvents.map((event) => ({ ...event })),
     outboxEvents: state.outboxEvents.map((event) => ({ ...event })),
+    deniedRestoreAudits: state.deniedRestoreAudits.map((event) => ({ ...event })),
   };
 }
 
@@ -2434,6 +3155,29 @@ function upsertRows<T extends { id?: number }>(
   });
 
   return rows;
+}
+
+function createOrderDto(overrides: { orderId: number; orderName?: string; version?: number }): OrderDto {
+  return toOrderDto({
+    orderId: overrides.orderId,
+    header: createHeader({ orderName: overrides.orderName ?? 'Test order' }),
+    details: [],
+    payments: [],
+    workshops: [],
+    requirements: [],
+    dowelingLinks: [],
+    totals: createTotals(),
+    version: overrides.version ?? 1,
+    createdByUserId: 'user_admin',
+    managerUserId: 'user_admin',
+    projectId: null,
+    projectCode: null,
+    createdAt: '2026-04-30T00:00:00.000Z',
+    updatedAt: '2026-04-30T00:00:00.000Z',
+    deleteFlag: false,
+    deletedAt: null,
+    deletedBy: null,
+  });
 }
 
 function toOrderDto(order: FakeOrderRecord): OrderDto {

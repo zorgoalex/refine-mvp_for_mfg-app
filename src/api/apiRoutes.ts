@@ -44,6 +44,7 @@ export const apiRoutes = {
     list: backendApiPath('/orders'),
     formData: backendApiPath('/orders/form-data'),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
+    restore: (orderId: number) => backendApiPath(`/orders/${orderId}/restore`),
     status: (orderId: number) => backendApiPath(`/orders/${orderId}/status`),
     paymentStatus: (orderId: number) => backendApiPath(`/orders/${orderId}/payment-status`),
     productionStatus: (orderId: number) => backendApiPath(`/orders/${orderId}/production-status`),

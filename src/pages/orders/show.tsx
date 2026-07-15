@@ -1,11 +1,11 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined } from "@ant-design/icons";
+import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select, Popconfirm } from "antd";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTabStore } from "../../stores/tabStore";
 import { resolveOrderTabLabel } from "../../utils/tabLabels";
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from "../../utils/materialDisplayName";
@@ -20,6 +20,7 @@ import { OrderProductionBlock } from "./components/sections/OrderProductionBlock
 import { OrderFilesBlock } from "./components/sections/OrderFilesBlock";
 import { OrderMetaBlock } from "./components/sections/OrderMetaBlock";
 import { featureFlags } from "../../config/featureFlags";
+import { isApiError } from "../../api/apiError";
 import { shouldShowOrderLoading } from "./utils/orderShowLoading";
 import { getDowelingOrderShowPath } from "./utils/dowelingOrderPaths";
 import { resolveOrderExportClientName, toOrderExportClient } from "./utils/orderExportClient";
@@ -44,6 +45,11 @@ import { authSession } from '../../api/authSession';
 import { useIsMobile } from '../../hooks/useDeviceTier';
 import { DetailCardList } from './mobile/DetailCardList';
 import type { DetailCardLookups } from './mobile/detailCardModel';
+import { makeOrderDeleteHandler } from './orderDeleteAction';
+import { makeRestoreHandler } from './orderRestoreAction';
+import { DeletedOrderCard } from './DeletedOrderCard';
+import { buildDeletedOrderCardModel } from './deletedOrderCard';
+import type { OrderDto } from "../../api/types/orderApi.types";
 import {
   applyOrderDetailColumnSettings,
   OrderDetailColumnSettingsButton,
@@ -89,9 +95,27 @@ function createProjectMoveIdempotencyKey(): string {
 
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
+
+const modalConfirm = (content: string): Promise<boolean> =>
+  new Promise((resolve) => {
+    Modal.confirm({
+      title: 'Подтверждение',
+      content,
+      okText: 'Восстановить',
+      cancelText: 'Отмена',
+      onOk: () => {
+        resolve(true);
+      },
+      onCancel: () => {
+        resolve(false);
+      },
+    });
+  });
+
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const { id: currentOrderId } = useParams();
   const [searchParams] = useSearchParams();
   const highlightDetail = Number(searchParams.get('highlightDetail')) || null;
   const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(null);
@@ -101,6 +125,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [moveSubmitting, setMoveSubmitting] = useState(false);
   const [moveTargetProjectId, setMoveTargetProjectId] = useState<number | undefined>(undefined);
   const [moveCreateNew, setMoveCreateNew] = useState(false);
+  const [deletedOrder, setDeletedOrder] = useState<OrderDto | null>(null);
 
   const { queryResult } = useShow({
     meta: {
@@ -153,9 +178,59 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
   const backendOrder = useBackendOrdersRead ? record?.__backendOrder : null;
   const labelsEnabled = featureFlags.labels && canAny(['labels.view', 'labels.generate']);
-  const showTitle = record?.order_full_number
-    ? `Заказ ${record.order_full_number}`
-    : 'Просмотр заказа';
+  const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
+  const deletedOrderModel = deletedOrder ? buildDeletedOrderCardModel(deletedOrder) : null;
+  const canRestore = canManageOrderTrash && featureFlags.useBackendOrdersWrite;
+  const showTitle = deletedOrder
+    ? `Заказ №${deletedOrder.header.orderName} (удалён)`
+    : record?.order_full_number
+      ? `Заказ ${record.order_full_number}`
+      : 'Просмотр заказа';
+
+  useEffect(() => {
+    setDeletedOrder(null);
+  }, [currentOrderId]);
+
+  useEffect(() => {
+    if (queryResult.data?.data) setDeletedOrder(null);
+  }, [queryResult.data]);
+
+  useEffect(() => {
+    if (!(featureFlags.useBackendOrdersRead && canManageOrderTrash)) {
+      return;
+    }
+    if (!queryResult.isError || !currentOrderId) {
+      return;
+    }
+
+    const err = queryResult.error;
+    const isNotFound =
+      isApiError(err, 'ORDER_NOT_FOUND') ||
+      ((err as { status?: number } | null)?.status === 404);
+    if (!isNotFound) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void ordersApi
+      .getById(Number(currentOrderId), { includeDeleted: true })
+      .then((o) => {
+        if (cancelled) {
+          return;
+        }
+        if (o.header.deleteFlag === true && o.header.orderId === Number(currentOrderId)) {
+          setDeletedOrder(o);
+        }
+      })
+      .catch(() => {
+        // keep the ordinary error state when deleted fallback is unavailable
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canManageOrderTrash, currentOrderId, queryResult.error, queryResult.isError]);
 
   // The workspace tab shows only the user-facing order name, never its database id.
   const location = useLocation();
@@ -899,6 +974,25 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     [visibleDetailColumns],
   );
 
+  const deletedOrderRestoreHandler = deletedOrder
+    ? makeRestoreHandler({
+        restoreFn: (req) => ordersApi.restore(deletedOrder.header.orderId, req),
+        confirmFn: modalConfirm,
+        notify: {
+          success: (msg) => message.success(msg),
+          warning: (msg) => message.warning(msg),
+          error: (msg) => message.error(msg),
+        },
+        onRestored: () => {
+          setDeletedOrder(null);
+          void queryResult.refetch();
+        },
+        onStale: () => {
+          void queryResult.refetch();
+        },
+      })
+    : null;
+
   return (
     <Show
       isLoading={showLoading}
@@ -917,133 +1011,197 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         </Breadcrumb>
       }
       headerButtons={() => (
-        isMobile ? (
-          <>
-            <EditButton>Изменить</EditButton>
-            {featureFlags.projects && record?.order_id && record?.client_id ? (
-              <Button onClick={() => setMoveModalOpen(true)}>Перенести в другой проект</Button>
-            ) : null}
-            <Dropdown
-              trigger={['click']}
-              menu={{
-                items: [
-                  {
-                    key: 'refresh',
-                    icon: <ReloadOutlined />,
-                    label: 'Обновить',
-                    disabled: isUpdating,
+        deletedOrder ? null : (
+          isMobile ? (
+            <>
+              <EditButton>Изменить</EditButton>
+              {featureFlags.projects && record?.order_id && record?.client_id ? (
+                <Button onClick={() => setMoveModalOpen(true)}>Перенести в другой проект</Button>
+              ) : null}
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  items: [
+                    {
+                      key: 'refresh',
+                      icon: <ReloadOutlined />,
+                      label: 'Обновить',
+                      disabled: isUpdating,
+                    },
+                    {
+                      key: 'print',
+                      icon: <PrinterOutlined />,
+                      label: 'Печать',
+                      disabled: !record || details.length === 0,
+                    },
+                    {
+                      key: 'excel',
+                      icon: <FileExcelOutlined />,
+                      label: 'Экспорт в Excel',
+                      disabled: !record || details.length === 0 || isClientResolving,
+                    },
+                    {
+                      key: 'json',
+                      icon: <FileTextOutlined />,
+                      label: 'JSON snapshot',
+                      disabled: !record || isSnapshotExporting,
+                    },
+                  ],
+                  onClick: ({ key }) => {
+                    if (key === 'refresh') {
+                      void handleRefreshPaymentStatus();
+                    }
+                    if (key === 'print') {
+                      handlePrint();
+                    }
+                    if (key === 'excel') {
+                      void handleExportExcel();
+                    }
+                    if (key === 'json') {
+                      void handleExportSnapshot();
+                    }
                   },
-                  {
-                    key: 'print',
-                    icon: <PrinterOutlined />,
-                    label: 'Печать',
-                    disabled: !record || details.length === 0,
-                  },
-                  {
-                    key: 'excel',
-                    icon: <FileExcelOutlined />,
-                    label: 'Экспорт в Excel',
-                    disabled: !record || details.length === 0 || isClientResolving,
-                  },
-                  {
-                    key: 'json',
-                    icon: <FileTextOutlined />,
-                    label: 'JSON snapshot',
-                    disabled: !record || isSnapshotExporting,
-                  },
-                ],
-                onClick: ({ key }) => {
-                  if (key === 'refresh') {
-                    void handleRefreshPaymentStatus();
-                  }
-                  if (key === 'print') {
-                    handlePrint();
-                  }
-                  if (key === 'excel') {
-                    void handleExportExcel();
-                  }
-                  if (key === 'json') {
-                    void handleExportSnapshot();
-                  }
-                },
-              }}
-            >
-              <Button icon={<EllipsisOutlined />} aria-label="Ещё действия" />
-            </Dropdown>
-          </>
-        ) : (
-          <>
-            <EditButton>Изменить</EditButton>
-            {featureFlags.projects && record?.order_id && record?.client_id ? (
-              <Button onClick={() => setMoveModalOpen(true)}>
-                Перенести в другой проект
-              </Button>
-            ) : null}
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={handleRefreshPaymentStatus}
-              loading={isUpdating}
-            >
-              Обновить
-            </Button>
-            <Button
-              type="primary"
-              icon={<PrinterOutlined />}
-              onClick={handlePrint}
-              disabled={!record || details.length === 0}
-            >
-              Печать
-            </Button>
-            <Tooltip title="Экспорт в Excel">
+                }}
+              >
+                <Button icon={<EllipsisOutlined />} aria-label="Ещё действия" />
+              </Dropdown>
+              {featureFlags.useBackendOrdersWrite && canManageOrderTrash && record?.order_id && !record?.delete_flag ? (
+                <Popconfirm
+                  title={`Удалить заказ №${record.order_name}?`}
+                  description="Заказ попадёт в корзину, его можно будет восстановить."
+                  okText="Удалить"
+                  okButtonProps={{ danger: true }}
+                  cancelText="Отмена"
+                  onConfirm={makeOrderDeleteHandler({
+                    deleteFn: () => ordersApi.delete(Number(record.order_id), {
+                      version: Number(record.version ?? backendOrder?.version ?? 0),
+                    }),
+                    onSuccess: () => {
+                      message.success('Заказ перемещён в корзину');
+                      navigate('/orders');
+                    },
+                    onVersionConflict: () =>
+                      Modal.error({
+                        title: 'Конфликт версий',
+                        content: 'Заказ был изменен другим пользователем. Обновите страницу и повторите.',
+                        okText: 'Обновить страницу',
+                        onOk: () => window.location.reload(),
+                      }),
+                    onError: (m) => message.error(m),
+                  })}
+                >
+                  <Button danger icon={<DeleteOutlined />}>Удалить</Button>
+                </Popconfirm>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <EditButton>Изменить</EditButton>
+              {featureFlags.projects && record?.order_id && record?.client_id ? (
+                <Button onClick={() => setMoveModalOpen(true)}>
+                  Перенести в другой проект
+                </Button>
+              ) : null}
               <Button
-                aria-label="Экспорт в Excel"
-                icon={<FileExcelOutlined />}
-                onClick={handleExportExcel}
-                loading={isExporting}
-                disabled={!record || details.length === 0 || isClientResolving}
-              />
-            </Tooltip>
-            <Dropdown
-              trigger={['click']}
-              menu={{
-                items: [
-                  {
-                    key: 'pdf',
-                    icon: <FilePdfOutlined />,
-                    label: 'Экспорт в PDF',
-                    disabled: !record || details.length === 0,
-                  },
-                  {
-                    key: 'json',
-                    icon: <FileTextOutlined />,
-                    label: 'JSON snapshot',
-                    disabled: !record || isSnapshotExporting,
-                  },
-                ],
-                onClick: ({ key }) => {
-                  if (key === 'pdf') {
-                    handlePrint();
-                  }
-                  if (key === 'json') {
-                    void handleExportSnapshot();
-                  }
-                },
-              }}
-            >
-              <Tooltip title="Другие экспорты">
+                icon={<ReloadOutlined />}
+                onClick={handleRefreshPaymentStatus}
+                loading={isUpdating}
+              >
+                Обновить
+              </Button>
+              <Button
+                type="primary"
+                icon={<PrinterOutlined />}
+                onClick={handlePrint}
+                disabled={!record || details.length === 0}
+              >
+                Печать
+              </Button>
+              <Tooltip title="Экспорт в Excel">
                 <Button
-                  aria-label="Другие экспорты"
-                  icon={isSnapshotExporting ? <DownloadOutlined /> : <MoreOutlined />}
-                  loading={isSnapshotExporting}
-                  disabled={!record}
+                  aria-label="Экспорт в Excel"
+                  icon={<FileExcelOutlined />}
+                  onClick={handleExportExcel}
+                  loading={isExporting}
+                  disabled={!record || details.length === 0 || isClientResolving}
                 />
               </Tooltip>
-            </Dropdown>
-          </>
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  items: [
+                    {
+                      key: 'pdf',
+                      icon: <FilePdfOutlined />,
+                      label: 'Экспорт в PDF',
+                      disabled: !record || details.length === 0,
+                    },
+                    {
+                      key: 'json',
+                      icon: <FileTextOutlined />,
+                      label: 'JSON snapshot',
+                      disabled: !record || isSnapshotExporting,
+                    },
+                  ],
+                  onClick: ({ key }) => {
+                    if (key === 'pdf') {
+                      handlePrint();
+                    }
+                    if (key === 'json') {
+                      void handleExportSnapshot();
+                    }
+                  },
+                }}
+              >
+                <Tooltip title="Другие экспорты">
+                  <Button
+                    aria-label="Другие экспорты"
+                    icon={isSnapshotExporting ? <DownloadOutlined /> : <MoreOutlined />}
+                    loading={isSnapshotExporting}
+                    disabled={!record}
+                  />
+                </Tooltip>
+              </Dropdown>
+              {featureFlags.useBackendOrdersWrite && canManageOrderTrash && record?.order_id && !record?.delete_flag ? (
+                <Popconfirm
+                  title={`Удалить заказ №${record.order_name}?`}
+                  description="Заказ попадёт в корзину, его можно будет восстановить."
+                  okText="Удалить"
+                  okButtonProps={{ danger: true }}
+                  cancelText="Отмена"
+                  onConfirm={makeOrderDeleteHandler({
+                    deleteFn: () => ordersApi.delete(Number(record.order_id), {
+                      version: Number(record.version ?? backendOrder?.version ?? 0),
+                    }),
+                    onSuccess: () => {
+                      message.success('Заказ перемещён в корзину');
+                      navigate('/orders');
+                    },
+                    onVersionConflict: () =>
+                      Modal.error({
+                        title: 'Конфликт версий',
+                        content: 'Заказ был изменен другим пользователем. Обновите страницу и повторите.',
+                        okText: 'Обновить страницу',
+                        onOk: () => window.location.reload(),
+                      }),
+                    onError: (m) => message.error(m),
+                  })}
+                >
+                  <Button danger icon={<DeleteOutlined />}>Удалить</Button>
+                </Popconfirm>
+              ) : null}
+            </>
+          )
         )
       )}
     >
-      {record && (
+      {deletedOrderModel && deletedOrderRestoreHandler ? (
+        <DeletedOrderCard
+          model={deletedOrderModel}
+          onRestore={deletedOrderRestoreHandler}
+          canRestore={canRestore}
+        />
+      ) : record && (
         <>
           {/* Компактная шапка заказа (Read-only summary) */}
           <div style={{ marginBottom: 4 }}>

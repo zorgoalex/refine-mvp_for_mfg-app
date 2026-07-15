@@ -9,6 +9,7 @@ export const ORDER_LIST_SORT_FIELDS = [
   'plannedCompletionDate',
   'completionDate',
   'issueDate',
+  'deletedAt',
   'projectCode',
   'clientName',
   'orderStatusName',
@@ -38,6 +39,8 @@ export interface OrderListQuery {
   dateFrom?: string;
   dateTo?: string;
   onlyMyOrders: boolean;
+  deleted?: boolean;
+  deletedScopeUserId?: string;
   groupIds?: string[];
   groupMode?: OrderGroupFilterMode;
 }
@@ -50,6 +53,7 @@ export interface ListOrdersCommand {
 export interface GetOrderByIdCommand {
   currentUser: CurrentUser;
   orderId: number;
+  includeDeleted?: boolean;
 }
 
 export interface GetOrderAuditCommand {

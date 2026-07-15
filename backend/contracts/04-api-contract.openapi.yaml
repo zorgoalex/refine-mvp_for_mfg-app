@@ -615,6 +615,8 @@ paths:
               - plannedCompletionDate
               - completionDate
               - issueDate
+              - deletedAt
+              - projectCode
               - clientName
               - orderStatusName
               - paymentStatusName
@@ -686,6 +688,12 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: deleted
+          in: query
+          required: false
+          description: true — только удалённые заказы; требует orders.delete.
+          schema:
+            type: boolean
         - name: groupIds
           in: query
           required: false
@@ -803,6 +811,13 @@ paths:
       security:
         - bearerAuth: []
       x-permission: orders.view
+      parameters:
+        - name: includeDeleted
+          in: query
+          required: false
+          description: true — разрешить чтение удалённого заказа; требует orders.delete.
+          schema:
+            type: boolean
       responses:
         '200':
           description: Полный заказ
@@ -943,6 +958,100 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    post:
+      tags:
+        - Orders
+      operationId: restoreOrder
+      summary: Восстановить удалённый заказ
+      description: |
+        Восстанавливает мягко удалённый заказ.
+        Команда stale-safe: клиент обязан передать текущую версию заказа в
+        `If-Match`, а retry-safe поведение обеспечивается `Idempotency-Key`.
+      security:
+        - bearerAuth: []
+      x-permission: orders.delete
+      x-transactional: true
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatchVersion'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                orderName:
+                  type: string
+      responses:
+        '200':
+          description: Заказ восстановлен
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreOrderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          description: ORDER_VERSION_CONFLICT, ORDER_NOT_DELETED, ORDER_NAME_DUPLICATE или ORDER_RESTORE_CONFLICT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+              examples:
+                versionConflict:
+                  value:
+                    error:
+                      code: ORDER_VERSION_CONFLICT
+                      message: Заказ был изменён другим пользователем
+                      details:
+                        currentVersion: 8
+                        clientVersion: 7
+                      requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+                orderNotDeleted:
+                  value:
+                    error:
+                      code: ORDER_NOT_DELETED
+                      message: Заказ не удалён
+                      details:
+                        orderId: 42
+                      requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+                orderNameDuplicate:
+                  value:
+                    error:
+                      code: ORDER_NAME_DUPLICATE
+                      message: Номер заказа «2561» уже занят заказом #77
+                      details:
+                        existingOrderId: 77
+                        orderName: '2561'
+                        suggestedOrderName: '2562'
+                      requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+                restoreConflict:
+                  value:
+                    error:
+                      code: ORDER_RESTORE_CONFLICT
+                      message: Конкурентное изменение помешало восстановлению, повторите попытку
+                      details:
+                        orderId: 42
+                      requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/orders/{orderId}/groups:
     parameters:
@@ -12054,6 +12163,17 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OrderGroupSummaryDto'
+        deletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        deletedBy:
+          type: integer
+          format: int64
+          nullable: true
+        deletedByName:
+          type: string
+          nullable: true
         updatedAt:
           type: string
           format: date-time
@@ -12230,6 +12350,15 @@ components:
         filmId:
           type: integer
           format: int64
+          nullable: true
+        deleteFlag:
+          type: boolean
+        deletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        deletedByName:
+          type: string
           nullable: true
         createdAt:
           type: string
@@ -13048,6 +13177,22 @@ components:
           type: string
           nullable: true
           description: ID audit_log события удаления.
+        requestId:
+          type: string
+          description: Correlation/request id команды.
+
+    RestoreOrderResponse:
+      type: object
+      required:
+        - order
+        - requestId
+      properties:
+        order:
+          $ref: '#/components/schemas/OrderDto'
+        auditId:
+          type: string
+          nullable: true
+          description: ID audit_log события восстановления.
         requestId:
           type: string
           description: Correlation/request id команды.

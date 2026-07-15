@@ -57,9 +57,39 @@ export class OrderVersionConflictError extends ApiError {
   }
 }
 
+export class OrderNotDeletedError extends ApiError {
+  constructor(orderId: number) {
+    super(409, 'ORDER_NOT_DELETED', 'Заказ не удалён', { orderId });
+  }
+}
+
 export class OrderDeleteIdempotencyKeyReusedError extends ApiError {
   constructor(idempotencyKey: string) {
     super(409, 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key was reused with a different request', {
+      idempotencyKey,
+    });
+  }
+}
+
+export class OrderRestoreIdempotencyKeyReusedError extends ApiError {
+  constructor(idempotencyKey: string) {
+    super(409, 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key was reused with a different request', {
+      idempotencyKey,
+    });
+  }
+}
+
+export class OrderRestoreIdempotencyInProgressError extends ApiError {
+  constructor(idempotencyKey: string) {
+    super(409, 'IDEMPOTENCY_IN_PROGRESS', 'Idempotent command is still processing', {
+      idempotencyKey,
+    });
+  }
+}
+
+export class OrderRestoreIdempotencyFailedError extends ApiError {
+  constructor(idempotencyKey: string) {
+    super(409, 'IDEMPOTENCY_FAILED', 'Idempotent command previously failed', {
       idempotencyKey,
     });
   }
