@@ -68,13 +68,15 @@ describe('buildOrderExcelBuffer dynamic detail rows', () => {
 
     expect(worksheet.getCell(`A${lastDetailRow}`).value).toBe(detailCount);
     expect(worksheet.getCell(`E${lastDetailRow}`).value).toEqual({
-      formula: `ROUNDUP((B${lastDetailRow}/1000)*(C${lastDetailRow}/1000)*D${lastDetailRow},2)`,
+      formula: `ROUND((B${lastDetailRow}/1000)*(C${lastDetailRow}/1000)*D${lastDetailRow},2)`,
     });
     expect(worksheet.getCell(`J${lastDetailRow}`).value).toEqual({
       formula: `E${lastDetailRow}*I${lastDetailRow}`,
     });
     expect(worksheet.getCell('J2').value).toEqual({ formula: `SUM(J12:J${lastDetailRow})` });
-    expect(worksheet.getCell('K8').value).toEqual({ formula: `SUM(E12:E${lastDetailRow})` });
+    expect(worksheet.getCell('K8').value).toEqual({
+      formula: `ROUND(SUMPRODUCT(B12:B${lastDetailRow},C12:C${lastDetailRow},D12:D${lastDetailRow})/1000000,2)`,
+    });
     expect(worksheet.getCell('M8').value).toEqual({ formula: `SUM(D12:D${lastDetailRow})` });
     expect(String(worksheet.getCell(`A${footerRow}`).value)).toContain('С техническими');
     expect(worksheet.pageSetup.printArea).toBe(`A1:M${lastDetailRow + 16}`);

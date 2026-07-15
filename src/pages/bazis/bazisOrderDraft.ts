@@ -3,6 +3,7 @@ import type {
   CreateOrderFromDraftNode,
 } from '../../api/types/bazisApi.types';
 import type { OrderDetail } from '../../types/orders';
+import { calculateOrderDetailArea } from '../../utils/orderArea';
 
 export interface BazisDraftFormSeed {
   header: {
@@ -29,7 +30,7 @@ export function draftToFormSeed(draft: BazisOrderDraftResponse): BazisDraftFormS
       height: detail.height,
       width: detail.width,
       quantity: detail.quantity,
-      area: calculateDraftArea(detail.height, detail.width, detail.quantity),
+      area: calculateOrderDetailArea(detail.height, detail.width, detail.quantity),
       material_id: null,
       sheet_material_type_id: detail.sheetMaterialTypeId,
       film_id: detail.filmId,
@@ -83,14 +84,6 @@ export function collectProvenanceNodes<T extends { bazisNodeId?: number | null }
   });
 
   return nodes;
-}
-
-function calculateDraftArea(height: number, width: number, quantity: number): number {
-  if (height <= 0 || width <= 0 || quantity <= 0) {
-    return 0;
-  }
-
-  return Math.ceil((height * width * quantity) / 10000) / 100;
 }
 
 /** Подсказка следующего номера заказа для draft-first формы: MAX числовых имён

@@ -10,6 +10,7 @@ import { FileUploadStep, RangeSelectionStep, ValidationStep } from './steps';
 import type { ImportStep, FieldMapping, ImportableField, SelectionRange, ReferenceData } from './types/importTypes';
 import { IMPORT_DEFAULTS } from './types/importTypes';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { calculateOrderDetailArea } from '../../../../utils/orderArea';
 
 interface ExcelImportModalProps {
   open: boolean;
@@ -212,10 +213,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
       const width = row.width || 0;
       const quantity = row.quantity || 1;
 
-      // Calculate area: (height * width * quantity) in mm² -> m²
-      // Using integer math to avoid floating point errors
-      const areaMm2 = height * width * quantity;
-      const area = areaMm2 > 0 ? Math.ceil(areaMm2 / 10000) / 100 : 0;
+      const area = calculateOrderDetailArea(height, width, quantity);
 
       const detail = {
         height,

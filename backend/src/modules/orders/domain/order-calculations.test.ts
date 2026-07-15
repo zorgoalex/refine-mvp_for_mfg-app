@@ -38,11 +38,56 @@ function createDetail(
 }
 
 describe('order calculations', () => {
-  it('calculates area with current frontend formula and preserves manual cost', () => {
+  it('calculates geometric area and preserves manual cost', () => {
     const detail = createDetail();
 
     expect(calculateDetailArea(detail)).toBe(0.22);
     expect(calculateDetailCost(detail, 0.22)).toBe(10000);
+  });
+
+  it('rounds geometric area to the nearest hundredth instead of always rounding up', () => {
+    const detail = createDetail({ height: 1055, width: 95, quantity: 1 });
+
+    // Exact geometry is 0.100225 m²: standard two-decimal rounding is 0.10,
+    // while the retired ROUNDUP formula produced 0.11.
+    expect(calculateDetailArea(detail)).toBe(0.1);
+  });
+
+  it('rounds an exact half-cent boundary up like Excel ROUND', () => {
+    const detail = createDetail({ height: 10075, width: 1000, quantity: 1 });
+
+    expect(calculateDetailArea(detail)).toBe(10.08);
+    expect(calculateDetailArea(createDetail({ height: 73.6, width: 1562.5, quantity: 1 }))).toBe(0.12);
+  });
+
+  it('sums raw geometry and rounds the order total only once', () => {
+    const details = calculateOrderDetails([
+      createDetail({ height: 50, width: 100, quantity: 1 }),
+      createDetail({ height: 50, width: 100, quantity: 1 }),
+    ]);
+    const totals = calculateOrderTotals({
+      header: { discount: 0, surcharge: 0, paymentStatusId: null },
+      details,
+      payments: [],
+    });
+
+    expect(details.map((detail) => detail.area)).toEqual([0.01, 0.01]);
+    expect(totals.totalArea).toBe(0.01);
+  });
+
+  it('sums standard-rounded detail areas without the former per-row uplift', () => {
+    const details = calculateOrderDetails([
+      createDetail({ height: 1055, width: 95, quantity: 1 }),
+      createDetail({ height: 614, width: 1011, quantity: 1 }),
+    ]);
+    const totals = calculateOrderTotals({
+      header: { discount: 0, surcharge: 0, paymentStatusId: null },
+      details,
+      payments: [],
+    });
+
+    expect(details.map((detail) => detail.area)).toEqual([0.1, 0.62]);
+    expect(totals.totalArea).toBe(0.72);
   });
 
   it('calculates detail cost from milling cost when manual cost is absent', () => {

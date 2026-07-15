@@ -23,6 +23,7 @@ import type {
   SaveOrderRequirementDto,
   SaveOrderWorkshopDto,
 } from '../types/orderApi.types';
+import { calculateOrderDetailArea } from '../../utils/orderArea';
 
 type DateLike = {
   format: (format: string) => string;
@@ -686,7 +687,7 @@ function tempIdFromClientKey(clientKey: string | null | undefined, fallbackId: n
 }
 
 function calculateArea(height: number, width: number, quantity: number): number {
-  return Math.ceil((height * width * quantity) / 10000) / 100;
+  return calculateOrderDetailArea(height, width, quantity);
 }
 
 function isDateLike(value: unknown): value is DateLike {

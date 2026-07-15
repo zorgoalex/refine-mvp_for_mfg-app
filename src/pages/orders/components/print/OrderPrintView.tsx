@@ -1,5 +1,6 @@
 import React, { useMemo, forwardRef } from 'react';
 import { formatNumber, formatDate, getYearLastTwoDigits, formatArea, formatPrice } from '../../../../utils/printFormat';
+import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import './OrderPrintView.css';
 
 /**
@@ -63,7 +64,7 @@ export const OrderPrintView = forwardRef<HTMLDivElement, OrderPrintViewProps>(
     );
 
     const totalArea = useMemo(
-      () => details.reduce((sum, d) => sum + (d.area || 0), 0),
+      () => calculateOrderTotalArea(details),
       [details]
     );
 

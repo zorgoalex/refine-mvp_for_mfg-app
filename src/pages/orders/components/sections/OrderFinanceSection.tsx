@@ -13,6 +13,7 @@ import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import dayjs from 'dayjs';
+import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 
 export const OrderFinanceSection: React.FC = () => {
   const { header, updateHeaderField, payments, details } = useOrderFormStore();
@@ -28,7 +29,7 @@ export const OrderFinanceSection: React.FC = () => {
   const totals = useMemo(() => ({
     positions_count: details.length,
     parts_count: details.reduce((sum, d) => sum + (d.quantity || 0), 0),
-    total_area: details.reduce((sum, d) => sum + (d.area || 0), 0),
+    total_area: calculateOrderTotalArea(details),
     total_paid: payments.reduce((sum, p) => sum + (p.amount || 0), 0),
     total_amount: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
   }), [details, payments]);

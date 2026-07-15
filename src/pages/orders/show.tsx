@@ -34,6 +34,7 @@ import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.ty
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
 import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
+import { calculateOrderTotalArea } from "../../utils/orderArea";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
 import { CutPage } from "../cut/CutPage";
@@ -1215,13 +1216,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             />
           </div>
 
-          {featureFlags.projects && projectId && (
-            <div style={{ marginBottom: 12 }}>
-              Проект:{' '}
-              <Link to={`/projects/show/${projectId}`}>{projectLabel}</Link>
-            </div>
-          )}
-
           <div style={{ marginBottom: 16 }}>
             <div
               role="tablist"
@@ -1343,6 +1337,35 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     >
                       {/* Колонка 1 — Даты */}
                       <div>
+                        {featureFlags.projects && projectId ? (
+                          <div
+                            aria-label="Проект заказа"
+                            style={{
+                              minHeight: 40,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              marginBottom: 8,
+                              paddingBottom: 8,
+                              borderBottom: '1px solid var(--app-border)',
+                            }}
+                          >
+                            <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>Проект</span>
+                            <Link
+                              to={`/projects/show/${projectId}`}
+                              aria-label={`Открыть проект ${projectLabel}`}
+                              style={{
+                                display: 'inline-flex',
+                                minHeight: 40,
+                                alignItems: 'center',
+                                fontWeight: 600,
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {projectLabel}
+                            </Link>
+                          </div>
+                        ) : null}
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#52c41a', marginBottom: 3 }}>
                           Даты
                         </div>
@@ -1601,7 +1624,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               summary={() => {
                 const totalCount = details.length;
                 const totalQuantity = details.reduce((sum, d) => sum + (d.quantity || 0), 0);
-                const totalArea = details.reduce((sum, d) => sum + (d.area || 0), 0);
+                const totalArea = calculateOrderTotalArea(details);
                 const totalCost = details.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
 
                 const base = cutSelectMode ? 1 : 0;

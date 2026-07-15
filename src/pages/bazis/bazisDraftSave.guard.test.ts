@@ -61,4 +61,10 @@ describe('bazis draft order guards', () => {
     expect(orderBasicInfo).toContain("extra={clientLocked ? 'Клиент Базис-проекта' : undefined}");
     expect(orderBasicInfo).toContain('{!clientLocked ? (');
   });
+
+  it('locks the ERP project to the Bazis project while creating the order', () => {
+    expect(orderForm).toContain("const bazisDraftProjectLocked = mode === 'create' && bazisDraft != null;");
+    expect(orderForm).toContain('disabled={!normalizedClientId || bazisDraftProjectLocked}');
+    expect(orderForm).toContain("extra={bazisDraftProjectLocked ? 'Проект Базис-проекта' : undefined}");
+  });
 });

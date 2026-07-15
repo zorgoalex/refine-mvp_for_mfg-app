@@ -7,6 +7,7 @@ import { FileTextOutlined, ColumnHeightOutlined } from '@ant-design/icons';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
+import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 
 export const OrderAggregatesDisplay: React.FC = () => {
   const { details, payments } = useOrderFormStore();
@@ -15,7 +16,7 @@ export const OrderAggregatesDisplay: React.FC = () => {
   const totals = useMemo(() => ({
     positions_count: details.length,
     parts_count: details.reduce((sum, d) => sum + (d.quantity || 0), 0),
-    total_area: details.reduce((sum, d) => sum + (d.area || 0), 0),
+    total_area: calculateOrderTotalArea(details),
     total_paid: payments.reduce((sum, p) => sum + (p.amount || 0), 0),
     total_amount: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
   }), [details, payments]);

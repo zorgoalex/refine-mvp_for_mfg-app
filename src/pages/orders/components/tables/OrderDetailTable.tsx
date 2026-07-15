@@ -34,6 +34,7 @@ import {
   useOrderDetailColumnPreferences,
   type OrderDetailColumnDefinition,
 } from './OrderDetailColumnSettings';
+import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -269,7 +270,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const totals = useMemo(() => {
     return {
       quantity: details.reduce((sum, d) => sum + (d.quantity || 0), 0),
-      area: details.reduce((sum, d) => sum + (d.area || 0), 0),
+      area: calculateOrderTotalArea(details),
       detail_cost: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
     };
   }, [details]);
@@ -458,9 +459,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       // Calculate area using INTEGER MATH to avoid floating point errors
       // height and width are in mm (integers), so we calculate in mm² first
       // Example: 550mm * 200mm * 2 = 220000 mm²
-      // Then: ceil(220000 / 10000) / 100 = ceil(22) / 100 = 0.22 m²
-      const areaMm2 = height * width * quantity; // Integer arithmetic - no floating point errors!
-      const area = Math.ceil(areaMm2 / 10000) / 100; // Convert to m² with 2 decimal places, round up
+      // Then: round((220000 / 1_000_000) * 100) / 100 = 0.22 m²
+      const areaMm2 = height * width * quantity;
+      const area = calculateOrderDetailArea(height, width, quantity);
       console.log('[OrderDetailTable] recalcArea - calculated area:', area, '(areaMm2:', areaMm2, ')');
 
       // FIX: Сохраняем area в ref

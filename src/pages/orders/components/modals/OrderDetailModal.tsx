@@ -20,6 +20,7 @@ import {
 import {
   validateSheetDimensions,
 } from '../../../../utils/materialDimensionValidation';
+import { calculateOrderDetailArea } from '../../../../utils/orderArea';
 
 interface OrderDetailModalProps {
   open: boolean;
@@ -165,11 +166,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     console.log('[OrderDetailModal] handleDimensionChange - height:', height, 'width:', width, 'quantity:', quantity);
 
     if (height && width && quantity && height > 0 && width > 0 && quantity > 0) {
-      // Formula: ROUNDUP((height_mm / 1000) * (width_mm / 1000) * quantity, 2)
       const areaPerPiece = (height / 1000) * (width / 1000);
       const totalArea = areaPerPiece * quantity;
-      // Round UP to 2 decimal places: Math.ceil(value * 100) / 100
-      const area = Math.ceil(totalArea * 100) / 100;
+      const area = calculateOrderDetailArea(height, width, quantity);
       console.log('[OrderDetailModal] calculated area:', area, '(per piece:', areaPerPiece, ', total before rounding:', totalArea, ')');
       setCalculatedArea(area);
       form.setFieldsValue({ area });

@@ -93,4 +93,38 @@ describe('bazisOrderDraft', () => {
       10,
     );
   });
+
+  it('seeds exact geometric area with standard two-decimal rounding', () => {
+    const seed = draftToFormSeed({
+      revisionId: 17,
+      projectId: 91,
+      clientId: 33,
+      clientName: 'Acme',
+      bazisProjectName: 'Kitchen',
+      bazisOrderNo: '1491',
+      duplicates: [],
+      details: [
+        {
+          bazisNodeId: 701,
+          clientKey: 'bazis-node-701',
+          detailName: 'Plinth',
+          height: 1055,
+          width: 95,
+          quantity: 1,
+          sheetMaterialTypeId: 9,
+          filmId: null,
+          millingTypeId: 5,
+          edgeTypeId: 6,
+          priority: 80,
+          basisProject: '1491',
+          basisProduct: 'KUH + PRIH',
+          basisDesignation: 'K1',
+          basisData: 'raw',
+          doweling: false,
+        },
+      ],
+    });
+
+    expect(seed.details[0].area).toBe(0.1);
+  });
 });

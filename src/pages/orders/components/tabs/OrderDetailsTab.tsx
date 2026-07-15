@@ -21,6 +21,7 @@ import { selectedGroupLabelForCut, type GroupField } from '../../detailGrouping'
 import { featureFlags } from '../../../../config/featureFlags';
 import { can } from '../../../../utils/permissions';
 import { useOrderFormData } from '../../../../hooks/useOrderFormData';
+import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -349,7 +350,6 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
 
     let areaUpdatedCount = 0;
     let costUpdatedCount = 0;
-    let totalArea = 0;
     let totalAmount = 0;
 
     // First pass: recalculate area for each detail, then cost
@@ -358,14 +358,9 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
       const width = Number(detail.width) || 0;
       const quantity = Number(detail.quantity) || 0;
 
-      // Calculate area using INTEGER MATH to avoid floating point errors
-      // height and width are in mm (integers), so we calculate in mm² first
-      // Example: 550mm * 200mm * 2 = 220000 mm²
-      // Then: ceil(220000 / 10000) / 100 = ceil(22) / 100 = 0.22 m²
       let newArea = 0;
       if (height > 0 && width > 0 && quantity > 0) {
-        const areaMm2 = height * width * quantity; // Integer arithmetic - no floating point errors!
-        newArea = Math.ceil(areaMm2 / 10000) / 100; // Convert to m² with 2 decimal places, round up
+        newArea = calculateOrderDetailArea(height, width, quantity);
       }
 
       const identifier = detail.temp_id || detail.detail_id;
@@ -394,12 +389,11 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
         costUpdatedCount++;
       }
 
-      totalArea += areaForCost;
       totalAmount += newDetailCost;
     });
 
     // Round totals
-    totalArea = Number(totalArea.toFixed(2));
+    const totalArea = calculateOrderTotalArea(details);
     totalAmount = Number(totalAmount.toFixed(2));
 
     // Update total_amount in header
@@ -458,8 +452,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
 
         // If dimensions changed, recalculate area
         if (dimensionsChanged && newHeight > 0 && newWidth > 0 && newQuantity > 0) {
-          const areaMm2 = newHeight * newWidth * newQuantity;
-          const newArea = Math.ceil(areaMm2 / 10000) / 100;
+          const newArea = calculateOrderDetailArea(newHeight, newWidth, newQuantity);
           updateData.area = newArea;
 
           // Recalculate cost based on new area

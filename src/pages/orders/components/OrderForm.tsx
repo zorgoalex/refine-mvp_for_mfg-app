@@ -197,6 +197,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     ],
   );
   const bazisDraftClientLocked = mode === 'create' && (bazisDraft?.clientId ?? null) != null;
+  const bazisDraftProjectLocked = mode === 'create' && bazisDraft != null;
 
   // Bridge dirty state into the workspace tab registry (single dirty contract).
   useTabDirty(tabKey, isDirty);
@@ -1443,12 +1444,13 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               </Space>
             )}
             name={['header', 'project_id']}
+            extra={bazisDraftProjectLocked ? 'Проект Базис-проекта' : undefined}
           >
             <Select
-              allowClear
+              allowClear={!bazisDraftProjectLocked}
               showSearch
               filterOption={false}
-              disabled={!normalizedClientId}
+              disabled={!normalizedClientId || bazisDraftProjectLocked}
               loading={projectsLoading}
               placeholder="Новый проект (авто)"
               value={header.project_id ?? undefined}

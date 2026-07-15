@@ -157,7 +157,7 @@ function applyDetailRowLayout(worksheet: any, rowNumber: number) {
 
   targetRow.getCell(1).value = rowNumber - DETAIL_START_ROW + 1;
   targetRow.getCell(5).value = {
-    formula: `ROUNDUP((B${rowNumber}/1000)*(C${rowNumber}/1000)*D${rowNumber},2)`,
+    formula: `ROUND((B${rowNumber}/1000)*(C${rowNumber}/1000)*D${rowNumber},2)`,
   };
   targetRow.getCell(10).value = { formula: `E${rowNumber}*I${rowNumber}` };
 }
@@ -181,7 +181,9 @@ function prepareDetailRows(worksheet: any, detailCount: number) {
   }
 
   worksheet.getCell('J2').value = { formula: `SUM(J${DETAIL_START_ROW}:J${lastDetailRow})` };
-  worksheet.getCell('K8').value = { formula: `SUM(E${DETAIL_START_ROW}:E${lastDetailRow})` };
+  worksheet.getCell('K8').value = {
+    formula: `ROUND(SUMPRODUCT(B${DETAIL_START_ROW}:B${lastDetailRow},C${DETAIL_START_ROW}:C${lastDetailRow},D${DETAIL_START_ROW}:D${lastDetailRow})/1000000,2)`,
+  };
   worksheet.getCell('M8').value = { formula: `SUM(D${DETAIL_START_ROW}:D${lastDetailRow})` };
   worksheet.pageSetup.printArea = `A1:M${lastDetailRow + PRINT_AREA_TRAILING_ROWS}`;
   restoreFooterTemplate(worksheet, footerTemplate, extraRows);

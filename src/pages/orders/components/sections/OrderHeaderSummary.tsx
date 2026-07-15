@@ -19,6 +19,7 @@ import { OrderHeaderContextMenu } from '../OrderHeaderContextMenu';
 import { RowSeparator } from './RowSeparator';
 import { collectOrderBasisProjects } from './orderBasisProjects';
 import dayjs from 'dayjs';
+import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 
 const { Text } = Typography;
 
@@ -51,7 +52,7 @@ export const OrderHeaderSummary: React.FC = () => {
   const totals = useMemo(() => ({
     positions_count: details.length,
     parts_count: details.reduce((sum, d) => sum + (d.quantity || 0), 0),
-    total_area: details.reduce((sum, d) => sum + (d.area || 0), 0),
+    total_area: calculateOrderTotalArea(details),
     total_paid: payments.reduce((sum, p) => sum + (p.amount || 0), 0),
     total_amount: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
   }), [details, payments]);

@@ -13,6 +13,7 @@ import { ValidationStep } from './steps';
 import type { ReferenceData, ImportRow } from './types/importTypes';
 import { IMPORT_DEFAULTS } from './types/importTypes';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { calculateOrderDetailArea } from '../../../../utils/orderArea';
 
 type VlmImportStep = 'upload' | 'validation';
 
@@ -163,9 +164,7 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
       const width = row.width || 0;
       const quantity = row.quantity || 1;
 
-      // Calculate area: (height * width * quantity) in mm² -> m²
-      const areaMm2 = height * width * quantity;
-      const area = areaMm2 > 0 ? Math.ceil(areaMm2 / 10000) / 100 : 0;
+      const area = calculateOrderDetailArea(height, width, quantity);
 
       const detail = {
         height,
