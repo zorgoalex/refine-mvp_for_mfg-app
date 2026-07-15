@@ -358,11 +358,6 @@ export const BazisPage: React.FC = () => {
           openRevisionTree(revisionId, label, projectId);
           setImportOpen(false);
         }}
-        onCreateOrder={(revisionId, label, projectId) => {
-          openRevisionTree(revisionId, label, projectId);
-          setCreateOrderOpen(true);
-          setImportOpen(false);
-        }}
       />
 
       <Drawer
