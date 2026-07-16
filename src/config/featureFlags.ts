@@ -13,6 +13,7 @@ export interface FrontendFeatureFlags {
   useBackendVlm: boolean;
   useBackendReferences: boolean;
   useBackendCut: boolean;
+  bazisCut: boolean;
   projects: boolean;
   useBackendBazis: boolean;
   labels: boolean;
@@ -49,6 +50,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   backendVlm: string | boolean;
   backendReferences: string | boolean;
   backendCut: string | boolean;
+  bazisCut: string | boolean;
   projects: string | boolean;
   bazisImport: string | boolean;
   labels: string | boolean;
@@ -90,6 +92,7 @@ export function getFeatureFlags(
     useBackendVlm: readBooleanFlag(env.VITE_USE_BACKEND_VLM, false),
     useBackendReferences: readBooleanFlag(env.VITE_USE_BACKEND_REFERENCES, false),
     useBackendCut: readBooleanFlag(env.VITE_USE_BACKEND_CUT, false),
+    bazisCut: readBooleanFlag(env.VITE_USE_BACKEND_BAZIS_CUT, false),
     projects: readBooleanFlag(env.VITE_USE_PROJECTS, false),
     useBackendBazis: readBooleanFlag(env.VITE_USE_BACKEND_BAZIS, false),
     labels: readBooleanFlag(env.VITE_USE_BACKEND_LABELS, false),
@@ -141,6 +144,7 @@ export function mergeRuntimeFeatureFlags(
     useBackendReferences:
       readOptionalBooleanFlag(runtimeFeatures.backendReferences) ?? fallback.useBackendReferences,
     useBackendCut: readOptionalBooleanFlag(runtimeFeatures.backendCut) ?? fallback.useBackendCut,
+    bazisCut: readOptionalBooleanFlag(runtimeFeatures.bazisCut) ?? fallback.bazisCut,
     projects: readOptionalBooleanFlag(runtimeFeatures.projects) ?? fallback.projects,
     useBackendBazis:
       readOptionalBooleanFlag(runtimeFeatures.bazisImport) ?? fallback.useBackendBazis,
@@ -175,6 +179,7 @@ function enforceFrontendFeatureDependencies(flags: FrontendFeatureFlags): Fronte
       flags.useBackendClientPhones && flags.useBackendProductionActions,
     useBackendDeadlines:
       flags.useBackendDeadlines && flags.useBackendAuth && flags.useBackendOrdersRead,
+    bazisCut: flags.bazisCut && flags.useBackendCut,
     workosAuth: flags.workosAuth && flags.useBackendAuth,
   };
 }

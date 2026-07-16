@@ -18,6 +18,7 @@ const RUNTIME_CONFIG_ENV_KEYS = [
   'RUNTIME_CONFIG_BACKEND_VLM',
   'RUNTIME_CONFIG_BACKEND_REFERENCES',
   'RUNTIME_CONFIG_BACKEND_BAZIS',
+  'RUNTIME_CONFIG_BAZIS_CUT',
   'RUNTIME_CONFIG_ENABLE_LEGACY_HASURA',
 ];
 
@@ -56,6 +57,7 @@ describe('runtime-config handler', () => {
         backendVlm: false,
         backendReferences: false,
         backendCut: false,
+        bazisCut: false,
         bazisImport: false,
         enableLegacyHasura: true,
       },
@@ -66,6 +68,7 @@ describe('runtime-config handler', () => {
     vi.stubEnv('RUNTIME_CONFIG_API_URL', 'https://api.example.test/');
     vi.stubEnv('RUNTIME_CONFIG_BACKEND_AUTH', 'true');
     vi.stubEnv('RUNTIME_CONFIG_BACKEND_DEADLINES', 'true');
+    vi.stubEnv('RUNTIME_CONFIG_BAZIS_CUT', 'true');
     vi.stubEnv('RUNTIME_CONFIG_ENABLE_LEGACY_HASURA', 'false');
 
     const res = createResponse();
@@ -77,6 +80,7 @@ describe('runtime-config handler', () => {
       features: {
         backendAuth: true,
         backendDeadlines: true,
+        bazisCut: true,
         enableLegacyHasura: false,
       },
     });

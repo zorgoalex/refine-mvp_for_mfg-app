@@ -1276,7 +1276,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       {
         key: 'details',
         label: 'Детали заказа',
-        children: <OrderDetailsTab ref={detailsTabRef} />,
+        children: <OrderDetailsTab ref={detailsTabRef} isSaving={isSaving} />,
       },
       {
         key: 'dates',

@@ -27,6 +27,8 @@ const CalendarList = lazy(async () => ({ default: (await import("./pages/calenda
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const BazisPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisPage")).BazisPage }));
 const BazisProjectViewPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisProjectViewPage")).BazisProjectViewPage }));
+const BazisCutListPage = lazy(async () => ({ default: (await import("./pages/bazis-cut/BazisCutListPage")).BazisCutListPage }));
+const BazisCutSetPage = lazy(async () => ({ default: (await import("./pages/bazis-cut/BazisCutSetPage")).BazisCutSetPage }));
 const ScanPage = lazy(async () => ({ default: (await import("./pages/scan/ScanPage")).ScanPage }));
 const GroupsPage = lazy(async () => ({ default: (await import("./pages/groups/GroupsPage")).GroupsPage }));
 const ProjectsList = lazy(async () => ({ default: (await import("./pages/projects/ProjectsList")).ProjectsList }));
@@ -289,6 +291,16 @@ const ThemedApp = () => {
                         meta: {
                           label: "Раскрой",
                         },
+                      },
+                    ]
+                  : []),
+                ...(featureFlags.bazisCut
+                  ? [
+                      {
+                        name: "bazis-cut-sets",
+                        list: "/bazis-cut",
+                        show: "/bazis-cut/:id",
+                        meta: { label: "Базис-раскрой" },
                       },
                     ]
                   : []),
@@ -649,6 +661,12 @@ const ThemedApp = () => {
                   {featureFlags.useBackendCut && (
                     <Route path="/cut">
                       <Route index element={<CutPage />} />
+                    </Route>
+                  )}
+                  {featureFlags.bazisCut && (
+                    <Route path="/bazis-cut">
+                      <Route index element={<BazisCutListPage />} />
+                      <Route path=":id" element={<BazisCutSetPage />} />
                     </Route>
                   )}
                   {featureFlags.useBackendBazis && (

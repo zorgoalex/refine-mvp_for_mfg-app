@@ -365,6 +365,10 @@ probe_file() {
                            AND od.delete_flag = false
                        )
                      );" ;;
+    068_*) probe_all "$(q_tbl bazis_cut_sets)" "$(q_tbl bazis_cut_set_details)" \
+                     "$(q_col bazis_cut_set_details source_order_detail_id)" \
+                     "$(q_col bazis_cut_set_details film)" \
+                     "$(q_idx uq_bazis_cut_set_details_source_detail)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

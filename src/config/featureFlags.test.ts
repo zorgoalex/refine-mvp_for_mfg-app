@@ -25,6 +25,7 @@ describe('featureFlags', () => {
       useBackendVlm: false,
       useBackendReferences: false,
       useBackendCut: false,
+      bazisCut: false,
       projects: false,
       useBackendBazis: false,
       labels: false,
@@ -59,6 +60,54 @@ describe('featureFlags', () => {
     expect(getFeatureFlags({ VITE_USE_BACKEND_CUT: 'true' }).useBackendCut).toBe(true);
     expect(
       getFeatureFlags({ VITE_USE_BACKEND_CUT: 'false' }, { backendCut: true }).useBackendCut,
+    ).toBe(true);
+  });
+
+  it('allows runtime config to disable build-enabled Bazis cut', () => {
+    expect(
+      getFeatureFlags(
+        {
+          VITE_USE_BACKEND_CUT: 'true',
+          VITE_USE_BACKEND_BAZIS_CUT: 'true',
+        },
+        { bazisCut: false },
+      ).bazisCut,
+    ).toBe(false);
+  });
+
+  it('allows runtime config to enable build-disabled Bazis cut when backend cut is enabled', () => {
+    expect(
+      getFeatureFlags(
+        {
+          VITE_USE_BACKEND_CUT: 'true',
+          VITE_USE_BACKEND_BAZIS_CUT: 'false',
+        },
+        { bazisCut: true },
+      ).bazisCut,
+    ).toBe(true);
+  });
+
+  it('fails closed when Bazis cut is enabled without backend cut', () => {
+    expect(
+      getFeatureFlags(
+        {
+          VITE_USE_BACKEND_CUT: 'false',
+          VITE_USE_BACKEND_BAZIS_CUT: 'true',
+        },
+        { bazisCut: true },
+      ).bazisCut,
+    ).toBe(false);
+  });
+
+  it('enables Bazis cut when build/runtime Bazis cut and backend cut are all enabled', () => {
+    expect(
+      getFeatureFlags(
+        {
+          VITE_USE_BACKEND_CUT: 'true',
+          VITE_USE_BACKEND_BAZIS_CUT: 'true',
+        },
+        { backendCut: true, bazisCut: true },
+      ).bazisCut,
     ).toBe(true);
   });
 

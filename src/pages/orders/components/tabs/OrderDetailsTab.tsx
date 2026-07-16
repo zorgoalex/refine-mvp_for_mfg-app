@@ -16,6 +16,7 @@ import { useDetailGrouping } from '../../useDetailGrouping';
 import { DetailGroupingControls } from '../DetailGroupingControls';
 import { authSession } from '../../../../api/authSession';
 import { AddToCutModal } from '../AddToCutModal';
+import { AddToBazisCutModal } from '../../../bazis-cut/AddToBazisCutModal';
 import { selectedDetailIds } from '../../groupSelection';
 import { selectedGroupLabelForCut, type GroupField } from '../../detailGrouping';
 import { featureFlags } from '../../../../config/featureFlags';
@@ -43,8 +44,8 @@ interface DragSelectionState {
   cancel: () => void;
 }
 
-export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
-  const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails, header, updateHeaderField } = useOrderFormStore();
+export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boolean }>(({ isSaving = false }, ref) => {
+  const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails, header, updateHeaderField, isDirty } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
 
   const groupingUserId = authSession.getUser()?.id ?? 'anon';
@@ -80,6 +81,13 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
 
   const cutEnabled = featureFlags.useBackendCut && can('cut.manage');
   const [addToCutOpen, setAddToCutOpen] = useState(false);
+  const bazisCutVisible = featureFlags.bazisCut;
+  const bazisCutManage = can('cut.manage');
+  const [addToBazisCutOpen, setAddToBazisCutOpen] = useState(false);
+  const bazisCutDetailIds = useMemo(
+    () => selectedDetailIds(details as any[], selectedRowKeys),
+    [details, selectedRowKeys],
+  );
   const eligibleCutDetailIds = useMemo(
     () => (cutEnabled ? selectedDetailIds(details as any[], selectedRowKeys) : []),
     [cutEnabled, details, selectedRowKeys],
@@ -538,6 +546,18 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
               Добавить выбранные в раскрой ({eligibleCutDetailIds.length})
             </Button>
           )}
+          {bazisCutVisible && (
+            <Tooltip title={isDirty || isSaving ? 'Сначала сохраните изменения заказа' : !bazisCutManage ? 'Недостаточно прав' : undefined}>
+              <span>
+                <Button
+                  onClick={() => setAddToBazisCutOpen(true)}
+                  disabled={!bazisCutManage || isDirty || isSaving || header?.order_id == null || bazisCutDetailIds.length === 0}
+                >
+                  Добавить в Базис раскрой
+                </Button>
+              </span>
+            </Tooltip>
+          )}
           <Button
             icon={<CalculatorOutlined />}
             onClick={handleRecalculateSums}
@@ -642,6 +662,16 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
             nameSuffix={cutSelectedGroupName}
             onClose={() => setAddToCutOpen(false)}
             onDone={() => { setAddToCutOpen(false); handleSelectChange([]); }}
+          />
+        )}
+        {bazisCutVisible && header?.order_id != null && (
+          <AddToBazisCutModal
+            open={addToBazisCutOpen}
+            orderId={header.order_id}
+            orderName={header.order_name}
+            detailIds={bazisCutDetailIds}
+            onClose={() => setAddToBazisCutOpen(false)}
+            onDone={() => handleSelectChange([])}
           />
         )}
       </Space>

@@ -28,6 +28,7 @@ import { ordersApi } from "../../api/ordersApi";
 import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
 import { GroupLinksEditor } from "./components/groups/GroupLinksEditor";
 import { AddToCutModal } from "./components/AddToCutModal";
+import { AddToBazisCutModal } from "../bazis-cut/AddToBazisCutModal";
 import { can, canAny } from "../../utils/permissions";
 import { cutApi } from "../../api/cutApi";
 import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.types";
@@ -454,9 +455,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   // Состояние для выбора деталей в раскрой
   const cutEnabled = featureFlags.useBackendCut && can('cut.manage');
+  const bazisCutVisible = featureFlags.bazisCut;
+  const bazisCutManage = can('cut.manage');
+  const detailSelectionEnabled = cutEnabled || bazisCutVisible;
   const [cutSelectMode, setCutSelectMode] = useState(false);
   const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
   const [cutModalOpen, setCutModalOpen] = useState(false);
+  const [bazisCutModalOpen, setBazisCutModalOpen] = useState(false);
 
   useEffect(() => {
     if (!cutSelectMode) setCutSelectedDetailIds([]);
@@ -1512,14 +1517,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
                 Детали заказа
               </div>
-              {!isMobile && (
-                <Space size="small" wrap>
+              <Space size="small" wrap>
+                {!isMobile && <>
                   <DetailGroupingControls
                     state={grouping.state}
                     onFieldChange={grouping.setField}
                     onToggleSeparation={grouping.setShowSeparation}
                   />
-                  {cutEnabled && details.length > 0 && (
+                  {detailSelectionEnabled && details.length > 0 && (
                     <>
                       <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
                         {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
@@ -1538,14 +1543,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                           >
                             {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
                           </Button>
-                          <Button
-                            size="small"
-                            type="primary"
-                            disabled={cutSelectedDetailIds.length === 0}
-                            onClick={() => setCutModalOpen(true)}
-                          >
-                            Добавить выбранные в раскрой ({cutSelectedDetailIds.length})
-                          </Button>
+                          {cutEnabled && <Button size="small" type="primary" disabled={cutSelectedDetailIds.length === 0}
+                            onClick={() => setCutModalOpen(true)}>Добавить выбранные в раскрой ({cutSelectedDetailIds.length})</Button>}
                         </>
                       )}
                     </>
@@ -1557,11 +1556,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     settings={showColumnSettings}
                     onChange={saveShowColumnSettings}
                   />
-                </Space>
-              )}
+                </>}
+                {isMobile && detailSelectionEnabled && details.length > 0 && <Button size="small" onClick={() => setCutSelectMode((value) => !value)}>
+                  {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
+                </Button>}
+                {bazisCutVisible && <Tooltip title={!bazisCutManage ? 'Недостаточно прав' : undefined}>
+                  <span><Button size="small" disabled={!bazisCutManage || cutSelectedDetailIds.length === 0}
+                    onClick={() => setBazisCutModalOpen(true)}>Добавить в Базис раскрой</Button></span>
+                </Tooltip>}
+              </Space>
             </div>
             {isMobile ? (
-              <DetailCardList rows={details} lookups={detailCardLookups} highlightDetailId={highlightDetail} />
+              <DetailCardList rows={details} lookups={detailCardLookups} highlightDetailId={highlightDetail}
+                selectionEnabled={cutSelectMode} selectedIds={cutSelectedDetailIds}
+                onSelectionChange={setCutSelectedDetailIds} />
             ) : (
             <TableTopScroll>
             <Table
@@ -1707,6 +1715,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               onClose={() => setCutModalOpen(false)}
               onDone={() => {
                 setCutModalOpen(false);
+                setCutSelectMode(false);
+                setCutSelectedDetailIds([]);
+              }}
+            />
+          )}
+          {bazisCutVisible && record?.order_id && (
+            <AddToBazisCutModal
+              open={bazisCutModalOpen}
+              orderId={record.order_id}
+              orderName={record.order_name}
+              detailIds={cutSelectedDetailIds}
+              onClose={() => setBazisCutModalOpen(false)}
+              onDone={() => {
+                setBazisCutModalOpen(false);
                 setCutSelectMode(false);
                 setCutSelectedDetailIds([]);
               }}

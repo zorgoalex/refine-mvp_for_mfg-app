@@ -39,6 +39,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   sheet_material_types: 'Листовые материалы',
   cut: 'Раскрой',
   bazis: 'Базис-проекты',
+  'bazis-cut-sets': 'Базис-раскрой',
   scan: 'Сканер бирок',
 };
 
@@ -55,6 +56,7 @@ const PATH_TO_RESOURCE: Record<string, string> = {
   configuration: 'configuration',
   audit: 'audit',
   'sheet-material-types': 'sheet_material_types',
+  'bazis-cut': 'bazis-cut-sets',
 };
 
 const ACTION_LABELS: Record<string, string> = {

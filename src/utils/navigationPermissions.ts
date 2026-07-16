@@ -46,6 +46,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   configuration: ['settings.view', 'settings.manage'],
   audit: ['audit.view'],
   'cut-jobs': ['cut.view'],
+  'bazis-cut-sets': ['cut.view'],
   bazis: ['bazis.view'],
   sheet_material_types: ['sheet_materials.view'],
 };
