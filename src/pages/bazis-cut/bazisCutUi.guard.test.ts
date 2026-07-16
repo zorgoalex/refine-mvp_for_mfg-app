@@ -49,9 +49,10 @@ describe('Basis-cut UI integration guards', () => {
 
   it('keeps all 33 fields editable and uses native picker with fallback', () => {
     expect((card.match(/key: '[A-Za-z0-9]+'/g) ?? []).length).toBeGreaterThanOrEqual(33);
+    expect(card).toContain("title: 'Базис заказ'");
+    expect(card).toContain("dataIndex: 'sourceBazisOrderNo'");
     expect(card).toContain('showSaveFilePicker');
     expect(card).toContain('downloadBlob');
     expect(card).toContain("error.name === 'AbortError'");
   });
 });
-

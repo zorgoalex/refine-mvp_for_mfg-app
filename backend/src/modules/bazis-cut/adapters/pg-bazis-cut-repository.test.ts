@@ -3,7 +3,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { PgBazisCutRepository } from './pg-bazis-cut-repository';
+import { PgBazisCutRepository, resolveBazisOrderNo } from './pg-bazis-cut-repository';
 
 const user: CurrentUser = {
   id: '7', username: 'manager', role: 'manager', roleId: 3,
@@ -13,6 +13,12 @@ const user: CurrentUser = {
 afterEach(() => vi.restoreAllMocks());
 
 describe('PgBazisCutRepository security and event contract', () => {
+  it('prefers the Basis order frozen directly on the order detail', () => {
+    expect(resolveBazisOrderNo(' Кухня ', '1491', 'fallback')).toBe('Кухня');
+    expect(resolveBazisOrderNo('', '1491', 'fallback')).toBe('1491');
+    expect(resolveBazisOrderNo(null, null, ' fallback ')).toBe('fallback');
+  });
+
   it('records an order-scope denial outside the command transaction before idempotency', async () => {
     const tx = { query: vi.fn(async (sql: string) => sql.includes('FROM orders')
       ? result([])

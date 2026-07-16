@@ -153,6 +153,8 @@ function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) =
   const grouped = (['Основное', 'Размеры', 'Кромки', 'Дополнительно'] as const).map((group) => ({ title: group, children: withoutFixed.filter((field) => field.group === group).map(valueColumn) }));
   return [
     { title: 'Источник', key: 'source', fixed: 'left', width: 180, render: (_, row) => row.sourceOrderId ? <Link to={`/orders/show/${row.sourceOrderId}`}>{row.sourceOrderFullNumber || row.sourceOrderName}</Link> : 'Снимок' },
+    { title: 'Базис заказ', dataIndex: 'sourceBazisOrderNo', key: 'sourceBazisOrderNo', fixed: 'left', width: 150,
+      render: (value: string) => value || <Text type="secondary">—</Text> },
     { title: 'Позиция', dataIndex: 'position', key: 'position', fixed: 'left', width: 130 },
     { title: 'Наименование', dataIndex: 'partName', key: 'partName', fixed: 'left', width: 200 },
     ...grouped,

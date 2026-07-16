@@ -16,7 +16,7 @@ describe('buildBazisCutXls', () => {
     expect(sheet['!ref']).toBe('A1:AG2');
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
     expect(rows[0]).toEqual([...BAZIS_CUT_HEADERS]);
-    expect(rows[1]?.[5]).toBe('01.00.07');
+    expect(rows[1]?.[5]).toBe('Заказ 149101.00.07');
     expect(rows[1]?.[4]).toBe(18);
     expect(rows[1]?.[26]).toBeNull();
     expect(rows[1]?.[27]).toBe('=literal');
@@ -25,6 +25,20 @@ describe('buildBazisCutXls', () => {
 
   it('rejects an empty set', () => {
     expect(() => buildBazisCutXls([])).toThrow('Нельзя экспортировать пустой набор');
+  });
+
+  it('writes only position when the detail has no Basis order', () => {
+    const bytes = buildBazisCutXls([detail({
+      sourceBazisOrderNo: '',
+      position: '01.00.07',
+    })]);
+    const workbook = XLSX.read(bytes, { type: 'buffer' });
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(
+      workbook.Sheets[BAZIS_CUT_SHEET_NAME],
+      { header: 1, defval: null },
+    );
+
+    expect(rows[1]?.[5]).toBe('01.00.07');
   });
 });
 
@@ -46,4 +60,3 @@ function detail(overrides: Partial<BazisCutSetDetailDto> = {}): BazisCutSetDetai
     ...overrides,
   };
 }
-

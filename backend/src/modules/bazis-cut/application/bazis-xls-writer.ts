@@ -35,10 +35,12 @@ export function buildBazisCutXls(details: readonly BazisCutSetDetailDto[]): Buff
   return XLSX.write(workbook, { type: 'buffer', bookType: 'biff8' }) as Buffer;
 }
 
-export function bazisCutFieldsToRow(detail: BazisCutDetailFields): unknown[] {
+export function bazisCutFieldsToRow(
+  detail: BazisCutDetailFields & { sourceBazisOrderNo?: string },
+): unknown[] {
   return [
       detail.cutEnabled ? 'Да' : 'Нет', detail.materialType, safeText(detail.materialName),
-      safeText(detail.materialArticle), detail.thicknessMm, safeText(detail.position),
+      safeText(detail.materialArticle), detail.thicknessMm, exportPosition(detail),
       safeText(detail.partName), detail.finishedLengthMm, detail.finishedWidthMm,
       detail.cutLengthMm, detail.cutWidthMm, detail.quantity, safeText(detail.orientation),
       safeText(detail.groove), safeText(detail.l1Name), safeText(detail.l1Designation),
@@ -49,6 +51,10 @@ export function bazisCutFieldsToRow(detail: BazisCutDetailFields): unknown[] {
       safeText(detail.customProperty), safeText(detail.glue), safeText(detail.milling),
       safeText(detail.route), safeText(detail.film),
     ];
+}
+
+function exportPosition(detail: BazisCutDetailFields & { sourceBazisOrderNo?: string }): string {
+  return `${detail.sourceBazisOrderNo?.trim() ?? ''}${detail.position.trim()}`;
 }
 
 function safeText(value: string): string {
