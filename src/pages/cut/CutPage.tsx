@@ -423,6 +423,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // Current geometry violations (empty = all clear, save enabled).
   const [violations, setViolations] = useState<ManualViolation[]>([]);
   const [editorViewZoom, setEditorViewZoom] = useState(1);
+  const [editorSheetRotations, setEditorSheetRotations] = useState<Record<number, number>>({});
+  const [editorSheetMirrors, setEditorSheetMirrors] = useState<Record<number, { horizontal: boolean; vertical: boolean }>>({});
   // Undo stack of workingSheets snapshots (one per committed drag/rotate),
   // capped at EDITOR_UNDO_LIMIT. Cleared on enter/cancel/save.
   const [editorHistory, setEditorHistory] = useState<{ sheetIndex: number; placements: SheetPlacements }[][]>([]);
@@ -1120,6 +1122,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       // Open zoomed out: the operator first orients across the whole group,
       // then zooms into the sheet they are editing.
       setEditorViewZoom(MIN_EDITOR_VIEW_ZOOM);
+      setEditorSheetRotations(Object.fromEntries(seed.map((sheet) => [
+        sheet.sheetIndex,
+        group.manualLayout?.sheets.find((saved) => saved.sheetIndex === sheet.sheetIndex)?.viewTransform?.rotationDeg ?? 0,
+      ])));
+      setEditorSheetMirrors(Object.fromEntries(seed.map((sheet) => {
+        const saved = group.manualLayout?.sheets.find((candidate) => candidate.sheetIndex === sheet.sheetIndex)?.viewTransform;
+        return [sheet.sheetIndex, {
+          horizontal: saved?.mirrorHorizontal ?? false,
+          vertical: saved?.mirrorVertical ?? false,
+        }];
+      })));
       setEditingGroupId(group.cutGroupId);
     },
     [job],
@@ -1192,6 +1205,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           jobVersion: job.version,
           active: true,
           placements: moves,
+          sheetTransforms: workingSheets.map(({ sheetIndex }) => ({
+            sheetIndex,
+            rotationDeg: (editorSheetRotations[sheetIndex] ?? 0) as 0 | 90 | 180 | 270,
+            mirrorHorizontal: editorSheetMirrors[sheetIndex]?.horizontal ?? false,
+            mirrorVertical: editorSheetMirrors[sheetIndex]?.vertical ?? false,
+          })),
         });
         setJob(updated);
         applyPdfTemplateState(updated);
@@ -1209,7 +1228,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setBusy(false);
       }
     },
-    [applyPdfTemplateState, job, workingSheets, loadJobs, handleError, resetSheetViews],
+    [applyPdfTemplateState, editorSheetMirrors, editorSheetRotations, job, workingSheets, loadJobs, handleError, resetSheetViews],
   );
 
   const filteredJobs = useMemo(() => {
@@ -2133,6 +2152,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 <SheetEditor
                   sheets={workingSheets}
                   viewZoom={editorViewZoom}
+                  sheetRotations={editorSheetRotations}
+                  sheetMirrors={editorSheetMirrors}
+                  onSheetRotationChange={(sheetIndex, rotationDeg) => setEditorSheetRotations((current) => ({ ...current, [sheetIndex]: rotationDeg }))}
+                  onSheetMirrorChange={(sheetIndex, mirror) => setEditorSheetMirrors((current) => ({ ...current, [sheetIndex]: mirror }))}
                   gap={{ kerfMm: job.editorParams.kerfMm, spacingMm: job.editorParams.spacingMm }}
                   filmTextureByItemId={editorFilmTextureByItemId}
                   labelInfoByItemId={editorLabelInfoByItemId}

@@ -98,6 +98,7 @@ export interface CutGroupSheetDto {
 export interface CutManualSheet {
   sheetIndex: number;
   placements: SheetPlacements;
+  viewTransform?: Omit<CutSheetViewTransform, 'sheetIndex'>;
 }
 
 /** Saved manual placement layout for a cut group. */
@@ -151,11 +152,19 @@ export interface CutManualMove {
   rotated: boolean;
 }
 
+export interface CutSheetViewTransform {
+  sheetIndex: number;
+  rotationDeg: 0 | 90 | 180 | 270;
+  mirrorHorizontal: boolean;
+  mirrorVertical: boolean;
+}
+
 /** Body for PATCH /cut-jobs/:cutJobId/groups/:groupId/manual-layout */
 export interface SaveManualLayoutRequest {
   jobVersion: number;
   active: boolean;
   placements: CutManualMove[];
+  sheetTransforms: CutSheetViewTransform[];
 }
 
 export interface CutJobDto {

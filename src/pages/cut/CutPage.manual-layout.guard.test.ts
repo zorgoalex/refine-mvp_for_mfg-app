@@ -10,6 +10,13 @@ import { describe, expect, it } from 'vitest';
 const src = readFileSync(fileURLToPath(new URL('./CutPage.tsx', import.meta.url)), 'utf8');
 
 describe('CutPage manual-layout guard', () => {
+  it('saves and restores per-sheet rotation and mirror transforms', () => {
+    expect(src).toMatch(/sheetTransforms:\s*workingSheets\.map/);
+    expect(src).toMatch(/viewTransform\?\.rotationDeg/);
+    expect(src).toMatch(/viewTransform;[\s\S]*mirrorHorizontal/);
+    expect(src).toMatch(/sheetRotations=\{editorSheetRotations\}/);
+    expect(src).toMatch(/sheetMirrors=\{editorSheetMirrors\}/);
+  });
   it('adds the edit button, alternative toggle, and save button', () => {
     expect(src).toMatch(/Редактировать раскрой/);
     expect(src).toMatch(/Показать альтернативный/);

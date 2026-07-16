@@ -25,6 +25,9 @@ describe('cutApi manual-layout', () => {
       placements: [
         { itemId: 'det-1', instance: 1, sheetIndex: 0, xMm: 10.5, yMm: 20, rotated: false },
       ],
+      sheetTransforms: [
+        { sheetIndex: 0, rotationDeg: 90, mirrorHorizontal: true, mirrorVertical: false },
+      ],
     };
     const fetchMock = mockFetch({ cutJobId: 5, version: 3 });
     await cutApi.saveManualLayout(5, 9, body);
@@ -34,7 +37,7 @@ describe('cutApi manual-layout', () => {
   });
 
   it('saveManualLayout rejects invalid cutJobId', async () => {
-    const body: SaveManualLayoutRequest = { jobVersion: 1, active: false, placements: [] };
+    const body: SaveManualLayoutRequest = { jobVersion: 1, active: false, placements: [], sheetTransforms: [] };
     await expect(cutApi.saveManualLayout(0, 9, body)).rejects.toThrow('Invalid cutJobId');
     await expect(cutApi.saveManualLayout(5, -1, body)).rejects.toThrow('Invalid cutJobId');
   });

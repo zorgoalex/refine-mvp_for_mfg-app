@@ -80,6 +80,10 @@ export interface SheetEditorProps {
   showFilm: boolean;
   /** Group view scale controlled by the sticky group toolbar. */
   viewZoom?: number;
+  sheetRotations: Record<number, number>;
+  sheetMirrors: Record<number, { horizontal: boolean; vertical: boolean }>;
+  onSheetRotationChange: (sheetIndex: number, rotationDeg: number) => void;
+  onSheetMirrorChange: (sheetIndex: number, mirror: { horizontal: boolean; vertical: boolean }) => void;
 }
 
 // ── Internal types ─────────────────────────────────────────────────────────
@@ -342,14 +346,16 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     pieceSheetInfoByItemId,
     showFilm,
     viewZoom = 1,
+    sheetRotations,
+    sheetMirrors,
+    onSheetRotationChange,
+    onSheetMirrorChange,
   } = props;
 
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const [selectedSheetIndex, setSelectedSheetIndex] = useState<number | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [pieceGroups, setPieceGroups] = useState<PieceGroups>(() => new Map());
-  const [sheetRotations, setSheetRotations] = useState<Record<number, number>>({});
-  const [sheetMirrors, setSheetMirrors] = useState<Record<number, { horizontal: boolean; vertical: boolean }>>({});
   const [menu, setMenu] = useState<{
     clientX: number;
     clientY: number;
@@ -373,11 +379,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
   }, []);
 
   const rotateSheetView = useCallback((sheetIndex: number, direction: -1 | 1) => {
-    setSheetRotations((current) => ({
-      ...current,
-      [sheetIndex]: (((current[sheetIndex] ?? 0) + direction * 90) % 360 + 360) % 360,
-    }));
-  }, []);
+    onSheetRotationChange(sheetIndex, (((sheetRotations[sheetIndex] ?? 0) + direction * 90) % 360 + 360) % 360);
+  }, [onSheetRotationChange, sheetRotations]);
 
   const toggleSheetMirror = useCallback((sheetIndex: number, axis: 'horizontal' | 'vertical') => {
     const previous = sheetMirrors[sheetIndex] ?? { horizontal: false, vertical: false };
@@ -385,11 +388,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     if (enabled) {
       void message.warning('Зеркальное отражение может исказить рисунок фрезеровки. Проверьте результат перед сохранением.');
     }
-    setSheetMirrors({
-      ...sheetMirrors,
-      [sheetIndex]: { ...previous, [axis]: enabled },
-    });
-  }, [sheetMirrors]);
+    onSheetMirrorChange(sheetIndex, { ...previous, [axis]: enabled });
+  }, [onSheetMirrorChange, sheetMirrors]);
 
   // ── Stable refs for window-level event handlers (avoid re-subscription on every state change) ──
   const dragRef = useRef<DragState | null>(null);

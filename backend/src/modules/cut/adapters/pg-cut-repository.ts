@@ -2732,10 +2732,21 @@ export class PgCutRepository implements CutRepositoryPort {
       // ── 8. Canonicalize: preserve auto sheet_index values; empty sheets dropped ─
       //   reconstructManualSheets keeps the REAL sheet_index of every surviving
       //   sheet (no renumber) but omits sheets left empty after a cross-sheet move.
-      const canonicalSheets: import('../dto/cut.dto').CutManualSheetDto[] = reconstructedSheets.map(({ sheetIndex, placements: p }) => ({
-        sheetIndex,
-        placements: p,
-      }));
+      const transformBySheet = new Map((command.sheetTransforms ?? []).map((transform) => [transform.sheetIndex, transform]));
+      const canonicalSheets: import('../dto/cut.dto').CutManualSheetDto[] = reconstructedSheets.map(({ sheetIndex, placements: p }) => {
+        const transform = transformBySheet.get(sheetIndex);
+        return {
+          sheetIndex,
+          placements: p,
+          ...(transform ? {
+            viewTransform: {
+              rotationDeg: transform.rotationDeg,
+              mirrorHorizontal: transform.mirrorHorizontal,
+              mirrorVertical: transform.mirrorVertical,
+            },
+          } : {}),
+        };
+      });
 
       // ── 9. No-op short-circuit ────────────────────────────────────────────
       // Short-circuit ONLY when the FULL target persisted state already matches:

@@ -636,9 +636,20 @@ describe('parseSaveManualLayoutBody', () => {
       jobVersion: 3,
       active: true,
       placements: [{ itemId: 'det-1', instance: 1, sheetIndex: 0, xMm: 5, yMm: 7, rotated: false }],
+      sheetTransforms: [{ sheetIndex: 0, rotationDeg: 270, mirrorHorizontal: true, mirrorVertical: false }],
     });
     expect(out.jobVersion).toBe(3);
     expect(out.placements[0].itemId).toBe('det-1');
+    expect(out.sheetTransforms[0]).toEqual({ sheetIndex: 0, rotationDeg: 270, mirrorHorizontal: true, mirrorVertical: false });
+  });
+  it('defaults transforms for older clients and rejects unsupported angles', () => {
+    expect(parseSaveManualLayoutBody({ jobVersion: 1, active: true, placements: [] }).sheetTransforms).toEqual([]);
+    expect(() => parseSaveManualLayoutBody({
+      jobVersion: 1,
+      active: true,
+      placements: [],
+      sheetTransforms: [{ sheetIndex: 0, rotationDeg: 45, mirrorHorizontal: false, mirrorVertical: false }],
+    })).toThrow();
   });
   it('rejects a body carrying geometry (width/height not allowed — strict)', () => {
     expect(() => parseSaveManualLayoutBody({

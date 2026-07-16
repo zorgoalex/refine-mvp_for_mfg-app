@@ -20,12 +20,20 @@ export interface ManualMove {
   rotated: boolean;
 }
 
+export interface SheetViewTransform {
+  sheetIndex: number;
+  rotationDeg: 0 | 90 | 180 | 270;
+  mirrorHorizontal: boolean;
+  mirrorVertical: boolean;
+}
+
 export interface SaveManualLayoutCommand {
   currentUser: CurrentUser;
   cutJobId: number;
   cutGroupId: number;
   jobVersion: number;
   placements: ManualMove[];
+  sheetTransforms?: SheetViewTransform[];
   active: boolean;
   requestId?: string;
 }

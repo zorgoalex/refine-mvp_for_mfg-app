@@ -72,6 +72,11 @@ export interface CutJobItemDto {
 export interface CutManualSheetDto {
   sheetIndex: number;
   placements: SheetPlacementsJson;
+  viewTransform?: {
+    rotationDeg: 0 | 90 | 180 | 270;
+    mirrorHorizontal: boolean;
+    mirrorVertical: boolean;
+  };
 }
 
 export interface CutManualLayoutDto {

@@ -12,7 +12,7 @@ import type {
   CutSelectionCriteriaDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
-import type { CutSheetTypeOption, ManualMove } from '../application/cut-command.types';
+import type { CutSheetTypeOption, ManualMove, SheetViewTransform } from '../application/cut-command.types';
 import { CutPdfCache, type PdfEnsureResult } from '../application/cut-pdf-cache';
 import { CutRuntimeConfigService } from './cut-runtime-config.service';
 
@@ -93,11 +93,19 @@ const manualMoveSchema = z
   })
   .strict();
 
+const sheetViewTransformSchema = z.object({
+  sheetIndex: z.number().int().min(0),
+  rotationDeg: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]),
+  mirrorHorizontal: z.boolean(),
+  mirrorVertical: z.boolean(),
+}).strict();
+
 const saveManualLayoutBodySchema = z
   .object({
     jobVersion: z.number().int().nonnegative(),
     active: z.boolean(),
     placements: z.array(manualMoveSchema),
+    sheetTransforms: z.array(sheetViewTransformSchema).default([]),
   })
   .strict();
 
@@ -396,7 +404,7 @@ export class CutController {
     @Body() body: unknown,
   ): Promise<CutJobDto> {
     const currentUser = this.requireMutation(request);
-    const { jobVersion, active, placements } = parseSaveManualLayoutBody(body);
+    const { jobVersion, active, placements, sheetTransforms } = parseSaveManualLayoutBody(body);
     const job = await this.cut.saveManualLayout({
       currentUser,
       cutJobId: parseCutJobId(cutJobId),
@@ -404,6 +412,7 @@ export class CutController {
       jobVersion,
       active,
       placements,
+      sheetTransforms,
       requestId: request.requestId,
     });
     if (job.status === 'ready' && job.pdfPrewarmState === 'pending') {
@@ -741,7 +750,7 @@ export function parseSetPdfTemplateBody(body: unknown): { pdfTemplate: string } 
   return parse(setPdfTemplateBodySchema, body);
 }
 
-export function parseSaveManualLayoutBody(body: unknown): { jobVersion: number; active: boolean; placements: ManualMove[] } {
+export function parseSaveManualLayoutBody(body: unknown): { jobVersion: number; active: boolean; placements: ManualMove[]; sheetTransforms: SheetViewTransform[] } {
   return parse(saveManualLayoutBodySchema, body);
 }
 
