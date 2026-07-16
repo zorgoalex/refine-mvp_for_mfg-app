@@ -9,6 +9,7 @@ import { Link, useParams } from 'react-router-dom';
 import {
   bazisCutApi, type BazisCutDetailFields, type BazisCutSetCardDto, type BazisCutSetDetailDto,
 } from '../../api/bazisCutApi';
+import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
 import { saveBazisCutFile, type BazisCutSaveHandle } from './bazisCutSaveFile';
 
@@ -60,6 +61,12 @@ export const BazisCutSetPage: React.FC = () => {
   const [exporting, setExporting] = useState(false); const [editing, setEditing] = useState<BazisCutSetDetailDto | null>(null);
   const [nameForm] = Form.useForm<{ name: string }>(); const [detailForm] = Form.useForm<BazisCutDetailFields>();
   const canManage = can('cut.manage');
+  const setTabTitle = useTabStore((state) => state.setTabTitle);
+  const tableHeaderOffset = useWorkspaceTabsHeight();
+
+  useEffect(() => {
+    if (valid) setTabTitle(`/bazis-cut/${setId}`, `Базис-раскрой #${setId}`);
+  }, [setId, setTabTitle, valid]);
 
   const load = useCallback(async () => {
     if (!valid) return; setLoading(true);
@@ -126,7 +133,8 @@ export const BazisCutSetPage: React.FC = () => {
       <Descriptions.Item label="Базис-заказы"><SourceRefs refs={set.bazisOrders} /></Descriptions.Item>
     </Descriptions>}</Card>
     <Card title="Детали набора"><Table rowKey="bazisCutSetDetailId" columns={columns} dataSource={set?.details ?? []}
-      loading={loading} pagination={false} scroll={{ x: 5200 }} size="small" locale={{ emptyText: 'В наборе нет деталей' }} /></Card>
+      loading={loading} pagination={false} scroll={{ x: 5200 }} sticky={{ offsetHeader: tableHeaderOffset }}
+      size="small" locale={{ emptyText: 'В наборе нет деталей' }} /></Card>
   </Space>
   <Modal width={1000} title={`Редактирование позиции ${editing?.position ?? ''}`} open={editing !== null}
     onCancel={() => setEditing(null)} onOk={() => void saveDetail()} confirmLoading={saving} okText="Сохранить" cancelText="Отмена" destroyOnClose>
@@ -166,6 +174,23 @@ function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) =
 
 function fieldsOf(detail: BazisCutSetDetailDto): BazisCutDetailFields { return Object.fromEntries(FIELDS.map((field) => [field.key, detail[field.key]])) as unknown as BazisCutDetailFields; }
 function commandKey(prefix: string): string { return `${prefix}-${typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`; }
+function useWorkspaceTabsHeight(): number {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const tabs = document.querySelector<HTMLElement>('.workspace-tabs');
+    if (!tabs) return;
+    const update = () => setHeight(Math.ceil(tabs.getBoundingClientRect().height));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(tabs);
+    window.addEventListener('resize', update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, []);
+  return height;
+}
 const SourceRefs: React.FC<{ refs: Array<{ id: number; label: string }>; href?: (id: number) => string }> = ({ refs, href }) => {
   if (refs.length === 0) return <>—</>;
   return <>{refs.map((ref, index) => <React.Fragment key={ref.id}>{index > 0 && ', '}{href ? <Link to={href(ref.id)}>{ref.label}</Link> : ref.label}</React.Fragment>)}</>;
