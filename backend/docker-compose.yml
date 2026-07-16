@@ -14,6 +14,7 @@ services:
       SWAGGER_ENABLED: "true"
       READINESS_REQUIRE_DATABASE: "false"
       READINESS_REQUIRE_REDIS: "false"
+      BACKEND_ENABLE_BAZIS_CUT: ${BACKEND_ENABLE_BAZIS_CUT:-false}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health/live"]
       interval: 30s

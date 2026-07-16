@@ -179,7 +179,9 @@ export function buildCategorizedResources(args: {
   );
 
   resources.forEach((resource) => {
-    if (resource.name === 'orders_view' || resource.name === 'calendar') return;
+    if (resource.name === 'orders_view' || resource.name === 'calendar') {
+      return;
+    }
     const category = categoryMap[resource.name] || 'Справочники';
     const label = resourceLabels[resource.name] || resource.meta?.label || resource.name;
     const route = typeof resource.list === 'string'

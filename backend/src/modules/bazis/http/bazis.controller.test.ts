@@ -8,9 +8,13 @@ import type { BazisService } from '../application/bazis.service';
 import {
   BazisController,
   parseBazisImportFields,
+  parseAddToOrderBody,
+  parseBuildOrderDraftBody,
+  parseCreateOrderFromDraftBody,
   parseMaterialMappingsQuery,
   parseNodeSearchQuery,
   parseRevisionTreeQuery,
+  parseSetNodeNotesBody,
   parseUpsertMaterialMappingsBody,
 } from './bazis.controller';
 import type { BazisRuntimeConfigService } from './bazis-runtime-config.service';
@@ -225,6 +229,266 @@ describe('BazisController', () => {
       code: 'VALIDATION_ERROR',
     } satisfies Partial<ApiError>);
   });
+
+  it('coerces create-order-from-draft body and delegates to the service', async () => {
+    const createOrderFromDraft = vi.fn().mockResolvedValue({
+      orderId: 601,
+      orderName: 'Черновик',
+      detailsCreated: 3,
+      mappedNodes: 2,
+      requestId: 'req-draft-order',
+      auditId: 'audit-draft-1',
+    });
+    const controller = createController({
+      bazisEnabled: true,
+      service: { createOrderFromDraft },
+    });
+
+    const body = createDraftOrderBody();
+    const result = await controller.createOrderFromDraft(request(), '12', {
+      ...body,
+      nodes: [{ clientKey: 'detail-1', bazisNodeId: '101' }],
+      idempotencyKey: ' draft-order-key ',
+    });
+
+    expect(createOrderFromDraft).toHaveBeenCalledWith({
+      currentUser: request().user,
+      requestId: 'req-1',
+      revisionId: 12,
+      order: body.order,
+      nodes: [{ clientKey: 'detail-1', bazisNodeId: 101 }],
+      idempotencyKey: 'draft-order-key',
+    });
+    expect(result.orderId).toBe(601);
+  });
+
+  it('coerces add-to-order body and delegates to the service', async () => {
+    const addToOrder = vi.fn().mockResolvedValue({
+      orderId: 9001,
+      detailsAdded: 1,
+      detailsReplaced: 1,
+      requestId: 'req-add-to-order',
+    });
+    const controller = createController({
+      bazisEnabled: true,
+      service: { addToOrder },
+    });
+
+    const result = await controller.addToOrder(request(), '12', {
+      orderId: '9001',
+      adds: ['101'],
+      replaces: [{ bazisNodeId: '102', orderDetailId: '7002' }],
+      skips: [{ bazisNodeId: '103', orderDetailId: '7003' }],
+      idempotencyKey: ' add-order-key ',
+    });
+
+    expect(addToOrder).toHaveBeenCalledWith({
+      currentUser: request().user,
+      requestId: 'req-1',
+      revisionId: 12,
+      orderId: 9001,
+      adds: [101],
+      replaces: [{ bazisNodeId: 102, orderDetailId: 7002 }],
+      skips: [{ bazisNodeId: 103, orderDetailId: 7003 }],
+      idempotencyKey: 'add-order-key',
+    });
+    expect(result).toEqual({
+      orderId: 9001,
+      detailsAdded: 1,
+      detailsReplaced: 1,
+      requestId: 'req-add-to-order',
+    });
+  });
+
+  it('validates add-to-order request body', async () => {
+    const controller = createController({ bazisEnabled: true });
+
+    await expect(
+      controller.addToOrder(request(), '12', {
+        orderId: '0',
+        adds: ['x'],
+        replaces: [{ bazisNodeId: '0', orderDetailId: '1' }],
+        skips: [{ bazisNodeId: '1', orderDetailId: '0' }],
+        idempotencyKey: '   ',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+    } satisfies Partial<ApiError>);
+  });
+
+  it('validates create-order-from-draft request body', async () => {
+    const controller = createController({ bazisEnabled: true });
+
+    await expect(
+      controller.createOrderFromDraft(request(), '12', {
+        order: [],
+        nodes: [{ clientKey: '   ', bazisNodeId: '0' }],
+        idempotencyKey: '   ',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+    } satisfies Partial<ApiError>);
+  });
+
+  it('coerces order-draft body and delegates to the service', async () => {
+    const buildOrderDraft = vi.fn().mockResolvedValue({
+      revisionId: 12,
+      projectId: 77,
+      clientId: 5,
+      clientName: 'ООО Клиент',
+      bazisProjectName: 'Шкаф Nova',
+      bazisOrderNo: '1457',
+      details: [],
+      duplicates: [],
+    });
+    const controller = createController({
+      bazisEnabled: true,
+      service: { buildOrderDraft },
+    });
+
+    const result = await controller.buildOrderDraft(request(), '12', {
+      selectedNodeIds: ['101', '102'],
+      targetOrderId: '9001',
+    });
+
+    expect(buildOrderDraft).toHaveBeenCalledWith({
+      currentUser: request().user,
+      requestId: 'req-1',
+      revisionId: 12,
+      selectedNodeIds: [101, 102],
+      targetOrderId: 9001,
+    });
+    expect(result.revisionId).toBe(12);
+  });
+
+  it('validates order-draft request body', async () => {
+    const controller = createController({ bazisEnabled: true });
+
+    await expect(
+      controller.buildOrderDraft(request(), '12', {
+        selectedNodeIds: Array.from({ length: 501 }, (_, index) => String(index + 1)),
+        targetOrderId: '0',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+    } satisfies Partial<ApiError>);
+  });
+
+  it('parseBuildOrderDraftBody enforces non-empty node ids and optional positive target order id', () => {
+    expect(
+      parseBuildOrderDraftBody({ selectedNodeIds: ['1', '2'], targetOrderId: '5' }),
+    ).toEqual({
+      selectedNodeIds: [1, 2],
+      targetOrderId: 5,
+    });
+
+    expect(() => parseBuildOrderDraftBody({ selectedNodeIds: [] })).toThrowError(ApiError);
+    expect(() => parseBuildOrderDraftBody({ selectedNodeIds: ['1'], targetOrderId: '0' })).toThrowError(
+      ApiError,
+    );
+  });
+
+  it('parseAddToOrderBody requires a positive order id, pair arrays, and non-empty idempotencyKey', () => {
+    expect(
+      parseAddToOrderBody({
+        orderId: '9001',
+        adds: ['101'],
+        replaces: [{ bazisNodeId: '102', orderDetailId: '7002' }],
+        skips: [],
+        idempotencyKey: 'add-order-key',
+      }),
+    ).toEqual({
+      orderId: 9001,
+      adds: [101],
+      replaces: [{ bazisNodeId: 102, orderDetailId: 7002 }],
+      skips: [],
+      idempotencyKey: 'add-order-key',
+    });
+
+    expect(() =>
+      parseAddToOrderBody({
+        orderId: 0,
+        adds: [],
+        replaces: [{ bazisNodeId: 1, orderDetailId: 0 }],
+        skips: [],
+        idempotencyKey: '',
+      }),
+    ).toThrowError(ApiError);
+  });
+
+  it('parseCreateOrderFromDraftBody requires an order object, node mappings and a non-empty idempotencyKey', () => {
+    expect(
+      parseCreateOrderFromDraftBody({
+        order: createDraftOrderBody().order,
+        nodes: [{ clientKey: 'detail-1', bazisNodeId: '10' }],
+        idempotencyKey: 'draft-key',
+      }),
+    ).toEqual({
+      order: createDraftOrderBody().order,
+      nodes: [{ clientKey: 'detail-1', bazisNodeId: 10 }],
+      idempotencyKey: 'draft-key',
+    });
+
+    expect(() => parseCreateOrderFromDraftBody({ order: null, nodes: [], idempotencyKey: 'x' })).toThrowError(
+      ApiError,
+    );
+    expect(() =>
+      parseCreateOrderFromDraftBody({
+        order: createDraftOrderBody().order,
+        nodes: [{ clientKey: '', bazisNodeId: 1 }],
+        idempotencyKey: '',
+      }),
+    ).toThrowError(ApiError);
+  });
+
+  describe('setNodeNotes', () => {
+    it('fails closed 503 when flag off', async () => {
+      const controller = createController({ bazisEnabled: false });
+
+      await expect(controller.setNodeNotes(request(), '1', { notes: 'x' })).rejects.toMatchObject({
+        statusCode: 503,
+        code: 'SERVICE_UNAVAILABLE',
+      } satisfies Partial<ApiError>);
+    });
+
+    it('requires auth', async () => {
+      const controller = createController({ bazisEnabled: true });
+
+      await expect(controller.setNodeNotes({} as RequestWithCurrentUser, '1', { notes: 'x' })).rejects.toMatchObject({
+        statusCode: 401,
+        code: 'AUTH_REQUIRED',
+      } satisfies Partial<ApiError>);
+    });
+
+    it('delegates to the service with parsed nodeId and notes', async () => {
+      const setNodeNotes = vi.fn().mockResolvedValue({ bazisNodeId: 7213, notes: 'текст' });
+      const controller = createController({
+        bazisEnabled: true,
+        service: { setNodeNotes },
+      });
+
+      const result = await controller.setNodeNotes(request(), '7213', { notes: 'текст' });
+
+      expect(result).toEqual({ bazisNodeId: 7213, notes: 'текст' });
+      expect(setNodeNotes).toHaveBeenCalledWith(request().user, 'req-1', 7213, 'текст');
+    });
+  });
+
+  describe('parseSetNodeNotesBody', () => {
+    it('accepts string and null', () => {
+      expect(parseSetNodeNotesBody({ notes: 'x' })).toEqual({ notes: 'x' });
+      expect(parseSetNodeNotesBody({ notes: null })).toEqual({ notes: null });
+    });
+
+    it('rejects missing/extra/typed-wrong payload with 422', () => {
+      expect(() => parseSetNodeNotesBody({})).toThrowError(ApiError);
+      expect(() => parseSetNodeNotesBody({ notes: 5 })).toThrowError(ApiError);
+      expect(() => parseSetNodeNotesBody({ notes: 'x', extra: 1 })).toThrowError(ApiError);
+    });
+  });
 });
 
 function createController(input: {
@@ -237,11 +501,15 @@ function createController(input: {
     getProject: vi.fn(),
     getTree: vi.fn(),
     getNodeCard: vi.fn(),
+    setNodeNotes: vi.fn(),
     searchNodes: vi.fn(),
     getMaterialsSummary: vi.fn(),
     listRevisionOrders: vi.fn(),
     listMaterialMappings: vi.fn(),
     upsertMaterialMappings: vi.fn(),
+    buildOrderDraft: vi.fn(),
+    addToOrder: vi.fn(),
+    createOrderFromDraft: vi.fn(),
     createOrderFromRevision: vi.fn(),
     ...input.service,
   } as unknown as BazisService;
@@ -261,6 +529,47 @@ function request(): RequestWithCurrentUser {
       permissions: ['bazis.manage', 'bazis.view'],
     },
     requestId: 'req-1',
+  };
+}
+
+function createDraftOrderBody() {
+  return {
+    order: {
+      header: {
+        orderName: 'Черновик',
+        clientId: 5,
+        orderDate: '2026-07-13',
+        orderStatusId: 3,
+        projectId: 999,
+      },
+      details: [
+        {
+          clientKey: 'detail-1',
+          detailNumber: 1,
+          detailName: 'Панель',
+          height: 1000,
+          width: 500,
+          quantity: 1,
+          materialId: null,
+          sheetMaterialTypeId: 501,
+          millingTypeId: 1,
+          edgeTypeId: 1,
+        },
+      ],
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+      deleted: {
+        detailIds: [],
+        paymentIds: [],
+        workshopIds: [],
+        requirementIds: [],
+        dowelingLinkIds: [],
+      },
+    },
+    nodes: [{ clientKey: 'detail-1', bazisNodeId: 101 }],
+    idempotencyKey: 'draft-order-key',
   };
 }
 

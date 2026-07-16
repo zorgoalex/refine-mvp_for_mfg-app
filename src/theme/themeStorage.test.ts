@@ -34,6 +34,15 @@ describe('themeStorage', () => {
     expect(isThemeMode('system')).toBe(false);
     expect(isThemeMode('dark')).toBe(true);
   });
+
+  it('isUiSize: только default|small; undefined/мусор — false (mixed-deploy guard)', async () => {
+    const { isUiSize } = await import('./themeStorage');
+    expect(isUiSize('small')).toBe(true);
+    expect(isUiSize('default')).toBe(true);
+    expect(isUiSize(undefined)).toBe(false);
+    expect(isUiSize(null)).toBe(false);
+    expect(isUiSize('huge')).toBe(false);
+  });
 });
 
 function createLocalStorageMock(): Storage {

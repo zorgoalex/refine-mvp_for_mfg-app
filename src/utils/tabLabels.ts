@@ -1,5 +1,6 @@
 export const RESOURCE_LABELS: Record<string, string> = {
   orders_view: 'Заказы',
+  'orders-trash': 'Корзина',
   calendar: 'Календарь',
   groups: 'Группы',
   projects: 'Проекты',
@@ -38,6 +39,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   sheet_material_types: 'Листовые материалы',
   cut: 'Раскрой',
   bazis: 'Базис-проекты',
+  'bazis-cut-sets': 'Базис-раскрой',
   scan: 'Сканер бирок',
 };
 
@@ -54,6 +56,7 @@ const PATH_TO_RESOURCE: Record<string, string> = {
   configuration: 'configuration',
   audit: 'audit',
   'sheet-material-types': 'sheet_material_types',
+  'bazis-cut': 'bazis-cut-sets',
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -69,12 +72,18 @@ export const resourceFromPath = (pathname: string): string | undefined => {
   return seg ? resourceKeyFromSegment(seg) : undefined;
 };
 
+export const resolveOrderTabLabel = (orderName: unknown): string =>
+  typeof orderName === 'string' && orderName.trim() ? orderName.trim() : 'Заказ';
+
 export const resolveTabLabel = (pathname: string): string => {
+  const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   const segs = pathname.split('/').filter(Boolean);
-  const orderMatch = pathname.match(/^\/orders\/(edit|show)\/(\d+)/);
+  if (normalizedPath === '/orders/trash') {
+    return 'Корзина';
+  }
+  const orderMatch = pathname.match(/^\/orders\/(edit|show)\/\d+/);
   if (orderMatch) {
-    const [, action, orderId] = orderMatch;
-    return action === 'edit' ? `Заказ #${orderId} · Редактирование` : `Заказ #${orderId}`;
+    return resolveOrderTabLabel(undefined);
   }
   const resource = resourceFromPath(pathname);
   const resourceLabel = resource ? RESOURCE_LABELS[resource] : undefined;

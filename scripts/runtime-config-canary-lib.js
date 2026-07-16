@@ -14,6 +14,8 @@ const ROLLOUT_FEATURE_KEYS = [
   'backendUsers',
   'backendVlm',
   'backendReferences',
+  'backendCut',
+  'bazisCut',
   'labels',
   'workosAuth',
 ];
@@ -135,6 +137,24 @@ const STAGED_CANARY_FILES = [
       'backendVlm',
     ],
   },
+  {
+    file: '12-bazis-cut.json',
+    enabled: [
+      'backendAuth',
+      'backendPermissions',
+      'backendOrdersRead',
+      'backendOrdersWrite',
+      'backendPayments',
+      'backendClientPhones',
+      'backendProductionActions',
+      'backendDeadlines',
+      'backendOrderExport',
+      'backendUsers',
+      'backendVlm',
+      'backendCut',
+      'bazisCut',
+    ],
+  },
   { file: '99-rollback-all-off.json', enabled: [] },
 ];
 
@@ -252,6 +272,10 @@ function validateFeatureDependencies(features, label) {
 
   if (features.backendVlm === true && features.backendPermissions !== true) {
     errors.push(`${label}: backendVlm requires backendPermissions`);
+  }
+
+  if (features.bazisCut === true && features.backendCut !== true) {
+    errors.push(`${label}: bazisCut requires backendCut`);
   }
 
   return errors;

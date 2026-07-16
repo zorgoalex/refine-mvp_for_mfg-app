@@ -66,7 +66,6 @@ interface ImportWizardModalProps {
   onClose: () => void;
   onImported: () => void;
   onOpenTree: (revisionId: number, label: string, projectId: number | null) => void;
-  onCreateOrder: (revisionId: number, label: string, projectId: number | null) => void;
 }
 
 type BindingMode = 'bazis' | 'erp' | 'new';
@@ -90,7 +89,6 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   onClose,
   onImported,
   onOpenTree,
-  onCreateOrder,
 }) => {
   const [currentStep, setCurrentStep] = useState<StepKey>('file');
   const [minimized, setMinimized] = useState(false);
@@ -834,13 +832,14 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
             </Descriptions>
 
             <Space wrap>
+              {/* Создание ERP-заказа НАМЕРЕННО не отсюда: заказ создаётся из
+                  карточки Базис-проекта (вкладка «Панели»). Визард только
+                  импортирует; синяя CTA «Создать заказ» подталкивала к
+                  необязательному действию. */}
               <Button onClick={() => onOpenTree(summary.revisionId, buildRevisionLabel(summary), summary.projectId)}>
                 Открыть дерево
               </Button>
-              <Button type="primary" onClick={() => onCreateOrder(summary.revisionId, buildRevisionLabel(summary), summary.projectId)}>
-                Создать заказ
-              </Button>
-              <Button onClick={handleClose}>Закрыть</Button>
+              <Button type="primary" onClick={handleClose}>Закрыть</Button>
             </Space>
           </Space>
         ) : null}

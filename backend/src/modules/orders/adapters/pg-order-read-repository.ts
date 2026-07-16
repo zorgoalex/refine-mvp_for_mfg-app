@@ -25,6 +25,7 @@ const SORT_COLUMNS: Record<OrderListSortBy, string> = {
   plannedCompletionDate: 'o.planned_completion_date',
   completionDate: 'o.completion_date',
   issueDate: 'o.issue_date',
+  deletedAt: 'o.deleted_at',
   projectCode: 'mp.code',
   clientName: 'c.client_name',
   orderStatusName: 'os.order_status_name',
@@ -43,6 +44,7 @@ const PAGE_SORT_COLUMNS: Record<OrderListSortBy, string> = {
   plannedCompletionDate: 'o.planned_completion_date',
   completionDate: 'o.completion_date',
   issueDate: 'o.issue_date',
+  deletedAt: 'o.deleted_at',
   projectCode: 'o.project_code',
   clientName: 'o.client_name',
   orderStatusName: 'o.order_status_name',
@@ -107,6 +109,10 @@ interface OrderHeaderRow extends QueryResultRow {
   milling_type_id: string | number | null;
   edge_type_id: string | number | null;
   film_id: string | number | null;
+  delete_flag: boolean;
+  deleted_at: string | Date | null;
+  deleted_by: string | number | null;
+  deleted_by_name: string | null;
   milling_type_name: string | null;
   latest_doweling_order_id: string | number | null;
   latest_doweling_order_name: string | null;
@@ -137,8 +143,10 @@ interface OrderDetailRow extends QueryResultRow {
   joint_order_id: string | number | null;
   note: string | null;
   basis_project: string | null;
+  basis_product: string | null;
   basis_data: string | null;
   basis_designation: string | null;
+  doweling: boolean;
   link_cutting_file: string | null;
   link_cutting_image_file: string | null;
   link_cad_file: string | null;
@@ -350,6 +358,18 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     const listSheetTypeIdsAggregate = this.sheetOrdersReads
       ? 'ARRAY_AGG(materials.sheet_material_type_id ORDER BY materials.first_detail_number, materials.first_detail_id) AS sheet_material_type_ids'
       : 'NULL::bigint[] AS sheet_material_type_ids';
+    const deletedSelect = command.query.deleted === true
+      ? `,
+          o.deleted_at,
+          o.deleted_by,
+          deleted_by_user.full_name AS deleted_by_name`
+      : '';
+    const deletedJoin = command.query.deleted === true
+      ? 'LEFT JOIN users deleted_by_user ON deleted_by_user.user_id = o.deleted_by'
+      : '';
+    const headerListMetadataJoin = command.query.deleted === true
+      ? [headerListMaterialJoin, deletedJoin].filter((fragment) => fragment.length > 0).join('\n        ')
+      : headerListMaterialJoin;
     const count = await this.database.query<CountRow>(
       `
       SELECT COUNT(*)::int AS total
@@ -380,14 +400,14 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
           o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
           o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
-          ${headerSheetSelect}
+          ${headerSheetSelect}${deletedSelect}
         FROM orders o
         JOIN projects mp ON mp.project_id = o.project_id
         LEFT JOIN clients c ON c.client_id = o.client_id
         LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
         LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
         LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
-        ${headerListMaterialJoin}
+        ${headerListMetadataJoin}
         ${headerSheetJoin}
         ${where}
         ORDER BY ${orderBy} ${command.query.sortOrder === 'asc' ? 'ASC' : 'DESC'}, o.order_id DESC
@@ -497,7 +517,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     const total = toNumber(count.rows[0]?.total ?? 0);
 
     return {
-      data: rows.rows.map(mapListItem),
+      data: rows.rows.map((row) => mapListItem(row, command.query.deleted === true)),
       pagination: {
         page: command.query.page,
         pageSize: command.query.pageSize,
@@ -537,6 +557,22 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     const detailSheetJoin = this.sheetOrdersReads
       ? 'LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id'
       : '';
+    const includeDeleted = command.includeDeleted === true;
+    const deletedHeaderSelect = includeDeleted
+      ? `,
+        o.delete_flag,
+        o.deleted_at,
+        deleted_by_user.full_name AS deleted_by_name`
+      : '';
+    const deletedHeaderJoin = includeDeleted
+      ? 'LEFT JOIN users deleted_by_user ON deleted_by_user.user_id = o.deleted_by'
+      : '';
+    const headerMetadataJoin = includeDeleted
+      ? [headerMaterialJoin, deletedHeaderJoin].filter((fragment) => fragment.length > 0).join('\n      ')
+      : headerMaterialJoin;
+    const headerWhere = includeDeleted
+      ? 'WHERE o.order_id = $1'
+      : 'WHERE o.order_id = $1 AND o.delete_flag = false';
     const headerResult = await this.database.query<OrderHeaderRow>(
       `
       SELECT
@@ -551,15 +587,15 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
         o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
         o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
-        ${headerSheetCols}
+        ${headerSheetCols}${deletedHeaderSelect}
       FROM orders o
       LEFT JOIN clients c ON c.client_id = o.client_id
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
       LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
       LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
-      ${headerMaterialJoin}
+      ${headerMetadataJoin}
       ${headerSheetJoin}
-      WHERE o.order_id = $1 AND o.delete_flag = false
+      ${headerWhere}
       `,
       [command.orderId],
     );
@@ -646,6 +682,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       requirements.rows,
       dowelingLinks.rows,
       groupLinks.rows.map(mapGroupLinkRow),
+      includeDeleted,
     );
   }
 
@@ -834,7 +871,12 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
   }
 
   private buildListWhere(command: ListOrdersCommand, params: unknown[]): string {
-    const clauses = ['o.delete_flag = false'];
+    const clauses = [command.query.deleted === true ? 'o.delete_flag = true' : 'o.delete_flag = false'];
+
+    if (command.query.deleted === true && command.query.deletedScopeUserId) {
+      const deletedScopeUserIdIndex = params.push(Number(command.query.deletedScopeUserId));
+      clauses.push(`(o.created_by = $${deletedScopeUserIdIndex} OR o.manager_id = $${deletedScopeUserIdIndex})`);
+    }
 
     if (command.query.search) {
       const search = parseOrderSearchInput(command.query.search);
@@ -1029,6 +1071,7 @@ function mapOrderDto(
   requirements: OrderRequirementRow[],
   dowelingLinks: OrderDowelingLinkRow[],
   groups: OrderGroupSummaryDto[],
+  includeDeleted: boolean = false,
 ): OrderDto {
   return {
     header: {
@@ -1068,6 +1111,13 @@ function mapOrderDto(
       millingTypeId: toNullableNumber(row.milling_type_id),
       edgeTypeId: toNullableNumber(row.edge_type_id),
       filmId: toNullableNumber(row.film_id),
+      ...(includeDeleted
+        ? {
+            deleteFlag: row.delete_flag,
+            deletedAt: row.deleted_at === null ? null : toIsoString(row.deleted_at),
+            deletedByName: row.deleted_by_name ?? null,
+          }
+        : {}),
       createdAt: toIsoString(row.created_at),
       updatedAt: toIsoString(row.updated_at),
       createdBy: toNullableNumber(row.created_by),
@@ -1097,7 +1147,7 @@ function mapOrderDto(
   };
 }
 
-function mapListItem(row: OrderHeaderRow): OrderListItemDto {
+function mapListItem(row: OrderHeaderRow, includeDeleted: boolean = false): OrderListItemDto {
   const groups = mapGroupSummaryArray(row.group_links_json);
   return {
     orderId: toNumber(row.order_id),
@@ -1146,6 +1196,13 @@ function mapListItem(row: OrderHeaderRow): OrderListItemDto {
     groups,
     createdBy: toNullableNumber(row.created_by),
     editedBy: toNullableNumber(row.edited_by),
+    ...(includeDeleted
+      ? {
+          deletedAt: row.deleted_at === null ? null : toIsoString(row.deleted_at),
+          deletedBy: toNullableNumber(row.deleted_by),
+          deletedByName: row.deleted_by_name ?? null,
+        }
+      : {}),
     updatedAt: toIsoString(row.updated_at),
     version: toNumber(row.version),
   };
@@ -1175,8 +1232,10 @@ function mapDetail(row: OrderDetailRow) {
     jointOrderId: toNullableNumber(row.joint_order_id),
     note: row.note,
     basisProject: row.basis_project,
+    basisProduct: row.basis_product,
     basisData: row.basis_data,
     basisDesignation: row.basis_designation,
+    doweling: row.doweling === true,
     linkCuttingFile: row.link_cutting_file,
     linkCuttingImageFile: row.link_cutting_image_file,
     linkCadFile: row.link_cad_file,

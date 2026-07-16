@@ -3,7 +3,7 @@
 
 import React, { useState, useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
 import { Card, Button, Space, Modal, message, Tooltip, Alert } from 'antd';
-import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined, EditOutlined, CheckOutlined, CloseOutlined, ClearOutlined } from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
 import { BulkEditModal } from '../modals/BulkEditModal';
@@ -16,11 +16,13 @@ import { useDetailGrouping } from '../../useDetailGrouping';
 import { DetailGroupingControls } from '../DetailGroupingControls';
 import { authSession } from '../../../../api/authSession';
 import { AddToCutModal } from '../AddToCutModal';
+import { AddToBazisCutModal } from '../../../bazis-cut/AddToBazisCutModal';
 import { selectedDetailIds } from '../../groupSelection';
 import { selectedGroupLabelForCut, type GroupField } from '../../detailGrouping';
 import { featureFlags } from '../../../../config/featureFlags';
 import { can } from '../../../../utils/permissions';
 import { useOrderFormData } from '../../../../hooks/useOrderFormData';
+import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -42,8 +44,8 @@ interface DragSelectionState {
   cancel: () => void;
 }
 
-export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
-  const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails, header, updateHeaderField } = useOrderFormStore();
+export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boolean }>(({ isSaving = false }, ref) => {
+  const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails, header, updateHeaderField, isDirty } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
 
   const groupingUserId = authSession.getUser()?.id ?? 'anon';
@@ -79,6 +81,13 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
 
   const cutEnabled = featureFlags.useBackendCut && can('cut.manage');
   const [addToCutOpen, setAddToCutOpen] = useState(false);
+  const bazisCutVisible = featureFlags.bazisCut;
+  const bazisCutManage = can('cut.manage');
+  const [addToBazisCutOpen, setAddToBazisCutOpen] = useState(false);
+  const bazisCutDetailIds = useMemo(
+    () => selectedDetailIds(details as any[], selectedRowKeys),
+    [details, selectedRowKeys],
+  );
   const eligibleCutDetailIds = useMemo(
     () => (cutEnabled ? selectedDetailIds(details as any[], selectedRowKeys) : []),
     [cutEnabled, details, selectedRowKeys],
@@ -300,6 +309,13 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
     }
   }, [dragSelectionState]);
 
+  // One-click reset of ANY selection: checked rows + pending drag selection.
+  const handleClearSelection = useCallback(() => {
+    dragSelectionState?.cancel();
+    setDragSelectionState(null);
+    setSelectedRowKeys([]);
+  }, [dragSelectionState]);
+
   // Handle copy row - duplicate the row and insert after original
   const handleCopyRow = (detail: OrderDetail) => {
     // Create copy without identifiers
@@ -342,7 +358,6 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
 
     let areaUpdatedCount = 0;
     let costUpdatedCount = 0;
-    let totalArea = 0;
     let totalAmount = 0;
 
     // First pass: recalculate area for each detail, then cost
@@ -351,14 +366,9 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
       const width = Number(detail.width) || 0;
       const quantity = Number(detail.quantity) || 0;
 
-      // Calculate area using INTEGER MATH to avoid floating point errors
-      // height and width are in mm (integers), so we calculate in mm² first
-      // Example: 550mm * 200mm * 2 = 220000 mm²
-      // Then: ceil(220000 / 10000) / 100 = ceil(22) / 100 = 0.22 m²
       let newArea = 0;
       if (height > 0 && width > 0 && quantity > 0) {
-        const areaMm2 = height * width * quantity; // Integer arithmetic - no floating point errors!
-        newArea = Math.ceil(areaMm2 / 10000) / 100; // Convert to m² with 2 decimal places, round up
+        newArea = calculateOrderDetailArea(height, width, quantity);
       }
 
       const identifier = detail.temp_id || detail.detail_id;
@@ -387,12 +397,11 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
         costUpdatedCount++;
       }
 
-      totalArea += areaForCost;
       totalAmount += newDetailCost;
     });
 
     // Round totals
-    totalArea = Number(totalArea.toFixed(2));
+    const totalArea = calculateOrderTotalArea(details);
     totalAmount = Number(totalAmount.toFixed(2));
 
     // Update total_amount in header
@@ -451,8 +460,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
 
         // If dimensions changed, recalculate area
         if (dimensionsChanged && newHeight > 0 && newWidth > 0 && newQuantity > 0) {
-          const areaMm2 = newHeight * newWidth * newQuantity;
-          const newArea = Math.ceil(areaMm2 / 10000) / 100;
+          const newArea = calculateOrderDetailArea(newHeight, newWidth, newQuantity);
           updateData.area = newArea;
 
           // Recalculate cost based on new area
@@ -524,10 +532,31 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
           >
             Удалить выбранные ({selectedRowKeys.length})
           </Button>
+          <Tooltip title="Сбросить любое выделение строк">
+            <Button
+              icon={<ClearOutlined />}
+              onClick={handleClearSelection}
+              disabled={selectedRowKeys.length === 0 && !dragSelectionState}
+            >
+              Сбросить выделение
+            </Button>
+          </Tooltip>
           {cutEnabled && (
             <Button onClick={() => setAddToCutOpen(true)} disabled={eligibleCutDetailIds.length === 0}>
               Добавить выбранные в раскрой ({eligibleCutDetailIds.length})
             </Button>
+          )}
+          {bazisCutVisible && (
+            <Tooltip title={isDirty || isSaving ? 'Сначала сохраните изменения заказа' : !bazisCutManage ? 'Недостаточно прав' : undefined}>
+              <span>
+                <Button
+                  onClick={() => setAddToBazisCutOpen(true)}
+                  disabled={!bazisCutManage || isDirty || isSaving || header?.order_id == null || bazisCutDetailIds.length === 0}
+                >
+                  Добавить в Базис раскрой
+                </Button>
+              </span>
+            </Tooltip>
           )}
           <Button
             icon={<CalculatorOutlined />}
@@ -633,6 +662,16 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef>((_, ref) => {
             nameSuffix={cutSelectedGroupName}
             onClose={() => setAddToCutOpen(false)}
             onDone={() => { setAddToCutOpen(false); handleSelectChange([]); }}
+          />
+        )}
+        {bazisCutVisible && header?.order_id != null && (
+          <AddToBazisCutModal
+            open={addToBazisCutOpen}
+            orderId={header.order_id}
+            orderName={header.order_name}
+            detailIds={bazisCutDetailIds}
+            onClose={() => setAddToBazisCutOpen(false)}
+            onDone={() => handleSelectChange([])}
           />
         )}
       </Space>

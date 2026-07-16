@@ -20,6 +20,7 @@ describe('frontend runtime config delivery', () => {
         backendVlm: false,
         backendReferences: false,
         backendCut: false,
+        bazisCut: false,
         labels: false,
         projects: false,
         bazisImport: false,
@@ -46,6 +47,7 @@ describe('frontend runtime config delivery', () => {
         RUNTIME_CONFIG_BACKEND_USERS: 'true',
         RUNTIME_CONFIG_BACKEND_VLM: 'true',
         RUNTIME_CONFIG_BACKEND_REFERENCES: 'false',
+        RUNTIME_CONFIG_BAZIS_CUT: 'true',
         RUNTIME_CONFIG_ENABLE_LEGACY_HASURA: 'false',
         GAS_API_KEY: 'must-not-leak',
       }),
@@ -66,6 +68,7 @@ describe('frontend runtime config delivery', () => {
         backendVlm: true,
         backendReferences: false,
         backendCut: false,
+        bazisCut: true,
         labels: false,
         projects: false,
         bazisImport: false,
@@ -95,6 +98,16 @@ describe('frontend runtime config delivery', () => {
   it('maps projects runtime flag default-off and true', () => {
     expect(buildFrontendRuntimeConfig({}).features.projects).toBe(false);
     expect(buildFrontendRuntimeConfig({ RUNTIME_CONFIG_PROJECTS: 'true' }).features.projects).toBe(true);
+  });
+
+  it('maps Bazis cut runtime flag default-off, explicit off, and on', () => {
+    expect(buildFrontendRuntimeConfig({}).features.bazisCut).toBe(false);
+    expect(
+      buildFrontendRuntimeConfig({ RUNTIME_CONFIG_BAZIS_CUT: 'false' }).features.bazisCut,
+    ).toBe(false);
+    expect(
+      buildFrontendRuntimeConfig({ RUNTIME_CONFIG_BAZIS_CUT: 'true' }).features.bazisCut,
+    ).toBe(true);
   });
 
   it('fails closed for backend client phones until production actions are enabled', () => {

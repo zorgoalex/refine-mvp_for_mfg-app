@@ -172,11 +172,21 @@ describe('BazisService', () => {
     });
   });
 
+  describe('manager writes', () => {
+    it.each([
+      ['deleteProject', (service: BazisService, user: CurrentUser) => service.deleteProject(user, 'req', 41)],
+      ['setNodeNotes', (service: BazisService, user: CurrentUser) => service.setNodeNotes(user, 'req', 1, 'x')],
+    ])('%s requires bazis.manage', async (_name, call) => {
+      await expect(call(createService(), viewerUser())).rejects.toMatchObject({ statusCode: 403 });
+      await expect(call(createService(), bazisManager())).resolves.toBeDefined();
+    });
+  });
+
   it('streams sha256 and gzip from disk, parses once, and delegates importRevision', async () => {
     const repository = createRepository();
     const service = new BazisService({ repository });
     const xml = await readFile(
-      'backend/src/modules/bazis/application/__fixtures__/bazis-sample.xml',
+      new URL('./__fixtures__/bazis-sample.xml', import.meta.url),
       'utf8',
     );
     const filePath = await writeFixtureFile(tempDir, 'bazis.xml', xml);
@@ -320,6 +330,135 @@ describe('BazisService', () => {
     });
   });
 
+  describe('BazisService.setNodeNotes normalization', () => {
+    it('trims and coerces empty to null', async () => {
+      const repository = createRepository();
+      repository.setNodeNotes.mockResolvedValue({ bazisNodeId: 1, notes: null });
+      const service = createService(repository);
+
+      await service.setNodeNotes(bazisManager(), 'req', 1, '   ');
+
+      expect(repository.setNodeNotes).toHaveBeenCalledWith(
+        expect.objectContaining({ nodeId: 1, notes: null }),
+      );
+    });
+
+    it('rejects notes longer than 2000 chars after trim with 422', async () => {
+      const service = createService();
+
+      await expect(
+        service.setNodeNotes(bazisManager(), 'req', 1, 'а'.repeat(2001)),
+      ).rejects.toMatchObject({ statusCode: 422, code: 'VALIDATION_FAILED' });
+    });
+
+    it('passes trimmed value through', async () => {
+      const repository = createRepository();
+      repository.setNodeNotes.mockResolvedValue({ bazisNodeId: 1, notes: 'текст' });
+      const service = createService(repository);
+
+      await service.setNodeNotes(bazisManager(), 'req', 1, '  текст  ');
+
+      expect(repository.setNodeNotes).toHaveBeenCalledWith(
+        expect.objectContaining({ notes: 'текст' }),
+      );
+    });
+  });
+
+  it('requires bazis.view for buildOrderDraft', async () => {
+    const repository = createRepository();
+    const service = new BazisService({ repository });
+
+    await expect(
+      service.buildOrderDraft({
+        currentUser: managerUser(),
+        requestId: 'req-draft',
+        revisionId: 1,
+        selectedNodeIds: [4],
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['bazis.view'] },
+    } satisfies Partial<ApiError>);
+
+    expect(repository.buildOrderDraft).not.toHaveBeenCalled();
+  });
+
+  it('requires orders.update for buildOrderDraft when targetOrderId is present and writes denied-audit', async () => {
+    const repository = createRepository();
+    const auditQuery = vi
+      .fn()
+      .mockResolvedValue({ rows: [{ audit_id: 'aud-denied-order-draft' }], rowCount: 1 });
+    const service = new BazisService({
+      repository,
+      auditDatabase: { query: auditQuery },
+    });
+
+    await expect(
+      service.buildOrderDraft({
+        currentUser: viewerUser(),
+        requestId: 'req-draft',
+        revisionId: 1,
+        selectedNodeIds: [4],
+        targetOrderId: 55,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['orders.update'] },
+    } satisfies Partial<ApiError>);
+
+    const auditInsert = auditQuery.mock.calls.find(([text]) =>
+      String(text).replace(/\s+/g, ' ').includes('INSERT INTO audit_log ('),
+    );
+    expect(auditInsert).toBeDefined();
+    const params = auditInsert?.[1] as unknown[];
+    expect(params[2]).toBe('order_draft');
+    expect(params.some((param) => String(param).includes('"action":"order_draft"'))).toBe(true);
+    expect(repository.buildOrderDraft).not.toHaveBeenCalled();
+  });
+
+  it('delegates buildOrderDraft with bazis.view only when targetOrderId is absent', async () => {
+    const repository = createRepository();
+    const service = new BazisService({ repository });
+
+    const result = await service.buildOrderDraft({
+      currentUser: viewerUser(),
+      requestId: 'req-draft',
+      revisionId: 1,
+      selectedNodeIds: [4, 5],
+    });
+
+    expect(repository.buildOrderDraft).toHaveBeenCalledWith({
+      currentUser: viewerUser(),
+      requestId: 'req-draft',
+      revisionId: 1,
+      selectedNodeIds: [4, 5],
+    });
+    expect(result.revisionId).toBe(1);
+  });
+
+  it('delegates buildOrderDraft when both bazis.view and orders.update are present', async () => {
+    const repository = createRepository();
+    const service = new BazisService({ repository });
+
+    await service.buildOrderDraft({
+      currentUser: ordersUpdaterUser(),
+      requestId: 'req-draft',
+      revisionId: 1,
+      selectedNodeIds: [4, 5],
+      targetOrderId: 77,
+    });
+
+    expect(repository.buildOrderDraft).toHaveBeenCalledWith({
+      currentUser: ordersUpdaterUser(),
+      requestId: 'req-draft',
+      revisionId: 1,
+      selectedNodeIds: [4, 5],
+      targetOrderId: 77,
+    });
+  });
+
   it('requires bazis.manage for createOrderFromRevision', async () => {
     const repository = createRepository();
     const service = new BazisService({ repository });
@@ -371,6 +510,174 @@ describe('BazisService', () => {
     });
     expect(result.orderId).toBe(1);
   });
+
+  it('requires bazis.manage for createOrderFromDraft and writes denied-audit', async () => {
+    const repository = createRepository();
+    const auditQuery = vi
+      .fn()
+      .mockResolvedValue({ rows: [{ audit_id: 'aud-denied-create-from-draft' }], rowCount: 1 });
+    const service = new BazisService({
+      repository,
+      auditDatabase: { query: auditQuery },
+    });
+
+    await expect(
+      service.createOrderFromDraft({
+        currentUser: viewerUser(),
+        requestId: 'req-draft-order',
+        revisionId: 82,
+        order: createDraftOrder(),
+        nodes: [{ clientKey: 'detail-1', bazisNodeId: 101 }],
+        idempotencyKey: 'draft-order-key-1',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['bazis.manage'] },
+    } satisfies Partial<ApiError>);
+
+    const auditInsert = auditQuery.mock.calls.find(([text]) =>
+      String(text).replace(/\s+/g, ' ').includes('INSERT INTO audit_log ('),
+    );
+    expect(auditInsert).toBeDefined();
+    const params = auditInsert?.[1] as unknown[];
+    expect(params[2]).toBe('create_order_from_draft');
+    expect(params.some((param) => String(param).includes('"action":"create_order_from_draft"'))).toBe(true);
+    expect(repository.createOrderFromDraft).not.toHaveBeenCalled();
+  });
+
+  it('requires orders.create for createOrderFromDraft after bazis.manage and writes denied-audit', async () => {
+    const repository = createRepository();
+    const auditQuery = vi
+      .fn()
+      .mockResolvedValue({ rows: [{ audit_id: 'aud-denied-orders-create' }], rowCount: 1 });
+    const service = new BazisService({
+      repository,
+      auditDatabase: { query: auditQuery },
+    });
+
+    await expect(
+      service.createOrderFromDraft({
+        currentUser: bazisManager(),
+        requestId: 'req-draft-order',
+        revisionId: 82,
+        order: createDraftOrder(),
+        nodes: [{ clientKey: 'detail-1', bazisNodeId: 101 }],
+        idempotencyKey: 'draft-order-key-1',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['orders.create'] },
+    } satisfies Partial<ApiError>);
+
+    const auditInsert = auditQuery.mock.calls.find(([text]) =>
+      String(text).replace(/\s+/g, ' ').includes('INSERT INTO audit_log ('),
+    );
+    expect(auditInsert).toBeDefined();
+    const params = auditInsert?.[1] as unknown[];
+    expect(params[2]).toBe('create_order_from_draft');
+    expect(params.some((param) => String(param).includes('"action":"create_order_from_draft"'))).toBe(true);
+    expect(repository.createOrderFromDraft).not.toHaveBeenCalled();
+  });
+
+  it('delegates createOrderFromDraft when bazis.manage and orders.create are present', async () => {
+    const repository = createRepository();
+    const service = new BazisService({ repository });
+
+    const result = await service.createOrderFromDraft({
+      currentUser: bazisOrderCreator(),
+      requestId: 'req-draft-order',
+      revisionId: 82,
+      order: createDraftOrder(),
+      nodes: [{ clientKey: 'detail-1', bazisNodeId: 101 }],
+      idempotencyKey: 'draft-order-key-1',
+    });
+
+    expect(repository.createOrderFromDraft).toHaveBeenCalledWith({
+      currentUser: bazisOrderCreator(),
+      requestId: 'req-draft-order',
+      revisionId: 82,
+      order: createDraftOrder(),
+      nodes: [{ clientKey: 'detail-1', bazisNodeId: 101 }],
+      idempotencyKey: 'draft-order-key-1',
+    });
+    expect(result.orderId).toBe(1);
+  });
+
+  it('requires bazis.manage for addToOrder and writes denied-audit', async () => {
+    const repository = createRepository();
+    const auditQuery = vi
+      .fn()
+      .mockResolvedValue({ rows: [{ audit_id: 'aud-denied-add-to-order' }], rowCount: 1 });
+    const service = new BazisService({
+      repository,
+      auditDatabase: { query: auditQuery },
+    });
+
+    await expect(
+      service.addToOrder({
+        currentUser: viewerUser(),
+        requestId: 'req-add-to-order',
+        revisionId: 82,
+        orderId: 9001,
+        adds: [101],
+        replaces: [],
+        skips: [],
+        idempotencyKey: 'add-to-order-key-1',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['bazis.manage'] },
+    } satisfies Partial<ApiError>);
+
+    const auditInsert = auditQuery.mock.calls.find(([text]) =>
+      String(text).replace(/\s+/g, ' ').includes('INSERT INTO audit_log ('),
+    );
+    expect(auditInsert).toBeDefined();
+    const params = auditInsert?.[1] as unknown[];
+    expect(params[2]).toBe('add_to_order');
+    expect(params.some((param) => String(param).includes('"action":"add_to_order"'))).toBe(true);
+    expect(repository.addToOrder).not.toHaveBeenCalled();
+  });
+
+  it('requires orders.update for addToOrder after bazis.manage and writes denied-audit', async () => {
+    const repository = createRepository();
+    const auditQuery = vi
+      .fn()
+      .mockResolvedValue({ rows: [{ audit_id: 'aud-denied-orders-update' }], rowCount: 1 });
+    const service = new BazisService({
+      repository,
+      auditDatabase: { query: auditQuery },
+    });
+
+    await expect(
+      service.addToOrder({
+        currentUser: bazisManager(),
+        requestId: 'req-add-to-order',
+        revisionId: 82,
+        orderId: 9001,
+        adds: [101],
+        replaces: [],
+        skips: [],
+        idempotencyKey: 'add-to-order-key-1',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['orders.update'] },
+    } satisfies Partial<ApiError>);
+
+    const auditInsert = auditQuery.mock.calls.find(([text]) =>
+      String(text).replace(/\s+/g, ' ').includes('INSERT INTO audit_log ('),
+    );
+    expect(auditInsert).toBeDefined();
+    const params = auditInsert?.[1] as unknown[];
+    expect(params[2]).toBe('add_to_order');
+    expect(params.some((param) => String(param).includes('"action":"add_to_order"'))).toBe(true);
+    expect(repository.addToOrder).not.toHaveBeenCalled();
+  });
 });
 
 function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
@@ -421,6 +728,7 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
       isRectangular: null,
       textureOrientation: null,
       mainMaterialName: null,
+      notes: null,
       childrenCount: 0,
       rawJson: {},
       orderLinks: [],
@@ -439,12 +747,39 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
     listRevisionOrders: vi.fn().mockResolvedValue([]),
     listMaterialMappings: vi.fn().mockResolvedValue([]),
     upsertMaterialMappings: vi.fn().mockResolvedValue([]),
+    buildOrderDraft: vi.fn().mockResolvedValue({
+      revisionId: 1,
+      projectId: 12,
+      clientId: 2,
+      clientName: 'Client',
+      bazisProjectName: 'Проект',
+      bazisOrderNo: '1457',
+      details: [],
+      duplicates: [],
+    }),
+    createOrderFromDraft: vi.fn().mockResolvedValue({
+      orderId: 1,
+      orderName: 'Order',
+      detailsCreated: 1,
+      mappedNodes: 1,
+      requestId: 'req-order',
+    }),
     createOrderFromRevision: vi.fn().mockResolvedValue({
       orderId: 1,
       orderName: 'Order',
       detailsCreated: 0,
       mappedNodes: 0,
       requestId: 'req-order',
+    }),
+    addToOrder: vi.fn().mockResolvedValue({
+      orderId: 9001,
+      detailsAdded: 1,
+      detailsReplaced: 0,
+      requestId: 'req-add-to-order',
+    }),
+    setNodeNotes: vi.fn().mockResolvedValue({
+      bazisNodeId: 1,
+      notes: null,
     }),
     deleteProject: vi.fn().mockResolvedValue({
       bazisProjectId: 41,
@@ -494,5 +829,63 @@ function managerUser(): CurrentUser {
     role: 'manager',
     roleId: 1,
     permissions: [],
+  };
+}
+
+function ordersUpdaterUser(): CurrentUser {
+  return {
+    id: '13',
+    username: 'order-updater',
+    role: 'manager',
+    roleId: 1,
+    permissions: ['bazis.view', 'orders.update'],
+  };
+}
+
+function bazisOrderCreator(): CurrentUser {
+  return {
+    id: '14',
+    username: 'bazis-order-creator',
+    role: 'manager',
+    roleId: 1,
+    permissions: ['bazis.manage', 'bazis.view', 'orders.create'],
+  };
+}
+
+function createDraftOrder() {
+  return {
+    header: {
+      orderName: 'Черновик',
+      clientId: 2,
+      orderDate: '2026-07-13',
+      orderStatusId: 3,
+      projectId: 999,
+    },
+    details: [
+      {
+        clientKey: 'detail-1',
+        detailNumber: 1,
+        detailName: 'Панель',
+        height: 1000,
+        width: 500,
+        quantity: 1,
+        materialId: null,
+        sheetMaterialTypeId: 501,
+        millingTypeId: 1,
+        edgeTypeId: 1,
+      },
+    ],
+    payments: [],
+    workshops: [],
+    requirements: [],
+    dowelingLinks: [],
+    deleted: {
+      detailIds: [],
+      paymentIds: [],
+      workshopIds: [],
+      requirementIds: [],
+      dowelingLinkIds: [],
+    },
+    idempotencyKey: 'nested-order-key',
   };
 }

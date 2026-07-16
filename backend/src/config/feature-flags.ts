@@ -20,6 +20,7 @@ export interface BackendFeatureFlags {
   deadlineActions: boolean;
   deadlineNotifications: boolean;
   cutJobs: boolean;
+  bazisCut: boolean;
   cutJobsReadOnly: boolean;
   cutAutoTrigger: boolean;
   cutNativePortrait: boolean;
@@ -51,6 +52,7 @@ export function getBackendFeatureFlags(env: BackendEnv): BackendFeatureFlags {
     deadlineActions: env.BACKEND_DEADLINE_ACTIONS_ENABLED,
     deadlineNotifications: env.BACKEND_DEADLINE_NOTIFICATIONS_ENABLED,
     cutJobs: env.BACKEND_ENABLE_CUT_JOBS,
+    bazisCut: env.BACKEND_ENABLE_BAZIS_CUT,
     cutJobsReadOnly: env.BACKEND_CUT_JOBS_READ_ONLY,
     cutAutoTrigger: env.BACKEND_CUT_AUTO_TRIGGER,
     cutNativePortrait: env.BACKEND_CUT_NATIVE_PORTRAIT,

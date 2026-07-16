@@ -21,7 +21,8 @@ export interface CalculateOrderTotalsInput {
 }
 
 export function calculateDetailArea(detail: Pick<NormalizedSaveOrderDetailDto, 'height' | 'width' | 'quantity'>): number {
-  return Math.ceil((detail.height * detail.width * detail.quantity) / 10000) / 100;
+  const areaMm2 = detail.height * detail.width * detail.quantity;
+  return roundAreaMm2(areaMm2);
 }
 
 export function calculateDetailCost(
@@ -59,7 +60,10 @@ export function calculateOrderDetails(
 }
 
 export function calculateOrderTotals(input: CalculateOrderTotalsInput): OrderTotalsDto {
-  const totalArea = roundMoney(input.details.reduce((sum, detail) => sum + detail.area, 0));
+  const totalArea = roundAreaMm2(input.details.reduce(
+    (sum, detail) => sum + detail.height * detail.width * detail.quantity,
+    0,
+  ));
   const totalAmount = sumMoney(input.details.map((detail) => detail.detailCost));
   const paidAmount = sumMoney(input.payments.map((payment) => payment.amount));
   const discount = roundMoney(input.header.discount ?? 0);
@@ -87,6 +91,12 @@ export function calculateOrderTotals(input: CalculateOrderTotalsInput): OrderTot
       paidAmount,
     ),
   };
+}
+
+function roundAreaMm2(areaMm2: number): number {
+  const hundredthsM2 = areaMm2 / 10_000;
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(hundredthsM2));
+  return Math.round(hundredthsM2 + tolerance) / 100;
 }
 
 export function calculatePaymentStatusId(

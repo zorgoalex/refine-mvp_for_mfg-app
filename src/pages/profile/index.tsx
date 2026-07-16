@@ -17,7 +17,7 @@ const roleNames: Record<string, string> = {
 
 export const ProfilePage: React.FC = () => {
   const { data: identity } = useGetIdentity<UserIdentity>();
-  const { mode, setMode } = useAppTheme();
+  const { mode, setMode, uiSize, setUiSize } = useAppTheme();
   const roleName = identity?.role ? roleNames[identity.role] ?? identity.role : "—";
 
   return (
@@ -35,12 +35,20 @@ export const ProfilePage: React.FC = () => {
       </Card>
       {featureFlags.workosAuth && <WorkosLinkCard />}
       <Card title="Настройки интерфейса">
-        <Checkbox
-          checked={mode === "dark"}
-          onChange={(event) => setMode(event.target.checked ? "dark" : "light")}
-        >
-          Использовать темную тему по умолчанию
-        </Checkbox>
+        <Space direction="vertical" size="small">
+          <Checkbox
+            checked={mode === "dark"}
+            onChange={(event) => setMode(event.target.checked ? "dark" : "light")}
+          >
+            Использовать темную тему по умолчанию
+          </Checkbox>
+          <Checkbox
+            checked={uiSize === "small"}
+            onChange={(event) => setUiSize(event.target.checked ? "small" : "default")}
+          >
+            Компактный интерфейс (уменьшенные элементы)
+          </Checkbox>
+        </Space>
       </Card>
     </Space>
   );

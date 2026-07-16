@@ -3,9 +3,11 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Card, Tabs, Button, Space, Spin, notification, Modal, Form, Select, Tooltip } from 'antd';
-import { SaveOutlined, CloseOutlined, EyeOutlined } from '@ant-design/icons';
+import { Card, Tabs, Button, Space, Spin, notification, Modal, Form, Select, Tooltip, Popconfirm, message } from 'antd';
+import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
+import { toClientKey } from '../../../api/mappers/orderMapper';
+import type { BazisOrderDraftResponse } from '../../../api/types/bazisApi.types';
 import {
   useOrderDraftStore,
   getOrderDraftStore,
@@ -25,6 +27,10 @@ import { OrderFormMode } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
 import { featureFlags } from '../../../config/featureFlags';
 import { can } from '../../../utils/permissions';
+import { resolveOrderTabLabel } from '../../../utils/tabLabels';
+import {
+  buildNextOrderNameFromList, collectProvenanceNodes, draftToFormSeed } from '../../bazis/bazisOrderDraft';
+import { ordersApi } from '../../../api/ordersApi';
 import dayjs from 'dayjs';
 
 // Sections
@@ -38,6 +44,7 @@ import { OrderLegacySection } from './sections/OrderLegacySection';
 import { OrderFilesSection } from './sections/OrderFilesSection';
 import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
 import { OrderLabelDataEditor } from './labels/OrderLabelDataEditor';
+import { makeOrderDeleteHandler } from '../orderDeleteAction';
 
 // Tabs
 import { OrderDetailsTab, OrderDetailsTabRef } from './tabs/OrderDetailsTab';
@@ -49,6 +56,15 @@ interface OrderFormProps {
   orderId?: number;
   onSaveSuccess?: (orderId: number) => void;
   onCancel?: () => void;
+}
+
+interface BazisDraftRuntime {
+  locationKey: string;
+  meta: {
+    revisionId: number;
+    clientId: number | null;
+  };
+  idempotencyKey: string;
 }
 
 function createOrderSaveIdempotencyKey(): string {
@@ -73,6 +89,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const navigate = useNavigate();
   const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
   const tabKey = location.pathname; // e.g. /orders/edit/11195 or /orders/create
+  const bazisDraft = readBazisDraftFromLocationState(location.state);
 
   const {
     header,
@@ -95,6 +112,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     loadOrder,
     getFormValues,
     setDirty,
+    setInitializing,
     finalizeInitialization,
     isTotalAmountManual,
     deleteDetail,
@@ -105,6 +123,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const paymentsTabRef = useRef<OrderPaymentsTabRef>(null);
   const saveKeyRef = useRef<string | undefined>(undefined);
   const saveKeySignatureRef = useRef<string | undefined>(undefined);
+  const bazisDraftRuntimeRef = useRef<BazisDraftRuntime | null>(null);
+  const seededBazisDraftLocationKeyRef = useRef<string | null>(null);
   const projectClientRef = useRef<number | undefined>(undefined);
   const projectRequestIdRef = useRef(0);
   const [projectOptions, setProjectOptions] = useState<Array<{ label: string; value: number }>>(
@@ -119,7 +139,28 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     error: statusesError,
   } =
     useDefaultStatuses();
-  const { saveOrder, isSaving } = useOrderSave(orderKey);
+  const { saveOrder, isSaving } = useOrderSave(orderKey, {
+    getBazisDraftSaveContext: () => {
+      const runtime = bazisDraftRuntimeRef.current;
+      if (!runtime) {
+        return null;
+      }
+
+      return {
+        revisionId: runtime.meta.revisionId,
+        collectNodes: (values) =>
+          collectProvenanceNodes(values.details ?? [], (row) => toClientKey(row.temp_id)),
+        regenerateIdempotencyKey: () => {
+          const nextKey = createOrderSaveIdempotencyKey();
+          const current = bazisDraftRuntimeRef.current;
+          bazisDraftRuntimeRef.current = current
+            ? { ...current, idempotencyKey: nextKey }
+            : null;
+          return nextKey;
+        },
+      };
+    },
+  });
   const normalizedClientId =
     typeof header.client_id === 'number' && Number.isFinite(header.client_id)
       ? header.client_id
@@ -155,6 +196,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       deletedDowelingLinks,
     ],
   );
+  const bazisDraftClientLocked = mode === 'create' && (bazisDraft?.clientId ?? null) != null;
+  const bazisDraftProjectLocked = mode === 'create' && bazisDraft != null;
 
   // Bridge dirty state into the workspace tab registry (single dirty contract).
   useTabDirty(tabKey, isDirty);
@@ -162,12 +205,12 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const setTabTitle = useTabStore((s) => s.setTabTitle);
   const closeTab = useTabStore((s) => s.closeTab);
 
-  // Enrich the tab label once the order name is known.
+  // The workspace tab shows only the user-facing order name, never its database id.
   useEffect(() => {
-    if (mode === 'edit' && orderId && header?.order_name) {
-      setTabTitle(tabKey, `Заказ #${orderId} · ${header.order_name} · Редактирование`);
+    if (mode === 'edit' && header?.order_name) {
+      setTabTitle(tabKey, resolveOrderTabLabel(header.order_name));
     }
-  }, [mode, orderId, header?.order_name, tabKey, setTabTitle]);
+  }, [mode, header?.order_name, tabKey, setTabTitle]);
   const { exportToDrive, isUploading } = useOrderExport();
 
   // Read sub-tab reactively from the URL (do NOT strip/replace it — the workspace
@@ -178,6 +221,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const useBackendOrderRead = featureFlags.useBackendOrdersRead;
   const labelsEnabled = featureFlags.labels && can('labels.view');
   const cutTabEnabled = featureFlags.useBackendCut && can('cut.view');
+  const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
 
   useEffect(() => {
     if (
@@ -397,6 +441,13 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
   // Initialize form with default values for create mode
   useEffect(() => {
+    if (mode === 'create' && !bazisDraft) {
+      bazisDraftRuntimeRef.current = null;
+      seededBazisDraftLocationKeyRef.current = null;
+    }
+  }, [bazisDraft, mode]);
+
+  useEffect(() => {
     if (mode === 'create' && defaultOrderStatus && defaultPaymentStatus) {
       const today = dayjs();
       const orderDate = today.format('YYYY-MM-DD');
@@ -417,6 +468,100 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       setDirty(false); // Reset dirty flag after initial setup
     }
   }, [mode, defaultOrderStatus, defaultPaymentStatus]);
+
+  useEffect(() => {
+    if (
+      mode !== 'create' ||
+      !bazisDraft ||
+      !defaultOrderStatus ||
+      !defaultPaymentStatus ||
+      seededBazisDraftLocationKeyRef.current === location.key
+    ) {
+      return;
+    }
+
+    const today = dayjs();
+    const seed = draftToFormSeed(bazisDraft);
+    const seededHeader: Record<string, unknown> = {
+      order_date: today.format('YYYY-MM-DD'),
+      planned_completion_date: today.add(10, 'day').format('YYYY-MM-DD'),
+      order_status_id: defaultOrderStatus,
+      payment_status_id: defaultPaymentStatus,
+      production_status_from_details_enabled: true,
+      priority: 100,
+      discount: 0,
+      surcharge: 0,
+      paid_amount: 0,
+      total_amount: 0,
+      final_amount: 0,
+      project_id: seed.header.projectId,
+      client_name: bazisDraft.clientName ?? null,
+    };
+
+    if (seed.header.clientId != null) {
+      seededHeader.client_id = seed.header.clientId;
+    }
+
+    reset();
+    loadOrder({
+      header: seededHeader as any,
+      details: seed.details,
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+      deletedDetails: [],
+      deletedPayments: [],
+      deletedWorkshops: [],
+      deletedRequirements: [],
+      deletedDowelingLinks: [],
+      isDirty: false,
+      version: 0,
+    });
+    setInitializing(false);
+    // Драфт из Базис-панелей = несохранённые данные by definition: кнопка
+    // «Сохранить» требует dirty, юзер должен мочь сохранить без правок.
+    setDirty(true);
+    bazisDraftRuntimeRef.current = {
+      locationKey: location.key,
+      meta: seed.meta,
+      idempotencyKey: createOrderSaveIdempotencyKey(),
+    };
+    seededBazisDraftLocationKeyRef.current = location.key;
+
+    // Подсказка номера заказа: асинхронно после seed, только если поле пусто
+    // (ручной ввод юзера не затираем). Финальная уникальность — серверный гейт.
+    void (async () => {
+      try {
+        const response = await ordersApi.list({
+          page: 1,
+          pageSize: 20,
+          sortBy: 'orderDate',
+          sortOrder: 'desc',
+        });
+        const next = buildNextOrderNameFromList(response.data.map((item) => item.orderName));
+        if (!next) {
+          return;
+        }
+        const store = getOrderDraftStore(orderKey).getState();
+        if (!store.header.order_name) {
+          store.updateHeaderField('order_name', next);
+        }
+      } catch {
+        // Non-blocking hint only.
+      }
+    })();
+  }, [
+    bazisDraft,
+    defaultOrderStatus,
+    defaultPaymentStatus,
+    loadOrder,
+    location.key,
+    mode,
+    reset,
+    setDirty,
+    setInitializing,
+  ]);
 
   useEffect(() => {
     if (!statusesError) return;
@@ -1013,11 +1158,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       }
 
       const saveSignature = computeOrderSaveSignature(formValues);
-      if (!saveKeyRef.current) {
-        saveKeyRef.current = createOrderSaveIdempotencyKey();
+      if (bazisDraftRuntimeRef.current) {
+        formValues.idempotencyKey = bazisDraftRuntimeRef.current.idempotencyKey;
+      } else {
+        if (!saveKeyRef.current) {
+          saveKeyRef.current = createOrderSaveIdempotencyKey();
+        }
+        saveKeySignatureRef.current = saveSignature;
+        formValues.idempotencyKey = saveKeyRef.current;
       }
-      saveKeySignatureRef.current = saveSignature;
-      formValues.idempotencyKey = saveKeyRef.current;
 
         console.log('[OrderForm] handleSave - calling saveOrder...');
         const savedOrderId = await saveOrder(formValues, mode === 'edit');
@@ -1119,7 +1268,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         label: 'Основная информация',
         children: (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
-            <OrderBasicInfo />
+            <OrderBasicInfo clientLocked={bazisDraftClientLocked} />
             <OrderNotesSection />
           </Space>
         ),
@@ -1127,7 +1276,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       {
         key: 'details',
         label: 'Детали заказа',
-        children: <OrderDetailsTab ref={detailsTabRef} />,
+        children: <OrderDetailsTab ref={detailsTabRef} isSaving={isSaving} />,
       },
       {
         key: 'dates',
@@ -1186,7 +1335,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         ),
       },
     ],
-    [mode, header.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled]
+    [mode, header.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled, bazisDraftClientLocked]
   );
 
   const enabledTabKeys = useMemo(
@@ -1295,12 +1444,13 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               </Space>
             )}
             name={['header', 'project_id']}
+            extra={bazisDraftProjectLocked ? 'Проект Базис-проекта' : undefined}
           >
             <Select
-              allowClear
+              allowClear={!bazisDraftProjectLocked}
               showSearch
               filterOption={false}
-              disabled={!normalizedClientId}
+              disabled={!normalizedClientId || bazisDraftProjectLocked}
               loading={projectsLoading}
               placeholder="Новый проект (авто)"
               value={header.project_id ?? undefined}
@@ -1344,6 +1494,41 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               Просмотр
             </Button>
           )}
+          {featureFlags.useBackendOrdersWrite && canManageOrderTrash && mode === 'edit' && orderId && !header.delete_flag ? (
+            <Popconfirm
+              title={`Удалить заказ №${header.order_name}?`}
+              description="Заказ попадёт в корзину, его можно будет восстановить."
+              okText="Удалить"
+              okButtonProps={{ danger: true }}
+              cancelText="Отмена"
+              onConfirm={makeOrderDeleteHandler({
+                deleteFn: () => ordersApi.delete(Number(orderId), {
+                  version: Number(header.version ?? 0),
+                }),
+                onSuccess: () => {
+                  message.success('Заказ перемещён в корзину');
+                  navigate('/orders');
+                },
+                onVersionConflict: () =>
+                  Modal.error({
+                    title: 'Конфликт версий',
+                    content: 'Заказ был изменен другим пользователем. Обновите страницу и повторите.',
+                    okText: 'Обновить страницу',
+                    onOk: () => window.location.reload(),
+                  }),
+                onError: (m) => message.error(m),
+              })}
+            >
+              <Tooltip title="Удалить заказ">
+                <Button
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled={isSaving}
+                  style={{ height: '27px', fontSize: '13px', padding: '0 8px' }}
+                />
+              </Tooltip>
+            </Popconfirm>
+          ) : null}
           <Button
             type={(isDirty || isDetailEditing || isPaymentEditing) ? "primary" : "default"}
             icon={<SaveOutlined />}
@@ -1380,3 +1565,16 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     </OrderDraftStoreProvider>
   );
 };
+
+function readBazisDraftFromLocationState(state: unknown): BazisOrderDraftResponse | null {
+  if (!state || typeof state !== 'object' || !('bazisDraft' in state)) {
+    return null;
+  }
+
+  const draft = (state as { bazisDraft?: BazisOrderDraftResponse }).bazisDraft;
+  if (!draft || typeof draft !== 'object' || !Array.isArray(draft.details)) {
+    return null;
+  }
+
+  return draft;
+}

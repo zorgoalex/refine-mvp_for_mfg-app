@@ -18,6 +18,7 @@ import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../
 import { RowSeparator } from './RowSeparator';
 import { collectOrderBasisProjects } from './orderBasisProjects';
 import dayjs from 'dayjs';
+import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 
 const { Text } = Typography;
 
@@ -83,7 +84,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   const totals = useMemo(() => {
     const positions_count = details.length;
     const parts_count = details.reduce((sum, d) => sum + (d.quantity || 0), 0);
-    const total_area = details.reduce((sum, d) => sum + (d.area || 0), 0);
+    const total_area = calculateOrderTotalArea(details);
 
     return {
       positions_count,

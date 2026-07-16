@@ -133,6 +133,64 @@ describe('ordersApi', () => {
     expect(deleteHeaders.get('Idempotency-Key')).toBe('order-delete-key-1');
   });
 
+  it('restores an order with If-Match, Idempotency-Key and orderName body', async () => {
+    const order = createOrderDto();
+    const fetchMock = mockFetch({ order, auditId: 'audit-restore-1', requestId: 'request-restore-1' });
+
+    await ordersApi.restore(15, {
+      version: 4,
+      orderName: '2561',
+      idempotencyKey: 'order-restore-key-1',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/15/restore');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
+    expect(headers.get('If-Match')).toBe('"4"');
+    expect(headers.get('Idempotency-Key')).toBe('order-restore-key-1');
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify({ orderName: '2561' }));
+  });
+
+  it('restore generates a fresh order-restore key and empty body without orderName', async () => {
+    const fetchMock = mockFetch({ order: createOrderDto(), requestId: 'request-restore-2' });
+
+    await ordersApi.restore(15, { version: 4 });
+
+    const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
+    expect(headers.get('Idempotency-Key')).toMatch(/^order-restore:/);
+    expect(fetchMock.mock.calls[0][1]?.body).toBe('{}');
+  });
+
+  it('restore validates version before fetch', () => {
+    const fetchMock = mockFetch({});
+    expect(() => ordersApi.restore(15, { version: -1 })).toThrow('Invalid order version');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('getById appends includeDeleted=true only when requested', async () => {
+    const fetchMock = mockFetch({ order: createOrderDto() }, { order: createOrderDto() });
+
+    await ordersApi.getById(15);
+    await ordersApi.getById(15, { includeDeleted: true });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/15');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/orders/15?includeDeleted=true');
+  });
+
+  it('list passes deleted=true and sortBy=deletedAt through the query string', async () => {
+    const fetchMock = mockFetch({
+      data: [],
+      pagination: { page: 1, pageSize: 25, total: 0, totalPages: 0 },
+    });
+
+    await ordersApi.list({ deleted: true, sortBy: 'deletedAt', sortOrder: 'desc' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/orders?deleted=true&sortBy=deletedAt&sortOrder=desc',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('rejects invalid order ids before fetch', async () => {
     const fetchMock = mockFetch({ order: createOrderDto() });
 

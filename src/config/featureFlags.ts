@@ -13,9 +13,11 @@ export interface FrontendFeatureFlags {
   useBackendVlm: boolean;
   useBackendReferences: boolean;
   useBackendCut: boolean;
+  bazisCut: boolean;
   projects: boolean;
   useBackendBazis: boolean;
   labels: boolean;
+  statusAutomation: boolean;
   // Variant B: gates reads that depend on migration 034 Hasura schema
   // (sheet_material_type_id as the sole order-material reference; order_details_view
   // now returns sheet name only). Default MUST stay false — a FRESH env (no 034 applied)
@@ -48,9 +50,11 @@ export type RuntimeFeatureFlagSource = Partial<{
   backendVlm: string | boolean;
   backendReferences: string | boolean;
   backendCut: string | boolean;
+  bazisCut: string | boolean;
   projects: string | boolean;
   bazisImport: string | boolean;
   labels: string | boolean;
+  statusAutomation: string | boolean;
   sheetMaterialsReads: string | boolean;
   sheetMaterials: string | boolean;
   enableLegacyHasura: string | boolean;
@@ -88,9 +92,11 @@ export function getFeatureFlags(
     useBackendVlm: readBooleanFlag(env.VITE_USE_BACKEND_VLM, false),
     useBackendReferences: readBooleanFlag(env.VITE_USE_BACKEND_REFERENCES, false),
     useBackendCut: readBooleanFlag(env.VITE_USE_BACKEND_CUT, false),
+    bazisCut: readBooleanFlag(env.VITE_USE_BACKEND_BAZIS_CUT, false),
     projects: readBooleanFlag(env.VITE_USE_PROJECTS, false),
     useBackendBazis: readBooleanFlag(env.VITE_USE_BACKEND_BAZIS, false),
     labels: readBooleanFlag(env.VITE_USE_BACKEND_LABELS, false),
+    statusAutomation: readBooleanFlag(env.VITE_STATUS_AUTOMATION, false),
     sheetMaterialsReads: readBooleanFlag(env.VITE_SHEET_MATERIALS_READS, false),
     enableLegacyHasura: readBooleanFlag(env.VITE_ENABLE_LEGACY_HASURA, true),
     workosAuth: readBooleanFlag(env.VITE_WORKOS_AUTH, false),
@@ -138,10 +144,13 @@ export function mergeRuntimeFeatureFlags(
     useBackendReferences:
       readOptionalBooleanFlag(runtimeFeatures.backendReferences) ?? fallback.useBackendReferences,
     useBackendCut: readOptionalBooleanFlag(runtimeFeatures.backendCut) ?? fallback.useBackendCut,
+    bazisCut: readOptionalBooleanFlag(runtimeFeatures.bazisCut) ?? fallback.bazisCut,
     projects: readOptionalBooleanFlag(runtimeFeatures.projects) ?? fallback.projects,
     useBackendBazis:
       readOptionalBooleanFlag(runtimeFeatures.bazisImport) ?? fallback.useBackendBazis,
     labels: readOptionalBooleanFlag(runtimeFeatures.labels) ?? fallback.labels,
+    statusAutomation:
+      readOptionalBooleanFlag(runtimeFeatures.statusAutomation) ?? fallback.statusAutomation,
     sheetMaterialsReads:
       readOptionalBooleanFlag(runtimeFeatures.sheetMaterialsReads) ??
       readOptionalBooleanFlag(runtimeFeatures.sheetMaterials) ??
@@ -170,6 +179,7 @@ function enforceFrontendFeatureDependencies(flags: FrontendFeatureFlags): Fronte
       flags.useBackendClientPhones && flags.useBackendProductionActions,
     useBackendDeadlines:
       flags.useBackendDeadlines && flags.useBackendAuth && flags.useBackendOrdersRead,
+    bazisCut: flags.bazisCut && flags.useBackendCut,
     workosAuth: flags.workosAuth && flags.useBackendAuth,
   };
 }

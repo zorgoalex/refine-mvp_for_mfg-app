@@ -11,6 +11,8 @@ const node = (over: Partial<BazisTreeNode>): BazisTreeNode => ({
   name: 'Стенка',
   detailCode: null,
   position: null,
+  designation: null,
+  productOrderNo: null,
   quantity: 2,
   cumulativeQuantity: 4,
   lengthMm: 600,
@@ -45,6 +47,14 @@ describe('bazisTreeUtils', () => {
     expect(mapTreeNode(legacy).orderIds).toEqual([]);
   });
 
+  it('mapTreeNode: legacy-ответ без designation/productOrderNo даёт null-поля', () => {
+    const legacy = node({});
+    delete (legacy as Partial<BazisTreeNode>).designation;
+    delete (legacy as Partial<BazisTreeNode>).productOrderNo;
+    expect(mapTreeNode(legacy).designation).toBeNull();
+    expect(mapTreeNode(legacy).productOrderNo).toBeNull();
+  });
+
   it('buildNodeTitle: панель — размер и qty; не-панель — имя как есть', () => {
     expect(buildNodeTitle(node({}))).toBe('Стенка — 600x400, qty 2');
     expect(buildNodeTitle(node({ objectType: 'Сборка', name: 'Корпус' }))).toBe('Корпус');
@@ -64,8 +74,9 @@ describe('bazisTreeUtils', () => {
 describe('buildTreeFromFlat / collectExpandableKeys', () => {
   const flat = (id: number, parent: number | null, children: number): BazisTreeNode => ({
     bazisNodeId: id, parentNodeId: parent, seq: 0, nodeKind: 'object', objectType: 'Панель',
-    name: `Узел ${id}`, detailCode: null, position: null, quantity: 1, cumulativeQuantity: 1,
-    lengthMm: null, widthMm: null, thicknessMm: null, mainMaterialName: null, childrenCount: children,
+    name: `Узел ${id}`, detailCode: null, position: null, designation: null, productOrderNo: null,
+    quantity: 1, cumulativeQuantity: 1, lengthMm: null, widthMm: null, thicknessMm: null,
+    mainMaterialName: null, childrenCount: children, orders: [], orderIds: [],
   });
 
   it('builds hierarchy parents-first and lifts orphans to roots', () => {

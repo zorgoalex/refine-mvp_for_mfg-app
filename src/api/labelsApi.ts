@@ -34,7 +34,7 @@ export const labelsApi = {
 
   listTemplates(includeInactive = false): Promise<LabelTemplate[]> {
     const query = includeInactive ? '?includeInactive=true' : '';
-    return httpClient.get<LabelTemplate[]>(`${apiRoutes.labels.templates}${query}`);
+    return httpClient.get<LabelTemplate[]>(`${apiRoutes.labels.templates}${query}`, { cache: 'no-store' });
   },
 
   getTemplate(id: number): Promise<LabelTemplate> {
@@ -81,8 +81,11 @@ export const labelsApi = {
     return httpClient.post<OrderLabelGeneration>(apiRoutes.labels.detailGenerate, input);
   },
 
-  getLatest(orderId: number): Promise<LatestOrderLabelsPreview> {
-    return httpClient.get<LatestOrderLabelsPreview>(apiRoutes.labels.latest(validateId(orderId, 'orderId')));
+  async getLatest(orderId: number): Promise<LatestOrderLabelsPreview | null> {
+    const latest = await httpClient.get<LatestOrderLabelsPreview | null | undefined>(
+      apiRoutes.labels.latest(validateId(orderId, 'orderId')),
+    );
+    return latest ?? null;
   },
 
   async downloadLatest(orderId: number): Promise<{ blob: Blob; fileName: string | null }> {

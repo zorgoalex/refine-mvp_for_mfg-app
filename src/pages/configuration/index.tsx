@@ -21,6 +21,7 @@ import { featureFlags } from '../../config/featureFlags';
 import { VlmConfigTab } from './VlmConfigTab';
 import { ProductionWorkflowTab } from './components/ProductionWorkflowTab';
 import { DeadlineTransitionRulesConfig } from './components/DeadlineTransitionRulesConfig';
+import { StatusAutomationConfig } from './components/StatusAutomationConfig';
 import { NotificationRulesConfig } from './components/NotificationRulesConfig';
 import { OrgStructureConfig } from './components/OrgStructureConfig';
 import { CutConfigTab } from './components/CutConfigTab';
@@ -492,6 +493,7 @@ const TableVisibilityByRoleTab: React.FC = () => {
 // ============================================================================
 export const ConfigurationPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState(() => readStoredConfigurationActiveTab() ?? 'orders');
+  const statusAutomationVisible = featureFlags.statusAutomation && (!featureFlags.useBackendPermissions || can('status_automation.view'));
 
   const tabItems = [
     {
@@ -514,16 +516,26 @@ export const ConfigurationPage: React.FC = () => {
       ),
       children: <ProductionWorkflowTab />,
     },
-    {
-      key: 'deadline-rules',
-      label: (
-        <span>
-          <ClockCircleOutlined />
-          Дедлайн-правила
-        </span>
-      ),
-      children: <DeadlineTransitionRulesConfig />,
-    },
+    ...(statusAutomationVisible
+      ? [
+          {
+            key: 'status-automation',
+            label: 'Автостатусы',
+            children: <StatusAutomationConfig />,
+          },
+        ]
+      : [
+          {
+            key: 'deadline-rules',
+            label: (
+              <span>
+                <ClockCircleOutlined />
+                Дедлайн-правила
+              </span>
+            ),
+            children: <DeadlineTransitionRulesConfig />,
+          },
+        ]),
     {
       key: 'notification-rules',
       label: (

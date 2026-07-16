@@ -25,7 +25,13 @@ import { featureFlags } from '../../../../config/featureFlags';
 import { ordersApi } from '../../../../api/ordersApi';
 import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
 
-export const OrderBasicInfo: React.FC = () => {
+interface OrderBasicInfoProps {
+  /** Bazis draft-режим: клиент зафиксирован клиентом Базис-проекта (backend
+   * валидирует совпадение), Select реально disabled, создание клиента скрыто. */
+  clientLocked?: boolean;
+}
+
+export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({ clientLocked = false }) => {
   const {
     header,
     updateHeaderField,
@@ -454,11 +460,18 @@ export const OrderBasicInfo: React.FC = () => {
               required
               help={!header.client_id && 'Обязательное поле'}
               validateStatus={!header.client_id ? 'error' : ''}
+              extra={clientLocked ? 'Клиент Базис-проекта' : undefined}
             >
               <Select
                 {...resolvedClientSelectProps}
                 value={header.client_id}
-                onChange={(value) => updateHeaderField('client_id', value)}
+                disabled={clientLocked}
+                onChange={(value) => {
+                  if (clientLocked) {
+                    return;
+                  }
+                  updateHeaderField('client_id', value);
+                }}
                 placeholder="Выберите клиента"
                 showSearch
                 filterOption={(input, option) =>
@@ -467,15 +480,17 @@ export const OrderBasicInfo: React.FC = () => {
                 dropdownRender={(menu) => (
                   <>
                     {menu}
-                    <Space style={{ padding: '8px' }}>
-                      <Button
-                        type="text"
-                        icon={<PlusOutlined />}
-                        onClick={() => setClientModalOpen(true)}
-                      >
-                        Создать клиента
-                      </Button>
-                    </Space>
+                    {!clientLocked ? (
+                      <Space style={{ padding: '8px' }}>
+                        <Button
+                          type="text"
+                          icon={<PlusOutlined />}
+                          onClick={() => setClientModalOpen(true)}
+                        >
+                          Создать клиента
+                        </Button>
+                      </Space>
+                    ) : null}
                   </>
                 )}
               />

@@ -478,6 +478,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     ...(tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination : {}),
     position: ['topRight', 'bottomRight'],
     size: 'small',
+    simple: false,
     showTotal: () => (
       <Space size={4}>
         {useBackendCut && (
@@ -1343,6 +1344,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             rows={tableProps.dataSource ?? []}
             loading={!!tableProps.loading}
             pagination={tableProps.pagination ?? false}
+            onPageChange={setCurrent}
             onOpen={(id) => show("orders_view", id, "push")}
           />
         ) : (

@@ -195,8 +195,10 @@ export const orderDetailSchema = z.object({
   // Additional
   note: z.string().max(1000, "Примечание не может превышать 1000 символов").nullable().optional(),
   basis_project: z.string().max(500, "Базис проект не может превышать 500 символов").nullable().optional(),
+  basis_product: z.string().max(500, "Базис изделие не может превышать 500 символов").nullable().optional(),
   basis_data: z.string().max(2000, "Базис данные не могут превышать 2000 символов").nullable().optional(),
   basis_designation: z.string().max(500, "Базис обозн. не может превышать 500 символов").nullable().optional(),
+  doweling: z.boolean().optional(),
   detail_name: z.string().max(200, "Название не может превышать 200 символов").nullable().optional(),
   priority: z.number().int().min(0).max(100).default(100),
   production_status_id: z.number().nullable().optional(),

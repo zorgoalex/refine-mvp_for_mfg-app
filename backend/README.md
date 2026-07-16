@@ -13,6 +13,10 @@ Current implemented foundation:
 - env validation for runtime settings, CORS, DB pool/query timeout, readiness, Swagger,
   and feature flags;
 - versioned backend API prefix `/api/v1` for new NestJS endpoints;
+- persistent Basis-cut sets under `/api/v1/bazis-cut-sets`: typed header/detail snapshots,
+  `cut.view`/`cut.manage` RBAC, order scope checks, optimistic versioning,
+  idempotent audited mutations, outbox facts, and genuine BIFF8 `.xls` export behind
+  `BACKEND_ENABLE_BAZIS_CUT`;
 - `/health/live` live health contract;
 - `/health/ready` readiness contract with real DB ping when
   `READINESS_REQUIRE_DATABASE=true`; Redis checks remain disabled unless explicitly required;

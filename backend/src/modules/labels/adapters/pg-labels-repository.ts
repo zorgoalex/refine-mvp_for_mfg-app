@@ -14,6 +14,7 @@ import type {
   DeleteLabelOcrTemplateCommand,
   DeleteLabelQrTemplateCommand,
   DeleteLabelTemplateCommand,
+  DetailFieldColumnDto,
   ExportOrderLabelsQuery,
   ExportDetailLabelsQuery,
   GenerateOrderLabelsCommand,
@@ -71,6 +72,7 @@ interface TemplateRow extends QueryResultRow {
   dpi: string | number;
   default_export_formats: LabelExportFormat[];
   custom_field_schema: Record<string, unknown>;
+  field_catalog_snapshot: LabelTemplateDto['fieldCatalogSnapshot'];
 }
 
 interface ElementRow extends QueryResultRow {
@@ -125,10 +127,10 @@ interface GenerationRow extends QueryResultRow {
 }
 
 const TEMPLATE_COLUMNS = `label_template_id, name, description, version, is_active,
-  canvas_width_mm, canvas_height_mm, dpi, default_export_formats, custom_field_schema`;
+  canvas_width_mm, canvas_height_mm, dpi, default_export_formats, custom_field_schema, field_catalog_snapshot`;
 
 const QR_TEMPLATE_COLUMNS = `label_qr_template_id, name, content_template, error_correction,
-  default_size_mm, is_active, version`;
+  default_size_mm, is_active, version, field_catalog_snapshot`;
 
 interface QrTemplateRow extends QueryResultRow {
   label_qr_template_id: string | number;
@@ -138,6 +140,7 @@ interface QrTemplateRow extends QueryResultRow {
   default_size_mm: string | number;
   is_active: boolean;
   version: string | number;
+  field_catalog_snapshot: LabelQrTemplateDto['fieldCatalogSnapshot'];
 }
 
 function mapQrTemplateRow(row: QrTemplateRow): LabelQrTemplateDto {
@@ -149,6 +152,7 @@ function mapQrTemplateRow(row: QrTemplateRow): LabelQrTemplateDto {
     defaultSizeMm: toNumber(row.default_size_mm),
     isActive: row.is_active,
     version: toNumber(row.version),
+    fieldCatalogSnapshot: row.field_catalog_snapshot ?? {},
   };
 }
 
@@ -232,6 +236,16 @@ function ocrAuditShape(dto: LabelOcrTemplateDto): Record<string, unknown> {
 export class PgLabelsRepository implements LabelsPort {
   constructor(private readonly database: DatabaseService) {}
 
+  async listDetailFieldColumns(): Promise<DetailFieldColumnDto[]> {
+    const result = await this.database.query<{ column_name: string; data_type: string }>(
+      `SELECT column_name, data_type
+       FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'order_details_view'
+       ORDER BY ordinal_position`,
+    );
+    return result.rows.map((row) => ({ columnName: row.column_name, dataType: row.data_type }));
+  }
+
   async listTemplates(query: ListLabelTemplatesQuery): Promise<LabelTemplateDto[]> {
     const result = await this.database.query<TemplateRow>(
       `SELECT ${TEMPLATE_COLUMNS}
@@ -274,8 +288,8 @@ export class PgLabelsRepository implements LabelsPort {
       const inserted = await tx.query<TemplateRow>(
         `INSERT INTO label_templates
           (name, description, canvas_width_mm, canvas_height_mm, dpi, default_export_formats,
-           custom_field_schema, created_by, updated_by)
-         VALUES ($1,$2,$3,$4,$5,$6::text[],$7::jsonb,$8,$8)
+           custom_field_schema, field_catalog_snapshot, created_by, updated_by)
+         VALUES ($1,$2,$3,$4,$5,$6::text[],$7::jsonb,$8::jsonb,$9,$9)
          RETURNING ${TEMPLATE_COLUMNS}`,
         [
           input.name,
@@ -285,6 +299,7 @@ export class PgLabelsRepository implements LabelsPort {
           input.dpi,
           input.defaultExportFormats,
           JSON.stringify(input.customFieldSchema),
+          JSON.stringify(command.fieldCatalogSnapshot ?? {}),
           actorId(command.currentUser),
         ],
       );
@@ -340,7 +355,7 @@ export class PgLabelsRepository implements LabelsPort {
         `UPDATE label_templates SET
            name=$2, description=$3, canvas_width_mm=$4, canvas_height_mm=$5, dpi=$6,
            default_export_formats=$7::text[], custom_field_schema=$8::jsonb,
-           version=version+1, updated_by=$9, updated_at=now()
+           field_catalog_snapshot=$9::jsonb, version=version+1, updated_by=$10, updated_at=now()
          WHERE label_template_id=$1 AND deleted_at IS NULL
          RETURNING ${TEMPLATE_COLUMNS}`,
         [
@@ -352,6 +367,7 @@ export class PgLabelsRepository implements LabelsPort {
           input.dpi,
           input.defaultExportFormats,
           JSON.stringify(input.customFieldSchema),
+          JSON.stringify(command.fieldCatalogSnapshot ?? {}),
           actorId(command.currentUser),
         ],
       );
@@ -452,10 +468,11 @@ export class PgLabelsRepository implements LabelsPort {
       try {
         inserted = await tx.query<QrTemplateRow>(
           `INSERT INTO label_qr_templates
-            (name, content_template, error_correction, default_size_mm, created_by, updated_by)
-           VALUES ($1,$2,$3,$4,$5,$5)
+            (name, content_template, error_correction, default_size_mm, field_catalog_snapshot, created_by, updated_by)
+           VALUES ($1,$2,$3,$4,$5::jsonb,$6,$6)
            RETURNING ${QR_TEMPLATE_COLUMNS}`,
           [input.name, input.contentTemplate, input.errorCorrection, input.defaultSizeMm,
+           JSON.stringify(command.fieldCatalogSnapshot ?? {}),
            actorId(command.currentUser)],
         );
       } catch (error) {
@@ -515,7 +532,7 @@ export class PgLabelsRepository implements LabelsPort {
         updated = await tx.query<QrTemplateRow>(
           `UPDATE label_qr_templates SET
              name=$2, content_template=$3, error_correction=$4, default_size_mm=$5,
-             version=version+1, updated_by=$6, updated_at=now()
+             field_catalog_snapshot=$6::jsonb, version=version+1, updated_by=$7, updated_at=now()
            WHERE label_qr_template_id=$1
            RETURNING ${QR_TEMPLATE_COLUMNS}`,
           [
@@ -524,6 +541,7 @@ export class PgLabelsRepository implements LabelsPort {
             input.contentTemplate,
             input.errorCorrection,
             input.defaultSizeMm,
+            JSON.stringify(command.fieldCatalogSnapshot ?? {}),
             actorId(command.currentUser),
           ],
         );
@@ -1203,8 +1221,9 @@ export class PgLabelsRepository implements LabelsPort {
       formats: generation.exportFormats,
       generatedAt: generation.generatedAt,
     });
+    const orderName = readOrderNameFromFields(await readOrderFields(this.database, query.orderId));
     return {
-      filename: `order-${query.orderId}-labels-${generation.generationId}.zip`,
+      filename: buildOrderLabelsArchiveFilename(orderName, generation.generationId),
       contentType: 'application/zip',
       body,
     };
@@ -1228,6 +1247,7 @@ export class PgLabelsRepository implements LabelsPort {
   }
 
   async getLatestOrderLabelsPreview(query: ExportOrderLabelsQuery): Promise<LatestOrderLabelsPreviewDto> {
+    await assertOrderExists(this.database, query.orderId);
     const generation = await readLatestGeneration(this.database, query.orderId);
     const svgPages = renderSvgPages(generation.template, generation.rows).pages;
     return {
@@ -1502,6 +1522,15 @@ async function readOrderFields(client: DatabaseClient, orderId: number): Promise
 function readOrderNameFromFields(orderFields: Record<string, unknown>): string | null {
   const value = orderFields.order_name;
   return value == null ? null : String(value);
+}
+
+export function buildOrderLabelsArchiveFilename(orderName: string | null, generationId: number): string {
+  const normalizedOrderName = (orderName?.trim() || 'без-названия')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '');
+  const safeOrderName = Array.from(normalizedOrderName).slice(0, 120).join('') || 'без-названия';
+  return `заказ-${safeOrderName}-бирки-${generationId}.zip`;
 }
 
 function filterDetails(details: OrderLabelDataDetailDto[], detailIds: number[]): OrderLabelDataDetailDto[] {
@@ -1883,6 +1912,7 @@ function mapTemplateRow(row: TemplateRow): Omit<LabelTemplateDto, 'elements'> {
     dpi: toNumber(row.dpi),
     defaultExportFormats: row.default_export_formats,
     customFieldSchema: row.custom_field_schema ?? {},
+    fieldCatalogSnapshot: row.field_catalog_snapshot ?? {},
   };
 }
 

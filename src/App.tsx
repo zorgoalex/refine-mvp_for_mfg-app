@@ -21,10 +21,14 @@ import { AppThemeProvider, useAppTheme } from "./theme/ThemeProvider";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
+const OrderCreate = lazy(async () => ({ default: (await import("./pages/orders/create")).OrderCreate }));
+const OrderTrash = lazy(async () => ({ default: (await import("./pages/orders/trash")).OrderTrash }));
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const BazisPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisPage")).BazisPage }));
 const BazisProjectViewPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisProjectViewPage")).BazisProjectViewPage }));
+const BazisCutListPage = lazy(async () => ({ default: (await import("./pages/bazis-cut/BazisCutListPage")).BazisCutListPage }));
+const BazisCutSetPage = lazy(async () => ({ default: (await import("./pages/bazis-cut/BazisCutSetPage")).BazisCutSetPage }));
 const ScanPage = lazy(async () => ({ default: (await import("./pages/scan/ScanPage")).ScanPage }));
 const GroupsPage = lazy(async () => ({ default: (await import("./pages/groups/GroupsPage")).GroupsPage }));
 const ProjectsList = lazy(async () => ({ default: (await import("./pages/projects/ProjectsList")).ProjectsList }));
@@ -193,7 +197,7 @@ const App = () => (
 );
 
 const ThemedApp = () => {
-  const { mode } = useAppTheme();
+  const { mode, uiSize } = useAppTheme();
 
   // Configure notifications globally
   useEffect(() => {
@@ -210,6 +214,7 @@ const ThemedApp = () => {
         <RefineKbarProvider>
           <ConfigProvider
             locale={ruRU}
+            componentSize={uiSize === 'small' ? 'small' : undefined}
             theme={{
               algorithm: mode === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
               token: {
@@ -237,6 +242,15 @@ const ThemedApp = () => {
                     label: "Заказы",
                   },
                 },
+                ...(featureFlags.useBackendOrdersRead
+                  ? [{
+                      name: "orders-trash",
+                      list: "/orders/trash",
+                      meta: {
+                        label: "Корзина",
+                      },
+                    }]
+                  : []),
                 {
                   name: "calendar",
                   list: "/calendar",
@@ -277,6 +291,16 @@ const ThemedApp = () => {
                         meta: {
                           label: "Раскрой",
                         },
+                      },
+                    ]
+                  : []),
+                ...(featureFlags.bazisCut
+                  ? [
+                      {
+                        name: "bazis-cut-sets",
+                        list: "/bazis-cut",
+                        show: "/bazis-cut/:id",
+                        meta: { label: "Базис-раскрой" },
                       },
                     ]
                   : []),
@@ -615,7 +639,9 @@ const ThemedApp = () => {
                   />
                   <Route path="/orders" >
                     <Route index element={<OrderList />} />
+                    <Route path="create" element={<OrderCreate />} />
                     <Route path="edit/:id" element={<OrderEdit />} />
+                    <Route path="trash" element={<OrderTrash />} />
                     <Route path="show/:id" element={<OrderShow />} />
                   </Route>
                   <Route path="/calendar" >
@@ -635,6 +661,12 @@ const ThemedApp = () => {
                   {featureFlags.useBackendCut && (
                     <Route path="/cut">
                       <Route index element={<CutPage />} />
+                    </Route>
+                  )}
+                  {featureFlags.bazisCut && (
+                    <Route path="/bazis-cut">
+                      <Route index element={<BazisCutListPage />} />
+                      <Route path=":id" element={<BazisCutSetPage />} />
                     </Route>
                   )}
                   {featureFlags.useBackendBazis && (

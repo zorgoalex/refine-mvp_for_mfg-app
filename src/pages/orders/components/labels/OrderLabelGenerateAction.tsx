@@ -66,6 +66,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     if (!selectedTemplate || isOrderDirty) return;
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
+    setPreview(null);
     setLoading(true);
     try {
       const nextPreview = await labelsApi.previewOrderLabels(orderId, {

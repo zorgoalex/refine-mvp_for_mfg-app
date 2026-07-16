@@ -197,6 +197,13 @@ describe('permissions foundation', () => {
     expect(can('manager', 'notifications.view_rules')).toBe(false);
   });
 
+  it('grants status automation permissions to admin roles', () => {
+    expect(getPermissionsForRole('admin')).toEqual(
+      expect.arrayContaining(['status_automation.view', 'status_automation.manage']),
+    );
+    expect(getPermissionsForRole('manager')).not.toContain('status_automation.manage');
+  });
+
   it('sets legacy Hasura allowed roles with superadmin at the top', () => {
     expect(HASURA_ALLOWED_ROLES.superadmin).toEqual([
       'superadmin',

@@ -180,6 +180,13 @@ export const BazisPage: React.FC = () => {
         render: (value: string, record) => <Link to={`/bazis/projects/${record.bazisProjectId}`}>{value}</Link>,
       },
       {
+        title: 'Заказ Базис',
+        dataIndex: 'bazisOrderNo',
+        key: 'bazisOrderNo',
+        width: 140,
+        render: (value: string | null) => value?.trim() || '—',
+      },
+      {
         title: 'Проект ERP',
         dataIndex: 'projectId',
         key: 'projectId',
@@ -349,11 +356,6 @@ export const BazisPage: React.FC = () => {
         }}
         onOpenTree={(revisionId, label, projectId) => {
           openRevisionTree(revisionId, label, projectId);
-          setImportOpen(false);
-        }}
-        onCreateOrder={(revisionId, label, projectId) => {
-          openRevisionTree(revisionId, label, projectId);
-          setCreateOrderOpen(true);
           setImportOpen(false);
         }}
       />

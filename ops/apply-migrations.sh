@@ -329,7 +329,46 @@ probe_file() {
     054_*) probe_all "$(q_tbl group_groups)" ;;
     055_*) probe_all "$(q_col user_identities auth_method)" ;;
     056_*) probe_all "$(q_tbl projects)" "$(q_col orders project_id)" ;;
+    057_*) probe_all "$(q_col order_details basis_designation)" ;;
     058_*) probe_all "$(q_tbl bazis_projects)" "$(q_tbl bazis_import_runs)" ;;
+    059_*) probe_all "$(q_col order_details basis_product)" ;;
+    060_*) probe_all "$(q_col label_templates field_catalog_snapshot)" \
+                     "$(q_col label_qr_templates field_catalog_snapshot)" \
+                     "$(q_con chk_label_templates_field_catalog_snapshot_object)" \
+                     "$(q_con chk_label_qr_templates_field_catalog_snapshot_object)" ;;
+    061_*) probe_all "$(q_col user_preferences ui_size)" ;;
+    062_*) probe_all "$(q_col bazis_project_revisions bazis_order_no)" ;;
+    063_*) probe_all "$(q_col order_details doweling)" \
+                     "$(q_col order_details_view doweling)" ;;
+    064_*) probe_all "$(q_col bazis_nodes notes)" ;;
+    065_*) probe_all "$(q_col orders deleted_at)" \
+                     "$(q_col orders deleted_by)" ;;
+    066_*) probe_all "$(q_tbl status_automation_rules)" ;;
+    067_*) probe_all "SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM order_details od
+                       WHERE od.area IS DISTINCT FROM ROUND(
+                         (od.height::numeric * od.width::numeric * od.quantity::numeric) / 1000000,
+                         2
+                       )
+                     );" \
+                     "SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM orders o
+                       WHERE o.total_area IS DISTINCT FROM (
+                         SELECT ROUND(
+                           COALESCE(SUM(od.height::numeric * od.width::numeric * od.quantity::numeric), 0) / 1000000,
+                           2
+                         )
+                         FROM order_details od
+                         WHERE od.order_id = o.order_id
+                           AND od.delete_flag = false
+                       )
+                     );" ;;
+    068_*) probe_all "$(q_tbl bazis_cut_sets)" "$(q_tbl bazis_cut_set_details)" \
+                     "$(q_col bazis_cut_set_details source_order_detail_id)" \
+                     "$(q_col bazis_cut_set_details film)" \
+                     "$(q_idx uq_bazis_cut_set_details_source_detail)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

@@ -35,6 +35,7 @@ import {
   type SheetPlacementsJson,
   validateFreecutResponseContract,
 } from '../application/cut-freecut-mapping';
+import { applyEngineSelection } from '../application/cut-engine-selection';
 import { computeRequestHash } from '../application/cut-request-hash';
 import {
   describeCutFailure,
@@ -354,15 +355,17 @@ export function resolveEffectiveVariant(
 export class PgCutRepository implements CutRepositoryPort {
   private readonly config: CutConfigPort;
   private readonly nativePortraitWriter: boolean;
+  private readonly heuristicAutoThresholdInstances: number;
 
   constructor(
     private readonly database: DatabaseService,
     private readonly freecut: FreecutClientLike,
     config?: CutConfigPort,
-    options?: { nativePortraitWriter?: boolean },
+    options?: { nativePortraitWriter?: boolean; heuristicAutoThresholdInstances?: number },
   ) {
     this.config = config ?? new PgCutConfigRepository(database);
     this.nativePortraitWriter = options?.nativePortraitWriter === true;
+    this.heuristicAutoThresholdInstances = options?.heuristicAutoThresholdInstances ?? 100;
   }
 
   /** Audited RBAC denial (plan §11). Best-effort for generic denials (fire-and-
@@ -655,17 +658,23 @@ export class PgCutRepository implements CutRepositoryPort {
           qty: item.qty,
           ...(item.filmTexture === true ? grainRules.textured : grainRules.plain),
         }));
+        const totalInstances = freecutItems.reduce((sum, item) => sum + item.qty, 0);
+        const engineSelection = applyEngineSelection(
+          params,
+          totalInstances,
+          this.heuristicAutoThresholdInstances,
+        );
         const request = buildOptimizeRequest({
           stock: { id: `smt-${group.sheetMaterialTypeId}`, width_mm: group.smtWidthMm, height_mm: group.smtHeightMm },
           items: freecutItems,
-          params,
+          params: engineSelection.params,
           includeSvg: false,
           nativePortrait: this.nativePortraitWriter,
         });
         // Per-group pre-call guards (a fan-out group can independently exceed limits).
         assertWithinInstanceLimit(freecutItems);
         assertWithinBodyLimit(request);
-        return { group, request };
+        return { group, request, engineSelection, totalInstances };
       });
 
       // Reflect the lifecycle: draft|ready -> calculating, and BUMP version so a
@@ -737,8 +746,7 @@ export class PgCutRepository implements CutRepositoryPort {
     // partial failure, so the operator never sees a half-cut job. (Sequential so
     // a failure short-circuits the remaining optimize calls.)
     const responses: Array<{
-      group: (typeof prep.groupPreps)[number]['group'];
-      request: ReturnType<typeof buildOptimizeRequest>;
+      prep: (typeof prep.groupPreps)[number];
       response: Awaited<ReturnType<FreecutClientLike['optimize']>>;
     }> = [];
     try {
@@ -764,7 +772,7 @@ export class PgCutRepository implements CutRepositoryPort {
         if (violations.length > 0) {
           throw new CutOptimizerInvalidGeometryError(violations.length, violations.slice(0, 20));
         }
-        responses.push({ group: groupPrep.group, request: groupPrep.request, response });
+        responses.push({ prep: groupPrep, response });
       }
     } catch (error) {
       // A freecut failure fails the WHOLE job. Guard the status write on THIS
@@ -787,7 +795,8 @@ export class PgCutRepository implements CutRepositoryPort {
       const cutGroupIds: number[] = [];
       let totalSheets = 0;
       let totalUnplaced = 0;
-      for (const { group, request, response } of responses) {
+      for (const { prep: groupPrep, response } of responses) {
+        const { group, request } = groupPrep;
         // Compute the stable group key (written to cut_group.group_key so manual
         // layouts survive recalculations that keep the same logical grouping).
         const gKey = logicalGroupKey({
@@ -807,7 +816,11 @@ export class PgCutRepository implements CutRepositoryPort {
             command.cutJobId,
             group.sheetMaterialTypeId,
             group.filmId,
-            response.summary ? JSON.stringify(response.summary) : null,
+            JSON.stringify({
+              ...(response.summary ?? {}),
+              engine_used: groupPrep.engineSelection.engineUsed,
+              engine_reason: groupPrep.engineSelection.engineReason,
+            }),
             gKey,
           ],
         );
@@ -908,6 +921,11 @@ export class PgCutRepository implements CutRepositoryPort {
           groupCount: responses.length,
           sheetCount: totalSheets,
           unplacedCount: totalUnplaced,
+          engines: prep.groupPreps.map((groupPrep) => ({
+            engine: groupPrep.engineSelection.engineUsed,
+            reason: groupPrep.engineSelection.engineReason,
+            instances: groupPrep.totalInstances,
+          })),
         },
       });
 

@@ -9,6 +9,7 @@ import type {
   LabelElementKind,
   LabelExportFormat,
   LabelFieldCatalogItem,
+  LabelFieldCatalogSnapshot,
   LabelQrTemplate,
   LabelQrTemplateInput,
   LabelTemplate,
@@ -213,6 +214,30 @@ export const LabelsConfigTab: React.FC = () => {
       return ids;
     },
     [elements],
+  );
+  const templateFieldHealth = useMemo(
+    () => compareFieldSnapshot(selectedTemplate?.fieldCatalogSnapshot ?? {}, sourceFields, usedFieldIds),
+    [selectedTemplate?.fieldCatalogSnapshot, sourceFields, usedFieldIds],
+  );
+  const templatePaletteFields = useMemo(
+    () => appendMissingSnapshotFields(sourceFields, selectedTemplate?.fieldCatalogSnapshot ?? {}, templateFieldHealth),
+    [selectedTemplate?.fieldCatalogSnapshot, sourceFields, templateFieldHealth],
+  );
+  const selectedQrTemplate = useMemo(
+    () => qrTemplates.find((template) => template.labelQrTemplateId === qrDraft.id) ?? null,
+    [qrDraft.id, qrTemplates],
+  );
+  const qrReferencedFieldIds = useMemo(
+    () => new Set(qrDraft.rows.flatMap((row) => row.filter((chip) => chip.kind === 'field').map((chip) => chip.fieldId))),
+    [qrDraft.rows],
+  );
+  const qrFieldHealth = useMemo(
+    () => compareFieldSnapshot(selectedQrTemplate?.fieldCatalogSnapshot ?? {}, qrPaletteFields, qrReferencedFieldIds),
+    [qrPaletteFields, qrReferencedFieldIds, selectedQrTemplate?.fieldCatalogSnapshot],
+  );
+  const qrEditorFields = useMemo(
+    () => appendMissingSnapshotFields(qrPaletteFields, selectedQrTemplate?.fieldCatalogSnapshot ?? {}, qrFieldHealth),
+    [qrFieldHealth, qrPaletteFields, selectedQrTemplate?.fieldCatalogSnapshot],
   );
 
   useEffect(() => {
@@ -1028,8 +1053,9 @@ export const LabelsConfigTab: React.FC = () => {
                 <Text strong>Поля бирки</Text>
                 <div style={{ marginTop: 8 }}>
                   <FieldPalette
-                    fields={sourceFields}
+                    fields={templatePaletteFields}
                     usedFieldIds={usedFieldIds}
+                    fieldHealth={templateFieldHealth}
                     disabled={!canManage}
                     search={fieldSearch}
                     onSearch={setFieldSearch}
@@ -1449,10 +1475,15 @@ export const LabelsConfigTab: React.FC = () => {
                                           <Text type="secondary">Строка {rowIndex + 1}: нет полей — перетащите поле или добавьте текст</Text>
                                         )}
                                         {row.map((chip, chipIndex) => (
-                                          <Tag key={`${chip.kind}-${chipIndex}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                          <Tag
+                                            key={`${chip.kind}-${chipIndex}`}
+                                            color={chip.kind === 'field' ? fieldHealthColor(qrFieldHealth.get(chip.fieldId)) : undefined}
+                                            title={chip.kind === 'field' ? fieldHealthTitle(qrFieldHealth.get(chip.fieldId)) : undefined}
+                                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                          >
                                             <span>
                                               {chip.kind === 'field'
-                                                ? (qrPaletteFields.find((field) => field.id === chip.fieldId)?.label ?? chip.fieldId)
+                                                ? (qrEditorFields.find((field) => field.id === chip.fieldId)?.label ?? chip.fieldId)
                                                 : chip.text}
                                             </span>
                                             {canManage && (
@@ -1518,7 +1549,8 @@ export const LabelsConfigTab: React.FC = () => {
                                 <Text type="secondary">Поля для перетаскивания</Text>
                                 <div style={{ marginTop: 4 }}>
                                   <FieldPalette
-                                    fields={qrPaletteFields}
+                                    fields={qrEditorFields}
+                                    fieldHealth={qrFieldHealth}
                                     disabled={!canManage}
                                     search={qrFieldSearch}
                                     onSearch={setQrFieldSearch}
@@ -2318,9 +2350,77 @@ function LabelTemplatePreview({
   );
 }
 
+type FieldHealth = 'changed' | 'missing';
+
+function compareFieldSnapshot(
+  snapshot: LabelFieldCatalogSnapshot,
+  currentFields: readonly LabelFieldCatalogItem[],
+  referencedFieldIds: ReadonlySet<string>,
+): Map<string, FieldHealth> {
+  const currentById = new Map(currentFields.map((field) => [field.id, field]));
+  const health = new Map<string, FieldHealth>();
+  for (const fieldId of referencedFieldIds) {
+    const current = currentById.get(fieldId);
+    if (!current) {
+      health.set(fieldId, 'missing');
+      continue;
+    }
+    const previous = snapshot[fieldId];
+    if (
+      previous &&
+      (previous.type !== current.type || previous.label !== current.label || previous.sourceColumn !== current.sourceColumn)
+    ) {
+      health.set(fieldId, 'changed');
+    }
+  }
+  return health;
+}
+
+function appendMissingSnapshotFields(
+  currentFields: readonly LabelFieldCatalogItem[],
+  snapshot: LabelFieldCatalogSnapshot,
+  health: ReadonlyMap<string, FieldHealth>,
+): LabelFieldCatalogItem[] {
+  const result = [...currentFields];
+  const currentIds = new Set(currentFields.map((field) => field.id));
+  for (const [fieldId, status] of health) {
+    if (status !== 'missing' || currentIds.has(fieldId)) continue;
+    const previous = snapshot[fieldId];
+    const source = fieldId.startsWith('detail.')
+      ? 'detail'
+      : fieldId.startsWith('order.')
+        ? 'order'
+        : fieldId.startsWith('bazis.')
+          ? 'bazis'
+          : 'dynamic';
+    result.push({
+      id: fieldId,
+      source,
+      sourceColumn: previous?.sourceColumn ?? null,
+      label: previous?.label ?? fieldId,
+      type: previous?.type ?? 'string',
+      category: 'Недоступные поля',
+    });
+  }
+  return result;
+}
+
+function fieldHealthColor(health: FieldHealth | undefined): 'error' | 'warning' | undefined {
+  if (health === 'missing') return 'error';
+  if (health === 'changed') return 'warning';
+  return undefined;
+}
+
+function fieldHealthTitle(health: FieldHealth | undefined): string | undefined {
+  if (health === 'missing') return 'Поле отсутствует в актуальной схеме деталей';
+  if (health === 'changed') return 'Название или тип поля изменились после сохранения шаблона';
+  return undefined;
+}
+
 function FieldPalette({
   fields,
   usedFieldIds,
+  fieldHealth,
   disabled,
   search,
   onSearch,
@@ -2329,6 +2429,7 @@ function FieldPalette({
 }: {
   fields: LabelFieldCatalogItem[];
   usedFieldIds?: Set<string>;
+  fieldHealth?: ReadonlyMap<string, FieldHealth>;
   disabled?: boolean;
   search: string;
   onSearch: (value: string) => void;
@@ -2344,6 +2445,12 @@ function FieldPalette({
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <Input.Search value={search} onChange={(event) => onSearch(event.target.value)} allowClear />
+      {fieldHealth && fieldHealth.size > 0 && (
+        <Space size={6} wrap>
+          {[...fieldHealth.values()].includes('changed') && <Tag color="warning">Изменено в схеме</Tag>}
+          {[...fieldHealth.values()].includes('missing') && <Tag color="error">Отсутствует в схеме</Tag>}
+        </Space>
+      )}
       <div style={{ maxHeight: maxHeight ?? 280, overflowY: 'auto', paddingRight: 4 }}>
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           {grouped.map(([category, categoryFields]) => (
@@ -2352,51 +2459,54 @@ function FieldPalette({
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
                 {categoryFields.map((field) => {
                   const used = usedFieldIds?.has(field.id) ?? false;
+                  const health = fieldHealth?.get(field.id);
+                  const unavailable = health === 'missing';
                   return (
                     <Tag
                       key={field.id}
-                      color={used ? 'processing' : undefined}
-                      draggable={!disabled}
+                      color={fieldHealthColor(health) ?? (used ? 'processing' : undefined)}
+                      title={fieldHealthTitle(health)}
+                      draggable={!disabled && !unavailable}
                       onDragStart={(event) => {
-                        if (!disabled) onBeginDrag?.(field);
+                        if (!disabled && !unavailable) onBeginDrag?.(field);
                         event.dataTransfer.setData('application/x-label-field', field.id);
                         event.dataTransfer.setData('text/plain', field.id);
                         event.dataTransfer.effectAllowed = 'copy';
                       }}
                       onMouseDown={(event) => {
-                        if (disabled) return;
+                        if (disabled || unavailable) return;
                         event.preventDefault();
                         onBeginDrag?.(field);
                       }}
                       onMouseDownCapture={(event) => {
-                        if (disabled) return;
+                        if (disabled || unavailable) return;
                         event.preventDefault();
                         onBeginDrag?.(field);
                       }}
                       onPointerDown={(event) => {
-                        if (disabled) return;
+                        if (disabled || unavailable) return;
                         event.preventDefault();
                         onBeginDrag?.(field);
                       }}
                       onPointerDownCapture={(event) => {
-                        if (disabled) return;
+                        if (disabled || unavailable) return;
                         event.preventDefault();
                         onBeginDrag?.(field);
                       }}
                       style={{
-                        cursor: disabled ? 'default' : 'grab',
+                        cursor: disabled || unavailable ? 'default' : 'grab',
                         userSelect: 'none',
                         fontWeight: used ? 600 : 400,
                       }}
                     >
                       <span
                         onMouseDown={(event) => {
-                          if (disabled) return;
+                          if (disabled || unavailable) return;
                           event.preventDefault();
                           onBeginDrag?.(field);
                         }}
                         onPointerDown={(event) => {
-                          if (disabled) return;
+                          if (disabled || unavailable) return;
                           event.preventDefault();
                           onBeginDrag?.(field);
                         }}
@@ -2422,7 +2532,7 @@ function groupFieldsByCategory(fields: LabelFieldCatalogItem[]): Array<[string, 
     grouped.set(field.category, [...(grouped.get(field.category) ?? []), field]);
   }
   return Array.from(grouped.entries()).sort(([a], [b]) => {
-    const order = ['Кастомные', 'Деталь', 'Заказ', 'Динамические'];
+    const order = ['Недоступные поля', 'Кастомные', 'Деталь', 'Заказ', 'Динамические'];
     const ai = order.indexOf(a);
     const bi = order.indexOf(b);
     if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);

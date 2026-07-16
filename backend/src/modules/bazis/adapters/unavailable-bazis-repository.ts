@@ -1,14 +1,21 @@
 import type {
+  AddToOrderCommand,
   BazisRepositoryPort,
+  BuildOrderDraftCommand,
+  CreateOrderFromDraftCommand,
   CreateOrderFromRevisionCommand,
   DeleteBazisProjectInput,
   ImportRevisionCommand,
+  SetNodeNotesInput,
 } from '../application/bazis.types';
 import type {
+  BazisAddToOrderResponseDto,
+  BazisOrderDraftResponseDto,
   BazisRevisionEstimateDto,
   BazisImportResponseDto,
   BazisProjectDeleteResponseDto,
   BazisNodeCardDto,
+  BazisNodeNotesDto,
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
@@ -71,9 +78,23 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
     return unavailable();
   }
 
+  buildOrderDraft(_command: BuildOrderDraftCommand): Promise<BazisOrderDraftResponseDto> {
+    return unavailable();
+  }
+
   createOrderFromRevision(
     _command: CreateOrderFromRevisionCommand,
   ): Promise<CreateOrderFromRevisionResponseDto> {
+    return unavailable();
+  }
+
+  createOrderFromDraft(
+    _command: CreateOrderFromDraftCommand,
+  ): Promise<CreateOrderFromRevisionResponseDto> {
+    return unavailable();
+  }
+
+  addToOrder(_command: AddToOrderCommand): Promise<BazisAddToOrderResponseDto> {
     return unavailable();
   }
 
@@ -99,6 +120,10 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
   }
 
   deleteProject(_input: DeleteBazisProjectInput): Promise<BazisProjectDeleteResponseDto> {
+    return unavailable();
+  }
+
+  setNodeNotes(_input: SetNodeNotesInput): Promise<BazisNodeNotesDto> {
     return unavailable();
   }
 }

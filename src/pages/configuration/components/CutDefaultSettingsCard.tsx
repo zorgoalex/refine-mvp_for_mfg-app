@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Button,
   Card,
   Col,
@@ -18,16 +19,50 @@ import { cutConfigApi, type CutConfig } from '../../../api/cutConfigApi';
 import { ApiError } from '../../../api/httpClient';
 import {
   DEFAULT_PARAM_FORM,
+  type FreecutCutQuality,
+  type FreecutEngineChoice,
   type FreecutLayoutMode,
   type FreecutObjective,
   type FreecutQuality,
   type ParamProfileForm,
+  detectEngineParamAnomalies,
   formToParams,
   paramsToForm,
   resolveRuntimeDefaultProfile,
 } from './cutConfigHelpers';
 
 const { Text } = Typography;
+
+const ENGINE_OPTIONS: Array<{ value: FreecutEngineChoice; label: string }> = [
+  { value: 'auto', label: 'Авто' },
+  { value: 'heuristic', label: 'Быстрый' },
+  { value: 'ga', label: 'Генетический' },
+];
+
+const ENGINE_TOOLTIP =
+  'Авто — движок выбирается автоматически: крупные задания (от серверного порога по числу деталей) считает быстрый движок, небольшие — генетический. ' +
+  'Быстрый — принудительно эвристический движок: жадная укладка деталей с доупаковкой листов (уровень задаётся полем ниже, по умолчанию Max); крупные задания считаются в разы быстрее и обычно не хуже. ' +
+  'Генетический — принудительно классический генетический алгоритм: эволюционный перебор множества вариантов раскладки в пределах лимита времени; на небольших и средних заданиях часто даёт самую плотную укладку, но на крупных считает заметно дольше и обычно уже не выигрывает у быстрого движка.';
+
+const ENGINE_EXTRA: Record<FreecutEngineChoice, string> = {
+  auto: 'Авто: крупные задания — быстрый движок, небольшие — генетический',
+  heuristic: 'Быстрый движок экономит листы на крупных заданиях',
+  ga: 'Генетический движок — самая плотная укладка небольших заданий, крупные считает дольше',
+};
+
+const CUT_QUALITY_OPTIONS: Array<{ value: FreecutCutQuality; label: string }> = [
+  { value: 'fast', label: 'Fast' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'max', label: 'Max' },
+];
+
+function isEngineChoice(value: string | number): value is FreecutEngineChoice {
+  return value === 'auto' || value === 'heuristic' || value === 'ga';
+}
+
+function isCutQuality(value: string | number): value is FreecutCutQuality {
+  return value === 'fast' || value === 'balanced' || value === 'max';
+}
 
 interface SliderMeta {
   label: string;
@@ -84,6 +119,10 @@ export const CutDefaultSettingsCard: React.FC<Props> = ({ config, canManage, onS
   const [saving, setSaving] = useState(false);
 
   const defaultProfile = resolveRuntimeDefaultProfile(config.paramProfiles, config.settings);
+  const engineAnomalies = useMemo(
+    () => (defaultProfile ? detectEngineParamAnomalies(defaultProfile.params) : []),
+    [defaultProfile],
+  );
 
   useEffect(() => {
     setForm(defaultProfile ? paramsToForm(defaultProfile.params) : DEFAULT_PARAM_FORM);
@@ -121,6 +160,15 @@ export const CutDefaultSettingsCard: React.FC<Props> = ({ config, canManage, onS
         <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
           Редактируется профиль: {defaultProfile ? defaultProfile.name : 'По умолчанию (будет создан)'}
         </Text>
+        {engineAnomalies.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="Несогласованные параметры движка в сохранённом профиле"
+            description={`${engineAnomalies.join('; ')}. При сохранении параметры будут приведены к выбранным в форме значениям.`}
+          />
+        )}
         <Row gutter={16}>
           <Col span={12}>
             <Form.Item label={SLIDER_META.kerf_mm.label} tooltip={SLIDER_META.kerf_mm.tooltip} extra={<Text type="secondary" style={{ fontSize: 12 }}>{SLIDER_META.kerf_mm.extra}</Text>} style={{ marginBottom: 12 }}>
@@ -193,6 +241,46 @@ export const CutDefaultSettingsCard: React.FC<Props> = ({ config, canManage, onS
             >
               <Switch checked={form.groupShift} onChange={(v) => setField('groupShift', v)} disabled={!canManage} />
             </Form.Item>
+          </Col>
+        </Row>
+
+        <Row gutter={16}>
+          <Col span={12}>
+            {form.layout_mode !== 'vacuum_table' && (
+              <Form.Item
+                label="Движок расчёта"
+                tooltip={ENGINE_TOOLTIP}
+                extra={<Text type="secondary" style={{ display: 'block', fontSize: 12 }}>{ENGINE_EXTRA[form.engine]}</Text>}
+                style={{ marginBottom: 12 }}
+              >
+                <Segmented
+                  value={form.engine}
+                  onChange={(v) => {
+                    if (isEngineChoice(v)) setField('engine', v);
+                  }}
+                  options={ENGINE_OPTIONS}
+                  disabled={!canManage}
+                />
+              </Form.Item>
+            )}
+          </Col>
+          <Col span={12}>
+            {form.layout_mode !== 'vacuum_table' && form.engine === 'heuristic' && (
+              <Form.Item
+                label="Доупаковка (быстрый движок)"
+                tooltip="Fast — только базовая укладка, миллисекунды. Balanced — доупаковка недозаполненных листов. Max — доупаковка + итеративный поиск в пределах лимита времени; обычно экономит листы на крупных заданиях."
+                style={{ marginBottom: 12 }}
+              >
+                <Segmented
+                  value={form.cutQuality}
+                  onChange={(v) => {
+                    if (isCutQuality(v)) setField('cutQuality', v);
+                  }}
+                  options={CUT_QUALITY_OPTIONS}
+                  disabled={!canManage}
+                />
+              </Form.Item>
+            )}
           </Col>
         </Row>
 

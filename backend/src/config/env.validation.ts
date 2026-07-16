@@ -156,6 +156,9 @@ export const envSchema = z
     BACKEND_DEADLINE_ACTIONS_ENABLED: booleanFromEnv.default(false),
     BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
     BACKEND_ENABLE_CUT_JOBS: booleanFromEnv.default(false),
+    // Independent production workflow for persistent Basis-cut XLS export sets.
+    // Default OFF; intentionally not an alias of BACKEND_ENABLE_CUT_JOBS.
+    BACKEND_ENABLE_BAZIS_CUT: booleanFromEnv.default(false),
     BACKEND_CUT_JOBS_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_CUT_AUTO_TRIGGER: booleanFromEnv.default(false),
     BACKEND_CUT_NATIVE_PORTRAIT: booleanFromEnv.default(false),
@@ -171,6 +174,7 @@ export const envSchema = z
     BACKEND_ENABLE_DOWELING_COMMANDS: booleanFromEnv.default(false),
     // Bazis XML import module. Default OFF (fail-closed); no cross-dependency.
     BACKEND_ENABLE_BAZIS: booleanFromEnv.default(false),
+    BACKEND_STATUS_AUTOMATION: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),
     BACKEND_NOTIFICATION_RULES_READ_ONLY: booleanFromEnv.default(true),
     BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE: booleanFromEnv.default(false),
@@ -181,6 +185,8 @@ export const envSchema = z
     BACKEND_OUTBOX_RELAY_MAX_ATTEMPTS: z.coerce.number().int().positive().max(100).default(10),
     FREECUT_BASE_URL: optionalUrlFromEnv,
     FREECUT_OPTIMIZE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+    /** Auto engine=heuristic for cut groups with >= this many item instances; 0 disables auto mode. */
+    BACKEND_CUT_HEURISTIC_AUTO_THRESHOLD: z.coerce.number().int().min(0).default(100),
     CAD_SERVICE_BASE_URL: optionalUrlFromEnv,
     CAD_SERVICE_API_TOKEN: optionalTrimmedStringFromEnv,
     OCR_SERVICE_BASE_URL: optionalUrlFromEnv,
@@ -412,6 +418,14 @@ export const envSchema = z
       ctx.addIssue({
         code: 'custom',
         message: 'DATABASE_URL is required when BACKEND_ENABLE_LABELS is true',
+        path: ['DATABASE_URL'],
+      });
+    }
+
+    if (env.BACKEND_ENABLE_BAZIS_CUT && !env.DATABASE_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'DATABASE_URL is required when BACKEND_ENABLE_BAZIS_CUT is true',
         path: ['DATABASE_URL'],
       });
     }

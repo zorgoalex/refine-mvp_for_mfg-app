@@ -25,6 +25,8 @@ const EXPECTED_FEATURE_KEYS = [
   'backendUsers',
   'backendVlm',
   'backendReferences',
+  'backendCut',
+  'bazisCut',
   'labels',
   'enableLegacyHasura',
   'workosAuth',
@@ -59,6 +61,7 @@ describe('runtime config canary examples', () => {
       '09-production-actions.json',
       '10-client-phones.json',
       '11-deadlines.json',
+      '12-bazis-cut.json',
       '99-rollback-all-off.json',
     ]);
 

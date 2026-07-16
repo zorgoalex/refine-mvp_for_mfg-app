@@ -15,6 +15,7 @@ export interface FrontendRuntimeConfigResponse {
     backendVlm: boolean;
     backendReferences: boolean;
     backendCut: boolean;
+    bazisCut: boolean;
     projects: boolean;
     bazisImport: boolean;
     labels: boolean;
@@ -58,6 +59,7 @@ export function buildFrontendRuntimeConfig(
       backendVlm: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_VLM, false),
       backendReferences: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_REFERENCES, false),
       backendCut: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_CUT, false),
+      bazisCut: readBooleanEnv(env.RUNTIME_CONFIG_BAZIS_CUT, false),
       projects: readBooleanEnv(env.RUNTIME_CONFIG_PROJECTS, false),
       bazisImport: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_BAZIS, false),
       labels: readBooleanEnv(env.RUNTIME_CONFIG_LABELS, false),

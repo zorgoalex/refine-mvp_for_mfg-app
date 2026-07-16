@@ -23,6 +23,7 @@ import type {
   SaveOrderRequirementDto,
   SaveOrderWorkshopDto,
 } from '../types/orderApi.types';
+import { calculateOrderDetailArea } from '../../utils/orderArea';
 
 type DateLike = {
   format: (format: string) => string;
@@ -402,8 +403,10 @@ function normalizeDetails(details: OrderDetail[]): SaveOrderDetailDto[] {
       productionStatusId: optionalNumber(detail.production_status_id),
       jointOrderId: optionalNumber(detail.joint_order_id),
       basisProject: normalizeOptionalString(detail.basis_project),
+      basisProduct: normalizeOptionalString(detail.basis_product),
       basisData: normalizeOptionalString(detail.basis_data),
       basisDesignation: normalizeOptionalString(detail.basis_designation),
+      doweling: detail.doweling === true,
 
       linkCuttingFile: normalizeOptionalString(detail.link_cutting_file),
       linkCuttingImageFile: normalizeOptionalString(detail.link_cutting_image_file),
@@ -515,8 +518,10 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     production_status_id: detail.productionStatusId ?? null,
     joint_order_id: detail.jointOrderId ?? null,
     basis_project: detail.basisProject ?? null,
+    basis_product: detail.basisProduct ?? null,
     basis_data: detail.basisData ?? null,
     basis_designation: detail.basisDesignation ?? null,
+    doweling: detail.doweling === true,
     link_cutting_file: detail.linkCuttingFile ?? null,
     link_cutting_image_file: detail.linkCuttingImageFile ?? null,
     link_cad_file: detail.linkCadFile ?? null,
@@ -682,7 +687,7 @@ function tempIdFromClientKey(clientKey: string | null | undefined, fallbackId: n
 }
 
 function calculateArea(height: number, width: number, quantity: number): number {
-  return Math.ceil((height * width * quantity) / 10000) / 100;
+  return calculateOrderDetailArea(height, width, quantity);
 }
 
 function isDateLike(value: unknown): value is DateLike {

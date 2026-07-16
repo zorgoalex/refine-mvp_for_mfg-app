@@ -40,6 +40,9 @@ Rules:
   the VPS backend service; frontend runtime flags such as
   `RUNTIME_CONFIG_BACKEND_PRODUCTION_ACTIONS` belong to the Vercel frontend
   project.
+- Basis-cut rollout uses `BACKEND_ENABLE_BAZIS_CUT` on the backend and
+  `RUNTIME_CONFIG_BAZIS_CUT` on Vercel. The frontend also requires
+  `RUNTIME_CONFIG_BACKEND_CUT=true`; rollback disables `BAZIS_CUT` first.
 - `BACKEND_BUILD_CONTEXT` controls where the backend Dockerfile is read from.
   Keep `./backend` for a normal one-repo checkout. Use `./repo_erp/backend` for
   the current split VPS layout where the runtime root contains `repo_erp/`,

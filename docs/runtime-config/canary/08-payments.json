@@ -13,6 +13,8 @@
     "backendUsers": true,
     "backendVlm": true,
     "backendReferences": false,
+    "backendCut": false,
+    "bazisCut": false,
     "labels": false,
     "enableLegacyHasura": true,
     "workosAuth": false

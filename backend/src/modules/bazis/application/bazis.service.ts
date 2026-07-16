@@ -11,13 +11,19 @@ import type { PermissionName } from '../../../permissions/permissions';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
+  AddToOrderCommand,
   BazisRepositoryPort,
+  BuildOrderDraftCommand,
+  CreateOrderFromDraftCommand,
   CreateOrderFromRevisionCommand,
   ImportXmlInput,
 } from './bazis.types';
 import {
+  type BazisAddToOrderResponseDto,
   type BazisImportResponseDto,
   type BazisNodeCardDto,
+  type BazisNodeNotesDto,
+  type BazisOrderDraftResponseDto,
   type BazisNodeSearchResponseDto,
   type BazisProjectCardDto,
   type BazisProjectDeleteResponseDto,
@@ -30,7 +36,7 @@ import {
   type MaterialMappingDto,
   type UpsertMaterialMappingDto,
 } from '../dto/bazis.dto';
-import { BazisImportBusyError, BazisParseFailedError } from '../errors/bazis.errors';
+import { BazisImportBusyError, BazisNodeNotesTooLongError, BazisParseFailedError } from '../errors/bazis.errors';
 import { BazisXmlParseError, parseBazisXml } from './bazis-xml-parser';
 
 export interface BazisServicePorts {
@@ -39,6 +45,8 @@ export interface BazisServicePorts {
   /** Optional client for best-effort denied-audit rows (absent in unit tests without DB). */
   auditDatabase?: DatabaseClient;
 }
+
+const NODE_NOTES_MAX_LENGTH = 2000;
 
 export class BazisService {
   private readonly permissions: PermissionsService;
@@ -165,6 +173,21 @@ export class BazisService {
     return this.ports.repository.deleteProject({ currentUser, requestId, bazisProjectId });
   }
 
+  async setNodeNotes(
+    currentUser: CurrentUser,
+    requestId: string | undefined,
+    nodeId: number,
+    rawNotes: string | null,
+  ): Promise<BazisNodeNotesDto> {
+    await this.requirePermission(currentUser, 'bazis.manage', 'set_node_notes', requestId);
+    const trimmed = rawNotes?.trim() ?? '';
+    const notes = trimmed === '' ? null : trimmed;
+    if (notes != null && notes.length > NODE_NOTES_MAX_LENGTH) {
+      throw new BazisNodeNotesTooLongError(NODE_NOTES_MAX_LENGTH);
+    }
+    return this.ports.repository.setNodeNotes({ currentUser, requestId, nodeId, notes });
+  }
+
   async listMaterialMappings(
     currentUser: CurrentUser,
     names?: string[],
@@ -187,6 +210,28 @@ export class BazisService {
   ): Promise<CreateOrderFromRevisionResponseDto> {
     await this.requirePermission(command.currentUser, 'bazis.manage', 'create_order', command.requestId);
     return this.ports.repository.createOrderFromRevision(command);
+  }
+
+  async createOrderFromDraft(
+    command: CreateOrderFromDraftCommand,
+  ): Promise<CreateOrderFromRevisionResponseDto> {
+    await this.requirePermission(command.currentUser, 'bazis.manage', 'create_order_from_draft', command.requestId);
+    await this.requirePermission(command.currentUser, 'orders.create', 'create_order_from_draft', command.requestId);
+    return this.ports.repository.createOrderFromDraft(command);
+  }
+
+  async addToOrder(command: AddToOrderCommand): Promise<BazisAddToOrderResponseDto> {
+    await this.requirePermission(command.currentUser, 'bazis.manage', 'add_to_order', command.requestId);
+    await this.requirePermission(command.currentUser, 'orders.update', 'add_to_order', command.requestId);
+    return this.ports.repository.addToOrder(command);
+  }
+
+  async buildOrderDraft(command: BuildOrderDraftCommand): Promise<BazisOrderDraftResponseDto> {
+    await this.requirePermission(command.currentUser, 'bazis.view', 'order_draft', command.requestId);
+    if (command.targetOrderId != null) {
+      await this.requirePermission(command.currentUser, 'orders.update', 'order_draft', command.requestId);
+    }
+    return this.ports.repository.buildOrderDraft(command);
   }
 
   private async requirePermission(

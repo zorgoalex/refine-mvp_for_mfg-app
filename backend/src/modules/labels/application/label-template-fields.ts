@@ -56,6 +56,7 @@ export function validateQrTemplateElement(
   element: LabelTemplateElementInput,
   customFieldSchema: Record<string, unknown>,
   index: number,
+  runtimeFieldIds?: ReadonlySet<string>,
 ): void {
   if (element.kind !== 'qr') {
     return;
@@ -90,7 +91,7 @@ export function validateQrTemplateElement(
   }
 
   for (const fieldId of extractLabelTemplateFieldIds(template)) {
-    if (!isSupportedFieldBinding(fieldId, customFieldSchema)) {
+    if (!isSupportedFieldBinding(fieldId, customFieldSchema, runtimeFieldIds)) {
       throw new LabelFieldBindingError(fieldId);
     }
   }

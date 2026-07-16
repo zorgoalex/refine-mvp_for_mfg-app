@@ -112,9 +112,16 @@ export class OrderLabelActionsController {
   async latest(
     @Req() request: RequestWithCurrentUser,
     @Param('orderId') orderId: string,
-  ): Promise<LatestOrderLabelsPreviewDto> {
+  ): Promise<LatestOrderLabelsPreviewDto | null> {
     assertLabelsEnabled(this.runtimeConfig);
-    return this.service.getLatestOrderLabelsPreview({ ...this.context(request), orderId: parseId(orderId) });
+    try {
+      return await this.service.getLatestOrderLabelsPreview({ ...this.context(request), orderId: parseId(orderId) });
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'ORDER_LABEL_GENERATION_NOT_FOUND') {
+        return null;
+      }
+      throw error;
+    }
   }
 
   @ApiOperation({ operationId: 'exportLatestOrderLabels', summary: 'Export latest order labels' })
@@ -127,7 +134,7 @@ export class OrderLabelActionsController {
   ): Promise<StreamableFile> {
     assertLabelsEnabled(this.runtimeConfig);
     const result = await this.service.exportOrderLabels({ ...this.context(request), orderId: parseId(orderId) });
-    response.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    response.setHeader('Content-Disposition', contentDisposition(result.filename));
     return new StreamableFile(result.body, { type: result.contentType });
   }
 
@@ -146,7 +153,7 @@ export class OrderLabelActionsController {
       orderId: parseId(orderId),
       generationId: parseId(generationId),
     });
-    response.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    response.setHeader('Content-Disposition', contentDisposition(result.filename));
     return new StreamableFile(result.body, { type: result.contentType });
   }
 
@@ -205,7 +212,7 @@ export class DetailLabelActionsController {
       ...this.context(request),
       generationId: parseId(generationId),
     });
-    response.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    response.setHeader('Content-Disposition', contentDisposition(result.filename));
     return new StreamableFile(result.body, { type: result.contentType });
   }
 
@@ -222,4 +229,10 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
     });
   }
   return parsed.data;
+}
+
+function contentDisposition(fileName: string): string {
+  const asciiFallback = fileName.replace(/[^\x20-\x7e]|["\\;]/g, '_');
+  const encoded = encodeURIComponent(fileName).replace(/['()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`;
 }

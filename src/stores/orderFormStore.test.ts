@@ -47,6 +47,150 @@ describe('orderFormStore version sync', () => {
     expect(state.header.version).toBe(4);
     expect(state.version).toBe(4);
   });
+
+  it('preserves bazisNodeId on load and clears it on inserted copies', () => {
+    useOrderFormStore.getState().loadOrder({
+      header: {
+        order_id: 15,
+        order_name: 'E2E order',
+        client_id: 1,
+        order_date: '2026-05-10',
+        order_status_id: 1,
+        payment_status_id: 1,
+        version: 3,
+      },
+      details: [
+        {
+          detail_id: 44,
+          detail_number: 1,
+          bazisNodeId: 777,
+          height: 500,
+          width: 300,
+          quantity: 2,
+          area: 0.3,
+          material_id: null,
+          sheet_material_type_id: 5,
+          milling_type_id: 1,
+          edge_type_id: 1,
+          detail_cost: 0,
+          priority: 100,
+        },
+      ],
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+      deletedDetails: [],
+      deletedPayments: [],
+      deletedWorkshops: [],
+      deletedRequirements: [],
+      deletedDowelingLinks: [],
+      isDirty: false,
+      version: 3,
+    });
+
+    const source = useOrderFormStore.getState().details[0];
+    const sourceKey = source.temp_id ?? source.detail_id!;
+    useOrderFormStore.getState().insertDetailAfter(sourceKey, {
+      ...source,
+      bazisNodeId: source.bazisNodeId,
+    });
+
+    const details = useOrderFormStore.getState().details;
+    expect(details[0].bazisNodeId).toBe(777);
+    expect(details[1].bazisNodeId).toBeUndefined();
+  });
+
+  it('assigns unique temp_id to every detail on bulk loadOrder without detail_id (bazis draft 214+ панелей)', () => {
+    // Регрессия: Date.now()+Math.random() давал ~2048 различимых значений в
+    // пределах одной мс (мантисса double) → на 214 деталях коллизия temp_id
+    // почти гарантирована → дубль clientKey → 422 на create-from-draft.
+    const detailCount = 300;
+    useOrderFormStore.getState().loadOrder({
+      header: {
+        order_name: 'E2E bazis draft',
+        client_id: 1,
+        order_date: '2026-07-15',
+        order_status_id: 1,
+        payment_status_id: 1,
+        version: 0,
+      },
+      details: Array.from({ length: detailCount }, (_, index) => ({
+        detail_number: index + 1,
+        bazisNodeId: 10_000 + index,
+        height: 500,
+        width: 300,
+        quantity: 1,
+        area: 0.15,
+        material_id: null,
+        sheet_material_type_id: 5,
+        milling_type_id: 1,
+        edge_type_id: 1,
+        detail_cost: 0,
+        priority: 100,
+      })),
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+      deletedDetails: [],
+      deletedPayments: [],
+      deletedWorkshops: [],
+      deletedRequirements: [],
+      deletedDowelingLinks: [],
+      isDirty: false,
+      version: 0,
+    });
+
+    const details = useOrderFormStore.getState().details;
+    expect(details).toHaveLength(detailCount);
+    const tempIds = details.map((detail) => detail.temp_id);
+    expect(tempIds.every((tempId) => tempId != null)).toBe(true);
+    expect(new Set(tempIds.map(String)).size).toBe(detailCount);
+  });
+
+  it('keeps detail_id as temp_id for persisted details on loadOrder', () => {
+    useOrderFormStore.getState().loadOrder({
+      header: {
+        order_id: 15,
+        order_name: 'E2E order',
+        client_id: 1,
+        order_date: '2026-05-10',
+        order_status_id: 1,
+        payment_status_id: 1,
+        version: 3,
+      },
+      details: [
+        {
+          detail_id: 44,
+          detail_number: 1,
+          height: 500,
+          width: 300,
+          quantity: 2,
+          area: 0.3,
+          material_id: null,
+          sheet_material_type_id: 5,
+          milling_type_id: 1,
+          edge_type_id: 1,
+          detail_cost: 0,
+          priority: 100,
+        },
+      ],
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingLinks: [],
+      deletedDetails: [],
+      deletedPayments: [],
+      deletedWorkshops: [],
+      deletedRequirements: [],
+      deletedDowelingLinks: [],
+      isDirty: false,
+      version: 3,
+    });
+
+    expect(useOrderFormStore.getState().details[0].temp_id).toBe(44);
+  });
 });
 
 describe('orderFormStore per-order isolation', () => {

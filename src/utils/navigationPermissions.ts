@@ -9,6 +9,7 @@ export const SETTINGS_CATEGORY_PERMISSIONS: PermissionName[] = [
 
 export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   orders_view: ['orders.view'],
+  'orders-trash': ['orders.delete'],
   calendar: ['orders.view'],
   scan: ['labels.view'],
   doweling_orders_view: ['orders.view'],
@@ -45,6 +46,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   configuration: ['settings.view', 'settings.manage'],
   audit: ['audit.view'],
   'cut-jobs': ['cut.view'],
+  'bazis-cut-sets': ['cut.view'],
   bazis: ['bazis.view'],
   sheet_material_types: ['sheet_materials.view'],
 };

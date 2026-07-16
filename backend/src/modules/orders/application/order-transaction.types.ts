@@ -1,7 +1,8 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import type { TransactionClient } from '../../../database/database.types';
-import type { DeleteOrderResponseDto, OrderDto } from '../dto/order.dto';
+import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
+import type { DeleteOrderResponseDto, OrderDto, RestoreOrderResponseDto } from '../dto/order.dto';
 import type {
   CalculatedOrderDetailDto,
   NormalizedSaveOrderDowelingLinkDto,
@@ -28,6 +29,11 @@ export interface UpdateOrderCommand {
   orderId: number;
   dto: SaveOrderDto;
   requestId?: string;
+  prePersistHook?: (uow: OrderWriteUnitOfWork, locked: LockedOrderRow) => Promise<void>;
+  postPersistHook?: (
+    uow: OrderWriteUnitOfWork,
+    updated: { orderId: number; detailIdsByClientKey: Map<string, number> },
+  ) => Promise<void>;
 }
 
 export interface DeleteOrderCommand {
@@ -35,6 +41,15 @@ export interface DeleteOrderCommand {
   orderId: number;
   version: number;
   idempotencyKey: string;
+  requestId?: string;
+}
+
+export interface RestoreOrderCommand {
+  currentUser: CurrentUser;
+  orderId: number;
+  version: number;
+  idempotencyKey: string;
+  orderName?: string;
   requestId?: string;
 }
 
@@ -55,8 +70,24 @@ export interface LockedOrderDeleteRow {
   managerUserId: string | null;
 }
 
+export interface LockedOrderRestoreRow {
+  orderId: number;
+  orderName: string;
+  clientId: number | null;
+  version: number;
+  createdByUserId: string | null;
+  managerUserId: string | null;
+  deleteFlag: boolean;
+  deletedAt: string | null;
+  deletedBy: string | null;
+}
+
 export interface OrderDeleteIdempotencyResult {
   completedResponse?: DeleteOrderResponseDto;
+}
+
+export interface OrderRestoreIdempotencyResult {
+  completedResponse?: RestoreOrderResponseDto;
 }
 
 export interface OrderCreateIdempotencyResult {
@@ -157,6 +188,19 @@ export interface OrderDeleteOutboxInput extends OrderDeleteAuditInput {
   idempotencyKey: string;
 }
 
+export interface OrderRestoreAuditInput {
+  currentUser: CurrentUser;
+  requestId: string;
+  order: LockedOrderRestoreRow;
+  targetOrderName: string;
+  nextVersion: number;
+}
+
+export interface OrderRestoreOutboxInput extends OrderRestoreAuditInput {
+  auditId: string;
+  idempotencyKey: string;
+}
+
 export interface OrderWriteUnitOfWork {
   setSessionUser(userId: string): Promise<void>;
   getTransactionClient(): TransactionClient;
@@ -189,7 +233,12 @@ export interface OrderWriteUnitOfWork {
     idempotencyKey: string,
     response: DeleteOrderResponseDto,
   ): Promise<void>;
+  completeOrderRestoreIdempotency(
+    idempotencyKey: string,
+    response: RestoreOrderResponseDto,
+  ): Promise<void>;
   loadOrderHeaderSnapshot(orderId: number): Promise<Record<string, unknown> | null>;
+  peekOrderName(orderId: number): Promise<string | null>;
   loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null>;
   /**
    * Advisory xact lock по нормализованному номеру заказа. Берётся ПЕРВЫМ,
@@ -205,6 +254,12 @@ export interface OrderWriteUnitOfWork {
    */
   assertOrderNameAvailable(input: { orderName: string; excludeOrderId?: number }): Promise<void>;
   loadOrderForDelete(orderId: number): Promise<LockedOrderDeleteRow | null>;
+  loadOrderForRestore(orderId: number): Promise<LockedOrderRestoreRow | null>;
+  recordOrderRestoreDenied(input: {
+    currentUser: CurrentUser;
+    orderId: number;
+    requestId: string;
+  }): Promise<void>;
   assertChildOwnership(orderId: number, refs: readonly OrderChildReference[]): Promise<void>;
   createOrderHeader(input: {
     header: NormalizedSaveOrderHeaderDto;
@@ -255,15 +310,32 @@ export interface OrderWriteUnitOfWork {
     previousVersion: number | null;
     currentUser: CurrentUser;
   }): Promise<number>;
-  softDeleteOrder(input: { orderId: number; previousVersion: number }): Promise<number>;
+  softDeleteOrder(input: {
+    orderId: number;
+    previousVersion: number;
+    actorUserId: string;
+  }): Promise<number>;
+  restoreOrder(input: {
+    orderId: number;
+    previousVersion: number;
+    targetOrderName: string;
+    actorUserId: string;
+  }): Promise<number>;
   writeAuditEvent(event: OrderSaveAuditEvent): Promise<void>;
+  evaluateStatusAutomation(event: StatusAutomationEvent): Promise<void>;
   writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string>;
   enqueueOrderDeleteOutbox(input: OrderDeleteOutboxInput): Promise<void>;
+  writeOrderRestoreAudit(input: OrderRestoreAuditInput): Promise<string>;
+  enqueueOrderRestoreOutbox(input: OrderRestoreOutboxInput): Promise<void>;
   readOrder(orderId: number): Promise<OrderDto>;
 }
 
 export interface OrderTransactionManagerPort {
   runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T>;
+  reserveOrderRestoreIdempotency(
+    command: RestoreOrderCommand,
+  ): Promise<OrderRestoreIdempotencyResult>;
+  markOrderRestoreIdempotencyFailed(command: RestoreOrderCommand): Promise<void>;
 }
 
 export interface OrderPermissionCheckerPort {

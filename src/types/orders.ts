@@ -97,6 +97,7 @@ export interface OrderDetail {
   detail_id?: number;
   order_id?: number; // Will be set when saving
   detail_number: number;
+  bazisNodeId?: number | null;
 
   // Dimensions
   height: number;
@@ -122,9 +123,12 @@ export interface OrderDetail {
   // Additional
   note?: string | null;
   basis_project?: string | null;
+  basis_product?: string | null;
   basis_data?: string | null;
   basis_designation?: string | null;
   detail_name?: string | null;
+  // Присадка: деталь требует присадки (auto-set при импорте Базис-PDF по слову в примечании).
+  doweling?: boolean;
   priority: number;
   production_status_id?: number | null;
   joint_order_id?: number | null;

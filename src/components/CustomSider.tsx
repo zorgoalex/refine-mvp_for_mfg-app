@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Layout as AntLayout, Menu, Collapse, Button, Typography, Tooltip } from "antd";
 import {
   PlusOutlined,
@@ -69,6 +69,7 @@ const CATEGORY_MAP: Record<string, string> = {
   film_vendors: "Контрагенты",
   payments: "Финансы",
   payments_view: "Финансы",
+  "orders-trash": "Производство",
   groups: "Производство",
   projects: "Производство",
   order_workshops: "Производство",
@@ -77,6 +78,7 @@ const CATEGORY_MAP: Record<string, string> = {
   doweling_orders_view: "Производство",
   bazis: "Производство",
   "cut-jobs": "Производство",
+  "bazis-cut-sets": "Производство",
   scan: "Производство",
   films: "Материалы",
   materials: "Материалы",
@@ -123,6 +125,12 @@ export const CustomSider: React.FC = () => {
     () => !featureFlags.useBackendPermissions || can("orders.create", currentUser),
     [currentUser, featureFlags.useBackendPermissions],
   );
+  const canViewNavigation = useCallback(
+    (name: string) =>
+      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
+      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
+    [currentRoleKey, currentUser, roleVisibilityMatrix],
+  );
 
   const sider = useSiderMenuItems({
     resources,
@@ -132,9 +140,7 @@ export const CustomSider: React.FC = () => {
     categoryMap: CATEGORY_MAP,
     resourceLabels: RESOURCE_LABELS,
     resourceIcons: SIDER_RESOURCE_ICONS,
-    canViewNavigation: (name) =>
-      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
-      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
+    canViewNavigation,
     canViewSettings,
     canCreateOrders,
     setIsCreateModalOpen,

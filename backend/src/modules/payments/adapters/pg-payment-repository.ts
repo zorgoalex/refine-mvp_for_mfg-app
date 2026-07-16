@@ -26,6 +26,7 @@ import type {
   UpdatePaymentRequestDto,
 } from '../dto/payment.dto';
 import { PaymentNotFoundError, PaymentOrderNotFoundError } from '../errors/payment.errors';
+import { evaluateStatusAutomation } from '../../status-automation/application/status-automation-runtime';
 
 interface PaymentRow extends QueryResultRow {
   payment_id: string | number;
@@ -93,6 +94,31 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
         requestId: command.requestId,
         after: { ...payment },
       });
+      const paymentsCountResult = await tx.query<{ payments_count: string | number }>(
+        'SELECT COUNT(*) AS payments_count FROM payments WHERE order_id = $1 AND delete_flag = false',
+        [payment.orderId],
+      );
+      const paymentsCountAfter = Number(paymentsCountResult.rows[0]?.payments_count ?? 0);
+      const requestId = command.requestId ?? `payment-${payment.paymentId}`;
+      await evaluateStatusAutomation(tx, {
+        eventType: 'payment.created',
+        origin: 'user',
+        orderId: payment.orderId,
+        actor: command.currentUser,
+        requestId,
+        paymentsCountAfter,
+      });
+      if (orderSummary.paymentStatusId !== order.paymentStatusId) {
+        await evaluateStatusAutomation(tx, {
+          eventType: 'order.payment_status_changed',
+          origin: 'user',
+          orderId: payment.orderId,
+          actor: command.currentUser,
+          requestId,
+          paymentStatusIdBefore: order.paymentStatusId,
+          paymentStatusIdAfter: orderSummary.paymentStatusId,
+        });
+      }
 
       return { payment, order: orderSummary };
     });
@@ -129,11 +155,23 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
       );
       const payment = mapPaymentRow(updated.rows[0]);
       let orderSummary: PaymentOrderSummaryDto | null = null;
+      const paymentStatusChanges: Array<{
+        orderId: number;
+        paymentStatusIdBefore: number;
+        paymentStatusIdAfter: number;
+      }> = [];
 
       for (const order of orders.values()) {
         const summary = await recalculateOrderPaymentState(tx, order);
         if (order.orderId === nextOrder.orderId) {
           orderSummary = summary;
+        }
+        if (summary.paymentStatusId !== order.paymentStatusId) {
+          paymentStatusChanges.push({
+            orderId: order.orderId,
+            paymentStatusIdBefore: order.paymentStatusId,
+            paymentStatusIdAfter: summary.paymentStatusId,
+          });
         }
       }
 
@@ -147,6 +185,18 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
         before: { ...mapPaymentRow(existing) },
         after: { ...payment },
       });
+      const requestId = command.requestId ?? `payment-${payment.paymentId}`;
+      for (const change of paymentStatusChanges) {
+        await evaluateStatusAutomation(tx, {
+          eventType: 'order.payment_status_changed',
+          origin: 'user',
+          orderId: change.orderId,
+          actor: command.currentUser,
+          requestId,
+          paymentStatusIdBefore: change.paymentStatusIdBefore,
+          paymentStatusIdAfter: change.paymentStatusIdAfter,
+        });
+      }
 
       return { payment, order: orderSummary ?? (await recalculateOrderPaymentState(tx, nextOrder)) };
     });
@@ -174,6 +224,17 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
         requestId: command.requestId,
         before: { ...mapPaymentRow(existing) },
       });
+      if (orderSummary.paymentStatusId !== order.paymentStatusId) {
+        await evaluateStatusAutomation(tx, {
+          eventType: 'order.payment_status_changed',
+          origin: 'user',
+          orderId,
+          actor: command.currentUser,
+          requestId: command.requestId ?? `payment-${command.paymentId}`,
+          paymentStatusIdBefore: order.paymentStatusId,
+          paymentStatusIdAfter: orderSummary.paymentStatusId,
+        });
+      }
 
       return { paymentId: command.paymentId, order: orderSummary, deleted: true };
     });

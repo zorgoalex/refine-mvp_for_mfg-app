@@ -12,13 +12,27 @@ describe('parseBazisXml', () => {
     expect(parsed.productPrice).toBeCloseTo(91750.53);
   });
 
+  it('reads raw bazis order number from project attribute and product order from root product only', () => {
+    const parsed = parseBazisXml(fixture);
+    expect(parsed.bazisOrderNo).toBeNull();
+    expect(parsed.nodes[0]?.nodeKind).toBe('product');
+    expect(parsed.nodes[0]?.productOrderNo).toBeNull();
+  });
+
   it('builds tree: every parentIndex precedes child index, root is product', () => {
     const parsed = parseBazisXml(fixture);
     expect(parsed.nodes[0].nodeKind).toBe('product');
     for (const node of parsed.nodes) {
       if (node.parentIndex !== null) {
-        expect(node.parentIndex).toBeLessThan(node.index);
+      expect(node.parentIndex).toBeLessThan(node.index);
       }
+    }
+  });
+
+  it('keeps productOrderNo null for non-root nodes', () => {
+    const parsed = parseBazisXml(fixture);
+    for (const node of parsed.nodes.filter((candidate) => candidate.parentIndex !== null)) {
+      expect(node.productOrderNo).toBeNull();
     }
   });
 
@@ -85,13 +99,13 @@ describe('parseBazisXml', () => {
   });
 
   describe('multi-product project (несколько Изделие в Проект)', () => {
-    const multiXml = `<Проект Наименование="1471" Версия="1">
-      <Изделие><Наименование>санузел</Наименование><Цена>100.5</Цена><Количество>1</Количество><СписокЭлементов>
+    const multiXml = `<Проект Наименование=" 1471 " Версия="1">
+      <Изделие><Наименование>санузел</Наименование><Заказ> 1471 </Заказ><Цена>100.5</Цена><Количество>1</Количество><СписокЭлементов>
         <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>П1</Наименование>
           <ОсновнойМатериал><Наименование>ЛДСП белый</Наименование></ОсновнойМатериал>
         </Объект>
       </СписокЭлементов></Изделие>
-      <Изделие><Наименование>шкаф</Наименование><Цена>200</Цена><Количество>1</Количество><СписокЭлементов>
+      <Изделие><Наименование>шкаф</Наименование><Заказ> </Заказ><Цена>200</Цена><Количество>1</Количество><СписокЭлементов>
         <Сборка><Наименование>Секция</Наименование><Количество>2</Количество><СписокЭлементов>
           <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>П2</Наименование><Количество>1</Количество>
             <ОсновнойМатериал><Наименование>МДФ 16</Наименование></ОсновнойМатериал>
@@ -126,8 +140,18 @@ describe('parseBazisXml', () => {
 
     it('joins product names and sums prices in revision header', () => {
       const parsed = parseBazisXml(multiXml);
+      expect(parsed.bazisOrderNo).toBe('1471');
       expect(parsed.productName).toBe('санузел + шкаф');
       expect(parsed.productPrice).toBeCloseTo(300.5);
+    });
+
+    it('reads product order number only on root product nodes', () => {
+      const parsed = parseBazisXml(multiXml);
+      const roots = parsed.nodes.filter((node) => node.parentIndex === null);
+      expect(roots.map((node) => node.productOrderNo)).toEqual(['1471', null]);
+      for (const node of parsed.nodes.filter((candidate) => candidate.parentIndex !== null)) {
+        expect(node.productOrderNo).toBeNull();
+      }
     });
 
     it('collects materials from every product', () => {
@@ -155,6 +179,76 @@ describe('parseBazisXml', () => {
         <Изделие><Наименование>Б</Наименование><СписокЭлементов/></Изделие>
       </Проект>`;
       expect(parseBazisXml(allNull).productPrice).toBeNull();
+    });
+  });
+
+  describe('universal container walk (неизвестные контейнеры в СписокЭлементов)', () => {
+    // Формат 1491.xml: внутри СписокЭлементов появился контейнер <Полуфабрикат> с собственным
+    // СписокЭлементов; старый whitelist-обход терял такие поддеревья целиком.
+    const semiXml = `<Проект Наименование="1491" Версия="1">
+      <Изделие><Наименование>KUH</Наименование><Заказ>1491</Заказ><Количество>1</Количество><Цена>10</Цена><СписокЭлементов>
+        <Полуфабрикат><Наименование>НМУ.М.R-2Д</Наименование><ТипОбъекта>Полуфабрикат</ТипОбъекта><Количество>2</Количество><Позиция>К1</Позиция><СписокЭлементов>
+          <Сборка><Наименование>НМУ.К.М-R</Наименование><ТипОбъекта>Блок</ТипОбъекта><Количество>1</Количество><СписокЭлементов>
+            <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>Бок</Наименование><Количество>3</Количество>
+              <ОсновнойМатериал><Наименование>ЛДСП 16</Наименование></ОсновнойМатериал>
+            </Объект>
+          </СписокЭлементов></Сборка>
+          <Объект><ТипОбъекта>Фурнитура</ТипОбъекта><Наименование>Винт</Наименование><Количество>4</Количество>
+            <ОсновнойМатериал><Наименование>Винт 4х30</Наименование></ОсновнойМатериал>
+          </Объект>
+        </СписокЭлементов></Полуфабрикат>
+        <НеизвестныйКонтейнер><Наименование>Новое</Наименование><ТипОбъекта>Нечто</ТипОбъекта><Количество>1</Количество><СписокЭлементов>
+          <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>Дно</Наименование><Количество>1</Количество>
+            <ОсновнойМатериал><Наименование>ХДФ 3</Наименование></ОсновнойМатериал>
+          </Объект>
+        </СписокЭлементов></НеизвестныйКонтейнер>
+      </СписокЭлементов></Изделие>
+    </Проект>`;
+
+    it('walks Полуфабрикат subtree: nodes, parent chain, cumulative quantity', () => {
+      const parsed = parseBazisXml(semiXml);
+      const semi = parsed.nodes.find((node) => node.objectType === 'Полуфабрикат');
+      expect(semi).toBeDefined();
+      expect(semi?.nodeKind).toBe('object');
+      expect(semi?.parentIndex).toBe(0);
+      expect(semi?.cumulativeQuantity).toBe(2);
+      const assembly = parsed.nodes.find((node) => node.name === 'НМУ.К.М-R');
+      expect(assembly?.nodeKind).toBe('assembly');
+      expect(assembly?.parentIndex).toBe(semi?.index);
+      const panel = parsed.nodes.find((node) => node.name === 'Бок');
+      expect(panel?.parentIndex).toBe(assembly?.index);
+      expect(panel?.cumulativeQuantity).toBe(6);
+      const hardware = parsed.nodes.find((node) => node.name === 'Винт');
+      expect(hardware?.parentIndex).toBe(semi?.index);
+      expect(hardware?.cumulativeQuantity).toBe(8);
+    });
+
+    it('walks any future unknown container tag with СписокЭлементов', () => {
+      const parsed = parseBazisXml(semiXml);
+      const unknown = parsed.nodes.find((node) => node.name === 'Новое');
+      expect(unknown).toBeDefined();
+      expect(unknown?.nodeKind).toBe('object');
+      const panel = parsed.nodes.find((node) => node.name === 'Дно');
+      expect(panel?.parentIndex).toBe(unknown?.index);
+    });
+
+    it('counts panels/materials from dropped-before subtrees', () => {
+      const parsed = parseBazisXml(semiXml);
+      expect(parsed.summary.panels).toBe(2);
+      expect(parsed.summary.hardware).toBe(1);
+      expect(parsed.summary.totalNodes).toBe(7);
+      expect(parsed.materials.map((material) => material.name).sort()).toEqual([
+        'Винт 4х30',
+        'ЛДСП 16',
+        'ХДФ 3',
+      ]);
+    });
+
+    it('keeps raw free of СписокЭлементов for container nodes of any tag', () => {
+      const parsed = parseBazisXml(semiXml);
+      for (const node of parsed.nodes) {
+        expect(node.raw).not.toHaveProperty('СписокЭлементов');
+      }
     });
   });
 

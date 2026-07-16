@@ -2,12 +2,14 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { profileApi } from '../api/profileApi';
 import { authSession } from '../api/authSession';
 import { authStorage } from '../utils/auth';
-import { getStoredThemeMode, setStoredThemeMode } from './themeStorage';
-import type { ThemeMode } from './themeTypes';
+import { getStoredThemeMode, getStoredUiSize, isUiSize, setStoredThemeMode, setStoredUiSize } from './themeStorage';
+import type { ThemeMode, UiSize } from './themeTypes';
 
 interface AppThemeContextValue {
   mode: ThemeMode;
+  uiSize: UiSize;
   setMode: (mode: ThemeMode) => Promise<void>;
+  setUiSize: (size: UiSize) => Promise<void>;
   toggleMode: () => Promise<void>;
 }
 
@@ -18,6 +20,10 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
   const [mode, setModeState] = useState<ThemeMode>(() => {
     const userId = getCurrentUserId();
     return (userId ? getStoredThemeMode(String(userId)) : null) ?? 'light';
+  });
+  const [uiSize, setUiSizeState] = useState<UiSize>(() => {
+    const userId = getCurrentUserId();
+    return (userId ? getStoredUiSize(String(userId)) : null) ?? 'default';
   });
 
   useEffect(() => {
@@ -39,12 +45,26 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
     if (cached) {
       setModeState(cached);
     }
+    // Смена юзера в том же браузере: state обязан сброситься на кэш ИМЕННО
+    // этого юзера (или default) — иначе новый юзер унаследует чужой компакт,
+    // если старый backend (mixed deploy) не вернёт uiSize в ответе
+    const cachedSize = userId ? getStoredUiSize(String(userId)) : null;
+    setUiSizeState(cachedSize ?? 'default');
 
     let active = true;
     profileApi.getPreferences()
       .then((response) => {
         if (!active) return;
         setModeState(response.preferences.themeMode);
+        // uiSize применяем только если сессия всё ещё принадлежит userId,
+        // с которым эффект стартовал: ответ юзера A не должен травить
+        // state/кэш юзера B (critic R4); mixed deploy — старый backend
+        // стрипает uiSize из ответа, undefined не затирает кэш
+        const responseSize = isUiSize(response.preferences.uiSize) ? response.preferences.uiSize : null;
+        if (responseSize && getCurrentUserId() === userId) {
+          setUiSizeState(responseSize);
+          setStoredUiSize(userId, responseSize);
+        }
         const refreshedUserId = getCurrentUserId();
         if (refreshedUserId) {
           setStoredThemeMode(refreshedUserId, response.preferences.themeMode);
@@ -81,14 +101,41 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
     }
   }, []);
 
+  const setUiSize = useCallback(async (nextSize: UiSize) => {
+    const token = authStorage.getAccessToken();
+    const userId = getCurrentUserId();
+    setUiSizeState(nextSize);
+    if (userId) {
+      setStoredUiSize(String(userId), nextSize);
+    }
+
+    if (!token || !userId) return;
+
+    try {
+      const response = await profileApi.updatePreferences({ uiSize: nextSize });
+      // Сессия могла смениться, пока PATCH летел — протухший ответ юзера A
+      // не должен перезаписать state/кэш юзера B
+      if (getCurrentUserId() !== userId) {
+        return;
+      }
+      // Старый backend может не вернуть uiSize (mixed deploy) — остаёмся на
+      // optimistic-значении nextSize
+      const confirmedSize = isUiSize(response.preferences.uiSize) ? response.preferences.uiSize : nextSize;
+      setUiSizeState(confirmedSize);
+      setStoredUiSize(userId, confirmedSize);
+    } catch {
+      // Optimistic local preference; backend retried on next explicit change.
+    }
+  }, []);
+
   const toggleMode = useCallback(
     () => setMode(mode === 'dark' ? 'light' : 'dark'),
     [mode, setMode],
   );
 
   const value = useMemo<AppThemeContextValue>(
-    () => ({ mode, setMode, toggleMode }),
-    [mode, setMode, toggleMode],
+    () => ({ mode, uiSize, setMode, setUiSize, toggleMode }),
+    [mode, uiSize, setMode, setUiSize, toggleMode],
   );
 
   return (

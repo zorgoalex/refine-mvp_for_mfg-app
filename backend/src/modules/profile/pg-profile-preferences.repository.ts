@@ -3,12 +3,14 @@ import type { DatabaseClient } from '../../database/database.types';
 import type {
   OrderDetailColumnPreferencesDto,
   ThemeMode,
+  UiSize,
   UserPreferencesDto,
   UserPreferencesRepositoryPort,
 } from './profile-preferences.types';
 
 interface PreferenceRow extends QueryResultRow {
   theme_mode: string | null;
+  ui_size: string | null;
   order_detail_columns: unknown;
 }
 
@@ -18,7 +20,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
   async getUserPreferences(userId: number): Promise<UserPreferencesDto> {
     const result = await this.database.query<PreferenceRow>(
       `
-      SELECT theme_mode, order_detail_columns
+      SELECT theme_mode, ui_size, order_detail_columns
       FROM user_preferences
       WHERE user_id = $1
       `,
@@ -32,24 +34,30 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
     userId: number,
     preferences: Partial<UserPreferencesDto>,
   ): Promise<UserPreferencesDto> {
-    if (preferences.themeMode === undefined && preferences.orderDetailColumns === undefined) {
+    if (
+      preferences.themeMode === undefined &&
+      preferences.uiSize === undefined &&
+      preferences.orderDetailColumns === undefined
+    ) {
       return this.getUserPreferences(userId);
     }
 
     const result = await this.database.query<PreferenceRow>(
       `
-      INSERT INTO user_preferences (user_id, theme_mode, order_detail_columns)
-      VALUES ($1, COALESCE($2, 'light'), COALESCE($3::jsonb, '{}'::jsonb))
+      INSERT INTO user_preferences (user_id, theme_mode, ui_size, order_detail_columns)
+      VALUES ($1, COALESCE($2, 'light'), $3, COALESCE($4::jsonb, '{}'::jsonb))
       ON CONFLICT (user_id)
       DO UPDATE SET
         theme_mode = COALESCE($2, user_preferences.theme_mode),
-        order_detail_columns = COALESCE($3::jsonb, user_preferences.order_detail_columns),
+        ui_size = COALESCE($3, user_preferences.ui_size),
+        order_detail_columns = COALESCE($4::jsonb, user_preferences.order_detail_columns),
         updated_at = now()
-      RETURNING theme_mode, order_detail_columns
+      RETURNING theme_mode, ui_size, order_detail_columns
       `,
       [
         userId,
         preferences.themeMode ?? null,
+        preferences.uiSize ?? null,
         preferences.orderDetailColumns === undefined ? null : JSON.stringify(preferences.orderDetailColumns),
       ],
     );
@@ -61,12 +69,17 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
 function mapPreferenceRow(row: PreferenceRow | undefined): UserPreferencesDto {
   return {
     themeMode: normalizeThemeMode(row?.theme_mode),
+    uiSize: normalizeUiSize(row?.ui_size),
     orderDetailColumns: normalizeOrderDetailColumns(row?.order_detail_columns),
   };
 }
 
 function normalizeThemeMode(value: unknown): ThemeMode {
   return value === 'dark' ? 'dark' : 'light';
+}
+
+function normalizeUiSize(value: unknown): UiSize {
+  return value === 'small' ? 'small' : 'default';
 }
 
 function normalizeOrderDetailColumns(value: unknown): OrderDetailColumnPreferencesDto {

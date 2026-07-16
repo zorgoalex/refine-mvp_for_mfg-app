@@ -44,6 +44,7 @@ export const apiRoutes = {
     list: backendApiPath('/orders'),
     formData: backendApiPath('/orders/form-data'),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
+    restore: (orderId: number) => backendApiPath(`/orders/${orderId}/restore`),
     status: (orderId: number) => backendApiPath(`/orders/${orderId}/status`),
     paymentStatus: (orderId: number) => backendApiPath(`/orders/${orderId}/payment-status`),
     productionStatus: (orderId: number) => backendApiPath(`/orders/${orderId}/production-status`),
@@ -160,6 +161,7 @@ export const apiRoutes = {
     projects: backendApiPath('/bazis/projects'),
     project: (id: number) => backendApiPath(`/bazis/projects/${id}`),
     node: (id: number) => backendApiPath(`/bazis/nodes/${id}`),
+    nodeNotes: (id: number) => backendApiPath(`/bazis/nodes/${id}/notes`),
     revisionTree: (id: number) => backendApiPath(`/bazis/revisions/${id}/tree`),
     revisionNodesSearch: (id: number) => backendApiPath(`/bazis/revisions/${id}/nodes/search`),
     revisionMaterialsSummary: (id: number) => backendApiPath(`/bazis/revisions/${id}/materials-summary`),
@@ -197,6 +199,11 @@ export const apiRoutes = {
     list: backendApiPath('/notification-rules'),
     byId: (ruleId: string) => backendApiPath(`/notification-rules/${encodeURIComponent(ruleId)}`),
     eventTypes: backendApiPath('/notification-event-types'),
+  },
+  statusAutomation: {
+    rules: backendApiPath('/status-automation/rules'),
+    ruleById: (ruleId: number) => backendApiPath(`/status-automation/rules/${ruleId}`),
+    eventTypes: backendApiPath('/status-automation/event-types'),
   },
   groups: groupsRoutes,
   projects: {

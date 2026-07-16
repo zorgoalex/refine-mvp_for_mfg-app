@@ -9,6 +9,11 @@ export interface LabelFieldCatalogItem {
   category: string;
 }
 
+export interface DetailFieldColumnMetadata {
+  columnName: string;
+  dataType: string;
+}
+
 export const BAZIS_COLUMN_LABELS = [
   '№',
   '№ п/п',
@@ -189,32 +194,34 @@ export const DYNAMIC_LABEL_FIELDS: readonly LabelFieldCatalogItem[] = [
 const DETAIL_FIELD_LABELS: Record<string, string> = {
   detail_id: 'ID детали',
   order_id: 'ID заказа',
-  detail_number: 'Номер/позиция детали',
+  detail_number: '№',
   detail_name: 'Название детали',
   height: 'Высота',
   width: 'Ширина',
-  quantity: 'Количество',
+  quantity: 'Кол-во',
   area: 'Площадь',
   material_id: 'ID материала',
-  sheet_material_type_id: 'ID листового материала',
+  sheet_material_type_id: 'Материал',
   material_name: 'Материал',
-  milling_type_id: 'ID фрезеровки',
-  edge_type_id: 'ID кромки',
-  film_id: 'ID пленки',
-  milling_cost_per_sqm: 'Фрезеровка за м2',
-  detail_cost: 'Стоимость детали',
-  priority: 'Приоритет',
-  production_status_id: 'ID статуса производства',
+  milling_type_id: 'Фрезеровка',
+  edge_type_id: 'Обкат',
+  film_id: 'Пленка',
+  milling_cost_per_sqm: 'Цена за кв.м.',
+  detail_cost: 'Сумма',
+  priority: 'Пр-т',
+  production_status_id: 'Статус',
   joint_order_id: 'ID объединенного заказа',
-  note: 'Примечание детали',
+  note: 'Примечание',
   link_cutting_file: 'Файл раскроя',
   link_cutting_image_file: 'Картинка раскроя',
   link_cad_file: 'CAD файл',
   link_pdf_file: 'PDF файл',
   ref_key_1c: 'Ключ 1C детали',
   basis_project: 'Базис проект',
+  basis_product: 'Базис обозн. изделия',
   basis_data: 'Базис данные',
-  basis_designation: 'Базис обозн.',
+  basis_designation: 'Базис обозн. детали',
+  doweling: 'Присадка',
 };
 
 const ORDER_FIELD_LABELS: Record<string, string> = {
@@ -269,14 +276,38 @@ export const BAZIS_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = BAZIS_COLUM
   category: inferCategory(label),
 }));
 
-export const DETAIL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.entries(DETAIL_FIELD_LABELS).map(([column, label]) => ({
-  id: `detail.${column}`,
-  source: 'detail',
-  sourceColumn: column,
-  label,
-  type: inferViewFieldType(column),
-  category: 'Деталь',
-}));
+export const DETAIL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.entries(DETAIL_FIELD_LABELS)
+  .map(([column, label]) => ({
+    id: `detail.${column}`,
+    source: 'detail',
+    sourceColumn: column,
+    label,
+    type: inferViewFieldType(column),
+    category: 'Деталь',
+  }));
+
+export function buildDetailFieldCatalog(columns: readonly DetailFieldColumnMetadata[]): LabelFieldCatalogItem[] {
+  return columns
+    .map(({ columnName, dataType }) => ({
+      id: `detail.${columnName}`,
+      source: 'detail' as const,
+      sourceColumn: columnName,
+      label: DETAIL_FIELD_LABELS[columnName] ?? humanizeColumnName(columnName),
+      type: inferDatabaseFieldType(dataType),
+      category: 'Деталь',
+    }));
+}
+
+export function buildRuntimeLabelFieldCatalog(
+  detailColumns: readonly DetailFieldColumnMetadata[],
+): LabelFieldCatalogItem[] {
+  return [
+    ...BAZIS_FIELD_CATALOG,
+    ...buildDetailFieldCatalog(detailColumns),
+    ...ORDER_FIELD_CATALOG,
+    ...DYNAMIC_LABEL_FIELDS,
+  ];
+}
 
 export const ORDER_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.entries(ORDER_FIELD_LABELS).map(([column, label]) => ({
   id: `order.${column}`,
@@ -296,21 +327,41 @@ export const LABEL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = [
 
 const LABEL_FIELD_IDS = new Set(LABEL_FIELD_CATALOG.map((field) => field.id));
 
-export function isBuiltInLabelFieldId(value: string): boolean {
-  return LABEL_FIELD_IDS.has(value);
+export function isBuiltInLabelFieldId(value: string, runtimeFieldIds?: ReadonlySet<string>): boolean {
+  return LABEL_FIELD_IDS.has(value) || runtimeFieldIds?.has(value) === true;
 }
 
 export function isSupportedFieldBinding(
   value: string | null | undefined,
   customFieldSchema?: unknown,
+  runtimeFieldIds?: ReadonlySet<string>,
 ): value is string {
   if (!value) {
     return false;
   }
-  if (isBuiltInLabelFieldId(value)) {
+  if (isBuiltInLabelFieldId(value, runtimeFieldIds)) {
     return true;
   }
   return getCustomFieldIds(customFieldSchema).has(value);
+}
+
+function humanizeColumnName(columnName: string): string {
+  const normalized = columnName.replaceAll('_', ' ').trim();
+  return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : columnName;
+}
+
+function inferDatabaseFieldType(dataType: string): LabelFieldType {
+  const normalized = dataType.toLowerCase();
+  if (normalized === 'boolean') return 'boolean';
+  if (normalized.includes('date') || normalized.includes('timestamp')) return 'date';
+  if (
+    normalized.includes('int') ||
+    normalized.includes('numeric') ||
+    normalized.includes('decimal') ||
+    normalized.includes('real') ||
+    normalized.includes('double')
+  ) return 'number';
+  return 'string';
 }
 
 export function getCustomFieldIds(customFieldSchema: unknown): Set<string> {

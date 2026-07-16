@@ -34,6 +34,7 @@ import {
   useOrderDetailColumnPreferences,
   type OrderDetailColumnDefinition,
 } from './OrderDetailColumnSettings';
+import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -84,16 +85,18 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'edge_type_id', label: 'Обкат' },
   { key: 'sheet_material_type_id', label: 'Материал' },
   { key: 'note', label: 'Примечание' },
+  { key: 'doweling', label: 'Присадка' },
   { key: 'milling_cost_per_sqm', label: 'Цена за кв.м.' },
   { key: 'detail_cost', label: 'Сумма' },
   { key: 'film_id', label: 'Пленка' },
   { key: 'priority', label: 'Пр-т' },
   { key: 'production_status_id', label: 'Статус' },
   { key: 'basis_project', label: 'Базис проект' },
+  { key: 'basis_product', label: 'Базис обозн. изделия' },
   { key: 'basis_data', label: 'Базис данные' },
-  { key: 'basis_designation', label: 'Базис обозн. изделия' },
+  { key: 'basis_designation', label: 'Базис обозн. детали' },
   { key: 'detail_name', label: 'Название детали' },
-  { key: 'actions', label: 'Действия', lockVisible: true },
+  { key: 'actions', label: 'Действия', lockVisible: true, lockPosition: 'end' },
 ];
 
 const ORDER_DETAIL_EDIT_DEFAULT_ORDER = ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS.map((definition) => definition.key);
@@ -267,7 +270,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const totals = useMemo(() => {
     return {
       quantity: details.reduce((sum, d) => sum + (d.quantity || 0), 0),
-      area: details.reduce((sum, d) => sum + (d.area || 0), 0),
+      area: calculateOrderTotalArea(details),
       detail_cost: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
     };
   }, [details]);
@@ -456,9 +459,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       // Calculate area using INTEGER MATH to avoid floating point errors
       // height and width are in mm (integers), so we calculate in mm² first
       // Example: 550mm * 200mm * 2 = 220000 mm²
-      // Then: ceil(220000 / 10000) / 100 = ceil(22) / 100 = 0.22 m²
-      const areaMm2 = height * width * quantity; // Integer arithmetic - no floating point errors!
-      const area = Math.ceil(areaMm2 / 10000) / 100; // Convert to m² with 2 decimal places, round up
+      // Then: round((220000 / 1_000_000) * 100) / 100 = 0.22 m²
+      const areaMm2 = height * width * quantity;
+      const area = calculateOrderDetailArea(height, width, quantity);
       console.log('[OrderDetailTable] recalcArea - calculated area:', area, '(areaMm2:', areaMm2, ')');
 
       // FIX: Сохраняем area в ref
@@ -514,7 +517,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       milling_cost_per_sqm: record.milling_cost_per_sqm ?? null,
       detail_cost: record.detail_cost ?? null,
       note: record.note ?? '',
+      doweling: record.doweling === true,
       basis_project: record.basis_project ?? '',
+      basis_product: record.basis_product ?? '',
       basis_data: record.basis_data ?? '',
       basis_designation: record.basis_designation ?? '',
       priority: record.priority,
@@ -957,10 +962,29 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       },
     },
     {
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Прис.</div>,
+      dataIndex: 'doweling',
+      key: 'doweling',
+      width: 52,
+      align: 'center',
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
+          <Form.Item name="doweling" valuePropName="checked" style={{ margin: 0, padding: '0 4px' }}>
+            <Checkbox />
+          </Form.Item>
+        ) : (
+          d.doweling ? <CheckOutlined style={{ color: '#1890ff' }} /> : null
+        );
+      },
+    },
+    {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Цена за кв.м.</div>,
       dataIndex: 'milling_cost_per_sqm',
       key: 'milling_cost_per_sqm',
-      width: 70,
+      width: 100,
       align: 'right',
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
@@ -980,7 +1004,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             />
           </Form.Item>
         ) : (
-          <span>
+          <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
             {d.milling_cost_per_sqm !== null && d.milling_cost_per_sqm !== undefined ? formatNumber(d.milling_cost_per_sqm, 2) : '—'}
           </span>
         );
@@ -1124,7 +1148,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             />
           </Form.Item>
         ) : (
-          formatNumber(d.priority, 0)
+          <span style={{ fontSize: 11, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+            {formatNumber(d.priority, 0)}
+          </span>
         );
       },
     },
@@ -1180,6 +1206,24 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       },
     },
     {
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис обозн. изделия</div>,
+      dataIndex: 'basis_product',
+      key: 'basis_product',
+      width: 120,
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditing(d) ? (
+          <Form.Item name="basis_product" style={{ margin: 0, padding: '0 4px' }}>
+            <Input placeholder="Обозн. изделия" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          </Form.Item>
+        ) : (
+          <span style={{ fontSize: '90%' }}>{d.basis_product || ''}</span>
+        );
+      },
+    },
+    {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис данные</div>,
       dataIndex: 'basis_data',
       key: 'basis_data',
@@ -1198,7 +1242,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       },
     },
     {
-      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис обозн. изделия</div>,
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис обозн. детали</div>,
       dataIndex: 'basis_designation',
       key: 'basis_designation',
       width: 90,
@@ -1421,6 +1465,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       case 'edge': return edgeNameById.get(sample.edge_type_id) || '—';
       case 'price': return sample.milling_cost_per_sqm != null ? String(sample.milling_cost_per_sqm) : '—';
       case 'note': return (sample.note || '').trim() || '—';
+      case 'doweling': return sample.doweling === true ? 'Присадка' : '—';
       default: return '—';
     }
   }, [millingNameById, sheetNameById, filmNameById, edgeNameById]);
@@ -1523,6 +1568,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         return !Number.isFinite(num);
       }),
       hasEmptyNote: sortedDetails.some(d => !(d.note || '').trim()),
+      hasDoweling: sortedDetails.some(d => d.doweling === true),
       hasPrisadka: sortedDetails.some(d => (d.note || '').includes('Присадка')),
       hasChernovoy: sortedDetails.some(d => (d.note || '').includes('Черновой')),
     };
@@ -1618,12 +1664,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       noteItems.push({ key, label: renderMenuValue(value, 44) });
     }
 
+    const dowelingItems: MenuProps['items'] = selectionAggregates.hasDoweling
+      ? [{ key: 'select:doweling:true', label: renderMenuValue('Присадка') }]
+      : [{ key: 'select:doweling:none', label: <span style={{ color: '#999' }}>Нет данных</span>, disabled: true }];
+
     const categories: MenuProps['items'] = [
       { key: 'select:category:milling', label: 'по фрезеровке', children: millingItems },
       { key: 'select:category:materials', label: 'по материалам', children: materialItems },
       { key: 'select:category:films', label: 'по пленкам', children: filmItems },
       { key: 'select:category:edges', label: 'по обкату', children: edgeItems },
       { key: 'select:category:prices', label: 'по ценам', children: priceItems },
+      { key: 'select:category:doweling', label: 'по присадке', children: dowelingItems },
       { key: 'select:category:notes', label: 'по примечанию', children: noteItems.length ? noteItems : [{ key: 'select:note:none', label: <span style={{ color: '#999' }}>Нет данных</span>, disabled: true }] },
     ];
 
@@ -1646,6 +1697,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     selectionAggregates.edgeIds,
     selectionAggregates.filmIds,
     selectionAggregates.hasChernovoy,
+    selectionAggregates.hasDoweling,
     selectionAggregates.hasEmptyEdge,
     selectionAggregates.hasEmptyFilm,
     selectionAggregates.hasEmptyMaterial,
@@ -1774,6 +1826,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       return;
     }
 
+    if (key === 'select:doweling:true') {
+      selectRows(d => d.doweling === true);
+      return;
+    }
+
     if (key === 'select:note:contains:prisadka') {
       selectRows(d => (d.note || '').includes('Присадка'));
       return;
@@ -1839,7 +1896,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           onShowSizeChange: (current, size) => setPageSize(size),
           onChange: (page, size) => setPageSize(size),
         }}
-        scroll={{ x: 1780, y: 500 }}
+        scroll={{ x: 'max-content', y: 500 }}
         size="small"
         bordered
         rowClassName={(row: any) => {

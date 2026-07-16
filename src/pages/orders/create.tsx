@@ -1,4 +1,6 @@
-// Create Order Page
+// Create Order Page — полноценная страница /orders/create (роут в App.tsx).
+// Используется draft-first флоу Базис-панелей (location.state.bazisDraft) и
+// доступна как обычная страница создания.
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -8,21 +10,10 @@ export const OrderCreate: React.FC = () => {
   const navigate = useNavigate();
 
   const handleSaveSuccess = (orderId: number) => {
-    // After successful create, redirect to edit page for this order
-    console.log('[OrderCreate] handleSaveSuccess - navigating to edit page for order:', orderId);
     navigate(`/orders/edit/${orderId}`, { replace: true });
   };
 
-  const handleCancel = () => {
-    // Navigate back to orders list
-    navigate('/orders');
-  };
-
-  return (
-    <OrderForm
-      mode="create"
-      onSaveSuccess={handleSaveSuccess}
-      onCancel={handleCancel}
-    />
-  );
+  // Без onCancel: в tabbed workspace OrderForm сам владеет закрытием
+  // (closeTab + переход к соседу); onCancel форсит embedded/modal-ветку.
+  return <OrderForm mode="create" onSaveSuccess={handleSaveSuccess} />;
 };

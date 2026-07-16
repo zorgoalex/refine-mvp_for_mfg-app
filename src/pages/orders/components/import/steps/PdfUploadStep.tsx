@@ -73,6 +73,22 @@ export const PdfUploadStep: React.FC<PdfUploadStepProps> = ({
       },
     },
     {
+      title: 'Базис проект',
+      dataIndex: 'basisProject',
+      key: 'basisProject',
+      width: 110,
+      ellipsis: true,
+      render: (value: string | null) => value || <Text type="secondary">—</Text>,
+    },
+    {
+      title: 'Базис обозн. изделия',
+      dataIndex: 'basisProduct',
+      key: 'basisProduct',
+      width: 130,
+      ellipsis: true,
+      render: (value: string | null) => value || <Text type="secondary">—</Text>,
+    },
+    {
       title: 'Размер (мм)',
       key: 'size',
       width: 120,

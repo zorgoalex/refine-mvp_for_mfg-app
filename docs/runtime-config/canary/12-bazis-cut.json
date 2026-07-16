@@ -1,0 +1,22 @@
+{
+  "apiUrl": "",
+  "features": {
+    "backendAuth": true,
+    "backendPermissions": true,
+    "backendOrdersRead": true,
+    "backendOrdersWrite": true,
+    "backendPayments": true,
+    "backendClientPhones": true,
+    "backendProductionActions": true,
+    "backendDeadlines": true,
+    "backendOrderExport": true,
+    "backendUsers": true,
+    "backendVlm": true,
+    "backendReferences": false,
+    "backendCut": true,
+    "bazisCut": true,
+    "labels": false,
+    "enableLegacyHasura": true,
+    "workosAuth": false
+  }
+}

@@ -1,12 +1,13 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined } from "@ant-design/icons";
+import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select, Popconfirm } from "antd";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useReactToPrint } from "react-to-print";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTabStore } from "../../stores/tabStore";
+import { resolveOrderTabLabel } from "../../utils/tabLabels";
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from "../../utils/materialDisplayName";
 import { downloadOrderExcel } from "../../utils/excel/generateOrderExcel";
 import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
@@ -19,6 +20,7 @@ import { OrderProductionBlock } from "./components/sections/OrderProductionBlock
 import { OrderFilesBlock } from "./components/sections/OrderFilesBlock";
 import { OrderMetaBlock } from "./components/sections/OrderMetaBlock";
 import { featureFlags } from "../../config/featureFlags";
+import { isApiError } from "../../api/apiError";
 import { shouldShowOrderLoading } from "./utils/orderShowLoading";
 import { getDowelingOrderShowPath } from "./utils/dowelingOrderPaths";
 import { resolveOrderExportClientName, toOrderExportClient } from "./utils/orderExportClient";
@@ -26,12 +28,14 @@ import { ordersApi } from "../../api/ordersApi";
 import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
 import { GroupLinksEditor } from "./components/groups/GroupLinksEditor";
 import { AddToCutModal } from "./components/AddToCutModal";
+import { AddToBazisCutModal } from "../bazis-cut/AddToBazisCutModal";
 import { can, canAny } from "../../utils/permissions";
 import { cutApi } from "../../api/cutApi";
 import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.types";
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
 import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
+import { calculateOrderTotalArea } from "../../utils/orderArea";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
 import { CutPage } from "../cut/CutPage";
@@ -43,6 +47,11 @@ import { authSession } from '../../api/authSession';
 import { useIsMobile } from '../../hooks/useDeviceTier';
 import { DetailCardList } from './mobile/DetailCardList';
 import type { DetailCardLookups } from './mobile/detailCardModel';
+import { makeOrderDeleteHandler } from './orderDeleteAction';
+import { makeRestoreHandler } from './orderRestoreAction';
+import { DeletedOrderCard } from './DeletedOrderCard';
+import { buildDeletedOrderCardModel } from './deletedOrderCard';
+import type { OrderDto } from "../../api/types/orderApi.types";
 import {
   applyOrderDetailColumnSettings,
   OrderDetailColumnSettingsButton,
@@ -88,9 +97,27 @@ function createProjectMoveIdempotencyKey(): string {
 
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
+
+const modalConfirm = (content: string): Promise<boolean> =>
+  new Promise((resolve) => {
+    Modal.confirm({
+      title: 'Подтверждение',
+      content,
+      okText: 'Восстановить',
+      cancelText: 'Отмена',
+      onOk: () => {
+        resolve(true);
+      },
+      onCancel: () => {
+        resolve(false);
+      },
+    });
+  });
+
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const { id: currentOrderId } = useParams();
   const [searchParams] = useSearchParams();
   const highlightDetail = Number(searchParams.get('highlightDetail')) || null;
   const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(null);
@@ -100,6 +127,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [moveSubmitting, setMoveSubmitting] = useState(false);
   const [moveTargetProjectId, setMoveTargetProjectId] = useState<number | undefined>(undefined);
   const [moveCreateNew, setMoveCreateNew] = useState(false);
+  const [deletedOrder, setDeletedOrder] = useState<OrderDto | null>(null);
 
   const { queryResult } = useShow({
     meta: {
@@ -152,23 +180,68 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
   const backendOrder = useBackendOrdersRead ? record?.__backendOrder : null;
   const labelsEnabled = featureFlags.labels && canAny(['labels.view', 'labels.generate']);
-  const showTitle = record?.order_full_number
-    ? `Заказ ${record.order_full_number}`
-    : 'Просмотр заказа';
+  const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
+  const deletedOrderModel = deletedOrder ? buildDeletedOrderCardModel(deletedOrder) : null;
+  const canRestore = canManageOrderTrash && featureFlags.useBackendOrdersWrite;
+  const showTitle = deletedOrder
+    ? `Заказ №${deletedOrder.header.orderName} (удалён)`
+    : record?.order_full_number
+      ? `Заказ ${record.order_full_number}`
+      : 'Просмотр заказа';
 
-  // Enrich the workspace tab label once the order record is loaded.
-  const location = useLocation();
-  const setTabTitle = useTabStore((s) => s.setTabTitle);
   useEffect(() => {
-    if (record?.order_full_number) {
-      setTabTitle(location.pathname, `Заказ ${record.order_full_number}`);
+    setDeletedOrder(null);
+  }, [currentOrderId]);
+
+  useEffect(() => {
+    if (queryResult.data?.data) setDeletedOrder(null);
+  }, [queryResult.data]);
+
+  useEffect(() => {
+    if (!(featureFlags.useBackendOrdersRead && canManageOrderTrash)) {
+      return;
+    }
+    if (!queryResult.isError || !currentOrderId) {
       return;
     }
 
-    if (record?.order_name) {
-      setTabTitle(location.pathname, `Заказ #${record.order_id} · ${record.order_name}`);
+    const err = queryResult.error;
+    const isNotFound =
+      isApiError(err, 'ORDER_NOT_FOUND') ||
+      ((err as { status?: number } | null)?.status === 404);
+    if (!isNotFound) {
+      return;
     }
-  }, [record?.order_id, record?.order_name, record?.order_full_number, location.pathname, setTabTitle]);
+
+    let cancelled = false;
+
+    void ordersApi
+      .getById(Number(currentOrderId), { includeDeleted: true })
+      .then((o) => {
+        if (cancelled) {
+          return;
+        }
+        if (o.header.deleteFlag === true && o.header.orderId === Number(currentOrderId)) {
+          setDeletedOrder(o);
+        }
+      })
+      .catch(() => {
+        // keep the ordinary error state when deleted fallback is unavailable
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canManageOrderTrash, currentOrderId, queryResult.error, queryResult.isError]);
+
+  // The workspace tab shows only the user-facing order name, never its database id.
+  const location = useLocation();
+  const setTabTitle = useTabStore((s) => s.setTabTitle);
+  useEffect(() => {
+    if (record?.order_name) {
+      setTabTitle(location.pathname, resolveOrderTabLabel(record.order_name));
+    }
+  }, [record?.order_name, location.pathname, setTabTitle]);
 
   const { data: clientData, isLoading: clientLoading } = useOne({
     resource: "clients",
@@ -382,9 +455,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   // Состояние для выбора деталей в раскрой
   const cutEnabled = featureFlags.useBackendCut && can('cut.manage');
+  const bazisCutVisible = featureFlags.bazisCut;
+  const bazisCutManage = can('cut.manage');
+  const detailSelectionEnabled = cutEnabled || bazisCutVisible;
   const [cutSelectMode, setCutSelectMode] = useState(false);
   const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
   const [cutModalOpen, setCutModalOpen] = useState(false);
+  const [bazisCutModalOpen, setBazisCutModalOpen] = useState(false);
 
   useEffect(() => {
     if (!cutSelectMode) setCutSelectedDetailIds([]);
@@ -478,6 +555,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       case 'edge': return edgeTypesMap.get(sample.edge_type_id) || '—';
       case 'price': return sample.milling_cost_per_sqm != null ? String(sample.milling_cost_per_sqm) : '—';
       case 'note': return (sample.note || '').trim() || '—';
+      case 'doweling': return sample.doweling === true ? 'Присадка' : '—';
       default: return '—';
     }
   }, [millingTypesMap, materialsMap, resolvedNameByDetailId, filmsMap, edgeTypesMap]);
@@ -754,28 +832,28 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       title: 'Высота',
       dataIndex: 'height',
       key: 'height',
-      width: 72,
+      width: 54,
       align: 'center',
     },
     {
       title: 'Ширина',
       dataIndex: 'width',
       key: 'width',
-      width: 72,
+      width: 54,
       align: 'center',
     },
     {
       title: 'Кол-во',
       dataIndex: 'quantity',
       key: 'quantity',
-      width: 63,
+      width: 47.25,
       align: 'center',
     },
     {
       title: 'м²',
       dataIndex: 'area',
       key: 'area',
-      width: 72,
+      width: 54,
       align: 'center',
       render: (value) => value ? value.toFixed(2) : '0.00',
     },
@@ -902,6 +980,25 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     [visibleDetailColumns],
   );
 
+  const deletedOrderRestoreHandler = deletedOrder
+    ? makeRestoreHandler({
+        restoreFn: (req) => ordersApi.restore(deletedOrder.header.orderId, req),
+        confirmFn: modalConfirm,
+        notify: {
+          success: (msg) => message.success(msg),
+          warning: (msg) => message.warning(msg),
+          error: (msg) => message.error(msg),
+        },
+        onRestored: () => {
+          setDeletedOrder(null);
+          void queryResult.refetch();
+        },
+        onStale: () => {
+          void queryResult.refetch();
+        },
+      })
+    : null;
+
   return (
     <Show
       isLoading={showLoading}
@@ -920,133 +1017,197 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         </Breadcrumb>
       }
       headerButtons={() => (
-        isMobile ? (
-          <>
-            <EditButton>Изменить</EditButton>
-            {featureFlags.projects && record?.order_id && record?.client_id ? (
-              <Button onClick={() => setMoveModalOpen(true)}>Перенести в другой проект</Button>
-            ) : null}
-            <Dropdown
-              trigger={['click']}
-              menu={{
-                items: [
-                  {
-                    key: 'refresh',
-                    icon: <ReloadOutlined />,
-                    label: 'Обновить',
-                    disabled: isUpdating,
+        deletedOrder ? null : (
+          isMobile ? (
+            <>
+              <EditButton>Изменить</EditButton>
+              {featureFlags.projects && record?.order_id && record?.client_id ? (
+                <Button onClick={() => setMoveModalOpen(true)}>Перенести в другой проект</Button>
+              ) : null}
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  items: [
+                    {
+                      key: 'refresh',
+                      icon: <ReloadOutlined />,
+                      label: 'Обновить',
+                      disabled: isUpdating,
+                    },
+                    {
+                      key: 'print',
+                      icon: <PrinterOutlined />,
+                      label: 'Печать',
+                      disabled: !record || details.length === 0,
+                    },
+                    {
+                      key: 'excel',
+                      icon: <FileExcelOutlined />,
+                      label: 'Экспорт в Excel',
+                      disabled: !record || details.length === 0 || isClientResolving,
+                    },
+                    {
+                      key: 'json',
+                      icon: <FileTextOutlined />,
+                      label: 'JSON snapshot',
+                      disabled: !record || isSnapshotExporting,
+                    },
+                  ],
+                  onClick: ({ key }) => {
+                    if (key === 'refresh') {
+                      void handleRefreshPaymentStatus();
+                    }
+                    if (key === 'print') {
+                      handlePrint();
+                    }
+                    if (key === 'excel') {
+                      void handleExportExcel();
+                    }
+                    if (key === 'json') {
+                      void handleExportSnapshot();
+                    }
                   },
-                  {
-                    key: 'print',
-                    icon: <PrinterOutlined />,
-                    label: 'Печать',
-                    disabled: !record || details.length === 0,
-                  },
-                  {
-                    key: 'excel',
-                    icon: <FileExcelOutlined />,
-                    label: 'Экспорт в Excel',
-                    disabled: !record || details.length === 0 || isClientResolving,
-                  },
-                  {
-                    key: 'json',
-                    icon: <FileTextOutlined />,
-                    label: 'JSON snapshot',
-                    disabled: !record || isSnapshotExporting,
-                  },
-                ],
-                onClick: ({ key }) => {
-                  if (key === 'refresh') {
-                    void handleRefreshPaymentStatus();
-                  }
-                  if (key === 'print') {
-                    handlePrint();
-                  }
-                  if (key === 'excel') {
-                    void handleExportExcel();
-                  }
-                  if (key === 'json') {
-                    void handleExportSnapshot();
-                  }
-                },
-              }}
-            >
-              <Button icon={<EllipsisOutlined />} aria-label="Ещё действия" />
-            </Dropdown>
-          </>
-        ) : (
-          <>
-            <EditButton>Изменить</EditButton>
-            {featureFlags.projects && record?.order_id && record?.client_id ? (
-              <Button onClick={() => setMoveModalOpen(true)}>
-                Перенести в другой проект
-              </Button>
-            ) : null}
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={handleRefreshPaymentStatus}
-              loading={isUpdating}
-            >
-              Обновить
-            </Button>
-            <Button
-              type="primary"
-              icon={<PrinterOutlined />}
-              onClick={handlePrint}
-              disabled={!record || details.length === 0}
-            >
-              Печать
-            </Button>
-            <Tooltip title="Экспорт в Excel">
+                }}
+              >
+                <Button icon={<EllipsisOutlined />} aria-label="Ещё действия" />
+              </Dropdown>
+              {featureFlags.useBackendOrdersWrite && canManageOrderTrash && record?.order_id && !record?.delete_flag ? (
+                <Popconfirm
+                  title={`Удалить заказ №${record.order_name}?`}
+                  description="Заказ попадёт в корзину, его можно будет восстановить."
+                  okText="Удалить"
+                  okButtonProps={{ danger: true }}
+                  cancelText="Отмена"
+                  onConfirm={makeOrderDeleteHandler({
+                    deleteFn: () => ordersApi.delete(Number(record.order_id), {
+                      version: Number(record.version ?? backendOrder?.version ?? 0),
+                    }),
+                    onSuccess: () => {
+                      message.success('Заказ перемещён в корзину');
+                      navigate('/orders');
+                    },
+                    onVersionConflict: () =>
+                      Modal.error({
+                        title: 'Конфликт версий',
+                        content: 'Заказ был изменен другим пользователем. Обновите страницу и повторите.',
+                        okText: 'Обновить страницу',
+                        onOk: () => window.location.reload(),
+                      }),
+                    onError: (m) => message.error(m),
+                  })}
+                >
+                  <Tooltip title="Удалить заказ"><Button danger icon={<DeleteOutlined />} /></Tooltip>
+                </Popconfirm>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <EditButton>Изменить</EditButton>
+              {featureFlags.projects && record?.order_id && record?.client_id ? (
+                <Button onClick={() => setMoveModalOpen(true)}>
+                  Перенести в другой проект
+                </Button>
+              ) : null}
               <Button
-                aria-label="Экспорт в Excel"
-                icon={<FileExcelOutlined />}
-                onClick={handleExportExcel}
-                loading={isExporting}
-                disabled={!record || details.length === 0 || isClientResolving}
-              />
-            </Tooltip>
-            <Dropdown
-              trigger={['click']}
-              menu={{
-                items: [
-                  {
-                    key: 'pdf',
-                    icon: <FilePdfOutlined />,
-                    label: 'Экспорт в PDF',
-                    disabled: !record || details.length === 0,
-                  },
-                  {
-                    key: 'json',
-                    icon: <FileTextOutlined />,
-                    label: 'JSON snapshot',
-                    disabled: !record || isSnapshotExporting,
-                  },
-                ],
-                onClick: ({ key }) => {
-                  if (key === 'pdf') {
-                    handlePrint();
-                  }
-                  if (key === 'json') {
-                    void handleExportSnapshot();
-                  }
-                },
-              }}
-            >
-              <Tooltip title="Другие экспорты">
+                icon={<ReloadOutlined />}
+                onClick={handleRefreshPaymentStatus}
+                loading={isUpdating}
+              >
+                Обновить
+              </Button>
+              <Button
+                type="primary"
+                icon={<PrinterOutlined />}
+                onClick={handlePrint}
+                disabled={!record || details.length === 0}
+              >
+                Печать
+              </Button>
+              <Tooltip title="Экспорт в Excel">
                 <Button
-                  aria-label="Другие экспорты"
-                  icon={isSnapshotExporting ? <DownloadOutlined /> : <MoreOutlined />}
-                  loading={isSnapshotExporting}
-                  disabled={!record}
+                  aria-label="Экспорт в Excel"
+                  icon={<FileExcelOutlined />}
+                  onClick={handleExportExcel}
+                  loading={isExporting}
+                  disabled={!record || details.length === 0 || isClientResolving}
                 />
               </Tooltip>
-            </Dropdown>
-          </>
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  items: [
+                    {
+                      key: 'pdf',
+                      icon: <FilePdfOutlined />,
+                      label: 'Экспорт в PDF',
+                      disabled: !record || details.length === 0,
+                    },
+                    {
+                      key: 'json',
+                      icon: <FileTextOutlined />,
+                      label: 'JSON snapshot',
+                      disabled: !record || isSnapshotExporting,
+                    },
+                  ],
+                  onClick: ({ key }) => {
+                    if (key === 'pdf') {
+                      handlePrint();
+                    }
+                    if (key === 'json') {
+                      void handleExportSnapshot();
+                    }
+                  },
+                }}
+              >
+                <Tooltip title="Другие экспорты">
+                  <Button
+                    aria-label="Другие экспорты"
+                    icon={isSnapshotExporting ? <DownloadOutlined /> : <MoreOutlined />}
+                    loading={isSnapshotExporting}
+                    disabled={!record}
+                  />
+                </Tooltip>
+              </Dropdown>
+              {featureFlags.useBackendOrdersWrite && canManageOrderTrash && record?.order_id && !record?.delete_flag ? (
+                <Popconfirm
+                  title={`Удалить заказ №${record.order_name}?`}
+                  description="Заказ попадёт в корзину, его можно будет восстановить."
+                  okText="Удалить"
+                  okButtonProps={{ danger: true }}
+                  cancelText="Отмена"
+                  onConfirm={makeOrderDeleteHandler({
+                    deleteFn: () => ordersApi.delete(Number(record.order_id), {
+                      version: Number(record.version ?? backendOrder?.version ?? 0),
+                    }),
+                    onSuccess: () => {
+                      message.success('Заказ перемещён в корзину');
+                      navigate('/orders');
+                    },
+                    onVersionConflict: () =>
+                      Modal.error({
+                        title: 'Конфликт версий',
+                        content: 'Заказ был изменен другим пользователем. Обновите страницу и повторите.',
+                        okText: 'Обновить страницу',
+                        onOk: () => window.location.reload(),
+                      }),
+                    onError: (m) => message.error(m),
+                  })}
+                >
+                  <Tooltip title="Удалить заказ"><Button danger icon={<DeleteOutlined />} /></Tooltip>
+                </Popconfirm>
+              ) : null}
+            </>
+          )
         )
       )}
     >
-      {record && (
+      {deletedOrderModel && deletedOrderRestoreHandler ? (
+        <DeletedOrderCard
+          model={deletedOrderModel}
+          onRestore={deletedOrderRestoreHandler}
+          canRestore={canRestore}
+        />
+      ) : record && (
         <>
           {/* Компактная шапка заказа (Read-only summary) */}
           <div style={{ marginBottom: 4 }}>
@@ -1059,13 +1220,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               headerMaterialName={headerMaterialName}
             />
           </div>
-
-          {featureFlags.projects && projectId && (
-            <div style={{ marginBottom: 12 }}>
-              Проект:{' '}
-              <Link to={`/projects/show/${projectId}`}>{projectLabel}</Link>
-            </div>
-          )}
 
           <div style={{ marginBottom: 16 }}>
             <div
@@ -1188,6 +1342,35 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     >
                       {/* Колонка 1 — Даты */}
                       <div>
+                        {featureFlags.projects && projectId ? (
+                          <div
+                            aria-label="Проект заказа"
+                            style={{
+                              minHeight: 40,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              marginBottom: 8,
+                              paddingBottom: 8,
+                              borderBottom: '1px solid var(--app-border)',
+                            }}
+                          >
+                            <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>Проект</span>
+                            <Link
+                              to={`/projects/show/${projectId}`}
+                              aria-label={`Открыть проект ${projectLabel}`}
+                              style={{
+                                display: 'inline-flex',
+                                minHeight: 40,
+                                alignItems: 'center',
+                                fontWeight: 600,
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {projectLabel}
+                            </Link>
+                          </div>
+                        ) : null}
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#52c41a', marginBottom: 3 }}>
                           Даты
                         </div>
@@ -1334,14 +1517,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
                 Детали заказа
               </div>
-              {!isMobile && (
-                <Space size="small" wrap>
+              <Space size="small" wrap>
+                {!isMobile && <>
                   <DetailGroupingControls
                     state={grouping.state}
                     onFieldChange={grouping.setField}
                     onToggleSeparation={grouping.setShowSeparation}
                   />
-                  {cutEnabled && details.length > 0 && (
+                  {detailSelectionEnabled && details.length > 0 && (
                     <>
                       <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
                         {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
@@ -1360,14 +1543,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                           >
                             {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
                           </Button>
-                          <Button
-                            size="small"
-                            type="primary"
-                            disabled={cutSelectedDetailIds.length === 0}
-                            onClick={() => setCutModalOpen(true)}
-                          >
-                            Добавить выбранные в раскрой ({cutSelectedDetailIds.length})
-                          </Button>
+                          {cutEnabled && <Button size="small" type="primary" disabled={cutSelectedDetailIds.length === 0}
+                            onClick={() => setCutModalOpen(true)}>Добавить выбранные в раскрой ({cutSelectedDetailIds.length})</Button>}
                         </>
                       )}
                     </>
@@ -1379,11 +1556,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     settings={showColumnSettings}
                     onChange={saveShowColumnSettings}
                   />
-                </Space>
-              )}
+                </>}
+                {isMobile && detailSelectionEnabled && details.length > 0 && <Button size="small" onClick={() => setCutSelectMode((value) => !value)}>
+                  {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
+                </Button>}
+                {bazisCutVisible && <Tooltip title={!bazisCutManage ? 'Недостаточно прав' : undefined}>
+                  <span><Button size="small" disabled={!bazisCutManage || cutSelectedDetailIds.length === 0}
+                    onClick={() => setBazisCutModalOpen(true)}>Добавить в Базис раскрой</Button></span>
+                </Tooltip>}
+              </Space>
             </div>
             {isMobile ? (
-              <DetailCardList rows={details} lookups={detailCardLookups} highlightDetailId={highlightDetail} />
+              <DetailCardList rows={details} lookups={detailCardLookups} highlightDetailId={highlightDetail}
+                selectionEnabled={cutSelectMode} selectedIds={cutSelectedDetailIds}
+                onSelectionChange={setCutSelectedDetailIds} />
             ) : (
             <TableTopScroll>
             <Table
@@ -1446,7 +1632,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               summary={() => {
                 const totalCount = details.length;
                 const totalQuantity = details.reduce((sum, d) => sum + (d.quantity || 0), 0);
-                const totalArea = details.reduce((sum, d) => sum + (d.area || 0), 0);
+                const totalArea = calculateOrderTotalArea(details);
                 const totalCost = details.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
 
                 const base = cutSelectMode ? 1 : 0;
@@ -1529,6 +1715,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               onClose={() => setCutModalOpen(false)}
               onDone={() => {
                 setCutModalOpen(false);
+                setCutSelectMode(false);
+                setCutSelectedDetailIds([]);
+              }}
+            />
+          )}
+          {bazisCutVisible && record?.order_id && (
+            <AddToBazisCutModal
+              open={bazisCutModalOpen}
+              orderId={record.order_id}
+              orderName={record.order_name}
+              detailIds={cutSelectedDetailIds}
+              onClose={() => setBazisCutModalOpen(false)}
+              onDone={() => {
+                setBazisCutModalOpen(false);
                 setCutSelectMode(false);
                 setCutSelectedDetailIds([]);
               }}

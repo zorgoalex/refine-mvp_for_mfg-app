@@ -110,6 +110,14 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/<Panel header="Пользовательские поля" key="custom-fields">/);
   });
 
+  it('highlights changed and missing schema fields in label and QR editors', () => {
+    expect(tabSrc).toMatch(/compareFieldSnapshot/);
+    expect(tabSrc).toMatch(/fieldCatalogSnapshot/);
+    expect(tabSrc).toContain('Изменено в схеме');
+    expect(tabSrc).toContain('Отсутствует в схеме');
+    expect(tabSrc).toMatch(/fieldHealthColor\(qrFieldHealth\.get\(chip\.fieldId\)\)/);
+  });
+
   it('keeps template dimensions, resolution and formats on one settings row', () => {
     expect(tabSrc).toMatch(/<Row gutter=\{8\} align="top" wrap=\{false\}>/);
     expect(tabSrc).toMatch(/name="canvasWidthMm" label=\{<span style=\{\{ fontSize: 11 \}\}>Ширина<\/span>\}/);
@@ -131,7 +139,7 @@ describe('LabelsConfigTab wiring', () => {
   it('exposes a draggable field palette that can drop fields onto the label visual', () => {
     expect(tabSrc).toMatch(/Поля бирки/);
     expect(tabSrc).toMatch(/FieldPalette/);
-    expect(tabSrc).toMatch(/draggable=\{!disabled\}/);
+    expect(tabSrc).toMatch(/draggable=\{!disabled && !unavailable\}/);
     expect(tabSrc).toMatch(/application\/x-label-field/);
     expect(tabSrc).toMatch(/onDropField/);
     expect(tabSrc).toMatch(/addFieldElement/);
@@ -146,7 +154,7 @@ describe('LabelsConfigTab wiring', () => {
 
   it('highlights fields already placed on the label and supports element context actions', () => {
     expect(tabSrc).toMatch(/usedFieldIds/);
-    expect(tabSrc).toMatch(/color=\{used \? 'processing' : undefined\}/);
+    expect(tabSrc).toMatch(/fieldHealthColor\(health\) \?\? \(used \? 'processing' : undefined\)/);
     expect(tabSrc).toMatch(/isLabelElementLocked/);
     expect(tabSrc).toMatch(/Заблокировать/);
     expect(tabSrc).toMatch(/Разблокировать/);

@@ -44,6 +44,45 @@ describe('LabelsService', () => {
     );
   });
 
+  it('exposes and snapshots new detail columns from the live view schema', async () => {
+    const repo = fakeRepo();
+    vi.mocked(repo.listDetailFieldColumns).mockResolvedValue([
+      { columnName: 'detail_id', dataType: 'bigint' },
+      { columnName: 'future_metric', dataType: 'numeric' },
+    ]);
+    const service = new LabelsService({ repo });
+
+    await expect(service.listFields({ currentUser: manager, requestId: 'req-fields-live' })).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'detail.future_metric', type: 'number' })]),
+    );
+
+    await service.createTemplate({
+      currentUser: templateManager,
+      requestId: 'req-template-live',
+      input: validInput({
+        elements: [{
+          elementKey: 'future',
+          kind: 'text',
+          sourceField: 'detail.future_metric',
+          xMm: 1,
+          yMm: 1,
+          widthMm: 20,
+          heightMm: 5,
+        }],
+      }),
+    });
+
+    expect(repo.createTemplate).toHaveBeenCalledWith(expect.objectContaining({
+      fieldCatalogSnapshot: {
+        'detail.future_metric': {
+          type: 'number',
+          label: 'Future metric',
+          sourceColumn: 'future_metric',
+        },
+      },
+    }));
+  });
+
   it('enforces labels.manage_templates for template writes', async () => {
     const repo = fakeRepo();
     const service = new LabelsService({ repo });
@@ -355,6 +394,11 @@ function validInput(overrides: Partial<LabelTemplateInput> = {}): LabelTemplateI
 
 function fakeRepo(): LabelsPort {
   return {
+    listDetailFieldColumns: vi.fn(async () => [
+      { columnName: 'detail_id', dataType: 'bigint' },
+      { columnName: 'detail_name', dataType: 'text' },
+      { columnName: 'material_name', dataType: 'text' },
+    ]),
     listTemplates: vi.fn(async () => []),
     getTemplateById: vi.fn(),
     createTemplate: vi.fn(async () => ({
@@ -368,6 +412,7 @@ function fakeRepo(): LabelsPort {
       dpi: 203,
       defaultExportFormats: ['bmp'],
       customFieldSchema: {},
+      fieldCatalogSnapshot: {},
       elements: [],
     })),
     updateTemplate: vi.fn(),

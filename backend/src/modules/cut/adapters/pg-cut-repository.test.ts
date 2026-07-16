@@ -10,7 +10,14 @@ import { PgCutRepository, profileChangedOutboxKey } from './pg-cut-repository';
 /** Build a CutConfigPort stub with selective overrides (defaults to StaticCutConfig). */
 function stubConfig(overrides: Partial<CutConfigPort> = {}): CutConfigPort {
   const base = new StaticCutConfig();
-  return { ...base, ...overrides };
+  return {
+    getReadyStatusCodes: base.getReadyStatusCodes.bind(base),
+    getDefaultParams: base.getDefaultParams.bind(base),
+    getGrainRules: base.getGrainRules.bind(base),
+    getRenderPresetPx: base.getRenderPresetPx.bind(base),
+    getParamsByProfileId: base.getParamsByProfileId.bind(base),
+    ...overrides,
+  };
 }
 
 function currentUser(overrides: Partial<CurrentUser> = {}): CurrentUser {
@@ -183,7 +190,7 @@ function fakeFreecut(response: FreecutOptimizeResponse): FreecutClient {
  *  own stock + items (so multi-group fan-out maps each group's pieces back). */
 function echoFreecut(): FreecutClient {
   return {
-    optimize: vi.fn().mockImplementation((req: { stock: Array<{ id: string; width_mm: number; height_mm: number }>; items: Array<{ id: string; width_mm: number; height_mm: number }> }) =>
+    optimize: vi.fn().mockImplementation((req: { stock: Array<{ id: string; width_mm: number; height_mm: number }>; items: Array<{ id: string; width_mm: number; height_mm: number; qty?: number }> }) =>
       Promise.resolve({
         status: 'ok',
         summary: { used_stock_count: 1, waste_percent: 5 },
@@ -194,15 +201,17 @@ function echoFreecut(): FreecutClient {
             width_mm: req.stock[0].width_mm,
             height_mm: req.stock[0].height_mm,
             trim_mm: { left: 10, right: 10, top: 10, bottom: 10 },
-            placements: req.items.map((it, i) => ({
-              item_id: it.id,
-              instance: 1,
-              x_mm: i * 620,
-              y_mm: 0,
-              width_mm: it.width_mm,
-              height_mm: it.height_mm,
-              rotated: false,
-            })),
+            placements: req.items.flatMap((it, itemIndex) =>
+              Array.from({ length: it.qty ?? 1 }, (_, instanceIndex) => ({
+                item_id: it.id,
+                instance: instanceIndex + 1,
+                x_mm: (itemIndex + instanceIndex) * 620,
+                y_mm: 0,
+                width_mm: it.width_mm,
+                height_mm: it.height_mm,
+                rotated: false,
+              })),
+            ),
           },
         ],
       }),
@@ -332,6 +341,174 @@ describe('PgCutRepository', () => {
     expect(String(outbox?.params[4])).toMatch(/^cut_job\.calculated:/);
     const audit = db.queries.find((q) => /INSERT INTO audit_log\b/i.test(q.text) && JSON.stringify(q.params).includes('cut_job.calculated'));
     expect(audit).toBeDefined();
+  });
+
+  it('calculate switches a large group to engine=heuristic and records engine_used in summary', async () => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [
+        {
+          cut_job_item_id: 501,
+          order_detail_id: 1,
+          order_id: 9,
+          qty: 3,
+          width_mm: 600,
+          height_mm: 400,
+          sheet_material_type_id: 9,
+          film_id: null,
+          film_texture: null,
+          smt_width_mm: 2800,
+          smt_height_mm: 2070,
+        },
+      ],
+    });
+    const optimize = vi.fn(echoFreecut().optimize);
+    const repo = new PgCutRepository(db.service, { optimize } as unknown as FreecutClient, undefined, {
+      heuristicAutoThresholdInstances: 3,
+    });
+
+    await repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: 'r-auto' });
+
+    const capturedRequest = optimize.mock.calls[0]?.[0] as {
+      params: { engine?: string; cut_quality?: string };
+    };
+    expect(capturedRequest.params.engine).toBe('heuristic');
+    expect(capturedRequest.params.cut_quality).toBe('max');
+
+    const groupInsert = db.queries.find((q) => normalize(q.text).startsWith('INSERT INTO cut_group ('));
+    const insertedSummary = JSON.parse(String(groupInsert?.params[3]));
+    expect(insertedSummary.engine_used).toBe('heuristic');
+    expect(insertedSummary.engine_reason).toBe('auto_threshold');
+
+    const audit = db.queries.find((q) => /INSERT INTO audit_log\b/i.test(q.text) && JSON.stringify(q.params).includes('cut_job.calculated'));
+    const metadata = JSON.parse(String(audit?.params[22]));
+    expect(metadata.engines).toEqual([{ engine: 'heuristic', reason: 'auto_threshold', instances: 3 }]);
+  });
+
+  it('calculate below threshold keeps GA request without engine field', async () => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [
+        {
+          cut_job_item_id: 501,
+          order_detail_id: 1,
+          order_id: 9,
+          qty: 2,
+          width_mm: 600,
+          height_mm: 400,
+          sheet_material_type_id: 9,
+          film_id: null,
+          film_texture: null,
+          smt_width_mm: 2800,
+          smt_height_mm: 2070,
+        },
+      ],
+    });
+    const optimize = vi.fn(echoFreecut().optimize);
+    const repo = new PgCutRepository(db.service, { optimize } as unknown as FreecutClient, undefined, {
+      heuristicAutoThresholdInstances: 3,
+    });
+
+    await repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: 'r-below-threshold' });
+
+    const capturedRequest = optimize.mock.calls[0]?.[0] as {
+      params: { engine?: string };
+    };
+    expect(capturedRequest.params.engine).toBeUndefined();
+  });
+
+  it('auto engine selection does NOT change request_hash or last_calc_params', async () => {
+    const calcItems = [
+      {
+        cut_job_item_id: 501,
+        order_detail_id: 1,
+        order_id: 9,
+        qty: 3,
+        width_mm: 600,
+        height_mm: 400,
+        sheet_material_type_id: 9,
+        film_id: null,
+        film_texture: null,
+        smt_width_mm: 2800,
+        smt_height_mm: 2070,
+      },
+    ];
+
+    const runCalculate = async (heuristicAutoThresholdInstances: number) => {
+      const db = createDatabase({
+        cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+        calcItems,
+      });
+      const repo = new PgCutRepository(db.service, echoFreecut(), undefined, {
+        heuristicAutoThresholdInstances,
+      });
+
+      await repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: `r-hash-${heuristicAutoThresholdInstances}` });
+
+      const readyUpdate = db.queries.find((q) => /last_calc_params = \$3::jsonb/i.test(normalize(q.text)));
+      return {
+        requestHash: String(readyUpdate?.params[1]),
+        lastCalcParams: JSON.parse(String(readyUpdate?.params[2])),
+      };
+    };
+
+    const autoOff = await runCalculate(0);
+    const autoOn = await runCalculate(3);
+
+    expect(autoOn.requestHash).toBe(autoOff.requestHash);
+    expect(autoOn.lastCalcParams).not.toHaveProperty('engine');
+    expect(autoOn.lastCalcParams).not.toHaveProperty('cut_quality');
+  });
+
+  it('explicit profile engine DOES change request_hash', async () => {
+    const baseConfig = new StaticCutConfig();
+    const baseParams = await baseConfig.getDefaultParams();
+    const calcItems = [
+      {
+        cut_job_item_id: 501,
+        order_detail_id: 1,
+        order_id: 9,
+        qty: 1,
+        width_mm: 600,
+        height_mm: 400,
+        sheet_material_type_id: 9,
+        film_id: null,
+        film_texture: null,
+        smt_width_mm: 2800,
+        smt_height_mm: 2070,
+      },
+    ];
+
+    const runCalculate = async (paramsByProfile: typeof baseParams) => {
+      const db = createDatabase({
+        cutJob: {
+          cut_job_id: 42,
+          name: 'J',
+          status: 'draft',
+          source: 'manual',
+          version: 0,
+          pdf_prewarm_state: 'pending',
+          params: null,
+          param_profile_id: 5,
+        },
+        calcItems,
+      });
+      const repo = new PgCutRepository(
+        db.service,
+        echoFreecut(),
+        stubConfig({ getParamsByProfileId: async () => paramsByProfile }),
+      );
+
+      await repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: 'r-profile-engine' });
+
+      const readyUpdate = db.queries.find((q) => /last_calc_params = \$3::jsonb/i.test(normalize(q.text)));
+      return String(readyUpdate?.params[1]);
+    };
+
+    const hashWithoutProfileEngine = await runCalculate(baseParams);
+    const hashWithProfileEngine = await runCalculate({ ...baseParams, engine: 'heuristic', cut_quality: 'max' });
+
+    expect(hashWithProfileEngine).not.toBe(hashWithoutProfileEngine);
   });
 
   it('calculate: rejects an optimizer layout below kerf before persisting any group', async () => {

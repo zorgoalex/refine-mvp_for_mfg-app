@@ -42,6 +42,9 @@ describe('ProfilePreferencesController', () => {
 
   it('validates update body', () => {
     expect(parseUpdateUserPreferencesRequest({ themeMode: 'dark' })).toEqual({ themeMode: 'dark' });
+    expect(parseUpdateUserPreferencesRequest({ uiSize: 'small' })).toEqual({ uiSize: 'small' });
+    expect(parseUpdateUserPreferencesRequest({ uiSize: 'default' })).toEqual({ uiSize: 'default' });
+    expect(() => parseUpdateUserPreferencesRequest({ uiSize: 'huge' })).toThrowError();
     expect(parseUpdateUserPreferencesRequest({
       orderDetailColumns: { orderShow: { order: ['detail_number', 'height'], hidden: ['note'] } },
     })).toEqual({

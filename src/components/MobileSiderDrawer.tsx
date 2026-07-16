@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import { Drawer, Menu, Button, Typography, Space } from "antd";
 import { CloseOutlined, PlusOutlined, ContactsOutlined } from "@ant-design/icons";
 import { useResource, useNavigation } from "@refinedev/core";
@@ -38,12 +38,16 @@ const CATEGORY_MAP: Record<string, string> = {
   film_vendors: "Контрагенты",
   payments: "Финансы",
   payments_view: "Финансы",
+  "orders-trash": "Производство",
   groups: "Производство",
   projects: "Производство",
   order_workshops: "Производство",
   workshops: "Производство",
   work_centers: "Производство",
   doweling_orders_view: "Производство",
+  bazis: "Производство",
+  "cut-jobs": "Производство",
+  "bazis-cut-sets": "Производство",
   films: "Материалы",
   materials: "Материалы",
   sheet_material_types: "Материалы",
@@ -98,6 +102,12 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
     () => !featureFlags.useBackendPermissions || can("orders.create", currentUser),
     [currentUser, featureFlags.useBackendPermissions],
   );
+  const canViewNavigation = useCallback(
+    (name: string) =>
+      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
+      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
+    [currentRoleKey, currentUser, roleVisibilityMatrix],
+  );
 
   const sider = useSiderMenuItems({
     resources,
@@ -110,9 +120,7 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
     categoryMap: CATEGORY_MAP,
     resourceLabels: RESOURCE_LABELS,
     resourceIcons: SIDER_RESOURCE_ICONS,
-    canViewNavigation: (name) =>
-      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
-      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
+    canViewNavigation,
     canViewSettings,
     canCreateOrders,
     setIsCreateModalOpen,
