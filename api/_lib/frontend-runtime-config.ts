@@ -19,6 +19,7 @@ export interface FrontendRuntimeConfigResponse {
     projects: boolean;
     bazisImport: boolean;
     labels: boolean;
+    pdfImportLayoutPatterns: boolean;
     enableLegacyHasura: boolean;
     workosAuth: boolean;
   };
@@ -63,6 +64,10 @@ export function buildFrontendRuntimeConfig(
       projects: readBooleanEnv(env.RUNTIME_CONFIG_PROJECTS, false),
       bazisImport: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_BAZIS, false),
       labels: readBooleanEnv(env.RUNTIME_CONFIG_LABELS, false),
+      pdfImportLayoutPatterns: readBooleanEnv(
+        env.RUNTIME_CONFIG_PDF_IMPORT_LAYOUT_PATTERNS,
+        false,
+      ),
       enableLegacyHasura: readBooleanEnv(env.RUNTIME_CONFIG_ENABLE_LEGACY_HASURA, true),
       workosAuth: readBooleanEnv(env.RUNTIME_CONFIG_WORKOS_AUTH, false),
     },

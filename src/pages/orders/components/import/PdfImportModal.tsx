@@ -1,20 +1,20 @@
 // Main PDF Import Modal with wizard steps (2 steps: upload + validation)
 
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { Modal, Steps, Button, Space, message } from 'antd';
-import { FilePdfOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons';
+import { Alert, Modal, Steps, Button, Space, message } from 'antd';
+import { FilePdfOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined, TableOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { usePdfParser } from './hooks/usePdfParser';
 import { useImportValidation } from './hooks';
 import { PdfUploadStep } from './steps/PdfUploadStep';
-import { ValidationStep } from './steps';
+import { PdfLayoutMappingStep, ValidationStep } from './steps';
 import type { ReferenceData } from './types/importTypes';
 import { IMPORT_DEFAULTS } from './types/importTypes';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { calculateOrderDetailArea } from '../../../../utils/orderArea';
 
-type PdfImportStep = 'upload' | 'validation';
+type PdfImportStep = 'upload' | 'mapping' | 'validation';
 
 interface PdfImportModalProps {
   open: boolean;
@@ -23,6 +23,7 @@ interface PdfImportModalProps {
 
 const STEPS: { key: PdfImportStep; title: string; icon: React.ReactNode }[] = [
   { key: 'upload', title: 'Загрузка PDF', icon: <FilePdfOutlined /> },
+  { key: 'mapping', title: 'Сопоставление', icon: <TableOutlined /> },
   { key: 'validation', title: 'Проверка', icon: <CheckCircleOutlined /> },
 ];
 
@@ -87,26 +88,37 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
     importValidation.setReferenceData(refData);
   }, [edgeTypesData, filmsData, sheetMaterialTypesData, millingTypesData]);
 
-  const currentStepIndex = STEPS.findIndex(s => s.key === currentStep);
+  const visibleSteps = useMemo(
+    () => STEPS.filter(step =>
+      step.key !== 'mapping' || pdfParser.needsLayoutMapping || currentStep === 'mapping'),
+    [pdfParser.needsLayoutMapping, currentStep],
+  );
+  const currentStepIndex = visibleSteps.findIndex(s => s.key === currentStep);
 
-  const handleNext = useCallback(() => {
-    const idx = currentStepIndex;
-    if (idx < STEPS.length - 1) {
-      const nextStep = STEPS[idx + 1].key;
-
-      // When moving to validation step from upload, process PDF data
-      if (nextStep === 'validation' && pdfParser.importRows.length > 0) {
-        importValidation.processDirectRows(pdfParser.importRows);
+  const handleNext = useCallback(async () => {
+    if (currentStep === 'upload') {
+      if (pdfParser.needsLayoutMapping) {
+        setCurrentStep('mapping');
+        return;
       }
-
-      setCurrentStep(nextStep);
+      if (pdfParser.importRows.length > 0) {
+        importValidation.processDirectRows(pdfParser.importRows);
+        setCurrentStep('validation');
+      }
+      return;
     }
-  }, [currentStepIndex, pdfParser.importRows, importValidation]);
+    if (currentStep === 'mapping') {
+      const rows = await pdfParser.confirmLayouts();
+      if (!rows) return;
+      importValidation.processDirectRows(rows);
+      setCurrentStep('validation');
+    }
+  }, [currentStep, pdfParser, importValidation]);
 
   const handleBack = useCallback(() => {
     const idx = currentStepIndex;
     if (idx > 0) {
-      const prevStep = STEPS[idx - 1].key;
+      const prevStep = visibleSteps[idx - 1].key;
 
       // Reset validation when going back
       if (currentStep === 'validation') {
@@ -115,7 +127,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
 
       setCurrentStep(prevStep);
     }
-  }, [currentStepIndex, currentStep, importValidation]);
+  }, [currentStepIndex, currentStep, importValidation, visibleSteps]);
 
   const handleClose = useCallback(() => {
     // Reset all state
@@ -182,7 +194,12 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
   const canGoNext = useMemo(() => {
     switch (currentStep) {
       case 'upload':
-        return pdfParser.importRows.length > 0 && !pdfParser.isLoading;
+        return (
+          (pdfParser.importRows.length > 0 || pdfParser.needsLayoutMapping)
+          && !pdfParser.isLoading
+        );
+      case 'mapping':
+        return pdfParser.genericTables.length > 0;
       case 'validation':
         return importValidation.stats.validRows > 0;
       default:
@@ -200,6 +217,8 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
             fileName={pdfParser.fileName}
             result={pdfParser.result}
             importRows={pdfParser.importRows}
+            needsLayoutMapping={pdfParser.needsLayoutMapping}
+            detectedTables={pdfParser.genericTables.length}
             onFileUpload={pdfParser.parseFile}
           />
         );
@@ -214,6 +233,19 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
             onUpdateRow={importValidation.updateRow}
             onRemoveRow={importValidation.removeRow}
             onBatchReplace={importValidation.batchReplaceReference}
+          />
+        );
+
+      case 'mapping':
+        return (
+          <PdfLayoutMappingStep
+            tables={pdfParser.genericTables}
+            mappings={pdfParser.layoutMappings}
+            matches={pdfParser.patternMatches}
+            issues={pdfParser.layoutIssues}
+            onTargetChange={pdfParser.setColumnTarget}
+            onGeometryCandidateRoleChange={pdfParser.setGeometryCandidateRole}
+            onUnresolvedLineAction={pdfParser.setUnresolvedLineAction}
           />
         );
 
@@ -284,12 +316,20 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
       >
         <Steps
           current={currentStepIndex}
-          items={STEPS.map(s => ({ key: s.key, title: s.title, icon: s.icon }))}
+          items={visibleSteps.map(s => ({ key: s.key, title: s.title, icon: s.icon }))}
           style={{ marginBottom: 24 }}
           size="small"
         />
 
         <div style={{ flex: 1, overflow: 'hidden' }}>
+          {pdfParser.patternSaveWarning && (
+            <Alert
+              type="warning"
+              showIcon
+              message={pdfParser.patternSaveWarning}
+              style={{ marginBottom: 12 }}
+            />
+          )}
           {renderStepContent()}
         </div>
       </Modal>

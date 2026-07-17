@@ -127,6 +127,11 @@ export function extractMetadata(allLines: PdfTextLine[]): PdfOrderMetadata {
       }
     }
 
+    const productMatch = text.match(/Изделие:\s*(.+?)(?=\s+Заказ:|\s+Стр\.|$)/i);
+    if (productMatch) {
+      metadata.productName = normalizeWhitespace(productMatch[1]);
+    }
+
     // Extract material: "Материал: МДФ 16 мм"
     const materialMatch = text.match(MATERIAL_PATTERN);
     if (materialMatch) {
@@ -362,6 +367,14 @@ function normalizeTableCell(items: PdfTextItem[]): string {
   );
 }
 
+function normalizeDesignationCell(items: PdfTextItem[]): string {
+  // Basis may wrap a long designation into visual fragments, e.g.
+  // "00.00.00.01.01" + ".05". A generic cell join inserts whitespace and
+  // turns a valid designation into an invalid one. Designations are structural
+  // numeric tokens, so whitespace between their fragments is never semantic.
+  return normalizeTableCell(items).replace(/\s+/g, '');
+}
+
 function parsePositiveIntCell(text: string): number | null {
   const normalized = normalizeWhitespace(text);
   if (!/^\d+$/.test(normalized)) return null;
@@ -444,7 +457,10 @@ function extractTableRowsForHeader(
     const cells = getEmptyTableCells();
 
     for (const column of columns) {
-      cells[column.key] = normalizeTableCell(rowItems.filter(item => getColumnForItem(item, columns)?.key === column.key));
+      const cellItems = rowItems.filter(item => getColumnForItem(item, columns)?.key === column.key);
+      cells[column.key] = column.key === 'designation'
+        ? normalizeDesignationCell(cellItems)
+        : normalizeTableCell(cellItems);
     }
 
     const position = parsePositiveIntCell(cells.position);

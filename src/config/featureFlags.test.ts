@@ -30,6 +30,7 @@ describe('featureFlags', () => {
       useBackendBazis: false,
       labels: false,
       statusAutomation: false,
+      pdfImportLayoutPatterns: false,
       sheetMaterialsReads: false,
       enableLegacyHasura: true,
       workosAuth: false,
@@ -40,6 +41,12 @@ describe('featureFlags', () => {
     expect(getFeatureFlags({}).statusAutomation).toBe(false);
     expect(getFeatureFlags({ VITE_STATUS_AUTOMATION: 'true' }).statusAutomation).toBe(true);
     expect(getFeatureFlags({}, { statusAutomation: true }).statusAutomation).toBe(true);
+  });
+
+  it('reads PDF layout-pattern flag from env and runtime config, default off', () => {
+    expect(getFeatureFlags({}).pdfImportLayoutPatterns).toBe(false);
+    expect(getFeatureFlags({ VITE_PDF_IMPORT_LAYOUT_PATTERNS: 'true' }).pdfImportLayoutPatterns).toBe(true);
+    expect(getFeatureFlags({}, { pdfImportLayoutPatterns: true }).pdfImportLayoutPatterns).toBe(true);
   });
 
   it('reads the SP3 sheetMaterialsReads flag from env and runtime config, default off', () => {

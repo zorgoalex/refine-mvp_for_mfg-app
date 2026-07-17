@@ -30,6 +30,20 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-17",
+    title: "Обучаемый импорт таблиц Базис PDF",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "Импорт Базис PDF находит таблицы по геометрии на любой странице и предлагает ручное сопоставление неизвестных колонок.",
+      "Подтверждённые layout-паттерны сохраняются без PDF, имени файла и значений документа; одобренный паттерн применяется автоматически.",
+    ],
+    fixed: [
+      "Перенесённые на следующую строку длинные обозначения больше не приводят к потере деталей.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-15",
     title: "Наборы деталей для Базис-раскрой",
     services: ["ERP", "Cutting"],
