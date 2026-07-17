@@ -377,7 +377,28 @@ probe_file() {
                        WHERE NULLIF(btrim(COALESCE(snapshot.source_bazis_order_no, '')), '') IS NULL
                          AND NULLIF(btrim(COALESCE(source.basis_product, '')), '') IS NOT NULL
                      );" ;;
-    070_*) probe_all "$(q_tbl bazis_pdf_table_patterns)" \
+    070_*) probe_all "$(q_col clients sort_order)" \
+                     "$(q_col materials sort_order)" \
+                     "$(q_col sheet_material_types sort_order)" \
+                     "$(q_col films sort_order)" \
+                     "$(q_col film_types sort_order)" \
+                     "$(q_col vendors sort_order)" \
+                     "$(q_col suppliers sort_order)" \
+                     "$(q_col units sort_order)" \
+                     "$(q_col transaction_direction sort_order)" \
+                     "$(q_col workshops sort_order)" \
+                     "$(q_col work_centers sort_order)" \
+                     "SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM pg_constraint
+                       WHERE conname IN (
+                         'uq_order_statuses_sort_order',
+                         'uq_payment_statuses_sort_order',
+                         'uq_production_statuses_sort_order'
+                       )
+                     );" ;;
+    071_*) probe_all "$(q_col user_preferences recent_reference_entities)" ;;
+    072_*) probe_all "$(q_tbl bazis_pdf_table_patterns)" \
                      "$(q_idx idx_bazis_pdf_table_patterns_active)" \
                      "$(q_con uq_bazis_pdf_table_patterns_fingerprint)" \
                      "$(q_con chk_bazis_pdf_table_patterns_fingerprint)" \

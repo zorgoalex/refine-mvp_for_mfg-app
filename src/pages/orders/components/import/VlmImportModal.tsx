@@ -14,6 +14,7 @@ import type { ReferenceData, ImportRow } from './types/importTypes';
 import { IMPORT_DEFAULTS } from './types/importTypes';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { calculateOrderDetailArea } from '../../../../utils/orderArea';
+import { sortOptionsByRecency, useRecentReferences } from '../../../../hooks/useRecentReferences';
 
 type VlmImportStep = 'upload' | 'validation';
 
@@ -53,6 +54,7 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
 
   const addDetail = useOrderFormStore((state) => state.addDetail);
   const recalculateFinancials = useOrderFormStore((state) => state.recalculateFinancials);
+  const materialRecency = useRecentReferences('sheet_material_types');
 
   // Load reference data
   const { data: edgeTypesData } = useList({
@@ -72,7 +74,8 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
     resource: 'sheet_material_types',
     pagination: { pageSize: 10000 },
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    meta: { fields: ['sheet_material_type_id', 'name', 'is_cuttable'] },
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'sheet_material_type_id', order: 'asc' }],
+    meta: { fields: ['sheet_material_type_id', 'name', 'is_cuttable', 'sort_order'] },
   });
 
   const { data: millingTypesData } = useList({
@@ -97,14 +100,22 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
         name: item.milling_type_name,
       })),
       // Variant B: material resolution uses sheet_material_types
-      sheetMaterialTypes: (sheetMaterialTypesData?.data || []).map((item: any) => ({
-        id: item.sheet_material_type_id,
-        name: item.name,
-        isCuttable: item.is_cuttable != null ? Boolean(item.is_cuttable) : true,
+      sheetMaterialTypes: sortOptionsByRecency(
+        (sheetMaterialTypesData?.data || []).map((item: any) => ({
+          value: item.sheet_material_type_id,
+          label: item.name,
+          sortOrder: item.sort_order,
+          isCuttable: item.is_cuttable != null ? Boolean(item.is_cuttable) : true,
+        })),
+        materialRecency.recentIds,
+      ).map((item) => ({
+        id: item.value,
+        name: item.label,
+        isCuttable: item.isCuttable,
       })),
     };
     importValidation.setReferenceData(refData);
-  }, [edgeTypesData, filmsData, sheetMaterialTypesData, millingTypesData]);
+  }, [edgeTypesData, filmsData, sheetMaterialTypesData, millingTypesData, materialRecency.recentIds]);
 
   const currentStepIndex = STEPS.findIndex(s => s.key === currentStep);
 
@@ -158,6 +169,7 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
     }
 
     let importedDetails = 0;
+    const usedMaterialIds = new Set<number>();
 
     for (const row of validRows) {
       const height = row.height || 0;
@@ -183,9 +195,13 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
       };
 
       addDetail(detail);
+      if (Number.isSafeInteger(row.sheet_material_type_id) && Number(row.sheet_material_type_id) > 0) {
+        usedMaterialIds.add(Number(row.sheet_material_type_id));
+      }
       importedDetails++;
     }
 
+    usedMaterialIds.forEach(materialRecency.promote);
     recalculateFinancials();
 
     // Show success message with provider info
@@ -196,7 +212,7 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
 
     // Close modal
     handleClose();
-  }, [importValidation, addDetail, recalculateFinancials, handleClose, vlmImport.result]);
+  }, [importValidation, addDetail, materialRecency.promote, recalculateFinancials, handleClose, vlmImport.result]);
 
   // Validation for next button
   const canGoNext = useMemo(() => {
@@ -236,6 +252,7 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
             onUpdateRow={importValidation.updateRow}
             onRemoveRow={importValidation.removeRow}
             onBatchReplace={importValidation.batchReplaceReference}
+            onMaterialUsed={materialRecency.promote}
           />
         );
 

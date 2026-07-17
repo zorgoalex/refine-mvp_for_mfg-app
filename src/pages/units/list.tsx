@@ -2,9 +2,13 @@
 import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
+import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
 export const UnitList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({ syncWithLocation: true });
+  const { tableProps } = useTable({
+    syncWithLocation: true,
+    sorters: { initial: [{ field: "sort_order", order: "asc" }, { field: "unit_id", order: "asc" }] },
+  });
   const { show } = useNavigation();
 
   return (
@@ -19,6 +23,7 @@ export const UnitList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="unit_id" title="id" sorter />
+        <ReferenceSortOrderColumn />
         <Table.Column dataIndex="unit_code" title="Код единицы" sorter />
         <Table.Column dataIndex="unit_name" title="Название" sorter />
         <Table.Column dataIndex="unit_symbol" title="Обозначение единицы" />

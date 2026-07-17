@@ -14,10 +14,30 @@ describe('tabStore', () => {
     const s = mod.useTabStore.getState();
     s.openTab({ key: '/bazis/projects/6', path: '/bazis/projects/6', label: 'Базис-проекты', resource: 'bazis' });
     s.setTabTitle('/bazis/projects/6', 'Шкаф');
-    s.openTab({ key: '/bazis/projects/6', path: '/bazis/projects/6?revision=7', label: 'Базис-проекты', resource: 'bazis' });
+    s.openTab({
+      key: '/bazis/projects/6',
+      path: '/bazis/projects/6?revision=7',
+      label: 'Базис-проекты',
+      resource: 'bazis',
+      preserveLabel: true,
+    });
     const tab = mod.useTabStore.getState().tabs.find((t) => t.key === '/bazis/projects/6');
     expect(tab?.label).toBe('Шкаф');
     expect(tab?.path).toBe('/bazis/projects/6?revision=7');
+  });
+
+  it('openTab restores the route label for a static page', () => {
+    const s = mod.useTabStore.getState();
+    s.openTab({ key: '/cut', path: '/cut', label: 'Раскрой', resource: 'cut' });
+    s.setTabTitle('/cut', '2557');
+    s.openTab({
+      key: '/cut',
+      path: '/cut',
+      label: 'Раскрой',
+      resource: 'cut',
+      preserveLabel: false,
+    });
+    expect(mod.useTabStore.getState().tabs[0].label).toBe('Раскрой');
   });
 
   it('openTab dedupes by key but updates path (query preserved)', () => {
@@ -51,6 +71,26 @@ describe('tabStore', () => {
     const raw = sessionStorage.getItem('workspace-tabs') || '';
     expect(raw).toContain('/orders');
     expect(raw).not.toContain('"dirty":true');
+  });
+
+  it('migration removes legacy stale labels from persisted tabs', () => {
+    const migrated = mod.migrateWorkspaceTabs(
+      {
+        tabs: [
+          { key: '/cut', path: '/cut', label: '2557', resource: 'cut', dirty: false },
+          {
+            key: '/orders/edit/42',
+            path: '/orders/edit/42',
+            label: 'Старый заказ',
+            resource: 'orders_view',
+            dirty: false,
+          },
+        ],
+      },
+      0,
+    ) as { tabs: Array<{ label: string }> };
+
+    expect(migrated.tabs.map((tab) => tab.label)).toEqual(['Раскрой', 'Старый заказ']);
   });
 });
 

@@ -25,12 +25,12 @@ export const KeepAliveOutlet: React.FC = () => {
   return (
     <>
       {Array.from(cacheRef.current.entries()).map(([key, node]) => (
-        <KeepAliveContext.Provider key={key} value={{ isActive: key === activeKey }}>
+        <KeepAliveContext.Provider key={key} value={{ isActive: key === activeKey, tabKey: key }}>
           <div hidden={key !== activeKey}>{node}</div>
         </KeepAliveContext.Provider>
       ))}
       {!eligible && (
-        <KeepAliveContext.Provider value={{ isActive: true }}>
+        <KeepAliveContext.Provider value={{ isActive: true, tabKey: activeKey }}>
           {outlet}
         </KeepAliveContext.Provider>
       )}

@@ -1,6 +1,7 @@
 export interface IdNameLookupDto {
   id: number;
   name: string;
+  sortOrder: number;
 }
 
 export interface MaterialLookupDto extends IdNameLookupDto {
@@ -39,6 +40,7 @@ export interface UnitLookupDto {
   code: string;
   name: string;
   symbol?: string;
+  sortOrder: number;
 }
 
 export interface OrderFormDataResponseDto {

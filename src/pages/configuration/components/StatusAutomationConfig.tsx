@@ -143,7 +143,7 @@ export function StatusAutomationConfig() {
       resource: 'order_statuses',
       pagination: { pageSize: 200 },
       filters: ALL_STATUS_FILTER,
-      sorters: [{ field: 'sort_order', order: 'asc' }],
+      sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'order_status_id', order: 'asc' }],
       queryOptions: { enabled: canView },
     });
   const {
@@ -154,7 +154,7 @@ export function StatusAutomationConfig() {
     resource: 'payment_statuses',
     pagination: { pageSize: 200 },
     filters: ALL_STATUS_FILTER,
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'payment_status_id', order: 'asc' }],
     queryOptions: { enabled: canView },
   });
   const {
@@ -165,7 +165,7 @@ export function StatusAutomationConfig() {
     resource: 'production_statuses',
     pagination: { pageSize: 200 },
     filters: ALL_STATUS_FILTER,
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
     queryOptions: { enabled: canView },
   });
 
@@ -661,4 +661,3 @@ export function StatusAutomationConfig() {
     </Space>
   );
 }
-

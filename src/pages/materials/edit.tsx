@@ -2,6 +2,7 @@ import { Edit, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Select, Checkbox } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
+import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
 
 export const MaterialEdit: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps, queryResult } = useFormWithHighlight({
@@ -74,8 +75,8 @@ export const MaterialEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Ref Key 1C" name="ref_key_1c">
           <Input />
         </Form.Item>
+        <ReferenceSortOrderFormItem />
       </Form>
     </Edit>
   );
 };
-

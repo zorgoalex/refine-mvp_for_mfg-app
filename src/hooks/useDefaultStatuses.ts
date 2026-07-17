@@ -25,7 +25,7 @@ export const useDefaultStatuses = (): DefaultStatuses => {
   const { data: orderStatuses, isLoading: orderStatusLoading } = useList({
     resource: 'order_statuses',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'order_status_id', order: 'asc' }],
     pagination: { current: 1, pageSize: 1 },
     queryOptions: { enabled: !useBackendReferences },
   });
@@ -34,7 +34,7 @@ export const useDefaultStatuses = (): DefaultStatuses => {
   const { data: paymentStatuses, isLoading: paymentStatusLoading } = useList({
     resource: 'payment_statuses',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'payment_status_id', order: 'asc' }],
     pagination: { current: 1, pageSize: 1 },
     queryOptions: { enabled: !useBackendReferences },
   });
@@ -43,7 +43,7 @@ export const useDefaultStatuses = (): DefaultStatuses => {
   const { data: productionStatuses, isLoading: productionStatusLoading } = useList({
     resource: 'production_statuses',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
     pagination: { current: 1, pageSize: 1 },
     queryOptions: { enabled: !useBackendReferences },
   });

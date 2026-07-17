@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { resolveOrderTabLabel, resolveTabLabel, RESOURCE_LABELS } from './tabLabels';
+import {
+  resolveOrderTabLabel,
+  resolveTabLabel,
+  RESOURCE_LABELS,
+  shouldPreserveTabLabel,
+} from './tabLabels';
 
 describe('resolveTabLabel', () => {
   it('maps a list route to its resource label', () => {
@@ -35,5 +40,20 @@ describe('resolveTabLabel', () => {
   it('exposes RESOURCE_LABELS for the sider', () => {
     expect(RESOURCE_LABELS.orders_view).toBe('Заказы');
     expect(RESOURCE_LABELS.groups).toBe('Группы');
+  });
+});
+
+describe('shouldPreserveTabLabel', () => {
+  it('preserves record-backed labels that are enriched after loading', () => {
+    expect(shouldPreserveTabLabel('/orders/edit/42')).toBe(true);
+    expect(shouldPreserveTabLabel('/materials/show/7')).toBe(true);
+    expect(shouldPreserveTabLabel('/bazis/projects/6')).toBe(true);
+    expect(shouldPreserveTabLabel('/bazis-cut/9')).toBe(true);
+  });
+
+  it('lets route sync restore labels for static and create pages', () => {
+    expect(shouldPreserveTabLabel('/orders')).toBe(false);
+    expect(shouldPreserveTabLabel('/cut')).toBe(false);
+    expect(shouldPreserveTabLabel('/materials/create')).toBe(false);
   });
 });

@@ -10,7 +10,7 @@ export const MovementStatusCreate: React.FC<IResourceComponentsProps> = () => {
       <Form
         {...formProps}
         layout="vertical"
-        initialValues={{ is_active: true, sort_order: 10 }}
+        initialValues={{ is_active: true, sort_order: 100 }}
         onFinish={async (values) => {
           const code = (values?.movement_status_code ?? "").trim();
           const name = (values?.movement_status_name ?? "").trim();
@@ -39,7 +39,7 @@ export const MovementStatusCreate: React.FC<IResourceComponentsProps> = () => {
         >
           <Input />
         </Form.Item>
-        <Form.Item label="Sort Order" name="sort_order">
+        <Form.Item label="Порядок сортировки" name="sort_order">
           <InputNumber min={0} />
         </Form.Item>
         <Form.Item label="Active" name="is_active" valuePropName="checked">

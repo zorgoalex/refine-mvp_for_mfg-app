@@ -2,6 +2,7 @@ import { Edit, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Switch, Select, Checkbox } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
+import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
 
 export const FilmEdit: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps, queryResult } = useFormWithHighlight({
@@ -52,8 +53,8 @@ export const FilmEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Активен" name="is_active" valuePropName="checked">
           <Checkbox>Активен</Checkbox>
         </Form.Item>
+        <ReferenceSortOrderFormItem />
       </Form>
     </Edit>
   );
 };
-

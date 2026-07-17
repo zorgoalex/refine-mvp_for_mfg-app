@@ -3,12 +3,13 @@ import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
+import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
 export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "film_type_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "film_type_id", order: "asc" }],
     },
   });
 
@@ -31,6 +32,7 @@ export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="film_type_id" title="id" sorter />
+        <ReferenceSortOrderColumn />
         <Table.Column dataIndex="film_type_name" title="Тип плёнки" sorter />
         <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column

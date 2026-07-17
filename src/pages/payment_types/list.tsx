@@ -8,7 +8,7 @@ export const PaymentTypeList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "type_paid_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "type_paid_id", order: "asc" }],
     },
   });
   const { highlightProps } = useHighlightRow(

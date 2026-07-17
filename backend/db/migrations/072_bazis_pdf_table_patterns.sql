@@ -1,3 +1,4 @@
+-- 072_bazis_pdf_table_patterns.sql
 -- Reusable structural mappings for Basis PDF tables.
 -- Never stores PDF bytes, filenames, hashes, raw rows, or document values.
 BEGIN;

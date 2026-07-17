@@ -16,7 +16,7 @@ export const MaterialTypeEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Name" name="material_type_name" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
-        <Form.Item label="Sort Order" name="sort_order" rules={[{ required: true }]}>
+        <Form.Item label="Порядок сортировки" name="sort_order" rules={[{ required: true }]}>
           <InputNumber min={1} style={{ width: '100%' }} />
         </Form.Item>
         <Form.Item label="Description" name="description">
@@ -32,4 +32,3 @@ export const MaterialTypeEdit: React.FC<IResourceComponentsProps> = () => {
     </Edit>
   );
 };
-

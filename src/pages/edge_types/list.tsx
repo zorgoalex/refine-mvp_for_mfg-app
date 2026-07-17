@@ -8,7 +8,7 @@ export const EdgeTypeList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "edge_type_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "edge_type_id", order: "asc" }],
     },
   });
 
@@ -74,4 +74,3 @@ export const EdgeTypeList: React.FC<IResourceComponentsProps> = () => {
     </LocalizedList>
   );
 };
-

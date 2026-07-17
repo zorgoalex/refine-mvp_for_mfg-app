@@ -93,7 +93,7 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
     optionLabel: 'type_paid_name',
     optionValue: 'type_paid_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'type_paid_id', order: 'asc' }],
     pagination: { mode: 'off' },
     queryOptions: { enabled: selectsEnabled && !useBackendReferences },
   });

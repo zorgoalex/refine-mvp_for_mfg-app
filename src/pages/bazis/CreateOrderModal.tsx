@@ -64,7 +64,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     optionLabel: 'order_status_name',
     optionValue: 'order_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'order_status_id', order: 'asc' }],
     queryOptions: { enabled: open && !useBackendReferences },
   });
 

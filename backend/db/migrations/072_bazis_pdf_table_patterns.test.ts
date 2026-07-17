@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-describe('migration 070 Basis PDF table patterns', () => {
-  const sql = readFileSync(resolve(__dirname, '070_bazis_pdf_table_patterns.sql'), 'utf8');
+describe('migration 072 Basis PDF table patterns', () => {
+  const sql = readFileSync(resolve(__dirname, '072_bazis_pdf_table_patterns.sql'), 'utf8');
 
   it('stores reusable structural patterns with approval and optimistic versioning', () => {
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS bazis_pdf_table_patterns/i);

@@ -1,10 +1,15 @@
-import { Body, Controller, Get, Inject, Patch, Req } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Patch, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../permissions/current-user';
 import { ProfilePreferencesService } from './profile-preferences.service';
-import type { UserPreferencesDto, UserPreferencesResponseDto } from './profile-preferences.types';
+import {
+  RECENT_REFERENCE_RESOURCES,
+  type RecentReferenceResource,
+  type UserPreferencesDto,
+  type UserPreferencesResponseDto,
+} from './profile-preferences.types';
 
 const updatePreferencesSchema = z.object({
   themeMode: z.enum(['light', 'dark']).optional(),
@@ -17,6 +22,16 @@ const updatePreferencesSchema = z.object({
     }),
   ).optional(),
 });
+
+const referenceUsageSchema = z.object({
+  resource: z.enum(RECENT_REFERENCE_RESOURCES),
+  entityId: z.number().int().positive(),
+}).strict();
+
+export interface ReferenceUsageRequest {
+  resource: RecentReferenceResource;
+  entityId: number;
+}
 
 export function parseUpdateUserPreferencesRequest(body: unknown): Partial<UserPreferencesDto> {
   const result = updatePreferencesSchema.safeParse(body);
@@ -66,6 +81,35 @@ export class ProfilePreferencesController {
       }),
     };
   }
+
+  @ApiOperation({ operationId: 'promoteCurrentUserReferenceUsage', summary: 'Remember current user reference usage' })
+  @ApiResponse({ status: 200, description: 'Updated current user preferences' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 422, description: 'Invalid reference usage payload' })
+  @Post('reference-usage')
+  async promoteReferenceUsage(
+    @Req() request: RequestWithCurrentUser,
+    @Body() body: unknown,
+  ): Promise<UserPreferencesResponseDto> {
+    const currentUser = requireCurrentUser(request);
+    const usage = parseReferenceUsageRequest(body);
+    return {
+      preferences: await this.preferences.promoteReferenceUsage({
+        currentUser,
+        ...usage,
+      }),
+    };
+  }
+}
+
+export function parseReferenceUsageRequest(body: unknown): ReferenceUsageRequest {
+  const result = referenceUsageSchema.safeParse(body);
+  if (!result.success) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid reference usage payload', {
+      issues: result.error.issues,
+    });
+  }
+  return result.data;
 }
 
 function requireCurrentUser(request: RequestWithCurrentUser) {

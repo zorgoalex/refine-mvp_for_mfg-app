@@ -11,7 +11,7 @@ export const MillingTypeCreate: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <Create saveButtonProps={saveButtonProps}>
-      <Form {...formProps} layout="vertical" initialValues={{ is_active: true, sort_order: 10 }}>
+      <Form {...formProps} layout="vertical" initialValues={{ is_active: true, sort_order: 100 }}>
         <Form.Item
           label="Name"
           name="milling_type_name"
@@ -26,7 +26,7 @@ export const MillingTypeCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Cost per sqm" name="cost_per_sqm">
           <InputNumber min={0} precision={2} style={{ width: '100%' }} />
         </Form.Item>
-        <Form.Item label="Sort Order" name="sort_order" rules={[{ required: true }]}>
+        <Form.Item label="Порядок сортировки" name="sort_order" rules={[{ required: true }]}>
           <InputNumber min={1} style={{ width: '100%' }} />
         </Form.Item>
         <Form.Item label="Description" name="description">

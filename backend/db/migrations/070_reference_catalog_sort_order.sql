@@ -1,0 +1,45 @@
+-- 070_reference_catalog_sort_order.sql
+-- Give every ERP reference catalog a non-unique, deterministic display order.
+
+BEGIN;
+
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 100;
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 100;
+ALTER TABLE sheet_material_types ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 100;
+ALTER TABLE films ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 100;
+ALTER TABLE film_types ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 100;
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 100;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 100;
+ALTER TABLE units ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 100;
+ALTER TABLE transaction_direction ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 100;
+ALTER TABLE workshops ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 100;
+ALTER TABLE work_centers ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 100;
+
+ALTER TABLE clients ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE materials ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE sheet_material_types ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE milling_types ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE films ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE edge_types ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE vendors ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE suppliers ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE film_types ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE material_types ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE units ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE order_statuses ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE payment_statuses ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE payment_types ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE requisition_statuses ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE movements_statuses ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE material_transaction_types ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE transaction_direction ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE production_statuses ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE resource_requirements_statuses ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE workshops ALTER COLUMN sort_order SET DEFAULT 100;
+ALTER TABLE work_centers ALTER COLUMN sort_order SET DEFAULT 100;
+
+ALTER TABLE order_statuses DROP CONSTRAINT IF EXISTS uq_order_statuses_sort_order;
+ALTER TABLE payment_statuses DROP CONSTRAINT IF EXISTS uq_payment_statuses_sort_order;
+ALTER TABLE production_statuses DROP CONSTRAINT IF EXISTS uq_production_statuses_sort_order;
+
+COMMIT;

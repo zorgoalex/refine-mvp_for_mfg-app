@@ -10,7 +10,12 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
   const canManage = can('sheet_materials.manage');
   const { tableProps } = useTable({
     syncWithLocation: true,
-    sorters: { initial: [{ field: 'sheet_material_type_id', order: 'desc' }] },
+    sorters: {
+      initial: [
+        { field: 'sort_order', order: 'asc' },
+        { field: 'sheet_material_type_id', order: 'asc' },
+      ],
+    },
   });
   const { highlightProps } = useHighlightRow('sheet_material_type_id', tableProps.dataSource);
   const { show } = useNavigation();
@@ -71,6 +76,7 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
       >
         <Table.Column dataIndex="sheet_material_type_id" title="ID" sorter />
         <Table.Column dataIndex="name" title="Название" sorter />
+        <Table.Column dataIndex="sort_order" title="Порядок" sorter />
         <Table.Column
           dataIndex="material_type_id"
           title="Тип материала"

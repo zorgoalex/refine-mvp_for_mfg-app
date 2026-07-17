@@ -6,6 +6,7 @@ import { featureFlags } from '../config/featureFlags';
 export interface ReferenceOption {
   label: string;
   value: number;
+  sortOrder: number;
 }
 
 // SP3: richer option for the sheet-material picker — carries dimensions (FE
@@ -138,6 +139,7 @@ export function mapOrderFormDataToReferences(
         heightMm: item.heightMm ?? null,
         isActive: item.isActive,
         isCuttable: item.isCuttable,
+        sortOrder: item.sortOrder,
       }))
     : [];
 
@@ -203,6 +205,7 @@ function toOptions<T extends { id: number }>(
   return items.map((item) => ({
     label: getLabel(item),
     value: item.id,
+    sortOrder: item.sortOrder,
   }));
 }
 

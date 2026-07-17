@@ -562,6 +562,53 @@ html {
   animation: slideInFromTop 0.2s ease-out;
 }
 
+.order-details-toolbar {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  margin-bottom: 6px;
+}
+
+.order-details-toolbar__content {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  min-width: 100%;
+  white-space: nowrap;
+}
+
+.order-details-toolbar__content .ant-btn {
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.order-details-toolbar__content--compact .order-details-toolbar__label {
+  display: none;
+}
+
+.order-details-toolbar__content--measure {
+  position: fixed;
+  inset: -10000px auto auto -10000px;
+  z-index: -1;
+  width: max-content;
+  min-width: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.order-details-toolbar__content--measure .order-details-toolbar__label {
+  display: inline;
+}
+
+.order-details-toolbar__summary {
+  margin-left: auto;
+  color: var(--app-text-muted, #666);
+  font-variant-numeric: tabular-nums;
+}
+
 @keyframes slideInFromTop {
   from {
     transform: translateY(-10px);

@@ -37,6 +37,7 @@ import type { ProjectDto } from "../../api/projectsApi";
 import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
 import { calculateOrderTotalArea } from "../../utils/orderArea";
 import { TableTopScroll } from "../../components/TableTopScroll";
+import { useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
 import { CutPage } from "../cut/CutPage";
 import { buildGroupedRows, GROUP_TINT_COUNT, selectedGroupLabelForCut } from './detailGrouping';
@@ -236,12 +237,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   // The workspace tab shows only the user-facing order name, never its database id.
   const location = useLocation();
+  const tabKey = useWorkspaceTabKey(location.pathname);
   const setTabTitle = useTabStore((s) => s.setTabTitle);
   useEffect(() => {
     if (record?.order_name) {
-      setTabTitle(location.pathname, resolveOrderTabLabel(record.order_name));
+      setTabTitle(tabKey, resolveOrderTabLabel(record.order_name));
     }
-  }, [record?.order_name, location.pathname, setTabTitle]);
+  }, [record?.order_name, setTabTitle, tabKey]);
 
   const { data: clientData, isLoading: clientLoading } = useOne({
     resource: "clients",
