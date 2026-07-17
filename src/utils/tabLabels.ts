@@ -75,6 +75,17 @@ export const resourceFromPath = (pathname: string): string | undefined => {
 export const resolveOrderTabLabel = (orderName: unknown): string =>
   typeof orderName === 'string' && orderName.trim() ? orderName.trim() : 'Заказ';
 
+export const shouldPreserveTabLabel = (pathname: string): boolean => {
+  const segs = pathname.split('/').filter(Boolean);
+  if ((segs[1] === 'show' || segs[1] === 'edit') && Boolean(segs[2])) {
+    return true;
+  }
+  if (segs[0] === 'bazis' && segs[1] === 'projects' && Boolean(segs[2])) {
+    return true;
+  }
+  return segs[0] === 'bazis-cut' && Boolean(segs[1]);
+};
+
 export const resolveTabLabel = (pathname: string): string => {
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   const segs = pathname.split('/').filter(Boolean);

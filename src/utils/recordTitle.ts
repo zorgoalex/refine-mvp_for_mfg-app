@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useWorkspaceTabKey } from '../components/workspace/KeepAliveContext';
 import { useTabStore } from '../stores/tabStore';
 import { RESOURCE_LABELS, resourceFromPath } from './tabLabels';
 
@@ -100,13 +101,14 @@ export const useRecordTabTitle = ({
   enabled?: boolean;
 }): void => {
   const location = useLocation();
+  const tabKey = useWorkspaceTabKey(location.pathname);
   const setTabTitle = useTabStore((s) => s.setTabTitle);
   const title = buildRecordTabTitle({ resourceLabel, actionLabel, record, fallbackId, preferredFields });
 
   useEffect(() => {
     if (!enabled) return;
-    setTabTitle(location.pathname, title);
-  }, [enabled, location.pathname, setTabTitle, title]);
+    setTabTitle(tabKey, title);
+  }, [enabled, setTabTitle, tabKey, title]);
 };
 
 export const useCurrentRecordTabTitle = (
@@ -114,8 +116,9 @@ export const useCurrentRecordTabTitle = (
   preferredFields?: string[]
 ): void => {
   const location = useLocation();
-  const segs = location.pathname.split('/').filter(Boolean);
-  const resource = resourceFromPath(location.pathname);
+  const tabKey = useWorkspaceTabKey(location.pathname);
+  const segs = tabKey.split('/').filter(Boolean);
+  const resource = resourceFromPath(tabKey);
   const action = segs[1];
   const resourceLabel = resource ? RESOURCE_LABELS[resource] : undefined;
   const actionLabel = action ? ACTION_LABELS[action] : undefined;
