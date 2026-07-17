@@ -13,6 +13,10 @@ describe('KeepAliveOutlet guards', () => {
     expect(outlet).toContain('KeepAliveContext.Provider');
     expect(outlet).toContain('isActive');
   });
+  it('pins each mounted screen to the tab key that owns it', () => {
+    expect(outlet).toContain('tabKey: key');
+    expect(outlet).toContain('tabKey: activeKey');
+  });
   it('excludes /calendar from keep-alive (B7)', () => {
     expect(policy).toContain("'/calendar'");
   });
