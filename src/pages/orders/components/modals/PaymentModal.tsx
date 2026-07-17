@@ -36,7 +36,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     optionLabel: 'type_paid_name',
     optionValue: 'type_paid_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'type_paid_id', order: 'asc' }],
     ...(payment?.type_paid_id ? { defaultValue: payment.type_paid_id } : {}),
     queryOptions: { enabled: !useBackendReferences },
   });

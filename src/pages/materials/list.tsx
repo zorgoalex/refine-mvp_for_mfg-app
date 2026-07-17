@@ -4,12 +4,13 @@ import { Space, Table, Badge } from "antd";
 import { useMemo } from "react";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
+import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
 export const MaterialList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "material_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "material_id", order: "asc" }],
     },
   });
 
@@ -136,6 +137,7 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="material_id" title="id" sorter />
+        <ReferenceSortOrderColumn />
         <Table.Column dataIndex="material_name" title="Материал" sorter />
         <Table.Column
           dataIndex="unit_id"

@@ -28,7 +28,7 @@ import type {
 } from '../application/sheet-materials.types';
 
 const SELECT_COLUMNS = `sheet_material_type_id, name, material_type_id, unit_id, thickness_mm, width_mm, height_mm,
-  supplier_id, vendor_id, supplier_article, texture, color, ref_key_1c::text, is_active, version`;
+  supplier_id, vendor_id, supplier_article, texture, color, ref_key_1c::text, is_active, sort_order, version`;
 
 /**
  * Backend-owned sheet-material-type CRUD (SP1). Every write is audited in-tx
@@ -44,7 +44,7 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
       `SELECT ${SELECT_COLUMNS}
        FROM sheet_material_types
        WHERE ($1::boolean IS TRUE OR is_active = true)
-       ORDER BY name`,
+       ORDER BY sort_order ASC, name ASC, sheet_material_type_id ASC`,
       [query.includeInactive ?? false],
     );
     return result.rows.map(mapRow);
@@ -70,8 +70,8 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
         const inserted = await tx.query(
           `INSERT INTO sheet_material_types
              (name, material_type_id, unit_id, thickness_mm, width_mm, height_mm,
-              supplier_id, vendor_id, supplier_article, texture, color, ref_key_1c, is_active, created_by, edited_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::uuid,COALESCE($13,true),$14,$14)
+              supplier_id, vendor_id, supplier_article, texture, color, ref_key_1c, is_active, sort_order, created_by, edited_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::uuid,COALESCE($13,true),COALESCE($14,100),$15,$15)
            RETURNING ${SELECT_COLUMNS}`,
           [
             input.name,
@@ -87,6 +87,7 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
             input.color ?? null,
             input.refKey1c || null,
             input.isActive ?? null,
+            input.sortOrder ?? null,
             numOrNull(command.currentUser.id),
           ],
         );
@@ -128,7 +129,8 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
           `UPDATE sheet_material_types SET
              name=$2, material_type_id=$3, unit_id=$4, thickness_mm=$5, width_mm=$6, height_mm=$7,
              supplier_id=$8, vendor_id=$9, supplier_article=$10, texture=$11, color=$12, ref_key_1c=$13::uuid,
-             is_active=COALESCE($14, is_active), version=version+1, edited_by=$15, updated_at=now()
+             is_active=COALESCE($14, is_active), sort_order=COALESCE($15, sort_order),
+             version=version+1, edited_by=$16, updated_at=now()
            WHERE sheet_material_type_id=$1
            RETURNING ${SELECT_COLUMNS}`,
           [
@@ -146,6 +148,7 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
             input.color ?? null,
             input.refKey1c || null,
             input.isActive ?? null,
+            input.sortOrder ?? null,
             numOrNull(command.currentUser.id),
           ],
         );
@@ -257,6 +260,7 @@ function mapRow(r: Record<string, unknown>): SheetMaterialTypeDto {
     color: r.color == null ? null : String(r.color),
     refKey1c: r.ref_key_1c == null ? null : String(r.ref_key_1c),
     isActive: Boolean(r.is_active),
+    sortOrder: toNum(r.sort_order),
     version: toNum(r.version),
   };
 }
@@ -276,6 +280,7 @@ function diffShape(s: SheetMaterialTypeDto): Record<string, unknown> {
     color: s.color,
     refKey1c: s.refKey1c,
     isActive: s.isActive,
+    sortOrder: s.sortOrder,
   };
 }
 

@@ -38,7 +38,7 @@ export const MovementStatusEdit: React.FC<IResourceComponentsProps> = () => {
         >
           <Input />
         </Form.Item>
-        <Form.Item label="Sort Order" name="sort_order">
+        <Form.Item label="Порядок сортировки" name="sort_order">
           <InputNumber min={0} />
         </Form.Item>
         <Form.Item label="Active" name="is_active" valuePropName="checked">

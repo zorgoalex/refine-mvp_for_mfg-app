@@ -94,7 +94,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     optionLabel: 'milling_type_name',
     optionValue: 'milling_type_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'milling_type_id', order: 'asc' }],
     pagination: { mode: 'off' },
     queryOptions: { enabled: open && !useBackendReferences },
   });
@@ -107,7 +107,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     optionLabel: 'edge_type_name',
     optionValue: 'edge_type_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'edge_type_id', order: 'asc' }],
     pagination: { mode: 'off' },
     queryOptions: { enabled: open && !useBackendReferences },
   });
@@ -132,7 +132,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     optionLabel: 'production_status_name',
     optionValue: 'production_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
     pagination: { mode: 'off' },
     queryOptions: { enabled: open && !useBackendReferences },
   });

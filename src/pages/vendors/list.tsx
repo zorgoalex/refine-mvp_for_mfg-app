@@ -4,12 +4,13 @@ import { Space, Table, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { useMemo } from "react";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
+import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
 export const VendorList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "vendor_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "vendor_id", order: "asc" }],
     },
   });
 
@@ -58,6 +59,7 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="vendor_id" title="id" sorter />
+        <ReferenceSortOrderColumn />
         <Table.Column dataIndex="vendor_name" title="Производитель" sorter />
         <Table.Column
           dataIndex="contact_info"
@@ -108,5 +110,4 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
     </LocalizedList>
   );
 };
-
 

@@ -365,21 +365,21 @@ describe('PgOrderReadRepository', () => {
         currentUser: currentUser('42'),
       }),
     ).resolves.toEqual({
-      clients: [{ id: 1, name: 'Client A' }],
-      materials: [{ id: 10, name: 'MDF 16', unitId: 2 }],
-      millingTypes: [{ id: 20, name: 'Modern', costPerSqm: 120.5 }],
-      edgeTypes: [{ id: 30, name: 'PVC 2mm' }],
-      films: [{ id: 40, name: 'White matte' }],
-      orderStatuses: [{ id: 50, name: 'New', code: null, color: '#ffffff' }],
-      paymentStatuses: [{ id: 60, name: 'Unpaid', code: null, color: '#ff0000' }],
-      paymentTypes: [{ id: 70, name: 'Cash' }],
-      productionStatuses: [{ id: 80, name: 'Cut', code: 'cut', color: '#00ff00' }],
-      workshops: [{ id: 90, name: 'Main workshop' }],
+      clients: [{ id: 1, name: 'Client A', sortOrder: 10 }],
+      materials: [{ id: 10, name: 'MDF 16', unitId: 2, sortOrder: 10 }],
+      millingTypes: [{ id: 20, name: 'Modern', costPerSqm: 120.5, sortOrder: 10 }],
+      edgeTypes: [{ id: 30, name: 'PVC 2mm', sortOrder: 10 }],
+      films: [{ id: 40, name: 'White matte', sortOrder: 10 }],
+      orderStatuses: [{ id: 50, name: 'New', code: null, color: '#ffffff', sortOrder: 10 }],
+      paymentStatuses: [{ id: 60, name: 'Unpaid', code: null, color: '#ff0000', sortOrder: 10 }],
+      paymentTypes: [{ id: 70, name: 'Cash', sortOrder: 10 }],
+      productionStatuses: [{ id: 80, name: 'Cut', code: 'cut', color: '#00ff00', sortOrder: 10 }],
+      workshops: [{ id: 90, name: 'Main workshop', sortOrder: 10 }],
       employees: [{ id: 100, fullName: 'Test Employee' }],
-      units: [{ id: 110, code: 'pcs', name: 'Pieces', symbol: 'pcs' }],
+      units: [{ id: 110, code: 'pcs', name: 'Pieces', symbol: 'pcs', sortOrder: 10 }],
       // SP3: repo always returns sheet types (dumb); the service masks by perm.
       sheetMaterialTypes: [
-        { id: 200, name: 'МДФ 16', widthMm: 2800, heightMm: 2070, isActive: true },
+        { id: 200, name: 'МДФ 16', widthMm: 2800, heightMm: 2070, isActive: true, isCuttable: true, sortOrder: 10 },
       ],
     });
 
@@ -762,43 +762,43 @@ function createDatabase() {
       }
 
       if (text.includes('FROM clients')) {
-        return { rows: [{ id: '1', name: 'Client A' }] };
+        return { rows: [{ id: '1', name: 'Client A', sort_order: 10 }] };
       }
 
       if (text.includes('FROM materials')) {
-        return { rows: [{ id: '10', name: 'MDF 16', unit_id: '2' }] };
+        return { rows: [{ id: '10', name: 'MDF 16', unit_id: '2', sort_order: 10 }] };
       }
 
       if (text.includes('FROM milling_types')) {
-        return { rows: [{ id: '20', name: 'Modern', cost_per_sqm: '120.50' }] };
+        return { rows: [{ id: '20', name: 'Modern', cost_per_sqm: '120.50', sort_order: 10 }] };
       }
 
       if (text.includes('FROM edge_types')) {
-        return { rows: [{ id: '30', name: 'PVC 2mm' }] };
+        return { rows: [{ id: '30', name: 'PVC 2mm', sort_order: 10 }] };
       }
 
       if (text.includes('FROM films')) {
-        return { rows: [{ id: '40', name: 'White matte' }] };
+        return { rows: [{ id: '40', name: 'White matte', sort_order: 10 }] };
       }
 
       if (text.includes('FROM order_statuses')) {
-        return { rows: [{ id: '50', name: 'New', code: null, color: '#ffffff' }] };
+        return { rows: [{ id: '50', name: 'New', code: null, color: '#ffffff', sort_order: 10 }] };
       }
 
       if (text.includes('FROM payment_statuses')) {
-        return { rows: [{ id: '60', name: 'Unpaid', code: null, color: '#ff0000' }] };
+        return { rows: [{ id: '60', name: 'Unpaid', code: null, color: '#ff0000', sort_order: 10 }] };
       }
 
       if (text.includes('FROM payment_types')) {
-        return { rows: [{ id: '70', name: 'Cash' }] };
+        return { rows: [{ id: '70', name: 'Cash', sort_order: 10 }] };
       }
 
       if (text.includes('FROM production_statuses')) {
-        return { rows: [{ id: '80', name: 'Cut', code: 'cut', color: '#00ff00' }] };
+        return { rows: [{ id: '80', name: 'Cut', code: 'cut', color: '#00ff00', sort_order: 10 }] };
       }
 
       if (text.includes('FROM workshops')) {
-        return { rows: [{ id: '90', name: 'Main workshop' }] };
+        return { rows: [{ id: '90', name: 'Main workshop', sort_order: 10 }] };
       }
 
       if (text.includes('FROM employees')) {
@@ -806,13 +806,13 @@ function createDatabase() {
       }
 
       if (text.includes('FROM units')) {
-        return { rows: [{ id: '110', code: 'pcs', name: 'Pieces', symbol: 'pcs' }] };
+        return { rows: [{ id: '110', code: 'pcs', name: 'Pieces', symbol: 'pcs', sort_order: 10 }] };
       }
 
       if (text.includes('FROM sheet_material_types')) {
         return {
           rows: [
-            { id: '200', name: 'МДФ 16', width_mm: '2800.00', height_mm: '2070.00', is_active: true },
+            { id: '200', name: 'МДФ 16', width_mm: '2800.00', height_mm: '2070.00', is_active: true, is_cuttable: true, sort_order: 10 },
           ],
         };
       }

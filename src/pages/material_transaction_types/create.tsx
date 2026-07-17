@@ -18,7 +18,7 @@ export const MaterialTransactionTypeCreate: React.FC<IResourceComponentsProps> =
         layout="vertical"
         initialValues={{
           is_active: true,
-          sort_order: 10,
+          sort_order: 100,
           affects_stock: true,
           requires_document: false
         }}
@@ -58,7 +58,7 @@ export const MaterialTransactionTypeCreate: React.FC<IResourceComponentsProps> =
         <Form.Item label="Requires Document" name="requires_document" valuePropName="checked">
           <Checkbox />
         </Form.Item>
-        <Form.Item label="Sort Order" name="sort_order">
+        <Form.Item label="Порядок сортировки" name="sort_order">
           <InputNumber min={0} />
         </Form.Item>
         <Form.Item label="Active" name="is_active" valuePropName="checked">

@@ -126,7 +126,7 @@ export const CutConfigTab: React.FC = () => {
     resource: 'production_statuses',
     pagination: { pageSize: 200 },
     filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
   });
   const statusOptions = useMemo(
     () =>

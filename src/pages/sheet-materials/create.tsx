@@ -55,7 +55,7 @@ export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: 24 }}>
       <h2>Новый листовой материал</h2>
-      <Form form={form} layout="vertical" initialValues={{ isActive: true }}>
+      <Form form={form} layout="vertical" initialValues={{ isActive: true, sortOrder: 100 }}>
         <Row gutter={16}>
           <Col xs={24} sm={12} md={8}>
             <Form.Item name="name" label="Название" rules={[{ required: true, message: 'Укажите название' }]}>
@@ -110,6 +110,11 @@ export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
           <Col xs={24} sm={12} md={8}>
             <Form.Item name="refKey1c" label="Ключ 1С">
               <Input maxLength={36} placeholder="UUID из 1С" allowClear />
+            </Form.Item>
+          </Col>
+          <Col xs={24} sm={12} md={8}>
+            <Form.Item name="sortOrder" label="Порядок сортировки" rules={[{ required: true }]}>
+              <InputNumber min={-32768} max={32767} style={{ width: '100%' }} />
             </Form.Item>
           </Col>
           <Col xs={24} sm={12} md={8}>

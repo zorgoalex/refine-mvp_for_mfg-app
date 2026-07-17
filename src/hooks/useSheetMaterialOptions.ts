@@ -3,6 +3,7 @@ import { useSelect } from '@refinedev/antd';
 import { can } from '../utils/permissions';
 import { featureFlags } from '../config/featureFlags';
 import { useOrderFormData, type SheetMaterialTypeOption } from './useOrderFormData';
+import { sortOptionsByRecency, useRecentReferences } from './useRecentReferences';
 
 export interface UseSheetMaterialOptionsResult {
   // The "Листовой материал" picker should render at all. SP3 sheet write is
@@ -14,6 +15,7 @@ export interface UseSheetMaterialOptionsResult {
   options: SheetMaterialTypeOption[];
   byId: Map<number, SheetMaterialTypeOption>;
   isLoading: boolean;
+  promoteUsage: (entityId: number) => void;
 }
 
 /**
@@ -25,6 +27,7 @@ export interface UseSheetMaterialOptionsResult {
  * disables inactive non-current options at render time.
  */
 export function useSheetMaterialOptions(): UseSheetMaterialOptionsResult {
+  const recency = useRecentReferences('sheet_material_types');
   const canViewSheetMaterials = can('sheet_materials.view');
   // SP3: the picker also requires the migration 029 schema (sheetMaterialsReads)
   // so the selected sheet_material_type_id round-trips through order_details and
@@ -46,12 +49,17 @@ export function useSheetMaterialOptions(): UseSheetMaterialOptionsResult {
     optionLabel: 'name',
     optionValue: 'sheet_material_type_id',
     filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
-    meta: { fields: ['sheet_material_type_id', 'name', 'width_mm', 'height_mm', 'is_active', 'is_cuttable'] },
+    sorters: [
+      { field: 'sort_order', order: 'asc' },
+      { field: 'name', order: 'asc' },
+      { field: 'sheet_material_type_id', order: 'asc' },
+    ],
+    meta: { fields: ['sheet_material_type_id', 'name', 'width_mm', 'height_mm', 'is_active', 'is_cuttable', 'sort_order'] },
     pagination: { mode: 'off' },
     queryOptions: { enabled: enabled && !useBackendReferences },
   });
 
-  const options = useMemo<SheetMaterialTypeOption[]>(() => {
+  const catalogOptions = useMemo<SheetMaterialTypeOption[]>(() => {
     if (!enabled) return [];
     if (useBackendReferences) {
       return orderFormData.references.sheetMaterialTypes;
@@ -66,6 +74,7 @@ export function useSheetMaterialOptions(): UseSheetMaterialOptionsResult {
       // Hasura column available after Task 13 allowlist cutover; default true
       // so that all types remain selectable until the column is whitelisted.
       isCuttable: row.is_cuttable != null ? Boolean(row.is_cuttable) : true,
+      sortOrder: row.sort_order != null ? Number(row.sort_order) : 100,
     }));
   }, [
     enabled,
@@ -73,6 +82,11 @@ export function useSheetMaterialOptions(): UseSheetMaterialOptionsResult {
     orderFormData.references.sheetMaterialTypes,
     queryResult?.data,
   ]);
+
+  const options = useMemo(
+    () => sortOptionsByRecency(catalogOptions, recency.recentIds),
+    [catalogOptions, recency.recentIds],
+  );
 
   const byId = useMemo(
     () => new Map(options.map((option) => [option.value, option])),
@@ -83,7 +97,14 @@ export function useSheetMaterialOptions(): UseSheetMaterialOptionsResult {
     ? orderFormData.isLoading
     : Boolean(queryResult?.isLoading);
 
-  return { enabled, canViewSheetMaterials, options, byId, isLoading };
+  return {
+    enabled,
+    canViewSheetMaterials,
+    options,
+    byId,
+    isLoading,
+    promoteUsage: recency.promote,
+  };
 }
 
 /**

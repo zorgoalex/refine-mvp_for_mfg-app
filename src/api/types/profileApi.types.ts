@@ -1,9 +1,44 @@
 import type { ThemeMode, UiSize } from '../../theme/themeTypes';
 
+export const RECENT_REFERENCE_RESOURCES = [
+  'clients',
+  'materials',
+  'sheet_material_types',
+  'milling_types',
+  'films',
+  'edge_types',
+  'vendors',
+  'suppliers',
+  'film_types',
+  'material_types',
+  'units',
+  'order_statuses',
+  'payment_statuses',
+  'payment_types',
+  'requisition_statuses',
+  'movements_statuses',
+  'material_transaction_types',
+  'transaction_direction',
+  'production_statuses',
+  'resource_requirements_statuses',
+  'workshops',
+  'work_centers',
+] as const;
+
+export type RecentReferenceResource = (typeof RECENT_REFERENCE_RESOURCES)[number];
+export type RecentReferences = Partial<Record<RecentReferenceResource, number[]>>;
+
 export interface UserPreferencesDto {
   themeMode: ThemeMode;
   uiSize: UiSize;
   orderDetailColumns: Record<string, OrderDetailColumnPreference>;
+  /** Optional during mixed frontend/backend rollout. */
+  recentReferences?: RecentReferences;
+}
+
+export interface ReferenceUsageRequest {
+  resource: RecentReferenceResource;
+  entityId: number;
 }
 
 export interface OrderDetailColumnPreference {

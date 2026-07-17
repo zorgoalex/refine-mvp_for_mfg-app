@@ -64,7 +64,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     optionLabel: 'milling_type_name',
     optionValue: 'milling_type_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'milling_type_id', order: 'asc' }],
     ...(detail?.milling_type_id ? { defaultValue: detail.milling_type_id } : {}),
     queryOptions: { enabled: !useBackendReferences },
   });
@@ -77,7 +77,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     optionLabel: 'edge_type_name',
     optionValue: 'edge_type_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'edge_type_id', order: 'asc' }],
     ...(detail?.edge_type_id ? { defaultValue: detail.edge_type_id } : {}),
     queryOptions: { enabled: !useBackendReferences },
   });
@@ -103,7 +103,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     optionLabel: 'production_status_name',
     optionValue: 'production_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
     ...(detail?.production_status_id ? { defaultValue: detail.production_status_id } : {}),
     queryOptions: { enabled: !useBackendReferences },
   });

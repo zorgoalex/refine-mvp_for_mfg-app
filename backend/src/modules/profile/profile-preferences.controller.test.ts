@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../common/errors/api-error';
 import type { CurrentUser } from '../../permissions/current-user';
 import { getPermissionsForRole } from '../../permissions/permissions';
-import { parseUpdateUserPreferencesRequest, ProfilePreferencesController } from './profile-preferences.controller';
+import {
+  parseReferenceUsageRequest,
+  parseUpdateUserPreferencesRequest,
+  ProfilePreferencesController,
+} from './profile-preferences.controller';
 import type { ProfilePreferencesService } from './profile-preferences.service';
 
 describe('ProfilePreferencesController', () => {
@@ -20,24 +24,71 @@ describe('ProfilePreferencesController', () => {
     const controller = createController({
       async get(command) {
         calls.push(`get:${command.currentUser.id}`);
-        return { themeMode: 'light', orderDetailColumns: {} };
+        return { themeMode: 'light', uiSize: 'default', orderDetailColumns: {}, recentReferences: {} };
       },
       async update(command) {
         calls.push(`update:${command.currentUser.id}:${command.preferences.themeMode}:${Object.keys(command.preferences.orderDetailColumns ?? {}).join(',')}`);
-        return { themeMode: 'dark', orderDetailColumns: command.preferences.orderDetailColumns ?? {} };
+        return { themeMode: 'dark', uiSize: 'default', orderDetailColumns: command.preferences.orderDetailColumns ?? {}, recentReferences: {} };
+      },
+      async promoteReferenceUsage(command) {
+        calls.push(`promote:${command.currentUser.id}:${command.resource}:${command.entityId}`);
+        return {
+          themeMode: 'dark',
+          uiSize: 'default',
+          orderDetailColumns: {},
+          recentReferences: { [command.resource]: [command.entityId] },
+        };
       },
     });
 
     await expect(controller.get({ user: currentUser('15') })).resolves.toEqual({
-      preferences: { themeMode: 'light', orderDetailColumns: {} },
+      preferences: { themeMode: 'light', uiSize: 'default', orderDetailColumns: {}, recentReferences: {} },
     });
     await expect(controller.update({ user: currentUser('15') }, {
       themeMode: 'dark',
       orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } },
     })).resolves.toEqual({
-      preferences: { themeMode: 'dark', orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } } },
+      preferences: { themeMode: 'dark', uiSize: 'default', orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } }, recentReferences: {} },
     });
-    expect(calls).toEqual(['get:15', 'update:15:dark:orderEdit']);
+    await expect(controller.promoteReferenceUsage(
+      { user: currentUser('15') },
+      { resource: 'sheet_material_types', entityId: 27 },
+    )).resolves.toEqual({
+      preferences: {
+        themeMode: 'dark',
+        uiSize: 'default',
+        orderDetailColumns: {},
+        recentReferences: { sheet_material_types: [27] },
+      },
+    });
+    expect(calls).toEqual([
+      'get:15',
+      'update:15:dark:orderEdit',
+      'promote:15:sheet_material_types:27',
+    ]);
+  });
+
+  it('strictly validates reference usage without accepting an owner id', () => {
+    expect(parseReferenceUsageRequest({
+      resource: 'sheet_material_types',
+      entityId: 11,
+    })).toEqual({
+      resource: 'sheet_material_types',
+      entityId: 11,
+    });
+    expect(() => parseReferenceUsageRequest({
+      resource: 'unknown',
+      entityId: 11,
+    })).toThrow(ApiError);
+    expect(() => parseReferenceUsageRequest({
+      resource: 'sheet_material_types',
+      entityId: 0,
+    })).toThrow(ApiError);
+    expect(() => parseReferenceUsageRequest({
+      resource: 'sheet_material_types',
+      entityId: 11,
+      userId: 99,
+    })).toThrow(ApiError);
   });
 
   it('validates update body', () => {
@@ -64,6 +115,9 @@ function createController(service?: Partial<ProfilePreferencesService>): Profile
     },
     async update() {
       throw new Error('update should not be called');
+    },
+    async promoteReferenceUsage() {
+      throw new Error('promoteReferenceUsage should not be called');
     },
     ...service,
   } as ProfilePreferencesService);

@@ -266,6 +266,7 @@ interface AuditLogRow extends QueryResultRow {
 interface IdNameLookupRow extends QueryResultRow {
   id: string | number;
   name: string;
+  sort_order: string | number;
 }
 
 interface MaterialLookupRow extends IdNameLookupRow {
@@ -298,6 +299,7 @@ interface UnitLookupRow extends QueryResultRow {
   code: string;
   name: string;
   symbol: string | null;
+  sort_order: string | number;
 }
 
 export class PgOrderReadRepository implements OrderReadRepositoryPort {
@@ -742,27 +744,27 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     ] = await Promise.all([
       this.database.query<IdNameLookupRow>(
         `
-        SELECT client_id AS id, client_name::text AS name
+        SELECT client_id AS id, client_name::text AS name, sort_order
         FROM clients
         WHERE is_active = true
-        ORDER BY client_name ASC, client_id ASC
+        ORDER BY sort_order ASC, client_name ASC, client_id ASC
         `,
       ),
       this.database.query<MaterialLookupRow>(
         `
-        SELECT material_id AS id, material_name AS name, unit_id
+        SELECT material_id AS id, material_name AS name, unit_id, sort_order
         FROM materials
         -- SP3 Task 10b: never offer synthetic sheet-shadow materials in the order
         -- form's material dropdown (sheet materials are picked via their own field).
         -- The is_sheet_shadow column only exists after migration 029; the filter is gated
         -- so this lookup works pre-migration (no shadows can exist before 029 anyway).
         WHERE is_active = true${this.sheetOrdersReads ? ' AND is_sheet_shadow = false' : ''}
-        ORDER BY material_name ASC, material_id ASC
+        ORDER BY sort_order ASC, material_name ASC, material_id ASC
         `,
       ),
       this.database.query<MillingTypeLookupRow>(
         `
-        SELECT milling_type_id AS id, milling_type_name AS name, cost_per_sqm
+        SELECT milling_type_id AS id, milling_type_name AS name, cost_per_sqm, sort_order
         FROM milling_types
         WHERE is_active = true
         ORDER BY sort_order ASC, milling_type_name ASC, milling_type_id ASC
@@ -770,7 +772,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       ),
       this.database.query<IdNameLookupRow>(
         `
-        SELECT edge_type_id AS id, edge_type_name AS name
+        SELECT edge_type_id AS id, edge_type_name AS name, sort_order
         FROM edge_types
         WHERE is_active = true
         ORDER BY sort_order ASC, edge_type_name ASC, edge_type_id ASC
@@ -778,15 +780,15 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       ),
       this.database.query<IdNameLookupRow>(
         `
-        SELECT film_id AS id, film_name AS name
+        SELECT film_id AS id, film_name AS name, sort_order
         FROM films
         WHERE is_active = true
-        ORDER BY film_name ASC, film_id ASC
+        ORDER BY sort_order ASC, film_name ASC, film_id ASC
         `,
       ),
       this.database.query<StatusLookupRow>(
         `
-        SELECT order_status_id AS id, order_status_name AS name, NULL::text AS code, color
+        SELECT order_status_id AS id, order_status_name AS name, NULL::text AS code, color, sort_order
         FROM order_statuses
         WHERE is_active = true
         ORDER BY sort_order ASC, order_status_name ASC, order_status_id ASC
@@ -794,7 +796,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       ),
       this.database.query<StatusLookupRow>(
         `
-        SELECT payment_status_id AS id, payment_status_name AS name, NULL::text AS code, color
+        SELECT payment_status_id AS id, payment_status_name AS name, NULL::text AS code, color, sort_order
         FROM payment_statuses
         WHERE is_active = true
         ORDER BY sort_order ASC, payment_status_name ASC, payment_status_id ASC
@@ -802,7 +804,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       ),
       this.database.query<IdNameLookupRow>(
         `
-        SELECT type_paid_id AS id, type_paid_name AS name
+        SELECT type_paid_id AS id, type_paid_name AS name, sort_order
         FROM payment_types
         WHERE is_active = true
         ORDER BY sort_order ASC, type_paid_name ASC, type_paid_id ASC
@@ -810,7 +812,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       ),
       this.database.query<StatusLookupRow>(
         `
-        SELECT production_status_id AS id, production_status_name AS name, production_status_code AS code, color
+        SELECT production_status_id AS id, production_status_name AS name, production_status_code AS code, color, sort_order
         FROM production_statuses
         WHERE is_active = true
         ORDER BY sort_order ASC, production_status_name ASC, production_status_id ASC
@@ -818,10 +820,10 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       ),
       this.database.query<IdNameLookupRow>(
         `
-        SELECT workshop_id AS id, workshop_name AS name
+        SELECT workshop_id AS id, workshop_name AS name, sort_order
         FROM workshops
         WHERE is_active = true
-        ORDER BY workshop_name ASC, workshop_id ASC
+        ORDER BY sort_order ASC, workshop_name ASC, workshop_id ASC
         `,
       ),
       this.database.query<EmployeeLookupRow>(
@@ -834,9 +836,9 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       ),
       this.database.query<UnitLookupRow>(
         `
-        SELECT unit_id AS id, unit_code AS code, COALESCE(unit_name, unit_code) AS name, unit_symbol AS symbol
+        SELECT unit_id AS id, unit_code AS code, COALESCE(unit_name, unit_code) AS name, unit_symbol AS symbol, sort_order
         FROM units
-        ORDER BY unit_code ASC, unit_id ASC
+        ORDER BY sort_order ASC, unit_code ASC, unit_id ASC
         `,
       ),
       // SP3: ALL sheet types (active + inactive) — repo stays dumb; the service
@@ -846,9 +848,9 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       // the FE DETAIL picker must exclude (HEADER picker keeps the full set).
       this.database.query<SheetMaterialTypeLookupRow>(
         `
-        SELECT sheet_material_type_id AS id, name, width_mm, height_mm, is_active, is_cuttable
+        SELECT sheet_material_type_id AS id, name, width_mm, height_mm, is_active, is_cuttable, sort_order
         FROM sheet_material_types
-        ORDER BY is_active DESC, name ASC, sheet_material_type_id ASC
+        ORDER BY is_active DESC, sort_order ASC, name ASC, sheet_material_type_id ASC
         `,
       ),
     ]);
@@ -989,6 +991,7 @@ function mapIdNameLookup(row: IdNameLookupRow) {
   return {
     id: toNumber(row.id),
     name: row.name,
+    sortOrder: toNumber(row.sort_order),
   };
 }
 
@@ -997,6 +1000,7 @@ function mapMaterialLookup(row: MaterialLookupRow) {
     id: toNumber(row.id),
     name: row.name,
     unitId: toNullableNumber(row.unit_id),
+    sortOrder: toNumber(row.sort_order),
   };
 }
 
@@ -1005,6 +1009,7 @@ function mapMillingTypeLookup(row: MillingTypeLookupRow) {
     id: toNumber(row.id),
     name: row.name,
     costPerSqm: toNullableNumber(row.cost_per_sqm),
+    sortOrder: toNumber(row.sort_order),
   };
 }
 
@@ -1014,6 +1019,7 @@ function mapStatusLookup(row: StatusLookupRow) {
     name: row.name,
     code: row.code,
     color: row.color,
+    sortOrder: toNumber(row.sort_order),
   };
 }
 
@@ -1025,6 +1031,7 @@ function mapSheetMaterialTypeLookup(row: SheetMaterialTypeLookupRow) {
     heightMm: toNullableNumber(row.height_mm),
     isActive: row.is_active,
     isCuttable: row.is_cuttable,
+    sortOrder: toNumber(row.sort_order),
   };
 }
 
@@ -1041,6 +1048,7 @@ function mapUnitLookup(row: UnitLookupRow) {
     code: row.code,
     name: row.name,
     ...(row.symbol ? { symbol: row.symbol } : {}),
+    sortOrder: toNumber(row.sort_order),
   };
 }
 

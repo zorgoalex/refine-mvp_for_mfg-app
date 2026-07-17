@@ -1,0 +1,30 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+
+const metadata = JSON.parse(
+  readFileSync(new URL('./metadata.json', import.meta.url), 'utf8'),
+);
+const tables = metadata.sources.flatMap((source: any) => source.tables);
+
+describe('reference sort-order Hasura permissions', () => {
+  it('keeps backend-owned sheet materials select-only', () => {
+    const table = tables.find((entry: any) => entry.table.name === 'sheet_material_types');
+    expect(table.select_permissions).toHaveLength(5);
+    expect(table.select_permissions.every((entry: any) => entry.permission.columns === '*')).toBe(true);
+    expect(table.insert_permissions ?? []).toHaveLength(0);
+    expect(table.update_permissions ?? []).toHaveLength(0);
+  });
+
+  it.each(['film_types', 'materials', 'transaction_direction', 'units'])(
+    'allows sort_order in every explicit write permission for %s',
+    (tableName) => {
+      const table = tables.find((entry: any) => entry.table.name === tableName);
+      for (const permissionType of ['insert_permissions', 'update_permissions']) {
+        for (const entry of table[permissionType] ?? []) {
+          const columns = entry.permission.columns;
+          expect(columns === '*' || columns.includes('sort_order')).toBe(true);
+        }
+      }
+    },
+  );
+});

@@ -7,14 +7,14 @@ export const ResourceRequirementStatusCreate: React.FC<IResourceComponentsProps>
 
   return (
     <Create saveButtonProps={saveButtonProps}>
-      <Form {...formProps} layout="vertical" initialValues={{ is_active: true, sort_order: 10 }}>
+      <Form {...formProps} layout="vertical" initialValues={{ is_active: true, sort_order: 100 }}>
         <Form.Item label="Code" name="requirement_status_code" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
         <Form.Item label="Name" name="requirement_status_name" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
-        <Form.Item label="Sort Order" name="sort_order" rules={[{ required: true }]}>
+        <Form.Item label="Порядок сортировки" name="sort_order" rules={[{ required: true }]}>
           <InputNumber min={1} style={{ width: '100%' }} />
         </Form.Item>
         <Form.Item label="Description" name="description">

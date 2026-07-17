@@ -1,0 +1,48 @@
+import { describe, expect, it } from 'vitest';
+import type { OrderDetail } from '../../../../types/orders';
+import {
+  pageContainingOrderDetail,
+  sortOrderDetailsForPagination,
+} from './OrderDetailTable';
+
+const details = Array.from({ length: 51 }, (_, index) => ({
+  temp_id: index + 1,
+  detail_number: index + 1,
+  height: (index + 1) * 10,
+})) as OrderDetail[];
+
+describe('order detail controlled pagination', () => {
+  it('opens a quick-added 51st detail on page two at page size 50', () => {
+    const ordered = sortOrderDetailsForPagination(
+      details,
+      (left, right) => left.detail_number - right.detail_number,
+      'ascend',
+    );
+    expect(pageContainingOrderDetail(ordered, details[50], 50)).toBe(2);
+  });
+
+  it('uses the active table sort order when calculating the target page', () => {
+    const ordered = sortOrderDetailsForPagination(
+      details,
+      (left, right) => Number(left.height) - Number(right.height),
+      'descend',
+    );
+    expect(pageContainingOrderDetail(ordered, details[50], 50)).toBe(1);
+    expect(pageContainingOrderDetail(ordered, details[0], 50)).toBe(2);
+  });
+
+  it('recalculates the edited row page after the page size changes', () => {
+    expect(pageContainingOrderDetail(details, details[50], 50)).toBe(2);
+    expect(pageContainingOrderDetail(details, details[50], 100)).toBe(1);
+  });
+
+  it('keeps duplicate sorter values deterministic by row key', () => {
+    const tied = [
+      { temp_id: 3, detail_number: 1 },
+      { temp_id: 1, detail_number: 2 },
+      { temp_id: 2, detail_number: 3 },
+    ] as OrderDetail[];
+    expect(sortOrderDetailsForPagination(tied, () => 0, 'ascend').map((row) => row.temp_id))
+      .toEqual([1, 2, 3]);
+  });
+});

@@ -6,6 +6,7 @@ import { SearchOutlined } from "@ant-design/icons";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { countClientsAfter, findClientByName } from "../../api/reports/clientsSearchReportApi";
+import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
 export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const [searchValue, setSearchValue] = useState<string>("");
@@ -14,7 +15,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps, current, pageSize, setCurrent, sorters, setSorters } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "client_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "client_id", order: "asc" }],
     },
     pagination: {
       mode: "server",
@@ -162,6 +163,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="client_id" title="id" sorter />
+        <ReferenceSortOrderColumn />
         <Table.Column dataIndex="client_name" title="Имя клиента" sorter />
         <Table.Column
           dataIndex="is_active"

@@ -2,12 +2,13 @@ import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
+import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
 export const WorkCenterList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "workcenter_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "workcenter_id", order: "asc" }],
     },
   });
   const { show } = useNavigation();
@@ -24,6 +25,7 @@ export const WorkCenterList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="workcenter_id" title="ID" sorter />
+        <ReferenceSortOrderColumn />
         <Table.Column dataIndex="workcenter_code" title="Код участка" sorter />
         <Table.Column
           dataIndex="workcenter_name"

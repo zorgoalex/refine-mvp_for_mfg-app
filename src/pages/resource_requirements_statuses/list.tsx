@@ -8,7 +8,7 @@ export const ResourceRequirementStatusList: React.FC<IResourceComponentsProps> =
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "requirement_status_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "requirement_status_id", order: "asc" }],
     },
   });
   const { highlightProps } = useHighlightRow("requirement_status_id", tableProps.dataSource);
