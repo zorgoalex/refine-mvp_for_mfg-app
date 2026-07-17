@@ -1,6 +1,7 @@
 import { Edit, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, message } from "antd";
+import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
 
 export const UnitEdit: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps } = useForm();
@@ -47,6 +48,7 @@ export const UnitEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Ref Key 1C" name="ref_key_1c">
           <Input />
         </Form.Item>
+        <ReferenceSortOrderFormItem />
       </Form>
     </Edit>
   );

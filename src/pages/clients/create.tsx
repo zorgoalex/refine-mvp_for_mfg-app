@@ -3,6 +3,7 @@ import { IResourceComponentsProps, useCreate, useNavigation } from "@refinedev/c
 import { Form, Input, Checkbox, notification } from "antd";
 import { ClientPhonesSection } from "./components/ClientPhonesSection";
 import { ClientPhone } from "../../types/clients";
+import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
 import { useState } from "react";
 
 export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
@@ -83,6 +84,7 @@ export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Ключ 1C" name="ref_key_1c">
           <Input />
         </Form.Item>
+        <ReferenceSortOrderFormItem />
       </Form>
 
       {/* Phones Section */}

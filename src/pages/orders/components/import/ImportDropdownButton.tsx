@@ -4,6 +4,7 @@ import React, { useState, useCallback, Suspense, lazy } from 'react';
 import { Dropdown, Button, Tooltip, Spin } from 'antd';
 import type { MenuProps } from 'antd';
 import { ImportOutlined, FileExcelOutlined, FilePdfOutlined, CameraOutlined, DownOutlined } from '@ant-design/icons';
+import { OrderToolbarLabel } from '../OrderDetailsToolbar';
 
 const ExcelImportModal = lazy(async () => ({
   default: (await import('./ExcelImportModal')).ExcelImportModal,
@@ -75,8 +76,12 @@ export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disa
     <>
       <Tooltip title="Импорт деталей из файла">
         <Dropdown menu={{ items: menuItems }} trigger={['click']} disabled={disabled}>
-          <Button icon={<ImportOutlined />} disabled={disabled}>
-            Импорт <DownOutlined style={{ fontSize: 10 }} />
+          <Button
+            icon={<ImportOutlined />}
+            disabled={disabled}
+            aria-label="Импорт деталей из файла"
+          >
+            <OrderToolbarLabel>Импорт</OrderToolbarLabel> <DownOutlined style={{ fontSize: 10 }} />
           </Button>
         </Dropdown>
       </Tooltip>

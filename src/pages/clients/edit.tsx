@@ -6,6 +6,7 @@ import {
   useUpdate,
   useDelete,
 } from "@refinedev/core";
+import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
 import { Form, Input, Checkbox, notification, Spin } from "antd";
 import { ClientPhonesSection } from "./components/ClientPhonesSection";
 import { ClientPhone } from "../../types/clients";
@@ -153,6 +154,7 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Ключ 1C" name="ref_key_1c">
           <Input />
         </Form.Item>
+        <ReferenceSortOrderFormItem />
       </Form>
 
       {/* Phones Section */}

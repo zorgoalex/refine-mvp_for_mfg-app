@@ -3,6 +3,7 @@ import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge, Row, Col, Divider } from "antd";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
+import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
 
 const { Title } = Typography;
 
@@ -70,9 +71,9 @@ export const PaymentStatusShow: React.FC<IResourceComponentsProps> = () => {
           <DateField value={record?.updated_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
         </Col>
       </Row>
+      <ReferenceSortOrderShow value={record?.sort_order} />
     </Show>
   );
 };
-
 
 

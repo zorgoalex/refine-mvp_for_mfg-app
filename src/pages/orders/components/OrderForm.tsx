@@ -18,6 +18,7 @@ import {
 import { useTabStore, computeNeighborPath } from '../../../stores/tabStore';
 import { useTabDirty } from '../../../hooks/useTabDirty';
 import { DraggableModalWrapper } from '../../../components/DraggableModalWrapper';
+import { useWorkspaceTabKey } from '../../../components/workspace/KeepAliveContext';
 import { useDefaultStatuses } from '../../../hooks/useDefaultStatuses';
 import { loadOrderViaBackend } from '../../../hooks/useOrderBackendRead';
 import { useOrderSave } from '../../../hooks/useOrderSave';
@@ -88,7 +89,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const location = useLocation();
   const navigate = useNavigate();
   const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
-  const tabKey = location.pathname; // e.g. /orders/edit/11195 or /orders/create
+  const tabKey = useWorkspaceTabKey(location.pathname);
   const bazisDraft = readBazisDraftFromLocationState(location.state);
 
   const {

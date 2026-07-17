@@ -200,6 +200,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   materials: [
     "material_id",
     "material_name",
+    "sort_order",
     "unit_id",
     "unit { unit_id unit_code unit_name unit_symbol }",
     "material_type_id",
@@ -245,6 +246,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   films: [
     "film_id",
     "film_name",
+    "sort_order",
     "film_type_id",
     "vendor_id",
     "film_texture",
@@ -258,6 +260,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   clients: [
     "client_id",
     "client_name",
+    "sort_order",
     "ref_key_1c",
     "is_active",
     "notes",
@@ -347,6 +350,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   ],
   sheet_material_types: [
     "sheet_material_type_id", "name",
+    "sort_order",
     "material_type_id", "material_type { material_type_id material_type_name }",
     "unit_id", "unit { unit_id unit_code unit_name unit_symbol }",
     "supplier_id", "supplier { supplier_id supplier_name }",
@@ -359,6 +363,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   film_types: [
     "film_type_id",
     "film_type_name",
+    "sort_order",
     "is_active",
     "ref_key_1c",
     "created_by",
@@ -381,6 +386,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   vendors: [
     "vendor_id",
     "vendor_name",
+    "sort_order",
     "contact_info",
     "material_type_id",
     "is_active",
@@ -393,6 +399,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   suppliers: [
     "supplier_id",
     "supplier_name",
+    "sort_order",
     "address",
     "contact_person",
     "phone",
@@ -447,6 +454,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "unit_code",
     "unit_name",
     "unit_symbol",
+    "sort_order",
     "decimals",
     "ref_key_1c",
   ],
@@ -479,6 +487,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   workshops: [
     "workshop_id",
     "workshop_name",
+    "sort_order",
     "address",
     "responsible_employee_id",
     "employee { employee_id full_name }",
@@ -489,6 +498,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "workcenter_id",
     "workcenter_code",
     "workcenter_name",
+    "sort_order",
     "workshop_id",
     "workshop { workshop_id workshop_name }",
     "is_active",
@@ -524,6 +534,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "direction_type_id",
     "direction_code",
     "direction_name",
+    "sort_order",
     "description",
     "is_active",
   ],

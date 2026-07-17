@@ -4,8 +4,8 @@ import { toSheetSelectOptions } from './useSheetMaterialOptions';
 import type { SheetMaterialTypeOption } from './useOrderFormData';
 
 const opts: SheetMaterialTypeOption[] = [
-  { value: 1, label: 'МДФ 16', widthMm: 2800, heightMm: 2070, isActive: true },
-  { value: 2, label: 'МДФ 8', widthMm: 2800, heightMm: 2070, isActive: false },
+  { value: 1, label: 'МДФ 16', widthMm: 2800, heightMm: 2070, isActive: true, isCuttable: true, sortOrder: 10 },
+  { value: 2, label: 'МДФ 8', widthMm: 2800, heightMm: 2070, isActive: false, isCuttable: true, sortOrder: 20 },
 ];
 
 describe('toSheetSelectOptions', () => {

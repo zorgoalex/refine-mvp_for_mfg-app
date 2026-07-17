@@ -3,7 +3,17 @@
 
 import React, { useState, useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
 import { Card, Button, Space, Modal, message, Tooltip, Alert } from 'antd';
-import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CalculatorOutlined, EditOutlined, CheckOutlined, CloseOutlined, ClearOutlined } from '@ant-design/icons';
+import {
+  PlusOutlined,
+  DeleteOutlined,
+  ThunderboltOutlined,
+  CalculatorOutlined,
+  EditOutlined,
+  CheckOutlined,
+  CloseOutlined,
+  ClearOutlined,
+  ScissorOutlined,
+} from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
 import { BulkEditModal } from '../modals/BulkEditModal';
@@ -23,6 +33,7 @@ import { featureFlags } from '../../../../config/featureFlags';
 import { can } from '../../../../utils/permissions';
 import { useOrderFormData } from '../../../../hooks/useOrderFormData';
 import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
+import { OrderToolbarLabel } from '../OrderDetailsToolbar';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -43,6 +54,28 @@ interface DragSelectionState {
   confirm: () => void;
   cancel: () => void;
 }
+
+const AccessibleToolbarTooltip: React.FC<{
+  title: React.ReactNode;
+  disabled?: boolean;
+  children: React.ReactElement;
+}> = ({ title, disabled = false, children }) => (
+  <Tooltip title={title}>
+    <span
+      style={{ display: 'inline-flex' }}
+      {...(disabled
+        ? {
+            tabIndex: 0,
+            role: 'button',
+            'aria-disabled': true,
+            'aria-label': String(title),
+          }
+        : {})}
+    >
+      {children}
+    </span>
+  </Tooltip>
+);
 
 export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boolean }>(({ isSaving = false }, ref) => {
   const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails, header, updateHeaderField, isDirty } = useOrderFormStore();
@@ -206,6 +239,13 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
       setModalOpen(false);
       setEditingDetail(undefined);
       return;
+    }
+
+    if (
+      Number.isSafeInteger(detailData.sheet_material_type_id) &&
+      Number(detailData.sheet_material_type_id) > 0
+    ) {
+      sheetMaterials.promoteUsage(Number(detailData.sheet_material_type_id));
     }
 
     setModalOpen(false);
@@ -497,6 +537,12 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     }
 
     message.success(`Обновлено позиций: ${updatedCount}`);
+    if (
+      Number.isSafeInteger(changes.sheet_material_type_id) &&
+      Number(changes.sheet_material_type_id) > 0
+    ) {
+      sheetMaterials.promoteUsage(Number(changes.sheet_material_type_id));
+    }
     setBulkEditModalOpen(false);
 
     // Clear selection after bulk edit
@@ -506,75 +552,6 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   return (
     <Card size="small">
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
-        {/* Toolbar */}
-        <Space wrap>
-          <Tooltip title="Быстрое добавление">
-            <Button type="primary" icon={<ThunderboltOutlined />} onClick={handleQuickAdd}>
-              +
-            </Button>
-          </Tooltip>
-          <Tooltip title="Добавить через форму">
-            <Button icon={<PlusOutlined />} onClick={handleCreate} />
-          </Tooltip>
-          <Button
-            icon={<EditOutlined />}
-            onClick={() => setBulkEditModalOpen(true)}
-            disabled={details.length === 0}
-          >
-            Групповые действия
-          </Button>
-          <ImportDropdownButton />
-          <Button
-            danger
-            icon={<DeleteOutlined />}
-            onClick={handleDeleteSelected}
-            disabled={selectedRowKeys.length === 0}
-          >
-            Удалить выбранные ({selectedRowKeys.length})
-          </Button>
-          <Tooltip title="Сбросить любое выделение строк">
-            <Button
-              icon={<ClearOutlined />}
-              onClick={handleClearSelection}
-              disabled={selectedRowKeys.length === 0 && !dragSelectionState}
-            >
-              Сбросить выделение
-            </Button>
-          </Tooltip>
-          {cutEnabled && (
-            <Button onClick={() => setAddToCutOpen(true)} disabled={eligibleCutDetailIds.length === 0}>
-              Добавить выбранные в раскрой ({eligibleCutDetailIds.length})
-            </Button>
-          )}
-          {bazisCutVisible && (
-            <Tooltip title={isDirty || isSaving ? 'Сначала сохраните изменения заказа' : !bazisCutManage ? 'Недостаточно прав' : undefined}>
-              <span>
-                <Button
-                  onClick={() => setAddToBazisCutOpen(true)}
-                  disabled={!bazisCutManage || isDirty || isSaving || header?.order_id == null || bazisCutDetailIds.length === 0}
-                >
-                  Добавить в Базис раскрой
-                </Button>
-              </span>
-            </Tooltip>
-          )}
-          <Button
-            icon={<CalculatorOutlined />}
-            onClick={handleRecalculateSums}
-            disabled={details.length === 0}
-          >
-            Пересчитать суммы
-          </Button>
-          <span style={{ marginLeft: 16, color: '#666' }}>
-            Всего позиций: {details.length}
-            {selectedRowKeys.length > 0 && (
-              <span style={{ marginLeft: 8, color: '#1890ff' }}>
-                (выбрано: {selectedRowKeys.length})
-              </span>
-            )}
-          </span>
-        </Space>
-
         {/* Drag Selection Confirmation Bar */}
         {dragSelectionState && dragSelectionState.pendingKeys.length > 0 && (
           <Alert
@@ -582,26 +559,10 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
             type="info"
             showIcon
             message={
-              <Space>
-                <span>
-                  Выделено строк: <strong>{dragSelectionState.pendingKeys.length}</strong>
-                </span>
-                <Button
-                  type="primary"
-                  size="small"
-                  icon={<CheckOutlined />}
-                  onClick={handleConfirmDragSelection}
-                >
-                  Подтвердить
-                </Button>
-                <Button
-                  size="small"
-                  icon={<CloseOutlined />}
-                  onClick={handleCancelDragSelection}
-                >
-                  Отмена
-                </Button>
-              </Space>
+              <span>
+                Выделено строк: <strong>{dragSelectionState.pendingKeys.length}</strong>.
+                Подтвердите или отмените выделение на панели действий.
+              </span>
             }
             style={{ marginBottom: 8 }}
           />
@@ -622,6 +583,127 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
           groupField={grouping.state.field}
           showSeparation={grouping.state.showSeparation}
           cutSelectable={cutEnabled}
+          toolbarActions={
+            <>
+              <AccessibleToolbarTooltip title="Быстрое добавление">
+                <Button
+                  type="primary"
+                  icon={<ThunderboltOutlined />}
+                  onClick={handleQuickAdd}
+                  aria-label="Быстрое добавление"
+                >
+                  <OrderToolbarLabel>Быстро добавить</OrderToolbarLabel>
+                </Button>
+              </AccessibleToolbarTooltip>
+              <AccessibleToolbarTooltip title="Добавить через форму">
+                <Button icon={<PlusOutlined />} onClick={handleCreate} aria-label="Добавить через форму">
+                  <OrderToolbarLabel>Добавить</OrderToolbarLabel>
+                </Button>
+              </AccessibleToolbarTooltip>
+              <AccessibleToolbarTooltip title="Групповые действия" disabled={details.length === 0}>
+                <Button
+                  icon={<EditOutlined />}
+                  onClick={() => setBulkEditModalOpen(true)}
+                  disabled={details.length === 0}
+                  aria-label="Групповые действия"
+                >
+                  <OrderToolbarLabel>Групповые действия</OrderToolbarLabel>
+                </Button>
+              </AccessibleToolbarTooltip>
+              <ImportDropdownButton />
+              <AccessibleToolbarTooltip
+                title={`Удалить выбранные (${selectedRowKeys.length})`}
+                disabled={selectedRowKeys.length === 0}
+              >
+                <Button
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={handleDeleteSelected}
+                  disabled={selectedRowKeys.length === 0}
+                  aria-label={`Удалить выбранные (${selectedRowKeys.length})`}
+                />
+              </AccessibleToolbarTooltip>
+              <AccessibleToolbarTooltip
+                title="Сбросить выделение"
+                disabled={selectedRowKeys.length === 0 && !dragSelectionState}
+              >
+                <Button
+                  icon={<ClearOutlined />}
+                  onClick={handleClearSelection}
+                  disabled={selectedRowKeys.length === 0 && !dragSelectionState}
+                  aria-label="Сбросить выделение"
+                />
+              </AccessibleToolbarTooltip>
+              {cutEnabled && (
+                <AccessibleToolbarTooltip
+                  title={`Добавить выбранные в раскрой (${eligibleCutDetailIds.length})`}
+                  disabled={eligibleCutDetailIds.length === 0}
+                >
+                  <Button
+                    icon={<ScissorOutlined />}
+                    onClick={() => setAddToCutOpen(true)}
+                    disabled={eligibleCutDetailIds.length === 0}
+                    aria-label={`Добавить выбранные в раскрой (${eligibleCutDetailIds.length})`}
+                  />
+                </AccessibleToolbarTooltip>
+              )}
+              {bazisCutVisible && (() => {
+                const disabled = !bazisCutManage || isDirty || isSaving || header?.order_id == null || bazisCutDetailIds.length === 0;
+                const reason = isDirty || isSaving
+                  ? 'Сначала сохраните изменения заказа'
+                  : !bazisCutManage
+                    ? 'Недостаточно прав'
+                    : `Добавить в Базис раскрой (${bazisCutDetailIds.length})`;
+                return (
+                  <AccessibleToolbarTooltip title={reason} disabled={disabled}>
+                    <Button
+                      icon={<ScissorOutlined />}
+                      onClick={() => setAddToBazisCutOpen(true)}
+                      disabled={disabled}
+                      aria-label="Добавить в Базис раскрой"
+                    >
+                      <OrderToolbarLabel>В Базис раскрой</OrderToolbarLabel>
+                    </Button>
+                  </AccessibleToolbarTooltip>
+                );
+              })()}
+              <AccessibleToolbarTooltip title="Пересчитать суммы" disabled={details.length === 0}>
+                <Button
+                  icon={<CalculatorOutlined />}
+                  onClick={handleRecalculateSums}
+                  disabled={details.length === 0}
+                  aria-label="Пересчитать суммы"
+                />
+              </AccessibleToolbarTooltip>
+              {dragSelectionState && dragSelectionState.pendingKeys.length > 0 && (
+                <>
+                  <AccessibleToolbarTooltip title="Подтвердить выделение">
+                    <Button
+                      type="primary"
+                      icon={<CheckOutlined />}
+                      onClick={handleConfirmDragSelection}
+                      aria-label="Подтвердить выделение"
+                    >
+                      <OrderToolbarLabel>Подтвердить</OrderToolbarLabel>
+                    </Button>
+                  </AccessibleToolbarTooltip>
+                  <AccessibleToolbarTooltip title="Отменить выделение">
+                    <Button
+                      icon={<CloseOutlined />}
+                      onClick={handleCancelDragSelection}
+                      aria-label="Отменить выделение"
+                    >
+                      <OrderToolbarLabel>Отмена</OrderToolbarLabel>
+                    </Button>
+                  </AccessibleToolbarTooltip>
+                </>
+              )}
+              <span className="order-details-toolbar__summary">
+                Всего: {details.length}
+                {selectedRowKeys.length > 0 ? ` · выбрано: ${selectedRowKeys.length}` : ''}
+              </span>
+            </>
+          }
           groupingControls={
             <DetailGroupingControls
               state={grouping.state}

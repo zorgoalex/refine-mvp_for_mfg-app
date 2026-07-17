@@ -2,6 +2,7 @@
 import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
+import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
 export const TransactionDirectionList: React.FC<
   IResourceComponentsProps
@@ -9,7 +10,7 @@ export const TransactionDirectionList: React.FC<
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "direction_type_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "direction_type_id", order: "asc" }],
     },
   });
   const { show } = useNavigation();
@@ -26,6 +27,7 @@ export const TransactionDirectionList: React.FC<
         })}
       >
         <Table.Column dataIndex="direction_type_id" title="ID" sorter />
+        <ReferenceSortOrderColumn />
         <Table.Column dataIndex="direction_code" title="Код направления" sorter />
         <Table.Column dataIndex="direction_name" title="Название направления" sorter />
         <Table.Column dataIndex="description" title="Описание" />

@@ -4,6 +4,7 @@ import { SaveOutlined, ArrowUpOutlined, ArrowDownOutlined, ReloadOutlined } from
 import { useInvalidate, useList, useUpdate } from '@refinedev/core';
 import { useLocation } from 'react-router-dom';
 import { useTabDirty } from '../../../hooks/useTabDirty';
+import { useWorkspaceTabKey } from '../../../components/workspace/KeepAliveContext';
 import { useAppSettings, SETTING_KEYS } from '../../../hooks/useAppSettings';
 import {
   ProductionStatusRef,
@@ -139,7 +140,7 @@ export const ProductionWorkflowTab: React.FC = () => {
     pagination: { pageSize: 200 },
     // IMPORTANT: explicit is_active filter disables the dataProvider auto-filter, so we can show ALL statuses
     filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
   });
 
   const statuses: ProductionStatusRef[] = useMemo(() => {
@@ -178,7 +179,8 @@ export const ProductionWorkflowTab: React.FC = () => {
 
   // Report editor dirty state to the workspace tab registry (single dirty contract).
   const location = useLocation();
-  useTabDirty(location.pathname, isDirty);
+  const tabKey = useWorkspaceTabKey(location.pathname);
+  useTabDirty(tabKey, isDirty);
 
   // Initialize draft once statuses are available (avoid resetting while editing)
   useEffect(() => {

@@ -11,11 +11,11 @@ export const PaymentTypeCreate: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <Create saveButtonProps={saveButtonProps}>
-      <Form {...formProps} layout="vertical" initialValues={{ sort_order: 10, is_active: true }}>
+      <Form {...formProps} layout="vertical" initialValues={{ sort_order: 100, is_active: true }}>
         <Form.Item label="Name" name="type_paid_name" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
-        <Form.Item label="Sort Order" name="sort_order" rules={[{ required: true }]}>
+        <Form.Item label="Порядок сортировки" name="sort_order" rules={[{ required: true }]}>
           <InputNumber min={1} style={{ width: '100%' }} />
         </Form.Item>
         <Form.Item label="Active" name="is_active" valuePropName="checked">
@@ -28,4 +28,3 @@ export const PaymentTypeCreate: React.FC<IResourceComponentsProps> = () => {
     </Create>
   );
 };
-

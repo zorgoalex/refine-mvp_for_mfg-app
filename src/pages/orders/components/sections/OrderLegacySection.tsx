@@ -85,9 +85,12 @@ export const OrderLegacySection: React.FC = () => {
                     header.sheet_material_type_id,
                   )}
                   loading={sheetMaterials.isLoading}
-                  onChange={(value) =>
-                    updateHeaderField('sheet_material_type_id', value ?? null)
-                  }
+                  onChange={(value) => {
+                    updateHeaderField('sheet_material_type_id', value ?? null);
+                    if (Number.isSafeInteger(value) && Number(value) > 0) {
+                      sheetMaterials.promoteUsage(Number(value));
+                    }
+                  }}
                   placeholder="Выберите материал"
                   allowClear={!hasSheetHeader}
                   showSearch

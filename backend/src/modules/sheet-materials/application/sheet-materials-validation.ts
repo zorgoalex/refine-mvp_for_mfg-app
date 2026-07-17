@@ -38,6 +38,9 @@ export function validateSheetMaterialTypeInput(input: SheetMaterialTypeInput): v
   if (input.texture != null && typeof input.texture !== 'boolean') {
     errors.push({ field: 'texture', message: 'texture must be boolean' });
   }
+  if (input.sortOrder != null && (!Number.isInteger(input.sortOrder) || input.sortOrder < -32768 || input.sortOrder > 32767)) {
+    errors.push({ field: 'sortOrder', message: 'sortOrder must be a small integer' });
+  }
   // Optional 1C key: when present (non-null/non-empty) must be a valid UUID (column type uuid).
   if (input.refKey1c != null && input.refKey1c !== '' && !UUID_RE.test(input.refKey1c)) {
     errors.push({ field: 'refKey1c', message: 'refKey1c must be a valid UUID' });

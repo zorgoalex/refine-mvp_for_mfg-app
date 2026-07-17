@@ -35,6 +35,7 @@ import {
   type OrderDetailColumnDefinition,
 } from './OrderDetailColumnSettings';
 import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
+import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -52,6 +53,8 @@ interface OrderDetailTableProps {
   cutSelectable?: boolean;
   /** Grouping controls rendered inline on the same right-aligned row as the column-settings gear. */
   groupingControls?: React.ReactNode;
+  /** All order-detail actions rendered in the same adaptive row as table controls. */
+  toolbarActions?: React.ReactNode;
 }
 
 // Exposed methods via ref
@@ -73,6 +76,42 @@ interface FieldValues {
   area: number | null;
   milling_cost_per_sqm: number | null;
   detail_cost: number | null;
+}
+
+type DetailSortOrder = 'ascend' | 'descend';
+interface DetailSorterState {
+  key: React.Key;
+  order: DetailSortOrder;
+}
+
+export function sortOrderDetailsForPagination(
+  details: readonly OrderDetail[],
+  compare: ((left: OrderDetail, right: OrderDetail) => number) | undefined,
+  order: DetailSortOrder,
+): OrderDetail[] {
+  const direction = order === 'descend' ? -1 : 1;
+  return details
+    .map((detail, index) => ({ detail, index }))
+    .sort((left, right) => {
+      const compared = compare?.(left.detail, right.detail) ?? 0;
+      if (compared !== 0) return compared * direction;
+      const leftKey = Number(left.detail.temp_id ?? left.detail.detail_id ?? left.index);
+      const rightKey = Number(right.detail.temp_id ?? right.detail.detail_id ?? right.index);
+      return leftKey - rightKey;
+    })
+    .map(({ detail }) => detail);
+}
+
+export function pageContainingOrderDetail(
+  details: readonly OrderDetail[],
+  target: OrderDetail,
+  pageSize: number,
+): number {
+  const targetKey = target.temp_id ?? target.detail_id;
+  const index = details.findIndex((detail) =>
+    (detail.temp_id ?? detail.detail_id) === targetKey,
+  );
+  return index < 0 ? 1 : Math.floor(index / Math.max(1, pageSize)) + 1;
 }
 
 const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -204,6 +243,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   showSeparation = true,
   cutSelectable = false,
   groupingControls,
+  toolbarActions,
 }, ref) => {
   const { header, details, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
   const orderFormData = useOrderFormData();
@@ -282,6 +322,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const [sumContextMenu, setSumContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(50);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [activeSorter, setActiveSorter] = useState<DetailSorterState>({
+    key: 'detail_number',
+    order: 'ascend',
+  });
   const [filmQuickCreateOpen, setFilmQuickCreateOpen] = useState(false);
   const [rowContextMenu, setRowContextMenu] = useState<{
     x: number;
@@ -342,7 +387,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     optionLabel: 'milling_type_name',
     optionValue: 'milling_type_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'milling_type_id', order: 'asc' }],
     pagination: { mode: 'off' },
     queryOptions: { enabled: selectsEnabled && !useBackendReferences },
   });
@@ -354,7 +399,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     optionLabel: 'edge_type_name',
     optionValue: 'edge_type_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'edge_type_id', order: 'asc' }],
     pagination: { mode: 'off' },
     queryOptions: { enabled: selectsEnabled && !useBackendReferences },
   });
@@ -387,7 +432,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     optionLabel: 'production_status_name',
     optionValue: 'production_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
     pagination: { mode: 'off' },
     queryOptions: { enabled: selectsEnabled && !useBackendReferences },
   });
@@ -485,6 +530,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
   const startEdit = (record: OrderDetail) => {
     console.log('[OrderDetailTable] startEdit - detail:', record);
+    if (!groupingActive) {
+      setCurrentPage(pageContainingOrderDetail(paginatedDetails, record, pageSize));
+    }
     setEditingKey(record.temp_id || record.detail_id || null);
     setCurrentFilmId(record.film_id ?? null);
     setDimensionValidationError(null);
@@ -577,6 +625,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       const values = await form.validateFields();
       const tempId = record.temp_id || record.detail_id!;
       updateDetail(tempId, values);
+      if (Number.isSafeInteger(values.sheet_material_type_id) && values.sheet_material_type_id > 0) {
+        sheetMaterials.promoteUsage(values.sheet_material_type_id);
+      }
       cancelEdit();
       return true;
     } catch (error) {
@@ -673,6 +724,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
     const tempId = record.temp_id || record.detail_id!;
     updateDetail(tempId, values);
+    if (Number.isSafeInteger(values.sheet_material_type_id) && values.sheet_material_type_id > 0) {
+      sheetMaterials.promoteUsage(values.sheet_material_type_id);
+    }
     cancelEdit();
   };
 
@@ -708,7 +762,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       key: 'detail_number',
       width: 27,
       fixed: 'left',
-      defaultSortOrder: 'ascend' as const,
       sorter: (a: OrderDetail, b: OrderDetail) => a.detail_number - b.detail_number,
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: DATA_COLUMN_COUNT } : {},
       render: (_: any, row: any) => {
@@ -1339,12 +1392,64 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   // Plain conditional — no memo — so render closures (isEditing, lookup maps,
   // Form watches) are always fresh. A stale memo on [groupingActive] would
   // freeze the closures captured at activation, breaking inline editing.
+  const controlledColumns = visibleColumns.map((col: any) => ({
+    ...col,
+    sortOrder: col.key === activeSorter.key ? activeSorter.order : null,
+  }));
+
+  const activeColumn = controlledColumns.find((column: any) => column.key === activeSorter.key) as any;
+  const activeCompare =
+    typeof activeColumn?.sorter === 'function'
+      ? activeColumn.sorter
+      : typeof activeColumn?.sorter?.compare === 'function'
+        ? activeColumn.sorter.compare
+        : undefined;
+  const paginatedDetails = sortOrderDetailsForPagination(
+    sortedDetails,
+    activeCompare,
+    activeSorter.order,
+  );
+
   const renderedColumns = groupingActive
-    ? visibleColumns.map((col: any) => {
+    ? controlledColumns.map((col: any) => {
         const { sorter, defaultSortOrder, sortOrder, ...rest } = col;
         return rest;
       })
-    : visibleColumns;
+    : controlledColumns;
+
+  useEffect(() => {
+    if (groupingActive) return;
+    const lastPage = Math.max(1, Math.ceil(paginatedDetails.length / pageSize));
+    setCurrentPage((page) => Math.min(page, lastPage));
+  }, [groupingActive, pageSize, paginatedDetails.length]);
+
+  useEffect(() => {
+    if (editingKey == null || groupingActive) return;
+    const editingDetail = paginatedDetails.find(
+      (detail) => (detail.temp_id ?? detail.detail_id) === editingKey,
+    );
+    if (!editingDetail) return;
+    setCurrentPage(pageContainingOrderDetail(paginatedDetails, editingDetail, pageSize));
+  }, [
+    activeSorter.key,
+    activeSorter.order,
+    editingKey,
+    groupingActive,
+    pageSize,
+    paginatedDetails,
+  ]);
+
+  useEffect(() => {
+    if (editingKey == null || groupingActive) return;
+    const frame = requestAnimationFrame(() => {
+      const row = tableContainerRef.current?.querySelector<HTMLElement>(
+        `[data-row-key="${String(editingKey)}"]`,
+      );
+      row?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      row?.querySelector<HTMLElement>('input, textarea, [role="combobox"]')?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [currentPage, editingKey, groupingActive]);
 
   const rowSelection = onSelectChange
     ? {
@@ -1477,8 +1582,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           groupKeyOf: (dd: any) => (dd.detail_id != null ? (dd.temp_id ?? dd.detail_id) : null),
           groupLabelOf,
         })
-      : sortedDetails),
-    [groupingActive, sortedDetails, groupField, cutSelectable, groupLabelOf],
+      : paginatedDetails),
+    [groupingActive, sortedDetails, paginatedDetails, groupField, cutSelectable, groupLabelOf],
   );
 
   const selectRows = useCallback((predicate: (detail: OrderDetail) => boolean) => {
@@ -1867,7 +1972,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         className={dragSelection.isDragging ? 'drag-selection-active' : ''}
         style={{ position: 'relative' }}
       >
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+      <OrderDetailsToolbar>
+        {toolbarActions}
         {groupingControls}
         <OrderDetailColumnSettingsButton
           tableKey="orderEdit"
@@ -1876,7 +1982,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           settings={columnSettings}
           onChange={saveColumnSettings}
         />
-      </div>
+      </OrderDetailsToolbar>
       <TableTopScroll>
       <Table<any>
         className={`order-details-table${groupingActive ? ' details-grouped' : ''}`}
@@ -1890,11 +1996,26 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         rowSelection={rowSelection}
         showSorterTooltip={false}
         pagination={groupingActive ? false : {
+          current: currentPage,
           pageSize: pageSize,
           showSizeChanger: true,
           showTotal: (total) => `Всего: ${total} позиций`,
-          onShowSizeChange: (current, size) => setPageSize(size),
-          onChange: (page, size) => setPageSize(size),
+          onShowSizeChange: (page, size) => {
+            setPageSize(size);
+            setCurrentPage(page);
+          },
+          onChange: (page, size) => {
+            setPageSize(size);
+            setCurrentPage(page);
+          },
+        }}
+        onChange={(_pagination, _filters, sorter) => {
+          const next = Array.isArray(sorter) ? sorter[0] : sorter;
+          if (next?.columnKey && (next.order === 'ascend' || next.order === 'descend')) {
+            setActiveSorter({ key: next.columnKey, order: next.order });
+          } else {
+            setActiveSorter({ key: 'detail_number', order: 'ascend' });
+          }
         }}
         scroll={{ x: 'max-content', y: 500 }}
         size="small"

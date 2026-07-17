@@ -46,6 +46,7 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
         color: record.color,
         refKey1c: record.ref_key_1c,
         isActive: record.is_active,
+        sortOrder: record.sort_order,
       });
     }
   }, [record, form]);
@@ -155,6 +156,11 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
           <Col xs={24} sm={12} md={8}>
             <Form.Item name="refKey1c" label="Ключ 1С">
               <Input maxLength={36} placeholder="UUID из 1С" allowClear />
+            </Form.Item>
+          </Col>
+          <Col xs={24} sm={12} md={8}>
+            <Form.Item name="sortOrder" label="Порядок сортировки" rules={[{ required: true }]}>
+              <InputNumber min={-32768} max={32767} style={{ width: '100%' }} />
             </Form.Item>
           </Col>
           <Col xs={24} sm={12} md={8}>

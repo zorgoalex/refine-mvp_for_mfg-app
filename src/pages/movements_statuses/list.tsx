@@ -8,7 +8,7 @@ export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "movement_status_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "movement_status_id", order: "asc" }],
     },
   });
   const { highlightProps } = useHighlightRow("movement_status_id", tableProps.dataSource);
@@ -59,6 +59,5 @@ export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
     </LocalizedList>
   );
 };
-
 
 

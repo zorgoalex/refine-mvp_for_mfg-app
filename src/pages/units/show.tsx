@@ -2,6 +2,7 @@ import { useShow, IResourceComponentsProps } from "@refinedev/core";
 import { Show, TextField } from "@refinedev/antd";
 import { Typography, Row, Col, Divider } from "antd";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
+import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
 
 const { Title } = Typography;
 
@@ -51,6 +52,8 @@ export const UnitShow: React.FC<IResourceComponentsProps> = () => {
           <TextField value={record?.ref_key_1c} />
         </Col>
       </Row>
+      <Divider />
+      <Row gutter={[16, 16]}><Col span={8}><ReferenceSortOrderShow value={record?.sort_order} /></Col></Row>
     </Show>
   );
 };

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { resolveTabLabel, shouldPreserveTabLabel } from '../utils/tabLabels';
 import { destroyOrderDraftStore } from './orderFormStore';
 
 export interface WorkspaceTab {
@@ -12,7 +13,7 @@ export interface WorkspaceTab {
 
 interface TabState {
   tabs: WorkspaceTab[];
-  openTab: (t: Omit<WorkspaceTab, 'dirty'>) => void;
+  openTab: (t: Omit<WorkspaceTab, 'dirty'> & { preserveLabel?: boolean }) => void;
   closeTab: (key: string, opts?: { discard?: boolean }) => void;
   setTabTitle: (key: string, label: string) => void;
   setDirty: (key: string, dirty: boolean) => void;
@@ -36,21 +37,43 @@ const orderKeyFromTab = (key: string): string | null => {
   return null;
 };
 
+export const migrateWorkspaceTabs = (persistedState: unknown, version: number): unknown => {
+  if (version >= 1 || !persistedState || typeof persistedState !== 'object') {
+    return persistedState;
+  }
+
+  const state = persistedState as { tabs?: WorkspaceTab[] };
+  if (!Array.isArray(state.tabs)) {
+    return persistedState;
+  }
+
+  return {
+    ...state,
+    tabs: state.tabs.map((tab) => ({
+      ...tab,
+      label: shouldPreserveTabLabel(tab.key) ? tab.label : resolveTabLabel(tab.key),
+    })),
+  };
+};
+
 export const useTabStore = create<TabState>()(
   persist(
     (set, get) => ({
       tabs: [],
       openTab: (t) =>
         set((state) => {
+          const { preserveLabel = true, ...nextTab } = t;
           const idx = state.tabs.findIndex((x) => x.key === t.key);
           if (idx >= 0) {
             const tabs = state.tabs.slice();
-            // label существующей вкладки сохраняем: setTabTitle (например, имя
-            // Базис-проекта) не должен затираться повторным location-sync
-            tabs[idx] = { ...tabs[idx], path: t.path, label: tabs[idx].label || t.label };
+            tabs[idx] = {
+              ...tabs[idx],
+              path: nextTab.path,
+              label: preserveLabel ? tabs[idx].label || nextTab.label : nextTab.label,
+            };
             return { tabs };
           }
-          return { tabs: [...state.tabs, { ...t, dirty: false }] };
+          return { tabs: [...state.tabs, { ...nextTab, dirty: false }] };
         }),
       closeTab: (key, opts) => {
         if (opts?.discard) {
@@ -73,6 +96,8 @@ export const useTabStore = create<TabState>()(
     }),
     {
       name: 'workspace-tabs',
+      version: 1,
+      migrate: migrateWorkspaceTabs,
       storage: createJSONStorage(() => sessionStorage),
       partialize: (state) => ({
         tabs: state.tabs.map(({ key, path, label, resource }) => ({ key, path, label, resource, dirty: false })),
