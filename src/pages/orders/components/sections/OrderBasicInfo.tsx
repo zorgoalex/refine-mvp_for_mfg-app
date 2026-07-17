@@ -90,7 +90,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({ clientLocked = f
     optionLabel: 'order_status_name',
     optionValue: 'order_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'order_status_id', order: 'asc' }],
     queryOptions: { enabled: !useBackendReferences },
   });
   const resolvedOrderStatusProps = useBackendReferences
@@ -103,7 +103,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({ clientLocked = f
     optionLabel: 'payment_status_name',
     optionValue: 'payment_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'payment_status_id', order: 'asc' }],
     queryOptions: { enabled: !useBackendReferences },
   });
   const resolvedPaymentStatusProps = useBackendReferences
@@ -116,7 +116,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({ clientLocked = f
     optionLabel: 'production_status_name',
     optionValue: 'production_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
     queryOptions: { enabled: !useBackendReferences },
   });
   const resolvedProductionStatusProps = useBackendReferences

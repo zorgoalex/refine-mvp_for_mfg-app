@@ -40,6 +40,7 @@ export const SheetMaterialShow: React.FC<IResourceComponentsProps> = () => {
         <Col span={8}><Title level={5}>ID</Title><TextField value={record?.sheet_material_type_id} /></Col>
         <Col span={8}><Title level={5}>Название</Title><TextField value={record?.name} /></Col>
         <Col span={8}><Title level={5}>Тип материала</Title><TextField value={typeOne?.data?.material_type_name} /></Col>
+        <Col span={8}><Title level={5}>Порядок сортировки</Title><TextField value={record?.sort_order} /></Col>
       </Row>
       <Divider />
       <Row gutter={[16, 16]}>

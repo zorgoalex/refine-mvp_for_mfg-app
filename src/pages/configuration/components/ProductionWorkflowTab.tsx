@@ -140,7 +140,7 @@ export const ProductionWorkflowTab: React.FC = () => {
     pagination: { pageSize: 200 },
     // IMPORTANT: explicit is_active filter disables the dataProvider auto-filter, so we can show ALL statuses
     filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
   });
 
   const statuses: ProductionStatusRef[] = useMemo(() => {

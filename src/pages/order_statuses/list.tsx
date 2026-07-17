@@ -8,7 +8,7 @@ export const OrderStatusList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "order_status_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "order_status_id", order: "asc" }],
     },
   });
 

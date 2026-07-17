@@ -2,12 +2,13 @@
 import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { Space, Table, Badge } from "antd";
+import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
 export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "workshop_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "workshop_id", order: "asc" }],
     },
   });
   const { show } = useNavigation();
@@ -24,6 +25,7 @@ export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="workshop_id" title="ID" sorter />
+        <ReferenceSortOrderColumn />
         <Table.Column
           dataIndex="workshop_name"
           title="Название цеха"
@@ -72,7 +74,6 @@ export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
     </LocalizedList>
   );
 };
-
 
 
 

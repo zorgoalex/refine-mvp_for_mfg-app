@@ -3,6 +3,7 @@ import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge, Row, Col, Divider } from "antd";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
+import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
 
 const { Title } = Typography;
 
@@ -77,6 +78,8 @@ export const VendorShow: React.FC<IResourceComponentsProps> = () => {
           <DateField value={record?.updated_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
         </Col>
       </Row>
+      <Divider />
+      <Row gutter={[16, 16]}><Col span={8}><ReferenceSortOrderShow value={record?.sort_order} /></Col></Row>
     </Show>
   );
 };

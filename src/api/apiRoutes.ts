@@ -39,6 +39,7 @@ export const apiRoutes = {
   },
   profile: {
     preferences: backendApiPath('/me/preferences'),
+    referenceUsage: backendApiPath('/me/preferences/reference-usage'),
   },
   orders: {
     list: backendApiPath('/orders'),

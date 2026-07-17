@@ -3,12 +3,13 @@ import { useTable, ShowButton, EditButton } from "@refinedev/antd";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
+import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
 export const SupplierList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
     syncWithLocation: true,
     sorters: {
-      initial: [{ field: "supplier_id", order: "desc" }],
+      initial: [{ field: "sort_order", order: "asc" }, { field: "supplier_id", order: "asc" }],
     },
   });
 
@@ -31,6 +32,7 @@ export const SupplierList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="supplier_id" title="id" sorter />
+        <ReferenceSortOrderColumn />
         <Table.Column dataIndex="supplier_name" title="Поставщик" sorter />
         <Table.Column dataIndex="address" title="Адрес поставщика" />
         <Table.Column dataIndex="contact_person" title="Контактное лицо" />

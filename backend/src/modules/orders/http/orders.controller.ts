@@ -641,54 +641,60 @@ const orderListResponseSwaggerSchema = {
 
 const lookupSwaggerSchema = {
   type: 'object',
-  required: ['id', 'name'],
+  required: ['id', 'name', 'sortOrder'],
   properties: {
     id: { type: 'integer' },
     name: { type: 'string' },
+    sortOrder: { type: 'integer' },
   },
 } as const;
 
 const materialLookupSwaggerSchema = {
   type: 'object',
-  required: ['id', 'name', 'unitId'],
+  required: ['id', 'name', 'unitId', 'sortOrder'],
   properties: {
     id: { type: 'integer' },
     name: { type: 'string' },
     unitId: nullableIntegerSwaggerSchema,
+    sortOrder: { type: 'integer' },
   },
 } as const;
 
 const millingTypeLookupSwaggerSchema = {
   type: 'object',
-  required: ['id', 'name', 'costPerSqm'],
+  required: ['id', 'name', 'costPerSqm', 'sortOrder'],
   properties: {
     id: { type: 'integer' },
     name: { type: 'string' },
     costPerSqm: nullableNumberSwaggerSchema,
+    sortOrder: { type: 'integer' },
   },
 } as const;
 
 const statusLookupSwaggerSchema = {
   type: 'object',
-  required: ['id', 'name'],
+  required: ['id', 'name', 'sortOrder'],
   properties: {
     id: { type: 'integer' },
     name: { type: 'string' },
     code: nullableStringSwaggerSchema,
     color: nullableStringSwaggerSchema,
+    sortOrder: { type: 'integer' },
   },
 } as const;
 
 // SP3: only present for callers with sheet_materials.view (service-masked).
 const sheetMaterialTypeLookupSwaggerSchema = {
   type: 'object',
-  required: ['id', 'name', 'widthMm', 'heightMm', 'isActive'],
+  required: ['id', 'name', 'widthMm', 'heightMm', 'isActive', 'isCuttable', 'sortOrder'],
   properties: {
     id: { type: 'integer' },
     name: { type: 'string' },
     widthMm: nullableNumberSwaggerSchema,
     heightMm: nullableNumberSwaggerSchema,
     isActive: { type: 'boolean' },
+    isCuttable: { type: 'boolean' },
+    sortOrder: { type: 'integer' },
   },
 } as const;
 
@@ -720,7 +726,7 @@ const orderFormDataResponseSwaggerSchema = {
     productionStatuses: { type: 'array', items: statusLookupSwaggerSchema },
     workshops: { type: 'array', items: lookupSwaggerSchema },
     employees: { type: 'array', items: { type: 'object', required: ['id', 'fullName'], properties: { id: { type: 'integer' }, fullName: { type: 'string' } } } },
-    units: { type: 'array', items: { type: 'object', required: ['id', 'code', 'name'], properties: { id: { type: 'integer' }, code: { type: 'string' }, name: { type: 'string' }, symbol: { type: 'string' } } } },
+    units: { type: 'array', items: { type: 'object', required: ['id', 'code', 'name', 'sortOrder'], properties: { id: { type: 'integer' }, code: { type: 'string' }, name: { type: 'string' }, symbol: { type: 'string' }, sortOrder: { type: 'integer' } } } },
     // SP3: optional — omitted entirely for callers without sheet_materials.view.
     sheetMaterialTypes: { type: 'array', items: sheetMaterialTypeLookupSwaggerSchema },
   },

@@ -4,6 +4,7 @@ import { Typography, Badge, Row, Col, Divider, Table, Tag, Space } from "antd";
 import { PhoneOutlined, StarFilled } from "@ant-design/icons";
 import { ClientPhone, PhoneType, PHONE_TYPE_LABELS } from "../../types/clients";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
+import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title, Text } = Typography;
@@ -140,6 +141,8 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
           <DateField value={record?.updated_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} />
         </Col>
       </Row>
+      <Divider />
+      <Row gutter={[16, 16]}><Col span={8}><ReferenceSortOrderShow value={record?.sort_order} /></Col></Row>
     </Show>
   );
 };

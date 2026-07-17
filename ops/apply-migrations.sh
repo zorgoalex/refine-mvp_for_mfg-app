@@ -369,6 +369,35 @@ probe_file() {
                      "$(q_col bazis_cut_set_details source_order_detail_id)" \
                      "$(q_col bazis_cut_set_details film)" \
                      "$(q_idx uq_bazis_cut_set_details_source_detail)" ;;
+    069_*) probe_all "SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM bazis_cut_set_details snapshot
+                       JOIN order_details source
+                         ON source.detail_id = snapshot.source_order_detail_id
+                       WHERE NULLIF(btrim(COALESCE(snapshot.source_bazis_order_no, '')), '') IS NULL
+                         AND NULLIF(btrim(COALESCE(source.basis_product, '')), '') IS NOT NULL
+                     );" ;;
+    070_*) probe_all "$(q_col clients sort_order)" \
+                     "$(q_col materials sort_order)" \
+                     "$(q_col sheet_material_types sort_order)" \
+                     "$(q_col films sort_order)" \
+                     "$(q_col film_types sort_order)" \
+                     "$(q_col vendors sort_order)" \
+                     "$(q_col suppliers sort_order)" \
+                     "$(q_col units sort_order)" \
+                     "$(q_col transaction_direction sort_order)" \
+                     "$(q_col workshops sort_order)" \
+                     "$(q_col work_centers sort_order)" \
+                     "SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM pg_constraint
+                       WHERE conname IN (
+                         'uq_order_statuses_sort_order',
+                         'uq_payment_statuses_sort_order',
+                         'uq_production_statuses_sort_order'
+                       )
+                     );" ;;
+    071_*) probe_all "$(q_col user_preferences recent_reference_entities)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

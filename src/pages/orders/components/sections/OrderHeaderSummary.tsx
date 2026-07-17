@@ -167,7 +167,7 @@ export const OrderHeaderSummary: React.FC = () => {
     pagination: { pageSize: 100 },
     // IMPORTANT: explicit is_active filter disables dataProvider auto-filter, so we can map inactive statuses too
     filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
   });
 
   // Create maps for production status lookup

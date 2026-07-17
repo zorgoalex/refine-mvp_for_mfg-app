@@ -50,6 +50,31 @@ const translations: Record<string, string> = {
     "suppliers.titles.list": "Список",
 };
 
+export const REFERENCE_RESOURCE_LABELS: Record<string, string> = {
+    clients: "клиента",
+    materials: "материал",
+    sheet_material_types: "листовой материал",
+    milling_types: "тип фрезеровки",
+    films: "плёнку",
+    edge_types: "тип обката",
+    vendors: "производителя",
+    suppliers: "поставщика",
+    film_types: "тип плёнки",
+    material_types: "тип материала",
+    units: "единицу измерения",
+    order_statuses: "статус заказа",
+    payment_statuses: "статус платежа",
+    payment_types: "тип оплаты",
+    requisition_statuses: "статус заявки на закупку",
+    movements_statuses: "статус перемещения",
+    material_transaction_types: "тип операции с материалом",
+    transaction_direction: "направление движения",
+    production_statuses: "статус производства",
+    resource_requirements_statuses: "статус потребности в ресурсах",
+    workshops: "цех",
+    work_centers: "участок цеха",
+};
+
 // Generic ru fallback for ONLY the per-resource list title `${resource}.titles.list` — the key Refine's
 // "back to list" ListButton resolves. When the exact key is absent Refine falls back to the ENGLISH
 // userFriendlyResourceName (e.g. "Doweling Orders"); enumerating every resource is brittle (new resources
@@ -61,9 +86,17 @@ function resolveListTitle(key: string): string | undefined {
     return /\.titles\.list$/.test(key) ? "Список" : undefined;
 }
 
+function resolveReferenceTitle(key: string): string | undefined {
+    const match = /^([^.]+)\.titles\.(create|edit)$/.exec(key);
+    if (!match) return undefined;
+    const label = REFERENCE_RESOURCE_LABELS[match[1]];
+    if (!label) return undefined;
+    return match[2] === "create" ? `Создать ${label}` : `Редактировать ${label}`;
+}
+
 export const i18nProvider: I18nProvider = {
     translate: (key: string, params?: any, defaultMessage?: string) => {
-        return translations[key] || resolveListTitle(key) || defaultMessage || key;
+        return translations[key] || resolveReferenceTitle(key) || resolveListTitle(key) || defaultMessage || key;
     },
     changeLocale: (lang: string) => Promise.resolve(),
     getLocale: () => "ru",

@@ -63,7 +63,7 @@ export const OrderFinanceSection: React.FC = () => {
     optionLabel: 'payment_status_name',
     optionValue: 'payment_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    sorters: [{ field: 'sort_order', order: 'asc' }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'payment_status_id', order: 'asc' }],
     queryOptions: { enabled: !useBackendReferences },
   });
   const resolvedPaymentStatusSelectProps = useBackendReferences

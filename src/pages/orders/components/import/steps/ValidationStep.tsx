@@ -66,6 +66,7 @@ interface ValidationStepProps {
   onUpdateRow: (index: number, field: keyof ValidatedRow, value: unknown) => void;
   onRemoveRow: (index: number) => void;
   onBatchReplace: (field: 'edge_type' | 'film' | 'material' | 'milling_type', originalValue: string, newId: number) => void;
+  onMaterialUsed?: (materialId: number) => void;
 }
 
 export const ValidationStep: React.FC<ValidationStepProps> = ({
@@ -76,6 +77,7 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
   onUpdateRow,
   onRemoveRow,
   onBatchReplace,
+  onMaterialUsed,
 }) => {
   const columns = useMemo(() => [
     {
@@ -167,7 +169,10 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
           <RefSelectEditor
             value={value}
             items={referenceData.sheetMaterialTypes ?? []}
-            onChange={(val) => onUpdateRow(index, 'sheet_material_type_id', val)}
+            onChange={(val) => {
+              onUpdateRow(index, 'sheet_material_type_id', val);
+              if (val) onMaterialUsed?.(val);
+            }}
           />
           {row.materialName && !value && (
             <Text type="secondary" style={{ fontSize: 10 }}>{row.materialName}</Text>
@@ -227,7 +232,7 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
         </Popconfirm>
       ),
     },
-  ], [referenceData, onUpdateRow, onRemoveRow]);
+  ], [referenceData, onUpdateRow, onRemoveRow, onMaterialUsed]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -359,7 +364,11 @@ export const ValidationStep: React.FC<ValidationStepProps> = ({
                           options={(referenceData.sheetMaterialTypes ?? [])
                             .filter(t => t.isCuttable !== false)
                             .map(item => ({ label: item.name, value: item.id }))}
-                          onChange={(val) => val && onBatchReplace('material', ref.originalValue, val)}
+                          onChange={(val) => {
+                            if (!val) return;
+                            onBatchReplace('material', ref.originalValue, val);
+                            onMaterialUsed?.(val);
+                          }}
                           showSearch
                           filterOption={(input, option) =>
                             (option?.label as string)?.toLowerCase().includes(input.toLowerCase())

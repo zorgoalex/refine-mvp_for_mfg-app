@@ -1,6 +1,7 @@
 import { Create, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Checkbox, message } from "antd";
+import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
 
 export const TransactionDirectionCreate: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps } = useForm();
@@ -49,6 +50,7 @@ export const TransactionDirectionCreate: React.FC<IResourceComponentsProps> = ()
         <Form.Item label="Active" name="is_active" valuePropName="checked">
           <Checkbox />
         </Form.Item>
+        <ReferenceSortOrderFormItem />
       </Form>
     </Create>
   );

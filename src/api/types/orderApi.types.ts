@@ -152,6 +152,7 @@ export interface ImportOrderSnapshotBatchResponse {
 export interface IdNameLookup {
   id: number;
   name: string;
+  sortOrder: number;
 }
 
 export interface MaterialLookup extends IdNameLookup {
@@ -186,6 +187,7 @@ export interface UnitLookup {
   code: string;
   name: string;
   symbol?: string;
+  sortOrder: number;
 }
 
 export interface OrderFormDataResponse {

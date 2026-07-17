@@ -1,7 +1,10 @@
 import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../database/database.types';
+import { RECENT_REFERENCE_RESOURCES } from './profile-preferences.types';
 import type {
   OrderDetailColumnPreferencesDto,
+  RecentReferenceEntitiesDto,
+  RecentReferenceResource,
   ThemeMode,
   UiSize,
   UserPreferencesDto,
@@ -12,6 +15,7 @@ interface PreferenceRow extends QueryResultRow {
   theme_mode: string | null;
   ui_size: string | null;
   order_detail_columns: unknown;
+  recent_reference_entities: unknown;
 }
 
 export class PgProfilePreferencesRepository implements UserPreferencesRepositoryPort {
@@ -20,7 +24,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
   async getUserPreferences(userId: number): Promise<UserPreferencesDto> {
     const result = await this.database.query<PreferenceRow>(
       `
-      SELECT theme_mode, ui_size, order_detail_columns
+      SELECT theme_mode, ui_size, order_detail_columns, recent_reference_entities
       FROM user_preferences
       WHERE user_id = $1
       `,
@@ -52,7 +56,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
         ui_size = COALESCE($3, user_preferences.ui_size),
         order_detail_columns = COALESCE($4::jsonb, user_preferences.order_detail_columns),
         updated_at = now()
-      RETURNING theme_mode, ui_size, order_detail_columns
+      RETURNING theme_mode, ui_size, order_detail_columns, recent_reference_entities
       `,
       [
         userId,
@@ -64,6 +68,66 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
 
     return mapPreferenceRow(result.rows[0]);
   }
+
+  async promoteReferenceUsage(
+    userId: number,
+    resource: RecentReferenceResource,
+    entityId: number,
+  ): Promise<UserPreferencesDto> {
+    const result = await this.database.query<PreferenceRow>(
+      `
+      INSERT INTO user_preferences (user_id, recent_reference_entities)
+      VALUES ($1, jsonb_build_object($2::text, jsonb_build_array($3::bigint)))
+      ON CONFLICT (user_id)
+      DO UPDATE SET
+        recent_reference_entities = jsonb_set(
+          CASE
+            WHEN jsonb_typeof(user_preferences.recent_reference_entities) = 'object'
+              THEN user_preferences.recent_reference_entities
+            ELSE '{}'::jsonb
+          END,
+          ARRAY[$2::text],
+          (
+            SELECT COALESCE(
+              jsonb_agg(candidate.entity_id ORDER BY candidate.position),
+              '[]'::jsonb
+            )
+            FROM (
+              SELECT raw.entity_id, MIN(raw.position) AS position
+              FROM (
+                SELECT $3::bigint AS entity_id, 0::bigint AS position
+                UNION ALL
+                SELECT
+                  CASE
+                    WHEN item.value ~ '^[1-9][0-9]{0,18}$'
+                      AND item.value::numeric <= 9223372036854775807
+                    THEN item.value::bigint
+                  END,
+                  item.ordinality::bigint
+                FROM jsonb_array_elements_text(
+                  CASE
+                    WHEN jsonb_typeof(user_preferences.recent_reference_entities -> $2::text) = 'array'
+                      THEN user_preferences.recent_reference_entities -> $2::text
+                    ELSE '[]'::jsonb
+                  END
+                ) WITH ORDINALITY AS item(value, ordinality)
+              ) raw
+              WHERE raw.entity_id IS NOT NULL
+              GROUP BY raw.entity_id
+              ORDER BY MIN(raw.position)
+              LIMIT 20
+            ) candidate
+          ),
+          true
+        ),
+        updated_at = now()
+      RETURNING theme_mode, ui_size, order_detail_columns, recent_reference_entities
+      `,
+      [userId, resource, entityId],
+    );
+
+    return mapPreferenceRow(result.rows[0]);
+  }
 }
 
 function mapPreferenceRow(row: PreferenceRow | undefined): UserPreferencesDto {
@@ -71,7 +135,23 @@ function mapPreferenceRow(row: PreferenceRow | undefined): UserPreferencesDto {
     themeMode: normalizeThemeMode(row?.theme_mode),
     uiSize: normalizeUiSize(row?.ui_size),
     orderDetailColumns: normalizeOrderDetailColumns(row?.order_detail_columns),
+    recentReferences: normalizeRecentReferences(row?.recent_reference_entities),
   };
+}
+
+function normalizeRecentReferences(value: unknown): RecentReferenceEntitiesDto {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+  const allowed = new Set<string>(RECENT_REFERENCE_RESOURCES);
+  const normalized: RecentReferenceEntitiesDto = {};
+  for (const [resource, rawIds] of Object.entries(value as Record<string, unknown>)) {
+    if (!allowed.has(resource) || !Array.isArray(rawIds)) continue;
+    const ids = [...new Set(
+      rawIds.filter((id): id is number => Number.isSafeInteger(id) && Number(id) > 0),
+    )].slice(0, 20);
+    normalized[resource as RecentReferenceResource] = ids;
+  }
+  return normalized;
 }
 
 function normalizeThemeMode(value: unknown): ThemeMode {

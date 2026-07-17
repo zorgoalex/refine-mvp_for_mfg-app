@@ -1,11 +1,12 @@
 // src/pages/orders/components/DetailGroupingControls.tsx
 import React, { useMemo } from 'react';
-import { Dropdown, Button, Checkbox, Space } from 'antd';
-import { DownOutlined } from '@ant-design/icons';
+import { Dropdown, Button, Checkbox, Space, Tooltip } from 'antd';
+import { ApartmentOutlined, DownOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { GroupField } from '../detailGrouping';
 import { GROUP_FIELDS } from '../detailGrouping';
 import type { DetailGroupingState } from '../useDetailGrouping';
+import { OrderToolbarLabel } from './OrderDetailsToolbar';
 
 export function groupingButtonLabel(field: GroupField | null): string {
   if (!field) return 'Группировать по…';
@@ -43,17 +44,20 @@ export const DetailGroupingControls: React.FC<DetailGroupingControlsProps> = ({
   return (
     <Space size="small">
       <Dropdown menu={menu} trigger={['click']}>
-        <Button size={size}>
-          {groupingButtonLabel(state.field)} <DownOutlined />
+        <Button size={size} icon={<ApartmentOutlined />} aria-label={groupingButtonLabel(state.field)}>
+          <OrderToolbarLabel>{groupingButtonLabel(state.field)}</OrderToolbarLabel> <DownOutlined />
         </Button>
       </Dropdown>
       {state.field !== null && (
-        <Checkbox
-          checked={state.showSeparation}
-          onChange={e => onToggleSeparation(e.target.checked)}
-        >
-          Разделение на группы
-        </Checkbox>
+        <Tooltip title="Разделение на группы">
+          <Checkbox
+            checked={state.showSeparation}
+            onChange={e => onToggleSeparation(e.target.checked)}
+            aria-label="Разделение на группы"
+          >
+            <OrderToolbarLabel>Разделение на группы</OrderToolbarLabel>
+          </Checkbox>
+        </Tooltip>
       )}
     </Space>
   );

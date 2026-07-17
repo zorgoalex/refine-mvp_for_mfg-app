@@ -1,6 +1,7 @@
 import { ApiError } from '../../common/errors/api-error';
 import type {
   GetUserPreferencesCommand,
+  PromoteReferenceUsageCommand,
   UpdateUserPreferencesCommand,
   UserPreferencesDto,
   UserPreferencesRepositoryPort,
@@ -17,6 +18,14 @@ export class ProfilePreferencesService {
     return this.repository.updateUserPreferences(
       parseCurrentUserId(command.currentUser.id),
       command.preferences,
+    );
+  }
+
+  promoteReferenceUsage(command: PromoteReferenceUsageCommand): Promise<UserPreferencesDto> {
+    return this.repository.promoteReferenceUsage(
+      parseCurrentUserId(command.currentUser.id),
+      command.resource,
+      command.entityId,
     );
   }
 }
