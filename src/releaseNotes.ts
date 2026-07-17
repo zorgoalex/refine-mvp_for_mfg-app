@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-17",
+    title: "Быстрое добавление оплаты",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Первое нажатие «Быстрое добавление» во вкладке «Финансы» больше не переключает форму заказа на вкладку «Детали заказа».",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-15",
     title: "Наборы деталей для Базис-раскрой",
     services: ["ERP", "Cutting"],
