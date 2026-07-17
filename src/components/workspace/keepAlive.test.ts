@@ -20,6 +20,11 @@ describe('keep-alive policy', () => {
     });
     expect(next.has('/cut')).toBe(true); // retained while inactive (order tab active)
   });
+  it('keeps order forms mounted across the first clean-to-dirty transition', () => {
+    expect(isKeepAliveEligible('/orders/edit/42', { dirty: false })).toBe(true);
+    expect(isKeepAliveEligible('/orders/edit/42', { dirty: true })).toBe(true);
+    expect(isKeepAliveEligible('/orders/create', { dirty: false })).toBe(true);
+  });
   it('keeps a dirty non-orders tab while dirty', () => {
     expect(isKeepAliveEligible('/clients/edit/3', { dirty: true })).toBe(true);
     expect(isKeepAliveEligible('/clients/edit/3', { dirty: false })).toBe(false);
@@ -35,10 +40,10 @@ describe('keep-alive policy', () => {
     expect(next.has('/clients/edit/3')).toBe(false); // clean + inactive → evicted
   });
   it('evicts active clean dirty-only entry so outlet is not rendered twice', () => {
-    const cache = new Set(['/orders/edit/42']);
-    const tabs = [{ key: '/orders/edit/42', dirty: false }];
-    const next = nextKeepAliveCache(cache, { activeKey: '/orders/edit/42', tabs });
-    expect(next.has('/orders/edit/42')).toBe(false);
+    const cache = new Set(['/clients/edit/3']);
+    const tabs = [{ key: '/clients/edit/3', dirty: false }];
+    const next = nextKeepAliveCache(cache, { activeKey: '/clients/edit/3', tabs });
+    expect(next.has('/clients/edit/3')).toBe(false);
   });
   it('drops entries whose tab was closed', () => {
     const cache = new Set(['/orders', '/clients/edit/3']);

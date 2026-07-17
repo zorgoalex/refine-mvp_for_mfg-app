@@ -7,9 +7,12 @@ const CALENDAR_KEY = '/calendar';
 // должна быть eligible ВСЕГДА, чтобы not-eligible→eligible ремаунта не было.
 const ALWAYS_KEEP = new Set(['/orders', '/cut', '/bazis']);
 
+const isOrderFormKey = (key: string): boolean =>
+  key === '/orders/create' || key.startsWith('/orders/edit/');
+
 export const isKeepAliveEligible = (key: string, { dirty }: { dirty: boolean }): boolean => {
   if (key === CALENDAR_KEY) return false;            // B7: global-class hack ⇒ remount only
-  if (ALWAYS_KEEP.has(key)) return true;
+  if (ALWAYS_KEEP.has(key) || isOrderFormKey(key)) return true;
   return dirty;                                       // dirty non-orders tab kept while dirty
 };
 
