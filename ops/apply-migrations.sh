@@ -369,6 +369,30 @@ probe_file() {
                      "$(q_col bazis_cut_set_details source_order_detail_id)" \
                      "$(q_col bazis_cut_set_details film)" \
                      "$(q_idx uq_bazis_cut_set_details_source_detail)" ;;
+    069_*) probe_all "SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM bazis_cut_set_details snapshot
+                       JOIN order_details source
+                         ON source.detail_id = snapshot.source_order_detail_id
+                       WHERE NULLIF(btrim(COALESCE(snapshot.source_bazis_order_no, '')), '') IS NULL
+                         AND NULLIF(btrim(COALESCE(source.basis_product, '')), '') IS NOT NULL
+                     );" ;;
+    070_*) probe_all "$(q_tbl bazis_pdf_table_patterns)" \
+                     "$(q_idx idx_bazis_pdf_table_patterns_active)" \
+                     "$(q_con uq_bazis_pdf_table_patterns_fingerprint)" \
+                     "$(q_con chk_bazis_pdf_table_patterns_fingerprint)" \
+                     "$(q_con chk_bazis_pdf_table_patterns_signature)" \
+                     "$(q_con chk_bazis_pdf_table_patterns_mapping)" \
+                     "$(q_con chk_bazis_pdf_table_patterns_approval)" \
+                     "$(q_con chk_bazis_pdf_table_patterns_version)" \
+                     "$(q_col bazis_pdf_table_patterns fingerprint_version)" \
+                     "$(q_col bazis_pdf_table_patterns parser_major)" \
+                     "$(q_col bazis_pdf_table_patterns signature_json)" \
+                     "$(q_col bazis_pdf_table_patterns mapping_json)" \
+                     "$(q_col bazis_pdf_table_patterns mapping_hash)" \
+                     "$(q_col bazis_pdf_table_patterns approval_status)" \
+                     "$(q_col bazis_pdf_table_patterns is_active)" \
+                     "$(q_col bazis_pdf_table_patterns version)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

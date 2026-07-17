@@ -9,9 +9,10 @@ import { UnavailableBazisRepository } from './adapters/unavailable-bazis-reposit
 import { BazisService } from './application/bazis.service';
 import { BazisController } from './http/bazis.controller';
 import { BazisRuntimeConfigService } from './http/bazis-runtime-config.service';
+import { PdfTablePatternsModule } from './pdf-table-patterns/pdf-table-patterns.controller';
 
 @Module({
-  imports: [DatabaseModule, OrdersModule],
+  imports: [DatabaseModule, OrdersModule, PdfTablePatternsModule],
   controllers: [BazisController],
   providers: [
     BazisRuntimeConfigService,
