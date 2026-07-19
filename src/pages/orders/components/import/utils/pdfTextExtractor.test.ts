@@ -12,6 +12,7 @@ import type { PdfParsedResult, PdfTextItem } from '../types/pdfTypes';
 const DEFAULT_PDF_FIXTURE_DIRS = [
   path.resolve(process.cwd(), '../spec_erp'),
   // Isolated worktrees live under repo_erp/.worktrees/<name>.
+  path.resolve(process.cwd(), '../../spec_erp'),
   path.resolve(process.cwd(), '../../../spec_erp'),
 ];
 const PDF_FIXTURE_DIR = process.env.PDF_FIXTURE_DIR
@@ -205,6 +206,18 @@ describe('parsePdfContent PDF fixtures', () => {
       positionsCount: 51,
       totalQuantity: 57,
       expectedTotalCount: 57,
+    },
+    {
+      fixture: 'artifacts_test/pdf_Bazis/мдф стол.pdf',
+      positionsCount: 8,
+      totalQuantity: 9,
+      expectedTotalCount: 9,
+    },
+    {
+      fixture: 'artifacts_test/pdf_Bazis/мдф шкаф2.pdf',
+      positionsCount: 14,
+      totalQuantity: 16,
+      expectedTotalCount: 16,
     },
   ];
   const availableFixtureCases = fixtureCases.filter(({ fixture }) => fs.existsSync(path.resolve(PDF_FIXTURE_DIR, fixture)));

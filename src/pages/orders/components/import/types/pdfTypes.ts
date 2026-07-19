@@ -31,6 +31,7 @@ export interface PdfPage {
 export interface PdfOrderMetadata {
   orderNumber: string;       // e.g., "1057" - this is doweling number
   orderName: string;         // e.g., "Кухня"
+  productName?: string;      // e.g., value from "Изделие:Кухня"
   material: string;          // e.g., "МДФ 16 мм"
   company?: string;          // e.g., "Zhihaz Best"
   printDate?: string;        // e.g., "18.12.2025"

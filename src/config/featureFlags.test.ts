@@ -31,6 +31,7 @@ describe('featureFlags', () => {
       labels: false,
       statusAutomation: false,
       orderStatusBoard: false,
+      pdfImportLayoutPatterns: false,
       sheetMaterialsReads: false,
       enableLegacyHasura: true,
       workosAuth: false,
@@ -58,6 +59,12 @@ describe('featureFlags', () => {
         { orderStatusBoard: true },
       ).orderStatusBoard,
     ).toBe(true);
+  });
+
+  it('reads PDF layout-pattern flag from env and runtime config, default off', () => {
+    expect(getFeatureFlags({}).pdfImportLayoutPatterns).toBe(false);
+    expect(getFeatureFlags({ VITE_PDF_IMPORT_LAYOUT_PATTERNS: 'true' }).pdfImportLayoutPatterns).toBe(true);
+    expect(getFeatureFlags({}, { pdfImportLayoutPatterns: true }).pdfImportLayoutPatterns).toBe(true);
   });
 
   it('reads the SP3 sheetMaterialsReads flag from env and runtime config, default off', () => {

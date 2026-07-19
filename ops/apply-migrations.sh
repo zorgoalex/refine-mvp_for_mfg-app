@@ -398,6 +398,22 @@ probe_file() {
                        )
                      );" ;;
     071_*) probe_all "$(q_col user_preferences recent_reference_entities)" ;;
+    072_*) probe_all "$(q_tbl bazis_pdf_table_patterns)" \
+                     "$(q_idx idx_bazis_pdf_table_patterns_active)" \
+                     "$(q_con uq_bazis_pdf_table_patterns_fingerprint)" \
+                     "$(q_con chk_bazis_pdf_table_patterns_fingerprint)" \
+                     "$(q_con chk_bazis_pdf_table_patterns_signature)" \
+                     "$(q_con chk_bazis_pdf_table_patterns_mapping)" \
+                     "$(q_con chk_bazis_pdf_table_patterns_approval)" \
+                     "$(q_con chk_bazis_pdf_table_patterns_version)" \
+                     "$(q_col bazis_pdf_table_patterns fingerprint_version)" \
+                     "$(q_col bazis_pdf_table_patterns parser_major)" \
+                     "$(q_col bazis_pdf_table_patterns signature_json)" \
+                     "$(q_col bazis_pdf_table_patterns mapping_json)" \
+                     "$(q_col bazis_pdf_table_patterns mapping_hash)" \
+                     "$(q_col bazis_pdf_table_patterns approval_status)" \
+                     "$(q_col bazis_pdf_table_patterns is_active)" \
+                     "$(q_col bazis_pdf_table_patterns version)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

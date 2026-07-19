@@ -5289,6 +5289,102 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/bazis/pdf-table-patterns/match:
+    post:
+      tags: [Bazis]
+      operationId: matchBazisPdfTablePatterns
+      summary: Match structural Basis PDF table layouts
+      security:
+        - bearerAuth: []
+      x-permission: orders.import
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signatures]
+              properties:
+                signatures:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Exact pattern matches }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/bazis/pdf-table-patterns:
+    post:
+      tags: [Bazis]
+      operationId: learnBazisPdfTablePattern
+      summary: Learn confirmed structural Basis PDF table layout
+      security:
+        - bearerAuth: []
+      x-permission: orders.import
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signature, mapping]
+              properties:
+                signature: { type: object, additionalProperties: true }
+                mapping: { type: object, additionalProperties: true }
+      responses:
+        '201': { description: Learned or replayed pattern }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Pattern or idempotency conflict }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/bazis/pdf-table-patterns/{fingerprint}:
+    patch:
+      tags: [Bazis]
+      operationId: updateBazisPdfTablePattern
+      summary: Approve, reject, correct, or deactivate a Basis PDF layout
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      parameters:
+        - in: path
+          name: fingerprint
+          required: true
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                approvalStatus: { type: string, enum: [approved, rejected] }
+                isActive: { type: boolean }
+                mapping: { type: object, additionalProperties: true }
+      responses:
+        '200': { description: Updated pattern }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Stale version or idempotency conflict }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
   /api/v1/deadlines/{deadlineId}/pause:
     parameters:
       - $ref: '#/components/parameters/DeadlineId'

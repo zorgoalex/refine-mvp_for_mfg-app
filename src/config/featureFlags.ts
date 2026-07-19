@@ -19,6 +19,7 @@ export interface FrontendFeatureFlags {
   labels: boolean;
   statusAutomation: boolean;
   orderStatusBoard: boolean;
+  pdfImportLayoutPatterns: boolean;
   // Variant B: gates reads that depend on migration 034 Hasura schema
   // (sheet_material_type_id as the sole order-material reference; order_details_view
   // now returns sheet name only). Default MUST stay false — a FRESH env (no 034 applied)
@@ -57,6 +58,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   labels: string | boolean;
   statusAutomation: string | boolean;
   orderStatusBoard: string | boolean;
+  pdfImportLayoutPatterns: string | boolean;
   sheetMaterialsReads: string | boolean;
   sheetMaterials: string | boolean;
   enableLegacyHasura: string | boolean;
@@ -100,6 +102,7 @@ export function getFeatureFlags(
     labels: readBooleanFlag(env.VITE_USE_BACKEND_LABELS, false),
     statusAutomation: readBooleanFlag(env.VITE_STATUS_AUTOMATION, false),
     orderStatusBoard: readBooleanFlag(env.VITE_ORDER_STATUS_BOARD, false),
+    pdfImportLayoutPatterns: readBooleanFlag(env.VITE_PDF_IMPORT_LAYOUT_PATTERNS, false),
     sheetMaterialsReads: readBooleanFlag(env.VITE_SHEET_MATERIALS_READS, false),
     enableLegacyHasura: readBooleanFlag(env.VITE_ENABLE_LEGACY_HASURA, true),
     workosAuth: readBooleanFlag(env.VITE_WORKOS_AUTH, false),
@@ -156,6 +159,9 @@ export function mergeRuntimeFeatureFlags(
       readOptionalBooleanFlag(runtimeFeatures.statusAutomation) ?? fallback.statusAutomation,
     orderStatusBoard:
       readOptionalBooleanFlag(runtimeFeatures.orderStatusBoard) ?? fallback.orderStatusBoard,
+    pdfImportLayoutPatterns:
+      readOptionalBooleanFlag(runtimeFeatures.pdfImportLayoutPatterns) ??
+      fallback.pdfImportLayoutPatterns,
     sheetMaterialsReads:
       readOptionalBooleanFlag(runtimeFeatures.sheetMaterialsReads) ??
       readOptionalBooleanFlag(runtimeFeatures.sheetMaterials) ??

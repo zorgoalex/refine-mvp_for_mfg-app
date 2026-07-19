@@ -23,6 +23,7 @@ describe('frontend runtime config delivery', () => {
         bazisCut: false,
         labels: false,
         orderStatusBoard: false,
+        pdfImportLayoutPatterns: false,
         projects: false,
         bazisImport: false,
         enableLegacyHasura: true,
@@ -73,6 +74,7 @@ describe('frontend runtime config delivery', () => {
         bazisCut: true,
         labels: false,
         orderStatusBoard: true,
+        pdfImportLayoutPatterns: false,
         projects: false,
         bazisImport: false,
         enableLegacyHasura: false,
@@ -96,6 +98,13 @@ describe('frontend runtime config delivery', () => {
   it('maps labels runtime flag default-off and true', () => {
     expect(buildFrontendRuntimeConfig({}).features.labels).toBe(false);
     expect(buildFrontendRuntimeConfig({ RUNTIME_CONFIG_LABELS: 'true' }).features.labels).toBe(true);
+  });
+
+  it('maps PDF layout-pattern runtime flag default-off and true', () => {
+    expect(buildFrontendRuntimeConfig({}).features.pdfImportLayoutPatterns).toBe(false);
+    expect(buildFrontendRuntimeConfig({
+      RUNTIME_CONFIG_PDF_IMPORT_LAYOUT_PATTERNS: 'true',
+    }).features.pdfImportLayoutPatterns).toBe(true);
   });
 
   it('maps projects runtime flag default-off and true', () => {

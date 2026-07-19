@@ -170,6 +170,9 @@ export const apiRoutes = {
     revisionOrders: (id: number) => backendApiPath(`/bazis/revisions/${id}/orders`),
     revisionEstimate: (id: number) => backendApiPath(`/bazis/revisions/${id}/estimate`),
     materialMappings: backendApiPath('/bazis/material-mappings'),
+    pdfTablePatterns: backendApiPath('/bazis/pdf-table-patterns'),
+    matchPdfTablePatterns: backendApiPath('/bazis/pdf-table-patterns/match'),
+    pdfTablePattern: (fingerprint: string) => backendApiPath(`/bazis/pdf-table-patterns/${fingerprint}`),
     createOrder: (revisionId: number) => backendApiPath(`/bazis/revisions/${revisionId}/create-order`),
   },
   deadlines: {

@@ -16,6 +16,8 @@ interface PdfUploadStepProps {
   fileName: string | null;
   result: PdfParsedResult | null;
   importRows: ImportRow[];
+  needsLayoutMapping?: boolean;
+  detectedTables?: number;
   onFileUpload: (file: File) => Promise<void>;
 }
 
@@ -25,6 +27,8 @@ export const PdfUploadStep: React.FC<PdfUploadStepProps> = ({
   fileName,
   result,
   importRows,
+  needsLayoutMapping = false,
+  detectedTables = 0,
   onFileUpload,
 }) => {
   const handleUpload: UploadProps['customRequest'] = useCallback(async (options) => {
@@ -224,6 +228,15 @@ export const PdfUploadStep: React.FC<PdfUploadStepProps> = ({
                   </ul>
                 }
                 showIcon
+              />
+            )}
+
+            {needsLayoutMapping && (
+              <Alert
+                type="info"
+                showIcon
+                message={`Найдено таблиц: ${detectedTables}`}
+                description="Структура новая или ещё не одобрена. На следующем шаге сопоставьте колонки."
               />
             )}
 
