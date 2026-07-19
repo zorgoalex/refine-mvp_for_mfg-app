@@ -79,8 +79,6 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
       ? decodeAndValidateCursor(command.query.cursor, command.query, filterKey)
       : null;
     const params: unknown[] = [];
-    const actorUserId = normalizeActorUserId(command.currentUser.id);
-    const actorIndex = params.push(actorUserId);
     const statusKeySql =
       command.query.board === 'order'
         ? 'o.order_status_id::text'
@@ -90,7 +88,13 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
       command.query.onlyMyOrders ||
       policy.orders.view === 'assigned' ||
       policy.productionTasks.update === 'assigned';
-    const assignedSql = needsAssignment ? assignmentExistsSql(actorIndex) : 'FALSE';
+    const needsActor = needsAssignment || policy.orders.view === 'own';
+    const actorIndex = needsActor
+      ? params.push(normalizeActorUserId(command.currentUser.id))
+      : null;
+    const assignedSql = needsAssignment
+      ? assignmentExistsSql(requireActorIndex(actorIndex))
+      : 'FALSE';
     const filters = [
       'o.delete_flag = false',
       buildReadScopePredicate(
@@ -247,7 +251,7 @@ function appendUserFilters(
   filters: string[],
   params: unknown[],
   query: OrderStatusBoardQuery,
-  actorIndex: number,
+  actorIndex: number | null,
   assignedSql: string,
 ): void {
   if (query.search) {
@@ -271,9 +275,10 @@ function appendUserFilters(
   }
 
   if (query.onlyMyOrders) {
+    const requiredActorIndex = requireActorIndex(actorIndex);
     filters.push(`(
-      o.created_by = $${actorIndex}
-      OR o.manager_id = $${actorIndex}
+      o.created_by = $${requiredActorIndex}
+      OR o.manager_id = $${requiredActorIndex}
       OR ${assignedSql}
     )`);
   }
@@ -291,19 +296,28 @@ function appendUserFilters(
 
 function buildReadScopePredicate(
   scope: Scope,
-  actorIndex: number,
+  actorIndex: number | null,
   assignedSql: string,
 ): string {
   switch (scope) {
     case 'all':
       return 'TRUE';
-    case 'own':
-      return `(o.created_by = $${actorIndex} OR o.manager_id = $${actorIndex})`;
+    case 'own': {
+      const requiredActorIndex = requireActorIndex(actorIndex);
+      return `(o.created_by = $${requiredActorIndex} OR o.manager_id = $${requiredActorIndex})`;
+    }
     case 'assigned':
       return assignedSql;
     case 'none':
       return 'FALSE';
   }
+}
+
+function requireActorIndex(actorIndex: number | null): number {
+  if (actorIndex === null) {
+    throw new Error('Actor SQL parameter is required');
+  }
+  return actorIndex;
 }
 
 function assignmentExistsSql(actorIndex: number): string {

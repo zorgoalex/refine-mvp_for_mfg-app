@@ -165,6 +165,9 @@ describe('PgOrderStatusBoardRepository', () => {
 
     expect(database.queries[0]?.text).toContain('FALSE AS current_user_assigned');
     expect(database.queries[0]?.text).not.toContain('assigned_ow');
+    expect(database.queries[0]?.text).toContain('ranked.row_number <= $1');
+    expect(database.queries[0]?.text).not.toContain('$2');
+    expect(database.queries[0]?.params).toEqual([25]);
   });
 
   it('keeps an inactive referenced status visible but read-only as a destination', async () => {
