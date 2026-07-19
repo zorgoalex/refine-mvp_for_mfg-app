@@ -16,17 +16,20 @@ import { GroupNotificationService } from '../groups/notifications/group-notifica
 import { GroupsRuntimeConfigService } from '../groups/groups-runtime-config.service';
 import { PgOrderExporter } from './adapters/pg-order-exporter';
 import { PgOrderReadRepository } from './adapters/pg-order-read-repository';
+import { PgOrderStatusBoardRepository } from './adapters/pg-order-status-board-repository';
 import { PgOrderSnapshot } from './adapters/pg-order-snapshot';
 import { PgOrderGroupLinkRepository, UnavailableOrderGroupLinkRepository } from './adapters/pg-order-group-link-repository';
 import { PgOrderTransactionManager } from './adapters/pg-order-transaction-manager';
 import { UnavailableOrderExporter } from './adapters/unavailable-order-exporter';
 import { UnavailableOrderReadRepository } from './adapters/unavailable-order-read-repository';
+import { UnavailableOrderStatusBoardRepository } from './adapters/unavailable-order-status-board-repository';
 import { UnavailableOrderSnapshot } from './adapters/unavailable-order-snapshot';
 import { OrderExportService } from './application/order-export.service';
 import { OrderGroupLinkService } from './application/order-group-link.service';
 import { OrderSnapshotService } from './application/order-snapshot.service';
 import { OrderTransactionService } from './application/order-transaction.service';
 import { OrderQueryService } from './application/order-query.service';
+import { OrderStatusBoardService } from './application/order-status-board.service';
 import { RateLimitService } from '../../rate-limit/rate-limit.service';
 import { UnavailableOrderTransactionManager } from './adapters/unavailable-order-transaction-manager';
 import { SharedOrderExportRateLimiter } from './application/order-export-rate-limiter';
@@ -34,6 +37,7 @@ import { OrderExportController } from './http/order-export.controller';
 import { OrderGroupLinksController } from './http/order-group-links.controller';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
+import { OrderStatusBoardController } from './http/order-status-board.controller';
 import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service';
 
 export function shouldEnableOrderDeadlineSync(input: {
@@ -52,7 +56,14 @@ export function shouldEnableOrderDeadlineSync(input: {
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [OrdersController, OrderExportController, OrderSnapshotController, OrderGroupLinksController],
+  controllers: [
+    // Register static `/orders/*` routes before the generic `/orders/:orderId`.
+    OrderStatusBoardController,
+    OrderExportController,
+    OrderSnapshotController,
+    OrderGroupLinksController,
+    OrdersController,
+  ],
   providers: [
     OrdersRuntimeConfigService,
     GroupsRuntimeConfigService,
@@ -90,6 +101,16 @@ export function shouldEnableOrderDeadlineSync(input: {
             : new UnavailableOrderReadRepository(),
         }),
       inject: [DatabaseService, ConfigService],
+    },
+    {
+      provide: OrderStatusBoardService,
+      useFactory: (database: DatabaseService) =>
+        new OrderStatusBoardService({
+          boards: database.isConfigured
+            ? new PgOrderStatusBoardRepository(database)
+            : new UnavailableOrderStatusBoardRepository(),
+        }),
+      inject: [DatabaseService],
     },
     {
       provide: OrderGroupLinkService,

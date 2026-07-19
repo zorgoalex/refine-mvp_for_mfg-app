@@ -51,7 +51,12 @@ describe('navigation permissions', () => {
   });
 
   it('requires orders.view for production-adjacent order resources in backend mode', () => {
-    ['doweling_orders_view', 'order_workshops', 'order_resource_requirements'].forEach(
+    [
+      'order-status-board',
+      'doweling_orders_view',
+      'order_workshops',
+      'order_resource_requirements',
+    ].forEach(
       (resourceName) => {
         expect(
           canViewNavigationResource(

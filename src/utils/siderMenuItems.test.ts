@@ -8,6 +8,7 @@ import {
   makeCrmOpener,
   resolveCalendarRoute,
   resolveOrdersRoute,
+  resolveStatusBoardRoute,
   CRM_WINDOW_NAME,
 } from './siderMenuItems';
 
@@ -27,6 +28,15 @@ describe('computeSelectedKey', () => {
     ];
     expect(computeSelectedKey(resources, '/orders/123')).toBe('orders');
     expect(computeSelectedKey(resources, '/calendar')).toBe('calendar');
+  });
+
+  it('selects the dedicated status-board resource', () => {
+    expect(
+      computeSelectedKey(
+        [makeResource('order-status-board', '/order-status-board')],
+        '/order-status-board',
+      ),
+    ).toBe('order-status-board');
   });
 
   it('prefers the longer matching route (avoids /clients vs /clients-analytics clash)', () => {
@@ -139,10 +149,11 @@ describe('buildCategorizedResources', () => {
     expect(result['Настройки']).toEqual([]);
   });
 
-  it('excludes orders_view and calendar from categorized list (handled in top menu)', () => {
+  it('excludes orders, calendar and status board from categorized list', () => {
     const resources: IResourceItem[] = [
       makeResource('orders_view', '/orders'),
       makeResource('calendar', '/calendar'),
+      makeResource('order-status-board', '/order-status-board'),
     ];
     const result = buildCategorizedResources({
       resources,
@@ -195,11 +206,18 @@ describe('resolveOrdersRoute and resolveCalendarRoute', () => {
     ];
     expect(resolveOrdersRoute(resources, {}).route).toBe('/custom-orders');
     expect(resolveCalendarRoute(resources, {}).route).toBe('/custom-calendar');
+    expect(
+      resolveStatusBoardRoute(
+        [makeResource('order-status-board', '/custom-board')],
+        {},
+      ).route,
+    ).toBe('/custom-board');
   });
 
   it('falls back to /orders and /calendar when resource is missing', () => {
     expect(resolveOrdersRoute([], {}).route).toBe('/orders');
     expect(resolveCalendarRoute([], {}).route).toBe('/calendar');
+    expect(resolveStatusBoardRoute([], {}).route).toBe('/order-status-board');
   });
 
   it('falls back to Russian labels when not in label map', () => {
@@ -207,6 +225,7 @@ describe('resolveOrdersRoute and resolveCalendarRoute', () => {
     expect(orders.label).toBe('Заказы');
     const calendar = resolveCalendarRoute([], {});
     expect(calendar.label).toBe('Календарь');
+    expect(resolveStatusBoardRoute([], {}).label).toBe('Доски статусов');
   });
 });
 
@@ -279,6 +298,21 @@ describe('buildTopMenuItems', () => {
     expect(items.map((i) => (i as { key: string }).key)).toEqual([
       'orders_view',
       'calendar',
+      'crm',
+    ]);
+  });
+
+  it('renders the status board directly below Calendar and before CRM', () => {
+    const items = buildTopMenuItems({
+      ...baseArgs,
+      statusBoard: { route: '/order-status-board', label: 'Доски статусов' },
+      crm: { url: 'https://crm-test.mebelkz.app', label: 'CRM' },
+      openExternal: () => {},
+    });
+    expect(items.map((item) => (item as { key: string }).key)).toEqual([
+      'orders_view',
+      'calendar',
+      'order-status-board',
       'crm',
     ]);
   });

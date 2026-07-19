@@ -24,6 +24,7 @@ const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edi
 const OrderCreate = lazy(async () => ({ default: (await import("./pages/orders/create")).OrderCreate }));
 const OrderTrash = lazy(async () => ({ default: (await import("./pages/orders/trash")).OrderTrash }));
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
+const OrderStatusBoardPage = lazy(async () => ({ default: (await import("./pages/orderStatusBoard")).OrderStatusBoardPage }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const BazisPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisPage")).BazisPage }));
 const BazisProjectViewPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisProjectViewPage")).BazisProjectViewPage }));
@@ -258,6 +259,15 @@ const ThemedApp = () => {
                     label: "Календарь",
                   },
                 },
+                ...(featureFlags.orderStatusBoard
+                  ? [{
+                      name: "order-status-board",
+                      list: "/order-status-board",
+                      meta: {
+                        label: "Доски статусов",
+                      },
+                    }]
+                  : []),
                 ...(featureFlags.useBackendGroups
                   ? [
                       {
@@ -647,6 +657,11 @@ const ThemedApp = () => {
                   <Route path="/calendar" >
                     <Route index element={<CalendarList />} />
                   </Route>
+                  {featureFlags.orderStatusBoard && (
+                    <Route path="/order-status-board">
+                      <Route index element={<OrderStatusBoardPage />} />
+                    </Route>
+                  )}
                   {featureFlags.useBackendGroups && (
                     <Route path="/groups">
                       <Route index element={<GroupsPage />} />

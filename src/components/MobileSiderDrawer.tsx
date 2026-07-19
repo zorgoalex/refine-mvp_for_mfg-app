@@ -10,7 +10,7 @@ import { featureFlags } from "../config/featureFlags";
 import { isLegacyAdminUser, canViewNavigationResource, canViewSettingsCategory } from "../utils/navigationPermissions";
 import { can } from "../utils/permissions";
 import { useSiderMenuItems } from "../utils/siderMenuItems";
-import { crmMenuConfig } from "../config/crm";
+import { bitrix24MenuConfig } from "../config/bitrix24";
 import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
 import {
   canViewResourceByRoleVisibility,
@@ -60,6 +60,7 @@ const CATEGORY_MAP: Record<string, string> = {
 const RESOURCE_LABELS: Record<string, string> = {
   orders_view: "Заказы",
   calendar: "Календарь",
+  'order-status-board': "Доски статусов",
   groups: "Группы",
   projects: "Проекты",
   clients: "Клиенты",
@@ -124,7 +125,9 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
     canViewSettings,
     canCreateOrders,
     setIsCreateModalOpen,
-    crm: crmMenuConfig ? { ...crmMenuConfig, icon: <ContactsOutlined /> } : null,
+    crm: bitrix24MenuConfig
+      ? { ...bitrix24MenuConfig, icon: <ContactsOutlined /> }
+      : null,
   });
 
   return (

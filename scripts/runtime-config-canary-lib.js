@@ -17,6 +17,7 @@ const ROLLOUT_FEATURE_KEYS = [
   'backendCut',
   'bazisCut',
   'labels',
+  'orderStatusBoard',
   'workosAuth',
 ];
 

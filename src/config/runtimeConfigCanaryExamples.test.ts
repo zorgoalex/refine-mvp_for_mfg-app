@@ -28,6 +28,7 @@ const EXPECTED_FEATURE_KEYS = [
   'backendCut',
   'bazisCut',
   'labels',
+  'orderStatusBoard',
   'enableLegacyHasura',
   'workosAuth',
 ];

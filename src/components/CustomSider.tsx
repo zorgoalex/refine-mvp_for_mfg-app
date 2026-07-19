@@ -23,7 +23,10 @@ import {
 } from "../utils/navigationPermissions";
 import { can } from "../utils/permissions";
 import { useSiderMenuItems } from "../utils/siderMenuItems";
-import { crmMenuConfig, ensureCrmResourceHints } from "../config/crm";
+import {
+  bitrix24MenuConfig,
+  ensureBitrix24ResourceHints,
+} from "../config/bitrix24";
 import { RESOURCE_LABELS } from "../utils/tabLabels";
 import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
 import {
@@ -97,10 +100,9 @@ export const CustomSider: React.FC = () => {
   const [collapsed, setCollapsed] = useState(true);
   const { getSetting } = useAppSettings();
 
-  // Warm DNS/TLS to the CRM origin while the user works in ERP, so the first
-  // CRM open is a touch faster (repeat opens reuse the named tab).
+  // Warm DNS/TLS to Bitrix24 while the user works in ERP.
   useEffect(() => {
-    if (crmMenuConfig) ensureCrmResourceHints(crmMenuConfig.url);
+    if (bitrix24MenuConfig) ensureBitrix24ResourceHints(bitrix24MenuConfig.url);
   }, []);
 
   const currentUser = featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser();
@@ -144,7 +146,9 @@ export const CustomSider: React.FC = () => {
     canViewSettings,
     canCreateOrders,
     setIsCreateModalOpen,
-    crm: crmMenuConfig ? { ...crmMenuConfig, icon: <ContactsOutlined /> } : null,
+    crm: bitrix24MenuConfig
+      ? { ...bitrix24MenuConfig, icon: <ContactsOutlined /> }
+      : null,
   });
 
   return (
@@ -180,7 +184,13 @@ export const CustomSider: React.FC = () => {
       >
         <Menu
           mode="inline"
-          selectedKeys={sider.selectedKey === "orders_view" || sider.selectedKey === "calendar" ? [sider.selectedKey] : []}
+          selectedKeys={
+            sider.selectedKey === "orders_view" ||
+            sider.selectedKey === "calendar" ||
+            sider.selectedKey === "order-status-board"
+              ? [sider.selectedKey]
+              : []
+          }
           items={sider.topMenuItems}
           style={{ background: "transparent", border: "none", marginBottom: 0, color: "#E0E0E0" }}
           className="orders-menu"

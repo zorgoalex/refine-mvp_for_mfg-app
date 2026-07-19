@@ -22,7 +22,7 @@ export interface SiderMenuData {
   handleNewOrder: () => void;
 }
 
-/** External CRM (Twenty) link rendered in the top menu, below Calendar. */
+/** External CRM link rendered in the top menu, below Calendar. */
 export interface TopMenuCrmInput {
   url: string;
   label: string;
@@ -49,9 +49,7 @@ export interface UseSiderMenuItemsInput {
 
 /**
  * Stable target name so the CRM tab is reused instead of spawning a new one.
- * We deliberately do NOT pass `noopener`/`noreferrer`: those force every open
- * into a fresh browsing-context group, which defeats name-based reuse. Twenty
- * is a trusted first-party target, so the retained `window.opener` is acceptable.
+ * Reuses one named external tab so repeated clicks focus it without reloading.
  */
 export const CRM_WINDOW_NAME = 'erpCrmWindow';
 
@@ -104,6 +102,7 @@ export function buildTopMenuItems(args: {
   ordersLabel: string;
   calendarRoute: string;
   calendarLabel: string;
+  statusBoard?: { route: string; label: string } | null;
   push: (route: string) => void;
   crm?: TopMenuCrmInput | null;
   openExternal?: (url: string) => void;
@@ -126,6 +125,15 @@ export function buildTopMenuItems(args: {
           label: args.calendarLabel,
           title: args.calendarLabel,
           onClick: () => args.push(args.calendarRoute),
+        }
+      : null,
+    args.statusBoard && args.canViewNavigation('order-status-board')
+      ? {
+          key: 'order-status-board',
+          icon: args.resourceIcons['order-status-board'],
+          label: args.statusBoard.label,
+          title: args.statusBoard.label,
+          onClick: () => args.push(args.statusBoard!.route),
         }
       : null,
     args.crm
@@ -179,7 +187,11 @@ export function buildCategorizedResources(args: {
   );
 
   resources.forEach((resource) => {
-    if (resource.name === 'orders_view' || resource.name === 'calendar') {
+    if (
+      resource.name === 'orders_view' ||
+      resource.name === 'calendar' ||
+      resource.name === 'order-status-board'
+    ) {
       return;
     }
     const category = categoryMap[resource.name] || 'Справочники';
@@ -225,6 +237,18 @@ export function resolveCalendarRoute(
   const calendarResource = resources.find((r) => r.name === 'calendar');
   const route = typeof calendarResource?.list === 'string' ? calendarResource.list : '/calendar';
   const label = resourceLabels['calendar'] || 'Календарь';
+  return { route, label };
+}
+
+/** Pick the status-board resource route and label with safe fallbacks. */
+export function resolveStatusBoardRoute(
+  resources: SiderResource[],
+  resourceLabels: Record<string, string>,
+): { route: string; label: string } {
+  const resource = resources.find((item) => item.name === 'order-status-board');
+  const route =
+    typeof resource?.list === 'string' ? resource.list : '/order-status-board';
+  const label = resourceLabels['order-status-board'] || 'Доски статусов';
   return { route, label };
 }
 
@@ -298,6 +322,14 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
     [resources, resourceLabels],
   );
 
+  const statusBoard = useMemo(
+    () =>
+      resources.some((resource) => resource.name === 'order-status-board')
+        ? resolveStatusBoardRoute(resources, resourceLabels)
+        : null,
+    [resources, resourceLabels],
+  );
+
   const handleNavigate = (route: string) => {
     push(route);
   };
@@ -314,6 +346,7 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
     ordersLabel,
     calendarRoute,
     calendarLabel,
+    statusBoard,
     push,
     crm,
     openExternal,

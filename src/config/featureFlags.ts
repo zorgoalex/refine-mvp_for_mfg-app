@@ -18,6 +18,7 @@ export interface FrontendFeatureFlags {
   useBackendBazis: boolean;
   labels: boolean;
   statusAutomation: boolean;
+  orderStatusBoard: boolean;
   // Variant B: gates reads that depend on migration 034 Hasura schema
   // (sheet_material_type_id as the sole order-material reference; order_details_view
   // now returns sheet name only). Default MUST stay false — a FRESH env (no 034 applied)
@@ -55,6 +56,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   bazisImport: string | boolean;
   labels: string | boolean;
   statusAutomation: string | boolean;
+  orderStatusBoard: string | boolean;
   sheetMaterialsReads: string | boolean;
   sheetMaterials: string | boolean;
   enableLegacyHasura: string | boolean;
@@ -97,6 +99,7 @@ export function getFeatureFlags(
     useBackendBazis: readBooleanFlag(env.VITE_USE_BACKEND_BAZIS, false),
     labels: readBooleanFlag(env.VITE_USE_BACKEND_LABELS, false),
     statusAutomation: readBooleanFlag(env.VITE_STATUS_AUTOMATION, false),
+    orderStatusBoard: readBooleanFlag(env.VITE_ORDER_STATUS_BOARD, false),
     sheetMaterialsReads: readBooleanFlag(env.VITE_SHEET_MATERIALS_READS, false),
     enableLegacyHasura: readBooleanFlag(env.VITE_ENABLE_LEGACY_HASURA, true),
     workosAuth: readBooleanFlag(env.VITE_WORKOS_AUTH, false),
@@ -151,6 +154,8 @@ export function mergeRuntimeFeatureFlags(
     labels: readOptionalBooleanFlag(runtimeFeatures.labels) ?? fallback.labels,
     statusAutomation:
       readOptionalBooleanFlag(runtimeFeatures.statusAutomation) ?? fallback.statusAutomation,
+    orderStatusBoard:
+      readOptionalBooleanFlag(runtimeFeatures.orderStatusBoard) ?? fallback.orderStatusBoard,
     sheetMaterialsReads:
       readOptionalBooleanFlag(runtimeFeatures.sheetMaterialsReads) ??
       readOptionalBooleanFlag(runtimeFeatures.sheetMaterials) ??
@@ -180,6 +185,7 @@ function enforceFrontendFeatureDependencies(flags: FrontendFeatureFlags): Fronte
     useBackendDeadlines:
       flags.useBackendDeadlines && flags.useBackendAuth && flags.useBackendOrdersRead,
     bazisCut: flags.bazisCut && flags.useBackendCut,
+    orderStatusBoard: flags.orderStatusBoard && flags.useBackendOrdersRead,
     workosAuth: flags.workosAuth && flags.useBackendAuth,
   };
 }

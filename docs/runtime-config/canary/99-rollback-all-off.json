@@ -16,6 +16,7 @@
     "backendCut": false,
     "bazisCut": false,
     "labels": false,
+    "orderStatusBoard": false,
     "enableLegacyHasura": true,
     "workosAuth": false
   }

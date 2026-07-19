@@ -30,6 +30,7 @@ describe('featureFlags', () => {
       useBackendBazis: false,
       labels: false,
       statusAutomation: false,
+      orderStatusBoard: false,
       sheetMaterialsReads: false,
       enableLegacyHasura: true,
       workosAuth: false,
@@ -40,6 +41,23 @@ describe('featureFlags', () => {
     expect(getFeatureFlags({}).statusAutomation).toBe(false);
     expect(getFeatureFlags({ VITE_STATUS_AUTOMATION: 'true' }).statusAutomation).toBe(true);
     expect(getFeatureFlags({}, { statusAutomation: true }).statusAutomation).toBe(true);
+  });
+
+  it('fails closed for the order status board until backend orders reads are enabled', () => {
+    expect(getFeatureFlags({}).orderStatusBoard).toBe(false);
+    expect(getFeatureFlags({ VITE_ORDER_STATUS_BOARD: 'true' }).orderStatusBoard).toBe(false);
+    expect(
+      getFeatureFlags({
+        VITE_ORDER_STATUS_BOARD: 'true',
+        VITE_USE_BACKEND_ORDERS_READ: 'true',
+      }).orderStatusBoard,
+    ).toBe(true);
+    expect(
+      getFeatureFlags(
+        { VITE_USE_BACKEND_ORDERS_READ: 'true' },
+        { orderStatusBoard: true },
+      ).orderStatusBoard,
+    ).toBe(true);
   });
 
   it('reads the SP3 sheetMaterialsReads flag from env and runtime config, default off', () => {

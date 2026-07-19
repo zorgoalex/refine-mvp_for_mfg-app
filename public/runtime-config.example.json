@@ -17,6 +17,7 @@
     "bazisCut": false,
     "backendProjects": false,
     "statusAutomation": false,
+    "orderStatusBoard": false,
     "enableLegacyHasura": true,
     "workosAuth": false
   }

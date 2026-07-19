@@ -19,6 +19,7 @@ export interface FrontendRuntimeConfigResponse {
     projects: boolean;
     bazisImport: boolean;
     labels: boolean;
+    orderStatusBoard: boolean;
     enableLegacyHasura: boolean;
     workosAuth: boolean;
   };
@@ -63,6 +64,7 @@ export function buildFrontendRuntimeConfig(
       projects: readBooleanEnv(env.RUNTIME_CONFIG_PROJECTS, false),
       bazisImport: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_BAZIS, false),
       labels: readBooleanEnv(env.RUNTIME_CONFIG_LABELS, false),
+      orderStatusBoard: readBooleanEnv(env.RUNTIME_CONFIG_ORDER_STATUS_BOARD, false),
       enableLegacyHasura: readBooleanEnv(env.RUNTIME_CONFIG_ENABLE_LEGACY_HASURA, true),
       workosAuth: readBooleanEnv(env.RUNTIME_CONFIG_WORKOS_AUTH, false),
     },

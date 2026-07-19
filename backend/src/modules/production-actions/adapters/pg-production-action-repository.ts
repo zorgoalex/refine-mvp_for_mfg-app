@@ -393,7 +393,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           clientId: order.clientId,
           orderStatusId: status.orderStatusId,
           action: 'order_status_change',
-          scope: { source: 'calendar|order-header' },
+          scope: { source: 'calendar|order-header|kanban' },
           idempotencyKey: command.dto.idempotencyKey,
         },
       });
@@ -690,7 +690,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           affectedDetailIds,
           affectedDetailCount: affectedDetailIds.length,
           action: 'production_status_change',
-          scope: { source: 'order-header' },
+          scope: { source: 'order-header|kanban' },
           accessVia: access.accessVia,
           assignmentSource: access.assignmentSource,
           idempotencyKey: command.dto.idempotencyKey,

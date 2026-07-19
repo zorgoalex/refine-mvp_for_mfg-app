@@ -22,6 +22,7 @@ import {
   HomeOutlined,
   IdcardOutlined,
   InboxOutlined,
+  LayoutOutlined,
   ProjectOutlined,
   QrcodeOutlined,
   ScissorOutlined,
@@ -41,6 +42,7 @@ import {
 export const SIDER_RESOURCE_ICONS: Record<string, React.ReactNode> = {
   orders_view: <FileTextOutlined />,
   calendar: <CalendarOutlined />,
+  'order-status-board': <LayoutOutlined />,
   scan: <QrcodeOutlined />,
   'orders-trash': <DeleteOutlined />,
   groups: <ProjectOutlined />,

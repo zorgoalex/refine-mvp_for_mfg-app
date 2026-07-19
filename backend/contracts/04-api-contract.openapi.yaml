@@ -838,6 +838,99 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/orders/status-board:
+    get:
+      tags:
+        - Orders
+      operationId: getOrderStatusBoard
+      summary: Получить доску статусов заказов
+      description: |
+        Возвращает независимую проекцию общих или производственных статусов.
+        Начальный запрос содержит первую ограниченную страницу каждой колонки;
+        последующие страницы одной колонки используют opaque keyset cursor.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - name: board
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [order, production]
+        - name: column
+          in: query
+          required: false
+          description: ID статуса или virtual key `unassigned` для production.
+          schema:
+            type: string
+            pattern: '^(unassigned|[1-9][0-9]*)$'
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor; требует параметр column.
+          schema:
+            type: string
+            maxLength: 2000
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 60
+            default: 24
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - name: onlyMyOrders
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - name: overdueOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - name: plannedFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: plannedTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Доска статусов
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderStatusBoardResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/orders/form-data:
     get:
       tags:
@@ -12588,6 +12681,194 @@ components:
             createdTo:
               type: string
               format: date-time
+
+    OrderStatusBoardResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - board
+        - generatedAt
+        - filterKey
+        - financialsVisible
+        - columns
+      properties:
+        board:
+          type: string
+          enum: [order, production]
+        generatedAt:
+          type: string
+          format: date-time
+        filterKey:
+          type: string
+        financialsVisible:
+          type: boolean
+        columns:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderStatusBoardColumn'
+
+    OrderStatusBoardColumn:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - status
+        - total
+        - cards
+        - nextCursor
+      properties:
+        key:
+          type: string
+        status:
+          $ref: '#/components/schemas/OrderStatusBoardStatus'
+        total:
+          type: integer
+          minimum: 0
+        cards:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderStatusBoardCard'
+        nextCursor:
+          type: string
+          nullable: true
+
+    OrderStatusBoardStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - code
+        - name
+        - color
+        - sortOrder
+        - isActive
+      properties:
+        id:
+          type: integer
+          format: int64
+          nullable: true
+        code:
+          type: string
+          nullable: true
+        name:
+          type: string
+        color:
+          type: string
+          nullable: true
+        sortOrder:
+          type: integer
+        isActive:
+          type: boolean
+
+    OrderStatusBoardCard:
+      type: object
+      additionalProperties: false
+      required:
+        - orderId
+        - orderName
+        - fullNumber
+        - clientId
+        - clientName
+        - priority
+        - plannedCompletionDate
+        - pastPlannedDate
+        - orderStatusId
+        - orderStatusName
+        - productionStatusId
+        - productionStatusName
+        - productionStatusFromDetailsEnabled
+        - paymentStatusId
+        - paymentStatusName
+        - finalAmount
+        - paidAmount
+        - debtAmount
+        - partsCount
+        - totalArea
+        - managerId
+        - managerName
+        - updatedAt
+        - version
+        - canChangeOrderStatus
+        - canChangeProductionStatus
+      properties:
+        orderId:
+          type: integer
+          format: int64
+        orderName:
+          type: string
+        fullNumber:
+          type: string
+        clientId:
+          type: integer
+          format: int64
+        clientName:
+          type: string
+          nullable: true
+        priority:
+          type: integer
+        plannedCompletionDate:
+          type: string
+          format: date
+          nullable: true
+        pastPlannedDate:
+          type: boolean
+        orderStatusId:
+          type: integer
+          format: int64
+        orderStatusName:
+          type: string
+        productionStatusId:
+          type: integer
+          format: int64
+          nullable: true
+        productionStatusName:
+          type: string
+          nullable: true
+        productionStatusFromDetailsEnabled:
+          type: boolean
+        paymentStatusId:
+          type: integer
+          format: int64
+          nullable: true
+        paymentStatusName:
+          type: string
+          nullable: true
+        finalAmount:
+          type: number
+          format: decimal
+          nullable: true
+        paidAmount:
+          type: number
+          format: decimal
+          nullable: true
+        debtAmount:
+          type: number
+          format: decimal
+          nullable: true
+        partsCount:
+          type: integer
+          minimum: 0
+        totalArea:
+          type: number
+          format: decimal
+          minimum: 0
+        managerId:
+          type: integer
+          format: int64
+          nullable: true
+        managerName:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          minimum: 0
+        canChangeOrderStatus:
+          type: boolean
+        canChangeProductionStatus:
+          type: boolean
 
     OrderListResponse:
       type: object

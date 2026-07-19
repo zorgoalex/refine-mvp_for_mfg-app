@@ -10,6 +10,7 @@ describe('resolveTabLabel', () => {
   it('maps a list route to its resource label', () => {
     expect(resolveTabLabel('/orders')).toBe('Заказы');
     expect(resolveTabLabel('/calendar')).toBe('Календарь');
+    expect(resolveTabLabel('/order-status-board')).toBe('Доски статусов');
     expect(resolveTabLabel('/groups')).toBe('Группы');
   });
   it('does not expose an order id in an edit tab before the record loads', () => {
@@ -40,6 +41,7 @@ describe('resolveTabLabel', () => {
   it('exposes RESOURCE_LABELS for the sider', () => {
     expect(RESOURCE_LABELS.orders_view).toBe('Заказы');
     expect(RESOURCE_LABELS.groups).toBe('Группы');
+    expect(RESOURCE_LABELS['order-status-board']).toBe('Доски статусов');
   });
 });
 
