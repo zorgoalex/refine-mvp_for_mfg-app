@@ -55,7 +55,12 @@ next-env.d.ts
 .gstack/
 ai_docs/
 /session-handoffs/
-/docs/
+/docs/*
+!/docs/project-overview.md
+!/docs/configuration-and-auth.md
+!/docs/deployment-and-operations.md
+!/docs/feature-guides.md
+!/docs/development-and-testing.md
 .claude/
 .agents/
 .gemini/
