@@ -44,6 +44,9 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     () => templates.find((template) => template.labelTemplateId === templateId) ?? null,
     [templateId, templates],
   );
+  const previewAspectRatio = selectedTemplate
+    ? selectedTemplate.canvasWidthMm / selectedTemplate.canvasHeightMm
+    : 1;
   const detailFilters = useMemo(
     () => previewDetailId ? { detailIds: [previewDetailId] } : undefined,
     [previewDetailId],
@@ -152,10 +155,8 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         <style>{`
           .order-label-preview-fit svg {
             display: block;
-            max-width: 100%;
-            max-height: 58vh;
-            width: auto;
-            height: auto;
+            width: 100%;
+            height: 100%;
           }
         `}</style>
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
@@ -195,7 +196,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
           >
             Использовать поля базис проекта
           </Checkbox>
-          {preview && (
+          {preview && selectedTemplate && (
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
               <Text type="secondary">Бирок: {preview.labelCount}. Показана первая.</Text>
               {preview.svgPages.slice(0, 1).map((svg, index) => (
@@ -203,13 +204,13 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
                   key={index}
                   className="order-label-preview-fit"
                   style={{
-                    alignItems: 'center',
+                    aspectRatio: `${selectedTemplate.canvasWidthMm} / ${selectedTemplate.canvasHeightMm}`,
+                    background: '#fff',
                     border: '1px solid var(--app-border)',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    minHeight: 260,
+                    boxSizing: 'border-box',
+                    lineHeight: 0,
                     overflow: 'hidden',
-                    padding: 12,
+                    width: `min(100%, calc(58vh * ${previewAspectRatio}))`,
                   }}
                   dangerouslySetInnerHTML={{ __html: svg }}
                 />

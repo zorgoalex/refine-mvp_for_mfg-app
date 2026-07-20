@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { LabelTemplateElement } from '../../../api/types/labelsApi.types';
+import type { LabelFieldCatalogItem, LabelTemplateElement } from '../../../api/types/labelsApi.types';
 import {
   customFieldRowsFromSchema,
   customFieldRowsToSchema,
+  describeLabelFieldSource,
   resolveLatestStateUpdate,
   snapElementCenters,
 } from './labelTemplateEditorHelpers';
@@ -125,5 +126,69 @@ describe('label template editor helpers', () => {
     const second = resolveLatestStateUpdate(first, (current) => [...current, 3]);
 
     expect(second).toEqual([1, 2, 3]);
+  });
+
+  it.each([
+    [
+      {
+        id: 'detail.milling_type_name',
+        source: 'detail',
+        sourceColumn: 'milling_type_name',
+        label: 'Фрезеровка',
+        type: 'string',
+        category: 'Деталь',
+      },
+      {
+        entity: 'Деталь заказа',
+        databasePath: 'order_details_view.milling_type_name',
+      },
+    ],
+    [
+      {
+        id: 'order.client_name',
+        source: 'order',
+        sourceColumn: 'client_name',
+        label: 'Клиент',
+        type: 'string',
+        category: 'Заказ',
+      },
+      {
+        entity: 'Заказ',
+        databasePath: 'orders_view.client_name',
+      },
+    ],
+    [
+      {
+        id: 'date.today',
+        source: 'dynamic',
+        sourceColumn: null,
+        label: 'Сегодня',
+        type: 'date',
+        category: 'Динамические',
+      },
+      {
+        entity: 'Вычисляемое поле',
+        databasePath: 'В БД не хранится',
+      },
+    ],
+  ] satisfies Array<[LabelFieldCatalogItem, { entity: string; databasePath: string }]>)(
+    'describes the database source for $id',
+    (field, expected) => {
+      expect(describeLabelFieldSource(field)).toEqual(expected);
+    },
+  );
+
+  it('describes custom field schema and stored values separately', () => {
+    expect(describeLabelFieldSource({
+      id: 'custom.operator_note',
+      source: 'dynamic',
+      sourceColumn: null,
+      label: 'Комментарий оператора',
+      type: 'string',
+      category: 'Кастомные',
+    })).toEqual({
+      entity: 'Пользовательское поле шаблона',
+      databasePath: 'label_templates.custom_field_schema (источник/константа) · order_label_detail_data.custom_fields (переопределение)',
+    });
   });
 });
