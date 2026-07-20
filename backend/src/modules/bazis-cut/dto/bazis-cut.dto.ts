@@ -108,6 +108,7 @@ export interface BazisCutSetDetailDto extends BazisCutDetailFields {
   sourceProjectCode: string;
   sourceBazisProjectName: string;
   sourceBazisOrderNo: string;
+  sourceBazisProductName: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -129,4 +130,3 @@ export interface BazisCutMutationResultDto {
   set: BazisCutSetDto;
   addedCount?: number;
 }
-

@@ -33,7 +33,7 @@ export interface BazisCutSetListResponse {
   total: number;
 }
 
-/** Exact 33-column editable/export snapshot carried by every set detail. */
+/** The 33 editable Basis fields; frozen provenance is carried separately. */
 export interface BazisCutDetailFields {
   cutEnabled: boolean;
   materialType: string;
@@ -85,6 +85,7 @@ export interface BazisCutSetDetailDto extends BazisCutDetailFields {
   sourceProjectCode: string;
   sourceBazisProjectName: string;
   sourceBazisOrderNo: string;
+  sourceBazisProductName: string;
   createdAt: string;
   updatedAt: string;
 }

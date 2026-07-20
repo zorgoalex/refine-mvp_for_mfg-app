@@ -76,7 +76,8 @@ interface SourceRow extends QueryResultRow {
   detail_number: number;
   basis_designation: string | null;
   basis_data: string | null;
-  detail_bazis_order_no: string | null;
+  detail_bazis_project: string | null;
+  detail_bazis_product: string | null;
   detail_name: string | null;
   height: string | number | null;
   width: string | number | null;
@@ -117,6 +118,7 @@ interface Snapshot {
     sourceProjectCode: string;
     sourceBazisProjectName: string;
     sourceBazisOrderNo: string;
+    sourceBazisProductName: string;
   };
   fields: BazisCutDetailFields;
 }
@@ -136,8 +138,13 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
                 FILTER (WHERE d.source_order_id IS NOT NULL), '[]'::jsonb) AS orders,
               COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id', d.source_project_id, 'label', d.source_project_code))
                 FILTER (WHERE d.source_project_id IS NOT NULL), '[]'::jsonb) AS projects,
-              COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id', d.source_bazis_project_id, 'label', d.source_bazis_project_name))
-                FILTER (WHERE d.source_bazis_project_id IS NOT NULL), '[]'::jsonb) AS bazis_projects,
+              COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
+                'id', COALESCE(d.source_bazis_project_id, -d.source_order_detail_id),
+                'label', d.source_bazis_project_name
+              )) FILTER (
+                WHERE NULLIF(btrim(d.source_bazis_project_name), '') IS NOT NULL
+                  AND (d.source_bazis_project_id IS NOT NULL OR d.source_order_detail_id IS NOT NULL)
+              ), '[]'::jsonb) AS bazis_projects,
               COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
                 'id', COALESCE(d.source_bazis_revision_id, -d.source_order_detail_id),
                 'label', d.source_bazis_order_no
@@ -153,7 +160,8 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
            SELECT 1 FROM bazis_cut_set_details sd
            WHERE sd.bazis_cut_set_id=s.bazis_cut_set_id
              AND concat_ws(' ', sd.source_order_name, sd.source_order_full_number,
-               sd.source_project_code, sd.source_bazis_project_name, sd.source_bazis_order_no) ILIKE '%' || $1 || '%'
+               sd.source_project_code, sd.source_bazis_project_name, sd.source_bazis_order_no,
+               sd.source_bazis_product_name) ILIKE '%' || $1 || '%'
          ))
        GROUP BY s.bazis_cut_set_id
        ORDER BY s.created_at DESC, s.bazis_cut_set_id DESC
@@ -398,7 +406,8 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
     `SELECT od.detail_id, od.order_id, o.project_id, o.order_name,
             (p.code || '-' || o.order_name) AS order_full_number, p.code::text AS project_code,
             smt.name AS material_name, smt.thickness_mm, od.detail_number,
-            od.basis_designation, od.basis_data, od.basis_product AS detail_bazis_order_no,
+            od.basis_designation, od.basis_data, od.basis_project AS detail_bazis_project,
+            od.basis_product AS detail_bazis_product,
             od.detail_name, od.height, od.width,
             od.quantity, od.note, mt.milling_type_name AS milling, f.film_name AS film,
             COALESCE(od.doweling, false) AS doweling,
@@ -471,6 +480,7 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
     if (!fields) { invalid.push(toNumber(row.detail_id)); continue; }
     const bazisProjectId = exactCount === 1 ? nullableNumber(row.exact_bazis_project_id) : nullableNumber(row.fallback_bazis_project_id);
     const bazisRevisionId = exactCount === 1 ? nullableNumber(row.exact_revision_id) : nullableNumber(row.fallback_revision_id);
+    const bazisLabels = resolveBazisDetailLabels(row.detail_bazis_project, row.detail_bazis_product);
     snapshots.push({
       provenance: {
         sourceOrderDetailId: toNumber(row.detail_id), sourceOrderId: toNumber(row.order_id),
@@ -479,12 +489,7 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
         sourceBazisNodeId: exactCount === 1 ? nullableNumber(row.exact_node_id) : null,
         sourceOrderName: row.order_name, sourceOrderFullNumber: row.order_full_number,
         sourceProjectCode: row.project_code,
-        sourceBazisProjectName: (exactCount === 1 ? row.exact_bazis_project_name : row.fallback_bazis_project_name) ?? '',
-        sourceBazisOrderNo: resolveBazisOrderNo(
-          row.detail_bazis_order_no,
-          exactCount === 1 ? row.exact_bazis_order_no : null,
-          row.fallback_bazis_order_no,
-        ),
+        ...bazisLabels,
       },
       fields,
     });
@@ -502,6 +507,7 @@ async function insertSnapshots(client: DatabaseClient, setId: number, snapshots:
     'source_order_detail_id', 'source_order_id', 'source_project_id', 'source_bazis_project_id',
     'source_bazis_revision_id', 'source_bazis_node_id', 'source_order_name',
     'source_order_full_number', 'source_project_code', 'source_bazis_project_name', 'source_bazis_order_no',
+    'source_bazis_product_name',
   ];
   for (let index = 0; index < snapshots.length; index += 1) {
     const snapshot = snapshots[index];
@@ -509,7 +515,7 @@ async function insertSnapshots(client: DatabaseClient, setId: number, snapshots:
     const values = [setId, startSort + index,
       p.sourceOrderDetailId, p.sourceOrderId, p.sourceProjectId, p.sourceBazisProjectId,
       p.sourceBazisRevisionId, p.sourceBazisNodeId, p.sourceOrderName, p.sourceOrderFullNumber,
-      p.sourceProjectCode, p.sourceBazisProjectName, p.sourceBazisOrderNo,
+      p.sourceProjectCode, p.sourceBazisProjectName, p.sourceBazisOrderNo, p.sourceBazisProductName,
       ...fieldsToValues(snapshot.fields), userId, userId];
     const columns = ['bazis_cut_set_id', 'sort_order', ...provenanceColumns, ...DETAIL_FIELD_COLUMNS, 'created_by', 'updated_by'];
     await client.query(
@@ -538,7 +544,7 @@ async function loadSet(client: DatabaseClient, setId: number): Promise<BazisCutS
     quantity: details.reduce((sum, detail) => sum + detail.quantity, 0), positionCount: details.length,
     orders: refs(details, 'sourceOrderId', 'sourceOrderFullNumber'),
     projects: refs(details, 'sourceProjectId', 'sourceProjectCode'),
-    bazisProjects: refs(details, 'sourceBazisProjectId', 'sourceBazisProjectName'),
+    bazisProjects: labelRefs(details, 'sourceBazisProjectId', 'sourceBazisProjectName'),
     bazisOrders: labelRefs(details, 'sourceBazisRevisionId', 'sourceBazisOrderNo'),
   };
 }
@@ -562,6 +568,7 @@ function mapDetail(row: DetailRow): BazisCutSetDetailDto {
     sourceOrderName: textValue(row.source_order_name), sourceOrderFullNumber: textValue(row.source_order_full_number),
     sourceProjectCode: textValue(row.source_project_code), sourceBazisProjectName: textValue(row.source_bazis_project_name),
     sourceBazisOrderNo: textValue(row.source_bazis_order_no),
+    sourceBazisProductName: textValue(row.source_bazis_product_name),
     cutEnabled: Boolean(row.cut_enabled), materialType: textValue(row.material_type), materialName: textValue(row.material_name),
     materialArticle: textValue(row.material_article), thicknessMm: toNumber(row.thickness_mm), position: textValue(row.position),
     partName: textValue(row.part_name), finishedLengthMm: toNumber(row.finished_length_mm),
@@ -750,14 +757,16 @@ function parseRefs(value: unknown): BazisCutSourceRefDto[] {
     .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
 }
 
-export function resolveBazisOrderNo(
-  detailBazisOrderNo: string | null,
-  exactBazisOrderNo: string | null,
-  fallbackBazisOrderNo: string | null,
-): string {
-  return [detailBazisOrderNo, exactBazisOrderNo, fallbackBazisOrderNo]
-    .map((value) => value?.trim())
-    .find((value): value is string => Boolean(value)) ?? '';
+export function resolveBazisDetailLabels(
+  detailBazisProject: string | null,
+  detailBazisProduct: string | null,
+): Pick<Snapshot['provenance'], 'sourceBazisProjectName' | 'sourceBazisOrderNo' | 'sourceBazisProductName'> {
+  const basisProject = detailBazisProject?.trim() ?? '';
+  return {
+    sourceBazisProjectName: basisProject,
+    sourceBazisOrderNo: basisProject,
+    sourceBazisProductName: detailBazisProduct?.trim() ?? '',
+  };
 }
 
 function hashRequest(command: string, user: CurrentUser, body: unknown): string {
