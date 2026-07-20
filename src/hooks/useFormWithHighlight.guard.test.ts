@@ -10,3 +10,16 @@ describe('useFormWithHighlight tab title enrichment', () => {
     expect(source).toMatch(/record:\s*formReturn\.queryResult\?\.data\?\.data/);
   });
 });
+
+describe('useFormWithHighlight success navigation', () => {
+  it('resolves registered resource routes instead of deriving URLs from resource names', () => {
+    expect(source).toMatch(/useGo/);
+    expect(source).toMatch(/to:\s*\{\s*resource,\s*action:\s*["']list["']\s*\}/);
+    expect(source).toMatch(/query:\s*\{\s*highlightId:\s*recordId\s*\}/);
+    expect(source).toMatch(
+      /to:\s*\{\s*resource,\s*action:\s*["']show["'],\s*id:\s*recordId\s*\}/,
+    );
+    expect(source).toMatch(/type:\s*["']replace["']/);
+    expect(source).not.toMatch(/window\.location/);
+  });
+});
