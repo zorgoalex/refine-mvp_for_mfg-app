@@ -168,6 +168,35 @@ describe('label row builder', () => {
     expect(row.values['custom.client']).toBe('Manual client');
     expect(row.values['custom.detail_priority']).toBe(8);
   });
+
+  it('uses a custom field constant as the label value unless detail data overrides it', () => {
+    const rows = buildLabelRows({
+      orderName: 'ERP-548',
+      orderFields: {},
+      today: '2026-06-24',
+      template: {
+        customFieldSchema: {
+          'custom.caption': {
+            type: 'string',
+            label: 'Подпись',
+            defaultValue: 'Собрано вручную',
+          },
+        },
+      },
+      details: [
+        detail(),
+        detail({
+          detailId: 102,
+          customFields: { 'custom.caption': 'Проверено мастером' },
+        }),
+      ],
+    });
+
+    expect(rows.map((row) => row.values['custom.caption'])).toEqual([
+      'Собрано вручную',
+      'Проверено мастером',
+    ]);
+  });
 });
 
 function detail(overrides: Partial<OrderLabelDataDetailDto> = {}): OrderLabelDataDetailDto {

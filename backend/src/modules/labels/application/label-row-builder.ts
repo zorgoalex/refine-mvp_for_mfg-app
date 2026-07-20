@@ -102,6 +102,10 @@ function buildBaseValues(
     values[`order.${key}`] = normalizeValue(value);
   }
   for (const [key, schema] of Object.entries(customFieldSchema)) {
+    const defaultValue = readCustomDefaultValue(schema);
+    if (defaultValue !== undefined) {
+      values[key] = normalizeValue(defaultValue);
+    }
     const sourceField = readCustomSourceField(schema);
     if (sourceField && values[sourceField] !== undefined) {
       values[key] = values[sourceField];
@@ -117,6 +121,14 @@ function readCustomSourceField(schema: unknown): string | null {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return null;
   const value = (schema as Record<string, unknown>).sourceField;
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readCustomDefaultValue(schema: unknown): unknown {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return undefined;
+  const value = schema as Record<string, unknown>;
+  return Object.prototype.hasOwnProperty.call(value, 'defaultValue')
+    ? value.defaultValue
+    : undefined;
 }
 
 function normalizeValue(value: unknown): string | number | boolean | null {

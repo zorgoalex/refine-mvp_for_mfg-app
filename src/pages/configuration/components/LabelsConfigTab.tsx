@@ -25,6 +25,16 @@ import {
   qrTemplateOf,
 } from './labelQrHelpers';
 import { collectDuplicateQrNames, qrDraftFromElement, qrElementFromLibrary, rowsToTemplate, sanitizeQrText, templateToRows, uniqueQrName, type QrRow } from './labelQrLibrary';
+import {
+  customFieldRowsFromSchema,
+  customFieldRowsToSchema,
+  resolveLatestStateUpdate,
+  snapElementCenters,
+  type AlignmentGuide,
+  type CustomFieldSchemaRow,
+  type CustomFieldType,
+  type CustomFieldValueMode,
+} from './labelTemplateEditorHelpers';
 import { OcrTemplatesConfig } from './OcrTemplatesConfig';
 
 const { Text } = Typography;
@@ -76,11 +86,12 @@ interface BazisImportVariant {
   templateFiles: string[];
 }
 
-interface CustomFieldSchemaRow {
-  fieldId: string;
+interface CustomFieldFormValues {
   label: string;
-  type: string;
-  sourceField: string | null;
+  type: CustomFieldType;
+  valueMode: CustomFieldValueMode;
+  sourceField?: string;
+  defaultValue?: unknown;
 }
 
 interface QrDraft {
@@ -97,15 +108,22 @@ const EMPTY_QR_DRAFT: QrDraft = { id: null, version: null, name: '', rows: [[]],
 export const LabelsConfigTab: React.FC = () => {
   const canManage = can('labels.manage_templates');
   const [form] = Form.useForm<TemplateFormValues>();
+  const [customFieldForm] = Form.useForm<CustomFieldFormValues>();
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [fields, setFields] = useState<LabelFieldCatalogItem[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<LabelTemplate | null>(null);
   const [elements, setElements] = useState<LabelTemplateElement[]>([]);
-  const [customSchemaText, setCustomSchemaText] = useState('{}');
+  const elementsRef = useRef<LabelTemplateElement[]>([]);
+  const [customFields, setCustomFields] = useState<CustomFieldSchemaRow[]>([]);
+  const customFieldsRef = useRef<CustomFieldSchemaRow[]>([]);
+  const [customFieldEditorOpen, setCustomFieldEditorOpen] = useState(false);
+  const [editingCustomFieldId, setEditingCustomFieldId] = useState<string | null>(null);
+  const [editorDirty, setEditorDirty] = useState(false);
   const [importVariants, setImportVariants] = useState<BazisImportVariant[]>([]);
   const [importFileName, setImportFileName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [saveAsName, setSaveAsName] = useState('');
   const [selectedElementKey, setSelectedElementKey] = useState<string | null>(null);
@@ -132,6 +150,35 @@ export const LabelsConfigTab: React.FC = () => {
   const qrFieldChipResolvedRef = useRef(false);
   const previewWidthMm = Form.useWatch('canvasWidthMm', form);
   const previewHeightMm = Form.useWatch('canvasHeightMm', form);
+  const customFieldValueMode = Form.useWatch('valueMode', customFieldForm);
+  const customFieldType = Form.useWatch('type', customFieldForm);
+
+  const setEditorElements = (
+    update: React.SetStateAction<LabelTemplateElement[]>,
+    markDirty = true,
+  ) => {
+    if (markDirty && savingRef.current) return;
+    const next = resolveLatestStateUpdate(elementsRef.current, update);
+    elementsRef.current = next;
+    setElements(next);
+    if (markDirty) setEditorDirty(true);
+  };
+
+  const setEditorCustomFields = (
+    update: React.SetStateAction<CustomFieldSchemaRow[]>,
+    markDirty = true,
+  ) => {
+    if (markDirty && savingRef.current) return;
+    const next = resolveLatestStateUpdate(customFieldsRef.current, update);
+    customFieldsRef.current = next;
+    setCustomFields(next);
+    if (markDirty) setEditorDirty(true);
+  };
+
+  const setTemplateSaving = (next: boolean) => {
+    savingRef.current = next;
+    setSaving(next);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -175,26 +222,38 @@ export const LabelsConfigTab: React.FC = () => {
         dpi: selectedTemplate.dpi,
         defaultExportFormats: selectedTemplate.defaultExportFormats,
       });
-      setElements(selectedTemplate.elements);
-      setCustomSchemaText(JSON.stringify(selectedTemplate.customFieldSchema ?? {}, null, 2));
+      setEditorElements(selectedTemplate.elements, false);
+      setEditorCustomFields(customFieldRowsFromSchema(selectedTemplate.customFieldSchema ?? {}), false);
+      setEditorDirty(false);
     }
   }, [form, selectedTemplate]);
 
   const fieldCategories = useMemo(() => new Set(fields.map((field) => field.category)).size, [fields]);
-  const customSchemaRows = useMemo(() => parseCustomSchemaRows(customSchemaText), [customSchemaText]);
   const sourceFields = useMemo<LabelFieldCatalogItem[]>(
     () => [
       ...fields,
-      ...customSchemaRows.rows.map((row) => ({
+      ...customFields.map((row) => ({
         id: row.fieldId,
         source: 'dynamic' as const,
         sourceColumn: null,
         label: row.label || row.fieldId,
-        type: (CUSTOM_FIELD_TYPE_OPTIONS.some((option) => option.value === row.type) ? row.type : 'string') as LabelFieldCatalogItem['type'],
+        type: row.type,
         category: 'Кастомные',
       })),
     ],
-    [customSchemaRows.rows, fields],
+    [customFields, fields],
+  );
+  const customFieldPreviewValues = useMemo(
+    () => Object.fromEntries(
+      customFields
+        .map((row) => [
+          row.fieldId,
+          row.valueMode === 'source' && row.sourceField
+            ? PREVIEW_FIELD_VALUES[row.sourceField] ?? row.label
+            : String(row.defaultValue ?? ''),
+        ]),
+    ),
+    [customFields],
   );
   // Global QR templates are backend-validated against built-in fields only (label-scoped
   // "Кастомные" fields are rejected with 422), so the QR builder's palette must never offer them.
@@ -339,8 +398,9 @@ export const LabelsConfigTab: React.FC = () => {
   }, [draggingQr]);
 
   const startNew = () => {
+    if (saving) return;
     setSelectedTemplate(null);
-    setElements([
+    setEditorElements([
       {
         elementKey: `text-${Date.now()}`,
         kind: 'text',
@@ -355,8 +415,9 @@ export const LabelsConfigTab: React.FC = () => {
         style: { fontSize: 12 },
         condition: {},
       },
-    ]);
-    setCustomSchemaText('{}');
+    ], false);
+    setEditorCustomFields([], false);
+    setEditorDirty(false);
     form.setFieldsValue({
       name: '',
       description: '',
@@ -368,7 +429,8 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const buildTemplatePayload = (values: TemplateFormValues, name = values.name): LabelTemplateInput => {
-    const customFieldSchema = parseCustomSchema(customSchemaText);
+    const currentElements = elementsRef.current;
+    const customFieldSchema = customFieldRowsToSchema(customFieldsRef.current);
     // QR is a first-class element: it may freely overlap other elements and sit
     // anywhere on the canvas (use z-index layering). Overlap/out-of-bounds is NOT
     // a conflict and never blocks saving.
@@ -379,12 +441,12 @@ export const LabelsConfigTab: React.FC = () => {
     // an older template — so saving never blocks on a missing name. Only a genuine
     // duplicate of two user-typed names is still surfaced (rare, actionable).
     const usedQrNames = new Set(
-      elements
+      currentElements
         .filter((element) => element.kind === 'qr')
         .map((element) => String((element.style as Record<string, unknown> | undefined)?.qrName ?? '').trim())
         .filter(Boolean),
     );
-    const namedElements = elements.map((element) => {
+    const namedElements = currentElements.map((element) => {
       if (element.kind !== 'qr') return element;
       const raw = String((element.style as Record<string, unknown> | undefined)?.qrName ?? '').trim();
       if (raw) return element;
@@ -432,8 +494,8 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const saveTemplate = async (values: TemplateFormValues) => {
-    if (!canManage) return;
-    setSaving(true);
+    if (!canManage || saving || qrSaving) return;
+    setTemplateSaving(true);
     try {
       const payload = buildTemplatePayload(values);
       let saved: LabelTemplate;
@@ -449,30 +511,31 @@ export const LabelsConfigTab: React.FC = () => {
       // Resetting to the blank new-template scaffold here read as "switched to
       // another template" after every save.
       setSelectedTemplate(saved);
-      setElements(saved.elements);
-      setCustomSchemaText(JSON.stringify(saved.customFieldSchema ?? {}, null, 2));
+      setEditorElements(saved.elements, false);
+      setEditorCustomFields(customFieldRowsFromSchema(saved.customFieldSchema ?? {}), false);
+      setEditorDirty(false);
     } catch (error) {
       message.error(describeSaveError(error, 'Не удалось сохранить шаблон'));
     } finally {
-      setSaving(false);
+      setTemplateSaving(false);
     }
   };
 
   const openSaveAs = async () => {
-    if (!canManage) return;
+    if (!canManage || saving || qrSaving) return;
     const values = await form.validateFields();
     setSaveAsName(`${values.name.trim() || selectedTemplate?.name || 'Шаблон'} — копия`);
     setSaveAsOpen(true);
   };
 
   const saveTemplateAs = async () => {
-    if (!canManage) return;
+    if (!canManage || saving || qrSaving) return;
     const name = saveAsName.trim();
     if (!name) {
       message.error('Введите название копии');
       return;
     }
-    setSaving(true);
+    setTemplateSaving(true);
     try {
       const values = await form.validateFields();
       const created = await labelsApi.createTemplate(buildTemplatePayload(values, name));
@@ -481,23 +544,25 @@ export const LabelsConfigTab: React.FC = () => {
       setSaveAsName('');
       await load();
       setSelectedTemplate(created);
-      setElements(created.elements);
-      setCustomSchemaText(JSON.stringify(created.customFieldSchema ?? {}, null, 2));
+      setEditorElements(created.elements, false);
+      setEditorCustomFields(customFieldRowsFromSchema(created.customFieldSchema ?? {}), false);
+      setEditorDirty(false);
     } catch (error) {
       message.error(describeSaveError(error, 'Не удалось создать копию шаблона'));
     } finally {
-      setSaving(false);
+      setTemplateSaving(false);
     }
   };
 
   const addElement = (kind: LabelElementKind) => {
+    if (!canManage || saving) return;
     const elementKey = `${kind}-${Date.now()}`;
-    setElements((current) => {
+    setEditorElements((current) => {
       const nextElement: LabelTemplateElement = {
         elementKey,
         kind,
-        sourceField: kind === 'text' ? 'bazis.name' : null,
-        staticText: kind === 'text' ? null : null,
+        sourceField: null,
+        staticText: kind === 'text' ? 'Новый текст' : null,
         xMm: kind === 'qr' ? 10 : 2,
         yMm: kind === 'qr' ? 10 : 2 + current.length * 6,
         widthMm: kind === 'line' ? 60 : kind === 'qr' ? 20 : 40,
@@ -528,7 +593,7 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const patchElement = (index: number, patch: Partial<LabelTemplateElement>) => {
-    setElements((current) => current.map((element, i) => (i === index ? { ...element, ...patch } : element)));
+    setEditorElements((current) => current.map((element, i) => (i === index ? { ...element, ...patch } : element)));
   };
 
   const currentCanvasBounds = () => ({
@@ -536,35 +601,80 @@ export const LabelsConfigTab: React.FC = () => {
     heightMm: Number(form.getFieldValue('canvasHeightMm') ?? selectedTemplate?.canvasHeightMm ?? 88),
   });
 
-  const addCustomField = () => {
-    const schema = parseEditableCustomSchema(customSchemaText);
-    const fieldId = `custom.field_${Date.now()}`;
-    schema[fieldId] = { type: 'string', label: 'Новое поле', sourceField: 'detail.detail_name' };
-    setCustomSchemaText(JSON.stringify(schema, null, 2));
+  const openCustomFieldEditor = (row?: CustomFieldSchemaRow) => {
+    if (!canManage || savingRef.current) return;
+    setEditingCustomFieldId(row?.fieldId ?? null);
+    customFieldForm.setFieldsValue({
+      label: row?.label ?? '',
+      type: row?.type ?? 'string',
+      valueMode: row?.valueMode ?? 'constant',
+      sourceField: row?.sourceField ?? undefined,
+      defaultValue: row?.defaultValue ?? '',
+    });
+    setCustomFieldEditorOpen(true);
   };
 
-  const patchCustomField = (fieldId: string, patch: Partial<CustomFieldSchemaRow>) => {
-    const schema = parseEditableCustomSchema(customSchemaText);
-    const current = normalizeCustomFieldSchemaEntry(schema[fieldId]);
-    const next = { ...current, ...patch };
-    if (!next.sourceField) delete next.sourceField;
-    schema[fieldId] = next;
-    setCustomSchemaText(JSON.stringify(schema, null, 2));
+  const saveCustomField = async () => {
+    if (!canManage || savingRef.current) return;
+    let values: CustomFieldFormValues;
+    try {
+      values = await customFieldForm.validateFields();
+    } catch {
+      return;
+    }
+    if (savingRef.current) return;
+    const duplicate = customFieldsRef.current.some((row) => (
+      row.fieldId !== editingCustomFieldId &&
+      row.label.trim().localeCompare(values.label.trim(), 'ru', { sensitivity: 'accent' }) === 0
+    ));
+    if (duplicate) {
+      message.error('Пользовательское поле с таким названием уже существует');
+      return;
+    }
+    const fieldId = editingCustomFieldId ?? `custom.field_${Date.now()}`;
+    const existing = customFieldsRef.current.find((row) => row.fieldId === fieldId);
+    const nextRow: CustomFieldSchemaRow = {
+      fieldId,
+      label: values.label.trim(),
+      type: values.type,
+      valueMode: values.valueMode,
+      sourceField: values.valueMode === 'source' ? values.sourceField ?? null : null,
+      defaultValue: values.valueMode === 'constant'
+        ? values.defaultValue ?? ''
+        : null,
+      extra: existing?.extra ?? {},
+    };
+    setEditorCustomFields((current) => {
+      const index = current.findIndex((row) => row.fieldId === fieldId);
+      return index === -1
+        ? [...current, nextRow]
+        : current.map((row) => (row.fieldId === fieldId ? nextRow : row));
+    });
+    setCustomFieldEditorOpen(false);
+    setEditingCustomFieldId(null);
+    customFieldForm.resetFields();
   };
 
   const deleteCustomField = (fieldId: string) => {
-    const schema = parseEditableCustomSchema(customSchemaText);
-    delete schema[fieldId];
-    setCustomSchemaText(JSON.stringify(schema, null, 2));
+    if (!canManage || savingRef.current) return;
+    const used = elementsRef.current.some((element) => (
+      element.sourceField === fieldId
+      || (element.kind === 'qr' && extractQrTemplateFieldIds(qrTemplateOf(element)).includes(fieldId))
+    ));
+    if (used) {
+      message.error('Поле размещено на бирке. Сначала удалите связанный элемент или выберите для него другое поле.');
+      return;
+    }
+    setEditorCustomFields((current) => current.filter((row) => row.fieldId !== fieldId));
   };
 
   const moveElement = (elementKey: string, xMm: number, yMm: number) => {
-    const target = elements.find((element) => element.elementKey === elementKey);
+    const target = elementsRef.current.find((element) => element.elementKey === elementKey);
     if (target?.kind === 'qr') {
       applyQrGeometryPatch(elementKey, { xMm: roundMm(xMm), yMm: roundMm(yMm) });
       return;
     }
-    setElements((current) =>
+    setEditorElements((current) =>
       current.map((element) =>
         element.elementKey === elementKey
           ? { ...element, xMm: roundMm(xMm), yMm: roundMm(yMm) }
@@ -574,12 +684,12 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const patchElementByKey = (elementKey: string, patch: Partial<LabelTemplateElement>) => {
-    const target = elements.find((element) => element.elementKey === elementKey);
+    const target = elementsRef.current.find((element) => element.elementKey === elementKey);
     if (target?.kind === 'qr' && (patch.xMm !== undefined || patch.yMm !== undefined || patch.widthMm !== undefined || patch.heightMm !== undefined)) {
       applyQrGeometryPatch(elementKey, patch);
       return;
     }
-    setElements((current) =>
+    setEditorElements((current) =>
       current.map((element) =>
         element.elementKey === elementKey
           ? { ...element, ...patch }
@@ -592,7 +702,7 @@ export const LabelsConfigTab: React.FC = () => {
   // nothing is pushed and there is no conflict tracking — the patch simply lands
   // and the QR is kept square (side = max of width/height via qrSideOf).
   const applyQrGeometryPatch = (elementKey: string, patch: Partial<LabelTemplateElement>) => {
-    setElements((current) => {
+    setEditorElements((current) => {
       const currentQr = current.find((element) => element.elementKey === elementKey);
       if (!currentQr || currentQr.kind !== 'qr') {
         return current.map((element) => (element.elementKey === elementKey ? { ...element, ...patch } : element));
@@ -621,7 +731,7 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const patchQrStyle = (index: number, patch: Record<string, unknown>) => {
-    setElements((current) => current.map((element, i) => (
+    setEditorElements((current) => current.map((element, i) => (
       i === index
         ? { ...element, style: { ...(element.style ?? {}), ...patch } }
         : element
@@ -629,7 +739,7 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const changeElementKind = (index: number, kind: LabelElementKind) => {
-    const current = elements[index];
+    const current = elementsRef.current[index];
     if (!current) return;
     const patch: Partial<LabelTemplateElement> = {
       kind,
@@ -649,7 +759,7 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const deleteElementByKey = (elementKey: string) => {
-    setElements((current) => current.filter((element) => element.elementKey !== elementKey));
+    setEditorElements((current) => current.filter((element) => element.elementKey !== elementKey));
     setSelectedElementKey((current) => (current === elementKey ? null : current));
   };
 
@@ -660,7 +770,7 @@ export const LabelsConfigTab: React.FC = () => {
   // is kept in sync with the new zIndex order too, since it doubles as a stable
   // tie-breaker / display order elsewhere.
   const bringElementToFront = (elementKey: string) => {
-    setElements((current) => {
+    setEditorElements((current) => {
       const index = current.findIndex((element) => element.elementKey === elementKey);
       if (index === -1) return current;
       const target = current[index];
@@ -670,7 +780,7 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const sendElementToBack = (elementKey: string) => {
-    setElements((current) => {
+    setEditorElements((current) => {
       const index = current.findIndex((element) => element.elementKey === elementKey);
       if (index === -1) return current;
       const target = current[index];
@@ -680,7 +790,7 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const duplicateElementByKey = (elementKey: string) => {
-    setElements((current) => {
+    setEditorElements((current) => {
       const source = current.find((element) => element.elementKey === elementKey);
       if (!source) return current;
       const nextKey = `${source.elementKey}-copy-${Date.now()}`;
@@ -699,7 +809,7 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const addFieldElement = (field: LabelFieldCatalogItem, xMm: number, yMm: number) => {
-    if (!canManage) return;
+    if (!canManage || saving) return;
     const elementKey = `field-${field.id.replace(/[^a-zA-Z0-9_-]/g, '-')}-${Date.now()}`;
     const element: LabelTemplateElement = {
       elementKey,
@@ -711,16 +821,16 @@ export const LabelsConfigTab: React.FC = () => {
       widthMm: 40,
       heightMm: 6,
       rotationDeg: 0,
-      zIndex: elements.length,
+      zIndex: elementsRef.current.length,
       style: { fontSize: 12 },
       condition: {},
     };
-    setElements((current) => [...current, element]);
+    setEditorElements((current) => [...current, element]);
     setSelectedElementKey(elementKey);
   };
 
   const onDropDraggingQr = (payload: LabelQrTemplate, xMm: number, yMm: number) => {
-    if (!canManage) return;
+    if (!canManage || saving) return;
     const el = qrElementFromLibrary(
       {
         name: payload.name,
@@ -731,7 +841,7 @@ export const LabelsConfigTab: React.FC = () => {
       },
       xMm,
       yMm,
-      elements,
+      elementsRef.current,
     );
     el.elementKey = `qr-${Date.now()}`;
     const bounds = currentCanvasBounds();
@@ -743,7 +853,7 @@ export const LabelsConfigTab: React.FC = () => {
     // QR drops exactly where placed (clamped inside the canvas). It may freely
     // overlap other elements — overlap is allowed (use z-index layering), so
     // nothing is pushed and there is no conflict.
-    setElements([...elements, el]);
+    setEditorElements((current) => [...current, el]);
     setSelectedElementKey(el.elementKey);
   };
 
@@ -765,9 +875,10 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const applyImportVariant = (variant: BazisImportVariant) => {
+    if (saving) return;
     setSelectedTemplate(null);
-    setElements(variant.elements);
-    setCustomSchemaText('{}');
+    setEditorElements(variant.elements);
+    setEditorCustomFields([]);
     form.setFieldsValue({
       name: variant.name,
       description: variant.description,
@@ -850,7 +961,7 @@ export const LabelsConfigTab: React.FC = () => {
   const saveQrTemplate = async (
     override?: { name: string; contentTemplate: string; errorCorrection: 'L' | 'M' | 'Q' | 'H'; defaultSizeMm: number },
   ): Promise<LabelQrTemplate | null> => {
-    if (!canManage) return null;
+    if (!canManage || saving || qrSaving) return null;
     const name = (override?.name ?? qrDraft.name).trim();
     if (!name) {
       message.error('Введите название QR-шаблона');
@@ -894,7 +1005,7 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const promoteAdHocQrToLibrary = async (element: LabelTemplateElement, index: number) => {
-    if (!canManage) return;
+    if (!canManage || saving) return;
     const draft = qrDraftFromElement(element);
     const created = await saveQrTemplate(draft);
     if (created) {
@@ -930,7 +1041,7 @@ export const LabelsConfigTab: React.FC = () => {
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Space wrap>
         <Button icon={<ReloadOutlined />} onClick={load} loading={loading} />
-        <Button type="primary" icon={<PlusOutlined />} disabled={!canManage} onClick={startNew}>
+        <Button type="primary" icon={<PlusOutlined />} disabled={!canManage || saving} onClick={startNew}>
           Новый шаблон
         </Button>
       </Space>
@@ -977,7 +1088,7 @@ export const LabelsConfigTab: React.FC = () => {
                   title: '',
                   width: 150,
                   render: (_, variant) => (
-                    <Button icon={<ImportOutlined />} disabled={!canManage} onClick={() => applyImportVariant(variant)}>
+                    <Button icon={<ImportOutlined />} disabled={!canManage || saving} onClick={() => applyImportVariant(variant)}>
                       В форму
                     </Button>
                   ),
@@ -998,8 +1109,10 @@ export const LabelsConfigTab: React.FC = () => {
           scroll={{ y: 430 }}
           rowClassName={(template) => (selectedTemplate?.labelTemplateId === template.labelTemplateId ? 'ant-table-row-selected' : '')}
           onRow={(template) => ({
-            onClick: () => setSelectedTemplate(template),
-            style: { cursor: 'pointer' },
+            onClick: () => {
+              if (!saving) setSelectedTemplate(template);
+            },
+            style: { cursor: saving ? 'wait' : 'pointer' },
           })}
           columns={[
             { title: 'Название', dataIndex: 'name' },
@@ -1019,7 +1132,7 @@ export const LabelsConfigTab: React.FC = () => {
             {
               title: '',
               width: 48,
-              render: () => <Button icon={<EditOutlined />} size="small" disabled={!canManage} />,
+              render: () => <Button icon={<EditOutlined />} size="small" disabled={!canManage || saving} />,
             },
           ]}
         />
@@ -1032,6 +1145,7 @@ export const LabelsConfigTab: React.FC = () => {
             heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
             elements={elements}
             fields={sourceFields}
+            previewFieldValues={customFieldPreviewValues}
             selectedElementKey={selectedElementKey}
             canDrag={false}
           />
@@ -1042,7 +1156,15 @@ export const LabelsConfigTab: React.FC = () => {
         <OcrTemplatesConfig canManage={can('labels.manage_templates')} />
       </Card>
 
-      <Form form={form} layout="vertical" onFinish={saveTemplate} disabled={!canManage || saving}>
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={saveTemplate}
+        onValuesChange={() => {
+          if (!savingRef.current) setEditorDirty(true);
+        }}
+        disabled={!canManage || saving}
+      >
         <Row gutter={16} align="top">
           <Col xs={24} lg={leftColumnSpan}>
             <Card size="small" title={selectedTemplate ? 'Редактирование шаблона' : 'Новый шаблон'} style={{ marginBottom: 16 }}>
@@ -1056,7 +1178,7 @@ export const LabelsConfigTab: React.FC = () => {
                     fields={templatePaletteFields}
                     usedFieldIds={usedFieldIds}
                     fieldHealth={templateFieldHealth}
-                    disabled={!canManage}
+                    disabled={!canManage || saving}
                     search={fieldSearch}
                     onSearch={setFieldSearch}
                     onBeginDrag={setDraggingField}
@@ -1067,85 +1189,102 @@ export const LabelsConfigTab: React.FC = () => {
               <div style={{ marginBottom: 16 }}>
                 <Collapse defaultActiveKey={[]}>
                   <Panel header="Пользовательские поля" key="custom-fields">
-                <div style={{ marginTop: 8 }}>
-                  <Form.Item label="Пользовательские поля JSON">
-                    <Input.TextArea value={customSchemaText} onChange={(event) => setCustomSchemaText(event.target.value)} autoSize={{ minRows: 3, maxRows: 6 }} />
-                  </Form.Item>
-                  <Table
-                    rowKey="fieldId"
-                    size="small"
-                    pagination={false}
-                    dataSource={customSchemaRows.rows}
-                    title={() => (
-                      <Space wrap>
-                        <Text strong>Кастомные поля</Text>
-                        <Button size="small" icon={<PlusOutlined />} disabled={!canManage || !customSchemaRows.valid} onClick={addCustomField}>
-                          Поле
+                    <Space direction="vertical" size={10} style={{ width: '100%', marginTop: 8 }}>
+                      <Alert
+                        type="info"
+                        showIcon
+                        message="Создайте понятное поле и выберите, откуда брать его значение: постоянный текст или данные заказа."
+                      />
+                      <div>
+                        <Button
+                          icon={<PlusOutlined />}
+                          disabled={!canManage || saving}
+                          onClick={() => openCustomFieldEditor()}
+                        >
+                          Добавить поле
                         </Button>
-                        {!customSchemaRows.valid && <Text type="danger">JSON некорректен</Text>}
-                      </Space>
-                    )}
-                    columns={[
-                      { title: 'Ключ', dataIndex: 'fieldId', width: 170 },
-                      {
-                        title: 'Название',
-                        width: 170,
-                        render: (_, row) => (
-                          <Input
-                            value={row.label}
-                            disabled={!canManage}
-                            onChange={(event) => patchCustomField(row.fieldId, { label: event.target.value })}
-                          />
-                        ),
-                      },
-                      {
-                        title: 'Тип',
-                        width: 110,
-                        render: (_, row) => (
-                          <Select
-                            value={row.type}
-                            disabled={!canManage}
-                            style={{ width: '100%' }}
-                            options={CUSTOM_FIELD_TYPE_OPTIONS}
-                            onChange={(type) => patchCustomField(row.fieldId, { type })}
-                          />
-                        ),
-                      },
-                      {
-                        title: 'Источник',
-                        width: 220,
-                        render: (_, row) => (
-                          <Select
-                            showSearch
-                            allowClear
-                            value={row.sourceField ?? undefined}
-                            disabled={!canManage}
-                            style={{ width: '100%' }}
-                            options={fields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
-                            onChange={(sourceField) => patchCustomField(row.fieldId, { sourceField: sourceField ?? null })}
-                          />
-                        ),
-                      },
-                      {
-                        title: '',
-                        width: 48,
-                        render: (_, row) => (
-                          <Button danger size="small" icon={<DeleteOutlined />} disabled={!canManage} onClick={() => deleteCustomField(row.fieldId)} />
-                        ),
-                      },
-                    ]}
-                  />
-                </div>
+                      </div>
+                      <Table
+                        rowKey="fieldId"
+                        size="small"
+                        pagination={false}
+                        locale={{ emptyText: 'Пользовательских полей пока нет' }}
+                        dataSource={customFields}
+                        columns={[
+                          { title: 'Название', dataIndex: 'label', width: 180 },
+                          {
+                            title: 'Тип',
+                            width: 100,
+                            render: (_, row) => CUSTOM_FIELD_TYPE_OPTIONS.find((option) => option.value === row.type)?.label ?? 'Строка',
+                          },
+                          {
+                            title: 'Значение',
+                            render: (_, row) => {
+                              if (row.valueMode === 'constant') {
+                                return (
+                                  <Space size={6}>
+                                    <Tag color="blue">Постоянный текст</Tag>
+                                    <Text ellipsis style={{ maxWidth: 220 }}>{String(row.defaultValue ?? '') || 'Пусто'}</Text>
+                                  </Space>
+                                );
+                              }
+                              if (row.valueMode === 'source') {
+                                const source = fields.find((field) => field.id === row.sourceField);
+                                return <Tag color="processing">{source ? `${source.category}: ${source.label}` : row.sourceField}</Tag>;
+                              }
+                              return null;
+                            },
+                          },
+                          {
+                            title: '',
+                            width: 92,
+                            render: (_, row) => (
+                              <Space size={4}>
+                                <Tooltip title="Редактировать поле">
+                                  <Button
+                                    type="text"
+                                    icon={<EditOutlined />}
+                                    disabled={!canManage || saving}
+                                    onClick={() => openCustomFieldEditor(row)}
+                                  />
+                                </Tooltip>
+                                <Tooltip title="Удалить поле">
+                                  <Button
+                                    type="text"
+                                    danger
+                                    icon={<DeleteOutlined />}
+                                    disabled={!canManage || saving}
+                                    onClick={() => Modal.confirm({
+                                      title: `Удалить поле «${row.label}»?`,
+                                      content: 'Удаление применится после сохранения шаблона.',
+                                      okText: 'Удалить',
+                                      okButtonProps: { danger: true },
+                                      cancelText: 'Отмена',
+                                      onOk: () => deleteCustomField(row.fieldId),
+                                    })}
+                                  />
+                                </Tooltip>
+                              </Space>
+                            ),
+                          },
+                        ]}
+                      />
+                    </Space>
                   </Panel>
                 </Collapse>
               </div>
               <Space wrap>
-                <Button htmlType="submit" type="primary" icon={<SaveOutlined />} loading={saving} disabled={!canManage}>
+                <Button htmlType="submit" type="primary" icon={<SaveOutlined />} loading={saving} disabled={!canManage || qrSaving}>
                   Сохранить шаблон
                 </Button>
-                <Button icon={<CopyOutlined />} loading={saving} disabled={!canManage || !selectedTemplate || elements.length === 0} onClick={() => void openSaveAs()}>
+                <Button icon={<CopyOutlined />} loading={saving} disabled={!canManage || qrSaving || !selectedTemplate || elements.length === 0} onClick={() => void openSaveAs()}>
                   Сохранить как
                 </Button>
+                {editorDirty
+                  ? <Tag color="warning">Есть несохранённые изменения</Tag>
+                  : selectedTemplate
+                    ? <Tag color="success">Все изменения сохранены</Tag>
+                    : <Tag>Новый шаблон</Tag>}
               </Space>
             </Card>
             <Table
@@ -1154,16 +1293,16 @@ export const LabelsConfigTab: React.FC = () => {
               <Space wrap>
                 <Text strong>Элементы</Text>
                 <Tooltip title="Добавляет текстовый элемент. Можно привязать к полю заказа, детали, Базиса или кастомному полю, затем перетащить на визуале.">
-                  <Button disabled={!canManage} onClick={() => addElement('text')}>Текст</Button>
+                  <Button disabled={!canManage || saving} onClick={() => addElement('text')}>Текст</Button>
                 </Tooltip>
                 <Tooltip title="Добавляет линию. Используйте для разделителей, подчеркиваний и простых графических границ внутри бирки.">
-                  <Button disabled={!canManage} onClick={() => addElement('line')}>Линия</Button>
+                  <Button disabled={!canManage || saving} onClick={() => addElement('line')}>Линия</Button>
                 </Tooltip>
                 <Tooltip title="Добавляет прямоугольник. Используйте для рамок, блоков и визуального выделения областей бирки.">
-                  <Button disabled={!canManage} onClick={() => addElement('rect')}>Прямоугольник</Button>
+                  <Button disabled={!canManage || saving} onClick={() => addElement('rect')}>Прямоугольник</Button>
                 </Tooltip>
                 <Tooltip title="Добавляет QR-код. Данные собираются по шаблону из полей детали, заказа, Bazis и кастомных полей.">
-                  <Button icon={<QrcodeOutlined />} disabled={!canManage} onClick={() => addElement('qr')}>QR-код</Button>
+                  <Button icon={<QrcodeOutlined />} disabled={!canManage || saving} onClick={() => addElement('qr')}>QR-код</Button>
                 </Tooltip>
               </Space>
             )}
@@ -1183,7 +1322,7 @@ export const LabelsConfigTab: React.FC = () => {
                 render: (_, element, index) => (
                   <Select
                     value={element.kind}
-                    disabled={!canManage}
+                    disabled={!canManage || saving}
                     style={{ width: '100%' }}
                     onChange={(kind) => changeElementKind(index, kind)}
                     options={[
@@ -1203,7 +1342,7 @@ export const LabelsConfigTab: React.FC = () => {
                     showSearch
                     allowClear
                     value={element.sourceField ?? undefined}
-                    disabled={!canManage || element.kind !== 'text'}
+                    disabled={!canManage || saving || element.kind !== 'text'}
                     style={{ width: '100%' }}
                     onChange={(sourceField) => patchElement(index, { sourceField: sourceField ?? null })}
                     options={sourceFields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
@@ -1216,7 +1355,7 @@ export const LabelsConfigTab: React.FC = () => {
                 render: (_, element, index) => (
                   <Input
                     value={element.staticText ?? ''}
-                    disabled={!canManage || element.kind !== 'text'}
+                    disabled={!canManage || saving || element.kind !== 'text'}
                     onChange={(event) => patchElement(index, { staticText: event.target.value || null })}
                   />
                 ),
@@ -1227,7 +1366,7 @@ export const LabelsConfigTab: React.FC = () => {
                 render: (_, element, index) => (
                   <Input
                     value={String((element.style as Record<string, unknown> | undefined)?.qrName ?? '')}
-                    disabled={!canManage || element.kind !== 'qr'}
+                    disabled={!canManage || saving || element.kind !== 'qr'}
                     onChange={(event) => patchQrStyle(index, { qrName: event.target.value })}
                     onBlur={(event) => patchQrStyle(index, { qrName: event.target.value.trim() })}
                   />
@@ -1241,12 +1380,12 @@ export const LabelsConfigTab: React.FC = () => {
                     <Input
                       value={qrTemplateOf(element)}
                       placeholder="{bazis.detail_id}|{bazis.name}"
-                      disabled={!canManage || element.kind !== 'qr'}
+                      disabled={!canManage || saving || element.kind !== 'qr'}
                       onChange={(event) => patchQrStyle(index, { qrTemplate: event.target.value })}
                     />
                     <Select
                       value={qrErrorCorrectionOf(element)}
-                      disabled={!canManage || element.kind !== 'qr'}
+                      disabled={!canManage || saving || element.kind !== 'qr'}
                       style={{ width: 72 }}
                       options={QR_ERROR_CORRECTION_OPTIONS}
                       onChange={(qrErrorCorrection) => patchQrStyle(index, { qrErrorCorrection })}
@@ -1265,7 +1404,7 @@ export const LabelsConfigTab: React.FC = () => {
                     <Tooltip title="Сохраняет этот QR-код как переиспользуемый шаблон в глобальной библиотеке QR-кодов.">
                       <Button
                         size="small"
-                        disabled={!canManage}
+                        disabled={!canManage || saving || qrSaving}
                         loading={qrSaving}
                         onClick={() => void promoteAdHocQrToLibrary(element, index)}
                       >
@@ -1282,7 +1421,7 @@ export const LabelsConfigTab: React.FC = () => {
                   <InputNumber
                     value={element[key]}
                     min={0}
-                    disabled={!canManage}
+                    disabled={!canManage || saving}
                     style={{ width: '100%' }}
                     onChange={(value) => {
                       const patch = { [key]: Number(value ?? 0) } as Partial<LabelTemplateElement>;
@@ -1339,8 +1478,9 @@ export const LabelsConfigTab: React.FC = () => {
                 heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
                 elements={elements}
                 fields={sourceFields}
+                previewFieldValues={customFieldPreviewValues}
                 selectedElementKey={selectedElementKey}
-                canDrag={canManage}
+                canDrag={canManage && !saving}
                 initialZoom={visualExpanded ? 1.3 : 0.6}
                 showAllBounds={showAllBorders}
                 onSelectElement={setSelectedElementKey}
@@ -1390,38 +1530,38 @@ export const LabelsConfigTab: React.FC = () => {
                                   <Space size={4}>
                                     <QrcodeOutlined
                                       data-qr-template-drag={template.labelQrTemplateId}
-                                      draggable={canManage}
-                                      style={{ cursor: canManage ? 'grab' : 'default', fontSize: 16, userSelect: 'none' }}
+                                      draggable={canManage && !saving}
+                                      style={{ cursor: canManage && !saving ? 'grab' : 'default', fontSize: 16, userSelect: 'none' }}
                                       onDragStart={(event) => {
-                                        if (!canManage) return;
+                                        if (!canManage || saving) return;
                                         setDraggingQr(template);
                                         event.dataTransfer.setData('application/x-label-qr-template', String(template.labelQrTemplateId));
                                         event.dataTransfer.effectAllowed = 'copy';
                                       }}
                                       onDragEnd={() => setDraggingQr(null)}
                                       onMouseDown={(event) => {
-                                        if (!canManage) return;
+                                        if (!canManage || saving) return;
                                         event.preventDefault();
                                         setDraggingQr(template);
                                       }}
                                       onMouseDownCapture={(event) => {
-                                        if (!canManage) return;
+                                        if (!canManage || saving) return;
                                         event.preventDefault();
                                         setDraggingQr(template);
                                       }}
                                       onPointerDown={(event) => {
-                                        if (!canManage) return;
+                                        if (!canManage || saving) return;
                                         event.preventDefault();
                                         setDraggingQr(template);
                                       }}
                                       onPointerDownCapture={(event) => {
-                                        if (!canManage) return;
+                                        if (!canManage || saving) return;
                                         event.preventDefault();
                                         setDraggingQr(template);
                                       }}
                                     />
-                                    <Button size="small" icon={<EditOutlined />} disabled={!canManage} onClick={() => editQrTemplateRow(template)} />
-                                    <Button size="small" danger icon={<DeleteOutlined />} disabled={!canManage} onClick={() => void deleteQrTemplateRow(template)} />
+                                    <Button size="small" icon={<EditOutlined />} disabled={!canManage || saving || qrSaving} onClick={() => editQrTemplateRow(template)} />
+                                    <Button size="small" danger icon={<DeleteOutlined />} disabled={!canManage || saving || qrSaving} onClick={() => void deleteQrTemplateRow(template)} />
                                   </Space>
                                 ),
                               },
@@ -1681,6 +1821,112 @@ export const LabelsConfigTab: React.FC = () => {
       )}
 
       <Modal
+        title={editingCustomFieldId ? 'Редактировать пользовательское поле' : 'Добавить пользовательское поле'}
+        open={customFieldEditorOpen}
+        okText={editingCustomFieldId ? 'Сохранить поле' : 'Добавить поле'}
+        cancelText="Отмена"
+        destroyOnClose
+        forceRender
+        okButtonProps={{ disabled: !canManage || saving }}
+        cancelButtonProps={{ disabled: saving }}
+        onOk={() => void saveCustomField()}
+        onCancel={() => {
+          setCustomFieldEditorOpen(false);
+          setEditingCustomFieldId(null);
+          customFieldForm.resetFields();
+        }}
+      >
+        <Form
+          form={customFieldForm}
+          layout="vertical"
+          preserve={false}
+          disabled={!canManage || saving}
+          initialValues={{ type: 'string', valueMode: 'constant', defaultValue: '' }}
+        >
+          <Form.Item
+            name="label"
+            label="Название поля"
+            rules={[
+              { required: true, whitespace: true, message: 'Введите понятное название поля' },
+              { max: 120, message: 'Не больше 120 символов' },
+            ]}
+          >
+            <Input autoFocus placeholder="Например: Особая отметка" />
+          </Form.Item>
+          <Form.Item name="type" label="Тип значения" rules={[{ required: true }]}>
+            <Select
+              options={CUSTOM_FIELD_TYPE_OPTIONS}
+              onChange={(type: CustomFieldType) => {
+                customFieldForm.setFieldValue(
+                  'defaultValue',
+                  type === 'boolean' ? false : type === 'number' ? undefined : '',
+                );
+              }}
+            />
+          </Form.Item>
+          <Form.Item
+            name="valueMode"
+            label="Откуда брать значение"
+            rules={[{ required: true }]}
+            extra="Постоянный текст печатается одинаково на каждой бирке. Значение из ERP подставляется автоматически."
+          >
+            <Select
+              options={[
+                { value: 'constant', label: 'Постоянный текст' },
+                { value: 'source', label: 'Данные ERP / Базис' },
+              ]}
+            />
+          </Form.Item>
+          {customFieldValueMode === 'source' && (
+            <Form.Item
+              name="sourceField"
+              label="Поле-источник"
+              rules={[{ required: true, message: 'Выберите поле-источник' }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder="Выберите данные заказа или детали"
+                options={fields.map((field) => ({
+                  value: field.id,
+                  label: `${field.category}: ${field.label}`,
+                }))}
+              />
+            </Form.Item>
+          )}
+          {customFieldValueMode === 'constant' && (
+            <Form.Item
+              name="defaultValue"
+              label={customFieldType === 'string' ? 'Текст' : 'Значение'}
+              valuePropName={customFieldType === 'boolean' ? 'checked' : 'value'}
+              rules={[{
+                validator: (_, value) => (
+                  value === undefined || value === null || value === ''
+                    ? Promise.reject(new Error('Введите постоянное значение'))
+                    : Promise.resolve()
+                ),
+              }]}
+            >
+              {customFieldType === 'number' ? (
+                <InputNumber style={{ width: '100%' }} placeholder="Введите число" />
+              ) : customFieldType === 'boolean' ? (
+                <Switch checkedChildren="Да" unCheckedChildren="Нет" />
+              ) : customFieldType === 'date' ? (
+                <Input type="date" />
+              ) : (
+                <Input.TextArea
+                  autoSize={{ minRows: 3, maxRows: 8 }}
+                  placeholder="Введите произвольный текст, который должен печататься на бирке"
+                  maxLength={1000}
+                  showCount
+                />
+              )}
+            </Form.Item>
+          )}
+        </Form>
+      </Modal>
+
+      <Modal
         title="Сохранить шаблон как"
         open={saveAsOpen}
         okText="Создать копию"
@@ -1706,6 +1952,7 @@ function LabelTemplatePreview({
   heightMm,
   elements,
   fields,
+  previewFieldValues,
   selectedElementKey,
   canDrag,
   onSelectElement,
@@ -1727,6 +1974,7 @@ function LabelTemplatePreview({
   heightMm: number;
   elements: LabelTemplateElement[];
   fields: LabelFieldCatalogItem[];
+  previewFieldValues?: Record<string, string>;
   selectedElementKey?: string | null;
   canDrag?: boolean;
   onSelectElement?: (elementKey: string) => void;
@@ -1757,6 +2005,7 @@ function LabelTemplatePreview({
   const [zoom, setZoom] = useState(initialZoom);
   const [showGrid, setShowGrid] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(true);
+  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
   const [hoveredElement, setHoveredElement] = useState<{ element: LabelTemplateElement; x: number; y: number } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ field: LabelFieldCatalogItem; xMm: number; yMm: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ element: LabelTemplateElement; x: number; y: number } | null>(null);
@@ -1768,6 +2017,10 @@ function LabelTemplatePreview({
   const externalDragActive = Boolean(draggingField || draggingQr);
   const fieldLabels = useMemo(() => new Map(fields.map((field) => [field.id, field.label])), [fields]);
   const fieldInfo = useMemo(() => new Map(fields.map((field) => [field.id, field])), [fields]);
+  const fieldValues = useMemo(
+    () => new Map(Object.entries({ ...PREVIEW_FIELD_VALUES, ...previewFieldValues })),
+    [previewFieldValues],
+  );
   const sorted = elements.slice().sort((a, b) => Number(a.zIndex ?? 0) - Number(b.zIndex ?? 0));
   const previewWidth = Math.round(Math.min(760, Math.max(360, safeWidth * 7)) * zoom);
   const previewHeight = previewWidth * (safeHeight / safeWidth);
@@ -1788,6 +2041,10 @@ function LabelTemplatePreview({
   }, [initialZoom]);
 
   useEffect(() => {
+    if (!canDrag || externalDragActive) setAlignmentGuides([]);
+  }, [canDrag, externalDragActive]);
+
+  useEffect(() => {
     if (!canDrag || !selectedElementKey || selectedElementLocked || externalDragActive) {
       transformerRef.current?.nodes([]);
       transformerRef.current?.getLayer()?.batchDraw();
@@ -1799,7 +2056,7 @@ function LabelTemplatePreview({
   }, [canDrag, externalDragActive, elements, selectedElementKey, selectedElementLocked]);
 
   useEffect(() => {
-    if (!draggingField || !onDropDraggingField) return;
+    if (!canDrag || !draggingField || !onDropDraggingField) return;
     let dropped = false;
     const handleGlobalDrop = (event: MouseEvent | PointerEvent) => {
       if (dropped) return;
@@ -1829,13 +2086,13 @@ function LabelTemplatePreview({
       window.removeEventListener('pointerup', handleGlobalDrop, true);
       window.removeEventListener('mouseup', handleGlobalDrop, true);
     };
-  }, [draggingField, onDropDraggingField, previewHeight, previewWidth, safeHeight, safeWidth]);
+  }, [canDrag, draggingField, onDropDraggingField, previewHeight, previewWidth, safeHeight, safeWidth]);
 
   // Mirrors the draggingField global-drop effect above: a capture-phase window listener
   // resolves the drop (if released over the canvas container) before the outer component's
   // bubble-phase listener clears draggingQr.
   useEffect(() => {
-    if (!draggingQr || !onDropDraggingQr) return;
+    if (!canDrag || !draggingQr || !onDropDraggingQr) return;
     qrDropResolvedRef.current = false;
     const handleGlobalDrop = (event: MouseEvent | PointerEvent) => {
       if (qrDropResolvedRef.current) return;
@@ -1861,7 +2118,7 @@ function LabelTemplatePreview({
       window.removeEventListener('pointerup', handleGlobalDrop, true);
       window.removeEventListener('mouseup', handleGlobalDrop, true);
     };
-  }, [draggingQr, onDropDraggingQr, previewHeight, previewWidth, safeHeight, safeWidth]);
+  }, [canDrag, draggingQr, onDropDraggingQr, previewHeight, previewWidth, safeHeight, safeWidth]);
 
   const applySnap = (value: number, event?: { altKey?: boolean }) => (
     snapToGrid && !event?.altKey ? Math.round(value) : value
@@ -1881,14 +2138,50 @@ function LabelTemplatePreview({
     onChangeElement?.(elementKey, next);
   };
 
+  const resolveDragPosition = (
+    elementKey: string,
+    xMm: number,
+    yMm: number,
+    event?: { altKey?: boolean },
+  ): { xMm: number; yMm: number; guides: AlignmentGuide[] } => {
+    const element = elements.find((item) => item.elementKey === elementKey);
+    if (!element || isLabelElementLocked(element)) return { xMm, yMm, guides: [] };
+    const maxX = Math.max(0, safeWidth - Number(element.widthMm ?? 0));
+    const maxY = Math.max(0, safeHeight - Number(element.heightMm ?? 0));
+    const gridX = applySnap(xMm, event);
+    const gridY = applySnap(yMm, event);
+    const centered = event?.altKey
+      ? { xMm: gridX, yMm: gridY, guides: [] }
+      : snapElementCenters({
+          elements,
+          movingElementKey: elementKey,
+          xMm: gridX,
+          yMm: gridY,
+          toleranceMm: 1.2,
+        });
+    return {
+      xMm: clamp(centered.xMm, 0, maxX),
+      yMm: clamp(centered.yMm, 0, maxY),
+      guides: centered.guides,
+    };
+  };
+
+  const handleDragMoveElement = (
+    elementKey: string,
+    node: Konva.Node,
+    event: Konva.KonvaEventObject<DragEvent>,
+  ) => {
+    const next = resolveDragPosition(elementKey, node.x(), node.y(), event.evt);
+    node.position({ x: next.xMm, y: next.yMm });
+    setAlignmentGuides(next.guides);
+  };
+
   const handleMoveElement = (elementKey: string, xMm: number, yMm: number, event?: { altKey?: boolean }) => {
     const element = elements.find((item) => item.elementKey === elementKey);
     if (!element || isLabelElementLocked(element)) return;
-    const maxX = Math.max(0, safeWidth - Number(element.widthMm ?? 0));
-    const maxY = Math.max(0, safeHeight - Number(element.heightMm ?? 0));
-    const nextX = clamp(applySnap(xMm, event), 0, maxX);
-    const nextY = clamp(applySnap(yMm, event), 0, maxY);
-    onMoveElement?.(elementKey, nextX, nextY);
+    const next = resolveDragPosition(elementKey, xMm, yMm, event);
+    onMoveElement?.(elementKey, next.xMm, next.yMm);
+    setAlignmentGuides([]);
   };
 
   const handleTransformEnd = (
@@ -1992,6 +2285,7 @@ function LabelTemplatePreview({
     onDropField(field, clamp(point.x, 0, safeWidth - 1), clamp(point.y, 0, safeHeight - 1));
   };
   const handleWrapperMouseUp = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!canDrag) return;
     if (draggingField && onDropDraggingField) {
       event.preventDefault();
       event.stopPropagation();
@@ -2042,11 +2336,14 @@ function LabelTemplatePreview({
               <Switch size="small" checked={showGrid} onChange={setShowGrid} />
             </Space>
           </Tooltip>
-          <Tooltip title="Привязывает перемещение и изменение размера к шагу 1 мм. Удерживайте клавишу свободного перемещения во время перетаскивания или изменения размера, чтобы временно отключить привязку.">
+          <Tooltip title="Привязывает перемещение и изменение размера к шагу 1 мм. Удерживайте Alt во время перетаскивания или изменения размера, чтобы временно отключить привязку.">
             <Space size={6}>
               <Text type="secondary">Привязка</Text>
               <Switch size="small" checked={snapToGrid} onChange={setSnapToGrid} />
             </Space>
+          </Tooltip>
+          <Tooltip title="При приближении элемента к центру другого элемента появляются направляющие и координата мягко привязывается. Удерживайте Alt для свободного перемещения.">
+            <Text type="secondary">Линии центрирования</Text>
           </Tooltip>
           <Tooltip title="Уменьшает масштаб визуального редактора. Размер самой бирки и координаты элементов не меняются.">
             <Button size="small" onClick={() => setZoom((value) => clamp(Math.round((value - 0.1) * 10) / 10, 0.4, 2.5))}>-</Button>
@@ -2142,6 +2439,7 @@ function LabelTemplatePreview({
               renderKonvaPreviewElement({
                 element,
                 fieldLabels,
+                fieldValues,
                 selected: !externalDragActive && selectedElementKey === element.elementKey,
                 interactive: Boolean(canDrag && !externalDragActive),
                 draggable: Boolean(canDrag && !externalDragActive && !isLabelElementLocked(element)),
@@ -2150,6 +2448,7 @@ function LabelTemplatePreview({
                 safeHeight,
                 onSelectElement: externalDragActive ? undefined : onSelectElement,
                 onMoveElement: handleMoveElement,
+                onDragMoveElement: handleDragMoveElement,
                 nodeRef: (node) => {
                   if (node) nodeRefs.current.set(element.elementKey, node);
                   else nodeRefs.current.delete(element.elementKey);
@@ -2178,6 +2477,7 @@ function LabelTemplatePreview({
                 },
               }),
             )}
+            {renderAlignmentGuides(alignmentGuides, safeWidth, safeHeight)}
             {dragPreview && (
               <>
                 <KonvaText
@@ -2543,6 +2843,7 @@ function groupFieldsByCategory(fields: LabelFieldCatalogItem[]): Array<[string, 
 function renderKonvaPreviewElement({
   element,
   fieldLabels,
+  fieldValues,
   selected,
   interactive,
   draggable,
@@ -2551,6 +2852,7 @@ function renderKonvaPreviewElement({
   safeHeight,
   onSelectElement,
   onMoveElement,
+  onDragMoveElement,
   nodeRef,
   onTransform,
   onTransformEnd,
@@ -2560,6 +2862,7 @@ function renderKonvaPreviewElement({
 }: {
   element: LabelTemplateElement;
   fieldLabels: Map<string, string>;
+  fieldValues: Map<string, string>;
   selected: boolean;
   interactive: boolean;
   draggable: boolean;
@@ -2568,6 +2871,11 @@ function renderKonvaPreviewElement({
   safeHeight: number;
   onSelectElement?: (elementKey: string) => void;
   onMoveElement?: (elementKey: string, xMm: number, yMm: number, event?: { altKey?: boolean }) => void;
+  onDragMoveElement?: (
+    elementKey: string,
+    node: Konva.Node,
+    event: Konva.KonvaEventObject<DragEvent>,
+  ) => void;
   nodeRef?: (node: Konva.Node | null) => void;
   onTransform?: (node: Konva.Node, event: Konva.KonvaEventObject<Event>) => void;
   onTransformEnd?: (node: Konva.Node, event: Konva.KonvaEventObject<Event>) => void;
@@ -2603,6 +2911,7 @@ function renderKonvaPreviewElement({
       onContextMenu?.(element, event);
     },
     onDragStart: select,
+    onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => onDragMoveElement?.(key, event.target, event),
     onDragEnd: dragEnd,
     onTransform: (event: Konva.KonvaEventObject<Event>) => onTransform?.(event.target, event),
     onTransformEnd: (event: Konva.KonvaEventObject<Event>) => onTransformEnd?.(event.target, event),
@@ -2753,7 +3062,7 @@ function renderKonvaPreviewElement({
   const fontSize = Math.max(1.8, Number(element.style?.fontSize ?? 10) * 0.35);
   const textAlign = getLabelTextAlign(element);
   const text = element.sourceField
-    ? PREVIEW_FIELD_VALUES[element.sourceField] ?? fieldLabels.get(element.sourceField) ?? element.sourceField
+    ? fieldValues.get(element.sourceField) ?? fieldLabels.get(element.sourceField) ?? element.sourceField
     : element.staticText ?? '';
   return (
     <React.Fragment key={key}>
@@ -2889,6 +3198,25 @@ function renderGrid(widthMm: number, heightMm: number) {
   return lines;
 }
 
+function renderAlignmentGuides(
+  guides: AlignmentGuide[],
+  widthMm: number,
+  heightMm: number,
+) {
+  return guides.map((guide) => (
+    <KonvaLine
+      key={`${guide.axis}-${guide.targetElementKey}`}
+      points={guide.axis === 'vertical'
+        ? [guide.positionMm, 0, guide.positionMm, heightMm]
+        : [0, guide.positionMm, widthMm, guide.positionMm]}
+      stroke="#13a8a8"
+      strokeWidth={0.32}
+      dash={[1.2, 0.8]}
+      listening={false}
+    />
+  ));
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -2991,48 +3319,4 @@ function buildStandardBazisElements(): LabelTemplateElement[] {
     text('date-value', 'date.today', null, 2, 80, 29, 7, 10, 11),
     text('counter-value', 'label.counter_text', null, 41, 80, 38, 7, 10, 12),
   ];
-}
-
-function parseCustomSchemaRows(value: string): { valid: boolean; rows: CustomFieldSchemaRow[] } {
-  try {
-    const schema = parseCustomSchema(value);
-    return {
-      valid: true,
-      rows: Object.entries(schema).map(([fieldId, entry]) => ({
-        fieldId,
-        ...normalizeCustomFieldSchemaEntry(entry),
-      })),
-    };
-  } catch {
-    return { valid: false, rows: [] };
-  }
-}
-
-function parseEditableCustomSchema(value: string): Record<string, unknown> {
-  try {
-    return parseCustomSchema(value);
-  } catch {
-    message.error('Сначала исправьте JSON пользовательских полей');
-    return {};
-  }
-}
-
-function normalizeCustomFieldSchemaEntry(entry: unknown): Omit<CustomFieldSchemaRow, 'fieldId'> {
-  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-    return { label: '', type: 'string', sourceField: null };
-  }
-  const value = entry as Record<string, unknown>;
-  return {
-    label: typeof value.label === 'string' ? value.label : '',
-    type: typeof value.type === 'string' ? value.type : 'string',
-    sourceField: typeof value.sourceField === 'string' && value.sourceField ? value.sourceField : null,
-  };
-}
-
-function parseCustomSchema(value: string): Record<string, unknown> {
-  const parsed = JSON.parse(value || '{}') as unknown;
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-    throw new Error('custom schema must be object');
-  }
-  return parsed as Record<string, unknown>;
 }

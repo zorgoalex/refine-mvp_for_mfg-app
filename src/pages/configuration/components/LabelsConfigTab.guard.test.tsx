@@ -28,16 +28,23 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/Сохранить шаблон/);
   });
 
-  it('exposes editable template elements and custom schema so created templates are not blank-only', () => {
+  it('exposes editable template elements and a user-facing custom-field editor without JSON', () => {
     expect(tabSrc).toMatch(/Элементы/);
     expect(tabSrc).toMatch(/addElement\('text'\)/);
     expect(tabSrc).toMatch(/addElement\('line'\)/);
     expect(tabSrc).toMatch(/addElement\('rect'\)/);
     expect(tabSrc).toMatch(/addElement\('qr'\)/);
     expect(tabSrc).toMatch(/customFieldSchema/);
-    expect(tabSrc).toMatch(/Кастомные поля/);
+    expect(tabSrc).toMatch(/Пользовательские поля/);
+    expect(tabSrc).toMatch(/Добавить поле/);
+    expect(tabSrc).toMatch(/Редактировать пользовательское поле/);
+    expect(tabSrc).toMatch(/Постоянный текст/);
+    expect(tabSrc).not.toMatch(/Заполняется вручную для заказа/);
+    expect(tabSrc).toMatch(/staticText: kind === 'text' \? 'Новый текст' : null/);
+    expect(tabSrc).not.toMatch(/Пользовательские поля JSON/);
+    expect(tabSrc).not.toMatch(/JSON некорректен/);
     expect(tabSrc).toMatch(/sourceField/);
-    expect(tabSrc).toMatch(/detail\.detail_name/);
+    expect(tabSrc).toMatch(/Данные ERP \/ Базис/);
     expect(tabSrc).toMatch(/elements,/);
   });
 
@@ -86,6 +93,14 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/ArrowLeft/);
     expect(tabSrc).toMatch(/onTransformEnd/);
     expect(tabSrc).toMatch(/boundBoxFunc/);
+  });
+
+  it('snaps nearby element centers and renders live horizontal or vertical guide lines', () => {
+    expect(tabSrc).toMatch(/snapElementCenters/);
+    expect(tabSrc).toMatch(/alignmentGuides/);
+    expect(tabSrc).toMatch(/onDragMove/);
+    expect(tabSrc).toMatch(/renderAlignmentGuides/);
+    expect(tabSrc).toMatch(/Линии центрирования/);
   });
 
   it('keeps text and rectangle content stable while resizing transform handles', () => {
@@ -247,9 +262,26 @@ describe('LabelsConfigTab wiring', () => {
     // form to the blank "new template" scaffold via startNew().
     expect(saveBody).not.toMatch(/startNew\(\)/);
     expect(saveBody).toMatch(/setSelectedTemplate\(saved\)/);
-    expect(saveBody).toMatch(/setElements\(saved\.elements\)/);
+    expect(saveBody).toMatch(/setEditorElements\(saved\.elements, false\)/);
     expect(saveBody).toMatch(/saved = await labelsApi\.updateTemplate/);
     expect(saveBody).toMatch(/saved = await labelsApi\.createTemplate/);
+  });
+
+  it('serializes the latest editor snapshot and blocks every template mutation while save is running', () => {
+    const payloadBody = tabSrc.slice(
+      tabSrc.indexOf('const buildTemplatePayload ='),
+      tabSrc.indexOf('const describeSaveError ='),
+    );
+    expect(payloadBody).toMatch(/elementsRef\.current/);
+    expect(payloadBody).toMatch(/customFieldsRef\.current/);
+    expect(tabSrc).toMatch(/savingRef\.current = next/);
+    expect(tabSrc).toMatch(/if \(markDirty && savingRef\.current\) return/);
+    expect(tabSrc).toMatch(/disabled=\{!canManage \|\| saving \|\| element\.kind !== 'text'\}/);
+    expect(tabSrc).toMatch(/disabled=\{!canManage \|\| saving \|\| element\.kind !== 'qr'\}/);
+    expect(tabSrc).toMatch(/disabled=\{!canManage \|\| saving\}/);
+    expect(tabSrc).toMatch(/canDrag=\{canManage && !saving\}/);
+    expect(tabSrc).toMatch(/setEditorElements/);
+    expect(tabSrc).not.toMatch(/setElements\(\[\.\.\.elements,/);
   });
 
   it('can create a copy from the current edited template through Save As', () => {
