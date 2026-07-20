@@ -162,7 +162,11 @@ function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) =
   return [
     { title: 'Источник', key: 'source', fixed: 'left', width: 180, render: (_, row) => row.sourceOrderId ? <Link to={`/orders/show/${row.sourceOrderId}`}>{row.sourceOrderFullNumber || row.sourceOrderName}</Link> : 'Снимок' },
     { title: 'Базис заказ', dataIndex: 'sourceBazisOrderNo', key: 'sourceBazisOrderNo', fixed: 'left', width: 150,
-      render: (value: string) => value || <Text type="secondary">—</Text> },
+      render: (value: string) => value
+        ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+        : <Text type="secondary">—</Text> },
+    { title: 'Базис изделие', dataIndex: 'sourceBazisProductName', key: 'sourceBazisProductName',
+      fixed: 'left', width: 160, render: (value: string) => value || <Text type="secondary">—</Text> },
     { title: 'Позиция', dataIndex: 'position', key: 'position', fixed: 'left', width: 130 },
     { title: 'Наименование', dataIndex: 'partName', key: 'partName', fixed: 'left', width: 200 },
     ...grouped,
@@ -193,7 +197,9 @@ function useWorkspaceTabsHeight(): number {
 }
 const SourceRefs: React.FC<{ refs: Array<{ id: number; label: string }>; href?: (id: number) => string }> = ({ refs, href }) => {
   if (refs.length === 0) return <>—</>;
-  return <>{refs.map((ref, index) => <React.Fragment key={ref.id}>{index > 0 && ', '}{href ? <Link to={href(ref.id)}>{ref.label}</Link> : ref.label}</React.Fragment>)}</>;
+  return <>{refs.map((ref, index) => <React.Fragment key={`${ref.id}-${ref.label}`}>{index > 0 && ', '}
+    {href && ref.id > 0 ? <Link to={href(ref.id)}>{ref.label}</Link> : ref.label}
+  </React.Fragment>)}</>;
 };
 function exportFileName(name: string, setId: number): string {
   const safe = name.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/\s+/g, ' ')

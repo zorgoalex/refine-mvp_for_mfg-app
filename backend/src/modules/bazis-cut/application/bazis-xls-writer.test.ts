@@ -13,23 +13,30 @@ describe('buildBazisCutXls', () => {
     const workbook = XLSX.read(bytes, { type: 'buffer', cellFormula: true });
     expect(workbook.SheetNames).toEqual([BAZIS_CUT_SHEET_NAME]);
     const sheet = workbook.Sheets[BAZIS_CUT_SHEET_NAME];
-    expect(sheet['!ref']).toBe('A1:AG2');
+    expect(sheet['!ref']).toBe('A1:AI2');
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
     expect(rows[0]).toEqual([...BAZIS_CUT_HEADERS]);
-    expect(rows[1]?.[5]).toBe('Заказ 149101.00.07');
+    expect(rows[1]?.[5]).toBe('1319');
+    expect(rows[1]?.[6]).toBe('Кухня');
+    expect(rows[1]?.[7]).toBe('1319Кухня.01.00.07');
     expect(rows[1]?.[4]).toBe(18);
-    expect(rows[1]?.[26]).toBeNull();
-    expect(rows[1]?.[27]).toBe('=literal');
-    expect(sheet.AB2?.f).toBeUndefined();
+    expect(rows[1]?.[28]).toBeNull();
+    expect(rows[1]?.[29]).toBe('=literal');
+    expect(sheet.AD2?.f).toBeUndefined();
   });
 
   it('rejects an empty set', () => {
     expect(() => buildBazisCutXls([])).toThrow('Нельзя экспортировать пустой набор');
   });
 
-  it('writes only position when the detail has no Basis order', () => {
+  it.each([
+    ['', '', '01.00.07'],
+    ['1319', '', '1319.01.00.07'],
+    ['', 'Кухня', 'Кухня.01.00.07'],
+  ])('omits missing order/product values from position', (order, product, expected) => {
     const bytes = buildBazisCutXls([detail({
-      sourceBazisOrderNo: '',
+      sourceBazisOrderNo: order,
+      sourceBazisProductName: product,
       position: '01.00.07',
     })]);
     const workbook = XLSX.read(bytes, { type: 'buffer' });
@@ -38,7 +45,9 @@ describe('buildBazisCutXls', () => {
       { header: 1, defval: null },
     );
 
-    expect(rows[1]?.[5]).toBe('01.00.07');
+    expect(rows[1]?.[5]).toBe(order);
+    expect(rows[1]?.[6]).toBe(product);
+    expect(rows[1]?.[7]).toBe(expected);
   });
 });
 
@@ -48,7 +57,7 @@ function detail(overrides: Partial<BazisCutSetDetailDto> = {}): BazisCutSetDetai
     sourceOrderDetailId: 7, sourceOrderId: 14, sourceProjectId: 3,
     sourceBazisProjectId: 2, sourceBazisRevisionId: 4, sourceBazisNodeId: 5,
     sourceOrderName: '1491', sourceOrderFullNumber: 'МП-1-1491', sourceProjectCode: 'МП-1',
-    sourceBazisProjectName: 'Кухня', sourceBazisOrderNo: 'Заказ 1491',
+    sourceBazisProjectName: '1319', sourceBazisOrderNo: '1319', sourceBazisProductName: 'Кухня',
     cutEnabled: true, materialType: 'Площадной', materialName: 'ЛДСП Белый', materialArticle: '',
     thicknessMm: 18, position: '01.00.01', partName: 'Панель', finishedLengthMm: 410.99,
     finishedWidthMm: 374.5, cutLengthMm: 411, cutWidthMm: 374.5, quantity: 2,

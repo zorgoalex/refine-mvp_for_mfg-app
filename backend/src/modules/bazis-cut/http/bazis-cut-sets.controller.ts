@@ -66,6 +66,7 @@ const detailResponseSchema: SchemaObject = { type: 'object', additionalPropertie
   required: [...detailFieldNames, 'bazisCutSetDetailId', 'bazisCutSetId', 'sortOrder', 'sourceOrderDetailId',
     'sourceOrderId', 'sourceProjectId', 'sourceBazisProjectId', 'sourceBazisRevisionId', 'sourceBazisNodeId',
     'sourceOrderName', 'sourceOrderFullNumber', 'sourceProjectCode', 'sourceBazisProjectName', 'sourceBazisOrderNo',
+    'sourceBazisProductName',
     'createdAt', 'updatedAt'],
   properties: { ...detailProperties,
     bazisCutSetDetailId: { type: 'integer', format: 'int64' }, bazisCutSetId: { type: 'integer', format: 'int64' },
@@ -78,6 +79,7 @@ const detailResponseSchema: SchemaObject = { type: 'object', additionalPropertie
     sourceBazisNodeId: { type: 'integer', format: 'int64', nullable: true },
     sourceOrderName: { type: 'string' }, sourceOrderFullNumber: { type: 'string' }, sourceProjectCode: { type: 'string' },
     sourceBazisProjectName: { type: 'string' }, sourceBazisOrderNo: { type: 'string' },
+    sourceBazisProductName: { type: 'string' },
     createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
   } };
 const setResponseSchema: SchemaObject = { type: 'object', additionalProperties: false,
@@ -174,11 +176,11 @@ export class BazisCutSetsController {
       setId: parseId(setId), idempotencyKey: parseIdempotencyKey(key), ...parsed });
   }
 
-  @ApiOperation({ operationId: 'updateBazisCutSetDetail', summary: 'Replace all 33 export fields of a set detail' })
+  @ApiOperation({ operationId: 'updateBazisCutSetDetail', summary: 'Replace all 33 editable Basis fields of a set detail' })
   @ApiParam(idParameter)
   @ApiParam({ name: 'detailId', type: Number, required: true })
   @ApiHeader(commandHeader)
-  @ApiBody({ description: 'Strict full replacement: all 33 XLS fields plus expectedVersion', schema: updateDetailSchema })
+  @ApiBody({ description: 'Strict full replacement: all 33 editable Basis fields plus expectedVersion', schema: updateDetailSchema })
   @ApiResponse({ status: 200, description: 'Updated set', schema: mutationResponseSchema })
   @Patch(':setId/details/:detailId')
   updateDetail(@Req() request: RequestWithCurrentUser, @Param('setId') setId: string,

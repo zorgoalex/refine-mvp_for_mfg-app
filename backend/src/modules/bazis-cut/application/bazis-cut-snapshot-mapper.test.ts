@@ -37,7 +37,7 @@ const GOLDEN_1491: GoldenRow[] = [
 ];
 
 describe('1491 snapshot mapper golden', () => {
-  it('reproduces all 33 cells for all 28 positions from real XML source dimensions/orientation', () => {
+  it('reproduces all 35 export cells for all 28 positions from real XML source dimensions/orientation', () => {
     const rows = GOLDEN_1491.map(([position, name, sourceLength, sourceWidth, verticalTexture,
       _length, _width, quantity, milling, route, film], index) => {
       const fields = mapBazisCutSnapshotFields({
@@ -51,17 +51,17 @@ describe('1491 snapshot mapper golden', () => {
     });
     const expected = GOLDEN_1491.map(([position, name, _sourceLength, _sourceWidth, _vertical,
       length, width, quantity, milling, route, film]) => [
-      'Да', 'Площадной', 'МДФ 16 мм', '', 16, position, name, length, width,
+      'Да', 'Площадной', 'МДФ 16 мм', '', 16, '', '', position, name, length, width,
       Math.round(length * 10) / 10, Math.round(width * 10) / 10, quantity, 'Не задана', '',
       '', '', 0, '', '', 0, '', '', 0, '', '', 0, null, '', '', '', milling, route, film,
     ]);
 
     expect(rows).toHaveLength(28);
-    expect(rows.every((row) => row.length === 33)).toBe(true);
+    expect(rows.every((row) => row.length === 35)).toBe(true);
     expect(rows).toEqual(expected);
-    expect(rows.reduce((sum, row) => sum + Number(row[11]), 0)).toBe(30);
+    expect(rows.reduce((sum, row) => sum + Number(row[13]), 0)).toBe(30);
     expect(GOLDEN_1491.filter((row) => row[4])).toHaveLength(26);
-    expect(rows.filter((row) => Number(row[7]) < Number(row[8]))).toHaveLength(9);
-    expect(rows[0][5]).toBe('01.00.07');
+    expect(rows.filter((row) => Number(row[9]) < Number(row[10]))).toHaveLength(9);
+    expect(rows[0][7]).toBe('01.00.07');
   });
 });

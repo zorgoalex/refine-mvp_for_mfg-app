@@ -3,7 +3,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { PgBazisCutRepository, resolveBazisOrderNo } from './pg-bazis-cut-repository';
+import { PgBazisCutRepository, resolveBazisDetailLabels } from './pg-bazis-cut-repository';
 
 const user: CurrentUser = {
   id: '7', username: 'manager', role: 'manager', roleId: 3,
@@ -13,10 +13,17 @@ const user: CurrentUser = {
 afterEach(() => vi.restoreAllMocks());
 
 describe('PgBazisCutRepository security and event contract', () => {
-  it('prefers the Basis order frozen directly on the order detail', () => {
-    expect(resolveBazisOrderNo(' Кухня ', '1491', 'fallback')).toBe('Кухня');
-    expect(resolveBazisOrderNo('', '1491', 'fallback')).toBe('1491');
-    expect(resolveBazisOrderNo(null, null, ' fallback ')).toBe('fallback');
+  it('maps the ERP detail Basis project and product to separate frozen labels', () => {
+    expect(resolveBazisDetailLabels(' 1319 ', ' Кухня ')).toEqual({
+      sourceBazisProjectName: '1319',
+      sourceBazisOrderNo: '1319',
+      sourceBazisProductName: 'Кухня',
+    });
+    expect(resolveBazisDetailLabels(null, '')).toEqual({
+      sourceBazisProjectName: '',
+      sourceBazisOrderNo: '',
+      sourceBazisProductName: '',
+    });
   });
 
   it('records an order-scope denial outside the command transaction before idempotency', async () => {
@@ -100,7 +107,8 @@ function detailRow() {
     source_order_detail_id: 40, source_order_id: 30, source_project_id: 50,
     source_bazis_project_id: 60, source_bazis_revision_id: 70, source_bazis_node_id: 80,
     source_order_name: '1', source_order_full_number: 'P-1', source_project_code: 'P',
-    source_bazis_project_name: 'BP', source_bazis_order_no: 'BO', cut_enabled: true,
+    source_bazis_project_name: 'BP', source_bazis_order_no: 'BO',
+    source_bazis_product_name: 'Кухня', cut_enabled: true,
     material_type: 'Площадной', material_name: 'ЛДСП', material_article: '', thickness_mm: '16',
     position: '001', part_name: 'Бок', finished_length_mm: '100', finished_width_mm: '50',
     cut_length_mm: '100', cut_width_mm: '50', quantity: 2, orientation: 'Не задана', groove: '',

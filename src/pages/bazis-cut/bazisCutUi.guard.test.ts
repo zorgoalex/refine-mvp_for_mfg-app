@@ -42,7 +42,8 @@ describe('Basis-cut UI integration guards', () => {
   it('wires the action into order edit/show and blocks dirty edit drafts', () => {
     expect(editDetails).toContain('Добавить в Базис раскрой');
     expect(editDetails).toContain('Сначала сохраните изменения заказа');
-    expect(editDetails).toMatch(/disabled=\{!bazisCutManage \|\| isDirty/);
+    expect(editDetails).toContain('const disabled = !bazisCutManage || isDirty');
+    expect(editDetails).toContain('disabled={disabled}');
     expect(show).toContain('Добавить в Базис раскрой');
     expect(show).toContain('AddToBazisCutModal');
   });
@@ -51,6 +52,8 @@ describe('Basis-cut UI integration guards', () => {
     expect((card.match(/key: '[A-Za-z0-9]+'/g) ?? []).length).toBeGreaterThanOrEqual(33);
     expect(card).toContain("title: 'Базис заказ'");
     expect(card).toContain("dataIndex: 'sourceBazisOrderNo'");
+    expect(card).toContain("dataIndex: 'sourceBazisProductName'");
+    expect(card).toContain("title: 'Базис изделие'");
     expect(card).toContain('showSaveFilePicker');
     expect(card).toContain('downloadBlob');
     expect(card).toContain("error.name === 'AbortError'");

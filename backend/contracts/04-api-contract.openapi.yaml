@@ -9988,7 +9988,7 @@ paths:
     patch:
       tags: [BazisCutSets]
       operationId: updateBazisCutSetDetail
-      summary: Replace all 33 export fields of a set detail
+      summary: Replace all 33 editable Basis fields of a set detail
       security: [{ bearerAuth: [] }]
       x-permission: cut.manage
       parameters:
@@ -10652,7 +10652,7 @@ components:
           required: [bazisCutSetDetailId, bazisCutSetId, sortOrder, sourceOrderDetailId, sourceOrderId,
             sourceProjectId, sourceBazisProjectId, sourceBazisRevisionId, sourceBazisNodeId,
             sourceOrderName, sourceOrderFullNumber, sourceProjectCode, sourceBazisProjectName,
-            sourceBazisOrderNo, createdAt, updatedAt]
+            sourceBazisOrderNo, sourceBazisProductName, createdAt, updatedAt]
           properties:
             bazisCutSetDetailId: { type: integer, format: int64 }
             bazisCutSetId: { type: integer, format: int64 }
@@ -10668,6 +10668,7 @@ components:
             sourceProjectCode: { type: string }
             sourceBazisProjectName: { type: string }
             sourceBazisOrderNo: { type: string }
+            sourceBazisProductName: { type: string }
             createdAt: { type: string, format: date-time }
             updatedAt: { type: string, format: date-time }
     BazisCutSet:
