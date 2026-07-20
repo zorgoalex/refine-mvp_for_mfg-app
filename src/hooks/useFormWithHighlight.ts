@@ -1,5 +1,5 @@
 import { useForm as useRefineForm, UseFormProps, UseFormReturnType } from "@refinedev/antd";
-import { BaseRecord, HttpError } from "@refinedev/core";
+import { BaseRecord, HttpError, useGo } from "@refinedev/core";
 import { RESOURCE_LABELS } from "../utils/tabLabels";
 import { useRecordTabTitle } from "../utils/recordTitle";
 
@@ -25,6 +25,7 @@ export const useFormWithHighlight = <
   formProps?: UseFormProps<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError>;
 }): UseFormReturnType<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError> => {
   const { resource, idField, action = "create", formProps: additionalProps } = props;
+  const go = useGo();
 
   const formReturn = useRefineForm<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError>({
     ...additionalProps,
@@ -36,13 +37,19 @@ export const useFormWithHighlight = <
       // Navigate manually with highlightId
       const recordId = data.data?.[idField];
       if (recordId) {
-        const baseUrl = `${window.location.origin}/${resource}`;
         if (action === "edit") {
           // After edit: navigate to show page
-          window.location.href = `${baseUrl}/show/${recordId}`;
+          go({
+            to: { resource, action: "show", id: recordId },
+            type: "replace",
+          });
         } else {
           // After create: navigate to list page with highlight parameter
-          window.location.href = `${baseUrl}?highlightId=${recordId}`;
+          go({
+            to: { resource, action: "list" },
+            query: { highlightId: recordId },
+            type: "replace",
+          });
         }
       }
     },

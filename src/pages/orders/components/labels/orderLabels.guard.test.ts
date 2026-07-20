@@ -79,6 +79,15 @@ describe('order labels UI wiring', () => {
     expect(generateSrc).not.toMatch(/maxHeight: 220, overflow: 'auto'/);
   });
 
+  it('renders the preview frame with the saved physical template proportions', () => {
+    expect(generateSrc).toMatch(/const previewAspectRatio = selectedTemplate/);
+    expect(generateSrc).toMatch(/selectedTemplate\.canvasWidthMm\s*\/\s*selectedTemplate\.canvasHeightMm/);
+    expect(generateSrc).toMatch(/aspectRatio: `\$\{selectedTemplate\.canvasWidthMm\} \/ \$\{selectedTemplate\.canvasHeightMm\}`/);
+    expect(generateSrc).toMatch(/width: `min\(100%, calc\(58vh \* \$\{previewAspectRatio\}\)\)`/);
+    expect(generateSrc).not.toMatch(/minHeight: 260/);
+    expect(generateSrc).toMatch(/\.order-label-preview-fit svg \{[\s\S]*width: 100%;[\s\S]*height: 100%/);
+  });
+
   it('updates modal preview automatically when preview inputs change', () => {
     expect(generateSrc).toMatch(/useCallback/);
     expect(generateSrc).toMatch(/void runPreview\(\)/);

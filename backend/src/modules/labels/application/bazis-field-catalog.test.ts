@@ -67,6 +67,37 @@ describe('Bazis label field catalog', () => {
     expect(catalog.some((field) => field.id === 'detail.width')).toBe(false);
   });
 
+  it('distinguishes reference ids from their display names', () => {
+    const catalog = buildRuntimeLabelFieldCatalog([
+      { columnName: 'milling_type_id', dataType: 'smallint' },
+      { columnName: 'milling_type_name', dataType: 'text' },
+      { columnName: 'film_id', dataType: 'bigint' },
+      { columnName: 'film_name', dataType: 'text' },
+    ]);
+    const byId = new Map(catalog.map((field) => [field.id, field]));
+
+    expect(byId.get('detail.milling_type_id')).toMatchObject({
+      label: 'ID фрезеровки',
+      type: 'number',
+      sourceColumn: 'milling_type_id',
+    });
+    expect(byId.get('detail.milling_type_name')).toMatchObject({
+      label: 'Фрезеровка',
+      type: 'string',
+      sourceColumn: 'milling_type_name',
+    });
+    expect(byId.get('detail.film_id')).toMatchObject({
+      label: 'ID пленки',
+      type: 'number',
+      sourceColumn: 'film_id',
+    });
+    expect(byId.get('detail.film_name')).toMatchObject({
+      label: 'Пленка',
+      type: 'string',
+      sourceColumn: 'film_name',
+    });
+  });
+
   it('uses order-card labels for separate Basis detail and product designations', () => {
     const orderDetailTableSource = readFileSync(
       new URL('../../../../../src/pages/orders/components/tables/OrderDetailTable.tsx', import.meta.url),
@@ -82,6 +113,8 @@ describe('Bazis label field catalog', () => {
     const catalog = buildRuntimeLabelFieldCatalog([
       ...cardFields.map(({ key }) => ({ columnName: key, dataType: 'text' })),
       { columnName: 'basis_product', dataType: 'text' },
+      { columnName: 'milling_type_name', dataType: 'text' },
+      { columnName: 'film_name', dataType: 'text' },
     ]);
     const detailFields = new Map(
       catalog.filter((field) => field.source === 'detail').map((field) => [field.sourceColumn, field.label]),
@@ -89,8 +122,15 @@ describe('Bazis label field catalog', () => {
 
     expect(cardFields.length).toBeGreaterThan(0);
     for (const { key, label } of cardFields) {
-      expect(detailFields.get(key), key).toBe(label);
+      const expectedLabel = key === 'milling_type_id'
+        ? 'ID фрезеровки'
+        : key === 'film_id'
+          ? 'ID пленки'
+          : label;
+      expect(detailFields.get(key), key).toBe(expectedLabel);
     }
+    expect(detailFields.get('milling_type_name')).toBe('Фрезеровка');
+    expect(detailFields.get('film_name')).toBe('Пленка');
     expect(detailFields.get('basis_designation')).toBe('Базис обозн. детали');
     expect(detailFields.get('basis_product')).toBe('Базис обозн. изделия');
   });
