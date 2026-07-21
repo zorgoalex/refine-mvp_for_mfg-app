@@ -49,27 +49,35 @@ function backendControllerFiles(): string[] {
 
 function routesFromController(file: string): string[] {
   const source = readFileSync(file, 'utf8');
-  const controllerPrefix = parseControllerPrefix(source, file);
   const routes: string[] = [];
 
   for (const match of source.matchAll(ROUTE_DECORATOR_PATTERN)) {
     const method = match[1].toUpperCase();
     const routePath = match[3] ?? '';
+    const controllerPrefix = parseControllerPrefix(source, file, match.index ?? 0);
     routes.push(`${method} ${toOpenApiPath(controllerPrefix, routePath)}`);
   }
 
   return routes;
 }
 
-function parseControllerPrefix(source: string, file: string): string {
-  const match = /@Controller\(\s*(?:(['"`])([^'"`]*)\1)?\s*\)/m.exec(source);
+function parseControllerPrefix(source: string, file: string, routeIndex: number): string {
+  const controllerPattern = /@Controller\(\s*(?:(['"`])([^'"`]*)\1)?\s*\)/gm;
+  let controllerPrefix: string | undefined;
+
+  for (const match of source.matchAll(controllerPattern)) {
+    if ((match.index ?? 0) > routeIndex) {
+      break;
+    }
+    controllerPrefix = match[2] ?? '';
+  }
 
   expect(
-    match,
-    `${normalizePath(relative(backendRoot(), file))} should declare a static @Controller(...) prefix`,
+    controllerPrefix,
+    `${normalizePath(relative(backendRoot(), file))} should declare a static @Controller(...) prefix before every route`,
   ).toBeDefined();
 
-  return match?.[2] ?? '';
+  return controllerPrefix ?? '';
 }
 
 function toOpenApiPath(controllerPrefix: string, routePath: string): string {
@@ -79,7 +87,7 @@ function toOpenApiPath(controllerPrefix: string, routePath: string): string {
     .replace(/\/+/g, '/')
     .replace(/\/:([^/]+)/g, '/{$1}');
 
-  return joinedPath === '' ? '/' : joinedPath;
+  return canonicalizePathParameters(joinedPath === '' ? '/' : joinedPath);
 }
 
 function readOpenApiContract(): string {
@@ -111,7 +119,9 @@ function collectDocumentedRoutes(contract: string): string[] {
   for (const line of lines) {
     const pathMatch = /^  (\/[^:]+):$/.exec(line);
     if (pathMatch) {
-      currentPath = pathMatch[1].startsWith('/api/v1/') ? pathMatch[1] : null;
+      currentPath = pathMatch[1].startsWith('/api/v1/')
+        ? canonicalizePathParameters(pathMatch[1])
+        : null;
       continue;
     }
 
@@ -122,6 +132,10 @@ function collectDocumentedRoutes(contract: string): string[] {
   }
 
   return routes;
+}
+
+function canonicalizePathParameters(path: string): string {
+  return path.replace(/\{[^/}]+\}/g, '{param}');
 }
 
 function formatRouteDiff(title: string, implementedRoutes: string[], documentedRoutes: string[]): string {

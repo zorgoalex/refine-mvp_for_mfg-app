@@ -8507,6 +8507,123 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/label-ocr-templates:
+    get:
+      tags: [Labels]
+      operationId: listLabelOcrTemplates
+      summary: List label OCR templates
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    post:
+      tags: [Labels]
+      operationId: createLabelOcrTemplate
+      summary: Create label OCR template
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.manage_templates
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/label-ocr-templates/{id}:
+    put:
+      tags: [Labels]
+      operationId: updateLabelOcrTemplate
+      summary: Update label OCR template
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.manage_templates
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Labels]
+      operationId: deleteLabelOcrTemplate
+      summary: Delete label OCR template
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.manage_templates
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/label-ocr-templates/preview:
+    post:
+      tags: [Labels]
+      operationId: previewLabelOcrTemplate
+      summary: Preview OCR recognition for template configuration
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.manage_templates
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/label-ocr-templates/test:
+    post:
+      tags: [Labels]
+      operationId: testLabelOcrTemplate
+      summary: Test OCR rules against an uploaded image
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.manage_templates
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/labels/preview:
+    post:
+      tags: [Labels]
+      operationId: previewDetailLabels
+      summary: Preview labels for explicit detail instances
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/labels/generate:
+    post:
+      tags: [Labels]
+      operationId: generateDetailLabels
+      summary: Generate labels for explicit detail instances
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.generate
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/labels/generations/{generationId}/export:
+    get:
+      tags: [Labels]
+      operationId: exportDetailLabelGeneration
+      summary: Export an explicit-detail label generation
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.view
+      responses:
+        '200': { description: ZIP export }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/labels/scan-resolve:
     post:
       tags:
@@ -9426,6 +9543,36 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/{cutJobId}/pdf-template:
+    patch:
+      tags: [CutJobs]
+      operationId: setCutJobPdfTemplate
+      summary: Set the PDF template for a whole cut job
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/pdf-template:
+    patch:
+      tags: [CutJobs]
+      operationId: setCutGroupPdfTemplate
+      summary: Set the PDF template for a cut group
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/manual-layout:
     patch:
       tags:
@@ -9974,6 +10121,35 @@ paths:
           $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-config/pdf-templates:
+    post:
+      tags: [CutConfig]
+      operationId: createCutPdfTemplate
+      summary: Create a PDF template layout
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cut-config/pdf-templates/{id}:
+    put:
+      tags: [CutConfig]
+      operationId: updateCutPdfTemplate
+      summary: Update a PDF template layout
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
 
   /api/v1/cut-config/render-presets:
     post:
