@@ -5433,7 +5433,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [version, commandId]
+              required: [version]
               properties:
                 version: { type: integer, minimum: 1 }
                 approvalStatus: { type: string, enum: [approved, rejected] }
@@ -9233,13 +9233,18 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/groups/{groupId}/sheets/{sheetIndex.png}:
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/groups/{groupId}/sheets/{sheetIndex}.png:
     get:
       tags: [CutJobs]
       operationId: renderCutResultSheetPng
       summary: Render frozen result sheet PNG
       security: [{ bearerAuth: [] }]
       x-permission: cut.view
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer } }
+        - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: groupId, in: path, required: true, schema: { type: integer } }
+        - { name: sheetIndex, in: path, required: true, schema: { type: integer, minimum: 0 } }
       responses:
         '200':
           description: PNG
@@ -9248,13 +9253,18 @@ paths:
               schema: { type: string, format: binary }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/groups/{groupId}/sheets/{sheetIndex.svg}:
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/groups/{groupId}/sheets/{sheetIndex}.svg:
     get:
       tags: [CutJobs]
       operationId: renderCutResultSheetSvg
       summary: Render frozen result sheet SVG
       security: [{ bearerAuth: [] }]
       x-permission: cut.view
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer } }
+        - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: groupId, in: path, required: true, schema: { type: integer } }
+        - { name: sheetIndex, in: path, required: true, schema: { type: integer, minimum: 0 } }
       responses:
         '200':
           description: SVG
@@ -9662,7 +9672,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/sheets/{sheetIndex.png}:
+  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/sheets/{sheetIndex}.png:
     get:
       tags:
         - CutJobs
@@ -9714,7 +9724,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/sheets/{sheetIndex.svg}:
+  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/sheets/{sheetIndex}.svg:
     get:
       tags:
         - CutJobs

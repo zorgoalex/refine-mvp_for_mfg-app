@@ -85,7 +85,7 @@ function toOpenApiPath(controllerPrefix: string, routePath: string): string {
     .filter((part) => part.length > 0)
     .join('/')
     .replace(/\/+/g, '/')
-    .replace(/\/:([^/]+)/g, '/{$1}');
+    .replace(/\/:([^/.]+)(?=\.|\/|$)/g, '/{$1}');
 
   return canonicalizePathParameters(joinedPath === '' ? '/' : joinedPath);
 }
