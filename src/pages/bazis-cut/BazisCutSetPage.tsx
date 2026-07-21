@@ -13,6 +13,7 @@ import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
 import { buildBazisCutQrCode, summarizeBazisCutDetails } from './bazisCutDetailPresentation';
 import { saveBazisCutFile, type BazisCutSaveHandle } from './bazisCutSaveFile';
+import './BazisCutSetPage.css';
 
 const { Title, Text } = Typography;
 
@@ -59,6 +60,9 @@ const GROUPED_FIELDS = FIELD_GROUPS.flatMap((group) =>
   FIELDS.filter((field) => field.group === group && field.key !== 'position' && field.key !== 'partName'),
 );
 const LEADING_COLUMN_COUNT = 6;
+const QR_CODE_COLUMN_INDEX = 4;
+const QR_CODE_STICKY_CLASS = 'bazis-cut-sticky-qr';
+const QR_CODE_STICKY_LEFT_PX = 58 + 180 + 150;
 const TOTAL_LABEL_COLUMN_INDEX = LEADING_COLUMN_COUNT - 1;
 const QUANTITY_COLUMN_INDEX = LEADING_COLUMN_COUNT
   + GROUPED_FIELDS.findIndex((field) => field.key === 'quantity');
@@ -141,7 +145,9 @@ export const BazisCutSetPage: React.FC = () => {
       <Descriptions.Item label="Базис-проекты"><SourceRefs refs={set.bazisProjects} href={(refId) => `/bazis/projects/${refId}`} /></Descriptions.Item>
       <Descriptions.Item label="Базис-заказы"><SourceRefs refs={set.bazisOrders} /></Descriptions.Item>
     </Descriptions>}</Card>
-    <Card title="Детали набора"><Table rowKey="bazisCutSetDetailId" columns={columns} dataSource={set?.details ?? []}
+    <Card title="Детали набора"><Table className="bazis-cut-set-details-table"
+      style={{ '--bazis-cut-sticky-qr-left': `${QR_CODE_STICKY_LEFT_PX}px` } as React.CSSProperties}
+      rowKey="bazisCutSetDetailId" columns={columns} dataSource={set?.details ?? []}
       loading={loading} pagination={false} scroll={{ x: 5320, y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
       summary={(details) => <DetailTableSummary details={details} canManage={canManage} />}
       size="small" locale={{ emptyText: 'В наборе нет деталей' }} /></Card>
@@ -176,15 +182,15 @@ function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) =
       render: (value: string) => value
         ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span>
         : <Text type="secondary">—</Text> },
-    { title: 'Позиция', dataIndex: 'position', key: 'position', fixed: 'left', width: 130,
+    { title: 'Позиция', dataIndex: 'position', key: 'position', width: 130,
       render: (value: string) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span> },
-    { title: 'QR-code', key: 'qrCode', fixed: 'left', width: 220, render: (_: unknown, row: BazisCutSetDetailDto) => {
+    { title: 'QR-code', key: 'qrCode', className: QR_CODE_STICKY_CLASS, width: 220, render: (_: unknown, row: BazisCutSetDetailDto) => {
       const qrCode = buildBazisCutQrCode(row);
       return qrCode
         ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{qrCode}</span>
         : <Text type="secondary">—</Text>;
     } },
-    { title: 'Наименование', dataIndex: 'partName', key: 'partName', fixed: 'left', width: 200 },
+    { title: 'Наименование', dataIndex: 'partName', key: 'partName', width: 200 },
     ...grouped,
     ...(canManage ? [{ title: 'Действия', key: 'actions', fixed: 'right' as const, width: 110,
       render: (_: unknown, row: BazisCutSetDetailDto) => <Space><Button aria-label="Редактировать" icon={<EditOutlined />} onClick={() => edit(row)} />
@@ -198,8 +204,9 @@ const DetailTableSummary: React.FC<{
 }> = ({ details, canManage }) => {
   const totals = summarizeBazisCutDetails(details);
   const columnCount = LEADING_COLUMN_COUNT + GROUPED_FIELDS.length + (canManage ? 1 : 0);
-  return <Table.Summary fixed><Table.Summary.Row>
-    {Array.from({ length: columnCount }, (_, index) => <Table.Summary.Cell key={index} index={index}>
+  return <Table.Summary fixed="bottom"><Table.Summary.Row style={{ backgroundColor: 'var(--app-surface-muted)' }}>
+    {Array.from({ length: columnCount }, (_, index) => <Table.Summary.Cell key={index} index={index}
+      className={index === QR_CODE_COLUMN_INDEX ? QR_CODE_STICKY_CLASS : undefined}>
       {index === TOTAL_LABEL_COLUMN_INDEX
         ? <div style={{ textAlign: 'right' }}><Text strong>Итого позиций: <span style={{ fontVariantNumeric: 'tabular-nums' }}>{totals.positionCount}</span></Text></div>
         : index === QUANTITY_COLUMN_INDEX
