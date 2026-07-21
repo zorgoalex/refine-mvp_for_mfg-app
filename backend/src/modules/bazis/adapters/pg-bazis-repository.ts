@@ -17,6 +17,7 @@ import type {
   CreateOrderFromRevisionCommand,
   DeleteBazisProjectInput,
   ImportRevisionCommand,
+  RenameBazisProjectInput,
   SetNodeNotesInput,
 } from '../application/bazis.types';
 import {
@@ -38,6 +39,7 @@ import type {
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
+  BazisProjectNameDto,
   BazisRevisionMaterialsSummaryDto,
   BazisRevisionOrderDto,
   BazisTreeNodeDto,
@@ -111,6 +113,7 @@ interface PruneCandidateRow {
 interface ProjectListRow {
   bazis_project_id: number | string;
   project_id: number | string;
+  project_name: string;
   name: string;
   revisions_count: number | string;
   last_revision_no: number | string | null;
@@ -306,6 +309,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const requestId = requestIdOrFallback(command.requestId, 'bazis-import');
+      const bazisOrderNo =
+        command.parsed.bazisOrderNo ?? firstRootProductOrderNo(command.parsed.nodes);
 
       let bazisProjectId = command.bazisProjectId;
       let projectId = command.projectId;
@@ -330,7 +335,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
         if (projectId == null) {
           throw new BazisReferenceNotFoundError('projectId');
         }
-        bazisProjectName = command.parsed.productName ?? command.fileName;
+        bazisProjectName = bazisOrderNo ?? command.fileName;
         const inserted = await tx.query<{ bazis_project_id: number | string }>(
           `
           INSERT INTO bazis_projects (project_id, name, created_by)
@@ -400,8 +405,6 @@ export class PgBazisRepository implements BazisRepositoryPort {
         [bazisProjectId],
       );
       const revisionNo = Number(revisionNoRow.rows[0].next);
-      const bazisOrderNo = command.parsed.bazisOrderNo ?? firstRootProductOrderNo(command.parsed.nodes);
-
       const revisionRow = await tx.query<{ bazis_revision_id: number | string }>(
         `
         INSERT INTO bazis_project_revisions
@@ -828,6 +831,93 @@ export class PgBazisRepository implements BazisRepositoryPort {
     });
   }
 
+  async renameProject(input: RenameBazisProjectInput): Promise<BazisProjectNameDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, input.currentUser.id);
+      const requestId = requestIdOrFallback(input.requestId, 'bazis-rename');
+      const existing = await tx.query<{
+        bazis_project_id: number | string;
+        project_id: number | string;
+        name: string;
+      }>(
+        `
+        SELECT bazis_project_id, project_id, name
+        FROM bazis_projects
+        WHERE bazis_project_id = $1
+        FOR UPDATE
+        `,
+        [input.bazisProjectId],
+      );
+      if (existing.rows.length === 0) {
+        throw new BazisProjectNotFoundError(input.bazisProjectId);
+      }
+
+      const row = existing.rows[0];
+      const projectId = Number(row.project_id);
+      if (row.name === input.name) {
+        return { bazisProjectId: input.bazisProjectId, projectId, name: row.name };
+      }
+
+      await tx.query(
+        `
+        UPDATE bazis_projects
+        SET name = $2
+        WHERE bazis_project_id = $1
+        `,
+        [input.bazisProjectId, input.name],
+      );
+
+      const auditId = await auditService.record(tx, {
+        event: 'bazis.project_renamed',
+        entityType: 'bazis_project',
+        entityId: String(input.bazisProjectId),
+        actorUserId: input.currentUser.id,
+        actorUsername: input.currentUser.username,
+        actorRole: input.currentUser.role,
+        requestId,
+        source: SOURCE,
+        relatedEntities: [
+          { entityType: 'project', entityId: projectId },
+          { entityType: 'bazis_project', entityId: input.bazisProjectId },
+        ],
+        before: { name: row.name },
+        after: { name: input.name },
+        metadata: {
+          source: SOURCE,
+          action: 'bazis_project_rename',
+          requestId,
+        },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1,$2,$3,$4::jsonb,$5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          'bazis.project_renamed',
+          'bazis_project',
+          String(input.bazisProjectId),
+          JSON.stringify({
+            eventType: 'bazis.project_renamed',
+            bazisProjectId: input.bazisProjectId,
+            projectId,
+            beforeName: row.name,
+            name: input.name,
+            actorUserId: input.currentUser.id,
+            requestId,
+          }),
+          input.requestId
+            ? `bazis-project-renamed-${input.bazisProjectId}-${input.requestId}`
+            : `bazis-project-renamed-${input.bazisProjectId}-audit-${auditId}`,
+        ],
+      );
+
+      return { bazisProjectId: input.bazisProjectId, projectId, name: input.name };
+    });
+  }
+
   async deleteProject(input: DeleteBazisProjectInput): Promise<BazisProjectDeleteResponseDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, input.currentUser.id);
@@ -952,6 +1042,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       `
       SELECT bp.bazis_project_id,
              bp.project_id,
+             erp_project.name AS project_name,
              bp.name,
              COUNT(DISTINCT r_all.bazis_revision_id)::int AS revisions_count,
              MAX(r_all.revision_no)::int AS last_revision_no,
@@ -976,6 +1067,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
                WHERE l.bazis_project_id = bp.bazis_project_id
              ), '[]'::jsonb) AS linked_orders
       FROM bazis_projects bp
+      JOIN projects erp_project ON erp_project.project_id = bp.project_id
       LEFT JOIN bazis_project_revisions r_all ON r_all.bazis_project_id = bp.bazis_project_id
       LEFT JOIN LATERAL (
         SELECT r_latest.bazis_revision_id, r_latest.bazis_order_no
@@ -986,7 +1078,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
       ) rev ON TRUE
       LEFT JOIN bazis_order_links bol ON bol.bazis_project_id = bp.bazis_project_id
       WHERE ($1::bigint IS NULL OR bp.project_id = $1)
-      GROUP BY bp.bazis_project_id, bp.project_id, bp.name, rev.bazis_revision_id, rev.bazis_order_no
+      GROUP BY bp.bazis_project_id, bp.project_id, erp_project.name, bp.name,
+               rev.bazis_revision_id, rev.bazis_order_no
       ORDER BY bp.bazis_project_id DESC
       `,
       [filter.projectId ?? null],
@@ -999,6 +1092,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       `
       SELECT bp.bazis_project_id,
              bp.project_id,
+             erp_project.name AS project_name,
              bp.name,
              COUNT(DISTINCT r_all.bazis_revision_id)::int AS revisions_count,
              MAX(r_all.revision_no)::int AS last_revision_no,
@@ -1023,6 +1117,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
                WHERE l.bazis_project_id = bp.bazis_project_id
              ), '[]'::jsonb) AS linked_orders
       FROM bazis_projects bp
+      JOIN projects erp_project ON erp_project.project_id = bp.project_id
       LEFT JOIN bazis_project_revisions r_all ON r_all.bazis_project_id = bp.bazis_project_id
       LEFT JOIN LATERAL (
         SELECT r_latest.bazis_revision_id, r_latest.bazis_order_no
@@ -1033,7 +1128,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
       ) rev ON TRUE
       LEFT JOIN bazis_order_links bol ON bol.bazis_project_id = bp.bazis_project_id
       WHERE bp.bazis_project_id = $1
-      GROUP BY bp.bazis_project_id, bp.project_id, bp.name, rev.bazis_revision_id, rev.bazis_order_no
+      GROUP BY bp.bazis_project_id, bp.project_id, erp_project.name, bp.name,
+               rev.bazis_revision_id, rev.bazis_order_no
       `,
       [bazisProjectId],
     );
@@ -2547,6 +2643,7 @@ function mapProjectListRow(row: ProjectListRow): BazisProjectListItemDto {
   return {
     bazisProjectId: Number(row.bazis_project_id),
     projectId: Number(row.project_id),
+    projectName: row.project_name,
     name: row.name,
     revisionsCount: Number(row.revisions_count),
     lastRevisionNo: nullableNumber(row.last_revision_no),

@@ -2579,6 +2579,7 @@ paths:
                   required:
                     - bazisProjectId
                     - projectId
+                    - projectName
                     - name
                     - revisionsCount
                     - linkedOrderIds
@@ -2588,6 +2589,8 @@ paths:
                       type: integer
                     projectId:
                       type: integer
+                    projectName:
+                      type: string
                     name:
                       type: string
                     revisionsCount:
@@ -2630,6 +2633,62 @@ paths:
           $ref: '#/components/responses/InternalError'
 
   /api/v1/bazis/projects/{id}:
+    patch:
+      tags:
+        - Bazis
+      operationId: renameBazisProject
+      summary: Rename a Bazis project
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 300
+      responses:
+        '200':
+          description: Renamed Bazis project
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - bazisProjectId
+                  - projectId
+                  - name
+                properties:
+                  bazisProjectId:
+                    type: integer
+                  projectId:
+                    type: integer
+                  name:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis project not found
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
     delete:
       tags:
         - Bazis
@@ -2710,6 +2769,7 @@ paths:
                 required:
                   - bazisProjectId
                   - projectId
+                  - projectName
                   - name
                   - revisionsCount
                   - linkedOrderIds
@@ -2720,6 +2780,8 @@ paths:
                     type: integer
                   projectId:
                     type: integer
+                  projectName:
+                    type: string
                   name:
                     type: string
                   revisionsCount:

@@ -28,6 +28,7 @@ import {
   type BazisProjectCardDto,
   type BazisProjectDeleteResponseDto,
   type BazisProjectListItemDto,
+  type BazisProjectNameDto,
   type BazisRevisionMaterialsSummaryDto,
   type BazisRevisionEstimateDto,
   type BazisRevisionOrderDto,
@@ -47,6 +48,7 @@ export interface BazisServicePorts {
 }
 
 const NODE_NOTES_MAX_LENGTH = 2000;
+const BAZIS_PROJECT_NAME_MAX_LENGTH = 300;
 
 export class BazisService {
   private readonly permissions: PermissionsService;
@@ -113,6 +115,30 @@ export class BazisService {
   async getProject(currentUser: CurrentUser, id: number): Promise<BazisProjectCardDto> {
     await this.requirePermission(currentUser, 'bazis.view', 'get_project');
     return this.ports.repository.getProject(id);
+  }
+
+  async renameProject(
+    currentUser: CurrentUser,
+    requestId: string | undefined,
+    bazisProjectId: number,
+    rawName: string,
+  ): Promise<BazisProjectNameDto> {
+    await this.requirePermission(currentUser, 'bazis.manage', 'rename_project', requestId);
+    const name = rawName.trim();
+    if (name.length === 0 || name.length > BAZIS_PROJECT_NAME_MAX_LENGTH) {
+      throw new ApiError(
+        422,
+        'VALIDATION_ERROR',
+        `Название Базис-проекта должно содержать от 1 до ${BAZIS_PROJECT_NAME_MAX_LENGTH} символов`,
+        { field: 'name', maxLength: BAZIS_PROJECT_NAME_MAX_LENGTH },
+      );
+    }
+    return this.ports.repository.renameProject({
+      currentUser,
+      requestId,
+      bazisProjectId,
+      name,
+    });
   }
 
   async getTree(

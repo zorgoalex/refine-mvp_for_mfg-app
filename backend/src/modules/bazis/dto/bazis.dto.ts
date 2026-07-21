@@ -16,6 +16,7 @@ export interface BazisImportResponseDto {
 export interface BazisProjectListItemDto {
   bazisProjectId: number;
   projectId: number;
+  projectName: string;
   name: string;
   revisionsCount: number;
   lastRevisionNo: number | null;
@@ -23,6 +24,12 @@ export interface BazisProjectListItemDto {
   bazisOrderNo: string | null;
   linkedOrderIds: number[];
   linkedOrders: BazisOrderRefDto[];
+}
+
+export interface BazisProjectNameDto {
+  bazisProjectId: number;
+  projectId: number;
+  name: string;
 }
 
 export interface BazisProjectCardDto extends BazisProjectListItemDto {

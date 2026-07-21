@@ -14,6 +14,7 @@ import type {
   BazisProjectCard,
   BazisProjectDeleteResponse,
   BazisProjectListItem,
+  BazisProjectNameResponse,
   BazisRevisionMaterialsSummary,
   BazisRevisionOrder,
   BazisTreeNode,
@@ -46,6 +47,13 @@ export const bazisApi = {
 
   getProject(id: number): Promise<BazisProjectCard> {
     return httpClient.get<BazisProjectCard>(apiRoutes.bazis.project(validateId(id, 'bazisProjectId')));
+  },
+
+  renameProject(id: number, name: string): Promise<BazisProjectNameResponse> {
+    return httpClient.patch<BazisProjectNameResponse>(
+      apiRoutes.bazis.project(validateId(id, 'bazisProjectId')),
+      { name },
+    );
   },
 
   deleteProject(id: number): Promise<BazisProjectDeleteResponse> {

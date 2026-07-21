@@ -22,6 +22,7 @@ import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import { createBackendSelectProps, useOrderFormData } from '../../hooks/useOrderFormData';
 import { MaterialMappingStep, materialMappingKey, type MaterialMappingValue, type UnmappedMaterialRow } from './MaterialMappingStep';
 import { parseXmlPreview, XmlPreviewError, type XmlPreviewBreakdown, type XmlPreviewNode, type XmlPreviewResult } from './parseXmlPreview';
+import { suggestBazisProjectName } from './bazisProjectName';
 
 const { Dragger } = Upload;
 
@@ -637,8 +638,8 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
               onChange={(event) => {
                 const mode = event.target.value as BindingMode;
                 setBindingMode(mode);
-                if (mode === 'new' && !newProjectName && preview?.productName) {
-                  setNewProjectName(preview.productName);
+                if (mode === 'new' && !newProjectName) {
+                  setNewProjectName(suggestBazisProjectName(preview?.bazisOrderNo, xmlFile?.name));
                 }
               }}
             >

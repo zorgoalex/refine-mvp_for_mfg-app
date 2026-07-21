@@ -39,12 +39,16 @@ describe('PgBazisRepository.importRevision', () => {
 
     const response = await repository.importRevision(importCommand());
 
-    expect(response.bazisProject).toEqual({ bazisProjectId: 41, projectId: 77, name: 'Шкаф Nova' });
+    expect(response.bazisProject).toEqual({ bazisProjectId: 41, projectId: 77, name: '1457' });
     expect(response.revision).toMatchObject({ bazisRevisionId: 82, revisionNo: 3, xmlSha256: 'sha-001' });
 
     const ordered = database.queries.map((query) => normalizeSql(query.text));
     expect(ordered[0]).toBe('SELECT set_session_user($1)');
     expect(ordered).toContain('INSERT INTO bazis_projects (project_id, name, created_by) VALUES ($1, $2, $3) RETURNING bazis_project_id');
+    const projectInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_projects'),
+    );
+    expect(projectInsert?.params?.[1]).toBe('1457');
     expect(ordered).toContain('SELECT revision_no FROM bazis_project_revisions WHERE bazis_project_id = $1 AND xml_sha256 = $2');
     expect(ordered).toContain('INSERT INTO bazis_project_revisions (bazis_project_id, revision_no, file_name, file_size, xml_sha256, raw_xml, bazis_version, bazis_order_no, product_name, product_price, summary_json, imported_by, request_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13) RETURNING bazis_revision_id');
     expect(ordered.filter((sql) => sql.startsWith('INSERT INTO bazis_nodes'))).toHaveLength(2);
@@ -100,6 +104,10 @@ describe('PgBazisRepository.importRevision', () => {
       normalizeSql(query.text).startsWith('INSERT INTO bazis_project_revisions'),
     );
     expect(revisionInsert?.params[7]).toBe('1443');
+    const projectInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_projects'),
+    );
+    expect(projectInsert?.params[1]).toBe('1443');
   });
 
   it('stores null bazis_order_no when both parsed and root fallback values are absent', async () => {
@@ -119,6 +127,10 @@ describe('PgBazisRepository.importRevision', () => {
       normalizeSql(query.text).startsWith('INSERT INTO bazis_project_revisions'),
     );
     expect(revisionInsert?.params[7]).toBeNull();
+    const projectInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_projects'),
+    );
+    expect(projectInsert?.params[1]).toBe('nova.xml');
   });
 
   it('throws BazisRevisionDuplicateError when sha256 exists in same bazis project', async () => {
@@ -330,6 +342,7 @@ describe('PgBazisRepository reads + mappings', () => {
         {
           bazis_project_id: 14,
           project_id: 10,
+          project_name: 'Квартира 1485',
           name: 'санузел + шкаф',
           revisions_count: 1,
           last_revision_no: 1,
@@ -357,6 +370,7 @@ describe('PgBazisRepository reads + mappings', () => {
 
     await expect(repository.getProject(14)).resolves.toMatchObject({
       bazisProjectId: 14,
+      projectName: 'Квартира 1485',
       bazisOrderNo: '1457',
       revisions: [{ bazisRevisionId: 82 }],
     });
@@ -2814,6 +2828,7 @@ describe('PgBazisRepository.listProjects', () => {
         {
           bazis_project_id: 14,
           project_id: 10,
+          project_name: 'Квартира 1485',
           name: 'санузел + шкаф',
           revisions_count: 1,
           last_revision_no: 1,
@@ -2830,12 +2845,14 @@ describe('PgBazisRepository.listProjects', () => {
 
     expect(projects[0].linkedOrders).toEqual([{ orderId: 11385, orderName: 'санузел' }]);
     expect(projects[0].linkedOrderIds).toEqual([11385]);
+    expect(projects[0].projectName).toBe('Квартира 1485');
 
     const listSql = database.queries
       .map((query) => normalizeSql(query.text))
       .find((sql) => sql.startsWith('SELECT bp.bazis_project_id'));
     expect(listSql).toContain('order_name');
     expect(listSql).toContain('JOIN orders');
+    expect(listSql).toContain('JOIN projects erp_project');
   });
 
   it('returns bazisOrderNo from the latest revision column for list items', async () => {
@@ -2844,6 +2861,7 @@ describe('PgBazisRepository.listProjects', () => {
         {
           bazis_project_id: 14,
           project_id: 10,
+          project_name: 'Квартира 1485',
           name: 'санузел + шкаф',
           revisions_count: 1,
           last_revision_no: 1,
@@ -2870,6 +2888,7 @@ describe('PgBazisRepository.listProjects', () => {
         {
           bazis_project_id: 14,
           project_id: 10,
+          project_name: 'Квартира 1485',
           name: 'санузел + шкаф',
           revisions_count: 1,
           last_revision_no: 1,
@@ -4083,6 +4102,110 @@ function sheetOnlyMapping(sheetMaterialTypeId: number) {
 
 function isoMinutesAgo(minutes: number): string {
   return new Date(Date.now() - minutes * 60_000).toISOString();
+}
+
+describe('PgBazisRepository.renameProject', () => {
+  it('locks and renames project with audit + outbox', async () => {
+    const database = createRenameDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.renameProject({
+      currentUser: currentUser('admin'),
+      requestId: 'req-rename-1',
+      bazisProjectId: 41,
+      name: '1485',
+    });
+
+    expect(response).toEqual({ bazisProjectId: 41, projectId: 77, name: '1485' });
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    expect(ordered[0]).toBe('SELECT set_session_user($1)');
+    expect(ordered.some((sql) => sql.includes('FROM bazis_projects') && sql.includes('FOR UPDATE'))).toBe(true);
+    expect(ordered).toContain('UPDATE bazis_projects SET name = $2 WHERE bazis_project_id = $1');
+
+    const audit = database.queries.find((query) => normalizeSql(query.text).startsWith('INSERT INTO audit_log ('));
+    expect(audit?.params).toContain('bazis.project_renamed');
+    expect(audit?.params).toContain(JSON.stringify({ name: 'Шкаф Nova' }));
+    expect(audit?.params).toContain(JSON.stringify({ name: '1485' }));
+
+    const outbox = database.queries.find((query) => normalizeSql(query.text).startsWith('INSERT INTO outbox_events'));
+    expect(outbox?.params?.[0]).toBe('bazis.project_renamed');
+    expect(outbox?.params?.[4]).toBe('bazis-project-renamed-41-req-rename-1');
+  });
+
+  it('same name is a no-op without update, audit, or outbox', async () => {
+    const database = createRenameDatabase({ name: '1485' });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(repository.renameProject({
+      currentUser: currentUser('admin'),
+      requestId: 'req-rename-noop',
+      bazisProjectId: 41,
+      name: '1485',
+    })).resolves.toEqual({ bazisProjectId: 41, projectId: 77, name: '1485' });
+
+    const ordered = database.queries.map((query) => normalizeSql(query.text));
+    expect(ordered.some((sql) => sql.startsWith('UPDATE bazis_projects'))).toBe(false);
+    expect(ordered.some((sql) => sql.startsWith('INSERT INTO audit_log'))).toBe(false);
+    expect(ordered.some((sql) => sql.startsWith('INSERT INTO outbox_events'))).toBe(false);
+  });
+
+  it('uses the audit id for outbox idempotency when request id is absent', async () => {
+    const database = createRenameDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.renameProject({
+      currentUser: currentUser('admin'),
+      bazisProjectId: 41,
+      name: '1485',
+    });
+
+    const outbox = database.queries.find((query) => normalizeSql(query.text).startsWith('INSERT INTO outbox_events'));
+    expect(outbox?.params?.[4]).toBe('bazis-project-renamed-41-audit-audit-rename-1');
+  });
+
+  it('throws BazisProjectNotFoundError for missing project', async () => {
+    const repository = new PgBazisRepository(createRenameDatabase({ missing: true }).service);
+
+    await expect(repository.renameProject({
+      currentUser: currentUser('admin'),
+      bazisProjectId: 404,
+      name: '1485',
+    })).rejects.toBeInstanceOf(BazisProjectNotFoundError);
+  });
+});
+
+function createRenameDatabase(options: { name?: string; missing?: boolean } = {}) {
+  const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  const tx = {
+    raw: {} as PoolClient,
+    async query(text: string, params: readonly unknown[] = []) {
+      queries.push({ text, params });
+      const normalized = normalizeSql(text);
+      if (normalized.includes('FROM bazis_projects') && normalized.includes('FOR UPDATE')) {
+        return options.missing
+          ? { rows: [], rowCount: 0 }
+          : {
+              rows: [{ bazis_project_id: 41, project_id: 77, name: options.name ?? 'Шкаф Nova' }],
+              rowCount: 1,
+            };
+      }
+      if (normalized.startsWith('INSERT INTO audit_log (')) {
+        return { rows: [{ audit_id: 'audit-rename-1' }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    },
+  };
+  return {
+    queries,
+    service: {
+      async transaction<T>(handler: (client: typeof tx) => Promise<T>) {
+        return handler(tx);
+      },
+      async query(text: string, params: readonly unknown[] = []) {
+        return tx.query(text, params);
+      },
+    } as unknown as DatabaseService,
+  };
 }
 
 describe('PgBazisRepository.deleteProject', () => {

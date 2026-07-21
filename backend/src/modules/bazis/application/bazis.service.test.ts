@@ -175,6 +175,7 @@ describe('BazisService', () => {
   describe('manager writes', () => {
     it.each([
       ['deleteProject', (service: BazisService, user: CurrentUser) => service.deleteProject(user, 'req', 41)],
+      ['renameProject', (service: BazisService, user: CurrentUser) => service.renameProject(user, 'req', 41, '1485')],
       ['setNodeNotes', (service: BazisService, user: CurrentUser) => service.setNodeNotes(user, 'req', 1, 'x')],
     ])('%s requires bazis.manage', async (_name, call) => {
       await expect(call(createService(), viewerUser())).rejects.toMatchObject({ statusCode: 403 });
@@ -327,6 +328,32 @@ describe('BazisService', () => {
       currentUser: bazisManager(),
       requestId: 'req-delete',
       bazisProjectId: 41,
+    });
+  });
+
+  describe('BazisService.renameProject normalization', () => {
+    it('trims and delegates a valid name', async () => {
+      const repository = createRepository();
+      const service = createService(repository);
+
+      await service.renameProject(bazisManager(), 'req-rename', 41, '  1485  ');
+
+      expect(repository.renameProject).toHaveBeenCalledWith({
+        currentUser: bazisManager(),
+        requestId: 'req-rename',
+        bazisProjectId: 41,
+        name: '1485',
+      });
+    });
+
+    it.each(['   ', 'x'.repeat(301)])('rejects invalid name %j with 422', async (name) => {
+      const repository = createRepository();
+      const service = createService(repository);
+
+      await expect(
+        service.renameProject(bazisManager(), 'req-rename', 41, name),
+      ).rejects.toMatchObject({ statusCode: 422, code: 'VALIDATION_ERROR' });
+      expect(repository.renameProject).not.toHaveBeenCalled();
     });
   });
 
@@ -694,6 +721,7 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
     getProject: vi.fn().mockResolvedValue({
       bazisProjectId: 1,
       projectId: 1,
+      projectName: 'ERP Проект',
       name: 'Проект',
       revisionsCount: 0,
       lastRevisionNo: null,
@@ -780,6 +808,11 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
     setNodeNotes: vi.fn().mockResolvedValue({
       bazisNodeId: 1,
       notes: null,
+    }),
+    renameProject: vi.fn().mockResolvedValue({
+      bazisProjectId: 41,
+      projectId: 77,
+      name: '1485',
     }),
     deleteProject: vi.fn().mockResolvedValue({
       bazisProjectId: 41,

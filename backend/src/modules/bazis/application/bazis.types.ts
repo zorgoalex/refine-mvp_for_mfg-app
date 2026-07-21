@@ -13,6 +13,7 @@ import type {
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
+  BazisProjectNameDto,
   BazisRevisionMaterialsSummaryDto,
   BazisRevisionEstimateDto,
   BazisRevisionOrderDto,
@@ -88,6 +89,13 @@ export interface DeleteBazisProjectInput {
   bazisProjectId: number;
 }
 
+export interface RenameBazisProjectInput {
+  currentUser: CurrentUser;
+  requestId?: string;
+  bazisProjectId: number;
+  name: string;
+}
+
 export interface SetNodeNotesInput {
   currentUser: CurrentUser;
   requestId?: string;
@@ -106,6 +114,7 @@ export interface BazisRepositoryPort {
   }): Promise<void>;
   listProjects(filter: { projectId?: number }): Promise<BazisProjectListItemDto[]>;
   getProject(bazisProjectId: number): Promise<BazisProjectCardDto>;
+  renameProject(input: RenameBazisProjectInput): Promise<BazisProjectNameDto>;
   getTreeChildren(revisionId: number, parentNodeId: number | null): Promise<BazisTreeNodeDto[]>;
   listAllTreeNodes(revisionId: number): Promise<BazisTreeNodeDto[]>;
   listMaterialMappings(names?: string[]): Promise<MaterialMappingDto[]>;

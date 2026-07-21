@@ -29,6 +29,8 @@ export interface BazisOrderRef {
 export interface BazisProjectListItem {
   bazisProjectId: number;
   projectId: number;
+  /** May be absent during a mixed frontend/backend rollout. */
+  projectName?: string | null;
   name: string;
   revisionsCount: number;
   lastRevisionNo: number | null;
@@ -36,6 +38,12 @@ export interface BazisProjectListItem {
   bazisOrderNo: string | null;
   linkedOrderIds: number[];
   linkedOrders: BazisOrderRef[];
+}
+
+export interface BazisProjectNameResponse {
+  bazisProjectId: number;
+  projectId: number;
+  name: string;
 }
 
 export interface BazisProjectDeleteResponse {
