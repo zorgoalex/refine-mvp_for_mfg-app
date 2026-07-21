@@ -5,7 +5,7 @@ import type { FreecutClient } from './freecut-client';
 import type { FreecutOptimizeResponse } from '../application/cut-freecut-mapping';
 import type { CutConfigPort } from '../application/cut-config';
 import { StaticCutConfig } from '../application/cut-config';
-import { PgCutRepository, profileChangedOutboxKey } from './pg-cut-repository';
+import { PgCutRepository, profileChangedOutboxKey, resolvePdfTemplateSelection } from './pg-cut-repository';
 
 /** Build a CutConfigPort stub with selective overrides (defaults to StaticCutConfig). */
 function stubConfig(overrides: Partial<CutConfigPort> = {}): CutConfigPort {
@@ -33,6 +33,33 @@ function currentUser(overrides: Partial<CurrentUser> = {}): CurrentUser {
 function normalize(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
+
+describe('resolvePdfTemplateSelection', () => {
+  it('uses an active request override for any frozen result', () => {
+    expect(resolvePdfTemplateSelection('bath_profiles', 'standard')).toEqual({
+      code: 'bath_profiles',
+      requiresActiveCheck: true,
+    });
+  });
+
+  it('keeps the frozen template without requiring it to remain active', () => {
+    expect(resolvePdfTemplateSelection(undefined, 'legacy_template')).toEqual({
+      code: 'legacy_template',
+      requiresActiveCheck: false,
+    });
+    expect(resolvePdfTemplateSelection('legacy_template', 'legacy_template')).toEqual({
+      code: 'legacy_template',
+      requiresActiveCheck: false,
+    });
+  });
+
+  it('defaults a non-frozen request to active standard', () => {
+    expect(resolvePdfTemplateSelection(undefined, undefined)).toEqual({
+      code: 'standard',
+      requiresActiveCheck: true,
+    });
+  });
+});
 
 interface FakeRow {
   [key: string]: unknown;

@@ -16,6 +16,13 @@ describe('CutPage result history guard', () => {
     expect(source).toContain('cutApi.getResult');
   });
 
+  it('allows request-only PDF template selection for every frozen or archived version', () => {
+    expect(source).toContain("const pdfTemplateIsRequestOnly = isHistoricalResult || job?.status === 'archived'");
+    expect(source.match(/if \(pdfTemplateIsRequestOnly\) return;/g)).toHaveLength(2);
+    expect(source).toContain('pdfTemplateIsRequestOnly, handleError, loadJobs');
+    expect(source).not.toContain('disabled={busy || isArchivedJob}\n                    data-testid="pdf-template-select-job"');
+  });
+
   it('keeps command ids stable until calculate/manual requests are confirmed', () => {
     expect(source).toContain('calcCommandRef.current?.cutJobId !== job.cutJobId');
     expect(source).toContain('manualCommandRef.current?.key !== commandKey');

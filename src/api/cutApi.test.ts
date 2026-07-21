@@ -171,6 +171,22 @@ describe('cutApi', () => {
     expect(url).toContain('template=bath_profiles');
   });
 
+  it('passes the selected PDF template to historical group and whole-result exports', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementation(() => Promise.resolve(
+        new Response('%PDF-1', { status: 200, headers: { 'Content-Type': 'application/pdf' } }),
+      ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cutApi.fetchGroupPdf(42, 100, false, undefined, true, 'bath_profiles', 'bottom-left', 3);
+    await cutApi.fetchJobPdf(42, false, undefined, true, 'bath_profiles', 'bottom-left', 3);
+
+    expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/cut-jobs/42/results/3/groups/100/export.pdf');
+    expect(fetchMock.mock.calls[0][0]).toContain('template=bath_profiles');
+    expect(fetchMock.mock.calls[1][0]).toContain('/api/v1/cut-jobs/42/results/3/export.pdf');
+    expect(fetchMock.mock.calls[1][0]).toContain('template=bath_profiles');
+  });
+
   it('validates cut job ids before fetch', async () => {
     const fetchMock = mockFetch(jobDto());
     expect(() => validateCutJobId(0)).toThrow('Invalid cutJobId');

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { useTable, ShowButton, EditButton, List } from "@refinedev/antd";
+import { ShowButton, EditButton, List } from "@refinedev/antd";
+import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Button, Space, Table, Tooltip } from "antd";
 import { EyeOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
@@ -80,7 +81,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
         showSorterTooltip={{ mouseEnterDelay: 1 }}
         pagination={{
           ...tableProps.pagination,
-          pageSizeOptions: [10, 20, 50, 100],
+          pageSizeOptions: [10, 20, 25, 50, 100],
           showSizeChanger: true,
           showTotal: (total, range) => `${range[0]}-${range[1]} из ${total}`,
         }}

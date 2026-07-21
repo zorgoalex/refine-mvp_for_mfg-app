@@ -1,4 +1,4 @@
--- 081_label_cut_maps.sql
+-- 082_label_cut_maps.sql
 -- Exact, immutable cut placements for adaptive cut-sheet miniatures on labels.
 
 BEGIN;

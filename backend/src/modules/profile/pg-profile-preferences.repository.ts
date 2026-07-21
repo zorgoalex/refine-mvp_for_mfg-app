@@ -1,8 +1,10 @@
 import type { QueryResultRow } from 'pg';
+import { ApiError } from '../../common/errors/api-error';
 import type { DatabaseClient } from '../../database/database.types';
 import { RECENT_REFERENCE_RESOURCES } from './profile-preferences.types';
 import type {
   OrderDetailColumnPreferencesDto,
+  PageSizePreferencesDto,
   RecentReferenceEntitiesDto,
   RecentReferenceResource,
   ThemeMode,
@@ -16,6 +18,7 @@ interface PreferenceRow extends QueryResultRow {
   ui_size: string | null;
   order_detail_columns: unknown;
   recent_reference_entities: unknown;
+  page_size_preferences: unknown;
 }
 
 export class PgProfilePreferencesRepository implements UserPreferencesRepositoryPort {
@@ -24,7 +27,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
   async getUserPreferences(userId: number): Promise<UserPreferencesDto> {
     const result = await this.database.query<PreferenceRow>(
       `
-      SELECT theme_mode, ui_size, order_detail_columns, recent_reference_entities
+      SELECT theme_mode, ui_size, order_detail_columns, recent_reference_entities, page_size_preferences
       FROM user_preferences
       WHERE user_id = $1
       `,
@@ -41,30 +44,53 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
     if (
       preferences.themeMode === undefined &&
       preferences.uiSize === undefined &&
-      preferences.orderDetailColumns === undefined
+      preferences.orderDetailColumns === undefined &&
+      preferences.pageSizePreferences === undefined
     ) {
       return this.getUserPreferences(userId);
     }
 
     const result = await this.database.query<PreferenceRow>(
       `
-      INSERT INTO user_preferences (user_id, theme_mode, ui_size, order_detail_columns)
-      VALUES ($1, COALESCE($2, 'light'), $3, COALESCE($4::jsonb, '{}'::jsonb))
+      INSERT INTO user_preferences (user_id, theme_mode, ui_size, order_detail_columns, page_size_preferences)
+      VALUES (
+        $1,
+        COALESCE($2, 'light'),
+        $3,
+        COALESCE($4::jsonb, '{}'::jsonb),
+        COALESCE($5::jsonb, '{}'::jsonb)
+      )
       ON CONFLICT (user_id)
       DO UPDATE SET
         theme_mode = COALESCE($2, user_preferences.theme_mode),
         ui_size = COALESCE($3, user_preferences.ui_size),
         order_detail_columns = COALESCE($4::jsonb, user_preferences.order_detail_columns),
+        page_size_preferences = CASE
+          WHEN $5::jsonb IS NULL THEN user_preferences.page_size_preferences
+          ELSE user_preferences.page_size_preferences || $5::jsonb
+        END,
         updated_at = now()
-      RETURNING theme_mode, ui_size, order_detail_columns, recent_reference_entities
+      WHERE $5::jsonb IS NULL
+        OR jsonb_object_length(user_preferences.page_size_preferences || $5::jsonb) <= 128
+      RETURNING theme_mode, ui_size, order_detail_columns, recent_reference_entities, page_size_preferences
       `,
       [
         userId,
         preferences.themeMode ?? null,
         preferences.uiSize ?? null,
         preferences.orderDetailColumns === undefined ? null : JSON.stringify(preferences.orderDetailColumns),
+        preferences.pageSizePreferences === undefined ? null : JSON.stringify(preferences.pageSizePreferences),
       ],
     );
+
+    if (!result.rows[0] && preferences.pageSizePreferences !== undefined) {
+      throw new ApiError(
+        422,
+        'PAGE_SIZE_PREFERENCES_LIMIT',
+        'Too many saved page-size preferences',
+        { maxEntries: MAX_STORED_PAGE_SIZE_PREFERENCES },
+      );
+    }
 
     return mapPreferenceRow(result.rows[0]);
   }
@@ -121,7 +147,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
           true
         ),
         updated_at = now()
-      RETURNING theme_mode, ui_size, order_detail_columns, recent_reference_entities
+      RETURNING theme_mode, ui_size, order_detail_columns, recent_reference_entities, page_size_preferences
       `,
       [userId, resource, entityId],
     );
@@ -136,7 +162,28 @@ function mapPreferenceRow(row: PreferenceRow | undefined): UserPreferencesDto {
     uiSize: normalizeUiSize(row?.ui_size),
     orderDetailColumns: normalizeOrderDetailColumns(row?.order_detail_columns),
     recentReferences: normalizeRecentReferences(row?.recent_reference_entities),
+    pageSizePreferences: normalizePageSizePreferences(row?.page_size_preferences),
   };
+}
+
+const ALLOWED_PAGE_SIZES = new Set([10, 20, 25, 50, 100]);
+const MAX_STORED_PAGE_SIZE_PREFERENCES = 128;
+
+function normalizePageSizePreferences(value: unknown): PageSizePreferencesDto {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+  const normalized: PageSizePreferencesDto = {};
+  let storedEntries = 0;
+  for (const [rawKey, rawSize] of Object.entries(value as Record<string, unknown>)) {
+    if (storedEntries >= MAX_STORED_PAGE_SIZE_PREFERENCES) break;
+    const key = rawKey.trim();
+    if (!key || key.length > 120 || typeof rawSize !== 'number' || !ALLOWED_PAGE_SIZES.has(rawSize)) {
+      continue;
+    }
+    normalized[key] = rawSize;
+    storedEntries += 1;
+  }
+  return normalized;
 }
 
 function normalizeRecentReferences(value: unknown): RecentReferenceEntitiesDto {

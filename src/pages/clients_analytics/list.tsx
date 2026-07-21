@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { List, useTable, ShowButton, useSelect } from "@refinedev/antd";
+import { List, ShowButton, useSelect } from "@refinedev/antd";
+import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import {
   Space,
   Table,

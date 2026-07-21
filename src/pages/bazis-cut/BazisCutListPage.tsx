@@ -3,6 +3,7 @@ import { Card, Input, Space, Table, Typography, message } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { Link, useNavigate } from 'react-router-dom';
 import { bazisCutApi, type BazisCutSetListItemDto, type BazisCutSourceRefDto } from '../../api/bazisCutApi';
+import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 
 const { Title, Text } = Typography;
 
@@ -12,7 +13,7 @@ export const BazisCutListPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const { pageSize, setPageSize } = usePageSizePreference('bazis-cut:list', 25);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
 
@@ -39,8 +40,16 @@ export const BazisCutListPage: React.FC = () => {
   ], []);
 
   const pagination: TablePaginationConfig = { current: page, pageSize, total, showSizeChanger: true,
+    pageSizeOptions: PAGE_SIZE_OPTIONS,
     showTotal: (value) => `Всего наборов: ${value}`,
-    onChange: (next, size) => { setPage(next); setPageSize(size); } };
+    onChange: (next, size) => {
+      if (size !== pageSize) {
+        setPageSize(size);
+        setPage(1);
+        return;
+      }
+      setPage(next);
+    } };
   return <div style={{ padding: 24 }}><Space direction="vertical" size="middle" style={{ width: '100%' }}>
     <Title level={3} style={{ margin: 0 }}>Базис-раскрой</Title>
     <Card><Input.Search allowClear value={search} onChange={(event) => setSearch(event.target.value)}
@@ -63,4 +72,3 @@ const SourceLine: React.FC<{ title: string; refs: BazisCutSourceRefDto[]; href?:
     {index > 0 && ', '}{href ? <Link to={href(ref.id)} onClick={(event) => event.stopPropagation()}>{ref.label}</Link> : ref.label}
   </React.Fragment>)}</div>;
 };
-

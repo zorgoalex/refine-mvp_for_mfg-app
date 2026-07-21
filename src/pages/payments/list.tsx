@@ -1,5 +1,6 @@
 ﻿import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
-import { useTable, ShowButton, EditButton, List, useSelect } from "@refinedev/antd";
+import { ShowButton, EditButton, List, useSelect } from "@refinedev/antd";
+import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Table, Button, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Input } from "antd";
 import { useMemo, useState } from "react";
 import { FilterOutlined, ClearOutlined, CheckCircleOutlined } from "@ant-design/icons";
@@ -23,7 +24,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   const currentUser = authStorage.getUser();
   const canViewUsers = canQueryUsersResource(currentUser);
 
-  const { tableProps, filters, setFilters } = useTable({
+  const { tableProps, pageSize, setCurrent, setPageSize, filters, setFilters } = useTable({
     syncWithLocation: true,
     sorters: { initial: [{ field: "payment_id", order: "desc" }] },
     pagination: { pageSize: 10 },
@@ -265,6 +266,13 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
           loading={!!tableProps.loading}
           pagination={tableProps.pagination ?? false}
           lookups={paymentCardLookups}
+          onPaginationChange={(nextPage, nextPageSize) => {
+            if (nextPageSize !== pageSize) {
+              setPageSize(nextPageSize);
+              return;
+            }
+            setCurrent(nextPage);
+          }}
           onOpen={(id) => show("payments", id)}
         />
       ) : (

@@ -305,6 +305,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const calcCommandRef = useRef<{ cutJobId: number; version: number; commandId: string } | null>(null);
   const manualCommandRef = useRef<{ key: string; commandId: string } | null>(null);
   const isHistoricalResult = selectedResult !== null && isFrozenResultSelection;
+  const pdfTemplateIsRequestOnly = isHistoricalResult || job?.status === 'archived';
   // Per-user, per-job sheet preview orientation (portrait by default), persisted
   // in localStorage. Landscape rotates the render server-side (labels stay upright).
   const [sheetPortrait, setSheetPortrait] = useState(true);
@@ -668,6 +669,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       if (!job) return;
       const previous = pdfTemplateForJob;
       setPdfTemplateForJob(pdfTemplate);
+      if (pdfTemplateIsRequestOnly) return;
       try {
         const updated = await cutApi.setJobPdfTemplate(job.cutJobId, pdfTemplate);
         setJob(updated);
@@ -678,7 +680,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         handleError(error, 'Не удалось сохранить шаблон PDF раскроя');
       }
     },
-    [applyPdfTemplateState, job, pdfTemplateForJob, handleError, loadJobs],
+    [applyPdfTemplateState, job, pdfTemplateForJob, pdfTemplateIsRequestOnly, handleError, loadJobs],
   );
 
   const setGroupPdfTemplate = useCallback(
@@ -686,6 +688,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       if (!job) return;
       const previous = pdfTemplateByGroup[group.cutGroupId] ?? group.pdfTemplate ?? 'standard';
       setPdfTemplateByGroup((prev) => ({ ...prev, [group.cutGroupId]: pdfTemplate }));
+      if (pdfTemplateIsRequestOnly) return;
       try {
         const updated = await cutApi.setGroupPdfTemplate(job.cutJobId, group.cutGroupId, pdfTemplate);
         setJob(updated);
@@ -696,7 +699,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         handleError(error, 'Не удалось сохранить шаблон PDF группы');
       }
     },
-    [applyPdfTemplateState, job, pdfTemplateByGroup, handleError, loadJobs],
+    [applyPdfTemplateState, job, pdfTemplateByGroup, pdfTemplateIsRequestOnly, handleError, loadJobs],
   );
 
   // Load the existing (non-archived) jobs on mount so an operator can reopen a
@@ -1955,7 +1958,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                     onChange={setJobPdfTemplate}
                     options={pdfTemplateOptions}
                     style={{ width: 180, flex: '0 0 180px' }}
-                    disabled={busy || isArchivedJob}
+                    disabled={busy}
                     data-testid="pdf-template-select-job"
                   />
                 </div>
@@ -2234,7 +2237,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                     onChange={(value) => setGroupPdfTemplate(group, value)}
                     options={pdfTemplateOptions}
                     style={{ width: 180, flex: '0 0 180px' }}
-                    disabled={busy || isArchivedJob}
+                    disabled={busy}
                     data-testid={`pdf-template-select-${group.cutGroupId}`}
                   />
                 </div>

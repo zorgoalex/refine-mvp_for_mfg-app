@@ -1,4 +1,4 @@
--- 082_label_cut_maps_backfill.sql
+-- 083_label_cut_maps_backfill.sql
 -- Backfill immutable cut-label projections one result per transaction, after
 -- migration 081 has released its cut_result DDL lock and enabled dual-write.
 

@@ -5,12 +5,15 @@ import type { ColumnsType } from 'antd/es/table';
 import { useNavigate } from 'react-router-dom';
 import { projectsApi } from '../../api/projectsApi';
 import type { ProjectDto } from '../../api/projectsApi';
+import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 import { formatProjectRow, type ProjectRow } from './projectHelpers';
 
 const { Title } = Typography;
 
 export const ProjectsList: React.FC = () => {
   const navigate = useNavigate();
+  const { pageSize, setPageSize } = usePageSizePreference('projects:list', 10);
+  const [currentPage, setCurrentPage] = useState(1);
   const [rows, setRows] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchInput, setSearchInput] = useState('');
@@ -150,6 +153,20 @@ export const ProjectsList: React.FC = () => {
           columns={columns}
           dataSource={rows}
           loading={loading}
+          pagination={{
+            current: currentPage,
+            pageSize,
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
+            showSizeChanger: true,
+            onChange: (nextPage, nextPageSize) => {
+              if (nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setCurrentPage(1);
+                return;
+              }
+              setCurrentPage(nextPage);
+            },
+          }}
           onRow={(record) => ({
             onClick: () => navigate(`/projects/show/${record.projectId}`),
             style: { cursor: 'pointer' },

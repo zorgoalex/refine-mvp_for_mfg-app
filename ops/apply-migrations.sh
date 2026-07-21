@@ -420,8 +420,6 @@ probe_file() {
     076_*) probe_076_endstate ;;
     077_*) probe_077_endstate ;;
     078_*) probe_078_endstate ;;
-    079_z_cut_result_jsonb_object_length_compat.sql)
-           probe_true "SELECT to_regprocedure('jsonb_object_length(jsonb)') IS NOT NULL;" ;;
     079_*) probe_all "$(q_tbl cut_result)" "$(q_tbl cut_result_command)" \
                      "$(q_col cut_job current_cut_result_id)" "$(q_col cut_job next_cut_result_no)" \
                      "$(q_con uq_cut_result_job_no)" "$(q_con fk_cut_result_command_payload)" ;;
@@ -432,7 +430,8 @@ probe_file() {
                      "$(q_trg trg_cut_result_command_state)" \
                      "$(q_trg trg_cut_result_command_terminal_immutable)" \
                      "$(q_trg trg_cut_result_ledger_state)" ;;
-    081_*) probe_all "$(q_tbl cut_result_sheet_map)" "$(q_tbl cut_result_placement)" \
+    081_*) probe_all "$(q_col user_preferences page_size_preferences)" ;;
+    082_*) probe_all "$(q_tbl cut_result_sheet_map)" "$(q_tbl cut_result_placement)" \
                      "$(q_tbl cut_result_label_map_projection)" \
                      "$(q_tbl label_generation_cut_placement)" \
                      "SELECT to_regprocedure('cut_result_label_map_expected_counts(jsonb)') IS NOT NULL;" \
@@ -451,7 +450,7 @@ probe_file() {
                      "SELECT pg_get_constraintdef(oid) LIKE '%cut_map%'
                         FROM pg_constraint
                        WHERE conname='chk_label_template_elements_kind';" ;;
-    082_*) probe_true "SELECT NOT EXISTS (
+    083_*) probe_true "SELECT NOT EXISTS (
                        SELECT 1
                          FROM cut_result r
                          CROSS JOIN LATERAL cut_result_label_map_expected_counts(r.snapshot_job) expected

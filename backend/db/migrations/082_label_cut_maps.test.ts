@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(new URL('./081_label_cut_maps.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('./082_label_cut_maps.sql', import.meta.url), 'utf8');
 
-describe('081 label cut maps migration', () => {
+describe('082 label cut maps migration', () => {
   it('projects immutable result sheets and exact physical placements', () => {
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS cut_result_sheet_map/i);
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS cut_result_placement/i);
