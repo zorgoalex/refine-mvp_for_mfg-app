@@ -89,6 +89,14 @@ export function parseJobQueryParam(search: string): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
+/** Parse a `?result=<number>` deep-link param into a positive job-local result number. */
+export function parseResultQueryParam(search: string): number | null {
+  const raw = new URLSearchParams(search).get('result');
+  if (raw === null) return null;
+  const resultNo = Number(raw);
+  return Number.isInteger(resultNo) && resultNo > 0 ? resultNo : null;
+}
+
 /** Parse a CSV like "9, 10, x" into distinct positive integer ids. */
 export function parseIdCsv(input: string): number[] {
   const ids = input

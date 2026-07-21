@@ -13,7 +13,9 @@ import type {
   DetailPlacementsQuery,
   EligibleDetailsQuery,
   GetCutJobQuery,
+  GetCutResultQuery,
   ListCutJobsQuery,
+  ListCutResultsQuery,
   ListSheetTypesForCutQuery,
   RemoveCutItemCommand,
   RenderGroupPdfQuery,
@@ -41,11 +43,37 @@ export interface CutServicePorts {
  * server-side (principle 8): reads require cut.view, mutations require
  * cut.manage. Frontend permission decisions are never authoritative.
  */
-export class CutService {
+export class CutService implements OnModuleInit, OnModuleDestroy {
   private readonly permissions: PermissionsService;
+  private readonly logger = new Logger(CutService.name);
+  private reconciliationTimer: ReturnType<typeof setInterval> | null = null;
+  private reconciliationRunning = false;
 
   constructor(private readonly ports: CutServicePorts) {
     this.permissions = ports.permissions ?? new PermissionsService();
+  }
+
+  async onModuleInit(): Promise<void> {
+    await this.reconcileExpiredCommands();
+    this.reconciliationTimer = setInterval(() => void this.reconcileExpiredCommands(), 60_000);
+    this.reconciliationTimer.unref?.();
+  }
+
+  onModuleDestroy(): void {
+    if (this.reconciliationTimer) clearInterval(this.reconciliationTimer);
+    this.reconciliationTimer = null;
+  }
+
+  private async reconcileExpiredCommands(): Promise<void> {
+    if (this.reconciliationRunning) return;
+    this.reconciliationRunning = true;
+    try {
+      await this.ports.cut.reconcileExpiredCommands(50);
+    } catch (error) {
+      this.logger.error('Failed to reconcile expired cut-result commands', error instanceof Error ? error.stack : String(error));
+    } finally {
+      this.reconciliationRunning = false;
+    }
   }
 
   async createJob(command: CreateCutJobCommand) {
@@ -76,6 +104,16 @@ export class CutService {
   async getJob(query: GetCutJobQuery) {
     this.require(query.currentUser, 'cut.view', { cutJobId: query.cutJobId, requestId: query.requestId });
     return this.ports.cut.getJob(query);
+  }
+
+  async listResults(query: ListCutResultsQuery) {
+    this.require(query.currentUser, 'cut.view', { cutJobId: query.cutJobId, requestId: query.requestId });
+    return this.ports.cut.listResults(query);
+  }
+
+  async getResult(query: GetCutResultQuery) {
+    this.require(query.currentUser, 'cut.view', { cutJobId: query.cutJobId, requestId: query.requestId });
+    return this.ports.cut.getResult(query);
   }
 
   async listJobs(query: ListCutJobsQuery) {
@@ -231,3 +269,4 @@ export class CutService {
     });
   }
 }
+import { Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';

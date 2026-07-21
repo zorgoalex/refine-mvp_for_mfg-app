@@ -86,7 +86,17 @@ describe('describeCutFailure', () => {
 
 describe('shouldMarkCutFailed', () => {
   it('returns false for precondition/concurrency codes (do not mark failed)', () => {
-    for (const code of ['CUT_STALE_VERSION', 'CUT_JOB_NOT_MUTABLE', 'CUT_JOB_NOT_FOUND', 'PERMISSION_DENIED']) {
+    for (const code of [
+      'CUT_STALE_VERSION',
+      'CUT_JOB_NOT_MUTABLE',
+      'CUT_JOB_NOT_FOUND',
+      'PERMISSION_DENIED',
+      'CUT_RESULT_COMMAND_IN_PROGRESS',
+      'CUT_RESULT_COMMAND_CONFLICT',
+      'CUT_RESULT_COMMAND_FAILED',
+      'CUT_RESULT_COMMAND_ABANDONED',
+      'CUT_CALCULATION_IN_PROGRESS',
+    ]) {
       expect(shouldMarkCutFailed(new ApiError(409, code, 'x'))).toBe(false);
     }
   });

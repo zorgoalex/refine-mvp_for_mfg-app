@@ -5433,7 +5433,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [version]
+              required: [version, commandId]
               properties:
                 version: { type: integer, minimum: 1 }
                 approvalStatus: { type: string, enum: [approved, rejected] }
@@ -9090,6 +9090,92 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/{cutJobId}/results:
+    get:
+      tags: [CutJobs]
+      operationId: listCutResults
+      summary: List immutable completed cut results
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}:
+    get:
+      tags: [CutJobs]
+      operationId: getCutResult
+      summary: Get one immutable completed cut result
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/groups/{groupId}/sheets/{sheetIndex.png}:
+    get:
+      tags: [CutJobs]
+      operationId: renderCutResultSheetPng
+      summary: Render frozen result sheet PNG
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200':
+          description: PNG
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/groups/{groupId}/sheets/{sheetIndex.svg}:
+    get:
+      tags: [CutJobs]
+      operationId: renderCutResultSheetSvg
+      summary: Render frozen result sheet SVG
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200':
+          description: SVG
+          content:
+            image/svg+xml:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/groups/{groupId}/export.pdf:
+    get:
+      tags: [CutJobs]
+      operationId: exportCutResultGroupPdf
+      summary: Export frozen result group PDF
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200':
+          description: PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/export.pdf:
+    get:
+      tags: [CutJobs]
+      operationId: exportCutResultJobPdf
+      summary: Export frozen whole-result PDF
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200':
+          description: PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/cut-jobs/{cutJobId}/items:
     post:
       tags:
@@ -9151,6 +9237,20 @@ paths:
       security:
         - bearerAuth: []
       x-permission: cut.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, commandId]
+              properties:
+                version: { type: integer, minimum: 0 }
+                commandId:
+                  type: string
+                  format: uuid
+                  description: Stable retry key reused after timeout or lost response.
       responses:
         '200':
           description: OK
@@ -9356,11 +9456,16 @@ paths:
                 - jobVersion
                 - active
                 - placements
+                - commandId
               properties:
                 jobVersion:
                   type: integer
                 active:
                   type: boolean
+                commandId:
+                  type: string
+                  format: uuid
+                  description: Stable retry key reused after timeout or lost response.
                 placements:
                   type: array
                   items:

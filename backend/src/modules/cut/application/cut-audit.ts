@@ -40,6 +40,7 @@ export interface CutRelatedDimensions {
   orderIds?: readonly number[];
   sheetMaterialTypeIds?: readonly number[];
   cutGroupIds?: readonly number[];
+  cutResultIds?: readonly number[];
 }
 
 export interface BuildCutAuditEventInput {
@@ -83,6 +84,9 @@ function buildRelatedEntities(related: CutRelatedDimensions | undefined): AuditR
   }
   for (const entityId of distinct(related.cutGroupIds)) {
     rows.push({ entityType: 'cut_group', entityId });
+  }
+  for (const entityId of distinct(related.cutResultIds)) {
+    rows.push({ entityType: 'cut_result', entityId });
   }
   return rows;
 }

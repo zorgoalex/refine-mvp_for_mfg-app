@@ -6,6 +6,8 @@ import type {
   CutDetailLastReadyResponse,
   CutDetailPlacements,
   CutJobDto,
+  CutResultDto,
+  CutResultSummary,
   CutSelectionCriteria,
   CutSheetTypeOption,
   EligibleDetailsResponse,
@@ -26,6 +28,16 @@ export const cutApi = {
     return httpClient.get<CutJobDto>(apiRoutes.cutJobs.byId(validateCutJobId(cutJobId)));
   },
 
+  async listResults(cutJobId: number): Promise<CutResultSummary[]> {
+    return httpClient.get<CutResultSummary[]>(apiRoutes.cutJobs.results(validateCutJobId(cutJobId)));
+  },
+
+  async getResult(cutJobId: number, resultNo: number): Promise<CutResultDto> {
+    return httpClient.get<CutResultDto>(
+      apiRoutes.cutJobs.result(validateCutJobId(cutJobId), validateCutJobId(resultNo)),
+    );
+  },
+
   create(request: CreateCutJobRequest): Promise<CutJobDto> {
     return httpClient.post<CutJobDto>(apiRoutes.cutJobs.list, request);
   },
@@ -41,9 +53,10 @@ export const cutApi = {
     );
   },
 
-  async calculate(cutJobId: number, version: number): Promise<CutJobDto> {
+  async calculate(cutJobId: number, version: number, commandId: string): Promise<CutJobDto> {
     return httpClient.post<CutJobDto>(apiRoutes.cutJobs.calculate(validateCutJobId(cutJobId)), {
       version,
+      commandId,
     });
   },
 
@@ -104,12 +117,11 @@ export const cutApi = {
     renderToken?: string,
     originTopLeft = true,
     axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
+    resultNo?: number,
   ): Promise<Blob> {
-    const path = apiRoutes.cutJobs.sheetPng(
-      validateCutJobId(cutJobId),
-      validateCutJobId(groupId),
-      sheetIndex,
-    );
+    const path = resultNo === undefined
+      ? apiRoutes.cutJobs.sheetPng(validateCutJobId(cutJobId), validateCutJobId(groupId), sheetIndex)
+      : apiRoutes.cutJobs.resultSheetPng(validateCutJobId(cutJobId), validateCutJobId(resultNo), validateCutJobId(groupId), sheetIndex);
     const params = new URLSearchParams();
     params.append('preset', preset);
     // On-screen preview always requests no baked labels so the HTML overlay
@@ -135,12 +147,11 @@ export const cutApi = {
     renderToken?: string,
     originTopLeft = true,
     axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
+    resultNo?: number,
   ): Promise<Blob> {
-    const path = apiRoutes.cutJobs.sheetSvg(
-      validateCutJobId(cutJobId),
-      validateCutJobId(groupId),
-      sheetIndex,
-    );
+    const path = resultNo === undefined
+      ? apiRoutes.cutJobs.sheetSvg(validateCutJobId(cutJobId), validateCutJobId(groupId), sheetIndex)
+      : apiRoutes.cutJobs.resultSheetSvg(validateCutJobId(cutJobId), validateCutJobId(resultNo), validateCutJobId(groupId), sheetIndex);
     const params = new URLSearchParams();
     if (landscape) params.append('orientation', 'landscape');
     params.append('origin', originTopLeft ? 'tl' : 'raw');
@@ -165,8 +176,11 @@ export const cutApi = {
     originTopLeft = true,
     pdfTemplate?: string,
     axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
+    resultNo?: number,
   ): Promise<CutPdfResult> {
-    const path = apiRoutes.cutJobs.groupPdf(validateCutJobId(cutJobId), validateCutJobId(groupId));
+    const path = resultNo === undefined
+      ? apiRoutes.cutJobs.groupPdf(validateCutJobId(cutJobId), validateCutJobId(groupId))
+      : apiRoutes.cutJobs.resultGroupPdf(validateCutJobId(cutJobId), validateCutJobId(resultNo), validateCutJobId(groupId));
     const params = new URLSearchParams();
     if (landscape) params.append('orientation', 'landscape');
     params.append('origin', originTopLeft ? 'tl' : 'raw');
@@ -185,8 +199,10 @@ export const cutApi = {
    * When `renderToken` is given, appends `variant=active&renderVersion=<token>`
    * so the browser fetches the active layout and busts the render cache.
    */
-  fetchJobPdf(cutJobId: number, landscape = false, renderToken?: string, originTopLeft = true, pdfTemplate?: string, axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left'): Promise<CutPdfResult> {
-    const path = apiRoutes.cutJobs.jobPdf(validateCutJobId(cutJobId));
+  fetchJobPdf(cutJobId: number, landscape = false, renderToken?: string, originTopLeft = true, pdfTemplate?: string, axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left', resultNo?: number): Promise<CutPdfResult> {
+    const path = resultNo === undefined
+      ? apiRoutes.cutJobs.jobPdf(validateCutJobId(cutJobId))
+      : apiRoutes.cutJobs.resultJobPdf(validateCutJobId(cutJobId), validateCutJobId(resultNo));
     const params = new URLSearchParams();
     if (landscape) params.append('orientation', 'landscape');
     params.append('origin', originTopLeft ? 'tl' : 'raw');
