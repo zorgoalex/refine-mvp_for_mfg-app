@@ -84,7 +84,7 @@ describe('Basis-cut UI integration guards', () => {
     expect(columns).toContain("title: 'Позиция', dataIndex: 'position', key: 'position', width: 130");
     expect(columns).toContain("title: 'Наименование', dataIndex: 'partName', key: 'partName', width: 200");
     expect(card).toContain("className={index === QR_CODE_COLUMN_INDEX ? QR_CODE_STICKY_CLASS : undefined}");
-    expect(styles).toContain('.bazis-cut-set-details-table .bazis-cut-sticky-qr');
+    expect(styles).toContain('.bazis-cut-set-details-table.ant-table-wrapper .ant-table-cell.bazis-cut-sticky-qr');
     expect(styles).toContain('left: var(--bazis-cut-sticky-qr-left);');
     expect(card).toContain('scroll={{ x: 5320, y: 480 }}');
     expect(card).toContain('<Table.Summary fixed="bottom">');
