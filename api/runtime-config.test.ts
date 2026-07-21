@@ -21,6 +21,8 @@ const RUNTIME_CONFIG_ENV_KEYS = [
   'RUNTIME_CONFIG_BAZIS_CUT',
   'RUNTIME_CONFIG_ORDER_STATUS_BOARD',
   'RUNTIME_CONFIG_ENABLE_LEGACY_HASURA',
+  'RUNTIME_CONFIG_UI_EVOLUTION',
+  'RUNTIME_CONFIG_UI_FORCE_LEGACY',
 ];
 
 describe('runtime-config handler', () => {
@@ -44,6 +46,10 @@ describe('runtime-config handler', () => {
     expect(res.headers['Content-Type']).toBe('application/json; charset=utf-8');
     expect(res.body).toMatchObject({
       apiUrl: '',
+      ui: {
+        evolutionEnabled: false,
+        forceLegacy: false,
+      },
       features: {
         backendAuth: false,
         backendPermissions: false,
@@ -71,6 +77,7 @@ describe('runtime-config handler', () => {
     vi.stubEnv('RUNTIME_CONFIG_BACKEND_DEADLINES', 'true');
     vi.stubEnv('RUNTIME_CONFIG_BAZIS_CUT', 'true');
     vi.stubEnv('RUNTIME_CONFIG_ENABLE_LEGACY_HASURA', 'false');
+    vi.stubEnv('RUNTIME_CONFIG_UI_EVOLUTION', 'true');
 
     const res = createResponse();
 
@@ -78,6 +85,10 @@ describe('runtime-config handler', () => {
 
     expect(res.body).toMatchObject({
       apiUrl: 'https://api.example.test',
+      ui: {
+        evolutionEnabled: true,
+        forceLegacy: false,
+      },
       features: {
         backendAuth: true,
         backendDeadlines: true,

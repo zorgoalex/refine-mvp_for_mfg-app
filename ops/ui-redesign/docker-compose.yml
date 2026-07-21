@@ -1,0 +1,193 @@
+name: erp_ui_redesign
+
+services:
+  postgresdb:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${PG_DB}
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      TZ: Asia/Almaty
+      PGTZ: Asia/Almaty
+    command: ["postgres", "-c", "timezone=Asia/Almaty"]
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d ${PG_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    networks: [back]
+
+  hasura_metadata_db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${HASURA_MD_DB}
+      POSTGRES_USER: ${HASURA_MD_USER}
+      POSTGRES_PASSWORD: ${HASURA_MD_PASSWORD}
+      TZ: Asia/Almaty
+      PGTZ: Asia/Almaty
+    volumes:
+      - hasura_metadata_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${HASURA_MD_USER} -d ${HASURA_MD_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    networks: [back]
+
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [back]
+
+  hasura:
+    image: hasura/graphql-engine:v2.40.0
+    environment:
+      HASURA_GRAPHQL_DATABASE_URL: postgres://${PG_USER}:${PG_PASSWORD}@postgresdb:5432/${PG_DB}
+      HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://${HASURA_MD_USER}:${HASURA_MD_PASSWORD}@hasura_metadata_db:5432/${HASURA_MD_DB}
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "false"
+      HASURA_GRAPHQL_ADMIN_SECRET: ${UI_REDESIGN_HASURA_ADMIN_SECRET:?run clone-current-data.sh first}
+      HASURA_GRAPHQL_JWT_SECRET: |
+        {
+          "type": "HS256",
+          "key": "${UI_REDESIGN_JWT_SECRET:?run clone-current-data.sh first}"
+        }
+      HASURA_GRAPHQL_LOG_LEVEL: warn
+      HASURA_GRAPHQL_CORS_DOMAIN: http://${PG_TAILSCALE_BIND_IP}:4174
+      HASURA_GRAPHQL_ENABLED_LOG_TYPES: startup,http-log,webhook-log,websocket-log
+    ports:
+      - "127.0.0.1:8586:8080"
+    depends_on:
+      postgresdb:
+        condition: service_healthy
+      hasura_metadata_db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    networks: [back]
+
+  backend:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      APP_NAME: erp-ui-redesign-backend
+      API_PREFIX: /api/v1
+      PORT: 3000
+      FRONTEND_ORIGIN: http://${PG_TAILSCALE_BIND_IP}:4174
+      CORS_ALLOWED_ORIGINS: http://${PG_TAILSCALE_BIND_IP}:4174
+      CORS_ALLOW_CREDENTIALS: "true"
+      TRUST_PROXY: "true"
+      SWAGGER_ENABLED: "false"
+      READINESS_REQUIRE_DATABASE: "true"
+      READINESS_REQUIRE_REDIS: "true"
+      DATABASE_URL: postgres://${PG_USER}:${PG_PASSWORD}@postgresdb:5432/${PG_DB}
+      DATABASE_SSL: "false"
+      BACKEND_RATE_LIMIT_STORE: redis
+      RATE_LIMIT_REDIS_URL: redis://valkey:6379
+      JWT_ACCESS_SECRET: ${UI_REDESIGN_JWT_SECRET:?run clone-current-data.sh first}
+      REFRESH_TOKEN_PEPPER: ${UI_REDESIGN_REFRESH_TOKEN_PEPPER:?run clone-current-data.sh first}
+      REFRESH_COOKIE_SECURE: "false"
+      REFRESH_COOKIE_SAME_SITE: lax
+      BACKEND_ENABLE_AUTH: "true"
+      BACKEND_ENABLE_ORDERS: "true"
+      BACKEND_ENABLE_PAYMENTS: "true"
+      BACKEND_ENABLE_PRODUCTION_ACTIONS: "true"
+      BACKEND_ENABLE_CLIENT_PHONES: "true"
+      BACKEND_ORDERS_READ_ONLY: "false"
+      BACKEND_ENABLE_USERS: "true"
+      BACKEND_ENABLE_GROUPS: "true"
+      BACKEND_GROUPS_READ_ONLY: "false"
+      BACKEND_ENABLE_GROUPS_BATCH_LINK_WRITE: "true"
+      BACKEND_ENABLE_ORG_MANAGEMENT: "true"
+      BACKEND_ORG_MANAGEMENT_READ_ONLY: "false"
+      BACKEND_ENABLE_DEADLINES: "true"
+      BACKEND_DEADLINES_READ_ONLY: "false"
+      BACKEND_ENABLE_DEADLINE_ORDER_SYNC: "false"
+      BACKEND_ENABLE_DEADLINE_WORKER: "false"
+      BACKEND_DEADLINE_WORKER_SCHEDULER_OWNER: none
+      BACKEND_DEADLINE_ACTIONS_ENABLED: "false"
+      BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: "false"
+      BACKEND_ENABLE_NOTIFICATION_ENGINE: "false"
+      BACKEND_NOTIFICATION_RULES_READ_ONLY: "true"
+      BACKEND_NOTIFICATION_ENGINE_OWNS_DEADLINE: "false"
+      BACKEND_OUTBOX_RELAY_OWNER: none
+      BACKEND_ENABLE_SHEET_MATERIALS: "true"
+      BACKEND_SHEET_ORDERS_READS: "true"
+      BACKEND_ENABLE_CUT_JOBS: "true"
+      BACKEND_CUT_JOBS_READ_ONLY: "false"
+      BACKEND_CUT_AUTO_TRIGGER: "false"
+      BACKEND_ENABLE_DOWELING_COMMANDS: "true"
+      BACKEND_ENABLE_LABELS: "true"
+      BACKEND_ENABLE_BAZIS: "true"
+      BACKEND_ENABLE_BAZIS_CUT: "true"
+      BACKEND_STATUS_AUTOMATION: "true"
+      BACKEND_ENABLE_ORDER_EXPORT: "true"
+      BACKEND_EXPORT_DISABLED: "true"
+      BACKEND_ENABLE_VLM: "false"
+      BACKEND_VLM_DISABLED: "true"
+      BACKEND_ENABLE_WORKOS_AUTH: "false"
+      BACKEND_ENABLE_TWENTY_SYNC: "false"
+      BACKEND_TWENTY_SYNC_RELAY_OWNER: none
+      OCR_SERVICE_BASE_URL: http://disabled.invalid
+      CAD_SERVICE_BASE_URL: http://disabled.invalid
+      FREECUT_BASE_URL: http://disabled.invalid
+    ports:
+      - "127.0.0.1:3301:3000"
+    depends_on:
+      postgresdb:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health/ready >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    networks: [back]
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: ops/ui-redesign/Dockerfile.frontend
+    ports:
+      - "${PG_TAILSCALE_BIND_IP:?Tailscale bind IP is required}:4174:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+      hasura:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks: [back]
+
+networks:
+  back:
+    internal: true
+
+volumes:
+  postgres_data:
+  hasura_metadata_data:
+  valkey_data:

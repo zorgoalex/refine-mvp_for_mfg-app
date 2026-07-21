@@ -1,0 +1,84 @@
+import React from 'react';
+import { Modal, Tabs } from 'antd';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
+import { computeNeighborPath, type WorkspaceTab, useTabStore } from '../../stores/tabStore';
+
+export interface EvolutionTabCloseRequest {
+  targetKey: string;
+  activeKey: string;
+  tabs: WorkspaceTab[];
+  closeTab: (key: string, options?: { discard?: boolean }) => void;
+  navigate: (path: string) => void;
+  confirmDiscard: (onConfirm: () => void) => void;
+}
+
+export function requestEvolutionTabClose(request: EvolutionTabCloseRequest): void {
+  const close = (discard = false) => {
+    request.closeTab(request.targetKey, discard ? { discard: true } : undefined);
+    if (request.targetKey === request.activeKey) {
+      request.navigate(computeNeighborPath(request.tabs, request.targetKey));
+    }
+  };
+  const tab = request.tabs.find((item) => item.key === request.targetKey);
+  if (tab?.dirty) {
+    request.confirmDiscard(() => close(true));
+    return;
+  }
+  close();
+}
+
+export const EvolutionWorkspaceTabs: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const tabs = useTabStore((state) => state.tabs);
+  const closeTab = useTabStore((state) => state.closeTab);
+  const activeKey = location.pathname;
+
+  const onEdit = (targetKey: React.Key | React.MouseEvent | React.KeyboardEvent, action: 'add' | 'remove') => {
+    if (action !== 'remove' || typeof targetKey !== 'string') return;
+    requestEvolutionTabClose({
+      targetKey,
+      activeKey,
+      tabs,
+      closeTab,
+      navigate,
+      confirmDiscard: (onConfirm) => {
+        Modal.confirm({
+          title: 'Несохраненные изменения',
+          content: 'Закрыть вкладку без сохранения?',
+          okText: 'Закрыть',
+          cancelText: 'Остаться',
+          modalRender: (modal) => React.createElement(DraggableModalWrapper, null, modal),
+          onOk: onConfirm,
+        });
+      },
+    });
+  };
+
+  if (tabs.length === 0) return null;
+
+  return (
+    <Tabs
+      activeKey={activeKey}
+      aria-label="Открытые страницы"
+      className="workspace-tabs evolution-workspace-tabs"
+      hideAdd
+      items={tabs.map((tab) => ({
+        key: tab.key,
+        label: (
+          <span className="evolution-workspace-tabs__label">
+            {tab.dirty ? <span aria-label="Есть несохраненные изменения" className="evolution-workspace-tabs__dirty" /> : null}
+            {tab.label}
+          </span>
+        ),
+      }))}
+      onChange={(key) => {
+        const tab = tabs.find((item) => item.key === key);
+        navigate(tab ? tab.path : key);
+      }}
+      onEdit={onEdit}
+      type="editable-card"
+    />
+  );
+};

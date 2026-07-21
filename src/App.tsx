@@ -1,6 +1,6 @@
 import { Refine, Authenticated } from "@refinedev/core";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
-import { WorkspaceLayout } from "./components/workspace/WorkspaceLayout";
+import { VariantWorkspaceLayout } from "./ui-variant/shellRegistry";
 import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev/react-router-v6";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { ConfigProvider, notification, Spin, theme as antdTheme } from "antd";
@@ -18,6 +18,10 @@ import { authProvider } from "./authProvider";
 import { i18nProvider } from "./utils/i18nProvider";
 import { featureFlags } from "./config/featureFlags";
 import { AppThemeProvider, useAppTheme } from "./theme/ThemeProvider";
+import { UiVariantProvider, useUiVariant } from "./ui-variant/UiVariantProvider";
+import { resolveUiVariant, type UiVariant } from "./ui-variant/uiVariant";
+import { getLoadedRuntimeConfig } from "./config/runtimeConfig";
+import { getEvolutionTheme } from "./ui-evolution/theme/evolutionTheme";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -191,14 +195,21 @@ const SheetMaterialShow = lazy(async () => ({ default: (await import('./pages/sh
 
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 
-const App = () => (
-  <AppThemeProvider>
-    <ThemedApp />
-  </AppThemeProvider>
+export interface AppProps {
+  initialUiVariant?: UiVariant;
+}
+
+const App = ({ initialUiVariant = resolveUiVariant(getLoadedRuntimeConfig()?.ui) }: AppProps) => (
+  <UiVariantProvider initialVariant={initialUiVariant}>
+    <AppThemeProvider>
+      <ThemedApp />
+    </AppThemeProvider>
+  </UiVariantProvider>
 );
 
 const ThemedApp = () => {
   const { mode, uiSize } = useAppTheme();
+  const { isEvolution } = useUiVariant();
 
   // Configure notifications globally
   useEffect(() => {
@@ -218,10 +229,14 @@ const ThemedApp = () => {
             componentSize={uiSize === 'small' ? 'small' : undefined}
             theme={{
               algorithm: mode === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-              token: {
-                colorPrimary: "#1677ff",
-                borderRadius: 6,
-              },
+              ...(isEvolution
+                ? getEvolutionTheme(mode)
+                : {
+                    token: {
+                      colorPrimary: "#1677ff",
+                      borderRadius: 6,
+                    },
+                  }),
             }}
             tooltip={{ mouseEnterDelay: 1 }}
             table={{ showSorterTooltip: { mouseEnterDelay: 1 } }}
@@ -639,7 +654,7 @@ const ThemedApp = () => {
                       key="authenticated-routes"
                       fallback={<CatchAllNavigate to="/login" />}
                     >
-                      <WorkspaceLayout />
+                      <VariantWorkspaceLayout />
                     </Authenticated>
                   }
                 >

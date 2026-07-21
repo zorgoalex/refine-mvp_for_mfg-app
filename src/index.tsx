@@ -1,9 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { initializeRuntimeConfig } from "./config/runtimeConfig";
+import { getLoadedRuntimeConfig, initializeRuntimeConfig } from "./config/runtimeConfig";
 import { featureFlags } from "./config/featureFlags";
 import { authSession } from "./api/authSession";
 import { authStorage } from "./utils/auth";
+import { resolveUiVariant, setDocumentUiVariant } from "./ui-variant/uiVariant";
 
 async function bootstrap() {
   try {
@@ -24,11 +25,14 @@ async function bootstrap() {
     }
   }
 
+  const uiVariant = resolveUiVariant(getLoadedRuntimeConfig()?.ui);
+  setDocumentUiVariant(uiVariant);
+
   const { default: App } = await import("./App");
   const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
   root.render(
     <React.StrictMode>
-      <App />
+      <App initialUiVariant={uiVariant} />
     </React.StrictMode>
   );
 }
