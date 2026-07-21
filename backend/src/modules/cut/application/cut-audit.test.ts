@@ -49,6 +49,7 @@ describe('cut audit contract (§11)', () => {
         orderIds: [101, 101, 102],
         sheetMaterialTypeIds: [9, 9],
         cutGroupIds: [777],
+        cutResultIds: [12, 12],
       },
     });
 
@@ -58,10 +59,11 @@ describe('cut audit contract (§11)', () => {
         { entityType: 'order', entityId: 102 },
         { entityType: 'sheet_material_type', entityId: 9 },
         { entityType: 'cut_group', entityId: 777 },
+        { entityType: 'cut_result', entityId: 12 },
       ]),
     );
     // de-duplicated: order 101 once, sheet_material_type 9 once
-    expect(event.relatedEntities).toHaveLength(4);
+    expect(event.relatedEntities).toHaveLength(5);
   });
 
   it('Variant B audit: emits sheet_material_type related entity and ZERO material entities', () => {

@@ -53,6 +53,8 @@ interface FakeDbOptions {
   eligibleRows?: FakeRow[];
   /** whether the cut_param_profiles SELECT returns a row (profile is active) */
   profileActive?: boolean;
+  /** expired calculate commands returned to the reconciliation worker */
+  expiredCommandRows?: FakeRow[];
 }
 
 function createDatabase(options: FakeDbOptions = {}) {
@@ -60,6 +62,14 @@ function createDatabase(options: FakeDbOptions = {}) {
   let cutGroupSeq = 100;
   let itemSeq = 500;
   let jobVersion = (options.cutJob?.version as number | undefined) ?? 0;
+  let currentResultId: number | null = null;
+  let nextResultNo = 1;
+  let lastCalcParams: unknown = null;
+  const groupByDetail = new Map<number, number>();
+  const storedGroups: FakeRow[] = [];
+  const storedSheets: FakeRow[] = [];
+  let storedResult: FakeRow | null = null;
+  let storedCalculateCommand: FakeRow | null = null;
 
   const handle = (text: string, params: readonly unknown[]) => {
     queries.push({ text, params });
@@ -67,13 +77,54 @@ function createDatabase(options: FakeDbOptions = {}) {
 
     if (sql.startsWith('SELECT set_session_user')) return { rows: [], rowCount: 0 };
 
+    if (sql.startsWith('SELECT c.cut_job_id, c.command_id, c.claimed_job_version')) {
+      const rows = options.expiredCommandRows ?? [];
+      return { rows, rowCount: rows.length };
+    }
+
+    if (sql.startsWith('SELECT command_type, payload_hash, status, cut_result_id, failure_code,')) {
+      return storedCalculateCommand
+        ? { rows: [storedCalculateCommand], rowCount: 1 }
+        : { rows: [], rowCount: 0 };
+    }
+    if (sql.startsWith('SELECT 1 FROM cut_result_command')) return { rows: [{ '?column?': 1 }], rowCount: 1 };
+
     if (sql.startsWith('INSERT INTO cut_job (')) {
       return { rows: [{ cut_job_id: 42 }], rowCount: 1 };
+    }
+
+    if (sql.startsWith('INSERT INTO cut_result_command') && sql.includes("'calculate'")) {
+      storedCalculateCommand = {
+        command_type: 'calculate',
+        payload_hash: params[2],
+        status: 'in_progress',
+        cut_result_id: null,
+        failure_code: null,
+        lease_alive: true,
+        claimed_job_version: params[5],
+      };
+      return { rows: [], rowCount: 1 };
+    }
+
+    if (sql.startsWith("UPDATE cut_result_command SET status = 'completed'")) {
+      if (storedCalculateCommand) {
+        storedCalculateCommand = {
+          ...storedCalculateCommand,
+          status: 'completed',
+          cut_result_id: params[2],
+          lease_expires_at: null,
+        };
+      }
+      return { rows: [], rowCount: 1 };
     }
 
     if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id, combine_films, split_by_material FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
       const base = options.cutJob ?? { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null };
       return { rows: [{ ...base, version: jobVersion, param_profile_id: options.cutJob?.param_profile_id ?? null, sheet_material_type_id: options.cutJob?.sheet_material_type_id ?? null, combine_films: options.cutJob?.combine_films ?? false, split_by_material: options.cutJob?.split_by_material ?? true }], rowCount: 1 };
+    }
+
+    if (sql.startsWith('SELECT cut_job_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
+      return { rows: [{ cut_job_id: options.cutJob?.cut_job_id ?? 42 }], rowCount: 1 };
     }
 
     // setProfile FOR UPDATE: narrower column list (cut_job_id, status, version, param_profile_id)
@@ -122,7 +173,17 @@ function createDatabase(options: FakeDbOptions = {}) {
 
     if (sql.startsWith('UPDATE cut_job SET')) {
       if (sql.includes('version = version + 1')) jobVersion += 1;
+      if (sql.includes('last_calc_params = $3::jsonb')) lastCalcParams = JSON.parse(String(params[2]));
+      if (sql.includes('current_cut_result_id = $2')) {
+        currentResultId = Number(params[1]);
+        nextResultNo = Number(params[2]);
+      }
       return { rows: [], rowCount: 1 };
+    }
+
+    if (sql.startsWith('UPDATE cut_job_item SET cut_group_id = $1')) {
+      for (const detailId of params[2] as number[]) groupByDetail.set(detailId, Number(params[0]));
+      return { rows: [], rowCount: (params[2] as number[]).length };
     }
 
     if (sql.startsWith('SELECT cji.cut_job_item_id')) {
@@ -135,17 +196,56 @@ function createDatabase(options: FakeDbOptions = {}) {
     }
 
     if (sql.startsWith('INSERT INTO cut_group (')) {
-      return { rows: [{ cut_group_id: ++cutGroupSeq }], rowCount: 1 };
+      const cutGroupId = ++cutGroupSeq;
+      storedGroups.push({
+        cut_group_id: cutGroupId,
+        sheet_material_type_id: params[1],
+        film_id: params[2],
+        status: 'ready',
+        summary: JSON.parse(String(params[3])),
+        group_key: params[4],
+        pdf_template_code: 'standard',
+      });
+      return { rows: [{ cut_group_id: cutGroupId }], rowCount: 1 };
     }
 
-    if (sql.startsWith('INSERT INTO cut_group_sheet (')) return { rows: [], rowCount: 1 };
+    if (sql.startsWith('INSERT INTO cut_group_sheet (')) {
+      storedSheets.push({
+        cut_group_sheet_id: storedSheets.length + 1,
+        cut_group_id: params[0],
+        sheet_index: params[1],
+        png_cache_key: null,
+        placements: JSON.parse(String(params[3])),
+      });
+      return { rows: [], rowCount: 1 };
+    }
+    if (sql.startsWith('INSERT INTO cut_result ')) {
+      storedResult = {
+        cut_result_id: 900,
+        cut_job_id: params[0],
+        result_no: params[1],
+        result_kind: params[2],
+        source_job_version: params[3],
+        based_on_result_id: params[4],
+        snapshot_job: JSON.parse(String(params[8])),
+        snapshot_manifest: JSON.parse(String(params[9])),
+        snapshot_digest: 'fake-digest',
+        computed_digest: 'fake-digest',
+        totals_snapshot: JSON.parse(String(params[10])),
+        created_by: params[11],
+        created_by_name_snapshot: params[12],
+        created_at: new Date('2026-07-21T00:00:00Z'),
+        is_current: false,
+      };
+      return { rows: [storedResult], rowCount: 1 };
+    }
     if (sql.startsWith('INSERT INTO outbox_events')) return { rows: [], rowCount: 1 };
     if (sql.startsWith('INSERT INTO audit_log')) return { rows: [{ audit_id: 'aud-1' }], rowCount: 1 };
     if (sql.startsWith('INSERT INTO audit_log_related_entity')) return { rows: [], rowCount: 1 };
 
     // loadJob reads
     if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material FROM cut_job WHERE cut_job_id = $1')) {
-      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: 1, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, pdf_template_code: 'default', combine_films: false, split_by_material: true }], rowCount: 1 };
+      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: jobVersion, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, pdf_template_code: 'default', combine_films: false, split_by_material: true }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT i.cut_job_id')) {
       return { rows: [{ cut_job_id: 42, positions: 0, details: 0, area: 0 }], rowCount: 1 };
@@ -154,13 +254,77 @@ function createDatabase(options: FakeDbOptions = {}) {
       return { rows: [{ cut_job_id: 42, sheets: 0 }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item')) {
-      return { rows: [], rowCount: 0 };
+      const rows = (options.calcItems ?? []).map((item) => ({
+        cut_job_item_id: item.cut_job_item_id,
+        order_detail_id: item.order_detail_id,
+        order_id: item.order_id,
+        qty: item.qty,
+        cut_group_id: groupByDetail.get(Number(item.order_detail_id)) ?? null,
+      }));
+      return { rows, rowCount: rows.length };
     }
-    if (sql.startsWith('SELECT cut_group_id, sheet_material_type_id, film_id, status, summary FROM cut_group')) {
-      return { rows: [], rowCount: 0 };
+    if (sql.startsWith('SELECT i.cut_job_item_id, i.order_detail_id')) {
+      const rows = (options.calcItems ?? []).map((item) => ({
+        cut_job_item_id: item.cut_job_item_id,
+        order_detail_id: item.order_detail_id,
+        order_id: item.order_id,
+        qty: item.qty,
+        cut_group_id: groupByDetail.get(Number(item.order_detail_id)) ?? null,
+        joined_detail_id: item.order_detail_id,
+        detail_fields: null,
+        detail_number: item.detail_number ?? null,
+        detail_name: null,
+        height: item.height_mm,
+        width: item.width_mm,
+        detail_quantity: item.qty,
+        area: 0,
+        material_id: null,
+        sheet_material_type_id: item.sheet_material_type_id,
+        material_name: null,
+        milling_type_id: null,
+        milling_type_name: null,
+        edge_type_id: null,
+        edge_type_name: null,
+        film_id: item.film_id,
+        film_name: null,
+        priority: null,
+        production_status_id: null,
+        production_status_name: null,
+        joint_order_id: null,
+        note: null,
+        order_name: null,
+      }));
+      return { rows, rowCount: rows.length };
+    }
+    if (sql.startsWith('SELECT cut_group_id, sheet_material_type_id, film_id, status, pdf_template_code, summary FROM cut_group')) {
+      return { rows: storedGroups, rowCount: storedGroups.length };
+    }
+    if (sql.startsWith('SELECT cut_job_id, group_key FROM cut_group WHERE cut_group_id = $1')) {
+      const group = storedGroups.find((candidate) => Number(candidate.cut_group_id) === Number(params[0]));
+      return group
+        ? { rows: [{ cut_job_id: 42, group_key: group.group_key }], rowCount: 1 }
+        : { rows: [], rowCount: 0 };
+    }
+    if (sql.startsWith('SELECT cgs.sheet_index, cgs.placements FROM cut_group_sheet')) {
+      const rows = storedSheets
+        .filter((sheet) => Number(sheet.cut_group_id) === Number(params[0]))
+        .map((sheet) => ({ sheet_index: sheet.sheet_index, placements: sheet.placements }));
+      return { rows, rowCount: rows.length };
     }
     if (sql.startsWith('SELECT cut_group_sheet_id, cut_group_id, sheet_index, png_cache_key, placements FROM cut_group_sheet')) {
-      return { rows: [], rowCount: 0 };
+      return { rows: storedSheets, rowCount: storedSheets.length };
+    }
+    if (sql.startsWith('SELECT last_calc_params FROM cut_job')) return { rows: [{ last_calc_params: lastCalcParams }], rowCount: 1 };
+    if (sql.startsWith('SELECT cut_group_id, group_key FROM cut_group')) return { rows: storedGroups, rowCount: storedGroups.length };
+    if (sql.startsWith('SELECT group_key, sheets, is_active, is_stale, version FROM cut_group_manual_layout')) return { rows: [], rowCount: 0 };
+    if (sql.startsWith('SELECT version, next_cut_result_no, current_cut_result_id, request_hash FROM cut_job')) {
+      return { rows: [{ version: jobVersion, next_cut_result_no: nextResultNo, current_cut_result_id: currentResultId, request_hash: null }], rowCount: 1 };
+    }
+    if (sql.startsWith('SELECT snapshot_job, snapshot_manifest, snapshot_digest')) {
+      return storedResult ? { rows: [{ ...storedResult, computed_digest: storedResult.snapshot_digest }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (sql.startsWith('SELECT r.cut_result_id')) {
+      return storedResult ? { rows: [{ ...storedResult, computed_digest: storedResult.snapshot_digest, is_current: currentResultId === 900 }], rowCount: 1 } : { rows: [], rowCount: 0 };
     }
 
     if (sql.startsWith('SELECT od.detail_id')) {
@@ -308,7 +472,7 @@ describe('PgCutRepository', () => {
     ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_JOB_NOT_MUTABLE' });
   });
 
-  it('calculate: single group happy path stores cut_group + sheets, ready, audit + outbox', async () => {
+  it('calculate stores one result and same-command retry returns it without duplicate side effects', async () => {
     const db = createDatabase({
       cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
       calcItems: [
@@ -330,17 +494,111 @@ describe('PgCutRepository', () => {
     const client = fakeFreecut(happyResponse);
     const repo = new PgCutRepository(db.service, client);
 
-    await repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 0, requestId: 'r' });
+    const command = { currentUser: currentUser(), cutJobId: 42, version: 0, commandId: '11111111-1111-4111-8111-111111111111', requestId: 'r' };
+    await repo.calculate(command);
+    await repo.calculate(command);
 
     expect(client.optimize).toHaveBeenCalledTimes(1);
     const sql = db.queries.map((q) => normalize(q.text));
     expect(sql.some((s) => s.startsWith('INSERT INTO cut_group ('))).toBe(true);
     expect(sql.some((s) => s.startsWith('INSERT INTO cut_group_sheet ('))).toBe(true);
+    expect(sql.some((s) => s.startsWith('INSERT INTO cut_result ('))).toBe(true);
+    expect(sql.filter((s) => s.startsWith('INSERT INTO cut_result ('))).toHaveLength(1);
+    expect(sql.some((s) => s.includes('current_cut_result_id = $2'))).toBe(true);
     const outbox = db.queries.find((q) => /INSERT INTO outbox_events/i.test(q.text));
     expect(outbox).toBeDefined();
     expect(String(outbox?.params[4])).toMatch(/^cut_job\.calculated:/);
     const audit = db.queries.find((q) => /INSERT INTO audit_log\b/i.test(q.text) && JSON.stringify(q.params).includes('cut_job.calculated'));
     expect(audit).toBeDefined();
+    expect(
+      db.queries.some((q) => /INSERT INTO audit_log_related_entity/i.test(q.text) && q.params[1] === 'cut_result' && q.params[2] === 900),
+    ).toBe(true);
+    expect(db.queries.filter((q) => /INSERT INTO outbox_events/i.test(q.text))).toHaveLength(1);
+  });
+
+  it('calculate snapshots optimizer unplaced instances without losing a successful result', async () => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [{
+        cut_job_item_id: 501,
+        order_detail_id: 1,
+        order_id: 9,
+        qty: 2,
+        width_mm: 600,
+        height_mm: 400,
+        sheet_material_type_id: 9,
+        film_id: null,
+        film_texture: null,
+        smt_width_mm: 2800,
+        smt_height_mm: 2070,
+      }],
+    });
+    const response: FreecutOptimizeResponse = {
+      ...happyResponse,
+      unplaced_items: [{ item_id: 'det-1', instance: 2, reason: 'no_space' }],
+    };
+    const repo = new PgCutRepository(db.service, fakeFreecut(response));
+
+    await repo.calculate({
+      currentUser: currentUser(),
+      cutJobId: 42,
+      version: 0,
+      commandId: '22222222-2222-4222-8222-222222222222',
+      requestId: 'r-unplaced',
+    });
+
+    const resultInsert = db.queries.find((query) => normalize(query.text).startsWith('INSERT INTO cut_result ('));
+    const snapshot = JSON.parse(String(resultInsert?.params[8])) as {
+      unplaced: Array<{ itemId: string; instance: number; reason?: string }>;
+      groups: Array<{ sheets: Array<{ renderSnapshot?: { contractVersion: string; views: Record<string, unknown> } }> }>;
+    };
+    expect(snapshot.unplaced).toEqual([{ itemId: 'det-1', instance: 2, reason: 'no_space' }]);
+    expect(snapshot.groups[0]?.sheets[0]?.renderSnapshot?.contractVersion).toBe('cut_sheet_render_v1');
+    expect(Object.keys(snapshot.groups[0]?.sheets[0]?.renderSnapshot?.views ?? {})).toHaveLength(12);
+  });
+
+  it('reconciles expired calculate commands and only fails the job at the claimed version', async () => {
+    const db = createDatabase({
+      expiredCommandRows: [{
+        cut_job_id: 42,
+        command_id: '33333333-3333-4333-8333-333333333333',
+        claimed_job_version: 7,
+      }],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    await expect(repo.reconcileExpiredCommands(999)).resolves.toBe(1);
+
+    const claim = db.queries.find((query) => /FROM cut_result_command c/i.test(query.text));
+    expect(claim?.params).toEqual([500]);
+    expect(normalize(claim?.text ?? '')).toContain('FOR UPDATE OF c, j SKIP LOCKED');
+    const jobUpdate = db.queries.find((query) => /failure_reason = 'Предыдущий процесс расчёта был прерван'/i.test(query.text));
+    expect(jobUpdate?.params).toEqual([42, 7]);
+    expect(normalize(jobUpdate?.text ?? '')).toContain("status = 'calculating' AND version = $2");
+  });
+
+  it('rejects a different commandId while the job is already calculating', async () => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'calculating', source: 'manual', version: 1, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [{
+        cut_job_item_id: 501, order_detail_id: 1, order_id: 9, qty: 1,
+        width_mm: 600, height_mm: 400, sheet_material_type_id: 9,
+        film_id: null, film_texture: null, smt_width_mm: 2800, smt_height_mm: 2070,
+      }],
+    });
+    const client = fakeFreecut(happyResponse);
+    const repo = new PgCutRepository(db.service, client);
+
+    await expect(repo.calculate({
+      currentUser: currentUser(),
+      cutJobId: 42,
+      version: 1,
+      commandId: '44444444-4444-4444-8444-444444444444',
+      requestId: 'r-reload',
+    })).rejects.toMatchObject({ code: 'CUT_CALCULATION_IN_PROGRESS' });
+
+    expect(client.optimize).not.toHaveBeenCalled();
+    expect(db.queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(false);
   });
 
   it('calculate switches a large group to engine=heuristic and records engine_used in summary', async () => {

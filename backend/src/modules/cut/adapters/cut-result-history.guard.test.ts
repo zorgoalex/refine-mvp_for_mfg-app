@@ -1,0 +1,49 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+
+const repository = readFileSync(new URL('./pg-cut-repository.ts', import.meta.url), 'utf8');
+const controller = readFileSync(new URL('../http/cut.controller.ts', import.meta.url), 'utf8');
+const pdfRenderer = readFileSync(new URL('../render/sheet-pdf.ts', import.meta.url), 'utf8');
+
+describe('cut result history implementation guards', () => {
+  it('allocates result numbers under job transaction and freezes whole-job snapshot', () => {
+    expect(repository).toContain('next_cut_result_no');
+    expect(repository).toContain('validateFrozenJobSnapshot(snapshot)');
+    expect(repository).toContain('snapshot_manifest');
+    expect(repository).toContain('snapshot_digest');
+    expect(repository).toContain("resultKind: 'auto'");
+    expect(repository).toContain("resultKind: 'manual'");
+    expect(repository).toContain('Ручной вариант содержит другой набор деталей');
+  });
+
+  it('dedupes commands and abandons expired calculate leases without replay', () => {
+    expect(repository).toContain('CUT_RESULT_COMMAND_IN_PROGRESS');
+    expect(repository).toContain('CUT_RESULT_COMMAND_ABANDONED');
+    expect(repository).toContain('lease_expires_at > now()');
+    expect(repository).toContain("status = 'completed', cut_result_id");
+    expect(repository).toContain('reconcileExpiredCommands(limit = 50)');
+    expect(repository).toContain("status = 'calculating' AND version = $2");
+  });
+
+  it('binds frozen render routes to job, result, group, and sheet ids', () => {
+    expect(controller).toContain("@Get(':cutJobId/results/:resultNo/groups/:groupId/sheets/:sheetIndex.png')");
+    expect(controller).toContain("@Get(':cutJobId/results/:resultNo/groups/:groupId/sheets/:sheetIndex.svg')");
+    expect(repository).toContain('candidate.cutGroupId === args.cutGroupId');
+  });
+
+  it('serves historical sheets from frozen render artifacts, never current geometry', () => {
+    expect(repository).toContain("contractVersion: 'cut_sheet_render_v1'");
+    expect(repository).toContain('renderSnapshot.pdfMeta as PdfSheetMeta');
+    expect(repository).toContain('renderSnapshot.pdfDetailRows as PdfSheetDetailRow[]');
+    const frozenLoader = repository.slice(
+      repository.indexOf('private async loadFrozenRenderContext'),
+      repository.indexOf('private async attachFrozenRenderSnapshots'),
+    );
+    expect(frozenLoader).toContain('renderSnapshot?.views');
+    expect(frozenLoader).not.toContain('buildSheetSvg(');
+    expect(repository).toContain('buildFrozenSheetsPdf(frozenContext.renderContractVersion, pdfSheets)');
+    expect(repository).toContain("buildFrozenSheetsPdf('cut_sheet_render_v1', pdfSheets)");
+    expect(pdfRenderer).toContain("case 'cut_sheet_render_v1':");
+    expect(pdfRenderer).toContain('return buildSheetsPdfV1(sheets)');
+  });
+});

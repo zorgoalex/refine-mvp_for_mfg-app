@@ -13,6 +13,7 @@ import {
   noSheetSpecMessage,
   parseIdCsv,
   parseJobQueryParam,
+  parseResultQueryParam,
   safeHttpHref,
   pollPdf,
   pruneEmptySheets,
@@ -30,6 +31,15 @@ describe('parseJobQueryParam', () => {
     expect(parseJobQueryParam('?job=abc')).toBeNull();
     expect(parseJobQueryParam('?job=-3')).toBeNull();
     expect(parseJobQueryParam('?foo=1')).toBeNull();
+  });
+});
+
+describe('parseResultQueryParam', () => {
+  it('parses only a positive integer result number', () => {
+    expect(parseResultQueryParam('?job=45&result=3')).toBe(3);
+    expect(parseResultQueryParam('?result=0')).toBeNull();
+    expect(parseResultQueryParam('?result=abc')).toBeNull();
+    expect(parseResultQueryParam('?job=45')).toBeNull();
   });
 });
 

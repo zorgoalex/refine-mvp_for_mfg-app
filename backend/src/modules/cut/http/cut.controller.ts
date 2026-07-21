@@ -9,6 +9,8 @@ import type {
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
   CutJobDto,
+  CutResultDto,
+  CutResultSummaryDto,
   CutSelectionCriteriaDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
@@ -47,6 +49,10 @@ const addItemsRequestSchema = z
   .strict();
 
 const versionBodySchema = z.object({ version: z.number().int().min(0) }).strict();
+const calculateBodySchema = z.object({
+  version: z.number().int().min(0),
+  commandId: z.string().uuid(),
+}).strict();
 
 const setProfileBodySchema = z
   .object({
@@ -106,6 +112,7 @@ const saveManualLayoutBodySchema = z
     active: z.boolean(),
     placements: z.array(manualMoveSchema),
     sheetTransforms: z.array(sheetViewTransformSchema).default([]),
+    commandId: z.string().uuid(),
   })
   .strict();
 
@@ -196,6 +203,150 @@ export class CutController {
     return this.cut.getJob({ currentUser, cutJobId: parseCutJobId(cutJobId), requestId: request.requestId });
   }
 
+  @ApiOperation({ operationId: 'listCutResults', summary: 'List immutable completed results for a cut job' })
+  @Get(':cutJobId/results')
+  async listResults(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+  ): Promise<CutResultSummaryDto[]> {
+    const currentUser = this.requireRead(request);
+    return this.cut.listResults({ currentUser, cutJobId: parseCutJobId(cutJobId), requestId: request.requestId });
+  }
+
+  @ApiOperation({ operationId: 'getCutResult', summary: 'Get one immutable completed cut result' })
+  @Get(':cutJobId/results/:resultNo')
+  async getResult(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Param('resultNo') resultNo: string,
+  ): Promise<CutResultDto> {
+    const currentUser = this.requireRead(request);
+    return this.cut.getResult({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      resultNo: parseCutJobId(resultNo),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'renderCutResultSheetPng', summary: 'Render a frozen result sheet PNG' })
+  @Get(':cutJobId/results/:resultNo/groups/:groupId/sheets/:sheetIndex.png')
+  async renderResultPng(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Param('resultNo') resultNo: string,
+    @Param('groupId') groupId: string,
+    @Param('sheetIndex') sheetIndex: string,
+    @Query() query: Record<string, string>,
+    @Res() response: Response,
+  ): Promise<void> {
+    const currentUser = this.requireRead(request);
+    const axisOrigin = parseAxisOrigin(query.axisOrigin);
+    const png = await this.cut.renderSheetPng({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      resultNo: parseCutJobId(resultNo),
+      cutGroupId: parseCutJobId(groupId),
+      sheetIndex: parseSheetIndex(sheetIndex),
+      preset: parsePreset(query.preset),
+      rotate90: parseOrientation(query.orientation),
+      originTopLeft: canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin),
+      axisOrigin,
+      variant: parseVariant(query.variant),
+      showLabels: query.labels !== 'off',
+      requestId: request.requestId,
+    });
+    response.setHeader('Content-Type', 'image/png');
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.send(png);
+  }
+
+  @ApiOperation({ operationId: 'renderCutResultSheetSvg', summary: 'Render a frozen result sheet SVG' })
+  @Get(':cutJobId/results/:resultNo/groups/:groupId/sheets/:sheetIndex.svg')
+  async renderResultSvg(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Param('resultNo') resultNo: string,
+    @Param('groupId') groupId: string,
+    @Param('sheetIndex') sheetIndex: string,
+    @Query() query: Record<string, string>,
+    @Res() response: Response,
+  ): Promise<void> {
+    const currentUser = this.requireRead(request);
+    const axisOrigin = parseAxisOrigin(query.axisOrigin);
+    const svg = await this.cut.renderSheetSvg({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      resultNo: parseCutJobId(resultNo),
+      cutGroupId: parseCutJobId(groupId),
+      sheetIndex: parseSheetIndex(sheetIndex),
+      rotate90: parseOrientation(query.orientation),
+      originTopLeft: canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin),
+      axisOrigin,
+      variant: parseVariant(query.variant),
+      requestId: request.requestId,
+    });
+    response.setHeader('Content-Type', 'image/svg+xml');
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.send(svg);
+  }
+
+  @ApiOperation({ operationId: 'exportCutResultGroupPdf', summary: 'Export a frozen result group PDF' })
+  @Get(':cutJobId/results/:resultNo/groups/:groupId/export.pdf')
+  async exportResultGroupPdf(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Param('resultNo') resultNo: string,
+    @Param('groupId') groupId: string,
+    @Query() query: Record<string, string>,
+    @Res() response: Response,
+  ): Promise<void> {
+    const currentUser = this.requireRead(request);
+    const axisOrigin = parseAxisOrigin(query.axisOrigin);
+    const pdf = await this.cut.renderGroupPdf({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      resultNo: parseCutJobId(resultNo),
+      cutGroupId: parseCutJobId(groupId),
+      rotate90: parseOrientation(query.orientation),
+      originTopLeft: canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin),
+      axisOrigin,
+      variant: parseVariant(query.variant),
+      pdfTemplate: parsePdfTemplate(query.template),
+      requestId: request.requestId,
+    });
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.send(pdf);
+  }
+
+  @ApiOperation({ operationId: 'exportCutResultJobPdf', summary: 'Export a frozen whole-result PDF' })
+  @Get(':cutJobId/results/:resultNo/export.pdf')
+  async exportResultJobPdf(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Param('resultNo') resultNo: string,
+    @Query() query: Record<string, string>,
+    @Res() response: Response,
+  ): Promise<void> {
+    const currentUser = this.requireRead(request);
+    const axisOrigin = parseAxisOrigin(query.axisOrigin);
+    const pdf = await this.cut.renderJobPdf({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      resultNo: parseCutJobId(resultNo),
+      rotate90: parseOrientation(query.orientation),
+      originTopLeft: canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin),
+      axisOrigin,
+      variant: parseVariant(query.variant),
+      pdfTemplate: parsePdfTemplate(query.template),
+      requestId: request.requestId,
+    });
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.send(pdf);
+  }
+
   @ApiOperation({ operationId: 'listEligibleDetails', summary: 'List criteria-driven eligible details (backend read)' })
   @Get(':cutJobId/eligible-details')
   async eligibleDetails(
@@ -256,10 +407,12 @@ export class CutController {
     @Body() body: unknown,
   ): Promise<CutJobDto> {
     const currentUser = this.requireMutation(request);
+    const parsed = parseCalculateBody(body);
     const job = await this.cut.calculate({
       currentUser,
       cutJobId: parseCutJobId(cutJobId),
-      version: parseVersionBody(body),
+      version: parsed.version,
+      commandId: parsed.commandId,
       requestId: request.requestId,
     });
     // Pre-warm the whole-job PDF (plan §7): cache-warming optimization, not
@@ -404,7 +557,7 @@ export class CutController {
     @Body() body: unknown,
   ): Promise<CutJobDto> {
     const currentUser = this.requireMutation(request);
-    const { jobVersion, active, placements, sheetTransforms } = parseSaveManualLayoutBody(body);
+    const { jobVersion, active, placements, sheetTransforms, commandId } = parseSaveManualLayoutBody(body);
     const job = await this.cut.saveManualLayout({
       currentUser,
       cutJobId: parseCutJobId(cutJobId),
@@ -413,6 +566,7 @@ export class CutController {
       active,
       placements,
       sheetTransforms,
+      commandId,
       requestId: request.requestId,
     });
     if (job.status === 'ready' && job.pdfPrewarmState === 'pending') {
@@ -730,6 +884,10 @@ export function parseVersionBody(body: unknown): number {
   return parse(versionBodySchema, body).version;
 }
 
+export function parseCalculateBody(body: unknown): { version: number; commandId: string } {
+  return parse(calculateBodySchema, body);
+}
+
 export function parseSetProfileBody(body: unknown): { paramProfileId: number | null; version: number } {
   return parse(setProfileBodySchema, body);
 }
@@ -750,7 +908,7 @@ export function parseSetPdfTemplateBody(body: unknown): { pdfTemplate: string } 
   return parse(setPdfTemplateBodySchema, body);
 }
 
-export function parseSaveManualLayoutBody(body: unknown): { jobVersion: number; active: boolean; placements: ManualMove[]; sheetTransforms: SheetViewTransform[] } {
+export function parseSaveManualLayoutBody(body: unknown): { jobVersion: number; active: boolean; placements: ManualMove[]; sheetTransforms: SheetViewTransform[]; commandId: string } {
   return parse(saveManualLayoutBodySchema, body);
 }
 

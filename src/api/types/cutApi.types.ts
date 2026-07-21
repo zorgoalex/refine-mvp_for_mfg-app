@@ -165,6 +165,7 @@ export interface SaveManualLayoutRequest {
   active: boolean;
   placements: CutManualMove[];
   sheetTransforms: CutSheetViewTransform[];
+  commandId: string;
 }
 
 export interface CutJobDto {
@@ -208,6 +209,30 @@ export interface CutJobDto {
   autoLayoutValidation?: { valid: boolean };
   /** Opaque render token for cache-busting render endpoints (present on single-job GET). */
   renderToken?: string;
+  currentCutResult?: CutResultSummary | null;
+  cutResults?: CutResultSummary[];
+}
+
+export type CutResultKind = 'auto' | 'manual' | 'legacy';
+
+export interface CutResultSummary {
+  cutResultId: number;
+  cutJobId: number;
+  resultNo: number;
+  cutNumber: string;
+  resultKind: CutResultKind;
+  sourceJobVersion: number;
+  basedOnResultId: number | null;
+  createdBy: number | null;
+  createdByName: string | null;
+  createdAt: string;
+  totals: CutJobTotals;
+  isCurrent: boolean;
+}
+
+export interface CutResultDto extends CutResultSummary {
+  job: CutJobDto;
+  renderToken: string;
 }
 
 export type CutIneligibleReason = 'deleted' | 'wrong_status' | 'not_cuttable' | 'no_sheet_spec';

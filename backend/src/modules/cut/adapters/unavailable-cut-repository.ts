@@ -3,6 +3,10 @@ import type { CutRepositoryPort } from '../application/cut-command.types';
 
 /** Mirrors UnavailablePaymentRepository: used when no DATABASE_URL is configured. */
 export class UnavailableCutRepository implements CutRepositoryPort {
+  reconcileExpiredCommands() {
+    return Promise.resolve(0);
+  }
+
   createJob() {
     return Promise.reject(unavailable());
   }
@@ -29,6 +33,14 @@ export class UnavailableCutRepository implements CutRepositoryPort {
   }
 
   getJob() {
+    return Promise.reject(unavailable());
+  }
+
+  listResults() {
+    return Promise.reject(unavailable());
+  }
+
+  getResult() {
     return Promise.reject(unavailable());
   }
 

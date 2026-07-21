@@ -42,7 +42,27 @@ export interface PdfSheetDetailRow {
   due?: string | null;
 }
 
+export type FrozenPdfRenderContract = 'cut_sheet_render_v1';
+
+/**
+ * Historical dispatcher. Once a contract exists here its implementation is
+ * append-only: a future PDF layout must add v2 and leave v1 untouched.
+ */
+export function buildFrozenSheetsPdf(
+  contract: FrozenPdfRenderContract,
+  sheets: readonly PdfSheetInput[],
+): Promise<Buffer> {
+  switch (contract) {
+    case 'cut_sheet_render_v1':
+      return buildSheetsPdfV1(sheets);
+  }
+}
+
 export function buildSheetsPdf(sheets: readonly PdfSheetInput[]): Promise<Buffer> {
+  return buildSheetsPdfV1(sheets);
+}
+
+function buildSheetsPdfV1(sheets: readonly PdfSheetInput[]): Promise<Buffer> {
   return new Promise<Buffer>((resolvePdf, reject) => {
     if (sheets.length === 0) {
       reject(new Error('Cannot render a cut PDF with no sheets'));
