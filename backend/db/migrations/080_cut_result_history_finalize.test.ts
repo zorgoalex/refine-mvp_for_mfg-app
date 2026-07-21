@@ -13,6 +13,8 @@ describe('080 cut result history finalize migration', () => {
     expect(sql).toContain('p_digest <> cut_result_snapshot_digest(p_snapshot)');
     expect(sql).toContain('manual_piece_keys IS DISTINCT FROM auto_piece_keys');
     expect(sql).toContain("jsonb_array_length(group_json -> 'sheets') = 0");
+    expect(sql).toContain("jsonb_object_keys(sheet_json #> '{renderSnapshot,views}')");
+    expect(sql).not.toContain('jsonb_object_length');
   });
 
   it('enforces append-only results and completed command linkage', () => {
