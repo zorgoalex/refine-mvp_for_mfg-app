@@ -2,6 +2,7 @@ import { Edit } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
+import { StatusColorFormItem } from "../../components/StatusColor";
 
 export const OrderStatusEdit: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps } = useFormWithHighlight({
@@ -19,9 +20,7 @@ export const OrderStatusEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Порядок сортировки" name="sort_order" rules={[{ required: true }]}>
           <InputNumber min={1} style={{ width: '100%' }} />
         </Form.Item>
-        <Form.Item label="Color (HEX)" name="color">
-          <Input placeholder="#FF5733" maxLength={7} />
-        </Form.Item>
+        <StatusColorFormItem />
         <Form.Item label="Description" name="description">
           <Input.TextArea rows={3} />
         </Form.Item>

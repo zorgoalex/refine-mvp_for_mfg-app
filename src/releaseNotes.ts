@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-21",
+    title: "Выбор и отображение цветов статусов",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В справочниках статусов заказов, платежей и производства цвет выбирается визуально, а в списках и карточках показывается компактным цветным индикатором.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-21",
     title: "История выполненных раскроев",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
