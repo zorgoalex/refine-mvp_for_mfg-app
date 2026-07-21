@@ -406,6 +406,24 @@ export function resolveEffectiveVariant(
   return usable && manual.isActive ? 'manual' : 'auto';
 }
 
+export function resolvePdfTemplateSelection(
+  requestedTemplate: string | undefined,
+  frozenTemplate: string | undefined,
+): { code: string; requiresActiveCheck: boolean } {
+  if (requestedTemplate !== undefined) {
+    return {
+      code: requestedTemplate,
+      // Preserve an archived snapshot's original template even if it was later
+      // deactivated. Any actual override must resolve to an active template.
+      requiresActiveCheck: frozenTemplate === undefined || requestedTemplate !== frozenTemplate,
+    };
+  }
+  if (frozenTemplate !== undefined) {
+    return { code: frozenTemplate, requiresActiveCheck: false };
+  }
+  return { code: 'standard', requiresActiveCheck: true };
+}
+
 export class PgCutRepository implements CutRepositoryPort {
   private readonly config: CutConfigPort;
   private readonly nativePortraitWriter: boolean;
@@ -2252,7 +2270,6 @@ export class PgCutRepository implements CutRepositoryPort {
 
   async renderGroupPdf(query: RenderGroupPdfQuery): Promise<Buffer> {
     const variant = query.variant ?? 'auto';
-    const requestedPdfTemplate = query.pdfTemplate ?? 'standard';
     // Rule 6 BEFORE Rule 5: load + assert group↔job ownership first so a wrong
     // cutJobId yields 404 CUT_GROUP_NOT_FOUND, not a 409 recalc block (a missing
     // job makes checkRequiresRecalc conservatively true). This also resolves the
@@ -2274,10 +2291,12 @@ export class PgCutRepository implements CutRepositoryPort {
           query.cutGroupId, variant, query.cutJobId, query.originTopLeft, query.axisOrigin,
         )
       : null;
-    const pdfTemplate = frozenContext?.group.pdfTemplate ?? requestedPdfTemplate;
-    if (frozenContext === null) {
-      await this.assertPdfTemplateActive(pdfTemplate);
-    }
+    const templateSelection = resolvePdfTemplateSelection(
+      query.pdfTemplate,
+      frozenContext?.group.pdfTemplate,
+    );
+    const pdfTemplate = templateSelection.code;
+    if (templateSelection.requiresActiveCheck) await this.assertPdfTemplateActive(pdfTemplate);
     const sheets = frozenContext?.sheets ?? currentContext!.sheets;
     const rotate90 = frozenContext ? (query.rotate90 ?? false) : currentContext!.rotate90;
     // Rule 5: group PDF is blocked while the job requires recalculation.
@@ -2308,7 +2327,6 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   async renderJobPdf(query: RenderJobPdfQuery): Promise<Buffer> {
-    const requestedPdfTemplate = query.pdfTemplate ?? 'standard';
     // Rule 4: variant=manual is PER-GROUP; the whole-job PDF can't coherently pick one
     // group's manual layout. Reject explicitly instead of silently ignoring it.
     if (query.variant === 'manual') {
@@ -2333,10 +2351,12 @@ export class PgCutRepository implements CutRepositoryPort {
           resultNo: query.resultNo,
           requestId: query.requestId,
         });
-    const pdfTemplate = frozen?.job.pdfTemplate ?? requestedPdfTemplate;
-    if (frozen === null) {
-      await this.assertPdfTemplateActive(pdfTemplate);
-    }
+    const templateSelection = resolvePdfTemplateSelection(
+      query.pdfTemplate,
+      frozen?.job.pdfTemplate,
+    );
+    const pdfTemplate = templateSelection.code;
+    if (templateSelection.requiresActiveCheck) await this.assertPdfTemplateActive(pdfTemplate);
     const groupIds = frozen
       ? frozen.job.groups.map((group) => group.cutGroupId)
       : (await this.database.query<{ cut_group_id: string | number }>(
