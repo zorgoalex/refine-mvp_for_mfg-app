@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisProjectCard, BazisProjectListItem } from '../../api/types/bazisApi.types';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
+import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
 import { CreateOrderModal } from './CreateOrderModal';
@@ -19,6 +20,8 @@ interface ProjectRow extends BazisProjectListItem {
 
 export const BazisPage: React.FC = () => {
   const navigate = useNavigate();
+  const { pageSize, setPageSize } = usePageSizePreference('bazis:projects', 10);
+  const [currentPage, setCurrentPage] = useState(1);
   const [rows, setRows] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -307,6 +310,20 @@ export const BazisPage: React.FC = () => {
               columns={columns}
               dataSource={rows}
               loading={loading}
+              pagination={{
+                current: currentPage,
+                pageSize,
+                pageSizeOptions: PAGE_SIZE_OPTIONS,
+                showSizeChanger: true,
+                onChange: (nextPage, nextPageSize) => {
+                  if (nextPageSize !== pageSize) {
+                    setPageSize(nextPageSize);
+                    setCurrentPage(1);
+                    return;
+                  }
+                  setCurrentPage(nextPage);
+                },
+              }}
               locale={{ emptyText: errorText ? <Text type="secondary">Нет данных</Text> : <Empty description="Базис-проекты не найдены" /> }}
               expandable={{
                 expandedRowKeys: expandedProjectIds,

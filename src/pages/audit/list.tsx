@@ -26,6 +26,7 @@ import { ApiError } from '../../api/httpClient';
 import { featureFlags } from '../../config/featureFlags';
 import { authSession } from '../../api/authSession';
 import { can } from '../../utils/permissions';
+import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 
 const { Text } = Typography;
 
@@ -180,7 +181,11 @@ export function ContextBlock({ record }: { record: AuditLogEventDto }) {
 export const AuditList: React.FC = () => {
   const [form] = Form.useForm<FilterValues>();
   const [filtersVisible, setFiltersVisible] = useState(false);
-  const [query, setQuery] = useState<AuditLogListQuery>({ page: 1, pageSize: PAGE_SIZE_DEFAULT });
+  const { pageSize: preferredPageSize, setPageSize: rememberPageSize } = usePageSizePreference(
+    'audit:list',
+    PAGE_SIZE_DEFAULT,
+  );
+  const [query, setQuery] = useState<AuditLogListQuery>({ page: 1, pageSize: preferredPageSize });
   const [data, setData] = useState<AuditLogEventDto[]>([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE_DEFAULT, total: 0 });
   const [loading, setLoading] = useState(false);
@@ -230,6 +235,12 @@ export const AuditList: React.FC = () => {
     void fetchData(query);
   }, [query, fetchData]);
 
+  useEffect(() => {
+    setQuery((current) => current.pageSize === preferredPageSize
+      ? current
+      : { ...current, page: 1, pageSize: preferredPageSize });
+  }, [preferredPageSize]);
+
   const handleFilter = (values: FilterValues) => {
     setQuery(buildAuditQuery(values, query.pageSize ?? PAGE_SIZE_DEFAULT));
   };
@@ -240,10 +251,13 @@ export const AuditList: React.FC = () => {
   };
 
   const handleTableChange = (pag: { current?: number; pageSize?: number }) => {
+    const nextPageSize = pag.pageSize ?? query.pageSize ?? PAGE_SIZE_DEFAULT;
+    const pageSizeChanged = nextPageSize !== query.pageSize;
+    if (pageSizeChanged) rememberPageSize(nextPageSize);
     setQuery((prev) => ({
       ...prev,
-      page: pag.current ?? 1,
-      pageSize: pag.pageSize ?? PAGE_SIZE_DEFAULT,
+      page: pageSizeChanged ? 1 : (pag.current ?? 1),
+      pageSize: nextPageSize,
     }));
   };
 
@@ -461,7 +475,7 @@ export const AuditList: React.FC = () => {
           current: pagination.page,
           pageSize: pagination.pageSize,
           total: pagination.total,
-          pageSizeOptions: ['20', '50', '100', '200'],
+          pageSizeOptions: PAGE_SIZE_OPTIONS,
           showSizeChanger: true,
           showTotal: (total) => `Всего: ${total}`,
         }}

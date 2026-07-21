@@ -8,13 +8,13 @@ export interface OrderCardListProps {
   rows: readonly Record<string, unknown>[];
   loading?: boolean;
   pagination: TablePaginationConfig | false;
-  onPageChange: (page: number) => void;
+  onPaginationChange: (page: number, pageSize: number) => void;
   onOpen: (id: number) => void;
 }
 
 export const buildOrderCardPagination = (
   pagination: TablePaginationConfig | false,
-  onPageChange: (page: number) => void,
+  onPaginationChange: (page: number, pageSize: number) => void,
 ) => {
   if (pagination === false) return false;
 
@@ -24,17 +24,18 @@ export const buildOrderCardPagination = (
   return {
     ...sharedPagination,
     position: 'bottom' as const,
-    simple: true,
-    showSizeChanger: false,
-    onChange: onPageChange,
+    simple: false,
+    showLessItems: true,
+    showSizeChanger: true,
+    onChange: onPaginationChange,
   };
 };
 
-export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pagination, onPageChange, onOpen }) => (
+export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pagination, onPaginationChange, onOpen }) => (
   <List
     dataSource={rows as Record<string, unknown>[]}
     loading={loading}
-    pagination={buildOrderCardPagination(pagination, onPageChange)}
+    pagination={buildOrderCardPagination(pagination, onPaginationChange)}
     rowKey={(r) => String(r.order_id)}
     renderItem={(row) => {
       const m = buildOrderCardModel(row);

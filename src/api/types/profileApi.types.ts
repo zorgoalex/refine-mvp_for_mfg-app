@@ -27,6 +27,7 @@ export const RECENT_REFERENCE_RESOURCES = [
 
 export type RecentReferenceResource = (typeof RECENT_REFERENCE_RESOURCES)[number];
 export type RecentReferences = Partial<Record<RecentReferenceResource, number[]>>;
+export type PageSizePreferences = Record<string, number>;
 
 export interface UserPreferencesDto {
   themeMode: ThemeMode;
@@ -34,6 +35,8 @@ export interface UserPreferencesDto {
   orderDetailColumns: Record<string, OrderDetailColumnPreference>;
   /** Optional during mixed frontend/backend rollout. */
   recentReferences?: RecentReferences;
+  /** Optional during mixed frontend/backend rollout. */
+  pageSizePreferences?: PageSizePreferences;
 }
 
 export interface ReferenceUsageRequest {
@@ -54,4 +57,5 @@ export interface UpdateUserPreferencesRequest {
   themeMode?: ThemeMode;
   uiSize?: UiSize;
   orderDetailColumns?: Record<string, OrderDetailColumnPreference>;
+  pageSizePreferences?: PageSizePreferences;
 }

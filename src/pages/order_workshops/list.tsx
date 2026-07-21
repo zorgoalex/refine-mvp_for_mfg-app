@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
-import { useTable, ShowButton, EditButton, DateField } from "@refinedev/antd";
+import { ShowButton, EditButton, DateField } from "@refinedev/antd";
+import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Table } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { DISPLAY_DATE_FORMAT, DISPLAY_DATE_TIME_FORMAT } from "../../utils/dateFormat";

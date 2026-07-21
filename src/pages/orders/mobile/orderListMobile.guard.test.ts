@@ -18,20 +18,21 @@ describe('orders list phone rendering', () => {
     expect(src).toContain('onOpen');
   });
   it('converts Table pagination position to a valid Ant List position', () => {
-    const onPageChange = vi.fn();
+    const onPaginationChange = vi.fn();
     expect(buildOrderCardPagination({
       current: 1,
       pageSize: 20,
       total: 4641,
       position: ['topRight', 'bottomRight'],
-    }, onPageChange)).toMatchObject({
+    }, onPaginationChange)).toMatchObject({
       current: 1,
       pageSize: 20,
       total: 4641,
       position: 'bottom',
-      simple: true,
-      showSizeChanger: false,
-      onChange: onPageChange,
+      simple: false,
+      showLessItems: true,
+      showSizeChanger: true,
+      onChange: onPaginationChange,
     });
   });
   it('cut-select group workflow stays desktop-only', () => {

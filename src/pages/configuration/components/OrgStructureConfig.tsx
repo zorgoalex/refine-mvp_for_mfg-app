@@ -25,6 +25,7 @@ import {
   type OrgWorkshopLookup,
   type ReplaceIdSetPayload,
 } from '../../../api/orgApi';
+import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../../hooks/usePageSizePreference';
 
 const { Title, Text } = Typography;
 
@@ -47,6 +48,8 @@ function reportError(error: unknown, fallback: string): void {
 }
 
 export const OrgStructureConfig: React.FC<OrgStructureConfigProps> = ({ initialPermissions }) => {
+  const { pageSize, setPageSize } = usePageSizePreference('configuration:org-directions', 10);
+  const [currentPage, setCurrentPage] = useState(1);
   const { data: identity } = useGetIdentity<{ permissions?: string[] }>();
   const permissions = initialPermissions ?? identity?.permissions ?? [];
   const canManage = permissions.includes('org.manage');
@@ -267,6 +270,20 @@ export const OrgStructureConfig: React.FC<OrgStructureConfigProps> = ({ initialP
           loading={loading}
           columns={columns}
           dataSource={directions}
+          pagination={{
+            current: currentPage,
+            pageSize,
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
+            showSizeChanger: true,
+            onChange: (nextPage, nextPageSize) => {
+              if (nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setCurrentPage(1);
+                return;
+              }
+              setCurrentPage(nextPage);
+            },
+          }}
           locale={{ emptyText: <Empty description="Нет направлений" /> }}
           onRow={(row) => ({ onClick: () => openDetail(row.directionId), style: { cursor: 'pointer' } })}
         />

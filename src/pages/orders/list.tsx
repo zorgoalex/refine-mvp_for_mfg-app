@@ -8,12 +8,12 @@ import {
 } from "@refinedev/core";
 import {
   List,
-  useTable,
   ShowButton,
   EditButton,
   CreateButton,
   useSelect,
 } from "@refinedev/antd";
+import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown } from "antd";
 import {
   EyeOutlined,
@@ -122,7 +122,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { isActive } = useKeepAlive();
   const { getSetting } = useAppSettings({ enabled: isActive });
 
-  const { tableProps, current, pageSize, setCurrent, sorters, setSorters, filters, setFilters } = useTable({
+  const { tableProps, current, pageSize, setCurrent, setPageSize, sorters, setSorters, filters, setFilters } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [
@@ -1344,7 +1344,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             rows={tableProps.dataSource ?? []}
             loading={!!tableProps.loading}
             pagination={tableProps.pagination ?? false}
-            onPageChange={setCurrent}
+            onPaginationChange={(nextPage, nextPageSize) => {
+              if (nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                return;
+              }
+              setCurrent(nextPage);
+            }}
             onOpen={(id) => show("orders_view", id, "push")}
           />
         ) : (

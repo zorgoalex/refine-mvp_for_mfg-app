@@ -428,6 +428,7 @@ probe_file() {
                      "$(q_trg trg_cut_result_command_state)" \
                      "$(q_trg trg_cut_result_command_terminal_immutable)" \
                      "$(q_trg trg_cut_result_ledger_state)" ;;
+    081_*) probe_all "$(q_col user_preferences page_size_preferences)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
