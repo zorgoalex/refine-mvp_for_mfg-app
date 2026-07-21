@@ -1006,16 +1006,20 @@ export class PgLabelsRepository implements LabelsPort {
               (j.current_cut_result_id = r.cut_result_id) AS is_current,
               (j.status = 'archived') AS is_archived,
               CASE WHEN maps.cut_result_placement_id IS NULL THEN NULL ELSE
-                od.width IS NOT NULL AND od.height IS NOT NULL
-                AND abs(maps.detail_width_mm - od.width) <= 0.01
-                AND abs(maps.detail_height_mm - od.height) <= 0.01
+                EXISTS (
+                  SELECT 1
+                  FROM jsonb_array_elements(r.snapshot_job -> 'items') AS snapshot_item(item_json)
+                  WHERE (snapshot_item.item_json ->> 'orderDetailId')::BIGINT = od.detail_id
+                    AND od.width IS NOT NULL AND od.height IS NOT NULL
+                    AND abs((snapshot_item.item_json #>> '{detail,width}')::NUMERIC - od.width) <= 0.01
+                    AND abs((snapshot_item.item_json #>> '{detail,height}')::NUMERIC - od.height) <= 0.01
+                )
               END AS dimensions_match
        FROM order_details_view od
        LEFT JOIN (
          SELECT p.cut_result_placement_id, p.order_detail_id, p.instance,
                 p.cut_result_id, p.cut_job_id, p.variant, p.sheet_index,
-                p.detail_width_mm, p.detail_height_mm, s.sheet_ordinal,
-                projection.snapshot_digest
+                s.sheet_ordinal, projection.snapshot_digest
          FROM cut_result_placement p
          JOIN cut_result_sheet_map s
            ON s.cut_result_sheet_map_id = p.cut_result_sheet_map_id
@@ -1722,9 +1726,14 @@ export async function resolveLabelCutMaps(
             r.result_no,
             COALESCE(r.snapshot_job ->> 'name', 'Раскрой ' || p.cut_job_id::text) AS cut_job_name,
             COALESCE(
-              od.width IS NOT NULL AND od.height IS NOT NULL
-              AND abs(p.detail_width_mm - od.width) <= 0.01
-              AND abs(p.detail_height_mm - od.height) <= 0.01
+              EXISTS (
+                SELECT 1
+                FROM jsonb_array_elements(r.snapshot_job -> 'items') AS snapshot_item(item_json)
+                WHERE (snapshot_item.item_json ->> 'orderDetailId')::BIGINT = od.detail_id
+                  AND od.width IS NOT NULL AND od.height IS NOT NULL
+                  AND abs((snapshot_item.item_json #>> '{detail,width}')::NUMERIC - od.width) <= 0.01
+                  AND abs((snapshot_item.item_json #>> '{detail,height}')::NUMERIC - od.height) <= 0.01
+              )
               AND p.instance <= od.quantity,
               false
             ) AS dimensions_match

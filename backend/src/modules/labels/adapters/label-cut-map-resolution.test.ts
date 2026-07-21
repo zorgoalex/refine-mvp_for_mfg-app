@@ -24,6 +24,10 @@ describe('label cut-map resolution', () => {
     });
     expect(resolved.rows[0].values).toMatchObject({ 'cut.number': '30-4', 'cut.sheet_number': 2 });
     expect(resolved.assets.get(600)).toContain('<svg');
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("jsonb_array_elements(r.snapshot_job -> 'items')"),
+      [[700], 20],
+    );
   });
 
   it('fails closed when a placement belongs to another physical instance', async () => {

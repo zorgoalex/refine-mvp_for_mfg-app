@@ -34,6 +34,16 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).toMatch(/JSON\.stringify\(command\.fieldCatalogSnapshot \?\? \{\}\)/);
   });
 
+  it('matches cut-map options against immutable snapshot dimensions', () => {
+    expect(source.match(/jsonb_array_elements\(r\.snapshot_job -> 'items'\)/g)).toHaveLength(2);
+    expect(source).toMatch(/snapshot_item\.item_json #>> '\{detail,width\}'/);
+    expect(source).toMatch(/snapshot_item\.item_json #>> '\{detail,height\}'/);
+    expect(source).not.toMatch(/abs\(maps\.detail_width_mm - od\.width\)/);
+    expect(source).not.toMatch(/abs\(maps\.detail_height_mm - od\.height\)/);
+    expect(source).not.toMatch(/abs\(p\.detail_width_mm - od\.width\)/);
+    expect(source).not.toMatch(/abs\(p\.detail_height_mm - od\.height\)/);
+  });
+
   it('names order archives from the order name and current generation number', () => {
     expect(buildOrderLabelsArchiveFilename(' Кухня / Север ', 22)).toBe('заказ-Кухня - Север-бирки-22.zip');
     expect(buildOrderLabelsArchiveFilename(null, 4)).toBe('заказ-без-названия-бирки-4.zip');
