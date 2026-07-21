@@ -1,6 +1,6 @@
 -- PostgreSQL exposes jsonb_array_length but has no jsonb_object_length helper.
--- Runtime preference updates use the latter to enforce a bounded JSON object,
--- so install the immutable compatibility helper before later migrations.
+-- Migration 080 uses the latter in immutable snapshot validation, so define
+-- the compatibility function before finalize runs.
 
 BEGIN;
 
@@ -16,5 +16,5 @@ $$;
 
 COMMIT;
 
--- Down (only after removing every dependent query/function):
+-- Down (only after removing every dependent constraint/function):
 -- DROP FUNCTION IF EXISTS jsonb_object_length(JSONB);
