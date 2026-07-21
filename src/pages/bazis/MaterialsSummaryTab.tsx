@@ -10,6 +10,7 @@ import { Alert, Button, Empty, Modal, Space, Spin, Table, Tag, message } from 'a
 import type { ColumnsType } from 'antd/es/table';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisRevisionMaterialsSummary } from '../../api/types/bazisApi.types';
+import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 import {
   MaterialMappingStep,
   materialMappingKey,
@@ -44,6 +45,7 @@ interface MaterialRow {
 }
 
 export const MaterialsSummaryTab: React.FC<MaterialsSummaryTabProps> = ({ revisionId, canManage }) => {
+  const { pageSize, setPageSize } = usePageSizePreference('bazis:materials-summary', 50);
   const [summary, setSummary] = useState<BazisRevisionMaterialsSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -274,7 +276,12 @@ export const MaterialsSummaryTab: React.FC<MaterialsSummaryTabProps> = ({ revisi
         size="small"
         columns={columns}
         dataSource={rows}
-        pagination={rows.length > 50 ? { pageSize: 50 } : false}
+        pagination={rows.length > pageSize ? {
+          pageSize,
+          pageSizeOptions: PAGE_SIZE_OPTIONS,
+          showSizeChanger: true,
+          onShowSizeChange: (_current, nextPageSize) => setPageSize(nextPageSize),
+        } : false}
         scroll={{ y: 480 }}
       />
 

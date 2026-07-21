@@ -39,12 +39,14 @@ export const RECENT_REFERENCE_RESOURCES = [
 
 export type RecentReferenceResource = (typeof RECENT_REFERENCE_RESOURCES)[number];
 export type RecentReferenceEntitiesDto = Partial<Record<RecentReferenceResource, number[]>>;
+export type PageSizePreferencesDto = Record<string, number>;
 
 export interface UserPreferencesDto {
   themeMode: ThemeMode;
   uiSize: UiSize;
   orderDetailColumns: OrderDetailColumnPreferencesDto;
   recentReferences: RecentReferenceEntitiesDto;
+  pageSizePreferences: PageSizePreferencesDto;
 }
 
 export interface UserPreferencesResponseDto {

@@ -415,6 +415,7 @@ probe_file() {
                      "$(q_col bazis_pdf_table_patterns is_active)" \
                      "$(q_col bazis_pdf_table_patterns version)" ;;
     075_*) probe_075_endstate ;;
+    081_*) probe_all "$(q_col user_preferences page_size_preferences)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

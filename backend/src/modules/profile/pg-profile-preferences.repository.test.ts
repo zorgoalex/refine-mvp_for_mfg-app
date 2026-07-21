@@ -7,7 +7,7 @@ describe('PgProfilePreferencesRepository', () => {
     const database = new FakeDatabase([{ rows: [] }]);
     const repository = new PgProfilePreferencesRepository(database);
 
-    await expect(repository.getUserPreferences(7)).resolves.toEqual({ themeMode: 'light', uiSize: 'default', orderDetailColumns: {}, recentReferences: {} });
+    await expect(repository.getUserPreferences(7)).resolves.toEqual({ themeMode: 'light', uiSize: 'default', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} });
     expect(database.queries[0].text).toContain('FROM user_preferences');
     expect(database.queries[0].params).toEqual([7]);
   });
@@ -21,6 +21,7 @@ describe('PgProfilePreferencesRepository', () => {
       uiSize: 'small',
       orderDetailColumns: { orderShow: { order: ['height'], hidden: ['note'] } },
       recentReferences: {},
+      pageSizePreferences: {},
     });
   });
 
@@ -33,10 +34,11 @@ describe('PgProfilePreferencesRepository', () => {
       uiSize: 'default',
       orderDetailColumns: {},
       recentReferences: {},
+      pageSizePreferences: {},
     });
     expect(database.queries[0].text).toContain('INSERT INTO user_preferences');
     expect(database.queries[0].text).toContain('ON CONFLICT (user_id)');
-    expect(database.queries[0].params).toEqual([7, 'dark', null, null]);
+    expect(database.queries[0].params).toEqual([7, 'dark', null, null, null]);
   });
 
   it('upserts order detail column preferences without changing theme', async () => {
@@ -50,12 +52,14 @@ describe('PgProfilePreferencesRepository', () => {
       uiSize: 'default',
       orderDetailColumns: { orderEdit: { order: ['width'], hidden: [] } },
       recentReferences: {},
+      pageSizePreferences: {},
     });
     expect(database.queries[0].params).toEqual([
       7,
       null,
       null,
       JSON.stringify({ orderEdit: { order: ['width'], hidden: [] } }),
+      null,
     ]);
   });
 
@@ -68,13 +72,40 @@ describe('PgProfilePreferencesRepository', () => {
       uiSize: 'small',
       orderDetailColumns: {},
       recentReferences: {},
+      pageSizePreferences: {},
     });
-    expect(database.queries[0].params).toEqual([7, null, 'small', null]);
+    expect(database.queries[0].params).toEqual([7, null, 'small', null, null]);
 
     const garbage = new FakeDatabase([{ rows: [{ theme_mode: 'light', ui_size: 'huge', order_detail_columns: {} }] }]);
     await expect(new PgProfilePreferencesRepository(garbage).getUserPreferences(7)).resolves.toMatchObject({
       uiSize: 'default',
     });
+  });
+
+  it('atomically merges one list page size without replacing other list preferences', async () => {
+    const database = new FakeDatabase([{
+      rows: [{
+        theme_mode: 'light',
+        ui_size: 'default',
+        order_detail_columns: {},
+        page_size_preferences: { 'refine:orders_view': 50, audit: 100 },
+      }],
+    }]);
+    const repository = new PgProfilePreferencesRepository(database);
+
+    await expect(repository.updateUserPreferences(7, {
+      pageSizePreferences: { 'refine:orders_view': 50 },
+    })).resolves.toMatchObject({
+      pageSizePreferences: { 'refine:orders_view': 50, audit: 100 },
+    });
+    expect(database.queries[0].params).toEqual([
+      7,
+      null,
+      null,
+      null,
+      JSON.stringify({ 'refine:orders_view': 50 }),
+    ]);
+    expect(database.queries[0].text).toContain('user_preferences.page_size_preferences || $5::jsonb');
   });
 
   it('atomically promotes, deduplicates and caps recent reference ids', async () => {
@@ -94,6 +125,7 @@ describe('PgProfilePreferencesRepository', () => {
       9,
     )).resolves.toMatchObject({
       recentReferences: { sheet_material_types: [9, 7] },
+      pageSizePreferences: {},
     });
     expect(database.queries[0].params).toEqual([7, 'sheet_material_types', 9]);
     expect(database.queries[0].text).toContain('ON CONFLICT (user_id)');
@@ -118,6 +150,24 @@ describe('PgProfilePreferencesRepository', () => {
     expect(preferences.recentReferences.sheet_material_types).toHaveLength(20);
     expect(preferences.recentReferences.sheet_material_types?.slice(0, 2)).toEqual([3, 10]);
     expect(preferences.recentReferences).not.toHaveProperty('unknown');
+  });
+
+  it('drops unsupported or malformed page-size preferences', async () => {
+    const database = new FakeDatabase([{
+      rows: [{
+        theme_mode: 'light',
+        order_detail_columns: {},
+        page_size_preferences: {
+          orders: 50,
+          audit: 200,
+          broken: '100',
+          ['x'.repeat(121)]: 20,
+        },
+      }],
+    }]);
+
+    await expect(new PgProfilePreferencesRepository(database).getUserPreferences(7))
+      .resolves.toMatchObject({ pageSizePreferences: { orders: 50 } });
   });
 });
 

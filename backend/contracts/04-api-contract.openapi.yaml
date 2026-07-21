@@ -10980,6 +10980,7 @@ components:
         - uiSize
         - orderDetailColumns
         - recentReferences
+        - pageSizePreferences
       properties:
         themeMode:
           type: string
@@ -10993,6 +10994,11 @@ components:
             $ref: '#/components/schemas/OrderDetailColumnPreference'
         recentReferences:
           $ref: '#/components/schemas/RecentReferenceEntities'
+        pageSizePreferences:
+          type: object
+          additionalProperties:
+            type: integer
+            enum: [10, 20, 25, 50, 100]
 
     UserPreferencesResponse:
       type: object
@@ -11015,6 +11021,11 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/OrderDetailColumnPreference'
+        pageSizePreferences:
+          type: object
+          additionalProperties:
+            type: integer
+            enum: [10, 20, 25, 50, 100]
 
     ReferenceUsageRequest:
       type: object

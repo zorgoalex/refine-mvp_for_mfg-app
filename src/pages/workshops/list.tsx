@@ -1,5 +1,6 @@
 ﻿import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { useTable, ShowButton, EditButton } from "@refinedev/antd";
+import { ShowButton, EditButton } from "@refinedev/antd";
+import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { LocalizedList } from "../../components/LocalizedList";
 import { Space, Table, Badge } from "antd";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
@@ -74,6 +75,5 @@ export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
     </LocalizedList>
   );
 };
-
 
 

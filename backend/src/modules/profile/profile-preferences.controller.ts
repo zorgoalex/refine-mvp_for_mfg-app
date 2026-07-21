@@ -21,6 +21,16 @@ const updatePreferencesSchema = z.object({
       hidden: z.array(z.string().min(1).max(80)).max(80),
     }),
   ).optional(),
+  pageSizePreferences: z.record(
+    z.string().min(1).max(120),
+    z.union([
+      z.literal(10),
+      z.literal(20),
+      z.literal(25),
+      z.literal(50),
+      z.literal(100),
+    ]),
+  ).optional(),
 });
 
 const referenceUsageSchema = z.object({
