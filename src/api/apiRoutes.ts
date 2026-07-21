@@ -143,6 +143,7 @@ export const apiRoutes = {
     orderData: (orderId: number) => backendApiPath(`/orders/${orderId}/label-data`),
     orderPreview: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/preview`),
     orderGenerate: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/generate`),
+    orderCutMapOptions: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/cut-map-options`),
     latest: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/latest`),
     latestExport: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/latest/export`),
     generationExport: (orderId: number, generationId: number) =>

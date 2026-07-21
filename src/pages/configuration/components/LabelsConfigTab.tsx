@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Collapse, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
-import { AlignCenterOutlined, AlignLeftOutlined, AlignRightOutlined, CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, QrcodeOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
+import { AlignCenterOutlined, AlignLeftOutlined, AlignRightOutlined, CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PictureOutlined, PlusOutlined, QrcodeOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import type Konva from 'konva';
 import { Group as KonvaGroup, Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
 import { labelsApi } from '../../../api/labelsApi';
@@ -286,6 +286,10 @@ export const LabelsConfigTab: React.FC = () => {
       template.rendererCapabilities?.includes('if_else_v1')
       && template.rendererCapabilities?.includes('typography_v1')
     )),
+    [templates],
+  );
+  const cutMapRendererReady = useMemo(
+    () => templates.length === 0 || templates.some((template) => template.rendererCapabilities?.includes('cut_map_v1')),
     [templates],
   );
   const sourceFields = useMemo<LabelFieldCatalogItem[]>(
@@ -629,6 +633,10 @@ export const LabelsConfigTab: React.FC = () => {
 
   const addElement = (kind: LabelElementKind) => {
     if (!canManage || saving || editorGestureActiveRef.current) return;
+    if (kind === 'cut_map' && elementsRef.current.some((element) => element.kind === 'cut_map')) {
+      message.warning('На бирке уже есть миниатюра раскроя');
+      return;
+    }
     const elementKey = `${kind}-${Date.now()}`;
     setEditorElements((current) => {
       const nextElement: LabelTemplateElement = {
@@ -638,11 +646,20 @@ export const LabelsConfigTab: React.FC = () => {
         staticText: kind === 'text' ? 'Новый текст' : null,
         xMm: kind === 'qr' ? 10 : 2,
         yMm: kind === 'qr' ? 10 : 2 + current.length * 6,
-        widthMm: kind === 'line' ? 60 : kind === 'qr' ? 20 : 40,
-        heightMm: kind === 'line' ? 0 : kind === 'qr' ? 20 : 6,
+        widthMm: kind === 'line' ? 60 : kind === 'qr' ? 20 : kind === 'cut_map' ? 40 : 40,
+        heightMm: kind === 'line' ? 0 : kind === 'qr' ? 20 : kind === 'cut_map' ? 28 : 6,
         rotationDeg: 0,
         zIndex: current.length,
-        style: kind === 'qr'
+        style: kind === 'cut_map'
+          ? {
+              cutMap: {
+                version: 1,
+                fit: 'contain',
+                highlightFill: '#ffd666',
+                highlightStroke: '#d4380d',
+              },
+            }
+          : kind === 'qr'
           ? {
               qrName: uniqueQrName(
                 'QR',
@@ -869,15 +886,28 @@ export const LabelsConfigTab: React.FC = () => {
   const changeElementKind = (index: number, kind: LabelElementKind) => {
     const current = elementsRef.current[index];
     if (!current) return;
+    if (kind === 'cut_map' && elementsRef.current.some((element, currentIndex) => currentIndex !== index && element.kind === 'cut_map')) {
+      message.warning('На бирке уже есть миниатюра раскроя');
+      return;
+    }
     const patch: Partial<LabelTemplateElement> = {
       kind,
       sourceField: kind === 'text' ? current.sourceField ?? 'bazis.name' : null,
       staticText: kind === 'text' ? current.staticText ?? null : null,
-      heightMm: kind === 'line' ? 0 : kind === 'qr' ? qrSideOf(current) : Math.max(6, Number(current.heightMm ?? 6)),
-      widthMm: kind === 'qr' ? qrSideOf(current) : kind === 'line' ? Math.max(10, Number(current.widthMm ?? 60)) : Number(current.widthMm ?? 40),
-      style: kind === 'qr'
-        ? { ...(current.style ?? {}), qrTemplate: qrTemplateOf(current) || '{bazis.detail_id}', qrErrorCorrection: qrErrorCorrectionOf(current) }
-        : { ...(current.style ?? {}), fontSize: Number(current.style?.fontSize ?? 12) },
+      heightMm: kind === 'line' ? 0 : kind === 'qr' ? qrSideOf(current) : kind === 'cut_map' ? Math.max(10, Number(current.heightMm ?? 28)) : Math.max(6, Number(current.heightMm ?? 6)),
+      widthMm: kind === 'qr' ? qrSideOf(current) : kind === 'line' ? Math.max(10, Number(current.widthMm ?? 60)) : kind === 'cut_map' ? Math.max(10, Number(current.widthMm ?? 40)) : Number(current.widthMm ?? 40),
+      style: kind === 'cut_map'
+        ? {
+            cutMap: {
+              version: 1,
+              fit: 'contain',
+              highlightFill: '#ffd666',
+              highlightStroke: '#d4380d',
+            },
+          }
+        : kind === 'qr'
+        ? { ...withoutCutMapStyle(current.style), qrTemplate: qrTemplateOf(current) || '{bazis.detail_id}', qrErrorCorrection: qrErrorCorrectionOf(current) }
+        : { ...withoutCutMapStyle(current.style), fontSize: Number(current.style?.fontSize ?? 12) },
       condition: kind === 'text' ? current.condition ?? {} : {},
     };
     if (kind === 'qr') {
@@ -960,6 +990,10 @@ export const LabelsConfigTab: React.FC = () => {
       : selectLabelElements(elementsRef.current, [], elementKey, false);
     const source = elementsRef.current.filter((element) => keys.includes(element.elementKey));
     if (source.length === 0) return;
+    if (source.some((element) => element.kind === 'cut_map')) {
+      message.warning('Миниатюра раскроя может быть только одна');
+      return;
+    }
     const freshGroupId = source.length > 1 || source.some((element) => readLabelEditorMeta(element).groupId)
       ? `label-group-copy-${Date.now()}`
       : null;
@@ -1507,6 +1541,15 @@ export const LabelsConfigTab: React.FC = () => {
                 <Tooltip title="Добавляет QR-код. Данные собираются по шаблону из полей детали, заказа, Bazis и кастомных полей.">
                   <Button icon={<QrcodeOutlined />} disabled={!canManage || saving} onClick={() => addElement('qr')}>QR-код</Button>
                 </Tooltip>
+                <Tooltip title="Добавляет растягиваемую область миниатюры листа раскроя. При формировании бирки лист впишется сюда автоматически, а нужная деталь будет выделена.">
+                  <Button
+                    icon={<PictureOutlined />}
+                    disabled={!canManage || saving || !cutMapRendererReady || elements.some((element) => element.kind === 'cut_map')}
+                    onClick={() => addElement('cut_map')}
+                  >
+                    Миниатюра раскроя
+                  </Button>
+                </Tooltip>
               </Space>
             )}
             size="small"
@@ -1538,6 +1581,7 @@ export const LabelsConfigTab: React.FC = () => {
                       { value: 'line', label: 'Линия' },
                       { value: 'rect', label: 'Прямоугольник' },
                       { value: 'qr', label: 'QR-код' },
+                      { value: 'cut_map', label: 'Миниатюра раскроя', disabled: !cutMapRendererReady },
                     ]}
                   />
                 ),
@@ -3714,6 +3758,42 @@ function renderKonvaPreviewElement({
       </React.Fragment>
     );
   }
+  if (element.kind === 'cut_map') {
+    const innerWidth = Math.max(w, 2);
+    const innerHeight = Math.max(h, 2);
+    return (
+      <React.Fragment key={key}>
+        <KonvaGroup {...common} width={innerWidth} height={innerHeight}>
+          <KonvaRect
+            x={0}
+            y={0}
+            width={innerWidth}
+            height={innerHeight}
+            fill="#f7f9fb"
+            stroke="#5b6b7a"
+            strokeWidth={0.35}
+          />
+          <KonvaRect x={innerWidth * 0.05} y={innerHeight * 0.08} width={innerWidth * 0.42} height={innerHeight * 0.36} fill="#e5ebf0" stroke="#8c9aa7" strokeWidth={0.2} listening={false} />
+          <KonvaRect x={innerWidth * 0.5} y={innerHeight * 0.08} width={innerWidth * 0.45} height={innerHeight * 0.2} fill="#e5ebf0" stroke="#8c9aa7" strokeWidth={0.2} listening={false} />
+          <KonvaRect x={innerWidth * 0.5} y={innerHeight * 0.31} width={innerWidth * 0.22} height={innerHeight * 0.58} fill="#ffd666" stroke="#d4380d" strokeWidth={0.55} listening={false} />
+          <KonvaRect x={innerWidth * 0.75} y={innerHeight * 0.31} width={innerWidth * 0.2} height={innerHeight * 0.58} fill="#e5ebf0" stroke="#8c9aa7" strokeWidth={0.2} listening={false} />
+          <KonvaText
+            x={innerWidth * 0.05}
+            y={innerHeight * 0.56}
+            width={innerWidth * 0.4}
+            text="Лист раскроя"
+            fontFamily="Arial"
+            fontSize={Math.max(1.8, Math.min(innerWidth, innerHeight) * 0.12)}
+            fill="#5b6b7a"
+            align="center"
+            listening={false}
+          />
+        </KonvaGroup>
+        {selectionBox}
+        {allBoundsBox}
+      </React.Fragment>
+    );
+  }
   if (element.kind === 'qr') {
     const side = qrSideOf(element);
     const protectedRect = qrProtectedRect(element);
@@ -3826,6 +3906,7 @@ function describeLabelElement(
   if (element.kind === 'rect') return 'Прямоугольник';
   if (element.kind === 'line') return 'Линия';
   if (element.kind === 'qr') return `QR-код: ${qrTemplateOf(element) || 'шаблон не задан'}`;
+  if (element.kind === 'cut_map') return 'Миниатюра листа раскроя с выделением детали';
   if (element.sourceField) {
     const field = fieldInfo.get(element.sourceField);
     if (field) {
@@ -3854,6 +3935,7 @@ function labelElementTitle(
   if (element.kind === 'rect') return 'Прямоугольник';
   if (element.kind === 'line') return 'Линия';
   if (element.kind === 'qr') return 'QR-код';
+  if (element.kind === 'cut_map') return 'Миниатюра раскроя';
   if (element.sourceField) return fieldInfo.get(element.sourceField)?.label ?? element.sourceField;
   return element.staticText || 'Текст';
 }
@@ -3953,6 +4035,12 @@ function newLabelTextStyle(advancedRendererReady: boolean): Record<string, unkno
     : { fontSize: 12 };
 }
 
+function withoutCutMapStyle(style: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!style) return {};
+  const { cutMap: _cutMap, ...rest } = style;
+  return rest;
+}
+
 function isLabelConditionDraftValid(condition: LabelIfElseCondition): boolean {
   if (!condition.when.field.trim()) return false;
   if (
@@ -3967,7 +4055,7 @@ function isLabelConditionDraftValid(condition: LabelIfElseCondition): boolean {
 function hasAdvancedLabelElementData(element: LabelTemplateElement): boolean {
   const style = element.style as Record<string, unknown> | undefined;
   const condition = element.condition as Record<string, unknown> | undefined;
-  return Boolean(style?.typography || style?.editor || condition?.type === 'if_else');
+  return Boolean(style?.typography || style?.editor || style?.cutMap || condition?.type === 'if_else');
 }
 
 function cleanupSingletonLabelGroups(elements: LabelTemplateElement[]): LabelTemplateElement[] {

@@ -1,5 +1,5 @@
 export type LabelExportFormat = 'bmp' | 'png' | 'emf';
-export type LabelElementKind = 'text' | 'line' | 'rect' | 'qr';
+export type LabelElementKind = 'text' | 'line' | 'rect' | 'qr' | 'cut_map';
 export type LabelConditionOperator = 'exists' | 'not_empty' | 'equals' | 'not_equals';
 export type LabelConditionBranch =
   | { type: 'current' }
@@ -75,7 +75,7 @@ export interface LabelTemplate {
   defaultExportFormats: LabelExportFormat[];
   customFieldSchema: Record<string, unknown>;
   fieldCatalogSnapshot: LabelFieldCatalogSnapshot;
-  rendererCapabilities?: Array<'if_else_v1' | 'typography_v1'>;
+  rendererCapabilities?: Array<'if_else_v1' | 'typography_v1' | 'cut_map_v1'>;
   elements: LabelTemplateElement[];
 }
 
@@ -136,6 +136,43 @@ export interface PreviewOrderLabelsInput {
   templateVersion: number;
   detailFilters?: { detailIds?: number[] };
   useBasisFields?: boolean;
+  cutMapSelections?: LabelCutMapSelection[];
+}
+
+export interface LabelCutMapSelection {
+  detailId: number;
+  copyIndex: number;
+  cutResultPlacementId: number;
+}
+
+export interface LabelCutMapOption {
+  cutResultPlacementId: number;
+  detailId: number;
+  instance: number;
+  cutResultId: number;
+  cutJobId: number;
+  cutNumber: string;
+  cutJobName: string;
+  resultNo: number;
+  resultKind: 'auto' | 'manual' | 'legacy';
+  variant: 'auto' | 'manual';
+  sheetIndex: number;
+  sheetNumber: number;
+  createdAt: string;
+  isCurrent: boolean;
+  isArchived: boolean;
+  dimensionsMatch: boolean;
+}
+
+export interface OrderLabelCutMapOptions {
+  orderId: number;
+  details: Array<{
+    detailId: number;
+    detailNumber: string | null;
+    detailName: string | null;
+    quantity: number;
+    options: LabelCutMapOption[];
+  }>;
 }
 
 export interface GenerateOrderLabelsInput extends PreviewOrderLabelsInput {

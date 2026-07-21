@@ -16,6 +16,7 @@ import type {
   OcrTestResult,
   OrderLabelData,
   OrderLabelGeneration,
+  OrderLabelCutMapOptions,
   OrderLabelsPreview,
   PreviewDetailLabelsInput,
   LatestOrderLabelsPreview,
@@ -71,6 +72,13 @@ export const labelsApi = {
 
   generateOrderLabels(orderId: number, input: GenerateOrderLabelsInput): Promise<OrderLabelGeneration> {
     return httpClient.post<OrderLabelGeneration>(apiRoutes.labels.orderGenerate(validateId(orderId, 'orderId')), input);
+  },
+
+  listOrderCutMapOptions(orderId: number): Promise<OrderLabelCutMapOptions> {
+    return httpClient.get<OrderLabelCutMapOptions>(
+      apiRoutes.labels.orderCutMapOptions(validateId(orderId, 'orderId')),
+      { cache: 'no-store' },
+    );
   },
 
   previewDetailLabels(input: PreviewDetailLabelsInput): Promise<DetailLabelsPreview> {
