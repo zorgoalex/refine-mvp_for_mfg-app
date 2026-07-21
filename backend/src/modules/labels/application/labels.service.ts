@@ -25,6 +25,8 @@ import type {
   LabelTemplateDto,
   LabelFieldCatalogSnapshot,
   ListLabelTemplatesQuery,
+  ListOrderLabelCutMapOptionsQuery,
+  OrderLabelCutMapOptionsDto,
   OrderLabelDataDto,
   OrderLabelGenerationDto,
   LatestOrderLabelsPreviewDto,
@@ -98,6 +100,7 @@ export interface LabelsServicePorts {
 const VIEW: PermissionName = 'labels.view';
 const MANAGE_TEMPLATES: PermissionName = 'labels.manage_templates';
 const GENERATE: PermissionName = 'labels.generate';
+const CUT_VIEW: PermissionName = 'cut.view';
 
 export class LabelsService {
   private readonly repo: LabelsPort;
@@ -178,13 +181,25 @@ export class LabelsService {
     return this.repo.updateOrderLabelData(command);
   }
 
+  async listOrderCutMapOptions(query: ListOrderLabelCutMapOptionsQuery): Promise<OrderLabelCutMapOptionsDto> {
+    await this.require(query, [GENERATE], query.orderId, 'order');
+    await this.require(query, [CUT_VIEW], query.orderId, 'order');
+    return this.repo.listOrderCutMapOptions(query);
+  }
+
   async previewOrderLabels(command: PreviewOrderLabelsCommand): Promise<OrderLabelsPreviewDto> {
     await this.require(command, [VIEW, GENERATE, MANAGE_TEMPLATES], command.orderId, 'order');
+    if (command.input.cutMapSelections !== undefined) {
+      await this.require(command, [CUT_VIEW], command.orderId, 'order');
+    }
     return this.repo.previewOrderLabels(command);
   }
 
   async generateOrderLabels(command: GenerateOrderLabelsCommand): Promise<OrderLabelGenerationDto> {
     await this.require(command, [GENERATE], command.orderId, 'order');
+    if (command.input.cutMapSelections !== undefined) {
+      await this.require(command, [CUT_VIEW], command.orderId, 'order');
+    }
     return this.repo.generateOrderLabels(command);
   }
 
@@ -535,6 +550,22 @@ export function validateTemplateInput(input: LabelTemplateInput, runtimeFieldIds
     }
   }
   validateQrElementNames(input.elements);
+  validateCutMapElements(input.elements);
+}
+
+function validateCutMapElements(elements: LabelTemplateElementInput[]): void {
+  const cutMaps = elements.filter((element) => element.kind === 'cut_map');
+  if (cutMaps.length > 1) {
+    throw new ApiError(422, 'LABEL_CUT_MAP_DUPLICATE', 'На бирке может быть только одна миниатюра раскроя', {});
+  }
+  for (const [index, element] of elements.entries()) {
+    if (element.kind !== 'cut_map') continue;
+    if (element.sourceField != null || element.staticText != null || Object.keys(element.condition ?? {}).length > 0) {
+      throw new ApiError(422, 'LABEL_CUT_MAP_INVALID', 'Миниатюра раскроя не поддерживает текстовые поля и условия', {
+        elementIndex: index,
+      });
+    }
+  }
 }
 
 export function validateQrTemplateInput(input: LabelQrTemplateInput, runtimeFieldIds?: ReadonlySet<string>): void {

@@ -9,6 +9,25 @@ export interface LabelRow {
   copyIndex: number;
   copyCount: number;
   values: Record<string, string | number | boolean | null>;
+  cutMap?: LabelRowCutMapSnapshot;
+}
+
+export interface LabelRowCutMapSnapshot {
+  cutResultPlacementId: number;
+  cutResultSheetMapId: number;
+  cutResultId: number;
+  cutJobId: number;
+  cutNumber: string;
+  cutJobName: string;
+  variant: 'auto' | 'manual';
+  sheetIndex: number;
+  sheetNumber: number;
+  sheetWidthMm: number;
+  sheetHeightMm: number;
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
 }
 
 export function buildLabelRows(input: {

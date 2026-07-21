@@ -1,7 +1,7 @@
 import { ApiError } from '../../../common/errors/api-error';
 import type { LabelTemplateElementInput } from './labels.types';
 
-export const LABEL_RENDERER_CAPABILITIES = ['if_else_v1', 'typography_v1'] as const;
+export const LABEL_RENDERER_CAPABILITIES = ['if_else_v1', 'typography_v1', 'cut_map_v1'] as const;
 export type LabelRendererCapability = (typeof LABEL_RENDERER_CAPABILITIES)[number];
 
 type ConditionOperator = 'exists' | 'not_empty' | 'equals' | 'not_equals';
@@ -26,6 +26,13 @@ export interface TypographyV1 {
   italic: boolean;
 }
 
+export interface CutMapStyleV1 {
+  version: 1;
+  fit: 'contain';
+  highlightFill: string;
+  highlightStroke: string;
+}
+
 export function assertAdvancedElementShape(element: LabelTemplateElementInput, elementIndex: number): void {
   const condition = element.condition ?? {};
   if (condition.type === 'if_else') {
@@ -44,6 +51,9 @@ export function assertAdvancedElementShape(element: LabelTemplateElementInput, e
   }
   if (Object.prototype.hasOwnProperty.call(style, 'editor') && !readEditorMetadataV1(style)) {
     throw invalidShape('Invalid editor metadata', elementIndex);
+  }
+  if (element.kind === 'cut_map' && !readCutMapStyleV1(style)) {
+    throw invalidShape('cut_map requires cutMap v1 metadata', elementIndex);
   }
   assertNoUnknownVersionedStyleNamespace(style, elementIndex);
 }
@@ -64,6 +74,9 @@ export function assertRenderableAdvancedElementShape(element: LabelTemplateEleme
   }
   if (Object.prototype.hasOwnProperty.call(style, 'editor') && !readEditorMetadataV1(style)) {
     throw invalidShape('Invalid stored editor metadata', elementIndex);
+  }
+  if (element.kind === 'cut_map' && !readCutMapStyleV1(style)) {
+    throw invalidShape('Stored cut_map requires cutMap v1 metadata', elementIndex);
   }
   assertNoUnknownVersionedStyleNamespace(style, elementIndex);
 }
@@ -86,7 +99,7 @@ function isStrictLegacyCondition(value: Record<string, unknown>): boolean {
 
 function assertNoUnknownVersionedStyleNamespace(style: Record<string, unknown>, elementIndex: number): void {
   for (const [key, value] of Object.entries(style)) {
-    if (key === 'typography' || key === 'editor' || !isRecord(value)) continue;
+    if (key === 'typography' || key === 'editor' || key === 'cutMap' || !isRecord(value)) continue;
     if (Object.prototype.hasOwnProperty.call(value, 'version')) {
       throw invalidShape(`Unknown versioned style namespace: ${key}`, elementIndex);
     }
@@ -161,6 +174,23 @@ export function readEditorMetadataV1(style: Record<string, unknown>): {
     boundsMode: value.boundsMode,
     ...(typeof value.groupId === 'string' ? { groupId: value.groupId } : {}),
   };
+}
+
+export function readCutMapStyleV1(style: Record<string, unknown>): CutMapStyleV1 | null {
+  const value = style.cutMap;
+  if (!isRecord(value) || !exactKeys(value, ['version', 'fit', 'highlightFill', 'highlightStroke'])) return null;
+  if (value.version !== 1 || value.fit !== 'contain') return null;
+  if (!isHexColor(value.highlightFill) || !isHexColor(value.highlightStroke)) return null;
+  return {
+    version: 1,
+    fit: 'contain',
+    highlightFill: value.highlightFill,
+    highlightStroke: value.highlightStroke,
+  };
+}
+
+function isHexColor(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
 }
 
 export function parseIfElseCondition(value: Record<string, unknown>): IfElseConditionV1 | null {

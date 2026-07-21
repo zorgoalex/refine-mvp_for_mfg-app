@@ -2,7 +2,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { LabelTextFields } from './scan/label-text-extraction';
 import type { OcrTemplateForMatch, OcrTemplateRule } from './scan/ocr-template-matcher';
 
-export type LabelElementKind = 'text' | 'line' | 'rect' | 'qr';
+export type LabelElementKind = 'text' | 'line' | 'rect' | 'qr' | 'cut_map';
 export type LabelExportFormat = 'bmp' | 'png' | 'emf';
 
 export interface LabelTemplateElementDto {
@@ -33,7 +33,7 @@ export interface LabelTemplateDto {
   defaultExportFormats: LabelExportFormat[];
   customFieldSchema: Record<string, unknown>;
   fieldCatalogSnapshot: LabelFieldCatalogSnapshot;
-  rendererCapabilities: Array<'if_else_v1' | 'typography_v1'>;
+  rendererCapabilities: Array<'if_else_v1' | 'typography_v1' | 'cut_map_v1'>;
   elements: LabelTemplateElementDto[];
 }
 
@@ -122,11 +122,50 @@ export interface LabelDetailFilterInput {
   detailIds?: number[];
 }
 
+export interface LabelCutMapSelectionInput {
+  detailId: number;
+  copyIndex: number;
+  cutResultPlacementId: number;
+}
+
+export interface LabelCutMapOptionDto {
+  cutResultPlacementId: number;
+  detailId: number;
+  instance: number;
+  cutResultId: number;
+  cutJobId: number;
+  cutNumber: string;
+  cutJobName: string;
+  resultNo: number;
+  resultKind: 'auto' | 'manual' | 'legacy';
+  variant: 'auto' | 'manual';
+  sheetIndex: number;
+  sheetNumber: number;
+  createdAt: string;
+  isCurrent: boolean;
+  isArchived: boolean;
+  dimensionsMatch: boolean;
+}
+
+export interface OrderLabelCutMapDetailOptionsDto {
+  detailId: number;
+  detailNumber: string | null;
+  detailName: string | null;
+  quantity: number;
+  options: LabelCutMapOptionDto[];
+}
+
+export interface OrderLabelCutMapOptionsDto {
+  orderId: number;
+  details: OrderLabelCutMapDetailOptionsDto[];
+}
+
 export interface PreviewOrderLabelsInput {
   templateId: number;
   templateVersion: number;
   detailFilters?: LabelDetailFilterInput;
   useBasisFields?: boolean;
+  cutMapSelections?: LabelCutMapSelectionInput[];
 }
 
 export interface PreviewDetailLabelsInput {
@@ -311,6 +350,10 @@ export interface PreviewOrderLabelsCommand extends LabelsContext {
   input: PreviewOrderLabelsInput;
 }
 
+export interface ListOrderLabelCutMapOptionsQuery extends LabelsContext {
+  orderId: number;
+}
+
 export interface GenerateOrderLabelsCommand extends LabelsContext {
   orderId: number;
   input: GenerateOrderLabelsInput;
@@ -428,6 +471,7 @@ export interface LabelsPort {
   deleteTemplate(command: DeleteLabelTemplateCommand): Promise<void>;
   getOrderLabelData(query: GetOrderLabelDataQuery): Promise<OrderLabelDataDto>;
   updateOrderLabelData(command: UpdateOrderLabelDataCommand): Promise<OrderLabelDataDto>;
+  listOrderCutMapOptions(query: ListOrderLabelCutMapOptionsQuery): Promise<OrderLabelCutMapOptionsDto>;
   previewOrderLabels(command: PreviewOrderLabelsCommand): Promise<OrderLabelsPreviewDto>;
   generateOrderLabels(command: GenerateOrderLabelsCommand): Promise<OrderLabelGenerationDto>;
   previewDetailLabels(command: PreviewDetailLabelsCommand): Promise<DetailLabelsPreviewDto>;

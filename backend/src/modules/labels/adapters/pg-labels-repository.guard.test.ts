@@ -42,6 +42,7 @@ describe('PgLabelsRepository structural guards', () => {
 
   it('rejects an invalid stored versioned template before generation side effects', async () => {
     const query = vi.fn()
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ idempotency_key: 'generation-invalid-stored' }] })
       .mockResolvedValueOnce({
         rowCount: 1,
         rows: [{
@@ -89,14 +90,64 @@ describe('PgLabelsRepository structural guards', () => {
       input: {
         templateId: 9,
         templateVersion: 1,
-        previewToken: 'previously-issued-token',
+        previewToken: previewToken({ orderId: 42, templateId: 9, templateVersion: 1 }),
         exportFormats: ['png'],
         idempotencyKey: 'generation-invalid-stored',
       },
     })).rejects.toMatchObject({ statusCode: 422, code: 'LABEL_ELEMENT_SCHEMA_INVALID' });
 
-    expect(query).toHaveBeenCalledTimes(2);
-    expect(query.mock.calls.some(([sql]) => /INSERT INTO order_label_generations|outbox_events|idempotency/i.test(String(sql))))
+    expect(query).toHaveBeenCalledTimes(3);
+    expect(query.mock.calls.some(([sql]) => /INSERT INTO order_label_generations|outbox_events/i.test(String(sql))))
       .toBe(false);
   });
+
+  it('replays a completed generation before revalidating mutable order state', async () => {
+    const response = {
+      generationId: 77,
+      orderId: 42,
+      templateId: 9,
+      templateVersion: 1,
+      labelCount: 1,
+      generatedAt: '2026-07-21T00:00:00.000Z',
+    };
+    let requestHash = '';
+    const query = vi.fn(async (sql: string, params?: unknown[]) => {
+      if (sql.includes('INSERT INTO command_idempotency_keys')) {
+        requestHash = String(params?.[5] ?? '');
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('FROM command_idempotency_keys')) {
+        return { rowCount: 1, rows: [{ request_hash: requestHash, response_json: response, status: 'completed' }] };
+      }
+      throw new Error(`unexpected live-state query: ${sql}`);
+    });
+    const tx = { query };
+    const database = {
+      transaction: vi.fn(async (work: (client: typeof tx) => Promise<unknown>) => work(tx)),
+    } as unknown as DatabaseService;
+    const repo = new PgLabelsRepository(database);
+
+    await expect(repo.generateOrderLabels({
+      currentUser: { id: '1', username: 'tester', role: 'manager', roleId: 1, permissions: ['labels.generate'] },
+      requestId: 'req-replay',
+      orderId: 42,
+      input: {
+        templateId: 9,
+        templateVersion: 1,
+        previewToken: previewToken({ orderId: 42, templateId: 9, templateVersion: 1 }),
+        exportFormats: ['png'],
+        idempotencyKey: 'generation-replay-completed',
+      },
+    })).resolves.toEqual(response);
+    expect(query).toHaveBeenCalledTimes(2);
+  });
 });
+
+function previewToken(input: { orderId: number; templateId: number; templateVersion: number }): string {
+  return Buffer.from(JSON.stringify({
+    ...input,
+    detailIds: [],
+    useBasisFields: true,
+    rowHash: 'frozen-preview-row-hash',
+  })).toString('base64url');
+}
