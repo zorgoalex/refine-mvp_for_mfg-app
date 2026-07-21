@@ -75,6 +75,44 @@ test.describe('Tabbed workspace', () => {
         await expect(workspaceTab(page, /Календарь/)).toHaveCount(1);
     });
 
+    test('keeps the workspace shell visible while a lazy route module loads', async ({ page }) => {
+        await setupWorkflowMockApi(page);
+
+        let calendarChunkDelayed = false;
+        await page.route(/\/src\/pages\/calendar\/index\.tsx(?:\?.*)?$/, async (route) => {
+            calendarChunkDelayed = true;
+            await new Promise((resolve) => setTimeout(resolve, 1_500));
+            await route.continue();
+        });
+
+        await page.goto('/orders');
+        await expect(workspaceTab(page, /Заказы/)).toBeVisible({ timeout: 30_000 });
+
+        const sider = page.locator('.ant-layout-sider');
+        const header = page.locator('.ant-layout-header');
+        await expect(sider).toBeVisible();
+        await expect(header).toBeVisible();
+
+        await page.getByRole('menuitem', { name: /Календарь/ }).click();
+
+        const routeSkeleton = page.getByRole('status', { name: 'Загрузка страницы' });
+        await expect(routeSkeleton).toBeVisible({ timeout: 1_000 });
+        expect(calendarChunkDelayed).toBe(true);
+        await expect(sider).toBeVisible();
+        await expect(header).toBeVisible();
+        await expect(workspaceTabs(page)).toBeVisible();
+
+        await workspaceTab(page, /Заказы/).click();
+        await expect(page).toHaveURL(/\/orders(?:$|\?)/);
+        await expect(routeSkeleton).toBeHidden();
+        await expect(sider).toBeVisible();
+        await expect(header).toBeVisible();
+
+        await workspaceTab(page, /Календарь/).click();
+        await expect(page).toHaveURL(/\/calendar(?:$|\?)/);
+        await expect(routeSkeleton).toBeHidden({ timeout: 10_000 });
+    });
+
     test('?tab deep-link into an order tab is not stripped', async ({ page }) => {
         const db = createWorkflowMockDb();
         seedOrder(db, 11195, 'E2E Тест deep-link order');
