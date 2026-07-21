@@ -473,7 +473,8 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
     }
     const fields = mapBazisCutSnapshotFields({
       materialName: row.material_name, thicknessMm: thickness!, detailNumber: row.detail_number,
-      basisDesignation: row.basis_designation, basisData: row.basis_data, detailName: row.detail_name,
+      basisProduct: row.detail_bazis_product, basisDesignation: row.basis_designation,
+      basisData: row.basis_data, detailName: row.detail_name,
       heightMm: height!, widthMm: width!, quantity: quantity!, note: row.note, milling: row.milling,
       film: row.film, doweling: row.doweling, verticalTexture: exactCount === 1 && row.exact_vertical === true,
     });

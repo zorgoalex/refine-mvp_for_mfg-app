@@ -13,17 +13,16 @@ describe('buildBazisCutXls', () => {
     const workbook = XLSX.read(bytes, { type: 'buffer', cellFormula: true });
     expect(workbook.SheetNames).toEqual([BAZIS_CUT_SHEET_NAME]);
     const sheet = workbook.Sheets[BAZIS_CUT_SHEET_NAME];
-    expect(sheet['!ref']).toBe('A1:AJ2');
+    expect(sheet['!ref']).toBe('A1:AI2');
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
     expect(rows[0]).toEqual([...BAZIS_CUT_HEADERS]);
     expect(rows[1]?.[5]).toBe('1319');
-    expect(rows[1]?.[6]).toBe('Кухня');
-    expect(rows[1]?.[7]).toBe('01.00.07');
-    expect(rows[1]?.[8]).toBe('1319Кухня.01.00.07');
+    expect(rows[1]?.[6]).toBe('01.00.07');
+    expect(rows[1]?.[7]).toBe('131901.00.07');
     expect(rows[1]?.[4]).toBe(18);
-    expect(rows[1]?.[29]).toBeNull();
-    expect(rows[1]?.[30]).toBe('=literal');
-    expect(sheet.AE2?.f).toBeUndefined();
+    expect(rows[1]?.[28]).toBeNull();
+    expect(rows[1]?.[29]).toBe('=literal');
+    expect(sheet.AD2?.f).toBeUndefined();
   });
 
   it('rejects an empty set', () => {
@@ -31,15 +30,13 @@ describe('buildBazisCutXls', () => {
   });
 
   it.each([
-    ['', '', '01.00.07', '01.00.07'],
-    ['1319', '', '01.00.07', '1319.01.00.07'],
-    ['', 'Кухня', '01.00.07', 'Кухня.01.00.07'],
-    ['1319', 'Кухня', '', '1319Кухня'],
-    ['', '', '', ''],
-  ])('writes raw position and omits missing values from QR-code', (order, product, position, expectedQrCode) => {
+    ['', 'Кухня.01.00.07', 'Кухня.01.00.07'],
+    ['1319', 'Кухня.01.00.07', '1319Кухня.01.00.07'],
+    ['1319', '', '1319'],
+    ['', '', ''],
+  ])('writes Position and builds QR-code from Order plus Position', (order, position, expectedQrCode) => {
     const bytes = buildBazisCutXls([detail({
       sourceBazisOrderNo: order,
-      sourceBazisProductName: product,
       position,
     })]);
     const workbook = XLSX.read(bytes, { type: 'buffer' });
@@ -49,9 +46,8 @@ describe('buildBazisCutXls', () => {
     );
 
     expect(rows[1]?.[5]).toBe(order);
-    expect(rows[1]?.[6]).toBe(product);
-    expect(rows[1]?.[7]).toBe(position);
-    expect(rows[1]?.[8]).toBe(expectedQrCode);
+    expect(rows[1]?.[6]).toBe(position);
+    expect(rows[1]?.[7]).toBe(expectedQrCode);
   });
 });
 

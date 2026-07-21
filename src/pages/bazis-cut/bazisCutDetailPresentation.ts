@@ -1,14 +1,10 @@
 export interface BazisCutQrCodeSource {
   sourceBazisOrderNo?: string | null;
-  sourceBazisProductName?: string | null;
   position?: string | null;
 }
 
 export function buildBazisCutQrCode(source: BazisCutQrCodeSource): string {
-  const prefix = `${clean(source.sourceBazisOrderNo)}${clean(source.sourceBazisProductName)}`;
-  const position = clean(source.position);
-  if (!prefix) return position;
-  return position ? `${prefix}.${position}` : prefix;
+  return `${clean(source.sourceBazisOrderNo)}${clean(source.position)}`;
 }
 
 export function summarizeBazisCutDetails(details: readonly { quantity: number }[]): {

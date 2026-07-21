@@ -35,7 +35,7 @@ const edgeMm: SchemaObject = { type: 'number', minimum: 0, maximum: 99_999_999.9
 const detailProperties: NonNullable<SchemaObject['properties']> = {
   cutEnabled: { type: 'boolean' }, materialType: { type: 'string', minLength: 1, maxLength: 100 },
   materialName: { type: 'string', minLength: 1, maxLength: 200 }, materialArticle: textProperty(200),
-  thicknessMm: positiveMm, position: { type: 'string', minLength: 1, maxLength: 200 },
+  thicknessMm: positiveMm, position: { type: 'string' },
   partName: { type: 'string', minLength: 1, maxLength: 300 }, finishedLengthMm: positiveMm,
   finishedWidthMm: positiveMm, cutLengthMm: positiveMm, cutWidthMm: positiveMm,
   quantity: { type: 'integer', minimum: 1, maximum: 1_000_000 }, orientation: textProperty(50), groove: textProperty(500),

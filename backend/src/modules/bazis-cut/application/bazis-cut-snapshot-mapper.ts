@@ -4,6 +4,7 @@ export interface BazisCutSnapshotSource {
   materialName: string;
   thicknessMm: number;
   detailNumber: number;
+  basisProduct: string | null;
   basisDesignation: string | null;
   basisData: string | null;
   detailName: string | null;
@@ -23,7 +24,7 @@ export function mapBazisCutSnapshotFields(source: BazisCutSnapshotSource): Bazis
   const fields: BazisCutDetailFields = {
     cutEnabled: true, materialType: 'Площадной', materialName: source.materialName.trim(),
     materialArticle: '', thicknessMm: source.thicknessMm,
-    position: firstNonEmpty(source.basisDesignation, source.basisData?.split('/')[1], String(source.detailNumber)),
+    position: buildBazisCutPosition(source.basisProduct, source.basisDesignation),
     partName: firstNonEmpty(source.detailName, source.basisData?.split('/')[2], `Деталь ${source.detailNumber}`),
     finishedLengthMm: length, finishedWidthMm: width,
     cutLengthMm: roundTenth(length), cutWidthMm: roundTenth(width), quantity: source.quantity,
@@ -34,6 +35,15 @@ export function mapBazisCutSnapshotFields(source: BazisCutSnapshotSource): Bazis
     milling: source.milling ?? '', route: source.doweling ? 'Присадка:' : '', film: source.film ?? '',
   };
   return bazisCutDetailFieldsSchema.safeParse(fields).success ? fields : null;
+}
+
+export function buildBazisCutPosition(
+  basisProduct: string | null | undefined,
+  basisDesignation: string | null | undefined,
+): string {
+  const product = basisProduct?.trim() ?? '';
+  const designation = basisDesignation?.trim() ?? '';
+  return product || designation ? `${product}.${designation}` : '';
 }
 
 function roundTenth(value: number): number {

@@ -58,7 +58,7 @@ const FIELD_GROUPS = ['Основное', 'Размеры', 'Кромки', 'Д�
 const GROUPED_FIELDS = FIELD_GROUPS.flatMap((group) =>
   FIELDS.filter((field) => field.group === group && field.key !== 'position' && field.key !== 'partName'),
 );
-const LEADING_COLUMN_COUNT = 7;
+const LEADING_COLUMN_COUNT = 6;
 const TOTAL_LABEL_COLUMN_INDEX = LEADING_COLUMN_COUNT - 1;
 const QUANTITY_COLUMN_INDEX = LEADING_COLUMN_COUNT
   + GROUPED_FIELDS.findIndex((field) => field.key === 'quantity');
@@ -142,7 +142,7 @@ export const BazisCutSetPage: React.FC = () => {
       <Descriptions.Item label="Базис-заказы"><SourceRefs refs={set.bazisOrders} /></Descriptions.Item>
     </Descriptions>}</Card>
     <Card title="Детали набора"><Table rowKey="bazisCutSetDetailId" columns={columns} dataSource={set?.details ?? []}
-      loading={loading} pagination={false} scroll={{ x: 5480, y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
+      loading={loading} pagination={false} scroll={{ x: 5320, y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
       summary={(details) => <DetailTableSummary details={details} canManage={canManage} />}
       size="small" locale={{ emptyText: 'В наборе нет деталей' }} /></Card>
   </Space>
@@ -155,7 +155,7 @@ export const BazisCutSetPage: React.FC = () => {
 };
 
 const FieldInput: React.FC<{ field: FieldDefinition }> = ({ field }) => {
-  const rules = field.key === 'materialName' || field.key === 'position' || field.key === 'partName' || field.key === 'materialType'
+  const rules = field.key === 'materialName' || field.key === 'partName' || field.key === 'materialType'
     ? [{ required: true, message: 'Обязательное поле' }] : [];
   if (field.kind === 'boolean') return <Form.Item name={field.key} label={field.label} valuePropName="checked"><Checkbox>Да</Checkbox></Form.Item>;
   if (field.kind === 'number' || field.kind === 'integer') return <Form.Item name={field.key} label={field.label} rules={rules}>
@@ -176,8 +176,6 @@ function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) =
       render: (value: string) => value
         ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span>
         : <Text type="secondary">—</Text> },
-    { title: 'Базис изделие', dataIndex: 'sourceBazisProductName', key: 'sourceBazisProductName',
-      fixed: 'left', width: 160, render: (value: string) => value || <Text type="secondary">—</Text> },
     { title: 'Позиция', dataIndex: 'position', key: 'position', fixed: 'left', width: 130,
       render: (value: string) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span> },
     { title: 'QR-code', key: 'qrCode', fixed: 'left', width: 220, render: (_: unknown, row: BazisCutSetDetailDto) => {

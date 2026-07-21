@@ -52,8 +52,9 @@ describe('Basis-cut UI integration guards', () => {
     expect((card.match(/key: '[A-Za-z0-9]+'/g) ?? []).length).toBeGreaterThanOrEqual(33);
     expect(card).toContain("title: 'Базис заказ'");
     expect(card).toContain("dataIndex: 'sourceBazisOrderNo'");
-    expect(card).toContain("dataIndex: 'sourceBazisProductName'");
-    expect(card).toContain("title: 'Базис изделие'");
+    expect(card).not.toContain("dataIndex: 'sourceBazisProductName'");
+    expect(card).not.toContain("title: 'Базис изделие'");
+    expect(card).not.toContain("field.key === 'position' ||");
     expect(card).toContain('showSaveFilePicker');
     expect(card).toContain('downloadBlob');
     expect(card).toContain("error.name === 'AbortError'");
@@ -71,7 +72,7 @@ describe('Basis-cut UI integration guards', () => {
     expect(card).toContain("title: 'QR-code'");
     expect(card.indexOf("title: 'Позиция'")).toBeLessThan(card.indexOf("title: 'QR-code'"));
     expect(card).toContain('buildBazisCutQrCode(row)');
-    expect(card).toContain('scroll={{ x: 5480, y: 480 }}');
+    expect(card).toContain('scroll={{ x: 5320, y: 480 }}');
     expect(card).toContain('<Table.Summary fixed>');
     expect(card).toContain('Итого позиций:');
   });

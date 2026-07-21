@@ -3,16 +3,13 @@ import { buildBazisCutQrCode, summarizeBazisCutDetails } from './bazisCutDetailP
 
 describe('buildBazisCutQrCode', () => {
   it.each([
-    ['1319', 'Кухня', '01.00.07', '1319Кухня.01.00.07'],
-    ['1319', '', '01.00.07', '1319.01.00.07'],
-    ['', 'Кухня', '01.00.07', 'Кухня.01.00.07'],
-    ['', '', '01.00.07', '01.00.07'],
-    ['1319', 'Кухня', '', '1319Кухня'],
-    ['', '', '', ''],
-  ])('joins available Order, Product, and Position values', (order, product, position, expected) => {
+    ['1319', 'Кухня.01.00.07', '1319Кухня.01.00.07'],
+    ['1319', '', '1319'],
+    ['', 'Кухня.01.00.07', 'Кухня.01.00.07'],
+    ['', '', ''],
+  ])('joins Order and Position values', (order, position, expected) => {
     expect(buildBazisCutQrCode({
       sourceBazisOrderNo: order,
-      sourceBazisProductName: product,
       position,
     })).toBe(expected);
   });
@@ -20,8 +17,7 @@ describe('buildBazisCutQrCode', () => {
   it('trims values without inserting blank fragments', () => {
     expect(buildBazisCutQrCode({
       sourceBazisOrderNo: ' 1319 ',
-      sourceBazisProductName: ' Кухня ',
-      position: ' 01.00.07 ',
+      position: ' Кухня.01.00.07 ',
     })).toBe('1319Кухня.01.00.07');
   });
 });

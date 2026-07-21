@@ -10657,7 +10657,7 @@ components:
         materialName: { type: string, minLength: 1, maxLength: 200 }
         materialArticle: { type: string, maxLength: 200 }
         thicknessMm: { type: number, exclusiveMinimum: true, minimum: 0, maximum: 99999999.99 }
-        position: { type: string, minLength: 1, maxLength: 200 }
+        position: { type: string }
         partName: { type: string, minLength: 1, maxLength: 300 }
         finishedLengthMm: { type: number, exclusiveMinimum: true, minimum: 0, maximum: 99999999.99 }
         finishedWidthMm: { type: number, exclusiveMinimum: true, minimum: 0, maximum: 99999999.99 }

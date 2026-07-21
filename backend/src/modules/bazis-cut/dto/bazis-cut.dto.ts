@@ -11,7 +11,7 @@ export const bazisCutDetailFieldsSchema = z.object({
   materialName: nonEmpty(200),
   materialArticle: text(200),
   thicknessMm: positiveMm,
-  position: nonEmpty(200),
+  position: z.string(),
   partName: nonEmpty(300),
   finishedLengthMm: positiveMm,
   finishedWidthMm: positiveMm,

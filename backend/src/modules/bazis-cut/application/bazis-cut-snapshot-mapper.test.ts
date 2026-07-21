@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bazisCutFieldsToRow } from './bazis-xls-writer';
-import { mapBazisCutSnapshotFields } from './bazis-cut-snapshot-mapper';
+import { buildBazisCutPosition, mapBazisCutSnapshotFields } from './bazis-cut-snapshot-mapper';
 
 // Real source L/W/orientation are extracted from adjacent 1491.xml; expected
 // L/W and the remaining export values are independently extracted from 1491.xls.
@@ -36,13 +36,43 @@ const GOLDEN_1491: GoldenRow[] = [
   ['14.00.04', 'К14_M1_М2_ФП', 1496, 104, true, 104, 1496, 1, 'Модерн', 'Присадка:', ''],
 ];
 
+describe('buildBazisCutPosition', () => {
+  it.each([
+    ['Кухня', '01.00.07', 'Кухня.01.00.07'],
+    ['Кухня', '', 'Кухня.'],
+    ['', '01.00.07', '.01.00.07'],
+    ['', '', ''],
+  ])('joins ERP Basis product and detail designations with a mandatory dot', (product, designation, expected) => {
+    expect(buildBazisCutPosition(product, designation)).toBe(expected);
+  });
+
+  it('trims both input values', () => {
+    expect(buildBazisCutPosition(' Кухня ', ' 01.00.07 ')).toBe('Кухня.01.00.07');
+  });
+
+  it('does not truncate long source fields', () => {
+    expect(buildBazisCutPosition('И'.repeat(1500), 'Д'.repeat(1500))).toHaveLength(3001);
+  });
+
+  it('keeps an empty Position when both ERP Basis fields are empty', () => {
+    const fields = mapBazisCutSnapshotFields({
+      materialName: 'ЛДСП', thicknessMm: 16, detailNumber: 1,
+      basisProduct: null, basisDesignation: null, basisData: null, detailName: 'Бок',
+      heightMm: 100, widthMm: 50, quantity: 1, note: null, milling: null, film: null,
+      doweling: false, verticalTexture: false,
+    });
+
+    expect(fields?.position).toBe('');
+  });
+});
+
 describe('1491 snapshot mapper golden', () => {
-  it('reproduces all 36 export cells for all 28 positions from real XML source dimensions/orientation', () => {
+  it('reproduces all 35 export cells for all 28 positions from real XML source dimensions/orientation', () => {
     const rows = GOLDEN_1491.map(([position, name, sourceLength, sourceWidth, verticalTexture,
       _length, _width, quantity, milling, route, film], index) => {
       const fields = mapBazisCutSnapshotFields({
         materialName: 'МДФ 16 мм', thicknessMm: 16, detailNumber: index + 1,
-        basisDesignation: position, basisData: null, detailName: name,
+        basisProduct: 'Кухня', basisDesignation: position, basisData: null, detailName: name,
         heightMm: sourceLength, widthMm: sourceWidth,
         quantity, note: null, milling, film, doweling: route === 'Присадка:', verticalTexture,
       });
@@ -50,19 +80,22 @@ describe('1491 snapshot mapper golden', () => {
       return bazisCutFieldsToRow(fields!);
     });
     const expected = GOLDEN_1491.map(([position, name, _sourceLength, _sourceWidth, _vertical,
-      length, width, quantity, milling, route, film]) => [
-      'Да', 'Площадной', 'МДФ 16 мм', '', 16, '', '', position, position, name, length, width,
+      length, width, quantity, milling, route, film]) => {
+      const computedPosition = `Кухня.${position}`;
+      return [
+      'Да', 'Площадной', 'МДФ 16 мм', '', 16, '', computedPosition, computedPosition, name, length, width,
       Math.round(length * 10) / 10, Math.round(width * 10) / 10, quantity, 'Не задана', '',
       '', '', 0, '', '', 0, '', '', 0, '', '', 0, null, '', '', '', milling, route, film,
-    ]);
+      ];
+    });
 
     expect(rows).toHaveLength(28);
-    expect(rows.every((row) => row.length === 36)).toBe(true);
+    expect(rows.every((row) => row.length === 35)).toBe(true);
     expect(rows).toEqual(expected);
-    expect(rows.reduce((sum, row) => sum + Number(row[14]), 0)).toBe(30);
+    expect(rows.reduce((sum, row) => sum + Number(row[13]), 0)).toBe(30);
     expect(GOLDEN_1491.filter((row) => row[4])).toHaveLength(26);
-    expect(rows.filter((row) => Number(row[10]) < Number(row[11]))).toHaveLength(9);
-    expect(rows[0][7]).toBe('01.00.07');
-    expect(rows[0][8]).toBe('01.00.07');
+    expect(rows.filter((row) => Number(row[9]) < Number(row[10]))).toHaveLength(9);
+    expect(rows[0][6]).toBe('Кухня.01.00.07');
+    expect(rows[0][7]).toBe('Кухня.01.00.07');
   });
 });

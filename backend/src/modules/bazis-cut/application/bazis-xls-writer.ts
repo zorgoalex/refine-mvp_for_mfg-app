@@ -6,7 +6,7 @@ export const BAZIS_CUT_SHEET_NAME = 'Детали для раскроя';
 
 export const BAZIS_CUT_HEADERS = [
   'Кроить', 'Тип материала', 'Материал', 'Артикул материала', 'Толщина',
-  'Заказ', 'Изделие', 'Позиция', 'QR-code', 'Наименования', 'Длина готовая', 'Ширина готовая',
+  'Заказ', 'Позиция', 'QR-code', 'Наименования', 'Длина готовая', 'Ширина готовая',
   'Длина распиловочная', 'Ширина распиловочная', 'Кол-во', 'Ориентация', 'Паз',
   'L1 - Наим.', 'L1 - Обозн.', 'L1 - Толщина', 'L2 - Наим.', 'L2 - Обозн.',
   'L2 - Толщина', 'W1 - Наим.', 'W1 - Обозн.', 'W1 - Толщина', 'W2 - Наим.',
@@ -28,7 +28,7 @@ export function buildBazisCutXls(details: readonly BazisCutSetDetailDto[]): Buff
   ];
   const worksheet = XLSX.utils.aoa_to_sheet(rows, { cellDates: false });
   worksheet['!cols'] = BAZIS_CUT_HEADERS.map((header, index) => ({
-    wch: Math.min(42, Math.max(header.length + 2, index >= 5 && index <= 11 ? 16 : 12)),
+    wch: Math.min(42, Math.max(header.length + 2, index >= 5 && index <= 10 ? 16 : 12)),
   }));
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, BAZIS_CUT_SHEET_NAME);
@@ -36,12 +36,12 @@ export function buildBazisCutXls(details: readonly BazisCutSetDetailDto[]): Buff
 }
 
 export function bazisCutFieldsToRow(
-  detail: BazisCutDetailFields & { sourceBazisOrderNo?: string; sourceBazisProductName?: string },
+  detail: BazisCutDetailFields & { sourceBazisOrderNo?: string },
 ): unknown[] {
   return [
       detail.cutEnabled ? 'Да' : 'Нет', detail.materialType, safeText(detail.materialName),
       safeText(detail.materialArticle), detail.thicknessMm, safeText(detail.sourceBazisOrderNo ?? ''),
-      safeText(detail.sourceBazisProductName ?? ''), safeText(detail.position), buildBazisCutQrCode(detail),
+      safeText(detail.position), buildBazisCutQrCode(detail),
       safeText(detail.partName), detail.finishedLengthMm, detail.finishedWidthMm,
       detail.cutLengthMm, detail.cutWidthMm, detail.quantity, safeText(detail.orientation),
       safeText(detail.groove), safeText(detail.l1Name), safeText(detail.l1Designation),
@@ -55,12 +55,9 @@ export function bazisCutFieldsToRow(
 }
 
 export function buildBazisCutQrCode(
-  detail: BazisCutDetailFields & { sourceBazisOrderNo?: string; sourceBazisProductName?: string },
+  detail: BazisCutDetailFields & { sourceBazisOrderNo?: string },
 ): string {
-  const prefix = `${detail.sourceBazisOrderNo?.trim() ?? ''}${detail.sourceBazisProductName?.trim() ?? ''}`;
-  const position = detail.position.trim();
-  if (!prefix) return position;
-  return position ? `${prefix}.${position}` : prefix;
+  return `${detail.sourceBazisOrderNo?.trim() ?? ''}${detail.position.trim()}`;
 }
 
 function safeText(value: string): string {

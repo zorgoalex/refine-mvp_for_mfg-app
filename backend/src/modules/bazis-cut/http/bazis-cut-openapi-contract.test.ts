@@ -26,6 +26,7 @@ describe('Bazis-cut OpenAPI contract', () => {
     ]) expect(contract).toContain(token);
     expect(contract.match(/name: setId/g)?.length).toBeGreaterThanOrEqual(1);
     expect(contract.match(/required: \[cutEnabled,[\s\S]*?film\]/)?.[0]).toContain('priority');
+    expect(contract).toContain('position: { type: string }');
   });
 
   it('keeps matching Swagger metadata on every command route', () => {
@@ -56,6 +57,10 @@ describe('Bazis-cut OpenAPI contract', () => {
         expect.arrayContaining(['cutEnabled', 'materialName', 'position', 'priority', 'film', 'expectedVersion']),
       );
       expect(schema && 'properties' in schema ? Object.keys(schema.properties ?? {}) : []).toHaveLength(34);
+      const position = schema && 'properties' in schema ? schema.properties?.position : undefined;
+      expect(position).toMatchObject({ type: 'string' });
+      expect(position).not.toHaveProperty('minLength');
+      expect(position).not.toHaveProperty('maxLength');
       expect(update?.responses?.['200']?.content?.['application/json']?.schema).toBeDefined();
     } finally {
       await app.close();
