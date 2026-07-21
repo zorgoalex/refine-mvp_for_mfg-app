@@ -45,11 +45,15 @@ AS $$
         ), '[]'::jsonb) ELSE '[]'::jsonb END,
         'renderContract', 'cut_sheet_render_v1',
         'autoRenderViews', COALESCE((
-          SELECT jsonb_agg(jsonb_object_length(sheet.sheet_json #> '{renderSnapshot,views}') ORDER BY sheet.ordinality)
+          SELECT jsonb_agg((
+            SELECT count(*) FROM jsonb_object_keys(sheet.sheet_json #> '{renderSnapshot,views}')
+          ) ORDER BY sheet.ordinality)
           FROM jsonb_array_elements(group_item.group_json -> 'sheets') WITH ORDINALITY AS sheet(sheet_json, ordinality)
         ), '[]'::jsonb),
         'manualRenderViews', CASE WHEN jsonb_typeof(group_item.group_json -> 'manualLayout') = 'object' THEN COALESCE((
-          SELECT jsonb_agg(jsonb_object_length(sheet.sheet_json #> '{renderSnapshot,views}') ORDER BY sheet.ordinality)
+          SELECT jsonb_agg((
+            SELECT count(*) FROM jsonb_object_keys(sheet.sheet_json #> '{renderSnapshot,views}')
+          ) ORDER BY sheet.ordinality)
           FROM jsonb_array_elements(group_item.group_json #> '{manualLayout,sheets}') WITH ORDINALITY AS sheet(sheet_json, ordinality)
         ), '[]'::jsonb) ELSE '[]'::jsonb END,
         'manualState', CASE
@@ -153,7 +157,7 @@ BEGIN
         OR jsonb_typeof(sheet_json #> '{placements,pieces}') IS DISTINCT FROM 'array'
         OR sheet_json #>> '{renderSnapshot,contractVersion}' IS DISTINCT FROM 'cut_sheet_render_v1'
         OR jsonb_typeof(sheet_json #> '{renderSnapshot,views}') IS DISTINCT FROM 'object'
-        OR jsonb_object_length(sheet_json #> '{renderSnapshot,views}') <> 12
+        OR (SELECT count(*) FROM jsonb_object_keys(sheet_json #> '{renderSnapshot,views}')) <> 12
         OR jsonb_typeof(sheet_json #> '{renderSnapshot,pdfMeta}') IS DISTINCT FROM 'object'
         OR jsonb_typeof(sheet_json #> '{renderSnapshot,pdfDetailRows}') IS DISTINCT FROM 'array'
       THEN
@@ -177,7 +181,7 @@ BEGIN
           OR jsonb_typeof(sheet_json #> '{placements,pieces}') IS DISTINCT FROM 'array'
           OR sheet_json #>> '{renderSnapshot,contractVersion}' IS DISTINCT FROM 'cut_sheet_render_v1'
           OR jsonb_typeof(sheet_json #> '{renderSnapshot,views}') IS DISTINCT FROM 'object'
-          OR jsonb_object_length(sheet_json #> '{renderSnapshot,views}') <> 12
+          OR (SELECT count(*) FROM jsonb_object_keys(sheet_json #> '{renderSnapshot,views}')) <> 12
           OR jsonb_typeof(sheet_json #> '{renderSnapshot,pdfMeta}') IS DISTINCT FROM 'object'
           OR jsonb_typeof(sheet_json #> '{renderSnapshot,pdfDetailRows}') IS DISTINCT FROM 'array'
         THEN
