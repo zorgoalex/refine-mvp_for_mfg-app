@@ -92,7 +92,14 @@ import type {
   EligibleDetailDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
-import { mapTotalsRow, TOTALS_BY_JOB_SQL, SHEETS_BY_JOB_SQL, MATERIAL_NAMES_BY_JOB_SQL, type TotalsRow } from './cut-totals';
+import {
+  mapTotalsRow,
+  TOTALS_FROZEN_ITEMS_BY_JOB_SQL,
+  TOTALS_BY_JOB_SQL,
+  SHEETS_BY_JOB_SQL,
+  MATERIAL_NAMES_BY_JOB_SQL,
+  type TotalsRow,
+} from './cut-totals';
 import { buildBathProfileSheetSvg, buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities, createOrderFillResolver } from '../render/sheet-svg';
 import { renderSheetPng } from '../render/sheet-png';
 import {
@@ -3972,7 +3979,32 @@ const ENRICHED_ITEMS_QUERY = `
   ORDER BY i.cut_job_item_id
 `;
 
+const ENRICHED_FROZEN_ITEMS_QUERY = ENRICHED_ITEMS_QUERY.replace(
+  ' AND i.is_active = true',
+  ` AND (
+      i.is_active = true
+      OR EXISTS (
+        SELECT 1 FROM cut_group frozen_group
+        WHERE frozen_group.cut_group_id = i.cut_group_id
+          AND frozen_group.cut_job_id = i.cut_job_id
+      )
+    )`,
+);
+
 const LIGHT_ITEMS_QUERY = `SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item WHERE cut_job_id = $1 AND is_active = true ORDER BY cut_job_item_id`;
+const LIGHT_FROZEN_ITEMS_QUERY = `
+  SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id
+  FROM cut_job_item i
+  WHERE cut_job_id = $1
+    AND (
+      i.is_active = true
+      OR EXISTS (
+        SELECT 1 FROM cut_group frozen_group
+        WHERE frozen_group.cut_group_id = i.cut_group_id
+          AND frozen_group.cut_job_id = i.cut_job_id
+      )
+    )
+  ORDER BY cut_job_item_id`;
 
 function mapItemDetail(row: ItemRow): CutDetailInfoDto | null {
   // Existence keyed off the joined PK, not user data: NULL means the LEFT JOIN
@@ -4026,14 +4058,21 @@ interface SheetRow extends QueryResultRow {
   placements: SheetPlacementsJson;
 }
 
-async function computeTotals(client: DatabaseClient, cutJobIds: number[]): Promise<Map<number, CutJobTotals>> {
+async function computeTotals(
+  client: DatabaseClient,
+  cutJobIds: number[],
+  frozenItems = false,
+): Promise<Map<number, CutJobTotals>> {
   const out = new Map<number, CutJobTotals>();
   for (const id of cutJobIds) out.set(id, { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 });
   if (cutJobIds.length === 0) return out;
   // SEQUENTIAL, not Promise.all: loadJob/computeTotals run inside command
   // transactions on a single pg client/connection. Two concurrent queries on one
   // connection corrupt the wire protocol — await them one at a time.
-  const agg = await client.query<TotalsRow & { cut_job_id: string | number }>(TOTALS_BY_JOB_SQL, [cutJobIds]);
+  const agg = await client.query<TotalsRow & { cut_job_id: string | number }>(
+    frozenItems ? TOTALS_FROZEN_ITEMS_BY_JOB_SQL : TOTALS_BY_JOB_SQL,
+    [cutJobIds],
+  );
   const sheets = await client.query<{ cut_job_id: string | number; sheets: string | number }>(SHEETS_BY_JOB_SQL, [cutJobIds]);
   for (const row of agg.rows) {
     const id = toNum(row.cut_job_id);
@@ -4067,6 +4106,7 @@ async function loadJob(
   includeItemDetails = true,
   totals?: CutJobTotals,
   materialNames?: string[],
+  frozenItems = false,
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
     `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason,
@@ -4078,12 +4118,14 @@ async function loadJob(
   if (!jobRow) {
     throw new CutJobNotFoundError(cutJobId);
   }
-  const resolvedTotals = totals ?? (await computeTotals(client, [cutJobId])).get(cutJobId)!;
+  const resolvedTotals = totals ?? (await computeTotals(client, [cutJobId], frozenItems)).get(cutJobId)!;
 
   // The list view only needs item counts, so it opts out of the dictionary joins
   // (it loads up to 200 jobs); single-job reads enrich each item with full detail.
   const itemsResult = await client.query<ItemRow>(
-    includeItemDetails ? ENRICHED_ITEMS_QUERY : LIGHT_ITEMS_QUERY,
+    includeItemDetails
+      ? (frozenItems ? ENRICHED_FROZEN_ITEMS_QUERY : ENRICHED_ITEMS_QUERY)
+      : (frozenItems ? LIGHT_FROZEN_ITEMS_QUERY : LIGHT_ITEMS_QUERY),
     [cutJobId],
   );
   const groupsResult = await client.query<GroupRow>(
@@ -4153,7 +4195,7 @@ async function loadJob(
 }
 
 async function loadFrozenJobSnapshot(client: DatabaseClient, cutJobId: number): Promise<CutJobDto> {
-  const base = await loadJob(client, cutJobId, true);
+  const base = await loadJob(client, cutJobId, true, undefined, undefined, true);
   const calc = await client.query<{ last_calc_params: FreecutParams | null }>(
     `SELECT last_calc_params FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
