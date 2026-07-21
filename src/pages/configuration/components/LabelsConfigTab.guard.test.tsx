@@ -152,6 +152,12 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/onMouseEnter/);
   });
 
+  it('keeps conditionally hidden field text visible on the editable canvas only', () => {
+    expect(tabSrc).toMatch(/keepConditionallyHiddenTextVisible/);
+    expect(tabSrc).toMatch(/resolveLabelCanvasText\(element, fieldValues, fieldLabels/);
+    expect(tabSrc).toMatch(/keepSourceVisible: keepConditionallyHiddenTextVisible/);
+  });
+
   it('exposes a draggable field palette that can drop fields onto the label visual', () => {
     expect(tabSrc).toMatch(/Поля бирки/);
     expect(tabSrc).toMatch(/FieldPalette/);

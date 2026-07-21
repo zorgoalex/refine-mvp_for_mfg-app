@@ -44,7 +44,7 @@ import {
   readAndNormalizeLabelTransformedNodes,
   readLabelTransformedNodes,
   readLabelTypography,
-  resolveLabelElementPreviewText,
+  resolveLabelCanvasText,
   resolveLatestStateUpdate,
   selectLabelElements,
   snapElementCenters,
@@ -1758,6 +1758,7 @@ export const LabelsConfigTab: React.FC = () => {
                 canDrag={canManage && !saving}
                 advancedFeaturesEnabled={advancedRendererReady}
                 initialZoom={visualExpanded ? 1.3 : 0.6}
+                keepConditionallyHiddenTextVisible
                 showAllBounds={showAllBorders}
                 onSelectElement={(elementKey, additive) => setEditorSelection(selectLabelElements(
                   elementsRef.current,
@@ -2398,6 +2399,7 @@ function LabelTemplatePreview({
   draggingQr,
   onDropDraggingQr,
   initialZoom = 1,
+  keepConditionallyHiddenTextVisible = false,
   showAllBounds = false,
 }: {
   widthMm: number;
@@ -2428,6 +2430,7 @@ function LabelTemplatePreview({
   draggingQr?: LabelQrTemplate | null;
   onDropDraggingQr?: (payload: LabelQrTemplate, xMm: number, yMm: number) => void;
   initialZoom?: number;
+  keepConditionallyHiddenTextVisible?: boolean;
   showAllBounds?: boolean;
 }) {
   const stageRef = useRef<Konva.Stage | null>(null);
@@ -3000,6 +3003,7 @@ function LabelTemplatePreview({
                 fieldLabels,
                 fieldValues,
                 evaluateConditions: previewDataMode === 'sample',
+                keepConditionallyHiddenTextVisible,
                 selected: !externalDragActive && effectiveSelectedKeys.includes(element.elementKey),
                 interactive: Boolean(canDrag && !externalDragActive),
                 draggable: Boolean(canDrag && !externalDragActive && !isLabelElementLocked(element)),
@@ -3564,6 +3568,7 @@ function renderKonvaPreviewElement({
   fieldLabels,
   fieldValues,
   evaluateConditions,
+  keepConditionallyHiddenTextVisible,
   selected,
   interactive,
   draggable,
@@ -3584,6 +3589,7 @@ function renderKonvaPreviewElement({
   fieldLabels: Map<string, string>;
   fieldValues: Map<string, string>;
   evaluateConditions: boolean;
+  keepConditionallyHiddenTextVisible: boolean;
   selected: boolean;
   interactive: boolean;
   draggable: boolean;
@@ -3789,11 +3795,10 @@ function renderKonvaPreviewElement({
   const typography = readLabelTypography(element);
   const fontSize = Math.max(1.8, typography.fontSizePt * 0.3528);
   const textAlign = getLabelTextAlign(element);
-  const text = evaluateConditions
-    ? resolveLabelElementPreviewText(element, fieldValues, fieldLabels)
-    : element.sourceField
-      ? fieldLabels.get(element.sourceField) ?? element.sourceField
-      : element.staticText ?? '';
+  const text = resolveLabelCanvasText(element, fieldValues, fieldLabels, {
+    evaluateConditions,
+    keepSourceVisible: keepConditionallyHiddenTextVisible,
+  });
   const manualBounds = readLabelEditorMeta(element).boundsMode === 'manual';
   const fontStyle = [typography.fontWeight === 'bold' ? 'bold' : '', typography.italic ? 'italic' : '']
     .filter(Boolean)
