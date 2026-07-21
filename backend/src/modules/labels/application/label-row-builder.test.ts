@@ -197,7 +197,92 @@ describe('label row builder', () => {
       'Проверено мастером',
     ]);
   });
+
+  it('evaluates concat and nested if/else independently of custom schema key order', () => {
+    const [row] = buildLabelRows({
+      orderName: 'ERP-548',
+      orderFields: { client_name: 'Client A' },
+      today: '2026-07-21',
+      template: {
+        customFieldSchema: {
+          'custom.result': expressionSchema({
+            type: 'concat',
+            parts: [
+              { type: 'field', field: 'custom.material' },
+              { type: 'text', value: ' / ' },
+              {
+                type: 'if_else',
+                when: { field: 'order.client_name', op: 'not_empty' },
+                then: { type: 'field', field: 'order.client_name' },
+                else: { type: 'empty' },
+              },
+            ],
+          }),
+          'custom.material': expressionSchema({ type: 'field', field: 'bazis.material' }),
+        },
+      },
+      details: [detail({ materialName: 'МДФ 16' })],
+    });
+
+    expect(row.values['custom.result']).toBe('МДФ 16 / Client A');
+  });
+
+  it('uses manual custom overrides, including null, inside dependent formulas', () => {
+    const [row] = buildLabelRows({
+      orderName: 'ERP-548',
+      orderFields: {},
+      template: {
+        customFieldSchema: {
+          'custom.base': expressionSchema({ type: 'text', value: 'automatic' }),
+          'custom.dependent': expressionSchema({
+            type: 'concat',
+            parts: [
+              { type: 'text', value: 'Value=' },
+              { type: 'field', field: 'custom.base' },
+            ],
+          }),
+        },
+      },
+      details: [detail({ customFields: { 'custom.base': null } })],
+    });
+
+    expect(row.values['custom.base']).toBeNull();
+    expect(row.values['custom.dependent']).toBe('Value=');
+  });
+
+  it('makes date and label counters available before custom formulas run', () => {
+    const rows = buildLabelRows({
+      orderName: 'ERP-548',
+      orderFields: {},
+      today: '2026-07-21',
+      template: {
+        customFieldSchema: {
+          'custom.dynamic': expressionSchema({
+            type: 'concat',
+            parts: [
+              { type: 'field', field: 'date.today' },
+              { type: 'text', value: ' · ' },
+              { type: 'field', field: 'label.counter_text' },
+            ],
+          }),
+        },
+      },
+      details: [detail({ quantity: 2 })],
+    });
+
+    expect(rows.map((row) => row.values['custom.dynamic'])).toEqual([
+      '2026-07-21 · Бир. № 1 / 2',
+      '2026-07-21 · Бир. № 2 / 2',
+    ]);
+  });
 });
+
+function expressionSchema(root: Record<string, unknown>): Record<string, unknown> {
+  return {
+    type: 'string',
+    expression: { type: 'custom_expression', version: 1, root },
+  };
+}
 
 function detail(overrides: Partial<OrderLabelDataDetailDto> = {}): OrderLabelDataDetailDto {
   return {

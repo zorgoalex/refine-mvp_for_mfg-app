@@ -5,7 +5,14 @@ import { PermissionsService } from '../../../permissions/permissions.service';
 import { isBuiltInLabelFieldId, isSupportedFieldBinding } from './bazis-field-catalog';
 import { buildRuntimeLabelFieldCatalog, type LabelFieldCatalogItem } from './bazis-field-catalog';
 import { validateQrTemplateElement, extractLabelTemplateFieldIds } from './label-template-fields';
-import { assertAdvancedElementShape, conditionFieldIds } from './label-template-advanced';
+import { assertAdvancedElementShape, conditionFieldIds, LABEL_RENDERER_CAPABILITIES } from './label-template-advanced';
+import {
+  assertRenderableCustomFieldSchema,
+  customExpressionFieldIds,
+  findCustomFieldExpressionCycle,
+  hasCustomFieldExpression,
+  readCustomFieldExpressionV1,
+} from './label-custom-field-expression';
 import { extractLabelFields, type LabelTextFields } from './scan/label-text-extraction';
 import { compileQrTemplate, parseQrPayload, parseQrPayloadRight } from './scan/qr-template-parser';
 import { scoreCandidate, rankCandidates } from './scan/scan-ranking';
@@ -23,6 +30,7 @@ import type {
   LabelsPort,
   LabelsContext,
   LabelTemplateDto,
+  LabelRendererCapabilitiesDto,
   LabelFieldCatalogSnapshot,
   ListLabelTemplatesQuery,
   ListOrderLabelCutMapOptionsQuery,
@@ -137,6 +145,11 @@ export class LabelsService {
   async listFields(ctx: LabelsContext): Promise<LabelFieldCatalogItem[]> {
     await this.require(ctx, [VIEW]);
     return this.runtimeFieldCatalog();
+  }
+
+  async getRendererCapabilities(ctx: LabelsContext): Promise<LabelRendererCapabilitiesDto> {
+    await this.require(ctx, [VIEW]);
+    return { rendererCapabilities: [...LABEL_RENDERER_CAPABILITIES] };
   }
 
   async getTemplateById(query: GetLabelTemplateQuery): Promise<LabelTemplateDto> {
@@ -633,13 +646,45 @@ export function validateQrElementNames(elements: LabelTemplateElementInput[]): v
 }
 
 function validateCustomFieldMappings(customFieldSchema: Record<string, unknown>, runtimeFieldIds?: ReadonlySet<string>): void {
-  for (const schema of Object.values(customFieldSchema)) {
+  assertRenderableCustomFieldSchema(customFieldSchema);
+  for (const [fieldId, schema] of Object.entries(customFieldSchema)) {
     if (!schema || typeof schema !== 'object' || Array.isArray(schema)) continue;
-    const sourceField = (schema as Record<string, unknown>).sourceField;
+    const record = schema as Record<string, unknown>;
+    if (hasCustomFieldExpression(record)) {
+      const expression = readCustomFieldExpressionV1(record);
+      if (!expression) {
+        throw new ApiError(422, 'LABEL_CUSTOM_EXPRESSION_INVALID', 'Некорректная формула пользовательского поля', { fieldId });
+      }
+      if (Object.prototype.hasOwnProperty.call(record, 'sourceField')
+        || Object.prototype.hasOwnProperty.call(record, 'defaultValue')) {
+        throw new ApiError(
+          422,
+          'LABEL_CUSTOM_EXPRESSION_INVALID',
+          'Формула не может одновременно иметь источник или постоянное значение',
+          { fieldId },
+        );
+      }
+      for (const dependency of customExpressionFieldIds(expression)) {
+        if (!isSupportedFieldBinding(dependency, customFieldSchema, runtimeFieldIds)) {
+          throw new LabelFieldBindingError(dependency);
+        }
+      }
+      continue;
+    }
+    const sourceField = record.sourceField;
     if (sourceField == null || sourceField === '') continue;
     if (typeof sourceField !== 'string' || !isBuiltInLabelFieldId(sourceField, runtimeFieldIds)) {
       throw new LabelFieldBindingError(String(sourceField));
     }
+  }
+  const cycle = findCustomFieldExpressionCycle(customFieldSchema);
+  if (cycle) {
+    throw new ApiError(
+      422,
+      'LABEL_CUSTOM_EXPRESSION_INVALID',
+      'Формулы пользовательских полей образуют циклическую зависимость',
+      { fieldId: cycle[0], cycle },
+    );
   }
 }
 
@@ -683,6 +728,12 @@ function snapshotTemplateFields(
     if (!schema || typeof schema !== 'object' || Array.isArray(schema)) continue;
     const sourceField = (schema as Record<string, unknown>).sourceField;
     if (typeof sourceField === 'string' && sourceField) fieldIds.add(sourceField);
+    const expression = readCustomFieldExpressionV1(schema);
+    if (expression) {
+      for (const dependency of customExpressionFieldIds(expression)) {
+        if (!Object.prototype.hasOwnProperty.call(input.customFieldSchema, dependency)) fieldIds.add(dependency);
+      }
+    }
   }
   return snapshotFieldIds([...fieldIds], catalog);
 }

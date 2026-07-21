@@ -8267,6 +8267,42 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/label-templates/renderer-capabilities:
+    get:
+      tags:
+        - Labels
+      operationId: getLabelRendererCapabilities
+      summary: Get label renderer capabilities
+      security:
+        - bearerAuth: []
+      x-permission: labels.view
+      responses:
+        '200':
+          description: Renderer capabilities supported by this backend
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - rendererCapabilities
+                properties:
+                  rendererCapabilities:
+                    type: array
+                    uniqueItems: true
+                    items:
+                      type: string
+                      enum:
+                        - if_else_v1
+                        - typography_v1
+                        - cut_map_v1
+                        - custom_expression_v1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/label-templates/{templateId}:
     get:
       tags:

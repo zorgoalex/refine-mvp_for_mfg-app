@@ -9,6 +9,7 @@ import type {
   LabelElementKind,
   LabelConditionBranch,
   LabelConditionOperator,
+  LabelCustomFieldExpressionV1,
   LabelExportFormat,
   LabelFieldCatalogItem,
   LabelFieldCatalogSnapshot,
@@ -18,6 +19,7 @@ import type {
   LabelTemplateElement,
   LabelTemplateInput,
   LabelIfElseCondition,
+  LabelRendererCapability,
 } from '../../../api/types/labelsApi.types';
 import { can } from '../../../utils/permissions';
 import {
@@ -31,10 +33,12 @@ import { collectDuplicateQrNames, qrDraftFromElement, qrElementFromLibrary, rows
 import {
   customFieldRowsFromSchema,
   customFieldRowsToSchema,
+  customExpressionFieldIds,
   centerLabelSelection,
   claimLabelGestureCommit,
   describeLabelFieldSource,
   findSameRowHeightSuggestion,
+  findCustomFieldDependencyCycle,
   groupLabelElements,
   labelConditionFieldIds,
   moveLabelDragGesture,
@@ -44,10 +48,13 @@ import {
   readAndNormalizeLabelTransformedNodes,
   readLabelTransformedNodes,
   readLabelTypography,
+  evaluateCustomFieldPreviewValues,
+  isCustomFieldExpressionValid,
   resolveLabelCanvasText,
   resolveLatestStateUpdate,
   selectLabelElements,
   snapElementCenters,
+  summarizeCustomFieldExpression,
   ungroupLabelElements,
   withLabelEditorMeta,
   withLabelTypography,
@@ -56,6 +63,7 @@ import {
   type CustomFieldType,
   type CustomFieldValueMode,
 } from './labelTemplateEditorHelpers';
+import { CustomFieldExpressionEditor } from './CustomFieldExpressionEditor';
 import { OcrTemplatesConfig } from './OcrTemplatesConfig';
 
 const { Text } = Typography;
@@ -146,6 +154,7 @@ export const LabelsConfigTab: React.FC = () => {
   const [customFieldForm] = Form.useForm<CustomFieldFormValues>();
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [fields, setFields] = useState<LabelFieldCatalogItem[]>([]);
+  const [rendererCapabilities, setRendererCapabilities] = useState<LabelRendererCapability[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<LabelTemplate | null>(null);
   const [elements, setElements] = useState<LabelTemplateElement[]>([]);
   const elementsRef = useRef<LabelTemplateElement[]>([]);
@@ -153,6 +162,7 @@ export const LabelsConfigTab: React.FC = () => {
   const customFieldsRef = useRef<CustomFieldSchemaRow[]>([]);
   const [customFieldEditorOpen, setCustomFieldEditorOpen] = useState(false);
   const [editingCustomFieldId, setEditingCustomFieldId] = useState<string | null>(null);
+  const [customFieldExpression, setCustomFieldExpression] = useState<LabelCustomFieldExpressionV1>(() => defaultCustomFieldExpression());
   const [editorDirty, setEditorDirty] = useState(false);
   const [importVariants, setImportVariants] = useState<BazisImportVariant[]>([]);
   const [importFileName, setImportFileName] = useState<string | null>(null);
@@ -234,12 +244,17 @@ export const LabelsConfigTab: React.FC = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const [nextTemplates, nextFields] = await Promise.all([
+      const [nextTemplates, nextFields, capabilitiesResponse] = await Promise.all([
         labelsApi.listTemplates(true),
         labelsApi.listFields(),
+        labelsApi.getRendererCapabilities().catch(() => null),
       ]);
       setTemplates(nextTemplates);
       setFields(nextFields);
+      setRendererCapabilities(
+        capabilitiesResponse?.rendererCapabilities
+        ?? [...new Set(nextTemplates.flatMap((template) => template.rendererCapabilities ?? []))],
+      );
     } catch {
       message.error('Не удалось загрузить настройки бирок');
     } finally {
@@ -282,15 +297,16 @@ export const LabelsConfigTab: React.FC = () => {
 
   const fieldCategories = useMemo(() => new Set(fields.map((field) => field.category)).size, [fields]);
   const advancedRendererReady = useMemo(
-    () => templates.some((template) => (
-      template.rendererCapabilities?.includes('if_else_v1')
-      && template.rendererCapabilities?.includes('typography_v1')
-    )),
-    [templates],
+    () => rendererCapabilities.includes('if_else_v1') && rendererCapabilities.includes('typography_v1'),
+    [rendererCapabilities],
   );
   const cutMapRendererReady = useMemo(
-    () => templates.length === 0 || templates.some((template) => template.rendererCapabilities?.includes('cut_map_v1')),
-    [templates],
+    () => rendererCapabilities.includes('cut_map_v1'),
+    [rendererCapabilities],
+  );
+  const customExpressionRendererReady = useMemo(
+    () => rendererCapabilities.includes('custom_expression_v1'),
+    [rendererCapabilities],
   );
   const sourceFields = useMemo<LabelFieldCatalogItem[]>(
     () => [
@@ -306,17 +322,26 @@ export const LabelsConfigTab: React.FC = () => {
     ],
     [customFields, fields],
   );
-  const customFieldPreviewValues = useMemo(
-    () => Object.fromEntries(
-      customFields
-        .map((row) => [
-          row.fieldId,
-          row.valueMode === 'source' && row.sourceField
-            ? PREVIEW_FIELD_VALUES[row.sourceField] ?? row.label
-            : String(row.defaultValue ?? ''),
-        ]),
-    ),
-    [customFields],
+  const customFieldPreview = useMemo(() => {
+    const generated = Object.fromEntries(fields.map((field, index) => [field.id, sampleLabelFieldValue(field, index)]));
+    try {
+      return {
+        values: evaluateCustomFieldPreviewValues(customFields, { ...generated, ...PREVIEW_FIELD_VALUES }),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        values: {},
+        error: error instanceof Error && error.message === 'LABEL_CUSTOM_EXPRESSION_RESULT_TOO_LONG'
+          ? 'Результат формулы превышает 10 000 символов'
+          : 'Не удалось вычислить пример формулы',
+      };
+    }
+  }, [customFields, fields]);
+  const customFieldPreviewValues = customFieldPreview.values;
+  const customExpressionFields = useMemo(
+    () => sourceFields.filter((field) => field.id !== editingCustomFieldId),
+    [editingCustomFieldId, sourceFields],
   );
   // Global QR templates are backend-validated against built-in fields only (label-scoped
   // "Кастомные" fields are rejected with 422), so the QR builder's palette must never offer them.
@@ -544,6 +569,12 @@ export const LabelsConfigTab: React.FC = () => {
       if (error.code === 'LABEL_QR_NAME_DUPLICATE') {
         return 'Имена QR-кодов должны быть уникальны: имя уже используется в этом шаблоне.';
       }
+      if (error.code === 'LABEL_CUSTOM_EXPRESSION_INVALID') {
+        return 'Проверьте формулы пользовательских полей: найдена некорректная ссылка, структура или циклическая зависимость.';
+      }
+      if (error.code === 'LABEL_CUSTOM_EXPRESSION_RESULT_TOO_LONG') {
+        return 'Результат формулы пользовательского поля превышает 10 000 символов.';
+      }
     }
     if (error instanceof Error) {
       if (error.message.startsWith(QR_NAME_DUP_ERROR_PREFIX)) {
@@ -566,6 +597,10 @@ export const LabelsConfigTab: React.FC = () => {
     }
     if (!advancedRendererReady && elementsRef.current.some(hasAdvancedLabelElementData)) {
       message.error('Backend ещё не подтвердил новый renderer шаблонов. Сохранение расширенных настроек заблокировано.');
+      return;
+    }
+    if (!customExpressionRendererReady && customFieldsRef.current.some((row) => row.valueMode === 'expression')) {
+      message.error('Backend ещё не подтвердил поддержку формул пользовательских полей. Сохранение заблокировано.');
       return;
     }
     setTemplateSaving(true);
@@ -610,6 +645,10 @@ export const LabelsConfigTab: React.FC = () => {
     }
     if (!advancedRendererReady && elementsRef.current.some(hasAdvancedLabelElementData)) {
       message.error('Backend ещё не подтвердил новый renderer шаблонов. Копирование расширенного шаблона заблокировано.');
+      return;
+    }
+    if (!customExpressionRendererReady && customFieldsRef.current.some((row) => row.valueMode === 'expression')) {
+      message.error('Backend ещё не подтвердил поддержку формул пользовательских полей. Копирование заблокировано.');
       return;
     }
     setTemplateSaving(true);
@@ -718,9 +757,10 @@ export const LabelsConfigTab: React.FC = () => {
   const openCustomFieldEditor = (row?: CustomFieldSchemaRow) => {
     if (!canManage || savingRef.current) return;
     setEditingCustomFieldId(row?.fieldId ?? null);
+    setCustomFieldExpression(row?.expression ?? defaultCustomFieldExpression(fields[0]?.id));
     customFieldForm.setFieldsValue({
       label: row?.label ?? '',
-      type: row?.type ?? 'string',
+      type: row?.valueMode === 'expression' ? 'string' : row?.type ?? 'string',
       valueMode: row?.valueMode ?? 'constant',
       sourceField: row?.sourceField ?? undefined,
       defaultValue: row?.defaultValue ?? '',
@@ -747,17 +787,42 @@ export const LabelsConfigTab: React.FC = () => {
     }
     const fieldId = editingCustomFieldId ?? `custom.field_${Date.now()}`;
     const existing = customFieldsRef.current.find((row) => row.fieldId === fieldId);
+    if (values.valueMode === 'expression') {
+      if (!customExpressionRendererReady) {
+        message.error('Backend ещё не подтвердил поддержку формул пользовательских полей');
+        return;
+      }
+      const allowedFieldIds = new Set(customExpressionFields.map((field) => field.id));
+      if (!isCustomFieldExpressionValid(customFieldExpression, allowedFieldIds)) {
+        message.error('Заполните все поля формулы и удалите недоступные ссылки');
+        return;
+      }
+    }
     const nextRow: CustomFieldSchemaRow = {
       fieldId,
       label: values.label.trim(),
-      type: values.type,
+      type: values.valueMode === 'expression' ? 'string' : values.type,
       valueMode: values.valueMode,
       sourceField: values.valueMode === 'source' ? values.sourceField ?? null : null,
       defaultValue: values.valueMode === 'constant'
         ? values.defaultValue ?? ''
         : null,
+      expression: values.valueMode === 'expression' ? customFieldExpression : null,
       extra: existing?.extra ?? {},
     };
+    const candidateRows = customFieldsRef.current.some((row) => row.fieldId === fieldId)
+      ? customFieldsRef.current.map((row) => (row.fieldId === fieldId ? nextRow : row))
+      : [...customFieldsRef.current, nextRow];
+    if (candidateRows.some((row) => row.valueMode === 'expression') && candidateRows.length > 100) {
+      message.error('В шаблоне с формулами может быть не больше 100 пользовательских полей');
+      return;
+    }
+    const cycle = findCustomFieldDependencyCycle(candidateRows);
+    if (cycle) {
+      const labelsById = new Map(candidateRows.map((row) => [row.fieldId, row.label]));
+      message.error(`Циклическая зависимость: ${cycle.map((id) => labelsById.get(id) ?? id).join(' → ')}`);
+      return;
+    }
     setEditorCustomFields((current) => {
       const index = current.findIndex((row) => row.fieldId === fieldId);
       return index === -1
@@ -766,6 +831,7 @@ export const LabelsConfigTab: React.FC = () => {
     });
     setCustomFieldEditorOpen(false);
     setEditingCustomFieldId(null);
+    setCustomFieldExpression(defaultCustomFieldExpression());
     customFieldForm.resetFields();
   };
 
@@ -776,6 +842,15 @@ export const LabelsConfigTab: React.FC = () => {
       || labelConditionFieldIds(element.condition).includes(fieldId)
       || (element.kind === 'qr' && extractQrTemplateFieldIds(qrTemplateOf(element)).includes(fieldId))
     ));
+    const dependedOn = customFieldsRef.current.some((row) => (
+      row.fieldId !== fieldId
+      && row.expression
+      && customExpressionFieldIds(row.expression).includes(fieldId)
+    ));
+    if (dependedOn) {
+      message.error('Поле используется в другой формуле. Сначала удалите эту ссылку.');
+      return;
+    }
     if (used) {
       message.error('Поле размещено на бирке. Сначала удалите связанный элемент или выберите для него другое поле.');
       return;
@@ -1430,8 +1505,18 @@ export const LabelsConfigTab: React.FC = () => {
                       <Alert
                         type="info"
                         showIcon
-                        message="Создайте понятное поле и выберите, откуда брать его значение: постоянный текст или данные заказа."
+                        message="Поле может быть константой, данными ERP или формулой из полей, текста, склейки и цепочек IF/ELSE."
                       />
+                      {customFieldPreview.error && (
+                        <Alert type="error" showIcon message={customFieldPreview.error} />
+                      )}
+                      {!customExpressionRendererReady && (
+                        <Alert
+                          type="warning"
+                          showIcon
+                          message="Формулы недоступны: backend не подтвердил capability custom_expression_v1."
+                        />
+                      )}
                       <div>
                         <Button
                           icon={<PlusOutlined />}
@@ -1468,6 +1553,17 @@ export const LabelsConfigTab: React.FC = () => {
                               if (row.valueMode === 'source') {
                                 const source = fields.find((field) => field.id === row.sourceField);
                                 return <Tag color="processing">{source ? `${source.category}: ${source.label}` : row.sourceField}</Tag>;
+                              }
+                              if (row.valueMode === 'expression' && row.expression) {
+                                const labelsById = new Map(sourceFields.map((field) => [field.id, field.label]));
+                                return (
+                                  <Space size={6}>
+                                    <Tag color="purple">Формула</Tag>
+                                    <Text ellipsis={{ tooltip: true }} style={{ maxWidth: 260 }}>
+                                      {summarizeCustomFieldExpression(row.expression, labelsById)}
+                                    </Text>
+                                  </Space>
+                                );
                               }
                               return null;
                             },
@@ -2154,16 +2250,21 @@ export const LabelsConfigTab: React.FC = () => {
       <Modal
         title={editingCustomFieldId ? 'Редактировать пользовательское поле' : 'Добавить пользовательское поле'}
         open={customFieldEditorOpen}
+        width={960}
+        styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
         okText={editingCustomFieldId ? 'Сохранить поле' : 'Добавить поле'}
         cancelText="Отмена"
         destroyOnClose
         forceRender
-        okButtonProps={{ disabled: !canManage || saving }}
+        okButtonProps={{
+          disabled: !canManage || saving || (customFieldValueMode === 'expression' && !customExpressionRendererReady),
+        }}
         cancelButtonProps={{ disabled: saving }}
         onOk={() => void saveCustomField()}
         onCancel={() => {
           setCustomFieldEditorOpen(false);
           setEditingCustomFieldId(null);
+          setCustomFieldExpression(defaultCustomFieldExpression());
           customFieldForm.resetFields();
         }}
       >
@@ -2186,6 +2287,7 @@ export const LabelsConfigTab: React.FC = () => {
           </Form.Item>
           <Form.Item name="type" label="Тип значения" rules={[{ required: true }]}>
             <Select
+              disabled={customFieldValueMode === 'expression'}
               options={CUSTOM_FIELD_TYPE_OPTIONS}
               onChange={(type: CustomFieldType) => {
                 customFieldForm.setFieldValue(
@@ -2199,13 +2301,21 @@ export const LabelsConfigTab: React.FC = () => {
             name="valueMode"
             label="Откуда брать значение"
             rules={[{ required: true }]}
-            extra="Постоянный текст печатается одинаково на каждой бирке. Значение из ERP подставляется автоматически."
+            extra="Формула позволяет склеивать поля и текст, строить цепочки IF/ELSE и возвращать пустое значение."
           >
             <Select
               options={[
                 { value: 'constant', label: 'Постоянный текст' },
                 { value: 'source', label: 'Данные ERP / Базис' },
+                {
+                  value: 'expression',
+                  label: 'Формула',
+                  disabled: !customExpressionRendererReady,
+                },
               ]}
+              onChange={(mode: CustomFieldValueMode) => {
+                if (mode === 'expression') customFieldForm.setFieldValue('type', 'string');
+              }}
             />
           </Form.Item>
           {customFieldValueMode === 'source' && (
@@ -2252,6 +2362,23 @@ export const LabelsConfigTab: React.FC = () => {
                   showCount
                 />
               )}
+            </Form.Item>
+          )}
+          {customFieldValueMode === 'expression' && (
+            <Form.Item
+              label="Формула значения"
+              extra="В склейке пробелы и разделители добавляются отдельными фиксированными текстами. IF/ELSE можно вкладывать в любую ветвь."
+            >
+              <CustomFieldExpressionEditor
+                value={customFieldExpression.root}
+                fields={customExpressionFields}
+                disabled={!canManage || saving || !customExpressionRendererReady}
+                onChange={(root) => setCustomFieldExpression({
+                  type: 'custom_expression',
+                  version: 1,
+                  root,
+                })}
+              />
             </Form.Item>
           )}
         </Form>
@@ -4028,6 +4155,14 @@ function defaultIfElseCondition(field = ''): LabelIfElseCondition {
     when: { field, op: 'not_empty' },
     then: { type: 'current' },
     else: { type: 'hidden' },
+  };
+}
+
+function defaultCustomFieldExpression(field = ''): LabelCustomFieldExpressionV1 {
+  return {
+    type: 'custom_expression',
+    version: 1,
+    root: { type: 'field', field },
   };
 }
 

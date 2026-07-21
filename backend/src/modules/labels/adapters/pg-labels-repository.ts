@@ -310,7 +310,11 @@ export class PgLabelsRepository implements LabelsPort {
       this.database,
       templates.map((template) => template.labelTemplateId),
     );
-    return templates.map((template) => ({ ...template, elements: elementsByTemplate.get(template.labelTemplateId) ?? [] }));
+    return templates.map((template) => {
+      const hydrated = { ...template, elements: elementsByTemplate.get(template.labelTemplateId) ?? [] };
+      assertRenderableTemplateShape(hydrated);
+      return hydrated;
+    });
   }
 
   async getTemplateById(query: GetLabelTemplateQuery): Promise<LabelTemplateDto> {

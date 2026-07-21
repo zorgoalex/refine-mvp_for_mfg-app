@@ -139,6 +139,7 @@ export const apiRoutes = {
   labels: {
     fields: backendApiPath('/label-fields'),
     templates: backendApiPath('/label-templates'),
+    rendererCapabilities: backendApiPath('/label-templates/renderer-capabilities'),
     template: (id: number) => backendApiPath(`/label-templates/${id}`),
     orderData: (orderId: number) => backendApiPath(`/orders/${orderId}/label-data`),
     orderPreview: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/preview`),

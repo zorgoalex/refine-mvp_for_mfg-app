@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { LabelTemplateStaleVersionError } from '../errors/labels.errors';
@@ -68,6 +69,28 @@ describe('LabelTemplatesController', () => {
       }),
     );
   });
+
+  it('returns global renderer capabilities even when there are no templates', async () => {
+    const service = fakeService();
+    const controller = new LabelTemplatesController(service, runtime(true));
+
+    await expect(controller.capabilities({ user, requestId: 'req-capabilities' })).resolves.toEqual({
+      rendererCapabilities: ['custom_expression_v1'],
+    });
+    expect(service.getRendererCapabilities).toHaveBeenCalledWith(expect.objectContaining({ currentUser: user }));
+  });
+
+  it('documents the global renderer capability handshake in the OpenAPI contract', () => {
+    const contract = readFileSync(new URL('../../../../contracts/04-api-contract.openapi.yaml', import.meta.url), 'utf8');
+    const path = contract.slice(
+      contract.indexOf('/api/v1/label-templates/renderer-capabilities:'),
+      contract.indexOf('/api/v1/label-templates/{templateId}:'),
+    );
+
+    expect(path).toContain('operationId: getLabelRendererCapabilities');
+    expect(path).toContain('x-permission: labels.view');
+    expect(path).toContain('custom_expression_v1');
+  });
 });
 
 function runtime(enabled: boolean): LabelsRuntimeConfigService {
@@ -79,6 +102,7 @@ function runtime(enabled: boolean): LabelsRuntimeConfigService {
 function fakeService(overrides: Record<string, unknown> = {}) {
   return {
     listTemplates: vi.fn(async () => []),
+    getRendererCapabilities: vi.fn(async () => ({ rendererCapabilities: ['custom_expression_v1'] })),
     getTemplateById: vi.fn(),
     createTemplate: vi.fn(async () => ({})),
     updateTemplate: vi.fn(async () => ({})),
