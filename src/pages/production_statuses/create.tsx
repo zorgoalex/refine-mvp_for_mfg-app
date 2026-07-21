@@ -1,14 +1,32 @@
 import { Create, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox } from "antd";
+import { generateProductionStatusCode } from "./productionStatusCode";
 
 export const ProductionStatusCreate: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps } = useForm();
 
   return (
     <Create saveButtonProps={saveButtonProps}>
-      <Form {...formProps} layout="vertical" initialValues={{ is_active: true, sort_order: 100 }}>
-        <Form.Item label="Name" name="production_status_name" rules={[{ required: true }]}>
+      <Form
+        {...formProps}
+        layout="vertical"
+        initialValues={{ is_active: true, sort_order: 100 }}
+        onFinish={(values) => {
+          const name = String(values?.production_status_name ?? "").trim();
+          return formProps.onFinish?.({
+            ...values,
+            production_status_name: name,
+            production_status_code: generateProductionStatusCode(name),
+          });
+        }}
+      >
+        <Form.Item
+          label="Name"
+          name="production_status_name"
+          extra="Технический код создаётся автоматически."
+          rules={[{ required: true, whitespace: true }]}
+        >
           <Input />
         </Form.Item>
         <Form.Item label="Порядок сортировки" name="sort_order" rules={[{ required: true }]}>
