@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-21",
+    title: "История выполненных раскроев",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "Каждый автоматический расчёт и изменённая ручная раскладка сохраняются отдельной неизменяемой версией с номером вида «задание-версия».",
+      "В задании доступен список выполненных раскроев; любую версию можно открыть, просмотреть и повторно выгрузить в PNG, SVG или PDF.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-21",
     title: "Расширенный редактор шаблонов бирок",
     services: ["ERP"],
     repositories: ["repo_erp"],

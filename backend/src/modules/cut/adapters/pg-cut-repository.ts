@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseService } from '../../../database/database.service';
@@ -56,8 +56,10 @@ import type {
   DetailPlacementsQuery,
   EligibleDetailsQuery,
   GetCutJobQuery,
+  GetCutResultQuery,
   GetRenderCacheTokenArgs,
   ListCutJobsQuery,
+  ListCutResultsQuery,
   RemoveCutItemCommand,
   RenderGroupPdfQuery,
   RenderJobPdfQuery,
@@ -81,15 +83,26 @@ import type {
   CutJobDto,
   CutJobRefDto,
   CutJobTotals,
+  CutResultDto,
+  CutResultKind,
+  CutResultSummaryDto,
   CutManualLayoutDto,
   CutManualSheetDto,
+  CutSheetRenderSnapshotDto,
   EligibleDetailDto,
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
 import { mapTotalsRow, TOTALS_BY_JOB_SQL, SHEETS_BY_JOB_SQL, MATERIAL_NAMES_BY_JOB_SQL, type TotalsRow } from './cut-totals';
 import { buildBathProfileSheetSvg, buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities, createOrderFillResolver } from '../render/sheet-svg';
 import { renderSheetPng } from '../render/sheet-png';
-import { buildSheetsPdf, type PdfSheetDetailRow, type PdfSheetInput, type PdfSheetMeta } from '../render/sheet-pdf';
+import {
+  buildFrozenSheetsPdf,
+  buildSheetsPdf,
+  type FrozenPdfRenderContract,
+  type PdfSheetDetailRow,
+  type PdfSheetInput,
+  type PdfSheetMeta,
+} from '../render/sheet-pdf';
 import {
   CutGroupSheetNotFoundError,
   CutJobItemNotFoundError,
@@ -178,6 +191,23 @@ interface CutJobLockRow extends QueryResultRow {
   combine_films: boolean | null;
   split_by_material: boolean | null;
 }
+
+interface CutResultRow extends QueryResultRow {
+  cut_result_id: string | number;
+  cut_job_id: string | number;
+  result_no: string | number;
+  result_kind: CutResultKind;
+  source_job_version: string | number;
+  based_on_result_id: string | number | null;
+  snapshot_job: CutJobDto;
+  totals_snapshot: CutJobTotals;
+  created_by: string | number | null;
+  created_by_name_snapshot: string | null;
+  created_at: Date | string;
+  is_current: boolean;
+}
+
+const CUT_RESULT_LEASE_MS = 15 * 60 * 1000;
 
 interface CalcItemRow extends QueryResultRow {
   cut_job_item_id: string | number;
@@ -317,6 +347,23 @@ function stableJson(v: unknown): string {
   });
 }
 
+function frozenRenderViewKey(view: {
+  rotate90?: boolean;
+  originTopLeft?: boolean;
+  axisOrigin?: 'top-left' | 'bottom-left';
+  showLabels?: boolean;
+}): string {
+  const rotate90 = view.rotate90 === true;
+  return [
+    rotate90 ? 'r90' : 'r0',
+    rotate90 && view.originTopLeft === true ? 'tl' : 'raw',
+    view.axisOrigin ?? 'top-left',
+    view.showLabels === false ? 'labels-off' : 'labels-on',
+  ].join(':');
+}
+
+const FROZEN_RENDER_VIEW_COUNT = 12;
+
 function sheetsMatchCanonical(existing: import('../dto/cut.dto').CutManualSheetDto[], canonical: import('../dto/cut.dto').CutManualSheetDto[]): boolean {
   return stableJson(existing) === stableJson(canonical);
 }
@@ -366,6 +413,47 @@ export class PgCutRepository implements CutRepositoryPort {
     this.config = config ?? new PgCutConfigRepository(database);
     this.nativePortraitWriter = options?.nativePortraitWriter === true;
     this.heuristicAutoThresholdInstances = options?.heuristicAutoThresholdInstances ?? 100;
+  }
+
+  async reconcileExpiredCommands(limit = 50): Promise<number> {
+    const boundedLimit = Math.max(1, Math.min(Math.trunc(limit), 500));
+    return this.database.transaction(async (tx) => {
+      const expired = await tx.query<{
+        cut_job_id: string | number;
+        command_id: string;
+        claimed_job_version: string | number | null;
+      }>(
+        `SELECT c.cut_job_id, c.command_id, c.claimed_job_version
+         FROM cut_result_command c
+         JOIN cut_job j ON j.cut_job_id = c.cut_job_id
+         WHERE c.command_type = 'calculate' AND c.status = 'in_progress'
+           AND c.lease_expires_at <= now()
+         ORDER BY c.lease_expires_at, c.cut_job_id
+         LIMIT $1
+         FOR UPDATE OF c, j SKIP LOCKED`,
+        [boundedLimit],
+      );
+      for (const row of expired.rows) {
+        await tx.query(
+          `UPDATE cut_result_command
+           SET status = 'failed', failure_code = 'CUT_RESULT_COMMAND_ABANDONED',
+               owner_token = NULL, lease_expires_at = NULL,
+               heartbeat_at = now(), completed_at = now()
+           WHERE cut_job_id = $1 AND command_id = $2::uuid AND status = 'in_progress'`,
+          [toNum(row.cut_job_id), row.command_id],
+        );
+        if (row.claimed_job_version !== null) {
+          await tx.query(
+            `UPDATE cut_job
+             SET status = 'failed', failure_code = 'CUT_RESULT_COMMAND_ABANDONED',
+                 failure_reason = 'Предыдущий процесс расчёта был прерван', updated_at = now()
+             WHERE cut_job_id = $1 AND status = 'calculating' AND version = $2`,
+            [toNum(row.cut_job_id), toNum(row.claimed_job_version)],
+          );
+        }
+      }
+      return expired.rows.length;
+    });
   }
 
   /** Audited RBAC denial (plan §11). Best-effort for generic denials (fire-and-
@@ -550,6 +638,11 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   async calculate(command: CalculateCutJobCommand): Promise<CutJobDto> {
+    const commandPayloadHash = hashCutResultCommand({
+      type: 'calculate',
+      version: command.version,
+    });
+    const ownerToken = randomUUID();
     // Phase 1 — read + validate + build request under a short lock (NOT held
     // across the external freecut call). A validation failure here (no items, no
     // sheet spec, instance/body limit) is a calculation outcome too: persist a
@@ -565,8 +658,72 @@ export class PgCutRepository implements CutRepositoryPort {
       .transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const job = await loadJobForUpdate(tx, command.cutJobId);
+
+      const priorCommand = await tx.query<{
+        command_type: string;
+        payload_hash: string;
+        status: 'in_progress' | 'completed' | 'failed';
+        cut_result_id: string | number | null;
+        failure_code: string | null;
+        lease_alive: boolean;
+        claimed_job_version: string | number | null;
+      }>(
+        `SELECT command_type, payload_hash, status, cut_result_id, failure_code,
+                (lease_expires_at > now()) AS lease_alive, claimed_job_version
+         FROM cut_result_command
+         WHERE cut_job_id = $1 AND command_id = $2::uuid
+         FOR UPDATE`,
+        [command.cutJobId, command.commandId],
+      );
+      const prior = priorCommand.rows[0];
+      if (prior) {
+        if (prior.command_type !== 'calculate' || prior.payload_hash !== commandPayloadHash) {
+          throw new ApiError(409, 'CUT_RESULT_COMMAND_CONFLICT', 'commandId уже использован с другим запросом');
+        }
+        if (prior.status === 'completed' && prior.cut_result_id !== null) {
+          return { kind: 'completed' as const };
+        }
+        if (prior.status === 'failed') {
+          throw new ApiError(409, 'CUT_RESULT_COMMAND_FAILED', 'Команда раскроя уже завершилась ошибкой', {
+            failureCode: prior.failure_code,
+          });
+        }
+        if (prior.lease_alive) {
+          throw new ApiError(409, 'CUT_RESULT_COMMAND_IN_PROGRESS', 'Расчёт уже выполняется');
+        }
+        await tx.query(
+          `UPDATE cut_result_command
+           SET status = 'failed', failure_code = 'CUT_RESULT_COMMAND_ABANDONED',
+               owner_token = NULL, completed_at = now(), lease_expires_at = NULL,
+               heartbeat_at = now()
+           WHERE cut_job_id = $1 AND command_id = $2::uuid`,
+          [command.cutJobId, command.commandId],
+        );
+        await tx.query(
+          `UPDATE cut_job
+           SET status = 'failed', failure_code = 'CUT_RESULT_COMMAND_ABANDONED',
+               failure_reason = 'Предыдущий процесс расчёта был прерван', updated_at = now()
+           WHERE cut_job_id = $1 AND status = 'calculating' AND version = $2`,
+          [command.cutJobId, numOrNull(prior.claimed_job_version)],
+        );
+        return { kind: 'abandoned' as const };
+      }
+
+      if (job.status === 'calculating') {
+        throw new ApiError(409, 'CUT_CALCULATION_IN_PROGRESS', 'Для задания уже выполняется расчёт');
+      }
+
       assertVersion(job, command.version);
       assertMutable(job);
+
+      await tx.query(
+        `INSERT INTO cut_result_command
+          (cut_job_id, command_id, command_type, payload_hash, status,
+            owner_token, lease_expires_at, heartbeat_at, claimed_job_version, created_by)
+         VALUES ($1, $2::uuid, 'calculate', $3, 'in_progress',
+                 $4::uuid, now() + ($5::bigint * interval '1 millisecond'), now(), $6, $7)`,
+        [command.cutJobId, command.commandId, commandPayloadHash, ownerToken, CUT_RESULT_LEASE_MS, job.version + 1, numOrNull(command.currentUser.id)],
+      );
 
       let items = await loadCalcItems(tx, command.cutJobId);
       if (items.length === 0) {
@@ -726,7 +883,7 @@ export class PgCutRepository implements CutRepositoryPort {
         sheetTypes: basisSheetTypes,
       });
 
-      return { groupPreps, params, expectedVersion: job.version + 1, calcBasis, calcParams: params };
+      return { kind: 'new' as const, groupPreps, params, expectedVersion: job.version + 1, calcBasis, calcParams: params };
       })
       // A Phase 1 validation failure (no items / no sheet spec / instance|body
       // limit) is a calculation outcome: persist a matching reason. Guard on the
@@ -735,6 +892,17 @@ export class PgCutRepository implements CutRepositoryPort {
       // matches and the failure write is skipped (supersede-safe, no clobber).
       // Concurrency / precondition errors pass through unchanged (markCalcFailed).
       .catch((error) => this.markCalcFailed(error, command, phase1Related, command.version));
+
+    if (prep.kind === 'completed') {
+      return this.getJob({
+        currentUser: command.currentUser,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+      });
+    }
+    if (prep.kind === 'abandoned') {
+      throw new ApiError(409, 'CUT_RESULT_COMMAND_ABANDONED', 'Предыдущий процесс расчёта был прерван; запустите новый расчёт');
+    }
 
     // Related dimensions aggregated across ALL groups (audit query/report-ready).
     const allOrderIds = prep.groupPreps.flatMap((p) => p.group.orderIds);
@@ -751,6 +919,14 @@ export class PgCutRepository implements CutRepositoryPort {
     }> = [];
     try {
       for (const groupPrep of prep.groupPreps) {
+        await this.database.query(
+          `UPDATE cut_result_command
+           SET heartbeat_at = now(),
+               lease_expires_at = now() + ($4::bigint * interval '1 millisecond')
+           WHERE cut_job_id = $1 AND command_id = $2::uuid
+             AND owner_token = $3::uuid AND status = 'in_progress'`,
+          [command.cutJobId, command.commandId, ownerToken, CUT_RESULT_LEASE_MS],
+        );
         const response = await this.freecut.optimize(groupPrep.request);
         const contractViolations = validateFreecutResponseContract(groupPrep.request, response);
         if (contractViolations.length > 0) {
@@ -787,10 +963,22 @@ export class PgCutRepository implements CutRepositoryPort {
     }
 
     // Phase 3 — persist ALL groups + a single audit + a single outbox row.
-    await this.database.transaction(async (tx) => {
+    try {
+      await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const job = await loadJobForUpdate(tx, command.cutJobId);
       assertVersion(job, prep.expectedVersion);
+      const ownership = await tx.query(
+        `SELECT 1 FROM cut_result_command
+         WHERE cut_job_id = $1 AND command_id = $2::uuid
+           AND owner_token = $3::uuid AND status = 'in_progress'
+           AND lease_expires_at > now()
+         FOR UPDATE`,
+        [command.cutJobId, command.commandId, ownerToken],
+      );
+      if (ownership.rowCount !== 1) {
+        throw new ApiError(409, 'CUT_RESULT_COMMAND_ABANDONED', 'Владение командой расчёта потеряно');
+      }
 
       const cutGroupIds: number[] = [];
       let totalSheets = 0;
@@ -908,6 +1096,21 @@ export class PgCutRepository implements CutRepositoryPort {
         [command.cutJobId, requestHash, JSON.stringify(prep.calcParams), prep.calcBasis],
       );
 
+      const cutResult = await this.createCutResult(tx, {
+        cutJobId: command.cutJobId,
+        resultKind: 'auto',
+        commandId: command.commandId,
+        commandPayloadHash,
+        actor: command.currentUser,
+        unplaced: responses.flatMap(({ response }) =>
+          (response.unplaced_items ?? []).map((item) => ({
+            itemId: item.item_id,
+            instance: item.instance,
+            reason: item.reason,
+          })),
+        ),
+      });
+
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.calculated,
         cutJobId: command.cutJobId,
@@ -916,6 +1119,7 @@ export class PgCutRepository implements CutRepositoryPort {
           orderIds: allOrderIds,
           sheetMaterialTypeIds: allSheetMaterialTypeIds,
           cutGroupIds,
+          cutResultIds: [cutResult.cutResultId],
         },
         metadata: {
           groupCount: responses.length,
@@ -926,6 +1130,11 @@ export class PgCutRepository implements CutRepositoryPort {
             reason: groupPrep.engineSelection.engineReason,
             instances: groupPrep.totalInstances,
           })),
+          cutResultId: cutResult.cutResultId,
+          resultNo: cutResult.resultNo,
+          cutNumber: cutResult.cutNumber,
+          resultKind: cutResult.resultKind,
+          basedOnResultId: cutResult.basedOnResultId,
         },
       });
 
@@ -947,15 +1156,26 @@ export class PgCutRepository implements CutRepositoryPort {
             orderIds: allOrderIds,
             sheetMaterialTypeIds: allSheetMaterialTypeIds,
             requestHash,
+            cutResultId: cutResult.cutResultId,
+            resultNo: cutResult.resultNo,
+            cutNumber: cutResult.cutNumber,
           }),
           // Scope the outbox idempotency key to the JOB: after migration 031 two
           // DIFFERENT jobs can legitimately share an identical detail set / params
           // (and thus requestHash). Without cutJobId the global dedupe would swallow
           // the second job's calculated event. Same-job re-calc still dedupes.
-          `${CUT_AUDIT_EVENTS.calculated}:${command.cutJobId}:${requestHash}`,
+          `${CUT_AUDIT_EVENTS.calculated}:${command.cutJobId}:${cutResult.resultNo}`,
         ],
       );
-    });
+      });
+    } catch (error) {
+      await this.markCalcFailed(
+        error,
+        command,
+        { orderIds: allOrderIds, sheetMaterialTypeIds: allSheetMaterialTypeIds },
+        prep.expectedVersion,
+      );
+    }
 
     // All cut commands (calculate + setters) return the fully enriched job via a
     // post-commit getJob read (with editorParams, requiresRecalc, renderToken).
@@ -1013,6 +1233,23 @@ export class PgCutRepository implements CutRepositoryPort {
         [command.cutJobId],
       );
       await tx.query(`DELETE FROM cut_group WHERE cut_job_id = $1`, [command.cutJobId]);
+      await tx.query(
+        `INSERT INTO cut_result_command
+           (cut_job_id, command_id, command_type, payload_hash, status,
+            failure_code, created_by, completed_at)
+         VALUES ($1, $2::uuid, 'calculate', $3, 'failed', $4, $5, now())
+         ON CONFLICT (cut_job_id, command_id) DO UPDATE
+           SET status = 'failed', failure_code = EXCLUDED.failure_code,
+               owner_token = NULL, lease_expires_at = NULL,
+               heartbeat_at = now(), completed_at = now()`,
+        [
+          command.cutJobId,
+          command.commandId,
+          hashCutResultCommand({ type: 'calculate', version: command.version }),
+          failure.code,
+          numOrNull(command.currentUser.id),
+        ],
+      );
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.calculateFailed,
         cutJobId: command.cutJobId,
@@ -1160,7 +1397,354 @@ export class PgCutRepository implements CutRepositoryPort {
       })
       .join(',')}`;
 
-    return { ...base, groups: enrichedGroupsWithTokens, editorParams, requiresRecalc, autoLayoutValidation, renderToken: jobRenderToken };
+    const cutResults = await this.listResults({
+      currentUser: query.currentUser,
+      cutJobId: query.cutJobId,
+      requestId: query.requestId,
+    });
+
+    return {
+      ...base,
+      groups: enrichedGroupsWithTokens,
+      editorParams,
+      requiresRecalc,
+      autoLayoutValidation,
+      renderToken: jobRenderToken,
+      currentCutResult: cutResults.find((result) => result.isCurrent) ?? null,
+      cutResults,
+    };
+  }
+
+  async listResults(query: ListCutResultsQuery): Promise<CutResultSummaryDto[]> {
+    const result = await this.database.query<CutResultRow>(
+      `SELECT r.cut_result_id, r.cut_job_id, r.result_no, r.result_kind,
+              r.source_job_version, r.based_on_result_id, r.totals_snapshot,
+              r.created_by, r.created_by_name_snapshot, r.created_at,
+              (j.current_cut_result_id = r.cut_result_id) AS is_current,
+              r.snapshot_job
+       FROM cut_result r
+       JOIN cut_job j ON j.cut_job_id = r.cut_job_id
+       WHERE r.cut_job_id = $1
+       ORDER BY r.result_no DESC`,
+      [query.cutJobId],
+    );
+    return result.rows.map(mapCutResultSummary);
+  }
+
+  async getResult(query: GetCutResultQuery): Promise<CutResultDto> {
+    const result = await this.database.query<CutResultRow & { snapshot_digest: string; computed_digest: string }>(
+      `SELECT r.cut_result_id, r.cut_job_id, r.result_no, r.result_kind,
+              r.source_job_version, r.based_on_result_id, r.totals_snapshot,
+              r.created_by, r.created_by_name_snapshot, r.created_at,
+              r.snapshot_job, r.snapshot_digest,
+              cut_result_snapshot_digest(r.snapshot_job) AS computed_digest,
+              (j.current_cut_result_id = r.cut_result_id) AS is_current
+       FROM cut_result r
+       JOIN cut_job j ON j.cut_job_id = r.cut_job_id
+       WHERE r.cut_job_id = $1 AND r.result_no = $2`,
+      [query.cutJobId, query.resultNo],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new ApiError(404, 'CUT_RESULT_NOT_FOUND', `Раскрой ${query.cutJobId}-${query.resultNo} не найден`);
+    }
+    if (row.computed_digest !== row.snapshot_digest) {
+      throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_CORRUPT', 'Исторический раскрой повреждён');
+    }
+    const summary = mapCutResultSummary(row);
+    return {
+      ...summary,
+      job: {
+        ...row.snapshot_job,
+        currentCutResult: summary,
+        cutResults: undefined,
+      },
+      renderToken: `r${summary.cutResultId}:${row.snapshot_digest.slice(0, 16)}`,
+    };
+  }
+
+  async backfillLegacyResults(batchSize = 50): Promise<number> {
+    return this.database.transaction(async (tx) => {
+      const jobs = await tx.query<{
+        cut_job_id: string | number;
+        version: string | number;
+        request_hash: string | null;
+        created_by: string | number | null;
+        username: string | null;
+      }>(
+        `SELECT j.cut_job_id, j.version, j.request_hash, j.created_by, u.username
+         FROM cut_job j
+         LEFT JOIN users u ON u.user_id = j.created_by
+         WHERE j.current_cut_result_id IS NULL
+           AND EXISTS (SELECT 1 FROM cut_group g WHERE g.cut_job_id = j.cut_job_id)
+         ORDER BY j.cut_job_id
+         FOR UPDATE OF j SKIP LOCKED
+         LIMIT $1`,
+        [batchSize],
+      );
+      for (const row of jobs.rows) {
+        const cutJobId = toNum(row.cut_job_id);
+        let snapshot = synthesizeLegacyUnplaced(await loadFrozenJobSnapshot(tx, cutJobId));
+        snapshot = await this.attachFrozenRenderSnapshots(tx, snapshot);
+        validateFrozenJobSnapshot(snapshot);
+        const manifest = buildCutResultManifest(snapshot);
+        const inserted = await tx.query<{ cut_result_id: string | number }>(
+          `INSERT INTO cut_result
+             (cut_job_id, result_no, result_kind, source_job_version,
+              request_hash, snapshot_job, snapshot_manifest, snapshot_digest,
+              totals_snapshot, created_by, created_by_name_snapshot)
+           VALUES ($1, 1, 'legacy', $2, $3, $4::jsonb, $5::jsonb,
+                   cut_result_snapshot_digest($4::jsonb), $6::jsonb, $7, $8)
+           ON CONFLICT (cut_job_id, result_no) DO NOTHING
+           RETURNING cut_result_id`,
+          [
+            cutJobId,
+            toNum(row.version),
+            row.request_hash,
+            JSON.stringify(snapshot),
+            JSON.stringify(manifest),
+            JSON.stringify(snapshot.totals),
+            numOrNull(row.created_by),
+            row.username,
+          ],
+        );
+        const existing = inserted.rows[0] ?? (await tx.query<{ cut_result_id: string | number }>(
+          `SELECT cut_result_id FROM cut_result WHERE cut_job_id = $1 AND result_no = 1`,
+          [cutJobId],
+        )).rows[0];
+        if (!existing) throw new ApiError(500, 'CUT_RESULT_BACKFILL_FAILED', `Не создан legacy раскрой задания ${cutJobId}`);
+        await tx.query(
+          `UPDATE cut_job
+           SET current_cut_result_id = $2, next_cut_result_no = 2
+           WHERE cut_job_id = $1 AND current_cut_result_id IS NULL`,
+          [cutJobId, toNum(existing.cut_result_id)],
+        );
+      }
+      return jobs.rows.length;
+    });
+  }
+
+  private async loadFrozenRenderContext(args: {
+    currentUser: CurrentUser;
+    cutJobId: number;
+    resultNo: number;
+    cutGroupId: number;
+    variant: 'auto' | 'manual' | 'active';
+    rotate90?: boolean;
+    originTopLeft?: boolean;
+    axisOrigin?: import('../../../shared/cut-geometry').CutAxisOrigin;
+    showLabels?: boolean;
+  }): Promise<{
+    job: CutJobDto;
+    group: CutGroupDto;
+    sheets: RenderedSheetContext[];
+    renderContractVersion: FrozenPdfRenderContract;
+  }> {
+    const frozen = await this.getResult({
+      currentUser: args.currentUser,
+      cutJobId: args.cutJobId,
+      resultNo: args.resultNo,
+    });
+    const group = frozen.job.groups.find((candidate) => candidate.cutGroupId === args.cutGroupId);
+    if (!group) {
+      throw new ApiError(404, 'CUT_GROUP_NOT_FOUND', `Группа ${args.cutGroupId} не принадлежит раскрою ${frozen.cutNumber}`);
+    }
+    const manual = group.manualLayout;
+    const useManual = args.variant === 'manual'
+      ? manual !== null && manual !== undefined
+      : args.variant === 'active'
+        ? manual !== null && manual !== undefined && manual.isActive && !manual.isStale
+        : false;
+    if (args.variant === 'manual' && !useManual) {
+      throw new ApiError(409, 'CUT_MANUAL_LAYOUT_UNAVAILABLE', 'Ручной вариант раскроя недоступен');
+    }
+    const sourceSheets = useManual ? manual!.sheets : group.sheets;
+    const sheets = sourceSheets.map((sheet) => {
+      const placements = sheet.placements;
+      const renderSnapshot = sheet.renderSnapshot;
+      const view = renderSnapshot?.views[frozenRenderViewKey({
+        rotate90: args.rotate90,
+        originTopLeft: args.originTopLeft,
+        axisOrigin: args.axisOrigin,
+        showLabels: args.showLabels,
+      })];
+      if (!renderSnapshot || renderSnapshot.contractVersion !== 'cut_sheet_render_v1' || !view) {
+        throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_CORRUPT', `Нет frozen render листа ${sheet.sheetIndex}`);
+      }
+      return {
+        sheetIndex: sheet.sheetIndex,
+        placements,
+        svg: view.svg,
+        bathSvg: view.bathSvg,
+        pdfMeta: renderSnapshot.pdfMeta as PdfSheetMeta,
+        pdfDetailRows: renderSnapshot.pdfDetailRows as PdfSheetDetailRow[],
+      };
+    });
+    return { job: frozen.job, group, sheets, renderContractVersion: 'cut_sheet_render_v1' };
+  }
+
+  private async attachFrozenRenderSnapshots(tx: TransactionClient, snapshot: CutJobDto): Promise<CutJobDto> {
+    const groups: CutGroupDto[] = [];
+    for (const group of snapshot.groups) {
+      const freezeVariant = async <T extends { sheetIndex: number; placements: SheetPlacementsJson }>(
+        variant: 'auto' | 'manual',
+        sourceSheets: T[],
+      ): Promise<Array<T & { renderSnapshot: CutSheetRenderSnapshotDto }>> => {
+        const renderBySheet = new Map<number, CutSheetRenderSnapshotDto>();
+        const viewArgs: Array<{ rotate90: boolean; originTopLeft: boolean; axisOrigin: 'top-left' | 'bottom-left'; showLabels: boolean }> = [];
+        for (const rotate90 of [false, true]) {
+          for (const originTopLeft of rotate90 ? [false, true] : [false]) {
+            for (const axisOrigin of ['top-left', 'bottom-left'] as const) {
+              for (const showLabels of [false, true]) {
+                viewArgs.push({ rotate90, originTopLeft, axisOrigin, showLabels });
+              }
+            }
+          }
+        }
+        for (const view of viewArgs) {
+          const rendered = await this.loadGroupRenderContext(
+            group.cutGroupId,
+            view.rotate90,
+            view.originTopLeft,
+            view.axisOrigin,
+            variant,
+            snapshot.cutJobId,
+            view.showLabels,
+            tx,
+            true,
+          );
+          for (const sheet of rendered.sheets) {
+            const existing = renderBySheet.get(sheet.sheetIndex) ?? {
+              contractVersion: 'cut_sheet_render_v1' as const,
+              views: {},
+              pdfMeta: sheet.pdfMeta,
+              pdfDetailRows: sheet.pdfDetailRows,
+            };
+            existing.views[frozenRenderViewKey(view)] = { svg: sheet.svg, bathSvg: sheet.bathSvg };
+            renderBySheet.set(sheet.sheetIndex, existing);
+          }
+        }
+        return sourceSheets.map((sheet) => {
+          const renderSnapshot = renderBySheet.get(sheet.sheetIndex);
+          if (!renderSnapshot) {
+            throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Не создан render snapshot листа ${sheet.sheetIndex}`);
+          }
+          return { ...sheet, renderSnapshot };
+        });
+      };
+
+      const autoSheets = await freezeVariant('auto', group.sheets);
+      const manualLayout = group.manualLayout
+        ? {
+            ...group.manualLayout,
+            sheets: await freezeVariant('manual', group.manualLayout.sheets),
+          }
+        : group.manualLayout;
+      groups.push({ ...group, sheets: autoSheets, manualLayout });
+    }
+    return { ...snapshot, groups };
+  }
+
+  private async createCutResult(
+    tx: TransactionClient,
+    args: {
+      cutJobId: number;
+      resultKind: Exclude<CutResultKind, 'legacy'>;
+      commandId: string;
+      commandPayloadHash: string;
+      actor: CurrentUser;
+      unplaced?: CutJobDto['unplaced'];
+    },
+  ): Promise<CutResultSummaryDto> {
+    const state = await tx.query<{
+      version: string | number;
+      next_cut_result_no: string | number;
+      current_cut_result_id: string | number | null;
+      request_hash: string | null;
+    }>(
+      `SELECT version, next_cut_result_no, current_cut_result_id, request_hash
+       FROM cut_job WHERE cut_job_id = $1`,
+      [args.cutJobId],
+    );
+    const jobState = state.rows[0];
+    if (!jobState) throw new CutJobNotFoundError(args.cutJobId);
+
+    let snapshot = await loadFrozenJobSnapshot(tx, args.cutJobId);
+    if (args.unplaced !== undefined) {
+      snapshot = { ...snapshot, unplaced: args.unplaced };
+    } else if (jobState.current_cut_result_id !== null) {
+      const prior = await tx.query<{ snapshot_job: CutJobDto }>(
+        `SELECT snapshot_job FROM cut_result WHERE cut_result_id = $1 AND cut_job_id = $2`,
+        [toNum(jobState.current_cut_result_id), args.cutJobId],
+      );
+      snapshot = { ...snapshot, unplaced: prior.rows[0]?.snapshot_job.unplaced ?? [] };
+    }
+    snapshot = await this.attachFrozenRenderSnapshots(tx, snapshot);
+    validateFrozenJobSnapshot(snapshot);
+    const manifest = buildCutResultManifest(snapshot);
+    const resultNo = toNum(jobState.next_cut_result_no);
+    const inserted = await tx.query<CutResultRow>(
+      `INSERT INTO cut_result
+         (cut_job_id, result_no, result_kind, source_job_version,
+          based_on_result_id, command_id, command_payload_hash, request_hash,
+          snapshot_job, snapshot_manifest, snapshot_digest, totals_snapshot,
+          created_by, created_by_name_snapshot)
+       VALUES ($1, $2, $3, $4, $5, $6::uuid, $7, $8,
+               $9::jsonb, $10::jsonb, cut_result_snapshot_digest($9::jsonb),
+               $11::jsonb, $12, $13)
+       RETURNING cut_result_id, cut_job_id, result_no, result_kind,
+                 source_job_version, based_on_result_id, snapshot_job,
+                 totals_snapshot, created_by, created_by_name_snapshot,
+                 created_at, FALSE AS is_current`,
+      [
+        args.cutJobId,
+        resultNo,
+        args.resultKind,
+        toNum(jobState.version),
+        numOrNull(jobState.current_cut_result_id),
+        args.commandId,
+        args.commandPayloadHash,
+        jobState.request_hash,
+        JSON.stringify(snapshot),
+        JSON.stringify(manifest),
+        JSON.stringify(snapshot.totals),
+        numOrNull(args.actor.id),
+        args.actor.username,
+      ],
+    );
+    const resultRow = inserted.rows[0];
+    const cutResultId = toNum(resultRow.cut_result_id);
+
+    const verified = await tx.query<{ snapshot_job: CutJobDto; snapshot_manifest: Record<string, unknown>; snapshot_digest: string; computed_digest: string }>(
+      `SELECT snapshot_job, snapshot_manifest, snapshot_digest,
+              cut_result_snapshot_digest(snapshot_job) AS computed_digest
+       FROM cut_result WHERE cut_result_id = $1 AND cut_job_id = $2`,
+      [cutResultId, args.cutJobId],
+    );
+    const reread = verified.rows[0];
+    if (
+      !reread
+      || stableJson(reread.snapshot_manifest) !== stableJson(manifest)
+      || reread.computed_digest !== reread.snapshot_digest
+    ) {
+      throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', 'Не удалось проверить полноту версии раскроя');
+    }
+
+    await tx.query(
+      `UPDATE cut_job
+       SET current_cut_result_id = $2, next_cut_result_no = $3, updated_at = now()
+       WHERE cut_job_id = $1`,
+      [args.cutJobId, cutResultId, resultNo + 1],
+    );
+    await tx.query(
+      `UPDATE cut_result_command
+       SET status = 'completed', cut_result_id = $3, completed_at = now(),
+           owner_token = NULL, heartbeat_at = now(), lease_expires_at = NULL
+       WHERE cut_job_id = $1 AND command_id = $2::uuid AND status = 'in_progress'`,
+      [args.cutJobId, args.commandId, cutResultId],
+    );
+
+    return { ...mapCutResultSummary(resultRow), isCurrent: true };
   }
 
   // ── Task 4: manual-layout read/persist/invalidate ────────────────────────
@@ -1168,8 +1752,9 @@ export class PgCutRepository implements CutRepositoryPort {
   async getManualLayoutByKey(
     cutJobId: number,
     groupKey: string,
+    client: DatabaseClient = this.database,
   ): Promise<{ sheets: CutManualSheetDto[]; isActive: boolean; isStale: boolean; version: number } | null> {
-    const result = await this.database.query<{
+    const result = await client.query<{
       sheets: unknown;
       is_active: boolean;
       is_stale: boolean;
@@ -1607,7 +2192,19 @@ export class PgCutRepository implements CutRepositoryPort {
     // PNG is NOT recalc-blocked (rule 5): only PDF endpoints enforce the print-block.
     const variant = query.variant ?? 'auto';
     const showLabels = query.showLabels ?? true;
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, query.axisOrigin, variant, query.cutJobId, showLabels);
+    const { sheets } = query.resultNo !== undefined && query.cutJobId !== undefined
+      ? await this.loadFrozenRenderContext({
+          currentUser: query.currentUser,
+          cutJobId: query.cutJobId,
+          resultNo: query.resultNo,
+          cutGroupId: query.cutGroupId,
+          variant,
+          rotate90: query.rotate90,
+          originTopLeft: query.originTopLeft,
+          axisOrigin: query.axisOrigin,
+          showLabels,
+        })
+      : await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, query.axisOrigin, variant, query.cutJobId, showLabels);
     // Rule 8: blank sheets are index-stable and never 404 for PNG/SVG.
     const sheet = sheets.find((s) => s.sheetIndex === query.sheetIndex);
     if (!sheet) {
@@ -1626,7 +2223,18 @@ export class PgCutRepository implements CutRepositoryPort {
   async renderSheetSvg(query: RenderSheetSvgQuery): Promise<string> {
     // SVG is NOT recalc-blocked (rule 5): only PDF endpoints enforce the print-block.
     const variant = query.variant ?? 'auto';
-    const { sheets } = await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, query.axisOrigin, variant, query.cutJobId);
+    const { sheets } = query.resultNo !== undefined && query.cutJobId !== undefined
+      ? await this.loadFrozenRenderContext({
+          currentUser: query.currentUser,
+          cutJobId: query.cutJobId,
+          resultNo: query.resultNo,
+          cutGroupId: query.cutGroupId,
+          variant,
+          rotate90: query.rotate90,
+          originTopLeft: query.originTopLeft,
+          axisOrigin: query.axisOrigin,
+        })
+      : await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, query.axisOrigin, variant, query.cutJobId);
     // Rule 8: blank sheets are index-stable and never 404 for SVG.
     const sheet = sheets.find((s) => s.sheetIndex === query.sheetIndex);
     if (!sheet) {
@@ -1637,18 +2245,37 @@ export class PgCutRepository implements CutRepositoryPort {
 
   async renderGroupPdf(query: RenderGroupPdfQuery): Promise<Buffer> {
     const variant = query.variant ?? 'auto';
-    const pdfTemplate = query.pdfTemplate ?? 'standard';
-    await this.assertPdfTemplateActive(pdfTemplate);
+    const requestedPdfTemplate = query.pdfTemplate ?? 'standard';
     // Rule 6 BEFORE Rule 5: load + assert group↔job ownership first so a wrong
     // cutJobId yields 404 CUT_GROUP_NOT_FOUND, not a 409 recalc block (a missing
     // job makes checkRequiresRecalc conservatively true). This also resolves the
     // variant (manual-unavailable → 409) on the validated group.
-    const { sheets, rotate90 } = await this.loadGroupPdfLandscapeRenderContext(
-      query.cutGroupId, variant, query.cutJobId, query.originTopLeft, query.axisOrigin,
-    );
+    const frozenContext = query.resultNo !== undefined && query.cutJobId !== undefined
+      ? await this.loadFrozenRenderContext({
+          currentUser: query.currentUser,
+          cutJobId: query.cutJobId,
+          resultNo: query.resultNo,
+          cutGroupId: query.cutGroupId,
+          variant,
+          rotate90: query.rotate90,
+          originTopLeft: query.originTopLeft,
+          axisOrigin: query.axisOrigin,
+        })
+      : null;
+    const currentContext = frozenContext === null
+      ? await this.loadGroupPdfLandscapeRenderContext(
+          query.cutGroupId, variant, query.cutJobId, query.originTopLeft, query.axisOrigin,
+        )
+      : null;
+    const pdfTemplate = frozenContext?.group.pdfTemplate ?? requestedPdfTemplate;
+    if (frozenContext === null) {
+      await this.assertPdfTemplateActive(pdfTemplate);
+    }
+    const sheets = frozenContext?.sheets ?? currentContext!.sheets;
+    const rotate90 = frozenContext ? (query.rotate90 ?? false) : currentContext!.rotate90;
     // Rule 5: group PDF is blocked while the job requires recalculation.
     // PNG/SVG are NOT blocked; only PDF/print surfaces enforce this.
-    if (query.cutJobId !== undefined) {
+    if (query.cutJobId !== undefined && query.resultNo === undefined) {
       if (await this.checkRequiresRecalc(query.cutJobId)) {
         throw new ApiError(409, 'CUT_RECALC_REQUIRED', 'Требуется пересчёт раскроя перед печатью');
       }
@@ -1658,8 +2285,7 @@ export class PgCutRepository implements CutRepositoryPort {
     if (printableSheets.length === 0) {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, 0);
     }
-    return buildSheetsPdf(
-      printableSheets.map((s, index) => ({
+    const pdfSheets = printableSheets.map((s, index) => ({
         svg: s.svg,
         bathSvg: s.bathSvg,
         sheetWidthMm: rotate90 ? s.placements.sheet_height_mm : s.placements.sheet_width_mm,
@@ -1668,13 +2294,14 @@ export class PgCutRepository implements CutRepositoryPort {
         template: pdfTemplate,
         meta: s.pdfMeta,
         detailRows: s.pdfDetailRows,
-      })),
-    );
+      }));
+    return frozenContext
+      ? buildFrozenSheetsPdf(frozenContext.renderContractVersion, pdfSheets)
+      : buildSheetsPdf(pdfSheets);
   }
 
   async renderJobPdf(query: RenderJobPdfQuery): Promise<Buffer> {
-    const pdfTemplate = query.pdfTemplate ?? 'standard';
-    await this.assertPdfTemplateActive(pdfTemplate);
+    const requestedPdfTemplate = query.pdfTemplate ?? 'standard';
     // Rule 4: variant=manual is PER-GROUP; the whole-job PDF can't coherently pick one
     // group's manual layout. Reject explicitly instead of silently ignoring it.
     if (query.variant === 'manual') {
@@ -1685,22 +2312,66 @@ export class PgCutRepository implements CutRepositoryPort {
       );
     }
     // Rule 5: job PDF is blocked while the job requires recalculation.
-    if (await this.checkRequiresRecalc(query.cutJobId)) {
+    if (query.resultNo === undefined && await this.checkRequiresRecalc(query.cutJobId)) {
       throw new ApiError(409, 'CUT_RECALC_REQUIRED', 'Требуется пересчёт раскроя перед печатью');
     }
     // Rule 4 (active): for variant=active each group resolves effectiveActive independently
     // (a mixed manual+auto job is fine). For variant=auto all groups use auto.
     const variant = query.variant ?? 'auto';
-    const groups = await this.database.query<{ cut_group_id: string | number }>(
-      `SELECT cut_group_id FROM cut_group WHERE cut_job_id = $1 ORDER BY cut_group_id`,
-      [query.cutJobId],
-    );
+    const frozen = query.resultNo === undefined
+      ? null
+      : await this.getResult({
+          currentUser: query.currentUser,
+          cutJobId: query.cutJobId,
+          resultNo: query.resultNo,
+          requestId: query.requestId,
+        });
+    const pdfTemplate = frozen?.job.pdfTemplate ?? requestedPdfTemplate;
+    if (frozen === null) {
+      await this.assertPdfTemplateActive(pdfTemplate);
+    }
+    const groupIds = frozen
+      ? frozen.job.groups.map((group) => group.cutGroupId)
+      : (await this.database.query<{ cut_group_id: string | number }>(
+          `SELECT cut_group_id FROM cut_group WHERE cut_job_id = $1 ORDER BY cut_group_id`,
+          [query.cutJobId],
+        )).rows.map((row) => toNum(row.cut_group_id));
     const pdfSheets: PdfSheetInput[] = [];
-    for (const groupRow of groups.rows) {
-      const cutGroupId = toNum(groupRow.cut_group_id);
-      const { sheets, rotate90 } = await this.loadGroupPdfLandscapeRenderContext(
-        cutGroupId, variant, query.cutJobId, query.originTopLeft, query.axisOrigin,
-      );
+    for (const cutGroupId of groupIds) {
+      let frozenContext = frozen
+        ? await this.loadFrozenRenderContext({
+            currentUser: query.currentUser,
+            cutJobId: query.cutJobId,
+            resultNo: query.resultNo!,
+            cutGroupId,
+            variant,
+            originTopLeft: query.originTopLeft,
+            axisOrigin: query.axisOrigin,
+          })
+        : null;
+      const currentContext = frozenContext === null
+        ? await this.loadGroupPdfLandscapeRenderContext(
+            cutGroupId, variant, query.cutJobId, query.originTopLeft, query.axisOrigin,
+          )
+        : null;
+      const initialSheets = frozenContext?.sheets ?? currentContext!.sheets;
+      const first = initialSheets[0]?.placements;
+      const rotate90 = frozenContext
+        ? first !== undefined && first.sheet_height_mm > first.sheet_width_mm
+        : currentContext!.rotate90;
+      if (frozenContext && rotate90) {
+        frozenContext = await this.loadFrozenRenderContext({
+          currentUser: query.currentUser,
+          cutJobId: query.cutJobId,
+          resultNo: query.resultNo!,
+          cutGroupId,
+          variant,
+          rotate90: true,
+          originTopLeft: query.originTopLeft,
+          axisOrigin: query.axisOrigin,
+        });
+      }
+      const sheets = frozenContext?.sheets ?? currentContext!.sheets;
       // Rule 8: skip blank sheets in PDF assembly.
       let sheetNumber = 1;
       for (const sheet of sheets) {
@@ -1721,7 +2392,9 @@ export class PgCutRepository implements CutRepositoryPort {
     if (pdfSheets.length === 0) {
       throw new CutJobNotFoundError(query.cutJobId);
     }
-    return buildSheetsPdf(pdfSheets);
+    return frozen
+      ? buildFrozenSheetsPdf('cut_sheet_render_v1', pdfSheets)
+      : buildSheetsPdf(pdfSheets);
   }
 
   private async loadGroupPdfLandscapeRenderContext(
@@ -1812,9 +2485,11 @@ export class PgCutRepository implements CutRepositoryPort {
     variant: 'auto' | 'manual' | 'active' = 'auto',
     cutJobId?: number,
     showLabels = true,
+    client: DatabaseClient = this.database,
+    allowStaleManual = false,
   ): Promise<{ sheets: RenderedSheetContext[] }> {
     // Rule 6: load group metadata + assert job ownership when cutJobId provided.
-    const groupRes = await this.database.query<{
+    const groupRes = await client.query<{
       cut_job_id: string | number;
       group_key: string | null;
     }>(
@@ -1837,11 +2512,13 @@ export class PgCutRepository implements CutRepositoryPort {
 
     // Load manual layout for variant resolution.
     const manualLayout = groupKey
-      ? await this.getManualLayoutByKey(resolvedJobId, groupKey)
+      ? await this.getManualLayoutByKey(resolvedJobId, groupKey, client)
       : null;
 
     // Rule 3: resolve effective variant.
-    const effectiveVariant = resolveEffectiveVariant(variant, manualLayout);
+    const effectiveVariant = variant === 'manual' && allowStaleManual && manualLayout !== null
+      ? 'manual'
+      : resolveEffectiveVariant(variant, manualLayout);
 
     // Rule 3: for explicit `manual` requests, hard-fail when layout is unavailable.
     if (variant === 'manual' && effectiveVariant !== 'manual') {
@@ -1860,7 +2537,7 @@ export class PgCutRepository implements CutRepositoryPort {
       rawSheets = manualLayout.sheets.map((s) => ({ sheetIndex: s.sheetIndex, placements: s.placements }));
     } else {
       // Auto variant: read from cut_group_sheet.
-      const autoSheets = await this.database.query<{ sheet_index: number; placements: SheetPlacementsJson }>(
+      const autoSheets = await client.query<{ sheet_index: number; placements: SheetPlacementsJson }>(
         `SELECT cgs.sheet_index, cgs.placements FROM cut_group_sheet cgs WHERE cgs.cut_group_id = $1 ORDER BY cgs.sheet_index`,
         [cutGroupId],
       );
@@ -1878,7 +2555,7 @@ export class PgCutRepository implements CutRepositoryPort {
 
     // Rule 7: build live detail lookup for LEGACY rows (pre-Task 4) that lack
     // a frozen label snapshot. New rows written by calculate always have piece.label.
-    const items = await this.database.query<{
+    const items = await client.query<{
       order_detail_id: string | number;
       order_id: string | number;
       detail_number: string | number | null;
@@ -2215,6 +2892,7 @@ export class PgCutRepository implements CutRepositoryPort {
         orderIds?: number[];
         sheetMaterialTypeIds?: Array<number | null>;
         cutGroupIds?: number[];
+        cutResultIds?: number[];
       };
       metadata?: Record<string, unknown> | null;
       before?: Record<string, unknown> | null;
@@ -2239,6 +2917,7 @@ export class PgCutRepository implements CutRepositoryPort {
           orderIds: cleanIds(input.related?.orderIds),
           sheetMaterialTypeIds: cleanIds(input.related?.sheetMaterialTypeIds),
           cutGroupIds: cleanIds(input.related?.cutGroupIds),
+          cutResultIds: cleanIds(input.related?.cutResultIds),
         },
         metadata: input.metadata ?? null,
         before: input.before ?? null,
@@ -2508,6 +3187,11 @@ export class PgCutRepository implements CutRepositoryPort {
   async setJobPdfTemplate(command: SetCutJobPdfTemplateCommand): Promise<CutJobDto> {
     await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      const job = await tx.query(
+        `SELECT cut_job_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      if (job.rows.length === 0) throw new CutJobNotFoundError(command.cutJobId);
       await this.assertPdfTemplateActive(command.pdfTemplate, tx);
       const updated = await tx.query(
         `UPDATE cut_job
@@ -2524,6 +3208,11 @@ export class PgCutRepository implements CutRepositoryPort {
   async setGroupPdfTemplate(command: SetCutGroupPdfTemplateCommand): Promise<CutJobDto> {
     await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      const job = await tx.query(
+        `SELECT cut_job_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      if (job.rows.length === 0) throw new CutJobNotFoundError(command.cutJobId);
       await this.assertPdfTemplateActive(command.pdfTemplate, tx);
       const updated = await tx.query(
         `UPDATE cut_group
@@ -2551,7 +3240,15 @@ export class PgCutRepository implements CutRepositoryPort {
    * read AFTER the transaction commits.
    */
   async saveManualLayout(command: SaveManualLayoutCommand): Promise<CutJobDto> {
-    await this.database.transaction(async (tx) => {
+    const commandPayloadHash = hashCutResultCommand({
+      type: 'manual_save',
+      jobVersion: command.jobVersion,
+      cutGroupId: command.cutGroupId,
+      active: command.active,
+      placements: command.placements,
+      sheetTransforms: command.sheetTransforms ?? [],
+    });
+    const outcome = await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
 
       // ── 1. Load cut_job FOR UPDATE; version guard + recalc-basis guard ──────
@@ -2560,13 +3257,49 @@ export class PgCutRepository implements CutRepositoryPort {
         version: string | number;
         last_calc_basis: string | null;
         last_calc_params: FreecutParams | null;
+        current_cut_result_id: string | number | null;
       }>(
-        `SELECT status, version, last_calc_basis, last_calc_params
+        `SELECT status, version, last_calc_basis, last_calc_params, current_cut_result_id
          FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
         [command.cutJobId],
       );
       const jobRow = jobRes.rows[0];
       if (!jobRow) throw new CutJobNotFoundError(command.cutJobId);
+
+      const priorCommand = await tx.query<{
+        command_type: string;
+        payload_hash: string;
+        status: 'in_progress' | 'completed' | 'failed';
+        cut_result_id: string | number | null;
+        failure_code: string | null;
+      }>(
+        `SELECT command_type, payload_hash, status, cut_result_id, failure_code
+         FROM cut_result_command
+         WHERE cut_job_id = $1 AND command_id = $2::uuid
+         FOR UPDATE`,
+        [command.cutJobId, command.commandId],
+      );
+      const prior = priorCommand.rows[0];
+      if (prior) {
+        if (prior.command_type !== 'manual_save' || prior.payload_hash !== commandPayloadHash) {
+          throw new ApiError(409, 'CUT_RESULT_COMMAND_CONFLICT', 'commandId уже использован с другим запросом');
+        }
+        if (prior.status === 'completed' && prior.cut_result_id !== null) {
+          return { kind: 'deduped' as const };
+        }
+        throw new ApiError(
+          409,
+          prior.status === 'failed' ? (prior.failure_code ?? 'CUT_RESULT_COMMAND_FAILED') : 'CUT_RESULT_COMMAND_IN_PROGRESS',
+          prior.status === 'failed' ? 'Сохранение уже завершилось ошибкой' : 'Сохранение уже выполняется',
+        );
+      }
+
+      await tx.query(
+        `INSERT INTO cut_result_command
+           (cut_job_id, command_id, command_type, payload_hash, status, created_by)
+         VALUES ($1, $2::uuid, 'manual_save', $3, 'in_progress', $4)`,
+        [command.cutJobId, command.commandId, commandPayloadHash, numOrNull(command.currentUser.id)],
+      );
 
       const currentVersion = toNum(jobRow.version);
       if (command.jobVersion !== currentVersion) {
@@ -2779,7 +3512,16 @@ export class PgCutRepository implements CutRepositoryPort {
         sheetsMatchCanonical(existing.sheets.filter((s) => s.placements.pieces.length > 0), canonicalSheets)
       ) {
         // Identical re-save: no version bump, no audit, no outbox.
-        return;
+        if (jobRow.current_cut_result_id === null) {
+          throw new ApiError(409, 'CUT_RESULT_REQUIRED', 'Текущий выполненный раскрой не найден');
+        }
+        await tx.query(
+          `UPDATE cut_result_command
+           SET status = 'completed', cut_result_id = $3, completed_at = now()
+           WHERE cut_job_id = $1 AND command_id = $2::uuid`,
+          [command.cutJobId, command.commandId, toNum(jobRow.current_cut_result_id)],
+        );
+        return { kind: 'saved' as const };
       }
 
       // ── 10. Persist: version bump + prewarm reset + upsert + audit + outbox ─
@@ -2807,13 +3549,25 @@ export class PgCutRepository implements CutRepositoryPort {
         [command.cutJobId, groupKey, JSON.stringify(canonicalSheets), command.active, nextVersion, numOrNull(command.currentUser.id)],
       );
 
+      const cutResult = await this.createCutResult(tx, {
+        cutJobId: command.cutJobId,
+        resultKind: 'manual',
+        commandId: command.commandId,
+        commandPayloadHash,
+        actor: command.currentUser,
+      });
+
       // Audit: before/after metadata + cut_group + order bridge rows.
       const beforeSheets = existing ? (existing.sheets as import('../dto/cut.dto').CutManualSheetDto[]) : [];
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.manualLayoutSaved,
         cutJobId: command.cutJobId,
         requestId: command.requestId,
-        related: { cutGroupIds: [command.cutGroupId], orderIds: groupOrderIds },
+        related: {
+          cutGroupIds: [command.cutGroupId],
+          orderIds: groupOrderIds,
+          cutResultIds: [cutResult.cutResultId],
+        },
         before: {
           cutGroupId: command.cutGroupId,
           active: existing?.is_active ?? null,
@@ -2833,6 +3587,11 @@ export class PgCutRepository implements CutRepositoryPort {
           },
           movedCount: command.placements.length,
           rotatedCount: command.placements.filter((m) => m.rotated).length,
+          cutResultId: cutResult.cutResultId,
+          resultNo: cutResult.resultNo,
+          cutNumber: cutResult.cutNumber,
+          resultKind: cutResult.resultKind,
+          basedOnResultId: cutResult.basedOnResultId,
         },
       });
 
@@ -2853,14 +3612,25 @@ export class PgCutRepository implements CutRepositoryPort {
             requestId: command.requestId ?? null,
             occurredAtJobVersion: nextVersion,
             active: command.active,
+            cutResultId: cutResult.cutResultId,
+            resultNo: cutResult.resultNo,
+            cutNumber: cutResult.cutNumber,
           }),
-          manualLayoutSavedOutboxKey(command.cutJobId, nextVersion),
+          `${CUT_AUDIT_EVENTS.manualLayoutSaved}:${command.cutJobId}:${cutResult.resultNo}`,
         ],
       );
+      return { kind: 'saved' as const };
     });
 
     // Return the fully enriched job (with manualLayout, editorParams, requiresRecalc)
     // read after the transaction commits. Uses this.getJob which queries this.database.
+    if (outcome.kind === 'deduped') {
+      return this.getJob({
+        currentUser: command.currentUser,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+      });
+    }
     return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 }
@@ -3380,6 +4150,224 @@ async function loadJob(
     items: itemDtos,
     groups,
   };
+}
+
+async function loadFrozenJobSnapshot(client: DatabaseClient, cutJobId: number): Promise<CutJobDto> {
+  const base = await loadJob(client, cutJobId, true);
+  const calc = await client.query<{ last_calc_params: FreecutParams | null }>(
+    `SELECT last_calc_params FROM cut_job WHERE cut_job_id = $1`,
+    [cutJobId],
+  );
+  const groupKeys = await client.query<{ cut_group_id: string | number; group_key: string | null }>(
+    `SELECT cut_group_id, group_key FROM cut_group WHERE cut_job_id = $1`,
+    [cutJobId],
+  );
+  const manual = await client.query<{
+    group_key: string;
+    sheets: CutManualSheetDto[];
+    is_active: boolean;
+    is_stale: boolean;
+    version: string | number;
+  }>(
+    `SELECT group_key, sheets, is_active, is_stale, version
+     FROM cut_group_manual_layout WHERE cut_job_id = $1`,
+    [cutJobId],
+  );
+  const keyByGroup = new Map(groupKeys.rows.map((row) => [toNum(row.cut_group_id), row.group_key]));
+  const manualByKey = new Map(manual.rows.map((row) => [row.group_key, row]));
+  const params = calc.rows[0]?.last_calc_params ?? null;
+  const editorParams = params ? { kerfMm: params.kerf_mm, spacingMm: params.spacing_mm } : null;
+  const groups = base.groups.map((group) => {
+    const groupKey = keyByGroup.get(group.cutGroupId) ?? null;
+    const manualRow = groupKey ? manualByKey.get(groupKey) : undefined;
+    const manualLayout: CutManualLayoutDto | null = groupKey && manualRow
+      ? {
+          groupKey,
+          sheets: manualRow.sheets,
+          isActive: manualRow.is_active,
+          isStale: manualRow.is_stale,
+          version: toNum(manualRow.version),
+        }
+      : null;
+    const effective = manualLayout !== null && manualLayout.isActive && !manualLayout.isStale;
+    return {
+      ...group,
+      groupKey,
+      manualLayout,
+      renderToken: `snapshot:g${group.cutGroupId}:m${manualLayout?.version ?? 0}:a${effective ? 1 : 0}`,
+    };
+  });
+  return {
+    ...base,
+    items: base.items.map((item) => ({
+      ...item,
+      detail: item.detail ? { ...item.detail, detailFields: null } : null,
+    })),
+    groups,
+    editorParams,
+    requiresRecalc: false,
+    autoLayoutValidation: { valid: true },
+    renderToken: `snapshot:j${base.version}`,
+  };
+}
+
+function validateFrozenJobSnapshot(snapshot: CutJobDto): void {
+  if (snapshot.groups.length === 0 || snapshot.items.length === 0) {
+    throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', 'Версия раскроя не содержит групп или деталей');
+  }
+  const expected = new Map(snapshot.items.map((item) => [
+    freecutItemId(item.orderDetailId),
+    { qty: item.qty, cutGroupId: item.cutGroupId },
+  ]));
+  const actual = new Map<string, Set<number>>();
+  const snapshotGroupIds = new Set(snapshot.groups.map((group) => group.cutGroupId));
+  if ([...expected.values()].some((item) => item.cutGroupId === null || !snapshotGroupIds.has(item.cutGroupId))) {
+    throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', 'Деталь ссылается на отсутствующую группу');
+  }
+  for (const group of snapshot.groups) {
+    if (group.sheets.length === 0) {
+      throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Группа ${group.cutGroupId} не содержит автоматических листов`);
+    }
+    if (![...expected.values()].some((item) => item.cutGroupId === group.cutGroupId)) {
+      throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Группа ${group.cutGroupId} не содержит деталей`);
+    }
+    const autoVariantInstances = new Set<string>();
+    for (const sheet of group.sheets) {
+      if (
+        sheet.renderSnapshot?.contractVersion !== 'cut_sheet_render_v1'
+        || Object.keys(sheet.renderSnapshot.views).length !== FROZEN_RENDER_VIEW_COUNT
+      ) {
+        throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Лист ${sheet.sheetIndex} не содержит frozen render`);
+      }
+      for (const piece of sheet.placements.pieces) {
+        if (!expected.has(piece.item_id) || expected.get(piece.item_id)?.cutGroupId !== group.cutGroupId) {
+          throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Неизвестная деталь ${piece.item_id}`);
+        }
+        const instances = actual.get(piece.item_id) ?? new Set<number>();
+        if (instances.has(piece.instance)) {
+          throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Дубликат ${piece.item_id}#${piece.instance}`);
+        }
+        autoVariantInstances.add(`${piece.item_id}#${piece.instance}`);
+        instances.add(piece.instance);
+        actual.set(piece.item_id, instances);
+      }
+    }
+    const manual = group.manualLayout;
+    if (manual?.isActive && manual.isStale) {
+      throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', 'Устаревший ручной вариант не может быть активным');
+    }
+    if (manual && manual.sheets.length === 0) {
+      throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', 'Ручной вариант не содержит листов');
+    }
+    if (manual) {
+      const manualVariantInstances = new Set<string>();
+      for (const sheet of manual.sheets) {
+        if (
+          sheet.renderSnapshot?.contractVersion !== 'cut_sheet_render_v1'
+          || Object.keys(sheet.renderSnapshot.views).length !== FROZEN_RENDER_VIEW_COUNT
+        ) {
+          throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', 'Ручной вариант не содержит frozen render');
+        }
+        for (const piece of sheet.placements.pieces) {
+          const key = `${piece.item_id}#${piece.instance}`;
+          if (!expected.has(piece.item_id) || manualVariantInstances.has(key)) {
+            throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Некорректная ручная деталь ${key}`);
+          }
+          manualVariantInstances.add(key);
+        }
+      }
+      if (
+        manualVariantInstances.size !== autoVariantInstances.size
+        || [...autoVariantInstances].some((key) => !manualVariantInstances.has(key))
+      ) {
+        throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', 'Ручной вариант содержит другой набор деталей');
+      }
+    }
+  }
+  for (const item of snapshot.unplaced ?? []) {
+    if (!expected.has(item.itemId)) {
+      throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Неизвестная неразмещённая деталь ${item.itemId}`);
+    }
+    const instances = actual.get(item.itemId) ?? new Set<number>();
+    if (instances.has(item.instance)) {
+      throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Дубликат ${item.itemId}#${item.instance}`);
+    }
+    instances.add(item.instance);
+    actual.set(item.itemId, instances);
+  }
+  for (const [itemId, item] of expected) {
+    if ((actual.get(itemId)?.size ?? 0) !== item.qty) {
+      throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', `Количество экземпляров ${itemId} не совпадает`);
+    }
+  }
+}
+
+function synthesizeLegacyUnplaced(snapshot: CutJobDto): CutJobDto {
+  const placed = new Map<string, Set<number>>();
+  for (const group of snapshot.groups) {
+    for (const sheet of group.sheets) {
+      for (const piece of sheet.placements.pieces) {
+        const instances = placed.get(piece.item_id) ?? new Set<number>();
+        instances.add(piece.instance);
+        placed.set(piece.item_id, instances);
+      }
+    }
+  }
+  const unplaced = snapshot.items.flatMap((item) => {
+    const itemId = freecutItemId(item.orderDetailId);
+    const present = placed.get(itemId) ?? new Set<number>();
+    return Array.from({ length: item.qty }, (_, index) => index + 1)
+      .filter((instance) => !present.has(instance))
+      .map((instance) => ({ itemId, instance, reason: 'legacy_unplaced' }));
+  });
+  return { ...snapshot, unplaced };
+}
+
+function buildCutResultManifest(snapshot: CutJobDto): Record<string, unknown> {
+  return {
+    groups: snapshot.groups.length,
+    items: snapshot.items.length,
+    instances: snapshot.items.reduce((sum, item) => sum + item.qty, 0),
+    unplaced: snapshot.unplaced?.length ?? 0,
+    variants: snapshot.groups.map((group) => ({
+      groupKey: group.groupKey ?? `group:${group.cutGroupId}`,
+      autoSheets: group.sheets.map((sheet) => sheet.sheetIndex),
+      manualSheets: group.manualLayout?.sheets.map((sheet) => sheet.sheetIndex) ?? [],
+      renderContract: 'cut_sheet_render_v1',
+      autoRenderViews: group.sheets.map((sheet) => Object.keys(sheet.renderSnapshot?.views ?? {}).length),
+      manualRenderViews: group.manualLayout?.sheets.map((sheet) => Object.keys(sheet.renderSnapshot?.views ?? {}).length) ?? [],
+      manualState: group.manualLayout
+        ? group.manualLayout.isStale
+          ? 'stale'
+          : group.manualLayout.isActive
+            ? 'active'
+            : 'inactive'
+        : 'none',
+    })),
+  };
+}
+
+function mapCutResultSummary(row: CutResultRow): CutResultSummaryDto {
+  const cutJobId = toNum(row.cut_job_id);
+  const resultNo = toNum(row.result_no);
+  return {
+    cutResultId: toNum(row.cut_result_id),
+    cutJobId,
+    resultNo,
+    cutNumber: `${cutJobId}-${resultNo}`,
+    resultKind: row.result_kind,
+    sourceJobVersion: toNum(row.source_job_version),
+    basedOnResultId: numOrNull(row.based_on_result_id),
+    createdBy: numOrNull(row.created_by),
+    createdByName: row.created_by_name_snapshot,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    totals: row.totals_snapshot,
+    isCurrent: row.is_current === true,
+  };
+}
+
+function hashCutResultCommand(value: unknown): string {
+  return createHash('sha256').update(stableJson(value)).digest('hex');
 }
 
 function uniqueSorted(values: Array<string | null | undefined>): string[] {

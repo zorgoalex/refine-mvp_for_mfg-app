@@ -20,6 +20,7 @@ describe('cutApi manual-layout', () => {
 
   it('PATCHes manual-layout moves to the group route', async () => {
     const body: SaveManualLayoutRequest = {
+      commandId: '11111111-1111-4111-8111-111111111111',
       jobVersion: 2,
       active: true,
       placements: [
@@ -37,7 +38,7 @@ describe('cutApi manual-layout', () => {
   });
 
   it('saveManualLayout rejects invalid cutJobId', async () => {
-    const body: SaveManualLayoutRequest = { jobVersion: 1, active: false, placements: [], sheetTransforms: [] };
+    const body: SaveManualLayoutRequest = { commandId: '11111111-1111-4111-8111-111111111111', jobVersion: 1, active: false, placements: [], sheetTransforms: [] };
     await expect(cutApi.saveManualLayout(0, 9, body)).rejects.toThrow('Invalid cutJobId');
     await expect(cutApi.saveManualLayout(5, -1, body)).rejects.toThrow('Invalid cutJobId');
   });

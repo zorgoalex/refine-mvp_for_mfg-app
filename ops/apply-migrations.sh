@@ -415,8 +415,90 @@ probe_file() {
                      "$(q_col bazis_pdf_table_patterns is_active)" \
                      "$(q_col bazis_pdf_table_patterns version)" ;;
     075_*) probe_075_endstate ;;
+    076_*) probe_076_endstate ;;
+    077_*) probe_077_endstate ;;
+    078_*) probe_078_endstate ;;
+    079_*) probe_all "$(q_tbl cut_result)" "$(q_tbl cut_result_command)" \
+                     "$(q_col cut_job current_cut_result_id)" "$(q_col cut_job next_cut_result_no)" \
+                     "$(q_con uq_cut_result_job_no)" "$(q_con fk_cut_result_command_payload)" ;;
+    080_*) probe_all "$(q_con chk_cut_result_command_identity)" \
+                     "$(q_con chk_cut_result_snapshot_shape)" \
+                     "$(q_con fk_cut_job_current_result_same_job)" \
+                     "$(q_trg trg_cut_result_append_only)" \
+                     "$(q_trg trg_cut_result_command_state)" \
+                     "$(q_trg trg_cut_result_command_terminal_immutable)" \
+                     "$(q_trg trg_cut_result_ledger_state)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
+}
+
+probe_076_endstate() {
+  probe_all "$(q_col bazis_cut_set_details source_bazis_product_name)" \
+            "SELECT NOT EXISTS (
+               SELECT 1
+               FROM bazis_cut_set_details snapshot
+               JOIN order_details source ON source.detail_id = snapshot.source_order_detail_id
+               WHERE snapshot.source_bazis_project_name IS DISTINCT FROM COALESCE(NULLIF(btrim(source.basis_project), ''), '')
+                  OR snapshot.source_bazis_order_no IS DISTINCT FROM COALESCE(NULLIF(btrim(source.basis_project), ''), '')
+                  OR snapshot.source_bazis_product_name IS DISTINCT FROM COALESCE(NULLIF(btrim(source.basis_product), ''), '')
+             );"
+}
+
+probe_077_endstate() {
+  probe_true "SELECT NOT EXISTS (
+    WITH latest_order AS (
+      SELECT DISTINCT ON (r.bazis_project_id)
+             r.bazis_project_id,
+             COALESCE(
+               NULLIF(btrim(r.bazis_order_no), ''),
+               (
+                 SELECT NULLIF(btrim(n.raw_json->>'Заказ'), '')
+                 FROM bazis_nodes n
+                 WHERE n.revision_id = r.bazis_revision_id
+                   AND n.parent_node_id IS NULL
+                   AND NULLIF(btrim(n.raw_json->>'Заказ'), '') IS NOT NULL
+                 ORDER BY n.seq
+                 LIMIT 1
+               )
+             ) AS order_name
+      FROM bazis_project_revisions r
+      ORDER BY r.bazis_project_id, r.revision_no DESC, r.imported_at DESC, r.bazis_revision_id DESC
+    )
+    SELECT 1
+    FROM bazis_projects project
+    JOIN latest_order latest ON latest.bazis_project_id = project.bazis_project_id
+    WHERE latest.order_name IS NOT NULL
+      AND project.name IS DISTINCT FROM latest.order_name
+      AND EXISTS (
+        SELECT 1
+        FROM bazis_project_revisions legacy_revision
+        WHERE legacy_revision.bazis_project_id = project.bazis_project_id
+          AND legacy_revision.product_name = project.name
+      )
+  );"
+}
+
+probe_078_endstate() {
+  probe_all "SELECT EXISTS (
+               SELECT 1
+               FROM information_schema.columns
+               WHERE table_schema='public'
+                 AND table_name='bazis_cut_set_details'
+                 AND column_name='position'
+                 AND data_type='text'
+             );" \
+            "SELECT NOT EXISTS (
+               SELECT 1
+               FROM bazis_cut_set_details snapshot
+               JOIN order_details source ON source.detail_id = snapshot.source_order_detail_id
+               WHERE snapshot.position IS DISTINCT FROM CASE
+                 WHEN NULLIF(btrim(COALESCE(source.basis_product, '')), '') IS NULL
+                  AND NULLIF(btrim(COALESCE(source.basis_designation, '')), '') IS NULL
+                   THEN ''
+                 ELSE COALESCE(NULLIF(btrim(source.basis_product), ''), '')
+                   || '.' || COALESCE(NULLIF(btrim(source.basis_designation), ''), '')
+               END
+             );"
 }
 
 # 075 includes a data rewrite. Columns alone are not enough: a restored
