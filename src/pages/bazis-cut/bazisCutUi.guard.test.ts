@@ -65,4 +65,14 @@ describe('Basis-cut UI integration guards', () => {
     expect(card).toContain("document.querySelector<HTMLElement>('.workspace-tabs')");
     expect(card).toContain('new ResizeObserver(update)');
   });
+
+  it('shows numbered scrollable rows, QR-code after Position, and fixed totals', () => {
+    expect(card).toContain("title: '№'");
+    expect(card).toContain("title: 'QR-code'");
+    expect(card.indexOf("title: 'Позиция'")).toBeLessThan(card.indexOf("title: 'QR-code'"));
+    expect(card).toContain('buildBazisCutQrCode(row)');
+    expect(card).toContain('scroll={{ x: 5480, y: 480 }}');
+    expect(card).toContain('<Table.Summary fixed>');
+    expect(card).toContain('Итого позиций:');
+  });
 });

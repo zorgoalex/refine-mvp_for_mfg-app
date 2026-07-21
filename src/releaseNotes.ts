@@ -30,6 +30,20 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-21",
+    title: "QR-code и итоги набора Базис-раскрой",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В карточке набора появились порядковые номера строк, колонка QR-code после «Позиция» и закреплённая итоговая строка с количеством позиций и деталей.",
+    ],
+    changed: [
+      "Список деталей набора прокручивается внутри карточки, сохраняя заголовки и итоги видимыми.",
+      "Excel теперь хранит исходную позицию отдельно, а QR-code формирует как «Заказ + Изделие + точка + Позиция» без пустых частей.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-20",
     title: "Сохранение записей справочников",
     services: ["ERP"],
