@@ -8855,6 +8855,92 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/orders/{orderId}/labels/cut-map-options:
+    get:
+      tags:
+        - Labels
+      operationId: listOrderLabelCutMapOptions
+      summary: List exact cut placements available for order labels
+      description: Requires both `labels.generate` and `cut.view` permissions.
+      security:
+        - bearerAuth: []
+      x-permissions-all:
+        - labels.generate
+        - cut.view
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Exact immutable cut-result placements grouped by order detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orderId, details]
+                properties:
+                  orderId:
+                    type: integer
+                  details:
+                    type: array
+                    items:
+                      type: object
+                      required: [detailId, detailNumber, detailName, quantity, options]
+                      properties:
+                        detailId: { type: integer }
+                        detailNumber: { type: string, nullable: true }
+                        detailName: { type: string, nullable: true }
+                        quantity: { type: integer, minimum: 0 }
+                        options:
+                          type: array
+                          items:
+                            type: object
+                            required:
+                              - cutResultPlacementId
+                              - detailId
+                              - instance
+                              - cutResultId
+                              - cutJobId
+                              - cutNumber
+                              - cutJobName
+                              - resultNo
+                              - resultKind
+                              - variant
+                              - sheetIndex
+                              - sheetNumber
+                              - createdAt
+                              - isCurrent
+                              - isArchived
+                              - dimensionsMatch
+                            properties:
+                              cutResultPlacementId: { type: integer }
+                              detailId: { type: integer }
+                              instance: { type: integer, minimum: 1 }
+                              cutResultId: { type: integer }
+                              cutJobId: { type: integer }
+                              cutNumber: { type: string }
+                              cutJobName: { type: string }
+                              resultNo: { type: integer, minimum: 1 }
+                              resultKind: { type: string, enum: [auto, manual, legacy] }
+                              variant: { type: string, enum: [auto, manual] }
+                              sheetIndex: { type: integer, minimum: 0 }
+                              sheetNumber: { type: integer, minimum: 1 }
+                              createdAt: { type: string, format: date-time }
+                              isCurrent: { type: boolean }
+                              isArchived: { type: boolean }
+                              dimensionsMatch: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/orders/{orderId}/labels/generate:
     post:
       tags:
