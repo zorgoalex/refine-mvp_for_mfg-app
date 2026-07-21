@@ -4,6 +4,7 @@ import type {
   OrderStatusBoardResponse,
 } from '../../api/types/orderStatusBoardApi.types';
 import {
+  filterBoardColumns,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
@@ -11,6 +12,25 @@ import {
 } from './model';
 
 describe('order status board model', () => {
+  it('hides the completed column only on the order board', () => {
+    const completed = column('completed', [], 0, null);
+    const columns = [
+      column('active', [], 0, null),
+      {
+        ...completed,
+        status: {
+          ...completed.status,
+          name: ' Завершён ',
+        },
+      },
+    ];
+
+    expect(filterBoardColumns('order', columns).map((item) => item.key)).toEqual([
+      'active',
+    ]);
+    expect(filterBoardColumns('production', columns)).toBe(columns);
+  });
+
   it('round-trips shareable URL state and API query', () => {
     const state = parseOrderStatusBoardViewState(
       new URLSearchParams(

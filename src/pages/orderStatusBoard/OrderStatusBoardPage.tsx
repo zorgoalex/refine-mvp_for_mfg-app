@@ -56,6 +56,7 @@ import {
   restoreOrderStatusBoardFocus,
 } from './interaction';
 import {
+  filterBoardColumns,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
@@ -95,6 +96,9 @@ export const OrderStatusBoardPage: React.FC = () => {
   const datasetRevisionRef = useRef(0);
   const actionFocusRef = useRef<HTMLElement | null>(null);
   const focusOrderRef = useRef<number | null>(null);
+  const topScrollbarRef = useRef<HTMLDivElement | null>(null);
+  const topScrollbarTrackRef = useRef<HTMLDivElement | null>(null);
+  const boardViewportRef = useRef<HTMLElement | null>(null);
   const [announcement, setAnnouncement] = useState('');
   const finePointer = useFinePointer();
   const viewStateRef = useRef(viewState);
@@ -369,12 +373,54 @@ export const OrderStatusBoardPage: React.FC = () => {
     [fetchInitial, replacePending, stale, viewState.board],
   );
 
+  const boardColumns = useMemo(
+    () => filterBoardColumns(viewState.board, board?.columns ?? []),
+    [board?.columns, viewState.board],
+  );
   const columns = useMemo(
     () =>
-      (board?.columns ?? []).filter(
-        (column) => !viewState.hideEmpty || column.total > 0,
-      ),
-    [board?.columns, viewState.hideEmpty],
+      boardColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
+    [boardColumns, viewState.hideEmpty],
+  );
+
+  useEffect(() => {
+    const topScrollbar = topScrollbarRef.current;
+    const topScrollbarTrack = topScrollbarTrackRef.current;
+    const viewport = boardViewportRef.current;
+    if (!topScrollbar || !topScrollbarTrack || !viewport) return;
+
+    const updateTrackWidth = () => {
+      topScrollbarTrack.style.width = `${viewport.scrollWidth}px`;
+      topScrollbar.scrollLeft = viewport.scrollLeft;
+    };
+    updateTrackWidth();
+
+    const resizeObserver = new ResizeObserver(updateTrackWidth);
+    resizeObserver.observe(viewport);
+    if (viewport.firstElementChild) {
+      resizeObserver.observe(viewport.firstElementChild);
+    }
+    return () => resizeObserver.disconnect();
+  }, [columns.length, loading, viewKey]);
+
+  const scrollBoardFromTop = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const viewport = boardViewportRef.current;
+      if (viewport && viewport.scrollLeft !== event.currentTarget.scrollLeft) {
+        viewport.scrollLeft = event.currentTarget.scrollLeft;
+      }
+    },
+    [],
+  );
+
+  const scrollTopFromBoard = useCallback(
+    (event: React.UIEvent<HTMLElement>) => {
+      const topScrollbar = topScrollbarRef.current;
+      if (topScrollbar && topScrollbar.scrollLeft !== event.currentTarget.scrollLeft) {
+        topScrollbar.scrollLeft = event.currentTarget.scrollLeft;
+      }
+    },
+    [],
   );
 
   const dateRange: [Dayjs | null, Dayjs | null] = [
@@ -505,7 +551,27 @@ export const OrderStatusBoardPage: React.FC = () => {
           {announcement}
         </div>
 
+        {columns.length > 0 && (
+          <div
+            ref={topScrollbarRef}
+            className="status-board-scrollbar"
+            role="region"
+            aria-label="Верхняя горизонтальная прокрутка доски"
+            aria-controls="status-board-viewport"
+            tabIndex={0}
+            onScroll={scrollBoardFromTop}
+          >
+            <div
+              ref={topScrollbarTrackRef}
+              className="status-board-scrollbar__track"
+              aria-hidden="true"
+            />
+          </div>
+        )}
+
         <section
+          id="status-board-viewport"
+          ref={boardViewportRef}
           className="status-board-viewport"
           aria-label={
             viewState.board === 'order'
@@ -513,6 +579,7 @@ export const OrderStatusBoardPage: React.FC = () => {
               : 'Доска производственных статусов'
           }
           aria-busy={loading}
+          onScroll={scrollTopFromBoard}
         >
           {loading && !board ? (
             <div className="status-board-loading">
@@ -527,7 +594,7 @@ export const OrderStatusBoardPage: React.FC = () => {
                   key={column.key}
                   board={viewState.board}
                   column={column}
-                  allColumns={board?.columns ?? []}
+                  allColumns={boardColumns}
                   finePointer={finePointer}
                   mutationsEnabled={
                     featureFlags.useBackendProductionActions &&

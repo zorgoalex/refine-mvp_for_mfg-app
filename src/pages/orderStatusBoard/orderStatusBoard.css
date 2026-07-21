@@ -55,6 +55,25 @@
   cursor: pointer;
 }
 
+.status-board-scrollbar {
+  min-height: 16px;
+  flex: 0 0 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+}
+
+.status-board-scrollbar:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}
+
+.status-board-scrollbar__track {
+  height: 1px;
+}
+
 .status-board-viewport {
   min-height: 0;
   flex: 1;

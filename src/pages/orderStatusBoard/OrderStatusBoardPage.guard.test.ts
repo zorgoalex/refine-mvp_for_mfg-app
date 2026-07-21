@@ -37,6 +37,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('scroll-snap-type: x mandatory');
   });
 
+  it('keeps the upper scrollbar synchronized with the board viewport', () => {
+    expect(page).toContain('topScrollbarTrack.style.width');
+    expect(page).toContain('scrollBoardFromTop');
+    expect(page).toContain('scrollTopFromBoard');
+    expect(page).toContain('aria-controls="status-board-viewport"');
+    expect(css).toContain('.status-board-scrollbar');
+    expect(css).toContain('overflow-x: auto');
+  });
+
   it('uses the application currency instead of a hardcoded foreign currency', () => {
     expect(page).toContain('currency: CURRENCY_CODE');
     expect(page).not.toContain("currency: 'RUB'");

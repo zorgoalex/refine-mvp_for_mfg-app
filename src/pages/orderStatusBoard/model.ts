@@ -1,8 +1,11 @@
 import type {
+  OrderStatusBoardColumn,
   OrderStatusBoardQuery,
   OrderStatusBoardResponse,
   OrderStatusBoardType,
 } from '../../api/types/orderStatusBoardApi.types';
+
+const COMPLETED_ORDER_STATUS_NAMES = new Set(['завершен', 'завершён']);
 
 export interface OrderStatusBoardViewState {
   board: OrderStatusBoardType;
@@ -12,6 +15,19 @@ export interface OrderStatusBoardViewState {
   plannedFrom?: string;
   plannedTo?: string;
   hideEmpty: boolean;
+}
+
+export function filterBoardColumns(
+  board: OrderStatusBoardType,
+  columns: OrderStatusBoardColumn[],
+): OrderStatusBoardColumn[] {
+  if (board !== 'order') return columns;
+  return columns.filter(
+    (column) =>
+      !COMPLETED_ORDER_STATUS_NAMES.has(
+        column.status.name.trim().toLocaleLowerCase('ru-RU'),
+      ),
+  );
 }
 
 export function parseOrderStatusBoardViewState(

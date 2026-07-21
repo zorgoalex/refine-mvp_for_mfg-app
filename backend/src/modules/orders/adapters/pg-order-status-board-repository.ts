@@ -95,6 +95,10 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
     const assignedSql = needsAssignment
       ? assignmentExistsSql(requireActorIndex(actorIndex))
       : 'FALSE';
+    const boardFilterJoinSql =
+      command.query.board === 'order'
+        ? 'JOIN order_statuses board_order_status ON board_order_status.order_status_id = o.order_status_id'
+        : '';
     const filters = [
       'o.delete_flag = false',
       buildReadScopePredicate(
@@ -103,6 +107,9 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
         assignedSql,
       ),
     ];
+    if (command.query.board === 'order') {
+      filters.push(visibleOrderStatusSql('board_order_status'));
+    }
 
     appendUserFilters(filters, params, command.query, actorIndex, assignedSql);
     const filterJoinsSql = command.query.search
@@ -135,6 +142,7 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
           o.planned_completion_date,
           ${assignedSql} AS current_user_assigned
         FROM orders o
+        ${boardFilterJoinSql}
         ${filterJoinsSql}
         WHERE ${filters.join('\n          AND ')}
       ),
@@ -357,6 +365,7 @@ function buildStatusCatalogSql(query: OrderStatusBoardQuery, params: unknown[]):
         COALESCE(os.is_active, true) AS status_is_active
       FROM order_statuses os
       WHERE ${where}
+        AND ${visibleOrderStatusSql('os')}
     `;
   }
 
@@ -397,6 +406,10 @@ function buildStatusCatalogSql(query: OrderStatusBoardQuery, params: unknown[]):
     FROM production_statuses ps
     WHERE ${productionWhere}
   `;
+}
+
+function visibleOrderStatusSql(alias: string): string {
+  return `LOWER(BTRIM(${alias}.order_status_name)) NOT IN ('завершен', 'завершён')`;
 }
 
 function buildCursorPredicate(params: unknown[], cursor: BoardCursor): string {

@@ -170,6 +170,31 @@ describe('PgOrderStatusBoardRepository', () => {
     expect(database.queries[0]?.params).toEqual([25]);
   });
 
+  it('excludes the completed status from the order catalog and order scan', async () => {
+    const database = fakeDatabase([]);
+
+    await new PgOrderStatusBoardRepository(database.client).getBoard({
+      currentUser: user('admin'),
+      query: {
+        board: 'order',
+        limit: 24,
+        onlyMyOrders: false,
+        overdueOnly: false,
+      },
+    });
+
+    const sql = database.queries[0]?.text ?? '';
+    expect(sql).toContain(
+      'JOIN order_statuses board_order_status ON board_order_status.order_status_id = o.order_status_id',
+    );
+    expect(sql).toContain(
+      "LOWER(BTRIM(board_order_status.order_status_name)) NOT IN ('завершен', 'завершён')",
+    );
+    expect(sql).toContain(
+      "LOWER(BTRIM(os.order_status_name)) NOT IN ('завершен', 'завершён')",
+    );
+  });
+
   it('keeps an inactive referenced status visible but read-only as a destination', async () => {
     const database = fakeDatabase([
       {
