@@ -2,10 +2,17 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Checkbox, Modal, Select, Space, Typography, message } from 'antd';
 import { DownloadOutlined, TagsOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../../../api/labelsApi';
-import type { LabelTemplate, OrderLabelsPreview } from '../../../../api/types/labelsApi.types';
+import type { LabelCutMapOption, LabelTemplate, OrderLabelCutMapOptions, OrderLabelsPreview } from '../../../../api/types/labelsApi.types';
 import { can } from '../../../../utils/permissions';
 import { saveLabelBlob } from './labelDownloads';
 import { LabelSvgPreviewFrame } from './LabelSvgPreviewFrame';
+import {
+  buildDefaultOrderCutMapSelection,
+  buildOrderCutMapLabelRows,
+  buildOrderCutMapSelections,
+  missingOrderCutMapRows,
+  type OrderCutMapSelectionState,
+} from './orderCutMapSelection';
 
 const { Text } = Typography;
 
@@ -60,6 +67,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   detailOptions = [],
 }) => {
   const canGenerate = can('labels.generate');
+  const canViewCut = can('cut.view');
   const [open, setOpen] = useState(false);
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
@@ -68,6 +76,9 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   const [preview, setPreview] = useState<OrderLabelsPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [cutMapOptions, setCutMapOptions] = useState<OrderLabelCutMapOptions | null>(null);
+  const [cutMapOptionsLoading, setCutMapOptionsLoading] = useState(false);
+  const [cutMapSelection, setCutMapSelection] = useState<OrderCutMapSelectionState>({});
   const previewRequestRef = useRef(0);
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.labelTemplateId === templateId) ?? null,
@@ -76,6 +87,24 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   const previewAspectRatio = selectedTemplate
     ? selectedTemplate.canvasWidthMm / selectedTemplate.canvasHeightMm
     : 1;
+  const hasCutMap = Boolean(selectedTemplate?.elements.some((element) => element.kind === 'cut_map'));
+  const cutMapRows = useMemo(() => buildOrderCutMapLabelRows(cutMapOptions), [cutMapOptions]);
+  const previewCutMapSelections = useMemo(
+    () => hasCutMap ? buildOrderCutMapSelections(cutMapRows, cutMapSelection, previewDetailId) : undefined,
+    [cutMapRows, cutMapSelection, hasCutMap, previewDetailId],
+  );
+  const generationCutMapSelections = useMemo(
+    () => hasCutMap ? buildOrderCutMapSelections(cutMapRows, cutMapSelection) : undefined,
+    [cutMapRows, cutMapSelection, hasCutMap],
+  );
+  const missingPreviewCutMaps = useMemo(
+    () => hasCutMap ? missingOrderCutMapRows(cutMapRows, cutMapSelection, previewDetailId) : [],
+    [cutMapRows, cutMapSelection, hasCutMap, previewDetailId],
+  );
+  const missingGenerationCutMaps = useMemo(
+    () => hasCutMap ? missingOrderCutMapRows(cutMapRows, cutMapSelection) : [],
+    [cutMapRows, cutMapSelection, hasCutMap],
+  );
   const detailFilters = useMemo(
     () => previewDetailId ? { detailIds: [previewDetailId] } : undefined,
     [previewDetailId],
@@ -94,8 +123,43 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
       .finally(() => setLoading(false));
   }, [initialDetailId, open]);
 
+  useEffect(() => {
+    if (!open || !hasCutMap || !canViewCut) {
+      setCutMapOptions(null);
+      setCutMapSelection({});
+      setCutMapOptionsLoading(false);
+      return;
+    }
+    let active = true;
+    setPreview(null);
+    setCutMapOptions(null);
+    setCutMapSelection({});
+    setCutMapOptionsLoading(true);
+    labelsApi.listOrderCutMapOptions(orderId)
+      .then((next) => {
+        if (!active) return;
+        const rows = buildOrderCutMapLabelRows(next);
+        setCutMapOptions(next);
+        setCutMapSelection(buildDefaultOrderCutMapSelection(rows));
+      })
+      .catch(() => {
+        if (active) message.error('Не удалось загрузить раскрои для бирок');
+      })
+      .finally(() => {
+        if (active) setCutMapOptionsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [canViewCut, hasCutMap, open, orderId, selectedTemplate?.labelTemplateId]);
+
   const runPreview = useCallback(async () => {
-    if (!selectedTemplate || isOrderDirty) return;
+    if (
+      !selectedTemplate
+      || isOrderDirty
+      || cutMapOptionsLoading
+      || (hasCutMap && (cutMapOptions === null || missingPreviewCutMaps.length > 0))
+    ) return;
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
     setPreview(null);
@@ -106,6 +170,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         templateVersion: selectedTemplate.version,
         detailFilters,
         useBasisFields,
+        cutMapSelections: previewCutMapSelections,
       });
       if (previewRequestRef.current === requestId) {
         setPreview(nextPreview);
@@ -119,21 +184,22 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         setLoading(false);
       }
     }
-  }, [detailFilters, isOrderDirty, orderId, selectedTemplate, useBasisFields]);
+  }, [cutMapOptions, cutMapOptionsLoading, detailFilters, hasCutMap, isOrderDirty, missingPreviewCutMaps.length, orderId, previewCutMapSelections, selectedTemplate, useBasisFields]);
 
   useEffect(() => {
-    if (!open || !selectedTemplate || isOrderDirty || generating) return;
+    if (!open || !selectedTemplate || isOrderDirty || generating || cutMapOptionsLoading) return;
     void runPreview();
   }, [generating, open, previewDetailId, runPreview, selectedTemplate, isOrderDirty, useBasisFields]);
 
   const runGenerate = async () => {
-    if (!selectedTemplate || !preview || isOrderDirty) return;
+    if (!selectedTemplate || !preview || isOrderDirty || missingGenerationCutMaps.length > 0) return;
     setGenerating(true);
     try {
       const generationPreview = await labelsApi.previewOrderLabels(orderId, {
         templateId: selectedTemplate.labelTemplateId,
         templateVersion: selectedTemplate.version,
         useBasisFields,
+        cutMapSelections: generationCutMapSelections,
       });
       const generation = await labelsApi.generateOrderLabels(orderId, {
         templateId: selectedTemplate.labelTemplateId,
@@ -141,6 +207,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         previewToken: generationPreview.previewToken,
         exportFormats: selectedTemplate.defaultExportFormats,
         useBasisFields,
+        cutMapSelections: generationCutMapSelections,
         idempotencyKey: `order-labels-generate-${orderId}-${Date.now()}`,
       });
       const downloaded = await labelsApi.downloadGeneration(orderId, generation.generationId);
@@ -171,10 +238,10 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         open={open}
         onCancel={() => !generating && setOpen(false)}
         footer={[
-          <Button key="preview" onClick={runPreview} loading={loading} disabled={!selectedTemplate || isOrderDirty || generating}>
+          <Button key="preview" onClick={runPreview} loading={loading || cutMapOptionsLoading} disabled={!selectedTemplate || isOrderDirty || generating || missingPreviewCutMaps.length > 0}>
             Предпросмотр
           </Button>,
-          <Button key="generate" type="primary" icon={<DownloadOutlined />} onClick={runGenerate} loading={generating} disabled={!preview || isOrderDirty}>
+          <Button key="generate" type="primary" icon={<DownloadOutlined />} onClick={runGenerate} loading={generating} disabled={!preview || isOrderDirty || cutMapOptionsLoading || missingGenerationCutMaps.length > 0}>
             Сформировать и скачать
           </Button>,
         ]}
@@ -225,6 +292,48 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
           >
             Использовать поля базис проекта
           </Checkbox>
+          {hasCutMap && (
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Text strong>Раскрой для миниатюры</Text>
+              <Text type="secondary">
+                Для каждого физического экземпляра выберите результат раскроя. Лист и положение детали определяются автоматически.
+              </Text>
+              {!canViewCut && <Alert type="error" showIcon message="Нет права на просмотр раскроев" />}
+              {cutMapOptionsLoading && <Text type="secondary">Загрузка раскроев...</Text>}
+              {!cutMapOptionsLoading && missingGenerationCutMaps.length > 0 && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={`Не выбран раскрой для ${missingGenerationCutMaps.length} бирок`}
+                  description="Бирки с пустой или устаревшей картой не формируются. Рассчитайте раскрой либо выберите другой результат."
+                />
+              )}
+              {!cutMapOptionsLoading && cutMapRows.length > 0 && (
+                <div style={{ maxHeight: 260, overflowY: 'auto', paddingRight: 4 }}>
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {cutMapRows.map((row) => (
+                      <div key={row.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(300px, 1.5fr)', gap: 8, alignItems: 'center' }}>
+                        <Text ellipsis={{ tooltip: row.label }}>{row.label}</Text>
+                        <Select
+                          style={{ width: '100%' }}
+                          value={cutMapSelection[row.key]}
+                          status={row.options.some((option) => option.cutResultPlacementId === cutMapSelection[row.key]) ? undefined : 'warning'}
+                          placeholder="Выберите раскрой"
+                          onChange={(cutResultPlacementId) => {
+                            setCutMapSelection((current) => ({ ...current, [row.key]: cutResultPlacementId }));
+                          }}
+                          options={row.options.map((option) => ({
+                            value: option.cutResultPlacementId,
+                            label: cutMapOptionLabel(option),
+                          }))}
+                        />
+                      </div>
+                    ))}
+                  </Space>
+                </div>
+              )}
+            </Space>
+          )}
           {preview && selectedTemplate && (
             <OrderLabelGeneratePreviewSurface preview={preview} template={selectedTemplate} />
           )}
@@ -233,3 +342,12 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     </>
   );
 };
+
+function cutMapOptionLabel(option: LabelCutMapOption): string {
+  const flags = [
+    option.isCurrent ? 'текущий' : null,
+    option.isArchived ? 'архив' : null,
+    option.variant === 'manual' ? 'ручной' : 'авто',
+  ].filter(Boolean).join(', ');
+  return `${option.cutNumber} · ${option.cutJobName} · лист ${option.sheetNumber}${flags ? ` · ${flags}` : ''}`;
+}

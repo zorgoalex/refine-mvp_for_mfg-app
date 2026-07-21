@@ -15,6 +15,66 @@ describe('label renderer', () => {
     expect(svg).toContain('<rect ');
   });
 
+  it('fits a frozen cut sheet into a resizable cut-map box and highlights the exact placement', () => {
+    const base = template();
+    base.rendererCapabilities = ['if_else_v1', 'typography_v1', 'cut_map_v1'];
+    base.elements = [{
+      labelTemplateElementId: 10,
+      elementKey: 'cut-map',
+      kind: 'cut_map',
+      sourceField: null,
+      staticText: null,
+      xMm: 5,
+      yMm: 7,
+      widthMm: 42,
+      heightMm: 18,
+      rotationDeg: 0,
+      zIndex: 0,
+      style: {
+        cutMap: {
+          version: 1,
+          fit: 'contain',
+          highlightFill: '#ffd666',
+          highlightStroke: '#d4380d',
+        },
+      },
+      condition: {},
+    }];
+    const mapped: LabelRow = {
+      ...row({}),
+      cutMap: {
+        cutResultPlacementId: 77,
+        cutResultSheetMapId: 9,
+        cutResultId: 4,
+        cutJobId: 12,
+        cutNumber: '12-3',
+        cutJobName: 'Кухня',
+        variant: 'auto',
+        sheetIndex: 8,
+        sheetNumber: 2,
+        sheetWidthMm: 1000,
+        sheetHeightMm: 500,
+        xMm: 120,
+        yMm: 80,
+        widthMm: 200,
+        heightMm: 50,
+      },
+    };
+
+    const svg = renderSvgPages(base, [mapped], new Map([
+      [9, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500"><rect x="0" y="0" width="1000" height="500" fill="#fff"/></svg>'],
+    ])).pages[0];
+
+    expect(svg).toContain('data-label-element-kind="cut_map"');
+    expect(svg).toContain('width="42" height="18" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet"');
+    expect(svg).toContain('x="120" y="80" width="200" height="50" fill="#ffd666"');
+    expect(svg).toContain('stroke="#d4380d"');
+
+    expect(() => renderSvgPages(base, [mapped], new Map([
+      [9, '<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="1" height="1" onload="alert(1)"/></svg>'],
+    ]))).toThrow(/Invalid frozen cut-map asset/);
+  });
+
   it('aligns text values inside their template box with center as the default', () => {
     const base = template();
     base.elements = [
@@ -266,14 +326,18 @@ describe('label renderer', () => {
   });
 
   it('renders content-bearing BMP/PNG and sample-compatible BMP-backed .emf entries in a ZIP', async () => {
-    const zip = await renderLabelsZip({
+    const input = {
       generationId: 7,
       orderId: 42,
       template: template(),
       rows: [row({ 'bazis.name': 'Side' })],
-      formats: ['bmp', 'emf', 'png'],
+      formats: ['bmp', 'emf', 'png'] as Array<'bmp' | 'emf' | 'png'>,
       generatedAt: '2026-06-24T00:00:00.000Z',
-    });
+    };
+    const zip = await renderLabelsZip(input);
+    const repeatedZip = await renderLabelsZip(input);
+
+    expect(repeatedZip.equals(zip)).toBe(true);
 
     const parsed = await JSZip.loadAsync(zip);
     const bmp = await parsed.file('labels/label1.bmp')?.async('nodebuffer');

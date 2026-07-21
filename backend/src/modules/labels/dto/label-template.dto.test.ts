@@ -115,4 +115,50 @@ describe('label template DTO advanced element contract', () => {
     });
     expect(parsed.elements[0].style).toEqual({ fontSize: 11, pluginLegacyMarker: { keep: true } });
   });
+
+  it('accepts one adaptive cut-map placeholder with strict v1 style', () => {
+    const parsed = createLabelTemplateSchema.parse({
+      ...base,
+      elements: [{
+        elementKey: 'cut-map',
+        kind: 'cut_map',
+        sourceField: null,
+        staticText: null,
+        xMm: 2,
+        yMm: 3,
+        widthMm: 45,
+        heightMm: 22,
+        style: {
+          cutMap: {
+            version: 1,
+            fit: 'contain',
+            highlightFill: '#ffd666',
+            highlightStroke: '#d4380d',
+          },
+        },
+      }],
+    });
+    expect(parsed.elements[0]).toMatchObject({ kind: 'cut_map', widthMm: 45, heightMm: 22 });
+  });
+
+  it.each([
+    { version: 2, fit: 'contain', highlightFill: '#ffd666', highlightStroke: '#d4380d' },
+    { version: 1, fit: 'stretch', highlightFill: '#ffd666', highlightStroke: '#d4380d' },
+    { version: 1, fit: 'contain', highlightFill: 'yellow', highlightStroke: '#d4380d' },
+  ])('rejects malformed cut-map style: %j', (cutMap) => {
+    expect(() => createLabelTemplateSchema.parse({
+      ...base,
+      elements: [{
+        elementKey: 'cut-map',
+        kind: 'cut_map',
+        sourceField: null,
+        staticText: null,
+        xMm: 2,
+        yMm: 3,
+        widthMm: 45,
+        heightMm: 22,
+        style: { cutMap },
+      }],
+    })).toThrow();
+  });
 });

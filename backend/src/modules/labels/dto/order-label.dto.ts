@@ -28,12 +28,19 @@ const detailFiltersSchema = z
   })
   .strict();
 
+const cutMapSelectionSchema = z.object({
+  detailId: z.number().int().positive(),
+  copyIndex: z.number().int().positive(),
+  cutResultPlacementId: z.number().int().positive(),
+}).strict();
+
 export const previewOrderLabelsSchema = z
   .object({
     templateId: z.number().int().positive(),
     templateVersion: z.number().int().min(1),
     detailFilters: detailFiltersSchema.optional(),
     useBasisFields: z.boolean().optional().default(true),
+    cutMapSelections: z.array(cutMapSelectionSchema).max(5000).optional(),
   })
   .strict();
 

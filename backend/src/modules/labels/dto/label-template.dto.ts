@@ -44,6 +44,12 @@ const editorMetadataV1Schema = z.object({
   boundsMode: z.enum(['auto', 'manual']),
   groupId: z.string().trim().min(1).max(100).regex(/^[\p{L}\p{N}._:-]+$/u).optional(),
 }).strict();
+const cutMapV1Schema = z.object({
+  version: z.literal(1),
+  fit: z.literal('contain'),
+  highlightFill: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  highlightStroke: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+}).strict();
 const labelElementStyleSchema = jsonObjectSchema.superRefine((style, ctx) => {
   // Existing unversioned keys are intentionally preserved. Only the new,
   // versioned namespaces are strict, so an old template can still be edited.
@@ -53,8 +59,11 @@ const labelElementStyleSchema = jsonObjectSchema.superRefine((style, ctx) => {
   if (Object.prototype.hasOwnProperty.call(style, 'editor')) {
     addNestedSchemaIssues(editorMetadataV1Schema.safeParse(style.editor), ctx, ['editor']);
   }
+  if (Object.prototype.hasOwnProperty.call(style, 'cutMap')) {
+    addNestedSchemaIssues(cutMapV1Schema.safeParse(style.cutMap), ctx, ['cutMap']);
+  }
   for (const [key, value] of Object.entries(style)) {
-    if (key === 'typography' || key === 'editor') continue;
+    if (key === 'typography' || key === 'editor' || key === 'cutMap') continue;
     if (
       value
       && typeof value === 'object'
@@ -80,7 +89,7 @@ function addNestedSchemaIssues(
 export const labelTemplateElementInputSchema = z
   .object({
     elementKey: z.string().trim().min(1).max(100),
-    kind: z.enum(['text', 'line', 'rect', 'qr']),
+    kind: z.enum(['text', 'line', 'rect', 'qr', 'cut_map']),
     sourceField: z.string().trim().min(1).max(200).nullable().optional(),
     staticText: z.string().max(1000).nullable().optional(),
     xMm: z.number().min(0),
@@ -96,6 +105,17 @@ export const labelTemplateElementInputSchema = z
   .superRefine((element, ctx) => {
     if (element.condition && 'type' in element.condition && element.condition.type === 'if_else' && element.kind !== 'text') {
       ctx.addIssue({ code: 'custom', path: ['condition'], message: 'if_else is supported only for text elements' });
+    }
+    if (element.kind === 'cut_map') {
+      if (!cutMapV1Schema.safeParse(element.style?.cutMap).success) {
+        ctx.addIssue({ code: 'custom', path: ['style', 'cutMap'], message: 'cut_map requires cutMap v1 style' });
+      }
+      if (element.widthMm <= 0 || element.heightMm <= 0) {
+        ctx.addIssue({ code: 'custom', path: ['widthMm'], message: 'cut_map dimensions must be positive' });
+      }
+      if (element.sourceField != null || element.staticText != null) {
+        ctx.addIssue({ code: 'custom', path: ['sourceField'], message: 'cut_map cannot bind text fields' });
+      }
     }
   });
 

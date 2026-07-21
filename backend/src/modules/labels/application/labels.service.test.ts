@@ -95,6 +95,35 @@ describe('LabelsService', () => {
     expect(repo.createTemplate).toHaveBeenCalledOnce();
   });
 
+  it('requires both label generation and cut viewing for cut-map choices', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    const query = { currentUser: manager, requestId: 'req-cut-map', orderId: 42 };
+
+    await expect(service.listOrderCutMapOptions(query)).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    expect(repo.listOrderCutMapOptions).not.toHaveBeenCalled();
+
+    await expect(service.listOrderCutMapOptions({
+      ...query,
+      currentUser: { ...manager, permissions: [...manager.permissions, 'cut.view'] },
+    })).resolves.toMatchObject({ orderId: 42 });
+
+    const preview = {
+      ...query,
+      input: {
+        templateId: 1,
+        templateVersion: 1,
+        cutMapSelections: [{ detailId: 11, copyIndex: 1, cutResultPlacementId: 99 }],
+      },
+    };
+    await expect(service.previewOrderLabels(preview)).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    expect(repo.previewOrderLabels).not.toHaveBeenCalled();
+    await expect(service.previewOrderLabels({
+      ...preview,
+      currentUser: { ...manager, permissions: [...manager.permissions, 'cut.view'] },
+    })).resolves.toBeUndefined();
+  });
+
   it('rejects unsupported field bindings before repository writes', async () => {
     const repo = fakeRepo();
     const service = new LabelsService({ repo });
@@ -502,6 +531,7 @@ function fakeRepo(): LabelsPort {
     deleteTemplate: vi.fn(),
     getOrderLabelData: vi.fn(),
     updateOrderLabelData: vi.fn(),
+    listOrderCutMapOptions: vi.fn(async (query) => ({ orderId: query.orderId, details: [] })),
     previewOrderLabels: vi.fn(),
     generateOrderLabels: vi.fn(),
     previewDetailLabels: vi.fn(async () => ({

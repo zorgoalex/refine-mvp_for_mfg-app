@@ -17,7 +17,7 @@ describe('081 page-size preferences migration', () => {
 
   it('lets auto migration mode detect an already-applied schema', () => {
     expect(runner).toMatch(
-      /081_\*\)\s*probe_all\s+"\$\(q_col user_preferences page_size_preferences\)"/,
+      /081_user_preferences_page_sizes\*\)\s*probe_all\s+"\$\(q_col user_preferences page_size_preferences\)"/,
     );
   });
 });
