@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-21",
+    title: "Плавная навигация между разделами",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "При переходе между разделами меню, шапка, вкладки и подвал больше не исчезают; во время загрузки нового экрана placeholder показывается только в рабочей области.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-20",
     title: "Сохранение записей справочников",
     services: ["ERP"],
