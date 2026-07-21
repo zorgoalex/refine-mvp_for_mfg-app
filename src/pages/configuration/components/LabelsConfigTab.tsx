@@ -28,6 +28,7 @@ import { collectDuplicateQrNames, qrDraftFromElement, qrElementFromLibrary, rows
 import {
   customFieldRowsFromSchema,
   customFieldRowsToSchema,
+  describeLabelFieldSource,
   resolveLatestStateUpdate,
   snapElementCenters,
   type AlignmentGuide,
@@ -2761,46 +2762,42 @@ function FieldPalette({
                   const used = usedFieldIds?.has(field.id) ?? false;
                   const health = fieldHealth?.get(field.id);
                   const unavailable = health === 'missing';
+                  const source = describeLabelFieldSource(field);
                   return (
-                    <Tag
+                    <Tooltip
                       key={field.id}
-                      color={fieldHealthColor(health) ?? (used ? 'processing' : undefined)}
-                      title={fieldHealthTitle(health)}
-                      draggable={!disabled && !unavailable}
-                      onDragStart={(event) => {
-                        if (!disabled && !unavailable) onBeginDrag?.(field);
-                        event.dataTransfer.setData('application/x-label-field', field.id);
-                        event.dataTransfer.setData('text/plain', field.id);
-                        event.dataTransfer.effectAllowed = 'copy';
-                      }}
-                      onMouseDown={(event) => {
-                        if (disabled || unavailable) return;
-                        event.preventDefault();
-                        onBeginDrag?.(field);
-                      }}
-                      onMouseDownCapture={(event) => {
-                        if (disabled || unavailable) return;
-                        event.preventDefault();
-                        onBeginDrag?.(field);
-                      }}
-                      onPointerDown={(event) => {
-                        if (disabled || unavailable) return;
-                        event.preventDefault();
-                        onBeginDrag?.(field);
-                      }}
-                      onPointerDownCapture={(event) => {
-                        if (disabled || unavailable) return;
-                        event.preventDefault();
-                        onBeginDrag?.(field);
-                      }}
-                      style={{
-                        cursor: disabled || unavailable ? 'default' : 'grab',
-                        userSelect: 'none',
-                        fontWeight: used ? 600 : 400,
-                      }}
+                      mouseEnterDelay={0.25}
+                      title={
+                        <Space direction="vertical" size={2}>
+                          <div style={{ fontWeight: 600 }}>{field.category}: {field.label}</div>
+                          <div>{source.entity}</div>
+                          <code style={{ color: 'inherit', fontSize: 11 }}>{source.databasePath}</code>
+                          <div style={{ opacity: 0.82, fontSize: 11 }}>
+                            Поле шаблона: <code style={{ color: 'inherit' }}>{field.id}</code>
+                            {' · '}
+                            Тип: {labelFieldTypeName(field.type)}
+                          </div>
+                          {fieldHealthTitle(health) && (
+                            <div style={{ color: '#ffd666', fontSize: 11 }}>{fieldHealthTitle(health)}</div>
+                          )}
+                        </Space>
+                      }
                     >
-                      <span
+                      <Tag
+                        color={fieldHealthColor(health) ?? (used ? 'processing' : undefined)}
+                        draggable={!disabled && !unavailable}
+                        onDragStart={(event) => {
+                          if (!disabled && !unavailable) onBeginDrag?.(field);
+                          event.dataTransfer.setData('application/x-label-field', field.id);
+                          event.dataTransfer.setData('text/plain', field.id);
+                          event.dataTransfer.effectAllowed = 'copy';
+                        }}
                         onMouseDown={(event) => {
+                          if (disabled || unavailable) return;
+                          event.preventDefault();
+                          onBeginDrag?.(field);
+                        }}
+                        onMouseDownCapture={(event) => {
                           if (disabled || unavailable) return;
                           event.preventDefault();
                           onBeginDrag?.(field);
@@ -2810,11 +2807,34 @@ function FieldPalette({
                           event.preventDefault();
                           onBeginDrag?.(field);
                         }}
-                        style={{ display: 'inline-block' }}
+                        onPointerDownCapture={(event) => {
+                          if (disabled || unavailable) return;
+                          event.preventDefault();
+                          onBeginDrag?.(field);
+                        }}
+                        style={{
+                          cursor: disabled || unavailable ? 'default' : 'grab',
+                          userSelect: 'none',
+                          fontWeight: used ? 600 : 400,
+                        }}
                       >
-                        {field.label}
-                      </span>
-                    </Tag>
+                        <span
+                          onMouseDown={(event) => {
+                            if (disabled || unavailable) return;
+                            event.preventDefault();
+                            onBeginDrag?.(field);
+                          }}
+                          onPointerDown={(event) => {
+                            if (disabled || unavailable) return;
+                            event.preventDefault();
+                            onBeginDrag?.(field);
+                          }}
+                          style={{ display: 'inline-block' }}
+                        >
+                          {field.label}
+                        </span>
+                      </Tag>
+                    </Tooltip>
                   );
                 })}
               </div>
@@ -2824,6 +2844,13 @@ function FieldPalette({
       </div>
     </Space>
   );
+}
+
+function labelFieldTypeName(type: LabelFieldCatalogItem['type']): string {
+  if (type === 'number') return 'число';
+  if (type === 'boolean') return 'да/нет';
+  if (type === 'date') return 'дата';
+  return 'текст';
 }
 
 function groupFieldsByCategory(fields: LabelFieldCatalogItem[]): Array<[string, LabelFieldCatalogItem[]]> {

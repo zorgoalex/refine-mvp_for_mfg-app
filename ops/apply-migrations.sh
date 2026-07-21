@@ -414,8 +414,52 @@ probe_file() {
                      "$(q_col bazis_pdf_table_patterns approval_status)" \
                      "$(q_col bazis_pdf_table_patterns is_active)" \
                      "$(q_col bazis_pdf_table_patterns version)" ;;
+    075_*) probe_075_endstate ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
+}
+
+# 075 includes a data rewrite. Columns alone are not enough: a restored
+# database may already expose names while saved templates still bind raw ids.
+probe_075_endstate() {
+  probe_all "$(q_col order_details_view milling_type_name)" \
+            "$(q_col order_details_view film_name)" \
+            "$(q_col label_templates field_catalog_snapshot)" \
+            "$(q_col label_qr_templates field_catalog_snapshot)" || return 1
+  probe_true "SELECT NOT EXISTS (
+    SELECT 1
+    FROM label_template_elements lte
+    WHERE btrim(COALESCE(lte.source_field, ''))
+            IN ('detail.milling_type_id', 'detail.film_id')
+       OR COALESCE(lte.style_json->>'qrTemplate', '')
+            ~ '\{[[:space:]]*detail\.(milling_type_id|film_id)[[:space:]]*\}'
+       OR btrim(COALESCE(lte.condition_json->>'field', ''))
+            IN ('detail.milling_type_id', 'detail.film_id')
+    UNION ALL
+    SELECT 1
+    FROM label_templates lt
+    WHERE lt.field_catalog_snapshot
+            ?| ARRAY['detail.milling_type_id', 'detail.film_id']
+    UNION ALL
+    SELECT 1
+    FROM label_templates lt
+    CROSS JOIN LATERAL jsonb_each(lt.custom_field_schema) entry
+    WHERE btrim(COALESCE(entry.value->>'sourceField', ''))
+            IN ('detail.milling_type_id', 'detail.film_id')
+    UNION ALL
+    SELECT 1
+    FROM label_qr_templates lqt
+    WHERE lqt.content_template
+            ~ '\{[[:space:]]*detail\.(milling_type_id|film_id)[[:space:]]*\}'
+       OR lqt.field_catalog_snapshot
+            ?| ARRAY['detail.milling_type_id', 'detail.film_id']
+    UNION ALL
+    SELECT 1
+    FROM order_label_detail_data data
+    CROSS JOIN LATERAL jsonb_each(data.custom_field_schema_snapshot) entry
+    WHERE btrim(COALESCE(entry.value->>'sourceField', ''))
+            IN ('detail.milling_type_id', 'detail.film_id')
+  );"
 }
 
 # 003 policy probe: the numeric-cast guard is present in orders_view.

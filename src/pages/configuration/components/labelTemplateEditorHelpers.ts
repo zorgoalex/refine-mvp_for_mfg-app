@@ -19,6 +19,50 @@ export interface AlignmentGuide {
   targetElementKey: string;
 }
 
+export interface LabelFieldSourceDescription {
+  entity: string;
+  databasePath: string;
+}
+
+export function describeLabelFieldSource(
+  field: LabelFieldCatalogItem,
+): LabelFieldSourceDescription {
+  if (field.category === 'Кастомные' || field.id.startsWith('custom.')) {
+    return {
+      entity: 'Пользовательское поле шаблона',
+      databasePath: 'label_templates.custom_field_schema (источник/константа) · order_label_detail_data.custom_fields (переопределение)',
+    };
+  }
+  if (field.source === 'detail') {
+    return {
+      entity: 'Деталь заказа',
+      databasePath: field.sourceColumn
+        ? `order_details_view.${field.sourceColumn}`
+        : 'order_details_view',
+    };
+  }
+  if (field.source === 'order') {
+    return {
+      entity: 'Заказ',
+      databasePath: field.sourceColumn
+        ? `orders_view.${field.sourceColumn}`
+        : 'orders_view',
+    };
+  }
+  if (field.source === 'bazis') {
+    return {
+      entity: 'Данные Базис детали',
+      databasePath: field.sourceColumn
+        ? `order_details_view.basis_data / order_label_detail_data.bazis_fields · ${field.sourceColumn}`
+        : 'order_details_view.basis_data / order_label_detail_data.bazis_fields',
+    };
+  }
+  return {
+    entity: 'Вычисляемое поле',
+    databasePath: 'В БД не хранится',
+  };
+}
+
 export function customFieldRowsFromSchema(schema: Record<string, unknown>): CustomFieldSchemaRow[] {
   return Object.entries(schema).map(([fieldId, rawEntry]) => {
     const entry = isRecord(rawEntry) ? rawEntry : {};

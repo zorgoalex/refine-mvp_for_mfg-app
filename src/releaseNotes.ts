@@ -56,6 +56,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-20",
+    title: "Сохранение записей справочников",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "После создания записи форма корректно возвращается к списку нужного справочника; список и новая запись остаются доступны после перезагрузки страницы.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-20",
     title: "Редактор шаблонов бирок",
     services: ["ERP"],
     repositories: ["repo_erp"],
