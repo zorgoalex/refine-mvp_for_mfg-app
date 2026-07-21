@@ -47,6 +47,12 @@
   width: min(320px, 100%);
 }
 
+.status-board-toolbar__checkbox {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+}
+
 .status-board-toolbar__switch {
   min-height: 32px;
   display: inline-flex;

@@ -195,6 +195,48 @@ describe('PgOrderStatusBoardRepository', () => {
     );
   });
 
+  it('excludes production Done from catalog and order scan by default', async () => {
+    const database = fakeDatabase([]);
+
+    await new PgOrderStatusBoardRepository(database.client).getBoard({
+      currentUser: user('admin'),
+      query: {
+        board: 'production',
+        limit: 24,
+        onlyMyOrders: false,
+        overdueOnly: false,
+      },
+    });
+
+    const sql = database.queries[0]?.text ?? '';
+    expect(sql).toContain('LEFT JOIN production_statuses board_production_status');
+    expect(sql).toContain(
+      "LOWER(BTRIM(COALESCE(board_production_status.production_status_name, ''))) = 'done'",
+    );
+    expect(sql).toContain(
+      "LOWER(BTRIM(COALESCE(ps.production_status_code, ''))) ~ '^done(_|$)'",
+    );
+  });
+
+  it('includes production Done when explicitly requested', async () => {
+    const database = fakeDatabase([]);
+
+    await new PgOrderStatusBoardRepository(database.client).getBoard({
+      currentUser: user('admin'),
+      query: {
+        board: 'production',
+        limit: 24,
+        onlyMyOrders: false,
+        overdueOnly: false,
+        includeDone: true,
+      },
+    });
+
+    const sql = database.queries[0]?.text ?? '';
+    expect(sql).not.toContain('board_production_status');
+    expect(sql).not.toContain("COALESCE(ps.production_status_name, '')");
+  });
+
   it('keeps an inactive referenced status visible but read-only as a destination', async () => {
     const database = fakeDatabase([
       {

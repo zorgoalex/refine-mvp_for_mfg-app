@@ -50,4 +50,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('currency: CURRENCY_CODE');
     expect(page).not.toContain("currency: 'RUB'");
   });
+
+  it('shows the Done opt-in only on the production tab with a usable hit area', () => {
+    expect(page).toContain("viewState.board === 'production'");
+    expect(page).toContain('Показывать Done');
+    expect(page).toContain('showDone: event.target.checked');
+    expect(css).toContain('.status-board-toolbar__checkbox');
+    expect(css).toContain('min-height: 40px');
+  });
 });

@@ -34,15 +34,15 @@ describe('orderStatusBoardApi', () => {
       search: 'ABC 1',
       onlyMyOrders: true,
       overdueOnly: false,
+      includeDone: true,
       plannedFrom: '2026-07-01',
     });
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      '/api/v1/orders/status-board?board=production&column=unassigned&cursor=opaque&limit=24&search=ABC+1&onlyMyOrders=true&overdueOnly=false&plannedFrom=2026-07-01',
+      '/api/v1/orders/status-board?board=production&column=unassigned&cursor=opaque&limit=24&search=ABC+1&onlyMyOrders=true&overdueOnly=false&includeDone=true&plannedFrom=2026-07-01',
     );
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({ method: 'GET' }),
     );
   });
 });
-

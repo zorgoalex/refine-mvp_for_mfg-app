@@ -8,6 +8,7 @@ export interface OrderStatusBoardQuery {
   search?: string;
   onlyMyOrders?: boolean;
   overdueOnly?: boolean;
+  includeDone?: boolean;
   plannedFrom?: string;
   plannedTo?: string;
 }
@@ -65,4 +66,3 @@ export interface OrderStatusBoardResponse {
   financialsVisible: boolean;
   columns: OrderStatusBoardColumn[];
 }
-

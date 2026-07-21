@@ -12,6 +12,7 @@ export interface OrderStatusBoardViewState {
   search: string;
   onlyMyOrders: boolean;
   overdueOnly: boolean;
+  showDone: boolean;
   plannedFrom?: string;
   plannedTo?: string;
   hideEmpty: boolean;
@@ -20,8 +21,12 @@ export interface OrderStatusBoardViewState {
 export function filterBoardColumns(
   board: OrderStatusBoardType,
   columns: OrderStatusBoardColumn[],
+  showDone = false,
 ): OrderStatusBoardColumn[] {
-  if (board !== 'order') return columns;
+  if (board === 'production') {
+    if (showDone) return columns;
+    return columns.filter((column) => !isDoneProductionStatus(column));
+  }
   return columns.filter(
     (column) =>
       !COMPLETED_ORDER_STATUS_NAMES.has(
@@ -41,6 +46,7 @@ export function parseOrderStatusBoardViewState(
     search: params.get('q')?.trim() ?? '',
     onlyMyOrders: params.get('mine') === '1',
     overdueOnly: params.get('overdue') === '1',
+    showDone: params.get('showDone') === '1',
     ...(plannedFrom ? { plannedFrom } : {}),
     ...(plannedTo ? { plannedTo } : {}),
     hideEmpty: params.get('hideEmpty') === '1',
@@ -55,6 +61,7 @@ export function serializeOrderStatusBoardViewState(
   if (state.search.trim()) params.set('q', state.search.trim());
   if (state.onlyMyOrders) params.set('mine', '1');
   if (state.overdueOnly) params.set('overdue', '1');
+  if (state.showDone) params.set('showDone', '1');
   if (state.plannedFrom) params.set('plannedFrom', state.plannedFrom);
   if (state.plannedTo) params.set('plannedTo', state.plannedTo);
   if (state.hideEmpty) params.set('hideEmpty', '1');
@@ -71,10 +78,19 @@ export function toOrderStatusBoardQuery(
     ...(state.search.trim() ? { search: state.search.trim() } : {}),
     onlyMyOrders: state.onlyMyOrders,
     overdueOnly: state.overdueOnly,
+    ...(state.board === 'production' && state.showDone
+      ? { includeDone: true }
+      : {}),
     ...(state.plannedFrom ? { plannedFrom: state.plannedFrom } : {}),
     ...(state.plannedTo ? { plannedTo: state.plannedTo } : {}),
     ...override,
   };
+}
+
+function isDoneProductionStatus(column: OrderStatusBoardColumn): boolean {
+  const name = column.status.name.trim().toLocaleLowerCase('en-US');
+  const code = column.status.code?.trim().toLocaleLowerCase('en-US') ?? '';
+  return name === 'done' || /^done(?:_|$)/.test(code);
 }
 
 export type MergeColumnPageResult =
