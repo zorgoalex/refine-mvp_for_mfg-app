@@ -33,6 +33,7 @@ export interface LabelTemplateDto {
   defaultExportFormats: LabelExportFormat[];
   customFieldSchema: Record<string, unknown>;
   fieldCatalogSnapshot: LabelFieldCatalogSnapshot;
+  rendererCapabilities: Array<'if_else_v1' | 'typography_v1'>;
   elements: LabelTemplateElementDto[];
 }
 

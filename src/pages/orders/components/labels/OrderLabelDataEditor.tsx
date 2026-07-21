@@ -6,6 +6,7 @@ import type { LabelTemplate, OrderLabelData } from '../../../../api/types/labels
 import { canAny } from '../../../../utils/permissions';
 import { parseBasisDataView } from './parseBasisDataView';
 import { OrderLabelGenerateAction } from './OrderLabelGenerateAction';
+import { LabelSvgPreviewFrame } from './LabelSvgPreviewFrame';
 
 const { Text } = Typography;
 
@@ -13,6 +14,25 @@ interface OrderLabelDataEditorProps {
   orderId?: number;
   isOrderDirty: boolean;
 }
+
+export const OrderLabelInlinePreviewSurface: React.FC<{ svg: string }> = ({ svg }) => (
+  <div
+    style={{
+      alignItems: 'center',
+      display: 'flex',
+      justifyContent: 'center',
+      minHeight: 180,
+      overflow: 'hidden',
+      padding: 12,
+    }}
+  >
+    <LabelSvgPreviewFrame
+      className="order-label-inline-preview-fit"
+      svg={svg}
+      style={{ display: 'inline-block', maxWidth: '100%' }}
+    />
+  </div>
+);
 
 export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orderId, isOrderDirty }) => {
   const canWrite = canAny(['labels.generate', 'labels.manage_templates']);
@@ -191,19 +211,7 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
             {latestPreviewLoading ? (
               <Text type="secondary">Загрузка превью...</Text>
             ) : (
-              <div
-                className="order-label-inline-preview-fit"
-                style={{
-                  alignItems: 'center',
-                  border: '1px solid var(--app-border)',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  minHeight: 180,
-                  overflow: 'hidden',
-                  padding: 12,
-                }}
-                dangerouslySetInnerHTML={{ __html: latestPreviewSvg ?? '' }}
-              />
+              <OrderLabelInlinePreviewSurface svg={latestPreviewSvg ?? ''} />
             )}
           </Space>
         )}

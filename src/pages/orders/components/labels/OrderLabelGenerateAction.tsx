@@ -5,6 +5,7 @@ import { labelsApi } from '../../../../api/labelsApi';
 import type { LabelTemplate, OrderLabelsPreview } from '../../../../api/types/labelsApi.types';
 import { can } from '../../../../utils/permissions';
 import { saveLabelBlob } from './labelDownloads';
+import { LabelSvgPreviewFrame } from './LabelSvgPreviewFrame';
 
 const { Text } = Typography;
 
@@ -21,6 +22,34 @@ interface OrderLabelGenerateActionProps {
   initialDetailId?: number | null;
   detailOptions?: LabelPreviewDetailOption[];
 }
+
+export const OrderLabelGeneratePreviewSurface: React.FC<{
+  preview: OrderLabelsPreview;
+  template: LabelTemplate;
+}> = ({ preview, template }) => {
+  const previewAspectRatio = template.canvasWidthMm / template.canvasHeightMm;
+  return (
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Text type="secondary">Бирок: {preview.labelCount}. Показана первая.</Text>
+      {preview.svgPages.slice(0, 1).map((svg, index) => (
+        <LabelSvgPreviewFrame
+          key={index}
+          svg={svg}
+          className="order-label-preview-fit"
+          style={{
+            aspectRatio: `${template.canvasWidthMm} / ${template.canvasHeightMm}`,
+            background: '#fff',
+            border: '1px solid var(--app-border)',
+            boxSizing: 'border-box',
+            lineHeight: 0,
+            overflow: 'hidden',
+            width: `min(100%, calc(58vh * ${previewAspectRatio}))`,
+          }}
+        />
+      ))}
+    </Space>
+  );
+};
 
 export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> = ({
   orderId,
@@ -197,25 +226,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
             Использовать поля базис проекта
           </Checkbox>
           {preview && selectedTemplate && (
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Text type="secondary">Бирок: {preview.labelCount}. Показана первая.</Text>
-              {preview.svgPages.slice(0, 1).map((svg, index) => (
-                <div
-                  key={index}
-                  className="order-label-preview-fit"
-                  style={{
-                    aspectRatio: `${selectedTemplate.canvasWidthMm} / ${selectedTemplate.canvasHeightMm}`,
-                    background: '#fff',
-                    border: '1px solid var(--app-border)',
-                    boxSizing: 'border-box',
-                    lineHeight: 0,
-                    overflow: 'hidden',
-                    width: `min(100%, calc(58vh * ${previewAspectRatio}))`,
-                  }}
-                  dangerouslySetInnerHTML={{ __html: svg }}
-                />
-              ))}
-            </Space>
+            <OrderLabelGeneratePreviewSurface preview={preview} template={selectedTemplate} />
           )}
         </Space>
       </Modal>

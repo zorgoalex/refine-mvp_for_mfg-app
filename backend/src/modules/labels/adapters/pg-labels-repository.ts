@@ -47,6 +47,7 @@ import type {
   UpdateOrderLabelDataCommand,
   UpdateLabelTemplateCommand,
 } from '../application/labels.types';
+import { assertRenderableTemplateShape, LABEL_RENDERER_CAPABILITIES } from '../application/label-template-advanced';
 import type { OcrTemplateForMatch, OcrTemplateRule } from '../application/scan/ocr-template-matcher';
 import {
   LabelCustomFieldSchemaStaleError,
@@ -1303,7 +1304,12 @@ export class PgLabelsRepository implements LabelsPort {
     }
     const template = mapTemplateRow(result.rows[0]);
     const elements = await loadElements(client, template.labelTemplateId);
-    return { ...template, elements };
+    const hydrated = { ...template, elements };
+    // Validate immediately after the locked/read snapshot and before a preview
+    // token, idempotency claim, generation row, audit entry, or outbox event can
+    // be produced. This also closes the old-preview-token mixed-deploy path.
+    assertRenderableTemplateShape(hydrated);
+    return hydrated;
   }
 
   private async readQrTemplate(
@@ -1913,6 +1919,7 @@ function mapTemplateRow(row: TemplateRow): Omit<LabelTemplateDto, 'elements'> {
     defaultExportFormats: row.default_export_formats,
     customFieldSchema: row.custom_field_schema ?? {},
     fieldCatalogSnapshot: row.field_catalog_snapshot ?? {},
+    rendererCapabilities: [...LABEL_RENDERER_CAPABILITIES],
   };
 }
 

@@ -68,6 +68,10 @@
   --app-group-tint-7: #232a33;
 }
 
+[data-theme="dark"] .label-svg-preview-frame {
+  --label-preview-outline: rgba(255, 255, 255, 0.1);
+}
+
 html,
 body,
 #root {

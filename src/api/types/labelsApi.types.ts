@@ -1,5 +1,36 @@
 export type LabelExportFormat = 'bmp' | 'png' | 'emf';
 export type LabelElementKind = 'text' | 'line' | 'rect' | 'qr';
+export type LabelConditionOperator = 'exists' | 'not_empty' | 'equals' | 'not_equals';
+export type LabelConditionBranch =
+  | { type: 'current' }
+  | { type: 'field'; field: string }
+  | { type: 'text'; value: string }
+  | { type: 'hidden' };
+
+export interface LabelIfElseCondition {
+  type: 'if_else';
+  version: 1;
+  when: {
+    field: string;
+    op: LabelConditionOperator;
+    value?: string | number | boolean | null;
+  };
+  then: LabelConditionBranch;
+  else: LabelConditionBranch;
+}
+
+export interface LabelTypographyV1 {
+  version: 1;
+  fontSizePt: number;
+  fontWeight: 'normal' | 'bold';
+  italic: boolean;
+}
+
+export interface LabelEditorMetadataV1 {
+  version: 1;
+  boundsMode: 'auto' | 'manual';
+  groupId?: string;
+}
 
 export interface LabelFieldCatalogItem {
   id: string;
@@ -44,6 +75,7 @@ export interface LabelTemplate {
   defaultExportFormats: LabelExportFormat[];
   customFieldSchema: Record<string, unknown>;
   fieldCatalogSnapshot: LabelFieldCatalogSnapshot;
+  rendererCapabilities?: Array<'if_else_v1' | 'typography_v1'>;
   elements: LabelTemplateElement[];
 }
 

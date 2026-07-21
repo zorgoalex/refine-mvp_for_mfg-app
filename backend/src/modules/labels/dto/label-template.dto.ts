@@ -3,6 +3,80 @@ import { z } from 'zod';
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 const exportFormatSchema = z.enum(['bmp', 'png', 'emf']);
 
+const conditionScalarSchema = z.union([z.string().max(1000), z.number().finite(), z.boolean(), z.null()]);
+const existenceWhenSchema = z.object({
+  field: z.string().trim().min(1).max(200),
+  op: z.enum(['exists', 'not_empty']),
+}).strict();
+const compareWhenSchema = z.object({
+  field: z.string().trim().min(1).max(200),
+  op: z.enum(['equals', 'not_equals']),
+  value: conditionScalarSchema,
+}).strict();
+const conditionBranchSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('current') }).strict(),
+  z.object({ type: z.literal('field'), field: z.string().trim().min(1).max(200) }).strict(),
+  z.object({ type: z.literal('text'), value: z.string().max(1000) }).strict(),
+  z.object({ type: z.literal('hidden') }).strict(),
+]);
+const ifElseConditionSchema = z.object({
+  type: z.literal('if_else'),
+  version: z.literal(1),
+  when: z.union([existenceWhenSchema, compareWhenSchema]),
+  then: conditionBranchSchema,
+  else: conditionBranchSchema,
+}).strict();
+const legacyConditionSchema = z.union([existenceWhenSchema, compareWhenSchema]);
+const labelElementConditionSchema = z.union([
+  z.object({}).strict(),
+  legacyConditionSchema,
+  ifElseConditionSchema,
+]);
+
+const typographyV1Schema = z.object({
+  version: z.literal(1),
+  fontSizePt: z.number().finite().min(4).max(96),
+  fontWeight: z.enum(['normal', 'bold']),
+  italic: z.boolean(),
+}).strict();
+const editorMetadataV1Schema = z.object({
+  version: z.literal(1),
+  boundsMode: z.enum(['auto', 'manual']),
+  groupId: z.string().trim().min(1).max(100).regex(/^[\p{L}\p{N}._:-]+$/u).optional(),
+}).strict();
+const labelElementStyleSchema = jsonObjectSchema.superRefine((style, ctx) => {
+  // Existing unversioned keys are intentionally preserved. Only the new,
+  // versioned namespaces are strict, so an old template can still be edited.
+  if (Object.prototype.hasOwnProperty.call(style, 'typography')) {
+    addNestedSchemaIssues(typographyV1Schema.safeParse(style.typography), ctx, ['typography']);
+  }
+  if (Object.prototype.hasOwnProperty.call(style, 'editor')) {
+    addNestedSchemaIssues(editorMetadataV1Schema.safeParse(style.editor), ctx, ['editor']);
+  }
+  for (const [key, value] of Object.entries(style)) {
+    if (key === 'typography' || key === 'editor') continue;
+    if (
+      value
+      && typeof value === 'object'
+      && !Array.isArray(value)
+      && Object.prototype.hasOwnProperty.call(value, 'version')
+    ) {
+      ctx.addIssue({ code: 'custom', path: [key, 'version'], message: `Unknown versioned style namespace: ${key}` });
+    }
+  }
+});
+
+function addNestedSchemaIssues(
+  result: z.ZodSafeParseResult<unknown>,
+  ctx: z.RefinementCtx,
+  prefix: PropertyKey[] = [],
+): void {
+  if (result.success) return;
+  for (const issue of result.error.issues) {
+    ctx.addIssue({ code: 'custom', path: [...prefix, ...issue.path], message: issue.message });
+  }
+}
+
 export const labelTemplateElementInputSchema = z
   .object({
     elementKey: z.string().trim().min(1).max(100),
@@ -15,10 +89,15 @@ export const labelTemplateElementInputSchema = z
     heightMm: z.number().min(0),
     rotationDeg: z.number().optional(),
     zIndex: z.number().int().optional(),
-    style: jsonObjectSchema.optional(),
-    condition: jsonObjectSchema.optional(),
+    style: labelElementStyleSchema.optional(),
+    condition: labelElementConditionSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((element, ctx) => {
+    if (element.condition && 'type' in element.condition && element.condition.type === 'if_else' && element.kind !== 'text') {
+      ctx.addIssue({ code: 'custom', path: ['condition'], message: 'if_else is supported only for text elements' });
+    }
+  });
 
 export const createLabelTemplateSchema = z
   .object({

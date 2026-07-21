@@ -294,6 +294,88 @@ describe('LabelsService', () => {
     expect(repo.createTemplate).toHaveBeenCalledOnce();
   });
 
+  it('validates and snapshots if/else predicate and branch field bindings', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    const input = validInput({
+      elements: [{
+        elementKey: 'conditional',
+        kind: 'text',
+        sourceField: 'bazis.order_number',
+        xMm: 0,
+        yMm: 0,
+        widthMm: 20,
+        heightMm: 5,
+        condition: {
+          type: 'if_else',
+          version: 1,
+          when: { field: 'detail.material_name', op: 'not_empty' },
+          then: { type: 'field', field: 'detail.detail_name' },
+          else: { type: 'text', value: 'Без материала' },
+        },
+      }],
+    });
+
+    await service.createTemplate({ currentUser: templateManager, requestId: 'req-condition', input });
+
+    expect(repo.createTemplate).toHaveBeenCalledWith(expect.objectContaining({
+      fieldCatalogSnapshot: expect.objectContaining({
+        'detail.material_name': expect.objectContaining({ sourceColumn: 'material_name' }),
+        'detail.detail_name': expect.objectContaining({ sourceColumn: 'detail_name' }),
+      }),
+    }));
+  });
+
+  it('rejects unsupported if/else fields before repository writes', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    const input = validInput({
+      elements: [{
+        elementKey: 'conditional-bad',
+        kind: 'text',
+        sourceField: 'bazis.order_number',
+        xMm: 0,
+        yMm: 0,
+        widthMm: 20,
+        heightMm: 5,
+        condition: {
+          type: 'if_else',
+          version: 1,
+          when: { field: 'detail.missing', op: 'exists' },
+          then: { type: 'current' },
+          else: { type: 'hidden' },
+        },
+      }],
+    });
+
+    await expect(service.createTemplate({ currentUser: templateManager, requestId: 'req-condition-bad', input }))
+      .rejects.toMatchObject({ statusCode: 422, code: 'LABEL_FIELD_BINDING_INVALID' });
+    expect(repo.createTemplate).not.toHaveBeenCalled();
+  });
+
+  it('rejects coercible strings in versioned typography before repository writes', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    const input = validInput({
+      elements: [{
+        elementKey: 'malformed-typography',
+        kind: 'text',
+        staticText: 'Text',
+        xMm: 0,
+        yMm: 0,
+        widthMm: 20,
+        heightMm: 5,
+        style: {
+          typography: { version: 1, fontSizePt: '12', fontWeight: 'normal', italic: false },
+        },
+      }],
+    } as unknown as Partial<LabelTemplateInput>);
+
+    await expect(service.createTemplate({ currentUser: templateManager, requestId: 'req-typography-string', input }))
+      .rejects.toMatchObject({ statusCode: 422, code: 'LABEL_ELEMENT_SCHEMA_INVALID' });
+    expect(repo.createTemplate).not.toHaveBeenCalled();
+  });
+
   it('rejects custom field source mappings outside the label field catalog', async () => {
     const repo = fakeRepo();
     const service = new LabelsService({ repo });
@@ -413,6 +495,7 @@ function fakeRepo(): LabelsPort {
       defaultExportFormats: ['bmp'],
       customFieldSchema: {},
       fieldCatalogSnapshot: {},
+      rendererCapabilities: ['if_else_v1', 'typography_v1'],
       elements: [],
     })),
     updateTemplate: vi.fn(),

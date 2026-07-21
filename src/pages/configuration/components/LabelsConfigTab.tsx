@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Col, Collapse, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Collapse, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { AlignCenterOutlined, AlignLeftOutlined, AlignRightOutlined, CopyOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, QrcodeOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import type Konva from 'konva';
 import { Group as KonvaGroup, Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
@@ -7,6 +7,8 @@ import { labelsApi } from '../../../api/labelsApi';
 import { ApiError } from '../../../api/apiError';
 import type {
   LabelElementKind,
+  LabelConditionBranch,
+  LabelConditionOperator,
   LabelExportFormat,
   LabelFieldCatalogItem,
   LabelFieldCatalogSnapshot,
@@ -15,6 +17,7 @@ import type {
   LabelTemplate,
   LabelTemplateElement,
   LabelTemplateInput,
+  LabelIfElseCondition,
 } from '../../../api/types/labelsApi.types';
 import { can } from '../../../utils/permissions';
 import {
@@ -28,9 +31,26 @@ import { collectDuplicateQrNames, qrDraftFromElement, qrElementFromLibrary, rows
 import {
   customFieldRowsFromSchema,
   customFieldRowsToSchema,
+  centerLabelSelection,
+  claimLabelGestureCommit,
   describeLabelFieldSource,
+  findSameRowHeightSuggestion,
+  groupLabelElements,
+  labelConditionFieldIds,
+  moveLabelDragGesture,
+  normalizeLabelMultiSelectionTransform,
+  readLabelEditorMeta,
+  readLabelIfElseCondition,
+  readAndNormalizeLabelTransformedNodes,
+  readLabelTransformedNodes,
+  readLabelTypography,
+  resolveLabelElementPreviewText,
   resolveLatestStateUpdate,
+  selectLabelElements,
   snapElementCenters,
+  ungroupLabelElements,
+  withLabelEditorMeta,
+  withLabelTypography,
   type AlignmentGuide,
   type CustomFieldSchemaRow,
   type CustomFieldType,
@@ -68,6 +88,18 @@ const QR_ERROR_CORRECTION_OPTIONS = [
   { value: 'Q', label: 'Q' },
   { value: 'H', label: 'H' },
 ];
+const LABEL_CONDITION_OPERATOR_OPTIONS: Array<{ value: LabelConditionOperator; label: string }> = [
+  { value: 'exists', label: 'существует' },
+  { value: 'not_empty', label: 'не пусто' },
+  { value: 'equals', label: 'равно' },
+  { value: 'not_equals', label: 'не равно' },
+];
+const LABEL_CONDITION_BRANCH_OPTIONS: Array<{ value: LabelConditionBranch['type']; label: string }> = [
+  { value: 'current', label: 'Текущее значение элемента' },
+  { value: 'field', label: 'Другое поле' },
+  { value: 'text', label: 'Фиксированный текст' },
+  { value: 'hidden', label: 'Скрыть элемент' },
+];
 
 interface TemplateFormValues {
   name: string;
@@ -104,6 +136,8 @@ interface QrDraft {
   sizeMm: number;
 }
 
+type LabelPreviewDataMode = 'structure' | 'sample';
+
 const EMPTY_QR_DRAFT: QrDraft = { id: null, version: null, name: '', rows: [[]], errorCorrection: 'M', sizeMm: 20 };
 
 export const LabelsConfigTab: React.FC = () => {
@@ -128,6 +162,12 @@ export const LabelsConfigTab: React.FC = () => {
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [saveAsName, setSaveAsName] = useState('');
   const [selectedElementKey, setSelectedElementKey] = useState<string | null>(null);
+  const [selectedElementKeys, setSelectedElementKeys] = useState<string[]>([]);
+  const [editorGestureActive, setEditorGestureActive] = useState(false);
+  const editorGestureActiveRef = useRef(false);
+  const [previewDataMode, setPreviewDataMode] = useState<LabelPreviewDataMode>('sample');
+  const [conditionEditorKey, setConditionEditorKey] = useState<string | null>(null);
+  const [conditionDraft, setConditionDraft] = useState<LabelIfElseCondition>(() => defaultIfElseCondition());
   const [fieldSearch, setFieldSearch] = useState('');
   const [draggingField, setDraggingField] = useState<LabelFieldCatalogItem | null>(null);
   const [dragCursor, setDragCursor] = useState<{ x: number; y: number } | null>(null);
@@ -141,7 +181,7 @@ export const LabelsConfigTab: React.FC = () => {
   const [qrFieldDragCursor, setQrFieldDragCursor] = useState<{ x: number; y: number } | null>(null);
   const [draggingQr, setDraggingQr] = useState<LabelQrTemplate | null>(null);
   const [qrDragCursor, setQrDragCursor] = useState<{ x: number; y: number } | null>(null);
-  const [showAllBorders, setShowAllBorders] = useState(false);
+  const [showAllBorders, setShowAllBorders] = useState(true);
   const qrRowDropRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   // Shared guard so ONE field drag from the QR builder's own palette resolves
   // exactly once. Both the per-row native onDrop (HTML5 drag'n'drop) and the
@@ -158,7 +198,7 @@ export const LabelsConfigTab: React.FC = () => {
     update: React.SetStateAction<LabelTemplateElement[]>,
     markDirty = true,
   ) => {
-    if (markDirty && savingRef.current) return;
+    if (markDirty && (savingRef.current || editorGestureActiveRef.current)) return;
     const next = resolveLatestStateUpdate(elementsRef.current, update);
     elementsRef.current = next;
     setElements(next);
@@ -179,6 +219,16 @@ export const LabelsConfigTab: React.FC = () => {
   const setTemplateSaving = (next: boolean) => {
     savingRef.current = next;
     setSaving(next);
+  };
+
+  const setEditorGesture = (active: boolean) => {
+    editorGestureActiveRef.current = active;
+    setEditorGestureActive(active);
+  };
+
+  const setEditorSelection = (keys: string[]) => {
+    setSelectedElementKeys(keys);
+    setSelectedElementKey(keys.at(-1) ?? null);
   };
 
   const load = async () => {
@@ -225,11 +275,19 @@ export const LabelsConfigTab: React.FC = () => {
       });
       setEditorElements(selectedTemplate.elements, false);
       setEditorCustomFields(customFieldRowsFromSchema(selectedTemplate.customFieldSchema ?? {}), false);
+      setEditorSelection([]);
       setEditorDirty(false);
     }
   }, [form, selectedTemplate]);
 
   const fieldCategories = useMemo(() => new Set(fields.map((field) => field.category)).size, [fields]);
+  const advancedRendererReady = useMemo(
+    () => templates.some((template) => (
+      template.rendererCapabilities?.includes('if_else_v1')
+      && template.rendererCapabilities?.includes('typography_v1')
+    )),
+    [templates],
+  );
   const sourceFields = useMemo<LabelFieldCatalogItem[]>(
     () => [
       ...fields,
@@ -266,6 +324,7 @@ export const LabelsConfigTab: React.FC = () => {
     () => {
       const ids = new Set(elements.map((element) => element.sourceField).filter((fieldId): fieldId is string => Boolean(fieldId)));
       for (const element of elements) {
+        for (const fieldId of labelConditionFieldIds(element.condition)) ids.add(fieldId);
         if (element.kind !== 'qr') continue;
         for (const fieldId of extractQrTemplateFieldIds(qrTemplateOf(element))) {
           ids.add(fieldId);
@@ -399,7 +458,7 @@ export const LabelsConfigTab: React.FC = () => {
   }, [draggingQr]);
 
   const startNew = () => {
-    if (saving) return;
+    if (saving || editorGestureActiveRef.current) return;
     setSelectedTemplate(null);
     setEditorElements([
       {
@@ -413,11 +472,12 @@ export const LabelsConfigTab: React.FC = () => {
         heightMm: 6,
         rotationDeg: 0,
         zIndex: 0,
-        style: { fontSize: 12 },
+        style: newLabelTextStyle(advancedRendererReady),
         condition: {},
       },
     ], false);
     setEditorCustomFields([], false);
+    setEditorSelection([]);
     setEditorDirty(false);
     form.setFieldsValue({
       name: '',
@@ -496,6 +556,14 @@ export const LabelsConfigTab: React.FC = () => {
 
   const saveTemplate = async (values: TemplateFormValues) => {
     if (!canManage || saving || qrSaving) return;
+    if (editorGestureActiveRef.current) {
+      message.warning('Завершите изменение элементов на канвасе перед сохранением');
+      return;
+    }
+    if (!advancedRendererReady && elementsRef.current.some(hasAdvancedLabelElementData)) {
+      message.error('Backend ещё не подтвердил новый renderer шаблонов. Сохранение расширенных настроек заблокировано.');
+      return;
+    }
     setTemplateSaving(true);
     try {
       const payload = buildTemplatePayload(values);
@@ -523,17 +591,21 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const openSaveAs = async () => {
-    if (!canManage || saving || qrSaving) return;
+    if (!canManage || saving || qrSaving || editorGestureActiveRef.current) return;
     const values = await form.validateFields();
     setSaveAsName(`${values.name.trim() || selectedTemplate?.name || 'Шаблон'} — копия`);
     setSaveAsOpen(true);
   };
 
   const saveTemplateAs = async () => {
-    if (!canManage || saving || qrSaving) return;
+    if (!canManage || saving || qrSaving || editorGestureActiveRef.current) return;
     const name = saveAsName.trim();
     if (!name) {
       message.error('Введите название копии');
+      return;
+    }
+    if (!advancedRendererReady && elementsRef.current.some(hasAdvancedLabelElementData)) {
+      message.error('Backend ещё не подтвердил новый renderer шаблонов. Копирование расширенного шаблона заблокировано.');
       return;
     }
     setTemplateSaving(true);
@@ -556,7 +628,7 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const addElement = (kind: LabelElementKind) => {
-    if (!canManage || saving) return;
+    if (!canManage || saving || editorGestureActiveRef.current) return;
     const elementKey = `${kind}-${Date.now()}`;
     setEditorElements((current) => {
       const nextElement: LabelTemplateElement = {
@@ -581,7 +653,9 @@ export const LabelsConfigTab: React.FC = () => {
               qrTemplate: '{bazis.detail_id}',
               qrErrorCorrection: 'M',
             }
-          : { fontSize: 12 },
+          : kind === 'text'
+            ? newLabelTextStyle(advancedRendererReady)
+            : {},
         condition: {},
       };
       // QR is a first-class element: it may freely overlap others and sit anywhere
@@ -590,11 +664,33 @@ export const LabelsConfigTab: React.FC = () => {
       // for a freshly-added QR.
       return [...current, nextElement];
     });
-    setSelectedElementKey(elementKey);
+    setEditorSelection([elementKey]);
   };
 
   const patchElement = (index: number, patch: Partial<LabelTemplateElement>) => {
-    setEditorElements((current) => current.map((element, i) => (i === index ? { ...element, ...patch } : element)));
+    setEditorElements((current) => current.map((element, i) => {
+      if (i !== index) return element;
+      const updated = { ...element, ...patch };
+      return advancedRendererReady && element.kind === 'text' && (patch.widthMm !== undefined || patch.heightMm !== undefined)
+        ? withLabelEditorMeta(updated, { boundsMode: 'manual' })
+        : updated;
+    }));
+  };
+
+  const patchElementsByKey = (patches: Array<{ elementKey: string; patch: Partial<LabelTemplateElement> }>) => {
+    if (savingRef.current) return;
+    const byKey = new Map(patches.map((entry) => [entry.elementKey, entry.patch]));
+    const next = elementsRef.current.map((element) => {
+      const patch = byKey.get(element.elementKey);
+      if (!patch) return element;
+      const updated = { ...element, ...patch };
+      return advancedRendererReady && element.kind === 'text' && (patch.widthMm !== undefined || patch.heightMm !== undefined)
+        ? withLabelEditorMeta(updated, { boundsMode: 'manual' })
+        : updated;
+    });
+    elementsRef.current = next;
+    setElements(next);
+    setEditorDirty(true);
   };
 
   const currentCanvasBounds = () => ({
@@ -660,6 +756,7 @@ export const LabelsConfigTab: React.FC = () => {
     if (!canManage || savingRef.current) return;
     const used = elementsRef.current.some((element) => (
       element.sourceField === fieldId
+      || labelConditionFieldIds(element.condition).includes(fieldId)
       || (element.kind === 'qr' && extractQrTemplateFieldIds(qrTemplateOf(element)).includes(fieldId))
     ));
     if (used) {
@@ -690,13 +787,13 @@ export const LabelsConfigTab: React.FC = () => {
       applyQrGeometryPatch(elementKey, patch);
       return;
     }
-    setEditorElements((current) =>
-      current.map((element) =>
-        element.elementKey === elementKey
-          ? { ...element, ...patch }
-          : element,
-      ),
-    );
+    setEditorElements((current) => current.map((element) => {
+      if (element.elementKey !== elementKey) return element;
+      const updated = { ...element, ...patch };
+      return advancedRendererReady && element.kind === 'text' && (patch.widthMm !== undefined || patch.heightMm !== undefined)
+        ? withLabelEditorMeta(updated, { boundsMode: 'manual' })
+        : updated;
+    }));
   };
 
   // Applies a QR move/resize/geometry patch. QR is a free-overlap element, so
@@ -739,6 +836,36 @@ export const LabelsConfigTab: React.FC = () => {
     )));
   };
 
+  const patchElementTypography = (
+    index: number,
+    patch: { fontSizePt?: number; fontWeight?: 'normal' | 'bold'; italic?: boolean },
+  ) => {
+    setEditorElements((current) => current.map((element, currentIndex) => (
+      currentIndex === index && element.kind === 'text'
+        ? withLabelTypography(element, patch)
+        : element
+    )));
+  };
+
+  const openElementCondition = (element: LabelTemplateElement) => {
+    if (element.kind !== 'text' || !advancedRendererReady) return;
+    const current = readLabelIfElseCondition(element.condition);
+    setConditionDraft(current ?? defaultIfElseCondition(element.sourceField ?? sourceFields[0]?.id));
+    setConditionEditorKey(element.elementKey);
+  };
+
+  const saveElementCondition = () => {
+    if (!conditionEditorKey || !advancedRendererReady) return;
+    patchElementByKey(conditionEditorKey, { condition: conditionDraft as unknown as Record<string, unknown> });
+    setConditionEditorKey(null);
+  };
+
+  const clearElementCondition = () => {
+    if (!conditionEditorKey) return;
+    patchElementByKey(conditionEditorKey, { condition: {} });
+    setConditionEditorKey(null);
+  };
+
   const changeElementKind = (index: number, kind: LabelElementKind) => {
     const current = elementsRef.current[index];
     if (!current) return;
@@ -751,6 +878,7 @@ export const LabelsConfigTab: React.FC = () => {
       style: kind === 'qr'
         ? { ...(current.style ?? {}), qrTemplate: qrTemplateOf(current) || '{bazis.detail_id}', qrErrorCorrection: qrErrorCorrectionOf(current) }
         : { ...(current.style ?? {}), fontSize: Number(current.style?.fontSize ?? 12) },
+      condition: kind === 'text' ? current.condition ?? {} : {},
     };
     if (kind === 'qr') {
       applyQrGeometryPatch(current.elementKey, patch);
@@ -760,8 +888,44 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const deleteElementByKey = (elementKey: string) => {
-    setEditorElements((current) => current.filter((element) => element.elementKey !== elementKey));
-    setSelectedElementKey((current) => (current === elementKey ? null : current));
+    const keys = selectedElementKeys.includes(elementKey)
+      ? selectedElementKeys
+      : selectLabelElements(elementsRef.current, [], elementKey, false);
+    const selected = elementsRef.current.filter((element) => keys.includes(element.elementKey));
+    if (selected.some(isLabelElementLocked)) {
+      message.warning('Сначала разблокируйте все элементы группы');
+      return;
+    }
+    const removed = new Set(keys);
+    setEditorElements((current) => cleanupSingletonLabelGroups(current.filter((element) => !removed.has(element.elementKey))));
+    setEditorSelection([]);
+  };
+
+  const groupSelectedElements = (keys: string[]) => {
+    if (!advancedRendererReady) {
+      message.warning('Группировка станет доступна после обновления renderer backend');
+      return;
+    }
+    const selected = elementsRef.current.filter((element) => keys.includes(element.elementKey));
+    if (selected.length < 2 || selected.some(isLabelElementLocked)) return;
+    const groupId = `label-group-${Date.now()}`;
+    const grouped = groupLabelElements(elementsRef.current, keys, groupId);
+    setEditorElements(grouped);
+    setEditorSelection(grouped.filter((element) => readLabelEditorMeta(element).groupId === groupId).map((element) => element.elementKey));
+  };
+
+  const ungroupSelectedElements = (keys: string[]) => {
+    const selected = elementsRef.current.filter((element) => keys.includes(element.elementKey));
+    if (selected.length === 0 || selected.some(isLabelElementLocked)) return;
+    setEditorElements(ungroupLabelElements(elementsRef.current, keys));
+    setEditorSelection(keys);
+  };
+
+  const centerSelectedElements = (keys: string[], axis: 'horizontal' | 'vertical') => {
+    const selected = elementsRef.current.filter((element) => keys.includes(element.elementKey));
+    if (selected.length === 0 || selected.some(isLabelElementLocked)) return;
+    const bounds = currentCanvasBounds();
+    setEditorElements(centerLabelSelection(elementsRef.current, keys, bounds.widthMm, bounds.heightMm, axis));
   };
 
   // Both the Konva preview (`sorted` in LabelTemplatePreview) and the server SVG
@@ -791,22 +955,30 @@ export const LabelsConfigTab: React.FC = () => {
   };
 
   const duplicateElementByKey = (elementKey: string) => {
-    setEditorElements((current) => {
-      const source = current.find((element) => element.elementKey === elementKey);
-      if (!source) return current;
-      const nextKey = `${source.elementKey}-copy-${Date.now()}`;
-      const copy: LabelTemplateElement = {
-        ...source,
+    const keys = selectedElementKeys.includes(elementKey)
+      ? selectedElementKeys
+      : selectLabelElements(elementsRef.current, [], elementKey, false);
+    const source = elementsRef.current.filter((element) => keys.includes(element.elementKey));
+    if (source.length === 0) return;
+    const freshGroupId = source.length > 1 || source.some((element) => readLabelEditorMeta(element).groupId)
+      ? `label-group-copy-${Date.now()}`
+      : null;
+    let nextZ = Math.max(0, ...elementsRef.current.map((element) => Number(element.zIndex ?? 0))) + 1;
+    const copies = source.map((element, index) => {
+      const copyKey = `${element.elementKey}-copy-${Date.now()}-${index}`;
+      const copy = withLabelEditorMeta({
+        ...element,
         labelTemplateElementId: undefined,
-        elementKey: nextKey,
-        xMm: roundMm(Number(source.xMm ?? 0) + 2),
-        yMm: roundMm(Number(source.yMm ?? 0) + 2),
-        zIndex: Math.max(0, ...current.map((element) => Number(element.zIndex ?? 0))) + 1,
-        style: { ...(source.style ?? {}), locked: false },
-      };
-      setSelectedElementKey(nextKey);
-      return [...current, copy];
+        elementKey: copyKey,
+        xMm: roundMm(Number(element.xMm ?? 0) + 2),
+        yMm: roundMm(Number(element.yMm ?? 0) + 2),
+        zIndex: nextZ++,
+        style: { ...(element.style ?? {}), locked: false },
+      }, { groupId: freshGroupId });
+      return copy;
     });
+    setEditorElements((current) => [...current, ...copies]);
+    setEditorSelection(copies.map((element) => element.elementKey));
   };
 
   const addFieldElement = (field: LabelFieldCatalogItem, xMm: number, yMm: number) => {
@@ -823,11 +995,11 @@ export const LabelsConfigTab: React.FC = () => {
       heightMm: 6,
       rotationDeg: 0,
       zIndex: elementsRef.current.length,
-      style: { fontSize: 12 },
+      style: newLabelTextStyle(advancedRendererReady),
       condition: {},
     };
     setEditorElements((current) => [...current, element]);
-    setSelectedElementKey(elementKey);
+    setEditorSelection([elementKey]);
   };
 
   const onDropDraggingQr = (payload: LabelQrTemplate, xMm: number, yMm: number) => {
@@ -855,7 +1027,7 @@ export const LabelsConfigTab: React.FC = () => {
     // overlap other elements — overlap is allowed (use z-index layering), so
     // nothing is pushed and there is no conflict.
     setEditorElements((current) => [...current, el]);
-    setSelectedElementKey(el.elementKey);
+    setEditorSelection([el.elementKey]);
   };
 
   const handleBazisImportFile = async (file: File | null) => {
@@ -1140,13 +1312,32 @@ export const LabelsConfigTab: React.FC = () => {
       </Card>
 
       <Collapse defaultActiveKey={['current-template-preview']}>
-        <Panel header="Просмотр текущего шаблона" key="current-template-preview">
+        <Panel
+          header="Просмотр текущего шаблона"
+          key="current-template-preview"
+          extra={(
+            <div onClick={(event) => event.stopPropagation()}>
+              <Radio.Group
+                size="small"
+                value={previewDataMode}
+                onChange={(event) => setPreviewDataMode(event.target.value as LabelPreviewDataMode)}
+                optionType="button"
+                buttonStyle="solid"
+                options={[
+                  { value: 'structure', label: 'Структура' },
+                  { value: 'sample', label: 'Пример с данными' },
+                ]}
+              />
+            </div>
+          )}
+        >
           <LabelTemplatePreview
             widthMm={Number(previewWidthMm ?? selectedTemplate?.canvasWidthMm ?? 85)}
             heightMm={Number(previewHeightMm ?? selectedTemplate?.canvasHeightMm ?? 88)}
             elements={elements}
             fields={sourceFields}
             previewFieldValues={customFieldPreviewValues}
+            previewDataMode={previewDataMode}
             selectedElementKey={selectedElementKey}
             canDrag={false}
           />
@@ -1169,6 +1360,17 @@ export const LabelsConfigTab: React.FC = () => {
         <Row gutter={16} align="top">
           <Col xs={24} lg={leftColumnSpan}>
             <Card size="small" title={selectedTemplate ? 'Редактирование шаблона' : 'Новый шаблон'} style={{ marginBottom: 16 }}>
+              {!loading && !advancedRendererReady && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="Расширенный renderer пока не подтверждён"
+                  description={templates.length === 0
+                    ? 'Первый шаблон можно сохранить в совместимом формате. После перечитывания списка станут доступны if/else, группы и новая типографика.'
+                    : 'Размер шрифта, if/else и группы заблокированы до обновления backend.'}
+                />
+              )}
               <Form.Item name="name" label="Название" rules={[{ required: true, whitespace: true }]}>
                 <Input />
               </Form.Item>
@@ -1275,10 +1477,10 @@ export const LabelsConfigTab: React.FC = () => {
                 </Collapse>
               </div>
               <Space wrap>
-                <Button htmlType="submit" type="primary" icon={<SaveOutlined />} loading={saving} disabled={!canManage || qrSaving}>
+                <Button htmlType="submit" type="primary" icon={<SaveOutlined />} loading={saving} disabled={!canManage || qrSaving || editorGestureActive}>
                   Сохранить шаблон
                 </Button>
-                <Button icon={<CopyOutlined />} loading={saving} disabled={!canManage || qrSaving || !selectedTemplate || elements.length === 0} onClick={() => void openSaveAs()}>
+                <Button icon={<CopyOutlined />} loading={saving} disabled={!canManage || qrSaving || editorGestureActive || !selectedTemplate || elements.length === 0} onClick={() => void openSaveAs()}>
                   Сохранить как
                 </Button>
                 {editorDirty
@@ -1310,10 +1512,15 @@ export const LabelsConfigTab: React.FC = () => {
             size="small"
             pagination={false}
             dataSource={elements}
-            scroll={{ y: 360, x: 720 }}
-            rowClassName={(element) => (selectedElementKey === element.elementKey ? 'ant-table-row-selected' : '')}
+            scroll={{ y: 360, x: 1180 }}
+            rowClassName={(element) => (selectedElementKeys.includes(element.elementKey) ? 'ant-table-row-selected' : '')}
             onRow={(element) => ({
-              onClick: () => setSelectedElementKey(element.elementKey),
+              onClick: (event) => setEditorSelection(selectLabelElements(
+                elementsRef.current,
+                selectedElementKeys,
+                element.elementKey,
+                event.shiftKey,
+              )),
               style: { cursor: 'pointer' },
             })}
             columns={[
@@ -1360,6 +1567,60 @@ export const LabelsConfigTab: React.FC = () => {
                     onChange={(event) => patchElement(index, { staticText: event.target.value || null })}
                   />
                 ),
+              },
+              {
+                title: 'Шрифт',
+                width: 190,
+                render: (_, element, index) => {
+                  const typography = readLabelTypography(element);
+                  return (
+                    <Space.Compact block>
+                      <InputNumber
+                        aria-label="Размер шрифта"
+                        min={4}
+                        max={96}
+                        addonAfter="pt"
+                        value={typography.fontSizePt}
+                        disabled={!canManage || saving || !advancedRendererReady || element.kind !== 'text'}
+                        onChange={(value) => patchElementTypography(index, { fontSizePt: Number(value ?? 10) })}
+                      />
+                      <Button
+                        aria-label="Полужирный"
+                        type={typography.fontWeight === 'bold' ? 'primary' : 'default'}
+                        disabled={!canManage || saving || !advancedRendererReady || element.kind !== 'text'}
+                        onClick={() => patchElementTypography(index, { fontWeight: typography.fontWeight === 'bold' ? 'normal' : 'bold' })}
+                      >
+                        <strong>Ж</strong>
+                      </Button>
+                      <Button
+                        aria-label="Курсив"
+                        type={typography.italic ? 'primary' : 'default'}
+                        disabled={!canManage || saving || !advancedRendererReady || element.kind !== 'text'}
+                        onClick={() => patchElementTypography(index, { italic: !typography.italic })}
+                      >
+                        <em>К</em>
+                      </Button>
+                    </Space.Compact>
+                  );
+                },
+              },
+              {
+                title: 'Условие',
+                width: 150,
+                render: (_, element) => {
+                  if (element.kind !== 'text') return null;
+                  const active = Boolean(readLabelIfElseCondition(element.condition));
+                  return (
+                    <Button
+                      size="small"
+                      type={active ? 'primary' : 'default'}
+                      disabled={!canManage || saving || !advancedRendererReady}
+                      onClick={() => openElementCondition(element)}
+                    >
+                      {active ? 'if/else настроен' : 'Добавить if/else'}
+                    </Button>
+                  );
+                },
               },
               {
                 title: 'Имя QR',
@@ -1416,7 +1677,7 @@ export const LabelsConfigTab: React.FC = () => {
                 },
               },
               ...(['xMm', 'yMm', 'widthMm', 'heightMm'] as const).map((key) => ({
-                title: key,
+                title: ({ xMm: 'X, мм', yMm: 'Y, мм', widthMm: 'Ширина, мм', heightMm: 'Высота, мм' } as const)[key],
                 width: 95,
                 render: (_: unknown, element: LabelTemplateElement, index: number) => (
                   <InputNumber
@@ -1468,6 +1729,17 @@ export const LabelsConfigTab: React.FC = () => {
               title="Визуал бирки"
               extra={(
                 <Space size={12}>
+                  <Radio.Group
+                    size="small"
+                    value={previewDataMode}
+                    onChange={(event) => setPreviewDataMode(event.target.value as LabelPreviewDataMode)}
+                    optionType="button"
+                    buttonStyle="solid"
+                    options={[
+                      { value: 'structure', label: 'Структура' },
+                      { value: 'sample', label: 'Пример с данными' },
+                    ]}
+                  />
                   <Checkbox checked={visualExpanded} onChange={(event) => setVisualExpanded(event.target.checked)}>Увеличить визуал</Checkbox>
                   <Checkbox checked={showAllBorders} onChange={(event) => setShowAllBorders(event.target.checked)}>Показать границы всех элементов</Checkbox>
                 </Space>
@@ -1480,15 +1752,28 @@ export const LabelsConfigTab: React.FC = () => {
                 elements={elements}
                 fields={sourceFields}
                 previewFieldValues={customFieldPreviewValues}
+                previewDataMode={previewDataMode}
                 selectedElementKey={selectedElementKey}
+                selectedElementKeys={selectedElementKeys}
                 canDrag={canManage && !saving}
+                advancedFeaturesEnabled={advancedRendererReady}
                 initialZoom={visualExpanded ? 1.3 : 0.6}
                 showAllBounds={showAllBorders}
-                onSelectElement={setSelectedElementKey}
+                onSelectElement={(elementKey, additive) => setEditorSelection(selectLabelElements(
+                  elementsRef.current,
+                  selectedElementKeys,
+                  elementKey,
+                  additive,
+                ))}
                 onMoveElement={moveElement}
                 onChangeElement={patchElementByKey}
+                onChangeElements={patchElementsByKey}
+                onGestureActiveChange={setEditorGesture}
                 onDeleteElement={deleteElementByKey}
                 onDuplicateElement={duplicateElementByKey}
+                onGroupElements={groupSelectedElements}
+                onUngroupElements={ungroupSelectedElements}
+                onCenterElements={centerSelectedElements}
                 onBringElementToFront={bringElementToFront}
                 onSendElementToBack={sendElementToBack}
                 onDropField={addFieldElement}
@@ -1928,6 +2213,94 @@ export const LabelsConfigTab: React.FC = () => {
       </Modal>
 
       <Modal
+        title="Условие вывода поля"
+        open={conditionEditorKey !== null}
+        okText="Сохранить условие"
+        cancelText="Отмена"
+        okButtonProps={{
+          disabled: !canManage || saving || !advancedRendererReady || !isLabelConditionDraftValid(conditionDraft),
+        }}
+        onOk={saveElementCondition}
+        onCancel={() => setConditionEditorKey(null)}
+        footer={[
+          <Button key="clear" danger disabled={!canManage || saving} onClick={clearElementCondition} style={{ float: 'left' }}>
+            Удалить условие
+          </Button>,
+          <Button key="cancel" disabled={saving} onClick={() => setConditionEditorKey(null)}>
+            Отмена
+          </Button>,
+          <Button
+            key="save"
+            type="primary"
+            disabled={!canManage || saving || !advancedRendererReady || !isLabelConditionDraftValid(conditionDraft)}
+            onClick={saveElementCondition}
+          >
+            Сохранить условие
+          </Button>,
+        ]}
+      >
+        <Space direction="vertical" size={14} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="Проверка выполняется для каждой бирки. В каждой ветке можно оставить текущее значение, подставить другое поле, фиксированный текст или скрыть элемент."
+          />
+          <div>
+            <Text strong>Если</Text>
+            <Space.Compact block style={{ marginTop: 6 }}>
+              <Select
+                showSearch
+                optionFilterProp="label"
+                value={conditionDraft.when.field}
+                style={{ width: '58%' }}
+                options={sourceFields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
+                onChange={(field) => setConditionDraft((current) => ({
+                  ...current,
+                  when: { ...current.when, field },
+                }))}
+              />
+              <Select
+                value={conditionDraft.when.op}
+                style={{ width: '42%' }}
+                options={LABEL_CONDITION_OPERATOR_OPTIONS}
+                onChange={(op: LabelConditionOperator) => setConditionDraft((current) => ({
+                  ...current,
+                  when: op === 'equals' || op === 'not_equals'
+                    ? { ...current.when, op, value: current.when.value ?? '' }
+                    : { field: current.when.field, op },
+                }))}
+              />
+            </Space.Compact>
+            {(conditionDraft.when.op === 'equals' || conditionDraft.when.op === 'not_equals') && (
+              <Input
+                aria-label="Значение условия"
+                value={String(conditionDraft.when.value ?? '')}
+                placeholder="Значение для сравнения"
+                maxLength={1000}
+                style={{ marginTop: 8 }}
+                onChange={(event) => setConditionDraft((current) => ({
+                  ...current,
+                  when: { ...current.when, value: event.target.value },
+                }))}
+              />
+            )}
+          </div>
+          <ConditionBranchEditor
+            title="Тогда"
+            branch={conditionDraft.then}
+            fields={sourceFields}
+            onChange={(thenBranch) => setConditionDraft((current) => ({ ...current, then: thenBranch }))}
+          />
+          <ConditionBranchEditor
+            title="Иначе"
+            branch={conditionDraft.else}
+            fields={sourceFields}
+            onChange={(elseBranch) => setConditionDraft((current) => ({ ...current, else: elseBranch }))}
+          />
+        </Space>
+      </Modal>
+
+      <Modal
         title="Сохранить шаблон как"
         open={saveAsOpen}
         okText="Создать копию"
@@ -1948,19 +2321,75 @@ export const LabelsConfigTab: React.FC = () => {
   );
 };
 
+function ConditionBranchEditor({
+  title,
+  branch,
+  fields,
+  onChange,
+}: {
+  title: string;
+  branch: LabelConditionBranch;
+  fields: LabelFieldCatalogItem[];
+  onChange: (branch: LabelConditionBranch) => void;
+}) {
+  const changeType = (type: LabelConditionBranch['type']) => {
+    if (type === 'field') onChange({ type, field: fields[0]?.id ?? '' });
+    else if (type === 'text') onChange({ type, value: '' });
+    else onChange({ type });
+  };
+  return (
+    <div>
+      <Text strong>{title}</Text>
+      <Select
+        value={branch.type}
+        style={{ width: '100%', marginTop: 6 }}
+        options={LABEL_CONDITION_BRANCH_OPTIONS}
+        onChange={changeType}
+      />
+      {branch.type === 'field' && (
+        <Select
+          showSearch
+          optionFilterProp="label"
+          value={branch.field}
+          style={{ width: '100%', marginTop: 8 }}
+          options={fields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
+          onChange={(field) => onChange({ type: 'field', field })}
+        />
+      )}
+      {branch.type === 'text' && (
+        <Input
+          value={branch.value}
+          placeholder="Фиксированный текст"
+          maxLength={1000}
+          style={{ marginTop: 8 }}
+          onChange={(event) => onChange({ type: 'text', value: event.target.value })}
+        />
+      )}
+    </div>
+  );
+}
+
 function LabelTemplatePreview({
   widthMm,
   heightMm,
   elements,
   fields,
   previewFieldValues,
+  previewDataMode = 'sample',
   selectedElementKey,
+  selectedElementKeys,
   canDrag,
+  advancedFeaturesEnabled = true,
   onSelectElement,
   onMoveElement,
   onChangeElement,
+  onChangeElements,
+  onGestureActiveChange,
   onDeleteElement,
   onDuplicateElement,
+  onGroupElements,
+  onUngroupElements,
+  onCenterElements,
   onBringElementToFront,
   onSendElementToBack,
   onDropField,
@@ -1976,13 +2405,21 @@ function LabelTemplatePreview({
   elements: LabelTemplateElement[];
   fields: LabelFieldCatalogItem[];
   previewFieldValues?: Record<string, string>;
+  previewDataMode?: LabelPreviewDataMode;
   selectedElementKey?: string | null;
+  selectedElementKeys?: string[];
   canDrag?: boolean;
-  onSelectElement?: (elementKey: string) => void;
+  advancedFeaturesEnabled?: boolean;
+  onSelectElement?: (elementKey: string, additive: boolean) => void;
   onMoveElement?: (elementKey: string, xMm: number, yMm: number) => void;
   onChangeElement?: (elementKey: string, patch: Partial<LabelTemplateElement>) => void;
+  onChangeElements?: (patches: Array<{ elementKey: string; patch: Partial<LabelTemplateElement> }>) => void;
+  onGestureActiveChange?: (active: boolean) => void;
   onDeleteElement?: (elementKey: string) => void;
   onDuplicateElement?: (elementKey: string) => void;
+  onGroupElements?: (elementKeys: string[]) => void;
+  onUngroupElements?: (elementKeys: string[]) => void;
+  onCenterElements?: (elementKeys: string[], axis: 'horizontal' | 'vertical') => void;
   onBringElementToFront?: (elementKey: string) => void;
   onSendElementToBack?: (elementKey: string) => void;
   onDropField?: (field: LabelFieldCatalogItem, xMm: number, yMm: number) => void;
@@ -1996,6 +2433,16 @@ function LabelTemplatePreview({
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const nodeRefs = useRef(new Map<string, Konva.Node>());
+  const gestureSequenceRef = useRef(0);
+  const transformGestureRef = useRef<{ id: number; committed: boolean } | null>(null);
+  const dragGestureRef = useRef<{
+    id: number;
+    committed: boolean;
+    ownerKey: string;
+    keys: string[];
+    ownerStart: { x: number; y: number };
+    starts: Map<string, { x: number; y: number }>;
+  } | null>(null);
   // Shared guard so ONE QR-library release resolves the drop exactly once. Both
   // the capture-phase window listener (handleGlobalDrop) and the bubble-phase
   // wrapper onMouseUp used to fire on the same release, dropping TWO QR elements
@@ -2004,12 +2451,14 @@ function LabelTemplatePreview({
   // after the first was moved.
   const qrDropResolvedRef = useRef(false);
   const [zoom, setZoom] = useState(initialZoom);
-  const [showGrid, setShowGrid] = useState(false);
+  const [showGrid, setShowGrid] = useState(Boolean(canDrag));
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
+  const [measurement, setMeasurement] = useState<{ widthMm: number; heightMm: number } | null>(null);
+  const [heightSuggestion, setHeightSuggestion] = useState<ReturnType<typeof findSameRowHeightSuggestion>>(null);
   const [hoveredElement, setHoveredElement] = useState<{ element: LabelTemplateElement; x: number; y: number } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ field: LabelFieldCatalogItem; xMm: number; yMm: number } | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ element: LabelTemplateElement; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ elementKey: string; x: number; y: number } | null>(null);
   const safeWidth = Number.isFinite(widthMm) && widthMm > 0 ? widthMm : 85;
   const safeHeight = Number.isFinite(heightMm) && heightMm > 0 ? heightMm : 88;
   // True while an external drag (field or QR icon) is in flight over the canvas; used to
@@ -2018,15 +2467,35 @@ function LabelTemplatePreview({
   const externalDragActive = Boolean(draggingField || draggingQr);
   const fieldLabels = useMemo(() => new Map(fields.map((field) => [field.id, field.label])), [fields]);
   const fieldInfo = useMemo(() => new Map(fields.map((field) => [field.id, field])), [fields]);
-  const fieldValues = useMemo(
-    () => new Map(Object.entries({ ...PREVIEW_FIELD_VALUES, ...previewFieldValues })),
-    [previewFieldValues],
-  );
+  const fieldValues = useMemo(() => {
+    if (previewDataMode === 'structure') return new Map<string, string>();
+    const generated = Object.fromEntries(fields.map((field, index) => [field.id, sampleLabelFieldValue(field, index)]));
+    return new Map(Object.entries({ ...generated, ...PREVIEW_FIELD_VALUES, ...previewFieldValues }));
+  }, [fields, previewDataMode, previewFieldValues]);
   const sorted = elements.slice().sort((a, b) => Number(a.zIndex ?? 0) - Number(b.zIndex ?? 0));
   const previewWidth = Math.round(Math.min(760, Math.max(360, safeWidth * 7)) * zoom);
   const previewHeight = previewWidth * (safeHeight / safeWidth);
-  const selectedElement = elements.find((element) => element.elementKey === selectedElementKey);
-  const selectedElementLocked = Boolean(selectedElement && isLabelElementLocked(selectedElement));
+  const effectiveSelectedKeys = selectedElementKeys?.length
+    ? selectedElementKeys
+    : selectedElementKey
+      ? [selectedElementKey]
+      : [];
+  const selectedElements = elements.filter((element) => effectiveSelectedKeys.includes(element.elementKey));
+  const selectedElement = selectedElements.at(-1);
+  const selectedElementLocked = selectedElements.some(isLabelElementLocked);
+  const contextElement = contextMenu
+    ? elements.find((element) => element.elementKey === contextMenu.elementKey) ?? null
+    : null;
+  const contextKeys = contextElement && effectiveSelectedKeys.includes(contextElement.elementKey)
+    ? effectiveSelectedKeys
+    : contextElement
+      ? selectLabelElements(elements, [], contextElement.elementKey, false)
+      : [];
+  const contextElements = elements.filter((element) => contextKeys.includes(element.elementKey));
+  const contextBounds = contextElements.length > 0 ? labelElementsBounds(contextElements) : null;
+  const contextHasGroup = contextElements.some((element) => Boolean(readLabelEditorMeta(element).groupId));
+  const contextTextElement = contextElements.find((element) => element.kind === 'text') ?? null;
+  const contextAllLocked = contextElements.length > 0 && contextElements.every(isLabelElementLocked);
   const pointFromEvent = (event: Pick<React.MouseEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>) => {
     const container = stageRef.current?.container();
     if (!container) return { x: 0, y: 0 };
@@ -2046,15 +2515,17 @@ function LabelTemplatePreview({
   }, [canDrag, externalDragActive]);
 
   useEffect(() => {
-    if (!canDrag || !selectedElementKey || selectedElementLocked || externalDragActive) {
+    if (!canDrag || effectiveSelectedKeys.length === 0 || selectedElementLocked || externalDragActive) {
       transformerRef.current?.nodes([]);
       transformerRef.current?.getLayer()?.batchDraw();
       return;
     }
-    const node = nodeRefs.current.get(selectedElementKey);
-    transformerRef.current?.nodes(node ? [node] : []);
+    const nodes = effectiveSelectedKeys
+      .map((key) => nodeRefs.current.get(key))
+      .filter((node): node is Konva.Node => Boolean(node));
+    transformerRef.current?.nodes(nodes);
     transformerRef.current?.getLayer()?.batchDraw();
-  }, [canDrag, externalDragActive, elements, selectedElementKey, selectedElementLocked]);
+  }, [canDrag, externalDragActive, elements, selectedElementLocked, selectedElementKeys, selectedElementKey]);
 
   useEffect(() => {
     if (!canDrag || !draggingField || !onDropDraggingField) return;
@@ -2125,18 +2596,9 @@ function LabelTemplatePreview({
     snapToGrid && !event?.altKey ? Math.round(value) : value
   );
 
-  const patchGeometry = (
-    elementKey: string,
-    patch: Partial<LabelTemplateElement>,
-    event?: { altKey?: boolean },
-  ) => {
-    const next: Partial<LabelTemplateElement> = {};
-    if (patch.xMm !== undefined) next.xMm = roundMm(applySnap(Number(patch.xMm), event));
-    if (patch.yMm !== undefined) next.yMm = roundMm(applySnap(Number(patch.yMm), event));
-    if (patch.widthMm !== undefined) next.widthMm = roundMm(Math.max(0.1, applySnap(Number(patch.widthMm), event)));
-    if (patch.heightMm !== undefined) next.heightMm = roundMm(Math.max(0, applySnap(Number(patch.heightMm), event)));
-    if (patch.rotationDeg !== undefined) next.rotationDeg = roundMm(Number(patch.rotationDeg));
-    onChangeElement?.(elementKey, next);
+  const commitGeometry = (patches: Array<{ elementKey: string; patch: Partial<LabelTemplateElement> }>) => {
+    if (onChangeElements) onChangeElements(patches);
+    else patches.forEach(({ elementKey, patch }) => onChangeElement?.(elementKey, patch));
   };
 
   const resolveDragPosition = (
@@ -2167,93 +2629,183 @@ function LabelTemplatePreview({
     };
   };
 
+  const handleDragStartElement = (
+    elementKey: string,
+    node: Konva.Node,
+  ) => {
+    const keys = effectiveSelectedKeys.includes(elementKey)
+      ? effectiveSelectedKeys
+      : selectLabelElements(elements, [], elementKey, false);
+    const selected = elements.filter((element) => keys.includes(element.elementKey));
+    if (selected.some(isLabelElementLocked)) return;
+    const starts = new Map<string, { x: number; y: number }>();
+    for (const key of keys) {
+      const selectedNode = nodeRefs.current.get(key);
+      if (selectedNode) starts.set(key, { x: selectedNode.x(), y: selectedNode.y() });
+    }
+    dragGestureRef.current = {
+      id: ++gestureSequenceRef.current,
+      committed: false,
+      ownerKey: elementKey,
+      keys,
+      ownerStart: starts.get(elementKey) ?? { x: node.x(), y: node.y() },
+      starts,
+    };
+    onGestureActiveChange?.(true);
+  };
+
   const handleDragMoveElement = (
     elementKey: string,
     node: Konva.Node,
     event: Konva.KonvaEventObject<DragEvent>,
   ) => {
-    const next = resolveDragPosition(elementKey, node.x(), node.y(), event.evt);
-    node.position({ x: next.xMm, y: next.yMm });
-    setAlignmentGuides(next.guides);
-  };
-
-  const handleMoveElement = (elementKey: string, xMm: number, yMm: number, event?: { altKey?: boolean }) => {
-    const element = elements.find((item) => item.elementKey === elementKey);
-    if (!element || isLabelElementLocked(element)) return;
-    const next = resolveDragPosition(elementKey, xMm, yMm, event);
-    onMoveElement?.(elementKey, next.xMm, next.yMm);
-    setAlignmentGuides([]);
-  };
-
-  const handleTransformEnd = (
-    element: LabelTemplateElement,
-    node: Konva.Node,
-    event: Konva.KonvaEventObject<Event>,
-  ) => {
-    if (isLabelElementLocked(element)) return;
-    const rotationStep = (event.evt as MouseEvent | KeyboardEvent | PointerEvent | undefined)?.shiftKey ? 15 : 1;
-    const nextRotation = Math.round(Number(node.rotation() ?? 0) / rotationStep) * rotationStep;
-    const nextSize = normalizeTransformedNode(element, node);
-    patchGeometry(
-      element.elementKey,
-      {
-        xMm: clamp(node.x(), 0, safeWidth),
-        yMm: clamp(node.y(), 0, safeHeight),
-        widthMm: nextSize.widthMm,
-        heightMm: nextSize.heightMm,
-        rotationDeg: nextRotation,
-      },
-      event.evt as MouseEvent | PointerEvent,
+    const gesture = dragGestureRef.current;
+    if (!gesture || gesture.ownerKey !== elementKey || gesture.committed) return;
+    const selected = elements.filter((element) => gesture.keys.includes(element.elementKey));
+    const bounds = labelElementsBounds(selected);
+    const desiredOwner = gesture.keys.length === 1
+      ? resolveDragPosition(elementKey, node.x(), node.y(), event.evt)
+      : {
+          xMm: applySnap(node.x(), event.evt),
+          yMm: applySnap(node.y(), event.evt),
+          guides: [] as AlignmentGuide[],
+        };
+    const positions = moveLabelDragGesture(
+      gesture,
+      { x: desiredOwner.xMm, y: desiredOwner.yMm },
+      bounds,
+      { width: safeWidth, height: safeHeight },
     );
-  };
-
-  const handleTransform = (
-    element: LabelTemplateElement,
-    node: Konva.Node,
-    event: Konva.KonvaEventObject<Event>,
-  ) => {
-    if (element.kind === 'line' || isLabelElementLocked(element)) return;
-    const nextSize = normalizeTransformedNode(element, node);
-    patchGeometry(
-      element.elementKey,
-      {
-        xMm: clamp(node.x(), 0, safeWidth),
-        yMm: clamp(node.y(), 0, safeHeight),
-        widthMm: nextSize.widthMm,
-        heightMm: nextSize.heightMm,
-        rotationDeg: Number(node.rotation() ?? 0),
-      },
-      event.evt as MouseEvent | PointerEvent,
-    );
-  };
-
-  const toggleElementLock = (element: LabelTemplateElement, locked: boolean) => {
-    onChangeElement?.(element.elementKey, {
-      style: {
-        ...(element.style ?? {}),
-        locked,
-      },
-    });
-    setContextMenu(null);
-  };
-
-  const setElementTextAlign = (element: LabelTemplateElement, textAlign: LabelTextAlign) => {
-    if (element.kind !== 'text' || isLabelElementLocked(element)) return;
-    const style = { ...(element.style ?? {}) };
-    if (textAlign === 'center') {
-      delete style.textAlign;
-    } else {
-      style.textAlign = textAlign;
+    for (const position of positions) {
+      nodeRefs.current.get(position.elementKey)?.position({ x: position.x, y: position.y });
     }
-    onChangeElement?.(element.elementKey, { style });
+    setMeasurement({ widthMm: bounds.widthMm, heightMm: bounds.heightMm });
+    setAlignmentGuides(desiredOwner.guides);
+  };
+
+  const handleDragEndElement = (elementKey: string) => {
+    const gesture = dragGestureRef.current;
+    if (!gesture || gesture.ownerKey !== elementKey || !claimLabelGestureCommit(gesture)) return;
+    commitGeometry(gesture.keys.flatMap((key) => {
+      const node = nodeRefs.current.get(key);
+      return node ? [{ elementKey: key, patch: { xMm: roundMm(node.x()), yMm: roundMm(node.y()) } }] : [];
+    }));
+    dragGestureRef.current = null;
+    setMeasurement(null);
+    setAlignmentGuides([]);
+    onGestureActiveChange?.(false);
+  };
+
+  const transformedElements = () => {
+    const byKey = new Map(selectedElements.map((element) => [element.elementKey, element]));
+    return readLabelTransformedNodes(selectedElements, nodeRefs.current).flatMap((snapshot) => {
+      const element = byKey.get(snapshot.elementKey);
+      return element ? [{ ...element, ...snapshot }] : [];
+    });
+  };
+
+  const handleTransformStart = () => {
+    transformGestureRef.current = { id: ++gestureSequenceRef.current, committed: false };
+    onGestureActiveChange?.(true);
+  };
+
+  const handleTransform = () => {
+    const transformed = transformedElements();
+    if (transformed.length === 0) return;
+    const bounds = labelElementsBounds(transformed);
+    setMeasurement({ widthMm: roundMm(bounds.widthMm), heightMm: roundMm(bounds.heightMm) });
+    if (transformed.length === 1 && transformed[0].kind === 'text') {
+      setHeightSuggestion(findSameRowHeightSuggestion({
+        elements: elements.map((element) => (
+          element.elementKey === transformed[0].elementKey ? transformed[0] : element
+        )),
+        movingElementKey: transformed[0].elementKey,
+        proposedHeightMm: Number(transformed[0].heightMm),
+        rowToleranceMm: 1.2,
+        heightToleranceMm: 1.5,
+      }));
+    } else {
+      setHeightSuggestion(null);
+    }
+  };
+
+  const handleTransformEnd = (event: Konva.KonvaEventObject<Event>) => {
+    if (!claimLabelGestureCommit(transformGestureRef.current)) return;
+    const rotationStep = (event.evt as MouseEvent | KeyboardEvent | PointerEvent | undefined)?.shiftKey ? 15 : 1;
+    const eventFlags = event.evt as MouseEvent | PointerEvent | undefined;
+    const elementsByKey = new Map(selectedElements.map((element) => [element.elementKey, element]));
+    const rawSnapshots = readAndNormalizeLabelTransformedNodes(selectedElements, nodeRefs.current);
+    const snapshots = rawSnapshots.length > 1
+      ? normalizeLabelMultiSelectionTransform({
+          elements: selectedElements,
+          snapshots: rawSnapshots,
+          canvasWidthMm: safeWidth,
+          canvasHeightMm: safeHeight,
+          snapToGrid: snapToGrid && !eventFlags?.altKey,
+          rotationStep,
+        })
+      : rawSnapshots;
+    const patches = snapshots.flatMap((snapshot) => {
+      const element = elementsByKey.get(snapshot.elementKey);
+      if (!element) return [];
+      const widthMm = element.kind === 'qr'
+        ? Math.max(snapshot.widthMm, snapshot.heightMm)
+        : snapshot.widthMm;
+      const heightMm = element.kind === 'qr' ? widthMm : snapshot.heightMm;
+      return [{
+        elementKey: element.elementKey,
+        patch: {
+          xMm: roundMm(snapshots.length > 1
+            ? snapshot.xMm
+            : clamp(applySnap(snapshot.xMm, eventFlags), 0, Math.max(0, safeWidth - widthMm))),
+          yMm: roundMm(snapshots.length > 1
+            ? snapshot.yMm
+            : clamp(applySnap(snapshot.yMm, eventFlags), 0, Math.max(0, safeHeight - heightMm))),
+          widthMm: roundMm(Math.max(0.1, snapshots.length > 1 ? widthMm : applySnap(widthMm, eventFlags))),
+          heightMm: roundMm(Math.max(element.kind === 'line' ? 0 : 0.1, snapshots.length > 1 ? heightMm : applySnap(heightMm, eventFlags))),
+          rotationDeg: roundMm(snapshots.length > 1
+            ? snapshot.rotationDeg
+            : Math.round(snapshot.rotationDeg / rotationStep) * rotationStep),
+        },
+      }];
+    });
+    commitGeometry(patches);
+    transformGestureRef.current = null;
+    setMeasurement(null);
+    onGestureActiveChange?.(false);
+  };
+
+  const toggleElementLock = (locked: boolean) => {
+    commitGeometry(contextElements.map((element) => ({
+      elementKey: element.elementKey,
+      patch: { style: { ...(element.style ?? {}), locked } },
+    })));
     setContextMenu(null);
+  };
+
+  const setElementTextAlign = (textAlign: LabelTextAlign) => {
+    commitGeometry(contextElements.filter((element) => element.kind === 'text' && !isLabelElementLocked(element)).map((element) => {
+      const style = { ...(element.style ?? {}) };
+      if (textAlign === 'center') delete style.textAlign;
+      else style.textAlign = textAlign;
+      return { elementKey: element.elementKey, patch: { style } };
+    }));
+    setContextMenu(null);
+  };
+
+  const patchContextTypography = (patch: { fontSizePt?: number; fontWeight?: 'normal' | 'bold'; italic?: boolean }) => {
+    if (!advancedFeaturesEnabled) return;
+    commitGeometry(contextElements.filter((element) => element.kind === 'text' && !isLabelElementLocked(element)).map((element) => ({
+      elementKey: element.elementKey,
+      patch: { style: withLabelTypography(element, patch).style },
+    })));
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!canDrag || !selectedElement) return;
-    if ((event.key === 'Delete' || event.key === 'Backspace') && !isLabelElementLocked(selectedElement)) {
+    if (!canDrag || selectedElements.length === 0) return;
+    if ((event.key === 'Delete' || event.key === 'Backspace') && !selectedElementLocked) {
       event.preventDefault();
-      onDeleteElement?.(selectedElement.elementKey);
+      onDeleteElement?.(selectedElements[0].elementKey);
       return;
     }
     const delta = event.shiftKey ? 5 : 1;
@@ -2264,14 +2816,18 @@ function LabelTemplatePreview({
       ArrowDown: [0, delta],
     };
     const offset = moveBy[event.key];
-    if (!offset) return;
+    if (!offset || selectedElementLocked) return;
     event.preventDefault();
-    handleMoveElement(
-      selectedElement.elementKey,
-      Number(selectedElement.xMm ?? 0) + offset[0],
-      Number(selectedElement.yMm ?? 0) + offset[1],
-      event,
-    );
+    const bounds = labelElementsBounds(selectedElements);
+    const deltaX = clamp(offset[0], -bounds.minX, safeWidth - bounds.maxX);
+    const deltaY = clamp(offset[1], -bounds.minY, safeHeight - bounds.maxY);
+    commitGeometry(selectedElements.map((element) => ({
+      elementKey: element.elementKey,
+      patch: {
+        xMm: roundMm(Number(element.xMm ?? 0) + deltaX),
+        yMm: roundMm(Number(element.yMm ?? 0) + deltaY),
+      },
+    })));
   };
 
   const handleDrop = (event: React.DragEvent<Element>) => {
@@ -2320,9 +2876,11 @@ function LabelTemplatePreview({
       setContextMenu(null);
       return;
     }
-    onSelectElement?.(element.elementKey);
+    if (!effectiveSelectedKeys.includes(element.elementKey)) {
+      onSelectElement?.(element.elementKey, false);
+    }
     setContextMenu({
-      element,
+      elementKey: element.elementKey,
       x: (point.x / safeWidth) * previewWidth,
       y: (point.y / safeHeight) * previewHeight,
     });
@@ -2441,21 +2999,22 @@ function LabelTemplatePreview({
                 element,
                 fieldLabels,
                 fieldValues,
-                selected: !externalDragActive && selectedElementKey === element.elementKey,
+                evaluateConditions: previewDataMode === 'sample',
+                selected: !externalDragActive && effectiveSelectedKeys.includes(element.elementKey),
                 interactive: Boolean(canDrag && !externalDragActive),
                 draggable: Boolean(canDrag && !externalDragActive && !isLabelElementLocked(element)),
                 showAllBounds,
                 safeWidth,
                 safeHeight,
                 onSelectElement: externalDragActive ? undefined : onSelectElement,
-                onMoveElement: handleMoveElement,
+                onMoveElement,
+                onDragStartElement: handleDragStartElement,
                 onDragMoveElement: handleDragMoveElement,
+                onDragEndElement: handleDragEndElement,
                 nodeRef: (node) => {
                   if (node) nodeRefs.current.set(element.elementKey, node);
                   else nodeRefs.current.delete(element.elementKey);
                 },
-                onTransform: (node, event) => handleTransform(element, node, event),
-                onTransformEnd: (node, event) => handleTransformEnd(element, node, event),
                 onHoverElement: (hovered, event) => {
                   const pointer = event.target.getStage()?.getPointerPosition();
                   setHoveredElement({
@@ -2469,9 +3028,11 @@ function LabelTemplatePreview({
                   if (!canDrag) return;
                   event.evt.preventDefault();
                   const pointer = event.target.getStage()?.getPointerPosition();
-                  onSelectElement?.(menuElement.elementKey);
+                  if (!effectiveSelectedKeys.includes(menuElement.elementKey)) {
+                    onSelectElement?.(menuElement.elementKey, false);
+                  }
                   setContextMenu({
-                    element: menuElement,
+                    elementKey: menuElement.elementKey,
                     x: pointer?.x ?? 0,
                     y: pointer?.y ?? 0,
                   });
@@ -2510,23 +3071,64 @@ function LabelTemplatePreview({
               <Transformer
                 ref={transformerRef}
                 rotateEnabled
-                enabledAnchors={selectedElement?.kind === 'line' ? ['middle-left', 'middle-right'] : undefined}
+                flipEnabled={false}
+                keepRatio={selectedElements.length > 1 || selectedElement?.kind === 'qr'}
+                enabledAnchors={selectedElements.length === 1 && selectedElement?.kind === 'line' ? ['middle-left', 'middle-right'] : undefined}
                 boundBoxFunc={(oldBox, newBox) => (
                   newBox.width < 2 || newBox.height < 2 ? oldBox : newBox
                 )}
+                onTransformStart={handleTransformStart}
+                onTransform={handleTransform}
+                onTransformEnd={handleTransformEnd}
               />
             )}
           </Layer>
         </Stage>
-        {contextMenu && (
+        {measurement && (
+          <div
+            data-label-measurement
+            style={{
+              position: 'absolute',
+              right: 8,
+              top: 8,
+              zIndex: 3,
+              padding: '4px 7px',
+              color: '#fff',
+              background: 'rgba(0, 0, 0, 0.72)',
+              borderRadius: 4,
+              fontSize: 12,
+              pointerEvents: 'none',
+            }}
+          >
+            {roundMm(measurement.widthMm)} × {roundMm(measurement.heightMm)} мм
+          </div>
+        )}
+        {heightSuggestion && selectedElements.length === 1 && (
+          <Button
+            data-label-height-suggestion
+            size="small"
+            type="primary"
+            style={{ position: 'absolute', right: 8, bottom: 8, zIndex: 3 }}
+            onClick={() => {
+              commitGeometry([{
+                elementKey: selectedElements[0].elementKey,
+                patch: { heightMm: heightSuggestion.heightMm },
+              }]);
+              setHeightSuggestion(null);
+            }}
+          >
+            Выровнять высоту: {roundMm(heightSuggestion.heightMm)} мм
+          </Button>
+        )}
+        {contextMenu && contextElement && contextBounds && (
           <div
             data-label-context-menu
             style={{
               position: 'absolute',
-              left: Math.min(contextMenu.x + 6, Math.max(8, previewWidth - 190)),
-              top: Math.min(contextMenu.y + 6, Math.max(8, previewHeight - 230)),
+              left: Math.min(contextMenu.x + 6, Math.max(8, previewWidth - 252)),
+              top: Math.min(contextMenu.y + 6, Math.max(8, previewHeight - 420)),
               zIndex: 3,
-              minWidth: 180,
+              minWidth: 244,
               padding: 4,
               background: '#fff',
               border: '1px solid #d9d9d9',
@@ -2535,8 +3137,46 @@ function LabelTemplatePreview({
             }}
             onMouseLeave={() => setContextMenu(null)}
           >
-            {contextMenu.element.kind === 'text' && (
+            <div style={{ padding: '4px 6px 7px', borderBottom: '1px solid #f0f0f0', marginBottom: 3 }}>
+              <Text strong style={{ display: 'block', fontSize: 12 }}>
+                {contextElements.length > 1 ? `Выбрано: ${contextElements.length}` : labelElementTitle(contextElement, fieldInfo)}
+              </Text>
+              <Text type="secondary" style={{ display: 'block', fontSize: 11, marginTop: 3 }}>
+                X {roundMm(contextBounds.minX)} · Y {roundMm(contextBounds.minY)} · {roundMm(contextBounds.widthMm)} × {roundMm(contextBounds.heightMm)} мм
+              </Text>
+            </div>
+            {contextTextElement && (
               <div style={{ padding: '4px 4px 6px' }}>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>
+                  Шрифт
+                </Text>
+                <Space.Compact block style={{ marginBottom: 6 }}>
+                  <InputNumber
+                    aria-label="Размер шрифта в контекстном меню"
+                    min={4}
+                    max={96}
+                    addonAfter="pt"
+                    value={readLabelTypography(contextTextElement).fontSizePt}
+                    disabled={!advancedFeaturesEnabled || contextElements.some(isLabelElementLocked)}
+                    onChange={(value) => patchContextTypography({ fontSizePt: Number(value ?? 10) })}
+                  />
+                  <Button
+                    type={readLabelTypography(contextTextElement).fontWeight === 'bold' ? 'primary' : 'default'}
+                    disabled={!advancedFeaturesEnabled || contextElements.some(isLabelElementLocked)}
+                    onClick={() => patchContextTypography({
+                      fontWeight: readLabelTypography(contextTextElement).fontWeight === 'bold' ? 'normal' : 'bold',
+                    })}
+                  >
+                    <strong>Ж</strong>
+                  </Button>
+                  <Button
+                    type={readLabelTypography(contextTextElement).italic ? 'primary' : 'default'}
+                    disabled={!advancedFeaturesEnabled || contextElements.some(isLabelElementLocked)}
+                    onClick={() => patchContextTypography({ italic: !readLabelTypography(contextTextElement).italic })}
+                  >
+                    <em>К</em>
+                  </Button>
+                </Space.Compact>
                 <Text type="secondary" style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>
                   Выравнивание значения
                 </Text>
@@ -2545,27 +3185,27 @@ function LabelTemplatePreview({
                     <Button
                       size="small"
                       icon={<AlignLeftOutlined />}
-                      type={getLabelTextAlign(contextMenu.element) === 'left' ? 'primary' : 'default'}
-                      disabled={isLabelElementLocked(contextMenu.element)}
-                      onClick={() => setElementTextAlign(contextMenu.element, 'left')}
+                      type={getLabelTextAlign(contextTextElement) === 'left' ? 'primary' : 'default'}
+                      disabled={contextElements.some(isLabelElementLocked)}
+                      onClick={() => setElementTextAlign('left')}
                     />
                   </Tooltip>
                   <Tooltip title="Выровнять значение по центру поля">
                     <Button
                       size="small"
                       icon={<AlignCenterOutlined />}
-                      type={getLabelTextAlign(contextMenu.element) === 'center' ? 'primary' : 'default'}
-                      disabled={isLabelElementLocked(contextMenu.element)}
-                      onClick={() => setElementTextAlign(contextMenu.element, 'center')}
+                      type={getLabelTextAlign(contextTextElement) === 'center' ? 'primary' : 'default'}
+                      disabled={contextElements.some(isLabelElementLocked)}
+                      onClick={() => setElementTextAlign('center')}
                     />
                   </Tooltip>
                   <Tooltip title="Выровнять значение по правой стороне поля">
                     <Button
                       size="small"
                       icon={<AlignRightOutlined />}
-                      type={getLabelTextAlign(contextMenu.element) === 'right' ? 'primary' : 'default'}
-                      disabled={isLabelElementLocked(contextMenu.element)}
-                      onClick={() => setElementTextAlign(contextMenu.element, 'right')}
+                      type={getLabelTextAlign(contextTextElement) === 'right' ? 'primary' : 'default'}
+                      disabled={contextElements.some(isLabelElementLocked)}
+                      onClick={() => setElementTextAlign('right')}
                     />
                   </Tooltip>
                 </Space.Compact>
@@ -2575,16 +3215,68 @@ function LabelTemplatePreview({
               type="text"
               size="small"
               block
-              onClick={() => toggleElementLock(contextMenu.element, !isLabelElementLocked(contextMenu.element))}
+              disabled={contextElements.some(isLabelElementLocked)}
+              onClick={() => {
+                onCenterElements?.(contextKeys, 'horizontal');
+                setContextMenu(null);
+              }}
             >
-              {isLabelElementLocked(contextMenu.element) ? 'Разблокировать' : 'Заблокировать'}
+              По горизонтальному центру канваса
+            </Button>
+            <Button
+              type="text"
+              size="small"
+              block
+              disabled={contextElements.some(isLabelElementLocked)}
+              onClick={() => {
+                onCenterElements?.(contextKeys, 'vertical');
+                setContextMenu(null);
+              }}
+            >
+              По вертикальному центру канваса
+            </Button>
+            {contextElements.length > 1 && (
+              <Button
+                type="text"
+                size="small"
+                block
+                disabled={!advancedFeaturesEnabled || contextElements.some(isLabelElementLocked)}
+                onClick={() => {
+                  onGroupElements?.(contextKeys);
+                  setContextMenu(null);
+                }}
+              >
+                {contextHasGroup ? 'Перегруппировать выделение' : 'Сгруппировать'}
+              </Button>
+            )}
+            {contextHasGroup && (
+              <Button
+                type="text"
+                size="small"
+                block
+                disabled={!advancedFeaturesEnabled || contextElements.some(isLabelElementLocked)}
+                onClick={() => {
+                  onUngroupElements?.(contextKeys);
+                  setContextMenu(null);
+                }}
+              >
+                Разгруппировать
+              </Button>
+            )}
+            <Button
+              type="text"
+              size="small"
+              block
+              onClick={() => toggleElementLock(!contextAllLocked)}
+            >
+              {contextAllLocked ? 'Разблокировать' : 'Заблокировать'}
             </Button>
             <Button
               type="text"
               size="small"
               block
               onClick={() => {
-                onDuplicateElement?.(contextMenu.element.elementKey);
+                onDuplicateElement?.(contextElement.elementKey);
                 setContextMenu(null);
               }}
             >
@@ -2595,7 +3287,7 @@ function LabelTemplatePreview({
               size="small"
               block
               onClick={() => {
-                onBringElementToFront?.(contextMenu.element.elementKey);
+                onBringElementToFront?.(contextElement.elementKey);
                 setContextMenu(null);
               }}
             >
@@ -2606,7 +3298,7 @@ function LabelTemplatePreview({
               size="small"
               block
               onClick={() => {
-                onSendElementToBack?.(contextMenu.element.elementKey);
+                onSendElementToBack?.(contextElement.elementKey);
                 setContextMenu(null);
               }}
             >
@@ -2618,7 +3310,7 @@ function LabelTemplatePreview({
               size="small"
               block
               onClick={() => {
-                onDeleteElement?.(contextMenu.element.elementKey);
+                onDeleteElement?.(contextElement.elementKey);
                 setContextMenu(null);
               }}
             >
@@ -2871,6 +3563,7 @@ function renderKonvaPreviewElement({
   element,
   fieldLabels,
   fieldValues,
+  evaluateConditions,
   selected,
   interactive,
   draggable,
@@ -2879,10 +3572,10 @@ function renderKonvaPreviewElement({
   safeHeight,
   onSelectElement,
   onMoveElement,
+  onDragStartElement,
   onDragMoveElement,
+  onDragEndElement,
   nodeRef,
-  onTransform,
-  onTransformEnd,
   onHoverElement,
   onLeaveElement,
   onContextMenu,
@@ -2890,22 +3583,23 @@ function renderKonvaPreviewElement({
   element: LabelTemplateElement;
   fieldLabels: Map<string, string>;
   fieldValues: Map<string, string>;
+  evaluateConditions: boolean;
   selected: boolean;
   interactive: boolean;
   draggable: boolean;
   showAllBounds?: boolean;
   safeWidth: number;
   safeHeight: number;
-  onSelectElement?: (elementKey: string) => void;
+  onSelectElement?: (elementKey: string, additive: boolean) => void;
   onMoveElement?: (elementKey: string, xMm: number, yMm: number, event?: { altKey?: boolean }) => void;
+  onDragStartElement?: (elementKey: string, node: Konva.Node) => void;
   onDragMoveElement?: (
     elementKey: string,
     node: Konva.Node,
     event: Konva.KonvaEventObject<DragEvent>,
   ) => void;
+  onDragEndElement?: (elementKey: string) => void;
   nodeRef?: (node: Konva.Node | null) => void;
-  onTransform?: (node: Konva.Node, event: Konva.KonvaEventObject<Event>) => void;
-  onTransformEnd?: (node: Konva.Node, event: Konva.KonvaEventObject<Event>) => void;
   onHoverElement?: (element: LabelTemplateElement, event: Konva.KonvaEventObject<MouseEvent>) => void;
   onLeaveElement?: () => void;
   onContextMenu?: (element: LabelTemplateElement, event: Konva.KonvaEventObject<MouseEvent>) => void;
@@ -2918,10 +3612,13 @@ function renderKonvaPreviewElement({
   const rotation = Number(element.rotationDeg ?? 0);
   const maxX = Math.max(0, safeWidth - Math.max(w, 1));
   const maxY = Math.max(0, safeHeight - Math.max(h, 1));
-  const select = () => onSelectElement?.(key);
+  const select = (event: Konva.KonvaEventObject<MouseEvent>) => onSelectElement?.(key, Boolean(event.evt.shiftKey));
   const dragEnd = (event: Konva.KonvaEventObject<DragEvent>) => {
-    if (!onMoveElement) return;
-    onMoveElement(key, clamp(event.target.x(), 0, maxX), clamp(event.target.y(), 0, maxY), event.evt);
+    if (onDragEndElement) {
+      onDragEndElement(key);
+      return;
+    }
+    onMoveElement?.(key, clamp(event.target.x(), 0, maxX), clamp(event.target.y(), 0, maxY), event.evt);
   };
   const common = {
     ref: nodeRef,
@@ -2931,17 +3628,18 @@ function renderKonvaPreviewElement({
     listening: interactive,
     draggable,
     onClick: select,
-    onTap: select,
+    onTap: () => onSelectElement?.(key, false),
     onMouseDown: (event: Konva.KonvaEventObject<MouseEvent>) => {
       if (event.evt.button !== 2) return;
       event.evt.preventDefault();
       onContextMenu?.(element, event);
     },
-    onDragStart: select,
+    onDragStart: (event: Konva.KonvaEventObject<DragEvent>) => {
+      if (!selected) onSelectElement?.(key, false);
+      onDragStartElement?.(key, event.target);
+    },
     onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => onDragMoveElement?.(key, event.target, event),
     onDragEnd: dragEnd,
-    onTransform: (event: Konva.KonvaEventObject<Event>) => onTransform?.(event.target, event),
-    onTransformEnd: (event: Konva.KonvaEventObject<Event>) => onTransformEnd?.(event.target, event),
     onContextMenu: (event: Konva.KonvaEventObject<MouseEvent>) => onContextMenu?.(element, event),
     onMouseEnter: (event: Konva.KonvaEventObject<MouseEvent>) => {
       event.target.getStage()?.container().style.setProperty('cursor', draggable ? 'move' : 'default');
@@ -2960,6 +3658,7 @@ function renderKonvaPreviewElement({
       y={y}
       width={Math.max(w, 2)}
       height={Math.max(h, 2)}
+      rotation={rotation}
       stroke="#1677ff"
       strokeWidth={0.35}
       dash={[1, 1]}
@@ -2976,6 +3675,7 @@ function renderKonvaPreviewElement({
       y={y}
       width={Math.max(w, 2)}
       height={Math.max(h, 2)}
+      rotation={rotation}
       stroke="#faad14"
       strokeWidth={0.3}
       dash={[1, 1]}
@@ -3044,7 +3744,7 @@ function renderKonvaPreviewElement({
             only draggable node and the modules were absolutely-positioned
             siblings, so a drag left the image behind and only the frame moved.
             width/height are set on the group so the resize Transformer
-            (normalizeTransformedNode → node.width()) keeps working. */}
+            normalization helper keeps working. */}
         <KonvaGroup {...common} width={side} height={side}>
           <KonvaRect
             x={0}
@@ -3086,21 +3786,28 @@ function renderKonvaPreviewElement({
     );
   }
 
-  const fontSize = Math.max(1.8, Number(element.style?.fontSize ?? 10) * 0.35);
+  const typography = readLabelTypography(element);
+  const fontSize = Math.max(1.8, typography.fontSizePt * 0.3528);
   const textAlign = getLabelTextAlign(element);
-  const text = element.sourceField
-    ? fieldValues.get(element.sourceField) ?? fieldLabels.get(element.sourceField) ?? element.sourceField
-    : element.staticText ?? '';
+  const text = evaluateConditions
+    ? resolveLabelElementPreviewText(element, fieldValues, fieldLabels)
+    : element.sourceField
+      ? fieldLabels.get(element.sourceField) ?? element.sourceField
+      : element.staticText ?? '';
+  const manualBounds = readLabelEditorMeta(element).boundsMode === 'manual';
+  const fontStyle = [typography.fontWeight === 'bold' ? 'bold' : '', typography.italic ? 'italic' : '']
+    .filter(Boolean)
+    .join(' ') || 'normal';
   return (
     <React.Fragment key={key}>
       <KonvaText
         {...common}
         width={Math.max(w, 1)}
-        height={Math.max(h, fontSize + 1)}
+        height={manualBounds ? Math.max(h, 0.1) : Math.max(h, fontSize + 1)}
         text={text}
         fontFamily="Arial"
         fontSize={fontSize}
-        fontStyle={String(element.style?.fontWeight ?? 'normal') === 'bold' ? 'bold' : 'normal'}
+        fontStyle={fontStyle}
         fill="black"
         align={textAlign}
         wrap="none"
@@ -3140,6 +3847,17 @@ function describeLabelElement(
   return `Статический текст: ${element.staticText || 'пусто'}`;
 }
 
+function labelElementTitle(
+  element: LabelTemplateElement,
+  fieldInfo: Map<string, LabelFieldCatalogItem>,
+): string {
+  if (element.kind === 'rect') return 'Прямоугольник';
+  if (element.kind === 'line') return 'Линия';
+  if (element.kind === 'qr') return 'QR-код';
+  if (element.sourceField) return fieldInfo.get(element.sourceField)?.label ?? element.sourceField;
+  return element.staticText || 'Текст';
+}
+
 function isLabelElementLocked(element: LabelTemplateElement): boolean {
   return Boolean((element.style as Record<string, unknown> | undefined)?.locked);
 }
@@ -3166,34 +3884,6 @@ function findTopLabelElementAtPoint(
     }
   }
   return null;
-}
-
-function normalizeTransformedNode(
-  element: LabelTemplateElement,
-  node: Konva.Node,
-): { widthMm: number; heightMm: number } {
-  const scaleX = node.scaleX();
-  const scaleY = node.scaleY();
-  if (element.kind === 'line') {
-    node.scaleX(1);
-    node.scaleY(1);
-    return {
-      widthMm: Number(element.widthMm ?? 0) * scaleX,
-      heightMm: Number(element.heightMm ?? 0) * scaleY,
-    };
-  }
-
-  const sizedNode = node as Konva.Node & {
-    width: (value?: number) => number;
-    height: (value?: number) => number;
-  };
-  const widthMm = Math.max(0.1, Number(sizedNode.width()) * scaleX);
-  const heightMm = Math.max(0.1, Number(sizedNode.height()) * scaleY);
-  sizedNode.scaleX(1);
-  sizedNode.scaleY(1);
-  sizedNode.width(widthMm);
-  sizedNode.height(heightMm);
-  return { widthMm, heightMm };
 }
 
 function renderGrid(widthMm: number, heightMm: number) {
@@ -3242,6 +3932,92 @@ function renderAlignmentGuides(
       listening={false}
     />
   ));
+}
+
+function defaultIfElseCondition(field = ''): LabelIfElseCondition {
+  return {
+    type: 'if_else',
+    version: 1,
+    when: { field, op: 'not_empty' },
+    then: { type: 'current' },
+    else: { type: 'hidden' },
+  };
+}
+
+function newLabelTextStyle(advancedRendererReady: boolean): Record<string, unknown> {
+  return advancedRendererReady
+    ? {
+        typography: { version: 1, fontSizePt: 12, fontWeight: 'normal', italic: false },
+        editor: { version: 1, boundsMode: 'auto' },
+      }
+    : { fontSize: 12 };
+}
+
+function isLabelConditionDraftValid(condition: LabelIfElseCondition): boolean {
+  if (!condition.when.field.trim()) return false;
+  if (
+    (condition.when.op === 'equals' || condition.when.op === 'not_equals')
+    && condition.when.value === undefined
+  ) return false;
+  return [condition.then, condition.else].every((branch) => (
+    branch.type !== 'field' || Boolean(branch.field.trim())
+  ));
+}
+
+function hasAdvancedLabelElementData(element: LabelTemplateElement): boolean {
+  const style = element.style as Record<string, unknown> | undefined;
+  const condition = element.condition as Record<string, unknown> | undefined;
+  return Boolean(style?.typography || style?.editor || condition?.type === 'if_else');
+}
+
+function cleanupSingletonLabelGroups(elements: LabelTemplateElement[]): LabelTemplateElement[] {
+  const counts = new Map<string, number>();
+  for (const element of elements) {
+    const groupId = readLabelEditorMeta(element).groupId;
+    if (groupId) counts.set(groupId, (counts.get(groupId) ?? 0) + 1);
+  }
+  return elements.map((element) => {
+    const groupId = readLabelEditorMeta(element).groupId;
+    return groupId && (counts.get(groupId) ?? 0) < 2
+      ? withLabelEditorMeta(element, { groupId: null })
+      : element;
+  });
+}
+
+function sampleLabelFieldValue(field: LabelFieldCatalogItem, index: number): string {
+  if (field.type === 'boolean') return 'Да';
+  if (field.type === 'date') return '21.07.2026';
+  if (field.type === 'number') return String(100 + index);
+  if (field.id.includes('name')) return field.label === 'Название' ? 'Фасад кухонный' : field.label;
+  if (field.id.includes('number')) return 'ЗК-1048';
+  return `${field.label} ${index + 1}`;
+}
+
+function labelElementsBounds(elements: LabelTemplateElement[]): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  widthMm: number;
+  heightMm: number;
+} {
+  const points = elements.flatMap((element) => {
+    const x = Number(element.xMm ?? 0);
+    const y = Number(element.yMm ?? 0);
+    const width = Math.max(0.1, Number(element.widthMm ?? 0));
+    const height = Math.max(element.kind === 'line' ? 0.1 : 0.1, Number(element.heightMm ?? 0));
+    const angle = Number(element.rotationDeg ?? 0) * Math.PI / 180;
+    const rotate = (offsetX: number, offsetY: number) => ({
+      x: x + offsetX * Math.cos(angle) - offsetY * Math.sin(angle),
+      y: y + offsetX * Math.sin(angle) + offsetY * Math.cos(angle),
+    });
+    return [rotate(0, 0), rotate(width, 0), rotate(width, height), rotate(0, height)];
+  });
+  const minX = Math.min(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const maxY = Math.max(...points.map((point) => point.y));
+  return { minX, minY, maxX, maxY, widthMm: maxX - minX, heightMm: maxY - minY };
 }
 
 function clamp(value: number, min: number, max: number): number {

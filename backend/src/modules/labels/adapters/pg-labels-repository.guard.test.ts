@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-import { buildOrderLabelsArchiveFilename } from './pg-labels-repository';
+import { describe, expect, it, vi } from 'vitest';
+import type { DatabaseService } from '../../../database/database.service';
+import { buildOrderLabelsArchiveFilename, PgLabelsRepository } from './pg-labels-repository';
 
 const source = readFileSync(new URL('./pg-labels-repository.ts', import.meta.url), 'utf8');
 
@@ -37,5 +38,65 @@ describe('PgLabelsRepository structural guards', () => {
     expect(buildOrderLabelsArchiveFilename(' Кухня / Север ', 22)).toBe('заказ-Кухня - Север-бирки-22.zip');
     expect(buildOrderLabelsArchiveFilename(null, 4)).toBe('заказ-без-названия-бирки-4.zip');
     expect(buildOrderLabelsArchiveFilename(`${'a'.repeat(119)}😀`, 5)).toBe(`заказ-${'a'.repeat(119)}😀-бирки-5.zip`);
+  });
+
+  it('rejects an invalid stored versioned template before generation side effects', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({
+        rowCount: 1,
+        rows: [{
+          label_template_id: 9,
+          name: 'Broken',
+          description: null,
+          version: 1,
+          is_active: true,
+          canvas_width_mm: 85,
+          canvas_height_mm: 88,
+          dpi: 203,
+          default_export_formats: ['png'],
+          custom_field_schema: {},
+          field_catalog_snapshot: {},
+        }],
+      })
+      .mockResolvedValueOnce({
+        rowCount: 1,
+        rows: [{
+          label_template_element_id: 1,
+          element_key: 'bad',
+          kind: 'text',
+          source_field: null,
+          static_text: 'Bad',
+          x_mm: 0,
+          y_mm: 0,
+          width_mm: 20,
+          height_mm: 5,
+          rotation_deg: 0,
+          z_index: 0,
+          style_json: { typography: { version: 1, fontSizePt: '12', fontWeight: 'normal', italic: false } },
+          condition_json: {},
+        }],
+      });
+    const tx = { query };
+    const database = {
+      transaction: vi.fn(async (work: (client: typeof tx) => Promise<unknown>) => work(tx)),
+    } as unknown as DatabaseService;
+    const repo = new PgLabelsRepository(database);
+
+    await expect(repo.generateOrderLabels({
+      currentUser: { id: '1', username: 'tester', role: 'manager', roleId: 1, permissions: ['labels.generate'] },
+      requestId: 'req-invalid-stored',
+      orderId: 42,
+      input: {
+        templateId: 9,
+        templateVersion: 1,
+        previewToken: 'previously-issued-token',
+        exportFormats: ['png'],
+        idempotencyKey: 'generation-invalid-stored',
+      },
+    })).rejects.toMatchObject({ statusCode: 422, code: 'LABEL_ELEMENT_SCHEMA_INVALID' });
+
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls.some(([sql]) => /INSERT INTO order_label_generations|outbox_events|idempotency/i.test(String(sql))))
+      .toBe(false);
   });
 });

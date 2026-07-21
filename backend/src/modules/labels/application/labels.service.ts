@@ -5,6 +5,7 @@ import { PermissionsService } from '../../../permissions/permissions.service';
 import { isBuiltInLabelFieldId, isSupportedFieldBinding } from './bazis-field-catalog';
 import { buildRuntimeLabelFieldCatalog, type LabelFieldCatalogItem } from './bazis-field-catalog';
 import { validateQrTemplateElement, extractLabelTemplateFieldIds } from './label-template-fields';
+import { assertAdvancedElementShape, conditionFieldIds } from './label-template-advanced';
 import { extractLabelFields, type LabelTextFields } from './scan/label-text-extraction';
 import { compileQrTemplate, parseQrPayload, parseQrPayloadRight } from './scan/qr-template-parser';
 import { scoreCandidate, rankCandidates } from './scan/scan-ranking';
@@ -525,7 +526,13 @@ export function validateTemplateInput(input: LabelTemplateInput, runtimeFieldIds
   const customFieldSchema = input.customFieldSchema;
   validateCustomFieldMappings(customFieldSchema, runtimeFieldIds);
   for (const [index, element] of input.elements.entries()) {
+    assertAdvancedElementShape(element, index);
     validateElementFieldBinding(element, customFieldSchema, index, runtimeFieldIds);
+    for (const fieldId of conditionFieldIds(element.condition)) {
+      if (!isSupportedFieldBinding(fieldId, customFieldSchema, runtimeFieldIds)) {
+        throw new LabelFieldBindingError(fieldId);
+      }
+    }
   }
   validateQrElementNames(input.elements);
 }
@@ -636,6 +643,7 @@ function snapshotTemplateFields(
   const fieldIds = new Set<string>();
   for (const element of input.elements) {
     if (element.sourceField) fieldIds.add(element.sourceField);
+    for (const fieldId of conditionFieldIds(element.condition)) fieldIds.add(fieldId);
     if (element.kind === 'qr') {
       for (const fieldId of extractLabelTemplateFieldIds(String(element.style?.qrTemplate ?? ''))) fieldIds.add(fieldId);
     }

@@ -33,6 +33,125 @@ describe('label renderer', () => {
     expect(svg).toContain('text-anchor="end"');
   });
 
+  it('renders strict typography v1 as physical font size, bold, and italic SVG attributes', () => {
+    const base = template();
+    base.elements[0] = {
+      ...base.elements[0],
+      style: {
+        typography: {
+          version: 1,
+          fontSizePt: 14,
+          fontWeight: 'bold',
+          italic: true,
+        },
+      },
+    };
+
+    const svg = renderSvgPages(base, [row({ 'bazis.name': 'Side' })]).pages[0];
+
+    expect(svg).toContain('font-size="4.9392"');
+    expect(svg).toContain('font-weight="700"');
+    expect(svg).toContain('font-style="italic"');
+  });
+
+  it('renders persisted element rotations around the same top-left origin as the canvas', () => {
+    const base = template();
+    base.elements = base.elements.map((element, index) => ({
+      ...element,
+      rotationDeg: 15 + index * 15,
+    }));
+
+    const svg = renderSvgPages(base, [row({ 'bazis.name': 'Side' })]).pages[0];
+
+    expect(svg).toContain('<g transform="rotate(15 1 1)"><text ');
+    expect(svg).toContain('<g transform="rotate(30 1 10)"><line ');
+    expect(svg).toContain('<g transform="rotate(45 1 12)"><rect ');
+  });
+
+  it('resolves if/else v1 branches to another field, fixed text, current value, or hidden output', () => {
+    const base = template();
+    const condition = (thenBranch: Record<string, unknown>, elseBranch: Record<string, unknown>) => ({
+      type: 'if_else',
+      version: 1,
+      when: { field: 'detail.material_name', op: 'equals', value: 'МДФ' },
+      then: thenBranch,
+      else: elseBranch,
+    });
+    base.elements = [
+      { ...base.elements[0], elementKey: 'field', condition: condition({ type: 'field', field: 'detail.detail_name' }, { type: 'text', value: 'Не МДФ' }) },
+      { ...base.elements[0], elementKey: 'text', yMm: 7, zIndex: 1, condition: condition({ type: 'text', value: 'Фикс & <текст>' }, { type: 'current' }) },
+      { ...base.elements[0], elementKey: 'hidden', yMm: 13, zIndex: 2, condition: condition({ type: 'hidden' }, { type: 'current' }) },
+    ];
+
+    const mdf = renderSvgPages(base, [row({
+      'bazis.name': 'Исходное',
+      'detail.material_name': 'МДФ',
+      'detail.detail_name': 'Фасад',
+    })]).pages[0];
+    expect(mdf).toContain('Фасад');
+    expect(mdf).toContain('Фикс &amp; &lt;текст&gt;');
+    expect(mdf).not.toContain('Исходное');
+
+    const other = renderSvgPages(base, [row({
+      'bazis.name': 'Исходное',
+      'detail.material_name': 'ЛДСП',
+      'detail.detail_name': 'Боковина',
+    })]).pages[0];
+    expect(other).toContain('Не МДФ');
+    expect(other).toContain('Исходное');
+  });
+
+  it('keeps legacy visibility conditions compatible', () => {
+    const base = template();
+    base.elements[0] = {
+      ...base.elements[0],
+      condition: { field: 'bazis.comment', op: 'not_empty' },
+    };
+
+    expect(renderSvgPages(base, [row({ 'bazis.name': 'Side', 'bazis.comment': '' })]).pages[0]).not.toContain('Side');
+    expect(renderSvgPages(base, [row({ 'bazis.name': 'Side', 'bazis.comment': 'ok' })]).pages[0]).toContain('Side');
+  });
+
+  it('grandfathers unknown stored unversioned conditions as visible original content', () => {
+    const base = template();
+    base.elements[0] = { ...base.elements[0], condition: { legacyPluginRule: 'old' } };
+    expect(renderSvgPages(base, [row({ 'bazis.name': 'Side' })]).pages[0]).toContain('Side');
+  });
+
+  it.each([
+    { condition: { type: 'if_else', version: 2, when: {}, then: {}, else: {} } },
+    { style: { typography: { version: 2, fontSizePt: 12, fontWeight: 'normal', italic: false } } },
+    { style: { typography: { version: 1, fontSizePt: '12', fontWeight: 'normal', italic: false } } },
+    { style: { futureStyle: { version: 2, payload: true } } },
+  ])('fails closed on malformed stored versioned label metadata: %j', (patch) => {
+    const base = template();
+    base.elements[0] = { ...base.elements[0], ...patch };
+    expect(() => renderSvgPages(base, [row({ 'bazis.name': 'Side' })])).toThrow(
+      /if_else|label|typography|style/i,
+    );
+  });
+
+  it('validates stored versioned metadata even when a render has no rows', () => {
+    const base = template();
+    base.elements[0] = {
+      ...base.elements[0],
+      style: { typography: { version: 1, fontSizePt: '12', fontWeight: 'normal', italic: false } },
+    } as typeof base.elements[number];
+    expect(() => renderSvgPages(base, [])).toThrow(/typography/i);
+  });
+
+  it('normalizes hostile legacy font sizes to finite safe renderer bounds', () => {
+    const base = template();
+    base.elements = [
+      { ...base.elements[0], elementKey: 'infinite', style: { fontSize: '1e309' } },
+      { ...base.elements[0], elementKey: 'huge', yMm: 10, style: { fontSize: 100000 } },
+    ];
+    const svg = renderSvgPages(base, [row({ 'bazis.name': 'Side' })]).pages[0];
+    expect(svg).toContain('font-size="3.528"');
+    expect(svg).toContain('font-size="33.8688"');
+    expect(svg).not.toContain('Infinity');
+  });
+
   it('renders qr elements with payload metadata and module geometry', () => {
     const base = template();
     base.elements.push({
@@ -198,6 +317,7 @@ function template(): LabelTemplateDto {
     dpi: 203,
     defaultExportFormats: ['bmp'],
     customFieldSchema: {},
+    rendererCapabilities: ['if_else_v1', 'typography_v1'],
     elements: [
       {
         labelTemplateElementId: 1,
