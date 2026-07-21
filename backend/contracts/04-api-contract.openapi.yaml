@@ -898,6 +898,13 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: includeDone
+          in: query
+          required: false
+          description: Показывать статус Done и его заказы; только для production.
+          schema:
+            type: boolean
+            default: false
         - name: plannedFrom
           in: query
           required: false

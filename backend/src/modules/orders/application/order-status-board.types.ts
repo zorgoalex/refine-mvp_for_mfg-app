@@ -12,6 +12,7 @@ export interface OrderStatusBoardQuery {
   search?: string;
   onlyMyOrders: boolean;
   overdueOnly: boolean;
+  includeDone?: boolean;
   plannedFrom?: string;
   plannedTo?: string;
 }
@@ -24,4 +25,3 @@ export interface GetOrderStatusBoardCommand {
 export interface OrderStatusBoardRepositoryPort {
   getBoard(command: GetOrderStatusBoardCommand): Promise<OrderStatusBoardResponseDto>;
 }
-

@@ -15,6 +15,7 @@ describe('parseOrderStatusBoardQuery', () => {
         search: ' МП-100 ',
         onlyMyOrders: 'true',
         overdueOnly: 'false',
+        includeDone: 'true',
         plannedFrom: '2026-07-01',
         plannedTo: '2026-07-31',
       }),
@@ -25,6 +26,7 @@ describe('parseOrderStatusBoardQuery', () => {
       search: 'МП-100',
       onlyMyOrders: true,
       overdueOnly: false,
+      includeDone: true,
       plannedFrom: '2026-07-01',
       plannedTo: '2026-07-31',
     });
@@ -37,6 +39,7 @@ describe('parseOrderStatusBoardQuery', () => {
       limit: 24,
       onlyMyOrders: false,
       overdueOnly: false,
+      includeDone: false,
     });
   });
 
@@ -48,6 +51,8 @@ describe('parseOrderStatusBoardQuery', () => {
     [{ board: 'order', cursor: 'cursor-without-column' }, 'cursor'],
     [{ board: 'order', limit: '61' }, 'limit'],
     [{ board: 'order', onlyMyOrders: '1' }, 'onlyMyOrders'],
+    [{ board: 'production', includeDone: '1' }, 'includeDone'],
+    [{ board: 'order', includeDone: 'true' }, 'includeDone'],
     [{ board: 'order', plannedFrom: '19.07.2026' }, 'plannedFrom'],
     [{ board: 'order', plannedFrom: '2026-02-30' }, 'plannedFrom'],
     [{ board: 'order', plannedFrom: '0000-01-01' }, 'plannedFrom'],

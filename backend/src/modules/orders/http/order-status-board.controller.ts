@@ -33,6 +33,7 @@ export class OrderStatusBoardController {
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'onlyMyOrders', required: false, type: Boolean })
   @ApiQuery({ name: 'overdueOnly', required: false, type: Boolean })
+  @ApiQuery({ name: 'includeDone', required: false, type: Boolean })
   @ApiQuery({ name: 'plannedFrom', required: false, type: String })
   @ApiQuery({ name: 'plannedTo', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Order status board projection' })
@@ -150,6 +151,11 @@ export function parseOrderStatusBoardQuery(
     throw validationError('plannedFrom', 'plannedFrom must not be after plannedTo');
   }
 
+  const includeDone = parseBoolean(query.includeDone, 'includeDone', false);
+  if (includeDone && board !== 'production') {
+    throw validationError('includeDone', 'includeDone is only valid for production board');
+  }
+
   return {
     board,
     ...(column ? { column } : {}),
@@ -158,6 +164,7 @@ export function parseOrderStatusBoardQuery(
     ...(search ? { search } : {}),
     onlyMyOrders: parseBoolean(query.onlyMyOrders, 'onlyMyOrders', false),
     overdueOnly: parseBoolean(query.overdueOnly, 'overdueOnly', false),
+    includeDone,
     ...(plannedFrom ? { plannedFrom } : {}),
     ...(plannedTo ? { plannedTo } : {}),
   };

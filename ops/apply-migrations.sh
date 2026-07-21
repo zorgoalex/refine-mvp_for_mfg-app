@@ -468,6 +468,27 @@ probe_file() {
                              SELECT count(*) FROM cut_result_placement cp
                               WHERE cp.cut_result_id = r.cut_result_id)
                      );" ;;
+    083_orders_production_done_backfill*) probe_true "SELECT
+                       (SELECT count(*)
+                          FROM production_statuses ps
+                         WHERE LOWER(BTRIM(ps.production_status_name)) = 'done'
+                            OR LOWER(BTRIM(ps.production_status_code)) ~ '^done(_|$)') = 1
+                       AND NOT EXISTS (
+                       SELECT 1
+                         FROM orders o
+                        WHERE o.created_at < CURRENT_TIMESTAMP - INTERVAL '1 month'
+                          AND (
+                            o.production_status_id IS DISTINCT FROM (
+                              SELECT ps.production_status_id
+                                FROM production_statuses ps
+                               WHERE LOWER(BTRIM(ps.production_status_name)) = 'done'
+                                  OR LOWER(BTRIM(ps.production_status_code)) ~ '^done(_|$)'
+                               ORDER BY ps.production_status_id
+                               LIMIT 1
+                            )
+                            OR o.production_status_from_details_enabled IS DISTINCT FROM false
+                          )
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

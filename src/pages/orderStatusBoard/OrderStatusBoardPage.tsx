@@ -374,8 +374,8 @@ export const OrderStatusBoardPage: React.FC = () => {
   );
 
   const boardColumns = useMemo(
-    () => filterBoardColumns(viewState.board, board?.columns ?? []),
-    [board?.columns, viewState.board],
+    () => filterBoardColumns(viewState.board, board?.columns ?? [], viewState.showDone),
+    [board?.columns, viewState.board, viewState.showDone],
   );
   const columns = useMemo(
     () =>
@@ -479,6 +479,7 @@ export const OrderStatusBoardPage: React.FC = () => {
             aria-label="Поиск по заказам"
           />
           <Checkbox
+            className="status-board-toolbar__checkbox"
             checked={viewState.onlyMyOrders}
             onChange={(event) =>
               updateViewState({ onlyMyOrders: event.target.checked })
@@ -487,6 +488,7 @@ export const OrderStatusBoardPage: React.FC = () => {
             Связанные со мной
           </Checkbox>
           <Checkbox
+            className="status-board-toolbar__checkbox"
             checked={viewState.overdueOnly}
             onChange={(event) =>
               updateViewState({ overdueOnly: event.target.checked })
@@ -494,6 +496,17 @@ export const OrderStatusBoardPage: React.FC = () => {
           >
             Плановая дата прошла
           </Checkbox>
+          {viewState.board === 'production' && (
+            <Checkbox
+              className="status-board-toolbar__checkbox"
+              checked={viewState.showDone}
+              onChange={(event) =>
+                updateViewState({ showDone: event.target.checked })
+              }
+            >
+              Показывать Done
+            </Checkbox>
+          )}
           <DatePicker.RangePicker
             value={dateRange}
             format={DATE_FORMAT}
