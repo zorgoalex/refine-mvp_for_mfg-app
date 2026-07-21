@@ -7,8 +7,25 @@ export const ProductionStatusEdit: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <Edit saveButtonProps={saveButtonProps}>
-      <Form {...formProps} layout="vertical">
-        <Form.Item label="Name" name="production_status_name" rules={[{ required: true }]}>
+      <Form
+        {...formProps}
+        layout="vertical"
+        onFinish={(values) => {
+          const {
+            production_status_code: _productionStatusCode,
+            ...editableValues
+          } = values ?? {};
+          return formProps.onFinish?.({
+            ...editableValues,
+            production_status_name: String(editableValues.production_status_name ?? "").trim(),
+          });
+        }}
+      >
+        <Form.Item
+          label="Name"
+          name="production_status_name"
+          rules={[{ required: true, whitespace: true }]}
+        >
           <Input />
         </Form.Item>
         <Form.Item label="Порядок сортировки" name="sort_order" rules={[{ required: true }]}>

@@ -2106,6 +2106,9 @@ describeIntegration('PgCutRepository history backfill (integration)', () => {
     await seedLegacyJob('active');
     await seedLegacyJob('inactive');
     await seedLegacyJob('stale');
+    const archivedJobId = await seedLegacyJob('none');
+    await pool.query(`UPDATE cut_job SET status = 'archived' WHERE cut_job_id = $1`, [archivedJobId]);
+    await pool.query(`UPDATE cut_job_item SET is_active = false WHERE cut_job_id = $1`, [archivedJobId]);
   });
 
   afterAll(async () => {
@@ -2129,6 +2132,7 @@ describeIntegration('PgCutRepository history backfill (integration)', () => {
       optimize: async () => { throw new Error('optimizer must not run during backfill'); },
     });
     await expect(resumedProcess.backfillLegacyResults(2)).resolves.toBe(2);
+    await expect(resumedProcess.backfillLegacyResults(2)).resolves.toBe(1);
     await expect(resumedProcess.backfillLegacyResults(2)).resolves.toBe(0);
 
     const results = await pool.query<{
@@ -2146,10 +2150,10 @@ describeIntegration('PgCutRepository history backfill (integration)', () => {
              END ORDER BY cut_job_id) AS manual_states
       FROM cut_result
     `);
-    expect(results.rows[0].n).toBe(4);
-    expect(results.rows[0].jobs).toBe(4);
-    expect(results.rows[0].manual_states.sort()).toEqual(['active', 'inactive', 'none', 'stale']);
-    expect((await pool.query(`SELECT count(*)::int AS n FROM cut_job WHERE current_cut_result_id IS NOT NULL`)).rows[0].n).toBe(4);
+    expect(results.rows[0].n).toBe(5);
+    expect(results.rows[0].jobs).toBe(5);
+    expect(results.rows[0].manual_states.sort()).toEqual(['active', 'inactive', 'none', 'none', 'stale']);
+    expect((await pool.query(`SELECT count(*)::int AS n FROM cut_job WHERE current_cut_result_id IS NOT NULL`)).rows[0].n).toBe(5);
 
     await expect(pool.query(historyFinalizeMigration)).resolves.toBeDefined();
   });

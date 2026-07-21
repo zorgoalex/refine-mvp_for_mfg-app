@@ -57,6 +57,19 @@ export const TOTALS_BY_JOB_SQL = `
   GROUP BY i.cut_job_id, cj.sheet_material_type_id, cj.split_by_material
 `;
 
+/** Frozen history backfill also counts archived rows still owned by a live group. */
+export const TOTALS_FROZEN_ITEMS_BY_JOB_SQL = TOTALS_BY_JOB_SQL.replace(
+  ' AND i.is_active = true',
+  ` AND (
+      i.is_active = true
+      OR EXISTS (
+        SELECT 1 FROM cut_group frozen_group
+        WHERE frozen_group.cut_group_id = i.cut_group_id
+          AND frozen_group.cut_job_id = i.cut_job_id
+      )
+    )`,
+);
+
 export const SHEETS_BY_JOB_SQL = `
   SELECT g.cut_job_id, COUNT(*) AS sheets
   FROM cut_group_sheet s

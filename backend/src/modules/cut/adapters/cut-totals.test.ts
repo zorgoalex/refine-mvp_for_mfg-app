@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { roundTo2, mapTotalsRow, TOTALS_BY_JOB_SQL, MATERIAL_NAMES_BY_JOB_SQL } from './cut-totals';
+import {
+  roundTo2,
+  mapTotalsRow,
+  TOTALS_BY_JOB_SQL,
+  TOTALS_FROZEN_ITEMS_BY_JOB_SQL,
+  MATERIAL_NAMES_BY_JOB_SQL,
+} from './cut-totals';
 
 describe('roundTo2', () => {
   it('rounds to 2 decimals (avoid .x5 float boundaries)', () => {
@@ -29,6 +35,16 @@ describe('TOTALS_BY_JOB_SQL materials_count resolution', () => {
     expect(sql).toContain('JOIN cut_job cj ON cj.cut_job_id = i.cut_job_id');
     expect(sql).toContain('CASE WHEN NOT cj.split_by_material THEN 1 ELSE COUNT(DISTINCT COALESCE(od.sheet_material_type_id, cj.sheet_material_type_id)) END AS materials_count');
     expect(sql).toContain('GROUP BY i.cut_job_id, cj.sheet_material_type_id, cj.split_by_material');
+  });
+});
+
+describe('TOTALS_FROZEN_ITEMS_BY_JOB_SQL', () => {
+  it('includes archived group-owned rows but excludes unrelated released rows', () => {
+    const sql = TOTALS_FROZEN_ITEMS_BY_JOB_SQL.replace(/\s+/g, ' ');
+    expect(sql).toContain('i.is_active = true OR EXISTS');
+    expect(sql).toContain('frozen_group.cut_group_id = i.cut_group_id');
+    expect(sql).toContain('frozen_group.cut_job_id = i.cut_job_id');
+    expect(sql).not.toContain('AND i.is_active = true GROUP BY');
   });
 });
 
