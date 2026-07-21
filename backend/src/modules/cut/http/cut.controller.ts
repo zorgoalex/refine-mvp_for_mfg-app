@@ -312,7 +312,7 @@ export class CutController {
       originTopLeft: canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin),
       axisOrigin,
       variant: parseVariant(query.variant),
-      pdfTemplate: parsePdfTemplate(query.template),
+      pdfTemplate: query.template === undefined ? undefined : parsePdfTemplate(query.template),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'application/pdf');
@@ -339,7 +339,7 @@ export class CutController {
       originTopLeft: canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin),
       axisOrigin,
       variant: parseVariant(query.variant),
-      pdfTemplate: parsePdfTemplate(query.template),
+      pdfTemplate: query.template === undefined ? undefined : parsePdfTemplate(query.template),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'application/pdf');

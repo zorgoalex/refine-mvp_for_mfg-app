@@ -9280,6 +9280,15 @@ paths:
       summary: Export frozen result group PDF
       security: [{ bearerAuth: [] }]
       x-permission: cut.view
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: groupId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - name: template
+          in: query
+          required: false
+          description: Active PDF template code used only for this render; the frozen result is not modified.
+          schema: { type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }
       responses:
         '200':
           description: PDF
@@ -9287,6 +9296,7 @@ paths:
             application/pdf:
               schema: { type: string, format: binary }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/export.pdf:
     get:
@@ -9295,6 +9305,14 @@ paths:
       summary: Export frozen whole-result PDF
       security: [{ bearerAuth: [] }]
       x-permission: cut.view
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - name: template
+          in: query
+          required: false
+          description: Active PDF template code used only for this render; the frozen result is not modified.
+          schema: { type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }
       responses:
         '200':
           description: PDF
@@ -9302,6 +9320,7 @@ paths:
             application/pdf:
               schema: { type: string, format: binary }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   /api/v1/cut-jobs/{cutJobId}/items:
     post:

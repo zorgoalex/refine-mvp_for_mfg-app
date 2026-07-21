@@ -191,6 +191,56 @@ describe('CutController', () => {
     expect(state.sent).toBe('<svg/>');
   });
 
+  it('passes a request-level PDF template to frozen group and whole-result exports', async () => {
+    const pdf = Buffer.from('%PDF-result');
+    const renderGroupPdf = vi.fn(async () => pdf);
+    const renderJobPdf = vi.fn(async () => pdf);
+    const controller = createController({ service: { renderGroupPdf, renderJobPdf } });
+
+    await controller.exportResultGroupPdf(
+      { user: currentUser() } as never,
+      '42',
+      '3',
+      '100',
+      { template: 'bath_profiles' },
+      fakeResponse().res as never,
+    );
+    await controller.exportResultJobPdf(
+      { user: currentUser() } as never,
+      '42',
+      '3',
+      { template: 'bath_profiles' },
+      fakeResponse().res as never,
+    );
+
+    expect(renderGroupPdf).toHaveBeenCalledWith(expect.objectContaining({
+      cutJobId: 42,
+      resultNo: 3,
+      cutGroupId: 100,
+      pdfTemplate: 'bath_profiles',
+    }));
+    expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({
+      cutJobId: 42,
+      resultNo: 3,
+      pdfTemplate: 'bath_profiles',
+    }));
+  });
+
+  it('leaves the frozen snapshot template unchanged when query override is omitted', async () => {
+    const renderJobPdf = vi.fn(async () => Buffer.from('%PDF-result'));
+    const controller = createController({ service: { renderJobPdf } });
+
+    await controller.exportResultJobPdf(
+      { user: currentUser() } as never,
+      '42',
+      '3',
+      {},
+      fakeResponse().res as never,
+    );
+
+    expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({ pdfTemplate: undefined }));
+  });
+
   it('group PDF: 202 + Retry-After on a cold cache, then 200 application/pdf once warm', async () => {
     const pdf = Buffer.from('%PDF-1');
     const renderGroupPdf = vi.fn(async () => pdf);
