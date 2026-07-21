@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { bazisCutFieldsToRow } from './bazis-xls-writer';
-import { buildBazisCutPosition, mapBazisCutSnapshotFields } from './bazis-cut-snapshot-mapper';
+import {
+  buildBazisCutPosition,
+  buildBazisCutSnapshotIdentity,
+  mapBazisCutSnapshotFields,
+} from './bazis-cut-snapshot-mapper';
 
 // Real source L/W/orientation are extracted from adjacent 1491.xml; expected
 // L/W and the remaining export values are independently extracted from 1491.xls.
@@ -54,16 +58,48 @@ describe('buildBazisCutPosition', () => {
     expect(buildBazisCutPosition('И'.repeat(1500), 'Д'.repeat(1500))).toHaveLength(3001);
   });
 
-  it('keeps an empty Position when both ERP Basis fields are empty', () => {
+  it('uses the ERP detail number when all three Basis fields are empty', () => {
     const fields = mapBazisCutSnapshotFields({
       materialName: 'ЛДСП', thicknessMm: 16, detailNumber: 1,
+      orderName: 'ERP-заказ 1491', basisOrder: null,
       basisProduct: null, basisDesignation: null, basisData: null, detailName: 'Бок',
       heightMm: 100, widthMm: 50, quantity: 1, note: null, milling: null, film: null,
       doweling: false, verticalTexture: false,
     });
 
-    expect(fields?.position).toBe('');
+    expect(fields?.position).toBe('1');
   });
+});
+
+describe('buildBazisCutSnapshotIdentity', () => {
+  it('writes ERP order name and detail number to the Excel identity columns when all Basis fields are empty', () => {
+    const source = {
+      materialName: 'ЛДСП', thicknessMm: 16,
+      orderName: ' ERP-заказ 1491 ', detailNumber: 17,
+      basisOrder: ' ', basisProduct: null, basisDesignation: '',
+      basisData: null, detailName: 'Бок', heightMm: 100, widthMm: 50, quantity: 1,
+      note: null, milling: null, film: null, doweling: false, verticalTexture: false,
+    };
+    const identity = buildBazisCutSnapshotIdentity(source);
+    const fields = mapBazisCutSnapshotFields(source);
+
+    expect(identity).toEqual({ order: 'ERP-заказ 1491', position: '17' });
+    expect(fields).not.toBeNull();
+    const row = bazisCutFieldsToRow({ ...fields!, sourceBazisOrderNo: identity.order });
+    expect(row.slice(5, 8)).toEqual(['ERP-заказ 1491', '17', 'ERP-заказ 149117']);
+  });
+
+  it.each([
+    ['1319', '', '', { order: '1319', position: '' }],
+    ['', 'Кухня', '', { order: '', position: 'Кухня.' }],
+    ['', '', '01.00.07', { order: '', position: '.01.00.07' }],
+  ])('does not use ERP fallback when any Basis field is present',
+    (basisOrder, basisProduct, basisDesignation, expected) => {
+      expect(buildBazisCutSnapshotIdentity({
+        orderName: 'ERP-заказ 1491', detailNumber: 17,
+        basisOrder, basisProduct, basisDesignation,
+      })).toEqual(expected);
+    });
 });
 
 describe('1491 snapshot mapper golden', () => {
@@ -72,6 +108,7 @@ describe('1491 snapshot mapper golden', () => {
       _length, _width, quantity, milling, route, film], index) => {
       const fields = mapBazisCutSnapshotFields({
         materialName: 'МДФ 16 мм', thicknessMm: 16, detailNumber: index + 1,
+        orderName: '1491', basisOrder: '',
         basisProduct: 'Кухня', basisDesignation: position, basisData: null, detailName: name,
         heightMm: sourceLength, widthMm: sourceWidth,
         quantity, note: null, milling, film, doweling: route === 'Присадка:', verticalTexture,
