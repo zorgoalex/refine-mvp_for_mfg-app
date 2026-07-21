@@ -7,9 +7,10 @@ const databaseUrl = process.env.CUT_INTEGRATION_DATABASE_URL ?? process.env.TEST
 const describeIntegration = databaseUrl ? describe : describe.skip;
 const schema = `label_cut_map_${randomUUID().replaceAll('-', '_')}`;
 const migration079 = readFileSync(new URL('../../../../db/migrations/079_cut_result_history_expand.sql', import.meta.url), 'utf8');
+const migration079Compat = readFileSync(new URL('../../../../db/migrations/079_z_cut_result_jsonb_object_length_compat.sql', import.meta.url), 'utf8');
 const migration080 = readFileSync(new URL('../../../../db/migrations/080_cut_result_history_finalize.sql', import.meta.url), 'utf8');
-const migration082 = readFileSync(new URL('../../../../db/migrations/082_label_cut_maps.sql', import.meta.url), 'utf8');
-const migration083 = readFileSync(new URL('../../../../db/migrations/083_label_cut_maps_backfill.sql', import.meta.url), 'utf8');
+const migration081 = readFileSync(new URL('../../../../db/migrations/081_label_cut_maps.sql', import.meta.url), 'utf8');
+const migration082 = readFileSync(new URL('../../../../db/migrations/082_label_cut_maps_backfill.sql', import.meta.url), 'utf8');
 
 describeIntegration('label cut-map migration chain', () => {
   const pool = new Pool({ connectionString: databaseUrl });
@@ -56,20 +57,21 @@ describeIntegration('label cut-map migration chain', () => {
       `UPDATE ${schema}.cut_job SET current_cut_result_id = $2, next_cut_result_no = 2 WHERE cut_job_id = $1`,
       [cutJobId, inserted.rows[0].cut_result_id],
     );
+    await client.query(migration079Compat);
     await client.query(migration080);
-    await client.query(migration082);
+    await client.query(migration081);
     const beforeBackfill = await client.query<{ count: number }>(
       `SELECT count(*)::int AS count FROM ${schema}.cut_result_placement`,
     );
     expect(beforeBackfill.rows[0].count).toBe(0);
     const call = 'CALL backfill_cut_result_label_maps();';
-    const callIndex = migration083.indexOf(call);
+    const callIndex = migration082.indexOf(call);
     expect(callIndex).toBeGreaterThan(0);
-    await client.query(migration083.slice(0, callIndex));
+    await client.query(migration082.slice(0, callIndex));
     // CALL must be a top-level statement so the procedure can commit each
     // projected result independently, exactly as the psql migration runner does.
     await client.query(call);
-    await client.query(migration083.slice(callIndex + call.length));
+    await client.query(migration082.slice(callIndex + call.length));
   });
 
   afterAll(async () => {

@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(new URL('./082_label_cut_maps.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('./081_label_cut_maps.sql', import.meta.url), 'utf8');
+const runner = readFileSync(new URL('../../../ops/apply-migrations.sh', import.meta.url), 'utf8');
 
-describe('082 label cut maps migration', () => {
+describe('081 label cut maps migration', () => {
   it('projects immutable result sheets and exact physical placements', () => {
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS cut_result_sheet_map/i);
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS cut_result_placement/i);
@@ -24,5 +25,9 @@ describe('082 label cut maps migration', () => {
     expect(sql).toMatch(/UNIQUE \(order_label_generation_id, detail_id, copy_index\)/i);
     expect(sql).toMatch(/CHECK \(kind IN \('text', 'line', 'rect', 'qr', 'cut_map'\)\)/i);
     expect(sql.trim()).toMatch(/COMMIT;[\s\S]*Down \(manual, destructive\):[\s\S]*$/i);
+  });
+
+  it('has a filename-specific runner probe despite the shared 081 prefix', () => {
+    expect(runner).toMatch(/081_label_cut_maps\*\)\s*probe_all/);
   });
 });
