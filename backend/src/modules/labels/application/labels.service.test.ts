@@ -44,6 +44,15 @@ describe('LabelsService', () => {
     );
   });
 
+  it('returns renderer capabilities independently of the template list', async () => {
+    const service = new LabelsService({ repo: fakeRepo() });
+
+    await expect(service.getRendererCapabilities({ currentUser: manager, requestId: 'req-capabilities' }))
+      .resolves.toEqual({
+        rendererCapabilities: ['if_else_v1', 'typography_v1', 'cut_map_v1', 'custom_expression_v1'],
+      });
+  });
+
   it('exposes and snapshots new detail columns from the live view schema', async () => {
     const repo = fakeRepo();
     vi.mocked(repo.listDetailFieldColumns).mockResolvedValue([
@@ -420,6 +429,58 @@ describe('LabelsService', () => {
     expect(repo.createTemplate).not.toHaveBeenCalled();
   });
 
+  it('validates custom formula dependencies and snapshots only built-in fields', async () => {
+    const repo = fakeRepo();
+    const service = new LabelsService({ repo });
+    const input = validInput({
+      customFieldSchema: {
+        'custom.material': expressionSchema({ type: 'field', field: 'bazis.material' }),
+        'custom.caption': expressionSchema({
+          type: 'concat',
+          parts: [
+            { type: 'text', value: 'Материал: ' },
+            { type: 'field', field: 'custom.material' },
+          ],
+        }),
+      },
+    });
+
+    await service.createTemplate({ currentUser: templateManager, requestId: 'req-expression', input });
+    expect(repo.createTemplate).toHaveBeenCalledWith(expect.objectContaining({
+      fieldCatalogSnapshot: expect.objectContaining({
+        'bazis.material': expect.objectContaining({ type: 'string' }),
+      }),
+    }));
+    const call = vi.mocked(repo.createTemplate).mock.calls[0][0];
+    expect(call.fieldCatalogSnapshot).not.toHaveProperty('custom.material');
+  });
+
+  it('rejects invalid, non-string, and cyclic custom formulas before repository writes', async () => {
+    const cases: Record<string, unknown>[] = [
+      {
+        'custom.bad': expressionSchema({ type: 'field', field: 'orders.raw_sql' }),
+      },
+      {
+        'custom.number': { ...expressionSchema({ type: 'text', value: '1' }), type: 'number' },
+      },
+      {
+        'custom.a': expressionSchema({ type: 'field', field: 'custom.b' }),
+        'custom.b': expressionSchema({ type: 'field', field: 'custom.a' }),
+      },
+    ];
+
+    for (const [index, customFieldSchema] of cases.entries()) {
+      const repo = fakeRepo();
+      const service = new LabelsService({ repo });
+      await expect(service.createTemplate({
+        currentUser: templateManager,
+        requestId: `req-expression-invalid-${index}`,
+        input: validInput({ customFieldSchema }),
+      })).rejects.toMatchObject({ statusCode: 422 });
+      expect(repo.createTemplate).not.toHaveBeenCalled();
+    }
+  });
+
   it('allows labels.view to read latest preview but requires labels.generate for ZIP export', async () => {
     const repo = fakeRepo();
     const service = new LabelsService({ repo });
@@ -500,6 +561,14 @@ function validInput(overrides: Partial<LabelTemplateInput> = {}): LabelTemplateI
     ],
     idempotencyKey: 'template-create-1',
     ...overrides,
+  };
+}
+
+function expressionSchema(root: Record<string, unknown>): Record<string, unknown> {
+  return {
+    type: 'string',
+    label: 'Формула',
+    expression: { type: 'custom_expression', version: 1, root },
   };
 }
 

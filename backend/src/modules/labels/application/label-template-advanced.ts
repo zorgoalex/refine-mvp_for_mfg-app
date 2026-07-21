@@ -1,7 +1,8 @@
 import { ApiError } from '../../../common/errors/api-error';
 import type { LabelTemplateElementInput } from './labels.types';
+import { assertRenderableCustomFieldSchema } from './label-custom-field-expression';
 
-export const LABEL_RENDERER_CAPABILITIES = ['if_else_v1', 'typography_v1', 'cut_map_v1'] as const;
+export const LABEL_RENDERER_CAPABILITIES = ['if_else_v1', 'typography_v1', 'cut_map_v1', 'custom_expression_v1'] as const;
 export type LabelRendererCapability = (typeof LABEL_RENDERER_CAPABILITIES)[number];
 
 type ConditionOperator = 'exists' | 'not_empty' | 'equals' | 'not_equals';
@@ -81,8 +82,12 @@ export function assertRenderableAdvancedElementShape(element: LabelTemplateEleme
   assertNoUnknownVersionedStyleNamespace(style, elementIndex);
 }
 
-export function assertRenderableTemplateShape(template: { elements: LabelTemplateElementInput[] }): void {
+export function assertRenderableTemplateShape(template: {
+  elements: LabelTemplateElementInput[];
+  customFieldSchema?: Record<string, unknown>;
+}): void {
   template.elements.forEach(assertRenderableAdvancedElementShape);
+  assertRenderableCustomFieldSchema(template.customFieldSchema ?? {});
 }
 
 function isStrictLegacyCondition(value: Record<string, unknown>): boolean {

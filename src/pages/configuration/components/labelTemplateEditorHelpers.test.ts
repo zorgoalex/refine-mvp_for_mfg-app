@@ -3,6 +3,10 @@ import type { LabelFieldCatalogItem, LabelTemplateElement } from '../../../api/t
 import {
   customFieldRowsFromSchema,
   customFieldRowsToSchema,
+  customExpressionFieldIds,
+  evaluateCustomFieldPreviewValues,
+  findCustomFieldDependencyCycle,
+  isCustomFieldExpressionValid,
   centerLabelSelection,
   claimLabelGestureCommit,
   describeLabelFieldSource,
@@ -18,6 +22,7 @@ import {
   resolveLabelCanvasText,
   resolveLabelElementPreviewText,
   resolveLatestStateUpdate,
+  summarizeCustomFieldExpression,
   selectLabelElements,
   snapElementCenters,
   ungroupLabelElements,
@@ -47,6 +52,14 @@ const elements: LabelTemplateElement[] = [
     heightMm: 10,
   },
 ];
+
+function expressionSchema(root: Record<string, unknown>): Record<string, unknown> {
+  return {
+    type: 'string',
+    label: 'Формула',
+    expression: { type: 'custom_expression', version: 1, root },
+  };
+}
 
 describe('label template editor helpers', () => {
   it('snaps moving element center to the nearest peer center on both axes', () => {
@@ -135,6 +148,85 @@ describe('label template editor helpers', () => {
     })[0]).toMatchObject({
       valueMode: 'constant',
       defaultValue: '',
+    });
+  });
+
+  it('round-trips and previews custom formulas with concat, nested if/else, and custom dependencies', () => {
+    const schema = {
+      'custom.material': {
+        type: 'string',
+        label: 'Материал',
+        sourceField: 'bazis.material',
+      },
+      'custom.caption': {
+        type: 'string',
+        label: 'Подпись',
+        expression: {
+          type: 'custom_expression',
+          version: 1,
+          root: {
+            type: 'concat',
+            parts: [
+              { type: 'text', value: 'Материал: ' },
+              {
+                type: 'if_else',
+                when: { field: 'custom.material', op: 'not_empty' },
+                then: { type: 'field', field: 'custom.material' },
+                else: { type: 'text', value: 'не указан' },
+              },
+              { type: 'empty' },
+            ],
+          },
+        },
+      },
+    };
+    const rows = customFieldRowsFromSchema(schema);
+    const expression = rows[1].expression!;
+
+    expect(customFieldRowsToSchema(rows)).toEqual(schema);
+    expect(customExpressionFieldIds(expression)).toEqual(['custom.material']);
+    expect(evaluateCustomFieldPreviewValues(rows, { 'bazis.material': 'МДФ 16' })).toMatchObject({
+      'custom.material': 'МДФ 16',
+      'custom.caption': 'Материал: МДФ 16',
+    });
+    expect(isCustomFieldExpressionValid(expression, new Set(['custom.material']))).toBe(true);
+    expect(summarizeCustomFieldExpression(expression, new Map([['custom.material', 'Материал']]))).toContain('Материал');
+  });
+
+  it('detects custom formula dependency cycles and reports oversized preview output', () => {
+    const rows = customFieldRowsFromSchema({
+      'custom.a': expressionSchema({ type: 'field', field: 'custom.b' }),
+      'custom.b': expressionSchema({ type: 'field', field: 'custom.a' }),
+    });
+    expect(findCustomFieldDependencyCycle(rows)).toEqual(['custom.a', 'custom.b', 'custom.a']);
+
+    const oversized = customFieldRowsFromSchema({
+      'custom.long': expressionSchema({
+        type: 'concat',
+        parts: Array.from({ length: 11 }, () => ({ type: 'text', value: 'x'.repeat(1000) })),
+      }),
+    });
+    expect(() => evaluateCustomFieldPreviewValues(oversized, {})).toThrow('LABEL_CUSTOM_EXPRESSION_RESULT_TOO_LONG');
+  });
+
+  it('preserves null source values while dependent formula conditions are evaluated', () => {
+    const rows = customFieldRowsFromSchema({
+      'custom.source': {
+        type: 'string',
+        label: 'Источник',
+        sourceField: 'detail.optional_value',
+      },
+      'custom.exists': expressionSchema({
+        type: 'if_else',
+        when: { field: 'custom.source', op: 'exists' },
+        then: { type: 'text', value: 'есть' },
+        else: { type: 'text', value: 'нет' },
+      }),
+    });
+
+    expect(evaluateCustomFieldPreviewValues(rows, { 'detail.optional_value': null })).toMatchObject({
+      'custom.source': '',
+      'custom.exists': 'нет',
     });
   });
 

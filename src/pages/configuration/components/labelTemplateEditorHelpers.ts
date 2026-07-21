@@ -1,5 +1,7 @@
 import type {
   LabelConditionBranch,
+  LabelCustomExpressionNode,
+  LabelCustomFieldExpressionV1,
   LabelEditorMetadataV1,
   LabelFieldCatalogItem,
   LabelIfElseCondition,
@@ -8,7 +10,7 @@ import type {
 } from '../../../api/types/labelsApi.types';
 
 export type CustomFieldType = LabelFieldCatalogItem['type'];
-export type CustomFieldValueMode = 'constant' | 'source';
+export type CustomFieldValueMode = 'constant' | 'source' | 'expression';
 
 export interface CustomFieldSchemaRow {
   fieldId: string;
@@ -17,6 +19,7 @@ export interface CustomFieldSchemaRow {
   valueMode: CustomFieldValueMode;
   sourceField: string | null;
   defaultValue: unknown;
+  expression: LabelCustomFieldExpressionV1 | null;
   extra: Record<string, unknown>;
 }
 
@@ -482,16 +485,18 @@ export function customFieldRowsFromSchema(schema: Record<string, unknown>): Cust
       ? entry.sourceField.trim()
       : null;
     const hasDefaultValue = Object.prototype.hasOwnProperty.call(entry, 'defaultValue');
+    const expression = readCustomFieldExpressionV1(entry);
     const extra = Object.fromEntries(
-      Object.entries(entry).filter(([key]) => !['label', 'type', 'sourceField', 'defaultValue'].includes(key)),
+      Object.entries(entry).filter(([key]) => !['label', 'type', 'sourceField', 'defaultValue', 'expression'].includes(key)),
     );
     return {
       fieldId,
       label: typeof entry.label === 'string' ? entry.label : '',
       type,
-      valueMode: sourceField ? 'source' : 'constant',
+      valueMode: expression ? 'expression' : sourceField ? 'source' : 'constant',
       sourceField,
       defaultValue: hasDefaultValue ? entry.defaultValue : '',
+      expression,
       extra,
     };
   });
@@ -501,7 +506,7 @@ export function customFieldRowsToSchema(rows: CustomFieldSchemaRow[]): Record<st
   return Object.fromEntries(rows.map((row) => {
     const entry: Record<string, unknown> = {
       ...row.extra,
-      type: row.type,
+      type: row.valueMode === 'expression' ? 'string' : row.type,
       label: row.label.trim(),
     };
     if (row.valueMode === 'source' && row.sourceField) {
@@ -510,8 +515,110 @@ export function customFieldRowsToSchema(rows: CustomFieldSchemaRow[]): Record<st
     if (row.valueMode === 'constant') {
       entry.defaultValue = normalizeConstantValue(row.defaultValue, row.type);
     }
+    if (row.valueMode === 'expression' && row.expression) {
+      entry.expression = row.expression;
+    }
     return [row.fieldId, entry];
   }));
+}
+
+export function readCustomFieldExpressionV1(schema: unknown): LabelCustomFieldExpressionV1 | null {
+  if (!isRecord(schema) || !isRecord(schema.expression)) return null;
+  const expression = schema.expression;
+  if (!hasExactKeys(expression, ['type', 'version', 'root'])
+    || expression.type !== 'custom_expression'
+    || expression.version !== 1) return null;
+  const budget = { nodes: 0 };
+  const root = parseCustomExpressionNode(expression.root, 1, budget);
+  return root ? { type: 'custom_expression', version: 1, root } : null;
+}
+
+export function customExpressionFieldIds(expression: LabelCustomFieldExpressionV1): string[] {
+  const result = new Set<string>();
+  visitCustomExpressionNode(expression.root, (fieldId) => result.add(fieldId));
+  return [...result];
+}
+
+export function findCustomFieldDependencyCycle(rows: CustomFieldSchemaRow[]): string[] | null {
+  const rowIds = new Set(rows.map((row) => row.fieldId));
+  const graph = new Map(rows.map((row) => [
+    row.fieldId,
+    row.expression
+      ? customExpressionFieldIds(row.expression).filter((fieldId) => rowIds.has(fieldId))
+      : [],
+  ]));
+  const visited = new Set<string>();
+  const active = new Set<string>();
+  const path: string[] = [];
+  const walk = (fieldId: string): string[] | null => {
+    if (active.has(fieldId)) {
+      const start = path.indexOf(fieldId);
+      return [...path.slice(start), fieldId];
+    }
+    if (visited.has(fieldId)) return null;
+    visited.add(fieldId);
+    active.add(fieldId);
+    path.push(fieldId);
+    for (const dependency of graph.get(fieldId) ?? []) {
+      const cycle = walk(dependency);
+      if (cycle) return cycle;
+    }
+    path.pop();
+    active.delete(fieldId);
+    return null;
+  };
+  for (const fieldId of graph.keys()) {
+    const cycle = walk(fieldId);
+    if (cycle) return cycle;
+  }
+  return null;
+}
+
+export function evaluateCustomFieldPreviewValues(
+  rows: CustomFieldSchemaRow[],
+  baseValues: Record<string, string | number | boolean | null | undefined>,
+): Record<string, string> {
+  const byId = new Map(rows.map((row) => [row.fieldId, row]));
+  const resolvedValues = new Map<string, string | number | boolean | null | undefined>();
+  const resolving = new Set<string>();
+  const resolve = (fieldId: string): string | number | boolean | null | undefined => {
+    if (resolvedValues.has(fieldId)) return resolvedValues.get(fieldId);
+    const row = byId.get(fieldId);
+    if (!row) return baseValues[fieldId];
+    if (resolving.has(fieldId)) return '';
+    resolving.add(fieldId);
+    let value: string | number | boolean | null | undefined;
+    if (row.valueMode === 'expression' && row.expression) {
+      value = evaluateCustomExpressionNode(row.expression.root, (dependency) => resolve(dependency));
+    } else if (row.valueMode === 'source' && row.sourceField) {
+      value = resolve(row.sourceField);
+    } else {
+      value = normalizeCustomPreviewScalar(row.defaultValue);
+    }
+    resolving.delete(fieldId);
+    resolvedValues.set(fieldId, value);
+    return value;
+  };
+  rows.forEach((row) => resolve(row.fieldId));
+  return Object.fromEntries(rows.map((row) => [
+    row.fieldId,
+    stringifyCustomExpressionValue(resolvedValues.get(row.fieldId)),
+  ]));
+}
+
+export function summarizeCustomFieldExpression(
+  expression: LabelCustomFieldExpressionV1,
+  fieldLabels: ReadonlyMap<string, string>,
+): string {
+  return summarizeCustomExpressionNode(expression.root, fieldLabels);
+}
+
+export function isCustomFieldExpressionValid(
+  expression: LabelCustomFieldExpressionV1,
+  allowedFieldIds: ReadonlySet<string>,
+): boolean {
+  const parsed = readCustomFieldExpressionV1({ expression });
+  return Boolean(parsed) && customExpressionFieldIds(parsed!).every((fieldId) => allowedFieldIds.has(fieldId));
 }
 
 export function resolveLatestStateUpdate<T>(
@@ -597,6 +704,141 @@ function elementCenterAt(
     xMm: xMm + Math.cos(radians) * halfWidth - Math.sin(radians) * halfHeight,
     yMm: yMm + Math.sin(radians) * halfWidth + Math.cos(radians) * halfHeight,
   };
+}
+
+function parseCustomExpressionNode(
+  value: unknown,
+  depth: number,
+  budget: { nodes: number },
+): LabelCustomExpressionNode | null {
+  if (!isRecord(value) || depth > 8) return null;
+  budget.nodes += 1;
+  if (budget.nodes > 100) return null;
+  if (value.type === 'empty') return hasExactKeys(value, ['type']) ? { type: 'empty' } : null;
+  if (value.type === 'field') {
+    return hasExactKeys(value, ['type', 'field']) && isCustomExpressionFieldId(value.field)
+      ? { type: 'field', field: value.field.trim() }
+      : null;
+  }
+  if (value.type === 'text') {
+    return hasExactKeys(value, ['type', 'value']) && typeof value.value === 'string' && value.value.length <= 1000
+      ? { type: 'text', value: value.value }
+      : null;
+  }
+  if (value.type === 'concat') {
+    if (!hasExactKeys(value, ['type', 'parts']) || !Array.isArray(value.parts)
+      || value.parts.length === 0 || value.parts.length > 20) return null;
+    const parts: LabelCustomExpressionNode[] = [];
+    for (const part of value.parts) {
+      const parsed = parseCustomExpressionNode(part, depth + 1, budget);
+      if (!parsed) return null;
+      parts.push(parsed);
+    }
+    return { type: 'concat', parts };
+  }
+  if (value.type === 'if_else') {
+    if (!hasExactKeys(value, ['type', 'when', 'then', 'else']) || !isRecord(value.when)) return null;
+    const when = parseCustomExpressionWhen(value.when);
+    const thenNode = parseCustomExpressionNode(value.then, depth + 1, budget);
+    const elseNode = parseCustomExpressionNode(value.else, depth + 1, budget);
+    return when && thenNode && elseNode
+      ? { type: 'if_else', when, then: thenNode, else: elseNode }
+      : null;
+  }
+  return null;
+}
+
+function parseCustomExpressionWhen(
+  value: Record<string, unknown>,
+): Extract<LabelCustomExpressionNode, { type: 'if_else' }>['when'] | null {
+  if (!isCustomExpressionFieldId(value.field)) return null;
+  if (value.op === 'exists' || value.op === 'not_empty') {
+    return hasExactKeys(value, ['field', 'op'])
+      ? { field: value.field.trim(), op: value.op }
+      : null;
+  }
+  if (value.op !== 'equals' && value.op !== 'not_equals') return null;
+  if (!hasExactKeys(value, ['field', 'op', 'value']) || !isLabelConditionScalar(value.value)) return null;
+  if (typeof value.value === 'string' && value.value.length > 1000) return null;
+  return { field: value.field.trim(), op: value.op, value: value.value };
+}
+
+function visitCustomExpressionNode(node: LabelCustomExpressionNode, visit: (fieldId: string) => void): void {
+  if (node.type === 'field') {
+    visit(node.field);
+    return;
+  }
+  if (node.type === 'concat') {
+    node.parts.forEach((part) => visitCustomExpressionNode(part, visit));
+    return;
+  }
+  if (node.type === 'if_else') {
+    visit(node.when.field);
+    visitCustomExpressionNode(node.then, visit);
+    visitCustomExpressionNode(node.else, visit);
+  }
+}
+
+function evaluateCustomExpressionNode(
+  node: LabelCustomExpressionNode,
+  getValue: (fieldId: string) => string | number | boolean | null | undefined,
+): string {
+  if (node.type === 'empty') return '';
+  if (node.type === 'text') return ensureCustomExpressionPreviewLength(node.value);
+  if (node.type === 'field') return ensureCustomExpressionPreviewLength(stringifyCustomExpressionValue(getValue(node.field)));
+  if (node.type === 'concat') {
+    let result = '';
+    for (const part of node.parts) {
+      result = ensureCustomExpressionPreviewLength(result + evaluateCustomExpressionNode(part, getValue));
+    }
+    return result;
+  }
+  const value = getValue(node.when.field);
+  const matches = node.when.op === 'exists'
+    ? value !== undefined && value !== null
+    : node.when.op === 'not_empty'
+      ? value !== undefined && value !== null && String(value) !== ''
+      : node.when.op === 'equals'
+        ? String(value ?? '') === String(node.when.value ?? '')
+        : String(value ?? '') !== String(node.when.value ?? '');
+  return evaluateCustomExpressionNode(matches ? node.then : node.else, getValue);
+}
+
+function summarizeCustomExpressionNode(
+  node: LabelCustomExpressionNode,
+  fieldLabels: ReadonlyMap<string, string>,
+): string {
+  if (node.type === 'empty') return 'пропуск';
+  if (node.type === 'field') return fieldLabels.get(node.field) ?? node.field;
+  if (node.type === 'text') return `«${node.value || 'пусто'}»`;
+  if (node.type === 'concat') return node.parts.map((part) => summarizeCustomExpressionNode(part, fieldLabels)).join(' + ');
+  const operator = {
+    exists: 'существует',
+    not_empty: 'не пусто',
+    equals: `= ${String(node.when.value ?? '')}`,
+    not_equals: `≠ ${String(node.when.value ?? '')}`,
+  }[node.when.op];
+  return `IF ${fieldLabels.get(node.when.field) ?? node.when.field} ${operator}: ${summarizeCustomExpressionNode(node.then, fieldLabels)}; ELSE: ${summarizeCustomExpressionNode(node.else, fieldLabels)}`;
+}
+
+function stringifyCustomExpressionValue(value: string | number | boolean | null | undefined): string {
+  return value == null ? '' : String(value);
+}
+
+function normalizeCustomPreviewScalar(value: unknown): string | number | boolean | null | undefined {
+  if (value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value ?? null;
+  }
+  return JSON.stringify(value);
+}
+
+function ensureCustomExpressionPreviewLength(value: string): string {
+  if (value.length <= 10_000) return value;
+  throw new Error('LABEL_CUSTOM_EXPRESSION_RESULT_TOO_LONG');
+}
+
+function isCustomExpressionFieldId(value: unknown): value is string {
+  return typeof value === 'string' && Boolean(value.trim()) && value.length <= 200;
 }
 
 function parseLabelConditionBranch(value: unknown): LabelConditionBranch | null {

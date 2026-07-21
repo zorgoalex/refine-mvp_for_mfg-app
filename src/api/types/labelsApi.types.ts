@@ -19,6 +19,28 @@ export interface LabelIfElseCondition {
   else: LabelConditionBranch;
 }
 
+export type LabelCustomExpressionNode =
+  | { type: 'field'; field: string }
+  | { type: 'text'; value: string }
+  | { type: 'concat'; parts: LabelCustomExpressionNode[] }
+  | {
+      type: 'if_else';
+      when: {
+        field: string;
+        op: LabelConditionOperator;
+        value?: string | number | boolean | null;
+      };
+      then: LabelCustomExpressionNode;
+      else: LabelCustomExpressionNode;
+    }
+  | { type: 'empty' };
+
+export interface LabelCustomFieldExpressionV1 {
+  type: 'custom_expression';
+  version: 1;
+  root: LabelCustomExpressionNode;
+}
+
 export interface LabelTypographyV1 {
   version: 1;
   fontSizePt: number;
@@ -75,8 +97,14 @@ export interface LabelTemplate {
   defaultExportFormats: LabelExportFormat[];
   customFieldSchema: Record<string, unknown>;
   fieldCatalogSnapshot: LabelFieldCatalogSnapshot;
-  rendererCapabilities?: Array<'if_else_v1' | 'typography_v1' | 'cut_map_v1'>;
+  rendererCapabilities?: Array<'if_else_v1' | 'typography_v1' | 'cut_map_v1' | 'custom_expression_v1'>;
   elements: LabelTemplateElement[];
+}
+
+export type LabelRendererCapability = 'if_else_v1' | 'typography_v1' | 'cut_map_v1' | 'custom_expression_v1';
+
+export interface LabelRendererCapabilities {
+  rendererCapabilities: LabelRendererCapability[];
 }
 
 export interface LabelTemplateInput {

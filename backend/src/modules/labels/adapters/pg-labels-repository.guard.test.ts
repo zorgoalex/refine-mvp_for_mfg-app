@@ -111,6 +111,41 @@ describe('PgLabelsRepository structural guards', () => {
       .toBe(false);
   });
 
+  it('fails closed when listTemplates encounters a malformed stored custom formula', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({
+        rowCount: 1,
+        rows: [{
+          label_template_id: 9,
+          name: 'Broken formula',
+          description: null,
+          version: 1,
+          is_active: true,
+          canvas_width_mm: 85,
+          canvas_height_mm: 88,
+          dpi: 203,
+          default_export_formats: ['png'],
+          custom_field_schema: {
+            'custom.bad': {
+              type: 'string',
+              expression: { type: 'custom_expression', version: 99, root: { type: 'empty' } },
+            },
+          },
+          field_catalog_snapshot: {},
+        }],
+      })
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] });
+    const database = { query } as unknown as DatabaseService;
+    const repo = new PgLabelsRepository(database);
+
+    await expect(repo.listTemplates({
+      currentUser: { id: '1', username: 'tester', role: 'manager', roleId: 1, permissions: ['labels.view'] },
+      requestId: 'req-list-invalid-expression',
+      includeInactive: true,
+    })).rejects.toMatchObject({ statusCode: 422, code: 'LABEL_CUSTOM_EXPRESSION_INVALID' });
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
   it('replays a completed generation before revalidating mutable order state', async () => {
     const response = {
       generationId: 77,

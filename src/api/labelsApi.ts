@@ -9,6 +9,7 @@ import type {
   LabelOcrTemplateInput,
   LabelQrTemplate,
   LabelQrTemplateInput,
+  LabelRendererCapabilities,
   LabelTemplate,
   LabelTemplateInput,
   OcrPreviewResult,
@@ -36,6 +37,10 @@ export const labelsApi = {
   listTemplates(includeInactive = false): Promise<LabelTemplate[]> {
     const query = includeInactive ? '?includeInactive=true' : '';
     return httpClient.get<LabelTemplate[]>(`${apiRoutes.labels.templates}${query}`, { cache: 'no-store' });
+  },
+
+  getRendererCapabilities(): Promise<LabelRendererCapabilities> {
+    return httpClient.get<LabelRendererCapabilities>(apiRoutes.labels.rendererCapabilities, { cache: 'no-store' });
   },
 
   getTemplate(id: number): Promise<LabelTemplate> {

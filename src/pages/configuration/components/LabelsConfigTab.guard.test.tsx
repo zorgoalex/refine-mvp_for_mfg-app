@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const tabSrc = readFileSync(new URL('./LabelsConfigTab.tsx', import.meta.url), 'utf8');
 const indexSrc = readFileSync(new URL('../index.tsx', import.meta.url), 'utf8');
 const apiSrc = readFileSync(new URL('../../../api/labelsApi.ts', import.meta.url), 'utf8');
+const expressionEditorSrc = readFileSync(new URL('./CustomFieldExpressionEditor.tsx', import.meta.url), 'utf8');
 
 describe('LabelsConfigTab wiring', () => {
   it('is registered only behind labels runtime flag and labels.view permission', () => {
@@ -46,6 +47,20 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/sourceField/);
     expect(tabSrc).toMatch(/Данные ERP \/ Базис/);
     expect(tabSrc).toMatch(/elements,/);
+  });
+
+  it('gates custom formulas with a global capability handshake and exposes every expression node', () => {
+    expect(tabSrc).toMatch(/labelsApi\.getRendererCapabilities/);
+    expect(apiSrc).toMatch(/rendererCapabilities/);
+    expect(tabSrc).toMatch(/custom_expression_v1/);
+    expect(tabSrc).toMatch(/CustomFieldExpressionEditor/);
+    expect(tabSrc).toMatch(/findCustomFieldDependencyCycle/);
+    expect(expressionEditorSrc).toMatch(/Склейка значений/);
+    expect(expressionEditorSrc).toMatch(/IF \/ ELSE/);
+    expect(expressionEditorSrc).toMatch(/Фиксированный текст/);
+    expect(expressionEditorSrc).toMatch(/Пропустить/);
+    expect(expressionEditorSrc).toMatch(/ArrowUpOutlined/);
+    expect(expressionEditorSrc).toMatch(/ArrowDownOutlined/);
   });
 
   it('offers Bazis .xbir import variants that can be applied to the template form', () => {
