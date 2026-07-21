@@ -92,6 +92,25 @@ describe('PgOrderStatusBoardRepository', () => {
       code: 'BOARD_CURSOR_MISMATCH',
       statusCode: 422,
     });
+
+    await expect(
+      repository.getBoard({
+        currentUser: worker(),
+        query: {
+          board: 'production',
+          column: 'unassigned',
+          cursor: cursor!,
+          limit: 1,
+          search: 'ABC',
+          onlyMyOrders: false,
+          overdueOnly: false,
+          includeDone: true,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'BOARD_CURSOR_MISMATCH',
+      statusCode: 422,
+    });
     expect(firstDatabase.queries).toHaveLength(1);
   });
 
