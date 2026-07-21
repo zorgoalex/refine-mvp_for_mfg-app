@@ -227,6 +227,8 @@ q_tbl()   { echo "SELECT to_regclass('public.$1') IS NOT NULL;"; }
 q_con()   { echo "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='$1');"; }
 q_idx()   { echo "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='$1');"; }
 q_trg()   { echo "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='$1');"; }
+q_con_def() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)='$2' FROM pg_constraint WHERE conname='$1'), false);"; }
+q_trg_def() { echo "SELECT COALESCE((SELECT pg_get_triggerdef(oid)='$2' FROM pg_trigger WHERE tgname='$1'), false);"; }
 probe_true() { [ "$(pg_query "$1")" = "t" ]; }
 # AND-chain: every argument is a boolean SQL statement; all must be true.
 probe_all() { local q; for q in "$@"; do probe_true "$q" || return 1; done; return 0; }
@@ -418,6 +420,8 @@ probe_file() {
     076_*) probe_076_endstate ;;
     077_*) probe_077_endstate ;;
     078_*) probe_078_endstate ;;
+    079_z_cut_result_jsonb_object_length_compat.sql)
+           probe_true "SELECT to_regprocedure('jsonb_object_length(jsonb)') IS NOT NULL;" ;;
     079_*) probe_all "$(q_tbl cut_result)" "$(q_tbl cut_result_command)" \
                      "$(q_col cut_job current_cut_result_id)" "$(q_col cut_job next_cut_result_no)" \
                      "$(q_con uq_cut_result_job_no)" "$(q_con fk_cut_result_command_payload)" ;;
@@ -428,6 +432,41 @@ probe_file() {
                      "$(q_trg trg_cut_result_command_state)" \
                      "$(q_trg trg_cut_result_command_terminal_immutable)" \
                      "$(q_trg trg_cut_result_ledger_state)" ;;
+    081_*) probe_all "$(q_tbl cut_result_sheet_map)" "$(q_tbl cut_result_placement)" \
+                     "$(q_tbl cut_result_label_map_projection)" \
+                     "$(q_tbl label_generation_cut_placement)" \
+                     "SELECT to_regprocedure('cut_result_label_map_expected_counts(jsonb)') IS NOT NULL;" \
+                     "$(q_trg_def trg_cut_result_label_map_projection 'CREATE TRIGGER trg_cut_result_label_map_projection AFTER INSERT ON public.cut_result FOR EACH ROW EXECUTE FUNCTION project_new_cut_result_label_maps()')" \
+                     "$(q_trg_def trg_cut_result_sheet_map_projection_insert 'CREATE TRIGGER trg_cut_result_sheet_map_projection_insert BEFORE INSERT ON public.cut_result_sheet_map FOR EACH ROW EXECUTE FUNCTION guard_cut_result_label_map_projection_insert()')" \
+                     "$(q_trg_def trg_cut_result_placement_projection_insert 'CREATE TRIGGER trg_cut_result_placement_projection_insert BEFORE INSERT ON public.cut_result_placement FOR EACH ROW EXECUTE FUNCTION guard_cut_result_label_map_projection_insert()')" \
+                     "$(q_trg_def trg_cut_result_label_map_projection_insert 'CREATE TRIGGER trg_cut_result_label_map_projection_insert BEFORE INSERT ON public.cut_result_label_map_projection FOR EACH ROW EXECUTE FUNCTION guard_cut_result_label_map_projection_insert()')" \
+                     "$(q_trg_def trg_cut_result_sheet_map_append_only 'CREATE TRIGGER trg_cut_result_sheet_map_append_only BEFORE DELETE OR UPDATE ON public.cut_result_sheet_map FOR EACH ROW EXECUTE FUNCTION reject_cut_result_label_map_mutation()')" \
+                     "$(q_trg_def trg_cut_result_placement_append_only 'CREATE TRIGGER trg_cut_result_placement_append_only BEFORE DELETE OR UPDATE ON public.cut_result_placement FOR EACH ROW EXECUTE FUNCTION reject_cut_result_label_map_mutation()')" \
+                     "$(q_trg_def trg_cut_result_label_map_projection_append_only 'CREATE TRIGGER trg_cut_result_label_map_projection_append_only BEFORE DELETE OR UPDATE ON public.cut_result_label_map_projection FOR EACH ROW EXECUTE FUNCTION reject_cut_result_label_map_mutation()')" \
+                     "$(q_con_def fk_cut_result_placement_exact_sheet 'FOREIGN KEY (cut_result_sheet_map_id, cut_result_id, cut_job_id, cut_group_id, variant, sheet_index) REFERENCES cut_result_sheet_map(cut_result_sheet_map_id, cut_result_id, cut_job_id, cut_group_id, variant, sheet_index) ON DELETE RESTRICT')" \
+                     "SELECT pg_get_functiondef('guard_cut_result_label_map_projection_insert()'::regprocedure)
+                              LIKE '%current_setting(''erp.cut_label_projection_result_id'', TRUE)%';" \
+                     "SELECT pg_get_functiondef('project_cut_result_label_maps(bigint)'::regprocedure)
+                              LIKE '%set_config(''erp.cut_label_projection_result_id'', '''', TRUE)%';" \
+                     "SELECT pg_get_constraintdef(oid) LIKE '%cut_map%'
+                        FROM pg_constraint
+                       WHERE conname='chk_label_template_elements_kind';" ;;
+    082_*) probe_true "SELECT NOT EXISTS (
+                       SELECT 1
+                         FROM cut_result r
+                         CROSS JOIN LATERAL cut_result_label_map_expected_counts(r.snapshot_job) expected
+                         LEFT JOIN cut_result_label_map_projection p USING (cut_result_id)
+                        WHERE p.cut_result_id IS NULL
+                           OR p.snapshot_digest IS DISTINCT FROM r.snapshot_digest
+                           OR p.sheet_count IS DISTINCT FROM expected.sheet_count
+                           OR p.placement_count IS DISTINCT FROM expected.placement_count
+                           OR p.sheet_count IS DISTINCT FROM (
+                             SELECT count(*) FROM cut_result_sheet_map s
+                              WHERE s.cut_result_id = r.cut_result_id)
+                           OR p.placement_count IS DISTINCT FROM (
+                             SELECT count(*) FROM cut_result_placement cp
+                              WHERE cp.cut_result_id = r.cut_result_id)
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
