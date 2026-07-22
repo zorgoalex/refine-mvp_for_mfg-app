@@ -11,14 +11,14 @@ BEGIN
   SELECT count(*), min(ps.production_status_id)
     INTO done_status_count, done_status_id
     FROM production_statuses ps
-   WHERE LOWER(BTRIM(ps.production_status_name)) = 'done'
-      OR LOWER(BTRIM(ps.production_status_code)) ~ '^done(_|$)';
+   WHERE LOWER(BTRIM(ps.production_status_name)) IN ('done', 'завершено')
+      OR LOWER(BTRIM(ps.production_status_code)) ~ '^(done|zaversheno)(_|$)';
 
   IF done_status_count = 0 THEN
-    RAISE EXCEPTION 'Production status Done was not found';
+    RAISE EXCEPTION 'Terminal production status Done/Завершено was not found';
   END IF;
   IF done_status_count > 1 THEN
-    RAISE EXCEPTION 'Production status Done is ambiguous: % matches', done_status_count;
+    RAISE EXCEPTION 'Terminal production status Done/Завершено is ambiguous: % matches', done_status_count;
   END IF;
 
   UPDATE orders o

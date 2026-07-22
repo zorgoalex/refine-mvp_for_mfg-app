@@ -589,8 +589,8 @@ probe_file() {
     083_orders_production_done_backfill*) probe_true "SELECT
                        (SELECT count(*)
                           FROM production_statuses ps
-                         WHERE LOWER(BTRIM(ps.production_status_name)) = 'done'
-                            OR LOWER(BTRIM(ps.production_status_code)) ~ '^done(_|$)') = 1
+                         WHERE LOWER(BTRIM(ps.production_status_name)) IN ('done', 'завершено')
+                            OR LOWER(BTRIM(ps.production_status_code)) ~ '^(done|zaversheno)(_|$)') = 1
                        AND NOT EXISTS (
                        SELECT 1
                          FROM orders o
@@ -599,8 +599,8 @@ probe_file() {
                             o.production_status_id IS DISTINCT FROM (
                               SELECT ps.production_status_id
                                 FROM production_statuses ps
-                               WHERE LOWER(BTRIM(ps.production_status_name)) = 'done'
-                                  OR LOWER(BTRIM(ps.production_status_code)) ~ '^done(_|$)'
+                               WHERE LOWER(BTRIM(ps.production_status_name)) IN ('done', 'завершено')
+                                  OR LOWER(BTRIM(ps.production_status_code)) ~ '^(done|zaversheno)(_|$)'
                                ORDER BY ps.production_status_id
                                LIMIT 1
                             )

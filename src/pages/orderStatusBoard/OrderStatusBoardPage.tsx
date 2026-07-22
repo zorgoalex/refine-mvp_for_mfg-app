@@ -504,7 +504,7 @@ export const OrderStatusBoardPage: React.FC = () => {
                 updateViewState({ showDone: event.target.checked })
               }
             >
-              Показывать Done
+              Показывать завершённые
             </Checkbox>
           )}
           <DatePicker.RangePicker

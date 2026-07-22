@@ -423,8 +423,8 @@ function visibleOrderStatusSql(alias: string): string {
 
 function visibleProductionStatusSql(alias: string): string {
   return `NOT (
-    LOWER(BTRIM(COALESCE(${alias}.production_status_name, ''))) = 'done'
-    OR LOWER(BTRIM(COALESCE(${alias}.production_status_code, ''))) ~ '^done(_|$)'
+    LOWER(BTRIM(COALESCE(${alias}.production_status_name, ''))) IN ('done', 'завершено')
+    OR LOWER(BTRIM(COALESCE(${alias}.production_status_code, ''))) ~ '^(done|zaversheno)(_|$)'
   )`;
 }
 
