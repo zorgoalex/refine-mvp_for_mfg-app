@@ -6,6 +6,7 @@ import { ClientPhone, PhoneType, PHONE_TYPE_LABELS } from "../../types/clients";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
+import { CLIENT_PERSON_TYPE_LABELS, ClientPersonType } from "../../types/clients";
 
 const { Title, Text } = Typography;
 
@@ -80,6 +81,12 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
             status={record?.is_active ? "success" : "default"}
             text={record?.is_active ? "Активен" : "Неактивен"}
           />
+        </Col>
+        <Col span={8}>
+          <Title level={5}>Тип лица</Title>
+          <Text>
+            {CLIENT_PERSON_TYPE_LABELS[record?.person_type as ClientPersonType] || "Физическое лицо"}
+          </Text>
         </Col>
       </Row>
 

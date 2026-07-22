@@ -1,5 +1,11 @@
 import type { DatabaseService } from '../../../database/database.service';
-import type { ClientRow, CrmSourcePort, OrderRow } from '../application/crm-sync.types';
+import type {
+  ClientPhoneRow,
+  ClientRow,
+  CrmSourcePort,
+  OrderRow,
+  PaymentRow,
+} from '../application/crm-sync.types';
 
 /**
  * Serialize an ERP DATE value to a date-only 'YYYY-MM-DD' string.
@@ -7,7 +13,8 @@ import type { ClientRow, CrmSourcePort, OrderRow } from '../application/crm-sync
  * node-postgres parses a DATE column (OID 1082) into a JS `Date` built at LOCAL
  * midnight, so a naive `String(v)` yields a `Date.prototype.toString()` value
  * ("Fri Jun 19 2026 00:00:00 GMT+0000 (Coordinated Universal Time)") that the
- * Twenty mapper then turns into a non-ISO string Twenty rejects with HTTP 400.
+ * CRM mapper expects date-only input; leaking Date.toString() produces invalid
+ * Bitrix24 date fields.
  *
  * Because pg constructs the Date from local Y/M/D components, reading the local
  * getters round-trips the stored DATE exactly, independent of the process
@@ -37,16 +44,31 @@ export class PgCrmSourceRepository implements CrmSourcePort {
 
   async getClientById(id: string): Promise<ClientRow | null> {
     const { rows } = await this.db.query(
-      `SELECT client_id, client_name, notes, is_active FROM clients WHERE client_id = $1`,
+      `SELECT client_id, client_name, person_type, notes, is_active
+         FROM clients
+        WHERE client_id = $1`,
       [id],
     );
     if (!rows.length) return null;
     const r = rows[0];
+    const phonesResult = await this.db.query(
+      `SELECT phone_number, phone_type, is_primary
+         FROM client_phones
+        WHERE client_id = $1
+        ORDER BY is_primary DESC, phone_id ASC`,
+      [id],
+    );
     return {
       clientId: String(r.client_id),
       clientName: r.client_name,
+      personType: r.person_type === 'legal' ? 'legal' : 'individual',
       notes: r.notes ?? null,
       isActive: Boolean(r.is_active),
+      phones: phonesResult.rows.map((phone): ClientPhoneRow => ({
+        phoneNumber: String(phone.phone_number),
+        phoneType: normalizePhoneType(phone.phone_type),
+        isPrimary: Boolean(phone.is_primary),
+      })),
     };
   }
 
@@ -80,6 +102,37 @@ export class PgCrmSourceRepository implements CrmSourcePort {
     };
   }
 
+  async getPaymentsByOrderId(orderId: string): Promise<PaymentRow[]> {
+    const { rows } = await this.db.query(
+      `SELECT p.payment_id, p.order_id, p.type_paid_id, pt.type_paid_name,
+              p.amount, p.payment_date, p.notes
+         FROM payments p
+         LEFT JOIN payment_types pt ON pt.type_paid_id = p.type_paid_id
+        WHERE p.order_id = $1 AND p.delete_flag = false
+        ORDER BY p.payment_id ASC`,
+      [orderId],
+    );
+    return rows.map((row) => ({
+      paymentId: String(row.payment_id),
+      orderId: String(row.order_id),
+      typePaidId: String(row.type_paid_id),
+      typePaidName: row.type_paid_name ?? null,
+      amount: Number(row.amount),
+      paymentDate: toErpDateString(row.payment_date) ?? '',
+      notes: row.notes ?? null,
+    }));
+  }
+
+  async hasOrdersForClient(clientId: string): Promise<boolean> {
+    const { rows } = await this.db.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM orders WHERE client_id = $1
+       ) AS has_orders`,
+      [clientId],
+    );
+    return Boolean(rows[0]?.has_orders);
+  }
+
   async listClientIds(afterId: string, limit: number): Promise<string[]> {
     const { rows } = await this.db.query(
       `SELECT client_id FROM clients WHERE client_id > $1 ORDER BY client_id ASC LIMIT $2`,
@@ -95,4 +148,8 @@ export class PgCrmSourceRepository implements CrmSourcePort {
     );
     return rows.map((r) => String(r.order_id));
   }
+}
+
+function normalizePhoneType(value: unknown): ClientPhoneRow['phoneType'] {
+  return value === 'work' || value === 'home' || value === 'fax' ? value : 'mobile';
 }

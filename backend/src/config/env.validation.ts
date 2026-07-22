@@ -54,6 +54,23 @@ function isPostgresUrl(value: string): boolean {
   }
 }
 
+export function isBitrix24WebhookUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      url.hostname === 'mebelkz.bitrix24.kz' &&
+      /^\/rest\/\d+\/[^/]+\/?$/.test(url.pathname) &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
+}
+
 export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
@@ -209,16 +226,23 @@ export const envSchema = z
       .trim()
       .min(1)
       .default('image/jpeg,image/png,image/webp'),
-    BACKEND_ENABLE_TWENTY_SYNC: booleanFromEnv.default(false),
-    BACKEND_TWENTY_SYNC_RELAY_OWNER: z.enum(['none', 'in_process', 'external']).default('none'),
-    BACKEND_TWENTY_SYNC_DRY_RUN: booleanFromEnv.default(false),
-    BACKEND_TWENTY_SYNC_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(60000),
-    BACKEND_TWENTY_SYNC_BATCH_SIZE: z.coerce.number().int().positive().default(100),
-    BACKEND_TWENTY_SYNC_MAX_ATTEMPTS: z.coerce.number().int().positive().default(10),
-    BACKEND_TWENTY_SYNC_WORKER_ID: z.string().default('crm-sync-local'),
-    BACKEND_TWENTY_SYNC_LEASE_MS: z.coerce.number().int().positive().default(300000),
-    TWENTY_SYNC_BASE_URL: optionalUrlFromEnv,
-    TWENTY_SYNC_API_KEY: optionalTrimmedStringFromEnv,
+    BACKEND_ENABLE_BITRIX24_SYNC: booleanFromEnv.default(false),
+    BACKEND_BITRIX24_SYNC_RELAY_OWNER: z.enum(['none', 'in_process', 'external']).default('none'),
+    BACKEND_BITRIX24_SYNC_DRY_RUN: booleanFromEnv.default(false),
+    BACKEND_BITRIX24_SYNC_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(60000),
+    BACKEND_BITRIX24_SYNC_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(100),
+    BACKEND_BITRIX24_SYNC_MAX_ATTEMPTS: z.coerce.number().int().positive().max(100).default(10),
+    BACKEND_BITRIX24_SYNC_WORKER_ID: z.string().trim().min(1).default('bitrix24-sync-local'),
+    BACKEND_BITRIX24_SYNC_LEASE_MS: z.coerce.number().int().min(60000).default(300000),
+    BITRIX24_WEBHOOK_URL: optionalUrlFromEnv,
+    BITRIX24_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(30000),
+    BITRIX24_CURRENCY_ID: z.string().trim().length(3).transform((value) => value.toUpperCase()).default('KZT'),
+    BITRIX24_PAY_SYSTEM_ID: z
+      .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])
+      .optional(),
+    BITRIX24_ASSIGNED_BY_ID: z
+      .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])
+      .optional(),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && !env.FRONTEND_ORIGIN) {
@@ -490,20 +514,41 @@ export const envSchema = z
       }
     }
 
-    if (env.BACKEND_ENABLE_TWENTY_SYNC) {
+    if (env.BACKEND_ENABLE_BITRIX24_SYNC) {
       if (!env.DATABASE_URL) {
         ctx.addIssue({
           code: 'custom',
           path: ['DATABASE_URL'],
-          message: 'DATABASE_URL is required when BACKEND_ENABLE_TWENTY_SYNC is true',
+          message: 'DATABASE_URL is required when BACKEND_ENABLE_BITRIX24_SYNC is true',
         });
       }
-      if (!env.TWENTY_SYNC_BASE_URL) {
-        ctx.addIssue({ code: 'custom', path: ['TWENTY_SYNC_BASE_URL'], message: 'required when BACKEND_ENABLE_TWENTY_SYNC=true' });
+      if (!env.BITRIX24_WEBHOOK_URL) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['BITRIX24_WEBHOOK_URL'],
+          message: 'required when BACKEND_ENABLE_BITRIX24_SYNC=true',
+        });
+      } else if (!isBitrix24WebhookUrl(env.BITRIX24_WEBHOOK_URL)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['BITRIX24_WEBHOOK_URL'],
+          message: 'must be an HTTPS incoming webhook for mebelkz.bitrix24.kz',
+        });
       }
-      if (!env.TWENTY_SYNC_API_KEY) {
-        ctx.addIssue({ code: 'custom', path: ['TWENTY_SYNC_API_KEY'], message: 'required when BACKEND_ENABLE_TWENTY_SYNC=true' });
+      if (!env.BITRIX24_PAY_SYSTEM_ID) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['BITRIX24_PAY_SYSTEM_ID'],
+          message: 'required when BACKEND_ENABLE_BITRIX24_SYNC=true',
+        });
       }
+    }
+    if (env.BITRIX24_REQUEST_TIMEOUT_MS >= env.BACKEND_BITRIX24_SYNC_LEASE_MS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['BITRIX24_REQUEST_TIMEOUT_MS'],
+        message: 'must be less than BACKEND_BITRIX24_SYNC_LEASE_MS',
+      });
     }
   })
   .transform((env) => ({
