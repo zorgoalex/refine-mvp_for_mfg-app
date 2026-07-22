@@ -1,4 +1,4 @@
-import type { ClientRow, CrmSourcePort, OrderRow } from '../application/crm-sync.types';
+import type { ClientRow, CrmSourcePort, OrderRow, PaymentRow } from '../application/crm-sync.types';
 
 /**
  * Fallback CrmSourcePort implementation used when no DATABASE_URL is configured.
@@ -12,6 +12,14 @@ export class UnavailableCrmSourceRepository implements CrmSourcePort {
 
   getOrderById(_id: string): Promise<OrderRow | null> {
     return Promise.resolve(null);
+  }
+
+  getPaymentsByOrderId(_orderId: string): Promise<PaymentRow[]> {
+    return Promise.resolve([]);
+  }
+
+  hasOrdersForClient(_clientId: string): Promise<boolean> {
+    return Promise.resolve(false);
   }
 
   listClientIds(_afterId: string, _limit: number): Promise<string[]> {

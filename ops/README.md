@@ -2,7 +2,7 @@
 
 This folder contains scripts for quickly preparing a new VPS for the ERP stack:
 Traefik, PostgreSQL, Hasura, backend, freecut (cut optimizer), cad-service
-(SVG/DXF milling layouts), and the Twenty CRM overlay.
+(SVG/DXF milling layouts), and the Bitrix24 CRM integration.
 
 Production source branch is `main`. Pull, build, and deploy production ERP code
 from `main`; `feat/backend-erp-prevprod` is retired. Stage integration remains on
@@ -21,6 +21,33 @@ on the VPS and fill real values there. `.env` is ignored by git.
 The tracked Compose source-of-truth is
 `ops/templates/docker-compose.vps.yml`. The tracked env shape is
 `ops/templates/env.vps.example`.
+
+Bitrix24 sync remains disabled until an administrator-created incoming webhook
+for `mebelkz.bitrix24.kz` and a numeric payment-system ID are configured. The
+webhook needs CRM plus sale/payment access; keep its complete URL only in `.env`.
+Keep `BITRIX24_REQUEST_TIMEOUT_MS` below
+`BACKEND_BITRIX24_SYNC_LEASE_MS`; startup validation rejects an unsafe pair.
+
+Safe first rollout order:
+
+1. Apply migrations through
+   `074_bitrix24_payment_delivery_guards.sql`.
+2. Build/recreate the backend with the webhook, payment-system ID,
+   `BACKEND_ENABLE_BITRIX24_SYNC=true`, and
+   `BACKEND_BITRIX24_SYNC_RELAY_OWNER=external`. This paused owner prevents the
+   in-process scheduler from writing before approval.
+3. Run the repository command
+   `npm run test:e2e:bitrix24-sync-stage-canary`; it is read-only and refuses
+   non-`erp_test` container names.
+4. Run `npm --prefix backend run crm-sync:backfill -- --dry-run`, inspect the
+   projection, then run the live backfill once approved.
+5. Only after the live backfill succeeds, recreate exactly one backend with
+   `BACKEND_BITRIX24_SYNC_RELAY_OWNER=in_process`.
+
+CRM API deletes move Contact/Company/Deal records to the Bitrix24 recycle bin.
+If storage must be released immediately, an administrator must disable the
+recycle bin for those CRM types or empty it manually; the sync never tries an
+undocumented permanent-delete endpoint.
 
 On a fresh VPS, `ops/setup-vps.sh`/`ops/deploy-stack.sh` create the live
 `docker-compose.yml` from that template when the live file is missing. The live
@@ -79,14 +106,11 @@ docker compose \
 `ops/up-all.sh` is a single entry point for the full `erp_test` complex. It
 hard-codes the fixed flags that every operation on this project needs:
 `--project-directory <runtime-root>`, `-p erp_test`, `--env-file .env`, and
-**both** compose files (`docker-compose.vps.yml` + `docker-compose.twenty.yml`).
-This prevents the classic mistakes: dropping the Twenty overlay (which marks the
-CRM as orphan, so a later `--remove-orphans` deletes it) and running from the
-wrong directory (which renders traefik labels and build contexts from empty env).
+the tracked `docker-compose.vps.yml`. This prevents running from the wrong
+directory, which would render traefik labels and build contexts from empty env.
 
-The base file already defines `freecut` (cut optimizer) and `cad-service`
-(SVG/DXF milling layouts) alongside the core stack, so they come up with the
-rest. Twenty CRM comes up via the overlay the wrapper always passes.
+The file defines `freecut` (cut optimizer) and `cad-service` (SVG/DXF milling
+layouts) alongside the core stack, so they come up with the rest.
 
 ```bash
 cd ~/projects/erp_dev
@@ -98,28 +122,26 @@ repo_erp/ops/up-all.sh rebuild freecut     # cut optimizer
 repo_erp/ops/up-all.sh ps                  # status
 repo_erp/ops/up-all.sh logs backend        # tail logs
 repo_erp/ops/up-all.sh config              # render merged config (dry check)
-repo_erp/ops/up-all.sh down-crm            # service-scoped Twenty teardown only
 ```
 
 The wrapper self-locates its runtime root (three levels up from the script), so
-it can be invoked from any directory. It refuses a bare `down`/`stop` on the
-merged stack (that would stop ERP too); use `down-crm` for the CRM, or the
-`-- <raw args>` escape hatch for deliberate one-off compose subcommands.
-Preflight checks (`.env` present, Twenty upload dir owned by uid 1000, no
-`REPLACE_ME` placeholders) are warn-only, since `erp_test` is the test contour.
+it can be invoked from any directory. It refuses a bare `down`/`stop` (that
+would stop ERP); use the `-- <raw args>` escape hatch for deliberate one-off
+compose subcommands. Preflight checks (`.env` present and no `REPLACE_ME`
+placeholders) are warn-only, since `erp_test` is the test contour.
 
 ## gen-secrets.sh, ensure-build-repos.sh, up-all.sh provision
 
 `gen-secrets.sh` fills the cryptographic `REPLACE_ME_*` placeholders in `<root>/.env`
 (idempotent; never overwrites set values; prints the CAD basic-auth password once;
-leaves domains/email/TWENTY_TAG/TWENTY_SYNC_API_KEY for the operator).
+leaves domains/email and external integration credentials for the operator).
 
 `ensure-build-repos.sh` clones `repo_freecut` and `repo_svgdxf` next to `repo_erp`
 if missing (`--dry-run` supported). Closes the cad-service clone gap that
 `setup-vps.sh` (freecut-only) leaves open.
 
 `up-all.sh provision` is the first-time orchestrator: ensure-build-repos →
-check-env → twenty preflight (uid 1000) → bring up the whole complex → Hasura
+check-env → bring up the whole complex → Hasura
 metadata → smoke. DB migrations are gated behind `--migrate <apply|baseline|skip>`
 (default `skip`, printing the exact follow-up command). Hasura metadata defaults
 to `--hasura bundled` (imports `ops/hasura/metadata.json`); override with

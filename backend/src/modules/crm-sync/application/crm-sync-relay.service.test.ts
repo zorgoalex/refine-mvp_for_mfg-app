@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { OutboxEventRecord } from '../../notifications-engine/domain/outbox-event.types';
 import type { ClaimedCrmSyncOutboxEvent } from '../adapters/pg-crm-sync-outbox-repository';
-import type { SyncIntent } from './twenty-sync-consumer';
+import {
+  CrmSyncTargetError,
+  type SyncIntent,
+} from './bitrix24-sync-consumer';
 import { CrmSyncRelayService } from './crm-sync-relay.service';
 
 // ─── Shared mock factories ────────────────────────────────────────────────────
@@ -29,24 +32,25 @@ function makeClaimedEvent(overrides: Partial<ClaimedCrmSyncOutboxEvent> = {}): C
   };
 }
 
-function makeMapping(entityType: string, erpId: string, twentyObject: string) {
+function makeMapping(entityType: string, erpId: string, bitrixObject: string) {
   return {
     entityType,
     erpId,
-    twentyObject,
-    twentyId: 'twenty-1',
+    bitrixObject,
+    bitrixId: '1',
+    parentErpId: null,
     status: 'active',
     lastHash: 'h1',
   };
 }
 
 function clientIntent(): SyncIntent {
-  return { mapping: makeMapping('client', '1', 'companies'), audit: { ...NOOP_AUDIT_EVENT } };
+  return { mapping: makeMapping('client', '1', 'contact'), audit: { ...NOOP_AUDIT_EVENT } };
 }
 
 function orderIntent(): SyncIntent {
   return {
-    mapping: makeMapping('order', '42', 'erpOrders'),
+    mapping: makeMapping('order', '42', 'deal'),
     audit: { ...NOOP_AUDIT_EVENT, entityType: 'order', entityId: '42' },
   };
 }
@@ -65,6 +69,10 @@ function makeDb(txClient?: DatabaseClient) {
     transaction: vi.fn().mockImplementation((handler: (c: DatabaseClient) => Promise<unknown>) =>
       handler(fakeTxClient),
     ),
+    withAdvisoryLock: vi.fn().mockImplementation(
+      (_key: string, handler: (assertOwned: () => Promise<void>) => Promise<unknown>) =>
+        handler(() => Promise.resolve()),
+    ),
     isConfigured: true,
   };
   return { db, fakeTxClient };
@@ -72,6 +80,10 @@ function makeDb(txClient?: DatabaseClient) {
 
 function makeOutboxRepo(overrides: Record<string, unknown> = {}) {
   return {
+    acquireWriterLock: vi.fn().mockResolvedValue(true),
+    heartbeatWriterLock: vi.fn().mockResolvedValue(true),
+    releaseWriterLock: vi.fn().mockResolvedValue(undefined),
+    heartbeat: vi.fn().mockResolvedValue(true),
     claimBatch: vi.fn(),
     markProcessed: vi.fn(),
     markRetry: vi.fn(),
@@ -85,6 +97,7 @@ function makeMappingRepo(overrides: Record<string, unknown> = {}) {
     get: vi.fn(),
     upsertSuccess: vi.fn().mockResolvedValue(undefined),
     markFailed: vi.fn().mockResolvedValue(undefined),
+    deletePaymentCreateGuard: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -114,7 +127,7 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
       leaseMs: 300000,
       ...overrides,
     }),
-    getTwenty: vi.fn().mockReturnValue({ baseUrl: null, apiKey: null }),
+    getBitrix24: vi.fn().mockReturnValue({ webhookUrl: null }),
   };
 }
 
@@ -285,14 +298,15 @@ describe('CrmSyncRelayService', () => {
         claimBatch: vi.fn().mockResolvedValue([event]),
         markRetry: vi.fn().mockResolvedValue(1),
       });
-      const consumer = { sync: vi.fn().mockRejectedValue(new Error('Twenty API down')) };
+      const consumer = { sync: vi.fn().mockRejectedValue(new Error('Bitrix24 API down')) };
       const mapping = makeMappingRepo();
+      const audit = makeAudit();
       const { db, fakeTxClient } = makeDb();
       db.transaction = vi.fn().mockImplementation((handler: (c: DatabaseClient) => Promise<unknown>) =>
         handler(fakeTxClient),
       );
 
-      const relay = makeRelay({ outboxRepo, consumer, mapping, db });
+      const relay = makeRelay({ outboxRepo, consumer, mapping, audit, db });
       const result = await relay.runTick();
 
       // The finalize must happen inside a single db.transaction call.
@@ -311,8 +325,8 @@ describe('CrmSyncRelayService', () => {
         fakeTxClient,
         'client',
         '1',
-        'companies',
-        'Twenty API down',
+        'contact',
+        'Bitrix24 API down',
       );
       // Never on the pool.
       expect(outboxRepo.markRetry).not.toHaveBeenCalledWith(
@@ -328,6 +342,14 @@ describe('CrmSyncRelayService', () => {
         expect.anything(),
         expect.anything(),
         expect.anything(),
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        fakeTxClient,
+        expect.objectContaining({
+          entityType: 'client',
+          entityId: '1',
+          relatedClientId: 1,
+        }),
       );
       expect(result).toEqual({ claimed: 1, processed: 0, failed: 1 });
     });
@@ -363,6 +385,56 @@ describe('CrmSyncRelayService', () => {
       // Not counted as a failure either (we didn't own the row)
       expect(result).toEqual({ claimed: 1, processed: 0, failed: 0 });
     });
+  });
+
+  it('records a payment-targeted mapping failure and audit dimension', async () => {
+    const event = makeClaimedEvent({
+      payload: { entity: 'order', id: '42', op: 'upsert', clientId: '9' },
+    });
+    const outboxRepo = makeOutboxRepo({
+      claimBatch: vi.fn().mockResolvedValue([event]),
+      markRetry: vi.fn().mockResolvedValue(1),
+    });
+    const consumer = {
+      sync: vi.fn().mockRejectedValue(new CrmSyncTargetError({
+        entityType: 'payment',
+        erpId: '7',
+        bitrixObject: 'payment',
+        relatedOrderId: 42,
+        relatedPaymentId: 7,
+      }, new Error('payment write failed'))),
+    };
+    const mapping = makeMappingRepo();
+    const audit = makeAudit();
+    const { db, fakeTxClient } = makeDb();
+    const relay = makeRelay({
+      outboxRepo,
+      consumer: consumer as never,
+      mapping,
+      audit,
+      db,
+    });
+
+    await relay.runTick();
+
+    expect(mapping.markFailed).toHaveBeenCalledWith(
+      fakeTxClient,
+      'payment',
+      '7',
+      'payment',
+      'payment write failed',
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      fakeTxClient,
+      expect.objectContaining({
+        event: 'crm_sync.failed',
+        entityType: 'payment',
+        entityId: '7',
+        relatedClientId: 9,
+        relatedOrderId: 42,
+        relatedPaymentId: 7,
+      }),
+    );
   });
 
   // ── (c3) RACE COVERAGE: markRetry + markFailed share ONE tx, markRetry FIRST ──
@@ -522,7 +594,7 @@ describe('CrmSyncRelayService', () => {
     });
   });
 
-  // ── (d) dryRun=true: uses peekPending + dryRunConsumer, zero DB/Twenty writes ─
+  // ── (d) dryRun=true: uses peekPending + dryRunConsumer, zero DB/Bitrix24 writes ─
   describe('(d) runTick({dryRun:true})', () => {
     it('uses peekPending (NOT claimBatch), calls dryRunConsumer, no markProcessed/markRetry/tx', async () => {
       const pendingEvent: OutboxEventRecord = {
@@ -621,6 +693,82 @@ describe('CrmSyncRelayService', () => {
       expect(db.transaction).not.toHaveBeenCalled();
       expect(result).toEqual({ claimed: 0, processed: 0, failed: 0 });
     });
+  });
+
+  it('does not claim events while another live writer holds the global lease', async () => {
+    const outboxRepo = makeOutboxRepo({
+      acquireWriterLock: vi.fn().mockResolvedValue(false),
+      claimBatch: vi.fn(),
+    });
+    const relay = makeRelay({ outboxRepo });
+
+    await expect(relay.runTick()).resolves.toEqual({
+      claimed: 0,
+      processed: 0,
+      failed: 0,
+    });
+    expect(outboxRepo.claimBatch).not.toHaveBeenCalled();
+  });
+
+  it('stops before persistence and later events when writer heartbeat ownership is lost', async () => {
+    const first = makeClaimedEvent({ outboxEventId: 'oe-1', lockToken: 'lock-1' });
+    const second = makeClaimedEvent({ outboxEventId: 'oe-2', lockToken: 'lock-2' });
+    const outboxRepo = makeOutboxRepo({
+      claimBatch: vi.fn().mockResolvedValue([first, second]),
+      heartbeatWriterLock: vi.fn()
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false),
+      heartbeat: vi.fn().mockResolvedValue(true),
+      markProcessed: vi.fn().mockResolvedValue(1),
+    });
+    const consumer = makeConsumer([clientIntent()]);
+    const mapping = makeMappingRepo();
+    const relay = makeRelay({ outboxRepo, consumer, mapping });
+
+    const result = await relay.runTick();
+
+    expect(consumer.sync).toHaveBeenCalledTimes(1);
+    expect(outboxRepo.markProcessed).not.toHaveBeenCalled();
+    expect(mapping.upsertSuccess).not.toHaveBeenCalled();
+    expect(result).toEqual({ claimed: 2, processed: 0, failed: 0 });
+  });
+
+  it('stops between two consumer REST calls when request-level ownership proof fails', async () => {
+    const event = makeClaimedEvent();
+    const externalCalls: string[] = [];
+    const outboxRepo = makeOutboxRepo({
+      claimBatch: vi.fn().mockResolvedValue([event]),
+      heartbeatWriterLock: vi.fn()
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false),
+      heartbeat: vi.fn().mockResolvedValue(true),
+      markProcessed: vi.fn().mockResolvedValue(1),
+    });
+    const consumer = {
+      sync: vi.fn().mockImplementation(async (
+        _event: ClaimedCrmSyncOutboxEvent,
+        assertRequestOwned: () => Promise<void>,
+      ) => {
+        await assertRequestOwned();
+        externalCalls.push('first');
+        await assertRequestOwned();
+        externalCalls.push('second');
+        return [clientIntent()];
+      }),
+    };
+    const mapping = makeMappingRepo();
+    const relay = makeRelay({ outboxRepo, consumer: consumer as never, mapping });
+
+    await expect(relay.runTick()).resolves.toEqual({
+      claimed: 1,
+      processed: 0,
+      failed: 0,
+    });
+
+    expect(externalCalls).toEqual(['first']);
+    expect(outboxRepo.markProcessed).not.toHaveBeenCalled();
+    expect(mapping.upsertSuccess).not.toHaveBeenCalled();
   });
 
   // ── (f3) fail-closed: dry-run is NOT gated (still works when disabled) ────────

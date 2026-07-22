@@ -1,6 +1,6 @@
 import { Create, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps, useCreate, useNavigation } from "@refinedev/core";
-import { Form, Input, Checkbox, notification } from "antd";
+import { Form, Input, Checkbox, notification, Radio } from "antd";
 import { ClientPhonesSection } from "./components/ClientPhonesSection";
 import { ClientPhone } from "../../types/clients";
 import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
@@ -61,7 +61,7 @@ export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
       <Form
         {...formProps}
         layout="vertical"
-        initialValues={{ is_active: true }}
+        initialValues={{ is_active: true, person_type: "individual" }}
       >
         <Form.Item
           label="Название клиента"
@@ -74,6 +74,16 @@ export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
           ]}
         >
           <Input />
+        </Form.Item>
+        <Form.Item
+          label="Тип лица"
+          name="person_type"
+          rules={[{ required: true, message: "Выберите тип лица" }]}
+        >
+          <Radio.Group>
+            <Radio value="individual">Физическое лицо</Radio>
+            <Radio value="legal">Юридическое лицо</Radio>
+          </Radio.Group>
         </Form.Item>
         <Form.Item label="Примечание" name="notes">
           <Input.TextArea rows={4} />

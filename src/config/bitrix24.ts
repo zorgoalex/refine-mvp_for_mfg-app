@@ -25,8 +25,8 @@ const DEFAULT_BITRIX24_LABEL = 'Битрикс24';
  *  - VITE_BITRIX24_URL explicitly empty, or
  *  - the value is not an http(s) URL.
  *
- * Retired VITE_CRM_* variables are deliberately ignored so an old Twenty
- * deployment override cannot redirect the new Bitrix24 menu item.
+ * Retired VITE_CRM_* variables are deliberately ignored so an old deployment
+ * override cannot redirect the new Bitrix24 menu item.
  */
 export function getBitrix24MenuConfig(
   env: EnvSource = ((import.meta as { env?: EnvSource }).env ?? {}),

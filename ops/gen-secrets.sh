@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # gen-secrets.sh — fill cryptographic REPLACE_ME placeholders in .env.
 # Idempotent: replaces a token only while it is still the placeholder. Leaves
-# operator-only fields (FQDNs, email, TWENTY_TAG, TWENTY_SYNC_API_KEY) alone.
+# operator-only fields (FQDNs, email and external integration credentials) alone.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -19,8 +19,6 @@ declare -A MAP=(
   [REPLACE_ME_SHARED_JWT_SECRET_AT_LEAST_32_CHARS]="$(openssl rand -hex 32)"
   [REPLACE_ME_REFRESH_TOKEN_PEPPER_AT_LEAST_32_CHARS]="$(openssl rand -hex 32)"
   [REPLACE_ME_CAD_TOKEN_openssl_rand_hex_32]="$(openssl rand -hex 32)"
-  [REPLACE_ME_TWENTY_DB_PASSWORD_NO_SPECIAL_CHARS]="$(openssl rand -hex 24)"
-  [REPLACE_ME_TWENTY_ENCRYPTION_KEY]="$(openssl rand -base64 32)"
 )
 
 # Escape replacement for sed (slashes, ampersands, backslashes).
@@ -50,6 +48,6 @@ echo "gen-secrets: cryptographic secrets filled in $ENV_FILE"
   echo "     SAVE THIS NOW — it cannot be recovered from the stored hash."
 }
 echo "  Still for the operator (not auto-filled):"
-echo "   - all *_FQDN, FRONTEND_ORIGIN, *_CORS*, LETSENCRYPT_EMAIL, TWENTY_SERVER_URL"
-echo "   - TWENTY_TAG (immutable release tag), TWENTY_SYNC_API_KEY (Twenty workspace key)"
+echo "   - all *_FQDN, FRONTEND_ORIGIN, *_CORS*, LETSENCRYPT_EMAIL"
+echo "   - BITRIX24_WEBHOOK_URL and BITRIX24_PAY_SYSTEM_ID when CRM sync is enabled"
 echo "   - optional GAS_*/VLM_*/AUTH0_* if those integrations are used"

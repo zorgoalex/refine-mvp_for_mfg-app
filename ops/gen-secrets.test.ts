@@ -31,8 +31,6 @@ describe('gen-secrets.sh', () => {
       'REPLACE_ME_SHARED_JWT_SECRET_AT_LEAST_32_CHARS',
       'REPLACE_ME_REFRESH_TOKEN_PEPPER_AT_LEAST_32_CHARS',
       'REPLACE_ME_CAD_TOKEN_openssl_rand_hex_32',
-      'REPLACE_ME_TWENTY_DB_PASSWORD_NO_SPECIAL_CHARS',
-      'REPLACE_ME_TWENTY_ENCRYPTION_KEY',
     ]) {
       expect(out).not.toContain(tok);
     }
@@ -45,11 +43,11 @@ describe('gen-secrets.sh', () => {
     expect(out).toContain(`postgres://erp_user:${pg}@postgresdb:5432/erpdb`);
   });
 
-  it('leaves operator-only fields for the operator', () => {
+  it('leaves external integration credentials for the operator', () => {
     run(envFile);
     const out = readFileSync(envFile, 'utf8');
-    expect(out).toContain('REPLACE_ME_TWENTY_RELEASE_TAG');     // TWENTY_TAG
-    expect(out).toContain('REPLACE_ME_TWENTY_SYNC_API_KEY');    // workspace key
+    expect(out).toContain('BITRIX24_WEBHOOK_URL=');
+    expect(out).toContain('BITRIX24_PAY_SYSTEM_ID=');
   });
 
   it('is idempotent: a second run does not change already-filled secrets', () => {

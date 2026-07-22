@@ -8,29 +8,26 @@ export class CrmSyncRuntimeConfigService {
 
   getFlags() {
     return {
-      enabled: this.config.get('BACKEND_ENABLE_TWENTY_SYNC', { infer: true }) ?? false,
-      relayOwner: this.config.get('BACKEND_TWENTY_SYNC_RELAY_OWNER', { infer: true }) ?? 'none',
-      dryRun: this.config.get('BACKEND_TWENTY_SYNC_DRY_RUN', { infer: true }) ?? false,
-      pollIntervalMs: this.config.get('BACKEND_TWENTY_SYNC_POLL_INTERVAL_MS', { infer: true }),
-      batchSize: this.config.get('BACKEND_TWENTY_SYNC_BATCH_SIZE', { infer: true }),
-      maxAttempts: this.config.get('BACKEND_TWENTY_SYNC_MAX_ATTEMPTS', { infer: true }),
-      workerId: this.config.get('BACKEND_TWENTY_SYNC_WORKER_ID', { infer: true }),
-      leaseMs: this.config.get('BACKEND_TWENTY_SYNC_LEASE_MS', { infer: true }),
+      enabled: this.config.get('BACKEND_ENABLE_BITRIX24_SYNC', { infer: true }) ?? false,
+      relayOwner: this.config.get('BACKEND_BITRIX24_SYNC_RELAY_OWNER', { infer: true }) ?? 'none',
+      dryRun: this.config.get('BACKEND_BITRIX24_SYNC_DRY_RUN', { infer: true }) ?? false,
+      pollIntervalMs: this.config.get('BACKEND_BITRIX24_SYNC_POLL_INTERVAL_MS', { infer: true }),
+      batchSize: this.config.get('BACKEND_BITRIX24_SYNC_BATCH_SIZE', { infer: true }),
+      maxAttempts: this.config.get('BACKEND_BITRIX24_SYNC_MAX_ATTEMPTS', { infer: true }),
+      workerId: this.config.get('BACKEND_BITRIX24_SYNC_WORKER_ID', { infer: true }),
+      leaseMs: this.config.get('BACKEND_BITRIX24_SYNC_LEASE_MS', { infer: true }),
     };
   }
 
-  getTwenty() {
-    // Normalize blank/whitespace-only values to null so the module's
-    // `tw.baseUrl && tw.apiKey` guard refuses to build a live client with
-    // empty credentials (fail-closed).
-    const rawBaseUrl = this.config.get('TWENTY_SYNC_BASE_URL', { infer: true });
-    const rawApiKey = this.config.get('TWENTY_SYNC_API_KEY', { infer: true });
-    const baseUrl = rawBaseUrl?.trim();
-    const apiKey = rawApiKey?.trim();
-
+  getBitrix24() {
+    const webhookUrl = this.config.get('BITRIX24_WEBHOOK_URL', { infer: true })?.trim();
     return {
-      baseUrl: baseUrl ? baseUrl : null,
-      apiKey: apiKey ? apiKey : null,
+      webhookUrl: webhookUrl || null,
+      requestTimeoutMs: this.config.get('BITRIX24_REQUEST_TIMEOUT_MS', { infer: true }),
+      currencyId: this.config.get('BITRIX24_CURRENCY_ID', { infer: true }),
+      paySystemId: this.config.get('BITRIX24_PAY_SYSTEM_ID', { infer: true }) ?? null,
+      assignedById: this.config.get('BITRIX24_ASSIGNED_BY_ID', { infer: true }) ?? null,
+      erpBaseUrl: this.config.get('FRONTEND_ORIGIN', { infer: true }),
     };
   }
 }

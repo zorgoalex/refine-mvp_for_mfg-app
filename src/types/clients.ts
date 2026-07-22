@@ -7,6 +7,7 @@
 export interface Client {
   client_id?: number;
   client_name: string;
+  person_type: ClientPersonType;
   notes?: string | null;
   is_active: boolean;
   ref_key_1c?: string | null;
@@ -18,6 +19,13 @@ export interface Client {
   // Related data
   client_phones?: ClientPhone[];
 }
+
+export type ClientPersonType = 'individual' | 'legal';
+
+export const CLIENT_PERSON_TYPE_LABELS: Record<ClientPersonType, string> = {
+  individual: 'Физическое лицо',
+  legal: 'Юридическое лицо',
+};
 
 // ============================================================================
 // CLIENT PHONE
