@@ -8,6 +8,10 @@ import {
   orderHeaderResponseSwaggerSchema,
 } from './orders.controller';
 
+const backendRoot = existsSync(resolve(process.cwd(), 'backend/contracts'))
+  ? resolve(process.cwd(), 'backend')
+  : process.cwd();
+
 describe('orders OpenAPI contract', () => {
   it('documents stale-safe idempotent DELETE /api/v1/orders/{orderId}', () => {
     const contract = readOpenApiContract();
@@ -77,11 +81,11 @@ describe('orders OpenAPI contract', () => {
   it('documents current order group links without legacy PATCH singular group route', () => {
     const contract = readOpenApiContract();
     const controllerSource = readFileSync(
-      resolve(process.cwd(), 'backend/src/modules/orders/http/order-group-links.controller.ts'),
+      resolve(backendRoot, 'src/modules/orders/http/order-group-links.controller.ts'),
       'utf8',
     );
     const repositorySource = readFileSync(
-      resolve(process.cwd(), 'backend/src/modules/orders/adapters/pg-order-group-link-repository.ts'),
+      resolve(backendRoot, 'src/modules/orders/adapters/pg-order-group-link-repository.ts'),
       'utf8',
     );
 

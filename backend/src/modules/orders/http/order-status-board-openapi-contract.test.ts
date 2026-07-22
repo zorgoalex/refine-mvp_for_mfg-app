@@ -1,9 +1,12 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+const backendRoot = existsSync(resolve(process.cwd(), 'backend/contracts'))
+  ? resolve(process.cwd(), 'backend')
+  : process.cwd();
 const contract = readFileSync(
-  resolve(process.cwd(), 'backend/contracts/04-api-contract.openapi.yaml'),
+  resolve(backendRoot, 'contracts/04-api-contract.openapi.yaml'),
   'utf8',
 );
 

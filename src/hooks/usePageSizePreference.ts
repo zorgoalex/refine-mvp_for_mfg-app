@@ -80,6 +80,7 @@ function isPreferenceKey(value: string): boolean {
 }
 
 function getCurrentUserId(): string | null {
+  if (typeof localStorage === 'undefined') return null;
   const id = authStorage.getUser()?.id;
   return id == null ? null : String(id);
 }
