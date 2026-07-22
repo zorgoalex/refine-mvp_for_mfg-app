@@ -91,8 +91,10 @@ describe('order labels UI wiring', () => {
 
   it('uses a responsive two-column generation modal and permits labels without cut maps', () => {
     expect(generateSrc).toMatch(/order-label-generate-layout/);
-    expect(generateSrc).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\) minmax\(360px, 0\.9fr\)/);
-    expect(generateSrc).toMatch(/@media \(max-width: 860px\)/);
+    expect(generateSrc).toMatch(/grid-template-columns:\s*minmax\(380px, 1fr\) minmax\(360px, 0\.9fr\)/);
+    expect(generateSrc).toMatch(/overflow-x:\s*auto/);
+    expect(generateSrc).not.toMatch(/\.order-label-generate-layout\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+    expect(generateSrc).toMatch(/@media \(max-width: 680px\)/);
     expect(generateSrc).toMatch(/row\.options\.length > 0/);
     expect(generateSrc).toMatch(/row\.options\.length === 0 && staleCandidates\.has\(row\.key\)/);
     expect(generateSrc).toMatch(/Нет раскроя — бирка будет без миниатюры/);

@@ -272,9 +272,11 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         <style>{`
           .order-label-generate-layout {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(360px, 0.9fr);
+            grid-template-columns: minmax(380px, 1fr) minmax(360px, 0.9fr);
             gap: 20px;
             align-items: start;
+            overflow-x: auto;
+            padding-bottom: 4px;
           }
           .order-label-generate-controls,
           .order-label-generate-preview-panel {
@@ -311,13 +313,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
             width: 100%;
             height: 100%;
           }
-          @media (max-width: 860px) {
-            .order-label-generate-layout {
-              grid-template-columns: minmax(0, 1fr);
-            }
-            .order-label-generate-preview-panel {
-              position: static;
-            }
+          @media (max-width: 680px) {
             .order-label-cut-map-row {
               grid-template-columns: minmax(0, 1fr);
             }
