@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import { Layout as RefineLayout } from '@refinedev/antd';
+import { Skeleton } from 'antd';
 import { AppHeader } from '../AppHeader';
 import { AppFooter } from '../AppFooter';
 import { CustomSider } from '../CustomSider';
@@ -10,6 +11,29 @@ import { KeepAliveOutlet } from './KeepAliveOutlet';
 import { useTabSync } from '../../hooks/useTabSync';
 import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
 import { GlobalTableTopScrollbars } from '../GlobalTableTopScrollbars';
+
+const WorkspaceRouteSkeleton: React.FC = () => (
+  <div
+    role="status"
+    aria-live="polite"
+    aria-label="Загрузка страницы"
+    aria-busy="true"
+    style={{ minHeight: 280, padding: 24 }}
+  >
+    <Skeleton
+      active
+      title={{ width: '32%' }}
+      paragraph={{ rows: 3, width: ['78%', '62%', '48%'] }}
+    />
+    <div style={{ marginTop: 24 }}>
+      <Skeleton
+        active
+        title={false}
+        paragraph={{ rows: 6, width: ['100%', '100%', '94%', '100%', '88%', '72%'] }}
+      />
+    </div>
+  </div>
+);
 
 export const WorkspaceLayout: React.FC = () => {
   const [isSiderOpen, setIsSiderOpen] = React.useState(false);
@@ -48,7 +72,9 @@ export const WorkspaceLayout: React.FC = () => {
         <GlobalTableTopScrollbars />
         <WorkspaceTabs />
         <div style={{ flex: 1 }}>
-          <KeepAliveOutlet />
+          <Suspense fallback={<WorkspaceRouteSkeleton />}>
+            <KeepAliveOutlet />
+          </Suspense>
         </div>
         <AppFooter />
       </div>

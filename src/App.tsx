@@ -3,8 +3,8 @@ import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 import { WorkspaceLayout } from "./components/workspace/WorkspaceLayout";
 import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev/react-router-v6";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
-import { ConfigProvider, notification, Spin, theme as antdTheme } from "antd";
-import { useEffect, Suspense, lazy } from "react";
+import { ConfigProvider, notification, theme as antdTheme } from "antd";
+import { useEffect, lazy } from "react";
 import ruRU from 'antd/locale/ru_RU';
 import "@refinedev/antd/dist/reset.css";
 import "./styles/app.css";
@@ -40,9 +40,10 @@ const ConfigurationPage = lazy(async () => ({ default: (await import("./pages/co
 const ProfilePage = lazy(async () => ({ default: (await import("./pages/profile")).ProfilePage }));
 
 // Route-level code splitting: every page component is lazy-loaded so the root
-// bundle ships only shell/providers/login. The existing <Suspense> around
-// <Routes> covers all of these. Pages are named exports, so each lazy() adapts
-// the named export to the default export React.lazy requires.
+// bundle ships only shell/providers/login. WorkspaceLayout owns the Suspense
+// boundary around its outlet so navigation never hides the persistent shell.
+// Pages are named exports, so each lazy() adapts the named export to the default
+// export React.lazy requires.
 const OrderList = lazy(async () => ({ default: (await import("./pages/orders/list")).OrderList }));
 const DowelOrderList = lazy(async () => ({ default: (await import("./pages/doweling_orders/list")).DowelOrderList }));
 
@@ -625,14 +626,7 @@ const ThemedApp = () => {
                 disableTelemetry: true,
               }}
             >
-              <Suspense
-                fallback={
-                  <div style={{ padding: 24, display: "flex", justifyContent: "center" }}>
-                    <Spin />
-                  </div>
-                }
-              >
-                <Routes>
+              <Routes>
                 <Route
                   element={
                     <Authenticated
@@ -882,8 +876,7 @@ const ThemedApp = () => {
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/auth/workos/callback" element={<WorkosCallbackPage />} />
                 </Route>
-                </Routes>
-              </Suspense>
+              </Routes>
               <RefineKbar />
             </Refine>
           </ConfigProvider>
