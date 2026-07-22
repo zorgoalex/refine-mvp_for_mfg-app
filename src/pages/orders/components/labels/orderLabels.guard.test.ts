@@ -89,6 +89,16 @@ describe('order labels UI wiring', () => {
     expect(generateSrc).toMatch(/\.order-label-preview-fit svg \{[\s\S]*width: 100%;[\s\S]*height: 100%/);
   });
 
+  it('uses a responsive two-column generation modal and permits labels without cut maps', () => {
+    expect(generateSrc).toMatch(/order-label-generate-layout/);
+    expect(generateSrc).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\) minmax\(360px, 0\.9fr\)/);
+    expect(generateSrc).toMatch(/@media \(max-width: 860px\)/);
+    expect(generateSrc).toMatch(/row\.options\.length > 0/);
+    expect(generateSrc).toMatch(/row\.options\.length === 0 && staleCandidates\.has\(row\.key\)/);
+    expect(generateSrc).toMatch(/Нет раскроя — бирка будет без миниатюры/);
+    expect(generateSrc).toMatch(/Деталь изменена — выполните новый раскрой/);
+  });
+
   it('updates modal preview automatically when preview inputs change', () => {
     expect(generateSrc).toMatch(/useCallback/);
     expect(generateSrc).toMatch(/void runPreview\(\)/);

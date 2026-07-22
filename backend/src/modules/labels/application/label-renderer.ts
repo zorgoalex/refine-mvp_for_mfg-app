@@ -135,9 +135,7 @@ function renderCutMapElement(
   cutMapAssets: LabelCutMapAssets,
 ): string {
   const map = row.cutMap;
-  if (!map) {
-    throw new Error(`Missing cut-map placement for label row ${row.rowIndex}`);
-  }
+  if (!map) return '';
   const baseSvg = cutMapAssets.get(map.cutResultSheetMapId);
   if (!baseSvg) {
     throw new Error(`Missing frozen cut-map asset ${map.cutResultSheetMapId}`);
@@ -151,9 +149,16 @@ function renderCutMapElement(
     throw new Error(`Invalid cut-map style for ${element.elementKey}`);
   }
 
+  const rotateSheet = (
+    element.widthMm < element.heightMm && map.sheetWidthMm > map.sheetHeightMm
+  ) || (
+    element.widthMm > element.heightMm && map.sheetWidthMm < map.sheetHeightMm
+  );
+  const orientedSheetWidthMm = rotateSheet ? map.sheetHeightMm : map.sheetWidthMm;
+  const orientedSheetHeightMm = rotateSheet ? map.sheetWidthMm : map.sheetHeightMm;
   const scale = Math.max(0.000001, Math.min(
-    element.widthMm / map.sheetWidthMm,
-    element.heightMm / map.sheetHeightMm,
+    element.widthMm / orientedSheetWidthMm,
+    element.heightMm / orientedSheetHeightMm,
   ));
   const whiteStroke = 0.85 / scale;
   const accentStroke = 0.42 / scale;
@@ -163,13 +168,20 @@ function renderCutMapElement(
     ? `<circle cx="${num(map.xMm + map.widthMm / 2)}" cy="${num(map.yMm + map.heightMm / 2)}" r="${num(markerRadius)}" fill="none" stroke="#ffffff" stroke-width="${num(whiteStroke)}"/><circle cx="${num(map.xMm + map.widthMm / 2)}" cy="${num(map.yMm + map.heightMm / 2)}" r="${num(markerRadius)}" fill="none" stroke="${style.highlightStroke}" stroke-width="${num(accentStroke)}"/>`
     : '';
 
-  return [
-    `<g data-label-element-kind="cut_map" data-cut-number="${escapeXml(map.cutNumber)}" data-cut-result-placement-id="${map.cutResultPlacementId}">`,
-    `<svg x="${num(element.xMm)}" y="${num(element.yMm)}" width="${num(element.widthMm)}" height="${num(element.heightMm)}" viewBox="0 0 ${num(map.sheetWidthMm)} ${num(map.sheetHeightMm)}" preserveAspectRatio="xMidYMid meet" overflow="hidden">`,
+  const sheetBody = [
     body,
     `<rect x="${num(map.xMm)}" y="${num(map.yMm)}" width="${num(map.widthMm)}" height="${num(map.heightMm)}" fill="${style.highlightFill}" fill-opacity="0.58" stroke="#ffffff" stroke-width="${num(whiteStroke)}"/>`,
     `<rect x="${num(map.xMm)}" y="${num(map.yMm)}" width="${num(map.widthMm)}" height="${num(map.heightMm)}" fill="none" stroke="${style.highlightStroke}" stroke-width="${num(accentStroke)}"/>`,
     marker,
+  ].join('');
+  const orientedSheetBody = rotateSheet
+    ? `<g transform="translate(${num(map.sheetHeightMm)} 0) rotate(90)">${sheetBody}</g>`
+    : sheetBody;
+
+  return [
+    `<g data-label-element-kind="cut_map" data-cut-number="${escapeXml(map.cutNumber)}" data-cut-result-placement-id="${map.cutResultPlacementId}">`,
+    `<svg x="${num(element.xMm)}" y="${num(element.yMm)}" width="${num(element.widthMm)}" height="${num(element.heightMm)}" viewBox="0 0 ${num(orientedSheetWidthMm)} ${num(orientedSheetHeightMm)}" preserveAspectRatio="xMidYMid meet" overflow="hidden">`,
+    orientedSheetBody,
     '</svg>',
     '</g>',
   ].join('');
