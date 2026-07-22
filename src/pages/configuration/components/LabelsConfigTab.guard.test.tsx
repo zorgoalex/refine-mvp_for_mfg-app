@@ -135,6 +135,7 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/Крупный визуал/);
     expect(tabSrc).toMatch(/\{ leftColumnSpan, rightColumnSpan \} = layoutGeometry/);
     expect(tabSrc).toMatch(/new ResizeObserver\(updateAvailableWidth\)/);
+    expect(tabSrc).toMatch(/window\.addEventListener\('resize', updateAvailableWidth\)[\s\S]*\}, \[fitToContainer\]\);/);
     expect(tabSrc).toMatch(/data-label-preview-fit=\{fitToContainer \? 'container' : 'intrinsic'\}/);
   });
 

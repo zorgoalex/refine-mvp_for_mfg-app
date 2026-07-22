@@ -2741,7 +2741,7 @@ function LabelTemplatePreview({
     const observer = new ResizeObserver(updateAvailableWidth);
     observer.observe(host);
     return () => observer.disconnect();
-  }, []);
+  }, [fitToContainer]);
 
   useEffect(() => {
     if (!canDrag || externalDragActive) setAlignmentGuides([]);
