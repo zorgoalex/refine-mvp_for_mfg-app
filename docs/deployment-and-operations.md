@@ -6,6 +6,10 @@
 - VPS: NestJS backend, Hasura, PostgreSQL, Redis/Valkey, Traefik и связанные
   сервисы.
 
+Production source of truth — ветка `main`. Production Vercel deploy и VPS
+checkout выполняются из `main`. `feat/backend-erp-stage1` остаётся stage-веткой;
+`feat/backend-erp-prevprod` retired.
+
 Frontend и backend feature flags независимы:
 
 ```env

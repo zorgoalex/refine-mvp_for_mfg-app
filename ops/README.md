@@ -4,6 +4,10 @@ This folder contains scripts for quickly preparing a new VPS for the ERP stack:
 Traefik, PostgreSQL, Hasura, backend, freecut (cut optimizer), cad-service
 (SVG/DXF milling layouts), and the Twenty CRM overlay.
 
+Production source branch is `main`. Pull, build, and deploy production ERP code
+from `main`; `feat/backend-erp-prevprod` is retired. Stage integration remains on
+`feat/backend-erp-stage1`.
+
 Russian from-scratch deployment runbook for the WHOLE complex (all of the
 above) is maintained in the workspace spec folder:
 `../spec_erp/docs/operations/full-stack-vps-deployment-from-scratch.ru.md`.
@@ -486,7 +490,8 @@ project unless that project is actually running the NestJS backend.
 
 ```bash
 cd ~/projects/erp_dev/repo_erp
-git pull --ff-only
+git switch main
+git pull --ff-only origin main
 sudo ops/setup-vps.sh --yes
 ```
 
@@ -494,7 +499,8 @@ If only backend code or backend Compose/env flags changed:
 
 ```bash
 cd ~/projects/erp_dev
-git -C repo_erp pull --ff-only
+git -C repo_erp switch main
+git -C repo_erp pull --ff-only origin main
 docker compose --env-file .env -f docker-compose.yml up -d --build --no-deps backend
 repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-compose.yml
 ```
