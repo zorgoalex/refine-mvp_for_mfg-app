@@ -2,19 +2,11 @@
 #
 # up-all.sh — single entry point for the erp_test Docker complex.
 #
-# The stack is split across two compose files that MUST always be passed
-# together for any operation on the erp_test project:
+# The stack uses docker-compose.vps.yml: traefik, postgres, hasura, backend,
+# freecut (cut optimizer), and cad-service (SVG/DXF milling layouts).
 #
-#   - docker-compose.vps.yml    base stack: traefik, postgres, hasura,
-#                               backend, freecut (cut optimizer),
-#                               cad-service (SVG/DXF milling layouts)
-#   - docker-compose.twenty.yml CRM overlay: twenty, twenty_worker,
-#                               twenty_db, twenty_redis
-#
-# Forgetting the second -f marks the Twenty services as orphans, and a later
-# `--remove-orphans` would delete the running CRM. This wrapper hard-codes both
-# -f files plus the project name, project directory and env file so none of
-# those can be left out by accident. It is intentionally self-locating: it cd's
+# This wrapper hard-codes the compose file, project name, project directory and
+# env file. It is intentionally self-locating: it cd's
 # to the runtime root before running compose, so build contexts and traefik
 # label interpolation always resolve from the correct directory.
 #
@@ -24,7 +16,6 @@
 #   ops/up-all.sh ps                  Show container status.
 #   ops/up-all.sh logs <service> [..] Tail logs for a service.
 #   ops/up-all.sh config              Render merged config (dry validation).
-#   ops/up-all.sh down-crm            Service-scoped teardown of Twenty ONLY.
 #   ops/up-all.sh -- <raw args>       Escape hatch: pass raw args to compose.
 #
 # Refuses a bare `down` / `--remove-orphans`: those would stop ERP too.
@@ -40,13 +31,9 @@ ROOT="$(cd "$SCRIPT_PATH/../.." && pwd)"
 
 ENV_FILE="$ROOT/.env"
 VPS_FILE="$ROOT/repo_erp/ops/templates/docker-compose.vps.yml"
-TWENTY_FILE="$ROOT/repo_erp/ops/templates/docker-compose.twenty.yml"
 
 # Project name is fixed; the running stack already lives under erp_test.
 PROJECT="${COMPOSE_PROJECT_NAME_OVERRIDE:-erp_test}"
-
-# Twenty service names, used by the safe service-scoped teardown.
-TWENTY_SERVICES=(twenty twenty_worker twenty_db twenty_redis)
 
 err()  { printf 'up-all: %s\n' "$*" >&2; }
 die()  { err "$*"; exit 1; }
@@ -67,7 +54,6 @@ compose() {
       -p "$PROJECT" \
       --env-file "$ENV_FILE" \
       -f "$VPS_FILE" \
-      -f "$TWENTY_FILE" \
       "$@" )
 }
 
@@ -75,30 +61,10 @@ compose() {
 preflight() {
   [ -f "$ENV_FILE" ]    || die ".env not found at $ENV_FILE"
   [ -f "$VPS_FILE" ]    || die "base compose file not found at $VPS_FILE"
-  [ -f "$TWENTY_FILE" ] || die "twenty overlay not found at $TWENTY_FILE"
-
-  # Twenty image runs as uid 1000; the bind-mounted upload dir must exist and be
-  # owned by 1000 or local-storage writes fail.
-  local storage="$ROOT/data/twenty/server-storage"
-  if [ ! -d "$storage" ]; then
-    warn "missing $storage — Twenty uploads will fail (mkdir + chown 1000:1000)"
-  elif [ "$(stat -c %u "$storage" 2>/dev/null || echo -1)" != "1000" ]; then
-    warn "$storage not owned by uid 1000 — Twenty local-storage writes may fail"
-  fi
-
   # Unfilled placeholders in .env render internet-facing services with empty
   # secrets / empty traefik hosts. Warn, do not block (test contour).
   if grep -q 'REPLACE_ME' "$ENV_FILE" 2>/dev/null; then
     warn ".env still contains REPLACE_ME placeholders"
-  fi
-}
-
-twenty_preflight() {
-  local storage="$ROOT/data/twenty/server-storage"
-  mkdir -p "$storage"
-  if [ "$(stat -c %u "$storage" 2>/dev/null || echo -1)" != "1000" ]; then
-    if [ "$(id -u)" -eq 0 ]; then chown -R 1000:1000 "$storage"
-    else warn "$storage not owned by uid 1000 and not root — run: sudo chown -R 1000:1000 $storage"; fi
   fi
 }
 
@@ -147,14 +113,8 @@ case "$cmd" in
     compose config "$@"
     ;;
 
-  down-crm)
-    # The ONLY teardown this wrapper performs: Twenty services only, leaving
-    # the ERP base stack running.
-    compose rm -sf "${TWENTY_SERVICES[@]}"
-    ;;
-
   down|stop)
-    die "refusing '$cmd' on the merged stack — it would stop ERP too. Use 'down-crm' for Twenty, or 'up-all.sh -- <args>' deliberately."
+    die "refusing '$cmd' on the stack — it would stop ERP. Use 'up-all.sh -- <args>' deliberately."
     ;;
 
   --)
@@ -186,11 +146,10 @@ case "$cmd" in
     echo "provision plan (project $PROJECT, root $ROOT):"
     echo "  1. update-build-repos (freecut + svgdxf; verified fast-forward)"
     echo "  2. check-env$([ $DO_CHECK -eq 0 ] && echo ' (skipped)')"
-    echo "  3. twenty preflight (data/twenty/server-storage, uid 1000)"
-    echo "  4. compose up -d --build (whole complex; builds source images)"
-    echo "  5. migrate: $MIGRATE (apply-migrations.sh)"
-    echo "  6. hasura: $HASURA"
-    echo "  7. smoke$([ $DO_SMOKE -eq 0 ] && echo ' (skipped)')"
+    echo "  3. compose up -d --build (whole complex; builds source images)"
+    echo "  4. migrate: $MIGRATE (apply-migrations.sh)"
+    echo "  5. hasura: $HASURA"
+    echo "  6. smoke$([ $DO_SMOKE -eq 0 ] && echo ' (skipped)')"
     if [ $DRY -eq 1 ]; then echo; echo "(dry-run: nothing executed)"; exit 0; fi
     if [ $YES -ne 1 ]; then read -r -p "Proceed? [y/N] " a; [ "$a" = "y" ] || die "aborted"; fi
 
@@ -199,7 +158,6 @@ case "$cmd" in
     bash "$SCRIPT_PATH/ensure-build-repos.sh" --update
     freecut_sha="$(git -C "$ROOT/repo_freecut" rev-parse HEAD)"
     if [ $DO_CHECK -eq 1 ]; then bash "$SCRIPT_PATH/check-env.sh" --env-file "$ENV_FILE" --compose-file "$VPS_FILE"; fi
-    twenty_preflight
     preflight
     # --build: first-time bring-up must BUILD the source images (backend, freecut,
     # cad-service). cad-service has an explicit `image: cad-service:local`, so a
@@ -235,6 +193,6 @@ case "$cmd" in
     ;;
 
   *)
-    die "unknown command '$cmd' (try: up, rebuild, ps, logs, config, down-crm, help)"
+    die "unknown command '$cmd' (try: up, rebuild, ps, logs, config, help)"
     ;;
 esac

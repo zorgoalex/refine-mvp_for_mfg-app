@@ -19,10 +19,11 @@ async function createSchema(client: import('pg').PoolClient): Promise<void> {
   await client.query(`SET search_path TO ${schemaName}`);
   await client.query(`
     CREATE TABLE ${schemaName}.crm_sync_mapping (
-      entity_type   TEXT NOT NULL CHECK (entity_type IN ('client','order')),
+      entity_type   TEXT NOT NULL CHECK (entity_type IN ('client','order','payment')),
       erp_id        TEXT NOT NULL,
-      twenty_object TEXT NOT NULL,
-      twenty_id     TEXT,
+      bitrix_object TEXT NOT NULL,
+      bitrix_id     TEXT,
+      parent_erp_id TEXT,
       status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','deleted','failed')),
       attempts      INTEGER NOT NULL DEFAULT 0,
       last_hash     TEXT,
@@ -31,7 +32,7 @@ async function createSchema(client: import('pg').PoolClient): Promise<void> {
       created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
       CONSTRAINT pk_crm_sync_mapping PRIMARY KEY (entity_type, erp_id),
-      CONSTRAINT uq_crm_sync_mapping_twenty UNIQUE (entity_type, twenty_id)
+      CONSTRAINT uq_crm_sync_mapping_bitrix UNIQUE (entity_type, bitrix_object, bitrix_id)
     )
   `);
 }
@@ -85,8 +86,9 @@ describeIntegration('PgCrmSyncMappingRepository (integration)', () => {
     const row: MappingRow = {
       entityType: 'client',
       erpId: '1',
-      twentyObject: 'person',
-      twentyId: 'twenty-abc',
+      bitrixObject: 'contact',
+      bitrixId: '101',
+      parentErpId: null,
       status: 'active',
       lastHash: 'hash1',
     };
@@ -95,30 +97,32 @@ describeIntegration('PgCrmSyncMappingRepository (integration)', () => {
     expect(fetched).not.toBeNull();
     expect(fetched!.entityType).toBe('client');
     expect(fetched!.erpId).toBe('1');
-    expect(fetched!.twentyObject).toBe('person');
-    expect(fetched!.twentyId).toBe('twenty-abc');
+    expect(fetched!.bitrixObject).toBe('contact');
+    expect(fetched!.bitrixId).toBe('101');
+    expect(fetched!.parentErpId).toBeNull();
     expect(fetched!.status).toBe('active');
     expect(fetched!.lastHash).toBe('hash1');
   });
 
   // ── upsertSuccess again updates and resets attempts/last_error ────────────
 
-  it('upsertSuccess again (same PK) updates twenty_id/status/last_hash and resets attempts to 0 and last_error to null', async () => {
+  it('upsertSuccess again updates Bitrix ID/status/hash and resets failure state', async () => {
     // First insert a failed record manually to verify reset.
     await repo.markFailed(client, 'client', '1', 'person', 'some error');
     // Now upsert success — should reset.
     const row: MappingRow = {
       entityType: 'client',
       erpId: '1',
-      twentyObject: 'person',
-      twentyId: 'twenty-xyz',
+      bitrixObject: 'contact',
+      bitrixId: '102',
+      parentErpId: null,
       status: 'active',
       lastHash: 'hash2',
     };
     await repo.upsertSuccess(client, row);
     const fetched = await repo.get(client, 'client', '1');
     expect(fetched).not.toBeNull();
-    expect(fetched!.twentyId).toBe('twenty-xyz');
+    expect(fetched!.bitrixId).toBe('102');
     expect(fetched!.lastHash).toBe('hash2');
     expect(fetched!.status).toBe('active');
     // Verify attempts=0 and last_error=null via raw query.
@@ -133,7 +137,7 @@ describeIntegration('PgCrmSyncMappingRepository (integration)', () => {
   // ── markFailed on fresh key inserts status=failed attempts=1 ─────────────
 
   it('markFailed on a fresh key inserts status=failed attempts=1 last_error set', async () => {
-    await repo.markFailed(client, 'order', '100', 'company', 'connection refused');
+    await repo.markFailed(client, 'order', '100', 'deal', 'connection refused');
     const raw = await pool.query(
       `SELECT status, attempts, last_error FROM ${schemaName}.crm_sync_mapping WHERE entity_type=$1 AND erp_id=$2`,
       ['order', '100'],
@@ -147,7 +151,7 @@ describeIntegration('PgCrmSyncMappingRepository (integration)', () => {
   // ── markFailed again increments attempts to 2 ────────────────────────────
 
   it('markFailed again on same key increments attempts to 2 and keeps status=failed', async () => {
-    await repo.markFailed(client, 'order', '100', 'company', 'timeout');
+    await repo.markFailed(client, 'order', '100', 'deal', 'timeout');
     const raw = await pool.query(
       `SELECT status, attempts, last_error FROM ${schemaName}.crm_sync_mapping WHERE entity_type=$1 AND erp_id=$2`,
       ['order', '100'],

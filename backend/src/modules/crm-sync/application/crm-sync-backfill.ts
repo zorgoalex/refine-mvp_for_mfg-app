@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { OutboxEventRecord } from '../../notifications-engine/domain/outbox-event.types';
 import type { CrmSourcePort } from './crm-sync.types';
-import type { TwentySyncConsumer, SyncIntent } from './twenty-sync-consumer';
+import type { Bitrix24SyncConsumer, SyncIntent } from './bitrix24-sync-consumer';
 
 /**
  * Builds a synthetic OutboxEventRecord for backfill purposes.
@@ -21,10 +21,11 @@ function synthEvent(entity: 'client' | 'order', id: string): OutboxEventRecord {
 
 export interface BackfillDeps {
   source: CrmSourcePort;
-  consumer: TwentySyncConsumer;
+  consumer: Bitrix24SyncConsumer;
   persist: (intents: SyncIntent[]) => Promise<void>;
   batchSize: number;
   dryRun: boolean;
+  assertOwnership?: () => Promise<void>;
 }
 
 export interface BackfillResult {
@@ -36,8 +37,8 @@ export interface BackfillResult {
  * Idempotent backfill: paginates all clients then all orders through the
  * consumer/persist path.
  *
- * Clients are fully processed before orders so that Company relations in
- * Twenty are guaranteed to exist when orders reference them.
+ * Clients are fully processed before orders so Contact/Company relations exist
+ * before deals reference them.
  *
  * Idempotency: if a record's hash is unchanged the consumer returns [] and
  * persist([]) is a no-op — re-running is safe.
@@ -46,7 +47,7 @@ export interface BackfillResult {
  * but persist is never called.
  */
 export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
-  const { source, consumer, persist, batchSize, dryRun } = deps;
+  const { source, consumer, persist, batchSize, dryRun, assertOwnership } = deps;
   let clients = 0;
   let orders = 0;
 
@@ -56,8 +57,10 @@ export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
     const ids = await source.listClientIds(after, batchSize);
     if (!ids.length) break;
     for (const id of ids) {
+      await assertOwnership?.();
       const event = synthEvent('client', id);
-      const intents = await consumer.sync(event);
+      const intents = await consumer.sync(event, assertOwnership);
+      await assertOwnership?.();
       if (!dryRun) {
         await persist(intents);
       }
@@ -72,8 +75,10 @@ export async function runBackfill(deps: BackfillDeps): Promise<BackfillResult> {
     const ids = await source.listOrderIds(after, batchSize);
     if (!ids.length) break;
     for (const id of ids) {
+      await assertOwnership?.();
       const event = synthEvent('order', id);
-      const intents = await consumer.sync(event);
+      const intents = await consumer.sync(event, assertOwnership);
+      await assertOwnership?.();
       if (!dryRun) {
         await persist(intents);
       }

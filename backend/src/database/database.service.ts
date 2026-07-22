@@ -109,6 +109,51 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
     }
   }
 
+  /**
+   * Runs a handler while one dedicated PostgreSQL session owns a global
+   * advisory lock. No transaction is held across the handler.
+   *
+   * Returns null when another session owns the lock. The supplied assertion
+   * probes the same session, so a disconnected lock holder fails closed before
+   * its next external side effect.
+   */
+  async withAdvisoryLock<T>(
+    key: string,
+    handler: (assertOwned: () => Promise<void>) => Promise<T>,
+  ): Promise<T | null> {
+    const pool = this.requirePool();
+    const raw = await withTimeout(pool.connect(), this.queryTimeoutMs, 'Database connect');
+    let acquired = false;
+    try {
+      const result = await withTimeout(
+        raw.query<{ acquired: boolean }>(
+          'SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS acquired',
+          [key],
+        ),
+        this.queryTimeoutMs,
+        'Database advisory lock',
+      );
+      acquired = Boolean(result.rows[0]?.acquired);
+      if (!acquired) return null;
+
+      const assertOwned = async () => {
+        await withTimeout(
+          raw.query('SELECT 1'),
+          this.queryTimeoutMs,
+          'Database advisory lock heartbeat',
+        );
+      };
+      return await handler(assertOwned);
+    } finally {
+      if (acquired) {
+        await raw
+          .query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [key])
+          .catch(() => undefined);
+      }
+      raw.release();
+    }
+  }
+
   async ping(): Promise<boolean> {
     if (!this.pool) {
       return false;

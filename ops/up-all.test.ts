@@ -16,7 +16,6 @@ describe('up-all.sh provision', () => {
     const out = run(['provision', '--dry-run']);
     expect(out).toMatch(/update-build-repos/);
     expect(out).toMatch(/check-env/);
-    expect(out).toMatch(/server-storage/);
     expect(out).toMatch(/compose up/);
     expect(out).toMatch(/apply-migrations/);
     expect(out).toMatch(/smoke/);

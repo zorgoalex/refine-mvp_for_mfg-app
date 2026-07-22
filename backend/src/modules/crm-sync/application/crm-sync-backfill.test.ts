@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CrmSourcePort } from './crm-sync.types';
-import type { TwentySyncConsumer, SyncIntent } from './twenty-sync-consumer';
+import type { Bitrix24SyncConsumer, SyncIntent } from './bitrix24-sync-consumer';
 import { runBackfill } from './crm-sync-backfill';
 
 // ---------------------------------------------------------------------------
@@ -17,12 +17,12 @@ function makeSource(overrides?: Partial<CrmSourcePort>): CrmSourcePort {
   } as unknown as CrmSourcePort;
 }
 
-function makeConsumer(syncResult: SyncIntent[] | (() => SyncIntent[])): TwentySyncConsumer {
+function makeConsumer(syncResult: SyncIntent[] | (() => SyncIntent[])): Bitrix24SyncConsumer {
   const fn = typeof syncResult === 'function' ? syncResult : () => syncResult;
   return {
     sync: vi.fn().mockImplementation(() => Promise.resolve(fn())),
     supports: vi.fn().mockReturnValue(true),
-  } as unknown as TwentySyncConsumer;
+  } as unknown as Bitrix24SyncConsumer;
 }
 
 function makePersist(): ReturnType<typeof vi.fn> {
@@ -56,7 +56,7 @@ describe('runBackfill', () => {
           return Promise.resolve([]);
         }),
         supports: vi.fn().mockReturnValue(true),
-      } as unknown as TwentySyncConsumer;
+      } as unknown as Bitrix24SyncConsumer;
 
       await runBackfill({
         source,
@@ -105,7 +105,7 @@ describe('runBackfill', () => {
           return Promise.resolve([]);
         }),
         supports: vi.fn(),
-      } as unknown as TwentySyncConsumer;
+      } as unknown as Bitrix24SyncConsumer;
 
       await runBackfill({ source, consumer, persist: makePersist(), batchSize: 10, dryRun: true });
 
@@ -133,7 +133,7 @@ describe('runBackfill', () => {
           return Promise.resolve([{} as SyncIntent]);
         }),
         supports: vi.fn(),
-      } as unknown as TwentySyncConsumer;
+      } as unknown as Bitrix24SyncConsumer;
 
       const persist = makePersist();
 
@@ -184,8 +184,9 @@ describe('runBackfill', () => {
         mapping: {
           entityType: 'client',
           erpId: 'c-1',
-          twentyObject: 'companies',
-          twentyId: 'twenty-123',
+          bitrixObject: 'contact',
+          bitrixId: '123',
+          parentErpId: null,
           status: 'active',
           lastHash: 'abc',
         },
