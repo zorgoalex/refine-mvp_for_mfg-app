@@ -271,6 +271,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
       >
         <style>{`
           .order-label-generate-layout {
+            /* Keep position selection and label preview side by side at every viewport width. */
             display: grid;
             grid-template-columns: minmax(380px, 1fr) minmax(360px, 0.9fr);
             gap: 20px;
