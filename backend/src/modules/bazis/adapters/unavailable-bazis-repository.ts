@@ -6,6 +6,7 @@ import type {
   CreateOrderFromRevisionCommand,
   DeleteBazisProjectInput,
   ImportRevisionCommand,
+  RenameBazisProjectInput,
   SetNodeNotesInput,
 } from '../application/bazis.types';
 import type {
@@ -19,6 +20,7 @@ import type {
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectListItemDto,
+  BazisProjectNameDto,
   BazisRevisionMaterialsSummaryDto,
   BazisRevisionOrderDto,
   BazisTreeNodeDto,
@@ -51,6 +53,10 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
   }
 
   getProject(_bazisProjectId: number): Promise<BazisProjectCardDto> {
+    return unavailable();
+  }
+
+  renameProject(_input: RenameBazisProjectInput): Promise<BazisProjectNameDto> {
     return unavailable();
   }
 

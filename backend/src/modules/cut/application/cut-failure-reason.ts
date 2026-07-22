@@ -39,6 +39,11 @@ const PASSTHROUGH_CODES = new Set<string>([
   'CUT_JOB_NOT_MUTABLE',
   'CUT_JOB_NOT_FOUND',
   'CUT_JOB_ITEM_NOT_FOUND',
+  'CUT_RESULT_COMMAND_IN_PROGRESS',
+  'CUT_RESULT_COMMAND_CONFLICT',
+  'CUT_RESULT_COMMAND_FAILED',
+  'CUT_RESULT_COMMAND_ABANDONED',
+  'CUT_CALCULATION_IN_PROGRESS',
   'ORDER_DETAIL_NOT_FOUND',
   // Precondition: the chosen cut profile was deactivated after selection;
   // operator must clear or re-pick the profile before recalculating — no solve was attempted.

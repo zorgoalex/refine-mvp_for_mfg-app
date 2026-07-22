@@ -227,6 +227,8 @@ q_tbl()   { echo "SELECT to_regclass('public.$1') IS NOT NULL;"; }
 q_con()   { echo "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='$1');"; }
 q_idx()   { echo "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='$1');"; }
 q_trg()   { echo "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='$1');"; }
+q_con_def() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)='$2' FROM pg_constraint WHERE conname='$1'), false);"; }
+q_trg_def() { echo "SELECT COALESCE((SELECT pg_get_triggerdef(oid)='$2' FROM pg_trigger WHERE tgname='$1'), false);"; }
 probe_true() { [ "$(pg_query "$1")" = "t" ]; }
 # AND-chain: every argument is a boolean SQL statement; all must be true.
 probe_all() { local q; for q in "$@"; do probe_true "$q" || return 1; done; return 0; }
@@ -415,8 +417,149 @@ probe_file() {
                      "$(q_col bazis_pdf_table_patterns is_active)" \
                      "$(q_col bazis_pdf_table_patterns version)" ;;
     075_*) probe_075_endstate ;;
+    076_*) probe_076_endstate ;;
+    077_*) probe_077_endstate ;;
+    078_*) probe_078_endstate ;;
+    079_z_cut_result_jsonb_object_length_compat.sql)
+           probe_true "SELECT to_regprocedure('jsonb_object_length(jsonb)') IS NOT NULL;" ;;
+    079_*) probe_all "$(q_tbl cut_result)" "$(q_tbl cut_result_command)" \
+                     "$(q_col cut_job current_cut_result_id)" "$(q_col cut_job next_cut_result_no)" \
+                     "$(q_con uq_cut_result_job_no)" "$(q_con fk_cut_result_command_payload)" ;;
+    080_*) probe_all "$(q_con chk_cut_result_command_identity)" \
+                     "$(q_con chk_cut_result_snapshot_shape)" \
+                     "$(q_con fk_cut_job_current_result_same_job)" \
+                     "$(q_trg trg_cut_result_append_only)" \
+                     "$(q_trg trg_cut_result_command_state)" \
+                     "$(q_trg trg_cut_result_command_terminal_immutable)" \
+                     "$(q_trg trg_cut_result_ledger_state)" ;;
+    081_label_cut_maps*) probe_all "$(q_tbl cut_result_sheet_map)" "$(q_tbl cut_result_placement)" \
+                     "$(q_tbl cut_result_label_map_projection)" \
+                     "$(q_tbl label_generation_cut_placement)" \
+                     "SELECT to_regprocedure('cut_result_label_map_expected_counts(jsonb)') IS NOT NULL;" \
+                     "$(q_trg_def trg_cut_result_label_map_projection 'CREATE TRIGGER trg_cut_result_label_map_projection AFTER INSERT ON public.cut_result FOR EACH ROW EXECUTE FUNCTION project_new_cut_result_label_maps()')" \
+                     "$(q_trg_def trg_cut_result_sheet_map_projection_insert 'CREATE TRIGGER trg_cut_result_sheet_map_projection_insert BEFORE INSERT ON public.cut_result_sheet_map FOR EACH ROW EXECUTE FUNCTION guard_cut_result_label_map_projection_insert()')" \
+                     "$(q_trg_def trg_cut_result_placement_projection_insert 'CREATE TRIGGER trg_cut_result_placement_projection_insert BEFORE INSERT ON public.cut_result_placement FOR EACH ROW EXECUTE FUNCTION guard_cut_result_label_map_projection_insert()')" \
+                     "$(q_trg_def trg_cut_result_label_map_projection_insert 'CREATE TRIGGER trg_cut_result_label_map_projection_insert BEFORE INSERT ON public.cut_result_label_map_projection FOR EACH ROW EXECUTE FUNCTION guard_cut_result_label_map_projection_insert()')" \
+                     "$(q_trg_def trg_cut_result_sheet_map_append_only 'CREATE TRIGGER trg_cut_result_sheet_map_append_only BEFORE DELETE OR UPDATE ON public.cut_result_sheet_map FOR EACH ROW EXECUTE FUNCTION reject_cut_result_label_map_mutation()')" \
+                     "$(q_trg_def trg_cut_result_placement_append_only 'CREATE TRIGGER trg_cut_result_placement_append_only BEFORE DELETE OR UPDATE ON public.cut_result_placement FOR EACH ROW EXECUTE FUNCTION reject_cut_result_label_map_mutation()')" \
+                     "$(q_trg_def trg_cut_result_label_map_projection_append_only 'CREATE TRIGGER trg_cut_result_label_map_projection_append_only BEFORE DELETE OR UPDATE ON public.cut_result_label_map_projection FOR EACH ROW EXECUTE FUNCTION reject_cut_result_label_map_mutation()')" \
+                     "$(q_con_def fk_cut_result_placement_exact_sheet 'FOREIGN KEY (cut_result_sheet_map_id, cut_result_id, cut_job_id, cut_group_id, variant, sheet_index) REFERENCES cut_result_sheet_map(cut_result_sheet_map_id, cut_result_id, cut_job_id, cut_group_id, variant, sheet_index) ON DELETE RESTRICT')" \
+                     "SELECT pg_get_functiondef('guard_cut_result_label_map_projection_insert()'::regprocedure)
+                              LIKE '%current_setting(''erp.cut_label_projection_result_id'', TRUE)%';" \
+                     "SELECT pg_get_functiondef('project_cut_result_label_maps(bigint)'::regprocedure)
+                              LIKE '%set_config(''erp.cut_label_projection_result_id'', '''', TRUE)%';" \
+                     "SELECT pg_get_constraintdef(oid) LIKE '%cut_map%'
+                        FROM pg_constraint
+                       WHERE conname='chk_label_template_elements_kind';" ;;
+    081_user_preferences_page_sizes*) probe_all "$(q_col user_preferences page_size_preferences)" ;;
+    082_label_cut_maps_backfill*) probe_true "SELECT NOT EXISTS (
+                       SELECT 1
+                         FROM cut_result r
+                         CROSS JOIN LATERAL cut_result_label_map_expected_counts(r.snapshot_job) expected
+                         LEFT JOIN cut_result_label_map_projection p USING (cut_result_id)
+                        WHERE p.cut_result_id IS NULL
+                           OR p.snapshot_digest IS DISTINCT FROM r.snapshot_digest
+                           OR p.sheet_count IS DISTINCT FROM expected.sheet_count
+                           OR p.placement_count IS DISTINCT FROM expected.placement_count
+                           OR p.sheet_count IS DISTINCT FROM (
+                             SELECT count(*) FROM cut_result_sheet_map s
+                              WHERE s.cut_result_id = r.cut_result_id)
+                           OR p.placement_count IS DISTINCT FROM (
+                             SELECT count(*) FROM cut_result_placement cp
+                              WHERE cp.cut_result_id = r.cut_result_id)
+                     );" ;;
+    083_orders_production_done_backfill*) probe_true "SELECT
+                       (SELECT count(*)
+                          FROM production_statuses ps
+                         WHERE LOWER(BTRIM(ps.production_status_name)) = 'done'
+                            OR LOWER(BTRIM(ps.production_status_code)) ~ '^done(_|$)') = 1
+                       AND NOT EXISTS (
+                       SELECT 1
+                         FROM orders o
+                        WHERE o.created_at < CURRENT_TIMESTAMP - INTERVAL '1 month'
+                          AND (
+                            o.production_status_id IS DISTINCT FROM (
+                              SELECT ps.production_status_id
+                                FROM production_statuses ps
+                               WHERE LOWER(BTRIM(ps.production_status_name)) = 'done'
+                                  OR LOWER(BTRIM(ps.production_status_code)) ~ '^done(_|$)'
+                               ORDER BY ps.production_status_id
+                               LIMIT 1
+                            )
+                            OR o.production_status_from_details_enabled IS DISTINCT FROM false
+                          )
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
+}
+
+probe_076_endstate() {
+  probe_all "$(q_col bazis_cut_set_details source_bazis_product_name)" \
+            "SELECT NOT EXISTS (
+               SELECT 1
+               FROM bazis_cut_set_details snapshot
+               JOIN order_details source ON source.detail_id = snapshot.source_order_detail_id
+               WHERE snapshot.source_bazis_project_name IS DISTINCT FROM COALESCE(NULLIF(btrim(source.basis_project), ''), '')
+                  OR snapshot.source_bazis_order_no IS DISTINCT FROM COALESCE(NULLIF(btrim(source.basis_project), ''), '')
+                  OR snapshot.source_bazis_product_name IS DISTINCT FROM COALESCE(NULLIF(btrim(source.basis_product), ''), '')
+             );"
+}
+
+probe_077_endstate() {
+  probe_true "SELECT NOT EXISTS (
+    WITH latest_order AS (
+      SELECT DISTINCT ON (r.bazis_project_id)
+             r.bazis_project_id,
+             COALESCE(
+               NULLIF(btrim(r.bazis_order_no), ''),
+               (
+                 SELECT NULLIF(btrim(n.raw_json->>'Заказ'), '')
+                 FROM bazis_nodes n
+                 WHERE n.revision_id = r.bazis_revision_id
+                   AND n.parent_node_id IS NULL
+                   AND NULLIF(btrim(n.raw_json->>'Заказ'), '') IS NOT NULL
+                 ORDER BY n.seq
+                 LIMIT 1
+               )
+             ) AS order_name
+      FROM bazis_project_revisions r
+      ORDER BY r.bazis_project_id, r.revision_no DESC, r.imported_at DESC, r.bazis_revision_id DESC
+    )
+    SELECT 1
+    FROM bazis_projects project
+    JOIN latest_order latest ON latest.bazis_project_id = project.bazis_project_id
+    WHERE latest.order_name IS NOT NULL
+      AND project.name IS DISTINCT FROM latest.order_name
+      AND EXISTS (
+        SELECT 1
+        FROM bazis_project_revisions legacy_revision
+        WHERE legacy_revision.bazis_project_id = project.bazis_project_id
+          AND legacy_revision.product_name = project.name
+      )
+  );"
+}
+
+probe_078_endstate() {
+  probe_all "SELECT EXISTS (
+               SELECT 1
+               FROM information_schema.columns
+               WHERE table_schema='public'
+                 AND table_name='bazis_cut_set_details'
+                 AND column_name='position'
+                 AND data_type='text'
+             );" \
+            "SELECT NOT EXISTS (
+               SELECT 1
+               FROM bazis_cut_set_details snapshot
+               JOIN order_details source ON source.detail_id = snapshot.source_order_detail_id
+               WHERE snapshot.position IS DISTINCT FROM CASE
+                 WHEN NULLIF(btrim(COALESCE(source.basis_product, '')), '') IS NULL
+                  AND NULLIF(btrim(COALESCE(source.basis_designation, '')), '') IS NULL
+                   THEN ''
+                 ELSE COALESCE(NULLIF(btrim(source.basis_product), ''), '')
+                   || '.' || COALESCE(NULLIF(btrim(source.basis_designation), ''), '')
+               END
+             );"
 }
 
 # 075 includes a data rewrite. Columns alone are not enough: a restored

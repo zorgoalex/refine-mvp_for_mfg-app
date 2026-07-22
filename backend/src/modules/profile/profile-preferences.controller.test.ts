@@ -24,11 +24,11 @@ describe('ProfilePreferencesController', () => {
     const controller = createController({
       async get(command) {
         calls.push(`get:${command.currentUser.id}`);
-        return { themeMode: 'light', uiSize: 'default', orderDetailColumns: {}, recentReferences: {} };
+        return { themeMode: 'light', uiSize: 'default', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} };
       },
       async update(command) {
         calls.push(`update:${command.currentUser.id}:${command.preferences.themeMode}:${Object.keys(command.preferences.orderDetailColumns ?? {}).join(',')}`);
-        return { themeMode: 'dark', uiSize: 'default', orderDetailColumns: command.preferences.orderDetailColumns ?? {}, recentReferences: {} };
+        return { themeMode: 'dark', uiSize: 'default', orderDetailColumns: command.preferences.orderDetailColumns ?? {}, recentReferences: {}, pageSizePreferences: command.preferences.pageSizePreferences ?? {} };
       },
       async promoteReferenceUsage(command) {
         calls.push(`promote:${command.currentUser.id}:${command.resource}:${command.entityId}`);
@@ -37,18 +37,19 @@ describe('ProfilePreferencesController', () => {
           uiSize: 'default',
           orderDetailColumns: {},
           recentReferences: { [command.resource]: [command.entityId] },
+          pageSizePreferences: {},
         };
       },
     });
 
     await expect(controller.get({ user: currentUser('15') })).resolves.toEqual({
-      preferences: { themeMode: 'light', uiSize: 'default', orderDetailColumns: {}, recentReferences: {} },
+      preferences: { themeMode: 'light', uiSize: 'default', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} },
     });
     await expect(controller.update({ user: currentUser('15') }, {
       themeMode: 'dark',
       orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } },
     })).resolves.toEqual({
-      preferences: { themeMode: 'dark', uiSize: 'default', orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } }, recentReferences: {} },
+      preferences: { themeMode: 'dark', uiSize: 'default', orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } }, recentReferences: {}, pageSizePreferences: {} },
     });
     await expect(controller.promoteReferenceUsage(
       { user: currentUser('15') },
@@ -59,6 +60,7 @@ describe('ProfilePreferencesController', () => {
         uiSize: 'default',
         orderDetailColumns: {},
         recentReferences: { sheet_material_types: [27] },
+        pageSizePreferences: {},
       },
     });
     expect(calls).toEqual([
@@ -95,7 +97,15 @@ describe('ProfilePreferencesController', () => {
     expect(parseUpdateUserPreferencesRequest({ themeMode: 'dark' })).toEqual({ themeMode: 'dark' });
     expect(parseUpdateUserPreferencesRequest({ uiSize: 'small' })).toEqual({ uiSize: 'small' });
     expect(parseUpdateUserPreferencesRequest({ uiSize: 'default' })).toEqual({ uiSize: 'default' });
+    expect(parseUpdateUserPreferencesRequest({ pageSizePreferences: { 'refine:orders_view': 50 } }))
+      .toEqual({ pageSizePreferences: { 'refine:orders_view': 50 } });
     expect(() => parseUpdateUserPreferencesRequest({ uiSize: 'huge' })).toThrowError();
+    expect(() => parseUpdateUserPreferencesRequest({ pageSizePreferences: { audit: 200 } })).toThrow(ApiError);
+    expect(() => parseUpdateUserPreferencesRequest({
+      pageSizePreferences: Object.fromEntries(
+        Array.from({ length: 33 }, (_, index) => [`list:${index}`, 20]),
+      ),
+    })).toThrow(ApiError);
     expect(parseUpdateUserPreferencesRequest({
       orderDetailColumns: { orderShow: { order: ['detail_number', 'height'], hidden: ['note'] } },
     })).toEqual({

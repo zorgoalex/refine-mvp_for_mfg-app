@@ -1,5 +1,6 @@
 ﻿import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { useTable, ShowButton, EditButton } from "@refinedev/antd";
+import { ShowButton, EditButton } from "@refinedev/antd";
+import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Table, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
@@ -59,5 +60,4 @@ export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
     </LocalizedList>
   );
 };
-
 

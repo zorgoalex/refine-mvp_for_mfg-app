@@ -42,6 +42,9 @@ export class UnavailableLabelsRepository implements LabelsPort {
   async updateOrderLabelData() {
     return unavailable();
   }
+  async listOrderCutMapOptions() {
+    return unavailable();
+  }
   async previewOrderLabels() {
     return unavailable();
   }

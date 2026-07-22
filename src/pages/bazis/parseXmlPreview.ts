@@ -25,6 +25,7 @@ export interface XmlPreviewBreakdown {
 }
 
 export interface XmlPreviewResult {
+  bazisOrderNo: string | null;
   productName: string | null;
   totalNodes: number;
   tree: XmlPreviewNode[];
@@ -140,7 +141,12 @@ export function parseXmlPreview(xmlText: string): XmlPreviewResult {
   const productNames = products
     .map((product) => textOfChild(product, 'Наименование'))
     .filter((name): name is string => name !== null);
+  const projectOrderName = project.getAttribute('Наименование')?.trim() || null;
+  const firstProductOrderNo = products
+    .map((product) => textOfChild(product, 'Заказ'))
+    .find((value): value is string => value !== null) ?? null;
   return {
+    bazisOrderNo: projectOrderName ?? firstProductOrderNo,
     productName: productNames.length > 0 ? productNames.join(' + ') : null,
     totalNodes: counter,
     tree: roots,

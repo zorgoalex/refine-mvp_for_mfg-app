@@ -6,12 +6,33 @@ import type { LatestOrderLabelsPreview } from '../../../../api/types/labelsApi.t
 import { can } from '../../../../utils/permissions';
 import { saveLabelBlob } from './labelDownloads';
 import { OrderLabelGenerateAction } from './OrderLabelGenerateAction';
+import { LabelSvgPreviewFrame } from './LabelSvgPreviewFrame';
 
 const { Text } = Typography;
 
 interface OrderLatestLabelsPreviewProps {
   orderId: number;
 }
+
+export const OrderLatestLabelPreviewSurface: React.FC<{
+  svg: string;
+  zoomed: boolean;
+  onToggle?: () => void;
+}> = ({ svg, zoomed, onToggle }) => (
+  <LabelSvgPreviewFrame
+    svg={svg}
+    onClick={onToggle}
+    title={zoomed ? 'Свернуть бирку' : 'Увеличить бирку'}
+    contentStyle={{ zoom: zoomed ? 1 : 0.25 }}
+    style={{
+      border: '1px solid var(--app-border)',
+      overflow: 'hidden',
+      cursor: 'pointer',
+      display: 'inline-block',
+      lineHeight: 0,
+    }}
+  />
+);
 
 export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> = ({ orderId }) => {
   const canGenerate = can('labels.generate');
@@ -52,23 +73,12 @@ export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> =
           <>
             <Text type="secondary">Последняя генерация: {latest.labelCount} шт.</Text>
             {latest.svgPages.slice(0, 1).map((svg, index) => (
-              <div
+              <OrderLatestLabelPreviewSurface
                 key={index}
-                onClick={() => setZoomed((z) => !z)}
-                title={zoomed ? 'Свернуть бирку' : 'Увеличить бирку'}
-                style={{
-                  border: '1px solid var(--app-border)',
-                  overflow: 'hidden',
-                  cursor: 'pointer',
-                  display: 'inline-block',
-                  lineHeight: 0,
-                }}
-              >
-                <div
-                  style={{ zoom: zoomed ? 1 : 0.25 }}
-                  dangerouslySetInnerHTML={{ __html: svg }}
-                />
-              </div>
+                svg={svg}
+                zoomed={zoomed}
+                onToggle={() => setZoomed((z) => !z)}
+              />
             ))}
             <Space wrap>
               {canGenerate && (

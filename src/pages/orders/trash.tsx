@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { ordersApi } from '../../api/ordersApi';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
 import { featureFlags } from '../../config/featureFlags';
+import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 import { formatDate, formatDateTime } from '../../utils/dateFormat';
 import { formatNumber } from '../../utils/numberFormat';
 import { can } from '../../utils/permissions';
@@ -48,7 +49,14 @@ export const OrderTrash: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [searchDraft, setSearchDraft] = useState('');
   const [search, setSearch] = useState('');
-  const [pagination, setPagination] = useState<TrashPaginationState>(INITIAL_PAGINATION);
+  const { pageSize: preferredPageSize, setPageSize: rememberPageSize } = usePageSizePreference(
+    'orders:trash',
+    INITIAL_PAGINATION.pageSize,
+  );
+  const [pagination, setPagination] = useState<TrashPaginationState>({
+    ...INITIAL_PAGINATION,
+    pageSize: preferredPageSize,
+  });
   const [restoringOrderId, setRestoringOrderId] = useState<number | null>(null);
 
   const loadOrders = useCallback(async () => {
@@ -83,6 +91,12 @@ export const OrderTrash: React.FC = () => {
   useEffect(() => {
     void loadOrders();
   }, [loadOrders]);
+
+  useEffect(() => {
+    setPagination((current) => current.pageSize === preferredPageSize
+      ? current
+      : { ...current, page: 1, pageSize: preferredPageSize });
+  }, [preferredPageSize]);
 
   const columns = useMemo<ColumnsType<OrderListItemDto>>(() => {
     const baseColumns: ColumnsType<OrderListItemDto> = [
@@ -179,6 +193,7 @@ export const OrderTrash: React.FC = () => {
       pageSize: pagination.pageSize,
       total: pagination.total,
       showSizeChanger: true,
+      pageSizeOptions: PAGE_SIZE_OPTIONS,
       showTotal: (total) => `Всего: ${total}`,
     }),
     [pagination.page, pagination.pageSize, pagination.total],
@@ -218,10 +233,13 @@ export const OrderTrash: React.FC = () => {
           loading={loading}
           pagination={tablePagination}
           onChange={(nextPagination) => {
+            const nextPageSize = nextPagination.pageSize ?? pagination.pageSize;
+            const pageSizeChanged = nextPageSize !== pagination.pageSize;
+            if (pageSizeChanged) rememberPageSize(nextPageSize);
             setPagination((current) => ({
               ...current,
-              page: nextPagination.current ?? current.page,
-              pageSize: nextPagination.pageSize ?? current.pageSize,
+              page: pageSizeChanged ? 1 : (nextPagination.current ?? current.page),
+              pageSize: nextPageSize,
             }));
           }}
           locale={{ emptyText: 'Удалённых заказов нет' }}

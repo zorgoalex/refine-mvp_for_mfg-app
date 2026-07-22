@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
@@ -18,6 +19,15 @@ const databaseUrl = process.env.CUT_INTEGRATION_DATABASE_URL ?? process.env.TEST
 const describeIntegration = databaseUrl ? describe : describe.skip;
 
 const schemaName = `cut_repo_${randomUUID().replaceAll('-', '_')}`;
+const backfillSchemaName = `cut_backfill_${randomUUID().replaceAll('-', '_')}`;
+const historyExpandMigration = readFileSync(
+  new URL('../../../../db/migrations/079_cut_result_history_expand.sql', import.meta.url),
+  'utf8',
+);
+const historyFinalizeMigration = readFileSync(
+  new URL('../../../../db/migrations/080_cut_result_history_finalize.sql', import.meta.url),
+  'utf8',
+);
 
 function currentUser(): CurrentUser {
   return { id: '1', username: 'cutter', role: 'operator', permissions: ['cut.view', 'cut.manage'] } as unknown as CurrentUser;
@@ -290,7 +300,7 @@ async function createSchema(pool: Pool): Promise<void> {
 }
 
 /** Minimal DatabaseService over a single pooled connection in the throwaway schema. */
-function makeDatabase(pool: Pool): DatabaseService {
+function makeDatabase(pool: Pool, searchPath = schemaName): DatabaseService {
   const query = (text: string, params: readonly unknown[] = []) => pool.query(text, [...params]);
   return {
     isConfigured: true,
@@ -299,7 +309,7 @@ function makeDatabase(pool: Pool): DatabaseService {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await client.query(`SET search_path TO ${schemaName}`);
+        await client.query(`SET search_path TO ${searchPath}, public`);
         const tx: TransactionClient = {
           raw: client as never,
           query: (text: string, params: readonly unknown[] = []) => client.query(text, [...params]),
@@ -2011,5 +2021,140 @@ describeIntegration('PgCutRepository (integration)', () => {
       const token = await repo.getRenderCacheToken({ cutJobId });
       expect(job.renderToken).toBe(token);
     });
+  });
+});
+
+describeIntegration('PgCutRepository history backfill (integration)', () => {
+  let pool: Pool;
+  let database: DatabaseService;
+
+  const placements = {
+    sheet_width_mm: 2800,
+    sheet_height_mm: 2070,
+    trim_mm: { left: 10, right: 10, top: 10, bottom: 10 },
+    pieces: [{
+      item_id: 'det-1',
+      instance: 1,
+      x_mm: 10,
+      y_mm: 10,
+      width_mm: 600,
+      height_mm: 400,
+      rotated: false,
+      label: { orderId: 9, detailNumber: 1, widthMm: 600, heightMm: 400 },
+    }],
+  };
+
+  async function seedLegacyJob(manualState: 'none' | 'active' | 'inactive' | 'stale'): Promise<number> {
+    const job = await pool.query<{ cut_job_id: string }>(
+      `INSERT INTO cut_job
+         (name, status, source, version, last_calc_params, pdf_template_code)
+       VALUES ($1, 'ready', 'manual', 1, $2::jsonb, 'standard')
+       RETURNING cut_job_id`,
+      [`legacy-${manualState}`, JSON.stringify({ kerf_mm: 4, spacing_mm: 2 })],
+    );
+    const cutJobId = Number(job.rows[0].cut_job_id);
+    const groupKey = `legacy:${manualState}`;
+    const group = await pool.query<{ cut_group_id: string }>(
+      `INSERT INTO cut_group
+         (cut_job_id, sheet_material_type_id, status, summary, group_key, pdf_template_code)
+       VALUES ($1, 1, 'ready', '{}'::jsonb, $2, 'standard')
+       RETURNING cut_group_id`,
+      [cutJobId, groupKey],
+    );
+    const cutGroupId = Number(group.rows[0].cut_group_id);
+    await pool.query(
+      `INSERT INTO cut_job_item
+         (cut_job_id, cut_group_id, order_detail_id, order_id, qty, is_active)
+       VALUES ($1, $2, 1, 9, 1, true)`,
+      [cutJobId, cutGroupId],
+    );
+    await pool.query(
+      `INSERT INTO cut_group_sheet
+         (cut_group_id, sheet_index, sheet_material_type_id, placements)
+       VALUES ($1, 0, 1, $2::jsonb)`,
+      [cutGroupId, JSON.stringify(placements)],
+    );
+    if (manualState !== 'none') {
+      await pool.query(
+        `INSERT INTO cut_group_manual_layout
+           (cut_job_id, group_key, sheets, is_active, is_stale,
+            based_on_job_version, version)
+         VALUES ($1, $2, $3::jsonb, $4, $5, 1, 1)`,
+        [
+          cutJobId,
+          groupKey,
+          JSON.stringify([{ sheetIndex: 0, placements }]),
+          manualState === 'active',
+          manualState === 'stale',
+        ],
+      );
+    }
+    return cutJobId;
+  }
+
+  beforeAll(async () => {
+    // max=1 keeps SET search_path and both staged migration transactions on the
+    // same throwaway connection.
+    pool = new Pool({ connectionString: databaseUrl, max: 1 });
+    await pool.query(`CREATE SCHEMA ${backfillSchemaName}`);
+    await pool.query(`SET search_path TO ${backfillSchemaName}, public`);
+    await createSchema(pool);
+    await pool.query(`CREATE TABLE users (user_id BIGINT PRIMARY KEY, username TEXT)`);
+    await pool.query(historyExpandMigration);
+    database = makeDatabase(pool, backfillSchemaName);
+    await seedLegacyJob('none');
+    await seedLegacyJob('active');
+    await seedLegacyJob('inactive');
+    await seedLegacyJob('stale');
+    const archivedJobId = await seedLegacyJob('none');
+    await pool.query(`UPDATE cut_job SET status = 'archived' WHERE cut_job_id = $1`, [archivedJobId]);
+    await pool.query(`UPDATE cut_job_item SET is_active = false WHERE cut_job_id = $1`, [archivedJobId]);
+  });
+
+  afterAll(async () => {
+    if (pool) {
+      await pool.query('SET search_path TO public');
+      await pool.query(`DROP SCHEMA IF EXISTS ${backfillSchemaName} CASCADE`);
+      await pool.end();
+    }
+  });
+
+  it('resumes an interrupted production backfill without duplicate results, then finalizes', async () => {
+    const firstProcess = new PgCutRepository(database, {
+      optimize: async () => { throw new Error('optimizer must not run during backfill'); },
+    });
+    await expect(firstProcess.backfillLegacyResults(2)).resolves.toBe(2);
+    expect((await pool.query(`SELECT count(*)::int AS n FROM cut_result`)).rows[0].n).toBe(2);
+
+    // Simulate process stop/restart: a new repository instance continues from
+    // current_cut_result_id and does not replay the first batch.
+    const resumedProcess = new PgCutRepository(database, {
+      optimize: async () => { throw new Error('optimizer must not run during backfill'); },
+    });
+    await expect(resumedProcess.backfillLegacyResults(2)).resolves.toBe(2);
+    await expect(resumedProcess.backfillLegacyResults(2)).resolves.toBe(1);
+    await expect(resumedProcess.backfillLegacyResults(2)).resolves.toBe(0);
+
+    const results = await pool.query<{
+      n: number;
+      jobs: number;
+      manual_states: string[];
+    }>(`
+      SELECT count(*)::int AS n,
+             count(DISTINCT cut_job_id)::int AS jobs,
+             array_agg(CASE
+               WHEN snapshot_job -> 'groups' -> 0 -> 'manualLayout' = 'null'::jsonb THEN 'none'
+               WHEN (snapshot_job #>> '{groups,0,manualLayout,isStale}')::boolean THEN 'stale'
+               WHEN (snapshot_job #>> '{groups,0,manualLayout,isActive}')::boolean THEN 'active'
+               ELSE 'inactive'
+             END ORDER BY cut_job_id) AS manual_states
+      FROM cut_result
+    `);
+    expect(results.rows[0].n).toBe(5);
+    expect(results.rows[0].jobs).toBe(5);
+    expect(results.rows[0].manual_states.sort()).toEqual(['active', 'inactive', 'none', 'none', 'stale']);
+    expect((await pool.query(`SELECT count(*)::int AS n FROM cut_job WHERE current_cut_result_id IS NOT NULL`)).rows[0].n).toBe(5);
+
+    await expect(pool.query(historyFinalizeMigration)).resolves.toBeDefined();
   });
 });

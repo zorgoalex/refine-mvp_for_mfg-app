@@ -16,6 +16,7 @@ import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
 import { TableTopScroll } from '../../../../components/TableTopScroll';
+import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../../../hooks/usePageSizePreference';
 import { formatNumber, currencySmartFormatter, numberParser } from '../../../../utils/numberFormat';
 import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { getMaterialColor, getMillingBgColor } from '../../../../config/displayColors';
@@ -321,7 +322,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const [isSumEditable, setIsSumEditable] = useState(false);
   const [sumContextMenu, setSumContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
-  const [pageSize, setPageSize] = useState(50);
+  const { pageSize, setPageSize } = usePageSizePreference('orders:details-edit', 50);
   const [currentPage, setCurrentPage] = useState(1);
   const [activeSorter, setActiveSorter] = useState<DetailSorterState>({
     key: 'detail_number',
@@ -1999,13 +2000,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           current: currentPage,
           pageSize: pageSize,
           showSizeChanger: true,
+          pageSizeOptions: PAGE_SIZE_OPTIONS,
           showTotal: (total) => `Всего: ${total} позиций`,
-          onShowSizeChange: (page, size) => {
+          onShowSizeChange: (_page, size) => {
             setPageSize(size);
-            setCurrentPage(page);
+            setCurrentPage(1);
           },
           onChange: (page, size) => {
-            setPageSize(size);
+            if (size !== pageSize) {
+              setPageSize(size);
+              setCurrentPage(1);
+              return;
+            }
             setCurrentPage(page);
           },
         }}

@@ -3,6 +3,7 @@ import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge, Row, Col, Divider } from "antd";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
+import { StatusColorSwatch } from "../../components/StatusColor";
 
 const { Title } = Typography;
 
@@ -38,7 +39,7 @@ export const ProductionStatusShow: React.FC<IResourceComponentsProps> = () => {
       <Row gutter={[16, 16]}>
         <Col span={8}>
           <Title level={5}>Цвет статуса</Title>
-          <TextField value={record?.color} />
+          <StatusColorSwatch value={record?.color} />
         </Col>
         <Col span={8}>
           <Title level={5}>1C-key</Title>
@@ -82,4 +83,3 @@ export const ProductionStatusShow: React.FC<IResourceComponentsProps> = () => {
     </Show>
   );
 };
-

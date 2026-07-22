@@ -92,6 +92,25 @@ describe('PgOrderStatusBoardRepository', () => {
       code: 'BOARD_CURSOR_MISMATCH',
       statusCode: 422,
     });
+
+    await expect(
+      repository.getBoard({
+        currentUser: worker(),
+        query: {
+          board: 'production',
+          column: 'unassigned',
+          cursor: cursor!,
+          limit: 1,
+          search: 'ABC',
+          onlyMyOrders: false,
+          overdueOnly: false,
+          includeDone: true,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'BOARD_CURSOR_MISMATCH',
+      statusCode: 422,
+    });
     expect(firstDatabase.queries).toHaveLength(1);
   });
 
@@ -168,6 +187,73 @@ describe('PgOrderStatusBoardRepository', () => {
     expect(database.queries[0]?.text).toContain('ranked.row_number <= $1');
     expect(database.queries[0]?.text).not.toContain('$2');
     expect(database.queries[0]?.params).toEqual([25]);
+  });
+
+  it('excludes the completed status from the order catalog and order scan', async () => {
+    const database = fakeDatabase([]);
+
+    await new PgOrderStatusBoardRepository(database.client).getBoard({
+      currentUser: user('admin'),
+      query: {
+        board: 'order',
+        limit: 24,
+        onlyMyOrders: false,
+        overdueOnly: false,
+      },
+    });
+
+    const sql = database.queries[0]?.text ?? '';
+    expect(sql).toContain(
+      'JOIN order_statuses board_order_status ON board_order_status.order_status_id = o.order_status_id',
+    );
+    expect(sql).toContain(
+      "LOWER(BTRIM(board_order_status.order_status_name)) NOT IN ('завершен', 'завершён')",
+    );
+    expect(sql).toContain(
+      "LOWER(BTRIM(os.order_status_name)) NOT IN ('завершен', 'завершён')",
+    );
+  });
+
+  it('excludes production Done from catalog and order scan by default', async () => {
+    const database = fakeDatabase([]);
+
+    await new PgOrderStatusBoardRepository(database.client).getBoard({
+      currentUser: user('admin'),
+      query: {
+        board: 'production',
+        limit: 24,
+        onlyMyOrders: false,
+        overdueOnly: false,
+      },
+    });
+
+    const sql = database.queries[0]?.text ?? '';
+    expect(sql).toContain('LEFT JOIN production_statuses board_production_status');
+    expect(sql).toContain(
+      "LOWER(BTRIM(COALESCE(board_production_status.production_status_name, ''))) = 'done'",
+    );
+    expect(sql).toContain(
+      "LOWER(BTRIM(COALESCE(ps.production_status_code, ''))) ~ '^done(_|$)'",
+    );
+  });
+
+  it('includes production Done when explicitly requested', async () => {
+    const database = fakeDatabase([]);
+
+    await new PgOrderStatusBoardRepository(database.client).getBoard({
+      currentUser: user('admin'),
+      query: {
+        board: 'production',
+        limit: 24,
+        onlyMyOrders: false,
+        overdueOnly: false,
+        includeDone: true,
+      },
+    });
+
+    const sql = database.queries[0]?.text ?? '';
+    expect(sql).not.toContain('board_production_status');
+    expect(sql).not.toContain("COALESCE(ps.production_status_name, '')");
   });
 
   it('keeps an inactive referenced status visible but read-only as a destination', async () => {

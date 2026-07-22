@@ -4,6 +4,7 @@ import type {
   OrderStatusBoardResponse,
 } from '../../api/types/orderStatusBoardApi.types';
 import {
+  filterBoardColumns,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
@@ -11,10 +12,41 @@ import {
 } from './model';
 
 describe('order status board model', () => {
+  it('hides the completed column only on the order board', () => {
+    const completed = column('completed', [], 0, null);
+    const columns = [
+      column('active', [], 0, null),
+      {
+        ...completed,
+        status: {
+          ...completed.status,
+          name: ' Завершён ',
+        },
+      },
+    ];
+
+    expect(filterBoardColumns('order', columns).map((item) => item.key)).toEqual([
+      'active',
+    ]);
+    expect(filterBoardColumns('production', columns)).toEqual(columns);
+  });
+
+  it('hides production Done by default and reveals it explicitly', () => {
+    const done = column('21', [], 0, null);
+    done.status.name = ' Done ';
+    done.status.code = 'done_74650149756a47dd997c95e097acbd14';
+    const columns = [column('20', [], 0, null), done];
+
+    expect(filterBoardColumns('production', columns).map((item) => item.key)).toEqual([
+      '20',
+    ]);
+    expect(filterBoardColumns('production', columns, true)).toBe(columns);
+  });
+
   it('round-trips shareable URL state and API query', () => {
     const state = parseOrderStatusBoardViewState(
       new URLSearchParams(
-        'board=production&q=ABC&mine=1&overdue=1&plannedFrom=2026-07-01&hideEmpty=1',
+        'board=production&q=ABC&mine=1&overdue=1&showDone=1&plannedFrom=2026-07-01&hideEmpty=1',
       ),
     );
     expect(state).toMatchObject({
@@ -22,11 +54,15 @@ describe('order status board model', () => {
       search: 'ABC',
       onlyMyOrders: true,
       overdueOnly: true,
+      showDone: true,
       plannedFrom: '2026-07-01',
       hideEmpty: true,
     });
     expect(serializeOrderStatusBoardViewState(state).toString()).toContain(
       'board=production',
+    );
+    expect(serializeOrderStatusBoardViewState(state).toString()).toContain(
+      'showDone=1',
     );
     expect(toOrderStatusBoardQuery(state, { column: '7', cursor: 'next' })).toMatchObject({
       board: 'production',
@@ -34,6 +70,7 @@ describe('order status board model', () => {
       column: '7',
       cursor: 'next',
       limit: 24,
+      includeDone: true,
     });
   });
 

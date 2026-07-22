@@ -1,0 +1,25 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+
+const view = readFileSync(new URL('./BazisProjectViewPage.tsx', import.meta.url), 'utf8');
+const api = readFileSync(new URL('../../api/bazisApi.ts', import.meta.url), 'utf8');
+
+describe('Bazis project card header guards', () => {
+  it('shows owning ERP project name with a link', () => {
+    expect(view).toContain('projectCard.projectName?.trim()');
+    expect(view).toContain('ERP-проект:');
+    expect(view).toContain('/projects/show/${projectCard.projectId}');
+  });
+
+  it('offers manager-only accessible rename controls with keyboard support', () => {
+    expect(view).toContain("can('bazis.manage')");
+    expect(view).toContain('bazisApi.renameProject');
+    expect(view).toContain('aria-label="Изменить название Базис-проекта"');
+    expect(view).toContain('onPressEnter');
+    expect(view).toContain("event.key === 'Escape'");
+  });
+
+  it('uses PATCH for the rename command', () => {
+    expect(api).toMatch(/renameProject[\s\S]*httpClient\.patch/);
+  });
+});

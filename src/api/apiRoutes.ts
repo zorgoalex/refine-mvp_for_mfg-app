@@ -90,6 +90,8 @@ export const apiRoutes = {
     /** Variant B Task 11: cut.view-gated sheet-type lookup (no sheet_materials.view required). */
     sheetTypes: backendApiPath('/cut-jobs/sheet-types'),
     byId: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}`),
+    results: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/results`),
+    result: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}`),
     items: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/items`),
     item: (cutJobId: number, itemId: number) =>
       backendApiPath(`/cut-jobs/${cutJobId}/items/${itemId}`),
@@ -98,11 +100,18 @@ export const apiRoutes = {
       backendApiPath(`/cut-jobs/${cutJobId}/eligible-details`),
     sheetPng: (cutJobId: number, groupId: number, sheetIndex: number) =>
       backendApiPath(`/cut-jobs/${cutJobId}/groups/${groupId}/sheets/${sheetIndex}.png`),
+    resultSheetPng: (cutJobId: number, resultNo: number, groupId: number, sheetIndex: number) =>
+      backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}/groups/${groupId}/sheets/${sheetIndex}.png`),
     sheetSvg: (cutJobId: number, groupId: number, sheetIndex: number) =>
       backendApiPath(`/cut-jobs/${cutJobId}/groups/${groupId}/sheets/${sheetIndex}.svg`),
+    resultSheetSvg: (cutJobId: number, resultNo: number, groupId: number, sheetIndex: number) =>
+      backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}/groups/${groupId}/sheets/${sheetIndex}.svg`),
     groupPdf: (cutJobId: number, groupId: number) =>
       backendApiPath(`/cut-jobs/${cutJobId}/groups/${groupId}/export.pdf`),
+    resultGroupPdf: (cutJobId: number, resultNo: number, groupId: number) =>
+      backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}/groups/${groupId}/export.pdf`),
     jobPdf: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/export.pdf`),
+    resultJobPdf: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}/export.pdf`),
     jobPdfTemplate: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/pdf-template`),
     groupPdfTemplate: (cutJobId: number, groupId: number) =>
       backendApiPath(`/cut-jobs/${cutJobId}/groups/${groupId}/pdf-template`),
@@ -130,10 +139,12 @@ export const apiRoutes = {
   labels: {
     fields: backendApiPath('/label-fields'),
     templates: backendApiPath('/label-templates'),
+    rendererCapabilities: backendApiPath('/label-templates/renderer-capabilities'),
     template: (id: number) => backendApiPath(`/label-templates/${id}`),
     orderData: (orderId: number) => backendApiPath(`/orders/${orderId}/label-data`),
     orderPreview: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/preview`),
     orderGenerate: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/generate`),
+    orderCutMapOptions: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/cut-map-options`),
     latest: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/latest`),
     latestExport: (orderId: number) => backendApiPath(`/orders/${orderId}/labels/latest/export`),
     generationExport: (orderId: number, generationId: number) =>

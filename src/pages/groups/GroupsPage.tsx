@@ -34,6 +34,7 @@ import { canViewGroupsPage } from '../../utils/groupAccess';
 import { GroupDetailOverview } from './GroupDetailOverview';
 import { GroupEntityLinksPanel } from './GroupEntityLinksPanel';
 import { GroupParticipantsPanel } from './GroupParticipantsPanel';
+import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 
 const { Title } = Typography;
 
@@ -134,6 +135,9 @@ export const GroupsPage: React.FC<GroupsPageProps> = ({
   initialParticipantRoles = null,
   initialDeadlineStatusCounts = null,
 }) => {
+  const { pageSize, setPageSize } = usePageSizePreference('groups:list', 25);
+  const [groupPage, setGroupPage] = useState(1);
+  const [groupTotal, setGroupTotal] = useState(initialGroups?.length ?? 0);
   const [form] = Form.useForm<GroupFormValues>();
   const { data: identity } = useGetIdentity<UserIdentity>();
   const [groups, setGroups] = useState<GroupDto[]>(initialGroups);
@@ -172,14 +176,15 @@ export const GroupsPage: React.FC<GroupsPageProps> = ({
 
     setLoading(true);
     try {
-      const response = await groupsApi.listGroups({ page: 1, pageSize: 50, includeArchived: true });
+      const response = await groupsApi.listGroups({ page: groupPage, pageSize, includeArchived: true });
       setGroups(response.data);
+      setGroupTotal(response.pagination.total);
     } catch (error) {
       message.error(error instanceof Error ? error.message : 'Не удалось загрузить группы');
     } finally {
       setLoading(false);
     }
-  }, [canView]);
+  }, [canView, groupPage, pageSize]);
 
   useEffect(() => {
     void loadGroups();
@@ -432,7 +437,22 @@ export const GroupsPage: React.FC<GroupsPageProps> = ({
           columns={columns}
           dataSource={groups}
           loading={loading}
-          pagination={{ pageSize: 25 }}
+          pagination={{
+            current: groupPage,
+            pageSize,
+            total: groupTotal,
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
+            showSizeChanger: true,
+            showTotal: (total) => `Всего: ${total}`,
+            onChange: (nextPage, nextPageSize) => {
+              if (nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setGroupPage(1);
+                return;
+              }
+              setGroupPage(nextPage);
+            },
+          }}
         />
         {overviewSelection.overview ? (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>

@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { LabelTemplateDto, OrderLabelDataDetailDto } from './labels.types';
+import {
+  assertRenderableCustomFieldSchema,
+  evaluateCustomFieldExpression,
+  readCustomFieldExpressionV1,
+} from './label-custom-field-expression';
 import { parseBasisData, type ParsedBasisData } from './parse-basis-data';
 
 export interface LabelRow {
@@ -9,6 +14,25 @@ export interface LabelRow {
   copyIndex: number;
   copyCount: number;
   values: Record<string, string | number | boolean | null>;
+  cutMap?: LabelRowCutMapSnapshot;
+}
+
+export interface LabelRowCutMapSnapshot {
+  cutResultPlacementId: number;
+  cutResultSheetMapId: number;
+  cutResultId: number;
+  cutJobId: number;
+  cutNumber: string;
+  cutJobName: string;
+  variant: 'auto' | 'manual';
+  sheetIndex: number;
+  sheetNumber: number;
+  sheetWidthMm: number;
+  sheetHeightMm: number;
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
 }
 
 export function buildLabelRows(input: {
@@ -19,7 +43,12 @@ export function buildLabelRows(input: {
   useBasisFields?: boolean;
   today?: string;
 }): LabelRow[] {
+  assertRenderableCustomFieldSchema(input.template.customFieldSchema);
   const expanded: LabelRow[] = [];
+  const total = input.details.reduce(
+    (sum, detail) => sum + Math.max(0, Math.trunc(detail.quantity || 0)),
+    0,
+  );
   for (const detail of input.details) {
     const copyCount = Math.max(0, Math.trunc(detail.quantity || 0));
     const detailOrderFields = detail.orderFields && Object.keys(detail.orderFields).length > 0
@@ -27,25 +56,23 @@ export function buildLabelRows(input: {
       : input.orderFields ?? {};
     const detailOrderName = readOrderNameFromFields(detailOrderFields) ?? input.orderName;
     for (let copyIndex = 1; copyIndex <= copyCount; copyIndex += 1) {
+      const rowIndex = expanded.length + 1;
+      const values = buildBaseValues(detailOrderName, detailOrderFields, detail, input.useBasisFields ?? true);
+      values['date.today'] = input.today ?? new Date().toISOString().slice(0, 10);
+      values['label.counter'] = rowIndex;
+      values['label.counter_total'] = total;
+      values['label.counter_text'] = `Бир. № ${rowIndex} / ${total}`;
+      applyCustomFieldValues(values, input.template.customFieldSchema, detail.customFields);
       expanded.push({
-        rowIndex: expanded.length + 1,
+        rowIndex,
         detailId: detail.detailId,
         orderId: detail.orderId,
         copyIndex,
         copyCount,
-        values: buildBaseValues(detailOrderName, detailOrderFields, input.template.customFieldSchema, detail, input.useBasisFields ?? true),
+        values,
       });
     }
   }
-
-  const total = expanded.length;
-  for (const row of expanded) {
-    row.values['date.today'] = input.today ?? new Date().toISOString().slice(0, 10);
-    row.values['label.counter'] = row.rowIndex;
-    row.values['label.counter_total'] = total;
-    row.values['label.counter_text'] = `Бир. № ${row.rowIndex} / ${total}`;
-  }
-
   return expanded;
 }
 
@@ -61,7 +88,6 @@ export function hashLabelRows(rows: LabelRow[]): string {
 function buildBaseValues(
   orderName: string | null,
   orderFields: Record<string, unknown>,
-  customFieldSchema: Record<string, unknown>,
   detail: OrderLabelDataDetailDto,
   useBasisFields: boolean,
 ): Record<string, string | number | boolean | null> {
@@ -101,20 +127,48 @@ function buildBaseValues(
   for (const [key, value] of Object.entries(orderFields)) {
     values[`order.${key}`] = normalizeValue(value);
   }
-  for (const [key, schema] of Object.entries(customFieldSchema)) {
-    const defaultValue = readCustomDefaultValue(schema);
-    if (defaultValue !== undefined) {
-      values[key] = normalizeValue(defaultValue);
-    }
-    const sourceField = readCustomSourceField(schema);
-    if (sourceField && values[sourceField] !== undefined) {
-      values[key] = values[sourceField];
-    }
-  }
-  for (const [key, value] of Object.entries(detail.customFields)) {
-    values[key] = normalizeValue(value);
-  }
   return values;
+}
+
+function applyCustomFieldValues(
+  values: Record<string, string | number | boolean | null>,
+  customFieldSchema: Record<string, unknown>,
+  manualValues: Record<string, unknown>,
+): void {
+  const manualFieldIds = new Set(Object.keys(manualValues));
+  for (const [fieldId, value] of Object.entries(manualValues)) {
+    values[fieldId] = normalizeValue(value);
+  }
+
+  const resolved = new Set(manualFieldIds);
+  const resolving = new Set<string>();
+  const resolveCustomField = (fieldId: string): string | number | boolean | null | undefined => {
+    if (resolved.has(fieldId)) return values[fieldId];
+    const schema = customFieldSchema[fieldId];
+    if (schema === undefined) return values[fieldId];
+    if (resolving.has(fieldId)) return '';
+    resolving.add(fieldId);
+
+    const expression = readCustomFieldExpressionV1(schema);
+    if (expression) {
+      values[fieldId] = evaluateCustomFieldExpression(expression, (dependency) => (
+        Object.prototype.hasOwnProperty.call(customFieldSchema, dependency)
+          ? resolveCustomField(dependency)
+          : values[dependency]
+      ));
+    } else {
+      const defaultValue = readCustomDefaultValue(schema);
+      if (defaultValue !== undefined) values[fieldId] = normalizeValue(defaultValue);
+      const sourceField = readCustomSourceField(schema);
+      if (sourceField && values[sourceField] !== undefined) values[fieldId] = values[sourceField];
+    }
+
+    resolving.delete(fieldId);
+    resolved.add(fieldId);
+    return values[fieldId];
+  };
+
+  for (const fieldId of Object.keys(customFieldSchema)) resolveCustomField(fieldId);
 }
 
 function readCustomSourceField(schema: unknown): string | null {

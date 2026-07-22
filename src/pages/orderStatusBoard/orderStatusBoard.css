@@ -47,12 +47,37 @@
   width: min(320px, 100%);
 }
 
+.status-board-toolbar__checkbox {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+}
+
 .status-board-toolbar__switch {
   min-height: 32px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
+}
+
+.status-board-scrollbar {
+  min-height: 16px;
+  flex: 0 0 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+}
+
+.status-board-scrollbar:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}
+
+.status-board-scrollbar__track {
+  height: 1px;
 }
 
 .status-board-viewport {

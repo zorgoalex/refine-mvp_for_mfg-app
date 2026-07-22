@@ -11,6 +11,8 @@ import {
   type UserPreferencesResponseDto,
 } from './profile-preferences.types';
 
+const MAX_PAGE_SIZE_PREFERENCES_PER_REQUEST = 32;
+
 const updatePreferencesSchema = z.object({
   themeMode: z.enum(['light', 'dark']).optional(),
   uiSize: z.enum(['default', 'small']).optional(),
@@ -20,6 +22,19 @@ const updatePreferencesSchema = z.object({
       order: z.array(z.string().min(1).max(80)).max(80),
       hidden: z.array(z.string().min(1).max(80)).max(80),
     }),
+  ).optional(),
+  pageSizePreferences: z.record(
+    z.string().min(1).max(120),
+    z.union([
+      z.literal(10),
+      z.literal(20),
+      z.literal(25),
+      z.literal(50),
+      z.literal(100),
+    ]),
+  ).refine(
+    (preferences) => Object.keys(preferences).length <= MAX_PAGE_SIZE_PREFERENCES_PER_REQUEST,
+    { message: `pageSizePreferences must contain at most ${MAX_PAGE_SIZE_PREFERENCES_PER_REQUEST} entries` },
   ).optional(),
 });
 

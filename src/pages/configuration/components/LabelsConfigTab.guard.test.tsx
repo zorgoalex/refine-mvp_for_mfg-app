@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const tabSrc = readFileSync(new URL('./LabelsConfigTab.tsx', import.meta.url), 'utf8');
 const indexSrc = readFileSync(new URL('../index.tsx', import.meta.url), 'utf8');
 const apiSrc = readFileSync(new URL('../../../api/labelsApi.ts', import.meta.url), 'utf8');
+const expressionEditorSrc = readFileSync(new URL('./CustomFieldExpressionEditor.tsx', import.meta.url), 'utf8');
 
 describe('LabelsConfigTab wiring', () => {
   it('is registered only behind labels runtime flag and labels.view permission', () => {
@@ -46,6 +47,20 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/sourceField/);
     expect(tabSrc).toMatch(/Данные ERP \/ Базис/);
     expect(tabSrc).toMatch(/elements,/);
+  });
+
+  it('gates custom formulas with a global capability handshake and exposes every expression node', () => {
+    expect(tabSrc).toMatch(/labelsApi\.getRendererCapabilities/);
+    expect(apiSrc).toMatch(/rendererCapabilities/);
+    expect(tabSrc).toMatch(/custom_expression_v1/);
+    expect(tabSrc).toMatch(/CustomFieldExpressionEditor/);
+    expect(tabSrc).toMatch(/findCustomFieldDependencyCycle/);
+    expect(expressionEditorSrc).toMatch(/Склейка значений/);
+    expect(expressionEditorSrc).toMatch(/IF \/ ELSE/);
+    expect(expressionEditorSrc).toMatch(/Фиксированный текст/);
+    expect(expressionEditorSrc).toMatch(/Пропустить/);
+    expect(expressionEditorSrc).toMatch(/ArrowUpOutlined/);
+    expect(expressionEditorSrc).toMatch(/ArrowDownOutlined/);
   });
 
   it('offers Bazis .xbir import variants that can be applied to the template form', () => {
@@ -104,10 +119,11 @@ describe('LabelsConfigTab wiring', () => {
   });
 
   it('keeps text and rectangle content stable while resizing transform handles', () => {
-    expect(tabSrc).toMatch(/onTransform: \(node, event\) => handleTransform/);
-    expect(tabSrc).toMatch(/normalizeTransformedNode/);
-    expect(tabSrc).toMatch(/sizedNode\.scaleX\(1\)/);
-    expect(tabSrc).toMatch(/sizedNode\.width\(widthMm\)/);
+    expect(tabSrc).toMatch(/onTransform=\{handleTransform\}/);
+    expect(tabSrc).toMatch(/onTransformEnd=\{handleTransformEnd\}/);
+    expect(tabSrc).toMatch(/readAndNormalizeLabelTransformedNodes/);
+    expect(tabSrc).toMatch(/claimLabelGestureCommit/);
+    expect(tabSrc).toMatch(/commitGeometry\(patches\)/);
   });
 
   it('defaults the edit visual to compact mode and can expand it', () => {
@@ -149,6 +165,12 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/В списке полей/);
     expect(tabSrc).toMatch(/onHoverElement/);
     expect(tabSrc).toMatch(/onMouseEnter/);
+  });
+
+  it('keeps conditionally hidden field text visible on the editable canvas only', () => {
+    expect(tabSrc).toMatch(/keepConditionallyHiddenTextVisible/);
+    expect(tabSrc).toMatch(/resolveLabelCanvasText\(element, fieldValues, fieldLabels/);
+    expect(tabSrc).toMatch(/keepSourceVisible: keepConditionallyHiddenTextVisible/);
   });
 
   it('exposes a draggable field palette that can drop fields onto the label visual', () => {
@@ -243,8 +265,21 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/На задний план/);
     expect(tabSrc).toMatch(/bringElementToFront/);
     expect(tabSrc).toMatch(/sendElementToBack/);
-    expect(tabSrc).toMatch(/onBringElementToFront\?\.\(contextMenu\.element\.elementKey\)/);
-    expect(tabSrc).toMatch(/onSendElementToBack\?\.\(contextMenu\.element\.elementKey\)/);
+    expect(tabSrc).toMatch(/onBringElementToFront\?\.\(contextElement\.elementKey\)/);
+    expect(tabSrc).toMatch(/onSendElementToBack\?\.\(contextElement\.elementKey\)/);
+  });
+
+  it('supports sample preview, default editor guides and persistent multi-element groups', () => {
+    expect(tabSrc).toMatch(/useState\(Boolean\(canDrag\)\)/);
+    expect(tabSrc).toMatch(/setShowAllBorders\] = useState\(true\)/);
+    expect(tabSrc).toMatch(/Пример с данными/);
+    expect(tabSrc).toMatch(/event\.shiftKey/);
+    expect(tabSrc).toMatch(/Сгруппировать/);
+    expect(tabSrc).toMatch(/Разгруппировать/);
+    expect(tabSrc).toMatch(/По горизонтальному центру канваса/);
+    expect(tabSrc).toMatch(/По вертикальному центру канваса/);
+    expect(tabSrc).toMatch(/data-label-measurement/);
+    expect(tabSrc).toMatch(/Выровнять высоту/);
   });
 
   it('strips read-only element ids before create or update payloads', () => {

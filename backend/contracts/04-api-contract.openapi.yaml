@@ -898,6 +898,13 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: includeDone
+          in: query
+          required: false
+          description: Показывать статус Done и его заказы; только для production.
+          schema:
+            type: boolean
+            default: false
         - name: plannedFrom
           in: query
           required: false
@@ -2579,6 +2586,7 @@ paths:
                   required:
                     - bazisProjectId
                     - projectId
+                    - projectName
                     - name
                     - revisionsCount
                     - linkedOrderIds
@@ -2588,6 +2596,8 @@ paths:
                       type: integer
                     projectId:
                       type: integer
+                    projectName:
+                      type: string
                     name:
                       type: string
                     revisionsCount:
@@ -2630,6 +2640,62 @@ paths:
           $ref: '#/components/responses/InternalError'
 
   /api/v1/bazis/projects/{id}:
+    patch:
+      tags:
+        - Bazis
+      operationId: renameBazisProject
+      summary: Rename a Bazis project
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 300
+      responses:
+        '200':
+          description: Renamed Bazis project
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - bazisProjectId
+                  - projectId
+                  - name
+                properties:
+                  bazisProjectId:
+                    type: integer
+                  projectId:
+                    type: integer
+                  name:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis project not found
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
     delete:
       tags:
         - Bazis
@@ -2710,6 +2776,7 @@ paths:
                 required:
                   - bazisProjectId
                   - projectId
+                  - projectName
                   - name
                   - revisionsCount
                   - linkedOrderIds
@@ -2720,6 +2787,8 @@ paths:
                     type: integer
                   projectId:
                     type: integer
+                  projectName:
+                    type: string
                   name:
                     type: string
                   revisionsCount:
@@ -8198,6 +8267,42 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/label-templates/renderer-capabilities:
+    get:
+      tags:
+        - Labels
+      operationId: getLabelRendererCapabilities
+      summary: Get label renderer capabilities
+      security:
+        - bearerAuth: []
+      x-permission: labels.view
+      responses:
+        '200':
+          description: Renderer capabilities supported by this backend
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - rendererCapabilities
+                properties:
+                  rendererCapabilities:
+                    type: array
+                    uniqueItems: true
+                    items:
+                      type: string
+                      enum:
+                        - if_else_v1
+                        - typography_v1
+                        - cut_map_v1
+                        - custom_expression_v1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/label-templates/{templateId}:
     get:
       tags:
@@ -8445,6 +8550,123 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/label-ocr-templates:
+    get:
+      tags: [Labels]
+      operationId: listLabelOcrTemplates
+      summary: List label OCR templates
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    post:
+      tags: [Labels]
+      operationId: createLabelOcrTemplate
+      summary: Create label OCR template
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.manage_templates
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/label-ocr-templates/{id}:
+    put:
+      tags: [Labels]
+      operationId: updateLabelOcrTemplate
+      summary: Update label OCR template
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.manage_templates
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Labels]
+      operationId: deleteLabelOcrTemplate
+      summary: Delete label OCR template
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.manage_templates
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/label-ocr-templates/preview:
+    post:
+      tags: [Labels]
+      operationId: previewLabelOcrTemplate
+      summary: Preview OCR recognition for template configuration
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.manage_templates
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/label-ocr-templates/test:
+    post:
+      tags: [Labels]
+      operationId: testLabelOcrTemplate
+      summary: Test OCR rules against an uploaded image
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.manage_templates
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/labels/preview:
+    post:
+      tags: [Labels]
+      operationId: previewDetailLabels
+      summary: Preview labels for explicit detail instances
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/labels/generate:
+    post:
+      tags: [Labels]
+      operationId: generateDetailLabels
+      summary: Generate labels for explicit detail instances
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.generate
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/labels/generations/{generationId}/export:
+    get:
+      tags: [Labels]
+      operationId: exportDetailLabelGeneration
+      summary: Export an explicit-detail label generation
+      security: [{ bearerAuth: [] }]
+      x-permission: labels.view
+      responses:
+        '200': { description: ZIP export }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/labels/scan-resolve:
     post:
       tags:
@@ -8673,6 +8895,92 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/labels/cut-map-options:
+    get:
+      tags:
+        - Labels
+      operationId: listOrderLabelCutMapOptions
+      summary: List exact cut placements available for order labels
+      description: Requires both `labels.generate` and `cut.view` permissions.
+      security:
+        - bearerAuth: []
+      x-permissions-all:
+        - labels.generate
+        - cut.view
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Exact immutable cut-result placements grouped by order detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orderId, details]
+                properties:
+                  orderId:
+                    type: integer
+                  details:
+                    type: array
+                    items:
+                      type: object
+                      required: [detailId, detailNumber, detailName, quantity, options]
+                      properties:
+                        detailId: { type: integer }
+                        detailNumber: { type: string, nullable: true }
+                        detailName: { type: string, nullable: true }
+                        quantity: { type: integer, minimum: 0 }
+                        options:
+                          type: array
+                          items:
+                            type: object
+                            required:
+                              - cutResultPlacementId
+                              - detailId
+                              - instance
+                              - cutResultId
+                              - cutJobId
+                              - cutNumber
+                              - cutJobName
+                              - resultNo
+                              - resultKind
+                              - variant
+                              - sheetIndex
+                              - sheetNumber
+                              - createdAt
+                              - isCurrent
+                              - isArchived
+                              - dimensionsMatch
+                            properties:
+                              cutResultPlacementId: { type: integer }
+                              detailId: { type: integer }
+                              instance: { type: integer, minimum: 1 }
+                              cutResultId: { type: integer }
+                              cutJobId: { type: integer }
+                              cutNumber: { type: string }
+                              cutJobName: { type: string }
+                              resultNo: { type: integer, minimum: 1 }
+                              resultKind: { type: string, enum: [auto, manual, legacy] }
+                              variant: { type: string, enum: [auto, manual] }
+                              sheetIndex: { type: integer, minimum: 0 }
+                              sheetNumber: { type: integer, minimum: 1 }
+                              createdAt: { type: string, format: date-time }
+                              isCurrent: { type: boolean }
+                              isArchived: { type: boolean }
+                              dimensionsMatch: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -9028,6 +9336,121 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/{cutJobId}/results:
+    get:
+      tags: [CutJobs]
+      operationId: listCutResults
+      summary: List immutable completed cut results
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}:
+    get:
+      tags: [CutJobs]
+      operationId: getCutResult
+      summary: Get one immutable completed cut result
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/groups/{groupId}/sheets/{sheetIndex}.png:
+    get:
+      tags: [CutJobs]
+      operationId: renderCutResultSheetPng
+      summary: Render frozen result sheet PNG
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer } }
+        - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: groupId, in: path, required: true, schema: { type: integer } }
+        - { name: sheetIndex, in: path, required: true, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: PNG
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/groups/{groupId}/sheets/{sheetIndex}.svg:
+    get:
+      tags: [CutJobs]
+      operationId: renderCutResultSheetSvg
+      summary: Render frozen result sheet SVG
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer } }
+        - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: groupId, in: path, required: true, schema: { type: integer } }
+        - { name: sheetIndex, in: path, required: true, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: SVG
+          content:
+            image/svg+xml:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/groups/{groupId}/export.pdf:
+    get:
+      tags: [CutJobs]
+      operationId: exportCutResultGroupPdf
+      summary: Export frozen result group PDF
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: groupId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - name: template
+          in: query
+          required: false
+          description: Active PDF template code used only for this render; the frozen result is not modified.
+          schema: { type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }
+      responses:
+        '200':
+          description: PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/export.pdf:
+    get:
+      tags: [CutJobs]
+      operationId: exportCutResultJobPdf
+      summary: Export frozen whole-result PDF
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - name: template
+          in: query
+          required: false
+          description: Active PDF template code used only for this render; the frozen result is not modified.
+          schema: { type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }
+      responses:
+        '200':
+          description: PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   /api/v1/cut-jobs/{cutJobId}/items:
     post:
       tags:
@@ -9089,6 +9512,20 @@ paths:
       security:
         - bearerAuth: []
       x-permission: cut.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, commandId]
+              properties:
+                version: { type: integer, minimum: 0 }
+                commandId:
+                  type: string
+                  format: uuid
+                  description: Stable retry key reused after timeout or lost response.
       responses:
         '200':
           description: OK
@@ -9264,6 +9701,36 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/{cutJobId}/pdf-template:
+    patch:
+      tags: [CutJobs]
+      operationId: setCutJobPdfTemplate
+      summary: Set the PDF template for a whole cut job
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/pdf-template:
+    patch:
+      tags: [CutJobs]
+      operationId: setCutGroupPdfTemplate
+      summary: Set the PDF template for a cut group
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/manual-layout:
     patch:
       tags:
@@ -9294,11 +9761,16 @@ paths:
                 - jobVersion
                 - active
                 - placements
+                - commandId
               properties:
                 jobVersion:
                   type: integer
                 active:
                   type: boolean
+                commandId:
+                  type: string
+                  format: uuid
+                  description: Stable retry key reused after timeout or lost response.
                 placements:
                   type: array
                   items:
@@ -9348,7 +9820,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/sheets/{sheetIndex.png}:
+  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/sheets/{sheetIndex}.png:
     get:
       tags:
         - CutJobs
@@ -9400,7 +9872,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/sheets/{sheetIndex.svg}:
+  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/sheets/{sheetIndex}.svg:
     get:
       tags:
         - CutJobs
@@ -9807,6 +10279,35 @@ paths:
           $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-config/pdf-templates:
+    post:
+      tags: [CutConfig]
+      operationId: createCutPdfTemplate
+      summary: Create a PDF template layout
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cut-config/pdf-templates/{id}:
+    put:
+      tags: [CutConfig]
+      operationId: updateCutPdfTemplate
+      summary: Update a PDF template layout
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
 
   /api/v1/cut-config/render-presets:
     post:
@@ -10595,7 +11096,7 @@ components:
         materialName: { type: string, minLength: 1, maxLength: 200 }
         materialArticle: { type: string, maxLength: 200 }
         thicknessMm: { type: number, exclusiveMinimum: true, minimum: 0, maximum: 99999999.99 }
-        position: { type: string, minLength: 1, maxLength: 200 }
+        position: { type: string }
         partName: { type: string, minLength: 1, maxLength: 300 }
         finishedLengthMm: { type: number, exclusiveMinimum: true, minimum: 0, maximum: 99999999.99 }
         finishedWidthMm: { type: number, exclusiveMinimum: true, minimum: 0, maximum: 99999999.99 }
@@ -10918,6 +11419,7 @@ components:
         - uiSize
         - orderDetailColumns
         - recentReferences
+        - pageSizePreferences
       properties:
         themeMode:
           type: string
@@ -10931,6 +11433,12 @@ components:
             $ref: '#/components/schemas/OrderDetailColumnPreference'
         recentReferences:
           $ref: '#/components/schemas/RecentReferenceEntities'
+        pageSizePreferences:
+          type: object
+          maxProperties: 128
+          additionalProperties:
+            type: integer
+            enum: [10, 20, 25, 50, 100]
 
     UserPreferencesResponse:
       type: object
@@ -10953,6 +11461,12 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/OrderDetailColumnPreference'
+        pageSizePreferences:
+          type: object
+          maxProperties: 32
+          additionalProperties:
+            type: integer
+            enum: [10, 20, 25, 50, 100]
 
     ReferenceUsageRequest:
       type: object

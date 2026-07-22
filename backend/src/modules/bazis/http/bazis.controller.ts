@@ -22,6 +22,7 @@ import type {
   BazisProjectCardDto,
   BazisProjectDeleteResponseDto,
   BazisProjectListItemDto,
+  BazisProjectNameDto,
   BazisRevisionMaterialsSummaryDto,
   BazisRevisionOrderDto,
   BazisTreeNodeDto,
@@ -199,6 +200,12 @@ const buildOrderDraftBodySchema = z.object({
 const setNodeNotesSchema = z
   .object({
     notes: z.union([z.string(), z.null()]),
+  })
+  .strict();
+
+const renameProjectSchema = z
+  .object({
+    name: z.string().trim().min(1).max(300),
   })
   .strict();
 
@@ -400,6 +407,38 @@ export class BazisController {
     this.assertBazisEnabled();
     const currentUser = this.requireCurrentUser(request);
     return this.bazis.listProjects(currentUser, parseListProjectsQuery(query));
+  }
+
+  @ApiOperation({ operationId: 'renameBazisProject', summary: 'Rename a Bazis project' })
+  @ApiBody({
+    schema: swaggerSchema({
+      type: 'object',
+      required: ['name'],
+      additionalProperties: false,
+      properties: { name: { type: 'string', minLength: 1, maxLength: 300 } },
+    }),
+  })
+  @ApiResponse({ status: 200, description: 'Renamed Bazis project' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis project not found' })
+  @ApiResponse({ status: 422, description: 'Invalid project name or id' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Patch('projects/:id')
+  async renameProject(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<BazisProjectNameDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const parsed = parseRenameProjectBody(body);
+    return this.bazis.renameProject(
+      currentUser,
+      request.requestId,
+      parseNumericPathParam(id, 'id'),
+      parsed.name,
+    );
   }
 
   @ApiOperation({ operationId: 'deleteBazisProject', summary: 'Delete a Bazis project (hard, gated by created orders)' })
@@ -830,6 +869,10 @@ export function parseBuildOrderDraftBody(body: unknown): {
 
 export function parseSetNodeNotesBody(body: unknown): { notes: string | null } {
   return parseWithZod(setNodeNotesSchema, body, 'Bazis node notes payload validation failed');
+}
+
+export function parseRenameProjectBody(body: unknown): { name: string } {
+  return parseWithZod(renameProjectSchema, body, 'Bazis project name payload validation failed');
 }
 
 function parseNumericPathParam(value: unknown, field: string): number {

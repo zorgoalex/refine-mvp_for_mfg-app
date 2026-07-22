@@ -9,6 +9,7 @@ import type {
   LabelOcrTemplateInput,
   LabelQrTemplate,
   LabelQrTemplateInput,
+  LabelRendererCapabilities,
   LabelTemplate,
   LabelTemplateInput,
   OcrPreviewResult,
@@ -16,6 +17,7 @@ import type {
   OcrTestResult,
   OrderLabelData,
   OrderLabelGeneration,
+  OrderLabelCutMapOptions,
   OrderLabelsPreview,
   PreviewDetailLabelsInput,
   LatestOrderLabelsPreview,
@@ -35,6 +37,10 @@ export const labelsApi = {
   listTemplates(includeInactive = false): Promise<LabelTemplate[]> {
     const query = includeInactive ? '?includeInactive=true' : '';
     return httpClient.get<LabelTemplate[]>(`${apiRoutes.labels.templates}${query}`, { cache: 'no-store' });
+  },
+
+  getRendererCapabilities(): Promise<LabelRendererCapabilities> {
+    return httpClient.get<LabelRendererCapabilities>(apiRoutes.labels.rendererCapabilities, { cache: 'no-store' });
   },
 
   getTemplate(id: number): Promise<LabelTemplate> {
@@ -71,6 +77,13 @@ export const labelsApi = {
 
   generateOrderLabels(orderId: number, input: GenerateOrderLabelsInput): Promise<OrderLabelGeneration> {
     return httpClient.post<OrderLabelGeneration>(apiRoutes.labels.orderGenerate(validateId(orderId, 'orderId')), input);
+  },
+
+  listOrderCutMapOptions(orderId: number): Promise<OrderLabelCutMapOptions> {
+    return httpClient.get<OrderLabelCutMapOptions>(
+      apiRoutes.labels.orderCutMapOptions(validateId(orderId, 'orderId')),
+      { cache: 'no-store' },
+    );
   },
 
   previewDetailLabels(input: PreviewDetailLabelsInput): Promise<DetailLabelsPreview> {

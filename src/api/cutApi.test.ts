@@ -30,7 +30,7 @@ describe('cutApi', () => {
 
     await expect(cutApi.create({ name: 'Тест', detailIds: [1] })).resolves.toEqual(job);
     await cutApi.addItems(42, { detailIds: [1], version: 0 });
-    await cutApi.calculate(42, 1);
+    await cutApi.calculate(42, 1, '11111111-1111-4111-8111-111111111111');
     await cutApi.archive(42, 2);
     await expect(cutApi.listEligibleDetails(42, { orderIds: [9] })).resolves.toMatchObject({ noSheetSpecCount: 2 });
 
@@ -65,6 +65,25 @@ describe('cutApi', () => {
     expect(pngUrl).toContain('labels=off');
     expect(pngUrl).toContain('origin=tl');
     expect(pngUrl).toContain('axisOrigin=bottom-left');
+  });
+
+  it('reads result history and uses frozen render routes', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ cutResultId: 8, job: jobDto() }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response('PNG', { status: 200, headers: { 'Content-Type': 'image/png' } }))
+      .mockResolvedValueOnce(new Response('<svg/>', { status: 200, headers: { 'Content-Type': 'image/svg+xml' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cutApi.listResults(42);
+    await cutApi.getResult(42, 3);
+    await cutApi.fetchSheetPng(42, 100, 0, 'thumb', false, 'active', 'r8', true, 'bottom-left', 3);
+    await cutApi.fetchSheetSvg(42, 100, 0, false, 'active', 'r8', true, 'bottom-left', 3);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/42/results');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/cut-jobs/42/results/3');
+    expect(fetchMock.mock.calls[2][0]).toContain('/api/v1/cut-jobs/42/results/3/groups/100/sheets/0.png');
+    expect(fetchMock.mock.calls[3][0]).toContain('/api/v1/cut-jobs/42/results/3/groups/100/sheets/0.svg');
   });
 
   it('emits origin=raw on every render URL when originTopLeft is false (RAW half not dead)', async () => {
@@ -150,6 +169,22 @@ describe('cutApi', () => {
     const url = fetchMock.mock.calls[0][0] as string;
     expect(url).toContain('/api/v1/cut-jobs/42/export.pdf');
     expect(url).toContain('template=bath_profiles');
+  });
+
+  it('passes the selected PDF template to historical group and whole-result exports', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementation(() => Promise.resolve(
+        new Response('%PDF-1', { status: 200, headers: { 'Content-Type': 'application/pdf' } }),
+      ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cutApi.fetchGroupPdf(42, 100, false, undefined, true, 'bath_profiles', 'bottom-left', 3);
+    await cutApi.fetchJobPdf(42, false, undefined, true, 'bath_profiles', 'bottom-left', 3);
+
+    expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/cut-jobs/42/results/3/groups/100/export.pdf');
+    expect(fetchMock.mock.calls[0][0]).toContain('template=bath_profiles');
+    expect(fetchMock.mock.calls[1][0]).toContain('/api/v1/cut-jobs/42/results/3/export.pdf');
+    expect(fetchMock.mock.calls[1][0]).toContain('template=bath_profiles');
   });
 
   it('validates cut job ids before fetch', async () => {

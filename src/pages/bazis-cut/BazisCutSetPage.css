@@ -1,0 +1,14 @@
+.bazis-cut-set-details-table.ant-table-wrapper .ant-table-cell.bazis-cut-sticky-qr {
+  position: sticky;
+  left: var(--bazis-cut-sticky-qr-left);
+  z-index: 2;
+  background: var(--app-surface);
+}
+
+.bazis-cut-set-details-table.ant-table-wrapper .ant-table-thead .ant-table-cell.bazis-cut-sticky-qr {
+  z-index: 4;
+}
+
+.bazis-cut-set-details-table.ant-table-wrapper .ant-table-summary .ant-table-cell.bazis-cut-sticky-qr {
+  background: var(--app-surface-muted);
+}

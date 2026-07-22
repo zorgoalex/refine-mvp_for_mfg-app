@@ -4,6 +4,7 @@ import { Typography, Badge, Row, Col, Divider } from "antd";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
+import { StatusColorSwatch } from "../../components/StatusColor";
 
 const { Title } = Typography;
 
@@ -43,6 +44,10 @@ export const OrderStatusShow: React.FC<IResourceComponentsProps> = () => {
             status={record?.is_active ? "success" : "default"}
             text={record?.is_active ? "Активен" : "Неактивен"}
           />
+        </Col>
+        <Col span={8}>
+          <Title level={5}>Цвет статуса</Title>
+          <StatusColorSwatch value={record?.color} />
         </Col>
       </Row>
 

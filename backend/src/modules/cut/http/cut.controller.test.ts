@@ -19,9 +19,20 @@ import {
   parseOriginTopLeft,
   parseAxisOrigin,
   canonicalOriginTopLeft,
+  parseCalculateBody,
 } from './cut.controller';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import type { CutRuntimeConfigService } from './cut-runtime-config.service';
+
+const TEST_COMMAND_ID = '11111111-1111-4111-8111-111111111111';
+
+it('requires a stable commandId for calculate retries', () => {
+  expect(parseCalculateBody({ version: 1, commandId: TEST_COMMAND_ID })).toEqual({
+    version: 1,
+    commandId: TEST_COMMAND_ID,
+  });
+  expect(() => parseCalculateBody({ version: 1 })).toThrow();
+});
 
 function currentUser(id = '7'): CurrentUser {
   return { id, username: 'cutter', role: 'operator', permissions: ['cut.view', 'cut.manage'] } as CurrentUser;
@@ -119,7 +130,7 @@ describe('CutController', () => {
     });
 
     await expect(controller.create({ user: currentUser() } as never, { name: 'Тест' })).resolves.toMatchObject({ cutJobId: 42 });
-    await controller.calculate({ user: currentUser() } as never, '42', { version: 3 });
+    await controller.calculate({ user: currentUser() } as never, '42', { version: 3, commandId: TEST_COMMAND_ID });
     await controller.archive({ user: currentUser() } as never, '42', { version: 5 });
     expect(calls).toEqual(['create:Тест', 'calc:42:3', 'archive:42:5']);
   });
@@ -178,6 +189,56 @@ describe('CutController', () => {
     await controller.renderSvg({ user: currentUser() } as never, '42', '100', '0', {}, res as never);
     expect(headers['Content-Type']).toBe('image/svg+xml');
     expect(state.sent).toBe('<svg/>');
+  });
+
+  it('passes a request-level PDF template to frozen group and whole-result exports', async () => {
+    const pdf = Buffer.from('%PDF-result');
+    const renderGroupPdf = vi.fn(async () => pdf);
+    const renderJobPdf = vi.fn(async () => pdf);
+    const controller = createController({ service: { renderGroupPdf, renderJobPdf } });
+
+    await controller.exportResultGroupPdf(
+      { user: currentUser() } as never,
+      '42',
+      '3',
+      '100',
+      { template: 'bath_profiles' },
+      fakeResponse().res as never,
+    );
+    await controller.exportResultJobPdf(
+      { user: currentUser() } as never,
+      '42',
+      '3',
+      { template: 'bath_profiles' },
+      fakeResponse().res as never,
+    );
+
+    expect(renderGroupPdf).toHaveBeenCalledWith(expect.objectContaining({
+      cutJobId: 42,
+      resultNo: 3,
+      cutGroupId: 100,
+      pdfTemplate: 'bath_profiles',
+    }));
+    expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({
+      cutJobId: 42,
+      resultNo: 3,
+      pdfTemplate: 'bath_profiles',
+    }));
+  });
+
+  it('leaves the frozen snapshot template unchanged when query override is omitted', async () => {
+    const renderJobPdf = vi.fn(async () => Buffer.from('%PDF-result'));
+    const controller = createController({ service: { renderJobPdf } });
+
+    await controller.exportResultJobPdf(
+      { user: currentUser() } as never,
+      '42',
+      '3',
+      {},
+      fakeResponse().res as never,
+    );
+
+    expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({ pdfTemplate: undefined }));
   });
 
   it('group PDF: 202 + Retry-After on a cold cache, then 200 application/pdf once warm', async () => {
@@ -307,7 +368,7 @@ describe('CutController', () => {
     });
 
     // calculate → fires fire-and-forget prewarm (status ready).
-    await controller.calculate({ user: currentUser() } as never, '42', { version: 0 });
+    await controller.calculate({ user: currentUser() } as never, '42', { version: 0, commandId: TEST_COMMAND_ID });
     // Wait for the async prewarm chain (getRenderCacheToken → ensure → render) to register.
     for (let i = 0; i < 50 && renderJobPdf.mock.calls.length === 0; i++) await Promise.resolve();
     await pdfCache.whenIdle();
@@ -428,7 +489,7 @@ describe('CutController', () => {
       pdfCache,
     });
 
-    await controller.calculate({ user: currentUser() } as never, '42', { version: 0 });
+    await controller.calculate({ user: currentUser() } as never, '42', { version: 0, commandId: TEST_COMMAND_ID });
     for (let i = 0; i < 50 && renderJobPdf.mock.calls.length === 0; i++) await Promise.resolve();
     await pdfCache.whenIdle();
 
@@ -637,17 +698,19 @@ describe('parseSaveManualLayoutBody', () => {
       active: true,
       placements: [{ itemId: 'det-1', instance: 1, sheetIndex: 0, xMm: 5, yMm: 7, rotated: false }],
       sheetTransforms: [{ sheetIndex: 0, rotationDeg: 270, mirrorHorizontal: true, mirrorVertical: false }],
+      commandId: TEST_COMMAND_ID,
     });
     expect(out.jobVersion).toBe(3);
     expect(out.placements[0].itemId).toBe('det-1');
     expect(out.sheetTransforms[0]).toEqual({ sheetIndex: 0, rotationDeg: 270, mirrorHorizontal: true, mirrorVertical: false });
   });
   it('defaults transforms for older clients and rejects unsupported angles', () => {
-    expect(parseSaveManualLayoutBody({ jobVersion: 1, active: true, placements: [] }).sheetTransforms).toEqual([]);
+    expect(parseSaveManualLayoutBody({ jobVersion: 1, active: true, placements: [], commandId: TEST_COMMAND_ID }).sheetTransforms).toEqual([]);
     expect(() => parseSaveManualLayoutBody({
       jobVersion: 1,
       active: true,
       placements: [],
+      commandId: TEST_COMMAND_ID,
       sheetTransforms: [{ sheetIndex: 0, rotationDeg: 45, mirrorHorizontal: false, mirrorVertical: false }],
     })).toThrow();
   });
@@ -655,6 +718,7 @@ describe('parseSaveManualLayoutBody', () => {
     expect(() => parseSaveManualLayoutBody({
       jobVersion: 1,
       active: false,
+      commandId: TEST_COMMAND_ID,
       placements: [{ itemId: 'det-1', instance: 1, sheetIndex: 0, xMm: 0, yMm: 0, rotated: false, widthMm: 999 }],
     })).toThrow();
   });
@@ -662,6 +726,7 @@ describe('parseSaveManualLayoutBody', () => {
     expect(() => parseSaveManualLayoutBody({
       jobVersion: 1,
       active: false,
+      commandId: TEST_COMMAND_ID,
       placements: [{ itemId: 'det-1', instance: 1, xMm: 0, yMm: 0, rotated: false }],
     })).toThrow();
   });
@@ -679,6 +744,7 @@ it('PATCH saveManualLayout delegates parsed args to CutService.saveManualLayout'
     jobVersion: 3,
     active: true,
     placements,
+    commandId: TEST_COMMAND_ID,
   });
   expect(service.saveManualLayout).toHaveBeenCalledWith(expect.objectContaining({
     cutJobId: 42, cutGroupId: 100, jobVersion: 3, active: true, placements, requestId: 'req-manual',

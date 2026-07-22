@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Col, Descriptions, Empty, Row, Select, Space, Spin, Tabs, Typography } from 'antd';
+import { ArrowLeftOutlined, CheckOutlined, CloseOutlined, EditOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Col, Descriptions, Empty, Input, Row, Select, Space, Spin, Tabs, Tooltip, Typography, message } from 'antd';
 import type { BazisProjectCard } from '../../api/types/bazisApi.types';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
@@ -23,6 +23,10 @@ export const BazisProjectViewPage: React.FC = () => {
   const { bazisProjectId: bazisProjectIdParam } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [projectCard, setProjectCard] = useState<BazisProjectCard | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameErrorText, setRenameErrorText] = useState<string | null>(null);
   const setTabTitle = useTabStore((state) => state.setTabTitle);
 
   useEffect(() => {
@@ -183,6 +187,46 @@ export const BazisProjectViewPage: React.FC = () => {
     setActiveTab('panels');
   };
 
+  const startRename = () => {
+    if (!projectCard) return;
+    setRenameDraft(projectCard.name);
+    setRenameErrorText(null);
+    setRenaming(true);
+  };
+
+  const cancelRename = () => {
+    if (renameSaving) return;
+    setRenameErrorText(null);
+    setRenaming(false);
+  };
+
+  const saveProjectName = async () => {
+    if (!projectCard || renameSaving) return;
+    const name = renameDraft.trim();
+    if (!name) {
+      setRenameErrorText('Введите название Базис-проекта');
+      return;
+    }
+    if (name === projectCard.name) {
+      setRenaming(false);
+      setRenameErrorText(null);
+      return;
+    }
+
+    setRenameSaving(true);
+    setRenameErrorText(null);
+    try {
+      const renamed = await bazisApi.renameProject(projectCard.bazisProjectId, name);
+      setProjectCard((current) => current ? { ...current, name: renamed.name } : current);
+      setRenaming(false);
+      message.success('Название Базис-проекта обновлено');
+    } catch (error) {
+      setRenameErrorText(error instanceof Error ? error.message : 'Не удалось изменить название');
+    } finally {
+      setRenameSaving(false);
+    }
+  };
+
   if (!can('bazis.view')) {
     return <Alert type="error" message="Недостаточно прав" showIcon />;
   }
@@ -224,12 +268,67 @@ export const BazisProjectViewPage: React.FC = () => {
             <Link to="/bazis">
               <Button size="small" icon={<ArrowLeftOutlined />}>К списку</Button>
             </Link>
-            <Title level={3} style={{ margin: 0 }}>
-              {projectCard.name}
-            </Title>
+            {renaming ? (
+              <Space.Compact>
+                <Input
+                  autoFocus
+                  aria-label="Название Базис-проекта"
+                  value={renameDraft}
+                  maxLength={300}
+                  style={{ width: 'min(420px, 48vw)', height: 40 }}
+                  onChange={(event) => setRenameDraft(event.target.value)}
+                  onPressEnter={() => void saveProjectName()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') cancelRename();
+                  }}
+                />
+                <Tooltip title="Сохранить">
+                  <Button
+                    aria-label="Сохранить название"
+                    icon={<CheckOutlined />}
+                    type="primary"
+                    loading={renameSaving}
+                    disabled={!renameDraft.trim()}
+                    style={{ minWidth: 40, height: 40 }}
+                    onClick={() => void saveProjectName()}
+                  />
+                </Tooltip>
+                <Tooltip title="Отмена">
+                  <Button
+                    aria-label="Отменить редактирование"
+                    icon={<CloseOutlined />}
+                    disabled={renameSaving}
+                    style={{ minWidth: 40, height: 40 }}
+                    onClick={cancelRename}
+                  />
+                </Tooltip>
+              </Space.Compact>
+            ) : (
+              <Space align="center" size={4}>
+                <Title level={3} style={{ margin: 0 }}>
+                  {projectCard.name}
+                </Title>
+                {canManage ? (
+                  <Tooltip title="Изменить название">
+                    <Button
+                      aria-label="Изменить название Базис-проекта"
+                      type="text"
+                      icon={<EditOutlined />}
+                      style={{ width: 40, height: 40 }}
+                      onClick={startRename}
+                    />
+                  </Tooltip>
+                ) : null}
+              </Space>
+            )}
           </Space>
+          {renameErrorText ? <Text type="danger">{renameErrorText}</Text> : null}
           <Space size={12} wrap>
-            <Link to={`/projects/show/${projectCard.projectId}`}>Проект ERP #{projectCard.projectId}</Link>
+            <Link to={`/projects/show/${projectCard.projectId}`}>
+              {projectCard.projectName?.trim()
+                ? `ERP-проект: ${projectCard.projectName.trim()} · #${projectCard.projectId}`
+                : `ERP-проект #${projectCard.projectId}`}
+            </Link>
             {projectCard.bazisOrderNo?.trim() ? (
               <Text type="secondary">{`Заказ Базис: ${projectCard.bazisOrderNo.trim()}`}</Text>
             ) : null}

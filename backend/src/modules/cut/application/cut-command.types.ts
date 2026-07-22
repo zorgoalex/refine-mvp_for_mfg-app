@@ -6,6 +6,8 @@ import type {
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
   CutJobDto,
+  CutResultDto,
+  CutResultSummaryDto,
   CutManualSheetDto,
   EligibleDetailsResponseDto,
   CutSelectionCriteriaDto,
@@ -35,6 +37,7 @@ export interface SaveManualLayoutCommand {
   placements: ManualMove[];
   sheetTransforms?: SheetViewTransform[];
   active: boolean;
+  commandId: string;
   requestId?: string;
 }
 
@@ -65,6 +68,7 @@ export interface CalculateCutJobCommand {
   currentUser: CurrentUser;
   cutJobId: number;
   version: number;
+  commandId: string;
   requestId?: string;
 }
 
@@ -79,6 +83,16 @@ export interface GetCutJobQuery {
   currentUser: CurrentUser;
   cutJobId: number;
   requestId?: string;
+}
+
+export interface ListCutResultsQuery {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  requestId?: string;
+}
+
+export interface GetCutResultQuery extends ListCutResultsQuery {
+  resultNo: number;
 }
 
 export interface ListCutJobsQuery {
@@ -96,6 +110,7 @@ export interface EligibleDetailsQuery {
 export interface RenderSheetPngQuery {
   currentUser: CurrentUser;
   cutJobId?: number;
+  resultNo?: number;
   cutGroupId: number;
   sheetIndex: number;
   /** render preset NAME; px resolved from cut_render_presets config at render time */
@@ -120,6 +135,7 @@ export interface RenderSheetPngQuery {
 export interface RenderSheetSvgQuery {
   currentUser: CurrentUser;
   cutJobId?: number;
+  resultNo?: number;
   cutGroupId: number;
   sheetIndex: number;
   /** landscape orientation: rotate the layout 90° (long side horizontal). */
@@ -135,6 +151,7 @@ export interface RenderSheetSvgQuery {
 export interface RenderGroupPdfQuery {
   currentUser: CurrentUser;
   cutJobId?: number;
+  resultNo?: number;
   cutGroupId: number;
   /** landscape orientation: rotate the layout 90° (long side horizontal). */
   rotate90?: boolean;
@@ -150,6 +167,7 @@ export interface RenderGroupPdfQuery {
 export interface RenderJobPdfQuery {
   currentUser: CurrentUser;
   cutJobId: number;
+  resultNo?: number;
   /** landscape orientation: rotate the layout 90° (long side horizontal). */
   rotate90?: boolean;
   /** when rotated, anchor the dense cluster at the view's top-left (transpose)
@@ -281,6 +299,7 @@ export interface GetRenderCacheTokenArgs {
 }
 
 export interface CutRepositoryPort {
+  reconcileExpiredCommands(limit?: number): Promise<number>;
   createJob(command: CreateCutJobCommand): Promise<CutJobDto>;
   recordPermissionDenied(input: CutPermissionDeniedInput): Promise<void>;
   addItems(command: AddCutItemsCommand): Promise<CutJobDto>;
@@ -294,6 +313,8 @@ export interface CutRepositoryPort {
   setJobPdfTemplate(command: SetCutJobPdfTemplateCommand): Promise<CutJobDto>;
   setGroupPdfTemplate(command: SetCutGroupPdfTemplateCommand): Promise<CutJobDto>;
   getJob(query: GetCutJobQuery): Promise<CutJobDto>;
+  listResults(query: ListCutResultsQuery): Promise<CutResultSummaryDto[]>;
+  getResult(query: GetCutResultQuery): Promise<CutResultDto>;
   listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]>;
   listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto>;
   listDetailPlacements(query: DetailPlacementsQuery): Promise<CutDetailPlacementsResponseDto>;

@@ -8,14 +8,21 @@ export interface PaymentCardListProps {
   loading?: boolean;
   pagination: TablePaginationConfig | false;
   lookups: PaymentCardLookups;
+  onPaginationChange: (page: number, pageSize: number) => void;
   onOpen: (id: number) => void;
 }
 
-export const PaymentCardList: React.FC<PaymentCardListProps> = ({ rows, loading, pagination, lookups, onOpen }) => (
+export const PaymentCardList: React.FC<PaymentCardListProps> = ({ rows, loading, pagination, lookups, onPaginationChange, onOpen }) => (
   <List
     dataSource={rows as Record<string, unknown>[]}
     loading={loading}
-    pagination={pagination === false ? false : { ...pagination, simple: true, showSizeChanger: false }}
+    pagination={pagination === false ? false : {
+      ...pagination,
+      simple: false,
+      showLessItems: true,
+      showSizeChanger: true,
+      onChange: onPaginationChange,
+    }}
     rowKey={(r) => String(r.payment_id)}
     renderItem={(row) => {
       const m = buildPaymentCardModel(row, lookups);

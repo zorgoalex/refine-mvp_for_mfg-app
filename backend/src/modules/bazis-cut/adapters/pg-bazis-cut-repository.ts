@@ -7,7 +7,10 @@ import { DatabaseService } from '../../../database/database.service';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { buildBazisCutXls } from '../application/bazis-xls-writer';
-import { mapBazisCutSnapshotFields } from '../application/bazis-cut-snapshot-mapper';
+import {
+  buildBazisCutSnapshotIdentity,
+  mapBazisCutSnapshotFields,
+} from '../application/bazis-cut-snapshot-mapper';
 import type {
   AddBazisCutDetailsCommand,
   BazisCutRepositoryPort,
@@ -471,16 +474,20 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
       invalid.push(toNumber(row.detail_id));
       continue;
     }
-    const fields = mapBazisCutSnapshotFields({
+    const bazisLabels = resolveBazisDetailLabels(row.detail_bazis_project, row.detail_bazis_product);
+    const snapshotSource = {
       materialName: row.material_name, thicknessMm: thickness!, detailNumber: row.detail_number,
-      basisDesignation: row.basis_designation, basisData: row.basis_data, detailName: row.detail_name,
+      orderName: row.order_name, basisOrder: bazisLabels.sourceBazisOrderNo,
+      basisProduct: row.detail_bazis_product, basisDesignation: row.basis_designation,
+      basisData: row.basis_data, detailName: row.detail_name,
       heightMm: height!, widthMm: width!, quantity: quantity!, note: row.note, milling: row.milling,
       film: row.film, doweling: row.doweling, verticalTexture: exactCount === 1 && row.exact_vertical === true,
-    });
+    };
+    const identity = buildBazisCutSnapshotIdentity(snapshotSource);
+    const fields = mapBazisCutSnapshotFields(snapshotSource);
     if (!fields) { invalid.push(toNumber(row.detail_id)); continue; }
     const bazisProjectId = exactCount === 1 ? nullableNumber(row.exact_bazis_project_id) : nullableNumber(row.fallback_bazis_project_id);
     const bazisRevisionId = exactCount === 1 ? nullableNumber(row.exact_revision_id) : nullableNumber(row.fallback_revision_id);
-    const bazisLabels = resolveBazisDetailLabels(row.detail_bazis_project, row.detail_bazis_product);
     snapshots.push({
       provenance: {
         sourceOrderDetailId: toNumber(row.detail_id), sourceOrderId: toNumber(row.order_id),
@@ -490,6 +497,7 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
         sourceOrderName: row.order_name, sourceOrderFullNumber: row.order_full_number,
         sourceProjectCode: row.project_code,
         ...bazisLabels,
+        sourceBazisOrderNo: identity.order,
       },
       fields,
     });

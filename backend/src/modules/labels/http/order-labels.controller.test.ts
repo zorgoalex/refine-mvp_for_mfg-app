@@ -49,6 +49,19 @@ describe('DetailLabelActionsController', () => {
 });
 
 describe('OrderLabelActionsController', () => {
+  it('routes cut-map options through the order-scoped service contract', async () => {
+    const service = fakeService({
+      listOrderCutMapOptions: vi.fn(async () => ({ orderId: 11370, details: [] })),
+    });
+    const controller = new OrderLabelActionsController(service, runtime(true));
+
+    await expect(controller.cutMapOptions({ user, requestId: 'req-cut-map' }, '11370'))
+      .resolves.toEqual({ orderId: 11370, details: [] });
+    expect(service.listOrderCutMapOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ currentUser: user, requestId: 'req-cut-map', orderId: 11370 }),
+    );
+  });
+
   it('returns null when an order has no previous label generation', async () => {
     const service = fakeService({
       getLatestOrderLabelsPreview: vi.fn(async () => {
@@ -114,6 +127,7 @@ function fakeService(overrides: Record<string, unknown> = {}) {
     })),
     getLatestOrderLabelsPreview: vi.fn(),
     exportOrderLabels: vi.fn(),
+    listOrderCutMapOptions: vi.fn(),
     ...overrides,
   } as never;
 }

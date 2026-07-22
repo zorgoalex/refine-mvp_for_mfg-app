@@ -1,5 +1,6 @@
 ﻿import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
-import { useTable, ShowButton, EditButton } from "@refinedev/antd";
+import { ShowButton, EditButton } from "@refinedev/antd";
+import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Table, Badge } from "antd";
 import { useMemo } from "react";
 import { useHighlightRow } from "../../hooks/useHighlightRow";

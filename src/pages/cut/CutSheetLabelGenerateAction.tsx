@@ -55,8 +55,16 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
     setLoading(true);
     labelsApi.listTemplates(true)
       .then((next) => {
-        setTemplates(next);
-        setTemplateId((current) => current ?? next.find((template) => template.isActive)?.labelTemplateId ?? null);
+        // A cut-map label is intentionally configured from the order card,
+        // where every physical copy can be bound to an exact immutable
+        // placement. The sheet shortcut only carries de-duplicated detail IDs.
+        const supported = next.filter((template) => !template.elements.some((element) => element.kind === 'cut_map'));
+        setTemplates(supported);
+        setTemplateId((current) => (
+          current && supported.some((template) => template.labelTemplateId === current)
+            ? current
+            : supported.find((template) => template.isActive)?.labelTemplateId ?? null
+        ));
       })
       .catch(() => message.error('Не удалось загрузить шаблоны бирок'))
       .finally(() => setLoading(false));
@@ -164,6 +172,12 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
         `}</style>
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
           {detailIds.length === 0 && <Alert type="warning" showIcon message="На листе нет деталей для бирок" />}
+          <Alert
+            type="info"
+            showIcon
+            message="Шаблоны с миниатюрой раскроя доступны в карточке заказа"
+            description="Там раскрой выбирается отдельно для каждого физического экземпляра детали."
+          />
           <Select
             style={{ width: '100%' }}
             value={templateId}

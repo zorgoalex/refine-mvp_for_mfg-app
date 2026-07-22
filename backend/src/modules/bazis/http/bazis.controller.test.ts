@@ -13,6 +13,7 @@ import {
   parseCreateOrderFromDraftBody,
   parseMaterialMappingsQuery,
   parseNodeSearchQuery,
+  parseRenameProjectBody,
   parseRevisionTreeQuery,
   parseSetNodeNotesBody,
   parseUpsertMaterialMappingsBody,
@@ -477,6 +478,41 @@ describe('BazisController', () => {
     });
   });
 
+  describe('renameProject', () => {
+    it('parses id/name and delegates to service', async () => {
+      const renameProject = vi.fn().mockResolvedValue({
+        bazisProjectId: 41,
+        projectId: 77,
+        name: '1485',
+      });
+      const controller = createController({ bazisEnabled: true, service: { renameProject } });
+
+      await expect(controller.renameProject(request(), '41', { name: ' 1485 ' }))
+        .resolves.toEqual({ bazisProjectId: 41, projectId: 77, name: '1485' });
+      expect(renameProject).toHaveBeenCalledWith(request().user, 'req-1', 41, '1485');
+    });
+
+    it('fails closed when feature is disabled', async () => {
+      const controller = createController({ bazisEnabled: false });
+
+      await expect(controller.renameProject(request(), '41', { name: '1485' }))
+        .rejects.toMatchObject({ statusCode: 503, code: 'SERVICE_UNAVAILABLE' });
+    });
+  });
+
+  describe('parseRenameProjectBody', () => {
+    it('trims valid name', () => {
+      expect(parseRenameProjectBody({ name: ' 1485 ' })).toEqual({ name: '1485' });
+    });
+
+    it.each([{}, { name: '' }, { name: 'x'.repeat(301) }, { name: '1485', extra: true }])(
+      'rejects invalid payload %#',
+      (body) => {
+        expect(() => parseRenameProjectBody(body)).toThrowError(ApiError);
+      },
+    );
+  });
+
   describe('parseSetNodeNotesBody', () => {
     it('accepts string and null', () => {
       expect(parseSetNodeNotesBody({ notes: 'x' })).toEqual({ notes: 'x' });
@@ -499,6 +535,7 @@ function createController(input: {
     importXml: vi.fn(),
     listProjects: vi.fn().mockResolvedValue([]),
     getProject: vi.fn(),
+    renameProject: vi.fn(),
     getTree: vi.fn(),
     getNodeCard: vi.fn(),
     setNodeNotes: vi.fn(),

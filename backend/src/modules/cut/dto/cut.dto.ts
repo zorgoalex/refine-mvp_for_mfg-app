@@ -77,6 +77,14 @@ export interface CutManualSheetDto {
     mirrorHorizontal: boolean;
     mirrorVertical: boolean;
   };
+  renderSnapshot?: CutSheetRenderSnapshotDto;
+}
+
+export interface CutSheetRenderSnapshotDto {
+  contractVersion: 'cut_sheet_render_v1';
+  views: Record<string, { svg: string; bathSvg: string }>;
+  pdfMeta: unknown;
+  pdfDetailRows: unknown[];
 }
 
 export interface CutManualLayoutDto {
@@ -97,6 +105,7 @@ export interface CutGroupSheetDto {
   sheetIndex: number;
   pngCacheKey: string | null;
   placements: SheetPlacementsJson;
+  renderSnapshot?: CutSheetRenderSnapshotDto;
 }
 
 export interface CutGroupDto {
@@ -172,6 +181,33 @@ export interface CutJobDto {
   autoLayoutValidation?: { valid: boolean };
   /** Opaque browser-cache token for render endpoints; absent on list. */
   renderToken?: string;
+  /** Latest immutable completed cut result; absent on mixed-deploy old schema. */
+  currentCutResult?: CutResultSummaryDto | null;
+  /** Completed results newest-first; populated on single-job reads. */
+  cutResults?: CutResultSummaryDto[];
+}
+
+export type CutResultKind = 'auto' | 'manual' | 'legacy';
+
+export interface CutResultSummaryDto {
+  cutResultId: number;
+  cutJobId: number;
+  resultNo: number;
+  cutNumber: string;
+  resultKind: CutResultKind;
+  sourceJobVersion: number;
+  basedOnResultId: number | null;
+  createdBy: number | null;
+  createdByName: string | null;
+  createdAt: string;
+  totals: CutJobTotals;
+  isCurrent: boolean;
+}
+
+export interface CutResultDto extends CutResultSummaryDto {
+  /** Frozen whole-job read model. Historical mode never reads live geometry. */
+  job: CutJobDto;
+  renderToken: string;
 }
 
 /** A cut job a detail is placed in (informational, not exclusive). */

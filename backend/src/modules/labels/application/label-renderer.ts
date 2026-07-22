@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import { existsSync } from 'node:fs';
 import { writeBmp } from './bmp-writer';
 import { readQrErrorCorrection, readQrTemplate, renderLabelTemplateString } from './label-template-fields';
+import { assertRenderableTemplateShape, legacyConditionPasses, readCutMapStyleV1, readTypographyV1, resolveLabelText } from './label-template-advanced';
 import type { LabelRow } from './label-row-builder';
 import type { LabelExportFormat, LabelTemplateDto } from './labels.types';
 
@@ -12,15 +13,23 @@ export interface RenderedPreview {
   pages: string[];
 }
 
-export function renderSvgPages(template: LabelTemplateDto, rows: LabelRow[]): RenderedPreview {
+export type LabelCutMapAssets = ReadonlyMap<number, string>;
+
+export function renderSvgPages(
+  template: LabelTemplateDto,
+  rows: LabelRow[],
+  cutMapAssets: LabelCutMapAssets = new Map(),
+): RenderedPreview {
+  assertRenderableTemplateShape(template);
   const width = px(template.canvasWidthMm, template.dpi);
   const height = px(template.canvasHeightMm, template.dpi);
+  const sortedElements = template.elements
+    .slice()
+    .sort((a, b) => a.zIndex - b.zIndex);
   const pages = rows.map((row) => {
-    const body = template.elements
-      .slice()
-      .sort((a, b) => a.zIndex - b.zIndex)
-      .filter((element) => conditionPasses(element.condition, row.values))
-      .map((element) => renderElement(element, row.values))
+    const body = sortedElements
+      .filter((element) => legacyConditionPasses(element.condition, row.values))
+      .map((element) => renderElement(element, row, cutMapAssets))
       .join('');
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${template.canvasWidthMm} ${template.canvasHeightMm}"><rect x="0" y="0" width="${template.canvasWidthMm}" height="${template.canvasHeightMm}" fill="white"/>${body}</svg>`;
   });
@@ -34,20 +43,28 @@ export async function renderLabelsZip(input: {
   rows: LabelRow[];
   formats: LabelExportFormat[];
   generatedAt: string;
+  cutMapAssets?: LabelCutMapAssets;
 }): Promise<Buffer> {
+  assertRenderableTemplateShape(input.template);
   const zip = new JSZip();
+  const archiveDate = new Date(input.generatedAt);
+  if (Number.isNaN(archiveDate.getTime())) {
+    throw new Error('Invalid label generation timestamp');
+  }
+  const zipOptions = { date: archiveDate };
+  zip.file('labels/', null, { ...zipOptions, dir: true });
 
   for (const [index, row] of input.rows.entries()) {
     const n = index + 1;
-    const svg = renderSvgPage(input.template, row);
+    const svg = renderSvgPage(input.template, row, input.cutMapAssets);
     const png = renderSvgToPng(svg);
     const image = PNG.sync.read(png);
     const bmp = writeBmp({ width: image.width, height: image.height, rgba: image.data });
-    if (input.formats.includes('bmp')) zip.file(`labels/label${n}.bmp`, bmp);
-    if (input.formats.includes('png')) zip.file(`labels/label${n}.png`, png);
+    if (input.formats.includes('bmp')) zip.file(`labels/label${n}.bmp`, bmp, zipOptions);
+    if (input.formats.includes('png')) zip.file(`labels/label${n}.png`, png, zipOptions);
     // Observed Bazis sample `.emf` files are BMP bytes with an `.emf` extension.
     // True vector EMF is explicitly out of MVP scope.
-    if (input.formats.includes('emf')) zip.file(`labels/label${n}.emf`, bmp);
+    if (input.formats.includes('emf')) zip.file(`labels/label${n}.emf`, bmp, zipOptions);
   }
   zip.file(
     'manifest.json',
@@ -59,44 +76,153 @@ export async function renderLabelsZip(input: {
         labelCount: input.rows.length,
         formats: input.formats,
         generatedAt: input.generatedAt,
-        rendererVersion: 1,
+        rendererVersion: input.template.elements.some((element) => element.kind === 'cut_map') ? 2 : 1,
       },
       null,
       2,
     ),
+    zipOptions,
   );
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
 function renderElement(
   element: LabelTemplateDto['elements'][number],
-  values: Record<string, string | number | boolean | null>,
+  row: LabelRow,
+  cutMapAssets: LabelCutMapAssets,
 ): string {
+  const values = row.values;
   const x = element.xMm;
   const y = element.yMm;
   const w = element.widthMm;
   const h = element.heightMm;
+  const withRotation = (markup: string): string => {
+    const rotation = Number(element.rotationDeg ?? 0);
+    return Number.isFinite(rotation) && rotation !== 0
+      ? `<g transform="rotate(${rotation} ${x} ${y})">${markup}</g>`
+      : markup;
+  };
   if (element.kind === 'line') {
-    return `<line x1="${x}" y1="${y}" x2="${x + w}" y2="${y + h}" stroke="black"/>`;
+    return withRotation(`<line x1="${x}" y1="${y}" x2="${x + w}" y2="${y + h}" stroke="black"/>`);
   }
   if (element.kind === 'rect') {
-    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="black"/>`;
+    return withRotation(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="black"/>`);
   }
   if (element.kind === 'qr') {
-    return renderQrElement(element, values);
+    return withRotation(renderQrElement(element, values));
   }
-  const value = element.sourceField ? values[element.sourceField] : element.staticText;
-  const sizeMm = fontSizeMm(element.style.fontSize);
+  if (element.kind === 'cut_map') {
+    return withRotation(renderCutMapElement(element, row, cutMapAssets));
+  }
+  const value = resolveLabelText(element, values);
+  const typography = readTypographyV1(element.style);
+  const sizeMm = fontSizeMm(typography?.fontSizePt ?? element.style.fontSize);
   const align = labelTextAlign(element.style.textAlign);
   const textX = align === 'left' ? x : align === 'right' ? x + w : x + w / 2;
   const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle';
-  return `<text x="${textX}" y="${y + sizeMm}" text-anchor="${anchor}" font-family="DejaVu Sans, Arial, sans-serif" font-size="${sizeMm}">${escapeXml(
-    value == null ? '' : String(value),
-  )}</text>`;
+  const weight = typography?.fontWeight === 'bold' ? ' font-weight="700"' : '';
+  const italic = typography?.italic ? ' font-style="italic"' : '';
+  return withRotation(`<text x="${textX}" y="${y + sizeMm}" text-anchor="${anchor}" font-family="DejaVu Sans, Arial, sans-serif" font-size="${sizeMm}"${weight}${italic}>${escapeXml(value)}</text>`);
 }
 
-function renderSvgPage(template: LabelTemplateDto, row: LabelRow): string {
-  return renderSvgPages(template, [row]).pages[0] ?? '';
+function renderSvgPage(template: LabelTemplateDto, row: LabelRow, cutMapAssets?: LabelCutMapAssets): string {
+  return renderSvgPages(template, [row], cutMapAssets).pages[0] ?? '';
+}
+
+function renderCutMapElement(
+  element: LabelTemplateDto['elements'][number],
+  row: LabelRow,
+  cutMapAssets: LabelCutMapAssets,
+): string {
+  const map = row.cutMap;
+  if (!map) {
+    throw new Error(`Missing cut-map placement for label row ${row.rowIndex}`);
+  }
+  const baseSvg = cutMapAssets.get(map.cutResultSheetMapId);
+  if (!baseSvg) {
+    throw new Error(`Missing frozen cut-map asset ${map.cutResultSheetMapId}`);
+  }
+  const body = extractSafeCutSheetBody(baseSvg);
+  if (body === null) {
+    throw new Error(`Invalid frozen cut-map asset ${map.cutResultSheetMapId}`);
+  }
+  const style = readCutMapStyleV1(element.style);
+  if (!style) {
+    throw new Error(`Invalid cut-map style for ${element.elementKey}`);
+  }
+
+  const scale = Math.max(0.000001, Math.min(
+    element.widthMm / map.sheetWidthMm,
+    element.heightMm / map.sheetHeightMm,
+  ));
+  const whiteStroke = 0.85 / scale;
+  const accentStroke = 0.42 / scale;
+  const shownPieceSide = Math.min(map.widthMm, map.heightMm) * scale;
+  const markerRadius = Math.min(Math.min(map.sheetWidthMm, map.sheetHeightMm) / 18, 1.35 / scale);
+  const marker = shownPieceSide < 1.5
+    ? `<circle cx="${num(map.xMm + map.widthMm / 2)}" cy="${num(map.yMm + map.heightMm / 2)}" r="${num(markerRadius)}" fill="none" stroke="#ffffff" stroke-width="${num(whiteStroke)}"/><circle cx="${num(map.xMm + map.widthMm / 2)}" cy="${num(map.yMm + map.heightMm / 2)}" r="${num(markerRadius)}" fill="none" stroke="${style.highlightStroke}" stroke-width="${num(accentStroke)}"/>`
+    : '';
+
+  return [
+    `<g data-label-element-kind="cut_map" data-cut-number="${escapeXml(map.cutNumber)}" data-cut-result-placement-id="${map.cutResultPlacementId}">`,
+    `<svg x="${num(element.xMm)}" y="${num(element.yMm)}" width="${num(element.widthMm)}" height="${num(element.heightMm)}" viewBox="0 0 ${num(map.sheetWidthMm)} ${num(map.sheetHeightMm)}" preserveAspectRatio="xMidYMid meet" overflow="hidden">`,
+    body,
+    `<rect x="${num(map.xMm)}" y="${num(map.yMm)}" width="${num(map.widthMm)}" height="${num(map.heightMm)}" fill="${style.highlightFill}" fill-opacity="0.58" stroke="#ffffff" stroke-width="${num(whiteStroke)}"/>`,
+    `<rect x="${num(map.xMm)}" y="${num(map.yMm)}" width="${num(map.widthMm)}" height="${num(map.heightMm)}" fill="none" stroke="${style.highlightStroke}" stroke-width="${num(accentStroke)}"/>`,
+    marker,
+    '</svg>',
+    '</g>',
+  ].join('');
+}
+
+function extractSafeCutSheetBody(svg: string): string | null {
+  const match = /^\s*<svg\b[^>]*>([\s\S]*)<\/svg>\s*$/.exec(svg);
+  if (!match) return null;
+  const source = match[1];
+  const rectangles: string[] = [];
+  const tagPattern = /<rect\b([^>]*)\/>/gi;
+  let cursor = 0;
+  for (const tag of source.matchAll(tagPattern)) {
+    const index = tag.index ?? -1;
+    if (index < cursor || source.slice(cursor, index).trim()) return null;
+    const attributes = parseSafeRectAttributes(tag[1] ?? '');
+    if (!attributes) return null;
+    rectangles.push(`<rect${attributes}/>`);
+    cursor = index + tag[0].length;
+  }
+  if (source.slice(cursor).trim()) return null;
+  return rectangles.join('');
+}
+
+const CUT_SHEET_NUMERIC_ATTRIBUTES = new Set([
+  'x', 'y', 'width', 'height', 'rx', 'ry', 'opacity', 'fill-opacity', 'stroke-opacity', 'stroke-width',
+]);
+const CUT_SHEET_COLOR_ATTRIBUTES = new Set(['fill', 'stroke']);
+
+function parseSafeRectAttributes(source: string): string | null {
+  const attributes: string[] = [];
+  const seen = new Set<string>();
+  const pattern = /\s+([A-Za-z][A-Za-z0-9-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+  let cursor = 0;
+  for (const match of source.matchAll(pattern)) {
+    const index = match.index ?? -1;
+    if (index < cursor || source.slice(cursor, index).trim()) return null;
+    const name = (match[1] ?? '').toLowerCase();
+    const value = match[2] ?? match[3] ?? '';
+    if (seen.has(name)) return null;
+    if (CUT_SHEET_NUMERIC_ATTRIBUTES.has(name)) {
+      if (!/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(value) || !Number.isFinite(Number(value))) return null;
+    } else if (CUT_SHEET_COLOR_ATTRIBUTES.has(name)) {
+      if (!/^(?:#[0-9a-f]{3,8}|none|transparent|white|black)$/i.test(value)) return null;
+    } else {
+      return null;
+    }
+    seen.add(name);
+    attributes.push(` ${name}="${value}"`);
+    cursor = index + match[0].length;
+  }
+  if (source.slice(cursor).trim()) return null;
+  return attributes.join('');
 }
 
 function renderQrElement(
@@ -149,24 +275,17 @@ function renderSvgToPng(svg: string): Buffer {
   }).render().asPng();
 }
 
-function conditionPasses(condition: Record<string, unknown>, values: Record<string, unknown>): boolean {
-  const field = typeof condition.field === 'string' ? condition.field : '';
-  const op = typeof condition.op === 'string' ? condition.op : '';
-  if (!field || !op) return true;
-  const value = values[field];
-  if (op === 'exists') return value !== undefined && value !== null;
-  if (op === 'not_empty') return value !== undefined && value !== null && String(value) !== '';
-  if (op === 'equals') return String(value ?? '') === String(condition.value ?? '');
-  if (op === 'not_equals') return String(value ?? '') !== String(condition.value ?? '');
-  return true;
-}
-
 function px(mm: number, dpi: number): number {
   return Math.max(1, Math.round((mm * dpi) / 25.4));
 }
 
+function num(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)));
+}
+
 function fontSizeMm(value: unknown): number {
-  const sizePt = Number(value ?? 10);
+  const parsed = Number(value ?? 10);
+  const sizePt = Number.isFinite(parsed) ? Math.min(96, Math.max(4, parsed)) : 10;
   return Math.max(1.8, sizePt * 0.3528);
 }
 

@@ -491,7 +491,7 @@ describe('groups OpenAPI contract', () => {
     const filterSchema = sectionBetween(
       contract,
       '    GroupOverviewFilter:',
-      '    OrderListResponse:',
+      '    OrderStatusBoardResponse:',
     );
 
     expect(overviewSection).toContain('operationId: getGroupOverview');

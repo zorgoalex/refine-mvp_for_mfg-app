@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { LabelsService } from '../application/labels.service';
-import type { LabelTemplateDto, LabelsContext } from '../application/labels.types';
+import type { LabelRendererCapabilitiesDto, LabelTemplateDto, LabelsContext } from '../application/labels.types';
 import {
   createLabelTemplateSchema,
   deleteLabelTemplateSchema,
@@ -30,6 +30,13 @@ export class LabelTemplatesController {
   ): Promise<LabelTemplateDto[]> {
     assertLabelsEnabled(this.runtimeConfig);
     return this.service.listTemplates({ ...this.context(request), includeInactive: includeInactive === 'true' });
+  }
+
+  @ApiOperation({ operationId: 'getLabelRendererCapabilities', summary: 'Get label renderer capabilities' })
+  @Get('renderer-capabilities')
+  async capabilities(@Req() request: RequestWithCurrentUser): Promise<LabelRendererCapabilitiesDto> {
+    assertLabelsEnabled(this.runtimeConfig);
+    return this.service.getRendererCapabilities(this.context(request));
   }
 
   @ApiOperation({ operationId: 'getLabelTemplate', summary: 'Get label template' })

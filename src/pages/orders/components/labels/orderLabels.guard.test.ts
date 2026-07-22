@@ -6,6 +6,7 @@ const showSrc = readFileSync(new URL('../../show.tsx', import.meta.url), 'utf8')
 const dataEditorSrc = readFileSync(new URL('./OrderLabelDataEditor.tsx', import.meta.url), 'utf8');
 const generateSrc = readFileSync(new URL('./OrderLabelGenerateAction.tsx', import.meta.url), 'utf8');
 const latestSrc = readFileSync(new URL('./OrderLatestLabelsPreview.tsx', import.meta.url), 'utf8');
+const previewFrameSrc = readFileSync(new URL('./LabelSvgPreviewFrame.tsx', import.meta.url), 'utf8');
 
 describe('order labels UI wiring', () => {
   it('mounts the edit label-data editor in Дополнительно behind labels flag and labels.view', () => {
@@ -80,9 +81,9 @@ describe('order labels UI wiring', () => {
   });
 
   it('renders the preview frame with the saved physical template proportions', () => {
-    expect(generateSrc).toMatch(/const previewAspectRatio = selectedTemplate/);
-    expect(generateSrc).toMatch(/selectedTemplate\.canvasWidthMm\s*\/\s*selectedTemplate\.canvasHeightMm/);
-    expect(generateSrc).toMatch(/aspectRatio: `\$\{selectedTemplate\.canvasWidthMm\} \/ \$\{selectedTemplate\.canvasHeightMm\}`/);
+    expect(generateSrc).toMatch(/const previewAspectRatio = template/);
+    expect(generateSrc).toMatch(/template\.canvasWidthMm\s*\/\s*template\.canvasHeightMm/);
+    expect(generateSrc).toMatch(/aspectRatio: `\$\{template\.canvasWidthMm\} \/ \$\{template\.canvasHeightMm\}`/);
     expect(generateSrc).toMatch(/width: `min\(100%, calc\(58vh \* \$\{previewAspectRatio\}\)\)`/);
     expect(generateSrc).not.toMatch(/minHeight: 260/);
     expect(generateSrc).toMatch(/\.order-label-preview-fit svg \{[\s\S]*width: 100%;[\s\S]*height: 100%/);
@@ -115,5 +116,13 @@ describe('order labels UI wiring', () => {
     expect(dataEditorSrc).toMatch(/data\?\.details\[0\]\?\.detailId/);
     expect(dataEditorSrc).toMatch(/Превью последней генерации: первая позиция/);
     expect(dataEditorSrc).toMatch(/order-label-inline-preview-fit/);
+  });
+
+  it('outlines every order-card label preview with the shared neutral frame', () => {
+    expect(generateSrc).toMatch(/LabelSvgPreviewFrame/);
+    expect(latestSrc).toMatch(/LabelSvgPreviewFrame/);
+    expect(dataEditorSrc).toMatch(/LabelSvgPreviewFrame/);
+    expect(previewFrameSrc).toMatch(/outline: '1px solid var\(--label-preview-outline, rgba\(0,0,0,0\.1\)\)'/);
+    expect(previewFrameSrc).toMatch(/outlineOffset: -1/);
   });
 });

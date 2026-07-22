@@ -95,6 +95,13 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
     const assignedSql = needsAssignment
       ? assignmentExistsSql(requireActorIndex(actorIndex))
       : 'FALSE';
+    const boardFilterJoinSql =
+      command.query.board === 'order'
+        ? 'JOIN order_statuses board_order_status ON board_order_status.order_status_id = o.order_status_id'
+        : command.query.includeDone
+          ? ''
+          : `LEFT JOIN production_statuses board_production_status
+              ON board_production_status.production_status_id = o.production_status_id`;
     const filters = [
       'o.delete_flag = false',
       buildReadScopePredicate(
@@ -103,6 +110,14 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
         assignedSql,
       ),
     ];
+    if (command.query.board === 'order') {
+      filters.push(visibleOrderStatusSql('board_order_status'));
+    } else if (!command.query.includeDone) {
+      filters.push(`(
+        o.production_status_id IS NULL
+        OR ${visibleProductionStatusSql('board_production_status')}
+      )`);
+    }
 
     appendUserFilters(filters, params, command.query, actorIndex, assignedSql);
     const filterJoinsSql = command.query.search
@@ -135,6 +150,7 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
           o.planned_completion_date,
           ${assignedSql} AS current_user_assigned
         FROM orders o
+        ${boardFilterJoinSql}
         ${filterJoinsSql}
         WHERE ${filters.join('\n          AND ')}
       ),
@@ -357,6 +373,7 @@ function buildStatusCatalogSql(query: OrderStatusBoardQuery, params: unknown[]):
         COALESCE(os.is_active, true) AS status_is_active
       FROM order_statuses os
       WHERE ${where}
+        AND ${visibleOrderStatusSql('os')}
     `;
   }
 
@@ -396,7 +413,19 @@ function buildStatusCatalogSql(query: OrderStatusBoardQuery, params: unknown[]):
       COALESCE(ps.is_active, true) AS status_is_active
     FROM production_statuses ps
     WHERE ${productionWhere}
+      ${query.includeDone ? '' : `AND ${visibleProductionStatusSql('ps')}`}
   `;
+}
+
+function visibleOrderStatusSql(alias: string): string {
+  return `LOWER(BTRIM(${alias}.order_status_name)) NOT IN ('завершен', 'завершён')`;
+}
+
+function visibleProductionStatusSql(alias: string): string {
+  return `NOT (
+    LOWER(BTRIM(COALESCE(${alias}.production_status_name, ''))) = 'done'
+    OR LOWER(BTRIM(COALESCE(${alias}.production_status_code, ''))) ~ '^done(_|$)'
+  )`;
 }
 
 function buildCursorPredicate(params: unknown[], cursor: BoardCursor): string {
@@ -545,6 +574,7 @@ export function createOrderStatusBoardFilterKey(query: OrderStatusBoardQuery): s
     search: query.search?.trim() ?? null,
     onlyMyOrders: query.onlyMyOrders,
     overdueOnly: query.overdueOnly,
+    includeDone: query.includeDone === true,
     plannedFrom: query.plannedFrom ?? null,
     plannedTo: query.plannedTo ?? null,
   });

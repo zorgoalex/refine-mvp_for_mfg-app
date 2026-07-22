@@ -10,6 +10,7 @@ import type {
   LatestOrderLabelsPreviewDto,
   OrderLabelDataDto,
   OrderLabelGenerationDto,
+  OrderLabelCutMapOptionsDto,
   OrderLabelsPreviewDto,
 } from '../application/labels.types';
 import { generateOrderLabelsSchema, previewOrderLabelsSchema, updateOrderLabelDataSchema } from '../dto/order-label.dto';
@@ -74,6 +75,16 @@ export class OrderLabelActionsController {
     private readonly service: LabelsService,
     private readonly runtimeConfig: LabelsRuntimeConfigService,
   ) {}
+
+  @ApiOperation({ operationId: 'listOrderLabelCutMapOptions', summary: 'List exact cut placements available for order labels' })
+  @Get('cut-map-options')
+  async cutMapOptions(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderId: string,
+  ): Promise<OrderLabelCutMapOptionsDto> {
+    assertLabelsEnabled(this.runtimeConfig);
+    return this.service.listOrderCutMapOptions({ ...this.context(request), orderId: parseId(orderId) });
+  }
 
   @ApiOperation({ operationId: 'previewOrderLabels', summary: 'Preview order labels' })
   @Post('preview')

@@ -1,7 +1,16 @@
-import type { LabelFieldCatalogItem, LabelTemplateElement } from '../../../api/types/labelsApi.types';
+import type {
+  LabelConditionBranch,
+  LabelCustomExpressionNode,
+  LabelCustomFieldExpressionV1,
+  LabelEditorMetadataV1,
+  LabelFieldCatalogItem,
+  LabelIfElseCondition,
+  LabelTemplateElement,
+  LabelTypographyV1,
+} from '../../../api/types/labelsApi.types';
 
 export type CustomFieldType = LabelFieldCatalogItem['type'];
-export type CustomFieldValueMode = 'constant' | 'source';
+export type CustomFieldValueMode = 'constant' | 'source' | 'expression';
 
 export interface CustomFieldSchemaRow {
   fieldId: string;
@@ -10,6 +19,7 @@ export interface CustomFieldSchemaRow {
   valueMode: CustomFieldValueMode;
   sourceField: string | null;
   defaultValue: unknown;
+  expression: LabelCustomFieldExpressionV1 | null;
   extra: Record<string, unknown>;
 }
 
@@ -22,6 +32,410 @@ export interface AlignmentGuide {
 export interface LabelFieldSourceDescription {
   entity: string;
   databasePath: string;
+}
+
+export interface HeightMatchSuggestion {
+  targetElementKey: string;
+  heightMm: number;
+}
+
+export interface LabelTransformSnapshot {
+  elementKey: string;
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
+  rotationDeg: number;
+}
+
+export interface LabelGestureCommitToken {
+  id: number;
+  committed: boolean;
+}
+
+export interface LabelDragGestureState extends LabelGestureCommitToken {
+  ownerStart: { x: number; y: number };
+  starts: ReadonlyMap<string, { x: number; y: number }>;
+}
+
+interface LabelTransformNode {
+  x(): number;
+  y(): number;
+  rotation(): number;
+  scaleX(): number;
+  scaleX(value: number): unknown;
+  scaleY(): number;
+  scaleY(value: number): unknown;
+  width(): number;
+  width(value: number): unknown;
+  height(): number;
+  height(value: number): unknown;
+}
+
+const DEFAULT_TYPOGRAPHY: LabelTypographyV1 = {
+  version: 1,
+  fontSizePt: 10,
+  fontWeight: 'normal',
+  italic: false,
+};
+
+const DEFAULT_EDITOR_META: LabelEditorMetadataV1 = {
+  version: 1,
+  boundsMode: 'auto',
+};
+
+export function readLabelTypography(element: LabelTemplateElement): LabelTypographyV1 {
+  const style = isRecord(element.style) ? element.style : {};
+  const typography = isRecord(style.typography) ? style.typography : {};
+  const legacySize = Number(style.fontSize ?? DEFAULT_TYPOGRAPHY.fontSizePt);
+  return {
+    version: 1,
+    fontSizePt: Number.isFinite(Number(typography.fontSizePt))
+      ? Math.min(96, Math.max(4, Number(typography.fontSizePt)))
+      : Math.min(96, Math.max(4, legacySize)),
+    fontWeight: typography.fontWeight === 'bold' || style.fontWeight === 'bold' ? 'bold' : 'normal',
+    italic: typography.italic === true || style.fontItalic === true,
+  };
+}
+
+export function withLabelTypography(
+  element: LabelTemplateElement,
+  patch: Partial<Omit<LabelTypographyV1, 'version'>>,
+): LabelTemplateElement {
+  const style = isRecord(element.style) ? element.style : {};
+  const typography = { ...readLabelTypography(element), ...patch, version: 1 as const };
+  return { ...element, style: { ...style, typography } };
+}
+
+export function readLabelEditorMeta(element: LabelTemplateElement): LabelEditorMetadataV1 & { groupId: string | null } {
+  const style = isRecord(element.style) ? element.style : {};
+  const editor = isRecord(style.editor) ? style.editor : {};
+  return {
+    version: 1,
+    boundsMode: editor.boundsMode === 'manual' ? 'manual' : 'auto',
+    groupId: typeof editor.groupId === 'string' && editor.groupId.trim() ? editor.groupId.trim() : null,
+  };
+}
+
+export function withLabelEditorMeta(
+  element: LabelTemplateElement,
+  patch: { boundsMode?: 'auto' | 'manual'; groupId?: string | null },
+): LabelTemplateElement {
+  const style = isRecord(element.style) ? element.style : {};
+  const current = readLabelEditorMeta(element);
+  const groupId = patch.groupId === undefined ? current.groupId : patch.groupId?.trim() || null;
+  const editor: Record<string, unknown> = {
+    version: 1,
+    boundsMode: patch.boundsMode ?? current.boundsMode ?? DEFAULT_EDITOR_META.boundsMode,
+  };
+  if (groupId) editor.groupId = groupId;
+  return { ...element, style: { ...style, editor } };
+}
+
+export function readLabelIfElseCondition(condition: Record<string, unknown> | undefined): LabelIfElseCondition | null {
+  if (!isRecord(condition)
+    || !hasExactKeys(condition, ['type', 'version', 'when', 'then', 'else'])
+    || condition.type !== 'if_else'
+    || condition.version !== 1) return null;
+  const when = condition.when;
+  const thenBranch = parseLabelConditionBranch(condition.then);
+  const elseBranch = parseLabelConditionBranch(condition.else);
+  if (!isRecord(when) || !thenBranch || !elseBranch) return null;
+  const op = when.op;
+  if (typeof when.field !== 'string' || !when.field.trim() || when.field.length > 200) return null;
+  if (op === 'exists' || op === 'not_empty') {
+    if (!hasExactKeys(when, ['field', 'op'])) return null;
+  } else if (op === 'equals' || op === 'not_equals') {
+    if (!hasExactKeys(when, ['field', 'op', 'value']) || !isLabelConditionScalar(when.value)) return null;
+    if (typeof when.value === 'string' && when.value.length > 1000) return null;
+  } else {
+    return null;
+  }
+  return {
+    type: 'if_else',
+    version: 1,
+    when: {
+      field: when.field.trim(),
+      op: op as LabelIfElseCondition['when']['op'],
+      ...(Object.prototype.hasOwnProperty.call(when, 'value') ? { value: when.value as string | number | boolean | null } : {}),
+    },
+    then: thenBranch,
+    else: elseBranch,
+  };
+}
+
+export function labelConditionFieldIds(condition: Record<string, unknown> | undefined): string[] {
+  const advanced = readLabelIfElseCondition(condition);
+  if (advanced) {
+    const ids = [advanced.when.field];
+    if (advanced.then.type === 'field') ids.push(advanced.then.field);
+    if (advanced.else.type === 'field') ids.push(advanced.else.field);
+    return [...new Set(ids)];
+  }
+  return typeof condition?.field === 'string' && condition.field.trim()
+    ? [condition.field.trim()]
+    : [];
+}
+
+export function resolveLabelElementPreviewText(
+  element: LabelTemplateElement,
+  fieldValues: Map<string, string>,
+  fieldLabels: Map<string, string>,
+): string {
+  return resolveLabelCanvasText(element, fieldValues, fieldLabels, {
+    evaluateConditions: true,
+    keepSourceVisible: false,
+  });
+}
+
+export function resolveLabelCanvasText(
+  element: LabelTemplateElement,
+  fieldValues: Map<string, string>,
+  fieldLabels: Map<string, string>,
+  options: { evaluateConditions: boolean; keepSourceVisible: boolean },
+): string {
+  const current = element.sourceField
+    ? fieldValues.get(element.sourceField) ?? fieldLabels.get(element.sourceField) ?? element.sourceField
+    : element.staticText ?? '';
+  if (!options.evaluateConditions) return current;
+  const condition = readLabelIfElseCondition(element.condition);
+  if (!condition) return current;
+  const branch = labelConditionPasses(condition, fieldValues) ? condition.then : condition.else;
+  if (options.keepSourceVisible && branch.type === 'hidden') return current;
+  return resolvePreviewBranch(branch, current, fieldValues, fieldLabels);
+}
+
+export function findSameRowHeightSuggestion({
+  elements,
+  movingElementKey,
+  proposedHeightMm,
+  rowToleranceMm,
+  heightToleranceMm,
+}: {
+  elements: LabelTemplateElement[];
+  movingElementKey: string;
+  proposedHeightMm: number;
+  rowToleranceMm: number;
+  heightToleranceMm: number;
+}): HeightMatchSuggestion | null {
+  const moving = elements.find((element) => element.elementKey === movingElementKey);
+  if (!moving || moving.kind !== 'text') return null;
+  const proposedCenterY = Number(moving.yMm ?? 0) + proposedHeightMm / 2;
+  let best: (HeightMatchSuggestion & { distance: number }) | null = null;
+  for (const target of elements) {
+    if (target.elementKey === movingElementKey || target.kind !== 'text') continue;
+    const heightMm = Number(target.heightMm ?? 0);
+    const targetCenterY = Number(target.yMm ?? 0) + heightMm / 2;
+    const rowDistance = Math.abs(targetCenterY - proposedCenterY);
+    const heightDistance = Math.abs(heightMm - proposedHeightMm);
+    if (rowDistance > rowToleranceMm || heightDistance > heightToleranceMm) continue;
+    const distance = rowDistance + heightDistance;
+    if (!best || distance < best.distance) best = { targetElementKey: target.elementKey, heightMm, distance };
+  }
+  return best ? { targetElementKey: best.targetElementKey, heightMm: best.heightMm } : null;
+}
+
+export function selectLabelElements(
+  elements: LabelTemplateElement[],
+  currentKeys: string[],
+  elementKey: string,
+  additive: boolean,
+): string[] {
+  const unit = selectionUnit(elements, elementKey);
+  if (!additive) return unit;
+  const selected = new Set(currentKeys);
+  const remove = unit.every((key) => selected.has(key));
+  for (const key of unit) {
+    if (remove) selected.delete(key);
+    else selected.add(key);
+  }
+  return elements.map((element) => element.elementKey).filter((key) => selected.has(key));
+}
+
+export function groupLabelElements(
+  elements: LabelTemplateElement[],
+  selectedKeys: string[],
+  groupId: string,
+): LabelTemplateElement[] {
+  const expanded = expandSelectionKeys(elements, selectedKeys);
+  return elements.map((element) => expanded.has(element.elementKey)
+    ? withLabelEditorMeta(element, { groupId })
+    : element);
+}
+
+export function ungroupLabelElements(
+  elements: LabelTemplateElement[],
+  selectedKeys: string[],
+): LabelTemplateElement[] {
+  const expanded = expandSelectionKeys(elements, selectedKeys);
+  return elements.map((element) => expanded.has(element.elementKey)
+    ? withLabelEditorMeta(element, { groupId: null })
+    : element);
+}
+
+export function centerLabelSelection(
+  elements: LabelTemplateElement[],
+  selectedKeys: string[],
+  canvasWidthMm: number,
+  canvasHeightMm: number,
+  axis: 'horizontal' | 'vertical',
+): LabelTemplateElement[] {
+  const selected = elements.filter((element) => selectedKeys.includes(element.elementKey));
+  if (selected.length === 0) return elements;
+  const bounds = unionBounds(selected.map(elementAabb));
+  const delta = axis === 'horizontal'
+    ? { x: canvasWidthMm / 2 - (bounds.minX + bounds.maxX) / 2, y: 0 }
+    : { x: 0, y: canvasHeightMm / 2 - (bounds.minY + bounds.maxY) / 2 };
+  const selectedSet = new Set(selectedKeys);
+  return elements.map((element) => selectedSet.has(element.elementKey)
+    ? { ...element, xMm: roundGeometry(Number(element.xMm ?? 0) + delta.x), yMm: roundGeometry(Number(element.yMm ?? 0) + delta.y) }
+    : element);
+}
+
+export function readLabelTransformedNodes(
+  elements: LabelTemplateElement[],
+  nodes: ReadonlyMap<string, LabelTransformNode>,
+): LabelTransformSnapshot[] {
+  return elements.flatMap((element) => {
+    const node = nodes.get(element.elementKey);
+    if (!node) return [];
+    const scaleX = Math.abs(node.scaleX());
+    const scaleY = Math.abs(node.scaleY());
+    const widthMm = element.kind === 'line'
+      ? Number(element.widthMm ?? 0) * scaleX
+      : node.width() * scaleX;
+    const heightMm = element.kind === 'line'
+      ? Number(element.heightMm ?? 0) * scaleY
+      : node.height() * scaleY;
+    return [{
+      elementKey: element.elementKey,
+      xMm: node.x(),
+      yMm: node.y(),
+      widthMm: Math.max(0.1, widthMm),
+      heightMm: Math.max(element.kind === 'line' ? 0 : 0.1, heightMm),
+      rotationDeg: node.rotation(),
+    }];
+  });
+}
+
+export function readAndNormalizeLabelTransformedNodes(
+  elements: LabelTemplateElement[],
+  nodes: ReadonlyMap<string, LabelTransformNode>,
+): LabelTransformSnapshot[] {
+  // Read every selected node first. Resetting one Transformer child can update
+  // the shared Transformer box, so no node may be normalized before all raw
+  // geometries have been captured.
+  const snapshots = readLabelTransformedNodes(elements, nodes);
+  const elementsByKey = new Map(elements.map((element) => [element.elementKey, element]));
+  for (const snapshot of snapshots) {
+    const element = elementsByKey.get(snapshot.elementKey);
+    const node = nodes.get(snapshot.elementKey);
+    if (!element || !node) continue;
+    node.scaleX(1);
+    node.scaleY(1);
+    if (element.kind !== 'line') {
+      node.width(snapshot.widthMm);
+      node.height(snapshot.heightMm);
+    }
+  }
+  return snapshots;
+}
+
+export function claimLabelGestureCommit(token: LabelGestureCommitToken | null): boolean {
+  if (!token || token.committed) return false;
+  token.committed = true;
+  return true;
+}
+
+export function moveLabelDragGesture(
+  gesture: LabelDragGestureState,
+  ownerPosition: { x: number; y: number },
+  selectionBounds: { minX: number; minY: number; maxX: number; maxY: number },
+  canvas: { width: number; height: number },
+): Array<{ elementKey: string; x: number; y: number }> {
+  if (gesture.committed) return [];
+  const deltaX = clampNumber(
+    ownerPosition.x - gesture.ownerStart.x,
+    -selectionBounds.minX,
+    canvas.width - selectionBounds.maxX,
+  );
+  const deltaY = clampNumber(
+    ownerPosition.y - gesture.ownerStart.y,
+    -selectionBounds.minY,
+    canvas.height - selectionBounds.maxY,
+  );
+  return Array.from(gesture.starts, ([elementKey, start]) => ({
+    elementKey,
+    x: start.x + deltaX,
+    y: start.y + deltaY,
+  }));
+}
+
+export function normalizeLabelMultiSelectionTransform(input: {
+  elements: LabelTemplateElement[];
+  snapshots: LabelTransformSnapshot[];
+  canvasWidthMm: number;
+  canvasHeightMm: number;
+  snapToGrid: boolean;
+  rotationStep: number;
+}): LabelTransformSnapshot[] {
+  if (input.snapshots.length < 2) return input.snapshots;
+  const originals = new Map(input.elements.map((element) => [element.elementKey, element]));
+  const raw = input.snapshots.flatMap((snapshot) => {
+    const original = originals.get(snapshot.elementKey);
+    if (!original) return [];
+    const size = original.kind === 'qr' ? Math.max(snapshot.widthMm, snapshot.heightMm) : null;
+    return [{
+      ...snapshot,
+      widthMm: size ?? snapshot.widthMm,
+      heightMm: size ?? snapshot.heightMm,
+    }];
+  });
+  if (raw.length < 2) return raw;
+
+  const firstOriginal = originals.get(raw[0].elementKey);
+  if (!firstOriginal) return raw;
+  const rawRotationDelta = raw[0].rotationDeg - Number(firstOriginal.rotationDeg ?? 0);
+  const snappedRotationDelta = Math.round(rawRotationDelta / input.rotationStep) * input.rotationStep;
+  const correctionRadians = (snappedRotationDelta - rawRotationDelta) * Math.PI / 180;
+  const rawElements = raw.map((snapshot) => ({ ...originals.get(snapshot.elementKey)!, ...snapshot }));
+  const rawBounds = unionBounds(rawElements.map(elementAabb));
+  const pivot = {
+    x: (rawBounds.minX + rawBounds.maxX) / 2,
+    y: (rawBounds.minY + rawBounds.maxY) / 2,
+  };
+  const cos = Math.cos(correctionRadians);
+  const sin = Math.sin(correctionRadians);
+  const corrected = raw.map((snapshot) => {
+    const original = originals.get(snapshot.elementKey)!;
+    const dx = snapshot.xMm - pivot.x;
+    const dy = snapshot.yMm - pivot.y;
+    return {
+      ...snapshot,
+      xMm: pivot.x + dx * cos - dy * sin,
+      yMm: pivot.y + dx * sin + dy * cos,
+      rotationDeg: Number(original.rotationDeg ?? 0) + snappedRotationDelta,
+    };
+  });
+  const correctedElements = corrected.map((snapshot) => ({ ...originals.get(snapshot.elementKey)!, ...snapshot }));
+  const bounds = unionBounds(correctedElements.map(elementAabb));
+  const width = bounds.maxX - bounds.minX;
+  const height = bounds.maxY - bounds.minY;
+  const snappedMinX = input.snapToGrid ? Math.round(bounds.minX) : bounds.minX;
+  const snappedMinY = input.snapToGrid ? Math.round(bounds.minY) : bounds.minY;
+  const finalMinX = width <= input.canvasWidthMm
+    ? clampNumber(snappedMinX, 0, input.canvasWidthMm - width)
+    : 0;
+  const finalMinY = height <= input.canvasHeightMm
+    ? clampNumber(snappedMinY, 0, input.canvasHeightMm - height)
+    : 0;
+  const translationX = finalMinX - bounds.minX;
+  const translationY = finalMinY - bounds.minY;
+  return corrected.map((snapshot) => ({
+    ...snapshot,
+    xMm: snapshot.xMm + translationX,
+    yMm: snapshot.yMm + translationY,
+  }));
 }
 
 export function describeLabelFieldSource(
@@ -71,16 +485,18 @@ export function customFieldRowsFromSchema(schema: Record<string, unknown>): Cust
       ? entry.sourceField.trim()
       : null;
     const hasDefaultValue = Object.prototype.hasOwnProperty.call(entry, 'defaultValue');
+    const expression = readCustomFieldExpressionV1(entry);
     const extra = Object.fromEntries(
-      Object.entries(entry).filter(([key]) => !['label', 'type', 'sourceField', 'defaultValue'].includes(key)),
+      Object.entries(entry).filter(([key]) => !['label', 'type', 'sourceField', 'defaultValue', 'expression'].includes(key)),
     );
     return {
       fieldId,
       label: typeof entry.label === 'string' ? entry.label : '',
       type,
-      valueMode: sourceField ? 'source' : 'constant',
+      valueMode: expression ? 'expression' : sourceField ? 'source' : 'constant',
       sourceField,
       defaultValue: hasDefaultValue ? entry.defaultValue : '',
+      expression,
       extra,
     };
   });
@@ -90,7 +506,7 @@ export function customFieldRowsToSchema(rows: CustomFieldSchemaRow[]): Record<st
   return Object.fromEntries(rows.map((row) => {
     const entry: Record<string, unknown> = {
       ...row.extra,
-      type: row.type,
+      type: row.valueMode === 'expression' ? 'string' : row.type,
       label: row.label.trim(),
     };
     if (row.valueMode === 'source' && row.sourceField) {
@@ -99,8 +515,110 @@ export function customFieldRowsToSchema(rows: CustomFieldSchemaRow[]): Record<st
     if (row.valueMode === 'constant') {
       entry.defaultValue = normalizeConstantValue(row.defaultValue, row.type);
     }
+    if (row.valueMode === 'expression' && row.expression) {
+      entry.expression = row.expression;
+    }
     return [row.fieldId, entry];
   }));
+}
+
+export function readCustomFieldExpressionV1(schema: unknown): LabelCustomFieldExpressionV1 | null {
+  if (!isRecord(schema) || !isRecord(schema.expression)) return null;
+  const expression = schema.expression;
+  if (!hasExactKeys(expression, ['type', 'version', 'root'])
+    || expression.type !== 'custom_expression'
+    || expression.version !== 1) return null;
+  const budget = { nodes: 0 };
+  const root = parseCustomExpressionNode(expression.root, 1, budget);
+  return root ? { type: 'custom_expression', version: 1, root } : null;
+}
+
+export function customExpressionFieldIds(expression: LabelCustomFieldExpressionV1): string[] {
+  const result = new Set<string>();
+  visitCustomExpressionNode(expression.root, (fieldId) => result.add(fieldId));
+  return [...result];
+}
+
+export function findCustomFieldDependencyCycle(rows: CustomFieldSchemaRow[]): string[] | null {
+  const rowIds = new Set(rows.map((row) => row.fieldId));
+  const graph = new Map(rows.map((row) => [
+    row.fieldId,
+    row.expression
+      ? customExpressionFieldIds(row.expression).filter((fieldId) => rowIds.has(fieldId))
+      : [],
+  ]));
+  const visited = new Set<string>();
+  const active = new Set<string>();
+  const path: string[] = [];
+  const walk = (fieldId: string): string[] | null => {
+    if (active.has(fieldId)) {
+      const start = path.indexOf(fieldId);
+      return [...path.slice(start), fieldId];
+    }
+    if (visited.has(fieldId)) return null;
+    visited.add(fieldId);
+    active.add(fieldId);
+    path.push(fieldId);
+    for (const dependency of graph.get(fieldId) ?? []) {
+      const cycle = walk(dependency);
+      if (cycle) return cycle;
+    }
+    path.pop();
+    active.delete(fieldId);
+    return null;
+  };
+  for (const fieldId of graph.keys()) {
+    const cycle = walk(fieldId);
+    if (cycle) return cycle;
+  }
+  return null;
+}
+
+export function evaluateCustomFieldPreviewValues(
+  rows: CustomFieldSchemaRow[],
+  baseValues: Record<string, string | number | boolean | null | undefined>,
+): Record<string, string> {
+  const byId = new Map(rows.map((row) => [row.fieldId, row]));
+  const resolvedValues = new Map<string, string | number | boolean | null | undefined>();
+  const resolving = new Set<string>();
+  const resolve = (fieldId: string): string | number | boolean | null | undefined => {
+    if (resolvedValues.has(fieldId)) return resolvedValues.get(fieldId);
+    const row = byId.get(fieldId);
+    if (!row) return baseValues[fieldId];
+    if (resolving.has(fieldId)) return '';
+    resolving.add(fieldId);
+    let value: string | number | boolean | null | undefined;
+    if (row.valueMode === 'expression' && row.expression) {
+      value = evaluateCustomExpressionNode(row.expression.root, (dependency) => resolve(dependency));
+    } else if (row.valueMode === 'source' && row.sourceField) {
+      value = resolve(row.sourceField);
+    } else {
+      value = normalizeCustomPreviewScalar(row.defaultValue);
+    }
+    resolving.delete(fieldId);
+    resolvedValues.set(fieldId, value);
+    return value;
+  };
+  rows.forEach((row) => resolve(row.fieldId));
+  return Object.fromEntries(rows.map((row) => [
+    row.fieldId,
+    stringifyCustomExpressionValue(resolvedValues.get(row.fieldId)),
+  ]));
+}
+
+export function summarizeCustomFieldExpression(
+  expression: LabelCustomFieldExpressionV1,
+  fieldLabels: ReadonlyMap<string, string>,
+): string {
+  return summarizeCustomExpressionNode(expression.root, fieldLabels);
+}
+
+export function isCustomFieldExpressionValid(
+  expression: LabelCustomFieldExpressionV1,
+  allowedFieldIds: ReadonlySet<string>,
+): boolean {
+  const parsed = readCustomFieldExpressionV1({ expression });
+  return Boolean(parsed) && customExpressionFieldIds(parsed!).every((fieldId) => allowedFieldIds.has(fieldId));
 }
 
 export function resolveLatestStateUpdate<T>(
@@ -186,6 +704,255 @@ function elementCenterAt(
     xMm: xMm + Math.cos(radians) * halfWidth - Math.sin(radians) * halfHeight,
     yMm: yMm + Math.sin(radians) * halfWidth + Math.cos(radians) * halfHeight,
   };
+}
+
+function parseCustomExpressionNode(
+  value: unknown,
+  depth: number,
+  budget: { nodes: number },
+): LabelCustomExpressionNode | null {
+  if (!isRecord(value) || depth > 8) return null;
+  budget.nodes += 1;
+  if (budget.nodes > 100) return null;
+  if (value.type === 'empty') return hasExactKeys(value, ['type']) ? { type: 'empty' } : null;
+  if (value.type === 'field') {
+    return hasExactKeys(value, ['type', 'field']) && isCustomExpressionFieldId(value.field)
+      ? { type: 'field', field: value.field.trim() }
+      : null;
+  }
+  if (value.type === 'text') {
+    return hasExactKeys(value, ['type', 'value']) && typeof value.value === 'string' && value.value.length <= 1000
+      ? { type: 'text', value: value.value }
+      : null;
+  }
+  if (value.type === 'concat') {
+    if (!hasExactKeys(value, ['type', 'parts']) || !Array.isArray(value.parts)
+      || value.parts.length === 0 || value.parts.length > 20) return null;
+    const parts: LabelCustomExpressionNode[] = [];
+    for (const part of value.parts) {
+      const parsed = parseCustomExpressionNode(part, depth + 1, budget);
+      if (!parsed) return null;
+      parts.push(parsed);
+    }
+    return { type: 'concat', parts };
+  }
+  if (value.type === 'if_else') {
+    if (!hasExactKeys(value, ['type', 'when', 'then', 'else']) || !isRecord(value.when)) return null;
+    const when = parseCustomExpressionWhen(value.when);
+    const thenNode = parseCustomExpressionNode(value.then, depth + 1, budget);
+    const elseNode = parseCustomExpressionNode(value.else, depth + 1, budget);
+    return when && thenNode && elseNode
+      ? { type: 'if_else', when, then: thenNode, else: elseNode }
+      : null;
+  }
+  return null;
+}
+
+function parseCustomExpressionWhen(
+  value: Record<string, unknown>,
+): Extract<LabelCustomExpressionNode, { type: 'if_else' }>['when'] | null {
+  if (!isCustomExpressionFieldId(value.field)) return null;
+  if (value.op === 'exists' || value.op === 'not_empty') {
+    return hasExactKeys(value, ['field', 'op'])
+      ? { field: value.field.trim(), op: value.op }
+      : null;
+  }
+  if (value.op !== 'equals' && value.op !== 'not_equals') return null;
+  if (!hasExactKeys(value, ['field', 'op', 'value']) || !isLabelConditionScalar(value.value)) return null;
+  if (typeof value.value === 'string' && value.value.length > 1000) return null;
+  return { field: value.field.trim(), op: value.op, value: value.value };
+}
+
+function visitCustomExpressionNode(node: LabelCustomExpressionNode, visit: (fieldId: string) => void): void {
+  if (node.type === 'field') {
+    visit(node.field);
+    return;
+  }
+  if (node.type === 'concat') {
+    node.parts.forEach((part) => visitCustomExpressionNode(part, visit));
+    return;
+  }
+  if (node.type === 'if_else') {
+    visit(node.when.field);
+    visitCustomExpressionNode(node.then, visit);
+    visitCustomExpressionNode(node.else, visit);
+  }
+}
+
+function evaluateCustomExpressionNode(
+  node: LabelCustomExpressionNode,
+  getValue: (fieldId: string) => string | number | boolean | null | undefined,
+): string {
+  if (node.type === 'empty') return '';
+  if (node.type === 'text') return ensureCustomExpressionPreviewLength(node.value);
+  if (node.type === 'field') return ensureCustomExpressionPreviewLength(stringifyCustomExpressionValue(getValue(node.field)));
+  if (node.type === 'concat') {
+    let result = '';
+    for (const part of node.parts) {
+      result = ensureCustomExpressionPreviewLength(result + evaluateCustomExpressionNode(part, getValue));
+    }
+    return result;
+  }
+  const value = getValue(node.when.field);
+  const matches = node.when.op === 'exists'
+    ? value !== undefined && value !== null
+    : node.when.op === 'not_empty'
+      ? value !== undefined && value !== null && String(value) !== ''
+      : node.when.op === 'equals'
+        ? String(value ?? '') === String(node.when.value ?? '')
+        : String(value ?? '') !== String(node.when.value ?? '');
+  return evaluateCustomExpressionNode(matches ? node.then : node.else, getValue);
+}
+
+function summarizeCustomExpressionNode(
+  node: LabelCustomExpressionNode,
+  fieldLabels: ReadonlyMap<string, string>,
+): string {
+  if (node.type === 'empty') return 'пропуск';
+  if (node.type === 'field') return fieldLabels.get(node.field) ?? node.field;
+  if (node.type === 'text') return `«${node.value || 'пусто'}»`;
+  if (node.type === 'concat') return node.parts.map((part) => summarizeCustomExpressionNode(part, fieldLabels)).join(' + ');
+  const operator = {
+    exists: 'существует',
+    not_empty: 'не пусто',
+    equals: `= ${String(node.when.value ?? '')}`,
+    not_equals: `≠ ${String(node.when.value ?? '')}`,
+  }[node.when.op];
+  return `IF ${fieldLabels.get(node.when.field) ?? node.when.field} ${operator}: ${summarizeCustomExpressionNode(node.then, fieldLabels)}; ELSE: ${summarizeCustomExpressionNode(node.else, fieldLabels)}`;
+}
+
+function stringifyCustomExpressionValue(value: string | number | boolean | null | undefined): string {
+  return value == null ? '' : String(value);
+}
+
+function normalizeCustomPreviewScalar(value: unknown): string | number | boolean | null | undefined {
+  if (value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value ?? null;
+  }
+  return JSON.stringify(value);
+}
+
+function ensureCustomExpressionPreviewLength(value: string): string {
+  if (value.length <= 10_000) return value;
+  throw new Error('LABEL_CUSTOM_EXPRESSION_RESULT_TOO_LONG');
+}
+
+function isCustomExpressionFieldId(value: unknown): value is string {
+  return typeof value === 'string' && Boolean(value.trim()) && value.length <= 200;
+}
+
+function parseLabelConditionBranch(value: unknown): LabelConditionBranch | null {
+  if (!isRecord(value) || typeof value.type !== 'string') return null;
+  if (value.type === 'current' || value.type === 'hidden') {
+    return hasExactKeys(value, ['type']) ? { type: value.type } : null;
+  }
+  if (value.type === 'field') {
+    return hasExactKeys(value, ['type', 'field'])
+      && typeof value.field === 'string'
+      && Boolean(value.field.trim())
+      && value.field.length <= 200
+      ? { type: 'field', field: value.field.trim() }
+      : null;
+  }
+  return value.type === 'text'
+    && hasExactKeys(value, ['type', 'value'])
+    && typeof value.value === 'string'
+    && value.value.length <= 1000
+    ? { type: 'text', value: value.value }
+    : null;
+}
+
+function hasExactKeys(value: Record<string, unknown>, required: string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === required.length
+    && required.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function isLabelConditionScalar(value: unknown): value is string | number | boolean | null {
+  return value === null
+    || typeof value === 'string'
+    || typeof value === 'boolean'
+    || (typeof value === 'number' && Number.isFinite(value));
+}
+
+function labelConditionPasses(
+  condition: LabelIfElseCondition,
+  values: Map<string, string>,
+): boolean {
+  const value = values.get(condition.when.field);
+  if (condition.when.op === 'exists') return value !== undefined && value !== null;
+  if (condition.when.op === 'not_empty') return value !== undefined && value !== null && value !== '';
+  if (condition.when.op === 'equals') return String(value ?? '') === String(condition.when.value ?? '');
+  return String(value ?? '') !== String(condition.when.value ?? '');
+}
+
+function resolvePreviewBranch(
+  branch: LabelConditionBranch,
+  current: string,
+  values: Map<string, string>,
+  labels: Map<string, string>,
+): string {
+  if (branch.type === 'current') return current;
+  if (branch.type === 'hidden') return '';
+  if (branch.type === 'text') return branch.value;
+  return values.get(branch.field) ?? labels.get(branch.field) ?? branch.field;
+}
+
+function selectionUnit(elements: LabelTemplateElement[], elementKey: string): string[] {
+  const target = elements.find((element) => element.elementKey === elementKey);
+  if (!target) return [];
+  const groupId = readLabelEditorMeta(target).groupId;
+  if (!groupId) return [elementKey];
+  return elements
+    .filter((element) => readLabelEditorMeta(element).groupId === groupId)
+    .map((element) => element.elementKey);
+}
+
+function expandSelectionKeys(elements: LabelTemplateElement[], selectedKeys: string[]): Set<string> {
+  const expanded = new Set<string>();
+  for (const key of selectedKeys) {
+    for (const unitKey of selectionUnit(elements, key)) expanded.add(unitKey);
+  }
+  return expanded;
+}
+
+function elementAabb(element: LabelTemplateElement): { minX: number; minY: number; maxX: number; maxY: number } {
+  const x = Number(element.xMm ?? 0);
+  const y = Number(element.yMm ?? 0);
+  const width = Math.max(0, Number(element.widthMm ?? 0));
+  const height = Math.max(0, Number(element.heightMm ?? 0));
+  const radians = Number(element.rotationDeg ?? 0) * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const corners = [
+    [0, 0],
+    [width, 0],
+    [0, height],
+    [width, height],
+  ].map(([dx, dy]) => ({ x: x + dx * cos - dy * sin, y: y + dx * sin + dy * cos }));
+  return {
+    minX: Math.min(...corners.map((corner) => corner.x)),
+    minY: Math.min(...corners.map((corner) => corner.y)),
+    maxX: Math.max(...corners.map((corner) => corner.x)),
+    maxY: Math.max(...corners.map((corner) => corner.y)),
+  };
+}
+
+function unionBounds(bounds: Array<{ minX: number; minY: number; maxX: number; maxY: number }>) {
+  return {
+    minX: Math.min(...bounds.map((bound) => bound.minX)),
+    minY: Math.min(...bounds.map((bound) => bound.minY)),
+    maxX: Math.max(...bounds.map((bound) => bound.maxX)),
+    maxY: Math.max(...bounds.map((bound) => bound.maxY)),
+  };
+}
+
+function roundGeometry(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function normalizeConstantValue(value: unknown, type: CustomFieldType): unknown {

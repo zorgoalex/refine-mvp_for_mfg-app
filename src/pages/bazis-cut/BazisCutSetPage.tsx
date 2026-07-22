@@ -11,7 +11,9 @@ import {
 } from '../../api/bazisCutApi';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
+import { buildBazisCutQrCode, summarizeBazisCutDetails } from './bazisCutDetailPresentation';
 import { saveBazisCutFile, type BazisCutSaveHandle } from './bazisCutSaveFile';
+import './BazisCutSetPage.css';
 
 const { Title, Text } = Typography;
 
@@ -53,6 +55,17 @@ const FIELDS: FieldDefinition[] = [
   { key: 'route', label: '%Маршрут', group: 'Дополнительно', kind: 'text' },
   { key: 'film', label: '%Пленка', group: 'Дополнительно', kind: 'text' },
 ];
+const FIELD_GROUPS = ['Основное', 'Размеры', 'Кромки', 'Дополнительно'] as const;
+const GROUPED_FIELDS = FIELD_GROUPS.flatMap((group) =>
+  FIELDS.filter((field) => field.group === group && field.key !== 'position' && field.key !== 'partName'),
+);
+const LEADING_COLUMN_COUNT = 6;
+const QR_CODE_COLUMN_INDEX = 4;
+const QR_CODE_STICKY_CLASS = 'bazis-cut-sticky-qr';
+const QR_CODE_STICKY_LEFT_PX = 58 + 180 + 150;
+const TOTAL_LABEL_COLUMN_INDEX = LEADING_COLUMN_COUNT - 1;
+const QUANTITY_COLUMN_INDEX = LEADING_COLUMN_COUNT
+  + GROUPED_FIELDS.findIndex((field) => field.key === 'quantity');
 
 export const BazisCutSetPage: React.FC = () => {
   const { id } = useParams(); const setId = Number(id); const valid = Number.isInteger(setId) && setId > 0;
@@ -126,26 +139,29 @@ export const BazisCutSetPage: React.FC = () => {
     {set && <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 4 }} style={{ marginTop: 16 }}>
       <Descriptions.Item label="Сформирован">{new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(set.createdAt))}</Descriptions.Item>
       <Descriptions.Item label="Деталей"><span style={{ fontVariantNumeric: 'tabular-nums' }}>{set.quantity}</span></Descriptions.Item>
-      <Descriptions.Item label="Позиций">{set.positionCount}</Descriptions.Item>
+      <Descriptions.Item label="Позиций"><span style={{ fontVariantNumeric: 'tabular-nums' }}>{set.positionCount}</span></Descriptions.Item>
       <Descriptions.Item label="ERP-заказы"><SourceRefs refs={set.orders} href={(refId) => `/orders/show/${refId}`} /></Descriptions.Item>
       <Descriptions.Item label="ERP-проекты"><SourceRefs refs={set.projects} /></Descriptions.Item>
       <Descriptions.Item label="Базис-проекты"><SourceRefs refs={set.bazisProjects} href={(refId) => `/bazis/projects/${refId}`} /></Descriptions.Item>
       <Descriptions.Item label="Базис-заказы"><SourceRefs refs={set.bazisOrders} /></Descriptions.Item>
     </Descriptions>}</Card>
-    <Card title="Детали набора"><Table rowKey="bazisCutSetDetailId" columns={columns} dataSource={set?.details ?? []}
-      loading={loading} pagination={false} scroll={{ x: 5200 }} sticky={{ offsetHeader: tableHeaderOffset }}
+    <Card title="Детали набора"><Table className="bazis-cut-set-details-table"
+      style={{ '--bazis-cut-sticky-qr-left': `${QR_CODE_STICKY_LEFT_PX}px` } as React.CSSProperties}
+      rowKey="bazisCutSetDetailId" columns={columns} dataSource={set?.details ?? []}
+      loading={loading} pagination={false} scroll={{ x: 5320, y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
+      summary={(details) => <DetailTableSummary details={details} canManage={canManage} />}
       size="small" locale={{ emptyText: 'В наборе нет деталей' }} /></Card>
   </Space>
   <Modal width={1000} title={`Редактирование позиции ${editing?.position ?? ''}`} open={editing !== null}
     onCancel={() => setEditing(null)} onOk={() => void saveDetail()} confirmLoading={saving} okText="Сохранить" cancelText="Отмена" destroyOnClose>
-    <Form form={detailForm} layout="vertical">{(['Основное', 'Размеры', 'Кромки', 'Дополнительно'] as const).map((group) => <Card key={group} size="small" title={group} style={{ marginBottom: 12 }}><Row gutter={12}>
+    <Form form={detailForm} layout="vertical">{FIELD_GROUPS.map((group) => <Card key={group} size="small" title={group} style={{ marginBottom: 12 }}><Row gutter={12}>
       {FIELDS.filter((field) => field.group === group).map((field) => <Col xs={24} md={field.kind === 'long' ? 24 : 8} key={field.key}><FieldInput field={field} /></Col>)}
     </Row></Card>)}</Form>
   </Modal></div>;
 };
 
 const FieldInput: React.FC<{ field: FieldDefinition }> = ({ field }) => {
-  const rules = field.key === 'materialName' || field.key === 'position' || field.key === 'partName' || field.key === 'materialType'
+  const rules = field.key === 'materialName' || field.key === 'partName' || field.key === 'materialType'
     ? [{ required: true, message: 'Обязательное поле' }] : [];
   if (field.kind === 'boolean') return <Form.Item name={field.key} label={field.label} valuePropName="checked"><Checkbox>Да</Checkbox></Form.Item>;
   if (field.kind === 'number' || field.kind === 'integer') return <Form.Item name={field.key} label={field.label} rules={rules}>
@@ -157,24 +173,48 @@ function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) =
   const valueColumn = (field: FieldDefinition) => ({ title: field.label, dataIndex: field.key, key: field.key, width: field.kind === 'long' ? 220 : 140,
     align: field.kind === 'number' || field.kind === 'integer' ? 'right' as const : undefined,
     render: (value: unknown) => field.kind === 'boolean' ? (value ? 'Да' : 'Нет') : value == null || value === '' ? <Text type="secondary">—</Text> : <span style={{ fontVariantNumeric: field.kind === 'number' || field.kind === 'integer' ? 'tabular-nums' : undefined }}>{String(value)}</span> });
-  const withoutFixed = FIELDS.filter((field) => field.key !== 'position' && field.key !== 'partName');
-  const grouped = (['Основное', 'Размеры', 'Кромки', 'Дополнительно'] as const).map((group) => ({ title: group, children: withoutFixed.filter((field) => field.group === group).map(valueColumn) }));
+  const grouped = FIELD_GROUPS.map((group) => ({ title: group, children: GROUPED_FIELDS.filter((field) => field.group === group).map(valueColumn) }));
   return [
+    { title: '№', key: 'rowNumber', fixed: 'left', width: 58, align: 'right',
+      render: (_: unknown, _row: BazisCutSetDetailDto, index: number) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{index + 1}</span> },
     { title: 'Источник', key: 'source', fixed: 'left', width: 180, render: (_, row) => row.sourceOrderId ? <Link to={`/orders/show/${row.sourceOrderId}`}>{row.sourceOrderFullNumber || row.sourceOrderName}</Link> : 'Снимок' },
     { title: 'Базис заказ', dataIndex: 'sourceBazisOrderNo', key: 'sourceBazisOrderNo', fixed: 'left', width: 150,
       render: (value: string) => value
         ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span>
         : <Text type="secondary">—</Text> },
-    { title: 'Базис изделие', dataIndex: 'sourceBazisProductName', key: 'sourceBazisProductName',
-      fixed: 'left', width: 160, render: (value: string) => value || <Text type="secondary">—</Text> },
-    { title: 'Позиция', dataIndex: 'position', key: 'position', fixed: 'left', width: 130 },
-    { title: 'Наименование', dataIndex: 'partName', key: 'partName', fixed: 'left', width: 200 },
+    { title: 'Позиция', dataIndex: 'position', key: 'position', width: 130,
+      render: (value: string) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span> },
+    { title: 'QR-code', key: 'qrCode', className: QR_CODE_STICKY_CLASS, width: 220, render: (_: unknown, row: BazisCutSetDetailDto) => {
+      const qrCode = buildBazisCutQrCode(row);
+      return qrCode
+        ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{qrCode}</span>
+        : <Text type="secondary">—</Text>;
+    } },
+    { title: 'Наименование', dataIndex: 'partName', key: 'partName', width: 200 },
     ...grouped,
     ...(canManage ? [{ title: 'Действия', key: 'actions', fixed: 'right' as const, width: 110,
       render: (_: unknown, row: BazisCutSetDetailDto) => <Space><Button aria-label="Редактировать" icon={<EditOutlined />} onClick={() => edit(row)} />
         <Popconfirm title="Удалить деталь из набора?" onConfirm={() => void remove(row.bazisCutSetDetailId)} okText="Удалить" cancelText="Отмена"><Button danger aria-label="Удалить" icon={<DeleteOutlined />} /></Popconfirm></Space> }] : []),
   ];
 }
+
+const DetailTableSummary: React.FC<{
+  details: readonly BazisCutSetDetailDto[];
+  canManage: boolean;
+}> = ({ details, canManage }) => {
+  const totals = summarizeBazisCutDetails(details);
+  const columnCount = LEADING_COLUMN_COUNT + GROUPED_FIELDS.length + (canManage ? 1 : 0);
+  return <Table.Summary fixed="bottom"><Table.Summary.Row style={{ backgroundColor: 'var(--app-surface-muted)' }}>
+    {Array.from({ length: columnCount }, (_, index) => <Table.Summary.Cell key={index} index={index}
+      className={index === QR_CODE_COLUMN_INDEX ? QR_CODE_STICKY_CLASS : undefined}>
+      {index === TOTAL_LABEL_COLUMN_INDEX
+        ? <div style={{ textAlign: 'right' }}><Text strong>Итого позиций: <span style={{ fontVariantNumeric: 'tabular-nums' }}>{totals.positionCount}</span></Text></div>
+        : index === QUANTITY_COLUMN_INDEX
+          ? <div style={{ textAlign: 'right' }}><Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{totals.quantity}</Text></div>
+          : null}
+    </Table.Summary.Cell>)}
+  </Table.Summary.Row></Table.Summary>;
+};
 
 function fieldsOf(detail: BazisCutSetDetailDto): BazisCutDetailFields { return Object.fromEntries(FIELDS.map((field) => [field.key, detail[field.key]])) as unknown as BazisCutDetailFields; }
 function commandKey(prefix: string): string { return `${prefix}-${typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`; }

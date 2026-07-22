@@ -6,7 +6,7 @@ export const BAZIS_CUT_SHEET_NAME = 'Детали для раскроя';
 
 export const BAZIS_CUT_HEADERS = [
   'Кроить', 'Тип материала', 'Материал', 'Артикул материала', 'Толщина',
-  'Заказ', 'Изделие', 'Позиция', 'Наименования', 'Длина готовая', 'Ширина готовая',
+  'Заказ', 'Позиция', 'QR-code', 'Наименования', 'Длина готовая', 'Ширина готовая',
   'Длина распиловочная', 'Ширина распиловочная', 'Кол-во', 'Ориентация', 'Паз',
   'L1 - Наим.', 'L1 - Обозн.', 'L1 - Толщина', 'L2 - Наим.', 'L2 - Обозн.',
   'L2 - Толщина', 'W1 - Наим.', 'W1 - Обозн.', 'W1 - Толщина', 'W2 - Наим.',
@@ -36,12 +36,12 @@ export function buildBazisCutXls(details: readonly BazisCutSetDetailDto[]): Buff
 }
 
 export function bazisCutFieldsToRow(
-  detail: BazisCutDetailFields & { sourceBazisOrderNo?: string; sourceBazisProductName?: string },
+  detail: BazisCutDetailFields & { sourceBazisOrderNo?: string },
 ): unknown[] {
   return [
       detail.cutEnabled ? 'Да' : 'Нет', detail.materialType, safeText(detail.materialName),
       safeText(detail.materialArticle), detail.thicknessMm, safeText(detail.sourceBazisOrderNo ?? ''),
-      safeText(detail.sourceBazisProductName ?? ''), exportPosition(detail),
+      safeText(detail.position), buildBazisCutQrCode(detail),
       safeText(detail.partName), detail.finishedLengthMm, detail.finishedWidthMm,
       detail.cutLengthMm, detail.cutWidthMm, detail.quantity, safeText(detail.orientation),
       safeText(detail.groove), safeText(detail.l1Name), safeText(detail.l1Designation),
@@ -54,11 +54,10 @@ export function bazisCutFieldsToRow(
     ];
 }
 
-function exportPosition(
-  detail: BazisCutDetailFields & { sourceBazisOrderNo?: string; sourceBazisProductName?: string },
+export function buildBazisCutQrCode(
+  detail: BazisCutDetailFields & { sourceBazisOrderNo?: string },
 ): string {
-  const prefix = `${detail.sourceBazisOrderNo?.trim() ?? ''}${detail.sourceBazisProductName?.trim() ?? ''}`;
-  return prefix ? `${prefix}.${detail.position.trim()}` : detail.position.trim();
+  return `${detail.sourceBazisOrderNo?.trim() ?? ''}${detail.position.trim()}`;
 }
 
 function safeText(value: string): string {
