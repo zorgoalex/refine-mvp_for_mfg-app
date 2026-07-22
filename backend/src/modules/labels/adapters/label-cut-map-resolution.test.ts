@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseClient } from '../../../database/database.types';
+import { renderSvgPages } from '../application/label-renderer';
 import type { LabelRow } from '../application/label-row-builder';
 import type { LabelTemplateDto } from '../application/labels.types';
 import { resolveLabelCutMaps } from './pg-labels-repository';
@@ -41,21 +42,87 @@ describe('label cut-map resolution', () => {
     )).rejects.toMatchObject({ code: 'LABEL_CUT_MAP_SELECTION_MISMATCH' });
   });
 
-  it('requires a choice for every rendered label row', async () => {
+  it('keeps a label without a cut-map when the physical detail was not cut', async () => {
+    const client = databaseReturning();
+    const resolved = await resolveLabelCutMaps(client, template(), [labelRow()], [], 20);
+
+    expect(resolved.rows[0].cutMap).toBeUndefined();
+    expect(renderSvgPages(template(), resolved.rows, resolved.assets).pages[0])
+      .not.toContain('data-label-element-kind="cut_map"');
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining('JOIN unnest($1::bigint[], $2::bigint[], $3::integer[])'),
+      [[20], [10], [1]],
+    );
+  });
+
+  it('requires a selection when the physical detail has a valid cut placement', async () => {
     const client = databaseReturning(placementRow());
+
     await expect(resolveLabelCutMaps(client, template(), [labelRow()], [], 20))
       .rejects.toMatchObject({ code: 'LABEL_CUT_MAP_SELECTION_REQUIRED' });
-    expect(client.query).not.toHaveBeenCalled();
+  });
+
+  it('rejects an omitted placement when the detail changed after cutting', async () => {
+    const client = databaseReturning(placementRow({ dimensions_match: false }));
+
+    await expect(resolveLabelCutMaps(client, template(), [labelRow()], [], 20))
+      .rejects.toMatchObject({ code: 'LABEL_CUT_MAP_DETAIL_CHANGED' });
+  });
+
+  it('resolves selected cut rows while keeping uncut order rows in the same generation', async () => {
+    const client = databaseReturningSequence([], [placementRow()]);
+    const resolved = await resolveLabelCutMaps(
+      client,
+      template(),
+      [labelRow(), labelRow({ rowIndex: 2, detailId: 11 })],
+      [{ detailId: 10, copyIndex: 1, cutResultPlacementId: 700 }],
+      20,
+    );
+
+    expect(resolved.rows[0].cutMap?.cutResultPlacementId).toBe(700);
+    expect(resolved.rows[1].cutMap).toBeUndefined();
+    const pages = renderSvgPages(template(), resolved.rows, resolved.assets).pages;
+    expect(pages[0]).toContain('data-label-element-kind="cut_map"');
+    expect(pages[1]).not.toContain('data-label-element-kind="cut_map"');
+  });
+
+  it('rotates a landscape cut sheet to match a portrait template placeholder', async () => {
+    const client = databaseReturning(placementRow());
+    const portraitTemplate = template();
+    portraitTemplate.elements[0] = {
+      ...portraitTemplate.elements[0],
+      widthMm: 18,
+      heightMm: 42,
+    };
+    const resolved = await resolveLabelCutMaps(
+      client,
+      portraitTemplate,
+      [labelRow()],
+      [{ detailId: 10, copyIndex: 1, cutResultPlacementId: 700 }],
+      20,
+    );
+
+    const svg = renderSvgPages(portraitTemplate, resolved.rows, resolved.assets).pages[0];
+    expect(svg).toContain('width="18" height="42" viewBox="0 0 2070 2800"');
+    expect(svg).toContain('transform="translate(2070 0) rotate(90)"');
   });
 });
 
-function databaseReturning(row: ReturnType<typeof placementRow>): DatabaseClient & { query: ReturnType<typeof vi.fn> } {
+function databaseReturning(row?: ReturnType<typeof placementRow>): DatabaseClient & { query: ReturnType<typeof vi.fn> } {
   return {
-    query: vi.fn().mockResolvedValue({ rows: [row], rowCount: 1 }),
+    query: vi.fn().mockResolvedValue({ rows: row ? [row] : [], rowCount: row ? 1 : 0 }),
   } as unknown as DatabaseClient & { query: ReturnType<typeof vi.fn> };
 }
 
-function labelRow(): LabelRow {
+function databaseReturningSequence(...rows: Array<Array<ReturnType<typeof placementRow>>>): DatabaseClient & { query: ReturnType<typeof vi.fn> } {
+  const query = vi.fn();
+  for (const resultRows of rows) {
+    query.mockResolvedValueOnce({ rows: resultRows, rowCount: resultRows.length });
+  }
+  return { query } as unknown as DatabaseClient & { query: ReturnType<typeof vi.fn> };
+}
+
+function labelRow(overrides: Partial<LabelRow> = {}): LabelRow {
   return {
     rowIndex: 1,
     detailId: 10,
@@ -63,6 +130,7 @@ function labelRow(): LabelRow {
     copyIndex: 1,
     copyCount: 1,
     values: {},
+    ...overrides,
   };
 }
 

@@ -35,7 +35,7 @@ describe('PgLabelsRepository structural guards', () => {
   });
 
   it('matches cut-map options against immutable snapshot dimensions', () => {
-    expect(source.match(/jsonb_array_elements\(r\.snapshot_job -> 'items'\)/g)).toHaveLength(2);
+    expect(source.match(/jsonb_array_elements\(r\.snapshot_job -> 'items'\)/g)).toHaveLength(3);
     expect(source).toMatch(/snapshot_item\.item_json #>> '\{detail,width\}'/);
     expect(source).toMatch(/snapshot_item\.item_json #>> '\{detail,height\}'/);
     expect(source).not.toMatch(/abs\(maps\.detail_width_mm - od\.width\)/);

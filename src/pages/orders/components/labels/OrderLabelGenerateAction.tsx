@@ -89,6 +89,27 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     : 1;
   const hasCutMap = Boolean(selectedTemplate?.elements.some((element) => element.kind === 'cut_map'));
   const cutMapRows = useMemo(() => buildOrderCutMapLabelRows(cutMapOptions), [cutMapOptions]);
+  const staleCutMapRowKeys = useMemo(() => {
+    const staleCandidates = new Set<string>();
+    for (const detail of cutMapOptions?.details ?? []) {
+      for (const option of detail.options) {
+        if (!option.dimensionsMatch) staleCandidates.add(`${detail.detailId}:${option.instance}`);
+      }
+    }
+    return new Set(
+      cutMapRows
+        .filter((row) => row.options.length === 0 && staleCandidates.has(row.key))
+        .map((row) => row.key),
+    );
+  }, [cutMapOptions, cutMapRows]);
+  const selectableCutMapRows = useMemo(
+    () => cutMapRows.filter((row) => row.options.length > 0 || staleCutMapRowKeys.has(row.key)),
+    [cutMapRows, staleCutMapRowKeys],
+  );
+  const labelsWithoutCutMap = cutMapRows.filter(
+    (row) => row.options.length === 0 && !staleCutMapRowKeys.has(row.key),
+  ).length;
+  const staleCutMapCount = cutMapRows.filter((row) => staleCutMapRowKeys.has(row.key)).length;
   const previewCutMapSelections = useMemo(
     () => hasCutMap ? buildOrderCutMapSelections(cutMapRows, cutMapSelection, previewDetailId) : undefined,
     [cutMapRows, cutMapSelection, hasCutMap, previewDetailId],
@@ -98,12 +119,12 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     [cutMapRows, cutMapSelection, hasCutMap],
   );
   const missingPreviewCutMaps = useMemo(
-    () => hasCutMap ? missingOrderCutMapRows(cutMapRows, cutMapSelection, previewDetailId) : [],
-    [cutMapRows, cutMapSelection, hasCutMap, previewDetailId],
+    () => hasCutMap ? missingOrderCutMapRows(selectableCutMapRows, cutMapSelection, previewDetailId) : [],
+    [cutMapSelection, hasCutMap, previewDetailId, selectableCutMapRows],
   );
   const missingGenerationCutMaps = useMemo(
-    () => hasCutMap ? missingOrderCutMapRows(cutMapRows, cutMapSelection) : [],
-    [cutMapRows, cutMapSelection, hasCutMap],
+    () => hasCutMap ? missingOrderCutMapRows(selectableCutMapRows, cutMapSelection) : [],
+    [cutMapSelection, hasCutMap, selectableCutMapRows],
   );
   const detailFilters = useMemo(
     () => previewDetailId ? { detailIds: [previewDetailId] } : undefined,
@@ -245,99 +266,184 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
             Сформировать и скачать
           </Button>,
         ]}
-        width={680}
+        width={1080}
         destroyOnClose
       >
         <style>{`
+          .order-label-generate-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(360px, 0.9fr);
+            gap: 20px;
+            align-items: start;
+          }
+          .order-label-generate-controls,
+          .order-label-generate-preview-panel {
+            min-width: 0;
+          }
+          .order-label-generate-preview-panel {
+            position: sticky;
+            top: 0;
+            padding: 16px;
+            border-radius: 12px;
+            background: var(--app-surface, #fff);
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 8px 24px rgba(0, 0, 0, 0.06);
+          }
+          .order-label-generate-preview-empty {
+            display: grid;
+            min-height: 240px;
+            place-items: center;
+            padding: 24px;
+            text-align: center;
+          }
+          .order-label-cut-map-list {
+            max-height: 360px;
+            overflow-y: auto;
+            padding-right: 4px;
+          }
+          .order-label-cut-map-row {
+            display: grid;
+            grid-template-columns: minmax(140px, 0.75fr) minmax(200px, 1.25fr);
+            gap: 8px;
+            align-items: center;
+          }
           .order-label-preview-fit svg {
             display: block;
             width: 100%;
             height: 100%;
           }
+          @media (max-width: 860px) {
+            .order-label-generate-layout {
+              grid-template-columns: minmax(0, 1fr);
+            }
+            .order-label-generate-preview-panel {
+              position: static;
+            }
+            .order-label-cut-map-row {
+              grid-template-columns: minmax(0, 1fr);
+            }
+          }
         `}</style>
-        <Space direction="vertical" style={{ width: '100%' }} size={12}>
-          {isOrderDirty && <Alert type="warning" showIcon message="Сначала сохраните заказ" />}
-          <Select
-            style={{ width: '100%' }}
-            value={templateId}
-            loading={loading}
-            onChange={(value) => {
-              setTemplateId(value);
-            }}
-            options={templates.map((template) => ({
-              value: template.labelTemplateId,
-              label: template.isActive ? template.name : `${template.name} (архив)`,
-            }))}
-            placeholder="Шаблон"
-          />
-          {detailOptions.length > 0 && (
-            <Select
-              style={{ width: '100%' }}
-              value={previewDetailId ?? 0}
-              onChange={(value) => {
-                setPreviewDetailId(value || null);
-              }}
-              options={[
-                { value: 0, label: 'Все позиции: показать первую бирку' },
-                ...detailOptions.map((detail) => ({ value: detail.detailId, label: detail.label })),
-              ]}
-              placeholder="Позиция для предпросмотра"
-            />
-          )}
-          <Checkbox
-            checked={useBasisFields}
-            onChange={(event) => {
-              setUseBasisFields(event.target.checked);
-            }}
-          >
-            Использовать поля базис проекта
-          </Checkbox>
-          {hasCutMap && (
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Text strong>Раскрой для миниатюры</Text>
-              <Text type="secondary">
-                Для каждого физического экземпляра выберите результат раскроя. Лист и положение детали определяются автоматически.
-              </Text>
-              {!canViewCut && <Alert type="error" showIcon message="Нет права на просмотр раскроев" />}
-              {cutMapOptionsLoading && <Text type="secondary">Загрузка раскроев...</Text>}
-              {!cutMapOptionsLoading && missingGenerationCutMaps.length > 0 && (
-                <Alert
-                  type="warning"
-                  showIcon
-                  message={`Не выбран раскрой для ${missingGenerationCutMaps.length} бирок`}
-                  description="Бирки с пустой или устаревшей картой не формируются. Рассчитайте раскрой либо выберите другой результат."
+        <div className="order-label-generate-layout">
+          <div className="order-label-generate-controls">
+            <Space direction="vertical" style={{ width: '100%' }} size={12}>
+              {isOrderDirty && <Alert type="warning" showIcon message="Сначала сохраните заказ" />}
+              <Select
+                style={{ width: '100%' }}
+                value={templateId}
+                loading={loading}
+                onChange={(value) => {
+                  setTemplateId(value);
+                }}
+                options={templates.map((template) => ({
+                  value: template.labelTemplateId,
+                  label: template.isActive ? template.name : `${template.name} (архив)`,
+                }))}
+                placeholder="Шаблон"
+              />
+              {detailOptions.length > 0 && (
+                <Select
+                  style={{ width: '100%' }}
+                  value={previewDetailId ?? 0}
+                  onChange={(value) => {
+                    setPreviewDetailId(value || null);
+                  }}
+                  options={[
+                    { value: 0, label: 'Все позиции: показать первую бирку' },
+                    ...detailOptions.map((detail) => ({ value: detail.detailId, label: detail.label })),
+                  ]}
+                  placeholder="Позиция для предпросмотра"
                 />
               )}
-              {!cutMapOptionsLoading && cutMapRows.length > 0 && (
-                <div style={{ maxHeight: 260, overflowY: 'auto', paddingRight: 4 }}>
-                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                    {cutMapRows.map((row) => (
-                      <div key={row.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(300px, 1.5fr)', gap: 8, alignItems: 'center' }}>
-                        <Text ellipsis={{ tooltip: row.label }}>{row.label}</Text>
-                        <Select
-                          style={{ width: '100%' }}
-                          value={cutMapSelection[row.key]}
-                          status={row.options.some((option) => option.cutResultPlacementId === cutMapSelection[row.key]) ? undefined : 'warning'}
-                          placeholder="Выберите раскрой"
-                          onChange={(cutResultPlacementId) => {
-                            setCutMapSelection((current) => ({ ...current, [row.key]: cutResultPlacementId }));
-                          }}
-                          options={row.options.map((option) => ({
-                            value: option.cutResultPlacementId,
-                            label: cutMapOptionLabel(option),
-                          }))}
-                        />
-                      </div>
-                    ))}
-                  </Space>
-                </div>
+              <Checkbox
+                checked={useBasisFields}
+                onChange={(event) => {
+                  setUseBasisFields(event.target.checked);
+                }}
+              >
+                Использовать поля базис проекта
+              </Checkbox>
+              {hasCutMap && (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Text strong>Раскрой для миниатюры</Text>
+                  <Text type="secondary">
+                    Выберите раскрой для участвовавших в нём экземпляров. Остальные бирки будут сформированы без миниатюры.
+                  </Text>
+                  {!canViewCut && <Alert type="error" showIcon message="Нет права на просмотр раскроев" />}
+                  {cutMapOptionsLoading && <Text type="secondary">Загрузка раскроев...</Text>}
+                  {!cutMapOptionsLoading && labelsWithoutCutMap > 0 && (
+                    <Alert
+                      type="info"
+                      showIcon
+                      message={`${labelsWithoutCutMap} бирок будут без миниатюры раскроя`}
+                    />
+                  )}
+                  {!cutMapOptionsLoading && staleCutMapCount > 0 && (
+                    <Alert
+                      type="error"
+                      showIcon
+                      message={`${staleCutMapCount} деталей изменились после раскроя`}
+                      description="Выполните новый раскрой этих деталей перед формированием бирок с миниатюрой."
+                    />
+                  )}
+                  {!cutMapOptionsLoading && missingGenerationCutMaps.length > 0 && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message={`Не выбран или устарел раскрой для ${missingGenerationCutMaps.length} бирок`}
+                      description="Выберите доступный результат. Только детали, которые не участвовали в раскрое, не блокируют формирование."
+                    />
+                  )}
+                  {!cutMapOptionsLoading && cutMapRows.length > 0 && (
+                    <div className="order-label-cut-map-list">
+                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                        {cutMapRows.map((row) => {
+                          const hasOptions = row.options.length > 0;
+                          const hasStaleCutMap = staleCutMapRowKeys.has(row.key);
+                          const hasValidSelection = row.options.some(
+                            (option) => option.cutResultPlacementId === cutMapSelection[row.key],
+                          );
+                          return (
+                            <div key={row.key} className="order-label-cut-map-row">
+                              <Text ellipsis={{ tooltip: row.label }}>{row.label}</Text>
+                              <Select
+                                style={{ width: '100%' }}
+                                value={cutMapSelection[row.key]}
+                                disabled={!hasOptions}
+                                status={(hasOptions && !hasValidSelection) || hasStaleCutMap ? 'warning' : undefined}
+                                placeholder={hasOptions
+                                  ? 'Выберите раскрой'
+                                  : hasStaleCutMap
+                                    ? 'Деталь изменена — выполните новый раскрой'
+                                    : 'Нет раскроя — бирка будет без миниатюры'}
+                                onChange={(cutResultPlacementId) => {
+                                  setCutMapSelection((current) => ({ ...current, [row.key]: cutResultPlacementId }));
+                                }}
+                                options={row.options.map((option) => ({
+                                  value: option.cutResultPlacementId,
+                                  label: cutMapOptionLabel(option),
+                                }))}
+                              />
+                            </div>
+                          );
+                        })}
+                      </Space>
+                    </div>
+                  )}
+                </Space>
               )}
             </Space>
-          )}
-          {preview && selectedTemplate && (
-            <OrderLabelGeneratePreviewSurface preview={preview} template={selectedTemplate} />
-          )}
-        </Space>
+          </div>
+          <div className="order-label-generate-preview-panel">
+            <Text strong>Предпросмотр бирки</Text>
+            {preview && selectedTemplate ? (
+              <OrderLabelGeneratePreviewSurface preview={preview} template={selectedTemplate} />
+            ) : (
+              <div className="order-label-generate-preview-empty">
+                <Text type="secondary">Выберите шаблон и позицию, чтобы увидеть первую бирку.</Text>
+              </div>
+            )}
+          </div>
+        </div>
       </Modal>
     </>
   );

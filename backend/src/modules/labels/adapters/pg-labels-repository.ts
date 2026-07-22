@@ -1691,31 +1691,84 @@ export async function resolveLabelCutMaps(
     return { rows, assets: new Map() };
   }
   if (rows.length === 0) return { rows, assets: new Map() };
-  if (!selections || selections.length !== rows.length) {
-    throw new ApiError(422, 'LABEL_CUT_MAP_SELECTION_REQUIRED', 'Выберите раскрой для каждой бирки', {
-      expected: rows.length,
-      actual: selections?.length ?? 0,
-    });
-  }
 
   const selectionByCopy = new Map<string, LabelCutMapSelectionInput>();
   const placementIds = new Set<number>();
-  for (const selection of selections) {
+  const rowKeys = new Set(rows.map((row) => `${row.detailId}:${row.copyIndex}`));
+  for (const selection of selections ?? []) {
     const key = `${selection.detailId}:${selection.copyIndex}`;
+    if (!rowKeys.has(key)) {
+      throw new ApiError(422, 'LABEL_CUT_MAP_SELECTION_MISMATCH', 'Раскрой не соответствует бирке', { key });
+    }
     if (selectionByCopy.has(key) || placementIds.has(selection.cutResultPlacementId)) {
       throw new ApiError(422, 'LABEL_CUT_MAP_SELECTION_DUPLICATE', 'Один экземпляр раскроя нельзя назначить двум биркам', { key });
     }
     selectionByCopy.set(key, selection);
     placementIds.add(selection.cutResultPlacementId);
   }
-  for (const row of rows) {
-    if (!selectionByCopy.has(`${row.detailId}:${row.copyIndex}`)) {
-      throw new ApiError(422, 'LABEL_CUT_MAP_SELECTION_REQUIRED', 'Выберите раскрой для каждой бирки', {
-        detailId: row.detailId,
-        copyIndex: row.copyIndex,
-      });
+
+  const unselectedRows = rows.filter((row) => !selectionByCopy.has(`${row.detailId}:${row.copyIndex}`));
+  if (unselectedRows.length > 0) {
+    const omittedPlacements = await client.query<{
+      order_id: string | number;
+      order_detail_id: string | number;
+      instance: string | number;
+      dimensions_match: boolean;
+    }>(
+      `SELECT p.order_id, p.order_detail_id, p.instance,
+              EXISTS (
+                SELECT 1
+                FROM jsonb_array_elements(r.snapshot_job -> 'items') AS snapshot_item(item_json)
+                WHERE (snapshot_item.item_json ->> 'orderDetailId')::BIGINT = od.detail_id
+                  AND od.width IS NOT NULL AND od.height IS NOT NULL
+                  AND abs((snapshot_item.item_json #>> '{detail,width}')::NUMERIC - od.width) <= 0.01
+                  AND abs((snapshot_item.item_json #>> '{detail,height}')::NUMERIC - od.height) <= 0.01
+              ) AND p.instance <= od.quantity AS dimensions_match
+       FROM cut_result_placement p
+       JOIN cut_result_sheet_map s
+         ON s.cut_result_sheet_map_id = p.cut_result_sheet_map_id
+        AND s.is_effective = true
+       JOIN cut_result_label_map_projection projection
+         ON projection.cut_result_id = p.cut_result_id
+       JOIN cut_result r
+         ON r.cut_result_id = p.cut_result_id
+        AND r.snapshot_digest = projection.snapshot_digest
+       JOIN order_details od
+         ON od.detail_id = p.order_detail_id
+        AND od.order_id = p.order_id
+        AND od.delete_flag = false
+       JOIN unnest($1::bigint[], $2::bigint[], $3::integer[])
+         AS requested(order_id, detail_id, instance)
+         ON requested.order_id = p.order_id
+        AND requested.detail_id = p.order_detail_id
+        AND requested.instance = p.instance`,
+      [
+        unselectedRows.map((row) => row.orderId),
+        unselectedRows.map((row) => row.detailId),
+        unselectedRows.map((row) => row.copyIndex),
+      ],
+    );
+    const omittedPlacementState = new Map<string, boolean>();
+    for (const placement of omittedPlacements.rows) {
+      const key = `${toNumber(placement.order_id)}:${toNumber(placement.order_detail_id)}:${toNumber(placement.instance)}`;
+      omittedPlacementState.set(key, omittedPlacementState.get(key) === true || placement.dimensions_match);
+    }
+    for (const row of unselectedRows) {
+      const state = omittedPlacementState.get(`${row.orderId}:${row.detailId}:${row.copyIndex}`);
+      if (state === true) {
+        throw new ApiError(422, 'LABEL_CUT_MAP_SELECTION_REQUIRED', 'Выберите раскрой для бирки', {
+          detailId: row.detailId,
+          copyIndex: row.copyIndex,
+        });
+      }
+      if (state === false) {
+        throw new ApiError(409, 'LABEL_CUT_MAP_DETAIL_CHANGED', 'Размер или количество детали изменились после раскроя', {
+          detailId: row.detailId,
+        });
+      }
     }
   }
+  if (placementIds.size === 0) return { rows, assets: new Map() };
 
   const result = await client.query<ResolvedCutMapRow>(
     `SELECT p.cut_result_placement_id, p.cut_result_sheet_map_id,
@@ -1760,7 +1813,8 @@ export async function resolveLabelCutMaps(
 
   const assets = new Map<number, string>();
   const resolvedRows = rows.map((row): LabelRow => {
-    const selection = selectionByCopy.get(`${row.detailId}:${row.copyIndex}`)!;
+    const selection = selectionByCopy.get(`${row.detailId}:${row.copyIndex}`);
+    if (!selection) return row;
     const placement = placementById.get(selection.cutResultPlacementId);
     if (
       !placement
