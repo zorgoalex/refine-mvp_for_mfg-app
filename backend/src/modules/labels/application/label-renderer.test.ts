@@ -15,7 +15,7 @@ describe('label renderer', () => {
     expect(svg).toContain('<rect ');
   });
 
-  it('fits a frozen cut sheet into a resizable cut-map box and highlights the exact placement', () => {
+  it('fits a frozen cut sheet into a resizable cut-map box with print-safe detail contrast', () => {
     const base = template();
     base.rendererCapabilities = ['if_else_v1', 'typography_v1', 'cut_map_v1'];
     base.elements = [{
@@ -62,13 +62,21 @@ describe('label renderer', () => {
     };
 
     const svg = renderSvgPages(base, [mapped], new Map([
-      [9, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500"><rect x="0" y="0" width="1000" height="500" fill="#fff"/></svg>'],
+      [9, [
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500">',
+        '<rect x="0" y="0" width="1000" height="500" fill="#fff" stroke="#9aa7b4" stroke-width="3"/>',
+        '<rect x="10" y="20" width="300" height="100" fill="#eef3f8" stroke="#1f2d3d" stroke-width="2"/>',
+        '</svg>',
+      ].join('')],
     ])).pages[0];
 
     expect(svg).toContain('data-label-element-kind="cut_map"');
     expect(svg).toContain('width="42" height="18" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet"');
-    expect(svg).toContain('x="120" y="80" width="200" height="50" fill="#ffd666"');
-    expect(svg).toContain('stroke="#d4380d"');
+    expect(svg).toContain('fill="#fff" stroke="#9aa7b4" stroke-width="3"');
+    expect(svg).toContain('fill="#eef3f8" stroke="#1f2d3d" stroke-width="4"');
+    expect(svg).toContain('x="120" y="80" width="200" height="50" fill="#000000" stroke="#000000"');
+    expect(svg).not.toContain('fill="#ffd666"');
+    expect(svg).not.toContain('stroke="#d4380d"');
 
     expect(() => renderSvgPages(base, [mapped], new Map([
       [9, '<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="1" height="1" onload="alert(1)"/></svg>'],

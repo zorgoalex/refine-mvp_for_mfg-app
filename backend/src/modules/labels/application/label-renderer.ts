@@ -15,6 +15,10 @@ export interface RenderedPreview {
 
 export type LabelCutMapAssets = ReadonlyMap<number, string>;
 
+const CUT_MAP_RENDERER_VERSION = 3;
+const CUT_MAP_DETAIL_STROKE_MULTIPLIER = 2;
+const CUT_MAP_SELECTED_FILL = '#000000';
+
 export function renderSvgPages(
   template: LabelTemplateDto,
   rows: LabelRow[],
@@ -76,7 +80,9 @@ export async function renderLabelsZip(input: {
         labelCount: input.rows.length,
         formats: input.formats,
         generatedAt: input.generatedAt,
-        rendererVersion: input.template.elements.some((element) => element.kind === 'cut_map') ? 2 : 1,
+        rendererVersion: input.template.elements.some((element) => element.kind === 'cut_map')
+          ? CUT_MAP_RENDERER_VERSION
+          : 1,
       },
       null,
       2,
@@ -140,10 +146,11 @@ function renderCutMapElement(
   if (!baseSvg) {
     throw new Error(`Missing frozen cut-map asset ${map.cutResultSheetMapId}`);
   }
-  const body = extractSafeCutSheetBody(baseSvg);
-  if (body === null) {
+  const safeBody = extractSafeCutSheetBody(baseSvg);
+  if (safeBody === null) {
     throw new Error(`Invalid frozen cut-map asset ${map.cutResultSheetMapId}`);
   }
+  const body = thickenCutSheetDetailStrokes(safeBody);
   const style = readCutMapStyleV1(element.style);
   if (!style) {
     throw new Error(`Invalid cut-map style for ${element.elementKey}`);
@@ -160,18 +167,17 @@ function renderCutMapElement(
     element.widthMm / orientedSheetWidthMm,
     element.heightMm / orientedSheetHeightMm,
   ));
-  const whiteStroke = 0.85 / scale;
-  const accentStroke = 0.42 / scale;
+  const markerStroke = 0.85 / scale;
+  const selectedStroke = 0.42 / scale;
   const shownPieceSide = Math.min(map.widthMm, map.heightMm) * scale;
   const markerRadius = Math.min(Math.min(map.sheetWidthMm, map.sheetHeightMm) / 18, 1.35 / scale);
   const marker = shownPieceSide < 1.5
-    ? `<circle cx="${num(map.xMm + map.widthMm / 2)}" cy="${num(map.yMm + map.heightMm / 2)}" r="${num(markerRadius)}" fill="none" stroke="#ffffff" stroke-width="${num(whiteStroke)}"/><circle cx="${num(map.xMm + map.widthMm / 2)}" cy="${num(map.yMm + map.heightMm / 2)}" r="${num(markerRadius)}" fill="none" stroke="${style.highlightStroke}" stroke-width="${num(accentStroke)}"/>`
+    ? `<circle cx="${num(map.xMm + map.widthMm / 2)}" cy="${num(map.yMm + map.heightMm / 2)}" r="${num(markerRadius)}" fill="none" stroke="${CUT_MAP_SELECTED_FILL}" stroke-width="${num(markerStroke)}"/>`
     : '';
 
   const sheetBody = [
     body,
-    `<rect x="${num(map.xMm)}" y="${num(map.yMm)}" width="${num(map.widthMm)}" height="${num(map.heightMm)}" fill="${style.highlightFill}" fill-opacity="0.58" stroke="#ffffff" stroke-width="${num(whiteStroke)}"/>`,
-    `<rect x="${num(map.xMm)}" y="${num(map.yMm)}" width="${num(map.widthMm)}" height="${num(map.heightMm)}" fill="none" stroke="${style.highlightStroke}" stroke-width="${num(accentStroke)}"/>`,
+    `<rect x="${num(map.xMm)}" y="${num(map.yMm)}" width="${num(map.widthMm)}" height="${num(map.heightMm)}" fill="${CUT_MAP_SELECTED_FILL}" stroke="${CUT_MAP_SELECTED_FILL}" stroke-width="${num(selectedStroke)}"/>`,
     marker,
   ].join('');
   const orientedSheetBody = rotateSheet
@@ -204,6 +210,16 @@ function extractSafeCutSheetBody(svg: string): string | null {
   }
   if (source.slice(cursor).trim()) return null;
   return rectangles.join('');
+}
+
+function thickenCutSheetDetailStrokes(body: string): string {
+  return body.replace(/<rect\b[^>]*\/>/gi, (rect) => {
+    if (!/\sstroke="#1f2d3d"/i.test(rect)) return rect;
+    return rect.replace(
+      /\sstroke-width="([^"]+)"/i,
+      (_attribute, value: string) => ` stroke-width="${num(Number(value) * CUT_MAP_DETAIL_STROKE_MULTIPLIER)}"`,
+    );
+  });
 }
 
 const CUT_SHEET_NUMERIC_ATTRIBUTES = new Set([
