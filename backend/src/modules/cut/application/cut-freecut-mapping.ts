@@ -178,28 +178,44 @@ export function resolveVacuumDirection(
 }
 
 /**
- * Force detail orientation for a directional vacuum profile. 'width' = «по длине»
- * = long edge along the sheet's LONG side; 'height' = «по ширине» = long edge along
- * the SHORT side. Plain details (pattern_direction === 'none') are re-oriented and
- * rotation is forbidden so freecut lays them exactly as chosen instead of rotating
- * for min-waste. Textured details (pattern_direction !== 'none') keep their grain
- * orientation (film roll runs along the table's длина). 'optimal'/undefined: items
- * unchanged (free rotation).
+ * Apply the global vacuum profile contract before dispatching to Freecut.
+ * `optimal` (Auto) deliberately ignores film texture and permits 90° rotation.
+ * `width` («по длине») and `height` («по ширине») always forbid rotation;
+ * textured details preserve their grain-authoritative dimensions. Plain `height`
+ * details put their long edge across the physical table only when it fits the
+ * usable transverse span, otherwise they fall back along the table length.
  */
 export function orientItemsForVacuumDirection(
   items: readonly FreecutItem[],
   stockWidthMm: number,
   stockHeightMm: number,
   direction: 'optimal' | 'width' | 'height' | undefined,
+  trim?: TrimMm,
 ): FreecutItem[] {
+  if (direction === 'optimal') {
+    return items.map((item) => ({
+      ...item,
+      rotation: 'allow_90',
+      pattern_direction: 'none',
+    }));
+  }
   if (direction !== 'width' && direction !== 'height') return [...items];
+
   const longAxisIsX = stockWidthMm >= stockHeightMm;
-  const longEdgeAlongLongSide = direction === 'width'; // «по длине»
-  const longEdgeAlongX = longEdgeAlongLongSide ? longAxisIsX : !longAxisIsX;
+  const transverseAxisIsX = stockWidthMm <= stockHeightMm;
+  const usableTransverseSpan = transverseAxisIsX
+    ? stockWidthMm - (trim?.left ?? 0) - (trim?.right ?? 0)
+    : stockHeightMm - (trim?.top ?? 0) - (trim?.bottom ?? 0);
+
   return items.map((item) => {
-    if (item.pattern_direction !== 'none') return item; // textured: grain wins
+    if (item.pattern_direction !== 'none') {
+      return { ...item, rotation: 'forbid' };
+    }
     const longEdge = Math.max(item.width_mm, item.height_mm);
     const shortEdge = Math.min(item.width_mm, item.height_mm);
+    const canPlaceAcross = longEdge <= usableTransverseSpan + 1e-7;
+    const longEdgeAlongLongSide = direction === 'width' || !canPlaceAcross;
+    const longEdgeAlongX = longEdgeAlongLongSide ? longAxisIsX : !longAxisIsX;
     return {
       ...item,
       width_mm: longEdgeAlongX ? longEdge : shortEdge,
@@ -211,14 +227,18 @@ export function orientItemsForVacuumDirection(
 
 export function buildOptimizeRequest(input: BuildOptimizeRequestInput): OptimizeRequest {
   const orientedInput = orientOptimizeInputPortrait(input);
+  const isVacuum = orientedInput.params.layout_mode === 'vacuum_table';
+  const effectiveVacuumDirection = isVacuum
+    ? (orientedInput.params.vacuum?.direction ?? 'optimal')
+    : undefined;
   const resolvedParams =
-    orientedInput.params.layout_mode === 'vacuum_table' && orientedInput.params.vacuum
+    isVacuum
       ? {
           ...orientedInput.params,
           vacuum: {
-            ...orientedInput.params.vacuum,
+            ...(orientedInput.params.vacuum ?? {}),
             direction: resolveVacuumDirection(
-              orientedInput.params.vacuum.direction,
+              effectiveVacuumDirection,
               orientedInput.stock.width_mm,
               orientedInput.stock.height_mm,
             ),
@@ -227,12 +247,13 @@ export function buildOptimizeRequest(input: BuildOptimizeRequestInput): Optimize
       : orientedInput.params;
 
   const orientedItems =
-    orientedInput.params.layout_mode === 'vacuum_table' && orientedInput.params.vacuum
+    isVacuum
       ? orientItemsForVacuumDirection(
           orientedInput.items,
           orientedInput.stock.width_mm,
           orientedInput.stock.height_mm,
-          orientedInput.params.vacuum.direction,
+          effectiveVacuumDirection,
+          orientedInput.params.trim_mm,
         )
       : [...orientedInput.items];
 
