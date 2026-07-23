@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-23",
+    title: "Пустые поля новой детали",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "При быстром добавлении детали размеры, количество, цена и сумма теперь начинаются пустыми — нули перед вводом удалять не нужно.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-22",
     title: "Бирки с миниатюрой раскроя",
     services: ["ERP", "Cutting"],

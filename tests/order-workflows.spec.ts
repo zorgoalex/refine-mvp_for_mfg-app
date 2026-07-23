@@ -92,13 +92,19 @@ test.describe('Order workflows', () => {
 
         await orderDialog.getByRole('tab', { name: 'Детали заказа' }).click();
         const detailsCard = orderDialog.locator('.ant-card').filter({ hasText: 'Всего позиций' }).first();
-        await detailsCard.locator('button').filter({ hasText: '+' }).first().click();
+        await orderDialog.getByRole('button', { name: 'Быстрое добавление' }).click();
 
-        const heightInput = detailsCard.locator('input#height');
-        const widthInput = detailsCard.locator('input#width');
-        const quantityInput = detailsCard.locator('input#quantity');
-        const priceInput = detailsCard.locator('input#milling_cost_per_sqm');
-        const amountInput = detailsCard.locator('input#detail_cost');
+        const heightInput = orderDialog.locator('input#height');
+        const widthInput = orderDialog.locator('input#width');
+        const quantityInput = orderDialog.locator('input#quantity');
+        const priceInput = orderDialog.locator('input#milling_cost_per_sqm');
+        const amountInput = orderDialog.locator('input#detail_cost');
+
+        await expect(heightInput).toHaveValue('');
+        await expect(widthInput).toHaveValue('');
+        await expect(quantityInput).toHaveValue('');
+        await expect(priceInput).toHaveValue('');
+        await expect(amountInput).toHaveValue('');
 
         await heightInput.click();
         await page.keyboard.type('600');
@@ -118,9 +124,9 @@ test.describe('Order workflows', () => {
         // Variant B: QUICK_ADD_DEFAULTS pre-populates sheet_material_type_id with the first
         // active cuttable type (МДФ 16 мм (Лист)), so no manual selection is needed.
         // Assert it is already set so the inline save won't fail validation.
-        await expect(detailsCard.locator('.ant-card-body').getByText('МДФ 16 мм (Лист)').first()).toBeVisible();
+        await expect(orderDialog.getByText('МДФ 16 мм (Лист)').first()).toBeVisible();
 
-        await detailsCard.getByRole('button').filter({ has: page.locator('.anticon-check') }).click();
+        await orderDialog.getByRole('button').filter({ has: page.locator('.anticon-check') }).click();
 
         await orderDialog.getByRole('tab', { name: 'Основная информация' }).click();
         await selectAntdOption(page, orderDialog.locator('.ant-form-item').filter({ hasText: 'Клиент' }).first(), 'Базовый клиент');

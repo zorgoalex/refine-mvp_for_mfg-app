@@ -555,9 +555,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     };
 
     form.setFieldsValue({
-      height: record.height,
-      width: record.width,
-      quantity: record.quantity,
+      height: record.height ?? null,
+      width: record.width ?? null,
+      quantity: record.quantity ?? null,
       area: record.area,
       sheet_material_type_id: record.sheet_material_type_id ?? null,
       milling_type_id: record.milling_type_id,
@@ -803,6 +803,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedHeight) }}
               min={0}
               precision={2}
+              emptyWhenUnset
               onChange={handleHeightChange}
               onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
             />
@@ -838,6 +839,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedWidth) }}
               min={0}
               precision={2}
+              emptyWhenUnset
               onChange={handleWidthChange}
               onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
             />
