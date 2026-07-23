@@ -45,6 +45,7 @@ const MAX_PAGES = 100;
 const MAX_TABLES = 50;
 const MAX_ROWS = 5_000;
 const MAX_LINES_PER_TABLE = 5_000;
+const MAX_ROW_FRAGMENT_Y_DISTANCE = 18;
 
 export function detectGenericPdfTables(pages: PdfTextItem[][]): PdfGenericTable[] {
   if (pages.length > MAX_PAGES) {
@@ -248,10 +249,12 @@ function assembleRows(
   lines: ReturnType<typeof groupTextItemsIntoLines>,
   columns: PdfGenericColumn[],
 ): { rows: string[][]; unresolvedLines: string[][] } {
-  const rows: string[][] = [];
+  const candidates: Array<{
+    cells: string[];
+    startsRow: boolean;
+    y: number;
+  }> = [];
   const unresolvedLines: string[][] = [];
-  let current: string[] | null = null;
-  let currentY: number | null = null;
   const positionIndex = columns.findIndex(column => column.inferredTarget === 'position');
   const nameIndex = columns.findIndex(column => column.inferredTarget === 'name');
   const quantityIndex = columns.findIndex(column => column.inferredTarget === 'quantity');
@@ -265,28 +268,48 @@ function assembleRows(
         ? Boolean(cells[nameIndex])
           && (quantityIndex < 0 || /^\d+(?:[.,]\d+)?$/.test(cells[quantityIndex] ?? ''))
         : Boolean(cells[0]) && occupied >= 3;
-    if (startsRow) {
-      current = cells;
-      currentY = line.y;
-      rows.push(current);
-    } else if (current && currentY !== null && currentY - line.y <= 18) {
-      cells.forEach((cell, index) => {
+    if (occupied > 0) candidates.push({ cells, startsRow, y: line.y });
+  }
+
+  // A visual row may use different text baselines per cell. Assign fragments
+  // to the nearest structural row anchor instead of whichever line came first.
+  const anchors = candidates.filter(candidate => candidate.startsRow);
+  const assigned = anchors.map(anchor => [anchor]);
+  candidates.filter(candidate => !candidate.startsRow).forEach(candidate => {
+    let nearestIndex = -1;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    anchors.forEach((anchor, index) => {
+      const distance = Math.abs(anchor.y - candidate.y);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    });
+    if (nearestIndex >= 0 && nearestDistance <= MAX_ROW_FRAGMENT_Y_DISTANCE) {
+      assigned[nearestIndex].push(candidate);
+    } else {
+      unresolvedLines.push(candidate.cells);
+    }
+  });
+
+  const rows = assigned.map(rowLines => {
+    const cells = columns.map(() => '');
+    [...rowLines].sort((a, b) => b.y - a.y).forEach(line => {
+      line.cells.forEach((cell, index) => {
         if (!cell) return;
         const punctuationContinuation = index === 1 && /^[.\d]+$/.test(cell);
-        current![index] = punctuationContinuation
-          ? `${current![index]}${cell}`.replace(/\s+/g, '')
-          : [current![index], cell].filter(Boolean).join(' ');
+        cells[index] = punctuationContinuation
+          ? `${cells[index]}${cell}`.replace(/\s+/g, '')
+          : [cells[index], cell].filter(Boolean).join(' ');
       });
-      currentY = line.y;
-    } else if (occupied > 0) {
-      unresolvedLines.push(cells);
-      current = null;
-      currentY = null;
-    }
-  }
+    });
+    return cells;
+  });
+
   if (rows.length > MAX_ROWS) {
     throw new Error('PDF_COMPLEXITY_LIMIT: слишком много строк таблицы');
   }
+
   return { rows, unresolvedLines };
 }
 
