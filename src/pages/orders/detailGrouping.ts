@@ -1,5 +1,6 @@
 // src/pages/orders/detailGrouping.ts
 import type { OrderDetail } from '../../types/orders';
+import { calculateOrderTotalArea } from '../../utils/orderArea';
 
 export type GroupField = 'milling' | 'material' | 'film' | 'edge' | 'price' | 'note' | 'doweling';
 
@@ -56,7 +57,18 @@ export function extractGroupValue(detail: OrderDetail, field: GroupField): strin
 
 export type GroupedRow =
   | { kind: 'detail'; detail: OrderDetail; groupIndex: number }
-  | { kind: 'separator'; groupIndex: number; key: string; selectionKeys: Array<number | string>; label: string };
+  | { kind: 'separator'; groupIndex: number; key: string; selectionKeys: Array<number | string>; label: string }
+  | {
+      kind: 'summary';
+      groupIndex: number;
+      key: string;
+      totals: {
+        count: number;
+        quantity: number;
+        area: number;
+        detailCost: number;
+      };
+    };
 
 export interface BuildGroupedRowsOptions {
   includeLeadingSeparator?: boolean;
@@ -103,6 +115,17 @@ export function buildGroupedRows(
     for (const detail of groupDetails) {
       rows.push({ kind: 'detail', detail, groupIndex });
     }
+    rows.push({
+      kind: 'summary',
+      groupIndex,
+      key: `__summary__:${field}:${key}:${groupIndex}`,
+      totals: {
+        count: groupDetails.length,
+        quantity: groupDetails.reduce((sum, detail) => sum + (Number(detail.quantity) || 0), 0),
+        area: calculateOrderTotalArea(groupDetails),
+        detailCost: groupDetails.reduce((sum, detail) => sum + (Number(detail.detail_cost) || 0), 0),
+      },
+    });
   });
   return rows;
 }

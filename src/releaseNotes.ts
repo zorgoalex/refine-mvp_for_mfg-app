@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-23",
+    title: "Итоги по группам деталей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "При группировке деталей заказа после каждой группы показываются отдельные итоги по позициям, количеству, площади и стоимости.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-23",
     title: "Пустые поля новой детали",
     services: ["ERP"],
     repositories: ["repo_erp"],

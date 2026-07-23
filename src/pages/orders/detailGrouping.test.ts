@@ -57,7 +57,11 @@ describe('buildGroupedRows', () => {
       d({ detail_number: 4, detail_id: 14, milling_type_id: 5 }),
     ];
     const rows = buildGroupedRows(details, 'milling', { groupLabelOf: (s) => `m${s.milling_type_id}` });
-    expect(rows.map(r => r.kind)).toEqual(['detail', 'detail', 'separator', 'detail', 'separator', 'detail']);
+    expect(rows.map(r => r.kind)).toEqual([
+      'detail', 'detail', 'summary',
+      'separator', 'detail', 'summary',
+      'separator', 'detail', 'summary',
+    ]);
     const sep1 = rows.find(r => r.kind === 'separator' && r.groupIndex === 1) as any;
     expect(sep1.selectionKeys).toEqual([13]);   // group {7} → detail_id 13
     expect(sep1.label).toBe('m7');
@@ -78,20 +82,46 @@ describe('buildGroupedRows', () => {
   });
   it('includeLeadingSeparator adds a separator before the first group', () => {
     const rows = buildGroupedRows([d({ detail_id: 1, milling_type_id: 5 }), d({ detail_id: 2, milling_type_id: 7 })], 'milling', { includeLeadingSeparator: true });
-    expect(rows.map(r => r.kind)).toEqual(['separator', 'detail', 'separator', 'detail']);
+    expect(rows.map(r => r.kind)).toEqual([
+      'separator', 'detail', 'summary',
+      'separator', 'detail', 'summary',
+    ]);
     expect((rows[0] as any).selectionKeys).toEqual([1]);
   });
-  it('single group, no leading separator → no separators', () => {
+  it('single group, no leading separator → details followed by its summary', () => {
     const rows = buildGroupedRows([d({ milling_type_id: 5 }), d({ milling_type_id: 5 })], 'milling');
-    expect(rows.every(r => r.kind === 'detail')).toBe(true);
+    expect(rows.map(r => r.kind)).toEqual(['detail', 'detail', 'summary']);
   });
-  it('separator keys are unique', () => {
+  it('adds exact totals after every group', () => {
+    const rows = buildGroupedRows(
+      [
+        d({ detail_id: 1, milling_type_id: 5, height: 600, width: 400, quantity: 2, detail_cost: 125 }),
+        d({ detail_id: 2, milling_type_id: 7, height: 100, width: 100, quantity: 1, detail_cost: 50 }),
+        d({ detail_id: 3, milling_type_id: 5, height: 300, width: 200, quantity: 3, detail_cost: 75 }),
+      ],
+      'milling',
+    );
+
+    const summaries = rows.filter(r => r.kind === 'summary') as Array<any>;
+    expect(summaries).toHaveLength(2);
+    expect(summaries[0]).toMatchObject({
+      groupIndex: 0,
+      totals: { count: 2, quantity: 5, area: 0.66, detailCost: 200 },
+    });
+    expect(summaries[1]).toMatchObject({
+      groupIndex: 1,
+      totals: { count: 1, quantity: 1, area: 0.01, detailCost: 50 },
+    });
+  });
+  it('synthetic row keys are unique', () => {
     const rows = buildGroupedRows(
       [d({ milling_type_id: 1 }), d({ milling_type_id: 2 }), d({ milling_type_id: 3 })],
       'milling', { includeLeadingSeparator: true },
     );
-    const sepKeys = rows.filter(r => r.kind === 'separator').map(r => (r as any).key);
-    expect(new Set(sepKeys).size).toBe(sepKeys.length);
+    const syntheticKeys = rows
+      .filter(r => r.kind === 'separator' || r.kind === 'summary')
+      .map(r => (r as any).key);
+    expect(new Set(syntheticKeys).size).toBe(syntheticKeys.length);
   });
 });
 

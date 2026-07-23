@@ -17,6 +17,7 @@ describe('show.tsx detail grouping integration', () => {
   it('marks the table grouped and guards separator rows', () => {
     expect(src).toContain('details-grouped');
     expect(src).toContain("'separator'");
+    expect(src).toContain("'summary'");
   });
   it('uses raw details when separation is off (no clustering)', () => {
     // dataSource is grouped ONLY when groupingActive; otherwise plain details
@@ -37,5 +38,14 @@ describe('show.tsx detail grouping integration', () => {
   it('renders the group label on separator rows + resolves it via groupLabelOf', () => {
     expect(src).toContain('groupLabelOf');
     expect(src).toContain('row.label');
+  });
+  it('renders per-group totals in the same columns and colors as the overall summary', () => {
+    expect(src).toContain('renderGroupedSummaryValue');
+    expect(src).toContain("key === 'quantity'");
+    expect(src).toContain("key === 'area'");
+    expect(src).toContain("key === 'detail_cost'");
+    expect(src).toContain("color: '#1890ff'");
+    expect(src).toContain("color: '#52c41a'");
+    expect(src).toContain('detail-group-summary');
   });
 });

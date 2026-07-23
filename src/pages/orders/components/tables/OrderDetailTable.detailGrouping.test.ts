@@ -15,6 +15,7 @@ describe('edit-form detail grouping', () => {
   it('table builds grouped rows and marks the table grouped', () => {
     expect(table).toContain('buildGroupedRows');
     expect(table).toContain("'separator'");
+    expect(table).toContain("'summary'");
     expect(table).toContain('details-grouped');
   });
   it('uses raw sortedDetails when separation is off (no clustering)', () => {
@@ -25,6 +26,15 @@ describe('edit-form detail grouping', () => {
   });
   it('makes row selection separator-aware', () => {
     expect(table).toContain('getCheckboxProps');
+  });
+  it('renders group summaries with the same total columns and colors as the overall summary', () => {
+    expect(table).toContain('renderGroupedSummaryValue');
+    expect(table).toContain("key === 'quantity'");
+    expect(table).toContain("key === 'area'");
+    expect(table).toContain("key === 'detail_cost'");
+    expect(table).toContain("color: '#1890ff'");
+    expect(table).toContain("color: '#52c41a'");
+    expect(table).toContain('detail-group-summary');
   });
   it('renders a persisted-only group checkbox + group label on separators when cutSelectable', () => {
     expect(table).toContain('cutSelectable');
