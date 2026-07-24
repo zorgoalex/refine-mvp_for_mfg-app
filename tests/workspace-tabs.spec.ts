@@ -113,6 +113,41 @@ test.describe('Tabbed workspace', () => {
         await expect(routeSkeleton).toBeHidden({ timeout: 10_000 });
     });
 
+    test('keeps the evolution shell visible when switching to an unloaded workspace tab', async ({ page }) => {
+        await setupWorkflowMockApi(page, createWorkflowMockDb(), { uiVariant: 'evolution' });
+        await page.addInitScript(() => {
+            const tabs = [
+                { key: '/orders', path: '/orders', label: 'Заказы', resource: 'orders_view', dirty: false },
+                { key: '/calendar', path: '/calendar', label: 'Календарь', resource: 'calendar', dirty: false },
+            ];
+            sessionStorage.setItem('workspace-tabs', JSON.stringify({ state: { tabs }, version: 0 }));
+        });
+
+        let calendarChunkDelayed = false;
+        await page.route(/\/src\/pages\/calendar\/index\.tsx(?:\?.*)?$/, async (route) => {
+            calendarChunkDelayed = true;
+            await new Promise((resolve) => setTimeout(resolve, 1_500));
+            await route.continue();
+        });
+
+        await page.goto('/orders');
+        await expect(page.locator('.evolution-sider')).toBeVisible({ timeout: 30_000 });
+        await expect(workspaceTab(page, /Календарь/)).toBeVisible();
+
+        await workspaceTab(page, /Календарь/).click();
+
+        const routeSkeleton = page.getByRole('status', { name: 'Загрузка страницы' });
+        await expect(routeSkeleton).toBeVisible({ timeout: 1_000 });
+        expect(calendarChunkDelayed).toBe(true);
+        await expect(page.locator('.evolution-sider')).toBeVisible();
+        await expect(page.locator('.evolution-header')).toBeVisible();
+        await expect(workspaceTabs(page)).toBeVisible();
+        await expect(page.getByRole('status', { name: 'Загрузка интерфейса' })).toHaveCount(0);
+
+        await expect(routeSkeleton).toBeHidden({ timeout: 10_000 });
+        await expect(page).toHaveURL(/\/calendar(?:$|\?)/);
+    });
+
     test('?tab deep-link into an order tab is not stripped', async ({ page }) => {
         const db = createWorkflowMockDb();
         seedOrder(db, 11195, 'E2E Тест deep-link order');

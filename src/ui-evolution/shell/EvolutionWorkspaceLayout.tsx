@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layout } from 'antd';
+import { Layout, Skeleton } from 'antd';
 import { AppFooter } from '../../components/AppFooter';
 import { GlobalTableTopScrollbars } from '../../components/GlobalTableTopScrollbars';
 import { KeepAliveOutlet } from '../../components/workspace/KeepAliveOutlet';
@@ -13,6 +13,29 @@ import { EvolutionWorkspaceTabs } from './EvolutionWorkspaceTabs';
 import '../styles/evolution.css';
 
 const SIDEBAR_STORAGE_KEY = 'erp.ui.evolution.sidebar.collapsed';
+
+const EvolutionRouteSkeleton: React.FC = () => (
+  <div
+    role="status"
+    aria-live="polite"
+    aria-label="Загрузка страницы"
+    aria-busy="true"
+    style={{ minHeight: 280, padding: 24 }}
+  >
+    <Skeleton
+      active
+      title={{ width: '32%' }}
+      paragraph={{ rows: 3, width: ['78%', '62%', '48%'] }}
+    />
+    <div style={{ marginTop: 24 }}>
+      <Skeleton
+        active
+        title={false}
+        paragraph={{ rows: 6, width: ['100%', '100%', '94%', '100%', '88%', '72%'] }}
+      />
+    </div>
+  </div>
+);
 
 const getInitialCollapsed = (): boolean => {
   try {
@@ -48,7 +71,9 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
         <EvolutionWorkspaceTabs />
         <Layout.Content className="evolution-shell__content" id="evolution-main-content" tabIndex={-1}>
           <GlobalTableTopScrollbars />
-          <KeepAliveOutlet />
+          <React.Suspense fallback={<EvolutionRouteSkeleton />}>
+            <KeepAliveOutlet />
+          </React.Suspense>
         </Layout.Content>
         <AppFooter />
       </Layout>
