@@ -65,18 +65,21 @@ export const numberParser = (value: string | undefined): number | string => {
  * @param precision - maximum decimal places (default: 2)
  */
 export const createSmartFormatter = (precision: number = 2) => {
-  return (value: number | undefined): string => {
-    if (value === undefined || value === null) return '';
+  return (value: number | string | undefined | null): string => {
+    if (value === undefined || value === null || value === '') return '';
+
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return '';
 
     // Check if the value has a non-zero fractional part
-    const hasDecimalPart = value % 1 !== 0;
+    const hasDecimalPart = numericValue % 1 !== 0;
 
     if (hasDecimalPart) {
       // Show with precision if there's a decimal part
-      return formatNumber(value, precision);
+      return formatNumber(numericValue, precision);
     } else {
       // Show as integer if no decimal part
-      return formatNumber(value, 0);
+      return formatNumber(numericValue, 0);
     }
   };
 };

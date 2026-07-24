@@ -814,7 +814,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   // Unwrap a GroupedRow to the underlying detail, or null for separator rows.
   // Declared at component scope (NOT inside JSX) — statements inside JSX are invalid TSX.
-  const asDetail = (row: any) => (row?.kind === 'detail' ? row.detail : row?.kind === 'separator' ? null : row);
+  const asDetail = (row: any) =>
+    row?.kind === 'detail'
+      ? row.detail
+      : row?.kind === 'separator' || row?.kind === 'summary'
+        ? null
+        : row;
 
   const { settings: showColumnSettings, saveSettings: saveShowColumnSettings } = useOrderDetailColumnPreferences(
     'orderShow',
@@ -955,6 +960,30 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     [detailColumns, showColumnSettings],
   );
 
+  const renderGroupedSummaryValue = useCallback((row: any, key: string): React.ReactNode => {
+    const numericStyle: React.CSSProperties = { fontVariantNumeric: 'tabular-nums' };
+    if (key === 'detail_number') {
+      return <span style={{ ...numericStyle, color: '#1890ff' }}>{row.totals.count}</span>;
+    }
+    if (key === 'quantity') {
+      return <span style={{ ...numericStyle, color: '#1890ff' }}>{row.totals.quantity}</span>;
+    }
+    if (key === 'area') {
+      return <span style={{ ...numericStyle, color: '#1890ff' }}>{row.totals.area.toFixed(2)}</span>;
+    }
+    if (key === 'detail_cost') {
+      return (
+        <span style={{ ...numericStyle, color: '#52c41a' }}>
+          {row.totals.detailCost.toLocaleString('ru-RU', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0,
+          })}
+        </span>
+      );
+    }
+    return null;
+  }, []);
+
   const renderedDetailColumns = useMemo(
     () =>
       visibleDetailColumns.map((column, index) => {
@@ -967,6 +996,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             return { colSpan: index === 0 ? visibleDetailColumns.length : 0 };
           },
           render: (value: any, row: any, renderIndex: number) => {
+            if (row?.kind === 'summary') {
+              return renderGroupedSummaryValue(row, String(column.key ?? ''));
+            }
             if (row?.kind === 'separator') {
               return index === 0
                 ? <span style={{ fontWeight: 600, color: 'var(--app-text-muted)' }}>{row.label}</span>
@@ -979,7 +1011,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           },
         };
       }),
-    [visibleDetailColumns],
+    [renderGroupedSummaryValue, visibleDetailColumns],
   );
 
   const deletedOrderRestoreHandler = deletedOrder
@@ -1577,15 +1609,23 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             <Table
               className={groupingActive ? 'details-grouped' : undefined}
               dataSource={groupedDataSource as any}
-              rowKey={(row: any) => (row?.kind === 'separator' ? row.key : (row?.kind === 'detail' ? row.detail : row).detail_id)}
+              rowKey={(row: any) =>
+                row?.kind === 'separator' || row?.kind === 'summary'
+                  ? row.key
+                  : (row?.kind === 'detail' ? row.detail : row).detail_id
+              }
               scroll={{ x: 'max-content' }}
               rowSelection={
                 cutSelectMode
                   ? {
                       selectedRowKeys: cutSelectedDetailIds,
                       onChange: (keys) => setCutSelectedDetailIds(filterNumericKeys(keys)),
-                      getCheckboxProps: (row: any) => (row?.kind === 'separator' ? { disabled: true } : {}),
+                      getCheckboxProps: (row: any) =>
+                        row?.kind === 'separator' || row?.kind === 'summary'
+                          ? { disabled: true }
+                          : {},
                       renderCell: (_c: boolean, row: any, _i: number, node: React.ReactNode) => {
+                        if (row?.kind === 'summary') return null;
                         if (row?.kind !== 'separator') return node;
                         const state = groupCheckboxState(cutSelectedDetailIds, row.selectionKeys);
                         if (state === 'empty') return null;
@@ -1610,17 +1650,23 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 const isHighlighted = highlightDetail != null && detailRow?.detail_id === highlightDetail;
                 const highlightClass = isHighlighted ? ' highlighted-row' : '';
                 if (row?.kind === 'separator') return `detail-group-separator${highlightClass}`;
+                if (row?.kind === 'summary') return 'detail-group-summary';
                 if (!groupingActive) return `${index % 2 === 0 ? 'table-row-light' : 'table-row-dark'}${highlightClass}`;
                 const groupIndex = row?.kind === 'detail' ? row.groupIndex : index;
                 return `detail-group-tint-${groupIndex % GROUP_TINT_COUNT}${highlightClass}`;
               }}
               onRow={(row: any) => ({
                 onDoubleClick: () => {
-                  if (row?.kind === 'separator') return;
+                  if (row?.kind === 'separator' || row?.kind === 'summary') return;
                   const d = row?.kind === 'detail' ? row.detail : row;
                   if (d?.order_id) navigate(`/orders/edit/${d.order_id}`);
                 },
-                style: { cursor: row?.kind === 'separator' ? 'default' : 'pointer' },
+                style: {
+                  cursor:
+                    row?.kind === 'separator' || row?.kind === 'summary'
+                      ? 'default'
+                      : 'pointer',
+                },
               })}
               components={{
                 header: {

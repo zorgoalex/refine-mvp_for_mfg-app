@@ -1,3 +1,5 @@
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -5,7 +7,13 @@ import {
   normalizePageSizePreferences,
   pageSizeStorageKey,
   PAGE_SIZE_OPTIONS,
+  usePageSizePreference,
 } from './usePageSizePreference';
+
+function PageSizeProbe() {
+  const { pageSize } = usePageSizePreference('test:ssr');
+  return createElement('span', null, pageSize);
+}
 
 describe('page-size preferences', () => {
   it('accepts only the bounded page sizes offered by the UI', () => {
@@ -31,5 +39,9 @@ describe('page-size preferences', () => {
   it('isolates the local fallback by user', () => {
     expect(pageSizeStorageKey('15')).toBe('erp.pageSizes.15');
     expect(pageSizeStorageKey('16')).not.toBe(pageSizeStorageKey('15'));
+  });
+
+  it('uses the fallback when rendered without browser storage', () => {
+    expect(renderToString(createElement(PageSizeProbe))).toContain('10');
   });
 });

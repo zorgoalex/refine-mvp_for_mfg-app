@@ -5,7 +5,30 @@ import type { FreecutClient } from './freecut-client';
 import type { FreecutOptimizeResponse } from '../application/cut-freecut-mapping';
 import type { CutConfigPort } from '../application/cut-config';
 import { StaticCutConfig } from '../application/cut-config';
-import { PgCutRepository, profileChangedOutboxKey, resolvePdfTemplateSelection } from './pg-cut-repository';
+import {
+  PgCutRepository,
+  profileChangedOutboxKey,
+  resolvePdfTemplateSelection,
+  routingContractForCalcBasis,
+  VACUUM_ROUTING_CONTRACT_VERSION,
+} from './pg-cut-repository';
+
+describe('calculation basis routing contract', () => {
+  const base = {
+    kerf_mm: 2,
+    spacing_mm: 1,
+    trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
+    objective: 'min_waste' as const,
+  };
+
+  it('salts vacuum layouts with v2 while leaving non-vacuum layouts unsalted', () => {
+    expect(routingContractForCalcBasis({ ...base, layout_mode: 'vacuum_table' }))
+      .toBe(VACUUM_ROUTING_CONTRACT_VERSION);
+    expect(routingContractForCalcBasis({ ...base, layout_mode: 'guillotine' }))
+      .toBeNull();
+    expect(routingContractForCalcBasis(base)).toBeNull();
+  });
+});
 
 /** Build a CutConfigPort stub with selective overrides (defaults to StaticCutConfig). */
 function stubConfig(overrides: Partial<CutConfigPort> = {}): CutConfigPort {

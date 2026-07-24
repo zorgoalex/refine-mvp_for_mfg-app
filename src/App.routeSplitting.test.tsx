@@ -3,6 +3,10 @@ import { resolve } from 'path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(__dirname, 'App.tsx'), 'utf8');
+const workspaceLayoutSource = readFileSync(
+  resolve(__dirname, 'components/workspace/WorkspaceLayout.tsx'),
+  'utf8',
+);
 
 // Guard: route/page components must be loaded via React.lazy so the root bundle
 // ships only shell/providers/login. Regressing to static page imports re-inflates
@@ -14,8 +18,17 @@ describe('App.tsx route-level code splitting', () => {
     expect(lazyCount).toBeGreaterThan(50);
   });
 
-  it('wraps routes in a Suspense boundary', () => {
-    expect(source).toContain('Suspense');
+  it('keeps the persistent workspace shell outside the route loading boundary', () => {
+    expect(source).not.toContain('<Suspense');
+    expect(workspaceLayoutSource).toMatch(
+      /<WorkspaceTabs\s*\/>[\s\S]*<Suspense[\s\S]*<KeepAliveOutlet\s*\/>[\s\S]*<\/Suspense>[\s\S]*<AppFooter\s*\/>/,
+    );
+  });
+
+  it('shows a content skeleton while a lazy route chunk loads', () => {
+    expect(workspaceLayoutSource).toContain('<WorkspaceRouteSkeleton />');
+    expect(workspaceLayoutSource).toContain('<Skeleton');
+    expect(workspaceLayoutSource).toContain('aria-label="Загрузка страницы"');
   });
 
   it('does not statically import page components except the eager login page', () => {

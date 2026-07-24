@@ -154,6 +154,45 @@ describe('generic PDF table detector', () => {
     expect(mapped.issues[0]).toContain('обязательные поля');
   });
 
+  it('assigns vertically offset cells to the nearest anchored row', () => {
+    const page = [
+      item('№', 53, 400.6), item('Обозн.', 87.9, 400.6),
+      item('Наименование', 157.1, 400.6), item('Кол-во', 245.2, 400.6),
+      item('Размер, мм', 295.7, 400.6), item('Фрезировка', 404.7, 400.6),
+      item('Пленка', 581.8, 400.6), item('Примечание', 721.8, 400.6),
+
+      item('1760', 288.1, 387.3), item('192', 332.8, 387.3),
+      item('Алатау мат. KZ 03', 562.2, 387.3),
+      item('1', 64.2, 382.2), item('00.00.01.03', 74.6, 382.2),
+      item('Вертикальная', 160.2, 382.2), item('2', 268.3, 382.2),
+      item('Модерн', 414.3, 382.2), item('kira', 589.6, 382.2),
+
+      item('1425', 288.1, 364.6), item('346', 332.8, 364.6),
+      item('Алатау мат. KZ 03', 562.2, 364.6),
+      item('2', 64.2, 359.5), item('00.00.01.04', 74.6, 359.5),
+      item('Дверь', 175.1, 359.5), item('2', 268.3, 359.5),
+      item('Модерн', 414.3, 359.5), item('kira', 589.6, 359.5),
+      item('Присадка:', 727.2, 359.5),
+
+      item('698', 290.3, 341.9), item('100', 332.8, 341.9),
+      item('Алатау мат. KZ 03', 562.2, 341.9),
+      item('3', 64.2, 336.9), item('00.00.01.08', 74.6, 336.9),
+      item('Фронтальная', 161.7, 336.9), item('1', 268.3, 336.9),
+      item('Модерн', 414.3, 336.9), item('kira', 589.6, 336.9),
+    ];
+
+    const table = detectGenericPdfTables([page])[0];
+    const mapped = mapGenericTableRows(table, inferredMapping(table));
+
+    expect(table.unresolvedLines).toEqual([]);
+    expect(mapped.issues).toEqual([]);
+    expect(mapped.rows).toMatchObject([
+      { height: 1760, width: 192, quantity: 2, filmName: 'Алатау мат. KZ 03 kira' },
+      { height: 1425, width: 346, quantity: 2, filmName: 'Алатау мат. KZ 03 kira' },
+      { height: 698, width: 100, quantity: 1, filmName: 'Алатау мат. KZ 03 kira' },
+    ]);
+  });
+
   it('requires a document-local decision for unattached lines', () => {
     const page = [
       item('№', 100, 500), item('Наименование', 200, 500),
