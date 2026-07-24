@@ -76,6 +76,26 @@ export const OrderLabelPagesViewer: React.FC<OrderLabelPagesViewerProps> = ({
           width: 100%;
         }
 
+        .order-label-pages-viewer__list-panel {
+          background: var(--app-surface, #fff);
+          border-radius: 12px;
+          box-shadow: inset 0 0 0 1px var(--app-border);
+          padding: 10px;
+        }
+
+        .order-label-pages-viewer__list-title {
+          align-items: baseline;
+          display: flex;
+          gap: 8px;
+          justify-content: space-between;
+          margin-bottom: 8px;
+        }
+
+        .order-label-pages-viewer__list-count {
+          font-variant-numeric: tabular-nums;
+          white-space: nowrap;
+        }
+
         .order-label-pages-viewer__list {
           display: flex;
           flex-direction: column;
@@ -146,6 +166,10 @@ export const OrderLabelPagesViewer: React.FC<OrderLabelPagesViewerProps> = ({
             grid-template-columns: 1fr;
           }
 
+          .order-label-pages-viewer__list-panel {
+            padding: 8px;
+          }
+
           .order-label-pages-viewer__list {
             flex-direction: row;
             max-height: none;
@@ -162,7 +186,7 @@ export const OrderLabelPagesViewer: React.FC<OrderLabelPagesViewerProps> = ({
         <Space direction="vertical" size={0}>
           <Text strong>{title}</Text>
           <Text type="secondary">
-            {description ?? 'Выберите бирку в списке. В системном окне печати номера страниц совпадают с номерами бирок.'}
+            {description ?? 'Список бирок слева, на телефоне — сверху. В системном окне печати номера страниц совпадают с номерами бирок.'}
           </Text>
         </Space>
         {printEnabled && (
@@ -172,21 +196,29 @@ export const OrderLabelPagesViewer: React.FC<OrderLabelPagesViewerProps> = ({
         )}
       </div>
       <div className="order-label-pages-viewer">
-        <div className="order-label-pages-viewer__list" aria-label="Список бирок" role="list">
-          {pageButtons.map((index) => (
-            <button
-              key={index}
-              type="button"
-              className={[
-                'order-label-pages-viewer__list-button',
-                index === selectedIndex ? 'order-label-pages-viewer__list-button--active' : '',
-              ].filter(Boolean).join(' ')}
-              aria-current={index === selectedIndex ? 'page' : undefined}
-              onClick={() => setSelectedIndex(index)}
-            >
-              Бирка {index + 1}
-            </button>
-          ))}
+        <div className="order-label-pages-viewer__list-panel">
+          <div className="order-label-pages-viewer__list-title">
+            <Text strong>Список бирок</Text>
+            <Text type="secondary" className="order-label-pages-viewer__list-count">
+              {pageCount} шт.
+            </Text>
+          </div>
+          <div className="order-label-pages-viewer__list" aria-label="Список бирок" role="list">
+            {pageButtons.map((index) => (
+              <button
+                key={index}
+                type="button"
+                className={[
+                  'order-label-pages-viewer__list-button',
+                  index === selectedIndex ? 'order-label-pages-viewer__list-button--active' : '',
+                ].filter(Boolean).join(' ')}
+                aria-current={index === selectedIndex ? 'page' : undefined}
+                onClick={() => setSelectedIndex(index)}
+              >
+                Бирка {index + 1}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="order-label-pages-viewer__preview">
           <div className="order-label-pages-viewer__toolbar">
