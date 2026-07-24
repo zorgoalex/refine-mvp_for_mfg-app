@@ -148,6 +148,32 @@ test.describe('Tabbed workspace', () => {
         await expect(page).toHaveURL(/\/calendar(?:$|\?)/);
     });
 
+    test('keeps long evolution sidebar labels inside their menu items', async ({ page }) => {
+        await setupWorkflowMockApi(page, createWorkflowMockDb(), { uiVariant: 'evolution' });
+        await page.addInitScript(() => {
+            localStorage.removeItem('erp.ui.evolution.sidebar.collapsed');
+        });
+
+        await page.goto('/orders');
+        const sider = page.locator('.evolution-sider:not(.ant-layout-sider-collapsed)');
+        await expect(sider).toBeVisible({ timeout: 30_000 });
+
+        const overflowingLabels = await sider.locator('.ant-menu-item').evaluateAll((items) =>
+            items.flatMap((item) => {
+                const label = item.querySelector<HTMLElement>('.ant-menu-title-content');
+                if (!label) return [];
+
+                const itemRect = item.getBoundingClientRect();
+                const labelRect = label.getBoundingClientRect();
+                const overflows = labelRect.top < itemRect.top - 0.5 || labelRect.bottom > itemRect.bottom + 0.5;
+
+                return overflows ? [label.textContent?.trim() ?? ''] : [];
+            }),
+        );
+
+        expect(overflowingLabels).toEqual([]);
+    });
+
     test('?tab deep-link into an order tab is not stripped', async ({ page }) => {
         const db = createWorkflowMockDb();
         seedOrder(db, 11195, 'E2E Тест deep-link order');

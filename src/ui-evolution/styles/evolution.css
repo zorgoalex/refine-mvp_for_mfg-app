@@ -220,10 +220,27 @@
 }
 
 :root[data-ui-variant="evolution"] .evolution-sider .ant-menu-item {
-  min-height: 40px;
+  min-height: 44px;
   margin: 2px 0;
   border-radius: var(--evo-radius-md);
   color: #afc2c6;
+}
+
+:root[data-ui-variant="evolution"] .evolution-sider:not(.ant-layout-sider-collapsed) .ant-menu-item {
+  height: auto;
+  padding-block: 10px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+:root[data-ui-variant="evolution"] .evolution-sider:not(.ant-layout-sider-collapsed) .ant-menu-title-content {
+  min-width: 0;
+  overflow: visible;
+  line-height: 1.35;
+  text-overflow: clip;
+  text-wrap: pretty;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 :root[data-ui-variant="evolution"] .evolution-sider .ant-menu-item:hover {
