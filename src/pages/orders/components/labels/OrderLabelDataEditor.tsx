@@ -2,11 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Input, Select, Space, Table, Typography, message } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../../../api/labelsApi';
-import type { LabelTemplate, OrderLabelData } from '../../../../api/types/labelsApi.types';
+import type { LabelTemplate, LatestOrderLabelsPreview, OrderLabelData } from '../../../../api/types/labelsApi.types';
 import { canAny } from '../../../../utils/permissions';
 import { parseBasisDataView } from './parseBasisDataView';
 import { OrderLabelGenerateAction } from './OrderLabelGenerateAction';
 import { LabelSvgPreviewFrame } from './LabelSvgPreviewFrame';
+import { OrderLabelPagesViewer } from './OrderLabelPagesViewer';
 
 const { Text } = Typography;
 
@@ -44,7 +45,7 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
   const [dirtyDetailIds, setDirtyDetailIds] = useState<Set<number>>(new Set());
   const labelDataDirty = dirtyDetailIds.size > 0;
   const [loading, setLoading] = useState(false);
-  const [latestPreviewSvg, setLatestPreviewSvg] = useState<string | null>(null);
+  const [latestPreview, setLatestPreview] = useState<LatestOrderLabelsPreview | null>(null);
   const [latestPreviewLoading, setLatestPreviewLoading] = useState(false);
   const [latestPreviewRefreshKey, setLatestPreviewRefreshKey] = useState(0);
   const selectedTemplate = useMemo(
@@ -85,36 +86,18 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
   }, [orderId, templateId]);
 
   useEffect(() => {
-    const firstDetailId = data?.details[0]?.detailId;
-    if (!orderId || !firstDetailId) {
-      setLatestPreviewSvg(null);
+    if (!orderId) {
+      setLatestPreview(null);
       return;
     }
     let cancelled = false;
     setLatestPreviewLoading(true);
     labelsApi.getLatest(orderId)
-      .then(async (latest) => {
-        if (!latest) {
-          if (!cancelled) setLatestPreviewSvg(null);
-          return;
-        }
-        try {
-          const preview = await labelsApi.previewOrderLabels(orderId, {
-            templateId: latest.templateId,
-            templateVersion: latest.templateVersion,
-            detailFilters: { detailIds: [firstDetailId] },
-          });
-          if (!cancelled) {
-            setLatestPreviewSvg(preview.svgPages[0] ?? latest.svgPages[0] ?? null);
-          }
-        } catch {
-          if (!cancelled) {
-            setLatestPreviewSvg(latest.svgPages[0] ?? null);
-          }
-        }
+      .then((latest) => {
+        if (!cancelled) setLatestPreview(latest);
       })
       .catch(() => {
-        if (!cancelled) setLatestPreviewSvg(null);
+        if (!cancelled) setLatestPreview(null);
       })
       .finally(() => {
         if (!cancelled) setLatestPreviewLoading(false);
@@ -122,7 +105,7 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
     return () => {
       cancelled = true;
     };
-  }, [data, latestPreviewRefreshKey, orderId]);
+  }, [latestPreviewRefreshKey, orderId]);
 
   const save = async () => {
     if (!orderId || !data || !templateId || isOrderDirty) return;
@@ -205,13 +188,18 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
             onGenerated={() => setLatestPreviewRefreshKey((current) => current + 1)}
           />
         </Space>
-        {(latestPreviewSvg || latestPreviewLoading) && (
+        {(latestPreview || latestPreviewLoading) && (
           <Space direction="vertical" size={6} style={{ width: '100%' }}>
-            <Text type="secondary">Превью последней генерации: первая позиция</Text>
             {latestPreviewLoading ? (
               <Text type="secondary">Загрузка превью...</Text>
             ) : (
-              <OrderLabelInlinePreviewSurface svg={latestPreviewSvg ?? ''} />
+              latestPreview && (
+                <OrderLabelPagesViewer
+                  svgPages={latestPreview.svgPages}
+                  title={`Последняя генерация: ${latestPreview.labelCount} шт.`}
+                  printTitle={`Заказ ${orderId} — последняя генерация бирок #${latestPreview.generationId}`}
+                />
+              )
             )}
           </Space>
         )}

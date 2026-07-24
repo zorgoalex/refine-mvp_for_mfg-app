@@ -5,7 +5,7 @@ import { labelsApi } from '../../../../api/labelsApi';
 import type { LabelCutMapOption, LabelTemplate, OrderLabelCutMapOptions, OrderLabelsPreview } from '../../../../api/types/labelsApi.types';
 import { can } from '../../../../utils/permissions';
 import { saveLabelBlob } from './labelDownloads';
-import { LabelSvgPreviewFrame } from './LabelSvgPreviewFrame';
+import { OrderLabelPagesViewer } from './OrderLabelPagesViewer';
 import {
   buildDefaultOrderCutMapSelection,
   buildOrderCutMapLabelRows,
@@ -33,30 +33,13 @@ interface OrderLabelGenerateActionProps {
 export const OrderLabelGeneratePreviewSurface: React.FC<{
   preview: OrderLabelsPreview;
   template: LabelTemplate;
-}> = ({ preview, template }) => {
-  const previewAspectRatio = template.canvasWidthMm / template.canvasHeightMm;
-  return (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Text type="secondary">Бирок: {preview.labelCount}. Показана первая.</Text>
-      {preview.svgPages.slice(0, 1).map((svg, index) => (
-        <LabelSvgPreviewFrame
-          key={index}
-          svg={svg}
-          className="order-label-preview-fit"
-          style={{
-            aspectRatio: `${template.canvasWidthMm} / ${template.canvasHeightMm}`,
-            background: '#fff',
-            border: '1px solid var(--app-border)',
-            boxSizing: 'border-box',
-            lineHeight: 0,
-            overflow: 'hidden',
-            width: `min(100%, calc(58vh * ${previewAspectRatio}))`,
-          }}
-        />
-      ))}
-    </Space>
-  );
-};
+}> = ({ preview }) => (
+  <OrderLabelPagesViewer
+    svgPages={preview.svgPages}
+    title={`Предпросмотр бирок: ${preview.labelCount} шт.`}
+    printEnabled={false}
+  />
+);
 
 export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> = ({
   orderId,
@@ -74,6 +57,8 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   const [previewDetailId, setPreviewDetailId] = useState<number | null>(initialDetailId);
   const [useBasisFields, setUseBasisFields] = useState(true);
   const [preview, setPreview] = useState<OrderLabelsPreview | null>(null);
+  const [generatedPreview, setGeneratedPreview] = useState<OrderLabelsPreview | null>(null);
+  const [generatedGenerationId, setGeneratedGenerationId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [cutMapOptions, setCutMapOptions] = useState<OrderLabelCutMapOptions | null>(null);
@@ -84,9 +69,6 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     () => templates.find((template) => template.labelTemplateId === templateId) ?? null,
     [templateId, templates],
   );
-  const previewAspectRatio = selectedTemplate
-    ? selectedTemplate.canvasWidthMm / selectedTemplate.canvasHeightMm
-    : 1;
   const hasCutMap = Boolean(selectedTemplate?.elements.some((element) => element.kind === 'cut_map'));
   const cutMapRows = useMemo(() => buildOrderCutMapLabelRows(cutMapOptions), [cutMapOptions]);
   const staleCutMapRowKeys = useMemo(() => {
@@ -134,6 +116,9 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   useEffect(() => {
     if (!open) return;
     setPreviewDetailId(initialDetailId);
+    setPreview(null);
+    setGeneratedPreview(null);
+    setGeneratedGenerationId(null);
     setLoading(true);
     labelsApi.listTemplates(true)
       .then((next) => {
@@ -153,6 +138,8 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     }
     let active = true;
     setPreview(null);
+    setGeneratedPreview(null);
+    setGeneratedGenerationId(null);
     setCutMapOptions(null);
     setCutMapSelection({});
     setCutMapOptionsLoading(true);
@@ -174,6 +161,12 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     };
   }, [canViewCut, hasCutMap, open, orderId, selectedTemplate?.labelTemplateId]);
 
+  useEffect(() => {
+    if (!open) return;
+    setGeneratedPreview(null);
+    setGeneratedGenerationId(null);
+  }, [cutMapSelection, open, templateId, useBasisFields]);
+
   const runPreview = useCallback(async () => {
     if (
       !selectedTemplate
@@ -184,6 +177,8 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
     setPreview(null);
+    setGeneratedPreview(null);
+    setGeneratedGenerationId(null);
     setLoading(true);
     try {
       const nextPreview = await labelsApi.previewOrderLabels(orderId, {
@@ -210,10 +205,10 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   useEffect(() => {
     if (!open || !selectedTemplate || isOrderDirty || generating || cutMapOptionsLoading) return;
     void runPreview();
-  }, [generating, open, previewDetailId, runPreview, selectedTemplate, isOrderDirty, useBasisFields]);
+  }, [cutMapOptionsLoading, generating, open, previewDetailId, runPreview, selectedTemplate, isOrderDirty, useBasisFields]);
 
   const runGenerate = async () => {
-    if (!selectedTemplate || !preview || isOrderDirty || missingGenerationCutMaps.length > 0) return;
+    if (!selectedTemplate || !preview || isOrderDirty || cutMapOptionsLoading || missingGenerationCutMaps.length > 0) return;
     setGenerating(true);
     try {
       const generationPreview = await labelsApi.previewOrderLabels(orderId, {
@@ -233,9 +228,11 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
       });
       const downloaded = await labelsApi.downloadGeneration(orderId, generation.generationId);
       saveLabelBlob(downloaded.blob, downloaded.fileName ?? `order-${orderId}-labels-${generation.generationId}.zip`);
+      setGeneratedPreview(generationPreview);
+      setGeneratedGenerationId(generation.generationId);
+      setPreview(generationPreview);
       onGenerated?.();
-      message.success('Бирки сформированы');
-      setOpen(false);
+      message.success('Бирки сформированы: список доступен для просмотра и печати');
     } catch {
       message.error('Не удалось сформировать бирки');
     } finally {
@@ -263,7 +260,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
             Предпросмотр
           </Button>,
           <Button key="generate" type="primary" icon={<DownloadOutlined />} onClick={runGenerate} loading={generating} disabled={!preview || isOrderDirty || cutMapOptionsLoading || missingGenerationCutMaps.length > 0}>
-            Сформировать и скачать
+            Сформировать и скачать ZIP
           </Button>,
         ]}
         width={1080}
@@ -308,11 +305,6 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
             grid-template-columns: minmax(140px, 0.75fr) minmax(200px, 1.25fr);
             gap: 8px;
             align-items: center;
-          }
-          .order-label-preview-fit svg {
-            display: block;
-            width: 100%;
-            height: 100%;
           }
           @media (max-width: 680px) {
             .order-label-cut-map-row {
@@ -431,12 +423,17 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
             </Space>
           </div>
           <div className="order-label-generate-preview-panel">
-            <Text strong>Предпросмотр бирки</Text>
-            {preview && selectedTemplate ? (
+            {generatedPreview ? (
+              <OrderLabelPagesViewer
+                svgPages={generatedPreview.svgPages}
+                title={`Сформированные бирки${generatedGenerationId ? ` #${generatedGenerationId}` : ''}: ${generatedPreview.labelCount} шт.`}
+                printTitle={`Заказ ${orderId} — бирки${generatedGenerationId ? ` #${generatedGenerationId}` : ''}`}
+              />
+            ) : preview && selectedTemplate ? (
               <OrderLabelGeneratePreviewSurface preview={preview} template={selectedTemplate} />
             ) : (
               <div className="order-label-generate-preview-empty">
-                <Text type="secondary">Выберите шаблон и позицию, чтобы увидеть первую бирку.</Text>
+                <Text type="secondary">Выберите шаблон и позицию, чтобы увидеть бирки.</Text>
               </div>
             )}
           </div>
