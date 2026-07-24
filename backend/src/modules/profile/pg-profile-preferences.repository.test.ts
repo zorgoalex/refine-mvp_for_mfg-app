@@ -7,18 +7,19 @@ describe('PgProfilePreferencesRepository', () => {
     const database = new FakeDatabase([{ rows: [] }]);
     const repository = new PgProfilePreferencesRepository(database);
 
-    await expect(repository.getUserPreferences(7)).resolves.toEqual({ themeMode: 'light', uiSize: 'default', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} });
+    await expect(repository.getUserPreferences(7)).resolves.toEqual({ themeMode: 'light', uiSize: 'default', uiVariant: 'legacy', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} });
     expect(database.queries[0].text).toContain('FROM user_preferences');
     expect(database.queries[0].params).toEqual([7]);
   });
 
   it('returns persisted dark theme', async () => {
-    const database = new FakeDatabase([{ rows: [{ theme_mode: 'dark', ui_size: 'small', order_detail_columns: { orderShow: { order: ['height'], hidden: ['note'] } } }] }]);
+    const database = new FakeDatabase([{ rows: [{ theme_mode: 'dark', ui_size: 'small', ui_variant: 'evolution', order_detail_columns: { orderShow: { order: ['height'], hidden: ['note'] } } }] }]);
     const repository = new PgProfilePreferencesRepository(database);
 
     await expect(repository.getUserPreferences(7)).resolves.toEqual({
       themeMode: 'dark',
       uiSize: 'small',
+      uiVariant: 'evolution',
       orderDetailColumns: { orderShow: { order: ['height'], hidden: ['note'] } },
       recentReferences: {},
       pageSizePreferences: {},
@@ -32,13 +33,14 @@ describe('PgProfilePreferencesRepository', () => {
     await expect(repository.updateUserPreferences(7, { themeMode: 'dark' })).resolves.toEqual({
       themeMode: 'dark',
       uiSize: 'default',
+      uiVariant: 'legacy',
       orderDetailColumns: {},
       recentReferences: {},
       pageSizePreferences: {},
     });
     expect(database.queries[0].text).toContain('INSERT INTO user_preferences');
     expect(database.queries[0].text).toContain('ON CONFLICT (user_id)');
-    expect(database.queries[0].params).toEqual([7, 'dark', null, null, null]);
+    expect(database.queries[0].params).toEqual([7, 'dark', null, null, null, null]);
   });
 
   it('upserts order detail column preferences without changing theme', async () => {
@@ -50,12 +52,14 @@ describe('PgProfilePreferencesRepository', () => {
     })).resolves.toEqual({
       themeMode: 'light',
       uiSize: 'default',
+      uiVariant: 'legacy',
       orderDetailColumns: { orderEdit: { order: ['width'], hidden: [] } },
       recentReferences: {},
       pageSizePreferences: {},
     });
     expect(database.queries[0].params).toEqual([
       7,
+      null,
       null,
       null,
       JSON.stringify({ orderEdit: { order: ['width'], hidden: [] } }),
@@ -70,16 +74,36 @@ describe('PgProfilePreferencesRepository', () => {
     await expect(repository.updateUserPreferences(7, { uiSize: 'small' })).resolves.toEqual({
       themeMode: 'light',
       uiSize: 'small',
+      uiVariant: 'legacy',
       orderDetailColumns: {},
       recentReferences: {},
       pageSizePreferences: {},
     });
-    expect(database.queries[0].params).toEqual([7, null, 'small', null, null]);
+    expect(database.queries[0].params).toEqual([7, null, 'small', null, null, null]);
 
     const garbage = new FakeDatabase([{ rows: [{ theme_mode: 'light', ui_size: 'huge', order_detail_columns: {} }] }]);
     await expect(new PgProfilePreferencesRepository(garbage).getUserPreferences(7)).resolves.toMatchObject({
       uiSize: 'default',
+      uiVariant: 'legacy',
     });
+  });
+
+  it('upserts UI variant and normalizes unknown stored values to legacy', async () => {
+    const database = new FakeDatabase([{
+      rows: [{ theme_mode: 'light', ui_variant: 'evolution', order_detail_columns: {} }],
+    }]);
+    const repository = new PgProfilePreferencesRepository(database);
+
+    await expect(repository.updateUserPreferences(7, { uiVariant: 'evolution' }))
+      .resolves.toMatchObject({ uiVariant: 'evolution' });
+    expect(database.queries[0].params).toEqual([7, null, null, 'evolution', null, null]);
+    expect(database.queries[0].text).toContain('ui_variant = COALESCE($4, user_preferences.ui_variant)');
+
+    const garbage = new FakeDatabase([{
+      rows: [{ theme_mode: 'light', ui_variant: 'future', order_detail_columns: {} }],
+    }]);
+    await expect(new PgProfilePreferencesRepository(garbage).getUserPreferences(7))
+      .resolves.toMatchObject({ uiVariant: 'legacy' });
   });
 
   it('atomically merges one list page size without replacing other list preferences', async () => {
@@ -103,10 +127,11 @@ describe('PgProfilePreferencesRepository', () => {
       null,
       null,
       null,
+      null,
       JSON.stringify({ 'refine:orders_view': 50 }),
     ]);
-    expect(database.queries[0].text).toContain('user_preferences.page_size_preferences || $5::jsonb');
-    expect(database.queries[0].text).toContain('jsonb_object_length(user_preferences.page_size_preferences || $5::jsonb) <= 128');
+    expect(database.queries[0].text).toContain('user_preferences.page_size_preferences || $6::jsonb');
+    expect(database.queries[0].text).toContain('jsonb_object_length(user_preferences.page_size_preferences || $6::jsonb) <= 128');
   });
 
   it('rejects an atomic merge that would exceed the per-user key limit', async () => {

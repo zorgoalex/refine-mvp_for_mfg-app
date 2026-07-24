@@ -51,7 +51,6 @@ describe('authProvider backend cutover mode', () => {
       authProvider.login?.({ username: 'admin', password: 'secret' }),
     ).resolves.toMatchObject({
       success: true,
-      redirectTo: '/',
     });
 
     expect(fetchMock).toHaveBeenCalledWith(

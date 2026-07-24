@@ -4,6 +4,7 @@ import { UserOutlined, LockOutlined, LoginOutlined } from "@ant-design/icons";
 import { useLogin } from "@refinedev/core";
 import { featureFlags } from "../../config/featureFlags";
 import { SSO_LOGOUT_WARNING_KEY } from "../../authProvider";
+import { resolvePostLoginTarget } from "./postLoginTarget";
 
 const { Title, Text } = Typography;
 
@@ -19,10 +20,36 @@ function consumeSsoLogoutWarning(): boolean {
  * Использует username вместо email для аутентификации
  */
 export const LoginPage: React.FC = () => {
-  const { mutate: login, isLoading } = useLogin();
+  const postLoginTarget = React.useRef("/");
+  const [loginError, setLoginError] = React.useState<string | null>(null);
+  const { mutate: login, isLoading } = useLogin<{
+    username: string;
+    password: string;
+  }>({
+    // Override Refine's SPA redirect. The selected shell is immutable for one
+    // document, so successful login must start a new document before any
+    // authenticated route can paint.
+    mutationOptions: {
+      onSuccess: (result) => {
+        if (result.success) {
+          window.location.assign(postLoginTarget.current);
+          return;
+        }
+        setLoginError(result.error?.message ?? "Не удалось войти в систему");
+      },
+      onError: (error) => {
+        setLoginError(error.message || "Не удалось войти в систему");
+      },
+    },
+  });
   const [ssoLogoutWarning] = React.useState(consumeSsoLogoutWarning);
 
   const onFinish = (values: { username: string; password: string }) => {
+    postLoginTarget.current = resolvePostLoginTarget(
+      window.location.search,
+      window.location.origin,
+    );
+    setLoginError(null);
     login(values);
   };
 
@@ -59,6 +86,14 @@ export const LoginPage: React.FC = () => {
             style={{ marginBottom: 16 }}
             message="Сессия SSO-провайдера может быть ещё активна"
             description="Не удалось завершить сессию провайдера входа. На общем компьютере завершите её вручную (выход из аккаунта провайдера)."
+          />
+        )}
+        {loginError && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={loginError}
           />
         )}
 
