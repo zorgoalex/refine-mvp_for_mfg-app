@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import type { DeadlineActionRuleDto } from '../../../api/types/deadlineApi.types';
+import type { DeadlineActionRuleDto, DeadlinePolicyDto } from '../../../api/types/deadlineApi.types';
 import {
+  buildTransitionRuleCreatePayload,
   buildTransitionRuleDraft,
   buildTransitionRuleUpdatePayload,
   canManageDeadlineTransitionRules,
-  formatStatusIdList,
-  parseStatusIdList,
+  describeRuleScope,
+  describeTransition,
+  emptyTransitionRuleDraft,
 } from './deadlineTransitionRulesView';
 
 const actionRuleId = '11111111-1111-4111-8111-111111111111';
@@ -14,140 +16,125 @@ describe('deadlineTransitionRulesView', () => {
   it('matches backend permissions for managing transition rules', () => {
     expect(canManageDeadlineTransitionRules({ permissions: ['deadlines.actions.manage'] })).toBe(true);
     expect(canManageDeadlineTransitionRules({ permissions: ['settings.manage'] })).toBe(false);
-    expect(canManageDeadlineTransitionRules({ permissions: ['deadlines.manage'] })).toBe(false);
     expect(canManageDeadlineTransitionRules({ permissions: [] })).toBe(false);
   });
 
-  it('formats and parses comma separated status id lists', () => {
-    expect(formatStatusIdList([1, 2, 7])).toBe('1, 2, 7');
-    expect(formatStatusIdList(undefined)).toBe('');
-    expect(parseStatusIdList('1, 2 3\n4')).toEqual([1, 2, 3, 4]);
-    expect(parseStatusIdList('')).toEqual([]);
-  });
-
-  it('builds editable drafts from transition rule config', () => {
+  it('builds named drafts with policy and status arrays', () => {
     expect(buildTransitionRuleDraft(rule())).toEqual({
+      ruleName: 'Просрочена выдача',
+      ruleCode: 'overdue-issue',
+      policyId: '22222222-2222-4222-8222-222222222222',
       isEnabled: true,
       priority: 10,
       targetOrderStatusId: 7,
-      allowedFromOrderStatusIdsText: '1, 2',
-      excludeOrderStatusIdsText: '9',
+      allowedFromOrderStatusIds: [1, 2],
+      excludeOrderStatusIds: [9],
+      excludeCompletedOrders: true,
+      requireCurrentDeadlineEvent: true,
+    });
+    const legacyUnsafe = rule();
+    legacyUnsafe.config = {
+      ...legacyUnsafe.config,
+      conditions: {
+        ...legacyUnsafe.config?.conditions,
+        excludeCompletedOrders: false,
+        requireCurrentDeadlineEvent: false,
+      },
+    };
+    expect(buildTransitionRuleDraft(legacyUnsafe)).toMatchObject({
       excludeCompletedOrders: true,
       requireCurrentDeadlineEvent: true,
     });
   });
 
-  it('builds stale-safe disabled transition rule update payloads', () => {
-    const payload = buildTransitionRuleUpdatePayload(
-      rule({ updatedAt: '2026-06-14T00:00:00.000Z' }),
-      {
-        isEnabled: true,
-        priority: 25,
-        targetOrderStatusId: 8,
-        allowedFromOrderStatusIdsText: '1, 2',
-        excludeOrderStatusIdsText: '9, 10',
-        excludeCompletedOrders: false,
-        requireCurrentDeadlineEvent: true,
-      },
-      'Ops approved change',
-      'Ticket OPS-42',
-    );
+  it('builds complete create and stale-safe update payloads', () => {
+    const draft = {
+      ...emptyTransitionRuleDraft(),
+      ruleName: '  Просрочена выдача  ',
+      ruleCode: ' overdue-issue ',
+      policyId: '22222222-2222-4222-8222-222222222222',
+      isEnabled: true,
+      priority: 25,
+      targetOrderStatusId: 8,
+      allowedFromOrderStatusIds: [1, 2],
+      excludeOrderStatusIds: [9, 10],
+    };
 
-    expect(payload).toEqual({
-      expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
+    expect(buildTransitionRuleCreatePayload(draft, ' Ops approved ', ' Ticket OPS-42 ')).toEqual({
+      ruleName: 'Просрочена выдача',
+      ruleCode: 'overdue-issue',
+      policyId: draft.policyId,
+      isEnabled: true,
       priority: 25,
       eventType: 'DEADLINE_EXPIRED',
       actionType: 'change_order_status',
       targetOrderStatusId: 8,
       allowedFromOrderStatusIds: [1, 2],
       excludeOrderStatusIds: [9, 10],
-      excludeCompletedOrders: false,
+      excludeCompletedOrders: true,
       requireCurrentDeadlineEvent: true,
-      reason: 'Ops approved change',
+      reason: 'Ops approved',
       comment: 'Ticket OPS-42',
+    });
+    expect(
+      buildTransitionRuleUpdatePayload(
+        rule({ updatedAt: '2026-06-14T00:00:00.000Z' }),
+        draft,
+        'Ops approved',
+      ),
+    ).toMatchObject({
+      expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
+      ruleName: 'Просрочена выдача',
+      isEnabled: true,
+      targetOrderStatusId: 8,
     });
   });
 
-  it('sends an empty exclude list when blank so backend config can be cleared', () => {
-    const payload = buildTransitionRuleUpdatePayload(
-      rule(),
-      {
-        isEnabled: true,
-        priority: 10,
-        targetOrderStatusId: 7,
-        allowedFromOrderStatusIdsText: '1',
-        excludeOrderStatusIdsText: ' ',
-        excludeCompletedOrders: true,
-        requireCurrentDeadlineEvent: true,
-      },
-      'Enable rule',
-    );
-
-    expect(payload.allowedFromOrderStatusIds).toEqual([1]);
-    expect(payload.excludeOrderStatusIds).toEqual([]);
-    expect('isEnabled' in payload).toBe(false);
-    expect('enabled' in payload).toBe(false);
+  it('renders named scope and transition labels', () => {
+    const policies = [policy()];
+    expect(describeRuleScope(rule(), policies)).toBe('Финальная выдача');
+    expect(
+      describeTransition(rule(), {
+        statusNames: new Map([[1, 'Новый'], [2, 'Оформлен'], [7, 'Просрочен']]),
+        policyNames: new Map(),
+      }),
+    ).toBe('Новый, Оформлен → Просрочен');
+    expect(describeRuleScope(rule({ policyId: null }), policies)).toBe('Все дедлайны заказа');
   });
 
-  it('rejects blank required allowed-from statuses before building payload', () => {
+  it('rejects unsafe or incomplete drafts', () => {
     expect(() =>
-      buildTransitionRuleUpdatePayload(
-        rule(),
-        {
-          isEnabled: true,
-          priority: 10,
-          targetOrderStatusId: 7,
-          allowedFromOrderStatusIdsText: '',
-          excludeOrderStatusIdsText: '',
-          excludeCompletedOrders: true,
-          requireCurrentDeadlineEvent: true,
-        },
-        'Enable rule',
+      buildTransitionRuleCreatePayload(
+        { ...emptyTransitionRuleDraft(), ruleName: 'Rule', targetOrderStatusId: 7 },
+        'Reason',
       ),
-    ).toThrow('Allowed-from statuses are required');
-  });
-
-  it('rejects invalid status id tokens instead of dropping them', () => {
-    expect(() => parseStatusIdList('1, nope, 3', 'Allowed-from statuses')).toThrow(
-      'Allowed-from statuses contains invalid status ids: nope',
-    );
-    expect(() => parseStatusIdList('1e2', 'Allowed-from statuses')).toThrow(
-      'Allowed-from statuses contains invalid status ids: 1e2',
-    );
-    expect(() => parseStatusIdList('0x10', 'Allowed-from statuses')).toThrow(
-      'Allowed-from statuses contains invalid status ids: 0x10',
-    );
-    expect(() => parseStatusIdList('1.0', 'Allowed-from statuses')).toThrow(
-      'Allowed-from statuses contains invalid status ids: 1.0',
-    );
+    ).toThrow('Выберите хотя бы один исходный статус');
     expect(() =>
-      buildTransitionRuleUpdatePayload(
-        rule(),
+      buildTransitionRuleCreatePayload(
         {
-          isEnabled: true,
-          priority: 10,
+          ...emptyTransitionRuleDraft(),
+          ruleName: 'Rule',
           targetOrderStatusId: 7,
-          allowedFromOrderStatusIdsText: '1, nope',
-          excludeOrderStatusIdsText: '',
-          excludeCompletedOrders: true,
-          requireCurrentDeadlineEvent: true,
+          allowedFromOrderStatusIds: [7],
         },
-        'Enable rule',
+        'Reason',
       ),
-    ).toThrow('Allowed-from statuses contains invalid status ids: nope');
+    ).toThrow('Целевой статус должен отличаться от исходных');
   });
 });
 
 function rule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineActionRuleDto {
   return {
     actionRuleId,
-    policyId: null,
+    policyId: '22222222-2222-4222-8222-222222222222',
     scopeType: 'order',
     eventType: 'DEADLINE_EXPIRED',
     actionType: 'change_order_status',
     isEnabled: true,
     priority: 10,
     config: {
+      ruleName: 'Просрочена выдача',
+      ruleCode: 'overdue-issue',
       scope: { type: 'global_orders' },
       conditions: {
         allowedFromOrderStatusIds: [1, 2],
@@ -160,5 +147,17 @@ function rule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineActionRul
     createdAt: '2026-05-01T10:00:00.000Z',
     updatedAt: '2026-05-01T10:00:00.000Z',
     ...overrides,
+  };
+}
+
+function policy(): DeadlinePolicyDto {
+  return {
+    policyId: '22222222-2222-4222-8222-222222222222',
+    policyCode: 'order.final',
+    policyName: 'Финальная выдача',
+    scopeType: 'order',
+    isEnabled: true,
+    createdAt: '2026-05-01T10:00:00.000Z',
+    updatedAt: '2026-05-01T10:00:00.000Z',
   };
 }

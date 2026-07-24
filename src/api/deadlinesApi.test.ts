@@ -182,6 +182,49 @@ describe('deadlinesApi', () => {
     );
   });
 
+  it('creates and deletes deadline transition rules with audited payloads', async () => {
+    const rule = createActionRule();
+    const fetchMock = mockFetch({ rule }, { rule });
+
+    await deadlinesApi.createDeadlineTransitionRule({
+      ruleName: 'Просрочена выдача',
+      policyId: null,
+      targetOrderStatusId: 7,
+      allowedFromOrderStatusIds: [1, 2],
+      reason: 'Approved rule',
+    });
+    await deadlinesApi.deleteDeadlineTransitionRule(deadlineId, {
+      expectedUpdatedAt: '2026-05-01T10:00:00.000Z',
+      reason: 'Unused rule',
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/deadline-transition-rules',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          ruleName: 'Просрочена выдача',
+          policyId: null,
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1, 2],
+          reason: 'Approved rule',
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `/api/v1/deadline-transition-rules/${deadlineId}`,
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({
+          expectedUpdatedAt: '2026-05-01T10:00:00.000Z',
+          reason: 'Unused rule',
+        }),
+      }),
+    );
+  });
+
   it('creates and controls deadlines through versioned endpoints', async () => {
     const deadline = createDeadline();
     const fetchMock = mockFetch(

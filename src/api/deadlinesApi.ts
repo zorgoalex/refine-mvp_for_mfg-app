@@ -3,6 +3,7 @@ import { httpClient } from './httpClient';
 import { validateOrderId, withQuery } from './ordersApi';
 import type {
   CancelDeadlineRequest,
+  CreateGlobalTransitionRuleRequest,
   CreateDeadlineRequest,
   DeadlineActionRuleListResponse,
   DeadlineActionRuleResponse,
@@ -13,6 +14,7 @@ import type {
   DeadlinePolicyListResponse,
   DeadlineResponse,
   DeadlineSettingsResponse,
+  DeleteGlobalTransitionRuleRequest,
   OrderDeadlinesResponse,
   OrderDeadlineSummary,
   OrderEffectiveDeadlineRulesResponse,
@@ -142,6 +144,15 @@ export const deadlinesApi = {
     return httpClient.get<DeadlineActionRuleListResponse>(apiRoutes.deadlineTransitionRules.list);
   },
 
+  createDeadlineTransitionRule(
+    request: CreateGlobalTransitionRuleRequest,
+  ): Promise<DeadlineActionRuleResponse> {
+    return httpClient.post<DeadlineActionRuleResponse>(
+      apiRoutes.deadlineTransitionRules.list,
+      request,
+    );
+  },
+
   updateDeadlineTransitionRule(
     actionRuleId: string,
     request: UpdateGlobalTransitionRuleRequest,
@@ -149,6 +160,19 @@ export const deadlinesApi = {
     return httpClient.patch<DeadlineActionRuleResponse>(
       apiRoutes.deadlineTransitionRules.byId(validateDeadlineId(actionRuleId)),
       request,
+    );
+  },
+
+  deleteDeadlineTransitionRule(
+    actionRuleId: string,
+    request: DeleteGlobalTransitionRuleRequest,
+  ): Promise<DeadlineActionRuleResponse> {
+    return httpClient.request<DeadlineActionRuleResponse>(
+      apiRoutes.deadlineTransitionRules.byId(validateDeadlineId(actionRuleId)),
+      {
+        method: 'DELETE',
+        body: JSON.stringify(request),
+      },
     );
   },
 };
