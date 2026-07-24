@@ -17,7 +17,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../../api/apiError';
 import { deadlinesApi } from '../../../api/deadlinesApi';
 import type {
@@ -675,7 +675,7 @@ function AuditFields(props: {
   );
 }
 
-function ReadinessAlert({ readiness }: { readiness: DeadlineTransitionRulesReadinessDto }) {
+export function ReadinessAlert({ readiness }: { readiness: DeadlineTransitionRulesReadinessDto }) {
   if (readiness.inProcessAutomaticReady) {
     return (
       <Alert

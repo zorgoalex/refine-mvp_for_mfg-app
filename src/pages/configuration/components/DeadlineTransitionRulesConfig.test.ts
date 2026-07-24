@@ -1,5 +1,12 @@
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { DeadlineActionRuleDto, DeadlinePolicyDto } from '../../../api/types/deadlineApi.types';
+import type {
+  DeadlineActionRuleDto,
+  DeadlinePolicyDto,
+  DeadlineTransitionRulesReadinessDto,
+} from '../../../api/types/deadlineApi.types';
+import { ReadinessAlert } from './DeadlineTransitionRulesConfig';
 import {
   buildTransitionRuleCreatePayload,
   buildTransitionRuleDraft,
@@ -120,8 +127,70 @@ describe('deadlineTransitionRulesView', () => {
         'Reason',
       ),
     ).toThrow('Целевой статус должен отличаться от исходных');
+    expect(() =>
+      buildTransitionRuleCreatePayload(
+        {
+          ...emptyTransitionRuleDraft(),
+          ruleName: 'Rule',
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1],
+          excludeOrderStatusIds: [1],
+        },
+        'Reason',
+      ),
+    ).toThrow('Исходные и исключённые статусы не должны пересекаться');
+    expect(() =>
+      buildTransitionRuleCreatePayload(
+        {
+          ...emptyTransitionRuleDraft(),
+          ruleName: 'Rule',
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1],
+          excludeOrderStatusIds: [7],
+        },
+        'Reason',
+      ),
+    ).toThrow('Целевой статус не должен быть исключён');
+  });
+
+  it.each([
+    {
+      expected: 'Автоматическое выполнение настроено',
+      readiness: readiness({ inProcessAutomaticReady: true }),
+    },
+    {
+      expected: 'Выбран внешний планировщик',
+      readiness: readiness({
+        schedulerOwner: 'external',
+        manualMutationReady: true,
+        externalSchedulerOwnerSelected: true,
+      }),
+    },
+    {
+      expected: 'изменение статусов глобально выключено',
+      readiness: readiness(),
+    },
+  ])('renders readiness state: $expected', ({ expected, readiness: value }) => {
+    expect(renderToString(createElement(ReadinessAlert, { readiness: value }))).toContain(expected);
   });
 });
+
+function readiness(
+  overrides: Partial<DeadlineTransitionRulesReadinessDto> = {},
+): DeadlineTransitionRulesReadinessDto {
+  return {
+    deadlinesEnabled: true,
+    deadlinesReadOnly: false,
+    workerEnabled: true,
+    actionsEnabled: false,
+    schedulerOwner: 'none',
+    manualMutationReady: false,
+    inProcessAutomaticReady: false,
+    externalSchedulerOwnerSelected: false,
+    automaticExecutionConfigured: false,
+    ...overrides,
+  };
+}
 
 function rule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineActionRuleDto {
   return {

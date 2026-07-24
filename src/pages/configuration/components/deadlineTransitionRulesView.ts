@@ -149,6 +149,19 @@ function validateTransitionRuleDraft(
   if (draft.allowedFromOrderStatusIds.includes(draft.targetOrderStatusId)) {
     throw new Error('Целевой статус должен отличаться от исходных');
   }
+  if (draft.excludeOrderStatusIds.includes(draft.targetOrderStatusId)) {
+    throw new Error('Целевой статус не должен быть исключён');
+  }
+  if (
+    draft.allowedFromOrderStatusIds.some((statusId) =>
+      draft.excludeOrderStatusIds.includes(statusId),
+    )
+  ) {
+    throw new Error('Исходные и исключённые статусы не должны пересекаться');
+  }
+  if (!draft.excludeCompletedOrders || !draft.requireCurrentDeadlineEvent) {
+    throw new Error('Обязательные защиты правила должны быть включены');
+  }
   if (!Number.isInteger(draft.priority) || draft.priority < 0 || draft.priority > 100000) {
     throw new Error('Приоритет должен быть целым числом от 0 до 100000');
   }
