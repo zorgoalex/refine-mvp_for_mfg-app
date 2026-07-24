@@ -56,6 +56,15 @@ describe('PgLabelsRepository structural guards', () => {
     const latestSource = source.slice(latestStart, latestEnd);
     expect(latestSource).toMatch(/renderSvgPages\(\s*generation\.template,\s*generation\.rows,/);
     expect(latestSource).not.toMatch(/generation\.rows\.slice\(0,\s*1\)/);
+    expect(latestSource).toMatch(/rows:\s*generation\.rows/);
+  });
+
+  it('renders every detail label SVG page for preview, not only the first row', () => {
+    const previewStart = source.indexOf('async previewDetailLabels');
+    const previewEnd = source.indexOf('async generateDetailLabels', previewStart);
+    const previewSource = source.slice(previewStart, previewEnd);
+    expect(previewSource).toMatch(/renderSvgPages\(template,\s*rows\)/);
+    expect(previewSource).not.toMatch(/rows\.slice\(0,\s*1\)/);
   });
 
   it('names order archives from the order name and current generation number', () => {

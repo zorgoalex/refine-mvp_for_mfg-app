@@ -31,4 +31,21 @@ describe('OrderLabelPagesViewer', () => {
     expect(clampLabelPageIndex(1, 0)).toBe(0);
     expect(labelPageTitle(1, 3)).toBe('Бирка 2 из 3');
   });
+
+  it('can be controlled by the selected label index', () => {
+    const html = renderToStaticMarkup(
+      <OrderLabelPagesViewer
+        title="Последняя генерация: 2 шт."
+        selectedIndex={1}
+        svgPages={[
+          '<svg viewBox="0 0 10 10"><text>page-one</text></svg>',
+          '<svg viewBox="0 0 10 10"><text>page-two</text></svg>',
+        ]}
+      />,
+    );
+
+    expect(html).toContain('Бирка 2 из 2');
+    expect(html).toContain('page-two');
+    expect(html).not.toContain('page-one');
+  });
 });

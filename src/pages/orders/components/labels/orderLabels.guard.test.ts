@@ -76,6 +76,9 @@ describe('order labels UI wiring', () => {
     expect(dataEditorSrc).toMatch(/onRow=\{\(detail\) => \(\{/);
     expect(dataEditorSrc).toMatch(/initialDetailId=\{selectedDetailId\}/);
     expect(dataEditorSrc).toMatch(/detailOptions=\{detailPreviewOptions\}/);
+    expect(dataEditorSrc).toMatch(/firstLabelPageIndexForDetail/);
+    expect(dataEditorSrc).toMatch(/selectedIndex=\{selectedLatestPageIndex \?\? selectedDetailFirstPageIndex\}/);
+    expect(dataEditorSrc).toMatch(/onSelectedIndexChange=\{setSelectedLatestPageIndex\}/);
     expect(generateSrc).toMatch(/detailFilters/);
     expect(generateSrc).toMatch(/OrderLabelPagesViewer/);
     expect(pagesViewerSrc).toMatch(/Список бирок/);

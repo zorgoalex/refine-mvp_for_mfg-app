@@ -8,6 +8,7 @@ import { parseBasisDataView } from './parseBasisDataView';
 import { OrderLabelGenerateAction } from './OrderLabelGenerateAction';
 import { LabelSvgPreviewFrame } from './LabelSvgPreviewFrame';
 import { OrderLabelPagesViewer } from './OrderLabelPagesViewer';
+import { firstLabelPageIndexForDetail } from './orderLabelPreviewIndex';
 
 const { Text } = Typography;
 
@@ -48,6 +49,7 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
   const [latestPreview, setLatestPreview] = useState<LatestOrderLabelsPreview | null>(null);
   const [latestPreviewLoading, setLatestPreviewLoading] = useState(false);
   const [latestPreviewRefreshKey, setLatestPreviewRefreshKey] = useState(0);
+  const [selectedLatestPageIndex, setSelectedLatestPageIndex] = useState<number | null>(null);
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.labelTemplateId === templateId) ?? null,
     [templateId, templates],
@@ -149,6 +151,15 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
       label: `Позиция ${position}: ${name}`,
     };
   });
+  const selectedDetailFirstPageIndex = firstLabelPageIndexForDetail(
+    selectedDetailId,
+    latestPreview?.rows,
+    data?.details,
+  );
+
+  useEffect(() => {
+    setSelectedLatestPageIndex(selectedDetailFirstPageIndex);
+  }, [latestPreview?.generationId, selectedDetailId, selectedDetailFirstPageIndex]);
 
   return (
     <Card size="small" title="Бирки">
@@ -198,6 +209,8 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
                   svgPages={latestPreview.svgPages}
                   title={`Последняя генерация: ${latestPreview.labelCount} шт.`}
                   printTitle={`Заказ ${orderId} — последняя генерация бирок #${latestPreview.generationId}`}
+                  selectedIndex={selectedLatestPageIndex ?? selectedDetailFirstPageIndex}
+                  onSelectedIndexChange={setSelectedLatestPageIndex}
                 />
               )
             )}

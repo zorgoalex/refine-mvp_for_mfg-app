@@ -12,6 +12,8 @@ interface OrderLabelPagesViewerProps {
   description?: React.ReactNode;
   printTitle?: string;
   printEnabled?: boolean;
+  selectedIndex?: number | null;
+  onSelectedIndexChange?: (index: number) => void;
 }
 
 export function clampLabelPageIndex(index: number, pageCount: number): number {
@@ -29,18 +31,27 @@ export const OrderLabelPagesViewer: React.FC<OrderLabelPagesViewerProps> = ({
   description,
   printTitle,
   printEnabled = true,
+  selectedIndex: controlledSelectedIndex,
+  onSelectedIndexChange,
 }) => {
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [uncontrolledSelectedIndex, setUncontrolledSelectedIndex] = useState(0);
   const pageCount = svgPages.length;
-  const selectedSvg = svgPages[clampLabelPageIndex(selectedIndex, pageCount)] ?? null;
+  const selectedIndex = clampLabelPageIndex(controlledSelectedIndex ?? uncontrolledSelectedIndex, pageCount);
+  const selectedSvg = svgPages[selectedIndex] ?? null;
   const pageButtons = useMemo(() => svgPages.map((_, index) => index), [svgPages]);
 
   useEffect(() => {
-    setSelectedIndex((current) => clampLabelPageIndex(current, pageCount));
-  }, [pageCount]);
+    setUncontrolledSelectedIndex((current) => clampLabelPageIndex(current, pageCount));
+  }, [controlledSelectedIndex, pageCount]);
+
+  const selectIndex = (index: number) => {
+    const next = clampLabelPageIndex(index, pageCount);
+    setUncontrolledSelectedIndex(next);
+    onSelectedIndexChange?.(next);
+  };
 
   const move = (delta: number) => {
-    setSelectedIndex((current) => clampLabelPageIndex(current + delta, pageCount));
+    selectIndex(selectedIndex + delta);
   };
 
   const runPrint = () => {
@@ -213,7 +224,7 @@ export const OrderLabelPagesViewer: React.FC<OrderLabelPagesViewerProps> = ({
                   index === selectedIndex ? 'order-label-pages-viewer__list-button--active' : '',
                 ].filter(Boolean).join(' ')}
                 aria-current={index === selectedIndex ? 'page' : undefined}
-                onClick={() => setSelectedIndex(index)}
+                onClick={() => selectIndex(index)}
               >
                 Бирка {index + 1}
               </button>
