@@ -24,12 +24,22 @@ const isoTimestampSchema = z
   .min(1)
   .refine((value) => !Number.isNaN(Date.parse(value)), { message: 'Invalid timestamp' });
 
-const previewRequestSchema = z.object({
-  eventType: z.literal('DEADLINE_EXPIRED').default('DEADLINE_EXPIRED'),
-  deadlineId: uuidSchema.nullable().optional(),
-  deadlineEventId: uuidSchema.nullable().optional(),
-  fixtureKey: z.string().trim().min(1).nullable().optional(),
-});
+const previewRequestSchema = z
+  .object({
+    eventType: z.literal('DEADLINE_EXPIRED').default('DEADLINE_EXPIRED'),
+    deadlineId: uuidSchema.nullable().optional(),
+    deadlineEventId: uuidSchema.nullable().optional(),
+    fixtureKey: z.string().trim().min(1).nullable().optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.deadlineEventId && !value.deadlineId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['deadlineId'],
+        message: 'deadlineId is required when deadlineEventId is provided',
+      });
+    }
+  });
 
 const overrideConfigSchema = z
   .object({
@@ -73,24 +83,12 @@ const retireOverrideSchema = z.object({
   reason: reasonSchema,
 });
 
-function rejectEnabledTransitionRule(
-  value: { enabled?: boolean; isEnabled?: boolean },
-  context: z.RefinementCtx,
-): void {
-  if (value.enabled === true || value.isEnabled === true) {
-    context.addIssue({
-      code: 'custom',
-      path: value.isEnabled === true ? ['isEnabled'] : ['enabled'],
-      message: 'Transition rules cannot be enabled before an approved operator window',
-    });
-  }
-}
-
 const createGlobalTransitionRuleSchema = z
   .object({
+    ruleName: z.string().trim().min(1).max(160),
     ruleCode: z.string().trim().min(1).max(100).optional(),
-    enabled: z.literal(false).optional(),
-    isEnabled: z.literal(false).default(false),
+    policyId: uuidSchema.nullable().optional(),
+    isEnabled: z.boolean().default(false),
     priority: z.number().int().min(0).max(100000).default(100),
     eventType: z.literal('DEADLINE_EXPIRED').default('DEADLINE_EXPIRED'),
     actionType: z.literal('change_order_status').default('change_order_status'),
@@ -102,12 +100,14 @@ const createGlobalTransitionRuleSchema = z
     reason: reasonSchema,
     comment: z.string().trim().max(2000).nullable().optional(),
   })
-  .superRefine(rejectEnabledTransitionRule);
+  .superRefine(validateTransitionRuleStatuses);
 
 const updateGlobalTransitionRuleSchema = z
   .object({
     expectedUpdatedAt: isoTimestampSchema,
-    enabled: z.boolean().optional(),
+    ruleName: z.string().trim().min(1).max(160).optional(),
+    ruleCode: z.string().trim().min(1).max(100).nullable().optional(),
+    policyId: uuidSchema.nullable().optional(),
     isEnabled: z.boolean().optional(),
     priority: z.number().int().min(0).max(100000).optional(),
     eventType: z.literal('DEADLINE_EXPIRED').optional(),
@@ -121,7 +121,6 @@ const updateGlobalTransitionRuleSchema = z
     comment: z.string().trim().max(2000).nullable().optional(),
   })
   .superRefine((value, context) => {
-    rejectEnabledTransitionRule(value, context);
     if (value.allowedFromOrderStatusIds && value.allowedFromOrderStatusIds.length === 0) {
       context.addIssue({
         code: 'custom',
@@ -129,6 +128,7 @@ const updateGlobalTransitionRuleSchema = z
         message: 'allowedFromOrderStatusIds is required for status rules',
       });
     }
+    validateTransitionRuleStatuses(value, context);
   });
 
 const deleteGlobalTransitionRuleSchema = z.object({
@@ -237,9 +237,14 @@ export class DeadlineRulesController {
   async listGlobalTransitionRules(@Req() request: RequestWithCurrentUser) {
     this.assertReadEnabled();
 
-    return this.queries.listGlobalTransitionRules({
+    const result = await this.queries.listGlobalTransitionRules({
       currentUser: this.requireCurrentUser(request),
     });
+
+    return {
+      ...result,
+      readiness: this.runtimeConfig.getTransitionRulesReadiness(),
+    };
   }
 
   @ApiResponse({ status: 201, description: 'Created global status transition rule' })
@@ -328,6 +333,75 @@ export class DeadlineRulesController {
     }
 
     return request.user;
+  }
+}
+
+function validateTransitionRuleStatuses(
+  value: {
+    targetOrderStatusId?: number;
+    allowedFromOrderStatusIds?: number[];
+    excludeOrderStatusIds?: number[];
+  },
+  context: z.RefinementCtx,
+): void {
+  const allowed = value.allowedFromOrderStatusIds ?? [];
+  const excluded = value.excludeOrderStatusIds ?? [];
+
+  addDuplicateStatusIssue(allowed, 'allowedFromOrderStatusIds', context);
+  addDuplicateStatusIssue(excluded, 'excludeOrderStatusIds', context);
+
+  if (value.targetOrderStatusId && allowed.includes(value.targetOrderStatusId)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['targetOrderStatusId'],
+      message: 'Target status must differ from allowed source statuses',
+    });
+  }
+  if (value.targetOrderStatusId && excluded.includes(value.targetOrderStatusId)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['targetOrderStatusId'],
+      message: 'Target status must not be excluded',
+    });
+  }
+  if (allowed.some((statusId) => excluded.includes(statusId))) {
+    context.addIssue({
+      code: 'custom',
+      path: ['excludeOrderStatusIds'],
+      message: 'Allowed and excluded statuses must not overlap',
+    });
+  }
+  const safetyValue = value as {
+    excludeCompletedOrders?: boolean;
+    requireCurrentDeadlineEvent?: boolean;
+  };
+  if (safetyValue.excludeCompletedOrders === false) {
+    context.addIssue({
+      code: 'custom',
+      path: ['excludeCompletedOrders'],
+      message: 'Completed-order protection is mandatory',
+    });
+  }
+  if (safetyValue.requireCurrentDeadlineEvent === false) {
+    context.addIssue({
+      code: 'custom',
+      path: ['requireCurrentDeadlineEvent'],
+      message: 'Current-deadline-event protection is mandatory',
+    });
+  }
+}
+
+function addDuplicateStatusIssue(
+  statusIds: number[],
+  field: string,
+  context: z.RefinementCtx,
+): void {
+  if (new Set(statusIds).size !== statusIds.length) {
+    context.addIssue({
+      code: 'custom',
+      path: [field],
+      message: 'Status list must not contain duplicates',
+    });
   }
 }
 

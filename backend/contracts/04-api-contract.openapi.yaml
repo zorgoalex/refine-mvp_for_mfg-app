@@ -5606,6 +5606,10 @@ paths:
                 limit:
                   type: integer
                   minimum: 1
+                deadlineId:
+                  type: string
+                  format: uuid
+                  description: Optional exact-deadline target for an isolated canary run
       responses:
         '200':
           description: Manual worker batch processed
@@ -16542,6 +16546,12 @@ components:
     DeadlineActionRuleConfig:
       type: object
       properties:
+        ruleName:
+          type: string
+          maxLength: 160
+        ruleCode:
+          type: string
+          maxLength: 100
         scope:
           type: object
           properties:
@@ -16600,11 +16610,50 @@ components:
       type: object
       required:
         - data
+        - readiness
       properties:
         data:
           type: array
           items:
             $ref: '#/components/schemas/DeadlineActionRule'
+        readiness:
+          $ref: '#/components/schemas/DeadlineTransitionRulesReadiness'
+
+    DeadlineTransitionRulesReadiness:
+      type: object
+      required:
+        - deadlinesEnabled
+        - deadlinesReadOnly
+        - workerEnabled
+        - actionsEnabled
+        - schedulerOwner
+        - manualMutationReady
+        - inProcessAutomaticReady
+        - externalSchedulerOwnerSelected
+        - automaticExecutionConfigured
+      properties:
+        deadlinesEnabled:
+          type: boolean
+        deadlinesReadOnly:
+          type: boolean
+        workerEnabled:
+          type: boolean
+        actionsEnabled:
+          type: boolean
+        schedulerOwner:
+          type: string
+          enum:
+            - none
+            - in_process
+            - external
+        manualMutationReady:
+          type: boolean
+        inProcessAutomaticReady:
+          type: boolean
+        externalSchedulerOwnerSelected:
+          type: boolean
+        automaticExecutionConfigured:
+          type: boolean
 
     DeadlineActionRuleResponse:
       type: object
@@ -16859,17 +16908,24 @@ components:
     CreateGlobalTransitionRuleRequest:
       type: object
       required:
+        - ruleName
         - targetOrderStatusId
         - allowedFromOrderStatusIds
         - reason
       properties:
+        ruleName:
+          type: string
+          minLength: 1
+          maxLength: 160
         ruleCode:
           type: string
           maxLength: 100
+        policyId:
+          type: string
+          format: uuid
+          nullable: true
         isEnabled:
           type: boolean
-          enum:
-            - false
         priority:
           type: integer
           minimum: 0
@@ -16921,6 +16977,20 @@ components:
         expectedUpdatedAt:
           type: string
           format: date-time
+        ruleName:
+          type: string
+          minLength: 1
+          maxLength: 160
+        ruleCode:
+          type: string
+          maxLength: 100
+          nullable: true
+        policyId:
+          type: string
+          format: uuid
+          nullable: true
+        isEnabled:
+          type: boolean
         priority:
           type: integer
           minimum: 0

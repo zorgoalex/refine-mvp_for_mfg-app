@@ -809,11 +809,12 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       FROM deadline_instances
       WHERE status = 'active'
         AND deadline_at <= $1::timestamptz
+        AND ($3::uuid IS NULL OR deadline_id = $3::uuid)
       ORDER BY deadline_at ASC, created_at ASC
       LIMIT $2
       FOR UPDATE SKIP LOCKED
       `,
-      [command.now, command.limit],
+      [command.now, command.limit, command.deadlineId ?? null],
     );
 
     return result.rows.map(mapDeadline);
@@ -902,16 +903,52 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
   async listActionRules(input: {
     scopeType: DeadlineEntityType;
     eventType: DeadlineEventType;
+    deadlineId?: string | null;
+    orderId?: number | null;
   }): Promise<DeadlineActionRuleDto[]> {
     const result = await this.database.query<DeadlineActionRuleRow>(
       `
       SELECT ${ACTION_RULE_COLUMNS}
       FROM deadline_action_rules
-      WHERE scope_type = $1
-        AND event_type = $2
+      WHERE event_type = $2
+        AND (
+          scope_type = $1
+          OR (
+            action_type = 'change_order_status'
+            AND $4::bigint IS NOT NULL
+            AND (
+              (
+                policy_id IS NULL
+                AND config_json->'scope'->>'type' = 'global_orders'
+              )
+              OR policy_id = (
+                SELECT policy_id
+                FROM deadline_instances
+                WHERE deadline_id = $3::uuid
+              )
+            )
+          )
+        )
+        AND (
+          action_type <> 'change_order_status'
+          OR policy_id IS NULL
+          OR (
+            $3::uuid IS NOT NULL
+            AND policy_id = (
+              SELECT policy_id
+              FROM deadline_instances
+              WHERE deadline_id = $3::uuid
+            )
+          )
+        )
       ORDER BY priority ASC, created_at ASC, action_rule_id ASC
       `,
-      [input.scopeType, input.eventType],
+      [
+        input.scopeType,
+        input.eventType,
+        input.deadlineId ?? null,
+        input.orderId ?? null,
+      ],
     );
 
     return result.rows.map(mapActionRule);
@@ -1131,10 +1168,8 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       `
       SELECT ${ACTION_RULE_COLUMNS}
       FROM deadline_action_rules
-      WHERE scope_type = 'order'
-        AND event_type = 'DEADLINE_EXPIRED'
+      WHERE event_type = 'DEADLINE_EXPIRED'
         AND action_type = 'change_order_status'
-        AND config_json->'scope'->>'type' = 'global_orders'
       ORDER BY priority ASC, created_at ASC, action_rule_id ASC
       `,
     );
@@ -1145,24 +1180,26 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
   async createGlobalTransitionRule(
     command: CreateGlobalTransitionRuleCommand,
   ): Promise<DeadlineActionRuleDto> {
-    await this.assertActiveOrderStatusesExist([
-      command.dto.targetOrderStatusId,
-      ...command.dto.allowedFromOrderStatusIds,
-      ...(command.dto.excludeOrderStatusIds ?? []),
-    ]);
+    const config = buildCreateTransitionRuleConfig(command.dto);
+    await this.assertValidTransitionRuleConfig(config);
 
+    const policy = command.dto.policyId
+      ? await this.getOrderRelatedTransitionPolicy(command.dto.policyId)
+      : null;
     const result = await this.database.query<DeadlineActionRuleRow>(
       `
       INSERT INTO deadline_action_rules (
-        scope_type, event_type, action_type, is_enabled, priority, config_json
+        scope_type, policy_id, event_type, action_type, is_enabled, priority, config_json
       )
-      VALUES ('order', 'DEADLINE_EXPIRED', 'change_order_status', $1, $2, $3::jsonb)
+      VALUES ($4, $5, 'DEADLINE_EXPIRED', 'change_order_status', $1, $2, $3::jsonb)
       RETURNING ${ACTION_RULE_COLUMNS}
       `,
       [
-        false,
+        command.dto.isEnabled ?? false,
         command.dto.priority ?? 100,
-        JSON.stringify(buildCreateTransitionRuleConfig(command.dto)),
+        JSON.stringify(config),
+        policy?.scopeType ?? 'order',
+        policy?.policyId ?? null,
       ],
     );
     const rule = mapActionRule(result.rows[0]);
@@ -1193,10 +1230,8 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       SELECT ${ACTION_RULE_COLUMNS}
       FROM deadline_action_rules
       WHERE action_rule_id = $1
-        AND scope_type = 'order'
         AND event_type = 'DEADLINE_EXPIRED'
         AND action_type = 'change_order_status'
-        AND config_json->'scope'->>'type' = 'global_orders'
       FOR UPDATE
       `,
       [command.actionRuleId],
@@ -1214,36 +1249,43 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       });
     }
 
-    await this.assertActiveOrderStatusesExist([
-      ...(command.dto.targetOrderStatusId !== undefined ? [command.dto.targetOrderStatusId] : []),
-      ...(command.dto.allowedFromOrderStatusIds ?? []),
-      ...(command.dto.excludeOrderStatusIds ?? []),
-    ]);
+    const policyId = hasOwn(command.dto, 'policyId')
+      ? command.dto.policyId ?? null
+      : before.policyId ?? null;
+    const disableOnly = isDisableOnlyTransitionRuleUpdate(command.dto);
+    const policy = policyId && !disableOnly
+      ? await this.getOrderRelatedTransitionPolicy(policyId)
+      : null;
     const config = buildTransitionRuleConfig(before.config, command.dto);
+    if (!disableOnly) {
+      await this.assertValidTransitionRuleConfig(config);
+    }
     const result = await this.database.query<DeadlineActionRuleRow>(
       `
       UPDATE deadline_action_rules
       SET is_enabled = $2,
           priority = $3,
           config_json = $4::jsonb,
+          policy_id = $6,
+          scope_type = $7,
           updated_at = GREATEST(
             date_trunc('milliseconds', clock_timestamp()),
             date_trunc('milliseconds', updated_at) + interval '1 millisecond'
           )
       WHERE action_rule_id = $1
-        AND scope_type = 'order'
         AND event_type = 'DEADLINE_EXPIRED'
         AND action_type = 'change_order_status'
-        AND config_json->'scope'->>'type' = 'global_orders'
         AND date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $5::timestamptz)
       RETURNING ${ACTION_RULE_COLUMNS}
       `,
       [
         command.actionRuleId,
-        false,
+        command.dto.isEnabled ?? before.isEnabled,
         command.dto.priority ?? before.priority,
         JSON.stringify(config),
         command.dto.expectedUpdatedAt,
+        disableOnly ? before.policyId ?? null : policy?.policyId ?? null,
+        disableOnly ? before.scopeType : policy?.scopeType ?? 'order',
       ],
     );
     if (!result.rows[0]) {
@@ -1281,10 +1323,8 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       SELECT ${ACTION_RULE_COLUMNS}
       FROM deadline_action_rules
       WHERE action_rule_id = $1
-        AND scope_type = 'order'
         AND event_type = 'DEADLINE_EXPIRED'
         AND action_type = 'change_order_status'
-        AND config_json->'scope'->>'type' = 'global_orders'
       FOR UPDATE
       `,
       [command.actionRuleId],
@@ -1310,10 +1350,8 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         `
         DELETE FROM deadline_action_rules
         WHERE action_rule_id = $1
-          AND scope_type = 'order'
           AND event_type = 'DEADLINE_EXPIRED'
           AND action_type = 'change_order_status'
-          AND config_json->'scope'->>'type' = 'global_orders'
           AND date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $2::timestamptz)
         RETURNING ${ACTION_RULE_COLUMNS}
         `,
@@ -1507,6 +1545,66 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         statusIds: missingStatusIds,
       });
     }
+  }
+
+  private async assertValidTransitionRuleConfig(
+    config: DeadlineActionRuleConfigDto,
+  ): Promise<void> {
+    const targetStatusId = config.actionConfig?.targetOrderStatusId;
+    const allowed = config.conditions?.allowedFromOrderStatusIds ?? [];
+    const excluded = config.conditions?.excludeOrderStatusIds ?? [];
+    const invalid =
+      !config.ruleName?.trim()
+      || !targetStatusId
+      || allowed.length === 0
+      || new Set(allowed).size !== allowed.length
+      || new Set(excluded).size !== excluded.length
+      || allowed.includes(targetStatusId)
+      || excluded.includes(targetStatusId)
+      || allowed.some((statusId) => excluded.includes(statusId))
+      || config.conditions?.excludeCompletedOrders !== true
+      || config.conditions?.requireCurrentDeadlineEvent !== true;
+    if (invalid) {
+      throw new ApiError(
+        422,
+        'DEADLINE_TRANSITION_RULE_INVALID_CONFIG',
+        'Deadline transition rule configuration is unsafe or inconsistent',
+      );
+    }
+
+    await this.assertActiveOrderStatusesExist([targetStatusId, ...allowed, ...excluded]);
+  }
+
+  private async getOrderRelatedTransitionPolicy(policyId: string): Promise<DeadlinePolicyDto> {
+    const result = await this.database.query<DeadlinePolicyRow>(
+      `
+      SELECT ${POLICY_COLUMNS}
+      FROM deadline_policies
+      WHERE policy_id = $1
+      `,
+      [policyId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new ApiError(
+        422,
+        'DEADLINE_TRANSITION_RULE_POLICY_NOT_FOUND',
+        'Deadline transition rule references a missing policy',
+        { policyId },
+      );
+    }
+
+    const policy = mapPolicy(row);
+    if (!['order', 'order_stage', 'client_action'].includes(policy.scopeType)) {
+      throw new ApiError(
+        422,
+        'DEADLINE_TRANSITION_RULE_POLICY_SCOPE_UNSUPPORTED',
+        'Deadline transition rule policy is not linked to orders',
+        { policyId, scopeType: policy.scopeType },
+      );
+    }
+
+    return policy;
   }
 
   private async assertTransitionRuleNotReferenced(actionRuleId: string): Promise<void> {
@@ -1749,6 +1847,15 @@ function hasOwn<T extends object, K extends PropertyKey>(value: T, key: K): valu
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+function isDisableOnlyTransitionRuleUpdate(
+  dto: UpdateGlobalTransitionRuleCommand['dto'],
+): boolean {
+  const mutationKeys = Object.keys(dto).filter(
+    (key) => !['expectedUpdatedAt', 'reason', 'comment', 'isEnabled'].includes(key),
+  );
+  return dto.isEnabled === false && mutationKeys.length === 0;
+}
+
 function policyAuditSnapshot(policy: DeadlinePolicyDto): Record<string, unknown> {
   return {
     policyCode: policy.policyCode,
@@ -1766,6 +1873,7 @@ function policyAuditSnapshot(policy: DeadlinePolicyDto): Record<string, unknown>
 function actionRuleAuditSnapshot(rule: DeadlineActionRuleDto): Record<string, unknown> {
   return {
     actionRuleId: rule.actionRuleId,
+    policyId: rule.policyId ?? null,
     scopeType: rule.scopeType,
     eventType: rule.eventType,
     actionType: rule.actionType,
@@ -1794,6 +1902,7 @@ function buildCreateTransitionRuleConfig(
   dto: CreateGlobalTransitionRuleCommand['dto'],
 ): DeadlineActionRuleConfigDto {
   return {
+    ruleName: dto.ruleName,
     ...(dto.ruleCode ? { ruleCode: dto.ruleCode } : {}),
     scope: { type: 'global_orders' },
     conditions: {
@@ -1814,9 +1923,18 @@ function buildTransitionRuleConfig(
 ): DeadlineActionRuleConfigDto {
   return {
     ...(current ?? {}),
+    ...(hasOwn(dto, 'ruleName') ? { ruleName: dto.ruleName } : {}),
+    ...(hasOwn(dto, 'ruleCode')
+      ? dto.ruleCode
+        ? { ruleCode: dto.ruleCode }
+        : { ruleCode: undefined }
+      : {}),
     scope: { type: 'global_orders' },
     conditions: {
       ...(current?.conditions ?? {}),
+      excludeOrderStatusIds: current?.conditions?.excludeOrderStatusIds ?? [],
+      excludeCompletedOrders: current?.conditions?.excludeCompletedOrders ?? true,
+      requireCurrentDeadlineEvent: current?.conditions?.requireCurrentDeadlineEvent ?? true,
       ...(hasOwn(dto, 'allowedFromOrderStatusIds')
         ? { allowedFromOrderStatusIds: dto.allowedFromOrderStatusIds }
         : {}),
@@ -1846,9 +1964,12 @@ function buildTransitionRuleAuditMetadata(
 ): Record<string, unknown> {
   return {
     actionRuleId: rule.actionRuleId,
+    ruleName: rule.config?.ruleName ?? null,
+    ruleCode: rule.config?.ruleCode ?? null,
+    policyId: rule.policyId ?? null,
     eventType: 'DEADLINE_EXPIRED',
     actionType: 'change_order_status',
-    scopeType: 'order',
+    scopeType: rule.scopeType,
     scope: { type: 'global_orders' },
     targetOrderStatusId: rule.config?.actionConfig?.targetOrderStatusId ?? null,
     allowedFromOrderStatusIds: rule.config?.conditions?.allowedFromOrderStatusIds ?? [],

@@ -54,9 +54,11 @@ describe('DeadlineRulesController', () => {
     } satisfies Partial<ApiError>);
     await expect(controller.listGlobalTransitionRules({ user: currentUser() })).resolves.toEqual({
       data: [],
+      readiness: expect.objectContaining({ automaticExecutionConfigured: false }),
     });
     await expect(
       controller.createGlobalTransitionRule({ user: currentUser(), requestId: 'req-create' }, {
+        ruleName: 'Disabled rule',
         targetOrderStatusId: 7,
         allowedFromOrderStatusIds: [1],
         reason: 'Create disabled rule',
@@ -130,6 +132,7 @@ describe('DeadlineRulesController', () => {
       transitionRulePatch(),
     );
     await controller.createGlobalTransitionRule({ user: currentUser(), requestId: 'req-global-create' }, {
+      ruleName: 'Escalate overdue order',
       targetOrderStatusId: 9,
       allowedFromOrderStatusIds: [1],
       reason: 'Create disabled rule',
@@ -188,6 +191,7 @@ describe('DeadlineRulesController', () => {
     ).toThrow(ApiError);
     expect(() => parseRetireDeadlineOrderOverrideRequest({ reason: '' })).toThrow(ApiError);
     expect(parseCreateGlobalTransitionRuleRequest({
+      ruleName: 'Overdue transition',
       targetOrderStatusId: 7,
       allowedFromOrderStatusIds: [1, 2],
       reason: 'Create disabled transition rule',
@@ -200,22 +204,13 @@ describe('DeadlineRulesController', () => {
       excludeCompletedOrders: true,
       requireCurrentDeadlineEvent: true,
     });
-    expect(() =>
-      parseCreateGlobalTransitionRuleRequest({
-        isEnabled: true,
-        targetOrderStatusId: 7,
-        allowedFromOrderStatusIds: [1],
-        reason: 'Enable before approval',
-      }),
-    ).toThrow(ApiError);
-    expect(() =>
-      parseCreateGlobalTransitionRuleRequest({
-        enabled: true,
-        targetOrderStatusId: 7,
-        allowedFromOrderStatusIds: [1],
-        reason: 'Enable before approval',
-      }),
-    ).toThrow(ApiError);
+    expect(parseCreateGlobalTransitionRuleRequest({
+      ruleName: 'Approved enabled rule',
+      isEnabled: true,
+      targetOrderStatusId: 7,
+      allowedFromOrderStatusIds: [1],
+      reason: 'Enable approved automation',
+    })).toMatchObject({ isEnabled: true });
     expect(() =>
       parseUpdateGlobalTransitionRuleRequest({
         expectedUpdatedAt: 'not-a-date',
@@ -229,14 +224,14 @@ describe('DeadlineRulesController', () => {
     ).toThrow(ApiError);
     expect(() =>
       parseUpdateGlobalTransitionRuleRequest({
-        enabled: true,
+        isEnabled: true,
         expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
         priority: 10,
         targetOrderStatusId: 7,
         allowedFromOrderStatusIds: [1],
-        reason: 'Enable before approval',
+        reason: 'Enable approved automation',
       }),
-    ).toThrow(ApiError);
+    ).not.toThrow();
     expect(() =>
       parseDeleteGlobalTransitionRuleRequest({
         expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
@@ -252,6 +247,7 @@ describe('DeadlineRulesController', () => {
 
     await expect(
       controller.createGlobalTransitionRule({ user: currentUser() }, {
+        ruleName: 'Disabled rule',
         targetOrderStatusId: 7,
         allowedFromOrderStatusIds: [1],
         reason: 'Create disabled rule',
@@ -324,6 +320,19 @@ function createController(options: {
         deadlineWorkerId: 'backend-local',
       };
     },
+    getTransitionRulesReadiness() {
+      return {
+        deadlinesEnabled: options.flags.deadlinesEnabled,
+        deadlinesReadOnly: options.flags.deadlinesReadOnly,
+        workerEnabled: false,
+        actionsEnabled: false,
+        schedulerOwner: 'none' as const,
+        manualMutationReady: false,
+        inProcessAutomaticReady: false,
+        externalSchedulerOwnerSelected: false,
+        automaticExecutionConfigured: false,
+      };
+    },
   } as DeadlinesRuntimeConfigService;
 
   return new DeadlineRulesController(commands, queries, runtimeConfig);
@@ -342,7 +351,7 @@ function currentUser(): CurrentUser {
 function transitionRulePatch() {
   return {
     expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
-    enabled: false,
+    isEnabled: false,
     priority: 10,
     eventType: 'DEADLINE_EXPIRED',
     actionType: 'change_order_status',

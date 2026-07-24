@@ -215,6 +215,7 @@ export interface FindDueDeadlinesCommand {
   now: string;
   limit: number;
   workerId: string;
+  deadlineId?: string | null;
 }
 
 export interface DeadlineTargetRef {
@@ -310,6 +311,8 @@ export interface DeadlineRepositoryPort {
   listActionRules(input: {
     scopeType: DeadlineEntityType;
     eventType: DeadlineEventType;
+    deadlineId?: string | null;
+    orderId?: number | null;
   }): Promise<DeadlineActionRuleDto[]>;
   createActionExecution(input: CreateActionExecutionInput): Promise<DeadlineActionExecutionDto>;
   listOrderOverrides(orderId: number): Promise<DeadlineOrderOverrideDto[]>;
@@ -404,6 +407,7 @@ export interface DeadlineChangeOrderStatusCommand {
     actorLabel: 'deadline-engine';
   };
   orderId: number;
+  expectedSourceOrderStatusId: number;
   targetOrderStatusId: number;
   deadlineId: string;
   deadlineEventId: string;

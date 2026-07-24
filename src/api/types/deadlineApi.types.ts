@@ -199,6 +199,8 @@ export interface DeadlineActionRuleConfigDto {
   };
   conditions?: DeadlineActionRuleConditionsDto;
   actionConfig?: DeadlineActionRuleActionConfigDto;
+  ruleName?: string;
+  ruleCode?: string;
   fixtureKey?: string;
 }
 
@@ -311,14 +313,48 @@ export interface DeadlineOrderOverrideResponse {
 
 export interface DeadlineActionRuleListResponse {
   data: DeadlineActionRuleDto[];
+  readiness: DeadlineTransitionRulesReadinessDto;
 }
 
 export interface DeadlineActionRuleResponse {
   rule: DeadlineActionRuleDto;
 }
 
+export interface DeadlineTransitionRulesReadinessDto {
+  deadlinesEnabled: boolean;
+  deadlinesReadOnly: boolean;
+  workerEnabled: boolean;
+  actionsEnabled: boolean;
+  schedulerOwner: 'none' | 'in_process' | 'external';
+  manualMutationReady: boolean;
+  inProcessAutomaticReady: boolean;
+  externalSchedulerOwnerSelected: boolean;
+  automaticExecutionConfigured: boolean;
+}
+
+export interface CreateGlobalTransitionRuleRequest {
+  ruleName: string;
+  ruleCode?: string;
+  policyId?: string | null;
+  isEnabled?: boolean;
+  priority?: number;
+  eventType?: 'DEADLINE_EXPIRED';
+  actionType?: 'change_order_status';
+  targetOrderStatusId: number;
+  allowedFromOrderStatusIds: number[];
+  excludeOrderStatusIds?: number[];
+  excludeCompletedOrders?: boolean;
+  requireCurrentDeadlineEvent?: boolean;
+  reason: string;
+  comment?: string | null;
+}
+
 export interface UpdateGlobalTransitionRuleRequest {
   expectedUpdatedAt: string;
+  ruleName?: string;
+  ruleCode?: string | null;
+  policyId?: string | null;
+  isEnabled?: boolean;
   priority?: number;
   eventType?: 'DEADLINE_EXPIRED';
   actionType?: 'change_order_status';
@@ -327,6 +363,12 @@ export interface UpdateGlobalTransitionRuleRequest {
   excludeOrderStatusIds?: number[];
   excludeCompletedOrders?: boolean;
   requireCurrentDeadlineEvent?: boolean;
+  reason: string;
+  comment?: string | null;
+}
+
+export interface DeleteGlobalTransitionRuleRequest {
+  expectedUpdatedAt: string;
   reason: string;
   comment?: string | null;
 }

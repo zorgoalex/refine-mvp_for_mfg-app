@@ -133,11 +133,30 @@ export class DeadlineQueryService {
   async previewOrderActionRules(command: PreviewOrderDeadlineActionRulesCommand) {
     this.requirePermission(command, 'deadlines.view');
 
-    const [listedRules, overrides, orderContext] = await Promise.all([
-      this.ports.repository.listGlobalTransitionRules(),
+    const [deadline, overrides, orderContext] = await Promise.all([
+      command.dto.deadlineId
+        ? this.ports.repository.getDeadlineById(command.dto.deadlineId)
+        : Promise.resolve(null),
       this.ports.repository.listOrderOverrides(command.orderId),
       this.ports.repository.getOrderDeadlineEvaluationContext(command.orderId),
     ]);
+    if (
+      command.dto.deadlineId
+      && (!deadline || deadline.orderId !== command.orderId)
+    ) {
+      throw new ApiError(
+        422,
+        'DEADLINE_PREVIEW_SCOPE_MISMATCH',
+        'Deadline does not belong to the previewed order',
+        { orderId: command.orderId, deadlineId: command.dto.deadlineId },
+      );
+    }
+    const listedRules = await this.ports.repository.listActionRules({
+      scopeType: deadline?.entityType ?? 'order',
+      eventType: command.dto.eventType,
+      deadlineId: command.dto.deadlineId ?? null,
+      orderId: command.orderId,
+    });
     const rules = filterActionRulesForFixture(listedRules, command.dto.fixtureKey ?? null);
     const hasStatusTransitionRules = rules.some((rule) => rule.actionType === 'change_order_status');
     const isCurrentDeadlineEvent = hasStatusTransitionRules

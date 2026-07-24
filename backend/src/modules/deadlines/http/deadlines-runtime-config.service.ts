@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { BackendEnv } from '../../../config/env.validation';
+import type { DeadlineTransitionRulesReadinessDto } from '../dto/deadline-action-rule.dto';
 
 export interface DeadlinesFeatureFlags {
   deadlinesEnabled: boolean;
@@ -51,6 +52,29 @@ export class DeadlinesRuntimeConfigService {
         infer: true,
       }),
       deadlineWorkerId: this.config.get('BACKEND_DEADLINE_WORKER_ID', { infer: true }),
+    };
+  }
+
+  getTransitionRulesReadiness(): DeadlineTransitionRulesReadinessDto {
+    const flags = this.getFeatureFlags();
+    const manualMutationReady =
+      flags.deadlinesEnabled
+      && !flags.deadlinesReadOnly
+      && flags.deadlineWorkerEnabled
+      && flags.deadlineActionsEnabled;
+    const inProcessAutomaticReady =
+      manualMutationReady && flags.deadlineWorkerSchedulerOwner === 'in_process';
+
+    return {
+      deadlinesEnabled: flags.deadlinesEnabled,
+      deadlinesReadOnly: flags.deadlinesReadOnly,
+      workerEnabled: flags.deadlineWorkerEnabled,
+      actionsEnabled: flags.deadlineActionsEnabled,
+      schedulerOwner: flags.deadlineWorkerSchedulerOwner,
+      manualMutationReady,
+      inProcessAutomaticReady,
+      externalSchedulerOwnerSelected: flags.deadlineWorkerSchedulerOwner === 'external',
+      automaticExecutionConfigured: inProcessAutomaticReady,
     };
   }
 }

@@ -4,21 +4,25 @@ import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser, RequestWithCurrentUser } from '../../../permissions/current-user';
 import { RequirePermissions } from '../../../permissions/require-permissions.decorator';
-import { isoDateTimeSchema } from '../domain/deadline-validation';
+import { isUuid, isoDateTimeSchema } from '../domain/deadline-validation';
 import { DeadlineWorkerService } from '../application/deadline-worker.service';
 import { DeadlinesRuntimeConfigService } from './deadlines-runtime-config.service';
 
 interface ProcessDueNowRequestDto {
   now?: string;
   limit?: number;
+  deadlineId?: string;
 }
 
-const processDueNowRequestSchema = z
+const processDueBatchRequestSchema = z
   .object({
     now: isoDateTimeSchema.optional(),
     limit: z.number().int().positive().optional(),
   })
   .strict();
+const processDueNowRequestSchema = processDueBatchRequestSchema.extend({
+  deadlineId: z.string().trim().refine(isUuid, { message: 'Invalid UUID' }).optional(),
+});
 
 @ApiTags('Deadline Worker')
 @ApiBearerAuth()
@@ -48,6 +52,7 @@ export class DeadlineWorkerController {
       properties: {
         now: { type: 'string', format: 'date-time' },
         limit: { type: 'integer', minimum: 1 },
+        deadlineId: { type: 'string', format: 'uuid', description: 'Optional exact canary target' },
       },
     },
   })
@@ -68,6 +73,7 @@ export class DeadlineWorkerController {
       trigger: 'manual',
       actorUserId: currentUser.id,
       requestId: request.requestId,
+      deadlineId: parsedBody.deadlineId ?? null,
       config: {
         actionsEnabled: flags.deadlineActionsEnabled,
         notificationsEnabled: flags.deadlineNotificationsEnabled,
@@ -113,7 +119,7 @@ export class DeadlineWorkerController {
       );
     }
 
-    const parsedBody = parseProcessDueNowRequest(body);
+    const parsedBody = parseProcessDueBatchRequest(body);
     const cappedLimit = resolveWorkerBatchLimit(parsedBody.limit, flags.deadlineWorkerBatchSize);
 
     return this.worker.processDueDeadlines({
@@ -187,6 +193,21 @@ export class DeadlineWorkerController {
 
 export function parseProcessDueNowRequest(body: unknown): ProcessDueNowRequestDto {
   const parsed = processDueNowRequestSchema.safeParse(body ?? {});
+
+  if (!parsed.success) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Deadline worker request validation failed', {
+      errors: parsed.error.issues.map((issue) => ({
+        field: issue.path.join('.') || 'body',
+        message: issue.message,
+      })),
+    });
+  }
+
+  return parsed.data;
+}
+
+function parseProcessDueBatchRequest(body: unknown): Omit<ProcessDueNowRequestDto, 'deadlineId'> {
+  const parsed = processDueBatchRequestSchema.safeParse(body ?? {});
 
   if (!parsed.success) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Deadline worker request validation failed', {
