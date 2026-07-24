@@ -2,7 +2,8 @@
 
 Legend: `L` = legacy shell/body. `E-shell` = evolution shell with unchanged shared page body. `E-view` is a future migrated page view. Roles reflect current `ROLE_PERMISSIONS`; per-user permission arrays and resource-visibility settings may narrow navigation further.
 
-Every Phase B row has `rollout ready = no`: isolated shell review is allowed, general user selector/default is not.
+Every Phase B row has `rollout ready = no`: selector code is implemented, but
+runtime availability remains disabled until live rollout gates pass.
 
 | Route | Role(s) | Navigation gate | Route gate | Page/action/backend authority | Legacy | Evolution | Shared/fallback | Tests/evidence | Rollout ready |
 |---|---|---|---|---|---|---|---|---|---|
@@ -31,4 +32,6 @@ Every Phase B row has `rollout ready = no`: isolated shell review is allowed, ge
 - Same role does not always imply the same effective permissions; test fixtures must carry explicit permission arrays and role-visibility settings.
 - Navigation parity is necessary but not authorization proof. E2E compares visible items and direct deep-link behavior; backend tests remain authoritative for data/actions.
 - Phase B is an isolated `E-shell` pilot only. Ten internal screen migrations remain Phases C–E.
-- Per-user selector is withheld until every target role/route row reaches `E-view` or an explicitly approved shared view and all rows become rollout-ready.
+- Per-user selector is present behind the runtime availability gate. Enable it
+  only after every target role/route row reaches `E-view` or an explicitly
+  approved shared view and all rows become rollout-ready.

@@ -2,6 +2,10 @@
 
 Статус: утверждён как рабочий план после discovery; production merge не выполняется. Реализация ведётся только в worktree `/home/ovhtest/projects/erp_dev/.worktrees/ui-redesign-foundation`, branch `feat/ui-redesign-foundation`.
 
+Это исходный план foundation. Реализованное позже per-user переключение и
+актуальные rollout gates описаны в `ui-variant-architecture.md`,
+`variant-rollout-plan.md` и `implementation-report.md`.
+
 ## Scope
 
 В scope: discovery deliverables, reversible UI variant foundation, semantic tokens/shared primitives, evolution application shell, sidebar, top bar, open-page strip, responsive/accessibility QA, isolated preview stack.
