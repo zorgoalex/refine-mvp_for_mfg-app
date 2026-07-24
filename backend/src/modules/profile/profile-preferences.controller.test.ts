@@ -24,17 +24,18 @@ describe('ProfilePreferencesController', () => {
     const controller = createController({
       async get(command) {
         calls.push(`get:${command.currentUser.id}`);
-        return { themeMode: 'light', uiSize: 'default', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} };
+        return { themeMode: 'light', uiSize: 'default', uiVariant: 'legacy', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} };
       },
       async update(command) {
         calls.push(`update:${command.currentUser.id}:${command.preferences.themeMode}:${Object.keys(command.preferences.orderDetailColumns ?? {}).join(',')}`);
-        return { themeMode: 'dark', uiSize: 'default', orderDetailColumns: command.preferences.orderDetailColumns ?? {}, recentReferences: {}, pageSizePreferences: command.preferences.pageSizePreferences ?? {} };
+        return { themeMode: 'dark', uiSize: 'default', uiVariant: command.preferences.uiVariant ?? 'legacy', orderDetailColumns: command.preferences.orderDetailColumns ?? {}, recentReferences: {}, pageSizePreferences: command.preferences.pageSizePreferences ?? {} };
       },
       async promoteReferenceUsage(command) {
         calls.push(`promote:${command.currentUser.id}:${command.resource}:${command.entityId}`);
         return {
           themeMode: 'dark',
           uiSize: 'default',
+          uiVariant: 'legacy',
           orderDetailColumns: {},
           recentReferences: { [command.resource]: [command.entityId] },
           pageSizePreferences: {},
@@ -43,13 +44,13 @@ describe('ProfilePreferencesController', () => {
     });
 
     await expect(controller.get({ user: currentUser('15') })).resolves.toEqual({
-      preferences: { themeMode: 'light', uiSize: 'default', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} },
+      preferences: { themeMode: 'light', uiSize: 'default', uiVariant: 'legacy', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} },
     });
     await expect(controller.update({ user: currentUser('15') }, {
       themeMode: 'dark',
       orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } },
     })).resolves.toEqual({
-      preferences: { themeMode: 'dark', uiSize: 'default', orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } }, recentReferences: {}, pageSizePreferences: {} },
+      preferences: { themeMode: 'dark', uiSize: 'default', uiVariant: 'legacy', orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } }, recentReferences: {}, pageSizePreferences: {} },
     });
     await expect(controller.promoteReferenceUsage(
       { user: currentUser('15') },
@@ -58,6 +59,7 @@ describe('ProfilePreferencesController', () => {
       preferences: {
         themeMode: 'dark',
         uiSize: 'default',
+        uiVariant: 'legacy',
         orderDetailColumns: {},
         recentReferences: { sheet_material_types: [27] },
         pageSizePreferences: {},
@@ -97,9 +99,12 @@ describe('ProfilePreferencesController', () => {
     expect(parseUpdateUserPreferencesRequest({ themeMode: 'dark' })).toEqual({ themeMode: 'dark' });
     expect(parseUpdateUserPreferencesRequest({ uiSize: 'small' })).toEqual({ uiSize: 'small' });
     expect(parseUpdateUserPreferencesRequest({ uiSize: 'default' })).toEqual({ uiSize: 'default' });
+    expect(parseUpdateUserPreferencesRequest({ uiVariant: 'legacy' })).toEqual({ uiVariant: 'legacy' });
+    expect(parseUpdateUserPreferencesRequest({ uiVariant: 'evolution' })).toEqual({ uiVariant: 'evolution' });
     expect(parseUpdateUserPreferencesRequest({ pageSizePreferences: { 'refine:orders_view': 50 } }))
       .toEqual({ pageSizePreferences: { 'refine:orders_view': 50 } });
     expect(() => parseUpdateUserPreferencesRequest({ uiSize: 'huge' })).toThrowError();
+    expect(() => parseUpdateUserPreferencesRequest({ uiVariant: 'future' })).toThrow(ApiError);
     expect(() => parseUpdateUserPreferencesRequest({ pageSizePreferences: { audit: 200 } })).toThrow(ApiError);
     expect(() => parseUpdateUserPreferencesRequest({
       pageSizePreferences: Object.fromEntries(

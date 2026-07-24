@@ -108,4 +108,33 @@ describe('runtimeConfig', () => {
     );
     expect(featureFlags.useBackendVlm).toBe(true);
   });
+
+  it('accepts only boolean UI rollout values and preserves them for bootstrap', () => {
+    applyRuntimeConfig({
+      ui: { evolutionEnabled: true, forceLegacy: false },
+    });
+
+    expect(getLoadedRuntimeConfig()?.ui).toEqual({
+      evolutionEnabled: true,
+      forceLegacy: false,
+    });
+  });
+
+  it('fails closed when UI runtime shape is malformed', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ui: { evolutionEnabled: 'true' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const config = await initializeRuntimeConfig({
+      fetchImpl: fetchMock,
+      env: { VITE_UI_EVOLUTION: 'true' },
+      timeoutMs: 10,
+    });
+
+    expect(config).toBeNull();
+    expect(getLoadedRuntimeConfig()).toBeNull();
+  });
 });

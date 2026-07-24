@@ -10,7 +10,8 @@ Ant Design; command API — на NestJS; read/report/reference слой — Hasu
 - Рабочая и deploy-ветка production: `main`.
 - `feat/backend-erp-prevprod` выведена из эксплуатации и не используется для
   production deploy.
-- Тестовый frontend: `https://app-test.mebelkz.app`.
+- Канонический тестовый контур: frontend `https://app-test.mebelkz.app`,
+  backend `https://backend-test.mebelkz.app`.
 
 ## Документация
 
@@ -26,6 +27,7 @@ Ant Design; command API — на NestJS; read/report/reference слой — Hasu
 - [Контракт JSON snapshot заказов](docs/order-json-snapshot-v1.md)
 - [Frontend runtime config](docs/frontend-runtime-config-readiness.md)
 - [Runtime config canary](docs/runtime-config-canary-readiness.md)
+- [UI variant: архитектура и rollout](docs/ui-redesign/ui-variant-architecture.md)
 - [Users cutover](docs/users-cutover-readiness.md)
 - [Order export cutover](docs/order-export-cutover-readiness.md)
 - [VLM cutover](docs/vlm-cutover-readiness.md)
