@@ -26,7 +26,11 @@ import type {
   UserIdentityListItem,
   UserIdentityRecord,
 } from './pg-user-identity-repository';
-import type { WorkosApiClient, WorkosIdentity } from './workos-api.client';
+import type {
+  WorkosApiClient,
+  WorkosAuthorizeOptions,
+  WorkosIdentity,
+} from './workos-api.client';
 
 export const WORKOS_PROVIDER = 'workos';
 const MANAGE_SSO_PERMISSION: Parameters<PermissionsService['canUser']>[1] = 'users.manage_sso';
@@ -446,8 +450,8 @@ export class WorkosAuthService {
     }
   }
 
-  buildAuthorizeUrl(state: string): string {
-    return this.ports.workos.buildAuthorizeUrl(state);
+  buildAuthorizeUrl(state: string, options: WorkosAuthorizeOptions = {}): string {
+    return this.ports.workos.buildAuthorizeUrl(state, options);
   }
 
   /**
