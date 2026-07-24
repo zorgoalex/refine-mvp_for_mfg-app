@@ -3,6 +3,11 @@ name: erp_ui_redesign
 services:
   postgresdb:
     image: postgres:16-alpine
+    restart: "no"
+    cpus: 0.50
+    mem_limit: 384m
+    memswap_limit: 384m
+    pids_limit: 128
     environment:
       POSTGRES_DB: ${PG_DB}
       POSTGRES_USER: ${PG_USER}
@@ -10,8 +15,6 @@ services:
       TZ: Asia/Almaty
       PGTZ: Asia/Almaty
     command: ["postgres", "-c", "timezone=Asia/Almaty"]
-    ports:
-      - "127.0.0.1:55433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,6 +27,11 @@ services:
 
   hasura_metadata_db:
     image: postgres:16-alpine
+    restart: "no"
+    cpus: 0.25
+    mem_limit: 128m
+    memswap_limit: 128m
+    pids_limit: 64
     environment:
       POSTGRES_DB: ${HASURA_MD_DB}
       POSTGRES_USER: ${HASURA_MD_USER}
@@ -42,6 +50,11 @@ services:
 
   valkey:
     image: valkey/valkey:7.2-alpine
+    restart: "no"
+    cpus: 0.25
+    mem_limit: 64m
+    memswap_limit: 64m
+    pids_limit: 64
     command: ["valkey-server", "--appendonly", "yes"]
     volumes:
       - valkey_data:/data
@@ -54,6 +67,11 @@ services:
 
   hasura:
     image: hasura/graphql-engine:v2.40.0
+    restart: "no"
+    cpus: 0.75
+    mem_limit: 768m
+    memswap_limit: 768m
+    pids_limit: 256
     environment:
       HASURA_GRAPHQL_DATABASE_URL: postgres://${PG_USER}:${PG_PASSWORD}@postgresdb:5432/${PG_DB}
       HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://${HASURA_MD_USER}:${HASURA_MD_PASSWORD}@hasura_metadata_db:5432/${HASURA_MD_DB}
@@ -67,8 +85,6 @@ services:
       HASURA_GRAPHQL_LOG_LEVEL: warn
       HASURA_GRAPHQL_CORS_DOMAIN: http://${PG_TAILSCALE_BIND_IP}:4174
       HASURA_GRAPHQL_ENABLED_LOG_TYPES: startup,http-log,webhook-log,websocket-log
-    ports:
-      - "127.0.0.1:8586:8080"
     depends_on:
       postgresdb:
         condition: service_healthy
@@ -86,6 +102,11 @@ services:
     build:
       context: ../../backend
       dockerfile: Dockerfile
+    restart: "no"
+    cpus: 0.75
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 256
     environment:
       NODE_ENV: production
       APP_NAME: erp-ui-redesign-backend
@@ -149,8 +170,6 @@ services:
       OCR_SERVICE_BASE_URL: http://disabled.invalid
       CAD_SERVICE_BASE_URL: http://disabled.invalid
       FREECUT_BASE_URL: http://disabled.invalid
-    ports:
-      - "127.0.0.1:3301:3000"
     depends_on:
       postgresdb:
         condition: service_healthy
@@ -168,6 +187,11 @@ services:
     build:
       context: ../..
       dockerfile: ops/ui-redesign/Dockerfile.frontend
+    restart: "no"
+    cpus: 0.25
+    mem_limit: 64m
+    memswap_limit: 64m
+    pids_limit: 64
     ports:
       - "${PG_TAILSCALE_BIND_IP:?Tailscale bind IP is required}:4174:80"
     depends_on:
@@ -181,9 +205,10 @@ services:
       timeout: 3s
       retries: 20
       start_period: 5s
-    networks: [back]
+    networks: [back, edge]
 
 networks:
+  edge:
   back:
     internal: true
 

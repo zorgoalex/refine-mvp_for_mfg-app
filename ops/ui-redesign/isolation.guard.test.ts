@@ -23,12 +23,22 @@ describe('UI redesign review-stack isolation guard', () => {
     expect(runtime.apiUrl).toBe('/ui-redesign');
   });
 
-  it('binds only the frontend to the explicit Tailscale address', () => {
+  it('publishes only the frontend through a dedicated edge network', () => {
     expect(compose).toContain('${PG_TAILSCALE_BIND_IP:?Tailscale bind IP is required}:4174:80');
     expect(compose).not.toContain('0.0.0.0:4174');
-    expect(compose).toContain('127.0.0.1:3301:3000');
-    expect(compose).toContain('127.0.0.1:8586:8080');
+    expect(compose).not.toContain('127.0.0.1:3301:3000');
+    expect(compose).not.toContain('127.0.0.1:8586:8080');
+    expect(compose).not.toContain('127.0.0.1:55433:5432');
+    expect(compose).toContain('networks: [back, edge]');
+    expect(compose).toContain('edge:\n  back:\n    internal: true');
     expect(compose).toContain('internal: true');
+  });
+
+  it('caps every preview service without allowing container swap', () => {
+    expect(compose.match(/mem_limit:/g)).toHaveLength(6);
+    expect(compose.match(/memswap_limit:/g)).toHaveLength(6);
+    expect(compose.match(/pids_limit:/g)).toHaveLength(6);
+    expect(compose.match(/restart: "no"/g)).toHaveLength(6);
   });
 
   it('pins and validates source containers before cloning', () => {

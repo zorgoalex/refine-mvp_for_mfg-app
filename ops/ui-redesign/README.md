@@ -25,18 +25,30 @@ Open `http://${PG_TAILSCALE_BIND_IP}:4174` and sign in with an existing cloned
 test account. The frontend is published only on that explicit Tailscale IP;
 the runtime network is internal and has no outbound route.
 
-Core endpoints are isolated:
+Only the frontend is published to the host:
 
 - frontend: `http://${PG_TAILSCALE_BIND_IP}:4174`
-- backend diagnostic port: `http://127.0.0.1:3301`
-- Hasura diagnostic port: `http://127.0.0.1:8586`
-- PostgreSQL diagnostic port: `127.0.0.1:55433`
+
+Backend, Hasura, PostgreSQL, metadata PostgreSQL, and Valkey stay exclusively on
+the internal `back` network. The frontend joins a separate `edge` network only
+to publish the Tailscale-bound review port.
 
 ## Emergency legacy preview
 
 Set `ui.forceLegacy` to `true` in `runtime-config.json`, rebuild only frontend,
 then hard-refresh. Missing or malformed runtime config also fails closed to the
 legacy shell.
+
+## Resource guard
+
+The preview services have hard memory, swap, CPU, and PID limits. The combined
+memory ceiling is 1664 MiB, and container swap is disabled so the preview cannot
+push unrelated Codex sessions into swap.
+
+After the stack is healthy, run `memory-watchdog.sh` as a supervised background
+process. It stops only containers labelled with the `erp_ui_redesign` Compose
+project after available host memory stays below 1536 MiB for three checks. The
+watchdog can also start up to 60 seconds before the first preview container.
 
 Nginx exposes the review backend under `/ui-redesign/api/v1` and rewrites the
 backend's internal `/api/v1` prefix. It also rewrites the refresh cookie Path to
