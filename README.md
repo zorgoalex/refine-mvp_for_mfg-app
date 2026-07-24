@@ -10,7 +10,8 @@ Ant Design; command API — на NestJS; read/report/reference слой — Hasu
 - Рабочая и deploy-ветка production: `main`.
 - `feat/backend-erp-prevprod` выведена из эксплуатации и не используется для
   production deploy.
-- Тестовый frontend: `https://app-test.mebelkz.app`.
+- Канонический тестовый контур: frontend `https://app-test.mebelkz.app`,
+  backend `https://backend-test.mebelkz.app`.
 
 ## Документация
 
