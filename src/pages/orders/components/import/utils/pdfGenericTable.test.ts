@@ -48,6 +48,108 @@ describe('generic PDF table detector', () => {
     });
   });
 
+  it('applies section material metadata to mapped rows', () => {
+    const page = [
+      item('Материал:', 100, 540), item('МДФ 16 мм', 180, 540),
+      item('№', 100, 500), item('Наименование', 200, 500),
+      item('Кол-во', 300, 500), item('Размер', 400, 500),
+      item('1', 100, 470), item('Фасад', 200, 470),
+      item('2', 300, 470), item('700 400', 400, 470),
+    ];
+
+    const [table] = detectGenericPdfTables([page]);
+    const mapped = mapGenericTableRows(table, inferredMapping(table));
+    const [differentMaterialTable] = detectGenericPdfTables([
+      page.map(entry => entry.text === 'МДФ 16 мм'
+        ? item('ЛДСП 18 мм', entry.x, entry.y)
+        : entry),
+    ]);
+
+    expect(table.sectionMaterialName).toBe('МДФ 16 мм');
+    expect(mapped.rows[0].materialName).toBe('МДФ 16 мм');
+    expect(serializePdfLayoutSignature(differentMaterialTable.signature))
+      .toBe(serializePdfLayoutSignature(table.signature));
+  });
+
+  it('prefers an explicit material column over section metadata', () => {
+    const page = [
+      item('Материал:', 100, 540), item('МДФ 16 мм', 180, 540),
+      item('№', 100, 500), item('Наименование', 200, 500),
+      item('Кол-во', 300, 500), item('Размер', 400, 500), item('Материал', 520, 500),
+      item('1', 100, 470), item('Фасад', 200, 470),
+      item('2', 300, 470), item('700 400', 400, 470), item('ЛДСП 16 мм', 520, 470),
+    ];
+
+    const [table] = detectGenericPdfTables([page]);
+    const mapped = mapGenericTableRows(table, inferredMapping(table));
+
+    expect(mapped.rows[0].materialName).toBe('ЛДСП 16 мм');
+  });
+
+  it('keeps section materials scoped to their tables', () => {
+    const page = [
+      item('Материал:', 100, 640), item('МДФ 16 мм', 180, 640),
+      item('№', 100, 600), item('Наименование', 200, 600),
+      item('Кол-во', 300, 600), item('Размер', 400, 600),
+      item('1', 100, 570), item('Фасад', 200, 570),
+      item('1', 300, 570), item('700 400', 400, 570),
+      item('Общ. кол. 1', 100, 550),
+      item('Материал:', 100, 520), item('МДФ 18 мм', 180, 520),
+      item('№', 100, 480), item('Наименование', 200, 480),
+      item('Кол-во', 300, 480), item('Размер', 400, 480),
+      item('1', 100, 450), item('Полка', 200, 450),
+      item('1', 300, 450), item('600 300', 400, 450),
+    ];
+
+    const tables = detectGenericPdfTables([page]);
+    const materials = tables.map(table =>
+      mapGenericTableRows(table, inferredMapping(table)).rows[0].materialName);
+
+    expect(materials).toEqual(['МДФ 16 мм', 'МДФ 18 мм']);
+  });
+
+  it('inherits section material on a headerless continuation page', () => {
+    const headerPage = [
+      item('Материал:', 100, 540), item('МДФ 16 мм', 180, 540),
+      item('№', 100, 500), item('Наименование', 200, 500),
+      item('Кол-во', 300, 500), item('Размер', 400, 500),
+      item('1', 100, 470), item('Фасад', 200, 470),
+      item('1', 300, 470), item('700 400', 400, 470),
+    ];
+    const continuationPage = [
+      item('2', 100, 470), item('Полка', 200, 470),
+      item('2', 300, 470), item('600 300', 400, 470),
+    ];
+
+    const tables = detectGenericPdfTables([headerPage, continuationPage]);
+    const continuation = mapGenericTableRows(tables[1], inferredMapping(tables[1]));
+
+    expect(tables[1].sectionMaterialName).toBe('МДФ 16 мм');
+    expect(continuation.rows[0].materialName).toBe('МДФ 16 мм');
+  });
+
+  it('inherits section material when a continuation page repeats the header', () => {
+    const firstPage = [
+      item('Материал:', 100, 540), item('МДФ 16 мм', 180, 540),
+      item('№', 100, 500), item('Наименование', 200, 500),
+      item('Кол-во', 300, 500), item('Размер', 400, 500),
+      item('1', 100, 470), item('Фасад', 200, 470),
+      item('1', 300, 470), item('700 400', 400, 470),
+    ];
+    const secondPage = [
+      item('№', 100, 500), item('Наименование', 200, 500),
+      item('Кол-во', 300, 500), item('Размер', 400, 500),
+      item('2', 100, 470), item('Полка', 200, 470),
+      item('2', 300, 470), item('600 300', 400, 470),
+    ];
+
+    const tables = detectGenericPdfTables([firstPage, secondPage]);
+    const continuation = mapGenericTableRows(tables[1], inferredMapping(tables[1]));
+
+    expect(tables[1].sectionMaterialName).toBe('МДФ 16 мм');
+    expect(continuation.rows[0].materialName).toBe('МДФ 16 мм');
+  });
+
   it('retains geometry-stable tables with unknown headers for manual mapping', () => {
     const page = [
       item('A', 100, 500), item('B', 200, 500), item('C', 300, 500), item('D', 400, 500),
