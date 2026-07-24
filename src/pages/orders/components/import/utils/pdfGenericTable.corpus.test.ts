@@ -62,6 +62,9 @@ describe('generic detector Basis corpus', () => {
       const mapped = mappedResults.flatMap(result => result.rows);
       expect(mappedResults.flatMap(result => result.issues)).toEqual([]);
       expect(mapped.reduce((sum, row) => sum + row.quantity, 0)).toBe(expectedQuantity);
+      if (fileName.startsWith(`new${path.sep}`)) {
+        expect(mapped.every(row => row.materialName === 'МДФ 16 мм')).toBe(true);
+      }
     }
     if (fileName === 'мдф санузел.pdf') {
       const parsed = parsePdfContent(pages);

@@ -1,7 +1,12 @@
 import type { ImportRow } from '../types/importTypes';
-import type { PdfTextItem } from '../types/pdfTypes';
+import { MATERIAL_PATTERN, type PdfTextItem } from '../types/pdfTypes';
 import { groupTextItemsIntoLines, isHeaderOrFooter } from './pdfTextExtractor';
-import type { PdfLayoutMapping, PdfLayoutSignature, PdfLayoutTarget } from './pdfLayoutPattern';
+import {
+  normalizePdfHeader,
+  type PdfLayoutMapping,
+  type PdfLayoutSignature,
+  type PdfLayoutTarget,
+} from './pdfLayoutPattern';
 
 export interface PdfGenericColumn {
   header: string;
@@ -15,6 +20,8 @@ export interface PdfGenericTable {
   pageNumber: number;
   columns: PdfGenericColumn[];
   rows: string[][];
+  /** Document-local metadata. It must never be included in the persisted layout signature. */
+  sectionMaterialName?: string;
   geometryCandidateCells?: string[];
   unresolvedLines: string[][];
   signature: PdfLayoutSignature;
@@ -56,6 +63,7 @@ export function detectGenericPdfTables(pages: PdfTextItem[][]): PdfGenericTable[
   pages.forEach((items, pageIndex) => {
     const lines = groupTextItemsIntoLines(items);
     const tableCountBeforePage = tables.length;
+    let previousDetectedHeaderIndex: number | undefined;
     const semanticHeaderIndexes = lines.flatMap((line, index) => {
       const headerItems = mergeNearbyHeaderItems(line.items);
       return headerItems.length >= 4 && semanticHeaderCount(headerItems) >= 2 ? [index] : [];
@@ -111,6 +119,18 @@ export function detectGenericPdfTables(pages: PdfTextItem[][]): PdfGenericTable[
         maxX: index === sorted.length - 1 ? Number.POSITIVE_INFINITY : midpoint(item.x, sorted[index + 1].x),
         inferredTarget: semanticCount >= 2 ? inferTarget(item.text) : 'ignore',
       }));
+      const previousTable = tables[tables.length - 1];
+      const sectionMaterialName = findSectionMaterialName(
+        lines,
+        lineIndex,
+        previousDetectedHeaderIndex,
+      ) ?? (
+        previousDetectedHeaderIndex === undefined
+        && previousTable?.pageNumber === pageIndex
+        && hasSameColumnLayout(previousTable.columns, columns)
+          ? previousTable.sectionMaterialName
+          : undefined
+      );
       const nextSemanticHeader = semanticHeaderIndexes.find(index => index > lineIndex);
       const endIndex = findTableBoundary(
         lines,
@@ -133,6 +153,7 @@ export function detectGenericPdfTables(pages: PdfTextItem[][]): PdfGenericTable[
         pageNumber: pageIndex + 1,
         columns,
         rows: assembled.rows,
+        sectionMaterialName,
         geometryCandidateCells: semanticCount < 2 ? cellsForLine(header, columns) : undefined,
         unresolvedLines: assembled.unresolvedLines,
         signature: {
@@ -146,6 +167,7 @@ export function detectGenericPdfTables(pages: PdfTextItem[][]): PdfGenericTable[
           })),
         },
       });
+      previousDetectedHeaderIndex = lineIndex;
       lineIndex = Math.max(lineIndex, endIndex - 1);
     }
     if (tables.length === tableCountBeforePage && tables.length > 0) {
@@ -236,7 +258,8 @@ export function mapGenericTableRows(
       basisData: null,
       basisProject: values.get('basis_project') || null,
       basisProduct: values.get('basis_product') || null,
-      materialName: values.get('material') || null,
+      // A real material column is row-specific and therefore wins over section metadata.
+      materialName: values.get('material') || table.sectionMaterialName || null,
       millingTypeName: values.get('milling') || null,
       filmName: values.get('film') || null,
       note: values.get('note') || null,
@@ -332,6 +355,24 @@ function mergeNearbyHeaderItems(items: PdfTextItem[]): PdfTextItem[] {
 }
 function semanticHeaderCount(items: PdfTextItem[]) {
   return items.filter(item => inferTarget(item.text) !== 'ignore').length;
+}
+function findSectionMaterialName(
+  lines: ReturnType<typeof groupTextItemsIntoLines>,
+  headerIndex: number,
+  previousHeaderIndex?: number,
+) {
+  const firstCandidateIndex = previousHeaderIndex === undefined ? 0 : previousHeaderIndex + 1;
+  for (let index = headerIndex - 1; index >= firstCandidateIndex; index -= 1) {
+    const match = lines[index].text.match(MATERIAL_PATTERN);
+    const materialName = match?.[1]?.replace(/\s+/g, ' ').trim();
+    if (materialName) return materialName;
+  }
+  return undefined;
+}
+function hasSameColumnLayout(left: PdfGenericColumn[], right: PdfGenericColumn[]) {
+  return left.length === right.length && left.every((column, index) =>
+    column.inferredTarget === right[index].inferredTarget
+    && normalizePdfHeader(column.header) === normalizePdfHeader(right[index].header));
 }
 function hasStableGeometry(
   lines: ReturnType<typeof groupTextItemsIntoLines>,

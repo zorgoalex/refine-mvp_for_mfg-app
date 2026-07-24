@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-23",
+    title: "Материал при импорте PDF Базис",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Материал, указанный над таблицей PDF Базис, теперь переносится во все детали своей секции и сохраняется при продолжении таблицы на следующей странице.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-23",
     title: "Итоги по группам деталей",
     services: ["ERP"],
     repositories: ["repo_erp"],
