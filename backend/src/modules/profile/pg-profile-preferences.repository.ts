@@ -9,6 +9,7 @@ import type {
   RecentReferenceResource,
   ThemeMode,
   UiSize,
+  UiVariant,
   UserPreferencesDto,
   UserPreferencesRepositoryPort,
 } from './profile-preferences.types';
@@ -16,6 +17,7 @@ import type {
 interface PreferenceRow extends QueryResultRow {
   theme_mode: string | null;
   ui_size: string | null;
+  ui_variant: string | null;
   order_detail_columns: unknown;
   recent_reference_entities: unknown;
   page_size_preferences: unknown;
@@ -27,7 +29,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
   async getUserPreferences(userId: number): Promise<UserPreferencesDto> {
     const result = await this.database.query<PreferenceRow>(
       `
-      SELECT theme_mode, ui_size, order_detail_columns, recent_reference_entities, page_size_preferences
+      SELECT theme_mode, ui_size, ui_variant, order_detail_columns, recent_reference_entities, page_size_preferences
       FROM user_preferences
       WHERE user_id = $1
       `,
@@ -44,6 +46,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
     if (
       preferences.themeMode === undefined &&
       preferences.uiSize === undefined &&
+      preferences.uiVariant === undefined &&
       preferences.orderDetailColumns === undefined &&
       preferences.pageSizePreferences === undefined
     ) {
@@ -52,32 +55,35 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
 
     const result = await this.database.query<PreferenceRow>(
       `
-      INSERT INTO user_preferences (user_id, theme_mode, ui_size, order_detail_columns, page_size_preferences)
+      INSERT INTO user_preferences (user_id, theme_mode, ui_size, ui_variant, order_detail_columns, page_size_preferences)
       VALUES (
         $1,
         COALESCE($2, 'light'),
         $3,
-        COALESCE($4::jsonb, '{}'::jsonb),
-        COALESCE($5::jsonb, '{}'::jsonb)
+        COALESCE($4, 'legacy'),
+        COALESCE($5::jsonb, '{}'::jsonb),
+        COALESCE($6::jsonb, '{}'::jsonb)
       )
       ON CONFLICT (user_id)
       DO UPDATE SET
         theme_mode = COALESCE($2, user_preferences.theme_mode),
         ui_size = COALESCE($3, user_preferences.ui_size),
-        order_detail_columns = COALESCE($4::jsonb, user_preferences.order_detail_columns),
+        ui_variant = COALESCE($4, user_preferences.ui_variant),
+        order_detail_columns = COALESCE($5::jsonb, user_preferences.order_detail_columns),
         page_size_preferences = CASE
-          WHEN $5::jsonb IS NULL THEN user_preferences.page_size_preferences
-          ELSE user_preferences.page_size_preferences || $5::jsonb
+          WHEN $6::jsonb IS NULL THEN user_preferences.page_size_preferences
+          ELSE user_preferences.page_size_preferences || $6::jsonb
         END,
         updated_at = now()
-      WHERE $5::jsonb IS NULL
-        OR jsonb_object_length(user_preferences.page_size_preferences || $5::jsonb) <= 128
-      RETURNING theme_mode, ui_size, order_detail_columns, recent_reference_entities, page_size_preferences
+      WHERE $6::jsonb IS NULL
+        OR jsonb_object_length(user_preferences.page_size_preferences || $6::jsonb) <= 128
+      RETURNING theme_mode, ui_size, ui_variant, order_detail_columns, recent_reference_entities, page_size_preferences
       `,
       [
         userId,
         preferences.themeMode ?? null,
         preferences.uiSize ?? null,
+        preferences.uiVariant ?? null,
         preferences.orderDetailColumns === undefined ? null : JSON.stringify(preferences.orderDetailColumns),
         preferences.pageSizePreferences === undefined ? null : JSON.stringify(preferences.pageSizePreferences),
       ],
@@ -147,7 +153,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
           true
         ),
         updated_at = now()
-      RETURNING theme_mode, ui_size, order_detail_columns, recent_reference_entities, page_size_preferences
+      RETURNING theme_mode, ui_size, ui_variant, order_detail_columns, recent_reference_entities, page_size_preferences
       `,
       [userId, resource, entityId],
     );
@@ -160,6 +166,7 @@ function mapPreferenceRow(row: PreferenceRow | undefined): UserPreferencesDto {
   return {
     themeMode: normalizeThemeMode(row?.theme_mode),
     uiSize: normalizeUiSize(row?.ui_size),
+    uiVariant: normalizeUiVariant(row?.ui_variant),
     orderDetailColumns: normalizeOrderDetailColumns(row?.order_detail_columns),
     recentReferences: normalizeRecentReferences(row?.recent_reference_entities),
     pageSizePreferences: normalizePageSizePreferences(row?.page_size_preferences),
@@ -207,6 +214,10 @@ function normalizeThemeMode(value: unknown): ThemeMode {
 
 function normalizeUiSize(value: unknown): UiSize {
   return value === 'small' ? 'small' : 'default';
+}
+
+function normalizeUiVariant(value: unknown): UiVariant {
+  return value === 'evolution' ? 'evolution' : 'legacy';
 }
 
 function normalizeOrderDetailColumns(value: unknown): OrderDetailColumnPreferencesDto {

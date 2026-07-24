@@ -489,6 +489,7 @@ probe_file() {
                             OR o.production_status_from_details_enabled IS DISTINCT FROM false
                           )
                      );" ;;
+    084_user_preferences_ui_variant*) probe_all "$(q_col user_preferences ui_variant)" "$(q_con chk_user_preferences_ui_variant)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
