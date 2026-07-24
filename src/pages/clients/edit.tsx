@@ -7,7 +7,7 @@ import {
   useDelete,
 } from "@refinedev/core";
 import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
-import { Form, Input, Checkbox, notification, Spin } from "antd";
+import { Form, Input, Checkbox, notification, Spin, Radio } from "antd";
 import { ClientPhonesSection } from "./components/ClientPhonesSection";
 import { ClientPhone } from "../../types/clients";
 import { useState, useEffect, useCallback } from "react";
@@ -144,6 +144,16 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
           ]}
         >
           <Input />
+        </Form.Item>
+        <Form.Item
+          label="Тип лица"
+          name="person_type"
+          rules={[{ required: true, message: "Выберите тип лица" }]}
+        >
+          <Radio.Group>
+            <Radio value="individual">Физическое лицо</Radio>
+            <Radio value="legal">Юридическое лицо</Radio>
+          </Radio.Group>
         </Form.Item>
         <Form.Item label="Примечание" name="notes">
           <Input.TextArea rows={4} />

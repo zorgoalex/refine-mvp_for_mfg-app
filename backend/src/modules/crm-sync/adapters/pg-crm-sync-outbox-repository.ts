@@ -14,6 +14,62 @@ interface OutboxRow {
 }
 
 export class PgCrmSyncOutboxRepository {
+  async acquireWriterLock(
+    client: DatabaseClient,
+    lockToken: string,
+    leaseMs: number,
+  ): Promise<boolean> {
+    const result = await client.query(
+      `INSERT INTO crm_sync_writer_lock (lock_name, lock_token, locked_at)
+       VALUES ('bitrix24-live-writer', $1, now())
+       ON CONFLICT (lock_name) DO UPDATE SET
+         lock_token=EXCLUDED.lock_token,
+         locked_at=EXCLUDED.locked_at
+       WHERE crm_sync_writer_lock.locked_at < now() - ($2 * interval '1 millisecond')
+          OR crm_sync_writer_lock.lock_token = EXCLUDED.lock_token`,
+      [lockToken, leaseMs],
+    );
+    return (result.rowCount ?? 0) === 1;
+  }
+
+  async heartbeatWriterLock(
+    client: DatabaseClient,
+    lockToken: string,
+  ): Promise<boolean> {
+    const result = await client.query(
+      `UPDATE crm_sync_writer_lock
+          SET locked_at=now()
+        WHERE lock_name='bitrix24-live-writer' AND lock_token=$1`,
+      [lockToken],
+    );
+    return (result.rowCount ?? 0) === 1;
+  }
+
+  async releaseWriterLock(
+    client: DatabaseClient,
+    lockToken: string,
+  ): Promise<void> {
+    await client.query(
+      `DELETE FROM crm_sync_writer_lock
+        WHERE lock_name='bitrix24-live-writer' AND lock_token=$1`,
+      [lockToken],
+    );
+  }
+
+  async heartbeat(
+    client: DatabaseClient,
+    outboxEventId: string,
+    lockToken: string,
+  ): Promise<boolean> {
+    const result = await client.query(
+      `UPDATE crm_sync_outbox
+          SET locked_at=now()
+        WHERE outbox_event_id=$1 AND lock_token=$2 AND status='processing'`,
+      [outboxEventId, lockToken],
+    );
+    return (result.rowCount ?? 0) === 1;
+  }
+
   /**
    * Claims a batch of pending (due now) or stale-lease (processing with expired lock)
    * rows from crm_sync_outbox, assigning a fresh lock_token to each.

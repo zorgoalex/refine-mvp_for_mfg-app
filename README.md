@@ -4,6 +4,15 @@
 импортом, раскроем и интеграциями. Frontend построен на React, Vite, Refine и
 Ant Design; command API — на NestJS; read/report/reference слой — Hasura.
 
+## Рабочие ветки
+
+- Stage-интеграция и stage-deploy: `feat/backend-erp-stage1`.
+- Рабочая и deploy-ветка production: `main`.
+- `feat/backend-erp-prevprod` выведена из эксплуатации и не используется для
+  production deploy.
+- Канонический тестовый контур: frontend `https://app-test.mebelkz.app`,
+  backend `https://backend-test.mebelkz.app`.
+
 ## Документация
 
 - [Обзор проекта, возможности, стек и структура](docs/project-overview.md)

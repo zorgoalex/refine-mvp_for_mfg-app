@@ -48,7 +48,7 @@ describe('getBitrix24MenuConfig', () => {
     });
   });
 
-  it('does not reuse the retired Twenty CRM environment variables', () => {
+  it('does not reuse the retired CRM environment variables', () => {
     expect(
       getBitrix24MenuConfig({
         VITE_CRM_URL: 'https://crm-test.mebelkz.app',

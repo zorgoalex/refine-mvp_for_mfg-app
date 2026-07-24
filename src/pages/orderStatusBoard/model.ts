@@ -90,7 +90,11 @@ export function toOrderStatusBoardQuery(
 function isDoneProductionStatus(column: OrderStatusBoardColumn): boolean {
   const name = column.status.name.trim().toLocaleLowerCase('en-US');
   const code = column.status.code?.trim().toLocaleLowerCase('en-US') ?? '';
-  return name === 'done' || /^done(?:_|$)/.test(code);
+  return (
+    name === 'done'
+    || name === 'завершено'
+    || /^(?:done|zaversheno)(?:_|$)/.test(code)
+  );
 }
 
 export type MergeColumnPageResult =

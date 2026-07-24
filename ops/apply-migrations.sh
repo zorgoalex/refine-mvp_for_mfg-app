@@ -35,6 +35,8 @@
 #                     auto-healed, sequences are realigned. Fail-closed: any
 #                     non-autofixable state aborts with exact remediation and
 #                     an idempotent re-run continues from that point.
+#   probe <migration>  Read-only: classify one migration as PRESENT/PENDING.
+#                     Intended for diagnostics and integration tests.
 #   classify-material-name <name>
 #                     (internal) print the --auto-map heuristic verdict for one
 #                     legacy material name: "cuttable|<mm>|<mtype>" for known
@@ -111,7 +113,7 @@ err() { printf 'apply-migrations: %s\n' "$*" >&2; }
 die() { err "$*"; exit 1; }
 
 case "${1:-}" in
-  dry-run|status|apply|baseline|mark-applied|auto) MODE="$1"; shift ;;
+  dry-run|status|apply|baseline|mark-applied|auto|probe) MODE="$1"; shift ;;
   classify-material-name)
     shift
     # Pure heuristic, no DB access — used by --auto-map and unit tests.
@@ -130,7 +132,7 @@ case "${1:-}" in
   -h|--help|help) sed -n '2,100p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   "" ) ;;                                   # no arg → default dry-run
   -* ) ;;                                   # first token is an option → default mode
-  * ) die "unknown mode '${1}' (use dry-run|status|apply|baseline|mark-applied|auto)";;
+  * ) die "unknown mode '${1}' (use dry-run|status|apply|baseline|mark-applied|auto|probe)";;
 esac
 
 while [ $# -gt 0 ]; do
@@ -229,6 +231,8 @@ q_idx()   { echo "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='publ
 q_trg()   { echo "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='$1');"; }
 q_con_def() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)='$2' FROM pg_constraint WHERE conname='$1'), false);"; }
 q_trg_def() { echo "SELECT COALESCE((SELECT pg_get_triggerdef(oid)='$2' FROM pg_trigger WHERE tgname='$1'), false);"; }
+q_con_def_on() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)='$3' FROM pg_constraint WHERE conname='$1' AND conrelid='public.$2'::regclass), false);"; }
+q_trg_def_on() { echo "SELECT COALESCE((SELECT pg_get_triggerdef(oid)='$3' FROM pg_trigger WHERE tgname='$1' AND tgrelid='public.$2'::regclass), false);"; }
 probe_true() { [ "$(pg_query "$1")" = "t" ]; }
 # AND-chain: every argument is a boolean SQL statement; all must be true.
 probe_all() { local q; for q in "$@"; do probe_true "$q" || return 1; done; return 0; }
@@ -416,6 +420,120 @@ probe_file() {
                      "$(q_col bazis_pdf_table_patterns approval_status)" \
                      "$(q_col bazis_pdf_table_patterns is_active)" \
                      "$(q_col bazis_pdf_table_patterns version)" ;;
+    073_*) probe_all "SELECT EXISTS (
+                       SELECT 1
+                         FROM information_schema.columns
+                        WHERE table_schema='public'
+                          AND table_name='clients'
+                          AND column_name='person_type'
+                          AND data_type='text'
+                          AND is_nullable='NO'
+                          AND column_default='''individual''::text'
+                     );" \
+                     "SELECT count(*) = 3
+                        FROM information_schema.columns
+                       WHERE table_schema='public'
+                         AND table_name='crm_sync_mapping'
+                         AND (
+                           (column_name='bitrix_object' AND data_type='text' AND is_nullable='NO')
+                           OR (column_name='bitrix_id' AND data_type='text' AND is_nullable='YES')
+                           OR (column_name='parent_erp_id' AND data_type='text' AND is_nullable='YES')
+                         );" \
+                     "SELECT COALESCE((
+                       SELECT pg_get_constraintdef(oid) =
+                         'CHECK ((person_type = ANY (ARRAY[''individual''::text, ''legal''::text])))'
+                         FROM pg_constraint
+                        WHERE conname='chk_clients_person_type'
+                          AND conrelid='public.clients'::regclass
+                     ), false);" \
+                     "SELECT COALESCE((
+                       SELECT pg_get_constraintdef(oid) =
+                         'CHECK ((entity_type = ANY (ARRAY[''client''::text, ''order''::text, ''payment''::text])))'
+                         FROM pg_constraint
+                        WHERE conname='crm_sync_mapping_entity_type_check'
+                          AND conrelid='public.crm_sync_mapping'::regclass
+                     ), false);" \
+                     "$(q_con_def_on uq_crm_sync_mapping_bitrix crm_sync_mapping 'UNIQUE (entity_type, bitrix_object, bitrix_id)')" \
+                     "SELECT COALESCE((
+                       SELECT indexdef = 'CREATE INDEX idx_crm_sync_mapping_parent ON public.crm_sync_mapping USING btree (entity_type, parent_erp_id) WHERE (parent_erp_id IS NOT NULL)'
+                         FROM pg_indexes
+                        WHERE schemaname='public'
+                          AND indexname='idx_crm_sync_mapping_parent'
+                     ), false);" \
+                     "$(q_trg_def_on trg_crm_sync_client_phones client_phones 'CREATE TRIGGER trg_crm_sync_client_phones AFTER INSERT OR DELETE OR UPDATE ON public.client_phones FOR EACH ROW EXECUTE FUNCTION crm_sync_enqueue_client_phone()')" \
+                     "$(q_trg_def_on trg_crm_sync_client_person_type_orders clients 'CREATE TRIGGER trg_crm_sync_client_person_type_orders AFTER UPDATE OF person_type ON public.clients FOR EACH ROW EXECUTE FUNCTION crm_sync_enqueue_client_orders()')" \
+                     "SELECT COALESCE((
+                       SELECT pg_get_functiondef('crm_sync_enqueue_client_phone()'::regprocedure)
+                                LIKE '%crm.sync.client.upsert%'
+                          AND pg_get_functiondef('crm_sync_enqueue_client_phone()'::regprocedure)
+                                LIKE '%TG_OP = ''DELETE''%'
+                     ), false);" \
+                     "SELECT COALESCE((
+                       SELECT pg_get_functiondef('crm_sync_enqueue_client_orders()'::regprocedure)
+                                LIKE '%OLD.person_type IS NOT DISTINCT FROM NEW.person_type%'
+                          AND pg_get_functiondef('crm_sync_enqueue_client_orders()'::regprocedure)
+                                LIKE '%crm.sync.order.upsert%'
+                     ), false);" \
+                     "SELECT NOT EXISTS (
+                       SELECT 1
+                         FROM clients
+                        WHERE person_type IS NULL
+                           OR person_type NOT IN ('individual', 'legal')
+                     );" \
+                     "SELECT NOT EXISTS (
+                       SELECT 1
+                         FROM information_schema.columns
+                        WHERE table_schema='public'
+                          AND table_name='crm_sync_mapping'
+                          AND column_name IN ('twenty_object', 'twenty_id')
+                     );" ;;
+    074_*) probe_all "SELECT count(*) = 6
+                        FROM information_schema.columns
+                       WHERE table_schema='public'
+                         AND table_name='crm_sync_payment_create_guard'
+                         AND (
+                           (column_name='erp_payment_id' AND data_type='text' AND is_nullable='NO')
+                           OR (column_name='erp_order_id' AND data_type='text' AND is_nullable='NO')
+                           OR (column_name='bitrix_deal_id' AND data_type='text' AND is_nullable='NO')
+                           OR (column_name='before_ids' AND data_type='jsonb' AND is_nullable='NO')
+                           OR (column_name='created_at' AND data_type='timestamp with time zone' AND is_nullable='NO' AND column_default='now()')
+                           OR (column_name='updated_at' AND data_type='timestamp with time zone' AND is_nullable='NO' AND column_default='now()')
+                         );" \
+                     "SELECT count(*) = 3
+                        FROM information_schema.columns
+                       WHERE table_schema='public'
+                         AND table_name='crm_sync_writer_lock'
+                         AND (
+                           (column_name='lock_name' AND data_type='text' AND is_nullable='NO')
+                           OR (column_name='lock_token' AND data_type='text' AND is_nullable='NO')
+                           OR (column_name='locked_at' AND data_type='timestamp with time zone' AND is_nullable='NO')
+                         );" \
+                     "$(q_con_def_on crm_sync_payment_create_guard_pkey crm_sync_payment_create_guard 'PRIMARY KEY (erp_payment_id)')" \
+                     "$(q_con_def_on crm_sync_writer_lock_pkey crm_sync_writer_lock 'PRIMARY KEY (lock_name)')" \
+                     "SELECT COALESCE((
+                       SELECT pg_get_constraintdef(oid) =
+                         'CHECK ((jsonb_typeof(before_ids) = ''array''::text))'
+                         FROM pg_constraint
+                        WHERE conname='crm_sync_payment_create_guard_before_ids_check'
+                          AND conrelid='public.crm_sync_payment_create_guard'::regclass
+                     ), false);" \
+                     "$(q_trg_def_on trg_crm_sync_payments payments 'CREATE TRIGGER trg_crm_sync_payments AFTER INSERT OR DELETE OR UPDATE ON public.payments FOR EACH ROW EXECUTE FUNCTION crm_sync_enqueue_payment_order()')" \
+                     "SELECT COALESCE((
+                       SELECT pg_get_functiondef('crm_sync_enqueue_order_id(bigint)'::regprocedure)
+                                LIKE '%FROM orders%'
+                          AND pg_get_functiondef('crm_sync_enqueue_order_id(bigint)'::regprocedure)
+                                LIKE '%crm.sync.order.upsert%'
+                          AND pg_get_functiondef('crm_sync_enqueue_order_id(bigint)'::regprocedure)
+                                LIKE '%status = ''pending''%'
+                     ), false);" \
+                     "SELECT COALESCE((
+                       SELECT pg_get_functiondef('crm_sync_enqueue_payment_order()'::regprocedure)
+                                LIKE '%OLD.order_id IS DISTINCT FROM NEW.order_id%'
+                          AND pg_get_functiondef('crm_sync_enqueue_payment_order()'::regprocedure)
+                                LIKE '%crm_sync_enqueue_order_id(OLD.order_id)%'
+                          AND pg_get_functiondef('crm_sync_enqueue_payment_order()'::regprocedure)
+                                LIKE '%crm_sync_enqueue_order_id(NEW.order_id)%'
+                     ), false);" ;;
     075_*) probe_075_endstate ;;
     076_*) probe_076_endstate ;;
     077_*) probe_077_endstate ;;
@@ -471,8 +589,8 @@ probe_file() {
     083_orders_production_done_backfill*) probe_true "SELECT
                        (SELECT count(*)
                           FROM production_statuses ps
-                         WHERE LOWER(BTRIM(ps.production_status_name)) = 'done'
-                            OR LOWER(BTRIM(ps.production_status_code)) ~ '^done(_|$)') = 1
+                         WHERE LOWER(BTRIM(ps.production_status_name)) IN ('done', 'завершено')
+                            OR LOWER(BTRIM(ps.production_status_code)) ~ '^(done|zaversheno)(_|$)') = 1
                        AND NOT EXISTS (
                        SELECT 1
                          FROM orders o
@@ -481,8 +599,8 @@ probe_file() {
                             o.production_status_id IS DISTINCT FROM (
                               SELECT ps.production_status_id
                                 FROM production_statuses ps
-                               WHERE LOWER(BTRIM(ps.production_status_name)) = 'done'
-                                  OR LOWER(BTRIM(ps.production_status_code)) ~ '^done(_|$)'
+                               WHERE LOWER(BTRIM(ps.production_status_name)) IN ('done', 'завершено')
+                                  OR LOWER(BTRIM(ps.production_status_code)) ~ '^(done|zaversheno)(_|$)'
                                ORDER BY ps.production_status_id
                                LIMIT 1
                             )
@@ -494,6 +612,18 @@ probe_file() {
                      "$(q_con uq_cut_result_job_no)" \
                      "$(q_con chk_cut_result_revision_no)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
+  esac
+}
+
+# 073/074 contain IF NOT EXISTS DDL. A partially-created object can therefore
+# let PostgreSQL finish the file without reaching the required end state. Never
+# record those migrations in the ledger until the complete effect probe passes.
+verify_applied_effect() {
+  local f="$1"
+  case "$f" in
+    073_*|074_*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
+      ;;
   esac
 }
 
@@ -787,6 +917,33 @@ print_plan() {
 
 # --- Dispatch ----------------------------------------------------------------
 case "$MODE" in
+  probe)
+    [ "${#TARGETS[@]}" -eq 1 ] \
+      || die "probe needs exactly one migration filename or version"
+    PROBE_TARGET=""
+    PROBE_MATCHES=0
+    for f in "${FILES[@]}"; do
+      if [ "$f" = "${TARGETS[0]}" ] \
+         || [ "$(version_of "$f")" = "$(version_of "${TARGETS[0]}")" ]; then
+        PROBE_TARGET="$f"
+        PROBE_MATCHES=$((PROBE_MATCHES + 1))
+      fi
+    done
+    [ "$PROBE_MATCHES" -gt 0 ] || die "probe: no migration matches '${TARGETS[0]}'"
+    [ "$PROBE_MATCHES" -eq 1 ] \
+      || die "probe: version '${TARGETS[0]}' is ambiguous; pass the full filename"
+    if probe_file "$PROBE_TARGET"; then
+      echo "$PROBE_TARGET PRESENT"
+      exit 0
+    else
+      PROBE_RC=$?
+    fi
+    [ "$PROBE_RC" -ne 2 ] \
+      || die "probe: migration '$PROBE_TARGET' has no effect probe"
+    echo "$PROBE_TARGET PENDING"
+    exit 1
+    ;;
+
   dry-run|status)
     if ! ledger_exists; then
       err "NOTE: schema_migrations ledger does not exist yet — every file shown as PENDING."
@@ -869,6 +1026,7 @@ case "$MODE" in
       fi
       echo ">> applying $f"
       if pg_apply_file "$MIG_DIR/$f"; then
+        verify_applied_effect "$f"
         pg_query "INSERT INTO schema_migrations(filename, checksum)
                   VALUES ('$f', '$(checksum_of "$f")')
                   ON CONFLICT (filename) DO UPDATE SET checksum = EXCLUDED.checksum, applied_at = now();" >/dev/null
@@ -1130,6 +1288,7 @@ $DRIFTED}Re-run with:
         *)
           echo ">> applying $f"
           apply_file_with_heal "$f" || die "auto: FAILED on $f — stopped. Fix and re-run (idempotent)."
+          verify_applied_effect "$f"
           ledger_insert "$f" "$(checksum_of "$f")"
           echo "   ok"
           ;;

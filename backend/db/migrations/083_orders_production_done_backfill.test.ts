@@ -11,11 +11,11 @@ const runner = readFileSync(
 );
 
 describe('083 production Done backfill migration', () => {
-  it('requires one unambiguous Done status', () => {
-    expect(sql).toMatch(/production_status_name\)\) = 'done'/i);
-    expect(sql).toMatch(/production_status_code\)\) ~ '\^done\(_\|\$\)'/i);
-    expect(sql).toContain("RAISE EXCEPTION 'Production status Done was not found'");
-    expect(sql).toContain("RAISE EXCEPTION 'Production status Done is ambiguous");
+  it('requires one unambiguous localized terminal status', () => {
+    expect(sql).toMatch(/production_status_name\)\) IN \('done', 'завершено'\)/i);
+    expect(sql).toMatch(/production_status_code\)\) ~ '\^\(done\|zaversheno\)\(_\|\$\)'/i);
+    expect(sql).toContain("RAISE EXCEPTION 'Terminal production status Done/Завершено was not found'");
+    expect(sql).toContain("RAISE EXCEPTION 'Terminal production status Done/Завершено is ambiguous");
   });
 
   it('forces every order older than one month into manual Done', () => {
@@ -31,5 +31,7 @@ describe('083 production Done backfill migration', () => {
     expect(sql).toMatch(/IS DISTINCT FROM done_status_id/i);
     expect(sql).toMatch(/IS DISTINCT FROM false/i);
     expect(runner).toMatch(/083_orders_production_done_backfill\*\)\s*probe_true/);
+    expect(runner).toMatch(/production_status_name\)\) IN \('done', 'завершено'\)/i);
+    expect(runner).toMatch(/production_status_code\)\) ~ '\^\(done\|zaversheno\)\(_\|\$\)'/i);
   });
 });

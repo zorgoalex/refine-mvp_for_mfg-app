@@ -1,25 +1,47 @@
-/**
- * Pure credential resolution for the CRM-sync backfill entrypoint.
- *
- * Trims TWENTY_SYNC_BASE_URL / TWENTY_SYNC_API_KEY and treats blank
- * (missing or whitespace-only) values as absent so a config typo
- * hard-refuses (fail-closed) instead of constructing a live client with
- * an empty bearer token that would only 401-churn against Twenty.
- *
- * Never logs or returns secret values to the caller's stderr/stdout.
- */
-export interface TwentyCreds {
-  baseUrl: string;
-  apiKey: string;
+import { isBitrix24WebhookUrl } from '../src/config/env.validation';
+
+export interface Bitrix24BackfillConfig {
+  webhookUrl: string;
+  paySystemId: number;
+  currencyId: string;
+  assignedById: number | null;
+  erpBaseUrl: string;
+  requestTimeoutMs: number;
 }
 
-export function resolveTwentyCreds(env: NodeJS.ProcessEnv): TwentyCreds | null {
-  const baseUrl = (env.TWENTY_SYNC_BASE_URL ?? '').trim();
-  const apiKey = (env.TWENTY_SYNC_API_KEY ?? '').trim();
+export function assertBitrix24BackfillTiming(
+  requestTimeoutMs: number,
+  leaseMs: number,
+): void {
+  if (!Number.isInteger(leaseMs) || leaseMs < 60_000) {
+    throw new Error('BACKEND_BITRIX24_SYNC_LEASE_MS must be an integer >= 60000');
+  }
+  if (requestTimeoutMs >= leaseMs) {
+    throw new Error(
+      'BITRIX24_REQUEST_TIMEOUT_MS must be less than BACKEND_BITRIX24_SYNC_LEASE_MS',
+    );
+  }
+}
 
-  if (!baseUrl || !apiKey) {
+export function resolveBitrix24Config(
+  env: NodeJS.ProcessEnv,
+): Bitrix24BackfillConfig | null {
+  const webhookUrl = (env.BITRIX24_WEBHOOK_URL ?? '').trim().replace(/\/+$/, '');
+  const paySystemId = Number(env.BITRIX24_PAY_SYSTEM_ID);
+  if (!webhookUrl || !isBitrix24WebhookUrl(webhookUrl)) return null;
+  if (!Number.isInteger(paySystemId) || paySystemId <= 0) return null;
+
+  const assigned = Number(env.BITRIX24_ASSIGNED_BY_ID);
+  const requestTimeoutMs = Number(env.BITRIX24_REQUEST_TIMEOUT_MS ?? '30000');
+  if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1000 || requestTimeoutMs > 120000) {
     return null;
   }
-
-  return { baseUrl, apiKey };
+  return {
+    webhookUrl,
+    paySystemId,
+    currencyId: (env.BITRIX24_CURRENCY_ID ?? 'KZT').trim().toUpperCase(),
+    assignedById: Number.isInteger(assigned) && assigned > 0 ? assigned : null,
+    erpBaseUrl: (env.FRONTEND_ORIGIN ?? 'http://localhost:5173').trim().replace(/\/+$/, ''),
+    requestTimeoutMs,
+  };
 }

@@ -2,7 +2,7 @@
 // Allows creating a new client without leaving the order form
 
 import React from 'react';
-import { Modal, Form, Input, Select, Checkbox, Space, notification } from 'antd';
+import { Modal, Form, Input, Select, Checkbox, Space, notification, Radio } from 'antd';
 import { useCreate } from '@refinedev/core';
 import { PhoneOutlined, StarFilled } from '@ant-design/icons';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
@@ -36,6 +36,7 @@ export const ClientQuickCreate: React.FC<ClientQuickCreateProps> = ({
         resource: 'clients',
         values: {
           client_name: values.client_name.trim(),
+          person_type: values.person_type || 'individual',
           is_active: true,
         },
         successNotification: false,
@@ -102,7 +103,7 @@ export const ClientQuickCreate: React.FC<ClientQuickCreateProps> = ({
       <Form
         form={form}
         layout="vertical"
-        initialValues={{ phone_type: 'mobile', is_primary: true }}
+        initialValues={{ person_type: 'individual', phone_type: 'mobile', is_primary: true }}
       >
         <Form.Item
           label="Название клиента"
@@ -122,6 +123,17 @@ export const ClientQuickCreate: React.FC<ClientQuickCreateProps> = ({
             maxLength={200}
             autoFocus
           />
+        </Form.Item>
+
+        <Form.Item
+          label="Тип лица"
+          name="person_type"
+          rules={[{ required: true, message: 'Выберите тип лица' }]}
+        >
+          <Radio.Group>
+            <Radio value="individual">Физическое лицо</Radio>
+            <Radio value="legal">Юридическое лицо</Radio>
+          </Radio.Group>
         </Form.Item>
 
         <Form.Item

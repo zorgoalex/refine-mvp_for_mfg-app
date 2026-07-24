@@ -18,6 +18,7 @@ test.describe('Order UI full form coverage', () => {
         testInfo.setTimeout(600000);
         const runId = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
         const orderName = `E2E codex full coverage ${runId}`;
+        const clientName = `E2E юрлицо ${runId}`;
         const detailName = `E2E detail ${runId}`;
         const note = `E2E full form note ${runId}`;
         const paymentNote = `E2E payment note ${runId}`;
@@ -55,7 +56,17 @@ test.describe('Order UI full form coverage', () => {
         await expect(orderDialog).toBeVisible();
 
         await clickOrderTab(orderDialog, 'Основная информация');
-        await selectAntdOption(page, formItem(orderDialog, 'Клиент'));
+        await formItem(orderDialog, 'Клиент').locator('.ant-select').click();
+        await page.getByRole('button', { name: 'Создать клиента' }).click();
+        const clientDialog = page.getByRole('dialog', { name: 'Создать клиента' });
+        await expect(clientDialog).toBeVisible();
+        await clientDialog.getByPlaceholder('Введите название клиента').fill(clientName);
+        await clientDialog.getByRole('radio', { name: 'Юридическое лицо' }).check();
+        await clientDialog.getByPlaceholder('+7 (XXX) XXX-XX-XX').fill('+7 700 123 45 67');
+        await screenshot(page, testInfo, 'quick-client-legal-filled');
+        await clientDialog.getByRole('button', { name: 'Создать', exact: true }).click();
+        await expect(clientDialog).toBeHidden({ timeout: 30000 });
+        await expect(formItem(orderDialog, 'Клиент')).toContainText(clientName);
         await orderDialog.getByPlaceholder('Введите название заказа').fill(orderName);
         await fillDate(formItem(orderDialog, 'Дата заказа'), '22.05.2026');
         await selectAntdOption(page, formItem(orderDialog, 'Статус заказа'));
@@ -200,7 +211,7 @@ test.describe('Order UI full form coverage', () => {
             });
         }
         await verifyEditTabs(page, testInfo, orderName, detailName, paymentNote);
-        await verifyDurableDatabaseState(orderId, orderName, detailName, paymentRef);
+        await verifyDurableDatabaseState(orderId, orderName, clientName, detailName, paymentRef);
 
         await page.getByRole('button', { name: 'Просмотр' }).first().click();
         await page.waitForURL(new RegExp(`/orders/show/${orderId}`), { timeout: 30000 });
@@ -756,13 +767,21 @@ async function verifyShowPage(
     await page.goto(`${frontendUrl}/orders/show/${orderId}`, { waitUntil: 'domcontentloaded' });
 }
 
-async function verifyDurableDatabaseState(orderId: number, orderName: string, detailName: string, paymentRef: string) {
+async function verifyDurableDatabaseState(
+    orderId: number,
+    orderName: string,
+    clientName: string,
+    detailName: string,
+    paymentRef: string,
+) {
     if (!process.env.PG_USER || !process.env.PG_DB) return;
 
     const container = process.env.ORDER_UI_FULL_COVERAGE_DB_CONTAINER ?? `${process.env.COMPOSE_PROJECT_NAME ?? 'erp_dev'}-postgresdb-1`;
     const sql = `
       select json_build_object(
         'orderName', o.order_name,
+        'clientName', c.client_name,
+        'clientPersonType', c.person_type,
         'createdBy', u.username,
         'detailCount', (select count(*) from order_details od where od.order_id = o.order_id),
         'detailName', (select od.detail_name from order_details od where od.order_id = o.order_id order by od.detail_id desc limit 1),
@@ -770,6 +789,7 @@ async function verifyDurableDatabaseState(orderId: number, orderName: string, de
         'paymentRef', (select p.ref_key_1c from payments p where p.order_id = o.order_id order by p.payment_id desc limit 1)
       )
       from orders o
+      join clients c on c.client_id = o.client_id
       left join users u on u.user_id = o.created_by
       where o.order_id = ${orderId};
     `;
@@ -782,6 +802,8 @@ async function verifyDurableDatabaseState(orderId: number, orderName: string, de
 
     expect(state).toMatchObject({
         orderName,
+        clientName,
+        clientPersonType: 'legal',
         createdBy: username,
         detailName,
         paymentRef,

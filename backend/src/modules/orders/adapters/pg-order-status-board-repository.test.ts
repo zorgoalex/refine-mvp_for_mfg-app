@@ -230,10 +230,10 @@ describe('PgOrderStatusBoardRepository', () => {
     const sql = database.queries[0]?.text ?? '';
     expect(sql).toContain('LEFT JOIN production_statuses board_production_status');
     expect(sql).toContain(
-      "LOWER(BTRIM(COALESCE(board_production_status.production_status_name, ''))) = 'done'",
+      "LOWER(BTRIM(COALESCE(board_production_status.production_status_name, ''))) IN ('done', 'завершено')",
     );
     expect(sql).toContain(
-      "LOWER(BTRIM(COALESCE(ps.production_status_code, ''))) ~ '^done(_|$)'",
+      "LOWER(BTRIM(COALESCE(ps.production_status_code, ''))) ~ '^(done|zaversheno)(_|$)'",
     );
   });
 

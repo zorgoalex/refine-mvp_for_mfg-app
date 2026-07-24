@@ -31,11 +31,14 @@ describe('order status board model', () => {
     expect(filterBoardColumns('production', columns)).toEqual(columns);
   });
 
-  it('hides production Done by default and reveals it explicitly', () => {
+  it('hides localized terminal production statuses by default and reveals them explicitly', () => {
     const done = column('21', [], 0, null);
     done.status.name = ' Done ';
     done.status.code = 'done_74650149756a47dd997c95e097acbd14';
-    const columns = [column('20', [], 0, null), done];
+    const completed = column('22', [], 0, null);
+    completed.status.name = ' Завершено ';
+    completed.status.code = 'zaversheno_0123456789abcdef0123456789abcdef';
+    const columns = [column('20', [], 0, null), done, completed];
 
     expect(filterBoardColumns('production', columns).map((item) => item.key)).toEqual([
       '20',
