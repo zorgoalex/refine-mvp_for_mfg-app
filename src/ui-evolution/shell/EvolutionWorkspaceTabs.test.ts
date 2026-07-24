@@ -53,4 +53,3 @@ describe('evolution workspace tab close interaction', () => {
     expect(navigate).toHaveBeenCalledWith('/calendar');
   });
 });
-

@@ -3,7 +3,10 @@
 Дата snapshot/проверки: 2026-07-24 UTC
 Ветка: `feat/ui-redesign-foundation`
 Worktree: `/home/ovhtest/projects/erp_dev/.worktrees/ui-redesign-foundation`
-Migration 084: применена в `erp_test`; production merge/deploy ещё не выполнялись
+Migration 084: применена в `erp_test`; stage frontend
+`https://app-test.mebelkz.app` и backend
+`https://backend-test.mebelkz.app` задеплоены; production merge/deploy ещё не
+выполнялись
 
 ## Результат
 
@@ -89,12 +92,13 @@ Auth/network hardening после code review:
 | Targeted variant/profile/auth tests | 63/63 passed |
 | Backend `npm run build` | passed (`tsc -p tsconfig.json`) |
 | Frontend `npm run build` | passed; separate `WorkspaceLayout` and `EvolutionWorkspaceLayout` chunks |
-| Full `npx vitest run --maxWorkers=2` after migration 084 and final base merge | 681 files / 5483 tests passed; 7 files / 29 tests skipped; 0 failed |
+| Full release suite on `main` base | 683 files / 5447 tests passed; 9 files / 34 tests skipped; 0 failed |
 | Migration runner/head verification against `erp_test` | migration 084 applied; full head `PRESENT`; 101/101 migration tests passed |
 | Compose config/bash syntax/git diff check | passed |
 | Clone-script security guards | separate secrets/path, fixed source identity, session purge, bind/network invariants passed |
 | Isolated stack runtime before stop | six services healthy; backend readiness and Hasura GraphQL passed |
 | Browser authenticated smoke before final hardening/stop | ten routes 10/10, evolution marker/main shell, 0 console errors |
+| Live stage variant canary on `https://app-test.mebelkz.app` | login, profile, legacy → evolution → legacy, exact URL reload, clean console |
 | Responsive smoke before final hardening/stop | 1440×900, 1280×720, 1024×768 and 720×450: no document overflow |
 | New-order modal before final hardening/stop | 684px within 720px viewport; vertical modal wrapper scroll enabled |
 | Representative token contrast (calculated WCAG ratios) | sidebar 7.12:1; primary 5.17:1; body 14.71:1; selected nav 8.85:1; secondary text 4.90:1; group label 4.58:1 |
@@ -120,7 +124,8 @@ Screenshots:
   must be migrated and visually diffed in Phase C–E.
 - Cross-device per-user `uiVariant` is implemented by migration 084 and
   `GET/PATCH /api/v1/me/preferences`; migration acceptance in `erp_test` is
-  complete, deployed stage and production browser acceptance remain required.
+  complete and live stage acceptance passed; production acceptance remains
+  separate.
 - Final live cross-stack JWT/cookie rejection, all-ten-screen screenshot pass,
   keyboard navigation and post-hardening browser smoke remain deferred while
   the isolated stack is stopped.

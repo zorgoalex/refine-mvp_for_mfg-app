@@ -35,4 +35,3 @@ describe('evolution UI foundation', () => {
     expect(section).toContain('evolution-form-section__body');
   });
 });
-
