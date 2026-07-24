@@ -8,6 +8,7 @@ import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { countClientsAfter, findClientByName } from "../../api/reports/clientsSearchReportApi";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
+import { CLIENT_PERSON_TYPE_LABELS, ClientPersonType } from "../../types/clients";
 
 export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const [searchValue, setSearchValue] = useState<string>("");
@@ -166,6 +167,16 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="client_id" title="id" sorter />
         <ReferenceSortOrderColumn />
         <Table.Column dataIndex="client_name" title="Имя клиента" sorter />
+        <Table.Column
+          dataIndex="person_type"
+          title="Тип лица"
+          sorter
+          render={(value: ClientPersonType) => CLIENT_PERSON_TYPE_LABELS[value] || "Физическое лицо"}
+          filters={[
+            { text: "Физическое лицо", value: "individual" },
+            { text: "Юридическое лицо", value: "legal" },
+          ]}
+        />
         <Table.Column
           dataIndex="is_active"
           title="Активен"

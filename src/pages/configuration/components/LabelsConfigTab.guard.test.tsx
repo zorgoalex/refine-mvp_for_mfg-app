@@ -111,12 +111,16 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/commitGeometry\(patches\)/);
   });
 
-  it('defaults the edit visual to compact mode and can expand it', () => {
-    expect(tabSrc).toMatch(/visualExpanded/);
-    expect(tabSrc).toMatch(/initialZoom=\{visualExpanded \? 1\.3 : 0\.6\}/);
-    expect(tabSrc).toMatch(/Увеличить визуал/);
-    expect(tabSrc).toMatch(/leftColumnSpan = visualExpanded \? 10 : 14/);
-    expect(tabSrc).toMatch(/rightColumnSpan = visualExpanded \? 14 : 10/);
+  it('remembers normal or large-preview column proportions and auto-fits the canvas', () => {
+    expect(tabSrc).toMatch(/loadLabelEditorLayoutMode\(layoutPreferenceUserId\)/);
+    expect(tabSrc).toMatch(/saveLabelEditorLayoutMode\(layoutPreferenceUserId, mode\)/);
+    expect(tabSrc).toMatch(/labelEditorLayoutGeometry\(editorLayoutMode\)/);
+    expect(tabSrc).toMatch(/initialZoom=\{layoutGeometry\.initialZoom\}/);
+    expect(tabSrc).toMatch(/fitToContainer=\{layoutGeometry\.fitPreviewToColumn\}/);
+    expect(tabSrc).toMatch(/Крупный визуал/);
+    expect(tabSrc).toMatch(/\{ leftColumnSpan, rightColumnSpan \} = layoutGeometry/);
+    expect(tabSrc).toMatch(/new ResizeObserver\(updateAvailableWidth\)/);
+    expect(tabSrc).toMatch(/data-label-preview-fit=\{fitToContainer \? 'container' : 'intrinsic'\}/);
   });
 
   it('places field palette and template settings in the requested editor layout', () => {
@@ -150,6 +154,12 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/В списке полей/);
     expect(tabSrc).toMatch(/onHoverElement/);
     expect(tabSrc).toMatch(/onMouseEnter/);
+  });
+
+  it('keeps conditionally hidden field text visible on the editable canvas only', () => {
+    expect(tabSrc).toMatch(/keepConditionallyHiddenTextVisible/);
+    expect(tabSrc).toMatch(/resolveLabelCanvasText\(element, fieldValues, fieldLabels/);
+    expect(tabSrc).toMatch(/keepSourceVisible: keepConditionallyHiddenTextVisible/);
   });
 
   it('exposes a draggable field palette that can drop fields onto the label visual', () => {

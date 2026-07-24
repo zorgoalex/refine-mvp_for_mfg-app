@@ -16,6 +16,8 @@ describe('OrderLabelPagesViewer', () => {
     );
 
     expect(html).toContain('Список бирок');
+    expect(html).toContain('2 шт.');
+    expect(html).toContain('Список бирок слева');
     expect(html).toContain('Бирка 1');
     expect(html).toContain('Бирка 2');
     expect(html).toContain('Печать');

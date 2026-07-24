@@ -50,4 +50,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('currency: CURRENCY_CODE');
     expect(page).not.toContain("currency: 'RUB'");
   });
+
+  it('keeps CNC work as a separate visual flow and API contract', () => {
+    expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
+    expect(page).toContain("key: 'cnc_today'");
+    expect(page).toContain('cncTelegramApi.today');
+    expect(page).toContain('workday ? { date: workday } : {}');
+    expect(page).toContain('<CncTelegramTodayColumns');
+    expect(page).toContain('CNC_HISTORY_DAYS = 7');
+    expect(page).toContain('aria-label="Дата CNC-работ"');
+    expect(page).not.toContain("board: 'cnc");
+  });
 });

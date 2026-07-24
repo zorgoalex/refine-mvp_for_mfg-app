@@ -586,14 +586,14 @@ export class BazisController {
   @ApiResponse({ status: 404, description: 'Bazis revision not found' })
   @ApiResponse({ status: 422, description: 'Invalid revision id' })
   @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
-  @Get('revisions/:id/orders')
+  @Get('revisions/:revisionId/orders')
   async listRevisionOrders(
     @Req() request: RequestWithCurrentUser,
-    @Param('id') id: string,
+    @Param('revisionId') revisionId: string,
   ): Promise<BazisRevisionOrderDto[]> {
     this.assertBazisEnabled();
     const currentUser = this.requireCurrentUser(request);
-    return this.bazis.listRevisionOrders(currentUser, parseNumericPathParam(id, 'id'));
+    return this.bazis.listRevisionOrders(currentUser, parseNumericPathParam(revisionId, 'revisionId'));
   }
 
   @ApiOperation({ operationId: 'createOrderFromBazisRevision', summary: 'Create ERP order from a Bazis revision selection' })

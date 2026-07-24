@@ -260,6 +260,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   clients: [
     "client_id",
     "client_name",
+    "person_type",
     "sort_order",
     "ref_key_1c",
     "is_active",

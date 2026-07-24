@@ -7,9 +7,9 @@ import { PgCrmSourceRepository } from './adapters/pg-crm-source-repository';
 import { UnavailableCrmSourceRepository } from './adapters/unavailable-crm-source-repository';
 import { PgCrmSyncMappingRepository } from './adapters/pg-crm-sync-mapping-repository';
 import { PgCrmSyncOutboxRepository } from './adapters/pg-crm-sync-outbox-repository';
-import { TwentyApiClient, NoopTwentyApiClient } from './adapters/twenty-api-client';
-import { FailingTwentyApiClient } from './adapters/failing-twenty-api-client';
-import { TwentySyncConsumer } from './application/twenty-sync-consumer';
+import { Bitrix24ApiClient, NoopBitrix24ApiClient } from './adapters/bitrix24-api-client';
+import { FailingBitrix24ApiClient } from './adapters/failing-bitrix24-api-client';
+import { Bitrix24SyncConsumer } from './application/bitrix24-sync-consumer';
 import { CrmSyncRelayService } from './application/crm-sync-relay.service';
 import { CrmSyncRelaySchedulerService } from './application/crm-sync-relay-scheduler.service';
 
@@ -34,34 +34,38 @@ import { CrmSyncRelaySchedulerService } from './application/crm-sync-relay-sched
           ? new PgCrmSourceRepository(database)
           : new UnavailableCrmSourceRepository();
 
-        // Twenty API client — only build the REAL client when credentials are present.
-        // Never construct TwentyApiClient with empty baseUrl/apiKey.
-        const tw = config.getTwenty();
-        const realTwenty =
-          tw.baseUrl && tw.apiKey
-            ? new TwentyApiClient(tw.baseUrl, tw.apiKey)
-            : new FailingTwentyApiClient();
+        const bitrixConfig = config.getBitrix24();
+        const realBitrix = bitrixConfig.webhookUrl
+          ? new Bitrix24ApiClient(
+            bitrixConfig.webhookUrl,
+            undefined,
+            bitrixConfig.requestTimeoutMs,
+          )
+          : new FailingBitrix24ApiClient();
+        const noopBitrix = new NoopBitrix24ApiClient();
+        const options = {
+          erpBaseUrl: bitrixConfig.erpBaseUrl,
+          currencyId: bitrixConfig.currencyId,
+          assignedById: bitrixConfig.assignedById,
+          paySystemId: bitrixConfig.paySystemId ?? 1,
+        };
 
-        // Noop client is always constructed — used for dryRunConsumer only.
-        const noopTwenty = new NoopTwentyApiClient();
-
-        // Real consumer — backed by live TwentyApiClient when creds present, or
-        // FailingTwentyApiClient when creds absent (throws loudly → markRetry, never
-        // silent-processed). NEVER backed by NoopTwentyApiClient.
-        // Note: runTick() fail-closed guard ensures disabled runs never reach this consumer.
-        const consumer = new TwentySyncConsumer({
+        const consumer = new Bitrix24SyncConsumer({
           source,
-          twenty: realTwenty,
+          bitrix: realBitrix,
           mapping,
           db: database,
+          options,
+          durablePaymentCreates: true,
         });
 
-        // Dry-run consumer — always backed by Noop (zero real HTTP writes).
-        const dryRunConsumer = new TwentySyncConsumer({
+        const dryRunConsumer = new Bitrix24SyncConsumer({
           source,
-          twenty: noopTwenty,
+          bitrix: noopBitrix,
           mapping,
           db: database,
+          options,
+          durablePaymentCreates: false,
         });
 
         return new CrmSyncRelayService({

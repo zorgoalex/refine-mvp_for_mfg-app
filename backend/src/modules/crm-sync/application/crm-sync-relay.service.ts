@@ -1,10 +1,17 @@
 import { Logger, type LoggerService } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { redactLogFields } from '../../../common/logging/redaction';
 import type { DatabaseService } from '../../../database/database.service';
 import type { AuditService } from '../../../common/audit/audit.service';
-import type { PgCrmSyncOutboxRepository } from '../adapters/pg-crm-sync-outbox-repository';
+import type {
+  ClaimedCrmSyncOutboxEvent,
+  PgCrmSyncOutboxRepository,
+} from '../adapters/pg-crm-sync-outbox-repository';
 import type { PgCrmSyncMappingRepository } from '../adapters/pg-crm-sync-mapping-repository';
-import type { TwentySyncConsumer } from './twenty-sync-consumer';
+import {
+  CrmSyncTargetError,
+  type Bitrix24SyncConsumer,
+} from './bitrix24-sync-consumer';
 import type { CrmSyncRuntimeConfigService } from '../http/crm-sync-runtime-config.service';
 
 export interface RelayTickResult {
@@ -23,10 +30,8 @@ class OwnershipLost extends Error {
 
 interface CrmSyncRelayServiceDeps {
   outboxRepo: PgCrmSyncOutboxRepository;
-  /** Real TwentySyncConsumer backed by the live TwentyApiClient. */
-  consumer: TwentySyncConsumer;
-  /** Dry-run TwentySyncConsumer backed by NoopTwentyApiClient — zero real HTTP writes. */
-  dryRunConsumer: TwentySyncConsumer;
+  consumer: Bitrix24SyncConsumer;
+  dryRunConsumer: Bitrix24SyncConsumer;
   mapping: PgCrmSyncMappingRepository;
   audit: AuditService;
   db: DatabaseService;
@@ -35,18 +40,18 @@ interface CrmSyncRelayServiceDeps {
 }
 
 /**
- * CRM-sync relay: claims a batch of outbox events, calls Twenty HTTP (outside any tx),
+ * CRM-sync relay: claims a batch of outbox events, calls Bitrix24 HTTP (outside any tx),
  * then persists results in a short tx — proving ownership (lock_token) BEFORE any side effect.
  *
  * Key invariants:
  * - No DB tx is held across consumer.sync() HTTP calls.
  * - markProcessed / markRetry use lock_token → stale workers get rowCount=0 → skip all side effects.
- * - dryRun path uses peekPending (no claim) + dryRunConsumer (Noop) → zero DB/Twenty mutations.
+ * - dryRun path uses peekPending (no claim) + dryRunConsumer (Noop) → zero DB/Bitrix24 mutations.
  */
 export class CrmSyncRelayService {
   private readonly outboxRepo: PgCrmSyncOutboxRepository;
-  private readonly consumer: TwentySyncConsumer;
-  private readonly dryRunConsumer: TwentySyncConsumer;
+  private readonly consumer: Bitrix24SyncConsumer;
+  private readonly dryRunConsumer: Bitrix24SyncConsumer;
   private readonly mapping: PgCrmSyncMappingRepository;
   private readonly audit: AuditService;
   private readonly db: DatabaseService;
@@ -67,13 +72,13 @@ export class CrmSyncRelayService {
   async runTick(opts?: { dryRun?: boolean }): Promise<RelayTickResult> {
     const flags = this.config.getFlags();
 
-    // Honor BOTH the explicit opts.dryRun AND the runtime BACKEND_TWENTY_SYNC_DRY_RUN
+    // Honor explicit dry-run and the runtime BACKEND_BITRIX24_SYNC_DRY_RUN flag.
     // flag (flags.dryRun). A direct runTick() with the env flag set must NOT do live sync.
     const effectiveDryRun = opts?.dryRun === true || flags.dryRun;
 
     // ── Dry-run path ──────────────────────────────────────────────────────────
     // Triggered by opts.dryRun === true OR flags.dryRun, REGARDLESS of flags.enabled.
-    // Uses peekPending (no claim/lock) + Noop consumer (zero real Twenty writes).
+    // Uses peekPending (no claim/lock) + Noop consumer (zero real Bitrix24 writes).
     if (effectiveDryRun) {
       const events = await this.outboxRepo.peekPending(this.db, flags.batchSize);
       for (const event of events) {
@@ -88,7 +93,7 @@ export class CrmSyncRelayService {
               intents: intents.map((i) => ({
                 entityType: i.mapping.entityType,
                 erpId: i.mapping.erpId,
-                twentyObject: i.mapping.twentyObject,
+                bitrixObject: i.mapping.bitrixObject,
               })),
             }),
           );
@@ -112,22 +117,110 @@ export class CrmSyncRelayService {
       return { claimed: 0, processed: 0, failed: 0 };
     }
 
-    const claimed = await this.outboxRepo.claimBatch(
+    const lockedResult = await this.db.withAdvisoryLock(
+      'bitrix24-live-writer',
+      async (assertAdvisoryOwned) => {
+    const writerToken = randomUUID();
+    const writerAcquired = await this.outboxRepo.acquireWriterLock(
       this.db,
-      flags.workerId,
-      flags.batchSize,
+      writerToken,
       flags.leaseMs,
     );
+    if (!writerAcquired) {
+      return { claimed: 0, processed: 0, failed: 0 };
+    }
+
+    let claimed: ClaimedCrmSyncOutboxEvent[];
+    try {
+      claimed = await this.outboxRepo.claimBatch(
+        this.db,
+        flags.workerId,
+        flags.batchSize,
+        flags.leaseMs,
+      );
+    } catch (error) {
+      await this.outboxRepo.releaseWriterLock(this.db, writerToken).catch(() => undefined);
+      throw error;
+    }
+    const activeEvents = new Map(
+      claimed.map((event) => [event.outboxEventId, event]),
+    );
+    let heartbeatRunning = false;
+    let writerOwnershipLost = false;
+    const heartbeat = async () => {
+      if (heartbeatRunning) return;
+      heartbeatRunning = true;
+      try {
+        await assertAdvisoryOwned();
+        const writerOwned = await this.outboxRepo.heartbeatWriterLock(this.db, writerToken);
+        const eventOwnership = await Promise.all(
+          [...activeEvents.values()].map((event) =>
+            this.outboxRepo.heartbeat(
+              this.db,
+              event.outboxEventId,
+              event.lockToken,
+            )),
+        );
+        if (!writerOwned || eventOwnership.some((owned) => !owned)) {
+          writerOwnershipLost = true;
+        }
+      } catch (error) {
+        writerOwnershipLost = true;
+        this.logger.error(redactLogFields({
+          event: 'crm_sync_lease_heartbeat_error',
+          errorMessage: error instanceof Error ? error.message : String(error),
+        }));
+      } finally {
+        heartbeatRunning = false;
+      }
+    };
+    const heartbeatTimer = setInterval(
+      () => void heartbeat(),
+      Math.max(1000, Math.floor(flags.leaseMs / 3)),
+    );
+    heartbeatTimer.unref();
 
     let processed = 0;
     let failed = 0;
 
-    for (const event of claimed) {
-      // Step 1: call Twenty HTTP OUTSIDE any transaction (may take time; must not hold tx open).
-      let intents: Awaited<ReturnType<TwentySyncConsumer['sync']>>;
+    try {
+      for (const event of claimed) {
+      if (writerOwnershipLost || !await proveOwnership(
+        assertAdvisoryOwned,
+        this.outboxRepo,
+        this.db,
+        writerToken,
+        event,
+      )) {
+        writerOwnershipLost = true;
+        break;
+      }
+      // Step 1: call Bitrix24 HTTP outside any transaction.
+      let intents: Awaited<ReturnType<Bitrix24SyncConsumer['sync']>>;
       try {
-        intents = await this.consumer.sync(event);
+        intents = await this.consumer.sync(event, async () => {
+          if (writerOwnershipLost || !await proveOwnership(
+            assertAdvisoryOwned,
+            this.outboxRepo,
+            this.db,
+            writerToken,
+            event,
+          )) {
+            writerOwnershipLost = true;
+            throw new OwnershipLost();
+          }
+        });
       } catch (err) {
+        if (writerOwnershipLost || !await proveOwnership(
+          assertAdvisoryOwned,
+          this.outboxRepo,
+          this.db,
+          writerToken,
+          event,
+        )) {
+          writerOwnershipLost = true;
+          break;
+        }
         // consumer.sync threw → mark for retry (or failed if exhausted).
         //
         // Finalize ATOMICALLY in ONE tx, ownership-gated: markRetry token-gated FIRST,
@@ -142,19 +235,27 @@ export class CrmSyncRelayService {
           entity?: string;
           id?: string;
           op?: string;
+          clientId?: string;
         };
-        const entityType = String(payload.entity ?? 'unknown');
-        const erpId = String(payload.id ?? event.aggregateId);
+        const target = err instanceof CrmSyncTargetError ? err.target : null;
+        const entityType = target?.entityType ?? String(payload.entity ?? 'unknown');
+        const erpId = target?.erpId ?? String(payload.id ?? event.aggregateId);
         const errMsg = err instanceof Error ? err.message : String(err);
 
         // Only a STRUCTURALLY VALID payload may write a mapping row:
-        //  - entityType must be one of the entity_type CHECK values (client|order, migration 025);
+        //  - entityType must be one of the entity_type CHECK values;
         //    a malformed payload (e.g. 'unknown'/'bogus') would violate the CHECK and roll back the tx.
         //  - erpId must be a numeric id; an invalid id (e.g. 'abc') would write a junk mapping row.
-        const validEntity = entityType === 'client' || entityType === 'order';
+        const validEntity =
+          entityType === 'client' || entityType === 'order' || entityType === 'payment';
         const validId = typeof erpId === 'string' && /^\d+$/.test(erpId);
-        // twentyObject only matters when validEntity (client→companies, order→erpOrders).
-        const twentyObject = entityType === 'client' ? 'companies' : 'erpOrders';
+        const payloadClientId =
+          typeof payload.clientId === 'string' && /^\d+$/.test(payload.clientId)
+            ? Number(payload.clientId)
+            : null;
+        const bitrixObject =
+          target?.bitrixObject ??
+          (entityType === 'client' ? 'contact' : entityType === 'payment' ? 'payment' : 'deal');
 
         const didFail = await this.db.transaction(async (tx) => {
           // markRetry FIRST, token-gated: advances attempts and (when exhausted) flips the row
@@ -176,14 +277,47 @@ export class CrmSyncRelayService {
           // CHECK or writes a junk mapping row for a bad id. For a malformed payload we still
           // commit markRetry (no mapping write) → the outbox row advances toward 'failed'.
           if (validEntity && validId) {
-            await this.mapping.markFailed(tx, entityType, erpId, twentyObject, errMsg);
+            await this.mapping.markFailed(tx, entityType, erpId, bitrixObject, errMsg);
+            await this.audit.record(tx, {
+              event: 'crm_sync.failed',
+              entityType,
+              entityId: erpId,
+              requestId: event.outboxEventId,
+              source: 'crm-sync',
+              actorUserId: null,
+              relatedClientId: target?.relatedClientId ?? (
+                entityType === 'client' ? Number(erpId) : payloadClientId
+              ),
+              relatedOrderId: target?.relatedOrderId ?? (
+                entityType === 'order' ? Number(erpId) : null
+              ),
+              relatedPaymentId: target?.relatedPaymentId ?? (
+                entityType === 'payment' ? Number(erpId) : null
+              ),
+              metadata: {
+                bitrixObject,
+                error: errMsg.slice(0, 1000),
+              },
+            });
           }
           return true;
         });
         if (didFail) {
           failed++;
         }
+        activeEvents.delete(event.outboxEventId);
         continue;
+      }
+
+      if (writerOwnershipLost || !await proveOwnership(
+        assertAdvisoryOwned,
+        this.outboxRepo,
+        this.db,
+        writerToken,
+        event,
+      )) {
+        writerOwnershipLost = true;
+        break;
       }
 
       // Step 2: ONE short tx — prove ownership FIRST, then persist intents.
@@ -198,12 +332,19 @@ export class CrmSyncRelayService {
           for (const intent of intents) {
             await this.mapping.upsertSuccess(tx, intent.mapping);
             await this.audit.record(tx, intent.audit);
+            if (intent.clearPaymentCreateGuardId) {
+              await this.mapping.deletePaymentCreateGuard(
+                tx,
+                intent.clearPaymentCreateGuardId,
+              );
+            }
           }
         });
         processed++;
       } catch (e) {
         if (e instanceof OwnershipLost) {
           // Silently skip — not a failure. The reclaiming worker will handle it.
+          activeEvents.delete(event.outboxEventId);
           continue;
         }
         // Real persistence error: tx already rolled back (markProcessed undone →
@@ -216,13 +357,45 @@ export class CrmSyncRelayService {
           }),
         );
       }
+      activeEvents.delete(event.outboxEventId);
+      }
+    } finally {
+      clearInterval(heartbeatTimer);
+      await this.outboxRepo.releaseWriterLock(this.db, writerToken).catch((error) => {
+        this.logger.error(redactLogFields({
+          event: 'crm_sync_writer_lock_release_error',
+          errorMessage: error instanceof Error ? error.message : String(error),
+        }));
+      });
     }
 
     return { claimed: claimed.length, processed, failed };
+      },
+    );
+    return lockedResult ?? { claimed: 0, processed: 0, failed: 0 };
   }
 
   /** Simple fixed-delay backoff: retry after one poll interval. */
   private nextAttemptAt(pollIntervalMs: number): string {
     return new Date(Date.now() + pollIntervalMs).toISOString();
+  }
+}
+
+async function proveOwnership(
+  assertAdvisoryOwned: () => Promise<void>,
+  outboxRepo: PgCrmSyncOutboxRepository,
+  db: DatabaseService,
+  writerToken: string,
+  event: ClaimedCrmSyncOutboxEvent,
+): Promise<boolean> {
+  try {
+    await assertAdvisoryOwned();
+    const [writerOwned, eventOwned] = await Promise.all([
+      outboxRepo.heartbeatWriterLock(db, writerToken),
+      outboxRepo.heartbeat(db, event.outboxEventId, event.lockToken),
+    ]);
+    return writerOwned && eventOwned;
+  } catch {
+    return false;
   }
 }

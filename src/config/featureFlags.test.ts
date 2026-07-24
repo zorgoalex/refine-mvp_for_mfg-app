@@ -31,6 +31,7 @@ describe('featureFlags', () => {
       labels: false,
       statusAutomation: false,
       orderStatusBoard: false,
+      cncTelegram: false,
       pdfImportLayoutPatterns: false,
       sheetMaterialsReads: false,
       enableLegacyHasura: true,
@@ -58,6 +59,26 @@ describe('featureFlags', () => {
         { VITE_USE_BACKEND_ORDERS_READ: 'true' },
         { orderStatusBoard: true },
       ).orderStatusBoard,
+    ).toBe(true);
+  });
+
+  it('fails closed for CNC Telegram until the status board is enabled', () => {
+    expect(getFeatureFlags({ VITE_USE_BACKEND_CNC_TELEGRAM: 'true' }).cncTelegram).toBe(false);
+    expect(
+      getFeatureFlags({
+        VITE_USE_BACKEND_CNC_TELEGRAM: 'true',
+        VITE_ORDER_STATUS_BOARD: 'true',
+        VITE_USE_BACKEND_ORDERS_READ: 'true',
+      }).cncTelegram,
+    ).toBe(true);
+    expect(
+      getFeatureFlags(
+        {
+          VITE_ORDER_STATUS_BOARD: 'true',
+          VITE_USE_BACKEND_ORDERS_READ: 'true',
+        },
+        { cncTelegram: true },
+      ).cncTelegram,
     ).toBe(true);
   });
 

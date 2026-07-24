@@ -125,7 +125,7 @@ function makeRepoForSetSheet(opts: {
     }
 
     // loadJob reads (after update)
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, combine_films, split_by_material FROM cut_job')) {
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version') && sql.includes('FROM cut_job')) {
       return { rows: [{ cut_job_id: 9, name: 'J', status: opts.status, source: 'manual', version: opts.version, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, combine_films: false, split_by_material: true }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT i.cut_job_id')) return { rows: [{ cut_job_id: 9, positions: 0, details: 0, area: 0 }], rowCount: 1 };

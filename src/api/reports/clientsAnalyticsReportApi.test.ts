@@ -11,7 +11,8 @@ describe('clientsAnalyticsReportApi', () => {
       clients_analytics_view: [{ client_id: 3, client_name: 'X' }],
     });
     expect(await findClientAnalyticsByName('X')).toMatchObject({ client_id: 3 });
-    const [, vars] = (client.hasuraReportQuery as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [query, vars] = (client.hasuraReportQuery as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(query).toContain('$clientNamePattern: citext!');
     expect(vars).toEqual({ clientNamePattern: '%X%' });
   });
 

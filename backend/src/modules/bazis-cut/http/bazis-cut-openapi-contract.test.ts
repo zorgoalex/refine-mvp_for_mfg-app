@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -8,8 +8,14 @@ import { BazisCutService } from '../application/bazis-cut.service';
 import { BazisCutSetsController } from './bazis-cut-sets.controller';
 import { BazisCutRuntimeConfigService } from './bazis-cut-runtime-config.service';
 
-const contract = readFileSync(resolve(process.cwd(), 'contracts/04-api-contract.openapi.yaml'), 'utf8');
-const controller = readFileSync(resolve(process.cwd(), 'src/modules/bazis-cut/http/bazis-cut-sets.controller.ts'), 'utf8');
+const backendRoot = (() => {
+  const candidates = [resolve(process.cwd(), 'backend'), process.cwd()];
+  const root = candidates.find((candidate) => existsSync(resolve(candidate, 'src/modules/bazis-cut')));
+  expect(root, 'Expected to find backend root from repo root or backend cwd').toBeDefined();
+  return root as string;
+})();
+const contract = readFileSync(resolve(backendRoot, 'contracts/04-api-contract.openapi.yaml'), 'utf8');
+const controller = readFileSync(resolve(backendRoot, 'src/modules/bazis-cut/http/bazis-cut-sets.controller.ts'), 'utf8');
 
 @Module({ controllers: [BazisCutSetsController], providers: [
   { provide: BazisCutService, useValue: {} }, { provide: BazisCutRuntimeConfigService, useValue: {} },

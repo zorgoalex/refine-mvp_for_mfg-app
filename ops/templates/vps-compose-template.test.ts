@@ -52,6 +52,64 @@ describe('VPS compose backend runtime flags', () => {
     expect(envExample).toContain('BACKEND_STATUS_AUTOMATION=false');
   });
 
+  it('passes CNC Telegram feature gate with safe defaults', () => {
+    const compose = readTemplate('ops/templates/docker-compose.vps.yml');
+    const localCompose = readTemplate('backend/docker-compose.yml');
+    const envExample = readTemplate('ops/templates/env.vps.example');
+
+    expect(compose).toContain('BACKEND_ENABLE_CNC_TELEGRAM: ${BACKEND_ENABLE_CNC_TELEGRAM:-false}');
+    expect(localCompose).toContain('BACKEND_ENABLE_CNC_TELEGRAM: ${BACKEND_ENABLE_CNC_TELEGRAM:-false}');
+    expect(envExample).toContain('BACKEND_ENABLE_CNC_TELEGRAM=false');
+  });
+
+  it('defines the CNC Telegram Telethon worker as an internal profile service', () => {
+    const compose = readTemplate('ops/templates/docker-compose.vps.yml');
+    const overlay = readTemplate('ops/templates/docker-compose.cnc-telegram-worker.yml');
+    const envExample = readTemplate('ops/templates/env.vps.example');
+    const workerSegment = compose.slice(
+      compose.indexOf('  cnc-telegram-worker:'),
+      compose.indexOf('  cad-service:'),
+    );
+
+    expect(compose).toContain('glm-ocr-model-init:');
+    expect(compose).toContain('image: ${GLM_OCR_MODEL_INIT_IMAGE:-curlimages/curl:8.10.1}');
+    expect(compose).toContain('GLM_OCR_MODEL_URL: ${GLM_OCR_MODEL_URL:-https://huggingface.co/ggml-org/GLM-OCR-GGUF/resolve/main/GLM-OCR-Q8_0.gguf?download=true}');
+    expect(compose).toContain('GLM_OCR_MMPROJ_URL: ${GLM_OCR_MMPROJ_URL:-https://huggingface.co/ggml-org/GLM-OCR-GGUF/resolve/main/mmproj-GLM-OCR-Q8_0.gguf?download=true}');
+    expect(compose).toContain('glm-ocr-llama:');
+    expect(compose).toContain('image: ${GLM_OCR_LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}');
+    expect(compose).toContain('/models/${GLM_OCR_MODEL_FILE:-GLM-OCR-Q8_0.gguf}');
+    expect(compose).toContain('/models/${GLM_OCR_MMPROJ_FILE:-mmproj-GLM-OCR-Q8_0.gguf}');
+    expect(compose).toContain('glm-ocr-runner:');
+    expect(compose).toContain('context: ${GLM_OCR_RUNNER_BUILD_CONTEXT:-./repo_erp/glm-ocr-runner}');
+    expect(compose).toContain('LLAMA_SERVER_URL: ${LLAMA_SERVER_URL:-http://glm-ocr-llama:8080}');
+    expect(compose).toContain('cnc-telegram-worker:');
+    expect(compose).toContain('profiles: ["cnc-telegram"]');
+    expect(compose).toContain('context: ${CNC_TELEGRAM_WORKER_BUILD_CONTEXT:-./repo_erp/cnc-telegram-worker}');
+    expect(compose).toContain('TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}');
+    expect(compose).toContain('ERP_API_URL: ${CNC_TELEGRAM_ERP_API_URL:-http://backend:3000/api/v1}');
+    expect(compose).toContain('CNC_OCR_COMMAND: ${CNC_OCR_COMMAND:-python -m cnc_telegram_worker.glm_ocr_client --image {image}}');
+    expect(compose).toContain('GLM_OCR_RUNNER_URL: ${GLM_OCR_RUNNER_URL:-http://glm-ocr-runner:8001/ocr}');
+    expect(compose).toContain('CNC_TEMP_TTL_HOURS: ${CNC_TEMP_TTL_HOURS:-24}');
+    expect(compose).toContain('cnc-telegram-worker-data:/data');
+    expect(compose).toContain('cnc-telegram-worker-data:');
+    expect(compose).toContain('glm-ocr-model-cache:');
+    expect(workerSegment).toMatch(/networks:[\s\S]*- back[\s\S]*cpus:/);
+    expect(workerSegment).not.toMatch(/traefik\.enable=true|ports:/);
+    expect(overlay).toContain('glm-ocr-model-init:');
+    expect(overlay).toContain('glm-ocr-llama:');
+    expect(overlay).toContain('glm-ocr-runner:');
+    expect(overlay).toContain('cnc-telegram-worker:');
+    expect(overlay).toContain('profiles: ["cnc-telegram"]');
+    expect(overlay).toContain('cnc-telegram-worker-data:/data');
+    expect(envExample).toContain('COMPOSE_PROFILES=');
+    expect(envExample).toContain('# COMPOSE_PROFILES=cnc-telegram');
+    expect(envExample).toContain('CNC_TELEGRAM_WORKER_BUILD_CONTEXT=./repo_erp/cnc-telegram-worker');
+    expect(envExample).toContain('CNC_OCR_ENGINE=glm-ocr-0.9b-q8-llama.cpp');
+    expect(envExample).toContain('GLM_OCR_RUNNER_BUILD_CONTEXT=./repo_erp/glm-ocr-runner');
+    expect(envExample).toContain('GLM_OCR_MODEL_FILE=GLM-OCR-Q8_0.gguf');
+    expect(envExample).toContain('GLM_OCR_MMPROJ_FILE=mmproj-GLM-OCR-Q8_0.gguf');
+  });
+
   it('publishes the CAD service on a public traefik subdomain with internal access', () => {
     const compose = readTemplate('ops/templates/docker-compose.vps.yml');
 

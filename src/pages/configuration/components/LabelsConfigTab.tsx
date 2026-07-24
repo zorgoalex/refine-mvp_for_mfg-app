@@ -5,6 +5,7 @@ import type Konva from 'konva';
 import { Group as KonvaGroup, Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
 import { labelsApi } from '../../../api/labelsApi';
 import { ApiError } from '../../../api/apiError';
+import { authSession } from '../../../api/authSession';
 import type {
   LabelElementKind,
   LabelConditionBranch,
@@ -44,7 +45,7 @@ import {
   readAndNormalizeLabelTransformedNodes,
   readLabelTransformedNodes,
   readLabelTypography,
-  resolveLabelElementPreviewText,
+  resolveLabelCanvasText,
   resolveLatestStateUpdate,
   selectLabelElements,
   snapElementCenters,
@@ -57,6 +58,13 @@ import {
   type CustomFieldValueMode,
 } from './labelTemplateEditorHelpers';
 import { OcrTemplatesConfig } from './OcrTemplatesConfig';
+import {
+  labelEditorLayoutGeometry,
+  loadLabelEditorLayoutMode,
+  resolveLabelPreviewWidth,
+  saveLabelEditorLayoutMode,
+  type LabelEditorLayoutMode,
+} from './labelEditorLayoutPreference';
 
 const { Text } = Typography;
 const { Panel } = Collapse;
@@ -142,6 +150,7 @@ const EMPTY_QR_DRAFT: QrDraft = { id: null, version: null, name: '', rows: [[]],
 
 export const LabelsConfigTab: React.FC = () => {
   const canManage = can('labels.manage_templates');
+  const layoutPreferenceUserId = authSession.getUser()?.id ?? 'anon';
   const [form] = Form.useForm<TemplateFormValues>();
   const [customFieldForm] = Form.useForm<CustomFieldFormValues>();
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
@@ -171,7 +180,9 @@ export const LabelsConfigTab: React.FC = () => {
   const [fieldSearch, setFieldSearch] = useState('');
   const [draggingField, setDraggingField] = useState<LabelFieldCatalogItem | null>(null);
   const [dragCursor, setDragCursor] = useState<{ x: number; y: number } | null>(null);
-  const [visualExpanded, setVisualExpanded] = useState(false);
+  const [editorLayoutMode, setEditorLayoutMode] = useState<LabelEditorLayoutMode>(() => (
+    loadLabelEditorLayoutMode(layoutPreferenceUserId)
+  ));
   const [qrTemplates, setQrTemplates] = useState<LabelQrTemplate[]>([]);
   const [qrDraft, setQrDraft] = useState<QrDraft>(EMPTY_QR_DRAFT);
   const [qrTextDraftsByRow, setQrTextDraftsByRow] = useState<string[]>(['']);
@@ -1207,8 +1218,12 @@ export const LabelsConfigTab: React.FC = () => {
     }
   };
 
-  const leftColumnSpan = visualExpanded ? 10 : 14;
-  const rightColumnSpan = visualExpanded ? 14 : 10;
+  const layoutGeometry = labelEditorLayoutGeometry(editorLayoutMode);
+  const { leftColumnSpan, rightColumnSpan } = layoutGeometry;
+  const changeEditorLayoutMode = (mode: LabelEditorLayoutMode) => {
+    setEditorLayoutMode(mode);
+    saveLabelEditorLayoutMode(layoutPreferenceUserId, mode);
+  };
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -1728,7 +1743,7 @@ export const LabelsConfigTab: React.FC = () => {
               size="small"
               title="Визуал бирки"
               extra={(
-                <Space size={12}>
+                <Space size={12} wrap>
                   <Radio.Group
                     size="small"
                     value={previewDataMode}
@@ -1740,7 +1755,23 @@ export const LabelsConfigTab: React.FC = () => {
                       { value: 'sample', label: 'Пример с данными' },
                     ]}
                   />
-                  <Checkbox checked={visualExpanded} onChange={(event) => setVisualExpanded(event.target.checked)}>Увеличить визуал</Checkbox>
+                  <Tooltip title="Меняет пропорции формы. В крупном режиме правая колонка вдвое шире левой, а визуал автоматически занимает всю доступную ширину.">
+                    <Space size={6}>
+                      <Text type="secondary">Колонки</Text>
+                      <Radio.Group
+                        className="label-editor-layout-mode"
+                        aria-label="Пропорции колонок редактора"
+                        value={editorLayoutMode}
+                        optionType="button"
+                        buttonStyle="solid"
+                        onChange={(event) => changeEditorLayoutMode(event.target.value as LabelEditorLayoutMode)}
+                        options={[
+                          { value: 'balanced', label: 'Обычные' },
+                          { value: 'large-preview', label: 'Крупный визуал' },
+                        ]}
+                      />
+                    </Space>
+                  </Tooltip>
                   <Checkbox checked={showAllBorders} onChange={(event) => setShowAllBorders(event.target.checked)}>Показать границы всех элементов</Checkbox>
                 </Space>
               )}
@@ -1757,7 +1788,9 @@ export const LabelsConfigTab: React.FC = () => {
                 selectedElementKeys={selectedElementKeys}
                 canDrag={canManage && !saving}
                 advancedFeaturesEnabled={advancedRendererReady}
-                initialZoom={visualExpanded ? 1.3 : 0.6}
+                initialZoom={layoutGeometry.initialZoom}
+                fitToContainer={layoutGeometry.fitPreviewToColumn}
+                keepConditionallyHiddenTextVisible
                 showAllBounds={showAllBorders}
                 onSelectElement={(elementKey, additive) => setEditorSelection(selectLabelElements(
                   elementsRef.current,
@@ -2398,6 +2431,8 @@ function LabelTemplatePreview({
   draggingQr,
   onDropDraggingQr,
   initialZoom = 1,
+  fitToContainer = false,
+  keepConditionallyHiddenTextVisible = false,
   showAllBounds = false,
 }: {
   widthMm: number;
@@ -2428,8 +2463,11 @@ function LabelTemplatePreview({
   draggingQr?: LabelQrTemplate | null;
   onDropDraggingQr?: (payload: LabelQrTemplate, xMm: number, yMm: number) => void;
   initialZoom?: number;
+  fitToContainer?: boolean;
+  keepConditionallyHiddenTextVisible?: boolean;
   showAllBounds?: boolean;
 }) {
+  const previewHostRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const nodeRefs = useRef(new Map<string, Konva.Node>());
@@ -2451,6 +2489,7 @@ function LabelTemplatePreview({
   // after the first was moved.
   const qrDropResolvedRef = useRef(false);
   const [zoom, setZoom] = useState(initialZoom);
+  const [availableWidth, setAvailableWidth] = useState(0);
   const [showGrid, setShowGrid] = useState(Boolean(canDrag));
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
@@ -2473,7 +2512,13 @@ function LabelTemplatePreview({
     return new Map(Object.entries({ ...generated, ...PREVIEW_FIELD_VALUES, ...previewFieldValues }));
   }, [fields, previewDataMode, previewFieldValues]);
   const sorted = elements.slice().sort((a, b) => Number(a.zIndex ?? 0) - Number(b.zIndex ?? 0));
-  const previewWidth = Math.round(Math.min(760, Math.max(360, safeWidth * 7)) * zoom);
+  const intrinsicPreviewWidth = Math.min(760, Math.max(360, safeWidth * 7));
+  const previewWidth = resolveLabelPreviewWidth({
+    intrinsicWidth: intrinsicPreviewWidth,
+    availableWidth,
+    zoom,
+    fitToContainer,
+  });
   const previewHeight = previewWidth * (safeHeight / safeWidth);
   const effectiveSelectedKeys = selectedElementKeys?.length
     ? selectedElementKeys
@@ -2509,6 +2554,23 @@ function LabelTemplatePreview({
   useEffect(() => {
     setZoom(initialZoom);
   }, [initialZoom]);
+
+  useEffect(() => {
+    const host = previewHostRef.current;
+    if (!host) return;
+    const updateAvailableWidth = () => {
+      const width = Math.floor(host.getBoundingClientRect().width);
+      if (width > 0) setAvailableWidth(width);
+    };
+    updateAvailableWidth();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateAvailableWidth);
+      return () => window.removeEventListener('resize', updateAvailableWidth);
+    }
+    const observer = new ResizeObserver(updateAvailableWidth);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!canDrag || externalDragActive) setAlignmentGuides([]);
@@ -2923,20 +2985,24 @@ function LabelTemplatePreview({
         </Space>
       )}
       <div
-        data-label-dragging-field={draggingField?.id}
-        data-label-dragging-qr={draggingQr?.labelQrTemplateId}
-        tabIndex={canDrag ? 0 : undefined}
-        style={{
-          width: '100%',
-          maxWidth: previewWidth,
-          aspectRatio: `${safeWidth} / ${safeHeight}`,
-          border: '1px solid #d9d9d9',
-          background: '#fff',
-          overflow: 'hidden',
-          position: 'relative',
-          touchAction: 'none',
-          outline: 'none',
-        }}
+        ref={previewHostRef}
+        data-label-preview-fit={fitToContainer ? 'container' : 'intrinsic'}
+        style={{ width: '100%', overflowX: 'auto', overscrollBehaviorX: 'contain' }}
+      >
+        <div
+          data-label-dragging-field={draggingField?.id}
+          data-label-dragging-qr={draggingQr?.labelQrTemplateId}
+          tabIndex={canDrag ? 0 : undefined}
+          style={{
+            width: previewWidth,
+            aspectRatio: `${safeWidth} / ${safeHeight}`,
+            border: '1px solid #d9d9d9',
+            background: '#fff',
+            overflow: 'hidden',
+            position: 'relative',
+            touchAction: 'none',
+            outline: 'none',
+          }}
         onDragOver={(event) => {
           if (!canDrag) return;
           event.preventDefault();
@@ -3000,6 +3066,7 @@ function LabelTemplatePreview({
                 fieldLabels,
                 fieldValues,
                 evaluateConditions: previewDataMode === 'sample',
+                keepConditionallyHiddenTextVisible,
                 selected: !externalDragActive && effectiveSelectedKeys.includes(element.elementKey),
                 interactive: Boolean(canDrag && !externalDragActive),
                 draggable: Boolean(canDrag && !externalDragActive && !isLabelElementLocked(element)),
@@ -3338,6 +3405,7 @@ function LabelTemplatePreview({
             {describeLabelElement(hoveredElement.element, fieldInfo)}
           </div>
         )}
+        </div>
       </div>
     </Space>
   );
@@ -3564,6 +3632,7 @@ function renderKonvaPreviewElement({
   fieldLabels,
   fieldValues,
   evaluateConditions,
+  keepConditionallyHiddenTextVisible,
   selected,
   interactive,
   draggable,
@@ -3584,6 +3653,7 @@ function renderKonvaPreviewElement({
   fieldLabels: Map<string, string>;
   fieldValues: Map<string, string>;
   evaluateConditions: boolean;
+  keepConditionallyHiddenTextVisible: boolean;
   selected: boolean;
   interactive: boolean;
   draggable: boolean;
@@ -3789,11 +3859,10 @@ function renderKonvaPreviewElement({
   const typography = readLabelTypography(element);
   const fontSize = Math.max(1.8, typography.fontSizePt * 0.3528);
   const textAlign = getLabelTextAlign(element);
-  const text = evaluateConditions
-    ? resolveLabelElementPreviewText(element, fieldValues, fieldLabels)
-    : element.sourceField
-      ? fieldLabels.get(element.sourceField) ?? element.sourceField
-      : element.staticText ?? '';
+  const text = resolveLabelCanvasText(element, fieldValues, fieldLabels, {
+    evaluateConditions,
+    keepSourceVisible: keepConditionallyHiddenTextVisible,
+  });
   const manualBounds = readLabelEditorMeta(element).boundsMode === 'manual';
   const fontStyle = [typography.fontWeight === 'bold' ? 'bold' : '', typography.italic ? 'italic' : '']
     .filter(Boolean)

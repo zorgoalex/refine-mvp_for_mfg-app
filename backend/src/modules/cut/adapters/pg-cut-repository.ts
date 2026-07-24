@@ -242,6 +242,16 @@ interface BasisInputs {
   sheetTypes: BasisSheetType[];
 }
 
+export const VACUUM_ROUTING_CONTRACT_VERSION = 'vacuum_profile_routing_v2';
+
+export function routingContractForCalcBasis(
+  params: import('../application/cut-freecut-mapping').FreecutParams,
+): string | null {
+  return params.layout_mode === 'vacuum_table'
+    ? VACUUM_ROUTING_CONTRACT_VERSION
+    : null;
+}
+
 /**
  * Stable SHA-256 hash of all calc-relevant inputs. Same inputs → same hash;
  * any structural change flips it → requiresRecalc=true.
@@ -251,7 +261,9 @@ interface BasisInputs {
  * Items and sheetTypes are sorted by id for determinism.
  */
 function basisOf(inputs: BasisInputs): string {
+  const routingContract = routingContractForCalcBasis(inputs.params);
   const canonical = {
+    ...(routingContract === null ? {} : { routing: routingContract }),
     p: inputs.params,
     g: inputs.grainRules,
     cf: inputs.combineFilms,

@@ -3497,7 +3497,7 @@ paths:
           description: Invalid revision id
         '503':
           description: Bazis API is disabled
-  /api/v1/bazis/revisions/{id}/orders:
+  /api/v1/bazis/revisions/{revisionId}/orders:
     get:
       tags:
         - Bazis
@@ -3508,7 +3508,7 @@ paths:
       x-permission: bazis.view
       parameters:
         - in: path
-          name: id
+          name: revisionId
           required: true
           schema:
             type: integer
@@ -8260,7 +8260,7 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
-  /api/v1/label-templates/{templateId}:
+  /api/v1/label-templates/{id}:
     get:
       tags:
         - Labels
@@ -8270,7 +8270,7 @@ paths:
         - bearerAuth: []
       x-permission: labels.view
       parameters:
-        - name: templateId
+        - name: id
           in: path
           required: true
           schema:
@@ -8299,7 +8299,7 @@ paths:
         - bearerAuth: []
       x-permission: labels.manage_templates
       parameters:
-        - name: templateId
+        - name: id
           in: path
           required: true
           schema:
@@ -8336,7 +8336,7 @@ paths:
         - bearerAuth: []
       x-permission: labels.manage_templates
       parameters:
-        - name: templateId
+        - name: id
           in: path
           required: true
           schema:
@@ -8364,6 +8364,225 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/label-ocr-templates:
+    get:
+      tags:
+        - Labels
+      operationId: listLabelOcrTemplates
+      summary: List label OCR templates
+      security:
+        - bearerAuth: []
+      x-permission: labels.view
+      parameters:
+        - name: includeInactive
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Label OCR templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - Labels
+      operationId: createLabelOcrTemplate
+      summary: Create label OCR template
+      security:
+        - bearerAuth: []
+      x-permission: labels.manage_templates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Created OCR template
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/label-ocr-templates/{id}:
+    put:
+      tags:
+        - Labels
+      operationId: updateLabelOcrTemplate
+      summary: Update label OCR template
+      security:
+        - bearerAuth: []
+      x-permission: labels.manage_templates
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated OCR template
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - Labels
+      operationId: deleteLabelOcrTemplate
+      summary: Soft-delete label OCR template
+      security:
+        - bearerAuth: []
+      x-permission: labels.manage_templates
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - version
+                - idempotencyKey
+              properties:
+                version:
+                  type: integer
+                idempotencyKey:
+                  type: string
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/label-ocr-templates/preview:
+    post:
+      tags:
+        - Labels
+      operationId: previewLabelOcrTemplate
+      summary: Run OCR recognition for template setup
+      security:
+        - bearerAuth: []
+      x-permission: labels.manage_templates
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: OCR preview
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/label-ocr-templates/test:
+    post:
+      tags:
+        - Labels
+      operationId: testLabelOcrTemplate
+      summary: Test OCR template rules
+      security:
+        - bearerAuth: []
+      x-permission: labels.manage_templates
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - rules
+              properties:
+                file:
+                  type: string
+                  format: binary
+                rules:
+                  type: string
+      responses:
+        '200':
+          description: OCR rule test
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -8504,6 +8723,107 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/labels/preview:
+    post:
+      tags:
+        - Labels
+      operationId: previewDetailLabels
+      summary: Preview labels for explicit detail instances
+      security:
+        - bearerAuth: []
+      x-permissions-any:
+        - labels.view
+        - labels.generate
+        - labels.manage_templates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Detail label preview
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/labels/generate:
+    post:
+      tags:
+        - Labels
+      operationId: generateDetailLabels
+      summary: Generate labels for explicit detail instances
+      security:
+        - bearerAuth: []
+      x-permission: labels.generate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Detail label generation
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/labels/generations/{generationId}/export:
+    get:
+      tags:
+        - Labels
+      operationId: exportDetailLabelGeneration
+      summary: Export an explicit-detail label generation ZIP
+      security:
+        - bearerAuth: []
+      x-permission: labels.generate
+      parameters:
+        - name: generationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Labels ZIP
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -8887,6 +9207,73 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/cnc-telegram/today:
+    get:
+      tags:
+        - CncTelegram
+      operationId: listCncTelegramToday
+      summary: List current-day structured CNC Telegram parsing results
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Current-day CNC Telegram packets
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+
+  /api/v1/cnc-telegram/ingest:
+    post:
+      tags:
+        - CncTelegram
+      operationId: ingestCncTelegramPacket
+      summary: Ingest structured CNC Telegram parse results without raw media
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Structured packet accepted
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
 
   /api/v1/cut-jobs:
     post:
@@ -9326,6 +9713,107 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/{cutJobId}/pdf-template:
+    patch:
+      tags:
+        - CutJobs
+      operationId: setCutJobPdfTemplate
+      summary: Set the PDF template for a job
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - pdfTemplateCode
+                - version
+              properties:
+                pdfTemplateCode:
+                  type: string
+                  nullable: true
+                version:
+                  type: integer
+                  minimum: 0
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/pdf-template:
+    patch:
+      tags:
+        - CutJobs
+      operationId: setCutGroupPdfTemplate
+      summary: Set the PDF template for a cut group
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      parameters:
+        - name: cutJobId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - pdfTemplateCode
+                - version
+              properties:
+                pdfTemplateCode:
+                  type: string
+                  nullable: true
+                version:
+                  type: integer
+                  minimum: 0
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/cut-jobs/{cutJobId}/groups/{groupId}/manual-layout:
     patch:
       tags:
@@ -9665,6 +10153,80 @@ paths:
       responses:
         '200':
           description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-config/pdf-templates:
+    post:
+      tags:
+        - CutConfig
+      operationId: createCutPdfTemplate
+      summary: Create a PDF template layout
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-config/pdf-templates/{id}:
+    put:
+      tags:
+        - CutConfig
+      operationId: updateCutPdfTemplate
+      summary: Update a PDF template layout
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

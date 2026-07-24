@@ -179,12 +179,26 @@ export function resolveLabelElementPreviewText(
   fieldValues: Map<string, string>,
   fieldLabels: Map<string, string>,
 ): string {
+  return resolveLabelCanvasText(element, fieldValues, fieldLabels, {
+    evaluateConditions: true,
+    keepSourceVisible: false,
+  });
+}
+
+export function resolveLabelCanvasText(
+  element: LabelTemplateElement,
+  fieldValues: Map<string, string>,
+  fieldLabels: Map<string, string>,
+  options: { evaluateConditions: boolean; keepSourceVisible: boolean },
+): string {
   const current = element.sourceField
     ? fieldValues.get(element.sourceField) ?? fieldLabels.get(element.sourceField) ?? element.sourceField
     : element.staticText ?? '';
+  if (!options.evaluateConditions) return current;
   const condition = readLabelIfElseCondition(element.condition);
   if (!condition) return current;
   const branch = labelConditionPasses(condition, fieldValues) ? condition.then : condition.else;
+  if (options.keepSourceVisible && branch.type === 'hidden') return current;
   return resolvePreviewBranch(branch, current, fieldValues, fieldLabels);
 }
 

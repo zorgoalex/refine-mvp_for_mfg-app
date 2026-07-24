@@ -38,7 +38,7 @@ describe('order status board model', () => {
       ),
     );
     expect(state).toMatchObject({
-      board: 'production',
+      view: 'production',
       search: 'ABC',
       onlyMyOrders: true,
       overdueOnly: true,
@@ -55,6 +55,20 @@ describe('order status board model', () => {
       cursor: 'next',
       limit: 24,
     });
+  });
+
+  it('keeps CNC today as visual flow without changing status-board API type', () => {
+    const disabled = parseOrderStatusBoardViewState(new URLSearchParams('flow=cnc'));
+    const state = parseOrderStatusBoardViewState(new URLSearchParams('flow=cnc&date=2026-07-23'), {
+      cncTelegram: true,
+    });
+
+    expect(disabled.view).toBe('order');
+    expect(state.view).toBe('cnc_today');
+    expect(state.cncWorkday).toBe('2026-07-23');
+    expect(serializeOrderStatusBoardViewState(state).toString()).toContain('flow=cnc');
+    expect(serializeOrderStatusBoardViewState(state).toString()).toContain('date=2026-07-23');
+    expect(toOrderStatusBoardQuery(state)).toMatchObject({ board: 'order' });
   });
 
   it('drops impossible dates from a hand-edited shared URL', () => {

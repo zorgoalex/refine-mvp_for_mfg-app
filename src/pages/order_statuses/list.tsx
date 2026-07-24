@@ -4,6 +4,7 @@ import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
+import { StatusColorSwatch } from "../../components/StatusColor";
 
 export const OrderStatusList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -57,7 +58,12 @@ export const OrderStatusList: React.FC<IResourceComponentsProps> = () => {
             { text: "Неактивен", value: false },
           ]}
         />
-        <Table.Column dataIndex="color" title="Цвет статуса" />
+        <Table.Column
+          dataIndex="color"
+          title="Цвет статуса"
+          align="center"
+          render={(value: unknown) => <StatusColorSwatch value={value} />}
+        />
         <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column
           title="Действия"

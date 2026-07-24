@@ -72,6 +72,11 @@
   --label-preview-outline: rgba(255, 255, 255, 0.1);
 }
 
+.label-editor-layout-mode .ant-radio-button-wrapper {
+  min-height: 40px;
+  line-height: 38px;
+}
+
 html,
 body,
 #root {

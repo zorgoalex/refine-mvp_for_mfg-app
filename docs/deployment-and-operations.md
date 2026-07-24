@@ -6,6 +6,10 @@
 - VPS: NestJS backend, Hasura, PostgreSQL, Redis/Valkey, Traefik и связанные
   сервисы.
 
+Production source of truth — ветка `main`. Production Vercel deploy и VPS
+checkout выполняются из `main`. `feat/backend-erp-stage1` остаётся stage-веткой;
+`feat/backend-erp-prevprod` retired.
+
 Frontend и backend feature flags независимы:
 
 ```env
@@ -74,6 +78,51 @@ docker compose \
 
 После rebuild проверьте `/health/live`, `/health/ready`, нужные route mappings
 и runtime flags.
+
+## CNC Telegram worker
+
+Prod worker для рабочего Telegram-чата включается profile `cnc-telegram`.
+Обычный deploy/up поднимет его автоматически, если в VPS `.env` есть:
+
+```env
+BACKEND_ENABLE_CNC_TELEGRAM=true
+COMPOSE_PROFILES=cnc-telegram
+TELEGRAM_API_ID=<api-id>
+TELEGRAM_API_HASH=<api-hash>
+TELEGRAM_CHAT=<chat-id-or-username>
+TELEGRAM_ALLOWED_CHAT_ID=<expected-chat-id>
+ERP_WORKER_LOGIN=<erp-user-with-cut.manage>
+ERP_WORKER_PASSWORD=<password>
+```
+
+Этот же profile поднимает OCR stack:
+
+- `glm-ocr-model-init`: one-shot download of `GLM-OCR-Q8_0.gguf` and
+  `mmproj-GLM-OCR-Q8_0.gguf` into the shared Docker volume;
+- `glm-ocr-llama`: official `ghcr.io/ggml-org/llama.cpp:server`, local model
+  files, internal network only;
+- `glm-ocr-runner`: internal FastAPI wrapper `/ocr`, возвращает structured JSON;
+- `cnc-telegram-worker`: вызывает runner через default
+  `python -m cnc_telegram_worker.glm_ocr_client --image {image}`.
+
+Перед daemon нужен один интерактивный Telethon login:
+
+```bash
+repo_erp/ops/cnc-telegram-worker.sh login
+repo_erp/ops/cnc-telegram-worker.sh up
+```
+
+Backfill за неделю:
+
+```bash
+repo_erp/ops/cnc-telegram-worker.sh backfill 7
+```
+
+Worker internal-only: без ports/traefik. `/data` хранит только Telethon session,
+state и temp; temp hard-delete ограничен `CNC_TEMP_TTL_HOURS<=24`.
+Если `deploy-stack.sh` запускается со старым live `docker-compose.yml`, где ещё
+нет этого service, script добавляет tracked overlay
+`ops/templates/docker-compose.cnc-telegram-worker.yml` при включённом profile.
 
 ## Redis/Valkey для rate limit
 

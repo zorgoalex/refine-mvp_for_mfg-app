@@ -49,27 +49,31 @@ function backendControllerFiles(): string[] {
 
 function routesFromController(file: string): string[] {
   const source = readFileSync(file, 'utf8');
-  const controllerPrefix = parseControllerPrefix(source, file);
   const routes: string[] = [];
 
-  for (const match of source.matchAll(ROUTE_DECORATOR_PATTERN)) {
-    const method = match[1].toUpperCase();
-    const routePath = match[3] ?? '';
-    routes.push(`${method} ${toOpenApiPath(controllerPrefix, routePath)}`);
+  for (const section of controllerSections(source, file)) {
+    for (const match of section.source.matchAll(ROUTE_DECORATOR_PATTERN)) {
+      const method = match[1].toUpperCase();
+      const routePath = match[3] ?? '';
+      routes.push(`${method} ${toOpenApiPath(section.prefix, routePath)}`);
+    }
   }
 
   return routes;
 }
 
-function parseControllerPrefix(source: string, file: string): string {
-  const match = /@Controller\(\s*(?:(['"`])([^'"`]*)\1)?\s*\)/m.exec(source);
+function controllerSections(source: string, file: string): Array<{ prefix: string; source: string }> {
+  const matches = Array.from(source.matchAll(/@Controller\(\s*(?:(['"`])([^'"`]*)\1)?\s*\)/gm));
 
   expect(
-    match,
+    matches.length,
     `${normalizePath(relative(backendRoot(), file))} should declare a static @Controller(...) prefix`,
-  ).toBeDefined();
+  ).toBeGreaterThan(0);
 
-  return match?.[2] ?? '';
+  return matches.map((match, index) => ({
+    prefix: match[2] ?? '',
+    source: source.slice(match.index ?? 0, matches[index + 1]?.index ?? source.length),
+  }));
 }
 
 function toOpenApiPath(controllerPrefix: string, routePath: string): string {

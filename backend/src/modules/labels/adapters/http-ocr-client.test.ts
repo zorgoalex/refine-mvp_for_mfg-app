@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import { HttpOcrClient, UnavailableOcrClient, createOcrClientFromEnv, type OcrFetchFn } from './http-ocr-client';
 
-// Minimal Response-like mock factory (pattern from twenty-api-client.test.ts).
+// Minimal Response-like mock factory for adapter tests.
 function makeResponse(ok: boolean, status: number, body: unknown): Response {
   return {
     ok,

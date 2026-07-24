@@ -25,10 +25,17 @@ import {
   message,
 } from 'antd';
 import {
+  CalendarOutlined,
+  CheckCircleOutlined,
   ClockCircleOutlined,
   DragOutlined,
+  ExclamationCircleOutlined,
+  FileTextOutlined,
+  LeftOutlined,
   MoreOutlined,
   ReloadOutlined,
+  RightOutlined,
+  ToolOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -36,6 +43,7 @@ import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { isApiError } from '../../api/apiError';
+import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { orderStatusBoardApi } from '../../api/orderStatusBoardApi';
 import {
   createProductionActionIdempotencyKey,
@@ -47,6 +55,11 @@ import type {
   OrderStatusBoardResponse,
   OrderStatusBoardType,
 } from '../../api/types/orderStatusBoardApi.types';
+import type {
+  CncTelegramPacket,
+  CncTelegramTodayColumn,
+  CncTelegramTodayResponse,
+} from '../../api/types/cncTelegramApi.types';
 import { CURRENCY_CODE } from '../../config/currency';
 import { featureFlags } from '../../config/featureFlags';
 import {
@@ -66,6 +79,7 @@ import {
 
 const BOARD_DRAG_TYPE = 'ORDER_STATUS_BOARD_CARD';
 const DATE_FORMAT = 'DD.MM.YYYY';
+const CNC_HISTORY_DAYS = 7;
 
 interface BoardDragItem {
   card: OrderStatusBoardCard;
@@ -78,13 +92,17 @@ export const OrderStatusBoardPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const viewState = useMemo(
-    () => parseOrderStatusBoardViewState(searchParams),
+    () => parseOrderStatusBoardViewState(searchParams, {
+      cncTelegram: featureFlags.cncTelegram,
+    }),
     [searchParams],
   );
   const viewKey = searchParams.toString();
   const [searchDraft, setSearchDraft] = useState(viewState.search);
   const [board, setBoard] = useState<OrderStatusBoardResponse | null>(null);
   const boardRef = useRef<OrderStatusBoardResponse | null>(null);
+  const [cncToday, setCncToday] = useState<CncTelegramTodayResponse | null>(null);
+  const cncTodayRef = useRef<CncTelegramTodayResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
@@ -107,6 +125,10 @@ export const OrderStatusBoardPage: React.FC = () => {
   useEffect(() => {
     boardRef.current = board;
   }, [board]);
+
+  useEffect(() => {
+    cncTodayRef.current = cncToday;
+  }, [cncToday]);
 
   useEffect(() => {
     setSearchDraft(viewState.search);
@@ -141,12 +163,30 @@ export const OrderStatusBoardPage: React.FC = () => {
       loadingColumnTokensRef.current.clear();
       setLoadingColumns(new Set());
       try {
+        if (viewStateRef.current.view === 'cnc_today') {
+          const workday = viewStateRef.current.cncWorkday;
+          const response = await cncTelegramApi.today(
+            workday ? { date: workday } : {},
+          );
+          if (datasetRevisionRef.current !== revision) return false;
+          cncTodayRef.current = response;
+          setCncToday(response);
+          boardRef.current = null;
+          setBoard(null);
+          setStale(false);
+          replacePending(new Set());
+          setLoading(false);
+          return true;
+        }
+
         const response = await orderStatusBoardApi.get(
           toOrderStatusBoardQuery(viewStateRef.current),
         );
         if (datasetRevisionRef.current !== revision) return false;
         boardRef.current = response;
         setBoard(response);
+        cncTodayRef.current = null;
+        setCncToday(null);
         setStale(false);
         if (!commandInFlightRef.current && pendingRef.current.size > 0) {
           replacePending(new Set());
@@ -189,6 +229,8 @@ export const OrderStatusBoardPage: React.FC = () => {
   useEffect(() => {
     setBoard(null);
     boardRef.current = null;
+    setCncToday(null);
+    cncTodayRef.current = null;
     setStale(false);
     loadingColumnTokensRef.current.clear();
     void fetchInitial();
@@ -198,7 +240,11 @@ export const OrderStatusBoardPage: React.FC = () => {
 
   useEffect(() => {
     const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible' && boardRef.current && !stale) {
+      if (
+        document.visibilityState === 'visible' &&
+        (boardRef.current || cncTodayRef.current) &&
+        !stale
+      ) {
         void fetchInitial({ preserveLoading: true });
       }
     };
@@ -273,18 +319,19 @@ export const OrderStatusBoardPage: React.FC = () => {
     ) => {
       if (
         stale ||
-        !featureFlags.useBackendProductionActions
+        !featureFlags.useBackendProductionActions ||
+        viewState.view === 'cnc_today'
       ) {
         return;
       }
 
       const canMove =
-        viewState.board === 'order'
+        viewState.view === 'order'
           ? card.canChangeOrderStatus
           : card.canChangeProductionStatus;
       if (!canMove) return;
 
-      const boardType = viewState.board;
+      const boardType = viewState.view === 'production' ? 'production' : 'order';
       const nextPending = reserveOrderStatusBoardMutation(
         pendingRef.current,
         card.orderId,
@@ -370,18 +417,29 @@ export const OrderStatusBoardPage: React.FC = () => {
         }
       }
     },
-    [fetchInitial, replacePending, stale, viewState.board],
+    [fetchInitial, replacePending, stale, viewState.view],
   );
 
   const boardColumns = useMemo(
-    () => filterBoardColumns(viewState.board, board?.columns ?? []),
-    [board?.columns, viewState.board],
+    () => filterBoardColumns(
+      viewState.view === 'production' ? 'production' : 'order',
+      board?.columns ?? [],
+    ),
+    [board?.columns, viewState.view],
   );
   const columns = useMemo(
     () =>
       boardColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
     [boardColumns, viewState.hideEmpty],
   );
+  const cncColumns = cncToday?.columns ?? [];
+  const cncVisibleColumns = cncColumns.filter(
+    (column) => !viewState.hideEmpty || column.total > 0,
+  );
+  const isCncToday = viewState.view === 'cnc_today';
+  const activeBoard: OrderStatusBoardType =
+    viewState.view === 'production' ? 'production' : 'order';
+  const generatedAt = isCncToday ? cncToday?.generatedAt : board?.generatedAt;
 
   useEffect(() => {
     const topScrollbar = topScrollbarRef.current;
@@ -401,7 +459,7 @@ export const OrderStatusBoardPage: React.FC = () => {
       resizeObserver.observe(viewport.firstElementChild);
     }
     return () => resizeObserver.disconnect();
-  }, [columns.length, loading, viewKey]);
+  }, [cncVisibleColumns.length, columns.length, loading, viewKey]);
 
   const scrollBoardFromTop = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
@@ -427,6 +485,18 @@ export const OrderStatusBoardPage: React.FC = () => {
     viewState.plannedFrom ? dayjs(viewState.plannedFrom) : null,
     viewState.plannedTo ? dayjs(viewState.plannedTo) : null,
   ];
+  const cncMinDate = dayjs().subtract(CNC_HISTORY_DAYS - 1, 'day').startOf('day');
+  const cncMaxDate = dayjs().endOf('day');
+  const cncSelectedDate = viewState.cncWorkday
+    ? dayjs(viewState.cncWorkday)
+    : cncToday?.workday
+      ? dayjs(cncToday.workday)
+      : null;
+  const cncNavigationDate = cncSelectedDate ?? dayjs();
+  const cncCanStepBack = cncNavigationDate.startOf('day').isAfter(cncMinDate);
+  const cncCanStepForward = cncNavigationDate.startOf('day').isBefore(cncMaxDate);
+  const updateCncWorkday = (date: Dayjs) =>
+    updateViewState({ cncWorkday: date.format('YYYY-MM-DD') });
 
   return (
     <DndProvider backend={HTML5Backend}>
@@ -437,13 +507,13 @@ export const OrderStatusBoardPage: React.FC = () => {
               Доски статусов
             </Typography.Title>
             <Typography.Text type="secondary">
-              Два независимых потока одного заказа: общий и производственный.
+              Заказы, производство и CNC-работы на сегодня.
             </Typography.Text>
           </div>
           <div className="status-board-page__updated">
-            {board && (
+            {generatedAt && (
               <Typography.Text type="secondary">
-                Обновлено {formatDateTime(board.generatedAt)}
+                Обновлено {formatDateTime(generatedAt)}
               </Typography.Text>
             )}
             <Tooltip title="Обновить доску">
@@ -459,64 +529,123 @@ export const OrderStatusBoardPage: React.FC = () => {
 
         <Tabs
           className="status-board-tabs"
-          activeKey={viewState.board}
+          activeKey={viewState.view}
           onChange={(key) =>
-            updateViewState({ board: key as OrderStatusBoardType })
+            updateViewState({
+              view: key as typeof viewState.view,
+            })
           }
           items={[
             { key: 'order', label: 'Статусы заказов' },
             { key: 'production', label: 'Производство' },
+            ...(featureFlags.cncTelegram
+              ? [{ key: 'cnc_today', label: 'Работы сегодня' }]
+              : []),
           ]}
         />
 
-        <div className="status-board-toolbar" aria-label="Фильтры доски">
-          <Input
-            allowClear
-            className="status-board-toolbar__search"
-            placeholder="Номер заказа или клиент"
-            value={searchDraft}
-            onChange={(event) => setSearchDraft(event.target.value)}
-            aria-label="Поиск по заказам"
-          />
-          <Checkbox
-            checked={viewState.onlyMyOrders}
-            onChange={(event) =>
-              updateViewState({ onlyMyOrders: event.target.checked })
-            }
-          >
-            Связанные со мной
-          </Checkbox>
-          <Checkbox
-            checked={viewState.overdueOnly}
-            onChange={(event) =>
-              updateViewState({ overdueOnly: event.target.checked })
-            }
-          >
-            Плановая дата прошла
-          </Checkbox>
-          <DatePicker.RangePicker
-            value={dateRange}
-            format={DATE_FORMAT}
-            allowEmpty={[true, true]}
-            placeholder={['План с', 'План по']}
-            onChange={(dates) =>
-              updateViewState({
-                plannedFrom: dates?.[0]?.format('YYYY-MM-DD'),
-                plannedTo: dates?.[1]?.format('YYYY-MM-DD'),
-              })
-            }
-          />
-          <label className="status-board-toolbar__switch">
-            <Switch
-              size="small"
-              checked={viewState.hideEmpty}
-              onChange={(checked) => updateViewState({ hideEmpty: checked })}
+        {!isCncToday && (
+          <div className="status-board-toolbar" aria-label="Фильтры доски">
+            <Input
+              allowClear
+              className="status-board-toolbar__search"
+              placeholder="Номер заказа или клиент"
+              value={searchDraft}
+              onChange={(event) => setSearchDraft(event.target.value)}
+              aria-label="Поиск по заказам"
             />
-            Скрыть пустые
-          </label>
-        </div>
+            <Checkbox
+              checked={viewState.onlyMyOrders}
+              onChange={(event) =>
+                updateViewState({ onlyMyOrders: event.target.checked })
+              }
+            >
+              Связанные со мной
+            </Checkbox>
+            <Checkbox
+              checked={viewState.overdueOnly}
+              onChange={(event) =>
+                updateViewState({ overdueOnly: event.target.checked })
+              }
+            >
+              Плановая дата прошла
+            </Checkbox>
+            <DatePicker.RangePicker
+              value={dateRange}
+              format={DATE_FORMAT}
+              allowEmpty={[true, true]}
+              placeholder={['План с', 'План по']}
+              onChange={(dates) =>
+                updateViewState({
+                  plannedFrom: dates?.[0]?.format('YYYY-MM-DD'),
+                  plannedTo: dates?.[1]?.format('YYYY-MM-DD'),
+                })
+              }
+            />
+            <label className="status-board-toolbar__switch">
+              <Switch
+                size="small"
+                checked={viewState.hideEmpty}
+                onChange={(checked) => updateViewState({ hideEmpty: checked })}
+              />
+              Скрыть пустые
+            </label>
+          </div>
+        )}
+        {isCncToday && (
+          <div className="status-board-toolbar status-board-toolbar--cnc" aria-label="Фильтры CNC-работ">
+            <Tooltip title="Предыдущий день">
+              <Button
+                aria-label="Предыдущий день"
+                icon={<LeftOutlined />}
+                disabled={!cncCanStepBack}
+                onClick={() => updateCncWorkday(cncNavigationDate.subtract(1, 'day'))}
+              />
+            </Tooltip>
+            <DatePicker
+              value={cncSelectedDate}
+              format={DATE_FORMAT}
+              allowClear={false}
+              disabledDate={(date) =>
+                date
+                  ? date.startOf('day').isBefore(cncMinDate) ||
+                    date.startOf('day').isAfter(cncMaxDate)
+                  : false
+              }
+              onChange={(date) => {
+                if (date) updateCncWorkday(date);
+              }}
+              aria-label="Дата CNC-работ"
+            />
+            <Tooltip title="Следующий день">
+              <Button
+                aria-label="Следующий день"
+                icon={<RightOutlined />}
+                disabled={!cncCanStepForward}
+                onClick={() => updateCncWorkday(cncNavigationDate.add(1, 'day'))}
+              />
+            </Tooltip>
+            <Button
+              icon={<CalendarOutlined />}
+              onClick={() => updateCncWorkday(dayjs())}
+            >
+              Сегодня
+            </Button>
+            <Button onClick={() => updateCncWorkday(dayjs().subtract(1, 'day'))}>
+              Вчера
+            </Button>
+            <label className="status-board-toolbar__switch">
+              <Switch
+                size="small"
+                checked={viewState.hideEmpty}
+                onChange={(checked) => updateViewState({ hideEmpty: checked })}
+              />
+              Скрыть пустые
+            </label>
+          </div>
+        )}
 
-        {!featureFlags.useBackendProductionActions && (
+        {!isCncToday && !featureFlags.useBackendProductionActions && (
           <Alert
             showIcon
             type="info"
@@ -551,7 +680,7 @@ export const OrderStatusBoardPage: React.FC = () => {
           {announcement}
         </div>
 
-        {columns.length > 0 && (
+        {(isCncToday ? cncVisibleColumns.length > 0 : columns.length > 0) && (
           <div
             ref={topScrollbarRef}
             className="status-board-scrollbar"
@@ -574,17 +703,28 @@ export const OrderStatusBoardPage: React.FC = () => {
           ref={boardViewportRef}
           className="status-board-viewport"
           aria-label={
-            viewState.board === 'order'
+            isCncToday
+              ? 'CNC-работы на сегодня'
+              : activeBoard === 'order'
               ? 'Доска статусов заказов'
               : 'Доска производственных статусов'
           }
           aria-busy={loading}
           onScroll={scrollTopFromBoard}
         >
-          {loading && !board ? (
+          {loading && (isCncToday ? !cncToday : !board) ? (
             <div className="status-board-loading">
               <Spin size="large" tip="Загрузка доски…" />
             </div>
+          ) : isCncToday ? (
+            cncVisibleColumns.length === 0 ? (
+              <Empty description="CNC-работ на сегодня нет" />
+            ) : (
+              <CncTelegramTodayColumns
+                columns={cncVisibleColumns}
+                onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}
+              />
+            )
           ) : columns.length === 0 ? (
             <Empty description="По выбранным фильтрам заказов нет" />
           ) : (
@@ -592,7 +732,7 @@ export const OrderStatusBoardPage: React.FC = () => {
               {columns.map((column) => (
                 <StatusBoardColumnView
                   key={column.key}
-                  board={viewState.board}
+                  board={activeBoard}
                   column={column}
                   allColumns={boardColumns}
                   finePointer={finePointer}
@@ -615,6 +755,159 @@ export const OrderStatusBoardPage: React.FC = () => {
     </DndProvider>
   );
 };
+
+interface CncTelegramTodayColumnsProps {
+  columns: CncTelegramTodayColumn[];
+  onOpenOrder: (orderId: number) => void;
+}
+
+const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
+  columns,
+  onOpenOrder,
+}) => (
+  <div className="status-board-columns status-board-columns--cnc">
+    {columns.map((column) => (
+      <article
+        key={column.key}
+        className={`status-board-column cnc-today-column cnc-today-column--${column.key}`}
+        aria-label={`${column.title}: ${column.total} CNC-пакетов`}
+      >
+        <header className="status-board-column__header">
+          <div className="status-board-column__title">
+            <span className="status-board-column__marker" aria-hidden="true" />
+            <Typography.Text strong>{column.title}</Typography.Text>
+          </div>
+          <Badge count={column.total} overflowCount={9999} showZero />
+        </header>
+
+        <div className="status-board-column__cards">
+          {column.packets.length === 0 ? (
+            <div className="status-board-column__empty">Пакетов нет</div>
+          ) : (
+            column.packets.map((packet) => (
+              <CncTelegramPacketCard
+                key={packet.packetId}
+                packet={packet}
+                onOpenOrder={onOpenOrder}
+              />
+            ))
+          )}
+        </div>
+      </article>
+    ))}
+  </div>
+);
+
+interface CncTelegramPacketCardProps {
+  packet: CncTelegramPacket;
+  onOpenOrder: (orderId: number) => void;
+}
+
+const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
+  packet,
+  onOpenOrder,
+}) => {
+  const toolsText = packet.tools.length > 0
+    ? packet.tools.map((tool) =>
+      `T${tool.toolNumber}${tool.spindleRpm ? ` S${tool.spindleRpm}` : ''}`,
+    ).join(', ')
+    : 'Фрезы не распознаны';
+  return (
+    <div className="status-board-card cnc-packet-card">
+      <div className="status-board-card__top">
+        <div className="cnc-packet-card__title">
+          <Typography.Text strong className="cnc-packet-card__machine">
+            {packet.machine ?? 'CNC'}
+          </Typography.Text>
+          <Typography.Text className="cnc-packet-card__program">
+            {packet.programName ?? packet.externalPacketKey}
+          </Typography.Text>
+        </div>
+        <div className="cnc-packet-card__status-icons" aria-hidden="true">
+          {packet.thumbsUp && <CheckCircleOutlined />}
+          {(packet.analysisWarnings.length > 0 ||
+            packet.parseStatus === 'needs_review') && <ExclamationCircleOutlined />}
+        </div>
+      </div>
+
+      <div className="status-board-card__tags">
+        <Tag>{packet.materialName}</Tag>
+        <Tag icon={<ToolOutlined />}>{toolsText}</Tag>
+        {packet.rework && <Tag color="volcano">Переделка</Tag>}
+        {packet.thumbsUp && <Tag color="green">👍 Выполнено</Tag>}
+      </div>
+
+      {(packet.comments.length > 0 || packet.dowelingLinks.length > 0) && (
+        <div className="cnc-packet-card__notes">
+          {packet.comments.map((comment, index) => (
+            <span key={`${packet.packetId}:comment:${index}`}>{comment}</span>
+          ))}
+          {packet.dowelingLinks.map((link, index) => (
+            <span key={`${packet.packetId}:dowel:${index}`}>
+              {link.orderName}: присадка №{link.dowelingNumber}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {packet.analysisWarnings.length > 0 && (
+        <div className="cnc-packet-card__warnings">
+          {packet.analysisWarnings.map((warning, index) => (
+            <span key={`${packet.packetId}:warning:${index}`}>
+              <ExclamationCircleOutlined /> {warning}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="cnc-packet-card__items" role="table" aria-label="Результаты распознавания">
+        <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
+          <span>Заказ</span>
+          <span>Деталь</span>
+          <span>Размер</span>
+          <span>Кол.</span>
+          <span>Матч</span>
+        </div>
+        {packet.items.map((item) => (
+          <div className="cnc-packet-card__item" role="row" key={item.packetItemId}>
+            <span>
+              {item.matchOrderId ? (
+                <Button
+                  type="link"
+                  className="cnc-packet-card__order-link"
+                  onClick={() => item.matchOrderId && onOpenOrder(item.matchOrderId)}
+                >
+                  {item.orderName}
+                </Button>
+              ) : (
+                item.orderName
+              )}
+            </span>
+            <span>{item.detailNumber ? `#${item.detailNumber}` : '—'}</span>
+            <span>{formatCncSize(item.widthMm, item.heightMm)}</span>
+            <span>{item.quantity}</span>
+            <span>
+              <Tag color={matchStatusColor(item.matchStatus)}>
+                {matchStatusLabel(item.matchStatus)}
+              </Tag>
+              <span className="cnc-packet-card__confidence">
+                {formatPercent(item.confidence)}
+              </span>
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="status-board-card__footer">
+        <span>
+          <FileTextOutlined /> {packet.itemQuantityTotal} дет. · {packet.itemCount} строк
+        </span>
+        <span>{formatDateTime(packet.updatedAt)}</span>
+      </div>
+    </div>
+  );
+});
+CncTelegramPacketCard.displayName = 'CncTelegramPacketCard';
 
 interface StatusBoardColumnViewProps {
   board: OrderStatusBoardType;
@@ -1001,4 +1294,40 @@ function formatMoney(value: number): string {
 
 function formatArea(value: number): string {
   return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value)} м²`;
+}
+
+function formatCncSize(width: number | null, height: number | null): string {
+  if (!width || !height) return '—';
+  const formatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
+  return `${formatter.format(width)}×${formatter.format(height)}`;
+}
+
+function formatPercent(value: number): string {
+  return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(value * 100)}%`;
+}
+
+function matchStatusLabel(status: CncTelegramPacket['items'][number]['matchStatus']): string {
+  switch (status) {
+    case 'matched':
+      return 'ERP';
+    case 'conflict':
+      return 'Конфликт';
+    case 'needs_review':
+      return 'Проверка';
+    case 'unmatched':
+      return 'Нет';
+  }
+}
+
+function matchStatusColor(status: CncTelegramPacket['items'][number]['matchStatus']): string {
+  switch (status) {
+    case 'matched':
+      return 'green';
+    case 'conflict':
+      return 'red';
+    case 'needs_review':
+      return 'orange';
+    case 'unmatched':
+      return 'default';
+  }
 }

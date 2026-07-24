@@ -414,8 +414,37 @@ probe_file() {
                      "$(q_col bazis_pdf_table_patterns approval_status)" \
                      "$(q_col bazis_pdf_table_patterns is_active)" \
                      "$(q_col bazis_pdf_table_patterns version)" ;;
+    073_*) probe_all "$(q_col clients person_type)" \
+                     "$(q_con chk_clients_person_type)" \
+                     "$(q_col crm_sync_mapping bitrix_object)" \
+                     "$(q_col crm_sync_mapping bitrix_id)" \
+                     "$(q_col crm_sync_mapping parent_erp_id)" \
+                     "$(q_con uq_crm_sync_mapping_bitrix)" \
+                     "$(q_idx idx_crm_sync_mapping_parent)" \
+                     "$(q_trg trg_crm_sync_client_phones)" \
+                     "$(q_trg trg_crm_sync_client_person_type_orders)" ;;
+    074_*) probe_all "$(q_tbl crm_sync_payment_create_guard)" \
+                     "$(q_tbl crm_sync_writer_lock)" \
+                     "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='crm_sync_enqueue_order_id');" \
+                     "$(q_trg trg_crm_sync_payments)" ;;
     075_*) probe_075_endstate ;;
+    076_*) probe_all "$(q_col bazis_cut_set_details source_bazis_product_name)" ;;
+    077_*) probe_all "$(q_col bazis_project_revisions bazis_order_no)" "$(q_tbl bazis_projects)" ;;
+    078_*) probe_all "$(q_col bazis_cut_set_details position)" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                       FROM information_schema.columns
+                       WHERE table_schema='public'
+                         AND table_name='bazis_cut_set_details'
+                         AND column_name='position'
+                         AND data_type='text'
+                     );" ;;
     081_*) probe_all "$(q_col user_preferences page_size_preferences)" ;;
+    082_*) probe_all "$(q_tbl cnc_telegram_packets)" "$(q_tbl cnc_telegram_packet_items)" \
+                     "$(q_col cnc_telegram_packets source_version)" \
+                     "$(q_col cnc_telegram_packets payload_hash)" \
+                     "$(q_col cnc_telegram_packet_items packet_item_id)" \
+                     "$(q_idx idx_cnc_telegram_packets_workday_updated)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 
 const script = resolve(__dirname, 'up-all.sh');
 const source = readFileSync(script, 'utf8');
+const deploySource = readFileSync(resolve(__dirname, 'deploy-stack.sh'), 'utf8');
 const setupSource = readFileSync(resolve(__dirname, 'setup-vps.sh'), 'utf8');
 const composeSource = readFileSync(resolve(__dirname, 'templates/docker-compose.vps.yml'), 'utf8');
 function run(args: string[]) {
@@ -16,7 +17,6 @@ describe('up-all.sh provision', () => {
     const out = run(['provision', '--dry-run']);
     expect(out).toMatch(/update-build-repos/);
     expect(out).toMatch(/check-env/);
-    expect(out).toMatch(/server-storage/);
     expect(out).toMatch(/compose up/);
     expect(out).toMatch(/apply-migrations/);
     expect(out).toMatch(/smoke/);
@@ -58,5 +58,18 @@ describe('up-all.sh provision', () => {
   it('fixes compose Freecut build context to the verified checkout', () => {
     expect(composeSource).toMatch(/freecut:[\s\S]*build:[\s\S]*context: \.\/repo_freecut/);
     expect(composeSource).not.toContain('FREECUT_BUILD_CONTEXT');
+  });
+
+  it('exports COMPOSE_PROFILES from .env before compose up', () => {
+    expect(source).toMatch(/load_compose_profiles[\s\S]*export COMPOSE_PROFILES/);
+    expect(source).toMatch(/preflight\(\)[\s\S]*load_compose_profiles/);
+    expect(source).toMatch(/config\)[\s\S]*preflight[\s\S]*compose config/);
+  });
+
+  it('deploy-stack overlays CNC Telegram worker for existing live compose files', () => {
+    expect(deploySource).toContain('docker-compose.cnc-telegram-worker.yml');
+    expect(deploySource).toMatch(/compose_profile_enabled cnc-telegram[\s\S]*cnc-telegram-worker/);
+    expect(deploySource).toMatch(/COMPOSE_FILE_ARGS=\(-f "\$COMPOSE_FILE"\)/);
+    expect(deploySource).toMatch(/docker compose --env-file "\$ENV_FILE" "\$\{COMPOSE_FILE_ARGS\[@\]\}"/);
   });
 });

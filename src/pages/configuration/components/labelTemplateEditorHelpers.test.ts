@@ -15,6 +15,7 @@ import {
   readLabelIfElseCondition,
   readAndNormalizeLabelTransformedNodes,
   readLabelTypography,
+  resolveLabelCanvasText,
   resolveLabelElementPreviewText,
   resolveLatestStateUpdate,
   selectLabelElements,
@@ -250,6 +251,31 @@ describe('label template editor helpers', () => {
       'detail.material_name',
       'order.order_name',
     ]);
+  });
+
+  it('keeps a conditioned field name visible on the editable canvas when the active branch is hidden', () => {
+    const conditional: LabelTemplateElement = {
+      ...elements[0],
+      sourceField: 'detail.detail_name',
+      condition: {
+        type: 'if_else',
+        version: 1,
+        when: { field: 'detail.material_name', op: 'not_empty' },
+        then: { type: 'current' },
+        else: { type: 'hidden' },
+      },
+    };
+    const values = new Map<string, string>([['detail.material_name', '']]);
+    const labels = new Map<string, string>([['detail.detail_name', 'Название детали']]);
+
+    expect(resolveLabelCanvasText(conditional, values, labels, {
+      evaluateConditions: true,
+      keepSourceVisible: false,
+    })).toBe('');
+    expect(resolveLabelCanvasText(conditional, values, labels, {
+      evaluateConditions: true,
+      keepSourceVisible: true,
+    })).toBe('Название детали');
   });
 
   it.each([

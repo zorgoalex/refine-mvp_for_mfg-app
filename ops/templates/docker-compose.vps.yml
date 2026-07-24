@@ -203,6 +203,7 @@ services:
       BACKEND_ENABLE_SHEET_MATERIALS: ${BACKEND_ENABLE_SHEET_MATERIALS:-false}
       BACKEND_SHEET_ORDERS_READS: ${BACKEND_SHEET_ORDERS_READS:-false}
       BACKEND_ENABLE_CUT_JOBS: ${BACKEND_ENABLE_CUT_JOBS:-false}
+      BACKEND_ENABLE_CNC_TELEGRAM: ${BACKEND_ENABLE_CNC_TELEGRAM:-false}
       BACKEND_ENABLE_DOWELING_COMMANDS: ${BACKEND_ENABLE_DOWELING_COMMANDS:-false}
       BACKEND_ENABLE_LABELS: ${BACKEND_ENABLE_LABELS:-false}
       BACKEND_ENABLE_BAZIS: ${BACKEND_ENABLE_BAZIS:-false}
@@ -223,17 +224,20 @@ services:
       CAD_SERVICE_BASE_URL: ${CAD_SERVICE_BASE_URL:-http://cad-service:8000}
       OCR_SERVICE_BASE_URL: ${OCR_SERVICE_BASE_URL:-http://ocr-service:8000}
       CAD_SERVICE_API_TOKEN: ${CAD_SERVICE_API_TOKEN:-}
-      # Twenty CRM one-way sync (Phase 2) — fail-closed
-      BACKEND_ENABLE_TWENTY_SYNC: ${BACKEND_ENABLE_TWENTY_SYNC:-false}
-      BACKEND_TWENTY_SYNC_RELAY_OWNER: ${BACKEND_TWENTY_SYNC_RELAY_OWNER:-none}
-      BACKEND_TWENTY_SYNC_DRY_RUN: ${BACKEND_TWENTY_SYNC_DRY_RUN:-false}
-      BACKEND_TWENTY_SYNC_POLL_INTERVAL_MS: ${BACKEND_TWENTY_SYNC_POLL_INTERVAL_MS:-60000}
-      BACKEND_TWENTY_SYNC_BATCH_SIZE: ${BACKEND_TWENTY_SYNC_BATCH_SIZE:-100}
-      BACKEND_TWENTY_SYNC_MAX_ATTEMPTS: ${BACKEND_TWENTY_SYNC_MAX_ATTEMPTS:-10}
-      BACKEND_TWENTY_SYNC_WORKER_ID: ${BACKEND_TWENTY_SYNC_WORKER_ID:-crm-sync-local}
-      BACKEND_TWENTY_SYNC_LEASE_MS: ${BACKEND_TWENTY_SYNC_LEASE_MS:-300000}
-      TWENTY_SYNC_BASE_URL: ${TWENTY_SYNC_BASE_URL:-}
-      TWENTY_SYNC_API_KEY: ${TWENTY_SYNC_API_KEY:-}
+      # Bitrix24 one-way CRM projection — default OFF and fail-closed.
+      BACKEND_ENABLE_BITRIX24_SYNC: ${BACKEND_ENABLE_BITRIX24_SYNC:-false}
+      BACKEND_BITRIX24_SYNC_RELAY_OWNER: ${BACKEND_BITRIX24_SYNC_RELAY_OWNER:-none}
+      BACKEND_BITRIX24_SYNC_DRY_RUN: ${BACKEND_BITRIX24_SYNC_DRY_RUN:-false}
+      BACKEND_BITRIX24_SYNC_POLL_INTERVAL_MS: ${BACKEND_BITRIX24_SYNC_POLL_INTERVAL_MS:-60000}
+      BACKEND_BITRIX24_SYNC_BATCH_SIZE: ${BACKEND_BITRIX24_SYNC_BATCH_SIZE:-100}
+      BACKEND_BITRIX24_SYNC_MAX_ATTEMPTS: ${BACKEND_BITRIX24_SYNC_MAX_ATTEMPTS:-10}
+      BACKEND_BITRIX24_SYNC_WORKER_ID: ${BACKEND_BITRIX24_SYNC_WORKER_ID:-bitrix24-sync-local}
+      BACKEND_BITRIX24_SYNC_LEASE_MS: ${BACKEND_BITRIX24_SYNC_LEASE_MS:-300000}
+      BITRIX24_WEBHOOK_URL: ${BITRIX24_WEBHOOK_URL:-}
+      BITRIX24_REQUEST_TIMEOUT_MS: ${BITRIX24_REQUEST_TIMEOUT_MS:-30000}
+      BITRIX24_CURRENCY_ID: ${BITRIX24_CURRENCY_ID:-KZT}
+      BITRIX24_PAY_SYSTEM_ID: ${BITRIX24_PAY_SYSTEM_ID:-}
+      BITRIX24_ASSIGNED_BY_ID: ${BITRIX24_ASSIGNED_BY_ID:-}
     depends_on:
       postgresdb:
         condition: service_healthy
@@ -315,6 +319,174 @@ services:
       retries: 3
       start_period: 30s
 
+  glm-ocr-model-init:
+    profiles: ["cnc-telegram"]
+    image: ${GLM_OCR_MODEL_INIT_IMAGE:-curlimages/curl:8.10.1}
+    restart: "no"
+    user: "0:0"
+    entrypoint:
+      - /bin/sh
+      - -lc
+    command:
+      - |
+        set -eu
+        if [ ! -s "/models/$${GLM_OCR_MODEL_FILE}" ]; then
+          rm -f "/models/$${GLM_OCR_MODEL_FILE}.tmp"
+          curl -fL --retry 5 --retry-delay 10 --connect-timeout 20 -o "/models/$${GLM_OCR_MODEL_FILE}.tmp" "$${GLM_OCR_MODEL_URL}"
+          mv "/models/$${GLM_OCR_MODEL_FILE}.tmp" "/models/$${GLM_OCR_MODEL_FILE}"
+        fi
+        if [ ! -s "/models/$${GLM_OCR_MMPROJ_FILE}" ]; then
+          rm -f "/models/$${GLM_OCR_MMPROJ_FILE}.tmp"
+          curl -fL --retry 5 --retry-delay 10 --connect-timeout 20 -o "/models/$${GLM_OCR_MMPROJ_FILE}.tmp" "$${GLM_OCR_MMPROJ_URL}"
+          mv "/models/$${GLM_OCR_MMPROJ_FILE}.tmp" "/models/$${GLM_OCR_MMPROJ_FILE}"
+        fi
+    environment:
+      GLM_OCR_MODEL_URL: ${GLM_OCR_MODEL_URL:-https://huggingface.co/ggml-org/GLM-OCR-GGUF/resolve/main/GLM-OCR-Q8_0.gguf?download=true}
+      GLM_OCR_MMPROJ_URL: ${GLM_OCR_MMPROJ_URL:-https://huggingface.co/ggml-org/GLM-OCR-GGUF/resolve/main/mmproj-GLM-OCR-Q8_0.gguf?download=true}
+      GLM_OCR_MODEL_FILE: ${GLM_OCR_MODEL_FILE:-GLM-OCR-Q8_0.gguf}
+      GLM_OCR_MMPROJ_FILE: ${GLM_OCR_MMPROJ_FILE:-mmproj-GLM-OCR-Q8_0.gguf}
+    volumes:
+      - glm-ocr-model-cache:/models
+    networks:
+      - host_access
+    cpus: ${GLM_OCR_MODEL_INIT_CPUS:-1.0}
+    mem_limit: ${GLM_OCR_MODEL_INIT_MEM_LIMIT:-256m}
+    pids_limit: ${GLM_OCR_MODEL_INIT_PIDS_LIMIT:-128}
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  glm-ocr-llama:
+    profiles: ["cnc-telegram"]
+    image: ${GLM_OCR_LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    restart: unless-stopped
+    depends_on:
+      glm-ocr-model-init:
+        condition: service_completed_successfully
+    command:
+      - --model
+      - /models/${GLM_OCR_MODEL_FILE:-GLM-OCR-Q8_0.gguf}
+      - --mmproj
+      - /models/${GLM_OCR_MMPROJ_FILE:-mmproj-GLM-OCR-Q8_0.gguf}
+      - --alias
+      - ${GLM_OCR_MODEL_ALIAS:-glm-ocr}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - -c
+      - ${GLM_OCR_CTX_SIZE:-12000}
+      - --threads
+      - ${GLM_OCR_THREADS:-4}
+      - --n-gpu-layers
+      - "0"
+      - --no-mmproj-offload
+      - --flash-attn
+      - "off"
+    expose:
+      - "8080"
+    volumes:
+      - glm-ocr-model-cache:/models:ro
+    networks:
+      - back
+    cpus: ${GLM_OCR_LLAMA_CPUS:-2.0}
+    mem_limit: ${GLM_OCR_LLAMA_MEM_LIMIT:-4096m}
+    pids_limit: ${GLM_OCR_LLAMA_PIDS_LIMIT:-256}
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  glm-ocr-runner:
+    profiles: ["cnc-telegram"]
+    build:
+      context: ${GLM_OCR_RUNNER_BUILD_CONTEXT:-./repo_erp/glm-ocr-runner}
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      glm-ocr-llama:
+        condition: service_started
+    expose:
+      - "8001"
+    environment:
+      LLAMA_SERVER_URL: ${LLAMA_SERVER_URL:-http://glm-ocr-llama:8080}
+      GLM_OCR_MODEL_ALIAS: ${GLM_OCR_MODEL_ALIAS:-glm-ocr}
+      GLM_OCR_TIMEOUT_SECONDS: ${GLM_OCR_TIMEOUT_SECONDS:-600}
+      GLM_OCR_MAX_TOKENS: ${GLM_OCR_MAX_TOKENS:-4096}
+      GLM_OCR_RESPONSE_FORMAT: ${GLM_OCR_RESPONSE_FORMAT:-false}
+      GLM_OCR_MAX_IMAGE_BYTES: ${GLM_OCR_MAX_IMAGE_BYTES:-10485760}
+      GLM_OCR_MAX_WAITING: ${GLM_OCR_MAX_WAITING:-2}
+    networks:
+      - back
+    cpus: ${GLM_OCR_RUNNER_CPUS:-0.5}
+    mem_limit: ${GLM_OCR_RUNNER_MEM_LIMIT:-512m}
+    pids_limit: ${GLM_OCR_RUNNER_PIDS_LIMIT:-128}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=5)\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  cnc-telegram-worker:
+    profiles: ["cnc-telegram"]
+    build:
+      context: ${CNC_TELEGRAM_WORKER_BUILD_CONTEXT:-./repo_erp/cnc-telegram-worker}
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      glm-ocr-runner:
+        condition: service_healthy
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_SESSION_PATH: ${TELEGRAM_SESSION_PATH:-/data/session/cnc_telegram}
+      TELEGRAM_CHAT: ${TELEGRAM_CHAT:-}
+      TELEGRAM_ALLOWED_CHAT_ID: ${TELEGRAM_ALLOWED_CHAT_ID:-}
+      ERP_API_URL: ${CNC_TELEGRAM_ERP_API_URL:-http://backend:3000/api/v1}
+      ERP_BEARER_TOKEN: ${ERP_BEARER_TOKEN:-}
+      ERP_WORKER_LOGIN: ${ERP_WORKER_LOGIN:-}
+      ERP_WORKER_PASSWORD: ${ERP_WORKER_PASSWORD:-}
+      CNC_OCR_COMMAND: ${CNC_OCR_COMMAND:-python -m cnc_telegram_worker.glm_ocr_client --image {image}}
+      GLM_OCR_RUNNER_URL: ${GLM_OCR_RUNNER_URL:-http://glm-ocr-runner:8001/ocr}
+      GLM_OCR_CLIENT_TIMEOUT_SECONDS: ${GLM_OCR_CLIENT_TIMEOUT_SECONDS:-660}
+      CNC_OCR_ENGINE: ${CNC_OCR_ENGINE:-glm-ocr-0.9b-q8-llama.cpp}
+      CNC_PARSER_VERSION: ${CNC_PARSER_VERSION:-cnc-telegram-worker-v1}
+      CNC_MACHINE_DEFAULT: ${CNC_MACHINE_DEFAULT:-}
+      CNC_DEFAULT_MATERIAL: ${CNC_DEFAULT_MATERIAL:-МДФ 16мм}
+      CNC_BUSINESS_TIMEZONE: ${CNC_BUSINESS_TIMEZONE:-Asia/Almaty}
+      CNC_HISTORY_DAYS: ${CNC_HISTORY_DAYS:-7}
+      CNC_POLL_INTERVAL_SECONDS: ${CNC_POLL_INTERVAL_SECONDS:-120}
+      CNC_TEMP_TTL_HOURS: ${CNC_TEMP_TTL_HOURS:-24}
+      CNC_MAX_MESSAGES_PER_SCAN: ${CNC_MAX_MESSAGES_PER_SCAN:-1000}
+      CNC_TEMP_DIR: ${CNC_TEMP_DIR:-/data/tmp}
+      CNC_STATE_PATH: ${CNC_STATE_PATH:-/data/state.json}
+      CNC_RESEND_UNCHANGED: ${CNC_RESEND_UNCHANGED:-false}
+      CNC_BACKFILL_ON_START: ${CNC_BACKFILL_ON_START:-true}
+    command: ["daemon"]
+    volumes:
+      - cnc-telegram-worker-data:/data
+    networks:
+      - back
+    cpus: ${CNC_TELEGRAM_WORKER_CPUS:-1.0}
+    mem_limit: ${CNC_TELEGRAM_WORKER_MEM_LIMIT:-1024m}
+    pids_limit: ${CNC_TELEGRAM_WORKER_PIDS_LIMIT:-128}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   cad-service:
     build:
       context: ${CAD_BUILD_CONTEXT:-./repo_svgdxf}
@@ -385,3 +557,5 @@ volumes:
   valkey_data:
   cad-data:
   cad-generated:
+  cnc-telegram-worker-data:
+  glm-ocr-model-cache:
