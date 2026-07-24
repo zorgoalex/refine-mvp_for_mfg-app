@@ -1,0 +1,33 @@
+{
+  "apiUrl": "/ui-redesign",
+  "ui": {
+    "evolutionEnabled": true,
+    "forceLegacy": false
+  },
+  "features": {
+    "backendAuth": true,
+    "backendPermissions": true,
+    "backendOrdersRead": true,
+    "backendOrdersWrite": true,
+    "backendPayments": true,
+    "backendClientPhones": true,
+    "backendProductionActions": true,
+    "backendDeadlines": true,
+    "backendOrderExport": false,
+    "backendGroups": true,
+    "backendUsers": true,
+    "backendVlm": false,
+    "backendReferences": true,
+    "backendCut": true,
+    "bazisCut": true,
+    "projects": true,
+    "bazisImport": true,
+    "labels": true,
+    "statusAutomation": true,
+    "orderStatusBoard": true,
+    "pdfImportLayoutPatterns": true,
+    "sheetMaterialsReads": true,
+    "enableLegacyHasura": false,
+    "workosAuth": false
+  }
+}

@@ -61,7 +61,6 @@ export const authProvider: AuthBindings = {
 
       return {
         success: true,
-        redirectTo: '/',
       };
     } catch (error) {
       console.error('Login error:', error);
@@ -237,7 +236,6 @@ async function loginWithBackend(credentials: LoginCredentials) {
 
     return {
       success: true,
-      redirectTo: '/',
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Неверный логин или пароль';

@@ -5,6 +5,10 @@ describe('frontend runtime config delivery', () => {
   it('fails closed when runtime env is absent', () => {
     expect(buildFrontendRuntimeConfig({})).toEqual({
       apiUrl: '',
+      ui: {
+        evolutionEnabled: false,
+        forceLegacy: false,
+      },
       features: {
         backendAuth: false,
         backendPermissions: false,
@@ -56,6 +60,10 @@ describe('frontend runtime config delivery', () => {
       }),
     ).toEqual({
       apiUrl: 'https://api.example.test',
+      ui: {
+        evolutionEnabled: false,
+        forceLegacy: false,
+      },
       features: {
         backendAuth: true,
         backendPermissions: true,
@@ -98,6 +106,20 @@ describe('frontend runtime config delivery', () => {
   it('maps labels runtime flag default-off and true', () => {
     expect(buildFrontendRuntimeConfig({}).features.labels).toBe(false);
     expect(buildFrontendRuntimeConfig({ RUNTIME_CONFIG_LABELS: 'true' }).features.labels).toBe(true);
+  });
+
+  it('maps UI rollout flags and keeps force-legacy independent', () => {
+    expect(buildFrontendRuntimeConfig({}).ui).toEqual({
+      evolutionEnabled: false,
+      forceLegacy: false,
+    });
+    expect(buildFrontendRuntimeConfig({
+      RUNTIME_CONFIG_UI_EVOLUTION: 'true',
+      RUNTIME_CONFIG_UI_FORCE_LEGACY: 'true',
+    }).ui).toEqual({
+      evolutionEnabled: true,
+      forceLegacy: true,
+    });
   });
 
   it('maps PDF layout-pattern runtime flag default-off and true', () => {

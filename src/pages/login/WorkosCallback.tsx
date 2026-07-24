@@ -116,13 +116,11 @@ export const WorkosCallbackPage: React.FC = () => {
         return;
       }
 
-      // SPA navigation, no full reload: the exchanged access token lives
-      // in-memory only and a reload would discard it, forcing an extra
-      // /auth/refresh round-trip (POC race #5). me() rehydrates the user
-      // before entering the app.
+      // Never reload the consumed callback URL. A new document at `/` restores
+      // the cookie-backed session and resolves the per-user UI shell before
+      // the first authenticated paint.
       await exchange(() => authApi.workosCallback(code, state));
-      await authApi.me().catch(() => undefined);
-      navigate("/", { replace: true });
+      window.location.replace("/");
     };
 
     run().catch((exchangeError: unknown) => {

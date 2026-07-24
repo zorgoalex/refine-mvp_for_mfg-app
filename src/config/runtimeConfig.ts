@@ -7,6 +7,12 @@ import {
 export interface FrontendRuntimeConfig {
   apiUrl?: string | null;
   features?: RuntimeFeatureFlagSource | null;
+  ui?: FrontendUiRuntimeConfig | null;
+}
+
+export interface FrontendUiRuntimeConfig {
+  evolutionEnabled?: boolean;
+  forceLegacy?: boolean;
 }
 
 export interface InitializeRuntimeConfigOptions {
@@ -127,6 +133,13 @@ function isRuntimeConfig(value: unknown): value is FrontendRuntimeConfig {
     config.features === undefined ||
     config.features === null ||
     (typeof config.features === 'object' && !Array.isArray(config.features));
+  const uiIsValid =
+    config.ui === undefined ||
+    config.ui === null ||
+    (typeof config.ui === 'object' &&
+      !Array.isArray(config.ui) &&
+      (config.ui.evolutionEnabled === undefined || typeof config.ui.evolutionEnabled === 'boolean') &&
+      (config.ui.forceLegacy === undefined || typeof config.ui.forceLegacy === 'boolean'));
 
-  return apiUrlIsValid && featuresAreValid;
+  return apiUrlIsValid && featuresAreValid && uiIsValid;
 }

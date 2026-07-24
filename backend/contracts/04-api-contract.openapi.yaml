@@ -11417,6 +11417,7 @@ components:
       required:
         - themeMode
         - uiSize
+        - uiVariant
         - orderDetailColumns
         - recentReferences
         - pageSizePreferences
@@ -11427,6 +11428,9 @@ components:
         uiSize:
           type: string
           enum: [default, small]
+        uiVariant:
+          type: string
+          enum: [legacy, evolution]
         orderDetailColumns:
           type: object
           additionalProperties:
@@ -11457,6 +11461,9 @@ components:
         uiSize:
           type: string
           enum: [default, small]
+        uiVariant:
+          type: string
+          enum: [legacy, evolution]
         orderDetailColumns:
           type: object
           additionalProperties:
