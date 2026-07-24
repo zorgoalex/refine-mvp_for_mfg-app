@@ -1032,6 +1032,13 @@ export class PgLabelsRepository implements LabelsPort {
         AND r.snapshot_digest = maps.snapshot_digest
        LEFT JOIN cut_job j ON j.cut_job_id = maps.cut_job_id
        WHERE od.order_id = $1
+         AND NOT EXISTS (
+           SELECT 1
+           FROM cut_result newer
+           WHERE newer.cut_job_id = r.cut_job_id
+             AND newer.result_no = r.result_no
+             AND newer.revision_no > r.revision_no
+         )
        ORDER BY od.detail_id,
                 (j.status <> 'archived') DESC NULLS LAST,
                 (j.current_cut_result_id = r.cut_result_id) DESC NULLS LAST,

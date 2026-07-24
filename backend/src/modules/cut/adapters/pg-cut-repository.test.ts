@@ -7,11 +7,70 @@ import type { CutConfigPort } from '../application/cut-config';
 import { StaticCutConfig } from '../application/cut-config';
 import {
   PgCutRepository,
+  planCutResultAllocation,
   profileChangedOutboxKey,
   resolvePdfTemplateSelection,
   routingContractForCalcBasis,
   VACUUM_ROUTING_CONTRACT_VERSION,
 } from './pg-cut-repository';
+
+describe('cut result number allocation', () => {
+  const currentManual = {
+    cutResultId: 902,
+    resultNo: 2,
+    revisionNo: 3,
+    resultKind: 'manual' as const,
+    basedOnResultId: 900,
+  };
+
+  it('reuses the current manual number and consumes only an internal revision', () => {
+    expect(planCutResultAllocation({
+      nextResultNo: 3,
+      reuseCurrentManualVersion: true,
+      current: currentManual,
+    })).toEqual({
+      resultNo: 2,
+      revisionNo: 4,
+      basedOnResultId: 900,
+      nextResultNo: 3,
+      reusesCurrentManualVersion: true,
+    });
+  });
+
+  it('allocates a new public number for the first manual save after auto', () => {
+    expect(planCutResultAllocation({
+      nextResultNo: 2,
+      reuseCurrentManualVersion: true,
+      current: {
+        cutResultId: 900,
+        resultNo: 1,
+        revisionNo: 1,
+        resultKind: 'auto',
+        basedOnResultId: null,
+      },
+    })).toEqual({
+      resultNo: 2,
+      revisionNo: 1,
+      basedOnResultId: 900,
+      nextResultNo: 3,
+      reusesCurrentManualVersion: false,
+    });
+  });
+
+  it('allocates the next public number when recalculation follows manual edits', () => {
+    expect(planCutResultAllocation({
+      nextResultNo: 3,
+      reuseCurrentManualVersion: false,
+      current: currentManual,
+    })).toEqual({
+      resultNo: 3,
+      revisionNo: 1,
+      basedOnResultId: 902,
+      nextResultNo: 4,
+      reusesCurrentManualVersion: false,
+    });
+  });
+});
 
 describe('calculation basis routing contract', () => {
   const base = {
@@ -274,16 +333,17 @@ function createDatabase(options: FakeDbOptions = {}) {
         cut_result_id: 900,
         cut_job_id: params[0],
         result_no: params[1],
-        result_kind: params[2],
-        source_job_version: params[3],
-        based_on_result_id: params[4],
-        snapshot_job: JSON.parse(String(params[8])),
-        snapshot_manifest: JSON.parse(String(params[9])),
+        revision_no: params[2],
+        result_kind: params[3],
+        source_job_version: params[4],
+        based_on_result_id: params[5],
+        snapshot_job: JSON.parse(String(params[9])),
+        snapshot_manifest: JSON.parse(String(params[10])),
         snapshot_digest: 'fake-digest',
         computed_digest: 'fake-digest',
-        totals_snapshot: JSON.parse(String(params[10])),
-        created_by: params[11],
-        created_by_name_snapshot: params[12],
+        totals_snapshot: JSON.parse(String(params[11])),
+        created_by: params[12],
+        created_by_name_snapshot: params[13],
         created_at: new Date('2026-07-21T00:00:00Z'),
         is_current: false,
       };
@@ -367,13 +427,28 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('SELECT last_calc_params FROM cut_job')) return { rows: [{ last_calc_params: lastCalcParams }], rowCount: 1 };
     if (sql.startsWith('SELECT cut_group_id, group_key FROM cut_group')) return { rows: storedGroups, rowCount: storedGroups.length };
     if (sql.startsWith('SELECT group_key, sheets, is_active, is_stale, version FROM cut_group_manual_layout')) return { rows: [], rowCount: 0 };
-    if (sql.startsWith('SELECT version, next_cut_result_no, current_cut_result_id, request_hash FROM cut_job')) {
-      return { rows: [{ version: jobVersion, next_cut_result_no: nextResultNo, current_cut_result_id: currentResultId, request_hash: null }], rowCount: 1 };
+    if (sql.startsWith('SELECT j.version, j.next_cut_result_no, j.current_cut_result_id, j.request_hash,')) {
+      return {
+        rows: [{
+          version: jobVersion,
+          next_cut_result_no: nextResultNo,
+          current_cut_result_id: currentResultId,
+          request_hash: null,
+          current_result_no: storedResult?.result_no ?? null,
+          current_revision_no: storedResult?.revision_no ?? null,
+          current_result_kind: storedResult?.result_kind ?? null,
+          current_based_on_result_id: storedResult?.based_on_result_id ?? null,
+          current_created_by: storedResult?.created_by ?? null,
+          current_created_by_name_snapshot: storedResult?.created_by_name_snapshot ?? null,
+          current_created_at: storedResult?.created_at ?? null,
+        }],
+        rowCount: 1,
+      };
     }
     if (sql.startsWith('SELECT snapshot_job, snapshot_manifest, snapshot_digest')) {
       return storedResult ? { rows: [{ ...storedResult, computed_digest: storedResult.snapshot_digest }], rowCount: 1 } : { rows: [], rowCount: 0 };
     }
-    if (sql.startsWith('SELECT r.cut_result_id')) {
+    if (sql.startsWith('SELECT DISTINCT ON (r.result_no)') || sql.startsWith('SELECT r.cut_result_id')) {
       return storedResult ? { rows: [{ ...storedResult, computed_digest: storedResult.snapshot_digest, is_current: currentResultId === 900 }], rowCount: 1 } : { rows: [], rowCount: 0 };
     }
 
@@ -598,7 +673,7 @@ describe('PgCutRepository', () => {
     });
 
     const resultInsert = db.queries.find((query) => normalize(query.text).startsWith('INSERT INTO cut_result ('));
-    const snapshot = JSON.parse(String(resultInsert?.params[8])) as {
+    const snapshot = JSON.parse(String(resultInsert?.params[9])) as {
       unplaced: Array<{ itemId: string; instance: number; reason?: string }>;
       groups: Array<{ sheets: Array<{ renderSnapshot?: { contractVersion: string; views: Record<string, unknown> } }> }>;
     };

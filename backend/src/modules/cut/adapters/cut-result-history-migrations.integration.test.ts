@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { DatabaseService } from '../../../database/database.service';
+import type { CurrentUser } from '../../../permissions/current-user';
+import { PgCutRepository } from './pg-cut-repository';
 
 const databaseUrl = process.env.CUT_RESULT_HISTORY_TEST_DATABASE_URL
   ?? process.env.CUT_INTEGRATION_DATABASE_URL
@@ -10,6 +13,7 @@ const describeIntegration = databaseUrl ? describe : describe.skip;
 const schema = `cut_result_history_${randomUUID().replaceAll('-', '_')}`;
 const migration079 = readFileSync(new URL('../../../../db/migrations/079_cut_result_history_expand.sql', import.meta.url), 'utf8');
 const migration080 = readFileSync(new URL('../../../../db/migrations/080_cut_result_history_finalize.sql', import.meta.url), 'utf8');
+const migration085 = readFileSync(new URL('../../../../db/migrations/085_cut_result_manual_revisions.sql', import.meta.url), 'utf8');
 
 function renderSnapshot() {
   return {
@@ -63,7 +67,7 @@ function manifest(snapshot = validSnapshot()) {
   };
 }
 
-describeIntegration('cut result history migration chain', () => {
+describeIntegration('cut result history migration chain including manual revisions', () => {
   const pool = new Pool({ connectionString: databaseUrl });
   let client: PoolClient;
   let finalizeRejectedPartial = false;
@@ -117,6 +121,7 @@ describeIntegration('cut result history migration chain', () => {
     await insertLegacy(snapshotWithManualState('inactive'));
     await insertLegacy(snapshotWithManualState('stale'));
     await client.query(migration080);
+    await client.query(migration085);
   });
 
   afterAll(async () => {
@@ -154,6 +159,71 @@ describeIntegration('cut result history migration chain', () => {
       `UPDATE ${schema}.cut_result SET result_no = 2 WHERE cut_result_id = $1`,
       [inserted.rows[0].cut_result_id],
     )).rejects.toThrow(/append-only/i);
+  });
+
+  it('accepts immutable revisions under one public result number', async () => {
+    const cutJobId = await createJob();
+    const snapshot = { ...validSnapshot(), cutJobId };
+    const params = [
+      cutJobId,
+      JSON.stringify(snapshot),
+      JSON.stringify(manifest(snapshot)),
+      JSON.stringify(snapshot.totals),
+    ];
+    await client.query(
+      `INSERT INTO ${schema}.cut_result
+         (cut_job_id, result_no, revision_no, result_kind, source_job_version,
+          snapshot_job, snapshot_manifest, snapshot_digest, totals_snapshot)
+       VALUES ($1, 1, 1, 'legacy', 1, $2::jsonb, $3::jsonb,
+               cut_result_snapshot_digest($2::jsonb), $4::jsonb)`,
+      params,
+    );
+    const latest = await client.query<{ cut_result_id: string }>(
+      `INSERT INTO ${schema}.cut_result
+         (cut_job_id, result_no, revision_no, result_kind, source_job_version,
+          snapshot_job, snapshot_manifest, snapshot_digest, totals_snapshot)
+       VALUES ($1, 1, 2, 'legacy', 2, $2::jsonb, $3::jsonb,
+               cut_result_snapshot_digest($2::jsonb), $4::jsonb)
+       RETURNING cut_result_id`,
+      params,
+    );
+    await client.query(
+      `UPDATE ${schema}.cut_job
+       SET current_cut_result_id = $2, next_cut_result_no = 2
+       WHERE cut_job_id = $1`,
+      [cutJobId, latest.rows[0].cut_result_id],
+    );
+    const rows = await client.query<{ n: number }>(
+      `SELECT count(*)::int AS n
+       FROM ${schema}.cut_result
+       WHERE cut_job_id = $1 AND result_no = 1`,
+      [cutJobId],
+    );
+    expect(rows.rows[0].n).toBe(2);
+
+    const database = {
+      isConfigured: true,
+      query: (text: string, values: readonly unknown[] = []) => client.query(text, [...values]),
+    } as unknown as DatabaseService;
+    const repo = new PgCutRepository(database, {
+      optimize: async () => { throw new Error('optimizer must not run while reading history'); },
+    });
+    const currentUser = {
+      id: '1',
+      username: 'tester',
+      role: 'operator',
+      permissions: ['cut.view'],
+    } as unknown as CurrentUser;
+    const listed = await repo.listResults({ currentUser, cutJobId });
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({
+      cutResultId: Number(latest.rows[0].cut_result_id),
+      resultNo: 1,
+      sourceJobVersion: 2,
+      isCurrent: true,
+    });
+    const opened = await repo.getResult({ currentUser, cutJobId, resultNo: 1 });
+    expect(opened.cutResultId).toBe(Number(latest.rows[0].cut_result_id));
   });
 
   it('blocks finalize over a partial expand row, then accepts all legacy manual states', async () => {

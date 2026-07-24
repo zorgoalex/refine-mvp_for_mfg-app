@@ -490,6 +490,9 @@ probe_file() {
                           )
                      );" ;;
     084_user_preferences_ui_variant*) probe_all "$(q_col user_preferences ui_variant)" "$(q_con chk_user_preferences_ui_variant)" ;;
+    085_cut_result_manual_revisions*) probe_all "$(q_col cut_result revision_no)" \
+                     "$(q_con uq_cut_result_job_no)" \
+                     "$(q_con chk_cut_result_revision_no)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

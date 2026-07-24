@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const repository = readFileSync(new URL('./pg-cut-repository.ts', import.meta.url), 'utf8');
 const controller = readFileSync(new URL('../http/cut.controller.ts', import.meta.url), 'utf8');
 const pdfRenderer = readFileSync(new URL('../render/sheet-pdf.ts', import.meta.url), 'utf8');
+const labelsRepository = readFileSync(new URL('../../labels/adapters/pg-labels-repository.ts', import.meta.url), 'utf8');
 
 describe('cut result history implementation guards', () => {
   it('allocates result numbers under job transaction and freezes whole-job snapshot', () => {
@@ -23,6 +24,15 @@ describe('cut result history implementation guards', () => {
     expect(repository).toContain("status = 'completed', cut_result_id");
     expect(repository).toContain('reconcileExpiredCommands(limit = 50)');
     expect(repository).toContain("status = 'calculating' AND version = $2");
+  });
+
+  it('keeps repeated manual saves under one public result number', () => {
+    expect(repository).toContain('reuseCurrentManualVersion: true');
+    expect(repository).toContain('revisionNo: input.current.revisionNo + 1');
+    expect(repository).toContain('nextResultNo: input.nextResultNo');
+    expect(repository).toContain('ORDER BY r.result_no DESC, r.revision_no DESC');
+    expect(repository).toContain('ORDER BY r.revision_no DESC');
+    expect(labelsRepository).toContain('newer.revision_no > r.revision_no');
   });
 
   it('binds frozen render routes to job, result, group, and sheet ids', () => {

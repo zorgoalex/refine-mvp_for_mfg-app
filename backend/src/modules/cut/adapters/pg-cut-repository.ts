@@ -203,6 +203,7 @@ interface CutResultRow extends QueryResultRow {
   cut_result_id: string | number;
   cut_job_id: string | number;
   result_no: string | number;
+  revision_no: string | number;
   result_kind: CutResultKind;
   source_job_version: string | number;
   based_on_result_id: string | number | null;
@@ -347,6 +348,51 @@ export function splitByMaterialChangedOutboxKey(cutJobId: number, requestId: str
  *  only in the payload for relay dedupe/trace. */
 export function manualLayoutSavedOutboxKey(cutJobId: number, nextVersion: number): string {
   return `${CUT_AUDIT_EVENTS.manualLayoutSaved}:${cutJobId}:v${nextVersion}`;
+}
+
+export interface CutResultAllocation {
+  resultNo: number;
+  revisionNo: number;
+  basedOnResultId: number | null;
+  nextResultNo: number;
+  reusesCurrentManualVersion: boolean;
+}
+
+/**
+ * Allocate one operator-visible result number.
+ *
+ * Manual saves revise the current manual result without consuming another
+ * public number. Every revision is still an immutable cut_result row, so frozen
+ * PDFs, label maps, command dedupe, and audit links keep their original bytes.
+ */
+export function planCutResultAllocation(input: {
+  nextResultNo: number;
+  reuseCurrentManualVersion: boolean;
+  current: {
+    cutResultId: number;
+    resultNo: number;
+    revisionNo: number;
+    resultKind: CutResultKind;
+    basedOnResultId: number | null;
+  } | null;
+}): CutResultAllocation {
+  const reuse = input.reuseCurrentManualVersion && input.current?.resultKind === 'manual';
+  if (reuse && input.current) {
+    return {
+      resultNo: input.current.resultNo,
+      revisionNo: input.current.revisionNo + 1,
+      basedOnResultId: input.current.basedOnResultId,
+      nextResultNo: input.nextResultNo,
+      reusesCurrentManualVersion: true,
+    };
+  }
+  return {
+    resultNo: input.nextResultNo,
+    revisionNo: 1,
+    basedOnResultId: input.current?.cutResultId ?? null,
+    nextResultNo: input.nextResultNo + 1,
+    reusesCurrentManualVersion: false,
+  };
 }
 
 /**
@@ -1454,7 +1500,8 @@ export class PgCutRepository implements CutRepositoryPort {
 
   async listResults(query: ListCutResultsQuery): Promise<CutResultSummaryDto[]> {
     const result = await this.database.query<CutResultRow>(
-      `SELECT r.cut_result_id, r.cut_job_id, r.result_no, r.result_kind,
+      `SELECT DISTINCT ON (r.result_no)
+              r.cut_result_id, r.cut_job_id, r.result_no, r.revision_no, r.result_kind,
               r.source_job_version, r.based_on_result_id, r.totals_snapshot,
               r.created_by, r.created_by_name_snapshot, r.created_at,
               (j.current_cut_result_id = r.cut_result_id) AS is_current,
@@ -1462,7 +1509,7 @@ export class PgCutRepository implements CutRepositoryPort {
        FROM cut_result r
        JOIN cut_job j ON j.cut_job_id = r.cut_job_id
        WHERE r.cut_job_id = $1
-       ORDER BY r.result_no DESC`,
+       ORDER BY r.result_no DESC, r.revision_no DESC`,
       [query.cutJobId],
     );
     return result.rows.map(mapCutResultSummary);
@@ -1470,7 +1517,7 @@ export class PgCutRepository implements CutRepositoryPort {
 
   async getResult(query: GetCutResultQuery): Promise<CutResultDto> {
     const result = await this.database.query<CutResultRow & { snapshot_digest: string; computed_digest: string }>(
-      `SELECT r.cut_result_id, r.cut_job_id, r.result_no, r.result_kind,
+      `SELECT r.cut_result_id, r.cut_job_id, r.result_no, r.revision_no, r.result_kind,
               r.source_job_version, r.based_on_result_id, r.totals_snapshot,
               r.created_by, r.created_by_name_snapshot, r.created_at,
               r.snapshot_job, r.snapshot_digest,
@@ -1478,7 +1525,9 @@ export class PgCutRepository implements CutRepositoryPort {
               (j.current_cut_result_id = r.cut_result_id) AS is_current
        FROM cut_result r
        JOIN cut_job j ON j.cut_job_id = r.cut_job_id
-       WHERE r.cut_job_id = $1 AND r.result_no = $2`,
+       WHERE r.cut_job_id = $1 AND r.result_no = $2
+       ORDER BY r.revision_no DESC
+       LIMIT 1`,
       [query.cutJobId, query.resultNo],
     );
     const row = result.rows[0];
@@ -1532,7 +1581,7 @@ export class PgCutRepository implements CutRepositoryPort {
               totals_snapshot, created_by, created_by_name_snapshot)
            VALUES ($1, 1, 'legacy', $2, $3, $4::jsonb, $5::jsonb,
                    cut_result_snapshot_digest($4::jsonb), $6::jsonb, $7, $8)
-           ON CONFLICT (cut_job_id, result_no) DO NOTHING
+           ON CONFLICT (cut_job_id, result_no, revision_no) DO NOTHING
            RETURNING cut_result_id`,
           [
             cutJobId,
@@ -1546,7 +1595,11 @@ export class PgCutRepository implements CutRepositoryPort {
           ],
         );
         const existing = inserted.rows[0] ?? (await tx.query<{ cut_result_id: string | number }>(
-          `SELECT cut_result_id FROM cut_result WHERE cut_job_id = $1 AND result_no = 1`,
+          `SELECT cut_result_id
+           FROM cut_result
+           WHERE cut_job_id = $1 AND result_no = 1
+           ORDER BY revision_no DESC
+           LIMIT 1`,
           [cutJobId],
         )).rows[0];
         if (!existing) throw new ApiError(500, 'CUT_RESULT_BACKFILL_FAILED', `Не создан legacy раскрой задания ${cutJobId}`);
@@ -1691,6 +1744,7 @@ export class PgCutRepository implements CutRepositoryPort {
       commandPayloadHash: string;
       actor: CurrentUser;
       unplaced?: CutJobDto['unplaced'];
+      reuseCurrentManualVersion?: boolean;
     },
   ): Promise<CutResultSummaryDto> {
     const state = await tx.query<{
@@ -1698,9 +1752,27 @@ export class PgCutRepository implements CutRepositoryPort {
       next_cut_result_no: string | number;
       current_cut_result_id: string | number | null;
       request_hash: string | null;
+      current_result_no: string | number | null;
+      current_revision_no: string | number | null;
+      current_result_kind: CutResultKind | null;
+      current_based_on_result_id: string | number | null;
+      current_created_by: string | number | null;
+      current_created_by_name_snapshot: string | null;
+      current_created_at: Date | string | null;
     }>(
-      `SELECT version, next_cut_result_no, current_cut_result_id, request_hash
-       FROM cut_job WHERE cut_job_id = $1`,
+      `SELECT j.version, j.next_cut_result_no, j.current_cut_result_id, j.request_hash,
+              current_result.result_no AS current_result_no,
+              current_result.revision_no AS current_revision_no,
+              current_result.result_kind AS current_result_kind,
+              current_result.based_on_result_id AS current_based_on_result_id,
+              current_result.created_by AS current_created_by,
+              current_result.created_by_name_snapshot AS current_created_by_name_snapshot,
+              current_result.created_at AS current_created_at
+       FROM cut_job j
+       LEFT JOIN cut_result current_result
+         ON current_result.cut_result_id = j.current_cut_result_id
+        AND current_result.cut_job_id = j.cut_job_id
+       WHERE j.cut_job_id = $1`,
       [args.cutJobId],
     );
     const jobState = state.rows[0];
@@ -1719,34 +1791,61 @@ export class PgCutRepository implements CutRepositoryPort {
     snapshot = await this.attachFrozenRenderSnapshots(tx, snapshot);
     validateFrozenJobSnapshot(snapshot);
     const manifest = buildCutResultManifest(snapshot);
-    const resultNo = toNum(jobState.next_cut_result_no);
+    const current = jobState.current_cut_result_id !== null
+      && jobState.current_result_no !== null
+      && jobState.current_revision_no !== null
+      && jobState.current_result_kind !== null
+      ? {
+          cutResultId: toNum(jobState.current_cut_result_id),
+          resultNo: toNum(jobState.current_result_no),
+          revisionNo: toNum(jobState.current_revision_no),
+          resultKind: jobState.current_result_kind,
+          basedOnResultId: numOrNull(jobState.current_based_on_result_id),
+        }
+      : null;
+    const allocation = planCutResultAllocation({
+      nextResultNo: toNum(jobState.next_cut_result_no),
+      reuseCurrentManualVersion: args.reuseCurrentManualVersion === true,
+      current,
+    });
+    const resultCreatedBy = allocation.reusesCurrentManualVersion
+      ? numOrNull(jobState.current_created_by)
+      : numOrNull(args.actor.id);
+    const resultCreatedByName = allocation.reusesCurrentManualVersion
+      ? jobState.current_created_by_name_snapshot
+      : args.actor.username;
+    const resultCreatedAt = allocation.reusesCurrentManualVersion
+      ? jobState.current_created_at
+      : null;
     const inserted = await tx.query<CutResultRow>(
       `INSERT INTO cut_result
-         (cut_job_id, result_no, result_kind, source_job_version,
+         (cut_job_id, result_no, revision_no, result_kind, source_job_version,
           based_on_result_id, command_id, command_payload_hash, request_hash,
           snapshot_job, snapshot_manifest, snapshot_digest, totals_snapshot,
-          created_by, created_by_name_snapshot)
-       VALUES ($1, $2, $3, $4, $5, $6::uuid, $7, $8,
-               $9::jsonb, $10::jsonb, cut_result_snapshot_digest($9::jsonb),
-               $11::jsonb, $12, $13)
-       RETURNING cut_result_id, cut_job_id, result_no, result_kind,
+          created_by, created_by_name_snapshot, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::uuid, $8, $9,
+               $10::jsonb, $11::jsonb, cut_result_snapshot_digest($10::jsonb),
+               $12::jsonb, $13, $14, COALESCE($15::timestamptz, now()))
+       RETURNING cut_result_id, cut_job_id, result_no, revision_no, result_kind,
                  source_job_version, based_on_result_id, snapshot_job,
                  totals_snapshot, created_by, created_by_name_snapshot,
                  created_at, FALSE AS is_current`,
       [
         args.cutJobId,
-        resultNo,
+        allocation.resultNo,
+        allocation.revisionNo,
         args.resultKind,
         toNum(jobState.version),
-        numOrNull(jobState.current_cut_result_id),
+        allocation.basedOnResultId,
         args.commandId,
         args.commandPayloadHash,
         jobState.request_hash,
         JSON.stringify(snapshot),
         JSON.stringify(manifest),
         JSON.stringify(snapshot.totals),
-        numOrNull(args.actor.id),
-        args.actor.username,
+        resultCreatedBy,
+        resultCreatedByName,
+        resultCreatedAt,
       ],
     );
     const resultRow = inserted.rows[0];
@@ -1771,7 +1870,7 @@ export class PgCutRepository implements CutRepositoryPort {
       `UPDATE cut_job
        SET current_cut_result_id = $2, next_cut_result_no = $3, updated_at = now()
        WHERE cut_job_id = $1`,
-      [args.cutJobId, cutResultId, resultNo + 1],
+      [args.cutJobId, cutResultId, allocation.nextResultNo],
     );
     await tx.query(
       `UPDATE cut_result_command
@@ -3594,6 +3693,7 @@ export class PgCutRepository implements CutRepositoryPort {
         commandId: command.commandId,
         commandPayloadHash,
         actor: command.currentUser,
+        reuseCurrentManualVersion: true,
       });
 
       // Audit: before/after metadata + cut_group + order bridge rows.
@@ -3655,7 +3755,7 @@ export class PgCutRepository implements CutRepositoryPort {
             resultNo: cutResult.resultNo,
             cutNumber: cutResult.cutNumber,
           }),
-          `${CUT_AUDIT_EVENTS.manualLayoutSaved}:${command.cutJobId}:${cutResult.resultNo}`,
+          manualLayoutSavedOutboxKey(command.cutJobId, nextVersion),
         ],
       );
       return { kind: 'saved' as const };
