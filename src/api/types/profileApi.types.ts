@@ -1,4 +1,5 @@
 import type { ThemeMode, UiSize } from '../../theme/themeTypes';
+import type { UiVariant } from '../../ui-variant/uiVariant';
 
 export const RECENT_REFERENCE_RESOURCES = [
   'clients',
@@ -32,6 +33,8 @@ export type PageSizePreferences = Record<string, number>;
 export interface UserPreferencesDto {
   themeMode: ThemeMode;
   uiSize: UiSize;
+  /** Optional only while frontend can meet an older backend during rollout. */
+  uiVariant?: UiVariant;
   orderDetailColumns: Record<string, OrderDetailColumnPreference>;
   /** Optional during mixed frontend/backend rollout. */
   recentReferences?: RecentReferences;
@@ -56,6 +59,7 @@ export interface UserPreferencesResponse {
 export interface UpdateUserPreferencesRequest {
   themeMode?: ThemeMode;
   uiSize?: UiSize;
+  uiVariant?: UiVariant;
   orderDetailColumns?: Record<string, OrderDetailColumnPreference>;
   pageSizePreferences?: PageSizePreferences;
 }

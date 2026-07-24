@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveUiVariant, setDocumentUiVariant } from './uiVariant';
+import { isEvolutionAvailable, isUiVariant, resolveUiVariant, setDocumentUiVariant } from './uiVariant';
 
 describe('ui variant resolver', () => {
   it('fails closed for missing and disabled runtime config', () => {
@@ -8,12 +8,26 @@ describe('ui variant resolver', () => {
     expect(resolveUiVariant({ evolutionEnabled: false })).toBe('legacy');
   });
 
-  it('enables evolution only from an explicit runtime value', () => {
-    expect(resolveUiVariant({ evolutionEnabled: true })).toBe('evolution');
+  it('requires both runtime availability and a confirmed user preference', () => {
+    expect(resolveUiVariant({ evolutionEnabled: true })).toBe('legacy');
+    expect(resolveUiVariant({ evolutionEnabled: true }, 'evolution')).toBe('evolution');
+    expect(resolveUiVariant({ evolutionEnabled: true }, 'legacy')).toBe('legacy');
+    expect(resolveUiVariant({ evolutionEnabled: true }, 'future')).toBe('legacy');
   });
 
   it('gives emergency force-legacy highest priority', () => {
-    expect(resolveUiVariant({ evolutionEnabled: true, forceLegacy: true })).toBe('legacy');
+    expect(resolveUiVariant(
+      { evolutionEnabled: true, forceLegacy: true },
+      'evolution',
+    )).toBe('legacy');
+    expect(isEvolutionAvailable({ evolutionEnabled: true, forceLegacy: true })).toBe(false);
+  });
+
+  it('validates preference values without coercion', () => {
+    expect(isUiVariant('legacy')).toBe(true);
+    expect(isUiVariant('evolution')).toBe(true);
+    expect(isUiVariant('EVOLUTION')).toBe(false);
+    expect(isUiVariant(null)).toBe(false);
   });
 
   it('sets the document marker synchronously before React renders', () => {

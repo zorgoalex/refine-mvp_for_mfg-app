@@ -21,6 +21,10 @@ describe('UI shell registry', () => {
   });
 
   it('sets the root marker before importing App', () => {
+    expect(indexSource).toContain('seedLegacyAuthSession()');
+    expect(indexSource.indexOf('seedLegacyAuthSession()')).toBeLessThan(
+      indexSource.indexOf('await resolveInitialUiVariant'),
+    );
     expect(indexSource.indexOf('setDocumentUiVariant(uiVariant)')).toBeLessThan(
       indexSource.indexOf('await import("./App")'),
     );

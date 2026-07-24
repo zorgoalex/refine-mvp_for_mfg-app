@@ -4,14 +4,26 @@ export type UiVariant = 'legacy' | 'evolution';
 
 export const DEFAULT_UI_VARIANT: UiVariant = 'legacy';
 
+export function isUiVariant(value: unknown): value is UiVariant {
+  return value === 'legacy' || value === 'evolution';
+}
+
+export function isEvolutionAvailable(
+  config: FrontendUiRuntimeConfig | null | undefined,
+): boolean {
+  return config?.evolutionEnabled === true && config.forceLegacy !== true;
+}
+
 /**
- * UI rollout is runtime-only and fail-closed. Build-time VITE flags are
- * deliberately ignored: a missing, timed-out, or malformed runtime config
- * must never opt a user into the evolution shell.
+ * Runtime config is the availability/kill-switch boundary. Within that
+ * boundary only a validated, confirmed user preference can opt into evolution.
  */
-export function resolveUiVariant(config: FrontendUiRuntimeConfig | null | undefined): UiVariant {
-  if (config?.forceLegacy === true) return 'legacy';
-  return config?.evolutionEnabled === true ? 'evolution' : DEFAULT_UI_VARIANT;
+export function resolveUiVariant(
+  config: FrontendUiRuntimeConfig | null | undefined,
+  preference?: unknown,
+): UiVariant {
+  if (!isEvolutionAvailable(config)) return DEFAULT_UI_VARIANT;
+  return isUiVariant(preference) ? preference : DEFAULT_UI_VARIANT;
 }
 
 export function setDocumentUiVariant(
