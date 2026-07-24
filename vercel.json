@@ -2,6 +2,9 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
+  "env": {
+    "RUNTIME_CONFIG_UI_EVOLUTION": "true"
+  },
   "functions": {
     "api/order-export-to-drive.ts": {
       "maxDuration": 60
