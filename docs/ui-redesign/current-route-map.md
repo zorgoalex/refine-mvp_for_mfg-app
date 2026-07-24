@@ -133,6 +133,8 @@ All ten routes use the same authenticated shell. Navigation visibility is not a 
 
 1. Global search: Refine Kbar infrastructure exists, but current `useRefineKbar()` API only opens existing command navigation. Phase B may expose that command palette; it must not imply full-text entity search.
 2. Client list/card enrichment, payment summary/export, and material swatches are later-phase data-contract questions. No Phase B backend change.
-3. UI variant persistence: current profile contract stores `themeMode`, `uiSize`, column preferences and recent references, not `uiVariant`. Public user selection across devices needs a minimal backend preference extension; Phase B isolated preview uses boot-time runtime config only.
+3. UI variant persistence: profile contract stores `uiVariant` through
+   migration 084. Runtime config remains the availability/force-legacy
+   boundary; the confirmed per-user value selects only the presentation shell.
 4. Dark theme remains supported. Evolution palette needs an explicit scoped dark token set rather than forcing light mode.
 5. Existing footer/session data is low-value in target shell but remains accessible; evolution may compact it, legacy stays untouched.

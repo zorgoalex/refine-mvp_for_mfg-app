@@ -4,7 +4,9 @@
 
 - `src/index.tsx` ждёт `/runtime-config.json` до импорта `App`, поэтому bootstrap уже имеет безопасную точку выбора shell без flash.
 - `src/App.tsx` содержит один набор public/business routes и один authenticated `WorkspaceLayout`.
-- Profile preferences (`GET/PATCH /api/v1/me/preferences`) поддерживают `themeMode`, `uiSize`, order columns, recent references и `pageSizePreferences` (migration 081). `uiVariant` отсутствует.
+- Profile preferences (`GET/PATCH /api/v1/me/preferences`) поддерживают
+  `themeMode`, `uiSize`, `uiVariant`, order columns, recent references и
+  `pageSizePreferences` (migration 084).
 - Tabs/dirty state живут независимо от shell в Zustand/sessionStorage и hooks.
 - Feature flags могут приходить из Vite env и runtime config; неизвестный/отсутствующий key безопасно получает fallback.
 
@@ -16,40 +18,34 @@ export type UiVariant = 'legacy' | 'evolution';
 
 Variant управляет только presentation composition и theme tokens. Он не передаётся в API clients, data hooks, validation, permission helpers, status transitions, accounting/cut calculations или route guards.
 
-## Phase B: реализуемый resolver
+## Текущий resolver
 
 ```text
-runtime uiForceLegacy === true -> legacy
-runtime uiEvolution === true   -> evolution
-missing/false/invalid/timeout   -> legacy
+runtime forceLegacy === true                 -> legacy
+runtime evolutionEnabled !== true            -> legacy
+confirmed user preference legacy|evolution   -> selected value
+same-user confirmed cache while GET fails    -> cached value
+missing/invalid/timeout/user-change           -> legacy
 ```
 
-Runtime config завершается до импорта `App`. `src/index.tsx` ставит `document.documentElement.dataset.uiVariant` до динамического импорта `App`. `UiVariantProvider` получает уже финальное значение и не делает асинхронный переход после первого paint. Для UI-флагов отсутствие/ошибка runtime endpoint означает legacy независимо от build-time evolution value; isolated preview поставляет собственный same-origin runtime config.
+Runtime config, session restore и preferences GET завершаются до импорта
+`App`. `src/index.tsx` ставит
+`document.documentElement.dataset.uiVariant` до динамического импорта `App`.
+`UiVariantProvider` получает финальное значение и не делает асинхронный
+переход после первого paint.
 
-Это сознательный pilot boundary: user-facing переключатель не показывается, поэтому нет потери dirty data при live switch и нет ложного обещания cross-device persistence.
+Password login после подтверждённой аутентификации переходит новым документом
+на валидный same-origin `?to=` deep link (иначе `/`), а WorkOS login callback —
+на `/`. Это повторно запускает bootstrap уже для известного пользователя;
+consumed WorkOS callback URL никогда не перезагружается.
 
-## Target resolver после backend preference
+Per-user cache содержит только подтверждённое сервером значение и ключ с user
+ID. Он нужен лишь на случай временной ошибки GET, не участвует в разрешениях и
+не является источником cross-device persistence.
 
-```text
-1. emergency forceLegacy=true       -> legacy
-2. authenticated user preference    -> legacy | evolution
-3. organization default             -> configured variant
-4. per-user local cache             -> cache only while GET is pending
-5. safe default                     -> legacy
-```
+## Backend contract
 
-Требования target:
-
-- bootstrap endpoint или auth/session payload должен вернуть resolved variant до shell paint;
-- cache key включает user ID and organization ID;
-- cache never grants permissions and is replaced by server value;
-- PATCH failure restores confirmed value and reports error;
-- logout clears active in-memory/cache association, не стирая server preference;
-- evolution selector появляется только после полной route/role coverage.
-
-## Минимальный backend contract — blocker для user opt-in
-
-Расширить существующий endpoint, без нового route:
+Существующий endpoint расширен без нового route:
 
 ```json
 GET /api/v1/me/preferences
@@ -68,24 +64,16 @@ PATCH /api/v1/me/preferences
 { "uiVariant": "evolution" }
 ```
 
-- Validate enum `legacy|evolution` with Zod.
-- Add nullable/defaulted `ui_variant` to `user_preferences`; normalize invalid/missing to organization default or `legacy`.
-- Preserve partial PATCH semantics and mixed-deploy compatibility: frontend treats absent `uiVariant` as legacy; older frontend ignores extra response field.
-- If organization default is introduced, expose only resolved value to frontend; do not make UI preference authorization.
-- Migration number must be chosen against current upstream at implementation time. No migration is included in Phase B.
-
-Affected future files:
-
-- `backend/src/modules/profile/profile-preferences.types.ts`
-- `profile-preferences.controller.ts`
-- `pg-profile-preferences.repository.ts`
-- their tests and a new additive migration
-- `src/api/types/profileApi.types.ts`
-- `src/theme/ThemeProvider.tsx` or a dedicated preference coordinator
+- Zod принимает только `legacy|evolution`.
+- Migration 084 добавляет `user_preferences.ui_variant` с default `legacy`,
+  `NOT NULL` и check constraint.
+- Partial PATCH semantics сохранены.
+- Старый backend может ответить 200 без нового поля; frontend считает такой
+  ответ неподтверждённым, не пишет cache и не перезагружает shell.
 
 ## Provider and registry
 
-- `UiVariantProvider` owns immutable boot variant for Phase B.
+- `UiVariantProvider` owns immutable boot variant.
 - `useUiVariant()` returns value for shell selection and conditional Ant tokens.
 - `App.tsx` keeps one route tree and selects only layout component.
 - Shell registry dynamically imports both `WorkspaceLayout` and `EvolutionWorkspaceLayout`; выбранный boot variant загружает только свой shell chunk.
@@ -105,8 +93,9 @@ Affected future files:
 - Both variants use identical paths and `NavigateToResource` behavior.
 - Deep links resolve before shell composition; entity IDs/query strings are unchanged.
 - Same `useTabSync`, `tabStore`, `KeepAliveOutlet`, `useGlobalUnloadGuard` and modal close confirmation.
-- Pilot does not live-switch. Future selector must refuse/confirm when `hasAnyDirty(tabs)` or when an operation registry reports export/import/upload/payment in progress.
-- After confirmed future switch, retain `location.pathname + search`; remount only presentation shell and rehydrate shared route state where safe.
+- Selector refuses PATCH while any workspace tab is dirty.
+- After a confirmed PATCH, `window.location.reload()` retains
+  `location.pathname + search` and remounts the presentation shell cleanly.
 
 ## Alternatives rejected
 
@@ -119,9 +108,11 @@ Affected future files:
 | Switch after profile fetch inside mounted App | Wrong-shell flash and possible dirty/remount loss |
 | Embed prototype HTML | Static mock data, inaccessible, no business behavior |
 
-## Human decisions required before general rollout
+## Rollout boundary
 
-1. Approve backend `uiVariant` preference and organization default policy.
-2. Choose roles/organizations for pilot and success metrics.
-3. Decide whether live switching is allowed during long-running operations or only after reload.
-4. Approve full route/role coverage matrix after Phases C–E.
+- Existing and new users remain on `legacy` by database default.
+- `RUNTIME_CONFIG_UI_EVOLUTION=true` only makes evolution selectable.
+- `RUNTIME_CONFIG_UI_FORCE_LEGACY=true` immediately overrides all stored
+  preferences without deleting them.
+- Migration must precede backend; backend and the new resolver must precede the
+  availability flag in every environment.

@@ -1,9 +1,9 @@
 # UI redesign Phase A/B — implementation report
 
-Дата snapshot/проверки: 2026-07-21 UTC  
-Ветка: `feat/ui-redesign-foundation`  
-Worktree: `/home/ovhtest/projects/erp_dev/.worktrees/ui-redesign-foundation`  
-Production merge/deploy: не выполнялись
+Дата snapshot/проверки: 2026-07-24 UTC
+Ветка: `feat/ui-redesign-foundation`
+Worktree: `/home/ovhtest/projects/erp_dev/.worktrees/ui-redesign-foundation`
+Migration 084: применена в `erp_test`; production merge/deploy ещё не выполнялись
 
 ## Результат
 
@@ -86,9 +86,11 @@ Auth/network hardening после code review:
 
 | Check | Result |
 |---|---|
-| Targeted variant/foundation/shell/runtime/isolation tests | 47/47 passed |
-| `NODE_OPTIONS=--max-old-space-size=3072 npm run build` | passed; separate `WorkspaceLayout` and `EvolutionWorkspaceLayout` chunks |
-| Full `npm test -- --maxWorkers=1 --no-file-parallelism` on base `3ae59e86` | 667 files / 5377 tests passed; 3 files / 11 tests failed outside this diff; not repeated after base fast-forward to avoid host memory pressure |
+| Targeted variant/profile/auth tests | 63/63 passed |
+| Backend `npm run build` | passed (`tsc -p tsconfig.json`) |
+| Frontend `npm run build` | passed; separate `WorkspaceLayout` and `EvolutionWorkspaceLayout` chunks |
+| Full `npx vitest run --maxWorkers=2` after migration 084 and final base merge | 681 files / 5483 tests passed; 7 files / 29 tests skipped; 0 failed |
+| Migration runner/head verification against `erp_test` | migration 084 applied; full head `PRESENT`; 101/101 migration tests passed |
 | Compose config/bash syntax/git diff check | passed |
 | Clone-script security guards | separate secrets/path, fixed source identity, session purge, bind/network invariants passed |
 | Isolated stack runtime before stop | six services healthy; backend readiness and Hasura GraphQL passed |
@@ -116,21 +118,23 @@ Screenshots:
 
 - Internal content of all ten screens still has status `shared-legacy-body`; it
   must be migrated and visually diffed in Phase C–E.
-- Cross-device per-user `uiVariant` needs an additive backend preference
-  contract before user-facing opt-in.
+- Cross-device per-user `uiVariant` is implemented by migration 084 and
+  `GET/PATCH /api/v1/me/preferences`; migration acceptance in `erp_test` is
+  complete, deployed stage and production browser acceptance remain required.
 - Final live cross-stack JWT/cookie rejection, all-ten-screen screenshot pass,
   keyboard navigation and post-hardening browser smoke remain deferred while
   the isolated stack is stopped.
-- Full-suite failures are unrelated/pre-existing environment gaps: SSR tests in
-  `GroupsPage` and `OrgStructureConfig` access missing `localStorage`; one
-  backend contract test expects absent
-  `contracts/04-api-contract.openapi.yaml` in this worktree.
+- Pre-migration full suite exposed the expected pending migration 084 and a
+  password-login SPA navigation gap. Migration 084 was then applied to
+  `erp_test`, and login now overrides Refine's SPA redirect at hook level.
+  The final post-merge full suite and both production builds are green.
 - Repository has no formatter/lint/frontend typecheck scripts and no root
   `tsconfig.json`; build and Vitest transforms are the available frontend
   compilation checks. Existing dependency audit and main-bundle warnings are
   not remediated by this UI foundation change.
-- Do not merge or deploy until human review of this branch and isolated stack.
+- Do not enable the evolution runtime flag until migration, backend, frontend,
+  and version canaries are green in the target environment.
 
-Mandatory ERP Aggressive Critic re-review: `APPROVE`, no blocking code findings.
-It explicitly keeps the deferred live/browser checks as blockers for human live
-acceptance/merge, not for branch-level code approval.
+Final ERP Aggressive Critic verdict: `APPROVED`, no blocking findings and no ERP
+debt markers. Live stage/production evidence is recorded after each deployment
+gate completes.

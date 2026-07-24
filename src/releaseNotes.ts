@@ -30,6 +30,20 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-24",
+    title: "Переключение классического и нового дизайна",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В личном кабинете можно выбрать классический или новый дизайн интерфейса.",
+      "Выбор сохраняется в профиле пользователя и применяется на других устройствах после входа.",
+    ],
+    changed: [
+      "При переключении дизайн безопасно применяется после перезагрузки страницы; при несохранённых изменениях переключение блокируется.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-23",
     title: "Материал при импорте PDF Базис",
     services: ["ERP"],

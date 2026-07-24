@@ -32,13 +32,18 @@ Exit evidence: route/RBAC/tab parity tests, build, screenshots/responsive/zoom c
 
 ## Stage 4 — per-user opt-in
 
-Prerequisites:
+Implemented prerequisites:
 
 - backend `uiVariant` preference and confirmed-value error handling;
 - no wrong-shell flash;
-- dirty/long-operation switch guard;
+- dirty-tab switch guard;
+- safe password/WorkOS post-login bootstrap.
+
+Live rollout gates:
+
 - complete target-role coverage;
-- E2E legacy→evolution→legacy, deep links, logout/login and second-browser persistence.
+- E2E legacy→evolution→legacy, deep links, logout/login and second-browser persistence;
+- migration → backend → frontend/version canary → availability flag order.
 
 ## Stage 5 — default evolution
 
@@ -48,7 +53,8 @@ Prerequisites:
 
 ## Emergency rollback
 
-1. Set runtime `uiEvolution=false` (future force flag overrides all preferences).
+1. Set runtime `RUNTIME_CONFIG_UI_FORCE_LEGACY=true` (or disable
+   `RUNTIME_CONFIG_UI_EVOLUTION`); force-legacy overrides all preferences.
 2. Refresh/restart frontend delivery; no DB rollback needed.
 3. Verify `/orders`, deep link, login and permissions in legacy shell.
 4. Preserve user preference data for later recovery; do not delete it during incident response.
