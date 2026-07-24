@@ -7,6 +7,7 @@ import { can } from '../../../../utils/permissions';
 import { saveLabelBlob } from './labelDownloads';
 import { OrderLabelGenerateAction } from './OrderLabelGenerateAction';
 import { LabelSvgPreviewFrame } from './LabelSvgPreviewFrame';
+import { OrderLabelPagesViewer } from './OrderLabelPagesViewer';
 
 const { Text } = Typography;
 
@@ -38,9 +39,6 @@ export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> =
   const canGenerate = can('labels.generate');
   const [latest, setLatest] = useState<LatestOrderLabelsPreview | null>(null);
   const [loading, setLoading] = useState(false);
-  // Preview is rendered at 25% by default (fits without scroll); a click zooms
-  // it back to 100% (×4) and the block grows so the label shows in full.
-  const [zoomed, setZoomed] = useState(false);
 
   const loadLatest = useCallback(() => {
     setLoading(true);
@@ -71,15 +69,11 @@ export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> =
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
         {latest ? (
           <>
-            <Text type="secondary">Последняя генерация: {latest.labelCount} шт.</Text>
-            {latest.svgPages.slice(0, 1).map((svg, index) => (
-              <OrderLatestLabelPreviewSurface
-                key={index}
-                svg={svg}
-                zoomed={zoomed}
-                onToggle={() => setZoomed((z) => !z)}
-              />
-            ))}
+            <OrderLabelPagesViewer
+              svgPages={latest.svgPages}
+              title={`Последняя генерация: ${latest.labelCount} шт.`}
+              printTitle={`Заказ ${orderId} — последняя генерация бирок #${latest.generationId}`}
+            />
             <Space wrap>
               {canGenerate && (
                 <Button size="small" icon={<DownloadOutlined />} onClick={downloadLatest}>
