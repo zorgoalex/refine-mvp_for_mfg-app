@@ -107,6 +107,11 @@ describe('evaluateDeadlineActionRules', () => {
       orderContext: { orderId: 42, orderStatusId: 1, isCompleted: false },
       ruleSnapshot: {
         actionRuleId: 'stale-rule',
+        policyId: null,
+        scopeType: 'order',
+        isEnabled: true,
+        ruleName: null,
+        ruleCode: null,
         conditions: {
           allowedFromOrderStatusIds: [1],
           requireCurrentDeadlineEvent: true,
@@ -119,6 +124,7 @@ describe('evaluateDeadlineActionRules', () => {
         actionType: 'change_order_status',
         actionRuleId: 'stale-rule',
         orderId: 42,
+        sourceOrderStatusId: 1,
         targetStatusId: 8,
         snapshotHash: expect.stringMatching(/^sha256:/),
       },
@@ -179,8 +185,8 @@ describe('evaluateDeadlineActionRules', () => {
             config: {
               conditions: {
                 allowedFromOrderStatusIds: [1],
-                excludeCompletedOrders: false,
-                requireCurrentDeadlineEvent: false,
+                excludeCompletedOrders: true,
+                requireCurrentDeadlineEvent: true,
               },
               actionConfig: { targetOrderStatusId: 7 },
             },
@@ -222,7 +228,7 @@ describe('evaluateDeadlineActionRules', () => {
     });
   });
 
-  it('allows stale status transition events when the rule opts out of current-event enforcement', () => {
+  it('fails closed when a status rule opts out of current-event enforcement', () => {
     expect(
       evaluateDeadlineActionRules({
         eventType: 'DEADLINE_EXPIRED',
@@ -245,8 +251,8 @@ describe('evaluateDeadlineActionRules', () => {
       }).candidates[0],
     ).toMatchObject({
       actionRuleId: 'stale-allowed-rule',
-      wouldRun: true,
-      skipReason: null,
+      wouldRun: false,
+      skipReason: 'unsafe_rule_config',
     });
   });
 
@@ -554,7 +560,7 @@ describe('evaluateDeadlineActionRules', () => {
 });
 
 function rule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineActionRuleDto {
-  return {
+  const result: DeadlineActionRuleDto = {
     actionRuleId: 'rule-1',
     policyId: null,
     scopeType: 'order',
@@ -575,6 +581,17 @@ function rule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineActionRul
     updatedAt: '2026-05-25T10:00:00.000Z',
     ...overrides,
   };
+  if (result.actionType === 'change_order_status') {
+    result.config = {
+      ...(result.config ?? {}),
+      conditions: {
+        excludeCompletedOrders: true,
+        requireCurrentDeadlineEvent: true,
+        ...(result.config?.conditions ?? {}),
+      },
+    };
+  }
+  return result;
 }
 
 function override(overrides: Partial<DeadlineOrderOverrideDto> = {}): DeadlineOrderOverrideDto {

@@ -114,7 +114,7 @@ describe('deadline status transition fixture helper', () => {
     expect(sql).toContain("'DEADLINE_EXPIRED'");
     expect(sql).toContain("'scope', jsonb_build_object('type', 'global_orders')");
     expect(sql).toContain("'requireCurrentDeadlineEvent'");
-    expect(sql).toContain("'requireCurrentDeadlineEvent', false");
+    expect(sql).toContain("'requireCurrentDeadlineEvent', true");
     expect(sql).toContain("'targetOrderStatusId'");
     expect(sql).toMatch(/INSERT INTO deadline_order_overrides/i);
     expect(sql).toContain('true,');

@@ -26,12 +26,18 @@ export interface DeadlineActionRuleConfigDto {
   };
   conditions?: DeadlineActionRuleConditionsDto;
   actionConfig?: DeadlineActionRuleActionConfigDto;
+  ruleName?: string;
   ruleCode?: string;
   fixtureKey?: string;
 }
 
 export interface DeadlineRuleConfigSnapshotDto {
   actionRuleId: string;
+  policyId?: string | null;
+  scopeType?: DeadlineEntityType;
+  isEnabled?: boolean;
+  ruleName?: string | null;
+  ruleCode?: string | null;
   priority: number;
   eventType: DeadlineEventType;
   actionType: DeadlineActionType;
@@ -136,8 +142,10 @@ export interface PreviewOrderDeadlineActionRulesDto {
 }
 
 export interface CreateGlobalTransitionRuleRequestDto {
+  ruleName: string;
   ruleCode?: string;
-  isEnabled?: false;
+  policyId?: string | null;
+  isEnabled?: boolean;
   priority?: number;
   eventType?: 'DEADLINE_EXPIRED';
   actionType?: 'change_order_status';
@@ -152,7 +160,9 @@ export interface CreateGlobalTransitionRuleRequestDto {
 
 export interface UpdateGlobalTransitionRuleRequestDto {
   expectedUpdatedAt: string;
-  enabled?: boolean;
+  ruleName?: string;
+  ruleCode?: string | null;
+  policyId?: string | null;
   isEnabled?: boolean;
   priority?: number;
   eventType?: 'DEADLINE_EXPIRED';
@@ -164,6 +174,18 @@ export interface UpdateGlobalTransitionRuleRequestDto {
   requireCurrentDeadlineEvent?: boolean;
   reason: string;
   comment?: string | null;
+}
+
+export interface DeadlineTransitionRulesReadinessDto {
+  deadlinesEnabled: boolean;
+  deadlinesReadOnly: boolean;
+  workerEnabled: boolean;
+  actionsEnabled: boolean;
+  schedulerOwner: 'none' | 'in_process' | 'external';
+  manualMutationReady: boolean;
+  inProcessAutomaticReady: boolean;
+  externalSchedulerOwnerSelected: boolean;
+  automaticExecutionConfigured: boolean;
 }
 
 export interface DeleteGlobalTransitionRuleRequestDto {

@@ -322,7 +322,7 @@ primary_rule AS (
         'allowedFromOrderStatusIds', jsonb_build_array(selection.current_status_id),
         'excludeOrderStatusIds', jsonb_build_array(),
         'excludeCompletedOrders', true,
-        'requireCurrentDeadlineEvent', false
+        'requireCurrentDeadlineEvent', true
       ),
       'actionConfig', jsonb_build_object('targetOrderStatusId', selection.target_status_id)
     ),
@@ -358,7 +358,7 @@ lower_rule AS (
         'allowedFromOrderStatusIds', jsonb_build_array(selection.current_status_id),
         'excludeOrderStatusIds', jsonb_build_array(),
         'excludeCompletedOrders', true,
-        'requireCurrentDeadlineEvent', false
+        'requireCurrentDeadlineEvent', true
       ),
       'actionConfig', jsonb_build_object('targetOrderStatusId', selection.target_status_id)
     ),

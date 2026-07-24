@@ -566,6 +566,7 @@ describe('DeadlineActionDispatcherService', () => {
           actorLabel: 'deadline-engine',
         },
         orderId: 42,
+        expectedSourceOrderStatusId: 1,
         targetOrderStatusId: 7,
         deadlineId: 'deadline-status-1',
         deadlineEventId: 'event-status-1',
@@ -631,7 +632,7 @@ describe('DeadlineActionDispatcherService', () => {
     });
   });
 
-  it('executes stale change_order_status events when rule config opts out of current-event enforcement', async () => {
+  it('fails closed for stale status rules that opt out of current-event enforcement', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const currentEventChecks: unknown[] = [];
     const statusCommands: unknown[] = [];
@@ -680,19 +681,11 @@ describe('DeadlineActionDispatcherService', () => {
         deadlineEventId: 'event-stale-default',
       },
     ]);
-    expect(statusCommands).toEqual([
-      expect.objectContaining({
-        orderId: 42,
-        targetOrderStatusId: 7,
-        deadlineId: 'deadline-stale-default',
-        deadlineEventId: 'event-stale-default',
-        actionRuleId: 'status-stale-default',
-      }),
-    ]);
+    expect(statusCommands).toEqual([]);
     expect(executions[0]).toMatchObject({
       actionRuleId: 'status-stale-default',
-      status: 'executed',
-      skipReason: null,
+      status: 'skipped',
+      skipReason: 'unsafe_rule_config',
     });
   });
 
@@ -926,8 +919,8 @@ describe('DeadlineActionDispatcherService', () => {
     expect(executions.map((execution) => execution.idempotencyKey)).toEqual([
       expect.stringContaining('event-1:write_audit:order:42:order:42:rule-audit-a:'),
       expect.stringContaining('event-1:write_audit:order:42:order:42:rule-audit-b:'),
-      expect.stringContaining('event-1:change_order_status:order:42:order:42:rule-status-a:7:'),
-      expect.stringContaining('event-1:change_order_status:order:42:order:42:rule-status-b:8:'),
+      expect.stringContaining('event-1:change_order_status:order:42:order:42:rule-status-a:source:1:7:'),
+      expect.stringContaining('event-1:change_order_status:order:42:order:42:rule-status-b:source:1:8:'),
     ]);
   });
 
@@ -2131,7 +2124,7 @@ function createNotificationPort(): DeadlineNotificationPort {
 }
 
 function createRule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineActionRuleDto {
-  return {
+  const result: DeadlineActionRuleDto = {
     actionRuleId: 'rule-1',
     scopeType: 'order',
     eventType: 'DEADLINE_EXPIRED',
@@ -2143,6 +2136,17 @@ function createRule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineAct
     updatedAt: '2026-05-01T10:00:00.000Z',
     ...overrides,
   };
+  if (result.actionType === 'change_order_status') {
+    result.config = {
+      ...(result.config ?? {}),
+      conditions: {
+        excludeCompletedOrders: true,
+        requireCurrentDeadlineEvent: true,
+        ...(result.config?.conditions ?? {}),
+      },
+    };
+  }
+  return result;
 }
 
 function createEvent(overrides: Partial<DeadlineEventDto> = {}): DeadlineEventDto {

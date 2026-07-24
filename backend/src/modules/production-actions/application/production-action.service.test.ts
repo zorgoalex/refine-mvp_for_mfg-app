@@ -255,6 +255,7 @@ describe('ProductionActionService', () => {
           actorLabel: 'deadline-engine',
         },
         orderId: 15,
+        expectedSourceOrderStatusId: 5,
         targetOrderStatusId: 7,
         deadlineId: 'deadline-1',
         deadlineEventId: 'event-1',

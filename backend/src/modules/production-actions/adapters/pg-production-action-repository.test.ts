@@ -289,6 +289,7 @@ describe('PgProductionActionRepository', () => {
         actorLabel: 'deadline-engine',
       },
       orderId: 15,
+      expectedSourceOrderStatusId: 5,
       targetOrderStatusId: 7,
       deadlineId: 'deadline-1',
       deadlineEventId: 'event-1',
@@ -348,6 +349,7 @@ describe('PgProductionActionRepository', () => {
           actorLabel: 'deadline-engine',
         },
         orderId: 15,
+        expectedSourceOrderStatusId: 7,
         targetOrderStatusId: 7,
         deadlineId: 'deadline-1',
         deadlineEventId: 'event-1',
@@ -373,6 +375,45 @@ describe('PgProductionActionRepository', () => {
     expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
   });
 
+  it('skips a deadline transition when the locked source status changed after evaluation', async () => {
+    const database = createDatabase({ orderStatusId: 6 });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.changeOrderStatusFromDeadline({
+        source: 'deadline-engine',
+        systemActor: {
+          type: 'system',
+          actorUserId: null,
+          actorLabel: 'deadline-engine',
+        },
+        orderId: 15,
+        expectedSourceOrderStatusId: 5,
+        targetOrderStatusId: 7,
+        deadlineId: 'deadline-race',
+        deadlineEventId: 'event-race',
+        actionRuleId: 'rule-race',
+        ruleVersionId: null,
+        ruleConfigSnapshot: { snapshotHash: 'sha256:rule-race' },
+        idempotencyKey: 'deadline-status-race-key',
+        requestId: 'request-deadline-race',
+        occurredAt: '2026-05-25T10:00:00.000Z',
+      }),
+    ).resolves.toMatchObject({
+      status: 'skipped',
+      skipReason: 'stale_source_status',
+      response: {
+        order: { orderId: 15, orderStatusId: 6, version: 3 },
+      },
+    });
+
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE');
+    expect(sql).not.toContain('UPDATE orders SET order_status_id');
+    expect(sql).not.toContain('INSERT INTO audit_log');
+    expect(sql).not.toContain('INSERT INTO outbox_events');
+  });
+
   it('replays same-status deadline idempotency as skipped instead of executed', async () => {
     const database = createDatabase({
       idempotencyExistingRequestHash: hashStable({
@@ -381,6 +422,7 @@ describe('PgProductionActionRepository', () => {
         commandName: 'orders.status_change',
         source: 'deadline-engine',
         orderId: 15,
+        expectedSourceOrderStatusId: 7,
         orderStatusId: 7,
         deadlineId: 'deadline-1',
         deadlineEventId: 'event-1',
@@ -406,6 +448,7 @@ describe('PgProductionActionRepository', () => {
           actorLabel: 'deadline-engine',
         },
         orderId: 15,
+        expectedSourceOrderStatusId: 7,
         targetOrderStatusId: 7,
         deadlineId: 'deadline-1',
         deadlineEventId: 'event-1',

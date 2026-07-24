@@ -186,6 +186,32 @@ describe('DeadlineQueryService', () => {
     expect(repository.updateGlobalTransitionRule).not.toHaveBeenCalled();
   });
 
+  it('rejects preview deadlines that belong to another order', async () => {
+    const service = new DeadlineQueryService({
+      repository: createRepository({
+        deadline: createDeadline({
+          deadlineId: '11111111-1111-4111-8111-111111111111',
+          entityType: 'order',
+          orderId: 99,
+        }),
+      }),
+    });
+
+    await expect(
+      service.previewOrderActionRules({
+        currentUser: currentUser(),
+        orderId: 42,
+        dto: {
+          eventType: 'DEADLINE_EXPIRED',
+          deadlineId: '11111111-1111-4111-8111-111111111111',
+        },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'DEADLINE_PREVIEW_SCOPE_MISMATCH',
+    } satisfies Partial<ApiError>);
+  });
+
   it('applies active overrideConfig when previewing candidates', async () => {
     const repository = createRepository({
       actionRules: [
@@ -197,7 +223,7 @@ describe('DeadlineQueryService', () => {
               allowedFromOrderStatusIds: [2],
               excludeOrderStatusIds: [7],
               excludeCompletedOrders: true,
-              requireCurrentDeadlineEvent: false,
+              requireCurrentDeadlineEvent: true,
             },
             actionConfig: { targetOrderStatusId: 7 },
           },
@@ -359,7 +385,7 @@ describe('DeadlineQueryService', () => {
     expect(currentRepository.createActionExecution).not.toHaveBeenCalled();
   });
 
-  it('allows stale transition preview candidates when rule config opts out of current-event enforcement', async () => {
+  it('previews an opt-out transition rule as unsafe and non-runnable', async () => {
     const repository = createRepository({
       actionRules: [
         transitionRule({
@@ -389,12 +415,12 @@ describe('DeadlineQueryService', () => {
         },
       }),
     ).resolves.toMatchObject({
-      selectedActionRuleId: 'rule-stale-default',
+      selectedActionRuleId: null,
       candidateActionRules: [
         {
           actionRuleId: 'rule-stale-default',
-          wouldRun: true,
-          wouldSkipReason: null,
+          wouldRun: false,
+          wouldSkipReason: 'unsafe_rule_config',
         },
       ],
     });
@@ -490,6 +516,7 @@ function createRepository(options: {
   overrides?: DeadlineOrderOverrideDto[];
   orderContext?: { orderId: number; orderStatusId: number; isCompleted: boolean };
   isCurrentDeadlineEvent?: boolean;
+  deadline?: DeadlineInstanceDto | null;
 } = {}): DeadlineRepositoryPort {
   const createActionExecution = vi.fn(
     async () => {
@@ -505,8 +532,10 @@ function createRepository(options: {
     async listDeadlines() {
       return { data: [], total: 0 };
     },
-    async getDeadlineById() {
-      return null;
+    async getDeadlineById(deadlineId: string) {
+      return options.deadline === undefined
+        ? createDeadline({ deadlineId, entityType: 'order', orderId: 42 })
+        : options.deadline;
     },
     async getDeadlineByIdForUpdate() {
       return null;
@@ -601,7 +630,7 @@ function policy(overrides: Partial<DeadlinePolicyDto> = {}): DeadlinePolicyDto {
 }
 
 function transitionRule(overrides: Partial<DeadlineActionRuleDto> = {}): DeadlineActionRuleDto {
-  return {
+  const result: DeadlineActionRuleDto = {
     actionRuleId: 'rule-1',
     policyId: null,
     scopeType: 'order',
@@ -623,6 +652,15 @@ function transitionRule(overrides: Partial<DeadlineActionRuleDto> = {}): Deadlin
     updatedAt: '2026-05-25T10:00:00.000Z',
     ...overrides,
   };
+  result.config = {
+    ...(result.config ?? {}),
+    conditions: {
+      excludeCompletedOrders: true,
+      requireCurrentDeadlineEvent: true,
+      ...(result.config?.conditions ?? {}),
+    },
+  };
+  return result;
 }
 
 function orderOverride(overrides: Partial<DeadlineOrderOverrideDto> = {}): DeadlineOrderOverrideDto {

@@ -63,6 +63,8 @@ export class DeadlineActionDispatcherService {
     const listedRules = await command.repository.listActionRules({
       scopeType: command.event.entityType,
       eventType: command.event.eventType,
+      deadlineId: command.event.deadlineId,
+      orderId: command.event.orderId,
     });
     const rules = filterActionRulesForFixture(listedRules, getEventFixtureKey(command.event));
 
@@ -126,7 +128,12 @@ export class DeadlineActionDispatcherService {
     candidate: DeadlineActionRuleEvaluationCandidate,
     selectedActionRuleId: string | null,
   ) {
-    const baseExecution = createExecutionInput(command.event, candidate.rule, candidate.ruleSnapshot);
+    const baseExecution = createExecutionInput(
+      command.event,
+      candidate.rule,
+      candidate.ruleSnapshot,
+      candidate.orderContext?.orderStatusId ?? null,
+    );
 
     if (candidate.rule.actionType === 'change_order_status') {
       if (candidate.actionRuleId === selectedActionRuleId && candidate.skipReason === null) {
@@ -190,6 +197,7 @@ export class DeadlineActionDispatcherService {
           actorLabel: 'deadline-engine',
         },
         orderId,
+        expectedSourceOrderStatusId: candidate.orderContext?.orderStatusId as number,
         targetOrderStatusId,
         deadlineId: command.event.deadlineId,
         deadlineEventId: command.event.deadlineEventId,
@@ -648,6 +656,7 @@ function createExecutionInput(
   event: DeadlineEventDto,
   rule: DeadlineActionRuleDto,
   ruleConfigSnapshot: DeadlineRuleConfigSnapshotDto = buildRuleConfigSnapshot(rule),
+  sourceOrderStatusId: number | null = null,
 ): CreateActionExecutionInput {
   const targetType = event.entityType;
   const targetId = event.entityId;
@@ -668,6 +677,7 @@ function createExecutionInput(
       targetType,
       targetId,
       orderId: event.orderId ?? null,
+      sourceOrderStatusId,
       actionRuleId: rule.actionRuleId,
       targetStatusId,
       snapshotHash: ruleConfigSnapshot.snapshotHash,
