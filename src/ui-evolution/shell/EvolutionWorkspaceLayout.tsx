@@ -63,4 +63,3 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
 };
 
 export default EvolutionWorkspaceLayout;
-

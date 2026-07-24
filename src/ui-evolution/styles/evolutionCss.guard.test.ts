@@ -23,4 +23,3 @@ describe('evolution CSS isolation', () => {
     expect(source).not.toMatch(/transition\s*:\s*all\b/);
   });
 });
-
