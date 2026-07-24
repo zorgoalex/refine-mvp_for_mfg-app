@@ -24,6 +24,16 @@ export interface CreateOrderCommand {
   ) => Promise<void>;
 }
 
+export interface OrderDefaultSchedule {
+  version: number;
+  plannedOrderDays: number;
+  stageDeadlineDaysByProductionStatusId: ReadonlyMap<number, number>;
+}
+
+export interface OrderDefaultSchedulePort {
+  getConfiguredSchedule(client: TransactionClient): Promise<OrderDefaultSchedule | null>;
+}
+
 export interface UpdateOrderCommand {
   currentUser: CurrentUser;
   orderId: number;
@@ -131,6 +141,14 @@ export interface OrderSaveAuditMetadata {
   detailSheetMaterialTypeIds?: {
     before: DetailSheetAuditRef[];
     after: DetailSheetAuditRef[];
+  };
+  defaultSchedule?: {
+    version: number;
+    headerApplied: boolean;
+    workshops: Array<{
+      clientKey?: string;
+      productionStatusId: number;
+    }>;
   };
 }
 

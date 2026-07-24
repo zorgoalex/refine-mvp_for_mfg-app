@@ -32,6 +32,12 @@ import { resolveOrderTabLabel } from '../../../utils/tabLabels';
 import {
   buildNextOrderNameFromList, collectProvenanceNodes, draftToFormSeed } from '../../bazis/bazisOrderDraft';
 import { ordersApi } from '../../../api/ordersApi';
+import { deadlinesApi } from '../../../api/deadlinesApi';
+import type { DeadlineDefaultScheduleDto } from '../../../api/types/deadlineApi.types';
+import {
+  computePlannedCompletionDate,
+  shouldApplyComputedPlannedCompletion,
+} from '../../configuration/components/deadlineDefaultScheduleView';
 import dayjs from 'dayjs';
 
 // Sections
@@ -126,6 +132,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const saveKeySignatureRef = useRef<string | undefined>(undefined);
   const bazisDraftRuntimeRef = useRef<BazisDraftRuntime | null>(null);
   const seededBazisDraftLocationKeyRef = useRef<string | null>(null);
+  const createDefaultsSeededRef = useRef(false);
+  const automaticPlannedCompletionRef = useRef<string | null>(null);
   const projectClientRef = useRef<number | undefined>(undefined);
   const projectRequestIdRef = useRef(0);
   const [projectOptions, setProjectOptions] = useState<Array<{ label: string; value: number }>>(
@@ -140,6 +148,16 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     error: statusesError,
   } =
     useDefaultStatuses();
+  const [deadlineDefaultSchedule, setDeadlineDefaultSchedule] = useState<{
+    loaded: boolean;
+    schedule: DeadlineDefaultScheduleDto | null;
+  }>({
+    loaded:
+      mode !== 'create' ||
+      !featureFlags.useBackendDeadlines ||
+      !featureFlags.useBackendOrdersWrite,
+    schedule: null,
+  });
   const { saveOrder, isSaving } = useOrderSave(orderKey, {
     getBazisDraftSaveContext: () => {
       const runtime = bazisDraftRuntimeRef.current;
@@ -442,6 +460,42 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
   // Initialize form with default values for create mode
   useEffect(() => {
+    let cancelled = false;
+    if (
+      mode !== 'create' ||
+      !featureFlags.useBackendDeadlines ||
+      !featureFlags.useBackendOrdersWrite
+    ) {
+      setDeadlineDefaultSchedule({ loaded: true, schedule: null });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setDeadlineDefaultSchedule((current) => ({ ...current, loaded: false }));
+    void deadlinesApi
+      .getDefaultSchedule()
+      .then((response) => {
+        if (!cancelled) {
+          setDeadlineDefaultSchedule({ loaded: true, schedule: response.schedule });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDeadlineDefaultSchedule({ loaded: true, schedule: null });
+          notification.warning({
+            message: 'Срок по умолчанию не применён',
+            description: 'Плановую дату можно указать вручную. Сервер повторит проверку при сохранении.',
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mode]);
+
+  useEffect(() => {
     if (mode === 'create' && !bazisDraft) {
       bazisDraftRuntimeRef.current = null;
       seededBazisDraftLocationKeyRef.current = null;
@@ -449,26 +503,59 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   }, [bazisDraft, mode]);
 
   useEffect(() => {
-    if (mode === 'create' && defaultOrderStatus && defaultPaymentStatus) {
+    if (
+      mode === 'create' &&
+      defaultOrderStatus &&
+      defaultPaymentStatus &&
+      !createDefaultsSeededRef.current
+    ) {
+      const store = getOrderDraftStore(orderKey).getState();
+      const wasDirty = store.isDirty;
       const today = dayjs();
-      const orderDate = today.format('YYYY-MM-DD');
-      const plannedCompletion = today.add(10, 'day').format('YYYY-MM-DD');
+      const orderDate =
+        typeof store.header.order_date === 'string' &&
+        store.header.order_date.trim().length > 0
+          ? store.header.order_date
+          : today.format('YYYY-MM-DD');
+      const currentPlannedCompletion =
+        typeof store.header.planned_completion_date === 'string' &&
+        store.header.planned_completion_date.trim().length > 0
+          ? store.header.planned_completion_date
+          : null;
+      const plannedCompletion = computePlannedCompletionDate(
+        orderDate,
+        deadlineDefaultSchedule.schedule,
+      );
+      automaticPlannedCompletionRef.current =
+        currentPlannedCompletion === null ? plannedCompletion : null;
       setHeader({
         order_date: orderDate,
-        planned_completion_date: plannedCompletion,
-        order_status_id: defaultOrderStatus,
-        payment_status_id: defaultPaymentStatus,
-        production_status_from_details_enabled: true,
-        priority: 100,
-        discount: 0,
-        surcharge: 0,
-        paid_amount: 0,
-        total_amount: 0,
-        final_amount: 0,
+        planned_completion_date: currentPlannedCompletion ?? plannedCompletion,
+        order_status_id: store.header.order_status_id ?? defaultOrderStatus,
+        payment_status_id: store.header.payment_status_id ?? defaultPaymentStatus,
+        production_status_from_details_enabled:
+          store.header.production_status_from_details_enabled ?? true,
+        priority: store.header.priority ?? 100,
+        discount: store.header.discount ?? 0,
+        surcharge: store.header.surcharge ?? 0,
+        paid_amount: store.header.paid_amount ?? 0,
+        total_amount: store.header.total_amount ?? 0,
+        final_amount: store.header.final_amount ?? 0,
       });
-      setDirty(false); // Reset dirty flag after initial setup
+      createDefaultsSeededRef.current = true;
+      if (!wasDirty) {
+        setDirty(false);
+      }
     }
-  }, [mode, defaultOrderStatus, defaultPaymentStatus]);
+  }, [
+    mode,
+    defaultOrderStatus,
+    defaultPaymentStatus,
+    deadlineDefaultSchedule.schedule,
+    orderKey,
+    setDirty,
+    setHeader,
+  ]);
 
   useEffect(() => {
     if (
@@ -483,9 +570,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
     const today = dayjs();
     const seed = draftToFormSeed(bazisDraft);
+    const orderDate = today.format('YYYY-MM-DD');
+    const plannedCompletion = computePlannedCompletionDate(
+      orderDate,
+      deadlineDefaultSchedule.schedule,
+    );
+    automaticPlannedCompletionRef.current = plannedCompletion;
     const seededHeader: Record<string, unknown> = {
-      order_date: today.format('YYYY-MM-DD'),
-      planned_completion_date: today.add(10, 'day').format('YYYY-MM-DD'),
+      order_date: orderDate,
+      planned_completion_date: plannedCompletion,
       order_status_id: defaultOrderStatus,
       payment_status_id: defaultPaymentStatus,
       production_status_from_details_enabled: true,
@@ -554,6 +647,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     })();
   }, [
     bazisDraft,
+    deadlineDefaultSchedule.schedule,
     defaultOrderStatus,
     defaultPaymentStatus,
     loadOrder,
@@ -562,6 +656,50 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     reset,
     setDirty,
     setInitializing,
+  ]);
+
+  useEffect(() => {
+    if (
+      mode !== 'create' ||
+      !deadlineDefaultSchedule.loaded ||
+      !header.order_date
+    ) {
+      return;
+    }
+
+    const nextAutomaticDate = computePlannedCompletionDate(
+      String(header.order_date),
+      deadlineDefaultSchedule.schedule,
+    );
+    if (!nextAutomaticDate) {
+      return;
+    }
+
+    const previousAutomaticDate = automaticPlannedCompletionRef.current;
+    if (
+      !shouldApplyComputedPlannedCompletion(
+        header.planned_completion_date,
+        previousAutomaticDate,
+      )
+    ) {
+      return;
+    }
+    const currentDate =
+      typeof header.planned_completion_date === 'string' &&
+      header.planned_completion_date.trim().length > 0
+        ? header.planned_completion_date
+        : null;
+    automaticPlannedCompletionRef.current = nextAutomaticDate;
+    if (currentDate !== nextAutomaticDate) {
+      updateHeaderField('planned_completion_date', nextAutomaticDate);
+    }
+  }, [
+    deadlineDefaultSchedule.loaded,
+    deadlineDefaultSchedule.schedule,
+    header.order_date,
+    header.planned_completion_date,
+    mode,
+    updateHeaderField,
   ]);
 
   useEffect(() => {

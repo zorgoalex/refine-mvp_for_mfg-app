@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
 import { PgDeadlineNotificationPort } from './adapters/pg-deadline-notification-port';
+import { PgDeadlineDefaultScheduleRepository } from './adapters/pg-deadline-default-schedule-repository';
 import { PgDeadlineRepository } from './adapters/pg-deadline-repository';
 import { PgDeadlineTargetResolver } from './adapters/pg-deadline-target-resolver';
 import { PgDeadlineTransactionManager } from './adapters/pg-deadline-transaction-manager';
@@ -10,6 +11,10 @@ import { UnavailableDeadlineRepository } from './adapters/unavailable-deadline-r
 import { UnavailableDeadlineTargetResolver } from './adapters/unavailable-deadline-target-resolver';
 import { UnavailableDeadlineTransactionManager } from './adapters/unavailable-deadline-transaction-manager';
 import { DeadlineActionDispatcherService } from './application/deadline-action-dispatcher.service';
+import {
+  DeadlineDefaultScheduleService,
+  UnavailableDeadlineDefaultScheduleRepository,
+} from './application/deadline-default-schedule.service';
 import { DeadlineCommandService } from './application/deadline-command.service';
 import { DeadlineQueryService } from './application/deadline-query.service';
 import { DeadlineWorkerSchedulerService } from './application/deadline-worker-scheduler.service';
@@ -17,6 +22,7 @@ import { DeadlineWorkerService } from './application/deadline-worker.service';
 import { PgProductionActionRepository } from '../production-actions/adapters/pg-production-action-repository';
 import { UnavailableProductionActionRepository } from '../production-actions/adapters/unavailable-production-action-repository';
 import { DeadlinePoliciesController } from './http/deadline-policies.controller';
+import { DeadlineDefaultScheduleController } from './http/deadline-default-schedule.controller';
 import { DeadlineRulesController } from './http/deadline-rules.controller';
 import { DeadlineSettingsController } from './http/deadline-settings.controller';
 import { DeadlineWorkerController } from './http/deadline-worker.controller';
@@ -32,11 +38,22 @@ import { GroupsRuntimeConfigService } from '../groups/groups-runtime-config.serv
     DeadlinePoliciesController,
     DeadlineRulesController,
     DeadlineSettingsController,
+    DeadlineDefaultScheduleController,
     DeadlineWorkerController,
   ],
   providers: [
     DeadlinesRuntimeConfigService,
     DeadlineActionDispatcherService,
+    {
+      provide: DeadlineDefaultScheduleService,
+      useFactory: (database: DatabaseService) =>
+        new DeadlineDefaultScheduleService(
+          database.isConfigured
+            ? new PgDeadlineDefaultScheduleRepository(database)
+            : new UnavailableDeadlineDefaultScheduleRepository(),
+        ),
+      inject: [DatabaseService],
+    },
     {
       provide: DeadlineQueryService,
       useFactory: (database: DatabaseService) =>
