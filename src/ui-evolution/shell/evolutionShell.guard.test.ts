@@ -9,8 +9,11 @@ describe('evolution shell behavior preservation', () => {
   it('keeps tab sync, unload guards, keep-alive routes, and table scrollbars', () => {
     expect(layout).toContain('useTabSync()');
     expect(layout).toContain('useGlobalUnloadGuard()');
-    expect(layout).toContain('<KeepAliveOutlet />');
     expect(layout).toContain('<GlobalTableTopScrollbars />');
+    expect(layout).toMatch(
+      /<React\.Suspense fallback={<EvolutionRouteSkeleton \/>}>[\s\S]*<KeepAliveOutlet \/>[\s\S]*<\/React\.Suspense>/,
+    );
+    expect(layout).toContain('aria-label="Загрузка страницы"');
   });
 
   it('keeps dirty-tab confirmation and discard semantics', () => {
