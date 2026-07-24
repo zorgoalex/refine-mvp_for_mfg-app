@@ -1695,6 +1695,42 @@ describe('PgDeadlineRepository', () => {
     });
   });
 
+  it.each([
+    {
+      name: 'missing',
+      options: { missingTransitionPolicy: true },
+      code: 'DEADLINE_TRANSITION_RULE_POLICY_NOT_FOUND',
+    },
+    {
+      name: 'unsupported',
+      options: { transitionPolicyScope: 'project' as const },
+      code: 'DEADLINE_TRANSITION_RULE_POLICY_SCOPE_UNSUPPORTED',
+    },
+  ])('rejects $name transition policy references', async ({ name, options, code }) => {
+    const repository = new PgDeadlineRepository(createDatabase(options).client);
+
+    await expect(
+      repository.createGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: `req-transition-policy-${name}`,
+        dto: {
+          ruleName: 'Invalid policy rule',
+          policyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1, 2],
+          reason: 'Validate policy reference',
+        },
+        audit: transitionRuleAudit(
+          'DEADLINE_TRANSITION_RULE_CREATED',
+          `req-transition-policy-${name}`,
+        ),
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code,
+    } satisfies Partial<ApiError>);
+  });
+
   it('updates transition rules with stale safety, enabled posture and audit reason', async () => {
     const database = createDatabase();
     const repository = new PgDeadlineRepository(database.client);
@@ -2081,6 +2117,7 @@ function createDatabase(
     emptyTransitionRuleUpdate?: boolean;
     emptyTransitionRuleDelete?: boolean;
     missingOrderStatusIds?: number[];
+    missingTransitionPolicy?: boolean;
     transitionPolicyScope?: 'order' | 'order_stage' | 'client_action' | 'project';
     transitionRuleDependencyCount?: number;
     emptyRetireUpdate?: boolean;
@@ -2300,6 +2337,9 @@ function createDatabase(
       }
 
       if (text.includes('SELECT') && text.includes('FROM deadline_policies') && text.includes('policy_id = $1')) {
+        if (options.missingTransitionPolicy) {
+          return { rows: [] };
+        }
         return { rows: [policyRow({ scope_type: options.transitionPolicyScope ?? 'order' })] };
       }
 
