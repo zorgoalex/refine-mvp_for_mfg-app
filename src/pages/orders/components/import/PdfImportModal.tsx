@@ -14,6 +14,11 @@ import { IMPORT_DEFAULTS } from './types/importTypes';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { calculateOrderDetailArea } from '../../../../utils/orderArea';
 import { sortOptionsByRecency, useRecentReferences } from '../../../../hooks/useRecentReferences';
+import {
+  applyPdfSectionMaterialOverrides,
+  pdfSectionMaterialKey,
+  type PdfSectionMaterialOverrides,
+} from './utils/pdfSectionMaterialMapping';
 
 type PdfImportStep = 'upload' | 'mapping' | 'validation';
 
@@ -33,6 +38,8 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
 
   const pdfParser = usePdfParser();
   const importValidation = useImportValidation();
+  const [sectionMaterialOverrides, setSectionMaterialOverrides] =
+    useState<PdfSectionMaterialOverrides>({});
 
   const addDetail = useOrderFormStore((state) => state.addDetail);
   const recalculateFinancials = useOrderFormStore((state) => state.recalculateFinancials);
@@ -52,7 +59,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
   });
 
   // Variant B: material resolution uses sheet_material_types (cuttable only)
-  const { data: sheetMaterialTypesData } = useList({
+  const { data: sheetMaterialTypesData, isLoading: sheetMaterialTypesLoading } = useList({
     resource: 'sheet_material_types',
     pagination: { pageSize: 10000 },
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
@@ -106,6 +113,21 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
   );
   const currentStepIndex = visibleSteps.findIndex(s => s.key === currentStep);
 
+  const handlePdfUpload = useCallback((file: File) => {
+    setSectionMaterialOverrides({});
+    return pdfParser.parseFile(file);
+  }, [pdfParser.parseFile]);
+
+  const handleSectionMaterialMappingChange = useCallback((
+    sourceName: string,
+    materialId: number,
+  ) => {
+    setSectionMaterialOverrides(current => ({
+      ...current,
+      [pdfSectionMaterialKey(sourceName)]: materialId,
+    }));
+  }, []);
+
   const handleNext = useCallback(async () => {
     if (currentStep === 'upload') {
       if (pdfParser.needsLayoutMapping) {
@@ -121,10 +143,14 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
     if (currentStep === 'mapping') {
       const rows = await pdfParser.confirmLayouts();
       if (!rows) return;
-      importValidation.processDirectRows(rows);
+      importValidation.processDirectRows(applyPdfSectionMaterialOverrides(
+        rows,
+        sectionMaterialOverrides,
+        importValidation.referenceData.sheetMaterialTypes,
+      ));
       setCurrentStep('validation');
     }
-  }, [currentStep, pdfParser, importValidation]);
+  }, [currentStep, pdfParser, importValidation, sectionMaterialOverrides]);
 
   const handleBack = useCallback(() => {
     const idx = currentStepIndex;
@@ -144,6 +170,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
     // Reset all state
     pdfParser.reset();
     importValidation.reset();
+    setSectionMaterialOverrides({});
     setCurrentStep('upload');
     onClose();
   }, [pdfParser, importValidation, onClose]);
@@ -215,13 +242,13 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
           && !pdfParser.isLoading
         );
       case 'mapping':
-        return pdfParser.genericTables.length > 0;
+        return pdfParser.genericTables.length > 0 && !sheetMaterialTypesLoading;
       case 'validation':
         return importValidation.stats.validRows > 0;
       default:
         return false;
     }
-  }, [currentStep, pdfParser, importValidation.stats]);
+  }, [currentStep, pdfParser, importValidation.stats, sheetMaterialTypesLoading]);
 
   const renderStepContent = () => {
     switch (currentStep) {
@@ -235,7 +262,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
             importRows={pdfParser.importRows}
             needsLayoutMapping={pdfParser.needsLayoutMapping}
             detectedTables={pdfParser.genericTables.length}
-            onFileUpload={pdfParser.parseFile}
+            onFileUpload={handlePdfUpload}
           />
         );
 
@@ -260,7 +287,11 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
             mappings={pdfParser.layoutMappings}
             matches={pdfParser.patternMatches}
             issues={pdfParser.layoutIssues}
+            sheetMaterialTypes={importValidation.referenceData.sheetMaterialTypes}
+            sheetMaterialTypesLoading={sheetMaterialTypesLoading}
+            sectionMaterialOverrides={sectionMaterialOverrides}
             onTargetChange={pdfParser.setColumnTarget}
+            onSectionMaterialMappingChange={handleSectionMaterialMappingChange}
             onGeometryCandidateRoleChange={pdfParser.setGeometryCandidateRole}
             onUnresolvedLineAction={pdfParser.setUnresolvedLineAction}
           />

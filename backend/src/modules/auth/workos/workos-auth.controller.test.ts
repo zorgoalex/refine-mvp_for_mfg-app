@@ -16,6 +16,25 @@ describe('WorkosAuthController.linkStart', () => {
     ).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
     expect(harness.serviceCalls).toEqual([]);
   });
+
+  it('forces fresh provider authentication for linking, but not for ordinary SSO login', async () => {
+    const harness = createHarness({});
+    const response = { cookie: () => undefined } as never;
+
+    await harness.controller.authorize(createRequest(), response);
+    await harness.controller.linkStart(createRequest(), response);
+
+    const authorizeCalls = harness.serviceCalls.filter(
+      (call) => call.method === 'buildAuthorizeUrl',
+    );
+    expect(authorizeCalls).toHaveLength(2);
+    expect(authorizeCalls[0]?.input).toMatchObject({
+      options: { forceFreshAuthentication: false },
+    });
+    expect(authorizeCalls[1]?.input).toMatchObject({
+      options: { forceFreshAuthentication: true },
+    });
+  });
 });
 
 describe('WorkosAuthController callback rate limiting', () => {
@@ -328,6 +347,13 @@ function createHarness(options: {
   }> = [];
 
   const workos = {
+    buildAuthorizeUrl(
+      state: string,
+      options: { forceFreshAuthentication?: boolean } = {},
+    ) {
+      serviceCalls.push({ method: 'buildAuthorizeUrl', input: { state, options } });
+      return `https://api.workos.test/user_management/authorize?state=${encodeURIComponent(state)}`;
+    },
     async listOwnLinks(currentUser: unknown) {
       serviceCalls.push({ method: 'listOwnLinks', input: currentUser });
       return options.listOwnLinksResult ?? [];

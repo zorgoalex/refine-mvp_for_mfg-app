@@ -9,9 +9,17 @@ import { detectGenericPdfTables, inferredMapping, mapGenericTableRows } from './
 import { parsePdfContent } from './pdfTextExtractor';
 
 const corpusDir = '/home/ovhtest/projects/erp_dev/spec_erp/artifacts_test/pdf_Bazis';
-const files = fs.existsSync(corpusDir)
-  ? fs.readdirSync(corpusDir).filter(name => name.toLowerCase().endsWith('.pdf')).sort()
-  : [];
+
+function listPdfFiles(directory: string, prefix = ''): string[] {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const relativePath = path.join(prefix, entry.name);
+    return entry.isDirectory()
+      ? listPdfFiles(path.join(directory, entry.name), relativePath)
+      : entry.name.toLowerCase().endsWith('.pdf') ? [relativePath] : [];
+  });
+}
+
+const files = fs.existsSync(corpusDir) ? listPdfFiles(corpusDir).sort() : [];
 
 describe('generic detector Basis corpus', () => {
   if (!files.length) it.skip('corpus unavailable');
@@ -42,6 +50,11 @@ describe('generic detector Basis corpus', () => {
       ['мдф санузел.pdf', 4],
       ['мдф стол.pdf', 9],
       ['мдф шкаф2.pdf', 16],
+      [path.join('new', 'Инстал.pdf'), 5],
+      [path.join('new', 'МДФ-3.pdf'), 12],
+      [path.join('new', 'кухня мдф-1.pdf'), 32],
+      [path.join('new', 'мойка.pdf'), 5],
+      [path.join('new', 'шкаф.pdf'), 12],
     ]).get(fileName);
     if (expectedQuantity !== undefined) {
       const mappedResults = tables.map(table =>
@@ -49,6 +62,9 @@ describe('generic detector Basis corpus', () => {
       const mapped = mappedResults.flatMap(result => result.rows);
       expect(mappedResults.flatMap(result => result.issues)).toEqual([]);
       expect(mapped.reduce((sum, row) => sum + row.quantity, 0)).toBe(expectedQuantity);
+      if (fileName.startsWith(`new${path.sep}`)) {
+        expect(mapped.every(row => row.materialName === 'МДФ 16 мм')).toBe(true);
+      }
     }
     if (fileName === 'мдф санузел.pdf') {
       const parsed = parsePdfContent(pages);

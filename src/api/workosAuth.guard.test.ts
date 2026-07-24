@@ -162,14 +162,12 @@ describe('workos callback helpers contract', () => {
     expect(linkCardSource).toContain('markWorkosLinkIntent(state)');
   });
 
-  it('keeps the happy path in the SPA and rehydrates before navigating (no full reload)', () => {
-    // A full reload would discard the in-memory access token and force an
-    // extra /auth/refresh round-trip (POC race #5).
-    expect(callbackSource).not.toContain('window.location.replace');
-    expect(callbackSource).toContain('await authApi.me()');
-    expect(callbackSource.indexOf('authApi.me()')).toBeLessThan(
-      callbackSource.indexOf('navigate("/", { replace: true })'),
-    );
+  it('leaves the consumed callback URL through a safe hard navigation', () => {
+    // The new document restores the cookie session and resolves the per-user
+    // shell before authenticated paint. It must never reload the consumed
+    // callback URL.
+    expect(callbackSource).toContain('window.location.replace("/")');
+    expect(callbackSource).not.toContain('await authApi.me()');
   });
 
   it('restores the session from the refresh cookie before finishing a link', () => {

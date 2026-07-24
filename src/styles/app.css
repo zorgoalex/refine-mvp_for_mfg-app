@@ -786,6 +786,11 @@ html {
   cursor: default;
   user-select: none;
 }
+/* Per-group total: same visual hierarchy as the table-wide summary. */
+.details-grouped .ant-table-tbody > tr.detail-group-summary > td {
+  background-color: var(--app-surface-muted, #e6ebf2) !important;
+  font-weight: bold;
+}
 /* Row-state highlights must win over group tint (placed AFTER tint rules). */
 .details-grouped .ant-table-tbody > tr.dg-editing > td { background-color: var(--app-highlight) !important; }
 .details-grouped .ant-table-tbody > tr.dg-pending > td { background-color: var(--app-selection-bg) !important; }
@@ -801,6 +806,7 @@ html {
 .details-grouped .ant-table-tbody > tr.detail-group-tint-6:hover > td { background-color: var(--app-group-tint-6) !important; }
 .details-grouped .ant-table-tbody > tr.detail-group-tint-7:hover > td { background-color: var(--app-group-tint-7) !important; }
 .details-grouped .ant-table-tbody > tr.detail-group-separator:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
+.details-grouped .ant-table-tbody > tr.detail-group-summary:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
 
 .cut-jobs-table-container {
   overflow-y: auto;

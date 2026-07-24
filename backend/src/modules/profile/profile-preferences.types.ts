@@ -5,6 +5,8 @@ export type ThemeMode = 'light' | 'dark';
 /** Глобальный размер antd-компонентов: default = стандарт, small = компакт. */
 export type UiSize = 'default' | 'small';
 
+export type UiVariant = 'legacy' | 'evolution';
+
 export interface OrderDetailColumnPreferenceDto {
   order: string[];
   hidden: string[];
@@ -44,6 +46,7 @@ export type PageSizePreferencesDto = Record<string, number>;
 export interface UserPreferencesDto {
   themeMode: ThemeMode;
   uiSize: UiSize;
+  uiVariant: UiVariant;
   orderDetailColumns: OrderDetailColumnPreferencesDto;
   recentReferences: RecentReferenceEntitiesDto;
   pageSizePreferences: PageSizePreferencesDto;

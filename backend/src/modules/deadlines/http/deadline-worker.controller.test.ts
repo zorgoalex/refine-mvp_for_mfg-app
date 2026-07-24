@@ -110,6 +110,7 @@ describe('DeadlineWorkerController', () => {
         {
           now: '2026-05-21T10:00:00.000Z',
           limit: 100,
+          deadlineId: '11111111-1111-4111-8111-111111111111',
         },
       ),
     ).resolves.toEqual({ scanned: 2, processed: 2, expired: 1, completed: 1 });
@@ -119,12 +120,14 @@ describe('DeadlineWorkerController', () => {
         now: '2026-05-21T10:00:00.000Z',
         limit: 25,
         workerId: 'worker-acceptance',
+        deadlineId: '11111111-1111-4111-8111-111111111111',
         trigger: 'manual',
         actorUserId: '42',
         requestId: undefined,
         config: {
           actionsEnabled: false,
           notificationsEnabled: false,
+          engineOwnsDeadline: undefined,
         },
       },
     ]);

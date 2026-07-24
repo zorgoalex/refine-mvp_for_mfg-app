@@ -16,6 +16,7 @@ const MAX_PAGE_SIZE_PREFERENCES_PER_REQUEST = 32;
 const updatePreferencesSchema = z.object({
   themeMode: z.enum(['light', 'dark']).optional(),
   uiSize: z.enum(['default', 'small']).optional(),
+  uiVariant: z.enum(['legacy', 'evolution']).optional(),
   orderDetailColumns: z.record(
     z.string().min(1).max(80),
     z.object({

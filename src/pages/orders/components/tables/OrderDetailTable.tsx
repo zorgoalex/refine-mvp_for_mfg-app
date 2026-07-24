@@ -292,7 +292,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
   const asDetail = useCallback(
     (row: any): OrderDetail | null =>
-      row?.kind === 'detail' ? row.detail : row?.kind === 'separator' ? null : row,
+      row?.kind === 'detail'
+        ? row.detail
+        : row?.kind === 'separator' || row?.kind === 'summary'
+          ? null
+          : row,
     [],
   );
 
@@ -555,9 +559,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     };
 
     form.setFieldsValue({
-      height: record.height,
-      width: record.width,
-      quantity: record.quantity,
+      height: record.height ?? null,
+      width: record.width ?? null,
+      quantity: record.quantity ?? null,
       area: record.area,
       sheet_material_type_id: record.sheet_material_type_id ?? null,
       milling_type_id: record.milling_type_id,
@@ -803,6 +807,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedHeight) }}
               min={0}
               precision={2}
+              emptyWhenUnset
               onChange={handleHeightChange}
               onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
             />
@@ -838,6 +843,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedWidth) }}
               min={0}
               precision={2}
+              emptyWhenUnset
               onChange={handleWidthChange}
               onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
             />
@@ -1386,6 +1392,39 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     [columns, columnSettings],
   );
 
+  const renderGroupedSummaryValue = (row: any, key: string): React.ReactNode => {
+    const numericStyle: React.CSSProperties = { fontVariantNumeric: 'tabular-nums' };
+    if (key === 'detail_number') {
+      return (
+        <FitSummaryText align="center" style={{ ...numericStyle, color: '#666' }}>
+          {row.totals.count}
+        </FitSummaryText>
+      );
+    }
+    if (key === 'quantity') {
+      return (
+        <FitSummaryText align="right" style={{ ...numericStyle, color: '#1890ff' }}>
+          {formatNumber(row.totals.quantity, 0)}
+        </FitSummaryText>
+      );
+    }
+    if (key === 'area') {
+      return (
+        <FitSummaryText align="right" style={{ ...numericStyle, color: '#1890ff' }}>
+          {`${formatNumber(row.totals.area, 2)} м\u00B2`}
+        </FitSummaryText>
+      );
+    }
+    if (key === 'detail_cost') {
+      return (
+        <FitSummaryText align="right" style={{ ...numericStyle, color: '#52c41a' }}>
+          {formatNumber(row.totals.detailCost, 2)}
+        </FitSummaryText>
+      );
+    }
+    return null;
+  };
+
   // Number of visible data columns (excl. AntD-injected selection column).
   // Used to set colSpan on separator rows so they span the full width.
   const DATA_COLUMN_COUNT = visibleColumns.length;
@@ -1411,12 +1450,26 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     activeSorter.order,
   );
 
+  const summaryAwareColumns = controlledColumns.map((column: any) => {
+    const originalRender = column.render;
+    const key = String(column.key ?? '');
+    return {
+      ...column,
+      render: (value: any, row: any, index: number) =>
+        row?.kind === 'summary'
+          ? renderGroupedSummaryValue(row, key)
+          : originalRender
+            ? originalRender(value, row, index)
+            : value,
+    };
+  });
+
   const renderedColumns = groupingActive
-    ? controlledColumns.map((col: any) => {
+    ? summaryAwareColumns.map((col: any) => {
         const { sorter, defaultSortOrder, sortOrder, ...rest } = col;
         return rest;
       })
-    : controlledColumns;
+    : summaryAwareColumns;
 
   useEffect(() => {
     if (groupingActive) return;
@@ -1456,11 +1509,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     ? {
         selectedRowKeys,
         onChange: (keys: React.Key[]) =>
-          onSelectChange(keys.filter((k) => typeof k !== 'string' || !k.startsWith('__sep__'))),
+          onSelectChange(keys.filter((k) => typeof k !== 'string' || !k.startsWith('__'))),
         columnWidth: 24,
         getCheckboxProps: (row: any) =>
-          row?.kind === 'separator' ? { disabled: true, style: { display: 'none' } } : {},
+          row?.kind === 'separator' || row?.kind === 'summary'
+            ? { disabled: true, style: { display: 'none' } }
+            : {},
         renderCell: (_c: boolean, row: any, _i: number, node: React.ReactNode) => {
+          if (row?.kind === 'summary') return null;
           if (row?.kind !== 'separator') return node;
           if (!cutSelectable) return null;
           const state = groupCheckboxState(selectedRowKeys, row.selectionKeys);
@@ -1990,7 +2046,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         dataSource={tableRows as any}
         columns={renderedColumns}
         rowKey={(row: any) => {
-          if (row?.kind === 'separator') return row.key;
+          if (row?.kind === 'separator' || row?.kind === 'summary') return row.key;
           const d = row?.kind === 'detail' ? row.detail : row;
           return d.temp_id ?? d.detail_id ?? 0;
         }}
@@ -2028,6 +2084,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         bordered
         rowClassName={(row: any) => {
           if (row?.kind === 'separator') return 'detail-group-separator';
+          if (row?.kind === 'summary') return 'detail-group-summary';
           const record = asDetail(row)!;
           const rowKey = record.temp_id || record.detail_id || 0;
           if (!groupingActive) {
@@ -2083,7 +2140,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Table.Summary>
         )}
         onRow={(row: any, index) => {
-          if (row?.kind === 'separator') {
+          if (row?.kind === 'separator' || row?.kind === 'summary') {
             return { style: { cursor: 'default', userSelect: 'none' as const } };
           }
           const record = asDetail(row)!;

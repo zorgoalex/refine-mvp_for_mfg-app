@@ -10,6 +10,7 @@ export interface WorkflowMockApiOptions {
     graphqlErrorForQuery?: (query: string) => string | null | undefined;
     runtimeConfig?: false | Record<string, boolean>;
     themeMode?: 'light' | 'dark';
+    uiVariant?: 'legacy' | 'evolution';
 }
 
 const AUTH_TOKEN =
@@ -568,7 +569,10 @@ export async function setupWorkflowMockApi(
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify({
-                preferences: { themeMode },
+                preferences: {
+                    themeMode,
+                    ...(options.uiVariant ? { uiVariant: options.uiVariant } : {}),
+                },
             }),
         });
     });
@@ -580,6 +584,9 @@ export async function setupWorkflowMockApi(
                 contentType: 'application/json',
                 body: JSON.stringify({
                     apiUrl: '',
+                    ...(options.uiVariant
+                        ? { ui: { evolutionEnabled: true, forceLegacy: false } }
+                        : {}),
                     features: {
                         backendAuth: process.env.VITE_USE_BACKEND_AUTH === 'true',
                         backendPermissions: process.env.VITE_USE_BACKEND_PERMISSIONS === 'true',

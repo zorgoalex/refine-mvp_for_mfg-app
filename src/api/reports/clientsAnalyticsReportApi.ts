@@ -3,7 +3,7 @@ import { hasuraReportQuery } from '../hasuraReportClient';
 export interface ClientAnalyticsRow { client_id: number; client_name: string }
 
 const FIND_QUERY = `
-              query FindClient($clientNamePattern: String!) {
+              query FindClient($clientNamePattern: citext!) {
                 clients_analytics_view(
                   where: { client_name: { _ilike: $clientNamePattern } }
                   order_by: [{ client_id: desc }]

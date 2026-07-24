@@ -579,7 +579,9 @@ async function verifyEditTabs(page: Page, testInfo: TestInfo, orderName: string,
     // Real № column = 2nd cell (cell 1 is the row-selection checkbox), excluding separators.
     const detailsTable = form.locator('table:has(th:has-text("Обкат"))');
     const readNums = async () => {
-        const cells = detailsTable.locator('tbody tr:not(.detail-group-separator) td:nth-child(2)');
+        const cells = detailsTable.locator(
+            'tbody tr:not(.detail-group-separator):not(.detail-group-summary) td:nth-child(2)',
+        );
         return (await cells.allInnerTexts()).map((t) => t.trim()).filter((t) => t.length > 0);
     };
     const baselineNums = await readNums();
@@ -591,6 +593,8 @@ async function verifyEditTabs(page: Page, testInfo: TestInfo, orderName: string,
     const sepCheckbox = form.getByLabel('Разделение на группы');
     await expect(sepCheckbox).toBeVisible();
     await expect(detailsTable.locator('tr.detail-group-separator')).not.toHaveCount(0);
+    await expect(detailsTable.locator('tr.detail-group-summary')).toHaveCount(2);
+    await expect(detailsTable.locator('tr.detail-group-summary').first()).toContainText('0,58');
 
     // Tint must be GROUP-based, not row-based: walk rows in DOM order; detail rows
     // between separators must share one tint parity, and parity must flip across each
@@ -620,11 +624,13 @@ async function verifyEditTabs(page: Page, testInfo: TestInfo, orderName: string,
     // Uncheck → normal list: no separators AND original row order restored byte-equal.
     await sepCheckbox.uncheck();
     await expect(detailsTable.locator('tr.detail-group-separator')).toHaveCount(0);
+    await expect(detailsTable.locator('tr.detail-group-summary')).toHaveCount(0);
     expect(await readNums()).toEqual(baselineNums);
 
     // Re-check → grouping re-activates (field stays persisted; check forces showSeparation on).
     await sepCheckbox.check();
     await expect(detailsTable.locator('tr.detail-group-separator')).not.toHaveCount(0);
+    await expect(detailsTable.locator('tr.detail-group-summary')).toHaveCount(2);
     await screenshot(page, testInfo, 'edit-details-grouped');
 
     // ── Group-select-to-cut assertions (edit form) ────────────────────────────
@@ -691,6 +697,8 @@ async function verifyShowPage(
     // edit page (re-check step above) and persisted to localStorage; the show page
     // reads the same key and must render separators while the details section is open.
     await expect(page.locator('tr.detail-group-separator')).not.toHaveCount(0);
+    await expect(page.locator('tr.detail-group-summary')).toHaveCount(2);
+    await expect(page.locator('tr.detail-group-summary').first()).toContainText('0.58');
     // Entering cut-select mode must KEEP separators visible (Tasks 3/4 pass
     // includeLeadingSeparator + groupingActive without the old !cutSelectMode gate).
     // Group checkbox on the first separator selects the whole group (EXACTLY 2 rows
@@ -709,7 +717,9 @@ async function verifyShowPage(
         await showSep.locator('input[type="checkbox"]').check();
         await expect(showAdd).toHaveText(/Добавить выбранные в раскрой \(2\)/);
         // add one more individual row (a row NOT in that group) → union becomes 3
-        const otherRow = detailsTableShow.locator('tbody tr.ant-table-row:not(.detail-group-separator)').nth(2);
+        const otherRow = detailsTableShow
+            .locator('tbody tr.ant-table-row:not(.detail-group-separator):not(.detail-group-summary)')
+            .nth(2);
         await otherRow.locator('input[type="checkbox"]').check();
         await expect(showAdd).toHaveText(/Добавить выбранные в раскрой \(3\)/);
         // uncheck the group → back to the single individual row (1)

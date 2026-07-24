@@ -1,4 +1,5 @@
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { LabelRow } from './label-row-builder';
 import type { LabelTextFields } from './scan/label-text-extraction';
 import type { OcrTemplateForMatch, OcrTemplateRule } from './scan/ocr-template-matcher';
 
@@ -223,6 +224,7 @@ export interface OrderLabelGenerationDto {
 
 export interface LatestOrderLabelsPreviewDto extends OrderLabelGenerationDto {
   orderId: number;
+  rows: LabelRow[];
   svgPages: string[];
 }
 

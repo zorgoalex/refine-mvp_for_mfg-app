@@ -28,7 +28,8 @@ describe('order label preview surfaces', () => {
     const html = renderToStaticMarkup(
       <OrderLabelGeneratePreviewSurface preview={preview} template={template} />,
     );
-    expect(html).toContain('order-label-preview-fit');
+    expect(html).toContain('order-label-pages-viewer');
+    expect(html).toContain('Список бирок');
     expect(html).toContain('label-svg-preview-frame__content');
     expect(html).toContain('<svg viewBox="0 0 20 10">');
   });

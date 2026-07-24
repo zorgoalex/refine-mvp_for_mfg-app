@@ -35,6 +35,7 @@ export interface ChangeOrderStatusFromDeadlineCommand {
     actorLabel: 'deadline-engine';
   };
   orderId: number;
+  expectedSourceOrderStatusId: number;
   targetOrderStatusId: number;
   deadlineId: string;
   deadlineEventId: string;

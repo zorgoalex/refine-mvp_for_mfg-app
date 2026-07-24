@@ -7,6 +7,8 @@ const dataEditorSrc = readFileSync(new URL('./OrderLabelDataEditor.tsx', import.
 const generateSrc = readFileSync(new URL('./OrderLabelGenerateAction.tsx', import.meta.url), 'utf8');
 const latestSrc = readFileSync(new URL('./OrderLatestLabelsPreview.tsx', import.meta.url), 'utf8');
 const previewFrameSrc = readFileSync(new URL('./LabelSvgPreviewFrame.tsx', import.meta.url), 'utf8');
+const pagesViewerSrc = readFileSync(new URL('./OrderLabelPagesViewer.tsx', import.meta.url), 'utf8');
+const printSrc = readFileSync(new URL('./labelPrint.ts', import.meta.url), 'utf8');
 
 describe('order labels UI wiring', () => {
   it('mounts the edit label-data editor in Дополнительно behind labels flag and labels.view', () => {
@@ -74,19 +76,28 @@ describe('order labels UI wiring', () => {
     expect(dataEditorSrc).toMatch(/onRow=\{\(detail\) => \(\{/);
     expect(dataEditorSrc).toMatch(/initialDetailId=\{selectedDetailId\}/);
     expect(dataEditorSrc).toMatch(/detailOptions=\{detailPreviewOptions\}/);
+    expect(dataEditorSrc).toMatch(/firstLabelPageIndexForDetail/);
+    expect(dataEditorSrc).toMatch(/selectedIndex=\{selectedLatestPageIndex \?\? selectedDetailFirstPageIndex\}/);
+    expect(dataEditorSrc).toMatch(/onSelectedIndexChange=\{setSelectedLatestPageIndex\}/);
     expect(generateSrc).toMatch(/detailFilters/);
-    expect(generateSrc).toMatch(/slice\(0,\s*1\)/);
-    expect(generateSrc).toMatch(/order-label-preview-fit/);
+    expect(generateSrc).toMatch(/OrderLabelPagesViewer/);
+    expect(pagesViewerSrc).toMatch(/Список бирок/);
+    expect(pagesViewerSrc).toMatch(/labelPageTitle/);
     expect(generateSrc).not.toMatch(/maxHeight: 220, overflow: 'auto'/);
   });
 
-  it('renders the preview frame with the saved physical template proportions', () => {
-    expect(generateSrc).toMatch(/const previewAspectRatio = template/);
-    expect(generateSrc).toMatch(/template\.canvasWidthMm\s*\/\s*template\.canvasHeightMm/);
-    expect(generateSrc).toMatch(/aspectRatio: `\$\{template\.canvasWidthMm\} \/ \$\{template\.canvasHeightMm\}`/);
-    expect(generateSrc).toMatch(/width: `min\(100%, calc\(58vh \* \$\{previewAspectRatio\}\)\)`/);
+  it('renders generated labels as a full list and uses print pages for range printing', () => {
+    expect(generateSrc).toMatch(/generatedPreview/);
+    expect(generateSrc).toMatch(/Сформированные бирки/);
+    expect(generateSrc).toMatch(/setOpen\(false\)/);
+    expect(generateSrc).not.toMatch(/setOpen\(false\);\s*\n\s*}\s*catch/);
+    expect(latestSrc).toMatch(/OrderLabelPagesViewer/);
+    expect(dataEditorSrc).toMatch(/OrderLabelPagesViewer/);
+    expect(pagesViewerSrc).toMatch(/printLabelSvgPages/);
+    expect(pagesViewerSrc).toMatch(/диапазон страниц/);
+    expect(printSrc).toMatch(/page-break-after: always/);
+    expect(printSrc).toMatch(/frameWindow\.print\(\)/);
     expect(generateSrc).not.toMatch(/minHeight: 260/);
-    expect(generateSrc).toMatch(/\.order-label-preview-fit svg \{[\s\S]*width: 100%;[\s\S]*height: 100%/);
   });
 
   it('uses a responsive two-column generation modal and permits labels without cut maps', () => {
@@ -110,7 +121,7 @@ describe('order labels UI wiring', () => {
   });
 
   it('clears the previous template SVG before loading a fresh preview', () => {
-    expect(generateSrc).toMatch(/previewRequestRef\.current = requestId;\s*setPreview\(null\);\s*setLoading\(true\)/);
+    expect(generateSrc).toMatch(/previewRequestRef\.current = requestId;[\s\S]*setPreview\(null\);[\s\S]*setLoading\(true\)/);
   });
 
   it('lets order label generation choose whether Basis project/data columns feed the preview', () => {
@@ -123,15 +134,14 @@ describe('order labels UI wiring', () => {
 
   it('shows latest generated label template preview inside the order edit labels block', () => {
     expect(dataEditorSrc).toMatch(/labelsApi\.getLatest\(orderId\)/);
-    expect(dataEditorSrc).toMatch(/if \(!latest\) \{[\s\S]*setLatestPreviewSvg\(null\);[\s\S]*return;/);
-    expect(dataEditorSrc).toMatch(/labelsApi\.previewOrderLabels\(orderId,\s*\{/);
-    expect(dataEditorSrc).toMatch(/data\?\.details\[0\]\?\.detailId/);
-    expect(dataEditorSrc).toMatch(/Превью последней генерации: первая позиция/);
-    expect(dataEditorSrc).toMatch(/order-label-inline-preview-fit/);
+    expect(dataEditorSrc).toMatch(/setLatestPreview\(latest\)/);
+    expect(dataEditorSrc).toMatch(/Последняя генерация/);
+    expect(dataEditorSrc).toMatch(/latestPreview\.svgPages/);
+    expect(dataEditorSrc).not.toMatch(/data\?\.details\[0\]\?\.detailId/);
   });
 
   it('outlines every order-card label preview with the shared neutral frame', () => {
-    expect(generateSrc).toMatch(/LabelSvgPreviewFrame/);
+    expect(pagesViewerSrc).toMatch(/LabelSvgPreviewFrame/);
     expect(latestSrc).toMatch(/LabelSvgPreviewFrame/);
     expect(dataEditorSrc).toMatch(/LabelSvgPreviewFrame/);
     expect(previewFrameSrc).toMatch(/outline: '1px solid var\(--label-preview-outline, rgba\(0,0,0,0\.1\)\)'/);

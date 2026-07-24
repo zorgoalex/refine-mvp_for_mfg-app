@@ -29,6 +29,7 @@ export interface ProcessDueDeadlinesCommand {
   now: string;
   limit: number;
   workerId: string;
+  deadlineId?: string | null;
   trigger: 'manual' | 'scheduler';
   schedulerRunId?: string;
   actorUserId?: string;
@@ -55,6 +56,7 @@ export class DeadlineWorkerService {
         now: command.now,
         limit: command.limit,
         workerId: command.workerId,
+        deadlineId: command.deadlineId ?? null,
       });
       const result: ProcessDueDeadlinesResult = {
         scanned: dueDeadlines.length,

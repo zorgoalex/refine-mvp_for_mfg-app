@@ -29,6 +29,7 @@ export interface DeadlineActionRuleIdempotencyMaterial {
   actionType: DeadlineActionType;
   actionRuleId: string;
   orderId: number | null;
+  sourceOrderStatusId: number | null;
   targetStatusId: number | null;
   snapshotHash: string;
 }
@@ -102,6 +103,7 @@ export function evaluateDeadlineActionRules(
         actionType: rule.actionType,
         actionRuleId: rule.actionRuleId,
         orderId: input.orderContext?.orderId ?? null,
+        sourceOrderStatusId: input.orderContext?.orderStatusId ?? null,
         targetStatusId,
         snapshotHash: ruleSnapshot.snapshotHash,
       },
@@ -162,6 +164,11 @@ export function mergeRuleOverrideConfig(
 export function buildRuleConfigSnapshot(rule: DeadlineActionRuleDto): DeadlineRuleConfigSnapshotDto {
   const snapshotWithoutHash = {
     actionRuleId: rule.actionRuleId,
+    policyId: rule.policyId ?? null,
+    scopeType: rule.scopeType,
+    isEnabled: rule.isEnabled,
+    ruleName: rule.config?.ruleName ?? null,
+    ruleCode: rule.config?.ruleCode ?? null,
     priority: rule.priority,
     eventType: rule.eventType,
     actionType: rule.actionType,
@@ -302,12 +309,20 @@ function getRuleSkipReason(input: {
     return 'missing_target_status';
   }
 
-  const allowedFrom = input.rule.config?.conditions?.allowedFromOrderStatusIds ?? [];
+  const conditions = input.rule.config?.conditions;
+  if (
+    conditions?.excludeCompletedOrders !== true
+    || conditions.requireCurrentDeadlineEvent !== true
+  ) {
+    return 'unsafe_rule_config';
+  }
+
+  const allowedFrom = conditions.allowedFromOrderStatusIds ?? [];
   if (allowedFrom.length === 0) {
     return 'missing_allowed_from_statuses';
   }
 
-  const excluded = input.rule.config?.conditions?.excludeOrderStatusIds ?? [];
+  const excluded = conditions.excludeOrderStatusIds ?? [];
   if (excluded.includes(input.orderContext.orderStatusId) || excluded.includes(input.targetStatusId)) {
     return 'disallowed_from_status';
   }
@@ -317,8 +332,7 @@ function getRuleSkipReason(input: {
   if (input.orderContext.isCompleted) {
     return 'terminal_order_status';
   }
-  const requireCurrentDeadlineEvent = input.rule.config?.conditions?.requireCurrentDeadlineEvent ?? true;
-  if (requireCurrentDeadlineEvent && !input.isCurrentDeadlineEvent) {
+  if (!input.isCurrentDeadlineEvent) {
     return 'stale_deadline_event';
   }
 

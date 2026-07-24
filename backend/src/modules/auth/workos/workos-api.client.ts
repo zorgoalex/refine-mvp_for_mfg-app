@@ -7,6 +7,15 @@ export interface WorkosClientOptions {
   redirectUri: string;
 }
 
+export interface WorkosAuthorizeOptions {
+  /**
+   * Force AuthKit to actively authenticate instead of silently reusing its
+   * browser session. Link flows need this so the user can choose another
+   * social account; ordinary login should keep seamless SSO.
+   */
+  forceFreshAuthentication?: boolean;
+}
+
 export interface WorkosIdentity {
   sub: string;
   email: string;
@@ -37,13 +46,19 @@ export class WorkosApiClient {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  buildAuthorizeUrl(state: string): string {
+  buildAuthorizeUrl(state: string, authorizeOptions: WorkosAuthorizeOptions = {}): string {
     const url = new URL('/user_management/authorize', this.options.apiBase);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('client_id', this.options.clientId);
     url.searchParams.set('redirect_uri', this.options.redirectUri);
     url.searchParams.set('provider', 'authkit');
     url.searchParams.set('state', state);
+    if (authorizeOptions.forceFreshAuthentication) {
+      // WorkOS documents max_age=0 as the supported way to require a fresh
+      // AuthKit authentication. This prevents "Привязать ещё" from silently
+      // returning the identity already active in the provider session.
+      url.searchParams.set('max_age', '0');
+    }
     return url.toString();
   }
 

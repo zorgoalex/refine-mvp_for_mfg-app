@@ -1668,6 +1668,7 @@ export async function changeOrderStatusFromDeadlineInTransaction(
       commandName: 'orders.status_change',
       source: command.source,
       orderId: command.orderId,
+      expectedSourceOrderStatusId: command.expectedSourceOrderStatusId,
       orderStatusId: command.targetOrderStatusId,
       deadlineId: command.deadlineId,
       deadlineEventId: command.deadlineEventId,
@@ -1697,7 +1698,25 @@ export async function changeOrderStatusFromDeadlineInTransaction(
     idempotencyKey: command.idempotencyKey,
     requestId,
     occurredAt: command.occurredAt,
+    expectedSourceOrderStatusId: command.expectedSourceOrderStatusId,
   };
+
+  if (order.orderStatusId !== command.expectedSourceOrderStatusId) {
+    const response = {
+      order: {
+        orderId: order.orderId,
+        orderStatusId: order.orderStatusId,
+        version: order.version,
+      },
+      requestId,
+    };
+    await completeDeadlineIdempotency(tx, command.idempotencyKey, {
+      status: 'skipped',
+      skipReason: 'stale_source_status',
+      response,
+    });
+    return { status: 'skipped', skipReason: 'stale_source_status', response };
+  }
 
   if (order.orderStatusId === status.orderStatusId) {
     const response = {

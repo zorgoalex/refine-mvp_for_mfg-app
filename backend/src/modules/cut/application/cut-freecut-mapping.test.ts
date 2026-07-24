@@ -138,6 +138,55 @@ describe('freecut optimize request builder (§6)', () => {
     expect(request.params.vacuum?.direction).toBe('optimal');
   });
 
+  it.each([
+    ['missing vacuum', undefined],
+    ['empty vacuum', {}],
+  ] as const)('vacuum Auto default (%s) ignores texture and allows rotation', (_label, vacuum) => {
+    const request = buildOptimizeRequest({
+      stock,
+      items: [{
+        ...items[0],
+        rotation: 'forbid',
+        pattern_direction: 'along_height',
+      }],
+      params: {
+        ...params,
+        layout_mode: 'vacuum_table',
+        ...(vacuum === undefined ? {} : { vacuum }),
+      },
+    });
+    expect(request.params.vacuum?.direction).toBe('optimal');
+    expect(request.items[0]).toMatchObject({
+      rotation: 'allow_90',
+      pattern_direction: 'none',
+    });
+  });
+
+  it('native portrait Auto normalizes geometry then ignores transposed texture', () => {
+    const request = buildOptimizeRequest({
+      stock,
+      items: [{
+        ...items[0],
+        rotation: 'forbid',
+        pattern_direction: 'along_width',
+      }],
+      params: {
+        ...params,
+        layout_mode: 'vacuum_table',
+        vacuum: { direction: 'optimal' },
+      },
+      nativePortrait: true,
+    });
+    expect(request.stock[0]).toMatchObject({ width_mm: 2070, height_mm: 2800 });
+    expect(request.params.vacuum?.direction).toBe('optimal');
+    expect(request.items[0]).toMatchObject({
+      width_mm: 400,
+      height_mm: 600,
+      rotation: 'allow_90',
+      pattern_direction: 'none',
+    });
+  });
+
   it('normalizes landscape stock, items, grain and asymmetric trim to portrait axes', () => {
     const request = buildOptimizeRequest({
       stock,
@@ -199,6 +248,36 @@ describe('native portrait persistence metadata', () => {
     const legacy = backMapSolutions(response)[0].placements;
     expect(legacy.coordinate_contract).toBeUndefined();
     expect(legacy.pieces[0].rotation_forbidden).toBeUndefined();
+  });
+
+  it('persists profile-derived rotation rules for Auto and directional vacuum layouts', () => {
+    const stock = { id: 's', width_mm: 2070, height_mm: 2800 };
+    const params = {
+      kerf_mm: 2,
+      spacing_mm: 1,
+      trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
+      objective: 'min_waste' as const,
+      layout_mode: 'vacuum_table' as const,
+    };
+    const textured = [{
+      ...requestItems[0],
+      pattern_direction: 'along_height' as const,
+    }];
+    const autoItems = buildOptimizeRequest({
+      stock,
+      items: textured,
+      params: { ...params, vacuum: { direction: 'optimal' } },
+    }).items;
+    const directionalItems = buildOptimizeRequest({
+      stock,
+      items: textured,
+      params: { ...params, vacuum: { direction: 'width' } },
+    }).items;
+
+    expect(backMapSolutions(response, { requestItems: autoItems })[0]
+      .placements.pieces[0].rotation_forbidden).toBe(false);
+    expect(backMapSolutions(response, { requestItems: directionalItems })[0]
+      .placements.pieces[0].rotation_forbidden).toBe(true);
   });
 });
 
@@ -360,16 +439,20 @@ describe('orientItemsForVacuumDirection — force plain-detail orientation for v
     expect(result[0]).toMatchObject({ width_mm: 407, height_mm: 707, rotation: 'forbid' });
   });
 
-  it('textured item (along_height) with directional vacuum → returned UNCHANGED (grain wins)', () => {
-    const item = texturedItem(707, 407);
+  it('textured item with directional vacuum → grain/dimensions preserved and rotation forbidden', () => {
+    const item = { ...texturedItem(707, 407), rotation: 'allow_90' as const };
     const result = orientItemsForVacuumDirection([item], 1050, 2080, 'width');
-    expect(result[0]).toEqual(item);
+    expect(result[0]).toEqual({ ...item, rotation: 'forbid' });
   });
 
-  it('optimal direction → items unchanged (rotation stays as input)', () => {
-    const item = plainItem(707, 407, 'allow_90');
+  it('optimal/Auto ignores texture and permits rotation', () => {
+    const item = { ...texturedItem(707, 407), rotation: 'forbid' as const };
     const result = orientItemsForVacuumDirection([item], 1050, 2080, 'optimal');
-    expect(result[0]).toEqual(item);
+    expect(result[0]).toEqual({
+      ...item,
+      rotation: 'allow_90',
+      pattern_direction: 'none',
+    });
   });
 
   it('undefined direction → items unchanged', () => {
@@ -381,6 +464,32 @@ describe('orientItemsForVacuumDirection — force plain-detail orientation for v
   it('square plain item (500×500), width → forbid, dims 500×500', () => {
     const result = orientItemsForVacuumDirection([plainItem(500, 500)], 2800, 2070, 'width');
     expect(result[0]).toMatchObject({ width_mm: 500, height_mm: 500, rotation: 'forbid' });
+  });
+
+  it('по ширине falls back along table length when the long edge exceeds transverse span', () => {
+    const result = orientItemsForVacuumDirection([plainItem(1200, 400)], 1050, 2080, 'height');
+    expect(result[0]).toMatchObject({ width_mm: 400, height_mm: 1200, rotation: 'forbid' });
+  });
+
+  it('по ширине uses usable portrait transverse span after asymmetric trim', () => {
+    const trim = { left: 100, right: 100, top: 10, bottom: 20 };
+    const fits = orientItemsForVacuumDirection([plainItem(800, 300)], 1050, 2080, 'height', trim);
+    const tooLong = orientItemsForVacuumDirection([plainItem(900, 300)], 1050, 2080, 'height', trim);
+    expect(fits[0]).toMatchObject({ width_mm: 800, height_mm: 300, rotation: 'forbid' });
+    expect(tooLong[0]).toMatchObject({ width_mm: 300, height_mm: 900, rotation: 'forbid' });
+  });
+
+  it('landscape поперёк uses trimmed Y span; textured geometry remains authoritative', () => {
+    const trim = { left: 10, right: 20, top: 150, bottom: 150 };
+    const plain = orientItemsForVacuumDirection([plainItem(1800, 400)], 2800, 2070, 'height', trim);
+    const textured = {
+      ...texturedItem(1800, 400),
+      rotation: 'allow_90' as const,
+      pattern_direction: 'along_width' as const,
+    };
+    const texturedResult = orientItemsForVacuumDirection([textured], 2800, 2070, 'height', trim);
+    expect(plain[0]).toMatchObject({ width_mm: 1800, height_mm: 400, rotation: 'forbid' });
+    expect(texturedResult[0]).toEqual({ ...textured, rotation: 'forbid' });
   });
 });
 
@@ -442,7 +551,7 @@ describe('buildOptimizeRequest vacuum direction resolution integration', () => {
 
     // plain item: portrait w=1050<h=2080 so longAxisIsX=false; width→longEdgeAlongX=false → width_mm=407, height_mm=707
     expect(request.items[0]).toMatchObject({ id: 'det-10', width_mm: 407, height_mm: 707, rotation: 'forbid' });
-    // textured: unchanged
+    // textured geometry/grain stay authoritative; rotation remains forbidden
     expect(request.items[1]).toEqual(texturedItem);
     // input.items must NOT be mutated
     expect(inputItems[0].width_mm).toBe(707);

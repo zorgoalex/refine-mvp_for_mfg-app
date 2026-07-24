@@ -9,29 +9,44 @@ import { formatNumber, numberParser } from '../utils/numberFormat';
 interface CurrencyInputProps extends Omit<InputNumberProps, 'formatter' | 'parser'> {
   /** Decimal precision (default: 2) */
   precision?: number;
+  /** Keep an unset draft value visually empty even when the field is blurred. */
+  emptyWhenUnset?: boolean;
 }
 
 /**
  * Format value for focused state: hide ".00" for integers, empty for 0
  */
-const formatFocused = (value: number | undefined | null, precision: number): string => {
-  if (value === undefined || value === null || value === 0) {
+type CurrencyInputValue = number | string | undefined | null;
+
+const formatFocused = (value: CurrencyInputValue, precision: number): string => {
+  if (value === undefined || value === null || value === '' || Number(value) === 0) {
     return '';
   }
-  const hasDecimalPart = value % 1 !== 0;
+  const numericValue = Number(value);
+  const hasDecimalPart = numericValue % 1 !== 0;
   return hasDecimalPart
-    ? formatNumber(value, precision)
-    : formatNumber(value, 0);
+    ? formatNumber(numericValue, precision)
+    : formatNumber(numericValue, 0);
 };
 
 /**
  * Format value for blurred state: always show full precision
  */
-const formatBlurred = (value: number | undefined | null, precision: number): string => {
-  if (value === undefined || value === null) {
+const formatBlurred = (
+  value: CurrencyInputValue,
+  precision: number,
+  emptyWhenUnset: boolean,
+): string => {
+  if (
+    emptyWhenUnset &&
+    (value === undefined || value === null || value === '')
+  ) {
+    return '';
+  }
+  if (value === undefined || value === null || value === '') {
     return '0';
   }
-  return formatNumber(value, precision);
+  return formatNumber(Number(value), precision);
 };
 
 /**
@@ -46,6 +61,7 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
   value,
   onChange,
   autoFocus,
+  emptyWhenUnset = false,
   ...props
 }) => {
   // Initialize isFocused based on autoFocus prop
@@ -62,11 +78,11 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
   };
 
   // Formatter for InputNumber (used during typing)
-  const formatter = (val: number | undefined): string => {
+  const formatter = (val: number | string | undefined): string => {
     if (isFocused) {
       return formatFocused(val, precision);
     }
-    return formatBlurred(val, precision);
+    return formatBlurred(val, precision, emptyWhenUnset);
   };
 
   return (

@@ -228,7 +228,7 @@ export interface OrderLabelsPreview {
   templateId: number;
   templateVersion: number;
   labelCount: number;
-  rows: unknown[];
+  rows: LabelPreviewRow[];
   svgPages: string[];
   previewToken: string;
 }
@@ -238,7 +238,7 @@ export interface DetailLabelsPreview {
   templateId: number;
   templateVersion: number;
   labelCount: number;
-  rows: unknown[];
+  rows: LabelPreviewRow[];
   svgPages: string[];
   previewToken: string;
 }
@@ -253,7 +253,17 @@ export interface OrderLabelGeneration {
 }
 
 export interface LatestOrderLabelsPreview extends OrderLabelGeneration {
+  rows?: LabelPreviewRow[];
   svgPages: string[];
+}
+
+export interface LabelPreviewRow {
+  rowIndex: number;
+  detailId: number;
+  orderId: number;
+  copyIndex: number;
+  copyCount: number;
+  values: Record<string, string | number | boolean | null>;
 }
 
 export interface LabelQrTemplate {

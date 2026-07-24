@@ -106,22 +106,25 @@ test.describe('deadline status transition stage canary', () => {
     await retireFixtureOverride(request, token);
 
     const enabledPreview = await previewRules(request, token);
-    expect(enabledPreview.selectedActionRuleId, JSON.stringify(enabledPreview)).toBeTruthy();
+    // Preview without a persisted deadlineEventId is deliberately hypothetical:
+    // mandatory current-event protection keeps every status mutation non-runnable.
+    expect(enabledPreview.selectedActionRuleId).toBeNull();
     expect(
       enabledPreview.candidateActionRules.filter((rule: PreviewCandidate) => rule.wouldRun),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(enabledPreview.candidateActionRules).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           actionType: 'change_order_status',
           wouldRun: false,
-          wouldSkipReason: 'lower_priority_rule_not_selected',
+          wouldSkipReason: 'stale_deadline_event',
         }),
       ]),
     );
 
+    const fixtureDeadlineId = loadFixtureDeadlineId();
     const workerResponse = await request.post(`${backendApiUrl}/deadline-worker/process-due-now`, {
-      data: { now: workerNow, limit: 1 },
+      data: { now: workerNow, limit: 1, deadlineId: fixtureDeadlineId },
       headers: { Authorization: `Bearer ${token}` },
     });
     await expectOk(workerResponse);
@@ -141,7 +144,7 @@ test.describe('deadline status transition stage canary', () => {
     expect(evidence.productionOutboxRows).toBeGreaterThanOrEqual(1);
 
     const replayResponse = await request.post(`${backendApiUrl}/deadline-worker/process-due-now`, {
-      data: { now: workerNow, limit: 1 },
+      data: { now: workerNow, limit: 1, deadlineId: fixtureDeadlineId },
       headers: { Authorization: `Bearer ${token}` },
     });
     await expectOk(replayResponse);

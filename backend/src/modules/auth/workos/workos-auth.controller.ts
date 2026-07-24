@@ -357,7 +357,9 @@ export class WorkosAuthController {
     });
     response.cookie(cookie.name, cookie.value, cookie.options);
 
-    return service.buildAuthorizeUrl(state);
+    return service.buildAuthorizeUrl(state, {
+      forceFreshAuthentication: mode === 'link',
+    });
   }
 
   private consumeState(

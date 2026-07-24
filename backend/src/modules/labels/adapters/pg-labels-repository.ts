@@ -1109,7 +1109,7 @@ export class PgLabelsRepository implements LabelsPort {
     );
     const rows = resolved.rows;
     const rowHash = hashLabelRows(rows);
-    const svgPages = renderSvgPages(template, rows.slice(0, 1), resolved.assets).pages;
+    const svgPages = renderSvgPages(template, rows, resolved.assets).pages;
     return {
       orderId: command.orderId,
       templateId: template.labelTemplateId,
@@ -1268,7 +1268,7 @@ export class PgLabelsRepository implements LabelsPort {
     );
     const rows = buildLabelRows({ orderName: null, template, details, useBasisFields });
     const rowHash = hashLabelRows(rows);
-    const svgPages = renderSvgPages(template, rows.slice(0, 1)).pages;
+    const svgPages = renderSvgPages(template, rows).pages;
     return {
       generationScope: 'details',
       templateId: template.labelTemplateId,
@@ -1425,7 +1425,7 @@ export class PgLabelsRepository implements LabelsPort {
     const generation = await readLatestGeneration(this.database, query.orderId);
     const svgPages = renderSvgPages(
       generation.template,
-      generation.rows.slice(0, 1),
+      generation.rows,
       await loadCutMapAssets(this.database, generation.rows),
     ).pages;
     return {
@@ -1435,6 +1435,7 @@ export class PgLabelsRepository implements LabelsPort {
       templateVersion: generation.template.version,
       labelCount: generation.rows.length,
       generatedAt: generation.generatedAt,
+      rows: generation.rows,
       svgPages,
     };
   }

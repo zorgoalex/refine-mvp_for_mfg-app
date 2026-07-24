@@ -44,6 +44,29 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).not.toMatch(/abs\(p\.detail_height_mm - od\.height\)/);
   });
 
+  it('renders every order label SVG page for preview and latest, not only the first row', () => {
+    const previewStart = source.indexOf('async previewOrderLabels');
+    const previewEnd = source.indexOf('async generateOrderLabels', previewStart);
+    const previewSource = source.slice(previewStart, previewEnd);
+    expect(previewSource).toMatch(/renderSvgPages\(template,\s*rows,\s*resolved\.assets\)/);
+    expect(previewSource).not.toMatch(/rows\.slice\(0,\s*1\)/);
+
+    const latestStart = source.indexOf('async getLatestOrderLabelsPreview');
+    const latestEnd = source.indexOf('async recordPermissionDenied', latestStart);
+    const latestSource = source.slice(latestStart, latestEnd);
+    expect(latestSource).toMatch(/renderSvgPages\(\s*generation\.template,\s*generation\.rows,/);
+    expect(latestSource).not.toMatch(/generation\.rows\.slice\(0,\s*1\)/);
+    expect(latestSource).toMatch(/rows:\s*generation\.rows/);
+  });
+
+  it('renders every detail label SVG page for preview, not only the first row', () => {
+    const previewStart = source.indexOf('async previewDetailLabels');
+    const previewEnd = source.indexOf('async generateDetailLabels', previewStart);
+    const previewSource = source.slice(previewStart, previewEnd);
+    expect(previewSource).toMatch(/renderSvgPages\(template,\s*rows\)/);
+    expect(previewSource).not.toMatch(/rows\.slice\(0,\s*1\)/);
+  });
+
   it('names order archives from the order name and current generation number', () => {
     expect(buildOrderLabelsArchiveFilename(' Кухня / Север ', 22)).toBe('заказ-Кухня - Север-бирки-22.zip');
     expect(buildOrderLabelsArchiveFilename(null, 4)).toBe('заказ-без-названия-бирки-4.zip');
