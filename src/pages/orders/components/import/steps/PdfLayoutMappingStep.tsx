@@ -1,7 +1,14 @@
 import React from 'react';
 import { Alert, Card, Select, Space, Table, Tag, Typography } from 'antd';
+import type { SheetMaterialReferenceItem } from '../types/importTypes';
 import type { PdfGenericTable, PdfUnresolvedLineAction } from '../utils/pdfGenericTable';
 import type { PdfLayoutMapping, PdfLayoutTarget } from '../utils/pdfLayoutPattern';
+import {
+  collectPdfSectionMaterials,
+  pdfSectionMaterialKey,
+  resolvePdfSectionMaterialId,
+  type PdfSectionMaterialOverrides,
+} from '../utils/pdfSectionMaterialMapping';
 import type { PdfPatternMatch } from '../api/pdfTablePatternsApi';
 
 const { Text } = Typography;
@@ -27,7 +34,11 @@ interface Props {
   mappings: Record<string, PdfLayoutMapping>;
   matches: PdfPatternMatch[];
   issues: string[];
+  sheetMaterialTypes: SheetMaterialReferenceItem[];
+  sheetMaterialTypesLoading: boolean;
+  sectionMaterialOverrides: PdfSectionMaterialOverrides;
   onTargetChange: (tableId: string, columnIndex: number, target: PdfLayoutTarget) => void;
+  onSectionMaterialMappingChange: (sourceName: string, materialId: number) => void;
   onGeometryCandidateRoleChange: (tableId: string, role: 'header' | 'data') => void;
   onUnresolvedLineAction: (
     tableId: string,
@@ -38,10 +49,14 @@ interface Props {
 
 export const PdfLayoutMappingStep: React.FC<Props> = ({
   tables, mappings, matches, issues, onTargetChange, onGeometryCandidateRoleChange,
-  onUnresolvedLineAction,
+  onUnresolvedLineAction, sheetMaterialTypes, sheetMaterialTypesLoading,
+  sectionMaterialOverrides, onSectionMaterialMappingChange,
 }) => {
   const uniqueTables = tables.filter((table, index, all) =>
     all.findIndex(candidate => JSON.stringify(candidate.signature) === JSON.stringify(table.signature)) === index);
+  const cuttableMaterialOptions = sheetMaterialTypes
+    .filter(item => item.isCuttable !== false)
+    .map(item => ({ value: item.id, label: item.name }));
   return (
   <Space direction="vertical" size="middle" style={{ width: '100%', overflow: 'auto', maxHeight: '100%' }}>
     <Alert
@@ -60,6 +75,7 @@ export const PdfLayoutMappingStep: React.FC<Props> = ({
       const signature = JSON.stringify(table.signature);
       const occurrences = tables.filter(candidate =>
         JSON.stringify(candidate.signature) === signature);
+      const sectionMaterials = collectPdfSectionMaterials(occurrences);
       return (
         <Card
           key={table.id}
@@ -73,6 +89,71 @@ export const PdfLayoutMappingStep: React.FC<Props> = ({
               : <Tag>Новый паттерн</Tag>
           }
         >
+          {sectionMaterials.length > 0 && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message="Материалы секций"
+              description={
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Text type="secondary" style={{ fontSize: 12, textWrap: 'pretty' }}>
+                    Проверьте материал, найденный над таблицей. Выбор действует только
+                    для текущего импорта и не сохраняется в layout-паттерне.
+                  </Text>
+                  {sectionMaterials.map(material => {
+                    const materialKey = pdfSectionMaterialKey(material.sourceName);
+                    const overrideId = sectionMaterialOverrides[materialKey];
+                    const resolvedId = resolvePdfSectionMaterialId(
+                      material.sourceName,
+                      sectionMaterialOverrides,
+                      sheetMaterialTypes,
+                    );
+                    const status = overrideId
+                      ? { color: 'blue', label: 'Выбрано вручную' }
+                      : resolvedId
+                        ? { color: 'green', label: 'Автосопоставлено' }
+                        : sheetMaterialTypesLoading
+                          ? { color: 'default', label: 'Загрузка справочника' }
+                          : { color: 'orange', label: 'Нужно выбрать' };
+                    return (
+                      <div
+                        key={materialKey}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'minmax(170px, 1fr) 24px minmax(260px, 1.4fr) auto',
+                          gap: 8,
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Space direction="vertical" size={0}>
+                          <Text strong>{material.sourceName}</Text>
+                          <Text
+                            type="secondary"
+                            style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums' }}
+                          >
+                            Стр. {material.pageNumbers.join(', ')} · строк деталей: {material.rowCount}
+                          </Text>
+                        </Space>
+                        <Text type="secondary" style={{ textAlign: 'center' }}>→</Text>
+                        <Select
+                          value={resolvedId ?? undefined}
+                          loading={sheetMaterialTypesLoading}
+                          placeholder="Выберите материал справочника"
+                          options={cuttableMaterialOptions}
+                          showSearch
+                          optionFilterProp="label"
+                          onChange={(materialId: number) =>
+                            onSectionMaterialMappingChange(material.sourceName, materialId)}
+                        />
+                        <Tag color={status.color}>{status.label}</Tag>
+                      </div>
+                    );
+                  })}
+                </Space>
+              }
+            />
+          )}
           {table.geometryCandidateCells && (
             <Alert
               type="warning"
