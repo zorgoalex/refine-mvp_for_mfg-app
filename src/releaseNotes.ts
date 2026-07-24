@@ -31,6 +31,21 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-24",
+    title: "Работы CNC из Telegram на доске статусов",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "На странице «Доски статусов» за отдельным флагом появилась вкладка «Работы сегодня» с текущими листами раскроя из рабочего Telegram-чата и выбором даты за последнюю неделю.",
+      "Backend принимает структурированные результаты анализа сообщений, комментариев, реакций и G-code через отдельный CNC Telegram API без передачи и хранения сырых скриншотов или файлов станка.",
+      "Добавлены отдельные Telethon worker и GLM-OCR runner services: worker читает историю Telegram за неделю и временно скачивает media, а GLM-OCR Q8 через llama.cpp распознаёт скрины внутри Docker stack; оба автоматически запускаются на VPS через Compose profile cnc-telegram.",
+    ],
+    changed: [
+      "Для пакетов Telegram добавлены идемпотентность, source-version защита от старых повторов, audit/outbox и отдельные статусы разбора и выполнения листа.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-24",
     title: "Ручной раскрой: одна версия на все сохранения",
     services: ["Cutting"],
     repositories: ["repo_erp"],

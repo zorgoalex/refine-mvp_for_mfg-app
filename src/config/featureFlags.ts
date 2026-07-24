@@ -19,6 +19,7 @@ export interface FrontendFeatureFlags {
   labels: boolean;
   statusAutomation: boolean;
   orderStatusBoard: boolean;
+  cncTelegram: boolean;
   pdfImportLayoutPatterns: boolean;
   // Variant B: gates reads that depend on migration 034 Hasura schema
   // (sheet_material_type_id as the sole order-material reference; order_details_view
@@ -58,6 +59,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   labels: string | boolean;
   statusAutomation: string | boolean;
   orderStatusBoard: string | boolean;
+  cncTelegram: string | boolean;
   pdfImportLayoutPatterns: string | boolean;
   sheetMaterialsReads: string | boolean;
   sheetMaterials: string | boolean;
@@ -102,6 +104,7 @@ export function getFeatureFlags(
     labels: readBooleanFlag(env.VITE_USE_BACKEND_LABELS, false),
     statusAutomation: readBooleanFlag(env.VITE_STATUS_AUTOMATION, false),
     orderStatusBoard: readBooleanFlag(env.VITE_ORDER_STATUS_BOARD, false),
+    cncTelegram: readBooleanFlag(env.VITE_USE_BACKEND_CNC_TELEGRAM, false),
     pdfImportLayoutPatterns: readBooleanFlag(env.VITE_PDF_IMPORT_LAYOUT_PATTERNS, false),
     sheetMaterialsReads: readBooleanFlag(env.VITE_SHEET_MATERIALS_READS, false),
     enableLegacyHasura: readBooleanFlag(env.VITE_ENABLE_LEGACY_HASURA, true),
@@ -159,6 +162,8 @@ export function mergeRuntimeFeatureFlags(
       readOptionalBooleanFlag(runtimeFeatures.statusAutomation) ?? fallback.statusAutomation,
     orderStatusBoard:
       readOptionalBooleanFlag(runtimeFeatures.orderStatusBoard) ?? fallback.orderStatusBoard,
+    cncTelegram:
+      readOptionalBooleanFlag(runtimeFeatures.cncTelegram) ?? fallback.cncTelegram,
     pdfImportLayoutPatterns:
       readOptionalBooleanFlag(runtimeFeatures.pdfImportLayoutPatterns) ??
       fallback.pdfImportLayoutPatterns,
@@ -192,6 +197,8 @@ function enforceFrontendFeatureDependencies(flags: FrontendFeatureFlags): Fronte
       flags.useBackendDeadlines && flags.useBackendAuth && flags.useBackendOrdersRead,
     bazisCut: flags.bazisCut && flags.useBackendCut,
     orderStatusBoard: flags.orderStatusBoard && flags.useBackendOrdersRead,
+    cncTelegram:
+      flags.cncTelegram && flags.orderStatusBoard && flags.useBackendOrdersRead,
     workosAuth: flags.workosAuth && flags.useBackendAuth,
   };
 }

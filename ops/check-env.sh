@@ -140,6 +140,23 @@ if [[ "${BACKEND_ENABLE_VLM:-true}" == "true" && "${BACKEND_VLM_DISABLED:-true}"
   require_var AUTH0_M2M_AUDIENCE
 fi
 
+if csv_contains "${COMPOSE_PROFILES:-}" "cnc-telegram"; then
+  [[ "${BACKEND_ENABLE_CNC_TELEGRAM:-false}" == "true" ]] || mark_error "COMPOSE_PROFILES=cnc-telegram requires BACKEND_ENABLE_CNC_TELEGRAM=true"
+  require_var TELEGRAM_API_ID
+  require_var TELEGRAM_API_HASH
+  require_var TELEGRAM_CHAT
+  require_var TELEGRAM_ALLOWED_CHAT_ID
+  if [[ -z "${ERP_BEARER_TOKEN:-}" ]]; then
+    require_var ERP_WORKER_LOGIN
+    require_var ERP_WORKER_PASSWORD
+  fi
+  if [[ ! "${CNC_TEMP_TTL_HOURS:-24}" =~ ^[0-9]+$ ]]; then
+    mark_error "CNC_TEMP_TTL_HOURS must be an integer <= 24"
+  elif [[ "${CNC_TEMP_TTL_HOURS:-24}" -gt 24 ]]; then
+    mark_error "CNC_TEMP_TTL_HOURS must be <= 24 for Telegram raw media retention"
+  fi
+fi
+
 if [[ "$DNS_CHECK" == "1" ]]; then
   if [[ -z "$EXPECTED_IP" ]]; then
     EXPECTED_IP="$(curl -fsS --max-time 5 https://api.ipify.org || true)"

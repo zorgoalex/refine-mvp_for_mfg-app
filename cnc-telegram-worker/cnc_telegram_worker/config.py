@@ -1,0 +1,113 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+
+@dataclass(frozen=True)
+class WorkerConfig:
+    telegram_api_id: int | None
+    telegram_api_hash: str
+    telegram_session_path: Path
+    telegram_chat: str
+    telegram_allowed_chat_ids: tuple[str, ...]
+    erp_api_url: str
+    erp_bearer_token: str
+    erp_worker_login: str
+    erp_worker_password: str
+    ocr_command: str
+    ocr_engine: str
+    parser_version: str
+    default_machine: str
+    default_material: str
+    business_timezone_name: str
+    history_days: int
+    poll_interval_seconds: int
+    temp_ttl_hours: int
+    max_messages_per_scan: int
+    temp_dir: Path
+    state_path: Path
+    resend_unchanged: bool
+    backfill_on_start: bool
+
+    @property
+    def business_timezone(self) -> ZoneInfo:
+        return ZoneInfo(self.business_timezone_name)
+
+    @classmethod
+    def from_env(cls) -> "WorkerConfig":
+        api_id_raw = env("TELEGRAM_API_ID")
+        return cls(
+            telegram_api_id=int(api_id_raw) if api_id_raw else None,
+            telegram_api_hash=env("TELEGRAM_API_HASH"),
+            telegram_session_path=Path(env("TELEGRAM_SESSION_PATH", "/data/session/cnc_telegram")),
+            telegram_chat=env("TELEGRAM_CHAT") or env("TELEGRAM_ALLOWED_CHAT_ID"),
+            telegram_allowed_chat_ids=csv_env("TELEGRAM_ALLOWED_CHAT_ID"),
+            erp_api_url=env("ERP_API_URL", "http://backend:3000/api/v1").rstrip("/"),
+            erp_bearer_token=env("ERP_BEARER_TOKEN"),
+            erp_worker_login=env("ERP_WORKER_LOGIN"),
+            erp_worker_password=env("ERP_WORKER_PASSWORD"),
+            ocr_command=env("CNC_OCR_COMMAND"),
+            ocr_engine=env("CNC_OCR_ENGINE", "glm-ocr-0.9b-q8-llama.cpp"),
+            parser_version=env("CNC_PARSER_VERSION", "cnc-telegram-worker-v1"),
+            default_machine=env("CNC_MACHINE_DEFAULT"),
+            default_material=env("CNC_DEFAULT_MATERIAL", "МДФ 16мм"),
+            business_timezone_name=env("CNC_BUSINESS_TIMEZONE", "Asia/Almaty"),
+            history_days=positive_int_env("CNC_HISTORY_DAYS", 7),
+            poll_interval_seconds=positive_int_env("CNC_POLL_INTERVAL_SECONDS", 120),
+            temp_ttl_hours=positive_int_env("CNC_TEMP_TTL_HOURS", 24),
+            max_messages_per_scan=positive_int_env("CNC_MAX_MESSAGES_PER_SCAN", 1000),
+            temp_dir=Path(env("CNC_TEMP_DIR", "/data/tmp")),
+            state_path=Path(env("CNC_STATE_PATH", "/data/state.json")),
+            resend_unchanged=bool_env("CNC_RESEND_UNCHANGED", False),
+            backfill_on_start=bool_env("CNC_BACKFILL_ON_START", True),
+        )
+
+    def require_telegram(self) -> None:
+        missing = []
+        if self.telegram_api_id is None:
+            missing.append("TELEGRAM_API_ID")
+        if not self.telegram_api_hash:
+            missing.append("TELEGRAM_API_HASH")
+        if not self.telegram_chat:
+            missing.append("TELEGRAM_CHAT or TELEGRAM_ALLOWED_CHAT_ID")
+        if missing:
+            raise RuntimeError(f"missing required Telegram config: {', '.join(missing)}")
+
+    def require_backend_auth(self) -> None:
+        if self.erp_bearer_token:
+            return
+        if self.erp_worker_login and self.erp_worker_password:
+            return
+        raise RuntimeError("missing backend auth: set ERP_BEARER_TOKEN or ERP_WORKER_LOGIN/ERP_WORKER_PASSWORD")
+
+
+def env(name: str, default: str = "") -> str:
+    return os.environ.get(name, default).strip()
+
+
+def csv_env(name: str) -> tuple[str, ...]:
+    value = env(name)
+    return tuple(part.strip() for part in value.split(",") if part.strip())
+
+
+def positive_int_env(name: str, default: int) -> int:
+    value = env(name)
+    if not value:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
+    if parsed <= 0:
+        raise RuntimeError(f"{name} must be positive")
+    return parsed
+
+
+def bool_env(name: str, default: bool) -> bool:
+    value = env(name)
+    if not value:
+        return default
+    return value.lower() in {"1", "true", "yes", "y", "on"}

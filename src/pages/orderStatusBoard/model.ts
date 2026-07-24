@@ -6,16 +6,22 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 
 const COMPLETED_ORDER_STATUS_NAMES = new Set(['завершен', 'завершён']);
+export type OrderStatusBoardVisualFlow = OrderStatusBoardType | 'cnc_today';
 
 export interface OrderStatusBoardViewState {
-  board: OrderStatusBoardType;
+  view: OrderStatusBoardVisualFlow;
   search: string;
   onlyMyOrders: boolean;
   overdueOnly: boolean;
   showDone: boolean;
   plannedFrom?: string;
   plannedTo?: string;
+  cncWorkday?: string;
   hideEmpty: boolean;
+}
+
+export interface OrderStatusBoardViewStateOptions {
+  cncTelegram?: boolean;
 }
 
 export function filterBoardColumns(
@@ -37,18 +43,22 @@ export function filterBoardColumns(
 
 export function parseOrderStatusBoardViewState(
   params: URLSearchParams,
+  options: OrderStatusBoardViewStateOptions = {},
 ): OrderStatusBoardViewState {
   const board = params.get('board') === 'production' ? 'production' : 'order';
+  const view = options.cncTelegram && params.get('flow') === 'cnc' ? 'cnc_today' : board;
   const plannedFrom = dateOnly(params.get('plannedFrom'));
   const plannedTo = dateOnly(params.get('plannedTo'));
+  const cncWorkday = dateOnly(params.get('date'));
   return {
-    board,
+    view,
     search: params.get('q')?.trim() ?? '',
     onlyMyOrders: params.get('mine') === '1',
     overdueOnly: params.get('overdue') === '1',
     showDone: params.get('showDone') === '1',
     ...(plannedFrom ? { plannedFrom } : {}),
     ...(plannedTo ? { plannedTo } : {}),
+    ...(cncWorkday ? { cncWorkday } : {}),
     hideEmpty: params.get('hideEmpty') === '1',
   };
 }
@@ -57,13 +67,18 @@ export function serializeOrderStatusBoardViewState(
   state: OrderStatusBoardViewState,
 ): URLSearchParams {
   const params = new URLSearchParams();
-  if (state.board !== 'order') params.set('board', state.board);
+  if (state.view === 'cnc_today') {
+    params.set('flow', 'cnc');
+  } else if (state.view !== 'order') {
+    params.set('board', state.view);
+  }
   if (state.search.trim()) params.set('q', state.search.trim());
   if (state.onlyMyOrders) params.set('mine', '1');
   if (state.overdueOnly) params.set('overdue', '1');
   if (state.showDone) params.set('showDone', '1');
   if (state.plannedFrom) params.set('plannedFrom', state.plannedFrom);
   if (state.plannedTo) params.set('plannedTo', state.plannedTo);
+  if (state.view === 'cnc_today' && state.cncWorkday) params.set('date', state.cncWorkday);
   if (state.hideEmpty) params.set('hideEmpty', '1');
   return params;
 }
@@ -73,12 +88,12 @@ export function toOrderStatusBoardQuery(
   override: Partial<Pick<OrderStatusBoardQuery, 'column' | 'cursor'>> = {},
 ): OrderStatusBoardQuery {
   return {
-    board: state.board,
+    board: state.view === 'production' ? 'production' : 'order',
     limit: 24,
     ...(state.search.trim() ? { search: state.search.trim() } : {}),
     onlyMyOrders: state.onlyMyOrders,
     overdueOnly: state.overdueOnly,
-    ...(state.board === 'production' && state.showDone
+    ...(state.view === 'production' && state.showDone
       ? { includeDone: true }
       : {}),
     ...(state.plannedFrom ? { plannedFrom: state.plannedFrom } : {}),

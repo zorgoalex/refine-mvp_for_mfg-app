@@ -52,10 +52,21 @@ describe('OrderStatusBoardPage UX guards', () => {
   });
 
   it('shows the completed-status opt-in only on the production tab with a usable hit area', () => {
-    expect(page).toContain("viewState.board === 'production'");
+    expect(page).toContain("viewState.view === 'production'");
     expect(page).toContain('Показывать завершённые');
     expect(page).toContain('showDone: event.target.checked');
     expect(css).toContain('.status-board-toolbar__checkbox');
     expect(css).toContain('min-height: 40px');
+  });
+
+  it('keeps CNC work as a separate visual flow and API contract', () => {
+    expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
+    expect(page).toContain("key: 'cnc_today'");
+    expect(page).toContain('cncTelegramApi.today');
+    expect(page).toContain('workday ? { date: workday } : {}');
+    expect(page).toContain('<CncTelegramTodayColumns');
+    expect(page).toContain('CNC_HISTORY_DAYS = 7');
+    expect(page).toContain('aria-label="Дата CNC-работ"');
+    expect(page).not.toContain("board: 'cnc");
   });
 });

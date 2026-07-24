@@ -39,6 +39,16 @@ err()  { printf 'up-all: %s\n' "$*" >&2; }
 die()  { err "$*"; exit 1; }
 warn() { printf 'up-all: WARN: %s\n' "$*" >&2; }
 
+load_compose_profiles() {
+  local line raw
+  line="$(grep -E '^[[:space:]]*COMPOSE_PROFILES=' "$ENV_FILE" 2>/dev/null | tail -n 1 || true)"
+  [ -n "$line" ] || return 0
+  raw="${line#*=}"
+  raw="${raw%\"}"; raw="${raw#\"}"
+  raw="${raw%\'}"; raw="${raw#\'}"
+  export COMPOSE_PROFILES="$raw"
+}
+
 verify_freecut_sha() {
   local expected="$1" dir="$ROOT/repo_freecut"
   [ -z "$(git -C "$dir" status --porcelain)" ] || die "repo_freecut changed during build"
@@ -61,6 +71,7 @@ compose() {
 preflight() {
   [ -f "$ENV_FILE" ]    || die ".env not found at $ENV_FILE"
   [ -f "$VPS_FILE" ]    || die "base compose file not found at $VPS_FILE"
+  load_compose_profiles
   # Unfilled placeholders in .env render internet-facing services with empty
   # secrets / empty traefik hosts. Warn, do not block (test contour).
   if grep -q 'REPLACE_ME' "$ENV_FILE" 2>/dev/null; then
@@ -110,6 +121,7 @@ case "$cmd" in
     ;;
 
   config)
+    preflight
     compose config "$@"
     ;;
 

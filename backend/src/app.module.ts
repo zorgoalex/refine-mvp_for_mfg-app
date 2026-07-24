@@ -10,6 +10,7 @@ import { NotificationsEngineModule } from './modules/notifications-engine/notifi
 import { StatusAutomationModule } from './modules/status-automation/status-automation.module';
 import { HealthModule } from './modules/health/health.module';
 import { ClientPhonesModule } from './modules/client-phones/client-phones.module';
+import { CncTelegramModule } from './modules/cnc-telegram/cnc-telegram.module';
 import { CrmSyncModule } from './modules/crm-sync/crm-sync.module';
 import { BazisModule } from './modules/bazis/bazis.module';
 import { BazisCutModule } from './modules/bazis-cut/bazis-cut.module';
@@ -40,6 +41,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
     AuditModule,
     AuthModule,
     ClientPhonesModule,
+    CncTelegramModule,
     CrmSyncModule,
     BazisModule,
     BazisCutModule,

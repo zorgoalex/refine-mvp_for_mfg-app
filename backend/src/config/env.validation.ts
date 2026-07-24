@@ -173,6 +173,7 @@ export const envSchema = z
     BACKEND_DEADLINE_ACTIONS_ENABLED: booleanFromEnv.default(false),
     BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
     BACKEND_ENABLE_CUT_JOBS: booleanFromEnv.default(false),
+    BACKEND_ENABLE_CNC_TELEGRAM: booleanFromEnv.default(false),
     // Independent production workflow for persistent Basis-cut XLS export sets.
     // Default OFF; intentionally not an alias of BACKEND_ENABLE_CUT_JOBS.
     BACKEND_ENABLE_BAZIS_CUT: booleanFromEnv.default(false),
@@ -451,6 +452,14 @@ export const envSchema = z
       ctx.addIssue({
         code: 'custom',
         message: 'DATABASE_URL is required when BACKEND_ENABLE_BAZIS_CUT is true',
+        path: ['DATABASE_URL'],
+      });
+    }
+
+    if (env.BACKEND_ENABLE_CNC_TELEGRAM && !env.DATABASE_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'DATABASE_URL is required when BACKEND_ENABLE_CNC_TELEGRAM is true',
         path: ['DATABASE_URL'],
       });
     }

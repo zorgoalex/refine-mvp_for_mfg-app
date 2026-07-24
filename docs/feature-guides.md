@@ -2,11 +2,15 @@
 
 ## Доски статусов заказов
 
-Пункт «Доски статусов» открывает `/order-status-board`. Доступны две
+Пункт «Доски статусов» открывает `/order-status-board`. Базово доступны две
 независимые вкладки:
 
 - «Статусы заказов»;
 - «Производство».
+
+При включённом CNC Telegram появляется третья визуальная вкладка «Работы
+сегодня». Она не расширяет контракт обычной status-board API и читает отдельный
+read-model CNC.
 
 Отдельной payment-board нет. Payment status отображается в карточке только при
 `orders.view_financials`.
@@ -31,6 +35,110 @@ RUNTIME_CONFIG_ORDER_STATUS_BOARD=true
 
 Эффективный флаг требует backend orders read. Запись дополнительно требует
 `useBackendProductionActions`; иначе доска read-only.
+
+## CNC Telegram: работы сегодня
+
+Поток «Работы сегодня» показывает листы раскроя, полученные из рабочего
+Telegram-чата за выбранный рабочий день: лист, станок, программу, материал, фрезы,
+комментарии, найденные заказы/детали, предупреждения разбора и признак
+выполнения по реакции «палец вверх».
+
+Data flow:
+
+1. `cnc-telegram-worker` на Telethon читает новые сообщения, history за неделю,
+   файлы G-code, подписи/комментарии и
+   реакции в чате.
+2. OCR worker на CPU анализирует скриншот и объединяет результат с G-code
+   parser. G-code используется только для размеров деталей и фрез.
+3. Backend получает только структурированный JSON через
+   `POST /api/v1/cnc-telegram/ingest`.
+4. UI читает выбранный день через `GET /api/v1/cnc-telegram/today?date=YYYY-MM-DD`.
+
+Backend intentionally raw-free: скриншоты, G-code файлы и полный raw text не
+передаются в ERP API и не сохраняются в БД. Временное хранилище бота/воркера
+должно hard-delete файлы старше 24 часов; при необходимости любой файл можно
+повторно получить из Telegram-чата.
+
+Для проверки и разборов UI даёт перейти по датам за последнюю неделю. Worker
+должен поддерживать backfill по Telegram history за тот же диапазон и отправлять
+структурированные packets с тем же `externalPacketKey`/`source.version`, чтобы
+повторный проход был идемпотентным.
+
+Prod worker находится в `cnc-telegram-worker/` и запускается Docker Compose
+profile `cnc-telegram`. В этот же profile входят `glm-ocr-model-init`
+(скачивает GGUF и mmproj в Docker volume), `glm-ocr-llama` (official
+`ghcr.io/ggml-org/llama.cpp:server` с local model files) и `glm-ocr-runner`
+(internal structured `/ocr`).
+В `.env` prod нужно включить:
+
+```env
+BACKEND_ENABLE_CNC_TELEGRAM=true
+COMPOSE_PROFILES=cnc-telegram
+TELEGRAM_API_ID=<api-id>
+TELEGRAM_API_HASH=<api-hash>
+TELEGRAM_CHAT=<chat-id-or-username>
+TELEGRAM_ALLOWED_CHAT_ID=<expected-chat-id>
+ERP_WORKER_LOGIN=<erp-user-with-cut.manage>
+ERP_WORKER_PASSWORD=<password>
+```
+
+Первый запуск Telethon session:
+
+```bash
+repo_erp/ops/cnc-telegram-worker.sh login
+```
+
+Историческая проверка:
+
+```bash
+repo_erp/ops/cnc-telegram-worker.sh backfill 7
+```
+
+Если prod использует старый live `docker-compose.yml`, `ops/deploy-stack.sh`
+добавит tracked overlay `ops/templates/docker-compose.cnc-telegram-worker.yml`
+при включённом `COMPOSE_PROFILES=cnc-telegram`.
+
+Default worker OCR command уже вызывает internal runner:
+
+```env
+CNC_OCR_COMMAND=python -m cnc_telegram_worker.glm_ocr_client --image {image}
+GLM_OCR_RUNNER_URL=http://glm-ocr-runner:8001/ocr
+GLM_OCR_MODEL_FILE=GLM-OCR-Q8_0.gguf
+GLM_OCR_MMPROJ_FILE=mmproj-GLM-OCR-Q8_0.gguf
+```
+
+Primary OCR для CPU-VPS: GLM-OCR 0.9B Q8 через `llama.cpp`. Он тяжелее
+классических OCR, но лучше переносит реальные скриншоты раскроя и подходит для
+фоновой очереди. PaddleOCR можно держать быстрым fallback, Tesseract — только
+последним резервом. Решение OCR остаётся вне ERP backend: backend доверяет
+только нормализованному packet contract и помечает сомнительные строки
+`needs_review`.
+
+Backend semantics:
+
+- `externalPacketKey` уникален для сообщения/листа;
+- `source.version` монотонно защищает от старых Telegram replay;
+- тот же source version с другим payload hash возвращает конфликт;
+- `Idempotency-Key` приходит только из HTTP header и не входит в structured
+  packet body;
+- today-read без явного `date` берёт `CURRENT_DATE` из PostgreSQL, чтобы
+  совпадать с business timezone backend-контура;
+- packet хранит отдельные `parseStatus` и `completionStatus`;
+- matched detail rows требуют согласованную пару `matchOrderId` +
+  `matchDetailId`;
+- ingest пишет audit/outbox в одной транзакции с upsert;
+- denied ingest логируется отдельно.
+
+Включение:
+
+```env
+BACKEND_ENABLE_CNC_TELEGRAM=true
+COMPOSE_PROFILES=cnc-telegram
+VITE_ORDER_STATUS_BOARD=true
+VITE_USE_BACKEND_ORDERS_READ=true
+VITE_USE_BACKEND_CNC_TELEGRAM=true
+# либо runtime cncTelegram=true
+```
 
 ## Переход в Битрикс24
 

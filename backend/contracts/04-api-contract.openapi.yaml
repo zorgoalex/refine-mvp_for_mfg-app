@@ -9138,6 +9138,73 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/cnc-telegram/today:
+    get:
+      tags:
+        - CncTelegram
+      operationId: listCncTelegramToday
+      summary: List current-day structured CNC Telegram parsing results
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Current-day CNC Telegram packets
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+
+  /api/v1/cnc-telegram/ingest:
+    post:
+      tags:
+        - CncTelegram
+      operationId: ingestCncTelegramPacket
+      summary: Ingest structured CNC Telegram parse results without raw media
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Structured packet accepted
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+
   /api/v1/cut-jobs:
     post:
       tags:

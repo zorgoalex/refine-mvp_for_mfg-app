@@ -132,6 +132,10 @@ export const apiRoutes = {
     pdfTemplates: backendApiPath('/cut-config/pdf-templates'),
     pdfTemplate: (id: number) => backendApiPath(`/cut-config/pdf-templates/${id}`),
   },
+  cncTelegram: {
+    today: backendApiPath('/cnc-telegram/today'),
+    ingest: backendApiPath('/cnc-telegram/ingest'),
+  },
   sheetMaterials: {
     list: backendApiPath('/sheet-material-types'),
     byId: (id: number) => backendApiPath(`/sheet-material-types/${id}`),

@@ -26,6 +26,7 @@ describe('backend env validation', () => {
       BACKEND_ENABLE_PRODUCTION_ACTIONS: false,
       BACKEND_ENABLE_LABELS: false,
       BACKEND_ENABLE_BAZIS_CUT: false,
+      BACKEND_ENABLE_CNC_TELEGRAM: false,
       BACKEND_DEADLINES_READ_ONLY: true,
       BACKEND_GROUPS_READ_ONLY: true,
       BACKEND_ENABLE_DEADLINE_WORKER: false,
@@ -554,6 +555,15 @@ describe('backend env validation', () => {
       BACKEND_ENABLE_BAZIS_CUT: 'true',
       DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
     })).toMatchObject({ BACKEND_ENABLE_BAZIS_CUT: true });
+  });
+
+  it('requires DATABASE_URL when CNC Telegram ingest is enabled', () => {
+    expect(() => validateEnv({ BACKEND_ENABLE_CNC_TELEGRAM: 'true' }))
+      .toThrow(/DATABASE_URL is required when BACKEND_ENABLE_CNC_TELEGRAM is true/);
+    expect(validateEnv({
+      BACKEND_ENABLE_CNC_TELEGRAM: 'true',
+      DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+    })).toMatchObject({ BACKEND_ENABLE_CNC_TELEGRAM: true });
   });
 
   it('requires complete Bitrix24 configuration when CRM sync is enabled', () => {

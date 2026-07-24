@@ -44,6 +44,7 @@ VITE_USE_BACKEND_REFERENCES=false
 VITE_USE_BACKEND_CUT=false
 VITE_USE_BACKEND_BAZIS_CUT=false
 VITE_ORDER_STATUS_BOARD=false
+VITE_USE_BACKEND_CNC_TELEGRAM=false
 VITE_SHEET_MATERIALS_READS=false
 VITE_ENABLE_LEGACY_HASURA=true
 VITE_WORKOS_AUTH=false
@@ -184,6 +185,60 @@ Legacy Vercel Functions остаются rollback path до полного cutov
 `VITE_USE_BACKEND_DEADLINES=true` требует backend auth и orders read.
 Frontend читает `/api/v1/orders/:id/deadline-summary`, `/deadlines` и
 `/deadline-events`.
+
+### CNC Telegram
+
+`VITE_USE_BACKEND_CNC_TELEGRAM=true` включает на странице досок статусов
+визуальный поток «Работы сегодня» с выбором даты за последнюю неделю.
+Эффективный frontend-флаг требует `VITE_ORDER_STATUS_BOARD=true` и backend
+orders read.
+
+Backend включается отдельно:
+
+```env
+BACKEND_ENABLE_CNC_TELEGRAM=true
+```
+
+API:
+
+- `GET /api/v1/cnc-telegram/today` требует `orders.view`;
+- `POST /api/v1/cnc-telegram/ingest` требует `cut.manage`,
+  header `Idempotency-Key` и принимает только структурированный JSON. Если
+  `date` не передан в today-read, backend использует `CURRENT_DATE` PostgreSQL
+  в business timezone контура.
+
+Backend не принимает и не хранит raw screenshot/G-code payload. Временные файлы
+Telegram-бота или OCR worker удаляют на своей стороне; файлы старше 24 часов
+должны hard-delete без архивации.
+
+Для исторической проверки worker перечитывает Telegram history за нужный день и
+повторно отправляет structured packet. Backend хранит только structured
+projection, поэтому это не нарушает raw-retention.
+
+Prod worker включается Compose profile:
+
+```env
+COMPOSE_PROFILES=cnc-telegram
+TELEGRAM_API_ID=<api-id>
+TELEGRAM_API_HASH=<api-hash>
+TELEGRAM_CHAT=<chat-id-or-username>
+TELEGRAM_ALLOWED_CHAT_ID=<expected-chat-id>
+CNC_TELEGRAM_ERP_API_URL=http://backend:3000/api/v1
+ERP_WORKER_LOGIN=<user-with-cut.manage>
+ERP_WORKER_PASSWORD=<password>
+CNC_TEMP_TTL_HOURS=24
+CNC_HISTORY_DAYS=7
+CNC_POLL_INTERVAL_SECONDS=120
+GLM_OCR_MODEL_FILE=GLM-OCR-Q8_0.gguf
+GLM_OCR_MMPROJ_FILE=mmproj-GLM-OCR-Q8_0.gguf
+GLM_OCR_RUNNER_URL=http://glm-ocr-runner:8001/ocr
+```
+
+`ERP_BEARER_TOKEN` может заменить `ERP_WORKER_LOGIN/PASSWORD`.
+`CNC_OCR_COMMAND` по умолчанию вызывает internal `glm-ocr-runner`; переопределять
+его нужно только для кастомного OCR pipeline.
+Первый start profile скачивает GLM-OCR GGUF и multimodal projector в Docker
+volume через `glm-ocr-model-init`; дальше `llama-server` читает локальные файлы.
 
 ## JSON snapshot заказов
 

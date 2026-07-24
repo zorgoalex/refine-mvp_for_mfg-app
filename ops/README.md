@@ -110,7 +110,9 @@ the tracked `docker-compose.vps.yml`. This prevents running from the wrong
 directory, which would render traefik labels and build contexts from empty env.
 
 The file defines `freecut` (cut optimizer) and `cad-service` (SVG/DXF milling
-layouts) alongside the core stack, so they come up with the rest.
+layouts) alongside the core stack, so they come up with the rest. If `.env`
+sets `COMPOSE_PROFILES=cnc-telegram`, it also starts the internal Telethon
+`cnc-telegram-worker`.
 
 ```bash
 cd ~/projects/erp_dev
@@ -129,6 +131,53 @@ it can be invoked from any directory. It refuses a bare `down`/`stop` (that
 would stop ERP); use the `-- <raw args>` escape hatch for deliberate one-off
 compose subcommands. Preflight checks (`.env` present and no `REPLACE_ME`
 placeholders) are warn-only, since `erp_test` is the test contour.
+
+### CNC Telegram worker
+
+Enable in `.env`:
+
+```env
+BACKEND_ENABLE_CNC_TELEGRAM=true
+COMPOSE_PROFILES=cnc-telegram
+TELEGRAM_API_ID=<api-id>
+TELEGRAM_API_HASH=<api-hash>
+TELEGRAM_CHAT=<chat-id-or-username>
+TELEGRAM_ALLOWED_CHAT_ID=<expected-chat-id>
+ERP_WORKER_LOGIN=<erp-user-with-cut.manage>
+ERP_WORKER_PASSWORD=<password>
+```
+
+The same profile starts GLM-OCR:
+
+- `glm-ocr-model-init`: downloads `GLM-OCR-Q8_0.gguf` and
+  `mmproj-GLM-OCR-Q8_0.gguf` into a Docker volume once;
+- `glm-ocr-llama`: `ghcr.io/ggml-org/llama.cpp:server` loading local files;
+- `glm-ocr-runner`: internal `/ocr` wrapper returning structured JSON;
+- `cnc-telegram-worker`: default OCR command calls `glm-ocr-runner`.
+
+One-time Telethon login:
+
+```bash
+repo_erp/ops/cnc-telegram-worker.sh login
+```
+
+Manual backfill:
+
+```bash
+repo_erp/ops/cnc-telegram-worker.sh backfill 7
+```
+
+Logs:
+
+```bash
+repo_erp/ops/cnc-telegram-worker.sh logs
+```
+
+`deploy-stack.sh` also handles old live `docker-compose.yml` files: when
+`COMPOSE_PROFILES=cnc-telegram` is enabled but the live file has no
+`cnc-telegram-worker`, it adds
+`ops/templates/docker-compose.cnc-telegram-worker.yml` as an overlay for that
+deploy run.
 
 ## gen-secrets.sh, ensure-build-repos.sh, up-all.sh provision
 

@@ -584,8 +584,13 @@ probe_file() {
                               WHERE s.cut_result_id = r.cut_result_id)
                            OR p.placement_count IS DISTINCT FROM (
                              SELECT count(*) FROM cut_result_placement cp
-                              WHERE cp.cut_result_id = r.cut_result_id)
+                             WHERE cp.cut_result_id = r.cut_result_id)
                      );" ;;
+    082_cnc_telegram_packets*) probe_all "$(q_tbl cnc_telegram_packets)" "$(q_tbl cnc_telegram_packet_items)" \
+                     "$(q_col cnc_telegram_packets source_version)" \
+                     "$(q_col cnc_telegram_packets payload_hash)" \
+                     "$(q_col cnc_telegram_packet_items packet_item_id)" \
+                     "$(q_idx idx_cnc_telegram_packets_workday_updated)" ;;
     083_orders_production_done_backfill*) probe_true "SELECT
                        (SELECT count(*)
                           FROM production_statuses ps

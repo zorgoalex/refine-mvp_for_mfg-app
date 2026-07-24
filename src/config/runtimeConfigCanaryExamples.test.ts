@@ -29,6 +29,7 @@ const EXPECTED_FEATURE_KEYS = [
   'bazisCut',
   'labels',
   'orderStatusBoard',
+  'cncTelegram',
   'enableLegacyHasura',
   'workosAuth',
 ];
