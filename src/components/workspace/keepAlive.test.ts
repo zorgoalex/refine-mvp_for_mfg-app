@@ -20,6 +20,10 @@ describe('keep-alive policy', () => {
     });
     expect(next.has('/cut')).toBe(true); // retained while inactive (order tab active)
   });
+  it('keeps configuration mounted across the first clean-to-dirty edit', () => {
+    expect(isKeepAliveEligible('/configuration', { dirty: false })).toBe(true);
+    expect(isKeepAliveEligible('/configuration', { dirty: true })).toBe(true);
+  });
   it('keeps order forms mounted across the first clean-to-dirty transition', () => {
     expect(isKeepAliveEligible('/orders/edit/42', { dirty: false })).toBe(true);
     expect(isKeepAliveEligible('/orders/edit/42', { dirty: true })).toBe(true);
