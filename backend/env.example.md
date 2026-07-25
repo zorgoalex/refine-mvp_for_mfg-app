@@ -84,6 +84,34 @@ order-level production stage activate/deactivate. It requires `DATABASE_URL` and
 should be paired with the frontend/runtime-config flag only after the DB
 migration for production action audit/outbox/idempotency contracts is applied.
 
+## Bitrix24 One-Way Sync
+
+Keep the relay paused while running the initial backfill. The webhook is a
+secret and belongs only in an untracked runtime env file.
+
+```env
+BACKEND_ENABLE_BITRIX24_SYNC=true
+BACKEND_BITRIX24_SYNC_RELAY_OWNER=external
+BACKEND_BITRIX24_SYNC_LEASE_MS=300000
+BITRIX24_WEBHOOK_URL=https://mebelkz.bitrix24.kz/rest/USER/SECRET
+BITRIX24_PAY_SYSTEM_ID=12
+BITRIX24_REQUEST_TIMEOUT_MS=30000
+BITRIX24_MAX_REQUESTS_PER_SECOND=2
+BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS=11
+BITRIX24_QUERY_LIMIT_BASE_DELAY_MS=1000
+BITRIX24_OPERATION_LIMIT_FALLBACK_MS=60000
+BITRIX24_CURRENCY_ID=KZT
+```
+
+The standard cloud limit is two sustained requests per second. Use five only
+after confirming an Enterprise portal limit. Backfill requires an explicit
+scope and resumes its last committed database checkpoint:
+
+```bash
+npm --prefix backend run crm-sync:backfill -- --dry-run --scope clients
+npm --prefix backend run crm-sync:backfill -- --scope clients
+```
+
 ## Auth Session Adapter
 
 Use only local/dev secrets here. Real secrets must stay in local untracked env

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -35,11 +35,24 @@ import { CrmSyncRelaySchedulerService } from './application/crm-sync-relay-sched
           : new UnavailableCrmSourceRepository();
 
         const bitrixConfig = config.getBitrix24();
+        const bitrixLogger = new Logger(Bitrix24ApiClient.name);
         const realBitrix = bitrixConfig.webhookUrl
           ? new Bitrix24ApiClient(
             bitrixConfig.webhookUrl,
             undefined,
             bitrixConfig.requestTimeoutMs,
+            {
+              maxRequestsPerSecond: bitrixConfig.maxRequestsPerSecond,
+              limitRetryMaxAttempts: bitrixConfig.limitRetryMaxAttempts,
+              queryLimitBaseDelayMs: bitrixConfig.queryLimitBaseDelayMs,
+              operationLimitFallbackDelayMs: bitrixConfig.operationLimitFallbackDelayMs,
+              onLimitRetry: ({ method, code, attempt, maxAttempts, delayMs }) => {
+                bitrixLogger.warn(
+                  `rate-limit retry method=${method} code=${code} ` +
+                  `attempt=${attempt}/${maxAttempts} delayMs=${delayMs}`,
+                );
+              },
+            },
           )
           : new FailingBitrix24ApiClient();
         const noopBitrix = new NoopBitrix24ApiClient();

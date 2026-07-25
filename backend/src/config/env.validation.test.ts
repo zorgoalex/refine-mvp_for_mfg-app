@@ -603,6 +603,19 @@ describe('backend env validation', () => {
     });
   });
 
+  it('defaults Bitrix24 transport to the standard cloud limit', () => {
+    expect(validateEnv({})).toMatchObject({
+      BITRIX24_MAX_REQUESTS_PER_SECOND: 2,
+      BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS: 11,
+      BITRIX24_QUERY_LIMIT_BASE_DELAY_MS: 1000,
+      BITRIX24_OPERATION_LIMIT_FALLBACK_MS: 60000,
+    });
+    expect(() => validateEnv({ BITRIX24_MAX_REQUESTS_PER_SECOND: '6' }))
+      .toThrow(/BITRIX24_MAX_REQUESTS_PER_SECOND/);
+    expect(() => validateEnv({ BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS: '21' }))
+      .toThrow(/BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS/);
+  });
+
   it('pins WORKOS_API_BASE to workos.com over https (localhost http only for mocks)', () => {
     expect(validateEnv({})).toMatchObject({ WORKOS_API_BASE: 'https://api.workos.com' });
     expect(

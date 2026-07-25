@@ -42,6 +42,10 @@ describe('CrmSyncRuntimeConfigService', () => {
       svc({
         BITRIX24_WEBHOOK_URL: ' https://mebelkz.bitrix24.kz/rest/1/secret/ ',
         BITRIX24_REQUEST_TIMEOUT_MS: 25000,
+        BITRIX24_MAX_REQUESTS_PER_SECOND: 2,
+        BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS: 11,
+        BITRIX24_QUERY_LIMIT_BASE_DELAY_MS: 1000,
+        BITRIX24_OPERATION_LIMIT_FALLBACK_MS: 60000,
         BITRIX24_CURRENCY_ID: 'KZT',
         BITRIX24_PAY_SYSTEM_ID: 7,
         BITRIX24_ASSIGNED_BY_ID: 9,
@@ -50,6 +54,10 @@ describe('CrmSyncRuntimeConfigService', () => {
     ).toEqual({
         webhookUrl: 'https://mebelkz.bitrix24.kz/rest/1/secret/',
         requestTimeoutMs: 25000,
+      maxRequestsPerSecond: 2,
+      limitRetryMaxAttempts: 11,
+      queryLimitBaseDelayMs: 1000,
+      operationLimitFallbackDelayMs: 60000,
       currencyId: 'KZT',
       paySystemId: 7,
       assignedById: 9,
@@ -61,6 +69,8 @@ describe('CrmSyncRuntimeConfigService', () => {
     expect(svc({}).getBitrix24()).toMatchObject({
       webhookUrl: null,
       requestTimeoutMs: undefined,
+      maxRequestsPerSecond: undefined,
+      limitRetryMaxAttempts: undefined,
       paySystemId: null,
       assignedById: null,
     });
@@ -96,6 +106,23 @@ describe('envSchema Bitrix24 sync guards', () => {
   });
 
   it('accepts complete enabled configuration', () => {
-    expect(envSchema.parse(valid)).toMatchObject(valid);
+    expect(envSchema.parse(valid)).toMatchObject({
+      ...valid,
+      BITRIX24_MAX_REQUESTS_PER_SECOND: 2,
+      BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS: 11,
+      BITRIX24_QUERY_LIMIT_BASE_DELAY_MS: 1000,
+      BITRIX24_OPERATION_LIMIT_FALLBACK_MS: 60000,
+    });
+  });
+
+  it('bounds Bitrix24 rate and retry settings', () => {
+    expect(() => envSchema.parse({
+      ...valid,
+      BITRIX24_MAX_REQUESTS_PER_SECOND: 6,
+    })).toThrow(/BITRIX24_MAX_REQUESTS_PER_SECOND/);
+    expect(() => envSchema.parse({
+      ...valid,
+      BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS: 0,
+    })).toThrow(/BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS/);
   });
 });
