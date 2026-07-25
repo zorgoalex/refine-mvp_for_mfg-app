@@ -123,9 +123,19 @@ export const normalizeProductionWorkflowConfig = (
 
   const fallback = buildDefaultProductionWorkflowConfig(statuses, workflowKey);
 
-  const statusCodesOrder = Array.isArray(base?.status_codes_order)
+  const storedStatusCodesOrder = Array.isArray(base?.status_codes_order)
     ? base!.status_codes_order.filter((x) => typeof x === 'string')
     : fallback.status_codes_order;
+  const statusCodesOrder = [
+    ...storedStatusCodesOrder,
+    ...statuses
+      .filter(
+        (status) =>
+          status.is_active &&
+          !storedStatusCodesOrder.includes(status.production_status_code),
+      )
+      .map((status) => status.production_status_code),
+  ];
   const storedLayoutRows = Array.isArray(base?.layout_rows)
     ? base.layout_rows
         .filter((row): row is unknown[] => Array.isArray(row))

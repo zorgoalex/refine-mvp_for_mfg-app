@@ -50,6 +50,7 @@ describe('production workflow visual layout', () => {
           statuses,
           'production.workflow.default',
         ),
+        status_codes_order: ['drawn', 'cut'],
         layout_rows: [['drawn', 'cut']],
       },
       statuses,
