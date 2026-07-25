@@ -34,6 +34,7 @@ const ELEMENT_TYPES = new Set<CutPdfTemplateElementType>([
 
 const TEXT_ALIGN = new Set(['left', 'center', 'right']);
 const TABLE_SORT_FIELDS = new Set([
+  'row_number',
   'order',
   'position',
   'quantity',
@@ -45,6 +46,7 @@ const TABLE_SORT_FIELDS = new Set([
   'orderDate',
   'readyDate',
   'thickness',
+  'detail.row_number',
   'detail.order',
   'detail.position',
   'detail.quantity',
@@ -134,7 +136,7 @@ function validateTableColumns(rawColumns: unknown, index: number, customFieldSch
     if (!isSupportedPdfField(field, customFieldSchema)) {
       throw invalidLayout(`elements.${index}.style.columns.${columnIndex}.field`, { field });
     }
-    if (rawColumn.width !== undefined) boundedNumber(rawColumn.width, `elements.${index}.style.columns.${columnIndex}.width`, 1, 500);
+    if (rawColumn.width !== undefined) boundedNumber(rawColumn.width, `elements.${index}.style.columns.${columnIndex}.width`, 0.1, 100);
     if (rawColumn.visible !== undefined && typeof rawColumn.visible !== 'boolean') {
       throw invalidLayout(`elements.${index}.style.columns.${columnIndex}.visible`);
     }

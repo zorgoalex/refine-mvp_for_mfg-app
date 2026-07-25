@@ -112,4 +112,47 @@ describe('CutConfigAdminService RBAC', () => {
     ).rejects.toMatchObject({ statusCode: 422, code: 'LABEL_CUSTOM_EXPRESSION_INVALID' });
     expect(port.upsertPdfTemplate).not.toHaveBeenCalled();
   });
+
+  it('accepts v3 PDF layouts using the editor default detail table columns', async () => {
+    const port = fakePort();
+    const service = new CutConfigAdminService({ config: port });
+
+    await expect(
+      service.upsertPdfTemplate({
+        currentUser: user(['cut.view', 'cut.manage']),
+        id: 2,
+        expectedVersion: 3,
+        input: {
+          name: 'standard',
+          layout: {
+            version: 3,
+            page: { width: 297, height: 210 },
+            customFieldSchema: {},
+            elements: [
+              {
+                id: 'detail-table',
+                type: 'detail_table',
+                source: 'detail.table',
+                x: 222,
+                y: 34,
+                w: 60,
+                h: 78,
+                rotation: 0,
+                zIndex: 1,
+                align: 'center',
+                style: {
+                  columns: [
+                    { field: 'detail.row_number', label: '#', width: 0.55, visible: true },
+                    { field: 'detail.order', label: 'Заказ', width: 1.6, visible: true },
+                  ],
+                  sort: { field: 'detail.row_number', direction: 'asc' },
+                },
+              },
+            ],
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ cutPdfTemplateId: 1 });
+    expect(port.upsertPdfTemplate).toHaveBeenCalledWith(expect.objectContaining({ id: 2, expectedVersion: 3 }));
+  });
 });

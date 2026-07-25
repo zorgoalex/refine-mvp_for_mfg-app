@@ -753,7 +753,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
       setDrafts((prev) => prev.map((draft) => (draft.code === updated.code ? pdfTemplateToDraft(updated) : draft)));
       message.success('Шаблон PDF сохранён');
     } catch (error) {
-      message.error(error instanceof ApiError ? error.message : 'Не удалось сохранить шаблон PDF');
+      message.error(formatPdfTemplateSaveError(error));
     } finally {
       setSavingDraft(false);
     }
@@ -1509,7 +1509,7 @@ const PdfElementProperties: React.FC<{
   onDelete: () => void;
 }> = ({ element, fields, canManage, onPatch, onDelete }) => {
   const style = element.style;
-  const tableFields = fields.filter((field) => field.id.startsWith('detail.') && field.id !== 'detail.table');
+  const tableFields = fields.filter((field) => field.category === 'Таблица деталей' && field.id !== 'detail.table');
   const tableColumns = readPdfDetailTableColumns(style, true);
   const tableSort = readPdfDetailTableSort(style);
   const patchStyle = (patch: Record<string, unknown>) => onPatch({ style: { ...style, ...patch } });
@@ -1953,6 +1953,13 @@ function defaultPdfDetailTableColumn(fields: PdfFieldCatalogItem[], index: numbe
     width: 1,
     visible: true,
   };
+}
+
+function formatPdfTemplateSaveError(error: unknown): string {
+  if (!(error instanceof ApiError)) return 'Не удалось сохранить шаблон PDF';
+  const details = isRecord(error.details) ? error.details : {};
+  const field = typeof details.field === 'string' && details.field ? details.field : '';
+  return field ? `${error.message}: ${field}` : error.message;
 }
 
 function fieldLabelsFromList(fields: PdfFieldCatalogItem[]): Map<string, string> {
