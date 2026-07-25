@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Empty,
   Input,
   InputNumber,
@@ -23,10 +24,13 @@ import { featureFlags } from '../../../config/featureFlags';
 import {
   buildDefaultSchedulePayload,
   buildDurationDraft,
-  calculateCumulativeHints,
+  buildParallelDraft,
+  calculateScheduleDraft,
   canManageDeadlineDefaultSchedule,
   canViewDeadlineDefaultSchedule,
+  isDeadlineScheduleDraftComplete,
   type DeadlineDurationDraft,
+  type DeadlineParallelDraft,
 } from './deadlineDefaultScheduleView';
 
 const { Paragraph, Text, Title } = Typography;
@@ -37,6 +41,7 @@ export function DeadlineDefaultScheduleConfig() {
   const canManage = canManageDeadlineDefaultSchedule(identity);
   const [schedule, setSchedule] = useState<DeadlineDefaultScheduleDto | null>(null);
   const [durations, setDurations] = useState<DeadlineDurationDraft>({});
+  const [parallel, setParallel] = useState<DeadlineParallelDraft>({});
   const [stageOrder, setStageOrder] = useState<number[]>([]);
   const [reserveDays, setReserveDays] = useState<number | null>(0);
   const [reason, setReason] = useState('');
@@ -52,6 +57,7 @@ export function DeadlineDefaultScheduleConfig() {
       const response = await deadlinesApi.getDefaultSchedule();
       setSchedule(response.schedule);
       setDurations(buildDurationDraft(response.schedule));
+      setParallel(buildParallelDraft(response.schedule));
       setStageOrder(response.schedule.stages.map((stage) => stage.productionStatusId));
       setReserveDays(response.schedule.reserveDays);
       setReason('');
@@ -76,20 +82,32 @@ export function DeadlineDefaultScheduleConfig() {
       .filter((stage): stage is DeadlineDefaultScheduleDto['stages'][number] => Boolean(stage));
   }, [schedule, stageOrder]);
   const draftSchedule = schedule ? { ...schedule, stages: orderedStages } : null;
-  const cumulative = useMemo(
-    () => (draftSchedule ? calculateCumulativeHints(draftSchedule, durations) : new Map()),
-    [draftSchedule, durations],
+  const draftCalculation = useMemo(
+    () =>
+      draftSchedule
+        ? calculateScheduleDraft(draftSchedule, durations, parallel)
+        : { cumulativeHints: new Map<number, number | null>(), totalProductionDays: null },
+    [draftSchedule, durations, parallel],
   );
-  const totalProductionDays = orderedStages.length
-    ? cumulative.get(orderedStages.at(-1)!.productionStatusId) ?? null
-    : null;
+  const cumulative = draftCalculation.cumulativeHints;
+  const totalProductionDays = draftCalculation.totalProductionDays;
   const plannedOrderDays =
     totalProductionDays === null || reserveDays === null
       ? null
       : totalProductionDays + reserveDays;
   const payload = draftSchedule
-    ? buildDefaultSchedulePayload(draftSchedule, reserveDays, durations, reason)
+    ? buildDefaultSchedulePayload(
+        draftSchedule,
+        reserveDays,
+        durations,
+        parallel,
+        reason,
+      )
     : null;
+  const draftComplete = isDeadlineScheduleDraftComplete(
+    draftCalculation,
+    reserveDays,
+  );
 
   const save = async () => {
     if (!payload) {
@@ -101,6 +119,7 @@ export function DeadlineDefaultScheduleConfig() {
       const response = await deadlinesApi.replaceDefaultSchedule(payload);
       setSchedule(response.schedule);
       setDurations(buildDurationDraft(response.schedule));
+      setParallel(buildParallelDraft(response.schedule));
       setStageOrder(response.schedule.stages.map((stage) => stage.productionStatusId));
       setReserveDays(response.schedule.reserveDays);
       setReason('');
@@ -139,6 +158,7 @@ export function DeadlineDefaultScheduleConfig() {
           });
           setSchedule(response.schedule);
           setDurations(buildDurationDraft(response.schedule));
+          setParallel(buildParallelDraft(response.schedule));
           setStageOrder(response.schedule.stages.map((stage) => stage.productionStatusId));
           setReserveDays(response.schedule.reserveDays);
           setReason('');
@@ -154,14 +174,13 @@ export function DeadlineDefaultScheduleConfig() {
   };
 
   const moveStage = (productionStatusId: number, direction: -1 | 1) => {
-    setStageOrder((current) => {
-      const index = current.indexOf(productionStatusId);
-      const target = index + direction;
-      if (index < 0 || target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
+    const index = stageOrder.indexOf(productionStatusId);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= stageOrder.length) return;
+    const next = [...stageOrder];
+    [next[index], next[target]] = [next[target], next[index]];
+    setStageOrder(next);
+    setParallel((current) => ({ ...current, [next[0]]: false }));
   };
 
   if (!canView) {
@@ -183,11 +202,12 @@ export function DeadlineDefaultScheduleConfig() {
         <Title level={4} style={{ marginBottom: 4 }}>Сроки по умолчанию</Title>
         <Paragraph type="secondary" style={{ marginBottom: 0 }}>
           Укажите длительность каждого этапа. Итоговый день считается автоматически
-          от даты заказа. Ручная дата в заказе всегда имеет приоритет.
+          по этапам конкретного заказа. Параллельные этапы стартуют вместе,
+          ручная дата всегда имеет приоритет.
         </Paragraph>
       </div>
 
-      {!schedule.configured && (
+      {!draftComplete && (
         <Alert
           type="warning"
           showIcon
@@ -195,9 +215,7 @@ export function DeadlineDefaultScheduleConfig() {
           description={
             schedule.stages.length === 0
               ? 'Нет активных этапов производства. Сохранённую настройку можно отключить ниже.'
-              : schedule.hasStoredConfiguration
-                ? 'Список этапов изменился. Обновите сроки всех этапов или отключите старую настройку.'
-                : 'Пока не заполнены все этапы, новые заказы не получают автоматическую плановую дату.'
+              : 'Заполните длительность каждого этапа. Ноль дней — допустимое значение.'
           }
         />
       )}
@@ -271,19 +289,46 @@ export function DeadlineDefaultScheduleConfig() {
             ),
           },
           {
+            title: 'Выполнение',
+            width: 220,
+            render: (_, stage, index) => (
+              <div style={{ minHeight: 44, display: 'flex', alignItems: 'center' }}>
+                <Checkbox
+                  checked={index > 0 && parallel[stage.productionStatusId] === true}
+                  disabled={!canManage || index === 0}
+                  onChange={(event) =>
+                    setParallel((current) => ({
+                      ...current,
+                      [stage.productionStatusId]: event.target.checked,
+                    }))
+                  }
+                >
+                  Параллельно с предыдущим
+                </Checkbox>
+              </div>
+            ),
+          },
+          {
             title: 'Подсказка от даты заказа',
             width: 320,
             render: (_, stage, index) => {
               const deadlineDay = cumulative.get(stage.productionStatusId);
+              const duration = durations[stage.productionStatusId];
               const previousDays =
-                index === 0
-                  ? 0
-                  : cumulative.get(orderedStages[index - 1].productionStatusId);
+                deadlineDay !== null &&
+                deadlineDay !== undefined &&
+                duration !== null &&
+                duration !== undefined
+                  ? deadlineDay - duration
+                  : null;
               return deadlineDay === null || deadlineDay === undefined ? (
                 <Text type="secondary">Заполните этот и предыдущие этапы</Text>
               ) : (
                 <Text>
-                  Предыдущие этапы: <Text strong>{previousDays ?? 0}</Text> дн. ·
+                  {index > 0 && parallel[stage.productionStatusId]
+                    ? 'Параллельный старт: '
+                    : 'Предыдущие группы: '}
+                  <Text strong>{previousDays ?? 0}</Text> дн. ·
                   дедлайн: <Text strong>{deadlineDay}-й день</Text>
                 </Text>
               );
@@ -331,6 +376,11 @@ export function DeadlineDefaultScheduleConfig() {
             maxLength={500}
             autoSize={{ minRows: 2, maxRows: 4 }}
           />
+          {draftComplete && reason.trim().length < 3 && (
+            <Text type="secondary">
+              Укажите причину изменения, чтобы сохранить настройку.
+            </Text>
+          )}
           <Space wrap>
             <Button type="primary" onClick={() => void save()} loading={saving} disabled={!payload}>
               Сохранить сроки

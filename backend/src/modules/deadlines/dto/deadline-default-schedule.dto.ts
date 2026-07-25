@@ -4,6 +4,7 @@ export interface DeadlineDefaultScheduleStageDto {
   productionStatusCode: string | null;
   sortOrder: number;
   durationDays: number | null;
+  parallelWithPrevious: boolean;
   cumulativeDeadlineDays: number | null;
 }
 
@@ -25,6 +26,7 @@ export interface ReplaceDeadlineDefaultScheduleRequestDto {
   stages: Array<{
     productionStatusId: number;
     durationDays: number;
+    parallelWithPrevious: boolean;
   }>;
 }
 

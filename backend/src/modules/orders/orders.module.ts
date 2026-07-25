@@ -95,18 +95,22 @@ export function shouldEnableOrderDeadlineSync(input: {
                   const schedule = await new PgDeadlineDefaultScheduleRepository(
                     database,
                   ).getSchedule(client);
-                  if (!schedule.configured || schedule.plannedOrderDays === null) {
+                  if (!schedule.configured) {
                     return null;
                   }
                   return {
                     version: schedule.version,
-                    plannedOrderDays: schedule.plannedOrderDays,
-                    stageDeadlineDaysByProductionStatusId: new Map(
-                      schedule.stages.flatMap((stage) =>
-                        stage.cumulativeDeadlineDays === null
-                          ? []
-                          : [[stage.productionStatusId, stage.cumulativeDeadlineDays] as const],
-                      ),
+                    reserveDays: schedule.reserveDays,
+                    stages: schedule.stages.flatMap((stage) =>
+                      stage.durationDays === null
+                        ? []
+                        : [
+                            {
+                              productionStatusId: stage.productionStatusId,
+                              durationDays: stage.durationDays,
+                              parallelWithPrevious: stage.parallelWithPrevious,
+                            },
+                          ],
                     ),
                   };
                 },

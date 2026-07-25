@@ -25,6 +25,7 @@ const requestSchema = z.object({
       z.object({
         productionStatusId: z.number().int().positive(),
         durationDays: z.number().int().min(0).max(3650),
+        parallelWithPrevious: z.boolean(),
       }),
     ),
 }).superRefine((value, context) => {
@@ -35,8 +36,23 @@ const requestSchema = z.object({
       message: 'reserveDays must be 0 when stages is empty',
     });
   }
-  const total =
-    value.reserveDays + value.stages.reduce((sum, stage) => sum + stage.durationDays, 0);
+  if (value.stages[0]?.parallelWithPrevious) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['stages', 0, 'parallelWithPrevious'],
+      message: 'first stage cannot be parallel with a previous stage',
+    });
+  }
+  let total = value.reserveDays;
+  let groupMaximum = 0;
+  for (const [index, stage] of value.stages.entries()) {
+    if (index > 0 && !stage.parallelWithPrevious) {
+      total += groupMaximum;
+      groupMaximum = 0;
+    }
+    groupMaximum = Math.max(groupMaximum, stage.durationDays);
+  }
+  total += groupMaximum;
   if (total > MAX_DEADLINE_DEFAULT_SCHEDULE_DAYS) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -87,6 +103,7 @@ const responseSwaggerSchema = {
               'productionStatusCode',
               'sortOrder',
               'durationDays',
+              'parallelWithPrevious',
               'cumulativeDeadlineDays',
             ],
             properties: {
@@ -95,6 +112,7 @@ const responseSwaggerSchema = {
               productionStatusCode: { type: 'string', nullable: true },
               sortOrder: { type: 'integer' },
               durationDays: { type: 'integer', nullable: true },
+              parallelWithPrevious: { type: 'boolean' },
               cumulativeDeadlineDays: { type: 'integer', nullable: true },
             },
           },
@@ -138,10 +156,15 @@ export class DeadlineDefaultScheduleController {
           type: 'array',
           items: {
             type: 'object',
-            required: ['productionStatusId', 'durationDays'],
+            required: [
+              'productionStatusId',
+              'durationDays',
+              'parallelWithPrevious',
+            ],
             properties: {
               productionStatusId: { type: 'integer', minimum: 1 },
               durationDays: { type: 'integer', minimum: 0, maximum: 3650 },
+              parallelWithPrevious: { type: 'boolean' },
             },
           },
         },

@@ -634,6 +634,9 @@ probe_file() {
                            AND reserve_days BETWEEN 0 AND 3650
                            AND version > 0
                       );" ;;
+    087_deadline_default_parallel_stages*) probe_all \
+                     "$(q_col deadline_default_stage_durations parallel_with_previous)" \
+                     "$(q_con chk_deadline_default_stage_first_not_parallel)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

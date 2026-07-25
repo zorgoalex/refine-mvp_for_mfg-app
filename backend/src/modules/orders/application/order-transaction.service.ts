@@ -34,7 +34,10 @@ import {
 } from '../errors/order.errors';
 import { prepareOrderSave } from '../domain/order-save-preparer';
 import { ProjectClientMismatchError } from '../../projects/errors/projects.errors';
-import { addCalendarDays } from '../../deadlines/domain/deadline-default-schedule';
+import {
+  addCalendarDays,
+  calculateApplicableDeadlineSchedule,
+} from '../../deadlines/domain/deadline-default-schedule';
 import {
   assertSheetEligibilityAndNoClear,
   orderTouchesSheet,
@@ -279,7 +282,17 @@ export class OrderTransactionService {
     }
 
     const orderDate = prepared.order.header.orderDate;
-    const headerDefaultDate = addCalendarDays(orderDate, schedule.plannedOrderDays);
+    const applicableSchedule = calculateApplicableDeadlineSchedule(
+      schedule,
+      prepared.order.workshops.map((workshop) => workshop.productionStatusId),
+    );
+    if (!applicableSchedule) {
+      return { prepared };
+    }
+    const headerDefaultDate = addCalendarDays(
+      orderDate,
+      applicableSchedule.plannedOrderDays,
+    );
     const headerApplied =
       prepared.order.header.plannedCompletionDate === null && headerDefaultDate !== null;
     const appliedWorkshops: NonNullable<
@@ -301,9 +314,10 @@ export class OrderTransactionService {
             if (workshop.plannedCompletionDate !== null) {
               return workshop;
             }
-            const stageDays = schedule.stageDeadlineDaysByProductionStatusId.get(
-              workshop.productionStatusId,
-            );
+            const stageDays =
+              applicableSchedule.stageDeadlineDaysByProductionStatusId.get(
+                workshop.productionStatusId,
+              );
             const plannedCompletionDate =
               stageDays === undefined ? null : addCalendarDays(orderDate, stageDays);
             if (plannedCompletionDate === null) {

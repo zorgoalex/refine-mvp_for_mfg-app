@@ -7,6 +7,8 @@ describe('OrderForm deadline defaults', () => {
   it('does not restore the historical hard-coded +10 day fallback', () => {
     expect(source).not.toMatch(/add\(10,\s*['"]day['"]\)/);
     expect(source).toContain('computePlannedCompletionDate');
+    expect(source).toContain('applicableProductionStatusIds');
+    expect(source).toContain('workshop.production_status_id');
     expect(source).toMatch(/deadlinesApi\s*\.\s*getDefaultSchedule/);
   });
 });

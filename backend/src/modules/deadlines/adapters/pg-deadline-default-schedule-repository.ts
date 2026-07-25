@@ -23,6 +23,7 @@ interface ConfigRow {
     productionStatusCode: string | null;
     sortOrder: number;
     durationDays: number | null;
+    parallelWithPrevious: boolean;
   }>;
 }
 
@@ -62,7 +63,9 @@ export class PgDeadlineDefaultScheduleRepository
           before.stages.every(
             (stage, index) =>
               input.dto.stages[index]?.productionStatusId === stage.productionStatusId &&
-              input.dto.stages[index]?.durationDays === stage.durationDays,
+              input.dto.stages[index]?.durationDays === stage.durationDays &&
+              input.dto.stages[index]?.parallelWithPrevious ===
+                stage.parallelWithPrevious,
           ));
       if (same) {
         return before;
@@ -83,11 +86,18 @@ export class PgDeadlineDefaultScheduleRepository
         await tx.query(
           `
           INSERT INTO deadline_default_stage_durations (
-            production_status_id, position, duration_days, updated_by_user_id
+            production_status_id, position, duration_days,
+            parallel_with_previous, updated_by_user_id
           )
-          VALUES ($1, $2, $3, $4)
+          VALUES ($1, $2, $3, $4, $5)
           `,
-          [stage.productionStatusId, index + 1, stage.durationDays, actorUserId],
+          [
+            stage.productionStatusId,
+            index + 1,
+            stage.durationDays,
+            stage.parallelWithPrevious,
+            actorUserId,
+          ],
         );
       }
       await tx.query(
@@ -190,7 +200,8 @@ async function loadScheduleSnapshot(database: DatabaseClient): Promise<{
             'productionStatusName', ps.production_status_name,
             'productionStatusCode', ps.production_status_code,
             'sortOrder', COALESCE(durations.position, ps.sort_order, 100),
-            'durationDays', durations.duration_days
+            'durationDays', durations.duration_days,
+            'parallelWithPrevious', COALESCE(durations.parallel_with_previous, false)
           )
           ORDER BY
             CASE WHEN durations.position IS NULL THEN 1 ELSE 0 END,
@@ -246,6 +257,7 @@ async function loadScheduleSnapshot(database: DatabaseClient): Promise<{
         productionStatusCode: stage.productionStatusCode,
         sortOrder: Number(stage.sortOrder),
         durationDays: stage.durationDays === null ? null : Number(stage.durationDays),
+        parallelWithPrevious: stage.parallelWithPrevious,
       })),
     }),
   };
@@ -280,13 +292,21 @@ function changedStageIds(
   const beforeById = new Map(
     before.stages.map((stage, index) => [
       stage.productionStatusId,
-      { durationDays: stage.durationDays, position: index + 1 },
+      {
+        durationDays: stage.durationDays,
+        parallelWithPrevious: stage.parallelWithPrevious,
+        position: index + 1,
+      },
     ]),
   );
   const afterById = new Map(
     after.stages.map((stage, index) => [
       stage.productionStatusId,
-      { durationDays: stage.durationDays, position: index + 1 },
+      {
+        durationDays: stage.durationDays,
+        parallelWithPrevious: stage.parallelWithPrevious,
+        position: index + 1,
+      },
     ]),
   );
   return [...new Set([...beforeById.keys(), ...afterById.keys()])]
@@ -295,6 +315,7 @@ function changedStageIds(
       const next = afterById.get(id);
       return (
         previous?.durationDays !== next?.durationDays ||
+        previous?.parallelWithPrevious !== next?.parallelWithPrevious ||
         previous?.position !== next?.position
       );
     })

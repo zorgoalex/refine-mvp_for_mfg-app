@@ -904,11 +904,19 @@ describe('OrderTransactionService', () => {
         async getConfiguredSchedule() {
           return {
             version: 4,
-            plannedOrderDays: 9,
-            stageDeadlineDaysByProductionStatusId: new Map([
-              [10, 2],
-              [20, 7],
-            ]),
+            reserveDays: 2,
+            stages: [
+              {
+                productionStatusId: 10,
+                durationDays: 2,
+                parallelWithPrevious: false,
+              },
+              {
+                productionStatusId: 20,
+                durationDays: 5,
+                parallelWithPrevious: false,
+              },
+            ],
           };
         },
       },
@@ -949,8 +957,14 @@ describe('OrderTransactionService', () => {
         async getConfiguredSchedule() {
           return {
             version: 4,
-            plannedOrderDays: 9,
-            stageDeadlineDaysByProductionStatusId: new Map([[10, 2]]),
+            reserveDays: 7,
+            stages: [
+              {
+                productionStatusId: 10,
+                durationDays: 2,
+                parallelWithPrevious: false,
+              },
+            ],
           };
         },
       },
@@ -975,6 +989,121 @@ describe('OrderTransactionService', () => {
     expect(result.workshops[0]?.plannedCompletionDate).toBe('2026-05-20');
   });
 
+  it('calculates dates only from stages present in the order', async () => {
+    const transactions = new FakeOrderTransactions();
+    const result = await new OrderTransactionService({
+      transactions,
+      defaultSchedule: {
+        async getConfiguredSchedule() {
+          return {
+            version: 5,
+            reserveDays: 1,
+            stages: [
+              {
+                productionStatusId: 10,
+                durationDays: 3,
+                parallelWithPrevious: false,
+              },
+              {
+                productionStatusId: 20,
+                durationDays: 4,
+                parallelWithPrevious: false,
+              },
+              {
+                productionStatusId: 30,
+                durationDays: 8,
+                parallelWithPrevious: false,
+              },
+            ],
+          };
+        },
+      },
+    }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({
+        workshops: [{ workshopId: 2, productionStatusId: 20 }],
+      }),
+    });
+
+    expect(result.workshops[0]?.plannedCompletionDate).toBe('2026-05-04');
+    expect(result.header.plannedCompletionDate).toBe('2026-05-05');
+  });
+
+  it('uses the critical path instead of summing parallel order stages', async () => {
+    const transactions = new FakeOrderTransactions();
+    const result = await new OrderTransactionService({
+      transactions,
+      defaultSchedule: {
+        async getConfiguredSchedule() {
+          return {
+            version: 6,
+            reserveDays: 2,
+            stages: [
+              {
+                productionStatusId: 10,
+                durationDays: 2,
+                parallelWithPrevious: false,
+              },
+              {
+                productionStatusId: 20,
+                durationDays: 5,
+                parallelWithPrevious: true,
+              },
+              {
+                productionStatusId: 30,
+                durationDays: 1,
+                parallelWithPrevious: false,
+              },
+            ],
+          };
+        },
+      },
+    }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({
+        workshops: [
+          { workshopId: 1, productionStatusId: 10 },
+          { workshopId: 2, productionStatusId: 20 },
+          { workshopId: 3, productionStatusId: 30 },
+        ],
+      }),
+    });
+
+    expect(result.workshops.map((workshop) => workshop.plannedCompletionDate)).toEqual([
+      '2026-05-02',
+      '2026-05-05',
+      '2026-05-06',
+    ]);
+    expect(result.header.plannedCompletionDate).toBe('2026-05-08');
+  });
+
+  it('does not set an automatic order date when no production stages apply', async () => {
+    const transactions = new FakeOrderTransactions();
+    const result = await new OrderTransactionService({
+      transactions,
+      defaultSchedule: {
+        async getConfiguredSchedule() {
+          return {
+            version: 7,
+            reserveDays: 2,
+            stages: [
+              {
+                productionStatusId: 10,
+                durationDays: 2,
+                parallelWithPrevious: false,
+              },
+            ],
+          };
+        },
+      },
+    }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({ workshops: [] }),
+    });
+
+    expect(result.header.plannedCompletionDate).toBeNull();
+  });
+
   it.each([
     {
       name: 'non-date planned completion',
@@ -992,8 +1121,8 @@ describe('OrderTransactionService', () => {
     const transactions = new FakeOrderTransactions();
     const getConfiguredSchedule = vi.fn(async () => ({
       version: 4,
-      plannedOrderDays: 9,
-      stageDeadlineDaysByProductionStatusId: new Map<number, number>(),
+      reserveDays: 0,
+      stages: [],
     }));
     const dto = createSaveDto();
     mutate(dto);

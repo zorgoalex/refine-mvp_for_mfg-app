@@ -26,8 +26,12 @@ export interface CreateOrderCommand {
 
 export interface OrderDefaultSchedule {
   version: number;
-  plannedOrderDays: number;
-  stageDeadlineDaysByProductionStatusId: ReadonlyMap<number, number>;
+  reserveDays: number;
+  stages: ReadonlyArray<{
+    productionStatusId: number;
+    durationDays: number;
+    parallelWithPrevious: boolean;
+  }>;
 }
 
 export interface OrderDefaultSchedulePort {
