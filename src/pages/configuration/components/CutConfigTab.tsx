@@ -33,9 +33,11 @@ import {
   CopyOutlined,
   DeleteOutlined,
   MinusOutlined,
+  PictureOutlined,
   PlusOutlined,
   QrcodeOutlined,
   SaveOutlined,
+  TableOutlined,
 } from '@ant-design/icons';
 import type Konva from 'konva';
 import { Group as KonvaGroup, Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
@@ -43,10 +45,12 @@ import { useList } from '@refinedev/core';
 import {
   cutConfigApi,
   type CutConfig,
+  type CutPdfFieldCatalogItem,
   type CutParamProfile,
   type CutPdfTemplate,
   type CutRenderPreset,
 } from '../../../api/cutConfigApi';
+import type { LabelCustomExpressionNode, LabelFieldCatalogItem } from '../../../api/types/labelsApi.types';
 import { ApiError } from '../../../api/httpClient';
 import { can } from '../../../utils/permissions';
 import {
@@ -67,6 +71,15 @@ import {
   summarizeParams,
 } from './cutConfigHelpers';
 import { CutDefaultSettingsCard } from './CutDefaultSettingsCard';
+import { CustomFieldExpressionEditor } from './CustomFieldExpressionEditor';
+import {
+  customFieldRowsFromSchema,
+  customFieldRowsToSchema,
+  evaluateCustomFieldPreviewValues,
+  isCustomFieldExpressionValid,
+  summarizeCustomFieldExpression,
+  type CustomFieldSchemaRow,
+} from './labelTemplateEditorHelpers';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
@@ -383,23 +396,24 @@ export const CutConfigTab: React.FC = () => {
   );
 };
 
-type PdfTemplateElementType = 'text' | 'field' | 'custom' | 'qr' | 'line' | 'rect';
+type PdfTemplateElementType = 'text' | 'field' | 'custom' | 'qr' | 'line' | 'rect' | 'sheet_thumbnail' | 'detail_table';
 type PdfTextAlign = 'left' | 'center' | 'right';
-type PdfFieldSource = 'job' | 'group' | 'sheet' | 'detail' | 'order' | 'client' | 'computed' | 'custom';
+type PdfFieldSource = CutPdfFieldCatalogItem['source'] | 'client' | 'computed';
 
 interface PdfFieldCatalogItem {
   id: string;
   source: PdfFieldSource;
+  sourceColumn?: string | null;
   label: string;
   category: string;
-  type: 'string' | 'number' | 'date';
+  type: 'string' | 'number' | 'boolean' | 'date';
 }
 
-interface PdfCustomField {
-  fieldId: string;
+interface PdfDetailTableColumn {
+  field: string;
   label: string;
-  type: 'string' | 'number' | 'date';
-  sourceField?: string | null;
+  width: number;
+  visible: boolean;
 }
 
 interface PdfTemplateElement {
@@ -422,7 +436,7 @@ interface PdfTemplateDraft {
   code: string;
   name: string;
   page: { width: number; height: number };
-  customFields: PdfCustomField[];
+  customFields: CustomFieldSchemaRow[];
   elements: PdfTemplateElement[];
 }
 
@@ -440,9 +454,10 @@ const PDF_QR_ERROR_CORRECTION_OPTIONS = [
   { value: 'Q', label: 'Q' },
   { value: 'H', label: 'H' },
 ];
-const PDF_CUSTOM_FIELD_TYPE_OPTIONS = [
+const PDF_CUSTOM_FIELD_TYPE_OPTIONS: Array<{ value: CustomFieldSchemaRow['type']; label: string }> = [
   { value: 'string', label: 'Строка' },
   { value: 'number', label: 'Число' },
+  { value: 'boolean', label: 'Да/нет' },
   { value: 'date', label: 'Дата' },
 ];
 const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
@@ -457,6 +472,7 @@ const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
   { id: 'sheet.size', source: 'sheet', label: 'Размер листа', category: 'Лист', type: 'string' },
   { id: 'sheet.details_count', source: 'sheet', label: 'Количество деталей на листе', category: 'Лист', type: 'number' },
   { id: 'sheet.area', source: 'sheet', label: 'Площадь деталей', category: 'Лист', type: 'number' },
+  { id: 'sheet.thumbnail', source: 'sheet', label: 'Миниатюра листа раскроя', category: 'Лист', type: 'string' },
   { id: 'order.unique_names', source: 'order', label: 'Заказы на листе', category: 'Заказ', type: 'string' },
   { id: 'order.date', source: 'order', label: 'Дата заказа', category: 'Заказ', type: 'date' },
   { id: 'order.ready_date', source: 'order', label: 'Дата готовности', category: 'Заказ', type: 'date' },
@@ -465,6 +481,18 @@ const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
   { id: 'detail.films', source: 'detail', label: 'Пленки деталей', category: 'Детали', type: 'string' },
   { id: 'detail.thicknesses', source: 'detail', label: 'Толщины деталей', category: 'Детали', type: 'string' },
   { id: 'detail.table', source: 'detail', label: 'Таблица деталей', category: 'Детали', type: 'string' },
+  { id: 'detail.row_number', source: 'detail', label: 'Номер строки', category: 'Таблица деталей', type: 'number' },
+  { id: 'detail.order', source: 'detail', label: 'Заказ', category: 'Таблица деталей', type: 'string' },
+  { id: 'detail.position', source: 'detail', label: 'Позиция', category: 'Таблица деталей', type: 'string' },
+  { id: 'detail.lengthMm', source: 'detail', label: 'Длина', category: 'Таблица деталей', type: 'number' },
+  { id: 'detail.widthMm', source: 'detail', label: 'Ширина', category: 'Таблица деталей', type: 'number' },
+  { id: 'detail.quantity', source: 'detail', label: 'Количество', category: 'Таблица деталей', type: 'number' },
+  { id: 'detail.material', source: 'detail', label: 'Материал', category: 'Таблица деталей', type: 'string' },
+  { id: 'detail.film', source: 'detail', label: 'Пленка', category: 'Таблица деталей', type: 'string' },
+  { id: 'detail.client', source: 'detail', label: 'Клиент', category: 'Таблица деталей', type: 'string' },
+  { id: 'detail.orderDate', source: 'detail', label: 'Дата заказа', category: 'Таблица деталей', type: 'date' },
+  { id: 'detail.readyDate', source: 'detail', label: 'Дата готовности', category: 'Таблица деталей', type: 'date' },
+  { id: 'detail.thickness', source: 'detail', label: 'Толщина', category: 'Таблица деталей', type: 'number' },
   { id: 'computed.today', source: 'computed', label: 'Текущая дата', category: 'Вычисляемые', type: 'date' },
   { id: 'computed.page_number', source: 'computed', label: 'Номер страницы', category: 'Вычисляемые', type: 'number' },
   { id: 'computed.page_count', source: 'computed', label: 'Всего страниц', category: 'Вычисляемые', type: 'number' },
@@ -481,6 +509,7 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'sheet.size': '2080x1050',
   'sheet.details_count': '32',
   'sheet.area': '5.378 м.кв.',
+  'sheet.thumbnail': '',
   'order.unique_names': '11380',
   'order.date': '03.07.2026',
   'order.ready_date': '10.07.2026',
@@ -489,23 +518,46 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'detail.films': 'Крем брюле -Декор+',
   'detail.thicknesses': '16',
   'detail.table': '#  Длина  Ширина  Кол-во',
+  'detail.row_number': '1',
+  'detail.order': '11380',
+  'detail.position': '12',
+  'detail.lengthMm': '800',
+  'detail.widthMm': '240',
+  'detail.quantity': '2',
+  'detail.material': 'Ванна 2080x1050',
+  'detail.film': 'Крем брюле -Декор+',
+  'detail.client': 'Тестовый клиент',
+  'detail.orderDate': '03.07.2026',
+  'detail.readyDate': '10.07.2026',
+  'detail.thickness': '16',
   'computed.today': '03.07.2026',
   'computed.page_number': '1',
   'computed.page_count': '3',
 };
+const DEFAULT_PDF_DETAIL_TABLE_COLUMNS: PdfDetailTableColumn[] = [
+  { field: 'detail.row_number', label: '#', width: 0.55, visible: true },
+  { field: 'detail.order', label: 'Заказ', width: 1.6, visible: true },
+  { field: 'detail.position', label: 'Поз.', width: 0.9, visible: true },
+  { field: 'detail.lengthMm', label: 'Длина', width: 1.1, visible: true },
+  { field: 'detail.widthMm', label: 'Ширина', width: 1.1, visible: true },
+  { field: 'detail.quantity', label: 'Кол-во', width: 0.9, visible: true },
+];
 const DEFAULT_PDF_ELEMENTS: PdfTemplateElement[] = [
   makePdfElement('field', { id: 'field-order', label: 'Заказ', source: 'order.unique_names', x: 12, y: 10, w: 84, h: 8, align: 'left' }),
   makePdfElement('field', { id: 'field-client', label: 'Клиент', source: 'client.unique_names', x: 108, y: 10, w: 78, h: 8, align: 'left' }),
   makePdfElement('field', { id: 'field-film', label: 'Пленка', source: 'detail.films', x: 198, y: 10, w: 84, h: 8, align: 'left' }),
   makePdfElement('line', { id: 'line-header', label: 'Линия шапки', x: 12, y: 22, w: 270, h: 0 }),
-  makePdfElement('rect', { id: 'rect-sheet', label: 'Область листа', source: 'sheet.layout', x: 12, y: 34, w: 202, h: 154 }),
-  makePdfElement('rect', { id: 'rect-table', label: 'Таблица деталей', source: 'detail.table', x: 222, y: 34, w: 60, h: 78 }),
+  makePdfElement('sheet_thumbnail', { id: 'sheet-thumbnail', label: 'Миниатюра листа', source: 'sheet.thumbnail', x: 12, y: 34, w: 202, h: 154 }),
+  makePdfElement('detail_table', { id: 'detail-table', label: 'Таблица деталей', source: 'detail.table', x: 222, y: 34, w: 60, h: 78 }),
 ];
 
 const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canManage }) => {
   const [drafts, setDrafts] = useState<PdfTemplateDraft[]>(() => loadPdfTemplateDrafts(templates));
   const [savingDraft, setSavingDraft] = useState(false);
   const [selectedCode, setSelectedCode] = useState(() => templates[0]?.code ?? drafts[0]?.code ?? 'standard');
+  const [fieldCatalog, setFieldCatalog] = useState<PdfFieldCatalogItem[]>(PDF_FIELD_CATALOG);
+  const [fieldCatalogError, setFieldCatalogError] = useState<string | null>(null);
+  const [editingCustomFieldId, setEditingCustomFieldId] = useState<string | null>(null);
   const selected = drafts.find((draft) => draft.code === selectedCode) ?? drafts[0];
   const [selectedElementId, setSelectedElementId] = useState<string | null>(selected?.elements[0]?.id ?? null);
   const [fieldSearch, setFieldSearch] = useState('');
@@ -515,7 +567,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   const customFields = selected?.customFields ?? [];
   const customFieldCatalog = useMemo<PdfFieldCatalogItem[]>(
     () => customFields.map((field) => ({
-      id: `custom.${field.fieldId}`,
+      id: customFieldSourceId(field.fieldId),
       source: 'custom',
       label: field.label || field.fieldId,
       category: 'Пользовательские',
@@ -523,9 +575,41 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     })),
     [customFields],
   );
-  const fields = useMemo(() => [...customFieldCatalog, ...PDF_FIELD_CATALOG], [customFieldCatalog]);
+  const fields = useMemo(() => [...customFieldCatalog, ...fieldCatalog], [customFieldCatalog, fieldCatalog]);
+  const fieldLabels = useMemo(() => new Map(fields.map((field) => [field.id, field.label])), [fields]);
+  const expressionFields = useMemo(() => toLabelExpressionFields(fields), [fields]);
+  const allowedExpressionFieldIds = useMemo(() => new Set([
+    ...fields.map((field) => field.id),
+    ...customFields.map((field) => field.fieldId),
+  ]), [customFields, fields]);
   const usedFieldIds = useMemo(() => new Set((selected?.elements ?? []).map((element) => element.source).filter(Boolean) as string[]), [selected]);
-  const customSchemaText = useMemo(() => JSON.stringify(customFields, null, 2), [customFields]);
+  const previewValues = useMemo(() => {
+    const evaluated = evaluateCustomFieldPreviewValues(customFields, PDF_PREVIEW_VALUES);
+    return {
+      ...PDF_PREVIEW_VALUES,
+      ...evaluated,
+      ...Object.fromEntries(Object.entries(evaluated).map(([key, value]) => [customFieldSourceId(key), value])),
+    };
+  }, [customFields]);
+  const editingCustomField = customFields.find((field) => field.fieldId === editingCustomFieldId) ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    cutConfigApi.listPdfTemplateFields()
+      .then((rows) => {
+        if (cancelled) return;
+        setFieldCatalog(rows.length > 0 ? rows.map(normalizePdfFieldCatalogItem) : PDF_FIELD_CATALOG);
+        setFieldCatalogError(null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFieldCatalog(PDF_FIELD_CATALOG);
+        setFieldCatalogError('Не удалось загрузить полный список полей; показан локальный минимум.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     setDrafts((prev) => mergePdfTemplateDrafts(prev, templates));
@@ -575,13 +659,20 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
 
   const addFieldElement = useCallback(
     (field: PdfFieldCatalogItem, x = 24, y = 28) => {
-      addElement(field.source === 'custom' ? 'custom' : 'field', {
+      const type: PdfTemplateElementType = field.id === 'sheet.thumbnail'
+        ? 'sheet_thumbnail'
+        : field.id === 'detail.table'
+          ? 'detail_table'
+          : field.source === 'custom'
+            ? 'custom'
+            : 'field';
+      addElement(type, {
         label: field.label,
         source: field.id,
         x,
         y,
-        w: Math.min(80, Math.max(34, field.label.length * 3.2)),
-        h: 8,
+        w: type === 'sheet_thumbnail' ? 150 : type === 'detail_table' ? 82 : Math.min(80, Math.max(34, field.label.length * 3.2)),
+        h: type === 'sheet_thumbnail' ? 90 : type === 'detail_table' ? 64 : 8,
         align: 'left',
       });
     },
@@ -668,42 +759,26 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     }
   }, [drafts, selected, templates]);
 
-  const setCustomFieldsFromText = useCallback(
-    (text: string) => {
-      if (!selected) return;
-      try {
-        const parsed = JSON.parse(text) as PdfCustomField[];
-        if (!Array.isArray(parsed)) throw new Error('not-array');
-        updateSelected({
-          ...selected,
-          customFields: parsed
-            .filter((row) => row && typeof row.fieldId === 'string')
-            .map((row) => ({
-              fieldId: row.fieldId.trim(),
-              label: String(row.label ?? row.fieldId).trim(),
-              type: row.type === 'number' || row.type === 'date' ? row.type : 'string',
-              sourceField: typeof row.sourceField === 'string' ? row.sourceField : null,
-            }))
-            .filter((row) => row.fieldId),
-        });
-      } catch {
-        message.error('JSON пользовательских полей некорректен');
-      }
-    },
-    [selected, updateSelected],
-  );
-
   const addCustomField = useCallback(() => {
     if (!selected) return;
-    const fieldId = `field_${selected.customFields.length + 1}`;
+    const fieldId = `custom.field_${selected.customFields.length + 1}`;
     updateSelected({
       ...selected,
-      customFields: [...selected.customFields, { fieldId, label: 'Новое поле', type: 'string', sourceField: null }],
+      customFields: [...selected.customFields, {
+        fieldId,
+        label: 'Новое поле',
+        type: 'string',
+        valueMode: 'source',
+        sourceField: fieldCatalog[0]?.id ?? null,
+        defaultValue: '',
+        expression: null,
+        extra: {},
+      }],
     });
-  }, [selected, updateSelected]);
+  }, [fieldCatalog, selected, updateSelected]);
 
   const patchCustomField = useCallback(
-    (fieldId: string, patch: Partial<PdfCustomField>) => {
+    (fieldId: string, patch: Partial<CustomFieldSchemaRow>) => {
       if (!selected) return;
       updateSelected({
         ...selected,
@@ -711,6 +786,25 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
       });
     },
     [selected, updateSelected],
+  );
+
+  const setCustomFieldValueMode = useCallback(
+    (field: CustomFieldSchemaRow, valueMode: CustomFieldSchemaRow['valueMode']) => {
+      if (valueMode === 'expression') {
+        patchCustomField(field.fieldId, {
+          valueMode,
+          type: 'string',
+          expression: field.expression ?? { type: 'custom_expression', version: 1, root: defaultCustomExpressionNode(fieldCatalog[0]?.id ?? '') },
+        });
+        return;
+      }
+      patchCustomField(field.fieldId, {
+        valueMode,
+        expression: null,
+        sourceField: valueMode === 'source' ? field.sourceField ?? fieldCatalog[0]?.id ?? null : field.sourceField,
+      });
+    },
+    [fieldCatalog, patchCustomField],
   );
 
   const removeCustomField = useCallback(
@@ -774,6 +868,12 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         <Button icon={<QrcodeOutlined />} disabled={!canManage} onClick={() => addElement('qr')}>
           QR-код
         </Button>
+        <Button icon={<PictureOutlined />} disabled={!canManage} onClick={() => addElement('sheet_thumbnail')}>
+          Миниатюра листа
+        </Button>
+        <Button icon={<TableOutlined />} disabled={!canManage} onClick={() => addElement('detail_table')}>
+          Таблица деталей
+        </Button>
         <Button icon={<MinusOutlined />} disabled={!canManage} onClick={() => addElement('line')}>
           Линия
         </Button>
@@ -786,6 +886,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         <Col xs={24} xl={6}>
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <Card size="small" title="Поля карты раскроя PDF">
+              {fieldCatalogError && <Alert type="warning" showIcon message={fieldCatalogError} style={{ marginBottom: 8 }} />}
               <PdfFieldPalette
                 fields={fields}
                 usedFieldIds={usedFieldIds}
@@ -799,17 +900,22 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
             <Collapse>
               <Panel header="Пользовательские поля" key="custom-fields">
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Input.TextArea key={`${selected.code}:${customFields.length}`} defaultValue={customSchemaText} autoSize={{ minRows: 3, maxRows: 7 }} disabled={!canManage} onBlur={(event) => setCustomFieldsFromText(event.target.value)} />
                   <Button size="small" icon={<PlusOutlined />} disabled={!canManage} onClick={addCustomField}>
                     Добавить поле
                   </Button>
-                  <Table<PdfCustomField>
+                  <Table<CustomFieldSchemaRow>
                     rowKey="fieldId"
                     size="small"
                     pagination={false}
                     dataSource={customFields}
                     columns={[
-                      { title: 'Ключ', dataIndex: 'fieldId', width: 110 },
+                      {
+                        title: 'Ключ',
+                        width: 116,
+                        render: (_, row) => (
+                          <Input size="small" value={row.fieldId} disabled={!canManage} onChange={(event) => patchCustomField(row.fieldId, { fieldId: event.target.value.trim() })} />
+                        ),
+                      },
                       {
                         title: 'Название',
                         render: (_, row) => <Input size="small" value={row.label} disabled={!canManage} onChange={(event) => patchCustomField(row.fieldId, { label: event.target.value })} />,
@@ -821,10 +927,55 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
                           <Select
                             size="small"
                             value={row.type}
-                            disabled={!canManage}
+                            disabled={!canManage || row.valueMode === 'expression'}
                             options={PDF_CUSTOM_FIELD_TYPE_OPTIONS}
                             onChange={(type) => patchCustomField(row.fieldId, { type })}
                           />
+                        ),
+                      },
+                      {
+                        title: 'Значение',
+                        render: (_, row) => (
+                          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                            <Select
+                              size="small"
+                              value={row.valueMode}
+                              disabled={!canManage}
+                              options={[
+                                { value: 'source', label: 'Из поля' },
+                                { value: 'constant', label: 'Константа' },
+                                { value: 'expression', label: 'Формула' },
+                              ]}
+                              onChange={(valueMode) => setCustomFieldValueMode(row, valueMode)}
+                            />
+                            {row.valueMode === 'source' && (
+                              <Select
+                                showSearch
+                                size="small"
+                                value={row.sourceField ?? undefined}
+                                disabled={!canManage}
+                                options={fieldCatalog.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
+                                onChange={(sourceField) => patchCustomField(row.fieldId, { sourceField })}
+                              />
+                            )}
+                            {row.valueMode === 'constant' && (
+                              <Input
+                                size="small"
+                                value={String(row.defaultValue ?? '')}
+                                disabled={!canManage}
+                                onChange={(event) => patchCustomField(row.fieldId, { defaultValue: event.target.value })}
+                              />
+                            )}
+                            {row.valueMode === 'expression' && (
+                              <Space size={4} wrap>
+                                <Button size="small" disabled={!canManage} onClick={() => setEditingCustomFieldId(row.fieldId)}>
+                                  Формула
+                                </Button>
+                                {row.expression && !isCustomFieldExpressionValid(row.expression, allowedExpressionFieldIds) && <Tag color="error">Ошибка</Tag>}
+                                {row.expression && <Text type="secondary">{summarizeCustomFieldExpression(row.expression, fieldLabels)}</Text>}
+                              </Space>
+                            )}
+                          </Space>
                         ),
                       },
                       {
@@ -848,6 +999,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
             <PdfTemplateCanvas
               draft={selected}
               fields={fields}
+              previewValues={previewValues}
               selectedElementId={selectedElementId}
               canManage={canManage}
               showAllBounds={showAllBounds}
@@ -888,6 +1040,27 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
           </Space>
         </Col>
       </Row>
+      <Modal
+        title={editingCustomField ? `Формула: ${editingCustomField.label || editingCustomField.fieldId}` : 'Формула'}
+        open={Boolean(editingCustomField)}
+        onCancel={() => setEditingCustomFieldId(null)}
+        onOk={() => setEditingCustomFieldId(null)}
+        width={820}
+        destroyOnClose
+      >
+        {editingCustomField && (
+          <CustomFieldExpressionEditor
+            value={editingCustomField.expression?.root ?? defaultCustomExpressionNode(fieldCatalog[0]?.id ?? '')}
+            fields={expressionFields}
+            disabled={!canManage}
+            onChange={(root) => patchCustomField(editingCustomField.fieldId, {
+              valueMode: 'expression',
+              type: 'string',
+              expression: { type: 'custom_expression', version: 1, root },
+            })}
+          />
+        )}
+      </Modal>
     </Space>
   );
 };
@@ -895,6 +1068,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
 const PdfTemplateCanvas: React.FC<{
   draft: PdfTemplateDraft;
   fields: PdfFieldCatalogItem[];
+  previewValues: Record<string, string>;
   selectedElementId: string | null;
   canManage: boolean;
   showAllBounds: boolean;
@@ -905,7 +1079,7 @@ const PdfTemplateCanvas: React.FC<{
   onDuplicate: (id: string) => void;
   onMoveZ: (id: string, direction: 'front' | 'back') => void;
   onDropField: (field: PdfFieldCatalogItem, x: number, y: number) => void;
-}> = ({ draft, fields, selectedElementId, canManage, showAllBounds, draggingField, onSelect, onPatch, onDelete, onDuplicate, onMoveZ, onDropField }) => {
+}> = ({ draft, fields, previewValues, selectedElementId, canManage, showAllBounds, draggingField, onSelect, onPatch, onDelete, onDuplicate, onMoveZ, onDropField }) => {
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const nodeRefs = useRef(new Map<string, Konva.Node>());
@@ -1069,6 +1243,7 @@ const PdfTemplateCanvas: React.FC<{
                 key={element.id}
                 element={element}
                 fieldLabels={fieldLabels}
+                previewValues={previewValues}
                 selected={element.id === selectedElementId}
                 interactive={canManage && !draggingField}
                 showAllBounds={showAllBounds}
@@ -1124,6 +1299,7 @@ const PdfTemplateCanvas: React.FC<{
 const PdfKonvaElement: React.FC<{
   element: PdfTemplateElement;
   fieldLabels: Map<string, string>;
+  previewValues: Record<string, string>;
   selected: boolean;
   interactive: boolean;
   showAllBounds: boolean;
@@ -1131,7 +1307,7 @@ const PdfKonvaElement: React.FC<{
   onSelect: () => void;
   onMove: (x: number, y: number, event?: { altKey?: boolean }) => void;
   onTransformEnd: (node: Konva.Node, event: Konva.KonvaEventObject<Event>) => void;
-}> = ({ element, fieldLabels, selected, interactive, showAllBounds, nodeRef, onSelect, onMove, onTransformEnd }) => {
+}> = ({ element, fieldLabels, previewValues, selected, interactive, showAllBounds, nodeRef, onSelect, onMove, onTransformEnd }) => {
   const common = {
     ref: nodeRef,
     x: element.x,
@@ -1167,6 +1343,65 @@ const PdfKonvaElement: React.FC<{
       </React.Fragment>
     );
   }
+  if (element.type === 'sheet_thumbnail') {
+    const w = Math.max(element.w, 1);
+    const h = Math.max(element.h, 1);
+    const pieceColor = ['#e6f4ff', '#fff1f0', '#f6ffed', '#fffbe6'];
+    const pieces = [
+      { x: w * 0.07, y: h * 0.08, w: w * 0.34, h: h * 0.24 },
+      { x: w * 0.45, y: h * 0.08, w: w * 0.46, h: h * 0.18 },
+      { x: w * 0.08, y: h * 0.38, w: w * 0.26, h: h * 0.48 },
+      { x: w * 0.39, y: h * 0.35, w: w * 0.52, h: h * 0.38 },
+    ];
+    return (
+      <React.Fragment>
+        <KonvaGroup {...common} width={w} height={h}>
+          <KonvaRect x={0} y={0} width={w} height={h} fill="#ffffff" stroke={String(element.style.color ?? '#111111')} strokeWidth={Number(element.style.strokeWidth ?? 0.25)} />
+          {pieces.map((piece, index) => (
+            <KonvaRect key={index} x={piece.x} y={piece.y} width={piece.w} height={piece.h} fill={pieceColor[index % pieceColor.length]} stroke="#334155" strokeWidth={0.18} listening={false} />
+          ))}
+        </KonvaGroup>
+        {selectedBox}
+        {boundsBox}
+      </React.Fragment>
+    );
+  }
+  if (element.type === 'detail_table') {
+    const w = Math.max(element.w, 1);
+    const h = Math.max(element.h, 1);
+    const columns = readPdfDetailTableColumns(element.style);
+    const headerH = Math.min(7, h * 0.22);
+    const rowH = Math.max(4.5, Math.min(7, (h - headerH) / 4));
+    const totalWidth = columns.reduce((sum, column) => sum + column.width, 0) || 1;
+    let x = 0;
+    return (
+      <React.Fragment>
+        <KonvaGroup {...common} width={w} height={h}>
+          <KonvaRect x={0} y={0} width={w} height={h} fill="#ffffff" stroke={String(element.style.color ?? '#111111')} strokeWidth={0.22} />
+          {columns.map((column, index) => {
+            const colW = (w * column.width) / totalWidth;
+            const cx = x;
+            x += colW;
+            return (
+              <React.Fragment key={column.field}>
+                <KonvaRect x={cx} y={0} width={colW} height={headerH} fill="#f5f5f5" stroke="#111111" strokeWidth={0.16} listening={false} />
+                <KonvaText x={cx + 0.8} y={1} width={Math.max(1, colW - 1.6)} height={headerH - 1} text={column.label} fontFamily="Arial" fontSize={Math.max(2.2, Math.min(3.4, headerH * 0.42))} align="center" wrap="word" ellipsis listening={false} />
+                {[0, 1, 2].map((rowIndex) => (
+                  <KonvaRect key={`${column.field}-${rowIndex}`} x={cx} y={headerH + rowIndex * rowH} width={colW} height={rowH} fill="#ffffff" stroke="#111111" strokeWidth={0.12} listening={false} />
+                ))}
+                {[0, 1, 2].map((rowIndex) => (
+                  <KonvaText key={`${column.field}-txt-${rowIndex}`} x={cx + 0.8} y={headerH + rowIndex * rowH + 1} width={Math.max(1, colW - 1.6)} height={rowH - 1} text={pdfDetailTablePreviewValue(column.field, rowIndex)} fontFamily="Arial" fontSize={Math.max(2, Math.min(3, rowH * 0.42))} align="center" wrap="word" ellipsis listening={false} />
+                ))}
+                {index === columns.length - 1 ? null : <KonvaLine points={[x, 0, x, h]} stroke="#111111" strokeWidth={0.12} listening={false} />}
+              </React.Fragment>
+            );
+          })}
+        </KonvaGroup>
+        {selectedBox}
+        {boundsBox}
+      </React.Fragment>
+    );
+  }
   if (element.type === 'qr') {
     const side = Math.max(element.w, element.h, 8);
     const moduleSide = side / 7;
@@ -1187,7 +1422,7 @@ const PdfKonvaElement: React.FC<{
   const value = element.type === 'text'
     ? element.text ?? ''
     : element.source
-    ? PDF_PREVIEW_VALUES[element.source] ?? fieldLabels.get(element.source) ?? element.source
+    ? previewValues[element.source] ?? fieldLabels.get(element.source) ?? element.source
     : '';
   return (
     <React.Fragment>
@@ -1201,7 +1436,7 @@ const PdfKonvaElement: React.FC<{
         fontStyle={element.style.fontWeight === 'bold' ? 'bold' : 'normal'}
         fill={String(element.style.color ?? '#111111')}
         align={element.align}
-        wrap="none"
+        wrap="word"
         ellipsis
       />
       {selectedBox}
@@ -1274,6 +1509,16 @@ const PdfElementProperties: React.FC<{
   onDelete: () => void;
 }> = ({ element, fields, canManage, onPatch, onDelete }) => {
   const style = element.style;
+  const tableFields = fields.filter((field) => field.id.startsWith('detail.') && field.id !== 'detail.table');
+  const tableColumns = readPdfDetailTableColumns(style, true);
+  const tableSort = readPdfDetailTableSort(style);
+  const patchStyle = (patch: Record<string, unknown>) => onPatch({ style: { ...style, ...patch } });
+  const patchTableColumn = (index: number, patch: Partial<PdfDetailTableColumn>) => {
+    patchStyle({ columns: tableColumns.map((column, columnIndex) => (columnIndex === index ? { ...column, ...patch } : column)) });
+  };
+  const removeTableColumn = (index: number) => {
+    patchStyle({ columns: tableColumns.filter((_, columnIndex) => columnIndex !== index) });
+  };
   return (
     <Card size="small" title="Свойства элемента" extra={<Button size="small" danger icon={<DeleteOutlined />} disabled={!canManage} onClick={onDelete} />}>
       <Form layout="vertical">
@@ -1290,6 +1535,8 @@ const PdfElementProperties: React.FC<{
               { value: 'field', label: 'Динамическое поле' },
               { value: 'custom', label: 'Пользовательское поле' },
               { value: 'qr', label: 'QR-код' },
+              { value: 'sheet_thumbnail', label: 'Миниатюра листа' },
+              { value: 'detail_table', label: 'Таблица деталей' },
               { value: 'line', label: 'Линия' },
               { value: 'rect', label: 'Прямоугольник' },
             ]}
@@ -1324,6 +1571,93 @@ const PdfElementProperties: React.FC<{
             </Form.Item>
           </>
         )}
+        {element.type === 'sheet_thumbnail' && (
+          <Form.Item label="Масштабирование" style={{ marginBottom: 10 }}>
+            <Select
+              value={String(style.fit ?? 'contain')}
+              disabled={!canManage}
+              options={[
+                { value: 'contain', label: 'Вписать' },
+                { value: 'cover', label: 'Заполнить' },
+                { value: 'stretch', label: 'Растянуть' },
+              ]}
+              onChange={(fit) => patchStyle({ fit })}
+            />
+          </Form.Item>
+        )}
+        {element.type === 'detail_table' && (
+          <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 10 }}>
+            <Text strong>Таблица деталей</Text>
+            <Space.Compact block>
+              <Select
+                showSearch
+                value={tableSort.field}
+                disabled={!canManage}
+                options={tableFields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
+                style={{ width: '70%' }}
+                onChange={(field) => patchStyle({ sort: { ...tableSort, field } })}
+              />
+              <Select
+                value={tableSort.direction}
+                disabled={!canManage}
+                options={[
+                  { value: 'asc', label: 'A-Z' },
+                  { value: 'desc', label: 'Z-A' },
+                ]}
+                style={{ width: '30%' }}
+                onChange={(direction) => patchStyle({ sort: { ...tableSort, direction } })}
+              />
+            </Space.Compact>
+            <Table<PdfDetailTableColumn>
+              size="small"
+              rowKey={(row, index) => `${row.field}-${index}`}
+              pagination={false}
+              dataSource={tableColumns}
+              columns={[
+                {
+                  title: 'Поле',
+                  render: (_, row, index) => (
+                    <Select
+                      showSearch
+                      size="small"
+                      value={row.field}
+                      disabled={!canManage}
+                      options={tableFields.map((field) => ({ value: field.id, label: field.label }))}
+                      onChange={(field) => patchTableColumn(index, { field, label: fieldLabelsFromList(fields).get(field) ?? field })}
+                    />
+                  ),
+                },
+                {
+                  title: 'Название',
+                  render: (_, row, index) => <Input size="small" value={row.label} disabled={!canManage} onChange={(event) => patchTableColumn(index, { label: event.target.value })} />,
+                },
+                {
+                  title: 'W',
+                  width: 62,
+                  render: (_, row, index) => <InputNumber size="small" min={0.1} max={20} step={0.1} value={row.width} disabled={!canManage} onChange={(width) => patchTableColumn(index, { width: Number(width ?? 1) })} />,
+                },
+                {
+                  title: 'Вкл',
+                  width: 44,
+                  render: (_, row, index) => <Checkbox checked={row.visible} disabled={!canManage} onChange={(event) => patchTableColumn(index, { visible: event.target.checked })} />,
+                },
+                {
+                  title: '',
+                  width: 34,
+                  render: (_, _row, index) => <Button size="small" danger icon={<DeleteOutlined />} disabled={!canManage || tableColumns.length <= 1} onClick={() => removeTableColumn(index)} />,
+                },
+              ]}
+            />
+            <Button
+              size="small"
+              icon={<PlusOutlined />}
+              disabled={!canManage || tableFields.length === 0}
+              onClick={() => patchStyle({ columns: [...tableColumns, defaultPdfDetailTableColumn(tableFields, tableColumns.length)] })}
+            >
+              Добавить колонку
+            </Button>
+          </Space>
+        )}
         <Row gutter={8}>
           <Col span={6}><NumberBox label="X" value={element.x} disabled={!canManage} onChange={(x) => onPatch({ x })} /></Col>
           <Col span={6}><NumberBox label="Y" value={element.y} disabled={!canManage} onChange={(y) => onPatch({ y })} /></Col>
@@ -1332,8 +1666,8 @@ const PdfElementProperties: React.FC<{
         </Row>
         <Row gutter={8}>
           <Col span={8}><NumberBox label="Поворот" value={element.rotation} disabled={!canManage} onChange={(rotation) => onPatch({ rotation })} /></Col>
-          <Col span={8}><NumberBox label="Шрифт" value={Number(style.fontSize ?? 10)} disabled={!canManage || !['text', 'field', 'custom'].includes(element.type)} onChange={(fontSize) => onPatch({ style: { ...style, fontSize } })} /></Col>
-          <Col span={8}><NumberBox label="Линия" value={Number(style.strokeWidth ?? 0.35)} disabled={!canManage || !['line', 'rect'].includes(element.type)} onChange={(strokeWidth) => onPatch({ style: { ...style, strokeWidth } })} /></Col>
+          <Col span={8}><NumberBox label="Шрифт" value={Number(style.fontSize ?? 10)} disabled={!canManage || !['text', 'field', 'custom', 'detail_table'].includes(element.type)} onChange={(fontSize) => onPatch({ style: { ...style, fontSize } })} /></Col>
+          <Col span={8}><NumberBox label="Линия" value={Number(style.strokeWidth ?? 0.35)} disabled={!canManage || !['line', 'rect', 'sheet_thumbnail', 'detail_table'].includes(element.type)} onChange={(strokeWidth) => onPatch({ style: { ...style, strokeWidth } })} /></Col>
         </Row>
         <Form.Item label="Цвет" style={{ marginBottom: 10 }}>
           <Input type="color" value={String(style.color ?? '#111111')} disabled={!canManage} onChange={(event) => onPatch({ style: { ...style, color: event.target.value } })} />
@@ -1401,16 +1735,28 @@ function layoutToPdfDraftShape(layout: Record<string, unknown>): Pick<PdfTemplat
     width: Number(layout.page.width ?? PDF_PAGE.width),
     height: Number(layout.page.height ?? PDF_PAGE.height),
   } : PDF_PAGE;
-  const customFields = Array.isArray(layout.customFields) ? layout.customFields.map(normalizeCustomField) : [];
+  const customFields = isRecord(layout.customFieldSchema)
+    ? customFieldRowsFromSchema(layout.customFieldSchema)
+    : Array.isArray(layout.customFields)
+      ? layout.customFields.map(normalizeCustomField)
+      : [];
   const rawElements = Array.isArray(layout.elements) ? layout.elements : DEFAULT_PDF_ELEMENTS;
   return { page, customFields, elements: rawElements.map((element, index) => normalizePdfElement(element, index)) };
 }
 
 function pdfDraftToLayout(draft: PdfTemplateDraft): Record<string, unknown> {
+  const customFields = draft.customFields.map((field) => ({ ...field, fieldId: customFieldSourceId(field.fieldId) }));
+  const customFieldSchema = customFieldRowsToSchema(customFields);
   return {
-    version: 2,
+    version: 3,
     page: draft.page,
-    customFields: draft.customFields,
+    customFieldSchema,
+    customFields: customFields.map((field) => ({
+      fieldId: field.fieldId,
+      label: field.label,
+      type: field.type,
+      sourceField: field.valueMode === 'source' ? field.sourceField : null,
+    })),
     elements: draft.elements.map((element, index) => ({ ...normalizePdfElement(element, index), zIndex: index })),
   };
 }
@@ -1432,14 +1778,18 @@ function normalizePdfDraft(raw: Partial<PdfTemplateDraft>): PdfTemplateDraft {
   };
 }
 
-function normalizeCustomField(raw: unknown): PdfCustomField {
+function normalizeCustomField(raw: unknown): CustomFieldSchemaRow {
   const r = isRecord(raw) ? raw : {};
-  const type = r.type === 'number' || r.type === 'date' ? r.type : 'string';
+  const type = r.type === 'number' || r.type === 'date' || r.type === 'boolean' ? r.type : 'string';
   return {
-    fieldId: String(r.fieldId ?? r.id ?? 'field').trim(),
+    fieldId: customFieldSourceId(String(r.fieldId ?? r.id ?? 'field').trim()),
     label: String(r.label ?? r.fieldId ?? r.id ?? 'Поле').trim(),
     type,
+    valueMode: typeof r.sourceField === 'string' ? 'source' : 'constant',
     sourceField: typeof r.sourceField === 'string' ? r.sourceField : null,
+    defaultValue: isRecord(r) && Object.prototype.hasOwnProperty.call(r, 'defaultValue') ? r.defaultValue : '',
+    expression: null,
+    extra: {},
   };
 }
 
@@ -1501,6 +1851,8 @@ function defaultPatchForType(type: PdfTemplateElementType): Partial<PdfTemplateE
   if (type === 'field') return { label: 'Поле', source: 'order.unique_names', text: null, x: 18, y: 18, w: 58, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } };
   if (type === 'custom') return { label: 'Пользовательское поле', source: null, text: null, x: 18, y: 18, w: 58, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } };
   if (type === 'qr') return { label: 'QR-код', source: null, text: null, x: 18, y: 18, w: 22, h: 22, align: 'center', style: { qrName: 'QR', qrTemplate: '{order.unique_names}\\n{sheet.number}', qrErrorCorrection: 'M' } };
+  if (type === 'sheet_thumbnail') return { label: 'Миниатюра листа', source: 'sheet.thumbnail', text: null, x: 18, y: 32, w: 150, h: 95, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fit: 'contain' } };
+  if (type === 'detail_table') return { label: 'Таблица деталей', source: 'detail.table', text: null, x: 180, y: 32, w: 88, h: 72, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fontSize: 7, columns: DEFAULT_PDF_DETAIL_TABLE_COLUMNS, sort: { field: 'detail.order', direction: 'asc' } } };
   if (type === 'line') return { label: 'Линия', source: null, text: null, x: 18, y: 18, w: 64, h: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.35 } };
   return { label: 'Прямоугольник', source: null, text: null, x: 18, y: 18, w: 48, h: 22, align: 'center', style: { color: '#111111', strokeWidth: 0.35, fill: 'transparent' } };
 }
@@ -1511,6 +1863,8 @@ function pdfElementTypeLabel(type: PdfTemplateElementType): string {
     field: 'Поле',
     custom: 'Пользовательское',
     qr: 'QR',
+    sheet_thumbnail: 'Миниатюра листа',
+    detail_table: 'Таблица деталей',
     line: 'Линия',
     rect: 'Прямоугольник',
   };
@@ -1518,13 +1872,129 @@ function pdfElementTypeLabel(type: PdfTemplateElementType): string {
 }
 
 function isPdfElementType(value: unknown): value is PdfTemplateElementType {
-  return value === 'text' || value === 'field' || value === 'custom' || value === 'qr' || value === 'line' || value === 'rect';
+  return value === 'text'
+    || value === 'field'
+    || value === 'custom'
+    || value === 'qr'
+    || value === 'sheet_thumbnail'
+    || value === 'detail_table'
+    || value === 'line'
+    || value === 'rect';
+}
+
+function normalizePdfFieldCatalogItem(row: CutPdfFieldCatalogItem): PdfFieldCatalogItem {
+  return {
+    id: row.id,
+    source: row.source,
+    sourceColumn: row.sourceColumn,
+    label: row.label,
+    category: row.category,
+    type: row.type,
+  };
+}
+
+function toLabelExpressionFields(fields: PdfFieldCatalogItem[]): LabelFieldCatalogItem[] {
+  return fields.map((field) => ({
+    id: field.id,
+    source: field.source === 'bazis' || field.source === 'dynamic' || field.source === 'detail' || field.source === 'order'
+      ? field.source
+      : 'dynamic',
+    sourceColumn: field.sourceColumn ?? null,
+    label: field.label,
+    type: field.type,
+    category: field.category,
+  }));
+}
+
+function defaultCustomExpressionNode(fieldId: string): LabelCustomExpressionNode {
+  return fieldId ? { type: 'field', field: fieldId } : { type: 'empty' };
+}
+
+function customFieldSourceId(fieldId: string): string {
+  const normalized = fieldId.trim() || 'custom.field';
+  return normalized.startsWith('custom.') ? normalized : `custom.${normalized}`;
+}
+
+function readPdfDetailTableColumns(style: Record<string, unknown>, includeHidden = false): PdfDetailTableColumn[] {
+  const table = isRecord(style.table) ? style.table : {};
+  const rawColumns = Array.isArray(table.columns)
+    ? table.columns
+    : Array.isArray(style.columns)
+      ? style.columns
+      : DEFAULT_PDF_DETAIL_TABLE_COLUMNS;
+  return rawColumns
+    .map((raw): PdfDetailTableColumn | null => {
+      if (!isRecord(raw)) return null;
+      const field = typeof raw.field === 'string' && raw.field.trim() ? raw.field.trim() : 'detail.order';
+      return {
+        field,
+        label: String(raw.label ?? fieldLabelsFromList(PDF_FIELD_CATALOG).get(field) ?? field),
+        width: Math.max(0.1, Number(raw.width ?? 1)),
+        visible: raw.visible !== false,
+      };
+    })
+    .filter((column): column is PdfDetailTableColumn => Boolean(column) && (includeHidden || column.visible));
+}
+
+function readPdfDetailTableSort(style: Record<string, unknown>): { field: string; direction: 'asc' | 'desc' } {
+  const table = isRecord(style.table) ? style.table : {};
+  const raw = isRecord(table.sort) ? table.sort : isRecord(style.sort) ? style.sort : {};
+  return {
+    field: typeof raw.field === 'string' ? raw.field : 'detail.order',
+    direction: raw.direction === 'desc' ? 'desc' : 'asc',
+  };
+}
+
+function defaultPdfDetailTableColumn(fields: PdfFieldCatalogItem[], index: number): PdfDetailTableColumn {
+  const field = fields[index % Math.max(fields.length, 1)];
+  return {
+    field: field?.id ?? 'detail.order',
+    label: field?.label ?? 'Заказ',
+    width: 1,
+    visible: true,
+  };
+}
+
+function fieldLabelsFromList(fields: PdfFieldCatalogItem[]): Map<string, string> {
+  return new Map(fields.map((field) => [field.id, field.label]));
+}
+
+function pdfDetailTablePreviewValue(field: string, rowIndex: number): string {
+  const suffix = rowIndex === 0 ? '' : rowIndex === 1 ? '-2' : '-3';
+  const values: Record<string, string> = {
+    'detail.row_number': String(rowIndex + 1),
+    'detail.order': `11380${suffix}`,
+    'detail.position': String(12 + rowIndex),
+    'detail.lengthMm': String(800 - rowIndex * 20),
+    'detail.widthMm': String(240 + rowIndex * 15),
+    'detail.quantity': String(rowIndex + 1),
+    'detail.material': 'Ванна',
+    'detail.film': 'Крем',
+    'detail.client': 'Клиент',
+    'detail.orderDate': '03.07.2026',
+    'detail.readyDate': '10.07.2026',
+    'detail.thickness': '16',
+  };
+  return values[field] ?? values[field.replace(/^detail\./, 'detail.')] ?? '';
 }
 
 function groupPdfFields(fields: PdfFieldCatalogItem[]): Array<[string, PdfFieldCatalogItem[]]> {
   const grouped = new Map<string, PdfFieldCatalogItem[]>();
   for (const field of fields) grouped.set(field.category, [...(grouped.get(field.category) ?? []), field]);
-  const order = ['Пользовательские', 'Задание', 'Группа', 'Лист', 'Заказ', 'Клиент', 'Детали', 'Вычисляемые'];
+  const order = [
+    'Пользовательские',
+    'Задание',
+    'Задание раскроя',
+    'Группа',
+    'Группа раскроя',
+    'Лист',
+    'Лист раскроя',
+    'Заказ',
+    'Клиент',
+    'Детали',
+    'Таблица деталей',
+    'Вычисляемые',
+  ];
   return [...grouped.entries()].sort(([a], [b]) => {
     const ai = order.indexOf(a);
     const bi = order.indexOf(b);

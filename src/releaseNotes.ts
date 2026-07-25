@@ -30,6 +30,20 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-25",
+    title: "Редактор PDF-шаблонов карт раскроя",
+    services: ["Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В PDF-шаблонах раскроя появились отдельные элементы «Миниатюра листа» и «Таблица деталей»: их можно свободно ставить на лист, менять размер и поворачивать.",
+      "Редактор получил полный каталог полей через Cut API и формулы пользовательских полей по тому же принципу, что редактор бирок.",
+    ],
+    changed: [
+      "Текстовые поля PDF теперь переносят длинный текст внутри своих границ, а таблицу деталей можно собирать из выбранных колонок и сортировать по заказу.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-24",
     title: "Работы CNC из Telegram на доске статусов",
     services: ["ERP", "Cutting"],

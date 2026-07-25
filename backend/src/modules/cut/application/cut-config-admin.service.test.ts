@@ -65,4 +65,51 @@ describe('CutConfigAdminService RBAC', () => {
     ).resolves.toMatchObject({ cutPdfTemplateId: 1, layout: {} });
     expect(port.upsertPdfTemplate).toHaveBeenCalledWith(expect.objectContaining({ id: 1, expectedVersion: 0 }));
   });
+
+  it('lists PDF template fields with cut.view only', async () => {
+    const service = new CutConfigAdminService({ config: fakePort() });
+    const fields = await service.listPdfTemplateFields({ currentUser: user(['cut.view']) });
+
+    expect(fields.map((field) => field.id)).toEqual(expect.arrayContaining([
+      'sheet.thumbnail',
+      'detail.table',
+      'detail.order',
+    ]));
+    expect(fields.some((field) => field.source === 'bazis')).toBe(true);
+  });
+
+  it('denies PDF template fields without cut.view', async () => {
+    const service = new CutConfigAdminService({ config: fakePort() });
+    await expect(service.listPdfTemplateFields({ currentUser: user([]) })).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+    });
+  });
+
+  it('rejects invalid v3 PDF layouts before persistence', async () => {
+    const port = fakePort();
+    const service = new CutConfigAdminService({ config: port });
+    await expect(
+      service.upsertPdfTemplate({
+        currentUser: user(['cut.view', 'cut.manage']),
+        id: 1,
+        expectedVersion: 0,
+        input: {
+          name: 'bad',
+          layout: {
+            version: 3,
+            page: { width: 297, height: 210 },
+            customFieldSchema: {
+              bad: {
+                type: 'string',
+                expression: { type: 'custom_expression', version: 1, root: { type: 'concat', parts: [] } },
+              },
+            },
+            elements: [],
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'LABEL_CUSTOM_EXPRESSION_INVALID' });
+    expect(port.upsertPdfTemplate).not.toHaveBeenCalled();
+  });
 });

@@ -129,6 +129,7 @@ export const apiRoutes = {
     paramProfile: (id: number) => backendApiPath(`/cut-config/param-profiles/${id}`),
     renderPresets: backendApiPath('/cut-config/render-presets'),
     renderPreset: (id: number) => backendApiPath(`/cut-config/render-presets/${id}`),
+    pdfTemplateFields: backendApiPath('/cut-config/pdf-template-fields'),
     pdfTemplates: backendApiPath('/cut-config/pdf-templates'),
     pdfTemplate: (id: number) => backendApiPath(`/cut-config/pdf-templates/${id}`),
   },

@@ -34,6 +34,15 @@ export interface CutPdfTemplateDto {
   version: number;
 }
 
+export interface CutPdfFieldCatalogItemDto {
+  id: string;
+  source: 'bazis' | 'dynamic' | 'detail' | 'order' | 'job' | 'group' | 'sheet' | 'cut' | 'custom';
+  sourceColumn: string | null;
+  label: string;
+  type: 'string' | 'number' | 'boolean' | 'date';
+  category: string;
+}
+
 export interface CutConfigDto {
   settings: CutSettingRowDto[];
   paramProfiles: CutParamProfileDto[];

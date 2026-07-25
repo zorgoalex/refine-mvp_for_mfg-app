@@ -6,6 +6,7 @@ import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { CutConfigAdminService } from '../application/cut-config-admin.service';
 import type {
   CutConfigDto,
+  CutPdfFieldCatalogItemDto,
   CutParamProfileDto,
   CutPdfTemplateDto,
   CutRenderPresetDto,
@@ -124,6 +125,13 @@ export class CutConfigController {
   async deletePreset(@Req() request: RequestWithCurrentUser, @Param('id') id: string, @Body() body: unknown): Promise<void> {
     const currentUser = this.requireMutation(request);
     await this.config.deleteRenderPreset({ currentUser, id: parseId(id), expectedVersion: parseVersion(body), requestId: request.requestId });
+  }
+
+  @ApiOperation({ operationId: 'listCutPdfTemplateFields', summary: 'List cut PDF template field catalog' })
+  @Get('pdf-template-fields')
+  async listPdfTemplateFields(@Req() request: RequestWithCurrentUser): Promise<CutPdfFieldCatalogItemDto[]> {
+    const currentUser = this.requireRead(request);
+    return this.config.listPdfTemplateFields({ currentUser, requestId: request.requestId });
   }
 
   @ApiOperation({ operationId: 'updateCutPdfTemplate', summary: 'Update a PDF template layout' })

@@ -201,4 +201,97 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('2');
     expect(rendered).toContain('Итого: 5');
   });
+
+  it('renders v3 template text inside bounded wrapping boxes', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    const longText = 'Очень длинный заголовок заказа, который должен переноситься внутри своего поля';
+    await buildSheetsPdf([
+      {
+        svg: SVG('v3-text'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            { id: 't', type: 'text', text: longText, x: 10, y: 10, w: 45, h: 12, style: { fontSize: 10 } },
+          ],
+        },
+      },
+    ]);
+
+    const call = textSpy.mock.calls.find((entry) => entry[0] === longText);
+    expect(call?.[3]).toMatchObject({
+      width: expect.any(Number),
+      height: expect.any(Number),
+      lineBreak: true,
+      ellipsis: true,
+    });
+  });
+
+  it('renders v3 detail tables with configured columns sorted by order', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('v3-table'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            {
+              id: 'table',
+              type: 'detail_table',
+              x: 10,
+              y: 20,
+              w: 80,
+              h: 45,
+              style: {
+                sort: { field: 'detail.order', direction: 'asc' },
+                columns: [
+                  { field: 'detail.order', label: 'Заказ', width: 2, visible: true },
+                  { field: 'detail.quantity', label: 'Кол-во', width: 1, visible: true },
+                ],
+              },
+            },
+          ],
+        },
+        detailRows: [
+          { order: '2002', position: 2, lengthMm: 300, widthMm: 100, quantity: 1 },
+          { order: '1001', position: 1, lengthMm: 500, widthMm: 200, quantity: 3 },
+        ],
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('Заказ');
+    expect(rendered).toContain('Кол-во');
+    expect(rendered).not.toContain('Поз.');
+    expect(rendered.indexOf('1001')).toBeGreaterThan(-1);
+    expect(rendered.indexOf('2002')).toBeGreaterThan(-1);
+    expect(rendered.indexOf('1001')).toBeLessThan(rendered.indexOf('2002'));
+  });
+
+  it('renders v3 sheet thumbnail layouts on the configured PDF page size', async () => {
+    const pdf = await buildSheetsPdf([
+      {
+        svg: SVG('thumb'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            { id: 'thumb', type: 'sheet_thumbnail', x: 20, y: 30, w: 120, h: 80, rotation: 12, style: { fit: 'contain' } },
+          ],
+        },
+      },
+    ]);
+
+    const mediaBox = /\/MediaBox\s*\[\s*0\s+0\s+([0-9.]+)\s+([0-9.]+)\s*\]/.exec(pdf.toString('latin1'));
+    expect(mediaBox).not.toBeNull();
+    expect(Number(mediaBox?.[1])).toBeCloseTo(841.89, 1);
+    expect(Number(mediaBox?.[2])).toBeCloseTo(595.28, 1);
+  });
 });

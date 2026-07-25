@@ -2408,6 +2408,7 @@ export class PgCutRepository implements CutRepositoryPort {
     );
     const pdfTemplate = templateSelection.code;
     if (templateSelection.requiresActiveCheck) await this.assertPdfTemplateActive(pdfTemplate);
+    const templateLayout = frozenContext ? null : await this.loadPdfTemplateLayout(pdfTemplate);
     const sheets = frozenContext?.sheets ?? currentContext!.sheets;
     const rotate90 = frozenContext ? (query.rotate90 ?? false) : currentContext!.rotate90;
     // Rule 5: group PDF is blocked while the job requires recalculation.
@@ -2428,7 +2429,9 @@ export class PgCutRepository implements CutRepositoryPort {
         sheetWidthMm: rotate90 ? s.placements.sheet_height_mm : s.placements.sheet_width_mm,
         sheetHeightMm: rotate90 ? s.placements.sheet_width_mm : s.placements.sheet_height_mm,
         sheetNumber: index + 1,
+        pageCount: printableSheets.length,
         template: pdfTemplate,
+        templateLayout,
         meta: s.pdfMeta,
         detailRows: s.pdfDetailRows,
       }));
@@ -2468,6 +2471,7 @@ export class PgCutRepository implements CutRepositoryPort {
     );
     const pdfTemplate = templateSelection.code;
     if (templateSelection.requiresActiveCheck) await this.assertPdfTemplateActive(pdfTemplate);
+    const templateLayout = frozen ? null : await this.loadPdfTemplateLayout(pdfTemplate);
     const groupIds = frozen
       ? frozen.job.groups.map((group) => group.cutGroupId)
       : (await this.database.query<{ cut_group_id: string | number }>(
@@ -2520,7 +2524,9 @@ export class PgCutRepository implements CutRepositoryPort {
           sheetWidthMm: rotate90 ? sheet.placements.sheet_height_mm : sheet.placements.sheet_width_mm,
           sheetHeightMm: rotate90 ? sheet.placements.sheet_width_mm : sheet.placements.sheet_height_mm,
           sheetNumber,
+          pageCount: 0,
           template: pdfTemplate,
+          templateLayout,
           meta: sheet.pdfMeta,
           detailRows: sheet.pdfDetailRows,
         });
@@ -2530,6 +2536,7 @@ export class PgCutRepository implements CutRepositoryPort {
     if (pdfSheets.length === 0) {
       throw new CutJobNotFoundError(query.cutJobId);
     }
+    for (const sheet of pdfSheets) sheet.pageCount = pdfSheets.length;
     return frozen
       ? buildFrozenSheetsPdf('cut_sheet_render_v1', pdfSheets)
       : buildSheetsPdf(pdfSheets);
@@ -2558,6 +2565,15 @@ export class PgCutRepository implements CutRepositoryPort {
     if (row.rowCount === 0) {
       throw new ApiError(422, 'CUT_PDF_TEMPLATE_NOT_FOUND', 'Выбранный шаблон PDF не найден или неактивен', { code });
     }
+  }
+
+  private async loadPdfTemplateLayout(code: string, client: DatabaseClient | TransactionClient = this.database): Promise<Record<string, unknown> | null> {
+    const row = await client.query<{ layout: Record<string, unknown> | null }>(
+      `SELECT layout FROM cut_pdf_templates WHERE code = $1 AND is_active = true LIMIT 1`,
+      [code],
+    );
+    const layout = row.rows[0]?.layout;
+    return layout && typeof layout === 'object' && !Array.isArray(layout) ? layout : null;
   }
 
   async setPdfPrewarmState(query: SetPdfPrewarmStateQuery): Promise<void> {
@@ -4024,12 +4040,37 @@ function buildPdfDetailRows(
     const height = detail?.heightMm ?? piece.height_mm;
     const lengthMm = Math.max(width, height);
     const widthMm = Math.min(width, height);
-    const key = `${order}:${position}:${lengthMm}:${widthMm}`;
+    const row: PdfSheetDetailRow = {
+      order,
+      position,
+      lengthMm,
+      widthMm,
+      quantity: 1,
+      material: detail?.materialName ?? null,
+      film: detail?.filmName ?? null,
+      client: detail?.clientName ?? null,
+      orderDate: detail?.orderDate ?? null,
+      readyDate: detail?.readyDate ?? null,
+      due: detail?.readyDate ?? null,
+      thickness: detail?.thicknessMm ?? null,
+    };
+    const key = [
+      row.order,
+      row.position,
+      row.lengthMm,
+      row.widthMm,
+      row.material ?? '',
+      row.film ?? '',
+      row.client ?? '',
+      row.orderDate ?? '',
+      row.readyDate ?? '',
+      row.thickness ?? '',
+    ].join(':');
     const existing = byKey.get(key);
     if (existing) {
       existing.quantity += 1;
     } else {
-      byKey.set(key, { order, position, lengthMm, widthMm, quantity: 1 });
+      byKey.set(key, row);
     }
   }
   return [...byKey.values()].sort((a, b) => Number(a.position) - Number(b.position));

@@ -30,6 +30,14 @@ export interface CutPdfTemplate {
   isActive: boolean;
   version: number;
 }
+export interface CutPdfFieldCatalogItem {
+  id: string;
+  source: 'bazis' | 'dynamic' | 'detail' | 'order' | 'job' | 'group' | 'sheet' | 'cut' | 'custom';
+  sourceColumn: string | null;
+  label: string;
+  type: 'string' | 'number' | 'boolean' | 'date';
+  category: string;
+}
 export interface CutConfig {
   settings: CutSettingRow[];
   paramProfiles: CutParamProfile[];
@@ -66,6 +74,10 @@ export interface CutPdfTemplateInput {
 export const cutConfigApi = {
   get(): Promise<CutConfig> {
     return httpClient.get<CutConfig>(apiRoutes.cutConfig.root);
+  },
+
+  listPdfTemplateFields(): Promise<CutPdfFieldCatalogItem[]> {
+    return httpClient.get<CutPdfFieldCatalogItem[]>(apiRoutes.cutConfig.pdfTemplateFields);
   },
 
   updateSetting(key: string, value: unknown, version: number): Promise<CutSettingRow> {

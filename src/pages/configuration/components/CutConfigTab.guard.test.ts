@@ -113,12 +113,24 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
   it('exposes a PDF template editor tab with expected editor commands', () => {
     expect(tabSrc).toMatch(/Редактирование шаблонов карт раскроя PDF/);
     expect(tabSrc).toMatch(/PdfTemplateEditor/);
+    expect(apiSrc).toMatch(/listPdfTemplateFields\(/);
     expect(tabSrc).toMatch(/Сохранить как/);
     expect(tabSrc).toMatch(/Создать копию/);
     expect(tabSrc).toMatch(/Поля карты раскроя PDF/);
     expect(tabSrc).toMatch(/QR-код/);
+    expect(tabSrc).toMatch(/sheet_thumbnail/);
+    expect(tabSrc).toMatch(/detail_table/);
+    expect(tabSrc).toMatch(/Миниатюра листа/);
+    expect(tabSrc).toMatch(/Таблица деталей/);
     expect(tabSrc).toMatch(/Линия/);
     expect(tabSrc).toMatch(/Прямоугольник/);
     expect(tabSrc).toMatch(/PdfTemplateCanvas/);
+    expect(tabSrc).toMatch(/wrap="word"/);
+    expect(tabSrc).toMatch(/customFieldRowsToSchema/);
+    expect(tabSrc).toMatch(/CustomFieldExpressionEditor/);
+    expect(tabSrc).toMatch(/customFieldSchema/);
+    expect(tabSrc).toMatch(/sort:\s*\{\s*field:\s*'detail\.order'/);
+    expect(tabSrc).toMatch(/readPdfDetailTableColumns/);
+    expect(tabSrc).not.toMatch(/setCustomFieldsFromText/);
   });
 });
