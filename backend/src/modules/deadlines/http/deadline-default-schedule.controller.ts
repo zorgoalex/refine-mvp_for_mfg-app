@@ -11,7 +11,6 @@ import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { DeadlineDefaultScheduleService } from '../application/deadline-default-schedule.service';
-import { MAX_DEADLINE_DEFAULT_SCHEDULE_DAYS } from '../domain/deadline-default-schedule';
 import type { ReplaceDeadlineDefaultScheduleRequestDto } from '../dto/deadline-default-schedule.dto';
 import { DeadlinesRuntimeConfigService } from './deadlines-runtime-config.service';
 
@@ -36,30 +35,6 @@ const requestSchema = z.object({
       message: 'reserveDays must be 0 when stages is empty',
     });
   }
-  if (value.stages[0]?.parallelWithPrevious) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['stages', 0, 'parallelWithPrevious'],
-      message: 'first stage cannot be parallel with a previous stage',
-    });
-  }
-  let total = value.reserveDays;
-  let groupMaximum = 0;
-  for (const [index, stage] of value.stages.entries()) {
-    if (index > 0 && !stage.parallelWithPrevious) {
-      total += groupMaximum;
-      groupMaximum = 0;
-    }
-    groupMaximum = Math.max(groupMaximum, stage.durationDays);
-  }
-  total += groupMaximum;
-  if (total > MAX_DEADLINE_DEFAULT_SCHEDULE_DAYS) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['stages'],
-      message: `total schedule must not exceed ${MAX_DEADLINE_DEFAULT_SCHEDULE_DAYS} days`,
-    });
-  }
   if (new Set(value.stages.map((stage) => stage.productionStatusId)).size !== value.stages.length) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -80,6 +55,7 @@ const responseSwaggerSchema = {
         'hasStoredConfiguration',
         'version',
         'reserveDays',
+        'transitionsOrder',
         'totalProductionDays',
         'plannedOrderDays',
         'updatedAt',
@@ -90,6 +66,13 @@ const responseSwaggerSchema = {
         hasStoredConfiguration: { type: 'boolean' },
         version: { type: 'integer', minimum: 1 },
         reserveDays: { type: 'integer', minimum: 0, maximum: 3650 },
+        transitionsOrder: {
+          type: 'object',
+          additionalProperties: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+        },
         totalProductionDays: { type: 'integer', nullable: true },
         plannedOrderDays: { type: 'integer', nullable: true },
         updatedAt: { type: 'string', format: 'date-time', nullable: true },

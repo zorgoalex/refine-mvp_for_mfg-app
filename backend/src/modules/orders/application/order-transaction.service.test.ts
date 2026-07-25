@@ -1029,7 +1029,7 @@ describe('OrderTransactionService', () => {
     expect(result.header.plannedCompletionDate).toBe('2026-05-05');
   });
 
-  it('uses the critical path instead of summing parallel order stages', async () => {
+  it('uses the transition-graph critical path instead of visual stage order', async () => {
     const transactions = new FakeOrderTransactions();
     const result = await new OrderTransactionService({
       transactions,
@@ -1038,20 +1038,27 @@ describe('OrderTransactionService', () => {
           return {
             version: 6,
             reserveDays: 2,
+            transitionsOrder: {
+              drawn: ['packed'],
+              cut: ['packed'],
+            },
             stages: [
               {
+                productionStatusId: 30,
+                productionStatusCode: 'packed',
+                durationDays: 1,
+                parallelWithPrevious: false,
+              },
+              {
                 productionStatusId: 10,
+                productionStatusCode: 'drawn',
                 durationDays: 2,
                 parallelWithPrevious: false,
               },
               {
                 productionStatusId: 20,
+                productionStatusCode: 'cut',
                 durationDays: 5,
-                parallelWithPrevious: true,
-              },
-              {
-                productionStatusId: 30,
-                durationDays: 1,
                 parallelWithPrevious: false,
               },
             ],

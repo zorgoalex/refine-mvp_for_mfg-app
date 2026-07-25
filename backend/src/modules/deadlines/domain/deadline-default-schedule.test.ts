@@ -88,6 +88,79 @@ describe('deadline default schedule', () => {
     expect(schedule.plannedOrderDays).toBe(7);
   });
 
+  it('calculates deadlines from transitions instead of display order', () => {
+    const schedule = buildDeadlineDefaultSchedule({
+      version: 5,
+      reserveDays: 2,
+      updatedAt: null,
+      transitionsOrder: {
+        drawn: ['packed'],
+        cut: ['packed'],
+      },
+      stages: [
+        graphStage(3, 'packed', 1),
+        graphStage(1, 'drawn', 2),
+        graphStage(2, 'cut', 5),
+      ],
+    });
+
+    expect(schedule.configured).toBe(true);
+    expect(schedule.totalProductionDays).toBe(6);
+    expect(schedule.plannedOrderDays).toBe(8);
+    expect(
+      Object.fromEntries(
+        schedule.stages.map((item) => [
+          item.productionStatusCode,
+          item.cumulativeDeadlineDays,
+        ]),
+      ),
+    ).toEqual({ packed: 6, drawn: 2, cut: 5 });
+  });
+
+  it('removes absent order stages from the transition calculation', () => {
+    const result = calculateApplicableDeadlineSchedule(
+      {
+        reserveDays: 1,
+        transitionsOrder: {
+          drawn: ['cut'],
+          cut: ['packed'],
+        },
+        stages: [
+          graphStageDefinition(1, 'drawn', 3),
+          graphStageDefinition(2, 'cut', 20),
+          graphStageDefinition(3, 'packed', 8),
+        ],
+      },
+      [1, 3],
+    );
+
+    expect(result?.totalProductionDays).toBe(8);
+    expect(result?.plannedOrderDays).toBe(9);
+    expect([...result!.stageDeadlineDaysByProductionStatusId.entries()]).toEqual([
+      [1, 3],
+      [3, 8],
+    ]);
+  });
+
+  it('fails closed when the transition graph contains a cycle', () => {
+    expect(
+      calculateApplicableDeadlineSchedule(
+        {
+          reserveDays: 0,
+          transitionsOrder: {
+            drawn: ['cut'],
+            cut: ['drawn'],
+          },
+          stages: [
+            graphStageDefinition(1, 'drawn', 2),
+            graphStageDefinition(2, 'cut', 3),
+          ],
+        },
+        [1, 2],
+      ),
+    ).toBeNull();
+  });
+
   it('collapses stages that are absent from a concrete order route', () => {
     const result = calculateApplicableDeadlineSchedule(
       {
@@ -148,4 +221,28 @@ function stageDefinition(
   parallelWithPrevious = false,
 ) {
   return { productionStatusId, durationDays, parallelWithPrevious };
+}
+
+function graphStage(
+  productionStatusId: number,
+  productionStatusCode: string,
+  durationDays: number | null,
+) {
+  return {
+    ...stage(productionStatusId, durationDays),
+    productionStatusCode,
+  };
+}
+
+function graphStageDefinition(
+  productionStatusId: number,
+  productionStatusCode: string,
+  durationDays: number,
+) {
+  return {
+    productionStatusId,
+    productionStatusCode,
+    durationDays,
+    parallelWithPrevious: false,
+  };
 }

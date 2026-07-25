@@ -101,12 +101,14 @@ export function shouldEnableOrderDeadlineSync(input: {
                   return {
                     version: schedule.version,
                     reserveDays: schedule.reserveDays,
+                    transitionsOrder: schedule.transitionsOrder,
                     stages: schedule.stages.flatMap((stage) =>
                       stage.durationDays === null
                         ? []
                         : [
                             {
                               productionStatusId: stage.productionStatusId,
+                              productionStatusCode: stage.productionStatusCode,
                               durationDays: stage.durationDays,
                               parallelWithPrevious: stage.parallelWithPrevious,
                             },

@@ -1,17 +1,31 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Input, Select, Space, Spin, Switch, Table, Tag, Typography, message } from 'antd';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Button, Card, Checkbox, Input, InputNumber, Modal, Select, Space, Spin, Switch, Table, Tag, Typography, message } from 'antd';
 import { SaveOutlined, ArrowUpOutlined, ArrowDownOutlined, ReloadOutlined } from '@ant-design/icons';
-import { useInvalidate, useList, useUpdate } from '@refinedev/core';
+import { useGetIdentity, useInvalidate, useList, useUpdate } from '@refinedev/core';
 import { useLocation } from 'react-router-dom';
+import { ApiError } from '../../../api/apiError';
+import { deadlinesApi } from '../../../api/deadlinesApi';
+import type { DeadlineDefaultScheduleDto } from '../../../api/types/deadlineApi.types';
+import { featureFlags } from '../../../config/featureFlags';
 import { useTabDirty } from '../../../hooks/useTabDirty';
 import { useWorkspaceTabKey } from '../../../components/workspace/KeepAliveContext';
 import { useAppSettings, SETTING_KEYS } from '../../../hooks/useAppSettings';
+import type { UserIdentity } from '../../../types/auth';
 import {
   ProductionStatusRef,
   ProductionWorkflowConfig,
   buildDefaultProductionWorkflowConfig,
   normalizeProductionWorkflowConfig,
 } from '../../../types/productionWorkflow';
+import {
+  buildDefaultSchedulePayload,
+  buildDurationDraft,
+  calculateScheduleDraft,
+  canManageDeadlineDefaultSchedule,
+  canViewDeadlineDefaultSchedule,
+  isDeadlineScheduleDraftComplete,
+  type DeadlineDurationDraft,
+} from './deadlineDefaultScheduleView';
 
 const { Text } = Typography;
 
@@ -76,6 +90,28 @@ const validateWorkflow = (draft: ProductionWorkflowConfig, knownCodesSet: Set<st
   if (displayUnknown.length > 0) {
     items.push({ level: 'error', message: `status_codes_order содержит неизвестные коды: ${uniq(displayUnknown).join(', ')}` });
   }
+  const layoutCodes = (draft.layout_rows ?? []).flat();
+  const layoutDuplicates = findDuplicates(layoutCodes);
+  if (layoutDuplicates.length > 0) {
+    items.push({
+      level: 'error',
+      message: `В схеме этапы продублированы: ${layoutDuplicates.join(', ')}`,
+    });
+  }
+  const layoutUnknown = layoutCodes.filter((code) => !knownCodesSet.has(code));
+  if (layoutUnknown.length > 0) {
+    items.push({
+      level: 'error',
+      message: `В схеме есть неизвестные этапы: ${uniq(layoutUnknown).join(', ')}`,
+    });
+  }
+  const layoutMissing = displayOrder.filter((code) => !layoutCodes.includes(code));
+  if (layoutMissing.length > 0) {
+    items.push({
+      level: 'error',
+      message: `В схеме отсутствуют этапы: ${uniq(layoutMissing).join(', ')}`,
+    });
+  }
 
   // transitions_order validation
   const transitionsOrder = draft.transitions_order || {};
@@ -132,8 +168,19 @@ const validateWorkflow = (draft: ProductionWorkflowConfig, knownCodesSet: Set<st
 
 export const ProductionWorkflowTab: React.FC = () => {
   const { getSettingRecord, saveSetting, setSettingActive, isLoading: settingsLoading } = useAppSettings();
+  const { data: identity } = useGetIdentity<UserIdentity>();
   const invalidate = useInvalidate();
   const { mutateAsync: updateProductionStatus } = useUpdate();
+  const canViewDeadlines =
+    featureFlags.useBackendDeadlines &&
+    (!featureFlags.useBackendPermissions ||
+      canViewDeadlineDefaultSchedule(identity));
+  const canManageDeadlines =
+    !featureFlags.useBackendPermissions ||
+    canManageDeadlineDefaultSchedule(identity);
+  const canManageWorkflow =
+    !featureFlags.useBackendPermissions ||
+    Boolean(identity?.permissions?.includes('settings.manage'));
 
   const { data: statusesData, isLoading: statusesLoading, refetch: refetchStatuses } = useList({
     resource: 'production_statuses',
@@ -176,11 +223,45 @@ export const ProductionWorkflowTab: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [isTogglingSettingActive, setIsTogglingSettingActive] = useState(false);
+  const [deadlineSchedule, setDeadlineSchedule] =
+    useState<DeadlineDefaultScheduleDto | null>(null);
+  const [deadlineDurations, setDeadlineDurations] =
+    useState<DeadlineDurationDraft>({});
+  const [deadlineReserveDays, setDeadlineReserveDays] = useState<number | null>(0);
+  const [deadlineReason, setDeadlineReason] = useState('');
+  const [deadlineLoading, setDeadlineLoading] = useState(false);
+  const [deadlineSaving, setDeadlineSaving] = useState(false);
+  const [deadlineError, setDeadlineError] = useState<string | null>(null);
+  const [isDeadlineDirty, setIsDeadlineDirty] = useState(false);
+  const [draggedStageCode, setDraggedStageCode] = useState<string | null>(null);
+  const [dragOverRow, setDragOverRow] = useState<number | null>(null);
 
   // Report editor dirty state to the workspace tab registry (single dirty contract).
   const location = useLocation();
   const tabKey = useWorkspaceTabKey(location.pathname);
-  useTabDirty(tabKey, isDirty);
+  useTabDirty(tabKey, isDirty || isDeadlineDirty);
+
+  const loadDeadlineSchedule = useCallback(async () => {
+    if (!canViewDeadlines) return;
+    setDeadlineLoading(true);
+    setDeadlineError(null);
+    try {
+      const response = await deadlinesApi.getDefaultSchedule();
+      setDeadlineSchedule(response.schedule);
+      setDeadlineDurations(buildDurationDraft(response.schedule));
+      setDeadlineReserveDays(response.schedule.reserveDays);
+      setDeadlineReason('');
+      setIsDeadlineDirty(false);
+    } catch (error) {
+      setDeadlineError(errorText(error, 'Не удалось загрузить сроки этапов'));
+    } finally {
+      setDeadlineLoading(false);
+    }
+  }, [canViewDeadlines]);
+
+  useEffect(() => {
+    void loadDeadlineSchedule();
+  }, [loadDeadlineSchedule]);
 
   // Initialize draft once statuses are available (avoid resetting while editing)
   useEffect(() => {
@@ -213,6 +294,13 @@ export const ProductionWorkflowTab: React.FC = () => {
   const usedOrder = useMemo(() => new Set(draft?.order.allowed_codes || []), [draft?.order.allowed_codes]);
   const usedDetail = useMemo(() => new Set(draft?.detail.allowed_codes || []), [draft?.detail.allowed_codes]);
   const inDisplayOrder = useMemo(() => new Set(draft?.status_codes_order || []), [draft?.status_codes_order]);
+  const layoutRows = useMemo(
+    () =>
+      draft?.layout_rows?.length
+        ? draft.layout_rows
+        : (draft?.status_codes_order ?? []).map((code) => [code]),
+    [draft?.layout_rows, draft?.status_codes_order],
+  );
 
   const validationItems = useMemo(() => {
     if (!draft) return [];
@@ -221,10 +309,91 @@ export const ProductionWorkflowTab: React.FC = () => {
 
   const validationErrors = useMemo(() => validationItems.filter((i) => i.level === 'error'), [validationItems]);
   const validationWarnings = useMemo(() => validationItems.filter((i) => i.level === 'warning'), [validationItems]);
+  const deadlineStageByCode = useMemo(
+    () =>
+      new Map(
+        (deadlineSchedule?.stages ?? []).flatMap((stage) =>
+          stage.productionStatusCode
+            ? [[stage.productionStatusCode, stage] as const]
+            : [],
+        ),
+      ),
+    [deadlineSchedule],
+  );
+  const deadlineDraftSchedule = useMemo(
+    () =>
+      deadlineSchedule && draft
+        ? {
+            ...deadlineSchedule,
+            transitionsOrder: draft.transitions_order ?? {},
+          }
+        : null,
+    [deadlineSchedule, draft],
+  );
+  const deadlineCalculation = useMemo(
+    () =>
+      deadlineDraftSchedule
+        ? calculateScheduleDraft(
+            deadlineDraftSchedule,
+            deadlineDurations,
+            deadlineDraftSchedule.transitionsOrder,
+          )
+        : {
+            cumulativeHints: new Map<number, number | null>(),
+            totalProductionDays: null,
+            hasCycle: false,
+          },
+    [deadlineDraftSchedule, deadlineDurations],
+  );
+  const deadlineDraftComplete =
+    deadlineDraftSchedule !== null &&
+    isDeadlineScheduleDraftComplete(deadlineCalculation, deadlineReserveDays);
+  const plannedOrderDays =
+    deadlineCalculation.totalProductionDays === null ||
+    deadlineReserveDays === null
+      ? null
+      : deadlineCalculation.totalProductionDays + deadlineReserveDays;
+  const deadlinePayload = deadlineDraftSchedule
+    ? buildDefaultSchedulePayload(
+        deadlineDraftSchedule,
+        deadlineReserveDays,
+        deadlineDurations,
+        deadlineReason,
+      )
+    : null;
 
   const setAndDirty = (next: ProductionWorkflowConfig) => {
     setDraft(next);
     setIsDirty(true);
+  };
+
+  const setLayoutRows = (rows: string[][]) => {
+    if (!draft) return;
+    const compactRows = rows.filter((row) => row.length > 0);
+    setAndDirty({
+      ...draft,
+      layout_rows: compactRows,
+      status_codes_order: compactRows.flat(),
+    });
+  };
+
+  const moveStageToRow = (code: string, targetRowIndex: number) => {
+    const nextRows = layoutRows.map((row) =>
+      row.filter((stageCode) => stageCode !== code),
+    );
+    if (targetRowIndex >= nextRows.length) {
+      nextRows.push([code]);
+    } else if (!nextRows[targetRowIndex].includes(code)) {
+      nextRows[targetRowIndex] = [...nextRows[targetRowIndex], code];
+    }
+    setLayoutRows(nextRows);
+    setDraggedStageCode(null);
+    setDragOverRow(null);
+  };
+
+  const moveLayoutRow = (from: number, to: number) => {
+    if (to < 0 || to >= layoutRows.length) return;
+    setLayoutRows(moveItem(layoutRows, from, to));
   };
 
   const handleReset = () => {
@@ -251,7 +420,7 @@ export const ProductionWorkflowTab: React.FC = () => {
         'Workflow производства (production_status_events) + буквы этапов (временное хранение в app_settings)'
       );
       setIsDirty(false);
-      message.success('Workflow сохранён');
+      message.success('Схема и переходы сохранены');
     } catch (e) {
       message.error('Не удалось сохранить workflow');
     } finally {
@@ -287,6 +456,72 @@ export const ProductionWorkflowTab: React.FC = () => {
     }
   };
 
+  const saveDeadlineSchedule = async () => {
+    if (!deadlinePayload || isDirty) {
+      message.warning(
+        isDirty
+          ? 'Сначала сохраните схему этапов и переходы'
+          : 'Заполните длительности, резерв и причину изменения',
+      );
+      return;
+    }
+    setDeadlineSaving(true);
+    try {
+      const response = await deadlinesApi.replaceDefaultSchedule(deadlinePayload);
+      setDeadlineSchedule(response.schedule);
+      setDeadlineDurations(buildDurationDraft(response.schedule));
+      setDeadlineReserveDays(response.schedule.reserveDays);
+      setDeadlineReason('');
+      setIsDeadlineDirty(false);
+      message.success('Длительности этапов сохранены');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        message.error('Сроки или список этапов уже изменились. Данные обновлены.');
+        await loadDeadlineSchedule();
+      } else {
+        message.error(errorText(error, 'Не удалось сохранить длительности'));
+      }
+    } finally {
+      setDeadlineSaving(false);
+    }
+  };
+
+  const disableDeadlineSchedule = () => {
+    if (!deadlineSchedule || deadlineReason.trim().length < 3) {
+      message.warning('Укажите причину изменения');
+      return;
+    }
+    Modal.confirm({
+      title: 'Отключить автоматические сроки?',
+      content: 'Новые заказы не будут получать плановую дату по длительностям этапов.',
+      okText: 'Отключить',
+      okButtonProps: { danger: true },
+      cancelText: 'Отмена',
+      onOk: async () => {
+        setDeadlineSaving(true);
+        try {
+          const response = await deadlinesApi.replaceDefaultSchedule({
+            expectedVersion: deadlineSchedule.version,
+            reserveDays: 0,
+            reason: deadlineReason.trim(),
+            stages: [],
+          });
+          setDeadlineSchedule(response.schedule);
+          setDeadlineDurations(buildDurationDraft(response.schedule));
+          setDeadlineReserveDays(response.schedule.reserveDays);
+          setDeadlineReason('');
+          setIsDeadlineDirty(false);
+          message.success('Автоматические сроки отключены');
+        } catch (error) {
+          message.error(errorText(error, 'Не удалось отключить сроки'));
+          await loadDeadlineSchedule();
+        } finally {
+          setDeadlineSaving(false);
+        }
+      },
+    });
+  };
+
   if (settingsLoading || statusesLoading || !draft) {
     return (
       <div style={{ padding: '16px 0' }}>
@@ -315,6 +550,134 @@ export const ProductionWorkflowTab: React.FC = () => {
       ),
     };
   });
+
+  const layoutRowOptions = [
+    ...layoutRows.map((_, index) => ({
+      value: index,
+      label: `Строка ${index + 1}`,
+    })),
+    { value: layoutRows.length, label: 'Новая строка' },
+  ];
+
+  const renderStageCard = (code: string, rowIndex: number) => {
+    const status = statusByCode.get(code);
+    const stage = deadlineStageByCode.get(code);
+    const letter = normalizeLetter(draft.letters_by_code?.[code] || '');
+    const deadline = stage
+      ? deadlineCalculation.cumulativeHints.get(stage.productionStatusId)
+      : null;
+
+    return (
+      <div
+        key={code}
+        draggable={canManageWorkflow}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', code);
+          setDraggedStageCode(code);
+        }}
+        onDragEnd={() => {
+          setDraggedStageCode(null);
+          setDragOverRow(null);
+        }}
+        style={{
+          width: 310,
+          border: '1px solid #d9d9d9',
+          borderRadius: 8,
+          padding: 12,
+          background: '#fff',
+          boxShadow:
+            draggedStageCode === code
+              ? '0 8px 24px rgba(0, 0, 0, 0.12)'
+              : '0 1px 2px rgba(0, 0, 0, 0.04)',
+          cursor: canManageWorkflow ? 'grab' : 'default',
+          opacity: draggedStageCode === code ? 0.72 : 1,
+        }}
+      >
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Space size={8} wrap>
+            <Tag
+              color={status?.is_active ? 'green' : 'default'}
+              style={{ marginInlineEnd: 0 }}
+            >
+              {letter || '—'}
+            </Tag>
+            <Text strong>{status?.production_status_name || code}</Text>
+            <Text type="secondary">({code})</Text>
+          </Space>
+
+          {canViewDeadlines && stage ? (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '128px 1fr',
+                gap: 12,
+                alignItems: 'end',
+              }}
+            >
+              <div>
+                <Text type="secondary">Длительность</Text>
+                <InputNumber
+                  aria-label={`Длительность этапа ${stage.productionStatusName}`}
+                  min={0}
+                  max={3650}
+                  precision={0}
+                  addonAfter="дн."
+                  value={deadlineDurations[stage.productionStatusId]}
+                  disabled={!canManageDeadlines || deadlineLoading}
+                  onChange={(value) => {
+                    setDeadlineDurations((current) => ({
+                      ...current,
+                      [stage.productionStatusId]: value,
+                    }));
+                    setIsDeadlineDirty(true);
+                  }}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <div>
+                <Text type="secondary">Дедлайн</Text>
+                <div>
+                  {deadline === null || deadline === undefined ? (
+                    <Text type="secondary">Не рассчитан</Text>
+                  ) : (
+                    <Text strong>{deadline}-й день от даты заказа</Text>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            canViewDeadlines && <Text type="secondary">Неактивный этап</Text>
+          )}
+
+          {canManageWorkflow && (
+            <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
+              <Select
+                aria-label={`Строка этапа ${status?.production_status_name || code}`}
+                value={rowIndex}
+                options={layoutRowOptions}
+                onChange={(targetRow) => moveStageToRow(code, targetRow)}
+                style={{ width: 150 }}
+              />
+              <Button
+                danger
+                onClick={() =>
+                  setLayoutRows(
+                    layoutRows.map((row) =>
+                      row.filter((stageCode) => stageCode !== code),
+                    ),
+                  )
+                }
+                style={{ minHeight: 44 }}
+              >
+                Убрать
+              </Button>
+            </Space>
+          )}
+        </Space>
+      </div>
+    );
+  };
 
   return (
     <div style={{ padding: '16px 0' }}>
@@ -389,7 +752,7 @@ export const ProductionWorkflowTab: React.FC = () => {
 
       <Card
         size="small"
-        title="Порядок этапов (status_codes_order)"
+        title="Схема этапов и сроки"
         extra={
           <Space>
             <Space size={8}>
@@ -398,15 +761,25 @@ export const ProductionWorkflowTab: React.FC = () => {
                 checked={workflowIsActive}
                 loading={isTogglingSettingActive}
                 onChange={handleToggleWorkflowSettingActive}
-                disabled={validationErrors.length > 0}
+                disabled={!canManageWorkflow || validationErrors.length > 0}
               />
             </Space>
             <Button onClick={() => refetchStatuses()}>Обновить статусы</Button>
-            <Button icon={<ReloadOutlined />} onClick={handleReset} disabled={!isDirty}>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={handleReset}
+              disabled={!canManageWorkflow || !isDirty}
+            >
               Сбросить
             </Button>
-            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={isSaving} disabled={!isDirty}>
-              Сохранить
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              onClick={handleSave}
+              loading={isSaving}
+              disabled={!canManageWorkflow || !isDirty}
+            >
+              Сохранить схему
             </Button>
           </Space>
         }
@@ -415,10 +788,46 @@ export const ProductionWorkflowTab: React.FC = () => {
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
           <div>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              Этот порядок используется для отображения букв на карточках/в списках. Новые статусы можно добавить в
-              список.
+              Порядок здесь — визуальная схема производства. Реальную последовательность
+              и накопительные дедлайны определяет блок «Переходы». Длительность
+              относится только к самому этапу. Несколько карточек в одной строке
+              показывают параллельные или альтернативные ветки, но не создают
+              переходы автоматически.
             </Text>
           </div>
+
+          {deadlineCalculation.hasCycle && (
+            <Alert
+              type="error"
+              showIcon
+              message="В переходах найден цикл"
+              description="Накопительные сроки нельзя вычислить, пока замкнутый маршрут не будет исправлен в блоке «Переходы»."
+            />
+          )}
+          {deadlineError && (
+            <Alert
+              type="error"
+              showIcon
+              message={deadlineError}
+              action={
+                <Button onClick={() => void loadDeadlineSchedule()}>
+                  Повторить
+                </Button>
+              }
+            />
+          )}
+          {canViewDeadlines &&
+            deadlineSchedule &&
+            !deadlineLoading &&
+            !deadlineDraftComplete &&
+            !deadlineCalculation.hasCycle && (
+              <Alert
+                type="warning"
+                showIcon
+                message="Сроки этапов не настроены полностью"
+                description="Заполните длительность каждого активного этапа. Нулевая длительность допустима."
+              />
+            )}
 
           <Space wrap>
             <Text strong style={{ minWidth: 190 }}>
@@ -427,11 +836,14 @@ export const ProductionWorkflowTab: React.FC = () => {
             <Select
               style={{ minWidth: 360 }}
               placeholder="Выберите статус"
+              disabled={!canManageWorkflow}
               options={allCodesOptions.filter((o) => !inDisplayOrder.has(o.value as string))}
               onChange={(code) => {
+                const nextRows = [...layoutRows, [code]];
                 const next = {
                   ...draft,
-                  status_codes_order: [...draft.status_codes_order, code],
+                  layout_rows: nextRows,
+                  status_codes_order: nextRows.flat(),
                 };
                 setAndDirty(next);
               }}
@@ -441,88 +853,252 @@ export const ProductionWorkflowTab: React.FC = () => {
           <Table
             size="small"
             pagination={false}
-            rowKey="code"
-            dataSource={draft.status_codes_order.map((code, index) => ({
+            rowKey="index"
+            dataSource={layoutRows.map((codes, index) => ({
               index,
-              code,
-              status: statusByCode.get(code),
+              codes,
             }))}
             columns={[
               {
-                title: '#',
+                title: 'Строка',
                 dataIndex: 'index',
-                width: 46,
-                render: (i: number) => <Text type="secondary">{i + 1}</Text>,
-              },
-              {
-                title: 'Этап',
-                dataIndex: 'code',
-                render: (_: any, row: any) => {
-                  const s: ProductionStatusRef | undefined = row.status;
-                  const letter = normalizeLetter(draft.letters_by_code?.[row.code] || '');
-                  return (
-                    <Space size={8}>
-                      <Tag color={s?.is_active ? 'green' : 'default'} style={{ marginInlineEnd: 0 }}>
-                        {letter || '—'}
-                      </Tag>
-                      <span>{s?.production_status_name || row.code}</span>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        ({row.code})
-                      </Text>
-                    </Space>
-                  );
-                },
-              },
-              {
-                title: '',
-                key: 'actions',
-                width: 120,
-                render: (_: any, row: any) => {
-                  const idx = row.index as number;
-                  return (
-                    <Space>
+                width: 124,
+                render: (index: number) => (
+                  <Space direction="vertical" size={6}>
+                    <Text strong>Уровень {index + 1}</Text>
+                    <Space size={4}>
                       <Button
-                        size="small"
+                        aria-label={`Переместить строку ${index + 1} выше`}
                         icon={<ArrowUpOutlined />}
-                        disabled={idx <= 0}
-                        onClick={() => setAndDirty({ ...draft, status_codes_order: moveItem(draft.status_codes_order, idx, idx - 1) })}
+                        disabled={!canManageWorkflow || index === 0}
+                        onClick={() => moveLayoutRow(index, index - 1)}
+                        style={{ minWidth: 44, minHeight: 44 }}
                       />
                       <Button
-                        size="small"
+                        aria-label={`Переместить строку ${index + 1} ниже`}
                         icon={<ArrowDownOutlined />}
-                        disabled={idx >= draft.status_codes_order.length - 1}
-                        onClick={() => setAndDirty({ ...draft, status_codes_order: moveItem(draft.status_codes_order, idx, idx + 1) })}
-                      />
-                      <Button
-                        size="small"
-                        danger
-                        onClick={() =>
-                          setAndDirty({
-                            ...draft,
-                            status_codes_order: draft.status_codes_order.filter((c) => c !== row.code),
-                          })
+                        disabled={
+                          !canManageWorkflow || index === layoutRows.length - 1
                         }
-                      >
-                        Убрать
-                      </Button>
+                        onClick={() => moveLayoutRow(index, index + 1)}
+                        style={{ minWidth: 44, minHeight: 44 }}
+                      />
                     </Space>
-                  );
-                },
+                  </Space>
+                ),
+              },
+              {
+                title: 'Технологическая схема',
+                dataIndex: 'codes',
+                render: (codes: string[], row: { index: number }) => (
+                  <div
+                    onDragOver={(event) => {
+                      if (!canManageWorkflow || !draggedStageCode) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = 'move';
+                      setDragOverRow(row.index);
+                    }}
+                    onDragLeave={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+                        setDragOverRow(null);
+                      }
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const code =
+                        draggedStageCode || event.dataTransfer.getData('text/plain');
+                      if (code) moveStageToRow(code, row.index);
+                    }}
+                    style={{
+                      minHeight: 124,
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 12,
+                      alignItems: 'stretch',
+                      padding: 10,
+                      border:
+                        dragOverRow === row.index
+                          ? '2px solid #1677ff'
+                          : '2px dashed transparent',
+                      borderRadius: 8,
+                      background:
+                        dragOverRow === row.index ? '#e6f4ff' : 'transparent',
+                      transition:
+                        'border-color 160ms ease, background-color 160ms ease',
+                    }}
+                  >
+                    {codes.map((code) => renderStageCard(code, row.index))}
+                  </div>
+                ),
               },
             ]}
           />
+
+          {canManageWorkflow && (
+            <div
+              onDragOver={(event) => {
+                if (!draggedStageCode) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+                setDragOverRow(layoutRows.length);
+              }}
+              onDragLeave={() => setDragOverRow(null)}
+              onDrop={(event) => {
+                event.preventDefault();
+                const code =
+                  draggedStageCode || event.dataTransfer.getData('text/plain');
+                if (code) moveStageToRow(code, layoutRows.length);
+              }}
+              style={{
+                minHeight: 52,
+                display: 'grid',
+                placeItems: 'center',
+                border:
+                  dragOverRow === layoutRows.length
+                    ? '2px solid #1677ff'
+                    : '1px dashed #bfbfbf',
+                borderRadius: 8,
+                background:
+                  dragOverRow === layoutRows.length ? '#e6f4ff' : '#fafafa',
+              }}
+            >
+              <Text type="secondary">
+                Перетащите этап сюда, чтобы создать новую строку
+              </Text>
+            </div>
+          )}
+
+          {canViewDeadlines && deadlineLoading && !deadlineSchedule && (
+            <div style={{ minHeight: 96, display: 'grid', placeItems: 'center' }}>
+              <Spin />
+            </div>
+          )}
+
+          {canViewDeadlines && deadlineSchedule && (
+            <Card size="small" title="Плановая готовность заказа">
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Space wrap size={24} align="end">
+                  <div>
+                    <Text type="secondary">Производственный цикл</Text>
+                    <div>
+                      <Text
+                        strong
+                        style={{ fontSize: 20, fontVariantNumeric: 'tabular-nums' }}
+                      >
+                        {deadlineCalculation.totalProductionDays ?? '—'} дн.
+                      </Text>
+                    </div>
+                  </div>
+                  <div>
+                    <Text type="secondary">Резерв после производства</Text>
+                    <div>
+                      <InputNumber
+                        aria-label="Резерв после производства"
+                        min={0}
+                        max={3650}
+                        precision={0}
+                        addonAfter="дн."
+                        value={deadlineReserveDays}
+                        disabled={!canManageDeadlines}
+                        onChange={(value) => {
+                          setDeadlineReserveDays(value);
+                          setIsDeadlineDirty(true);
+                        }}
+                        style={{ width: 150 }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Text type="secondary">Плановая готовность</Text>
+                    <div>
+                      <Text
+                        strong
+                        style={{ fontSize: 20, fontVariantNumeric: 'tabular-nums' }}
+                      >
+                        {plannedOrderDays ?? '—'}-й день от даты заказа
+                      </Text>
+                    </div>
+                  </div>
+                </Space>
+
+                {!featureFlags.useBackendOrdersWrite && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="Автоприменение пока выключено"
+                    description="Сроки начнут применяться к новым заказам после включения backend-записи заказов."
+                  />
+                )}
+
+                {canManageDeadlines && (
+                  <>
+                    <Input.TextArea
+                      aria-label="Причина изменения сроков"
+                      value={deadlineReason}
+                      onChange={(event) => {
+                        setDeadlineReason(event.target.value);
+                        setIsDeadlineDirty(true);
+                      }}
+                      placeholder="Причина изменения сроков (обязательно)"
+                      maxLength={500}
+                      autoSize={{ minRows: 2, maxRows: 4 }}
+                    />
+                    {isDirty && (
+                      <Text type="warning">
+                        Сначала сохраните схему и переходы — сроки считаются по
+                        сохранённому графу.
+                      </Text>
+                    )}
+                    {deadlineDraftComplete && deadlineReason.trim().length < 3 && (
+                      <Text type="secondary">
+                        Укажите причину изменения, чтобы сохранить сроки.
+                      </Text>
+                    )}
+                    <Space wrap>
+                      <Button
+                        type="primary"
+                        onClick={() => void saveDeadlineSchedule()}
+                        loading={deadlineSaving}
+                        disabled={!deadlinePayload || isDirty}
+                      >
+                        Сохранить сроки
+                      </Button>
+                      <Button
+                        onClick={() => void loadDeadlineSchedule()}
+                        disabled={deadlineSaving || !isDeadlineDirty}
+                      >
+                        Сбросить сроки
+                      </Button>
+                      <Button
+                        danger
+                        onClick={disableDeadlineSchedule}
+                        disabled={
+                          deadlineSaving ||
+                          !deadlineSchedule.hasStoredConfiguration
+                        }
+                      >
+                        Отключить сроки
+                      </Button>
+                    </Space>
+                  </>
+                )}
+              </Space>
+            </Card>
+          )}
         </Space>
       </Card>
 
       <Card size="small" title="Переходы (transitions)" style={{ marginBottom: 16 }}>
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Переходы хранятся по <Text code>production_status_code</Text>. Это используется как правило workflow (в меню можно
-            подсвечивать/ограничивать “следующие” этапы).
+            Переходы хранятся по <Text code>production_status_code</Text>.
+            Они определяют разрешённые следующие этапы и цепочку накопления
+            дедлайнов. Визуальный порядок выше на расчёт не влияет.
           </Text>
 
           <Space wrap>
             <Button
+              disabled={!canManageWorkflow}
               onClick={() => {
                 const orderTransitions: Record<string, string[]> = {};
                 const detailTransitions: Record<string, string[]> = {};
@@ -572,6 +1148,7 @@ export const ProductionWorkflowTab: React.FC = () => {
                 render: (allowed: string[], row: any) => (
                   <Select
                     mode="multiple"
+                    disabled={!canManageWorkflow}
                     style={{ width: '100%' }}
                     placeholder="—"
                     value={allowed}
@@ -617,6 +1194,7 @@ export const ProductionWorkflowTab: React.FC = () => {
                 render: (allowed: string[], row: any) => (
                   <Select
                     mode="multiple"
+                    disabled={!canManageWorkflow}
                     style={{ width: '100%' }}
                     placeholder="—"
                     value={allowed}
@@ -649,6 +1227,7 @@ export const ProductionWorkflowTab: React.FC = () => {
               render: (v: boolean, row: ProductionStatusRef) => (
                 <Switch
                   checked={v}
+                  disabled={!canManageWorkflow}
                   onChange={async (next) => {
                     try {
                       await updateProductionStatus({
@@ -674,6 +1253,7 @@ export const ProductionWorkflowTab: React.FC = () => {
               render: (code: string) => (
                 <Input
                   value={draft.letters_by_code?.[code] || ''}
+                  disabled={!canManageWorkflow}
                   maxLength={1}
                   style={{ width: 54, textAlign: 'center' }}
                   onChange={(e) => {
@@ -705,6 +1285,7 @@ export const ProductionWorkflowTab: React.FC = () => {
               render: (code: string) => (
                 <Checkbox
                   checked={usedOrder.has(code)}
+                  disabled={!canManageWorkflow}
                   onChange={(e) => {
                     const nextAllowed = e.target.checked
                       ? Array.from(new Set([...draft.order.allowed_codes, code]))
@@ -724,6 +1305,7 @@ export const ProductionWorkflowTab: React.FC = () => {
               render: (code: string) => (
                 <Checkbox
                   checked={usedDetail.has(code)}
+                  disabled={!canManageWorkflow}
                   onChange={(e) => {
                     const nextAllowed = e.target.checked
                       ? Array.from(new Set([...draft.detail.allowed_codes, code]))
@@ -754,3 +1336,7 @@ export const ProductionWorkflowTab: React.FC = () => {
 };
 
 export default ProductionWorkflowTab;
+
+function errorText(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}

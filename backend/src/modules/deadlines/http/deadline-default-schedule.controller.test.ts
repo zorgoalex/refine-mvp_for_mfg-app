@@ -56,7 +56,7 @@ describe('deadline default schedule HTTP parser', () => {
     });
   });
 
-  it('bounds a parallel group by its longest stage instead of their sum', () => {
+  it('defers route-total validation to the saved transition graph', () => {
     expect(() =>
       parseReplaceDeadlineDefaultScheduleRequest({
         expectedVersion: 4,
@@ -83,7 +83,6 @@ describe('deadline default schedule HTTP parser', () => {
     [{ expectedVersion: 1, reserveDays: -1, reason: 'reason', stages: [{ productionStatusId: 1, durationDays: 1, parallelWithPrevious: false }] }],
     [{ expectedVersion: 1, reserveDays: 1, reason: 'reason', stages: [] }],
     [{ expectedVersion: 1, reserveDays: 1, reason: 'reason', stages: [{ productionStatusId: 1, durationDays: 3651, parallelWithPrevious: false }] }],
-    [{ expectedVersion: 1, reserveDays: 0, reason: 'reason', stages: [{ productionStatusId: 1, durationDays: 0, parallelWithPrevious: true }] }],
   ])('rejects invalid payload %#', (body) => {
     expect(() => parseReplaceDeadlineDefaultScheduleRequest(body)).toThrow();
   });

@@ -15,6 +15,10 @@ const schedule: DeadlineDefaultScheduleDto = {
   hasStoredConfiguration: false,
   version: 3,
   reserveDays: 0,
+  transitionsOrder: {
+    drawn: ['cut'],
+    cut: ['packed'],
+  },
   totalProductionDays: null,
   plannedOrderDays: null,
   updatedAt: null,
@@ -24,7 +28,6 @@ const schedule: DeadlineDefaultScheduleDto = {
     stage(3, 'Упакован'),
   ],
 };
-const sequential = { 1: false, 2: false, 3: false };
 
 describe('deadline default schedule view', () => {
   it('gates the read model to deadline viewers or settings managers', () => {
@@ -36,7 +39,6 @@ describe('deadline default schedule view', () => {
     const hints = calculateCumulativeHints(
       schedule,
       { 1: 2, 2: 3, 3: 1 },
-      sequential,
     );
     expect([...hints.values()]).toEqual([2, 5, 6]);
   });
@@ -45,7 +47,6 @@ describe('deadline default schedule view', () => {
     const calculation = calculateScheduleDraft(
       schedule,
       { 1: 0, 2: 0, 3: 0 },
-      sequential,
     );
 
     expect([...calculation.cumulativeHints.values()]).toEqual([0, 0, 0]);
@@ -53,11 +54,16 @@ describe('deadline default schedule view', () => {
     expect(isDeadlineScheduleDraftComplete(calculation, 0)).toBe(true);
   });
 
-  it('uses the longest stage in a parallel group', () => {
+  it('uses the longest incoming transition path at a merge', () => {
     const calculation = calculateScheduleDraft(
-      schedule,
+      {
+        ...schedule,
+        transitionsOrder: {
+          drawn: ['packed'],
+          cut: ['packed'],
+        },
+      },
       { 1: 2, 2: 5, 3: 1 },
-      { 1: false, 2: true, 3: false },
     );
 
     expect([...calculation.cumulativeHints.values()]).toEqual([2, 5, 6]);
@@ -70,7 +76,6 @@ describe('deadline default schedule view', () => {
         schedule,
         2,
         { 1: 2, 2: null, 3: 1 },
-        sequential,
         'Новый цикл',
       ),
     ).toBeNull();
@@ -82,7 +87,6 @@ describe('deadline default schedule view', () => {
         schedule,
         2,
         { 1: 2, 2: 3, 3: 1 },
-        sequential,
         ' Новый цикл ',
       ),
     ).toEqual({
@@ -120,7 +124,6 @@ describe('deadline default schedule view', () => {
         },
         0,
         { 1: 2, 2: 3, 3: 1 },
-        { 1: false, 2: false, 3: false },
         'Меняем маршрут',
       )?.stages.map((item) => item.productionStatusId),
     ).toEqual([3, 1, 2]);
@@ -157,13 +160,56 @@ describe('deadline default schedule view', () => {
       computePlannedCompletionDate('2026-07-01', configuredSchedule, []),
     ).toBeNull();
   });
+
+  it('does not add a stage that is absent from the order route', () => {
+    const configuredSchedule: DeadlineDefaultScheduleDto = {
+      ...schedule,
+      configured: true,
+      reserveDays: 0,
+      stages: [
+        { ...stage(1, 'Отрисован'), durationDays: 3 },
+        { ...stage(2, 'Распилен'), durationDays: 20 },
+        { ...stage(3, 'Упакован'), durationDays: 8 },
+      ],
+    };
+
+    expect(
+      computePlannedCompletionDate(
+        '2026-07-01',
+        configuredSchedule,
+        [1, 3],
+      ),
+    ).toBe('2026-07-09');
+  });
+
+  it('fails closed when transitions contain a cycle', () => {
+    const calculation = calculateScheduleDraft(
+      {
+        ...schedule,
+        transitionsOrder: {
+          drawn: ['cut'],
+          cut: ['drawn'],
+        },
+      },
+      { 1: 2, 2: 3, 3: 1 },
+    );
+
+    expect(calculation.hasCycle).toBe(true);
+    expect(calculation.totalProductionDays).toBeNull();
+    expect([...calculation.cumulativeHints.values()]).toEqual([null, null, null]);
+  });
 });
 
 function stage(productionStatusId: number, productionStatusName: string) {
   return {
     productionStatusId,
     productionStatusName,
-    productionStatusCode: null,
+    productionStatusCode:
+      productionStatusId === 1
+        ? 'drawn'
+        : productionStatusId === 2
+          ? 'cut'
+          : 'packed',
     sortOrder: productionStatusId,
     durationDays: null,
     cumulativeDeadlineDays: null,

@@ -8,6 +8,7 @@ const schedule: DeadlineDefaultScheduleDto = {
   hasStoredConfiguration: true,
   version: 2,
   reserveDays: 1,
+  transitionsOrder: {},
   totalProductionDays: 5,
   plannedOrderDays: 6,
   updatedAt: null,

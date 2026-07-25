@@ -23,26 +23,48 @@ describe('configuration tabs layout', () => {
     expect(source).toContain('<TableVisibilityByRoleTab />');
   });
 
-  it('keeps default schedules separate from transition rules', () => {
+  it('embeds default schedules into production stages', () => {
     const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
+    const productionSource = fs.readFileSync(
+      path.resolve(__dirname, 'components/ProductionWorkflowTab.tsx'),
+      'utf8',
+    );
 
-    expect(source).toContain("key: 'deadline-defaults'");
-    expect(source).toContain('Сроки по умолчанию');
-    expect(source).toContain('<DeadlineDefaultScheduleConfig />');
+    expect(source).not.toContain("key: 'deadline-defaults'");
+    expect(source).not.toContain('<DeadlineDefaultScheduleConfig />');
+    expect(productionSource).toContain('Длительность');
+    expect(productionSource).toContain('Плановая готовность заказа');
     expect(source).toContain("key: 'deadline-rules'");
   });
 
-  it('shows only deadline defaults to deadline viewers without settings access', () => {
+  it('keeps visual rows independent from transition-based deadlines', () => {
+    const productionSource = fs.readFileSync(
+      path.resolve(__dirname, 'components/ProductionWorkflowTab.tsx'),
+      'utf8',
+    );
+
+    expect(productionSource).toContain('draggable={canManageWorkflow}');
+    expect(productionSource).toContain('layout_rows: compactRows');
+    expect(productionSource).toContain(
+      'transitionsOrder: draft.transitions_order ?? {}',
+    );
+    expect(productionSource).toContain(
+      'Визуальный порядок выше на расчёт не влияет',
+    );
+  });
+
+  it('shows production stages to deadline viewers without settings access', () => {
     const items = [
       { key: 'orders' },
-      { key: 'deadline-defaults' },
+      { key: 'production' },
       { key: 'deadline-rules' },
     ];
 
-    expect(filterConfigurationTabItems(items, false)).toEqual([
-      { key: 'deadline-defaults' },
+    expect(filterConfigurationTabItems(items, false, true)).toEqual([
+      { key: 'production' },
     ]);
-    expect(filterConfigurationTabItems(items, true)).toEqual(items);
+    expect(filterConfigurationTabItems(items, true, true)).toEqual(items);
+    expect(filterConfigurationTabItems(items, false, false)).toEqual([]);
   });
 
   it('restores the last active configuration tab when it is still available', () => {

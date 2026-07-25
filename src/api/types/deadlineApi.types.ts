@@ -197,6 +197,7 @@ export interface DeadlineDefaultScheduleDto {
   hasStoredConfiguration: boolean;
   version: number;
   reserveDays: number;
+  transitionsOrder: Record<string, string[]>;
   totalProductionDays: number | null;
   plannedOrderDays: number | null;
   updatedAt: string | null;

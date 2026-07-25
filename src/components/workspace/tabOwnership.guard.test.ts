@@ -23,6 +23,8 @@ describe('workspace tab ownership guards', () => {
 
     expect(recordTitle).toContain('const tabKey = useWorkspaceTabKey(location.pathname)');
     expect(recordTitle).toContain('setTabTitle(tabKey, title)');
-    expect(workflow).toContain('useTabDirty(tabKey, isDirty)');
+    expect(workflow).toContain(
+      'useTabDirty(tabKey, isDirty || isDeadlineDirty)',
+    );
   });
 });

@@ -27,8 +27,10 @@ export interface CreateOrderCommand {
 export interface OrderDefaultSchedule {
   version: number;
   reserveDays: number;
+  transitionsOrder?: Record<string, string[]>;
   stages: ReadonlyArray<{
     productionStatusId: number;
+    productionStatusCode?: string | null;
     durationDays: number;
     parallelWithPrevious: boolean;
   }>;

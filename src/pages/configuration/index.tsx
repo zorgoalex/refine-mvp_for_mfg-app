@@ -11,7 +11,6 @@ import {
   CameraOutlined,
   BuildOutlined,
   ClockCircleOutlined,
-  CalendarOutlined,
   BellOutlined,
   ApartmentOutlined,
   ScissorOutlined,
@@ -22,7 +21,6 @@ import { featureFlags } from '../../config/featureFlags';
 import { VlmConfigTab } from './VlmConfigTab';
 import { ProductionWorkflowTab } from './components/ProductionWorkflowTab';
 import { DeadlineTransitionRulesConfig } from './components/DeadlineTransitionRulesConfig';
-import { DeadlineDefaultScheduleConfig } from './components/DeadlineDefaultScheduleConfig';
 import { StatusAutomationConfig } from './components/StatusAutomationConfig';
 import { NotificationRulesConfig } from './components/NotificationRulesConfig';
 import { OrgStructureConfig } from './components/OrgStructureConfig';
@@ -51,10 +49,13 @@ export const resolveConfigurationActiveTab = (storedKey: string | null | undefin
 export const filterConfigurationTabItems = <T extends { key: string },>(
   items: T[],
   generalSettingsVisible: boolean,
+  deadlineSettingsVisible: boolean,
 ): T[] =>
   generalSettingsVisible
     ? items
-    : items.filter((item) => item.key === 'deadline-defaults');
+    : deadlineSettingsVisible
+      ? items.filter((item) => item.key === 'production')
+      : [];
 
 const readStoredConfigurationActiveTab = (): string | null => {
   try {
@@ -504,7 +505,7 @@ const TableVisibilityByRoleTab: React.FC = () => {
 export const ConfigurationPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState(() => readStoredConfigurationActiveTab() ?? 'orders');
   const statusAutomationVisible = featureFlags.statusAutomation && (!featureFlags.useBackendPermissions || can('status_automation.view'));
-  const deadlineDefaultsVisible =
+  const deadlineSettingsVisible =
     featureFlags.useBackendDeadlines &&
     (!featureFlags.useBackendPermissions || can('deadlines.view') || can('settings.manage'));
   const generalSettingsVisible =
@@ -531,20 +532,6 @@ export const ConfigurationPage: React.FC = () => {
       ),
       children: <ProductionWorkflowTab />,
     },
-    ...(deadlineDefaultsVisible
-      ? [
-          {
-            key: 'deadline-defaults',
-            label: (
-              <span>
-                <CalendarOutlined />
-                Сроки по умолчанию
-              </span>
-            ),
-            children: <DeadlineDefaultScheduleConfig />,
-          },
-        ]
-      : []),
     ...(statusAutomationVisible
       ? [
           {
@@ -644,7 +631,11 @@ export const ConfigurationPage: React.FC = () => {
         ]
       : []),
   ];
-  const tabItems = filterConfigurationTabItems(allTabItems, generalSettingsVisible);
+  const tabItems = filterConfigurationTabItems(
+    allTabItems,
+    generalSettingsVisible,
+    deadlineSettingsVisible,
+  );
 
   const availableTabKeys = tabItems.map((item) => item.key);
   const resolvedActiveTab = resolveConfigurationActiveTab(activeTab, availableTabKeys);

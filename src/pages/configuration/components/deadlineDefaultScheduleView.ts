@@ -5,11 +5,11 @@ import type {
 import type { UserIdentity } from '../../../types/auth';
 
 export type DeadlineDurationDraft = Record<number, number | null>;
-export type DeadlineParallelDraft = Record<number, boolean>;
 
 export interface DeadlineScheduleDraftCalculation {
   cumulativeHints: Map<number, number | null>;
   totalProductionDays: number | null;
+  hasCycle: boolean;
 }
 
 export function isDeadlineScheduleDraftComplete(
@@ -43,67 +43,89 @@ export function buildDurationDraft(schedule: DeadlineDefaultScheduleDto): Deadli
   );
 }
 
-export function buildParallelDraft(schedule: DeadlineDefaultScheduleDto): DeadlineParallelDraft {
-  return Object.fromEntries(
-    schedule.stages.map((stage) => [
-      stage.productionStatusId,
-      stage.parallelWithPrevious,
-    ]),
-  );
-}
-
 export function calculateCumulativeHints(
   schedule: DeadlineDefaultScheduleDto,
   durations: DeadlineDurationDraft,
-  parallel: DeadlineParallelDraft = buildParallelDraft(schedule),
+  transitionsOrder: Record<string, string[]> = schedule.transitionsOrder ?? {},
 ): Map<number, number | null> {
-  return calculateScheduleDraft(schedule, durations, parallel).cumulativeHints;
+  return calculateScheduleDraft(schedule, durations, transitionsOrder).cumulativeHints;
 }
 
 export function calculateScheduleDraft(
   schedule: DeadlineDefaultScheduleDto,
   durations: DeadlineDurationDraft,
-  parallel: DeadlineParallelDraft,
+  transitionsOrder: Record<string, string[]> = schedule.transitionsOrder ?? {},
+  applicableProductionStatusIds?: Iterable<number>,
 ): DeadlineScheduleDraftCalculation {
-  const result = new Map<number, number | null>();
-  let elapsedDays = 0;
-  let groupMaximum = 0;
-  let groupComplete = true;
-  let previousGroupsComplete = true;
-  let complete = schedule.stages.length > 0;
-  for (const [index, stage] of schedule.stages.entries()) {
-    const parallelWithPrevious =
-      index > 0 && parallel[stage.productionStatusId] === true;
-    if (index > 0 && !parallelWithPrevious) {
-      if (groupComplete) {
-        elapsedDays += groupMaximum;
-      } else {
-        previousGroupsComplete = false;
-      }
-      groupMaximum = 0;
-      groupComplete = true;
-    }
+  const applicable =
+    applicableProductionStatusIds === undefined
+      ? new Set(schedule.stages.map((stage) => stage.productionStatusId))
+      : new Set(applicableProductionStatusIds);
+  const relevant = schedule.stages.filter((stage) =>
+    applicable.has(stage.productionStatusId),
+  );
+  const stageByCode = new Map(
+    relevant.flatMap((stage) =>
+      stage.productionStatusCode
+        ? [[stage.productionStatusCode, stage] as const]
+        : [],
+    ),
+  );
+  const predecessors = new Map<number, number[]>(
+    relevant.map((stage) => [stage.productionStatusId, []]),
+  );
+  Object.entries(transitionsOrder ?? {}).forEach(([fromCode, toCodes]) => {
+    const from = stageByCode.get(fromCode);
+    if (!from || !Array.isArray(toCodes)) return;
+    toCodes.forEach((toCode) => {
+      const to = stageByCode.get(toCode);
+      if (to) predecessors.get(to.productionStatusId)?.push(from.productionStatusId);
+    });
+  });
 
-    const duration = durations[stage.productionStatusId];
-    if (
+  const state = new Map<number, 'visiting' | 'done'>();
+  const result = new Map<number, number | null>();
+  let hasCycle = false;
+  const visit = (productionStatusId: number): number | null => {
+    if (state.get(productionStatusId) === 'visiting') {
+      hasCycle = true;
+      return null;
+    }
+    if (state.get(productionStatusId) === 'done') {
+      return result.get(productionStatusId) ?? null;
+    }
+    state.set(productionStatusId, 'visiting');
+    const duration = durations[productionStatusId];
+    const priorDeadlines = (predecessors.get(productionStatusId) ?? []).map(visit);
+    const deadline =
       duration === null ||
       duration === undefined ||
       !Number.isInteger(duration) ||
       duration < 0 ||
-      !previousGroupsComplete
-    ) {
-      complete = false;
-      groupComplete = false;
-      result.set(stage.productionStatusId, null);
-      continue;
-    }
-    groupMaximum = Math.max(groupMaximum, duration);
-    result.set(stage.productionStatusId, elapsedDays + duration);
+      priorDeadlines.some((value) => value === null)
+        ? null
+        : (priorDeadlines.length === 0
+            ? 0
+            : Math.max(...(priorDeadlines as number[]))) + duration;
+    result.set(productionStatusId, deadline);
+    state.set(productionStatusId, 'done');
+    return deadline;
+  };
+  relevant.forEach((stage) => visit(stage.productionStatusId));
+  if (hasCycle) {
+    relevant.forEach((stage) => result.set(stage.productionStatusId, null));
   }
+  const deadlines = [...result.values()];
+  const totalProductionDays =
+    relevant.length > 0 &&
+    !hasCycle &&
+    deadlines.every((deadline): deadline is number => deadline !== null)
+      ? Math.max(...deadlines)
+      : null;
   return {
     cumulativeHints: result,
-    totalProductionDays:
-      complete && groupComplete ? elapsedDays + groupMaximum : null,
+    totalProductionDays,
+    hasCycle,
   };
 }
 
@@ -111,7 +133,6 @@ export function buildDefaultSchedulePayload(
   schedule: DeadlineDefaultScheduleDto,
   reserveDays: number | null,
   durations: DeadlineDurationDraft,
-  parallel: DeadlineParallelDraft,
   reason: string,
 ): ReplaceDeadlineDefaultScheduleRequest | null {
   if (reserveDays === null || !Number.isInteger(reserveDays) || reserveDays < 0) {
@@ -120,7 +141,7 @@ export function buildDefaultSchedulePayload(
   const stages = schedule.stages.map((stage) => ({
     productionStatusId: stage.productionStatusId,
     durationDays: durations[stage.productionStatusId],
-    parallelWithPrevious: parallel[stage.productionStatusId] === true,
+    parallelWithPrevious: false,
   }));
   if (
     stages.some(
@@ -133,13 +154,10 @@ export function buildDefaultSchedulePayload(
   ) {
     return null;
   }
-  if (stages[0]?.parallelWithPrevious) {
-    return null;
-  }
   const totalProductionDays = calculateScheduleDraft(
     schedule,
     durations,
-    parallel,
+    schedule.transitionsOrder ?? {},
   ).totalProductionDays;
   if (totalProductionDays === null) {
     return null;
@@ -197,32 +215,15 @@ function calculateApplicableScheduleDays(
   applicable: Set<number>,
 ): number | null {
   if (applicable.size === 0) return null;
-
-  let elapsedDays = 0;
-  let matchedCount = 0;
-  let group: DeadlineDefaultScheduleDto['stages'] = [];
-  const flushGroup = () => {
-    const matched = group.filter((stage) =>
-      applicable.has(stage.productionStatusId),
-    );
-    if (matched.length === 0) return true;
-    if (matched.some((stage) => stage.durationDays === null)) return false;
-    elapsedDays += Math.max(...matched.map((stage) => stage.durationDays as number));
-    matchedCount += matched.length;
-    return true;
-  };
-
-  for (const [index, stage] of schedule.stages.entries()) {
-    if (index === 0 || !stage.parallelWithPrevious) {
-      if (group.length > 0 && !flushGroup()) return null;
-      group = [stage];
-    } else {
-      group.push(stage);
-    }
-  }
-  if (group.length > 0 && !flushGroup()) return null;
-  if (matchedCount === 0) return null;
-  return elapsedDays + schedule.reserveDays;
+  const calculation = calculateScheduleDraft(
+    schedule,
+    buildDurationDraft(schedule),
+    schedule.transitionsOrder ?? {},
+    applicable,
+  );
+  return calculation.totalProductionDays === null
+    ? null
+    : calculation.totalProductionDays + schedule.reserveDays;
 }
 
 export function shouldApplyComputedPlannedCompletion(

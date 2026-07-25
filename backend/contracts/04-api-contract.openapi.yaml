@@ -17418,6 +17418,7 @@ components:
         - hasStoredConfiguration
         - version
         - reserveDays
+        - transitionsOrder
         - totalProductionDays
         - plannedOrderDays
         - updatedAt
@@ -17435,6 +17436,13 @@ components:
           type: integer
           minimum: 0
           maximum: 3650
+        transitionsOrder:
+          type: object
+          description: Saved order-status graph used for deadline accumulation.
+          additionalProperties:
+            type: array
+            items:
+              type: string
         totalProductionDays:
           type: integer
           minimum: 0
@@ -17498,6 +17506,8 @@ components:
                 maximum: 3650
               parallelWithPrevious:
                 type: boolean
+                deprecated: true
+                description: Compatibility field; deadline calculation uses transitionsOrder.
 
     UserListResponse:
       type: object

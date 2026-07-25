@@ -12,6 +12,12 @@ export interface ProductionWorkflowConfigV1 {
    */
   status_codes_order: string[];
 
+  /**
+   * Presentation-only rows for the production diagram.
+   * Transitions remain the sole source of workflow and deadline dependencies.
+   */
+  layout_rows?: string[][];
+
   order: {
     initial_code: string;
     allowed_codes: string[];
@@ -85,6 +91,7 @@ export const buildDefaultProductionWorkflowConfig = (
     schema_version: 1,
     workflow_key: workflowKey,
     status_codes_order: codes,
+    layout_rows: codes.map((code) => [code]),
     order: { initial_code: initial, allowed_codes: [...codes] },
     detail: { initial_code: initial, allowed_codes: [...codes] },
     transitions_order: {},
@@ -119,6 +126,22 @@ export const normalizeProductionWorkflowConfig = (
   const statusCodesOrder = Array.isArray(base?.status_codes_order)
     ? base!.status_codes_order.filter((x) => typeof x === 'string')
     : fallback.status_codes_order;
+  const storedLayoutRows = Array.isArray(base?.layout_rows)
+    ? base.layout_rows
+        .filter((row): row is unknown[] => Array.isArray(row))
+        .map((row) => row.filter((code): code is string => typeof code === 'string'))
+        .filter((row) => row.length > 0)
+    : [];
+  const layoutCodes = new Set(storedLayoutRows.flat());
+  const layoutRows =
+    storedLayoutRows.length > 0
+      ? [
+          ...storedLayoutRows,
+          ...statusCodesOrder
+            .filter((code) => !layoutCodes.has(code))
+            .map((code) => [code]),
+        ]
+      : statusCodesOrder.map((code) => [code]);
 
   const orderAllowed = Array.isArray(base?.order?.allowed_codes)
     ? base!.order!.allowed_codes.filter((x) => typeof x === 'string')
@@ -139,6 +162,7 @@ export const normalizeProductionWorkflowConfig = (
     schema_version: 1,
     workflow_key: workflowKey,
     status_codes_order: statusCodesOrder,
+    layout_rows: layoutRows,
     order: {
       initial_code:
         typeof base?.order?.initial_code === 'string' ? base.order.initial_code : fallback.order.initial_code,

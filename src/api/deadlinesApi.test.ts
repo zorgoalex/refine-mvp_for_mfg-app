@@ -231,6 +231,7 @@ describe('deadlinesApi', () => {
       hasStoredConfiguration: false,
       version: 1,
       reserveDays: 0,
+      transitionsOrder: {},
       totalProductionDays: null,
       plannedOrderDays: null,
       updatedAt: null,

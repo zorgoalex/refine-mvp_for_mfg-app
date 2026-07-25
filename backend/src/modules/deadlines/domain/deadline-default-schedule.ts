@@ -25,6 +25,7 @@ export function buildDeadlineDefaultSchedule(input: {
   reserveDays: number;
   updatedAt: string | null;
   stages: DeadlineDefaultScheduleStageSource[];
+  transitionsOrder?: Record<string, string[]>;
   catalogAligned?: boolean;
   hasStoredConfiguration?: boolean;
 }): DeadlineDefaultScheduleDto {
@@ -38,14 +39,23 @@ export function buildDeadlineDefaultSchedule(input: {
           reserveDays: input.reserveDays,
           stages: input.stages.map((stage) => ({
             productionStatusId: stage.productionStatusId,
+            productionStatusCode: stage.productionStatusCode,
             durationDays: stage.durationDays as number,
             parallelWithPrevious: stage.parallelWithPrevious,
           })),
+          transitionsOrder: input.transitionsOrder,
         },
         input.stages.map((stage) => stage.productionStatusId),
       )
     : null;
-  const partialDeadlines = calculatePartialDeadlineHints(input.stages);
+  const partialDeadlines =
+    input.transitionsOrder === undefined
+      ? calculatePartialDeadlineHints(input.stages)
+      : calculateGraphDeadlineHints(
+          input.stages,
+          input.transitionsOrder,
+          input.stages.map((stage) => stage.productionStatusId),
+        );
   const stages: DeadlineDefaultScheduleStageDto[] = input.stages.map((stage) => ({
     ...stage,
     cumulativeDeadlineDays:
@@ -65,6 +75,7 @@ export function buildDeadlineDefaultSchedule(input: {
     hasStoredConfiguration: input.hasStoredConfiguration ?? configured,
     version: input.version,
     reserveDays: input.reserveDays,
+    transitionsOrder: input.transitionsOrder ?? {},
     totalProductionDays,
     plannedOrderDays:
       configured && calculation ? calculation.plannedOrderDays : null,
@@ -78,9 +89,11 @@ export function calculateApplicableDeadlineSchedule(
     reserveDays: number;
     stages: ReadonlyArray<{
       productionStatusId: number;
+      productionStatusCode?: string | null;
       durationDays: number;
       parallelWithPrevious: boolean;
     }>;
+    transitionsOrder?: Record<string, string[]>;
   },
   applicableProductionStatusIds: Iterable<number>,
 ): ApplicableDeadlineSchedule | null {
@@ -93,6 +106,10 @@ export function calculateApplicableDeadlineSchedule(
     schedule.reserveDays < 0
   ) {
     return null;
+  }
+
+  if (schedule.transitionsOrder !== undefined) {
+    return calculateGraphSchedule(schedule, applicable);
   }
 
   const deadlines = new Map<number, number>();
@@ -133,6 +150,138 @@ export function calculateApplicableDeadlineSchedule(
     plannedOrderDays: elapsedDays + schedule.reserveDays,
     stageDeadlineDaysByProductionStatusId: deadlines,
   };
+}
+
+function calculateGraphSchedule(
+  schedule: {
+    reserveDays: number;
+    stages: ReadonlyArray<{
+      productionStatusId: number;
+      productionStatusCode?: string | null;
+      durationDays: number;
+    }>;
+    transitionsOrder?: Record<string, string[]>;
+  },
+  applicable: ReadonlySet<number>,
+): ApplicableDeadlineSchedule | null {
+  const relevant = schedule.stages.filter((stage) =>
+    applicable.has(stage.productionStatusId),
+  );
+  if (relevant.length === 0) {
+    return null;
+  }
+  if (
+    relevant.some(
+      (stage) =>
+        !Number.isInteger(stage.durationDays) ||
+        stage.durationDays < 0 ||
+        stage.durationDays > MAX_DEADLINE_DEFAULT_SCHEDULE_DAYS,
+    )
+  ) {
+    return null;
+  }
+
+  const result = calculateGraphDeadlineHints(
+    relevant.map((stage) => ({
+      productionStatusId: stage.productionStatusId,
+      productionStatusCode: stage.productionStatusCode ?? null,
+      durationDays: stage.durationDays,
+    })),
+    schedule.transitionsOrder ?? {},
+    relevant.map((stage) => stage.productionStatusId),
+  );
+  if ([...result.values()].some((deadline) => deadline === null)) {
+    return null;
+  }
+  const deadlines = new Map<number, number>(
+    [...result.entries()].map(([id, deadline]) => [id, deadline as number]),
+  );
+  const totalProductionDays = Math.max(...deadlines.values());
+  if (
+    totalProductionDays + schedule.reserveDays >
+    MAX_DEADLINE_DEFAULT_SCHEDULE_DAYS
+  ) {
+    return null;
+  }
+  return {
+    totalProductionDays,
+    plannedOrderDays: totalProductionDays + schedule.reserveDays,
+    stageDeadlineDaysByProductionStatusId: deadlines,
+  };
+}
+
+function calculateGraphDeadlineHints(
+  stages: ReadonlyArray<
+    Pick<
+      DeadlineDefaultScheduleStageSource,
+      'productionStatusId' | 'productionStatusCode' | 'durationDays'
+    >
+  >,
+  transitionsOrder: Record<string, string[]>,
+  applicableProductionStatusIds: Iterable<number>,
+): Map<number, number | null> {
+  const applicable = new Set(applicableProductionStatusIds);
+  const relevant = stages.filter((stage) =>
+    applicable.has(stage.productionStatusId),
+  );
+  const stageByCode = new Map(
+    relevant.flatMap((stage) =>
+      stage.productionStatusCode ? [[stage.productionStatusCode, stage] as const] : [],
+    ),
+  );
+  const predecessors = new Map<number, number[]>(
+    relevant.map((stage) => [stage.productionStatusId, []]),
+  );
+  for (const [fromCode, toCodes] of Object.entries(transitionsOrder)) {
+    const from = stageByCode.get(fromCode);
+    if (!from || !Array.isArray(toCodes)) {
+      continue;
+    }
+    for (const toCode of toCodes) {
+      const to = stageByCode.get(toCode);
+      if (!to || to.productionStatusId === from.productionStatusId) {
+        if (to?.productionStatusId === from.productionStatusId) {
+          predecessors.get(to.productionStatusId)?.push(from.productionStatusId);
+        }
+        continue;
+      }
+      predecessors.get(to.productionStatusId)?.push(from.productionStatusId);
+    }
+  }
+
+  const byId = new Map(relevant.map((stage) => [stage.productionStatusId, stage]));
+  const state = new Map<number, 'visiting' | 'done'>();
+  const deadlines = new Map<number, number | null>();
+  let cyclic = false;
+  const visit = (id: number): number | null => {
+    if (state.get(id) === 'visiting') {
+      cyclic = true;
+      return null;
+    }
+    if (state.get(id) === 'done') {
+      return deadlines.get(id) ?? null;
+    }
+    state.set(id, 'visiting');
+    const stage = byId.get(id);
+    const duration = stage?.durationDays;
+    const prior = (predecessors.get(id) ?? []).map(visit);
+    const value =
+      duration === null ||
+      duration === undefined ||
+      !Number.isInteger(duration) ||
+      duration < 0 ||
+      prior.some((deadline) => deadline === null)
+        ? null
+        : (prior.length === 0 ? 0 : Math.max(...(prior as number[]))) + duration;
+    deadlines.set(id, value);
+    state.set(id, 'done');
+    return value;
+  };
+  relevant.forEach((stage) => visit(stage.productionStatusId));
+  if (cyclic) {
+    return new Map(relevant.map((stage) => [stage.productionStatusId, null]));
+  }
+  return deadlines;
 }
 
 function splitParallelGroups<T extends { parallelWithPrevious: boolean }>(
