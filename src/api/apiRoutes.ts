@@ -211,6 +211,9 @@ export const apiRoutes = {
   deadlineSettings: {
     root: backendApiPath('/deadline-settings'),
   },
+  deadlineDefaultSchedule: {
+    root: backendApiPath('/deadline-default-schedule'),
+  },
   deadlineTransitionRules: {
     list: backendApiPath('/deadline-transition-rules'),
     byId: (actionRuleId: string) => backendApiPath(`/deadline-transition-rules/${actionRuleId}`),

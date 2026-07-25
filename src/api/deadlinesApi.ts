@@ -14,6 +14,7 @@ import type {
   DeadlinePolicyListResponse,
   DeadlineResponse,
   DeadlineSettingsResponse,
+  DeadlineDefaultScheduleResponse,
   DeleteGlobalTransitionRuleRequest,
   OrderDeadlinesResponse,
   OrderDeadlineSummary,
@@ -25,6 +26,7 @@ import type {
   RetireDeadlineOrderOverrideRequest,
   ResumeDeadlineRequest,
   UpdateDeadlineSettingsRequest,
+  ReplaceDeadlineDefaultScheduleRequest,
   UpdateGlobalTransitionRuleRequest,
   UpsertDeadlineOrderOverrideRequest,
 } from './types/deadlineApi.types';
@@ -138,6 +140,21 @@ export const deadlinesApi = {
 
   updateSettings(request: UpdateDeadlineSettingsRequest): Promise<DeadlineSettingsResponse> {
     return httpClient.patch<DeadlineSettingsResponse>(apiRoutes.deadlineSettings.root, request);
+  },
+
+  getDefaultSchedule(): Promise<DeadlineDefaultScheduleResponse> {
+    return httpClient.get<DeadlineDefaultScheduleResponse>(
+      apiRoutes.deadlineDefaultSchedule.root,
+    );
+  },
+
+  replaceDefaultSchedule(
+    request: ReplaceDeadlineDefaultScheduleRequest,
+  ): Promise<DeadlineDefaultScheduleResponse> {
+    return httpClient.put<DeadlineDefaultScheduleResponse>(
+      apiRoutes.deadlineDefaultSchedule.root,
+      request,
+    );
   },
 
   listDeadlineTransitionRules(): Promise<DeadlineActionRuleListResponse> {

@@ -5854,6 +5854,62 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/deadline-default-schedule:
+    get:
+      tags:
+        - Deadlines
+      operationId: getDeadlineDefaultSchedule
+      summary: Получить сроки этапов и готовности заказа по умолчанию
+      security:
+        - bearerAuth: []
+      x-permissions-any:
+        - deadlines.view
+        - settings.manage
+      responses:
+        '200':
+          description: Сроки по умолчанию
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineDefaultScheduleResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags:
+        - Deadlines
+      operationId: replaceDeadlineDefaultSchedule
+      summary: Заменить сроки этапов и готовности заказа по умолчанию
+      security:
+        - bearerAuth: []
+      x-permission: settings.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceDeadlineDefaultScheduleRequest'
+      responses:
+        '200':
+          description: Сроки по умолчанию сохранены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineDefaultScheduleResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/status-automation/rules:
     get:
       tags:
@@ -17322,6 +17378,120 @@ components:
           type: boolean
         repeatNotificationsEnabled:
           type: boolean
+
+    DeadlineDefaultScheduleStage:
+      type: object
+      required:
+        - productionStatusId
+        - productionStatusName
+        - productionStatusCode
+        - sortOrder
+        - durationDays
+        - cumulativeDeadlineDays
+      properties:
+        productionStatusId:
+          type: integer
+        productionStatusName:
+          type: string
+        productionStatusCode:
+          type: string
+          nullable: true
+        sortOrder:
+          type: integer
+        durationDays:
+          type: integer
+          minimum: 0
+          maximum: 3650
+          nullable: true
+        cumulativeDeadlineDays:
+          type: integer
+          minimum: 0
+          nullable: true
+
+    DeadlineDefaultSchedule:
+      type: object
+      required:
+        - configured
+        - hasStoredConfiguration
+        - version
+        - reserveDays
+        - totalProductionDays
+        - plannedOrderDays
+        - updatedAt
+        - stages
+      properties:
+        configured:
+          type: boolean
+        hasStoredConfiguration:
+          type: boolean
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+        reserveDays:
+          type: integer
+          minimum: 0
+          maximum: 3650
+        totalProductionDays:
+          type: integer
+          minimum: 0
+          nullable: true
+        plannedOrderDays:
+          type: integer
+          minimum: 0
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeadlineDefaultScheduleStage'
+
+    DeadlineDefaultScheduleResponse:
+      type: object
+      required:
+        - schedule
+      properties:
+        schedule:
+          $ref: '#/components/schemas/DeadlineDefaultSchedule'
+
+    ReplaceDeadlineDefaultScheduleRequest:
+      type: object
+      required:
+        - expectedVersion
+        - reserveDays
+        - reason
+        - stages
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 1
+        reserveDays:
+          type: integer
+          minimum: 0
+          maximum: 3650
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+        stages:
+          type: array
+          items:
+            type: object
+            required:
+              - productionStatusId
+              - durationDays
+            properties:
+              productionStatusId:
+                type: integer
+                minimum: 1
+              durationDays:
+                type: integer
+                minimum: 0
+                maximum: 3650
 
     UserListResponse:
       type: object

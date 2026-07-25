@@ -225,6 +225,47 @@ describe('deadlinesApi', () => {
     );
   });
 
+  it('reads and replaces the default production schedule', async () => {
+    const schedule = {
+      configured: false,
+      hasStoredConfiguration: false,
+      version: 1,
+      reserveDays: 0,
+      totalProductionDays: null,
+      plannedOrderDays: null,
+      updatedAt: null,
+      stages: [],
+    };
+    const fetchMock = mockFetch({ schedule }, { schedule: { ...schedule, version: 2 } });
+
+    await deadlinesApi.getDefaultSchedule();
+    await deadlinesApi.replaceDefaultSchedule({
+      expectedVersion: 1,
+      reserveDays: 2,
+      reason: 'Новый производственный цикл',
+      stages: [{ productionStatusId: 10, durationDays: 3 }],
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/deadline-default-schedule',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/deadline-default-schedule',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          expectedVersion: 1,
+          reserveDays: 2,
+          reason: 'Новый производственный цикл',
+          stages: [{ productionStatusId: 10, durationDays: 3 }],
+        }),
+      }),
+    );
+  });
+
   it('creates and controls deadlines through versioned endpoints', async () => {
     const deadline = createDeadline();
     const fetchMock = mockFetch(

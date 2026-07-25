@@ -896,6 +896,123 @@ describe('OrderTransactionService order-name uniqueness', () => {
 });
 
 describe('OrderTransactionService', () => {
+  it('applies configured order and production-stage dates only during create', async () => {
+    const transactions = new FakeOrderTransactions();
+    const result = await new OrderTransactionService({
+      transactions,
+      defaultSchedule: {
+        async getConfiguredSchedule() {
+          return {
+            version: 4,
+            plannedOrderDays: 9,
+            stageDeadlineDaysByProductionStatusId: new Map([
+              [10, 2],
+              [20, 7],
+            ]),
+          };
+        },
+      },
+    }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({
+        workshops: [
+          { workshopId: 1, productionStatusId: 10 },
+          { workshopId: 2, productionStatusId: 20 },
+        ],
+      }),
+    });
+
+    expect(result.header.plannedCompletionDate).toBe('2026-05-09');
+    expect(result.workshops.map((workshop) => workshop.plannedCompletionDate)).toEqual([
+      '2026-05-02',
+      '2026-05-07',
+    ]);
+    expect(transactions.state.auditEvents[0]).toMatchObject({
+      metadata: {
+        defaultSchedule: {
+          version: 4,
+          headerApplied: true,
+          workshops: [
+            { productionStatusId: 10 },
+            { productionStatusId: 20 },
+          ],
+        },
+      },
+    });
+  });
+
+  it('preserves explicit dates instead of replacing them with configured defaults', async () => {
+    const transactions = new FakeOrderTransactions();
+    const result = await new OrderTransactionService({
+      transactions,
+      defaultSchedule: {
+        async getConfiguredSchedule() {
+          return {
+            version: 4,
+            plannedOrderDays: 9,
+            stageDeadlineDaysByProductionStatusId: new Map([[10, 2]]),
+          };
+        },
+      },
+    }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({
+        header: {
+          ...createSaveDto().header,
+          plannedCompletionDate: '2026-06-01',
+        },
+        workshops: [
+          {
+            workshopId: 1,
+            productionStatusId: 10,
+            plannedCompletionDate: '2026-05-20',
+          },
+        ],
+      }),
+    });
+
+    expect(result.header.plannedCompletionDate).toBe('2026-06-01');
+    expect(result.workshops[0]?.plannedCompletionDate).toBe('2026-05-20');
+  });
+
+  it.each([
+    {
+      name: 'non-date planned completion',
+      mutate(dto: SaveOrderDto) {
+        (dto.header as Record<string, unknown>).plannedCompletionDate = 42;
+      },
+    },
+    {
+      name: 'missing workshops array',
+      mutate(dto: SaveOrderDto) {
+        delete (dto as unknown as Record<string, unknown>).workshops;
+      },
+    },
+  ])('validates raw create payload before reading defaults: $name', async ({ mutate }) => {
+    const transactions = new FakeOrderTransactions();
+    const getConfiguredSchedule = vi.fn(async () => ({
+      version: 4,
+      plannedOrderDays: 9,
+      stageDeadlineDaysByProductionStatusId: new Map<number, number>(),
+    }));
+    const dto = createSaveDto();
+    mutate(dto);
+
+    await expect(
+      new OrderTransactionService({
+        transactions,
+        defaultSchedule: { getConfiguredSchedule },
+      }).create({
+        currentUser: currentUser('manager'),
+        dto,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+    });
+    expect(getConfiguredSchedule).not.toHaveBeenCalled();
+  });
+
   it('creates an order aggregate in the PRD transaction order and writes audit after totals', async () => {
     const transactions = new FakeOrderTransactions();
     const result = await new OrderTransactionService({ transactions }).create({
@@ -1313,7 +1430,14 @@ describe('OrderTransactionService', () => {
       updatedAt: '2026-04-30T00:00:00.000Z',
     });
 
-    const result = await new OrderTransactionService({ transactions }).create({
+    const result = await new OrderTransactionService({
+      transactions,
+      defaultSchedule: {
+        async getConfiguredSchedule() {
+          throw new Error('schedule must not be read for a completed replay');
+        },
+      },
+    }).create({
       currentUser: currentUser('manager'),
       dto: createSaveDto({ idempotencyKey: 'create-key-1' }),
     });

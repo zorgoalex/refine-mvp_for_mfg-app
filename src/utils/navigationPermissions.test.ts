@@ -19,6 +19,9 @@ describe('navigation permissions', () => {
     expect(
       canViewSettingsCategory({ permissions: ['orders.view'] }, true, true),
     ).toBe(false);
+    expect(
+      canViewSettingsCategory({ permissions: ['deadlines.view'] }, true, false),
+    ).toBe(true);
   });
 
   it('uses explicit resource permissions for known resources', () => {
@@ -40,6 +43,13 @@ describe('navigation permissions', () => {
     expect(
       canViewNavigationResource('groups', { permissions: ['orders.view'] }, true),
     ).toBe(false);
+    expect(
+      canViewNavigationResource(
+        'configuration',
+        { permissions: ['deadlines.view'] },
+        true,
+      ),
+    ).toBe(true);
     ['order_statuses', 'payment_statuses', 'payment_types'].forEach((resourceName) => {
       expect(
         canViewNavigationResource(resourceName, { permissions: ['references.view'] }, true),

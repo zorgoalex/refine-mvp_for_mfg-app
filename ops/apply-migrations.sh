@@ -616,6 +616,24 @@ probe_file() {
     085_cut_result_manual_revisions*) probe_all "$(q_col cut_result revision_no)" \
                      "$(q_con uq_cut_result_job_no)" \
                      "$(q_con chk_cut_result_revision_no)" ;;
+    086_deadline_default_schedule*) probe_all "$(q_tbl deadline_default_schedule_config)" \
+                     "$(q_tbl deadline_default_stage_durations)" \
+                     "$(q_con chk_deadline_default_schedule_singleton)" \
+                     "$(q_con chk_deadline_default_schedule_reserve_days)" \
+                     "$(q_con chk_deadline_default_schedule_version)" \
+                     "$(q_con fk_deadline_default_schedule_updated_by)" \
+                     "$(q_con chk_deadline_default_stage_duration_days)" \
+                     "$(q_con chk_deadline_default_stage_position)" \
+                     "$(q_con uq_deadline_default_stage_position)" \
+                     "$(q_con fk_deadline_default_stage_production_status)" \
+                     "$(q_con fk_deadline_default_stage_updated_by)" \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM deadline_default_schedule_config
+                         WHERE config_id = 1
+                           AND reserve_days BETWEEN 0 AND 3650
+                           AND version > 0
+                      );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

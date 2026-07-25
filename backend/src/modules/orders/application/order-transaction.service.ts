@@ -7,6 +7,7 @@ import type {
   DeleteOrderCommand,
   DetailSheetAuditRef,
   OrderDeadlineSyncPort,
+  OrderDefaultSchedulePort,
   OrderChildReference,
   RestoreOrderCommand,
   OrderSaveAuditMetadata,
@@ -33,6 +34,7 @@ import {
 } from '../errors/order.errors';
 import { prepareOrderSave } from '../domain/order-save-preparer';
 import { ProjectClientMismatchError } from '../../projects/errors/projects.errors';
+import { addCalendarDays } from '../../deadlines/domain/deadline-default-schedule';
 import {
   assertSheetEligibilityAndNoClear,
   orderTouchesSheet,
@@ -127,6 +129,7 @@ export interface OrderTransactionServicePorts {
   transactions: OrderTransactionManagerPort;
   permissions?: OrderPermissionCheckerPort;
   deadlineSync?: OrderDeadlineSyncPort;
+  defaultSchedule?: OrderDefaultSchedulePort;
 }
 
 export class OrderTransactionService {
@@ -138,9 +141,6 @@ export class OrderTransactionService {
   }
 
   async create(command: CreateOrderCommand): Promise<OrderDto> {
-    const prepared = prepareOrderSave(command.dto, { mode: 'create' });
-    const requestedProjectId = normalizeProjectIdInput(command.dto.header.projectId);
-
     const order = await this.ports.transactions.runInTransaction(async (unitOfWork) => {
       await unitOfWork.setSessionUser(command.currentUser.id);
       if (command.dto.idempotencyKey) {
@@ -155,6 +155,15 @@ export class OrderTransactionService {
       }
       this.requirePermission(command, 'orders.create');
       this.requirePermission(command, 'orders.view_financials');
+      const normalized = prepareOrderSave(command.dto, { mode: 'create' });
+      const appliedDefaults = await this.applyDefaultSchedule(
+        normalized,
+        unitOfWork,
+      );
+      const prepared = appliedDefaults.prepared;
+      const requestedProjectId = normalizeProjectIdInput(
+        command.dto.header.projectId,
+      );
       this.requireFinancePermissionForPaymentMutations(command, prepared.order);
 
       // Уникальность номера заказа среди живых заказов — жёсткий блок (409 с
@@ -211,6 +220,7 @@ export class OrderTransactionService {
           'orders.create',
           command.requestId,
           touchesSheet ? { before: [], after: afterDetailRefs! } : undefined,
+          appliedDefaults.provenance,
         ),
         relatedSheetMaterialTypeIds: collectSheetMaterialTypeIds(
           prepared.order.header.sheetMaterialTypeId,
@@ -250,6 +260,69 @@ export class OrderTransactionService {
     });
 
     return order;
+  }
+
+  private async applyDefaultSchedule(
+    prepared: PreparedOrderSave,
+    unitOfWork: OrderWriteUnitOfWork,
+  ): Promise<{
+    prepared: PreparedOrderSave;
+    provenance?: NonNullable<OrderSaveAuditMetadata['defaultSchedule']>;
+  }> {
+    const schedule = this.ports.defaultSchedule
+      ? await this.ports.defaultSchedule.getConfiguredSchedule(
+          unitOfWork.getTransactionClient(),
+        )
+      : undefined;
+    if (!schedule) {
+      return { prepared };
+    }
+
+    const orderDate = prepared.order.header.orderDate;
+    const headerDefaultDate = addCalendarDays(orderDate, schedule.plannedOrderDays);
+    const headerApplied =
+      prepared.order.header.plannedCompletionDate === null && headerDefaultDate !== null;
+    const appliedWorkshops: NonNullable<
+      OrderSaveAuditMetadata['defaultSchedule']
+    >['workshops'] = [];
+    return {
+      prepared: {
+        ...prepared,
+        order: {
+          ...prepared.order,
+          header: {
+            ...prepared.order.header,
+            plannedCompletionDate:
+              prepared.order.header.plannedCompletionDate === null
+                ? headerDefaultDate
+                : prepared.order.header.plannedCompletionDate,
+          },
+          workshops: prepared.order.workshops.map((workshop) => {
+            if (workshop.plannedCompletionDate !== null) {
+              return workshop;
+            }
+            const stageDays = schedule.stageDeadlineDaysByProductionStatusId.get(
+              workshop.productionStatusId,
+            );
+            const plannedCompletionDate =
+              stageDays === undefined ? null : addCalendarDays(orderDate, stageDays);
+            if (plannedCompletionDate === null) {
+              return workshop;
+            }
+            appliedWorkshops.push({
+              ...(workshop.clientKey ? { clientKey: workshop.clientKey } : {}),
+              productionStatusId: workshop.productionStatusId,
+            });
+            return { ...workshop, plannedCompletionDate };
+          }),
+        },
+      },
+      provenance: {
+        version: schedule.version,
+        headerApplied,
+        workshops: appliedWorkshops,
+      },
+    };
   }
 
   async update(command: UpdateOrderCommand): Promise<OrderDto> {
@@ -753,11 +826,13 @@ export class OrderTransactionService {
     commandName: 'orders.create' | 'orders.update',
     requestId: string | undefined,
     detailSheetMaterialTypeIds?: { before: DetailSheetAuditRef[]; after: DetailSheetAuditRef[] },
+    defaultSchedule?: OrderSaveAuditMetadata['defaultSchedule'],
   ): OrderSaveAuditMetadata {
     return {
       commandName,
       ...(requestId ? { requestId } : {}),
       ...(detailSheetMaterialTypeIds ? { detailSheetMaterialTypeIds } : {}),
+      ...(defaultSchedule ? { defaultSchedule } : {}),
     };
   }
 

@@ -4,6 +4,7 @@ import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
 import type { BackendEnv } from '../../config/env.validation';
 import { PgOrderDeadlineSync } from '../deadlines/adapters/pg-order-deadline-sync';
+import { PgDeadlineDefaultScheduleRepository } from '../deadlines/adapters/pg-deadline-default-schedule-repository';
 import {
   PgGroupNotificationRecipientRepository,
   UnavailableGroupNotificationRecipientRepository,
@@ -86,6 +87,31 @@ export function shouldEnableOrderDeadlineSync(input: {
             })
               ? new PgOrderDeadlineSync(database)
               : undefined,
+          defaultSchedule:
+            database.isConfigured &&
+            config.get('BACKEND_ENABLE_DEADLINES', { infer: true })
+            ? {
+                async getConfiguredSchedule(client) {
+                  const schedule = await new PgDeadlineDefaultScheduleRepository(
+                    database,
+                  ).getSchedule(client);
+                  if (!schedule.configured || schedule.plannedOrderDays === null) {
+                    return null;
+                  }
+                  return {
+                    version: schedule.version,
+                    plannedOrderDays: schedule.plannedOrderDays,
+                    stageDeadlineDaysByProductionStatusId: new Map(
+                      schedule.stages.flatMap((stage) =>
+                        stage.cumulativeDeadlineDays === null
+                          ? []
+                          : [[stage.productionStatusId, stage.cumulativeDeadlineDays] as const],
+                      ),
+                    ),
+                  };
+                },
+              }
+            : undefined,
         }),
       inject: [DatabaseService, ConfigService],
     },

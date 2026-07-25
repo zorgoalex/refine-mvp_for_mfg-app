@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   CONFIGURATION_ACTIVE_TAB_STORAGE_KEY,
+  filterConfigurationTabItems,
   resolveConfigurationActiveTab,
 } from './index';
 
@@ -20,6 +21,28 @@ describe('configuration tabs layout', () => {
     expect(source).toContain("key: 'table-visibility'");
     expect(source).toContain('Видимость таблиц для юзеров');
     expect(source).toContain('<TableVisibilityByRoleTab />');
+  });
+
+  it('keeps default schedules separate from transition rules', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
+
+    expect(source).toContain("key: 'deadline-defaults'");
+    expect(source).toContain('Сроки по умолчанию');
+    expect(source).toContain('<DeadlineDefaultScheduleConfig />');
+    expect(source).toContain("key: 'deadline-rules'");
+  });
+
+  it('shows only deadline defaults to deadline viewers without settings access', () => {
+    const items = [
+      { key: 'orders' },
+      { key: 'deadline-defaults' },
+      { key: 'deadline-rules' },
+    ];
+
+    expect(filterConfigurationTabItems(items, false)).toEqual([
+      { key: 'deadline-defaults' },
+    ]);
+    expect(filterConfigurationTabItems(items, true)).toEqual(items);
   });
 
   it('restores the last active configuration tab when it is still available', () => {
