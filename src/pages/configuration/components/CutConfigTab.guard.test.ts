@@ -131,6 +131,9 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/customFieldSchema/);
     expect(tabSrc).toMatch(/sort:\s*\{\s*field:\s*'detail\.order'/);
     expect(tabSrc).toMatch(/readPdfDetailTableColumns/);
+    expect(tabSrc).toMatch(/CUT_PDF_FIELD_DRAG_TYPE/);
+    expect(tabSrc).toMatch(/resolveDroppedPdfField/);
+    expect(tabSrc).not.toMatch(/onMouseDown=\{\(event\)[\s\S]{0,140}event\.preventDefault\(\)[\s\S]{0,140}onBeginDrag\(field\)/);
     expect(tabSrc).not.toMatch(/setCustomFieldsFromText/);
   });
 });

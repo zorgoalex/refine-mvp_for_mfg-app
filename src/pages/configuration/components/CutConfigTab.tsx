@@ -446,6 +446,7 @@ interface PdfTemplateEditorProps {
 }
 
 const PDF_TEMPLATE_DRAFTS_KEY = 'cut-pdf-template-drafts:v2';
+const CUT_PDF_FIELD_DRAG_TYPE = 'application/x-cut-pdf-field';
 const PDF_PAGE = { width: 297, height: 210 };
 const PDF_OLD_PAGE = { width: 842, height: 595 };
 const PDF_QR_ERROR_CORRECTION_OPTIONS = [
@@ -894,6 +895,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
                 search={fieldSearch}
                 onSearch={setFieldSearch}
                 onBeginDrag={setDraggingField}
+                onEndDrag={() => setDraggingField(null)}
                 onAddField={addFieldElement}
               />
             </Card>
@@ -1200,14 +1202,17 @@ const PdfTemplateCanvas: React.FC<{
           outline: 'none',
         }}
         onDragOver={(event) => {
-          if (!canManage || !draggingField) return;
+          if (!canManage || (!draggingField && !isCutPdfFieldDragEvent(event))) return;
           event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
         }}
         onDrop={(event) => {
-          if (!canManage || !draggingField) return;
+          if (!canManage) return;
+          const field = resolveDroppedPdfField(fields, event, draggingField);
+          if (!field) return;
           event.preventDefault();
           const point = pointFromEvent(event);
-          onDropField(draggingField, clamp(point.x, 0, page.width - 1), clamp(point.y, 0, page.height - 1));
+          onDropField(field, clamp(point.x, 0, page.width - 1), clamp(point.y, 0, page.height - 1));
         }}
         onKeyDown={keyDown}
         onContextMenu={(event) => {
@@ -1452,8 +1457,9 @@ const PdfFieldPalette: React.FC<{
   search: string;
   onSearch: (value: string) => void;
   onBeginDrag: (field: PdfFieldCatalogItem) => void;
+  onEndDrag: () => void;
   onAddField: (field: PdfFieldCatalogItem) => void;
-}> = ({ fields, usedFieldIds, disabled, search, onSearch, onBeginDrag, onAddField }) => {
+}> = ({ fields, usedFieldIds, disabled, search, onSearch, onBeginDrag, onEndDrag, onAddField }) => {
   const normalized = search.trim().toLowerCase();
   const visible = fields.filter((field) => !normalized || `${field.category} ${field.label} ${field.id}`.toLowerCase().includes(normalized));
   return (
@@ -1475,14 +1481,10 @@ const PdfFieldPalette: React.FC<{
                       onDragStart={(event) => {
                         if (disabled) return;
                         onBeginDrag(field);
-                        event.dataTransfer.setData('application/x-cut-pdf-field', field.id);
+                        event.dataTransfer.setData(CUT_PDF_FIELD_DRAG_TYPE, field.id);
                         event.dataTransfer.effectAllowed = 'copy';
                       }}
-                      onMouseDown={(event) => {
-                        if (disabled) return;
-                        event.preventDefault();
-                        onBeginDrag(field);
-                      }}
+                      onDragEnd={onEndDrag}
                       onDoubleClick={() => {
                         if (!disabled) onAddField(field);
                       }}
@@ -1891,6 +1893,20 @@ function normalizePdfFieldCatalogItem(row: CutPdfFieldCatalogItem): PdfFieldCata
     category: row.category,
     type: row.type,
   };
+}
+
+function isCutPdfFieldDragEvent(event: React.DragEvent<Element>): boolean {
+  return Array.from(event.dataTransfer.types).includes(CUT_PDF_FIELD_DRAG_TYPE);
+}
+
+function resolveDroppedPdfField(
+  fields: PdfFieldCatalogItem[],
+  event: React.DragEvent<Element>,
+  fallback: PdfFieldCatalogItem | null,
+): PdfFieldCatalogItem | null {
+  if (fallback) return fallback;
+  const fieldId = event.dataTransfer.getData(CUT_PDF_FIELD_DRAG_TYPE);
+  return fields.find((field) => field.id === fieldId) ?? null;
 }
 
 function toLabelExpressionFields(fields: PdfFieldCatalogItem[]): LabelFieldCatalogItem[] {
