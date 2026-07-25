@@ -178,21 +178,35 @@ BITRIX24_PAY_SYSTEM_ID=<numeric-id>
 BITRIX24_CURRENCY_ID=KZT
 BITRIX24_ASSIGNED_BY_ID=<optional-user-id>
 BITRIX24_REQUEST_TIMEOUT_MS=<less-than-lease>
+BITRIX24_MAX_REQUESTS_PER_SECOND=2
+BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS=11
+BITRIX24_QUERY_LIMIT_BASE_DELAY_MS=1000
+BITRIX24_OPERATION_LIMIT_FALLBACK_MS=60000
 ```
 
 Webhook создаёт администратор с правами CRM и
 интернет-магазина/оплат. `BITRIX24_REQUEST_TIMEOUT_MS` обязан быть меньше
-`BACKEND_BITRIX24_SYNC_LEASE_MS`.
+`BACKEND_BITRIX24_SYNC_LEASE_MS`. Значение `2` соответствует стандартному
+облачному лимиту Bitrix24; `5` разрешено ставить только после подтверждения
+Enterprise-тарифа.
 
 Первичный backfill:
 
 ```bash
 cd backend
-npm run crm-sync:backfill -- --dry-run
-npm run crm-sync:backfill
+npm run crm-sync:backfill -- --dry-run --scope clients
+npm run crm-sync:backfill -- --scope clients
+npm run crm-sync:backfill -- --dry-run --scope all
+npm run crm-sync:backfill -- --scope all
 ```
 
-Повторный запуск идемпотентен. Каждое событие ERP заново проецирует актуальные
+`--scope` обязателен: команда никогда не выбирает `all` молча. Live-запуск
+сохраняет курсор в PostgreSQL вместе с mapping/audit и после ошибки или
+SIGINT/SIGTERM продолжает с последней подтверждённой записи. Завершённый scope
+ничего не повторяет; для нового полного прохода нужен явный `--restart`.
+`--dry-run` не читает и не изменяет checkpoint.
+
+Повторный запуск безопасен. Каждое событие ERP заново проецирует актуальные
 данные клиента, заказа, итоговой товарной строки и оплаты. Ручные изменения
 этих полей в Bitrix24 заменяются. Стадию сделки ERP не передаёт и не меняет.
 
@@ -217,9 +231,10 @@ frontend, git или логи.
 1. включить `BACKEND_ENABLE_BITRIX24_SYNC=true`;
 2. оставить `BACKEND_BITRIX24_SYNC_RELAY_OWNER=external`;
 3. пройти canary;
-4. выполнить `--dry-run`;
-5. выполнить live backfill;
-6. переключить ровно один backend на
+4. выполнить `--dry-run --scope clients`;
+5. выполнить live `--scope clients`;
+6. после проверки выполнить dry/live `--scope all`;
+7. переключить ровно один backend на
    `BACKEND_BITRIX24_SYNC_RELAY_OWNER=in_process`.
 
 ## Корзина заказов
