@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Input, InputNumber, Modal, Select, Space, Spin, Switch, Table, Tag, Typography, message } from 'antd';
-import { SaveOutlined, ArrowUpOutlined, ArrowDownOutlined, ReloadOutlined } from '@ant-design/icons';
+import { SaveOutlined, ArrowUpOutlined, ArrowDownOutlined, HolderOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useGetIdentity, useInvalidate, useList, useUpdate } from '@refinedev/core';
 import { useLocation } from 'react-router-dom';
 import { ApiError } from '../../../api/apiError';
@@ -570,16 +570,6 @@ export const ProductionWorkflowTab: React.FC = () => {
     return (
       <div
         key={code}
-        draggable={canManageWorkflow}
-        onDragStart={(event) => {
-          event.dataTransfer.effectAllowed = 'move';
-          event.dataTransfer.setData('text/plain', code);
-          setDraggedStageCode(code);
-        }}
-        onDragEnd={() => {
-          setDraggedStageCode(null);
-          setDragOverRow(null);
-        }}
         style={{
           width: 310,
           border: '1px solid #d9d9d9',
@@ -590,21 +580,53 @@ export const ProductionWorkflowTab: React.FC = () => {
             draggedStageCode === code
               ? '0 8px 24px rgba(0, 0, 0, 0.12)'
               : '0 1px 2px rgba(0, 0, 0, 0.04)',
-          cursor: canManageWorkflow ? 'grab' : 'default',
           opacity: draggedStageCode === code ? 0.72 : 1,
         }}
       >
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Space size={8} wrap>
-            <Tag
-              color={status?.is_active ? 'green' : 'default'}
-              style={{ marginInlineEnd: 0 }}
-            >
-              {letter || '—'}
-            </Tag>
-            <Text strong>{status?.production_status_name || code}</Text>
-            <Text type="secondary">({code})</Text>
-          </Space>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+            }}
+          >
+            <Space size={8} wrap>
+              <Tag
+                color={status?.is_active ? 'green' : 'default'}
+                style={{ marginInlineEnd: 0 }}
+              >
+                {letter || '—'}
+              </Tag>
+              <Text strong>{status?.production_status_name || code}</Text>
+              <Text type="secondary">({code})</Text>
+            </Space>
+            {canManageWorkflow && (
+              <Button
+                type="text"
+                icon={<HolderOutlined />}
+                aria-label={`Перетащить этап ${status?.production_status_name || code}`}
+                title="Перетащить этап"
+                draggable={canManageWorkflow}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData('text/plain', code);
+                  setDraggedStageCode(code);
+                }}
+                onDragEnd={() => {
+                  setDraggedStageCode(null);
+                  setDragOverRow(null);
+                }}
+                style={{
+                  minWidth: 40,
+                  minHeight: 40,
+                  cursor: 'grab',
+                  flex: '0 0 auto',
+                }}
+              />
+            )}
+          </div>
 
           {canViewDeadlines && stage ? (
             <div

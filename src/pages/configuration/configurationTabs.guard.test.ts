@@ -44,6 +44,8 @@ describe('configuration tabs layout', () => {
     );
 
     expect(productionSource).toContain('draggable={canManageWorkflow}');
+    expect(productionSource).toContain('aria-label={`Перетащить этап ');
+    expect(productionSource).not.toMatch(/key=\{code\}\s+draggable=/);
     expect(productionSource).toContain('layout_rows: compactRows');
     expect(productionSource).toContain(
       'transitionsOrder: draft.transitions_order ?? {}',
