@@ -158,6 +158,7 @@ services:
       - cnc-telegram-worker-data:/data
     networks:
       - back
+      - host_access
     cpus: ${CNC_TELEGRAM_WORKER_CPUS:-1.0}
     mem_limit: ${CNC_TELEGRAM_WORKER_MEM_LIMIT:-1024m}
     pids_limit: ${CNC_TELEGRAM_WORKER_PIDS_LIMIT:-128}

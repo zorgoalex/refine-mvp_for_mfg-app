@@ -93,7 +93,8 @@ describe('VPS compose backend runtime flags', () => {
     expect(compose).toContain('cnc-telegram-worker-data:/data');
     expect(compose).toContain('cnc-telegram-worker-data:');
     expect(compose).toContain('glm-ocr-model-cache:');
-    expect(workerSegment).toMatch(/networks:[\s\S]*- back[\s\S]*cpus:/);
+    expect(workerSegment).toMatch(/networks:[\s\S]*- back[\s\S]*- host_access[\s\S]*cpus:/);
+    expect(overlay).toMatch(/cnc-telegram-worker:[\s\S]*networks:[\s\S]*- back[\s\S]*- host_access/);
     expect(workerSegment).not.toMatch(/traefik\.enable=true|ports:/);
     expect(overlay).toContain('glm-ocr-model-init:');
     expect(overlay).toContain('glm-ocr-llama:');
