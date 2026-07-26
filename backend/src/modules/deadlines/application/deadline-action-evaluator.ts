@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
 import type {
+  DeadlineActionRuleDeadlineTargetDto,
   DeadlineActionRuleConfigDto,
   DeadlineActionRuleDto,
   DeadlineOrderOverrideDto,
   DeadlineRuleConfigSnapshotDto,
 } from '../dto/deadline-action-rule.dto';
+import type { DeadlineInstanceDto } from '../dto/deadline-instance.dto';
+import type { DeadlineEntityType } from '../domain/deadline-validation';
 import type { DeadlineActionType } from '../domain/deadline-actions';
 import type { DeadlineEventType } from '../domain/deadline-events';
 import type { OrderDeadlineEvaluationContext } from './deadline.types';
@@ -46,12 +49,18 @@ export interface EvaluateDeadlineActionRulesInput {
   deadlineId?: string | null;
   targetType?: string | null;
   targetId?: string | null;
+  deadlineContext?: DeadlineActionRuleDeadlineContext | null;
   orderContext?: OrderDeadlineEvaluationContext | null;
   orderContextUnavailable?: boolean;
   isCurrentDeadlineEvent: boolean;
   actionsEnabled?: boolean;
   rules: DeadlineActionRuleDto[];
   overrides: DeadlineOrderOverrideDto[];
+}
+
+export interface DeadlineActionRuleDeadlineContext {
+  entityType: DeadlineEntityType;
+  productionStatusId: number | null;
 }
 
 export function evaluateDeadlineActionRules(
@@ -74,6 +83,7 @@ export function evaluateDeadlineActionRules(
       orderContextUnavailable: input.orderContextUnavailable ?? false,
       targetStatusId,
       isCurrentDeadlineEvent: input.isCurrentDeadlineEvent,
+      deadlineContext: input.deadlineContext ?? null,
     });
 
     if (!skipReason && rule.actionType === 'change_order_status' && selectedActionRuleId) {
@@ -172,6 +182,9 @@ export function buildRuleConfigSnapshot(rule: DeadlineActionRuleDto): DeadlineRu
     priority: rule.priority,
     eventType: rule.eventType,
     actionType: rule.actionType,
+    deadlineTarget: rule.config?.deadlineTarget ?? {
+      type: 'all_order_deadlines',
+    },
     conditions: rule.config?.conditions ?? {},
     actionConfig: rule.config?.actionConfig ?? {},
     createdAt: rule.createdAt,
@@ -279,6 +292,7 @@ function getRuleSkipReason(input: {
   orderContextUnavailable: boolean;
   targetStatusId: number | null;
   isCurrentDeadlineEvent: boolean;
+  deadlineContext: DeadlineActionRuleDeadlineContext | null;
 }): string | null {
   if (!input.actionsEnabled) {
     return 'global_actions_disabled';
@@ -291,6 +305,13 @@ function getRuleSkipReason(input: {
   }
   if (input.override?.isDisabled) {
     return 'order_override_disabled';
+  }
+  const deadlineTargetSkipReason = getDeadlineTargetSkipReason(
+    input.rule.config?.deadlineTarget,
+    input.deadlineContext,
+  );
+  if (deadlineTargetSkipReason) {
+    return deadlineTargetSkipReason;
   }
   if (input.rule.actionType === 'set_overdue_flag' || input.rule.actionType === 'change_production_status') {
     return getMutatingActionConditionSkipReason(input);
@@ -337,6 +358,42 @@ function getRuleSkipReason(input: {
   }
 
   return null;
+}
+
+export function buildDeadlineActionRuleDeadlineContext(
+  deadline: DeadlineInstanceDto | null | undefined,
+): DeadlineActionRuleDeadlineContext | null {
+  if (!deadline) return null;
+  const rawProductionStatusId = deadline.metadata?.productionStatusId;
+  const productionStatusId =
+    typeof rawProductionStatusId === 'number'
+    && Number.isInteger(rawProductionStatusId)
+    && rawProductionStatusId > 0
+      ? rawProductionStatusId
+      : typeof rawProductionStatusId === 'string'
+        && /^\d+$/.test(rawProductionStatusId)
+        && Number(rawProductionStatusId) > 0
+        ? Number(rawProductionStatusId)
+        : null;
+  return {
+    entityType: deadline.entityType,
+    productionStatusId,
+  };
+}
+
+export function getDeadlineTargetSkipReason(
+  target: DeadlineActionRuleDeadlineTargetDto | null | undefined,
+  context: DeadlineActionRuleDeadlineContext | null,
+): string | null {
+  if (!target || target.type === 'all_order_deadlines') return null;
+  if (!context) return 'missing_deadline_target_context';
+  if (target.type === 'final_order') {
+    return context.entityType === 'order' ? null : 'deadline_target_mismatch';
+  }
+  return context.entityType === 'order_stage'
+    && context.productionStatusId === target.productionStatusId
+    ? null
+    : 'deadline_target_mismatch';
 }
 
 function stableStringify(value: unknown): string {

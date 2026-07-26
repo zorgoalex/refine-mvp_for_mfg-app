@@ -1577,6 +1577,7 @@ describe('PgDeadlineRepository', () => {
       priority: 100,
       config: {
         scope: { type: 'global_orders' },
+        deadlineTarget: { type: 'all_order_deadlines' },
         conditions: {
           allowedFromOrderStatusIds: [1, 2],
           excludeOrderStatusIds: [8],
@@ -1602,6 +1603,7 @@ describe('PgDeadlineRepository', () => {
     expect(insert?.params[1]).toBe(100);
     expect(JSON.parse(String(insert?.params[2]))).toMatchObject({
       scope: { type: 'global_orders' },
+      deadlineTarget: { type: 'all_order_deadlines' },
       conditions: {
         allowedFromOrderStatusIds: [1, 2],
         excludeOrderStatusIds: [8],
@@ -1617,6 +1619,81 @@ describe('PgDeadlineRepository', () => {
     expect(audit?.params[0]).toBe('DEADLINE_TRANSITION_RULE_CREATED');
     expect(audit?.params[1]).toBe('deadline_transition_rule');
     expect(audit?.params[4]).toBe('req-transition-create');
+  });
+
+  it('persists a production-stage selector without creating deadline policies', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.createGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-stage',
+        dto: {
+          ruleName: 'Просрочен распил',
+          deadlineTarget: {
+            type: 'production_stage',
+            productionStatusId: 4,
+          },
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1, 2],
+          reason: 'Configure stage-specific automation',
+        },
+        audit: transitionRuleAudit(
+          'DEADLINE_TRANSITION_RULE_CREATED',
+          'req-transition-stage',
+        ),
+      }),
+    ).resolves.toMatchObject({
+      config: {
+        deadlineTarget: {
+          type: 'production_stage',
+          productionStatusId: 4,
+        },
+      },
+    });
+
+    const insert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_action_rules'),
+    );
+    expect(JSON.parse(String(insert?.params[2]))).toMatchObject({
+      deadlineTarget: {
+        type: 'production_stage',
+        productionStatusId: 4,
+      },
+    });
+    expect(insert?.params[4]).toBeNull();
+  });
+
+  it('rejects an inactive or missing production-stage selector', async () => {
+    const repository = new PgDeadlineRepository(
+      createDatabase({ missingProductionStatusIds: [4] }).client,
+    );
+
+    await expect(
+      repository.createGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-missing-stage',
+        dto: {
+          ruleName: 'Просрочен отсутствующий этап',
+          deadlineTarget: {
+            type: 'production_stage',
+            productionStatusId: 4,
+          },
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1],
+          reason: 'Reject missing production status',
+        },
+        audit: transitionRuleAudit(
+          'DEADLINE_TRANSITION_RULE_CREATED',
+          'req-transition-missing-stage',
+        ),
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'DEADLINE_TRANSITION_RULE_PRODUCTION_STATUS_NOT_FOUND',
+      details: { productionStatusId: 4 },
+    } satisfies Partial<ApiError>);
   });
 
   it('rejects transition rule status ids that are missing or inactive', async () => {
@@ -1693,6 +1770,35 @@ describe('PgDeadlineRepository', () => {
       scopeType: 'order_stage',
       isEnabled: true,
     });
+  });
+
+  it('rejects combining a legacy policy with a stage selector', async () => {
+    const repository = new PgDeadlineRepository(createDatabase().client);
+
+    await expect(
+      repository.createGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-target-conflict',
+        dto: {
+          ruleName: 'Ambiguous transition',
+          policyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          deadlineTarget: {
+            type: 'production_stage',
+            productionStatusId: 4,
+          },
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1],
+          reason: 'Reject ambiguous configuration',
+        },
+        audit: transitionRuleAudit(
+          'DEADLINE_TRANSITION_RULE_CREATED',
+          'req-transition-target-conflict',
+        ),
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'DEADLINE_TRANSITION_RULE_TARGET_CONFLICT',
+    } satisfies Partial<ApiError>);
   });
 
   it.each([
@@ -1787,6 +1893,7 @@ describe('PgDeadlineRepository', () => {
     expect(update?.params[4]).toBe('2026-05-01T10:00:00.000Z');
     expect(JSON.parse(String(update?.params[3]))).toMatchObject({
       scope: { type: 'global_orders' },
+      deadlineTarget: { type: 'all_order_deadlines' },
       conditions: {
         allowedFromOrderStatusIds: [1, 2],
         excludeOrderStatusIds: [8],
@@ -2117,6 +2224,7 @@ function createDatabase(
     emptyTransitionRuleUpdate?: boolean;
     emptyTransitionRuleDelete?: boolean;
     missingOrderStatusIds?: number[];
+    missingProductionStatusIds?: number[];
     missingTransitionPolicy?: boolean;
     transitionPolicyScope?: 'order' | 'order_stage' | 'client_action' | 'project';
     transitionRuleDependencyCount?: number;
@@ -2158,6 +2266,16 @@ function createDatabase(
           rows: requested
             .filter((statusId) => !missing.has(statusId))
             .map((statusId) => ({ order_status_id: statusId })),
+        };
+      }
+
+      if (text.includes('FROM production_statuses')) {
+        const productionStatusId = Number(params[0]);
+        const missing = new Set(options.missingProductionStatusIds ?? []);
+        return {
+          rows: missing.has(productionStatusId)
+            ? []
+            : [{ production_status_id: productionStatusId }],
         };
       }
 

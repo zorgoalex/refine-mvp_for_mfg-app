@@ -8,6 +8,8 @@ import type {
 } from '../../../api/types/deadlineApi.types';
 import { ReadinessAlert } from './DeadlineTransitionRulesConfig';
 import {
+  applyDeadlineTargetOption,
+  buildDeadlineTargetOptions,
   buildTransitionRuleCreatePayload,
   buildTransitionRuleDraft,
   buildTransitionRuleUpdatePayload,
@@ -15,6 +17,7 @@ import {
   describeRuleScope,
   describeTransition,
   emptyTransitionRuleDraft,
+  getDeadlineTargetOptionValue,
 } from './deadlineTransitionRulesView';
 
 const actionRuleId = '11111111-1111-4111-8111-111111111111';
@@ -31,6 +34,7 @@ describe('deadlineTransitionRulesView', () => {
       ruleName: 'Просрочена выдача',
       ruleCode: 'overdue-issue',
       policyId: '22222222-2222-4222-8222-222222222222',
+      deadlineTarget: { type: 'all_order_deadlines' },
       isEnabled: true,
       priority: 10,
       targetOrderStatusId: 7,
@@ -71,6 +75,7 @@ describe('deadlineTransitionRulesView', () => {
       ruleName: 'Просрочена выдача',
       ruleCode: 'overdue-issue',
       policyId: draft.policyId,
+      deadlineTarget: { type: 'all_order_deadlines' },
       isEnabled: true,
       priority: 25,
       eventType: 'DEADLINE_EXPIRED',
@@ -107,6 +112,94 @@ describe('deadlineTransitionRulesView', () => {
       }),
     ).toBe('Новый, Оформлен → Просрочен');
     expect(describeRuleScope(rule({ policyId: null }), policies)).toBe('Все дедлайны заказа');
+    const stageRule = rule({ policyId: null });
+    stageRule.config = {
+      ...stageRule.config,
+      deadlineTarget: { type: 'production_stage', productionStatusId: 4 },
+    };
+    expect(
+      describeRuleScope(
+        stageRule,
+        policies,
+        new Map([[4, 'Распилен']]),
+      ),
+    ).toBe('Этап: Распилен');
+  });
+
+  it('maps final, production-stage, global and legacy-policy selector values', () => {
+    const initial = emptyTransitionRuleDraft();
+    const finalOrder = applyDeadlineTargetOption(initial, 'final_order');
+    expect(getDeadlineTargetOptionValue(finalOrder)).toBe('final_order');
+    expect(finalOrder).toMatchObject({
+      policyId: null,
+      deadlineTarget: { type: 'final_order' },
+    });
+
+    const stage = applyDeadlineTargetOption(finalOrder, 'production_stage:4');
+    expect(getDeadlineTargetOptionValue(stage)).toBe('production_stage:4');
+    expect(stage.deadlineTarget).toEqual({
+      type: 'production_stage',
+      productionStatusId: 4,
+    });
+
+    const policy = applyDeadlineTargetOption(
+      stage,
+      'policy:22222222-2222-4222-8222-222222222222',
+    );
+    expect(policy).toMatchObject({
+      policyId: '22222222-2222-4222-8222-222222222222',
+      deadlineTarget: { type: 'all_order_deadlines' },
+    });
+    expect(getDeadlineTargetOptionValue(policy)).toBe(
+      'policy:22222222-2222-4222-8222-222222222222',
+    );
+
+    expect(applyDeadlineTargetOption(policy, 'all_order_deadlines')).toMatchObject({
+      policyId: null,
+      deadlineTarget: { type: 'all_order_deadlines' },
+    });
+  });
+
+  it('builds selector options from configured production-stage durations', () => {
+    expect(
+      buildDeadlineTargetOptions(
+        {
+          configured: true,
+          hasStoredConfiguration: true,
+          version: 2,
+          reserveDays: 0,
+          transitionsOrder: {},
+          totalProductionDays: 3,
+          plannedOrderDays: 3,
+          updatedAt: '2026-07-26T00:00:00.000Z',
+          stages: [
+            {
+              productionStatusId: 4,
+              productionStatusName: 'Распилен',
+              productionStatusCode: 'cut',
+              sortOrder: 4,
+              durationDays: 3,
+              parallelWithPrevious: false,
+              cumulativeDeadlineDays: 3,
+            },
+            {
+              productionStatusId: 5,
+              productionStatusName: 'Не настроен',
+              productionStatusCode: 'unset',
+              sortOrder: 5,
+              durationDays: null,
+              parallelWithPrevious: false,
+              cumulativeDeadlineDays: null,
+            },
+          ],
+        },
+        [],
+      ),
+    ).toEqual([
+      { value: 'all_order_deadlines', label: 'Все дедлайны заказа' },
+      { value: 'final_order', label: 'Финальный дедлайн заказа' },
+      { value: 'production_stage:4', label: 'Этап: Распилен' },
+    ]);
   });
 
   it('rejects unsafe or incomplete drafts', () => {

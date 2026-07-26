@@ -589,6 +589,83 @@ describe('DeadlineActionDispatcherService', () => {
     ]);
   });
 
+  it('loads deadline metadata and selects only the matching production-stage rule', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const statusCommands: unknown[] = [];
+    const dispatcher = new DeadlineActionDispatcherService({
+      statusActionPort: {
+        async changeOrderStatusFromDeadline(command) {
+          statusCommands.push(command);
+          return { status: 'executed', result: { orderId: command.orderId } };
+        },
+      },
+    });
+
+    await dispatcher.dispatch({
+      event: createEvent({
+        entityType: 'order_stage',
+        entityId: '84',
+        orderWorkshopId: 84,
+      }),
+      repository: createRepository({
+        rules: [
+          createRule({
+            actionRuleId: 'final-rule',
+            actionType: 'change_order_status',
+            priority: 1,
+            config: {
+              deadlineTarget: { type: 'final_order' },
+              conditions: { allowedFromOrderStatusIds: [1] },
+              actionConfig: { targetOrderStatusId: 8 },
+            },
+          }),
+          createRule({
+            actionRuleId: 'stage-4-rule',
+            actionType: 'change_order_status',
+            priority: 2,
+            config: {
+              deadlineTarget: {
+                type: 'production_stage',
+                productionStatusId: 4,
+              },
+              conditions: { allowedFromOrderStatusIds: [1] },
+              actionConfig: { targetOrderStatusId: 7 },
+            },
+          }),
+        ],
+        deadline: createDeadline({
+          entityType: 'order_stage',
+          entityId: '84',
+          orderWorkshopId: 84,
+          metadata: { productionStatusId: 4 },
+        }),
+        executions,
+        orderContext: { orderId: 42, orderStatusId: 1, isCompleted: false },
+        isCurrentDeadlineEvent: true,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(statusCommands).toHaveLength(1);
+    expect(statusCommands[0]).toMatchObject({
+      actionRuleId: 'stage-4-rule',
+      targetOrderStatusId: 7,
+    });
+    expect(executions).toMatchObject([
+      {
+        actionRuleId: 'final-rule',
+        status: 'skipped',
+        skipReason: 'deadline_target_mismatch',
+      },
+      {
+        actionRuleId: 'stage-4-rule',
+        status: 'executed',
+      },
+    ]);
+  });
+
   it('records selected change_order_status as skipped when internal command returns no-op', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const dispatcher = new DeadlineActionDispatcherService({
@@ -1973,6 +2050,7 @@ describe('DeadlineActionDispatcherService', () => {
 function createRepository(input: {
   rules: DeadlineActionRuleDto[];
   executions: DeadlineActionExecutionDto[];
+  deadline?: DeadlineInstanceDto | null;
   overdueUpdates?: Array<{ deadlineId: string; expiredAt: string }>;
   overrides?: DeadlineOrderOverrideDto[];
   orderContext?: { orderId: number; orderStatusId: number; isCompleted: boolean } | null;
@@ -1984,7 +2062,7 @@ function createRepository(input: {
       return { data: [], total: 0 };
     },
     async getDeadlineById() {
-      return null;
+      return input.deadline ?? null;
     },
     async getDeadlineByIdForUpdate() {
       return null;

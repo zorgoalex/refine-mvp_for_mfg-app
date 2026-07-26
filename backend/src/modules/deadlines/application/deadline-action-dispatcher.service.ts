@@ -12,6 +12,7 @@ function isEngineOwnedEventType(
   return withOwnerOverride(eventType, engineOwnsDeadline ? 'engine' : undefined)?.owner === 'engine';
 }
 import {
+  buildDeadlineActionRuleDeadlineContext,
   buildRuleConfigSnapshot,
   evaluateDeadlineActionRules,
   filterActionRulesForFixture,
@@ -107,6 +108,14 @@ export class DeadlineActionDispatcherService {
             deadlineEventId: command.event.deadlineEventId,
           })
         : true;
+    const needsDeadlineTargetContext = rules.some((rule) => {
+      const target = rule.config?.deadlineTarget;
+      return target && target.type !== 'all_order_deadlines';
+    });
+    const deadline =
+      needsDeadlineTargetContext && command.event.deadlineId
+        ? await command.repository.getDeadlineById(command.event.deadlineId)
+        : null;
 
     return evaluateDeadlineActionRules({
       eventType: command.event.eventType,
@@ -114,6 +123,7 @@ export class DeadlineActionDispatcherService {
       deadlineId: command.event.deadlineId,
       targetType: command.event.entityType,
       targetId: command.event.entityId,
+      deadlineContext: buildDeadlineActionRuleDeadlineContext(deadline),
       orderContext,
       orderContextUnavailable: Boolean(orderId && orderContextCandidateRules.length > 0 && !orderContext),
       isCurrentDeadlineEvent,

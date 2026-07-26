@@ -1186,6 +1186,10 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     const policy = command.dto.policyId
       ? await this.getOrderRelatedTransitionPolicy(command.dto.policyId)
       : null;
+    assertTransitionRuleDeadlineTargetPolicyCompatibility(
+      policy?.policyId ?? null,
+      config.deadlineTarget,
+    );
     const result = await this.database.query<DeadlineActionRuleRow>(
       `
       INSERT INTO deadline_action_rules (
@@ -1258,6 +1262,10 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       : null;
     const config = buildTransitionRuleConfig(before.config, command.dto);
     if (!disableOnly) {
+      assertTransitionRuleDeadlineTargetPolicyCompatibility(
+        policy?.policyId ?? null,
+        config.deadlineTarget,
+      );
       await this.assertValidTransitionRuleConfig(config);
     }
     const result = await this.database.query<DeadlineActionRuleRow>(
@@ -1573,6 +1581,27 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     }
 
     await this.assertActiveOrderStatusesExist([targetStatusId, ...allowed, ...excluded]);
+    if (config.deadlineTarget?.type === 'production_stage') {
+      const productionStatusId = config.deadlineTarget.productionStatusId;
+      const result = await this.database.query<{ production_status_id: string | number }>(
+        `
+        SELECT production_status_id
+        FROM production_statuses
+        WHERE production_status_id = $1
+          AND is_active = true
+        LIMIT 1
+        `,
+        [productionStatusId],
+      );
+      if (!result.rows[0]) {
+        throw new ApiError(
+          422,
+          'DEADLINE_TRANSITION_RULE_PRODUCTION_STATUS_NOT_FOUND',
+          'Deadline transition rule references an inactive or missing production status',
+          { productionStatusId },
+        );
+      }
+    }
   }
 
   private async getOrderRelatedTransitionPolicy(policyId: string): Promise<DeadlinePolicyDto> {
@@ -1905,6 +1934,7 @@ function buildCreateTransitionRuleConfig(
     ruleName: dto.ruleName,
     ...(dto.ruleCode ? { ruleCode: dto.ruleCode } : {}),
     scope: { type: 'global_orders' },
+    deadlineTarget: dto.deadlineTarget ?? { type: 'all_order_deadlines' },
     conditions: {
       allowedFromOrderStatusIds: dto.allowedFromOrderStatusIds,
       excludeOrderStatusIds: dto.excludeOrderStatusIds ?? [],
@@ -1930,6 +1960,9 @@ function buildTransitionRuleConfig(
         : { ruleCode: undefined }
       : {}),
     scope: { type: 'global_orders' },
+    deadlineTarget: hasOwn(dto, 'deadlineTarget')
+      ? dto.deadlineTarget
+      : current?.deadlineTarget ?? { type: 'all_order_deadlines' },
     conditions: {
       ...(current?.conditions ?? {}),
       excludeOrderStatusIds: current?.conditions?.excludeOrderStatusIds ?? [],
@@ -1971,6 +2004,9 @@ function buildTransitionRuleAuditMetadata(
     actionType: 'change_order_status',
     scopeType: rule.scopeType,
     scope: { type: 'global_orders' },
+    deadlineTarget: rule.config?.deadlineTarget ?? {
+      type: 'all_order_deadlines',
+    },
     targetOrderStatusId: rule.config?.actionConfig?.targetOrderStatusId ?? null,
     allowedFromOrderStatusIds: rule.config?.conditions?.allowedFromOrderStatusIds ?? [],
     excludeOrderStatusIds: rule.config?.conditions?.excludeOrderStatusIds ?? [],
@@ -1981,6 +2017,23 @@ function buildTransitionRuleAuditMetadata(
     reason,
     comment,
   };
+}
+
+function assertTransitionRuleDeadlineTargetPolicyCompatibility(
+  policyId: string | null,
+  deadlineTarget:
+    | DeadlineActionRuleConfigDto['deadlineTarget']
+    | null
+    | undefined,
+): void {
+  if (policyId && deadlineTarget?.type !== 'all_order_deadlines') {
+    throw new ApiError(
+      422,
+      'DEADLINE_TRANSITION_RULE_TARGET_CONFLICT',
+      'Deadline target cannot be combined with a deadline policy',
+      { policyId, deadlineTarget },
+    );
+  }
 }
 
 function transitionRuleInUseError(actionRuleId: string): ApiError {

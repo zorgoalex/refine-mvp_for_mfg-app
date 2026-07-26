@@ -22,6 +22,7 @@ import { ApiError } from '../../../api/apiError';
 import { deadlinesApi } from '../../../api/deadlinesApi';
 import type {
   DeadlineActionRuleDto,
+  DeadlineDefaultScheduleDto,
   DeadlinePolicyDto,
   DeadlineTransitionRulesReadinessDto,
 } from '../../../api/types/deadlineApi.types';
@@ -30,11 +31,14 @@ import {
   buildTransitionRuleCreatePayload,
   buildTransitionRuleDraft,
   buildTransitionRuleUpdatePayload,
+  applyDeadlineTargetOption,
+  buildDeadlineTargetOptions,
   canManageDeadlineTransitionRules,
   describeRuleScope,
   describeTransition,
   emptyTransitionRuleDraft,
   formatStatusNames,
+  getDeadlineTargetOptionValue,
   type DeadlineTransitionRuleDraft,
 } from './deadlineTransitionRulesView';
 
@@ -64,6 +68,8 @@ export function DeadlineTransitionRulesConfig() {
   const [loading, setLoading] = useState(false);
   const [rules, setRules] = useState<DeadlineActionRuleDto[]>([]);
   const [policies, setPolicies] = useState<DeadlinePolicyDto[]>([]);
+  const [deadlineSchedule, setDeadlineSchedule] =
+    useState<DeadlineDefaultScheduleDto | null>(null);
   const [readiness, setReadiness] = useState<DeadlineTransitionRulesReadinessDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorMode>({ kind: 'closed' });
@@ -110,9 +116,10 @@ export function DeadlineTransitionRulesConfig() {
     setLoading(true);
     setError(null);
     try {
-      const [rulesResponse, policiesResponse] = await Promise.all([
+      const [rulesResponse, policiesResponse, scheduleResponse] = await Promise.all([
         deadlinesApi.listDeadlineTransitionRules(),
         deadlinesApi.listPolicies(),
+        deadlinesApi.getDefaultSchedule(),
       ]);
       setRules(
         rulesResponse.data.filter(
@@ -121,6 +128,7 @@ export function DeadlineTransitionRulesConfig() {
         ),
       );
       setPolicies(policiesResponse.data);
+      setDeadlineSchedule(scheduleResponse.schedule);
       setReadiness(rulesResponse.readiness);
     } catch (loadError) {
       setError(errorText(loadError, 'Не удалось загрузить правила'));
@@ -133,25 +141,28 @@ export function DeadlineTransitionRulesConfig() {
     void load();
   }, [load]);
 
-  const policyOptions = useMemo(
-    () => [
-      { value: '__all__', label: 'Все дедлайны заказа' },
-      ...policies
-        .filter((policy) => ['order', 'order_stage', 'client_action'].includes(policy.scopeType))
-        .map((policy) => ({
-          value: policy.policyId,
-          label: `${policy.policyName}${policy.isEnabled ? '' : ' (выключена)'}`,
-        })),
-    ],
-    [policies],
+  const productionStatusNames = useMemo(
+    () =>
+      new Map(
+        (deadlineSchedule?.stages ?? []).map((stage) => [
+          stage.productionStatusId,
+          stage.productionStatusName,
+        ]),
+      ),
+    [deadlineSchedule],
   );
+  const deadlineTargetOptions = useMemo(
+    () => buildDeadlineTargetOptions(deadlineSchedule, policies),
+    [deadlineSchedule, policies],
+  );
+  const draftTargetKey = getDeadlineTargetOptionValue(draft);
   const priorityConflict =
     editor.kind !== 'closed'
     && rules.some(
       (rule) =>
         (editor.kind !== 'edit' || rule.actionRuleId !== editor.rule.actionRuleId)
         && rule.priority === draft.priority
-        && (rule.policyId ?? null) === draft.policyId,
+        && getDeadlineTargetOptionValue(buildTransitionRuleDraft(rule)) === draftTargetKey,
     );
 
   const openCreate = () => {
@@ -348,7 +359,8 @@ export function DeadlineTransitionRulesConfig() {
               title: 'Дедлайн',
               key: 'scope',
               width: 210,
-              render: (_, rule) => describeRuleScope(rule, policies),
+              render: (_, rule) =>
+                describeRuleScope(rule, policies, productionStatusNames),
             },
             {
               title: 'Переход',
@@ -442,7 +454,7 @@ export function DeadlineTransitionRulesConfig() {
         <RuleEditor
           draft={draft}
           onChange={setDraft}
-          policyOptions={policyOptions}
+          deadlineTargetOptions={deadlineTargetOptions}
           statusOptions={statusOptions}
           reason={reason}
           comment={comment}
@@ -473,7 +485,9 @@ export function DeadlineTransitionRulesConfig() {
           )}
           {pendingAction?.kind === 'toggle'
             && pendingAction.nextEnabled
-            && !pendingAction.rule.policyId && (
+            && !pendingAction.rule.policyId
+            && (!pendingAction.rule.config?.deadlineTarget
+              || pendingAction.rule.config.deadlineTarget.type === 'all_order_deadlines') && (
               <Alert
                 type="warning"
                 showIcon
@@ -501,7 +515,7 @@ export function DeadlineTransitionRulesConfig() {
 function RuleEditor(props: {
   draft: DeadlineTransitionRuleDraft;
   onChange: (draft: DeadlineTransitionRuleDraft) => void;
-  policyOptions: Array<{ value: string; label: string }>;
+  deadlineTargetOptions: Array<{ value: string; label: string }>;
   statusOptions: Array<{ value: number; label: string; disabled: boolean }>;
   reason: string;
   comment: string;
@@ -535,15 +549,18 @@ function RuleEditor(props: {
       <label>
         <Text strong>Для какого дедлайна</Text>
         <Select
-          value={props.draft.policyId ?? '__all__'}
-          options={props.policyOptions}
-          onChange={(value) => patch({ policyId: value === '__all__' ? null : value })}
+          value={getDeadlineTargetOptionValue(props.draft)}
+          options={props.deadlineTargetOptions}
+          onChange={(value) =>
+            props.onChange(applyDeadlineTargetOption(props.draft, value))
+          }
           showSearch
           optionFilterProp="label"
           style={{ width: '100%', minHeight: 44 }}
         />
       </label>
-      {props.draft.policyId === null && (
+      {props.draft.policyId === null
+        && props.draft.deadlineTarget.type === 'all_order_deadlines' && (
         <Alert
           type="warning"
           showIcon

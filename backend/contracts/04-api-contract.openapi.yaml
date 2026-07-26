@@ -16666,6 +16666,23 @@ components:
           format: int64
           minimum: 1
 
+    DeadlineActionRuleDeadlineTarget:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - all_order_deadlines
+            - final_order
+            - production_stage
+        productionStatusId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Required when type is production_stage.
+
     DeadlineActionRuleConfig:
       type: object
       properties:
@@ -16682,6 +16699,8 @@ components:
               type: string
               enum:
                 - global_orders
+        deadlineTarget:
+          $ref: '#/components/schemas/DeadlineActionRuleDeadlineTarget'
         conditions:
           $ref: '#/components/schemas/DeadlineActionRuleConditions'
         actionConfig:
@@ -17061,6 +17080,8 @@ components:
           type: string
           enum:
             - change_order_status
+        deadlineTarget:
+          $ref: '#/components/schemas/DeadlineActionRuleDeadlineTarget'
         targetOrderStatusId:
           type: integer
           format: int64
@@ -17126,6 +17147,8 @@ components:
           type: string
           enum:
             - change_order_status
+        deadlineTarget:
+          $ref: '#/components/schemas/DeadlineActionRuleDeadlineTarget'
         targetOrderStatusId:
           type: integer
           format: int64

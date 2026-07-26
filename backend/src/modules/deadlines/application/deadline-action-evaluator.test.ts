@@ -1,8 +1,117 @@
 import { describe, expect, it } from 'vitest';
 import type { DeadlineActionRuleDto, DeadlineOrderOverrideDto } from '../dto/deadline-action-rule.dto';
-import { evaluateDeadlineActionRules } from './deadline-action-evaluator';
+import {
+  buildDeadlineActionRuleDeadlineContext,
+  evaluateDeadlineActionRules,
+} from './deadline-action-evaluator';
 
 describe('evaluateDeadlineActionRules', () => {
+  it('runs a transition only for its selected final or production-stage deadline', () => {
+    const result = evaluateDeadlineActionRules({
+      eventType: 'DEADLINE_EXPIRED',
+      deadlineEventId: 'event-stage-4',
+      deadlineId: 'deadline-stage-4',
+      targetType: 'order_stage',
+      targetId: '84',
+      deadlineContext: {
+        entityType: 'order_stage',
+        productionStatusId: 4,
+      },
+      orderContext: { orderId: 42, orderStatusId: 1, isCompleted: false },
+      isCurrentDeadlineEvent: true,
+      rules: [
+        rule({
+          actionRuleId: 'final-rule',
+          priority: 1,
+          config: {
+            deadlineTarget: { type: 'final_order' },
+            conditions: { allowedFromOrderStatusIds: [1] },
+            actionConfig: { targetOrderStatusId: 7 },
+          },
+        }),
+        rule({
+          actionRuleId: 'stage-4-rule',
+          priority: 2,
+          config: {
+            deadlineTarget: {
+              type: 'production_stage',
+              productionStatusId: 4,
+            },
+            conditions: { allowedFromOrderStatusIds: [1] },
+            actionConfig: { targetOrderStatusId: 7 },
+          },
+        }),
+        rule({
+          actionRuleId: 'stage-5-rule',
+          priority: 3,
+          config: {
+            deadlineTarget: {
+              type: 'production_stage',
+              productionStatusId: 5,
+            },
+            conditions: { allowedFromOrderStatusIds: [1] },
+            actionConfig: { targetOrderStatusId: 7 },
+          },
+        }),
+      ],
+      overrides: [],
+    });
+
+    expect(result.selectedActionRuleId).toBe('stage-4-rule');
+    expect(
+      result.candidates.map((candidate) => [
+        candidate.actionRuleId,
+        candidate.skipReason,
+      ]),
+    ).toEqual([
+      ['final-rule', 'deadline_target_mismatch'],
+      ['stage-4-rule', null],
+      ['stage-5-rule', 'deadline_target_mismatch'],
+    ]);
+  });
+
+  it('extracts production status from deadline metadata and fails closed without context', () => {
+    expect(
+      buildDeadlineActionRuleDeadlineContext({
+        deadlineId: 'deadline-stage-4',
+        entityType: 'order_stage',
+        entityId: '84',
+        deadlineAt: '2026-07-26T00:00:00.000Z',
+        status: 'active',
+        source: 'recalculated',
+        isManuallyOverridden: false,
+        metadata: { productionStatusId: '4' },
+        createdAt: '2026-07-25T00:00:00.000Z',
+        updatedAt: '2026-07-25T00:00:00.000Z',
+      }),
+    ).toEqual({ entityType: 'order_stage', productionStatusId: 4 });
+
+    const result = evaluateDeadlineActionRules({
+      eventType: 'DEADLINE_EXPIRED',
+      deadlineEventId: 'event-missing-context',
+      orderContext: { orderId: 42, orderStatusId: 1, isCompleted: false },
+      isCurrentDeadlineEvent: true,
+      rules: [
+        rule({
+          config: {
+            deadlineTarget: {
+              type: 'production_stage',
+              productionStatusId: 4,
+            },
+            conditions: { allowedFromOrderStatusIds: [1] },
+            actionConfig: { targetOrderStatusId: 7 },
+          },
+        }),
+      ],
+      overrides: [],
+    });
+
+    expect(result.candidates[0]).toMatchObject({
+      wouldRun: false,
+      skipReason: 'missing_deadline_target_context',
+    });
+  });
+
   it('sorts candidates deterministically and applies first applicable status rule wins', () => {
     const result = evaluateDeadlineActionRules({
       eventType: 'DEADLINE_EXPIRED',
