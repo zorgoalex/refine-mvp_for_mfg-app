@@ -7,6 +7,10 @@ export interface Bitrix24BackfillConfig {
   assignedById: number | null;
   erpBaseUrl: string;
   requestTimeoutMs: number;
+  maxRequestsPerSecond: number;
+  limitRetryMaxAttempts: number;
+  queryLimitBaseDelayMs: number;
+  operationLimitFallbackDelayMs: number;
 }
 
 export function assertBitrix24BackfillTiming(
@@ -33,7 +37,39 @@ export function resolveBitrix24Config(
 
   const assigned = Number(env.BITRIX24_ASSIGNED_BY_ID);
   const requestTimeoutMs = Number(env.BITRIX24_REQUEST_TIMEOUT_MS ?? '30000');
+  const maxRequestsPerSecond = boundedInteger(
+    env.BITRIX24_MAX_REQUESTS_PER_SECOND,
+    2,
+    1,
+    5,
+  );
+  const limitRetryMaxAttempts = boundedInteger(
+    env.BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS,
+    11,
+    1,
+    20,
+  );
+  const queryLimitBaseDelayMs = boundedInteger(
+    env.BITRIX24_QUERY_LIMIT_BASE_DELAY_MS,
+    1000,
+    100,
+    60000,
+  );
+  const operationLimitFallbackDelayMs = boundedInteger(
+    env.BITRIX24_OPERATION_LIMIT_FALLBACK_MS,
+    60000,
+    1000,
+    600000,
+  );
   if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1000 || requestTimeoutMs > 120000) {
+    return null;
+  }
+  if (
+    maxRequestsPerSecond === null ||
+    limitRetryMaxAttempts === null ||
+    queryLimitBaseDelayMs === null ||
+    operationLimitFallbackDelayMs === null
+  ) {
     return null;
   }
   return {
@@ -43,5 +79,21 @@ export function resolveBitrix24Config(
     assignedById: Number.isInteger(assigned) && assigned > 0 ? assigned : null,
     erpBaseUrl: (env.FRONTEND_ORIGIN ?? 'http://localhost:5173').trim().replace(/\/+$/, ''),
     requestTimeoutMs,
+    maxRequestsPerSecond,
+    limitRetryMaxAttempts,
+    queryLimitBaseDelayMs,
+    operationLimitFallbackDelayMs,
   };
+}
+
+function boundedInteger(
+  raw: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number | null {
+  const parsed = Number(raw ?? fallback);
+  return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : null;
 }

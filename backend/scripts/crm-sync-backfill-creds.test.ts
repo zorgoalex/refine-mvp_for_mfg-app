@@ -19,6 +19,10 @@ describe('CRM backfill Bitrix24 configuration', () => {
       assignedById: 12,
       erpBaseUrl: 'https://erp.example',
       requestTimeoutMs: 30000,
+      maxRequestsPerSecond: 2,
+      limitRetryMaxAttempts: 11,
+      queryLimitBaseDelayMs: 1000,
+      operationLimitFallbackDelayMs: 60000,
     });
   });
 
@@ -39,6 +43,27 @@ describe('CRM backfill Bitrix24 configuration', () => {
     expect(resolveBitrix24Config({
       BITRIX24_WEBHOOK_URL: 'https://evil.example/rest/1/token',
       BITRIX24_PAY_SYSTEM_ID: '1',
+    } as NodeJS.ProcessEnv)).toBeNull();
+  });
+
+  it('normalizes bounded rate-limit settings', () => {
+    expect(resolveBitrix24Config({
+      BITRIX24_WEBHOOK_URL: 'https://mebelkz.bitrix24.kz/rest/1/token',
+      BITRIX24_PAY_SYSTEM_ID: '1',
+      BITRIX24_MAX_REQUESTS_PER_SECOND: '5',
+      BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS: '12',
+      BITRIX24_QUERY_LIMIT_BASE_DELAY_MS: '2500',
+      BITRIX24_OPERATION_LIMIT_FALLBACK_MS: '90000',
+    } as NodeJS.ProcessEnv)).toMatchObject({
+      maxRequestsPerSecond: 5,
+      limitRetryMaxAttempts: 12,
+      queryLimitBaseDelayMs: 2500,
+      operationLimitFallbackDelayMs: 90000,
+    });
+    expect(resolveBitrix24Config({
+      BITRIX24_WEBHOOK_URL: 'https://mebelkz.bitrix24.kz/rest/1/token',
+      BITRIX24_PAY_SYSTEM_ID: '1',
+      BITRIX24_MAX_REQUESTS_PER_SECOND: '6',
     } as NodeJS.ProcessEnv)).toBeNull();
   });
 

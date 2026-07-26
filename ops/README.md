@@ -27,11 +27,14 @@ for `mebelkz.bitrix24.kz` and a numeric payment-system ID are configured. The
 webhook needs CRM plus sale/payment access; keep its complete URL only in `.env`.
 Keep `BITRIX24_REQUEST_TIMEOUT_MS` below
 `BACKEND_BITRIX24_SYNC_LEASE_MS`; startup validation rejects an unsafe pair.
+The default REST admission rate is two requests/second. Limit errors publish a
+shared cooldown; only explicit `QUERY_LIMIT_EXCEEDED` and
+`OPERATION_TIME_LIMIT` responses are retried.
 
 Safe first rollout order:
 
 1. Apply migrations through
-   `074_bitrix24_payment_delivery_guards.sql`.
+   `087_bitrix24_backfill_checkpoint.sql`.
 2. Build/recreate the backend with the webhook, payment-system ID,
    `BACKEND_ENABLE_BITRIX24_SYNC=true`, and
    `BACKEND_BITRIX24_SYNC_RELAY_OWNER=external`. This paused owner prevents the
@@ -39,9 +42,16 @@ Safe first rollout order:
 3. Run the repository command
    `npm run test:e2e:bitrix24-sync-stage-canary`; it is read-only and refuses
    non-`erp_test` container names.
-4. Run `npm --prefix backend run crm-sync:backfill -- --dry-run`, inspect the
-   projection, then run the live backfill once approved.
-5. Only after the live backfill succeeds, recreate exactly one backend with
+4. Run
+   `npm --prefix backend run crm-sync:backfill -- --dry-run --scope clients`,
+   inspect the projection, then run the live `--scope clients` backfill.
+   `--scope` is mandatory. A failed live run resumes its durable DB cursor;
+   use `--restart` only for an intentional fresh pass.
+5. Inspect Contact/Company data in Bitrix24 and obtain explicit approval before
+   importing orders and payments.
+6. Run dry/live `--scope all`. A completed `clients` checkpoint is separate;
+   `all` intentionally verifies clients again before Deals/payments.
+7. Only after the `all` backfill succeeds, recreate exactly one backend with
    `BACKEND_BITRIX24_SYNC_RELAY_OWNER=in_process`.
 
 CRM API deletes move Contact/Company/Deal records to the Bitrix24 recycle bin.

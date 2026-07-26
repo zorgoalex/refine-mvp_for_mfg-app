@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CrmSourcePort } from './crm-sync.types';
 import type { Bitrix24SyncConsumer, SyncIntent } from './bitrix24-sync-consumer';
-import { runBackfill } from './crm-sync-backfill';
+import {
+  runBackfill,
+  type BackfillCheckpoint,
+} from './crm-sync-backfill';
 
 // ---------------------------------------------------------------------------
 // Helpers / fixtures
@@ -140,11 +143,16 @@ describe('runBackfill', () => {
       const result = await runBackfill({ source, consumer, persist, batchSize: 10, dryRun: false });
 
       expect(callOrder).toEqual(['client:1', 'client:2', 'order:10']);
-      expect(result).toEqual({ clients: 2, orders: 1 });
+      expect(result).toMatchObject({
+        clients: 2,
+        orders: 1,
+        alreadyCompleted: false,
+        checkpoint: { phase: 'completed' },
+      });
     });
   });
 
-  describe('idempotent re-run (hash no-op)', () => {
+  describe('empty consumer intents', () => {
     it('consumer returning [] does not cause errors and counts still increment', async () => {
       const source = makeSource({
         listClientIds: vi.fn()
@@ -160,11 +168,12 @@ describe('runBackfill', () => {
 
       const result = await runBackfill({ source, consumer, persist, batchSize: 10, dryRun: false });
 
-      expect(result).toEqual({ clients: 1, orders: 1 });
-      // persist was still called (with []) — no errors
-      expect(persist).toHaveBeenCalledTimes(2);
+      expect(result).toMatchObject({ clients: 1, orders: 1 });
+      // Records and durable phase transitions all advance the checkpoint.
+      expect(persist).toHaveBeenCalledTimes(4);
       persist.mock.calls.forEach((call) => {
         expect(call[0]).toEqual([]);
+        expect(call[1]).toEqual(expect.objectContaining({ scope: 'all' }));
       });
     });
   });
@@ -208,7 +217,7 @@ describe('runBackfill', () => {
       expect(persist).not.toHaveBeenCalled();
       // consumer.sync must still be called (so we can see what would happen)
       expect(consumer.sync).toHaveBeenCalledTimes(2);
-      expect(result).toEqual({ clients: 1, orders: 1 });
+      expect(result).toMatchObject({ clients: 1, orders: 1 });
     });
 
     it('counts increment in dryRun even when consumer returns empty intents', async () => {
@@ -227,7 +236,7 @@ describe('runBackfill', () => {
       const result = await runBackfill({ source, consumer, persist, batchSize: 10, dryRun: true });
 
       expect(persist).not.toHaveBeenCalled();
-      expect(result).toEqual({ clients: 3, orders: 2 });
+      expect(result).toMatchObject({ clients: 3, orders: 2 });
     });
   });
 
@@ -250,6 +259,274 @@ describe('runBackfill', () => {
       expect(listClientIds).toHaveBeenNthCalledWith(1, '0', 2);
       expect(listClientIds).toHaveBeenNthCalledWith(2, '2', 2);
       expect(listClientIds).toHaveBeenNthCalledWith(3, '3', 2);
+    });
+  });
+
+  describe('scope and durable resume', () => {
+    it('clients scope never lists or synchronizes orders', async () => {
+      const listOrderIds = vi.fn().mockResolvedValue(['10']);
+      const source = makeSource({
+        listClientIds: vi.fn()
+          .mockResolvedValueOnce(['1'])
+          .mockResolvedValueOnce([]),
+        listOrderIds,
+      });
+      const consumer = makeConsumer([]);
+      const persist = makePersist();
+
+      const result = await runBackfill({
+        source,
+        consumer,
+        persist,
+        batchSize: 10,
+        dryRun: false,
+        scope: 'clients',
+      });
+
+      expect(listOrderIds).not.toHaveBeenCalled();
+      expect(
+        (consumer.sync as ReturnType<typeof vi.fn>).mock.calls
+          .map(([event]) => event.eventType),
+      ).toEqual(['crm.sync.client.upsert']);
+      expect(result).toMatchObject({
+        clients: 1,
+        orders: 0,
+        checkpoint: { scope: 'clients', phase: 'completed', lastClientId: '1' },
+      });
+    });
+
+    it('resumes clients after the last transactionally committed cursor', async () => {
+      const checkpoint: BackfillCheckpoint = {
+        scope: 'all',
+        phase: 'clients',
+        lastClientId: '20',
+        lastOrderId: null,
+        processedClients: 20,
+        processedOrders: 0,
+      };
+      const listClientIds = vi.fn()
+        .mockResolvedValueOnce(['21'])
+        .mockResolvedValueOnce([]);
+      const source = makeSource({
+        listClientIds,
+        listOrderIds: vi.fn().mockResolvedValue([]),
+      });
+
+      const result = await runBackfill({
+        source,
+        consumer: makeConsumer([]),
+        persist: makePersist(),
+        batchSize: 10,
+        dryRun: false,
+        checkpoint,
+      });
+
+      expect(listClientIds).toHaveBeenNthCalledWith(1, '20', 10);
+      expect(result).toMatchObject({
+        clients: 21,
+        orders: 0,
+        checkpoint: { phase: 'completed', lastClientId: '21' },
+      });
+    });
+
+    it('resumes directly in orders without relisting clients', async () => {
+      const checkpoint: BackfillCheckpoint = {
+        scope: 'all',
+        phase: 'orders',
+        lastClientId: '20',
+        lastOrderId: '99',
+        processedClients: 20,
+        processedOrders: 50,
+      };
+      const listClientIds = vi.fn().mockResolvedValue([]);
+      const listOrderIds = vi.fn()
+        .mockResolvedValueOnce(['100'])
+        .mockResolvedValueOnce([]);
+      const source = makeSource({ listClientIds, listOrderIds });
+
+      const result = await runBackfill({
+        source,
+        consumer: makeConsumer([]),
+        persist: makePersist(),
+        batchSize: 10,
+        dryRun: false,
+        checkpoint,
+      });
+
+      expect(listClientIds).not.toHaveBeenCalled();
+      expect(listOrderIds).toHaveBeenNthCalledWith(1, '99', 10);
+      expect(result).toMatchObject({
+        clients: 20,
+        orders: 51,
+        checkpoint: { phase: 'completed', lastOrderId: '100' },
+      });
+    });
+
+    it('does not publish progress or advance the input cursor when persistence fails', async () => {
+      const checkpoint: BackfillCheckpoint = {
+        scope: 'clients',
+        phase: 'clients',
+        lastClientId: '4',
+        lastOrderId: null,
+        processedClients: 4,
+        processedOrders: 0,
+      };
+      const source = makeSource({
+        listClientIds: vi.fn().mockResolvedValueOnce(['5']),
+      });
+      const persist = vi.fn().mockRejectedValue(new Error('commit failed'));
+      const onProgress = vi.fn();
+
+      await expect(runBackfill({
+        source,
+        consumer: makeConsumer([]),
+        persist,
+        batchSize: 10,
+        dryRun: false,
+        scope: 'clients',
+        checkpoint,
+        onProgress,
+      })).rejects.toThrow('commit failed');
+
+      expect(persist).toHaveBeenCalledWith(
+        [],
+        expect.objectContaining({ lastClientId: '5', processedClients: 5 }),
+      );
+      expect(onProgress).not.toHaveBeenCalled();
+      expect(checkpoint).toEqual(expect.objectContaining({
+        lastClientId: '4',
+        processedClients: 4,
+      }));
+    });
+
+    it('treats a completed checkpoint as a no-op until restart', async () => {
+      const checkpoint: BackfillCheckpoint = {
+        scope: 'all',
+        phase: 'completed',
+        lastClientId: '20',
+        lastOrderId: '100',
+        processedClients: 20,
+        processedOrders: 50,
+      };
+      const source = makeSource();
+      const consumer = makeConsumer([]);
+      const persist = makePersist();
+
+      const result = await runBackfill({
+        source,
+        consumer,
+        persist,
+        batchSize: 10,
+        dryRun: false,
+        checkpoint,
+      });
+
+      expect(result).toEqual({
+        clients: 20,
+        orders: 50,
+        checkpoint,
+        alreadyCompleted: true,
+        interrupted: false,
+      });
+      expect(source.listClientIds).not.toHaveBeenCalled();
+      expect(source.listOrderIds).not.toHaveBeenCalled();
+      expect(consumer.sync).not.toHaveBeenCalled();
+      expect(persist).not.toHaveBeenCalled();
+    });
+
+    it('dry-run ignores a stored cursor and never persists checkpoints', async () => {
+      const checkpoint: BackfillCheckpoint = {
+        scope: 'clients',
+        phase: 'completed',
+        lastClientId: '99',
+        lastOrderId: null,
+        processedClients: 99,
+        processedOrders: 0,
+      };
+      const listClientIds = vi.fn()
+        .mockResolvedValueOnce(['1'])
+        .mockResolvedValueOnce([]);
+      const source = makeSource({ listClientIds });
+      const persist = makePersist();
+
+      const result = await runBackfill({
+        source,
+        consumer: makeConsumer([]),
+        persist,
+        batchSize: 10,
+        dryRun: true,
+        scope: 'clients',
+        checkpoint,
+      });
+
+      expect(listClientIds).toHaveBeenNthCalledWith(1, '0', 10);
+      expect(persist).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        clients: 1,
+        checkpoint: { phase: 'completed', lastClientId: '1' },
+        alreadyCompleted: false,
+      });
+    });
+
+    it('reports only successfully persisted cursors as committed progress', async () => {
+      const source = makeSource({
+        listClientIds: vi.fn()
+          .mockResolvedValueOnce(['1'])
+          .mockResolvedValueOnce([]),
+      });
+      const calls: string[] = [];
+
+      await runBackfill({
+        source,
+        consumer: makeConsumer([]),
+        persist: vi.fn().mockImplementation(async (_intents, checkpoint) => {
+          calls.push(`persist:${checkpoint.phase}:${checkpoint.lastClientId}`);
+        }),
+        batchSize: 10,
+        dryRun: false,
+        scope: 'clients',
+        onProgress: (progress) => {
+          calls.push(
+            `progress:${progress.kind}:${progress.checkpoint.lastClientId}:${progress.committed}`,
+          );
+        },
+      });
+
+      expect(calls).toEqual([
+        'persist:clients:1',
+        'progress:record:1:true',
+        'persist:completed:1',
+        'progress:completed:1:true',
+      ]);
+    });
+
+    it('finishes the current record then stops before taking the next one', async () => {
+      let stop = false;
+      const source = makeSource({
+        listClientIds: vi.fn().mockResolvedValueOnce(['1', '2']),
+      });
+      const consumer = makeConsumer([]);
+      const persist = vi.fn().mockImplementation(async () => {
+        stop = true;
+      });
+
+      const result = await runBackfill({
+        source,
+        consumer,
+        persist,
+        batchSize: 10,
+        dryRun: false,
+        scope: 'clients',
+        shouldStop: () => stop,
+      });
+
+      expect(consumer.sync).toHaveBeenCalledTimes(1);
+      expect(persist).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        clients: 1,
+        interrupted: true,
+        checkpoint: { phase: 'clients', lastClientId: '1' },
+      });
     });
   });
 });

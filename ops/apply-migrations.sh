@@ -232,6 +232,7 @@ q_trg()   { echo "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='$1');"; 
 q_con_def() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)='$2' FROM pg_constraint WHERE conname='$1'), false);"; }
 q_trg_def() { echo "SELECT COALESCE((SELECT pg_get_triggerdef(oid)='$2' FROM pg_trigger WHERE tgname='$1'), false);"; }
 q_con_def_on() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)='$3' FROM pg_constraint WHERE conname='$1' AND conrelid='public.$2'::regclass), false);"; }
+q_con_def_on_safe() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)=\$erp_probe\$$3\$erp_probe\$ FROM pg_constraint WHERE conname='$1' AND conrelid='public.$2'::regclass), false);"; }
 q_trg_def_on() { echo "SELECT COALESCE((SELECT pg_get_triggerdef(oid)='$3' FROM pg_trigger WHERE tgname='$1' AND tgrelid='public.$2'::regclass), false);"; }
 probe_true() { [ "$(pg_query "$1")" = "t" ]; }
 # AND-chain: every argument is a boolean SQL statement; all must be true.
@@ -633,18 +634,45 @@ probe_file() {
                          WHERE config_id = 1
                            AND reserve_days BETWEEN 0 AND 3650
                            AND version > 0
-                      );" ;;
+                     );" ;;
+    087_bitrix24_backfill_checkpoint*) probe_all \
+                     "$(q_tbl crm_sync_backfill_checkpoint)" \
+                     "SELECT count(*) = 9
+                        FROM information_schema.columns
+                       WHERE table_schema='public'
+                         AND table_name='crm_sync_backfill_checkpoint'
+                         AND (
+                           (column_name='scope' AND data_type='text' AND is_nullable='NO')
+                           OR (column_name='phase' AND data_type='text' AND is_nullable='NO')
+                           OR (column_name='last_client_id' AND data_type='text' AND is_nullable='YES')
+                           OR (column_name='last_order_id' AND data_type='text' AND is_nullable='YES')
+                           OR (column_name='processed_clients' AND data_type='bigint' AND is_nullable='NO' AND column_default='0')
+                           OR (column_name='processed_orders' AND data_type='bigint' AND is_nullable='NO' AND column_default='0')
+                           OR (column_name='started_at' AND data_type='timestamp with time zone' AND is_nullable='NO' AND column_default='now()')
+                           OR (column_name='updated_at' AND data_type='timestamp with time zone' AND is_nullable='NO' AND column_default='now()')
+                           OR (column_name='completed_at' AND data_type='timestamp with time zone' AND is_nullable='YES')
+                         );" \
+                     "$(q_con_def_on_safe crm_sync_backfill_checkpoint_pkey crm_sync_backfill_checkpoint 'PRIMARY KEY (scope)')" \
+                     "$(q_con_def_on_safe chk_crm_sync_backfill_scope crm_sync_backfill_checkpoint 'CHECK ((scope = ANY (ARRAY['\''clients'\''::text, '\''all'\''::text])))')" \
+                     "$(q_con_def_on_safe chk_crm_sync_backfill_phase crm_sync_backfill_checkpoint 'CHECK ((phase = ANY (ARRAY['\''clients'\''::text, '\''orders'\''::text, '\''completed'\''::text])))')" \
+                     "$(q_con_def_on_safe chk_crm_sync_backfill_scope_phase crm_sync_backfill_checkpoint 'CHECK (((scope = '\''all'\''::text) OR (phase <> '\''orders'\''::text)))')" \
+                     "$(q_con_def_on_safe chk_crm_sync_backfill_scope_state crm_sync_backfill_checkpoint 'CHECK (((scope = '\''all'\''::text) OR ((last_order_id IS NULL) AND (processed_orders = 0))))')" \
+                     "$(q_con_def_on_safe chk_crm_sync_backfill_phase_state crm_sync_backfill_checkpoint 'CHECK (((phase <> '\''clients'\''::text) OR ((last_order_id IS NULL) AND (processed_orders = 0))))')" \
+                     "$(q_con_def_on_safe chk_crm_sync_backfill_client_cursor crm_sync_backfill_checkpoint 'CHECK (((last_client_id IS NULL) OR (last_client_id ~ '\''^[0-9]+$'\''::text)))')" \
+                     "$(q_con_def_on_safe chk_crm_sync_backfill_order_cursor crm_sync_backfill_checkpoint 'CHECK (((last_order_id IS NULL) OR (last_order_id ~ '\''^[0-9]+$'\''::text)))')" \
+                     "$(q_con_def_on_safe chk_crm_sync_backfill_counts crm_sync_backfill_checkpoint 'CHECK (((processed_clients >= 0) AND (processed_orders >= 0)))')" \
+                     "$(q_con_def_on_safe chk_crm_sync_backfill_completed_at crm_sync_backfill_checkpoint 'CHECK (((phase = '\''completed'\''::text) = (completed_at IS NOT NULL)))')" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
 
-# 073/074 contain IF NOT EXISTS DDL. A partially-created object can therefore
+# 073/074/087 contain IF NOT EXISTS DDL. A partially-created object can therefore
 # let PostgreSQL finish the file without reaching the required end state. Never
 # record those migrations in the ledger until the complete effect probe passes.
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*)
+    073_*|074_*|087_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac
