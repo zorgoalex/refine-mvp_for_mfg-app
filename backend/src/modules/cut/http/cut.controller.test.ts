@@ -556,6 +556,36 @@ describe('CutController', () => {
       controller.listSheetTypes({ user: currentUser() } as never),
     ).rejects.toMatchObject({ statusCode: 503, code: 'SERVICE_UNAVAILABLE' } satisfies Partial<ApiError>);
   });
+
+  it('listFilmOptions: delegates date-filtered criteria to the service', async () => {
+    const films = [
+      { filmId: 7, name: 'Белый матовый' },
+      { filmId: 8, name: 'Дуб натуральный' },
+    ];
+    const listFilmOptionsForCut = vi.fn(async () => films);
+    const controller = createController({ service: { listFilmOptionsForCut } });
+    const request = { user: currentUser(), requestId: 'req-films' } as never;
+
+    const result = await controller.listFilmOptions(request, {
+      dateFrom: '2026-07-01',
+      dateTo: '2026-07-31',
+      orderIds: '10,11',
+      sheetMaterialTypeIds: '3',
+    });
+
+    expect(result).toEqual(films);
+    expect(listFilmOptionsForCut).toHaveBeenCalledWith(expect.objectContaining({
+      criteria: {
+        dateFrom: '2026-07-01',
+        dateTo: '2026-07-31',
+        orderIds: [10, 11],
+        sheetMaterialTypeIds: [3],
+        filmIds: undefined,
+        productionStatusIds: undefined,
+      },
+      requestId: 'req-films',
+    }));
+  });
 });
 
 describe('parseSetProfileBody', () => {

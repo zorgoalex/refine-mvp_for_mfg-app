@@ -5,6 +5,7 @@ import type {
   CreateCutJobRequestDto,
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
+  CutFilmOptionDto,
   CutJobDto,
   CutResultDto,
   CutResultSummaryDto,
@@ -231,6 +232,12 @@ export interface ListSheetTypesForCutQuery {
   requestId?: string;
 }
 
+export interface ListFilmOptionsForCutQuery {
+  currentUser: CurrentUser;
+  criteria: CutSelectionCriteriaDto;
+  requestId?: string;
+}
+
 export interface SetCutJobProfileCommand {
   currentUser: CurrentUser;
   cutJobId: number;
@@ -317,6 +324,7 @@ export interface CutRepositoryPort {
   getResult(query: GetCutResultQuery): Promise<CutResultDto>;
   listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]>;
   listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto>;
+  listFilmOptionsForCut(query: ListFilmOptionsForCutQuery): Promise<CutFilmOptionDto[]>;
   listDetailPlacements(query: DetailPlacementsQuery): Promise<CutDetailPlacementsResponseDto>;
   listDetailLastReady(query: DetailLastReadyQuery): Promise<CutDetailLastReadyResponseDto>;
   renderSheetPng(query: RenderSheetPngQuery): Promise<Buffer>;

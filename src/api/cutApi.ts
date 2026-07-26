@@ -3,6 +3,7 @@ import { httpClient } from './httpClient';
 import type {
   AddCutItemsRequest,
   CreateCutJobRequest,
+  CutFilmOption,
   CutDetailLastReadyResponse,
   CutDetailPlacements,
   CutJobDto,
@@ -74,6 +75,12 @@ export const cutApi = {
    */
   listSheetTypes(): Promise<CutSheetTypeOption[]> {
     return httpClient.get<CutSheetTypeOption[]>(apiRoutes.cutJobs.sheetTypes);
+  },
+
+  listFilmOptions(criteria: CutSelectionCriteria): Promise<CutFilmOption[]> {
+    const query = buildEligibleQuery(criteria);
+    const path = apiRoutes.cutJobs.filmOptions;
+    return httpClient.get<CutFilmOption[]>(query ? `${path}?${query}` : path);
   },
 
   /**

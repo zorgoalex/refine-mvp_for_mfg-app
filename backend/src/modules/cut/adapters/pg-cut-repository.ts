@@ -55,6 +55,7 @@ import type {
   DetailLastReadyQuery,
   DetailPlacementsQuery,
   EligibleDetailsQuery,
+  ListFilmOptionsForCutQuery,
   GetCutJobQuery,
   GetCutResultQuery,
   GetRenderCacheTokenArgs,
@@ -78,6 +79,7 @@ import type {
   CutDetailInfoDto,
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
+  CutFilmOptionDto,
   CutEditorParamsDto,
   CutGroupDto,
   CutJobDto,
@@ -2204,6 +2206,52 @@ export class PgCutRepository implements CutRepositoryPort {
     });
 
     return { details, noSheetSpecCount };
+  }
+
+  async listFilmOptionsForCut(query: ListFilmOptionsForCutQuery): Promise<CutFilmOptionDto[]> {
+    const conditions: string[] = [
+      'od.delete_flag = false',
+      'od.film_id IS NOT NULL',
+      'f.film_name IS NOT NULL',
+      `btrim(f.film_name) <> ''`,
+    ];
+    const params: unknown[] = [];
+    const addArrayFilter = (column: string, values: number[] | undefined) => {
+      if (values && values.length > 0) {
+        params.push(values);
+        conditions.push(`${column} = ANY($${params.length}::bigint[])`);
+      }
+    };
+    addArrayFilter('od.order_id', query.criteria.orderIds);
+    addArrayFilter('od.sheet_material_type_id', query.criteria.sheetMaterialTypeIds);
+    if (query.criteria.dateFrom) {
+      params.push(query.criteria.dateFrom);
+      conditions.push(`ord.order_date >= $${params.length}::date`);
+    }
+    if (query.criteria.dateTo) {
+      params.push(query.criteria.dateTo);
+      conditions.push(`ord.order_date <= $${params.length}::date`);
+    }
+    if (query.criteria.productionStatusIds && query.criteria.productionStatusIds.length > 0) {
+      addArrayFilter('od.production_status_id', query.criteria.productionStatusIds);
+    }
+
+    const result = await this.database.query<{ film_id: string | number; film_name: string }>(
+      `
+      SELECT DISTINCT od.film_id, f.film_name
+      FROM order_details od
+      JOIN orders ord ON ord.order_id = od.order_id
+      JOIN films f ON f.film_id = od.film_id
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY f.film_name, od.film_id
+      LIMIT 500
+      `,
+      params,
+    );
+    return result.rows.map((row) => ({
+      filmId: toNum(row.film_id),
+      name: row.film_name,
+    }));
   }
 
   /**

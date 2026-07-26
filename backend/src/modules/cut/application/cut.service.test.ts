@@ -27,6 +27,7 @@ function repo(overrides: Partial<CutRepositoryPort> = {}): CutRepositoryPort {
     getJob: reject,
     listJobs: reject,
     listEligibleDetails: reject,
+    listFilmOptionsForCut: reject,
     renderSheetPng: reject,
     listDetailLastReady: () => Promise.resolve({ details: [] }),
     ...overrides,
@@ -73,6 +74,23 @@ describe('CutService RBAC (§8 principle 8)', () => {
     const service = new CutService({ cut: repo({ listEligibleDetails }) });
     await service.listEligibleDetails({ currentUser: user(['cut.view']), criteria: {} });
     expect(listEligibleDetails).toHaveBeenCalledOnce();
+  });
+
+  it('denies film-options read without cut.view', async () => {
+    const service = new CutService({ cut: repo() });
+    await expect(
+      service.listFilmOptionsForCut({ currentUser: user([]), criteria: {} }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('allows film-options read with cut.view and delegates', async () => {
+    const listFilmOptionsForCut = vi.fn(async () => [{ filmId: 7, name: 'Белый матовый' }]);
+    const service = new CutService({ cut: repo({ listFilmOptionsForCut }) });
+    await service.listFilmOptionsForCut({
+      currentUser: user(['cut.view']),
+      criteria: { dateFrom: '2026-07-01', dateTo: '2026-07-31' },
+    });
+    expect(listFilmOptionsForCut).toHaveBeenCalledOnce();
   });
 
   it('requires cut.manage for calculate/addItems/removeItem/archive', async () => {

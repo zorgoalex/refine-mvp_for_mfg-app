@@ -100,10 +100,17 @@ type CutCriteriaForm = {
   orderDateRange?: CutOrderDateRangeValue;
   orderIds?: string | number[];
   sheetMaterialTypeIds?: number[];
-  filmIds?: string;
+  filmIds?: number[];
 };
 
 type CutOrderSelectOption = {
+  value: number;
+  label: string;
+  title: string;
+  searchText: string;
+};
+
+type CutFilmSelectOption = {
   value: number;
   label: string;
   title: string;
@@ -303,6 +310,15 @@ function buildCutOrderOption(order: OrderListItemDto): CutOrderSelectOption {
   };
 }
 
+function buildCutFilmOption(film: { filmId: number; name: string }): CutFilmSelectOption {
+  return {
+    value: film.filmId,
+    label: film.name,
+    title: film.name,
+    searchText: film.name.toLowerCase(),
+  };
+}
+
 async function fetchCutOrderOptions(dateFrom: string, dateTo: string): Promise<CutOrderSelectOption[]> {
   const firstPage = await ordersApi.list({
     page: 1,
@@ -384,6 +400,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [form] = Form.useForm<CutCriteriaForm>();
   const defaultOrderDateRange = useMemo(defaultCutOrderDateRange, []);
   const watchedOrderDateRange = Form.useWatch('orderDateRange', form) as CutOrderDateRangeValue;
+  const watchedOrderIds = Form.useWatch('orderIds', form) as CutCriteriaForm['orderIds'];
+  const watchedSheetMaterialTypeIds = Form.useWatch('sheetMaterialTypeIds', form) as number[] | undefined;
   const orderDateCriteria = cutDateRangeToCriteria(watchedOrderDateRange ?? defaultOrderDateRange);
   const orderDateFrom = orderDateCriteria.dateFrom;
   const orderDateTo = orderDateCriteria.dateTo;
@@ -513,6 +531,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const orderOptionsSeqRef = useRef(0);
+  const [filmOptions, setFilmOptions] = useState<CutFilmSelectOption[]>([]);
+  const [filmsLoading, setFilmsLoading] = useState(false);
+  const filmOptionsSeqRef = useRef(0);
 
   // ── Manual layout editor state ──────────────────────────────────────────────
   // The group currently open for editing (null = no editor active).
@@ -639,7 +660,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     return {
       orderIds: isEmbeddedOrder ? [embeddedOrderId!] : parseOrderIdsValue(values.orderIds),
       sheetMaterialTypeIds,
-      filmIds: parseIdCsv(values.filmIds ?? ''),
+      filmIds: parseOrderIdsValue(values.filmIds),
       ...(!isEmbeddedOrder ? cutDateRangeToCriteria(values.orderDateRange) : {}),
     };
   }, [embeddedOrderId, form, isEmbeddedOrder]);
@@ -648,6 +669,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     const text = error instanceof ApiError ? error.message : fallback;
     message.error(text);
   }, []);
+
+  const filmCriteriaOrderIds = useMemo(
+    () => (isEmbeddedOrder ? [embeddedOrderId!] : parseOrderIdsValue(watchedOrderIds)),
+    [embeddedOrderId, isEmbeddedOrder, watchedOrderIds],
+  );
+  const filmCriteriaSheetMaterialTypeIds = useMemo(
+    () => {
+      const ids = (watchedSheetMaterialTypeIds ?? []).filter((id) => Number.isInteger(id) && id > 0);
+      return ids.length > 0 ? ids : undefined;
+    },
+    [watchedSheetMaterialTypeIds],
+  );
+  const filmCriteriaOrderIdsKey = filmCriteriaOrderIds?.join(',') ?? '';
+  const filmCriteriaSheetMaterialTypeIdsKey = filmCriteriaSheetMaterialTypeIds?.join(',') ?? '';
 
   useEffect(() => {
     if (isEmbeddedOrder || !canViewOrders || !orderDateFrom || !orderDateTo) {
@@ -669,6 +704,41 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         if (orderOptionsSeqRef.current === seq) setOrdersLoading(false);
       });
   }, [canViewOrders, handleError, isEmbeddedOrder, orderDateFrom, orderDateTo]);
+
+  useEffect(() => {
+    if (!isEmbeddedOrder && (!orderDateFrom || !orderDateTo)) {
+      setFilmOptions([]);
+      return;
+    }
+    const seq = ++filmOptionsSeqRef.current;
+    setFilmsLoading(true);
+    cutApi.listFilmOptions({
+      orderIds: filmCriteriaOrderIds,
+      sheetMaterialTypeIds: filmCriteriaSheetMaterialTypeIds,
+      ...(!isEmbeddedOrder ? { dateFrom: orderDateFrom, dateTo: orderDateTo } : {}),
+    })
+      .then((options) => {
+        if (filmOptionsSeqRef.current !== seq) return;
+        setFilmOptions(options.map(buildCutFilmOption));
+      })
+      .catch((error) => {
+        if (filmOptionsSeqRef.current !== seq) return;
+        setFilmOptions([]);
+        handleError(error, 'Не удалось загрузить плёнки для раскроя');
+      })
+      .finally(() => {
+        if (filmOptionsSeqRef.current === seq) setFilmsLoading(false);
+      });
+  }, [
+    filmCriteriaOrderIds,
+    filmCriteriaOrderIdsKey,
+    filmCriteriaSheetMaterialTypeIds,
+    filmCriteriaSheetMaterialTypeIdsKey,
+    handleError,
+    isEmbeddedOrder,
+    orderDateFrom,
+    orderDateTo,
+  ]);
 
   const loadJobs = useCallback(async () => {
     setJobsLoading(true);
@@ -1790,6 +1860,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 placeholder={['Дата от', 'Дата до']}
                 onChange={() => {
                   if (canViewOrders) form.setFieldsValue({ orderIds: undefined });
+                  form.setFieldsValue({ filmIds: undefined });
                 }}
                 style={{ width: 250 }}
                 data-testid="cut-order-date-range"
@@ -1810,6 +1881,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 placeholder="Заказ"
                 options={orderOptions}
                 loading={ordersLoading}
+                onChange={() => form.setFieldsValue({ filmIds: undefined })}
                 filterOption={(input, option) =>
                   String((option as CutOrderSelectOption | undefined)?.searchText ?? '')
                     .includes(input.trim().toLowerCase())
@@ -1820,7 +1892,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             </Form.Item>
           ) : (
             <Form.Item name="orderIds">
-              <Input placeholder="Заказы (9,10)" />
+              <Input placeholder="Заказы (9,10)" onChange={() => form.setFieldsValue({ filmIds: undefined })} />
             </Form.Item>
           )}
           {sheetFilterEnabled && (
@@ -1831,13 +1903,29 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 placeholder="Типы листов"
                 options={sheetTypeOptions}
                 fieldNames={{ label: 'label', value: 'value' }}
+                onChange={() => form.setFieldsValue({ filmIds: undefined })}
                 style={{ minWidth: 200 }}
                 data-testid="cut-sheet-type-filter"
               />
             </Form.Item>
           )}
           <Form.Item name="filmIds">
-            <Input placeholder="Плёнки" />
+            <Select<number[]>
+              mode="multiple"
+              allowClear
+              showSearch
+              maxTagCount="responsive"
+              placeholder="Плёнки"
+              options={filmOptions}
+              loading={filmsLoading}
+              filterOption={(input, option) =>
+                String((option as CutFilmSelectOption | undefined)?.searchText ?? '')
+                  .includes(input.trim().toLowerCase())
+              }
+              notFoundContent={filmsLoading ? <Spin size="small" /> : 'Нет плёнок'}
+              style={{ minWidth: 220 }}
+              data-testid="cut-film-select"
+            />
           </Form.Item>
           <Form.Item>
             <Button type="primary" onClick={createJob} loading={busy} disabled={!canManage}>

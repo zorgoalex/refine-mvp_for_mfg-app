@@ -44,6 +44,18 @@ describe('cutApi', () => {
     expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/cut-jobs/42/eligible-details?orderIds=9');
   });
 
+  it('fetches date-filtered cut film options from the backend', async () => {
+    const fetchMock = mockFetch([{ filmId: 7, name: 'Белый матовый' }]);
+
+    await expect(
+      cutApi.listFilmOptions({ dateFrom: '2026-07-01', dateTo: '2026-07-31', sheetMaterialTypeIds: [3] }),
+    ).resolves.toEqual([{ filmId: 7, name: 'Белый матовый' }]);
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/v1/cut-jobs/film-options?sheetMaterialTypeIds=3&dateFrom=2026-07-01&dateTo=2026-07-31',
+    );
+  });
+
   it('fetches a per-sheet SVG and the preset PNG from the render endpoints', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('<svg/>', { status: 200, headers: { 'Content-Type': 'image/svg+xml' } }))

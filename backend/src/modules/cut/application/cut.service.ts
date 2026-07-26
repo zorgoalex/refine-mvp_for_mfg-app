@@ -14,6 +14,7 @@ import type {
   EligibleDetailsQuery,
   GetCutJobQuery,
   GetCutResultQuery,
+  ListFilmOptionsForCutQuery,
   ListCutJobsQuery,
   ListCutResultsQuery,
   ListSheetTypesForCutQuery,
@@ -124,6 +125,11 @@ export class CutService implements OnModuleInit, OnModuleDestroy {
   async listEligibleDetails(query: EligibleDetailsQuery) {
     this.require(query.currentUser, 'cut.view', { requestId: query.requestId });
     return this.ports.cut.listEligibleDetails(query);
+  }
+
+  async listFilmOptionsForCut(query: ListFilmOptionsForCutQuery) {
+    this.require(query.currentUser, 'cut.view', { requestId: query.requestId });
+    return this.ports.cut.listFilmOptionsForCut(query);
   }
 
   async listDetailPlacements(query: DetailPlacementsQuery) {

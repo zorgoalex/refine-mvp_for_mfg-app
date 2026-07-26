@@ -134,6 +134,15 @@ describe('CutPage source guards', () => {
     expect(source).toContain('data-testid="cut-order-select"');
   });
 
+  it('loads the cut film filter as unique Select options under the current date criteria', () => {
+    expect(source).toContain('cutApi.listFilmOptions');
+    expect(source).toContain('filmOptions');
+    expect(source).toContain('buildCutFilmOption');
+    expect(source).toContain('data-testid="cut-film-select"');
+    expect(source).toContain('form.setFieldsValue({ filmIds: undefined })');
+    expect(source).not.toContain('<Input placeholder="Плёнки"');
+  });
+
   it('supports embedded order mode: hard-scopes criteria and job list to one order', () => {
     expect(source).toContain('embeddedOrderId');
     expect(source).toContain('isEmbeddedOrder ? [embeddedOrderId!] : parseOrderIdsValue(values.orderIds)');

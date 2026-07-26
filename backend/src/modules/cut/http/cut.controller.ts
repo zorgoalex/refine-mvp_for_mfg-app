@@ -8,6 +8,7 @@ import { CutService } from '../application/cut.service';
 import type {
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
+  CutFilmOptionDto,
   CutJobDto,
   CutResultDto,
   CutResultSummaryDto,
@@ -193,6 +194,24 @@ export class CutController {
     // Gated on cut.view: worker can populate the cut filter without sheet_materials.view (Variant B Task 11).
     const currentUser = this.requireRead(request);
     return this.cut.listSheetTypesForCut({ currentUser, requestId: request.requestId });
+  }
+
+  @ApiOperation({
+    operationId: 'listCutFilmOptions',
+    summary: 'List distinct films for the cut filter under current criteria',
+  })
+  @Get('film-options')
+  async listFilmOptions(
+    @Req() request: RequestWithCurrentUser,
+    @Query() query: Record<string, string>,
+  ): Promise<CutFilmOptionDto[]> {
+    // Registered BEFORE ':cutJobId' so the literal 'film-options' path is not captured as an id.
+    const currentUser = this.requireRead(request);
+    return this.cut.listFilmOptionsForCut({
+      currentUser,
+      criteria: parseEligibleCriteria(query),
+      requestId: request.requestId,
+    });
   }
 
   @ApiOperation({ operationId: 'getCutJob', summary: 'Get a cut job manifest' })

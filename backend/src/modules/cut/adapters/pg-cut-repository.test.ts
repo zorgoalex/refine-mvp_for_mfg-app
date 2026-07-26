@@ -160,6 +160,8 @@ interface FakeDbOptions {
   reserveConflict?: boolean;
   /** rows for listEligibleDetails */
   eligibleRows?: FakeRow[];
+  /** rows for listFilmOptionsForCut */
+  filmOptionRows?: FakeRow[];
   /** whether the cut_param_profiles SELECT returns a row (profile is active) */
   profileActive?: boolean;
   /** expired calculate commands returned to the reconciliation worker */
@@ -450,6 +452,10 @@ function createDatabase(options: FakeDbOptions = {}) {
     }
     if (sql.startsWith('SELECT DISTINCT ON (r.result_no)') || sql.startsWith('SELECT r.cut_result_id')) {
       return storedResult ? { rows: [{ ...storedResult, computed_digest: storedResult.snapshot_digest, is_current: currentResultId === 900 }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+
+    if (sql.startsWith('SELECT DISTINCT od.film_id')) {
+      return { rows: options.filmOptionRows ?? [], rowCount: (options.filmOptionRows ?? []).length };
     }
 
     if (sql.startsWith('SELECT od.detail_id')) {
@@ -1194,6 +1200,36 @@ describe('PgCutRepository', () => {
     expect(normalize(eligibleQuery?.text ?? '')).toContain('ord.order_date <= $');
     expect(eligibleQuery?.params).toContain('2026-07-16');
     expect(eligibleQuery?.params).toContain('2026-07-26');
+  });
+
+  it('listFilmOptionsForCut returns distinct film options filtered by order date range', async () => {
+    const db = createDatabase({
+      filmOptionRows: [
+        { film_id: '7', film_name: 'Белый матовый' },
+        { film_id: '8', film_name: 'Дуб натуральный' },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    const result = await repo.listFilmOptionsForCut({
+      currentUser: currentUser(),
+      criteria: { dateFrom: '2026-07-01', dateTo: '2026-07-31', sheetMaterialTypeIds: [3] },
+      requestId: 'r-films',
+    });
+
+    expect(result).toEqual([
+      { filmId: 7, name: 'Белый матовый' },
+      { filmId: 8, name: 'Дуб натуральный' },
+    ]);
+    const filmQuery = db.queries.find((q) => normalize(q.text).includes('SELECT DISTINCT od.film_id'));
+    expect(normalize(filmQuery?.text ?? '')).toContain('JOIN orders');
+    expect(normalize(filmQuery?.text ?? '')).toContain('JOIN films');
+    expect(normalize(filmQuery?.text ?? '')).toContain('ord.order_date >= $');
+    expect(normalize(filmQuery?.text ?? '')).toContain('ord.order_date <= $');
+    expect(normalize(filmQuery?.text ?? '')).toContain('od.sheet_material_type_id = ANY');
+    expect(normalize(filmQuery?.text ?? '')).not.toContain('od.production_status_id = ANY');
+    expect(filmQuery?.params).toContain('2026-07-01');
+    expect(filmQuery?.params).toContain('2026-07-31');
   });
 });
 

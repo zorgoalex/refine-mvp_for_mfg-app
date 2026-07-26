@@ -84,6 +84,10 @@ export class UnavailableCutRepository implements CutRepositoryPort {
     return Promise.reject(unavailable());
   }
 
+  listFilmOptionsForCut() {
+    return Promise.reject(unavailable());
+  }
+
   setProfile() {
     return Promise.reject(unavailable());
   }

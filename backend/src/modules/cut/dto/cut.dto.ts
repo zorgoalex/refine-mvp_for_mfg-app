@@ -14,6 +14,11 @@ export interface CutSelectionCriteriaDto {
   dateTo?: string;
 }
 
+export interface CutFilmOptionDto {
+  filmId: number;
+  name: string;
+}
+
 export interface CreateCutJobRequestDto {
   name: string;
   criteria?: CutSelectionCriteriaDto;
