@@ -2122,6 +2122,14 @@ export class PgCutRepository implements CutRepositoryPort {
     addArrayFilter('od.order_id', query.criteria.orderIds);
     addArrayFilter('od.sheet_material_type_id', query.criteria.sheetMaterialTypeIds);
     addArrayFilter('od.film_id', query.criteria.filmIds);
+    if (query.criteria.dateFrom) {
+      params.push(query.criteria.dateFrom);
+      conditions.push(`ord.order_date >= $${params.length}::date`);
+    }
+    if (query.criteria.dateTo) {
+      params.push(query.criteria.dateTo);
+      conditions.push(`ord.order_date <= $${params.length}::date`);
+    }
     if (query.criteria.productionStatusIds && query.criteria.productionStatusIds.length > 0) {
       // Operator override: explicit status filter wins over the ready-set default.
       addArrayFilter('od.production_status_id', query.criteria.productionStatusIds);

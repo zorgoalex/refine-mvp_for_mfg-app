@@ -1173,6 +1173,28 @@ describe('PgCutRepository', () => {
     expect(sheetFilterQuery).toBeDefined();
     expect(result.details.every((d) => d.sheetMaterialTypeId === 2)).toBe(true);
   });
+
+  it('filters eligible details by inclusive order date range', async () => {
+    const db = createDatabase({
+      readyStatusIds: [1],
+      eligibleRows: [
+        { detail_id: 12, order_id: 11, order_name: '2561', quantity: 1, sheet_material_type_id: 2, film_id: null, production_status_id: 1, delete_flag: false },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    await repo.listEligibleDetails({
+      currentUser: currentUser(),
+      criteria: { dateFrom: '2026-07-16', dateTo: '2026-07-26' },
+      requestId: 'r-date',
+    });
+
+    const eligibleQuery = db.queries.find((q) => normalize(q.text).includes('FROM order_details od'));
+    expect(normalize(eligibleQuery?.text ?? '')).toContain('ord.order_date >= $');
+    expect(normalize(eligibleQuery?.text ?? '')).toContain('ord.order_date <= $');
+    expect(eligibleQuery?.params).toContain('2026-07-16');
+    expect(eligibleQuery?.params).toContain('2026-07-26');
+  });
 });
 
 describe('profileChangedOutboxKey', () => {

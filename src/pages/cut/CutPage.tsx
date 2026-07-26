@@ -5,6 +5,7 @@ import {
   Card,
   Checkbox,
   Collapse,
+  DatePicker,
   Form,
   Input,
   Modal,
@@ -22,10 +23,13 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { MinusOutlined, PlusOutlined, UndoOutlined, UpOutlined } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
+import dayjs, { type Dayjs } from 'dayjs';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
+import { ordersApi } from '../../api/ordersApi';
 import type { CutParamProfile, CutPdfTemplate, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
+import type { OrderListItemDto } from '../../api/types/orderApi.types';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
 import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, loadSheetAxisOrigin, saveSheetAxisOrigin, selectVariantSheets } from './cutPreviewHelpers';
@@ -85,6 +89,26 @@ const DEFAULT_PDF_TEMPLATE_OPTIONS = [
 ];
 
 const { Title, Text } = Typography;
+const { RangePicker } = DatePicker;
+
+const CUT_ORDER_LOOKBACK_DAYS = 10;
+
+type CutOrderDateRange = [Dayjs, Dayjs];
+type CutOrderDateRangeValue = [Dayjs | null, Dayjs | null] | null | undefined;
+type CutCriteriaForm = {
+  name: string;
+  orderDateRange?: CutOrderDateRangeValue;
+  orderIds?: string | number[];
+  sheetMaterialTypeIds?: number[];
+  filmIds?: string;
+};
+
+type CutOrderSelectOption = {
+  value: number;
+  label: string;
+  title: string;
+  searchText: string;
+};
 
 type PdfPreviewState = {
   open: boolean;
@@ -245,6 +269,64 @@ function formatJobMaterialNames(materialNames: string[] | undefined): string {
   return names.length > 0 ? names.join(', ') : '—';
 }
 
+function defaultCutOrderDateRange(now: Dayjs = dayjs()): CutOrderDateRange {
+  return [now.subtract(CUT_ORDER_LOOKBACK_DAYS, 'day'), now];
+}
+
+function cutDateRangeToCriteria(range: CutOrderDateRangeValue): { dateFrom?: string; dateTo?: string } {
+  const from = range?.[0];
+  const to = range?.[1];
+  if (!from || !to) return {};
+  return {
+    dateFrom: from.format('YYYY-MM-DD'),
+    dateTo: to.format('YYYY-MM-DD'),
+  };
+}
+
+function parseOrderIdsValue(value: string | number[] | undefined): number[] | undefined {
+  if (Array.isArray(value)) {
+    const ids = value.filter((id) => Number.isInteger(id) && id > 0);
+    return ids.length > 0 ? ids : undefined;
+  }
+  const ids = parseIdCsv(value ?? '');
+  return ids.length > 0 ? ids : undefined;
+}
+
+function buildCutOrderOption(order: OrderListItemDto): CutOrderSelectOption {
+  const client = order.clientName ? ` · ${order.clientName}` : '';
+  const title = `${order.orderName} · ${order.orderDate}${client}`;
+  return {
+    value: order.orderId,
+    label: order.orderName,
+    title,
+    searchText: title.toLowerCase(),
+  };
+}
+
+async function fetchCutOrderOptions(dateFrom: string, dateTo: string): Promise<CutOrderSelectOption[]> {
+  const firstPage = await ordersApi.list({
+    page: 1,
+    pageSize: 200,
+    sortBy: 'orderDate',
+    sortOrder: 'desc',
+    dateFrom,
+    dateTo,
+  });
+  const orders = [...firstPage.data];
+  for (let page = 2; page <= firstPage.pagination.totalPages; page += 1) {
+    const nextPage = await ordersApi.list({
+      page,
+      pageSize: 200,
+      sortBy: 'orderDate',
+      sortOrder: 'desc',
+      dateFrom,
+      dateTo,
+    });
+    orders.push(...nextPage.data);
+  }
+  return orders.map(buildCutOrderOption);
+}
+
 /**
  * Backend-owned /cut page (CLAUDE.md principle 2/3): all reads and commands go
  * through cutApi (`/api/v1/cut-jobs`); the read-layer is never written from here.
@@ -257,6 +339,7 @@ interface CutPageProps {
 
 export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const canManage = can('cut.manage');
+  const canViewOrders = can('orders.view');
   const isEmbeddedOrder = Number.isInteger(embeddedOrderId) && (embeddedOrderId ?? 0) > 0;
   // Theme-aware bg for the sticky group header (app uses AntD dark/default
   // algorithm, no CSS vars — read the token directly).
@@ -298,7 +381,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // Open orders inside the app's keep-alive workspace tabs (same as the orders
   // list double-click), not a new browser tab.
   const { show } = useNavigation();
-  const [form] = Form.useForm<{ name: string; orderIds?: string; sheetMaterialTypeIds?: number[]; filmIds?: string }>();
+  const [form] = Form.useForm<CutCriteriaForm>();
+  const defaultOrderDateRange = useMemo(defaultCutOrderDateRange, []);
+  const watchedOrderDateRange = Form.useWatch('orderDateRange', form) as CutOrderDateRangeValue;
+  const orderDateCriteria = cutDateRangeToCriteria(watchedOrderDateRange ?? defaultOrderDateRange);
+  const orderDateFrom = orderDateCriteria.dateFrom;
+  const orderDateTo = orderDateCriteria.dateTo;
   const [job, setJob] = useState<CutJobDto | null>(null);
   const [selectedResult, setSelectedResult] = useState<CutResultSummary | null>(null);
   const [isFrozenResultSelection, setIsFrozenResultSelection] = useState(false);
@@ -422,6 +510,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [embeddedJobIds, setEmbeddedJobIds] = useState<Set<number> | null>(null);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
+  const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const orderOptionsSeqRef = useRef(0);
 
   // ── Manual layout editor state ──────────────────────────────────────────────
   // The group currently open for editing (null = no editor active).
@@ -546,9 +637,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         ? values.sheetMaterialTypeIds
         : undefined;
     return {
-      orderIds: isEmbeddedOrder ? [embeddedOrderId!] : parseIdCsv(values.orderIds ?? ''),
+      orderIds: isEmbeddedOrder ? [embeddedOrderId!] : parseOrderIdsValue(values.orderIds),
       sheetMaterialTypeIds,
       filmIds: parseIdCsv(values.filmIds ?? ''),
+      ...(!isEmbeddedOrder ? cutDateRangeToCriteria(values.orderDateRange) : {}),
     };
   }, [embeddedOrderId, form, isEmbeddedOrder]);
 
@@ -556,6 +648,27 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     const text = error instanceof ApiError ? error.message : fallback;
     message.error(text);
   }, []);
+
+  useEffect(() => {
+    if (isEmbeddedOrder || !canViewOrders || !orderDateFrom || !orderDateTo) {
+      setOrderOptions([]);
+      return;
+    }
+    const seq = ++orderOptionsSeqRef.current;
+    setOrdersLoading(true);
+    fetchCutOrderOptions(orderDateFrom, orderDateTo)
+      .then((options) => {
+        if (orderOptionsSeqRef.current !== seq) return;
+        setOrderOptions(options);
+      })
+      .catch((error) => {
+        if (orderOptionsSeqRef.current !== seq) return;
+        handleError(error, 'Не удалось загрузить заказы для раскроя');
+      })
+      .finally(() => {
+        if (orderOptionsSeqRef.current === seq) setOrdersLoading(false);
+      });
+  }, [canViewOrders, handleError, isEmbeddedOrder, orderDateFrom, orderDateTo]);
 
   const loadJobs = useCallback(async () => {
     setJobsLoading(true);
@@ -756,7 +869,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         const orderIds = isEmbeddedOrder ? [embeddedOrderId!] : distinctOrderIdsFromItems(fresh.items);
         form.setFieldsValue({
           name: fresh.name,
-          orderIds: orderIds.length > 0 ? orderIds.join(',') : undefined,
+          orderDateRange: undefined,
+          orderIds: orderIds.length > 0 ? (canViewOrders ? orderIds : orderIds.join(',')) : undefined,
           sheetMaterialTypeIds: undefined, // Variant B sunset: cleared the post-034 filter key
           filmIds: undefined,
         });
@@ -771,7 +885,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         if (openSeqRef.current === seq) setBusy(false);
       }
     },
-    [embeddedOrderId, form, handleError, isEmbeddedOrder, loadJobs, resetSheetViews],
+    [canViewOrders, embeddedOrderId, form, handleError, isEmbeddedOrder, loadJobs, resetSheetViews],
   );
 
   const openResult = useCallback(
@@ -1664,13 +1778,45 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         {!isEmbeddedOrder && <Title level={3}>Раскрой</Title>}
 
       <Card title="Критерии выборки" size="small">
-        <Form form={form} layout="inline" disabled={busy || !canManage}>
+        <Form form={form} layout="inline" disabled={busy || !canManage} initialValues={{ orderDateRange: defaultOrderDateRange }}>
           <Form.Item name="name" rules={[{ required: true, message: 'Укажите название' }]}>
             <Input placeholder="Название раскроя" />
           </Form.Item>
+          {!isEmbeddedOrder && (
+            <Form.Item name="orderDateRange">
+              <RangePicker
+                allowClear={false}
+                format="DD.MM.YYYY"
+                placeholder={['Дата от', 'Дата до']}
+                onChange={() => {
+                  if (canViewOrders) form.setFieldsValue({ orderIds: undefined });
+                }}
+                style={{ width: 250 }}
+                data-testid="cut-order-date-range"
+              />
+            </Form.Item>
+          )}
           {isEmbeddedOrder ? (
             <Form.Item name="orderIds" hidden>
               <Input />
+            </Form.Item>
+          ) : canViewOrders ? (
+            <Form.Item name="orderIds">
+              <Select<number[]>
+                mode="multiple"
+                allowClear
+                showSearch
+                maxTagCount="responsive"
+                placeholder="Заказ"
+                options={orderOptions}
+                loading={ordersLoading}
+                filterOption={(input, option) =>
+                  String((option as CutOrderSelectOption | undefined)?.searchText ?? '')
+                    .includes(input.trim().toLowerCase())
+                }
+                style={{ minWidth: 240 }}
+                data-testid="cut-order-select"
+              />
             </Form.Item>
           ) : (
             <Form.Item name="orderIds">

@@ -30,6 +30,20 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-26",
+    title: "Раскрой: фильтр заказов по дате",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В блоке создания задания на раскрой появился период дат заказов: по умолчанию выбран диапазон от 10 дней назад до текущей даты.",
+      "Поле «Заказ» стало выпадающим списком с номерами заказов из выбранного периода; поиск работает по номеру, клиенту и дате заказа.",
+    ],
+    changed: [
+      "Загрузка подходящих деталей и создание задания учитывают выбранный период, даже если конкретные заказы не выбраны вручную.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-25",
     title: "Редактор PDF-шаблонов карт раскроя",
     services: ["Cutting"],

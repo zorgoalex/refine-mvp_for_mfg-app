@@ -4,6 +4,8 @@ export interface CutSelectionCriteria {
   orderIds?: number[];
   filmIds?: number[];
   productionStatusIds?: number[];
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 export interface CreateCutJobRequest {

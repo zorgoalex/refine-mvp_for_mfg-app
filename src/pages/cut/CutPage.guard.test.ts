@@ -122,9 +122,21 @@ describe('CutPage source guards', () => {
     expect(source).toContain('form.setFieldsValue');
   });
 
+  it('filters cut creation orders by a default 10-day date range', () => {
+    expect(source).toContain('CUT_ORDER_LOOKBACK_DAYS = 10');
+    expect(source).toContain('defaultCutOrderDateRange');
+    expect(source).toContain('orderDateRange');
+    expect(source).toContain('cutDateRangeToCriteria');
+    expect(source).toContain('ordersApi.list');
+    expect(source).toContain('dateFrom');
+    expect(source).toContain('dateTo');
+    expect(source).toContain('data-testid="cut-order-date-range"');
+    expect(source).toContain('data-testid="cut-order-select"');
+  });
+
   it('supports embedded order mode: hard-scopes criteria and job list to one order', () => {
     expect(source).toContain('embeddedOrderId');
-    expect(source).toContain('isEmbeddedOrder ? [embeddedOrderId!] : parseIdCsv(values.orderIds');
+    expect(source).toContain('isEmbeddedOrder ? [embeddedOrderId!] : parseOrderIdsValue(values.orderIds)');
     expect(source).toContain("cutApi.listPlacements({ orderIds: [embeddedOrderId!] })");
     expect(source).toContain('embeddedJobIds?.has(candidate.cutJobId)');
     expect(source).toContain('candidate.items?.some((item) => item.orderId === embeddedOrderId)');

@@ -138,10 +138,20 @@ describe('CutController', () => {
   it('serves eligible-details as a backend read (no Hasura)', async () => {
     const listEligibleDetails = vi.fn(async () => ({ details: [], noSheetSpecCount: 4 }));
     const controller = createController({ service: { listEligibleDetails } });
-    const result = await controller.eligibleDetails({ user: currentUser() } as never, '42', { orderIds: '9,10' });
+    const result = await controller.eligibleDetails(
+      { user: currentUser() } as never,
+      '42',
+      { orderIds: '9,10', dateFrom: '2026-07-16', dateTo: '2026-07-26' },
+    );
     expect(result.noSheetSpecCount).toBe(4);
     expect(listEligibleDetails).toHaveBeenCalledWith(
-      expect.objectContaining({ criteria: expect.objectContaining({ orderIds: [9, 10] }) }),
+      expect.objectContaining({
+        criteria: expect.objectContaining({
+          orderIds: [9, 10],
+          dateFrom: '2026-07-16',
+          dateTo: '2026-07-26',
+        }),
+      }),
     );
   });
 
@@ -391,7 +401,13 @@ describe('CutController', () => {
     expect(parseCreateCutJobRequest({ name: 'Тест', detailIds: [1, 2] }).detailIds).toEqual([1, 2]);
     expect(() => parseCreateCutJobRequest({ name: '' })).toThrow(ApiError);
     expect(parseAddItemsRequest({ detailIds: [3], version: 2 }).version).toBe(2);
-    expect(parseEligibleCriteria({ orderIds: '9,10', filmIds: '5' })).toMatchObject({ orderIds: [9, 10], filmIds: [5] });
+    expect(parseEligibleCriteria({ orderIds: '9,10', filmIds: '5', dateFrom: '2026-07-16', dateTo: '2026-07-26' })).toMatchObject({
+      orderIds: [9, 10],
+      filmIds: [5],
+      dateFrom: '2026-07-16',
+      dateTo: '2026-07-26',
+    });
+    expect(() => parseEligibleCriteria({ dateFrom: '16.07.2026' })).toThrow(ApiError);
   });
 
   // Task 7: parseVariant

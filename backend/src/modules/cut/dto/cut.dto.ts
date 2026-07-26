@@ -8,6 +8,10 @@ export interface CutSelectionCriteriaDto {
   orderIds?: number[];
   filmIds?: number[];
   productionStatusIds?: number[];
+  /** Inclusive filter by orders.order_date. */
+  dateFrom?: string;
+  /** Inclusive filter by orders.order_date. */
+  dateTo?: string;
 }
 
 export interface CreateCutJobRequestDto {

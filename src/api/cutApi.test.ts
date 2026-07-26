@@ -15,6 +15,7 @@ describe('cutApi', () => {
 
   it('builds a CSV eligible-details query string from criteria', () => {
     expect(buildEligibleQuery({ orderIds: [9, 10], filmIds: [5] })).toBe('orderIds=9%2C10&filmIds=5');
+    expect(buildEligibleQuery({ dateFrom: '2026-07-16', dateTo: '2026-07-26' })).toBe('dateFrom=2026-07-16&dateTo=2026-07-26');
     expect(buildEligibleQuery({})).toBe('');
   });
 

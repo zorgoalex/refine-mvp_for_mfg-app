@@ -292,12 +292,20 @@ export function buildEligibleQuery(criteria: CutSelectionCriteria): string {
   appendCsv(params, 'sheetMaterialTypeIds', criteria.sheetMaterialTypeIds);
   appendCsv(params, 'filmIds', criteria.filmIds);
   appendCsv(params, 'productionStatusIds', criteria.productionStatusIds);
+  appendDate(params, 'dateFrom', criteria.dateFrom);
+  appendDate(params, 'dateTo', criteria.dateTo);
   return params.toString();
 }
 
 function appendCsv(params: URLSearchParams, key: string, values: number[] | undefined): void {
   if (values && values.length > 0) {
     params.append(key, values.join(','));
+  }
+}
+
+function appendDate(params: URLSearchParams, key: string, value: string | undefined): void {
+  if (value) {
+    params.append(key, value);
   }
 }
 

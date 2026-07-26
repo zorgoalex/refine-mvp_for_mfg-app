@@ -30,6 +30,8 @@ const criteriaSchema = z
     orderIds: idArray.optional(),
     filmIds: idArray.optional(),
     productionStatusIds: idArray.optional(),
+    dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   })
   .strict();
 
@@ -919,6 +921,8 @@ export function parseEligibleCriteria(query: Record<string, string>): CutSelecti
     orderIds: parseCsvIds(query.orderIds),
     filmIds: parseCsvIds(query.filmIds),
     productionStatusIds: parseCsvIds(query.productionStatusIds),
+    dateFrom: parseOptionalDateOnly(query.dateFrom, 'dateFrom'),
+    dateTo: parseOptionalDateOnly(query.dateTo, 'dateTo'),
   };
 }
 
@@ -929,6 +933,16 @@ function parseCsvIds(value: string | undefined): number[] | undefined {
     .map((part) => Number(part.trim()))
     .filter((n) => Number.isInteger(n) && n > 0);
   return ids.length ? ids : undefined;
+}
+
+function parseOptionalDateOnly(value: string | undefined, field: string): string | undefined {
+  if (!value) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Cut job payload validation failed', {
+      errors: [{ field, message: `${field} must use YYYY-MM-DD format` }],
+    });
+  }
+  return value;
 }
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
