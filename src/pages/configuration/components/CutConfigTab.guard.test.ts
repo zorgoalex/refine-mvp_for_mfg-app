@@ -133,6 +133,10 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/readPdfDetailTableColumns/);
     expect(tabSrc).toMatch(/CUT_PDF_FIELD_DRAG_TYPE/);
     expect(tabSrc).toMatch(/resolveDroppedPdfField/);
+    expect(tabSrc).toMatch(/wideCanvas/);
+    expect(tabSrc).toMatch(/Широкий визуал/);
+    expect(tabSrc).toMatch(/xl=\{wideCanvas \? 24 : 12\}/);
+    expect(tabSrc).toMatch(/ResizeObserver/);
     expect(tabSrc).not.toMatch(/onMouseDown=\{\(event\)[\s\S]{0,140}event\.preventDefault\(\)[\s\S]{0,140}onBeginDrag\(field\)/);
     expect(tabSrc).not.toMatch(/setCustomFieldsFromText/);
   });

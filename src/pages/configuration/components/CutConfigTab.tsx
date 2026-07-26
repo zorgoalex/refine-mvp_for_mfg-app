@@ -564,6 +564,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   const [fieldSearch, setFieldSearch] = useState('');
   const [draggingField, setDraggingField] = useState<PdfFieldCatalogItem | null>(null);
   const [showAllBounds, setShowAllBounds] = useState(false);
+  const [wideCanvas, setWideCanvas] = useState(false);
   const selectedElement = selected?.elements.find((element) => element.id === selectedElementId) ?? selected?.elements[0] ?? null;
   const customFields = selected?.customFields ?? [];
   const customFieldCatalog = useMemo<PdfFieldCatalogItem[]>(
@@ -838,6 +839,139 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     },
   ];
 
+  const renderFieldPanel = () => (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Card size="small" title="Поля карты раскроя PDF">
+        {fieldCatalogError && <Alert type="warning" showIcon message={fieldCatalogError} style={{ marginBottom: 8 }} />}
+        <PdfFieldPalette
+          fields={fields}
+          usedFieldIds={usedFieldIds}
+          disabled={!canManage}
+          search={fieldSearch}
+          onSearch={setFieldSearch}
+          onBeginDrag={setDraggingField}
+          onEndDrag={() => setDraggingField(null)}
+          onAddField={addFieldElement}
+        />
+      </Card>
+      <Collapse>
+        <Panel header="Пользовательские поля" key="custom-fields">
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Button size="small" icon={<PlusOutlined />} disabled={!canManage} onClick={addCustomField}>
+              Добавить поле
+            </Button>
+            <Table<CustomFieldSchemaRow>
+              rowKey="fieldId"
+              size="small"
+              pagination={false}
+              dataSource={customFields}
+              columns={[
+                {
+                  title: 'Ключ',
+                  width: 116,
+                  render: (_, row) => (
+                    <Input size="small" value={row.fieldId} disabled={!canManage} onChange={(event) => patchCustomField(row.fieldId, { fieldId: event.target.value.trim() })} />
+                  ),
+                },
+                {
+                  title: 'Название',
+                  render: (_, row) => <Input size="small" value={row.label} disabled={!canManage} onChange={(event) => patchCustomField(row.fieldId, { label: event.target.value })} />,
+                },
+                {
+                  title: 'Тип',
+                  width: 92,
+                  render: (_, row) => (
+                    <Select
+                      size="small"
+                      value={row.type}
+                      disabled={!canManage || row.valueMode === 'expression'}
+                      options={PDF_CUSTOM_FIELD_TYPE_OPTIONS}
+                      onChange={(type) => patchCustomField(row.fieldId, { type })}
+                    />
+                  ),
+                },
+                {
+                  title: 'Значение',
+                  render: (_, row) => (
+                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                      <Select
+                        size="small"
+                        value={row.valueMode}
+                        disabled={!canManage}
+                        options={[
+                          { value: 'source', label: 'Из поля' },
+                          { value: 'constant', label: 'Константа' },
+                          { value: 'expression', label: 'Формула' },
+                        ]}
+                        onChange={(valueMode) => setCustomFieldValueMode(row, valueMode)}
+                      />
+                      {row.valueMode === 'source' && (
+                        <Select
+                          showSearch
+                          size="small"
+                          value={row.sourceField ?? undefined}
+                          disabled={!canManage}
+                          options={fieldCatalog.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
+                          onChange={(sourceField) => patchCustomField(row.fieldId, { sourceField })}
+                        />
+                      )}
+                      {row.valueMode === 'constant' && (
+                        <Input
+                          size="small"
+                          value={String(row.defaultValue ?? '')}
+                          disabled={!canManage}
+                          onChange={(event) => patchCustomField(row.fieldId, { defaultValue: event.target.value })}
+                        />
+                      )}
+                      {row.valueMode === 'expression' && (
+                        <Space size={4} wrap>
+                          <Button size="small" disabled={!canManage} onClick={() => setEditingCustomFieldId(row.fieldId)}>
+                            Формула
+                          </Button>
+                          {row.expression && !isCustomFieldExpressionValid(row.expression, allowedExpressionFieldIds) && <Tag color="error">Ошибка</Tag>}
+                          {row.expression && <Text type="secondary">{summarizeCustomFieldExpression(row.expression, fieldLabels)}</Text>}
+                        </Space>
+                      )}
+                    </Space>
+                  ),
+                },
+                {
+                  title: '',
+                  width: 38,
+                  render: (_, row) => <Button size="small" danger icon={<DeleteOutlined />} disabled={!canManage} onClick={() => removeCustomField(row.fieldId)} />,
+                },
+              ]}
+            />
+          </Space>
+        </Panel>
+      </Collapse>
+    </Space>
+  );
+
+  const renderElementPanel = () => (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Table<PdfTemplateElement>
+        size="small"
+        rowKey="id"
+        columns={elementRows}
+        dataSource={selected.elements.slice().sort((a, b) => a.zIndex - b.zIndex)}
+        pagination={false}
+        scroll={{ y: wideCanvas ? 320 : 260 }}
+        rowClassName={(row) => (row.id === selectedElement?.id ? 'ant-table-row-selected' : '')}
+        onRow={(row) => ({ onClick: () => setSelectedElementId(row.id), style: { cursor: 'pointer' } })}
+      />
+      {selectedElement && (
+        <PdfElementProperties
+          element={selectedElement}
+          fields={fields}
+          canManage={canManage}
+          onPatch={updateElement}
+          onDelete={() => deleteElement(selectedElement.id)}
+        />
+      )}
+    </Space>
+  );
+
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Space wrap align="center">
@@ -883,120 +1017,26 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         </Button>
       </Space>
 
-      <Row gutter={16} align="top">
-        <Col xs={24} xl={6}>
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Card size="small" title="Поля карты раскроя PDF">
-              {fieldCatalogError && <Alert type="warning" showIcon message={fieldCatalogError} style={{ marginBottom: 8 }} />}
-              <PdfFieldPalette
-                fields={fields}
-                usedFieldIds={usedFieldIds}
-                disabled={!canManage}
-                search={fieldSearch}
-                onSearch={setFieldSearch}
-                onBeginDrag={setDraggingField}
-                onEndDrag={() => setDraggingField(null)}
-                onAddField={addFieldElement}
-              />
-            </Card>
-            <Collapse>
-              <Panel header="Пользовательские поля" key="custom-fields">
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Button size="small" icon={<PlusOutlined />} disabled={!canManage} onClick={addCustomField}>
-                    Добавить поле
-                  </Button>
-                  <Table<CustomFieldSchemaRow>
-                    rowKey="fieldId"
-                    size="small"
-                    pagination={false}
-                    dataSource={customFields}
-                    columns={[
-                      {
-                        title: 'Ключ',
-                        width: 116,
-                        render: (_, row) => (
-                          <Input size="small" value={row.fieldId} disabled={!canManage} onChange={(event) => patchCustomField(row.fieldId, { fieldId: event.target.value.trim() })} />
-                        ),
-                      },
-                      {
-                        title: 'Название',
-                        render: (_, row) => <Input size="small" value={row.label} disabled={!canManage} onChange={(event) => patchCustomField(row.fieldId, { label: event.target.value })} />,
-                      },
-                      {
-                        title: 'Тип',
-                        width: 92,
-                        render: (_, row) => (
-                          <Select
-                            size="small"
-                            value={row.type}
-                            disabled={!canManage || row.valueMode === 'expression'}
-                            options={PDF_CUSTOM_FIELD_TYPE_OPTIONS}
-                            onChange={(type) => patchCustomField(row.fieldId, { type })}
-                          />
-                        ),
-                      },
-                      {
-                        title: 'Значение',
-                        render: (_, row) => (
-                          <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                            <Select
-                              size="small"
-                              value={row.valueMode}
-                              disabled={!canManage}
-                              options={[
-                                { value: 'source', label: 'Из поля' },
-                                { value: 'constant', label: 'Константа' },
-                                { value: 'expression', label: 'Формула' },
-                              ]}
-                              onChange={(valueMode) => setCustomFieldValueMode(row, valueMode)}
-                            />
-                            {row.valueMode === 'source' && (
-                              <Select
-                                showSearch
-                                size="small"
-                                value={row.sourceField ?? undefined}
-                                disabled={!canManage}
-                                options={fieldCatalog.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
-                                onChange={(sourceField) => patchCustomField(row.fieldId, { sourceField })}
-                              />
-                            )}
-                            {row.valueMode === 'constant' && (
-                              <Input
-                                size="small"
-                                value={String(row.defaultValue ?? '')}
-                                disabled={!canManage}
-                                onChange={(event) => patchCustomField(row.fieldId, { defaultValue: event.target.value })}
-                              />
-                            )}
-                            {row.valueMode === 'expression' && (
-                              <Space size={4} wrap>
-                                <Button size="small" disabled={!canManage} onClick={() => setEditingCustomFieldId(row.fieldId)}>
-                                  Формула
-                                </Button>
-                                {row.expression && !isCustomFieldExpressionValid(row.expression, allowedExpressionFieldIds) && <Tag color="error">Ошибка</Tag>}
-                                {row.expression && <Text type="secondary">{summarizeCustomFieldExpression(row.expression, fieldLabels)}</Text>}
-                              </Space>
-                            )}
-                          </Space>
-                        ),
-                      },
-                      {
-                        title: '',
-                        width: 38,
-                        render: (_, row) => <Button size="small" danger icon={<DeleteOutlined />} disabled={!canManage} onClick={() => removeCustomField(row.fieldId)} />,
-                      },
-                    ]}
-                  />
-                </Space>
-              </Panel>
-            </Collapse>
-          </Space>
-        </Col>
-        <Col xs={24} xl={12}>
+      <Row gutter={[16, 16]} align="top">
+        {!wideCanvas && (
+          <Col xs={24} xl={6}>
+            {renderFieldPanel()}
+          </Col>
+        )}
+        <Col xs={24} xl={wideCanvas ? 24 : 12}>
           <Card
             size="small"
             title="Визуал карты раскроя PDF"
-            extra={<Checkbox checked={showAllBounds} onChange={(event) => setShowAllBounds(event.target.checked)}>Границы</Checkbox>}
+            extra={(
+              <Space size={12} wrap>
+                <Checkbox checked={wideCanvas} onChange={(event) => setWideCanvas(event.target.checked)}>
+                  Широкий визуал
+                </Checkbox>
+                <Checkbox checked={showAllBounds} onChange={(event) => setShowAllBounds(event.target.checked)}>
+                  Границы
+                </Checkbox>
+              </Space>
+            )}
           >
             <PdfTemplateCanvas
               draft={selected}
@@ -1005,6 +1045,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
               selectedElementId={selectedElementId}
               canManage={canManage}
               showAllBounds={showAllBounds}
+              wideCanvas={wideCanvas}
               draggingField={draggingField}
               onSelect={setSelectedElementId}
               onPatch={patchElementById}
@@ -1018,29 +1059,21 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
             />
           </Card>
         </Col>
-        <Col xs={24} xl={6}>
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Table<PdfTemplateElement>
-              size="small"
-              rowKey="id"
-              columns={elementRows}
-              dataSource={selected.elements.slice().sort((a, b) => a.zIndex - b.zIndex)}
-              pagination={false}
-              scroll={{ y: 260 }}
-              rowClassName={(row) => (row.id === selectedElement?.id ? 'ant-table-row-selected' : '')}
-              onRow={(row) => ({ onClick: () => setSelectedElementId(row.id), style: { cursor: 'pointer' } })}
-            />
-            {selectedElement && (
-              <PdfElementProperties
-                element={selectedElement}
-                fields={fields}
-                canManage={canManage}
-                onPatch={updateElement}
-                onDelete={() => deleteElement(selectedElement.id)}
-              />
-            )}
-          </Space>
-        </Col>
+        {!wideCanvas && (
+          <Col xs={24} xl={6}>
+            {renderElementPanel()}
+          </Col>
+        )}
+        {wideCanvas && (
+          <>
+            <Col xs={24} xl={12}>
+              {renderFieldPanel()}
+            </Col>
+            <Col xs={24} xl={12}>
+              {renderElementPanel()}
+            </Col>
+          </>
+        )}
       </Row>
       <Modal
         title={editingCustomField ? `Формула: ${editingCustomField.label || editingCustomField.fieldId}` : 'Формула'}
@@ -1074,6 +1107,7 @@ const PdfTemplateCanvas: React.FC<{
   selectedElementId: string | null;
   canManage: boolean;
   showAllBounds: boolean;
+  wideCanvas: boolean;
   draggingField: PdfFieldCatalogItem | null;
   onSelect: (id: string | null) => void;
   onPatch: (id: string, patch: Partial<PdfTemplateElement>) => void;
@@ -1081,21 +1115,37 @@ const PdfTemplateCanvas: React.FC<{
   onDuplicate: (id: string) => void;
   onMoveZ: (id: string, direction: 'front' | 'back') => void;
   onDropField: (field: PdfFieldCatalogItem, x: number, y: number) => void;
-}> = ({ draft, fields, previewValues, selectedElementId, canManage, showAllBounds, draggingField, onSelect, onPatch, onDelete, onDuplicate, onMoveZ, onDropField }) => {
+}> = ({ draft, fields, previewValues, selectedElementId, canManage, showAllBounds, wideCanvas, draggingField, onSelect, onPatch, onDelete, onDuplicate, onMoveZ, onDropField }) => {
   const stageRef = useRef<Konva.Stage | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const nodeRefs = useRef(new Map<string, Konva.Node>());
   const [zoom, setZoom] = useState(1);
+  const [viewportWidth, setViewportWidth] = useState(0);
   const [showGrid, setShowGrid] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [contextMenu, setContextMenu] = useState<{ element: PdfTemplateElement; x: number; y: number } | null>(null);
   const page = draft.page;
-  const previewWidth = Math.round(Math.min(900, Math.max(520, page.width * 3)) * zoom);
+  const defaultPreviewBaseWidth = Math.min(900, Math.max(520, page.width * 3));
+  const widePreviewBaseWidth = viewportWidth > 0 ? Math.max(320, viewportWidth) : defaultPreviewBaseWidth;
+  const previewWidth = Math.round((wideCanvas ? widePreviewBaseWidth : defaultPreviewBaseWidth) * zoom);
   const previewHeight = previewWidth * (page.height / page.width);
   const selected = draft.elements.find((element) => element.id === selectedElementId) ?? null;
   const selectedLocked = Boolean(selected?.style.locked);
   const fieldLabels = useMemo(() => new Map(fields.map((field) => [field.id, field.label])), [fields]);
   const sorted = draft.elements.slice().sort((a, b) => a.zIndex - b.zIndex);
+
+  useEffect(() => {
+    const node = viewportRef.current;
+    if (!node) return;
+    setViewportWidth(Math.round(node.getBoundingClientRect().width));
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      setViewportWidth(Math.round(entries[0]?.contentRect.width ?? 0));
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!canManage || !selectedElementId || selectedLocked || draggingField) {
@@ -1187,115 +1237,125 @@ const PdfTemplateCanvas: React.FC<{
         <Button size="small" onClick={() => setZoom(1)}>100%</Button>
       </Space>
       <div
-        role="img"
-        aria-label="Редактор шаблона карты раскроя PDF"
-        tabIndex={canManage ? 0 : undefined}
+        ref={viewportRef}
         style={{
           width: '100%',
-          maxWidth: previewWidth,
-          aspectRatio: `${page.width} / ${page.height}`,
-          background: '#fff',
-          border: '1px solid #d9d9d9',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.08), 0 12px 32px rgba(15,23,42,0.08)',
-          overflow: 'hidden',
-          position: 'relative',
-          outline: 'none',
-        }}
-        onDragOver={(event) => {
-          if (!canManage || (!draggingField && !isCutPdfFieldDragEvent(event))) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'copy';
-        }}
-        onDrop={(event) => {
-          if (!canManage) return;
-          const field = resolveDroppedPdfField(fields, event, draggingField);
-          if (!field) return;
-          event.preventDefault();
-          const point = pointFromEvent(event);
-          onDropField(field, clamp(point.x, 0, page.width - 1), clamp(point.y, 0, page.height - 1));
-        }}
-        onKeyDown={keyDown}
-        onContextMenu={(event) => {
-          event.preventDefault();
-          openContextMenu(pointFromEvent(event));
+          overflowX: wideCanvas ? 'auto' : 'hidden',
+          overflowY: 'hidden',
+          paddingBottom: wideCanvas ? 8 : 0,
         }}
       >
-        <Stage
-          ref={stageRef}
-          width={previewWidth}
-          height={previewHeight}
-          scaleX={previewWidth / page.width}
-          scaleY={previewHeight / page.height}
-          onMouseDown={(event) => {
-            if (event.target === event.target.getStage()) onSelect(null);
-            if (event.evt.button === 2) {
-              event.evt.preventDefault();
-              const pointer = event.target.getStage()?.getPointerPosition();
-              if (pointer) openContextMenu({ x: (pointer.x / previewWidth) * page.width, y: (pointer.y / previewHeight) * page.height });
-            }
+        <div
+          role="img"
+          aria-label="Редактор шаблона карты раскроя PDF"
+          tabIndex={canManage ? 0 : undefined}
+          style={{
+            width: wideCanvas ? previewWidth : '100%',
+            maxWidth: wideCanvas ? undefined : previewWidth,
+            aspectRatio: `${page.width} / ${page.height}`,
+            background: '#fff',
+            border: '1px solid #d9d9d9',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.08), 0 12px 32px rgba(15,23,42,0.08)',
+            overflow: 'hidden',
+            position: 'relative',
+            outline: 'none',
           }}
-          onWheel={(event) => {
-            if (!event.evt.ctrlKey) return;
-            event.evt.preventDefault();
-            setZoom((value) => clamp(Math.round((value + (event.evt.deltaY > 0 ? -0.1 : 0.1)) * 10) / 10, 0.5, 2.2));
+          onDragOver={(event) => {
+            if (!canManage || (!draggingField && !isCutPdfFieldDragEvent(event))) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+          }}
+          onDrop={(event) => {
+            if (!canManage) return;
+            const field = resolveDroppedPdfField(fields, event, draggingField);
+            if (!field) return;
+            event.preventDefault();
+            const point = pointFromEvent(event);
+            onDropField(field, clamp(point.x, 0, page.width - 1), clamp(point.y, 0, page.height - 1));
+          }}
+          onKeyDown={keyDown}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            openContextMenu(pointFromEvent(event));
           }}
         >
-          <Layer>
-            <KonvaRect x={0} y={0} width={page.width} height={page.height} fill="#fff" listening={false} />
-            {showGrid && renderPdfGrid(page.width, page.height)}
-            {sorted.map((element) => (
-              <PdfKonvaElement
-                key={element.id}
-                element={element}
-                fieldLabels={fieldLabels}
-                previewValues={previewValues}
-                selected={element.id === selectedElementId}
-                interactive={canManage && !draggingField}
-                showAllBounds={showAllBounds}
-                nodeRef={(node) => {
-                  if (node) nodeRefs.current.set(element.id, node);
-                  else nodeRefs.current.delete(element.id);
-                }}
-                onSelect={() => onSelect(element.id)}
-                onMove={(x, y, event) => moveElement(element, x, y, event)}
-                onTransformEnd={(node, event) => transformEnd(element, node, event)}
-              />
-            ))}
-            {canManage && !draggingField && (
-              <Transformer
-                ref={transformerRef}
-                rotateEnabled
-                enabledAnchors={selected?.type === 'line' ? ['middle-left', 'middle-right'] : undefined}
-                boundBoxFunc={(oldBox, newBox) => (newBox.width < 2 || newBox.height < 2 ? oldBox : newBox)}
-              />
-            )}
-          </Layer>
-        </Stage>
-        {contextMenu && (
-          <div
-            style={{
-              position: 'absolute',
-              left: Math.min(contextMenu.x + 6, Math.max(8, previewWidth - 190)),
-              top: Math.min(contextMenu.y + 6, Math.max(8, previewHeight - 216)),
-              zIndex: 3,
-              minWidth: 180,
-              padding: 4,
-              background: '#fff',
-              border: '1px solid #d9d9d9',
-              borderRadius: 4,
-              boxShadow: '0 6px 16px rgba(0,0,0,0.16)',
+          <Stage
+            ref={stageRef}
+            width={previewWidth}
+            height={previewHeight}
+            scaleX={previewWidth / page.width}
+            scaleY={previewHeight / page.height}
+            onMouseDown={(event) => {
+              if (event.target === event.target.getStage()) onSelect(null);
+              if (event.evt.button === 2) {
+                event.evt.preventDefault();
+                const pointer = event.target.getStage()?.getPointerPosition();
+                if (pointer) openContextMenu({ x: (pointer.x / previewWidth) * page.width, y: (pointer.y / previewHeight) * page.height });
+              }
             }}
-            onMouseLeave={() => setContextMenu(null)}
+            onWheel={(event) => {
+              if (!event.evt.ctrlKey) return;
+              event.evt.preventDefault();
+              setZoom((value) => clamp(Math.round((value + (event.evt.deltaY > 0 ? -0.1 : 0.1)) * 10) / 10, 0.5, 2.2));
+            }}
           >
-            <Button type="text" size="small" block onClick={() => { onPatch(contextMenu.element.id, { style: { ...contextMenu.element.style, locked: !contextMenu.element.style.locked } }); setContextMenu(null); }}>
-              {contextMenu.element.style.locked ? 'Разблокировать' : 'Заблокировать'}
-            </Button>
-            <Button type="text" size="small" block onClick={() => { onDuplicate(contextMenu.element.id); setContextMenu(null); }}>Сделать копию</Button>
-            <Button type="text" size="small" block onClick={() => { onMoveZ(contextMenu.element.id, 'front'); setContextMenu(null); }}>На передний план</Button>
-            <Button type="text" size="small" block onClick={() => { onMoveZ(contextMenu.element.id, 'back'); setContextMenu(null); }}>На задний план</Button>
-            <Button danger type="text" size="small" block onClick={() => { onDelete(contextMenu.element.id); setContextMenu(null); }}>Удалить</Button>
-          </div>
-        )}
+            <Layer>
+              <KonvaRect x={0} y={0} width={page.width} height={page.height} fill="#fff" listening={false} />
+              {showGrid && renderPdfGrid(page.width, page.height)}
+              {sorted.map((element) => (
+                <PdfKonvaElement
+                  key={element.id}
+                  element={element}
+                  fieldLabels={fieldLabels}
+                  previewValues={previewValues}
+                  selected={element.id === selectedElementId}
+                  interactive={canManage && !draggingField}
+                  showAllBounds={showAllBounds}
+                  nodeRef={(node) => {
+                    if (node) nodeRefs.current.set(element.id, node);
+                    else nodeRefs.current.delete(element.id);
+                  }}
+                  onSelect={() => onSelect(element.id)}
+                  onMove={(x, y, event) => moveElement(element, x, y, event)}
+                  onTransformEnd={(node, event) => transformEnd(element, node, event)}
+                />
+              ))}
+              {canManage && !draggingField && (
+                <Transformer
+                  ref={transformerRef}
+                  rotateEnabled
+                  enabledAnchors={selected?.type === 'line' ? ['middle-left', 'middle-right'] : undefined}
+                  boundBoxFunc={(oldBox, newBox) => (newBox.width < 2 || newBox.height < 2 ? oldBox : newBox)}
+                />
+              )}
+            </Layer>
+          </Stage>
+          {contextMenu && (
+            <div
+              style={{
+                position: 'absolute',
+                left: Math.min(contextMenu.x + 6, Math.max(8, previewWidth - 190)),
+                top: Math.min(contextMenu.y + 6, Math.max(8, previewHeight - 216)),
+                zIndex: 3,
+                minWidth: 180,
+                padding: 4,
+                background: '#fff',
+                border: '1px solid #d9d9d9',
+                borderRadius: 4,
+                boxShadow: '0 6px 16px rgba(0,0,0,0.16)',
+              }}
+              onMouseLeave={() => setContextMenu(null)}
+            >
+              <Button type="text" size="small" block onClick={() => { onPatch(contextMenu.element.id, { style: { ...contextMenu.element.style, locked: !contextMenu.element.style.locked } }); setContextMenu(null); }}>
+                {contextMenu.element.style.locked ? 'Разблокировать' : 'Заблокировать'}
+              </Button>
+              <Button type="text" size="small" block onClick={() => { onDuplicate(contextMenu.element.id); setContextMenu(null); }}>Сделать копию</Button>
+              <Button type="text" size="small" block onClick={() => { onMoveZ(contextMenu.element.id, 'front'); setContextMenu(null); }}>На передний план</Button>
+              <Button type="text" size="small" block onClick={() => { onMoveZ(contextMenu.element.id, 'back'); setContextMenu(null); }}>На задний план</Button>
+              <Button danger type="text" size="small" block onClick={() => { onDelete(contextMenu.element.id); setContextMenu(null); }}>Удалить</Button>
+            </div>
+          )}
+        </div>
       </div>
     </Space>
   );
