@@ -73,8 +73,12 @@ describe('CutConfigAdminService RBAC', () => {
     expect(fields.map((field) => field.id)).toEqual(expect.arrayContaining([
       'sheet.thumbnail',
       'detail.table',
+      'detail.materials',
       'detail.order',
+      'detail.detail_name',
     ]));
+    expect(fields.find((field) => field.id === 'detail.order')).toMatchObject({ source: 'detail' });
+    expect(fields.find((field) => field.id === 'detail.materials')).toMatchObject({ source: 'detail' });
     expect(fields.some((field) => field.source === 'bazis')).toBe(true);
   });
 
@@ -144,8 +148,9 @@ describe('CutConfigAdminService RBAC', () => {
                   columns: [
                     { field: 'detail.row_number', label: '#', width: 0.55, visible: true },
                     { field: 'detail.order', label: 'Заказ', width: 1.6, visible: true },
+                    { field: 'detail.detail_name', label: 'Название детали', width: 1.8, visible: true },
                   ],
-                  sort: { field: 'detail.row_number', direction: 'asc' },
+                  sort: { field: 'detail.detail_name', direction: 'asc' },
                 },
               },
             ],
@@ -154,5 +159,45 @@ describe('CutConfigAdminService RBAC', () => {
       }),
     ).resolves.toMatchObject({ cutPdfTemplateId: 1 });
     expect(port.upsertPdfTemplate).toHaveBeenCalledWith(expect.objectContaining({ id: 2, expectedVersion: 3 }));
+  });
+
+  it('rejects non-detail fields in v3 PDF detail table columns', async () => {
+    const port = fakePort();
+    const service = new CutConfigAdminService({ config: port });
+
+    await expect(
+      service.upsertPdfTemplate({
+        currentUser: user(['cut.view', 'cut.manage']),
+        id: 2,
+        expectedVersion: 3,
+        input: {
+          name: 'standard',
+          layout: {
+            version: 3,
+            page: { width: 297, height: 210 },
+            customFieldSchema: {},
+            elements: [
+              {
+                id: 'detail-table',
+                type: 'detail_table',
+                source: 'detail.table',
+                x: 222,
+                y: 34,
+                w: 60,
+                h: 78,
+                rotation: 0,
+                zIndex: 1,
+                align: 'center',
+                style: {
+                  columns: [{ field: 'order.unique_names', label: 'Заказ', width: 1.6, visible: true }],
+                  sort: { field: 'detail.order', direction: 'asc' },
+                },
+              },
+            ],
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'CUT_PDF_TEMPLATE_LAYOUT_INVALID' });
+    expect(port.upsertPdfTemplate).not.toHaveBeenCalled();
   });
 });

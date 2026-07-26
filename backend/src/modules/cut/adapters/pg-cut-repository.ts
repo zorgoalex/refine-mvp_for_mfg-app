@@ -124,6 +124,7 @@ import {
   CutSheetMaterialNotCuttableError,
   CutStaleVersionError,
 } from '../errors/cut.errors';
+import type { LabelCustomExpressionScalar } from '../../labels/application/label-custom-field-expression';
 
 const AUDIT_SOURCE = 'backend-cut-command';
 
@@ -151,9 +152,13 @@ interface RenderDetailInfo {
   detailNumber: number | null;
   widthMm: number | null;
   heightMm: number | null;
+  detailFields: Record<string, unknown> | null;
   materialName: string | null;
   thicknessMm: number | null;
   filmName: string | null;
+  millingTypeName: string | null;
+  edgeTypeName: string | null;
+  productionStatusName: string | null;
   orderName: string | null;
   orderDate: string | null;
   readyDate: string | null;
@@ -2712,6 +2717,7 @@ export class PgCutRepository implements CutRepositoryPort {
     const items = await client.query<{
       order_detail_id: string | number;
       order_id: string | number;
+      detail_fields: Record<string, unknown> | null;
       detail_number: string | number | null;
       width: string | number | null;
       height: string | number | null;
@@ -2720,6 +2726,9 @@ export class PgCutRepository implements CutRepositoryPort {
       material_name: string | null;
       thickness_mm: string | number | null;
       film_name: string | null;
+      milling_type_name: string | null;
+      edge_type_name: string | null;
+      production_status_name: string | null;
       order_name: string | null;
       order_date: string | Date | null;
       completion_date: string | Date | null;
@@ -2731,10 +2740,12 @@ export class PgCutRepository implements CutRepositoryPort {
       // IDENTITY for mixed-material detection (two catalog rows can share a name).
       // Matches the FE preview overlay and the ENRICHED_ITEMS_QUERY resolution.
       `SELECT cji.order_detail_id, cji.order_id,
+              to_jsonb(od) AS detail_fields,
               od.detail_number, od.width, od.height,
               od.sheet_material_type_id, od.material_id,
               COALESCE(smt.name, m.material_name) AS material_name,
               smt.thickness_mm, f.film_name,
+              mt.milling_type_name, et.edge_type_name, ps.production_status_name,
               o.order_name, o.order_date, o.completion_date, o.planned_completion_date,
               c.client_name
        FROM cut_job_item cji
@@ -2742,6 +2753,9 @@ export class PgCutRepository implements CutRepositoryPort {
        LEFT JOIN materials m ON m.material_id = od.material_id
        LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
        LEFT JOIN films f ON f.film_id = od.film_id
+       LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
+       LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
+       LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
        LEFT JOIN orders o ON o.order_id = cji.order_id
        LEFT JOIN clients c ON c.client_id = o.client_id
        WHERE cji.cut_group_id = $1
@@ -2761,9 +2775,13 @@ export class PgCutRepository implements CutRepositoryPort {
         detailNumber: numOrNull(row.detail_number),
         widthMm: numOrNull(row.width),
         heightMm: numOrNull(row.height),
+        detailFields: row.detail_fields ?? null,
         materialName: row.material_name ?? null,
         thicknessMm: numOrNull(row.thickness_mm),
         filmName: row.film_name ?? null,
+        millingTypeName: row.milling_type_name ?? null,
+        edgeTypeName: row.edge_type_name ?? null,
+        productionStatusName: row.production_status_name ?? null,
         orderName: row.order_name ?? null,
         orderDate: dateOnly(row.order_date),
         readyDate: dateOnly(row.completion_date) ?? dateOnly(row.planned_completion_date),
@@ -4046,6 +4064,19 @@ function buildPdfDetailRows(
       lengthMm,
       widthMm,
       quantity: 1,
+      fields: buildPdfDetailRowFields(detail, detailId, {
+        order,
+        position,
+        lengthMm,
+        widthMm,
+        quantity: 1,
+        material: detail?.materialName ?? null,
+        film: detail?.filmName ?? null,
+        client: detail?.clientName ?? null,
+        orderDate: detail?.orderDate ?? null,
+        readyDate: detail?.readyDate ?? null,
+        thickness: detail?.thicknessMm ?? null,
+      }),
       material: detail?.materialName ?? null,
       film: detail?.filmName ?? null,
       client: detail?.clientName ?? null,
@@ -4069,11 +4100,70 @@ function buildPdfDetailRows(
     const existing = byKey.get(key);
     if (existing) {
       existing.quantity += 1;
+      existing.fields = { ...(existing.fields ?? {}), quantity: existing.quantity, sheet_quantity: existing.quantity };
     } else {
       byKey.set(key, row);
     }
   }
   return [...byKey.values()].sort((a, b) => Number(a.position) - Number(b.position));
+}
+
+function buildPdfDetailRowFields(
+  detail: RenderDetailInfo | null,
+  detailId: number | null,
+  row: {
+    order: string;
+    position: number | string;
+    lengthMm: number | null;
+    widthMm: number | null;
+    quantity: number;
+    material: string | null;
+    film: string | null;
+    client: string | null;
+    orderDate: string | null;
+    readyDate: string | null;
+    thickness: number | null;
+  },
+): Record<string, LabelCustomExpressionScalar> {
+  const fields: Record<string, LabelCustomExpressionScalar> = {};
+  for (const [key, value] of Object.entries(detail?.detailFields ?? {})) {
+    fields[key] = pdfDetailScalar(value);
+  }
+  return {
+    ...fields,
+    detail_id: detailId,
+    order_id: detail?.orderId ?? null,
+    detail_number: detail?.detailNumber ?? null,
+    height: detail?.heightMm ?? null,
+    width: detail?.widthMm ?? null,
+    quantity: row.quantity,
+    sheet_quantity: row.quantity,
+    material_name: row.material,
+    materials: row.material,
+    film_name: row.film,
+    films: row.film,
+    milling_type_name: detail?.millingTypeName ?? null,
+    edge_type_name: detail?.edgeTypeName ?? null,
+    production_status_name: detail?.productionStatusName ?? null,
+    order: row.order,
+    position: row.position,
+    lengthMm: row.lengthMm,
+    widthMm: row.widthMm,
+    material: row.material,
+    film: row.film,
+    client: row.client,
+    orderDate: row.orderDate,
+    readyDate: row.readyDate,
+    thickness: row.thickness,
+    thicknesses: row.thickness,
+  };
+}
+
+function pdfDetailScalar(value: unknown): LabelCustomExpressionScalar {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value);
 }
 
 interface ItemRow extends QueryResultRow {

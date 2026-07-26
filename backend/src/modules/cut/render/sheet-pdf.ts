@@ -47,6 +47,7 @@ export interface PdfSheetDetailRow {
   lengthMm: number | null;
   widthMm: number | null;
   quantity: number;
+  fields?: Record<string, LabelCustomExpressionScalar>;
   due?: string | null;
   material?: string | null;
   film?: string | null;
@@ -731,7 +732,8 @@ function sortDetailRows(
 }
 
 function detailRowValue(row: PdfSheetDetailRow, field: string, index: number): string {
-  switch (normalizeDetailField(field)) {
+  const normalized = normalizeDetailField(field);
+  switch (normalized) {
     case 'row_number':
       return String(index + 1);
     case 'order':
@@ -757,12 +759,13 @@ function detailRowValue(row: PdfSheetDetailRow, field: string, index: number): s
     case 'thickness':
       return formatMm(row.thickness);
     default:
-      return '';
+      return stringify(row.fields?.[normalized] ?? row.fields?.[field] ?? row.fields?.[field.replace(/^detail\./, '')] ?? '');
   }
 }
 
 function detailSortValue(row: PdfSheetDetailRow, field: string): string | number | null {
-  switch (field) {
+  const normalized = normalizeDetailField(field);
+  switch (normalized) {
     case 'order':
       return row.order;
     case 'position':
@@ -786,7 +789,7 @@ function detailSortValue(row: PdfSheetDetailRow, field: string): string | number
     case 'thickness':
       return row.thickness ?? null;
     default:
-      return '';
+      return stringify(row.fields?.[normalized] ?? row.fields?.[field] ?? row.fields?.[field.replace(/^detail\./, '')] ?? '');
   }
 }
 

@@ -135,8 +135,13 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/resolveDroppedPdfField/);
     expect(tabSrc).toMatch(/wideCanvas/);
     expect(tabSrc).toMatch(/Широкий визуал/);
-    expect(tabSrc).toMatch(/xl=\{wideCanvas \? 24 : 12\}/);
+    expect(tabSrc).toMatch(/rightAccordionLayout/);
+    expect(tabSrc).toMatch(/Панели справа 3:1/);
+    expect(tabSrc).toMatch(/xl=\{wideCanvas \? 24 : rightAccordionLayout \? 18 : 12\}/);
     expect(tabSrc).toMatch(/ResizeObserver/);
+    expect(tabSrc).toMatch(/isPdfDetailTableField/);
+    expect(tabSrc).toMatch(/field\.source === 'detail'/);
+    expect(tabSrc).toMatch(/field\.id\.startsWith\('detail\.'\)/);
     expect(tabSrc).not.toMatch(/onMouseDown=\{\(event\)[\s\S]{0,140}event\.preventDefault\(\)[\s\S]{0,140}onBeginDrag\(field\)/);
     expect(tabSrc).not.toMatch(/setCustomFieldsFromText/);
   });

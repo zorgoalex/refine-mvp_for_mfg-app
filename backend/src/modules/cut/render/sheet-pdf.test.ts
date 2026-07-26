@@ -273,6 +273,53 @@ describe('buildSheetsPdf', () => {
     expect(rendered.indexOf('1001')).toBeLessThan(rendered.indexOf('2002'));
   });
 
+  it('renders v3 detail tables with generic detail field columns', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('v3-table-generic-detail'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            {
+              id: 'table',
+              type: 'detail_table',
+              x: 10,
+              y: 20,
+              w: 90,
+              h: 45,
+              style: {
+                sort: { field: 'detail.detail_name', direction: 'asc' },
+                columns: [
+                  { field: 'detail.detail_name', label: 'Название детали', width: 2, visible: true },
+                  { field: 'detail.production_status_name', label: 'Статус', width: 1, visible: true },
+                ],
+              },
+            },
+          ],
+        },
+        detailRows: [
+          {
+            order: '1001',
+            position: 1,
+            lengthMm: 500,
+            widthMm: 200,
+            quantity: 1,
+            fields: { detail_name: 'Фасад A', production_status_name: 'К раскрою' },
+          },
+        ],
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('Название детали');
+    expect(rendered).toContain('Фасад A');
+    expect(rendered).toContain('К раскрою');
+  });
+
   it('renders v3 sheet thumbnail layouts on the configured PDF page size', async () => {
     const pdf = await buildSheetsPdf([
       {

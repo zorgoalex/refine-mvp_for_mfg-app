@@ -33,32 +33,6 @@ const ELEMENT_TYPES = new Set<CutPdfTemplateElementType>([
 ]);
 
 const TEXT_ALIGN = new Set(['left', 'center', 'right']);
-const TABLE_SORT_FIELDS = new Set([
-  'row_number',
-  'order',
-  'position',
-  'quantity',
-  'lengthMm',
-  'widthMm',
-  'material',
-  'film',
-  'client',
-  'orderDate',
-  'readyDate',
-  'thickness',
-  'detail.row_number',
-  'detail.order',
-  'detail.position',
-  'detail.quantity',
-  'detail.lengthMm',
-  'detail.widthMm',
-  'detail.material',
-  'detail.film',
-  'detail.client',
-  'detail.orderDate',
-  'detail.readyDate',
-  'detail.thickness',
-]);
 const TABLE_SORT_DIRECTIONS = new Set(['asc', 'desc']);
 
 export function cutPdfFieldCatalog(): CutPdfFieldCatalogItem[] {
@@ -121,9 +95,9 @@ function validateStyle(style: Record<string, unknown>, index: number, customFiel
   const table = style.table;
   if (isRecord(table)) {
     if (table.columns !== undefined) validateTableColumns(table.columns, index, customFieldSchema);
-    validateTableSort(table.sort, index);
+    validateTableSort(table.sort, index, customFieldSchema);
   }
-  validateTableSort(style.sort, index);
+  validateTableSort(style.sort, index, customFieldSchema);
 }
 
 function validateTableColumns(rawColumns: unknown, index: number, customFieldSchema: Record<string, unknown>): void {
@@ -133,7 +107,7 @@ function validateTableColumns(rawColumns: unknown, index: number, customFieldSch
   for (const [columnIndex, rawColumn] of rawColumns.entries()) {
     if (!isRecord(rawColumn)) throw invalidLayout(`elements.${index}.style.columns.${columnIndex}`);
     const field = String(rawColumn.field ?? '');
-    if (!isSupportedPdfField(field, customFieldSchema)) {
+    if (!isSupportedPdfDetailTableField(field, customFieldSchema)) {
       throw invalidLayout(`elements.${index}.style.columns.${columnIndex}.field`, { field });
     }
     if (rawColumn.width !== undefined) boundedNumber(rawColumn.width, `elements.${index}.style.columns.${columnIndex}.width`, 0.1, 100);
@@ -143,10 +117,10 @@ function validateTableColumns(rawColumns: unknown, index: number, customFieldSch
   }
 }
 
-function validateTableSort(rawSort: unknown, index: number): void {
+function validateTableSort(rawSort: unknown, index: number, customFieldSchema: Record<string, unknown>): void {
   if (rawSort === undefined || rawSort === null) return;
   if (!isRecord(rawSort)) throw invalidLayout(`elements.${index}.style.sort`);
-  if (!TABLE_SORT_FIELDS.has(String(rawSort.field)) || !TABLE_SORT_DIRECTIONS.has(String(rawSort.direction ?? 'asc'))) {
+  if (!isSupportedPdfDetailTableField(String(rawSort.field), customFieldSchema) || !TABLE_SORT_DIRECTIONS.has(String(rawSort.direction ?? 'asc'))) {
     throw invalidLayout(`elements.${index}.style.sort`);
   }
 }
@@ -158,6 +132,12 @@ function isSupportedPdfField(fieldId: string, customFieldSchema: Record<string, 
 
 function builtInPdfFieldIds(): Set<string> {
   return new Set([...LABEL_FIELD_CATALOG.map((field) => field.id), ...CUT_SPECIFIC_FIELD_CATALOG.map((field) => field.id)]);
+}
+
+function isSupportedPdfDetailTableField(fieldId: string, customFieldSchema: Record<string, unknown>): boolean {
+  const detailFieldId = fieldId.startsWith('detail.') ? fieldId : `detail.${fieldId}`;
+  if (detailFieldId === 'detail.table') return false;
+  return detailFieldId.startsWith('detail.') && isSupportedPdfField(detailFieldId, customFieldSchema);
 }
 
 function boundedNumber(value: unknown, field: string, min: number, max: number): number {
@@ -191,19 +171,22 @@ const CUT_SPECIFIC_FIELD_CATALOG: CutPdfFieldCatalogItem[] = [
   { id: 'sheet.details_count', source: 'sheet', sourceColumn: null, label: 'Количество деталей на листе', category: 'Лист раскроя', type: 'number' },
   { id: 'sheet.area', source: 'sheet', sourceColumn: null, label: 'Площадь деталей', category: 'Лист раскроя', type: 'number' },
   { id: 'sheet.thumbnail', source: 'sheet', sourceColumn: null, label: 'Миниатюра листа раскроя', category: 'Лист раскроя', type: 'string' },
-  { id: 'detail.table', source: 'cut', sourceColumn: null, label: 'Таблица деталей листа', category: 'Таблица деталей', type: 'string' },
-  { id: 'detail.row_number', source: 'cut', sourceColumn: null, label: 'Номер строки', category: 'Таблица деталей', type: 'number' },
-  { id: 'detail.order', source: 'cut', sourceColumn: null, label: 'Заказ', category: 'Таблица деталей', type: 'string' },
-  { id: 'detail.position', source: 'cut', sourceColumn: null, label: 'Позиция', category: 'Таблица деталей', type: 'string' },
-  { id: 'detail.lengthMm', source: 'cut', sourceColumn: null, label: 'Длина', category: 'Таблица деталей', type: 'number' },
-  { id: 'detail.widthMm', source: 'cut', sourceColumn: null, label: 'Ширина', category: 'Таблица деталей', type: 'number' },
-  { id: 'detail.quantity', source: 'cut', sourceColumn: null, label: 'Количество', category: 'Таблица деталей', type: 'number' },
-  { id: 'detail.material', source: 'cut', sourceColumn: null, label: 'Материал', category: 'Таблица деталей', type: 'string' },
-  { id: 'detail.film', source: 'cut', sourceColumn: null, label: 'Пленка', category: 'Таблица деталей', type: 'string' },
-  { id: 'detail.client', source: 'cut', sourceColumn: null, label: 'Клиент', category: 'Таблица деталей', type: 'string' },
-  { id: 'detail.orderDate', source: 'cut', sourceColumn: null, label: 'Дата заказа', category: 'Таблица деталей', type: 'date' },
-  { id: 'detail.readyDate', source: 'cut', sourceColumn: null, label: 'Дата готовности', category: 'Таблица деталей', type: 'date' },
-  { id: 'detail.thickness', source: 'cut', sourceColumn: null, label: 'Толщина', category: 'Таблица деталей', type: 'number' },
+  { id: 'detail.materials', source: 'detail', sourceColumn: null, label: 'Материалы деталей', category: 'Детали листа', type: 'string' },
+  { id: 'detail.films', source: 'detail', sourceColumn: null, label: 'Пленки деталей', category: 'Детали листа', type: 'string' },
+  { id: 'detail.thicknesses', source: 'detail', sourceColumn: null, label: 'Толщины деталей', category: 'Детали листа', type: 'string' },
+  { id: 'detail.table', source: 'detail', sourceColumn: null, label: 'Таблица деталей листа', category: 'Таблица деталей', type: 'string' },
+  { id: 'detail.row_number', source: 'detail', sourceColumn: null, label: 'Номер строки', category: 'Таблица деталей', type: 'number' },
+  { id: 'detail.order', source: 'detail', sourceColumn: null, label: 'Заказ', category: 'Таблица деталей', type: 'string' },
+  { id: 'detail.position', source: 'detail', sourceColumn: null, label: 'Позиция', category: 'Таблица деталей', type: 'string' },
+  { id: 'detail.lengthMm', source: 'detail', sourceColumn: null, label: 'Длина', category: 'Таблица деталей', type: 'number' },
+  { id: 'detail.widthMm', source: 'detail', sourceColumn: null, label: 'Ширина', category: 'Таблица деталей', type: 'number' },
+  { id: 'detail.quantity', source: 'detail', sourceColumn: null, label: 'Количество', category: 'Таблица деталей', type: 'number' },
+  { id: 'detail.material', source: 'detail', sourceColumn: null, label: 'Материал', category: 'Таблица деталей', type: 'string' },
+  { id: 'detail.film', source: 'detail', sourceColumn: null, label: 'Пленка', category: 'Таблица деталей', type: 'string' },
+  { id: 'detail.client', source: 'detail', sourceColumn: null, label: 'Клиент', category: 'Таблица деталей', type: 'string' },
+  { id: 'detail.orderDate', source: 'detail', sourceColumn: null, label: 'Дата заказа', category: 'Таблица деталей', type: 'date' },
+  { id: 'detail.readyDate', source: 'detail', sourceColumn: null, label: 'Дата готовности', category: 'Таблица деталей', type: 'date' },
+  { id: 'detail.thickness', source: 'detail', sourceColumn: null, label: 'Толщина', category: 'Таблица деталей', type: 'number' },
   { id: 'computed.today', source: 'cut', sourceColumn: null, label: 'Текущая дата', category: 'Вычисляемые', type: 'date' },
   { id: 'computed.page_number', source: 'cut', sourceColumn: null, label: 'Номер страницы', category: 'Вычисляемые', type: 'number' },
   { id: 'computed.page_count', source: 'cut', sourceColumn: null, label: 'Всего страниц', category: 'Вычисляемые', type: 'number' },

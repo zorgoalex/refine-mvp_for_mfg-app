@@ -445,6 +445,8 @@ interface PdfTemplateEditorProps {
   canManage: boolean;
 }
 
+type PdfTemplateEditorLayoutMode = 'standard' | 'wide' | 'rightAccordion';
+
 const PDF_TEMPLATE_DRAFTS_KEY = 'cut-pdf-template-drafts:v2';
 const CUT_PDF_FIELD_DRAG_TYPE = 'application/x-cut-pdf-field';
 const PDF_PAGE = { width: 297, height: 210 };
@@ -564,7 +566,10 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   const [fieldSearch, setFieldSearch] = useState('');
   const [draggingField, setDraggingField] = useState<PdfFieldCatalogItem | null>(null);
   const [showAllBounds, setShowAllBounds] = useState(false);
-  const [wideCanvas, setWideCanvas] = useState(false);
+  const [layoutMode, setLayoutMode] = useState<PdfTemplateEditorLayoutMode>('standard');
+  const wideCanvas = layoutMode === 'wide';
+  const rightAccordionLayout = layoutMode === 'rightAccordion';
+  const canvasFillsColumn = wideCanvas || rightAccordionLayout;
   const selectedElement = selected?.elements.find((element) => element.id === selectedElementId) ?? selected?.elements[0] ?? null;
   const customFields = selected?.customFields ?? [];
   const customFieldCatalog = useMemo<PdfFieldCatalogItem[]>(
@@ -839,110 +844,143 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     },
   ];
 
+  const renderFieldPalette = () => (
+    <>
+      {fieldCatalogError && <Alert type="warning" showIcon message={fieldCatalogError} style={{ marginBottom: 8 }} />}
+      <PdfFieldPalette
+        fields={fields}
+        usedFieldIds={usedFieldIds}
+        disabled={!canManage}
+        search={fieldSearch}
+        onSearch={setFieldSearch}
+        onBeginDrag={setDraggingField}
+        onEndDrag={() => setDraggingField(null)}
+        onAddField={addFieldElement}
+      />
+    </>
+  );
+
+  const renderCustomFields = () => (
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Button size="small" icon={<PlusOutlined />} disabled={!canManage} onClick={addCustomField}>
+        Добавить поле
+      </Button>
+      <Table<CustomFieldSchemaRow>
+        rowKey="fieldId"
+        size="small"
+        pagination={false}
+        dataSource={customFields}
+        columns={[
+          {
+            title: 'Ключ',
+            width: 116,
+            render: (_, row) => (
+              <Input size="small" value={row.fieldId} disabled={!canManage} onChange={(event) => patchCustomField(row.fieldId, { fieldId: event.target.value.trim() })} />
+            ),
+          },
+          {
+            title: 'Название',
+            render: (_, row) => <Input size="small" value={row.label} disabled={!canManage} onChange={(event) => patchCustomField(row.fieldId, { label: event.target.value })} />,
+          },
+          {
+            title: 'Тип',
+            width: 92,
+            render: (_, row) => (
+              <Select
+                size="small"
+                value={row.type}
+                disabled={!canManage || row.valueMode === 'expression'}
+                options={PDF_CUSTOM_FIELD_TYPE_OPTIONS}
+                onChange={(type) => patchCustomField(row.fieldId, { type })}
+              />
+            ),
+          },
+          {
+            title: 'Значение',
+            render: (_, row) => (
+              <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                <Select
+                  size="small"
+                  value={row.valueMode}
+                  disabled={!canManage}
+                  options={[
+                    { value: 'source', label: 'Из поля' },
+                    { value: 'constant', label: 'Константа' },
+                    { value: 'expression', label: 'Формула' },
+                  ]}
+                  onChange={(valueMode) => setCustomFieldValueMode(row, valueMode)}
+                />
+                {row.valueMode === 'source' && (
+                  <Select
+                    showSearch
+                    size="small"
+                    value={row.sourceField ?? undefined}
+                    disabled={!canManage}
+                    options={fieldCatalog.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
+                    onChange={(sourceField) => patchCustomField(row.fieldId, { sourceField })}
+                  />
+                )}
+                {row.valueMode === 'constant' && (
+                  <Input
+                    size="small"
+                    value={String(row.defaultValue ?? '')}
+                    disabled={!canManage}
+                    onChange={(event) => patchCustomField(row.fieldId, { defaultValue: event.target.value })}
+                  />
+                )}
+                {row.valueMode === 'expression' && (
+                  <Space size={4} wrap>
+                    <Button size="small" disabled={!canManage} onClick={() => setEditingCustomFieldId(row.fieldId)}>
+                      Формула
+                    </Button>
+                    {row.expression && !isCustomFieldExpressionValid(row.expression, allowedExpressionFieldIds) && <Tag color="error">Ошибка</Tag>}
+                    {row.expression && <Text type="secondary">{summarizeCustomFieldExpression(row.expression, fieldLabels)}</Text>}
+                  </Space>
+                )}
+              </Space>
+            ),
+          },
+          {
+            title: '',
+            width: 38,
+            render: (_, row) => <Button size="small" danger icon={<DeleteOutlined />} disabled={!canManage} onClick={() => removeCustomField(row.fieldId)} />,
+          },
+        ]}
+      />
+    </Space>
+  );
+
+  const renderElementList = (scrollY = wideCanvas ? 320 : 260) => (
+    <Table<PdfTemplateElement>
+      size="small"
+      rowKey="id"
+      columns={elementRows}
+      dataSource={selected.elements.slice().sort((a, b) => a.zIndex - b.zIndex)}
+      pagination={false}
+      scroll={{ y: scrollY }}
+      rowClassName={(row) => (row.id === selectedElement?.id ? 'ant-table-row-selected' : '')}
+      onRow={(row) => ({ onClick: () => setSelectedElementId(row.id), style: { cursor: 'pointer' } })}
+    />
+  );
+
+  const renderElementProperties = () => selectedElement && (
+    <PdfElementProperties
+      element={selectedElement}
+      fields={fields}
+      canManage={canManage}
+      onPatch={updateElement}
+      onDelete={() => deleteElement(selectedElement.id)}
+    />
+  );
+
   const renderFieldPanel = () => (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Card size="small" title="Поля карты раскроя PDF">
-        {fieldCatalogError && <Alert type="warning" showIcon message={fieldCatalogError} style={{ marginBottom: 8 }} />}
-        <PdfFieldPalette
-          fields={fields}
-          usedFieldIds={usedFieldIds}
-          disabled={!canManage}
-          search={fieldSearch}
-          onSearch={setFieldSearch}
-          onBeginDrag={setDraggingField}
-          onEndDrag={() => setDraggingField(null)}
-          onAddField={addFieldElement}
-        />
+        {renderFieldPalette()}
       </Card>
       <Collapse>
         <Panel header="Пользовательские поля" key="custom-fields">
-          <Space direction="vertical" size={8} style={{ width: '100%' }}>
-            <Button size="small" icon={<PlusOutlined />} disabled={!canManage} onClick={addCustomField}>
-              Добавить поле
-            </Button>
-            <Table<CustomFieldSchemaRow>
-              rowKey="fieldId"
-              size="small"
-              pagination={false}
-              dataSource={customFields}
-              columns={[
-                {
-                  title: 'Ключ',
-                  width: 116,
-                  render: (_, row) => (
-                    <Input size="small" value={row.fieldId} disabled={!canManage} onChange={(event) => patchCustomField(row.fieldId, { fieldId: event.target.value.trim() })} />
-                  ),
-                },
-                {
-                  title: 'Название',
-                  render: (_, row) => <Input size="small" value={row.label} disabled={!canManage} onChange={(event) => patchCustomField(row.fieldId, { label: event.target.value })} />,
-                },
-                {
-                  title: 'Тип',
-                  width: 92,
-                  render: (_, row) => (
-                    <Select
-                      size="small"
-                      value={row.type}
-                      disabled={!canManage || row.valueMode === 'expression'}
-                      options={PDF_CUSTOM_FIELD_TYPE_OPTIONS}
-                      onChange={(type) => patchCustomField(row.fieldId, { type })}
-                    />
-                  ),
-                },
-                {
-                  title: 'Значение',
-                  render: (_, row) => (
-                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                      <Select
-                        size="small"
-                        value={row.valueMode}
-                        disabled={!canManage}
-                        options={[
-                          { value: 'source', label: 'Из поля' },
-                          { value: 'constant', label: 'Константа' },
-                          { value: 'expression', label: 'Формула' },
-                        ]}
-                        onChange={(valueMode) => setCustomFieldValueMode(row, valueMode)}
-                      />
-                      {row.valueMode === 'source' && (
-                        <Select
-                          showSearch
-                          size="small"
-                          value={row.sourceField ?? undefined}
-                          disabled={!canManage}
-                          options={fieldCatalog.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
-                          onChange={(sourceField) => patchCustomField(row.fieldId, { sourceField })}
-                        />
-                      )}
-                      {row.valueMode === 'constant' && (
-                        <Input
-                          size="small"
-                          value={String(row.defaultValue ?? '')}
-                          disabled={!canManage}
-                          onChange={(event) => patchCustomField(row.fieldId, { defaultValue: event.target.value })}
-                        />
-                      )}
-                      {row.valueMode === 'expression' && (
-                        <Space size={4} wrap>
-                          <Button size="small" disabled={!canManage} onClick={() => setEditingCustomFieldId(row.fieldId)}>
-                            Формула
-                          </Button>
-                          {row.expression && !isCustomFieldExpressionValid(row.expression, allowedExpressionFieldIds) && <Tag color="error">Ошибка</Tag>}
-                          {row.expression && <Text type="secondary">{summarizeCustomFieldExpression(row.expression, fieldLabels)}</Text>}
-                        </Space>
-                      )}
-                    </Space>
-                  ),
-                },
-                {
-                  title: '',
-                  width: 38,
-                  render: (_, row) => <Button size="small" danger icon={<DeleteOutlined />} disabled={!canManage} onClick={() => removeCustomField(row.fieldId)} />,
-                },
-              ]}
-            />
-          </Space>
+          {renderCustomFields()}
         </Panel>
       </Collapse>
     </Space>
@@ -950,26 +988,26 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
 
   const renderElementPanel = () => (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Table<PdfTemplateElement>
-        size="small"
-        rowKey="id"
-        columns={elementRows}
-        dataSource={selected.elements.slice().sort((a, b) => a.zIndex - b.zIndex)}
-        pagination={false}
-        scroll={{ y: wideCanvas ? 320 : 260 }}
-        rowClassName={(row) => (row.id === selectedElement?.id ? 'ant-table-row-selected' : '')}
-        onRow={(row) => ({ onClick: () => setSelectedElementId(row.id), style: { cursor: 'pointer' } })}
-      />
-      {selectedElement && (
-        <PdfElementProperties
-          element={selectedElement}
-          fields={fields}
-          canManage={canManage}
-          onPatch={updateElement}
-          onDelete={() => deleteElement(selectedElement.id)}
-        />
-      )}
+      {renderElementList()}
+      {renderElementProperties()}
     </Space>
+  );
+
+  const renderRightAccordionPanel = () => (
+    <Collapse accordion defaultActiveKey="elements">
+      <Panel header="Поля карты раскроя PDF" key="fields">
+        {renderFieldPalette()}
+      </Panel>
+      <Panel header="Пользовательские поля" key="custom-fields">
+        {renderCustomFields()}
+      </Panel>
+      <Panel header="Элементы шаблона" key="elements">
+        {renderElementList(260)}
+      </Panel>
+      <Panel header="Свойства элемента" key="properties">
+        {renderElementProperties() ?? <Text type="secondary">Выберите элемент</Text>}
+      </Panel>
+    </Collapse>
   );
 
   return (
@@ -1018,19 +1056,22 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
       </Space>
 
       <Row gutter={[16, 16]} align="top">
-        {!wideCanvas && (
+        {!wideCanvas && !rightAccordionLayout && (
           <Col xs={24} xl={6}>
             {renderFieldPanel()}
           </Col>
         )}
-        <Col xs={24} xl={wideCanvas ? 24 : 12}>
+        <Col xs={24} xl={wideCanvas ? 24 : rightAccordionLayout ? 18 : 12}>
           <Card
             size="small"
             title="Визуал карты раскроя PDF"
             extra={(
               <Space size={12} wrap>
-                <Checkbox checked={wideCanvas} onChange={(event) => setWideCanvas(event.target.checked)}>
+                <Checkbox checked={wideCanvas} onChange={(event) => setLayoutMode(event.target.checked ? 'wide' : 'standard')}>
                   Широкий визуал
+                </Checkbox>
+                <Checkbox checked={rightAccordionLayout} onChange={(event) => setLayoutMode(event.target.checked ? 'rightAccordion' : 'standard')}>
+                  Панели справа 3:1
                 </Checkbox>
                 <Checkbox checked={showAllBounds} onChange={(event) => setShowAllBounds(event.target.checked)}>
                   Границы
@@ -1045,7 +1086,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
               selectedElementId={selectedElementId}
               canManage={canManage}
               showAllBounds={showAllBounds}
-              wideCanvas={wideCanvas}
+              wideCanvas={canvasFillsColumn}
               draggingField={draggingField}
               onSelect={setSelectedElementId}
               onPatch={patchElementById}
@@ -1059,12 +1100,17 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
             />
           </Card>
         </Col>
-        {!wideCanvas && (
+        {rightAccordionLayout && (
+          <Col xs={24} xl={6}>
+            {renderRightAccordionPanel()}
+          </Col>
+        )}
+        {!wideCanvas && !rightAccordionLayout && (
           <Col xs={24} xl={6}>
             {renderElementPanel()}
           </Col>
         )}
-        {wideCanvas && (
+        {wideCanvas && !rightAccordionLayout && (
           <>
             <Col xs={24} xl={12}>
               {renderFieldPanel()}
@@ -1571,7 +1617,9 @@ const PdfElementProperties: React.FC<{
   onDelete: () => void;
 }> = ({ element, fields, canManage, onPatch, onDelete }) => {
   const style = element.style;
-  const tableFields = fields.filter((field) => field.category === 'Таблица деталей' && field.id !== 'detail.table');
+  const tableFields = uniquePdfFields(fields.filter(isPdfDetailTableField));
+  const tableFieldLabels = fieldLabelsFromList(tableFields);
+  const tableFieldOptions = tableFields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }));
   const tableColumns = readPdfDetailTableColumns(style, true);
   const tableSort = readPdfDetailTableSort(style);
   const patchStyle = (patch: Record<string, unknown>) => onPatch({ style: { ...style, ...patch } });
@@ -1655,7 +1703,7 @@ const PdfElementProperties: React.FC<{
                 showSearch
                 value={tableSort.field}
                 disabled={!canManage}
-                options={tableFields.map((field) => ({ value: field.id, label: `${field.category}: ${field.label}` }))}
+                options={tableFieldOptions}
                 style={{ width: '70%' }}
                 onChange={(field) => patchStyle({ sort: { ...tableSort, field } })}
               />
@@ -1684,8 +1732,8 @@ const PdfElementProperties: React.FC<{
                       size="small"
                       value={row.field}
                       disabled={!canManage}
-                      options={tableFields.map((field) => ({ value: field.id, label: field.label }))}
-                      onChange={(field) => patchTableColumn(index, { field, label: fieldLabelsFromList(fields).get(field) ?? field })}
+                      options={tableFieldOptions}
+                      onChange={(field) => patchTableColumn(index, { field, label: tableFieldLabels.get(field) ?? field })}
                     />
                   ),
                 },
@@ -2042,23 +2090,48 @@ function fieldLabelsFromList(fields: PdfFieldCatalogItem[]): Map<string, string>
   return new Map(fields.map((field) => [field.id, field.label]));
 }
 
+function isPdfDetailTableField(field: PdfFieldCatalogItem): boolean {
+  return field.id !== 'detail.table' && (field.source === 'detail' || field.id.startsWith('detail.'));
+}
+
+function uniquePdfFields(fields: PdfFieldCatalogItem[]): PdfFieldCatalogItem[] {
+  const seen = new Set<string>();
+  return fields.filter((field) => {
+    if (seen.has(field.id)) return false;
+    seen.add(field.id);
+    return true;
+  });
+}
+
 function pdfDetailTablePreviewValue(field: string, rowIndex: number): string {
   const suffix = rowIndex === 0 ? '' : rowIndex === 1 ? '-2' : '-3';
   const values: Record<string, string> = {
     'detail.row_number': String(rowIndex + 1),
     'detail.order': `11380${suffix}`,
     'detail.position': String(12 + rowIndex),
+    'detail.detail_number': String(12 + rowIndex),
+    'detail.detail_name': `Фасад ${rowIndex + 1}`,
     'detail.lengthMm': String(800 - rowIndex * 20),
     'detail.widthMm': String(240 + rowIndex * 15),
+    'detail.height': String(800 - rowIndex * 20),
+    'detail.width': String(240 + rowIndex * 15),
     'detail.quantity': String(rowIndex + 1),
+    'detail.area': String(((800 - rowIndex * 20) * (240 + rowIndex * 15) / 1_000_000).toFixed(3)),
     'detail.material': 'Ванна',
+    'detail.material_name': 'Ванна',
     'detail.film': 'Крем',
+    'detail.film_name': 'Крем',
     'detail.client': 'Клиент',
     'detail.orderDate': '03.07.2026',
     'detail.readyDate': '10.07.2026',
     'detail.thickness': '16',
+    'detail.note': 'Примечание',
+    'detail.production_status_name': 'К раскрою',
+    'detail.milling_type_name': 'Стандарт',
+    'detail.edge_type_name': 'Кромка 2мм',
   };
-  return values[field] ?? values[field.replace(/^detail\./, 'detail.')] ?? '';
+  const detailField = field.startsWith('detail.') ? field : `detail.${field}`;
+  return values[field] ?? values[detailField] ?? PDF_PREVIEW_VALUES[field] ?? PDF_PREVIEW_VALUES[detailField] ?? '';
 }
 
 function groupPdfFields(fields: PdfFieldCatalogItem[]): Array<[string, PdfFieldCatalogItem[]]> {
