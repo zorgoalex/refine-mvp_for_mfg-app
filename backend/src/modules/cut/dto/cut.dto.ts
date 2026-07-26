@@ -230,11 +230,30 @@ export interface EligibleDetailDto {
   orderId: number;
   /** orders.order_name — пользователи мыслят названиями, не ID. */
   orderName: string | null;
+  /** clients.client_name — needed when preview spans many orders. */
+  clientName: string | null;
+  detailNumber: number | null;
+  detailName: string | null;
+  height: number | null;
+  width: number | null;
   quantity: number;
+  area: number | null;
   /** NULL post-034 (Variant B: material_id sunsetted on order_details). */
   materialId: number | null;
   sheetMaterialTypeId: number | null;
+  materialName: string | null;
+  millingTypeName: string | null;
+  edgeTypeName: string | null;
   filmId: number | null;
+  filmName: string | null;
+  productionStatusName: string | null;
+  priority: number | null;
+  jointOrderId: number | null;
+  note: string | null;
+  linkCuttingFile: string | null;
+  linkCuttingImageFile: string | null;
+  linkCadFile: string | null;
+  linkPdfFile: string | null;
   eligible: boolean;
   ineligibleReason: IneligibleReason | null;
   /** active (non-archived) cut jobs this detail is already placed in */

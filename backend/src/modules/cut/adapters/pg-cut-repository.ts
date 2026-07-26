@@ -2152,11 +2152,24 @@ export class PgCutRepository implements CutRepositoryPort {
       `
       SELECT od.detail_id, od.order_id, ord.order_name, od.quantity, od.material_id,
              od.sheet_material_type_id,
+             clients.client_name,
+             od.detail_number, od.detail_name, od.height, od.width, od.area,
+             COALESCE(smt.name, materials.material_name) AS material_name,
+             mt.milling_type_name, et.edge_type_name,
              od.film_id, od.production_status_id, od.delete_flag,
-             s.is_cuttable
+             films.film_name, ps.production_status_name,
+             od.priority, od.joint_order_id, od.note,
+             od.link_cutting_file, od.link_cutting_image_file, od.link_cad_file, od.link_pdf_file,
+             smt.is_cuttable
       FROM order_details od
       JOIN orders ord ON ord.order_id = od.order_id
-      LEFT JOIN sheet_material_types s ON s.sheet_material_type_id = od.sheet_material_type_id
+      LEFT JOIN clients ON clients.client_id = ord.client_id
+      LEFT JOIN materials ON materials.material_id = od.material_id
+      LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+      LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
+      LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
+      LEFT JOIN films ON films.film_id = od.film_id
+      LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
       WHERE ${conditions.join(' AND ')}
       ORDER BY od.detail_id
       LIMIT 2000
@@ -2194,10 +2207,28 @@ export class PgCutRepository implements CutRepositoryPort {
         orderDetailId: candidate.detailId,
         orderId: toNum(row.order_id),
         orderName: row.order_name ?? null,
+        clientName: row.client_name ?? null,
+        detailNumber: numOrNull(row.detail_number),
+        detailName: row.detail_name ?? null,
+        height: numOrNull(row.height),
+        width: numOrNull(row.width),
         quantity: toNum(row.quantity),
+        area: numOrNull(row.area),
         materialId: row.material_id === null || row.material_id === undefined ? null : toNum(row.material_id),
         sheetMaterialTypeId: candidate.sheetMaterialTypeId,
+        materialName: row.material_name ?? null,
+        millingTypeName: row.milling_type_name ?? null,
+        edgeTypeName: row.edge_type_name ?? null,
         filmId: row.film_id === null ? null : toNum(row.film_id),
+        filmName: row.film_name ?? null,
+        productionStatusName: row.production_status_name ?? null,
+        priority: numOrNull(row.priority),
+        jointOrderId: numOrNull(row.joint_order_id),
+        note: row.note ?? null,
+        linkCuttingFile: row.link_cutting_file ?? null,
+        linkCuttingImageFile: row.link_cutting_image_file ?? null,
+        linkCadFile: row.link_cad_file ?? null,
+        linkPdfFile: row.link_pdf_file ?? null,
         eligible,
         ineligibleReason: reason,
         activeJobs: placement?.activeJobs ?? [],
@@ -3868,11 +3899,29 @@ interface EligibleRow extends QueryResultRow {
   detail_id: string | number;
   order_id: string | number;
   order_name?: string | null;
+  client_name?: string | null;
+  detail_number?: string | number | null;
+  detail_name?: string | null;
+  height?: string | number | null;
+  width?: string | number | null;
   quantity: string | number;
+  area?: string | number | null;
   material_id: string | number | null;
   sheet_material_type_id: string | number | null;
+  material_name?: string | null;
+  milling_type_name?: string | null;
+  edge_type_name?: string | null;
   film_id: string | number | null;
+  film_name?: string | null;
   production_status_id: string | number | null;
+  production_status_name?: string | null;
+  priority?: string | number | null;
+  joint_order_id?: string | number | null;
+  note?: string | null;
+  link_cutting_file?: string | null;
+  link_cutting_image_file?: string | null;
+  link_cad_file?: string | null;
+  link_pdf_file?: string | null;
   delete_flag: boolean;
   /** NULL when sheet_material_type_id is NULL (LEFT JOIN produces no row). */
   is_cuttable: boolean | null;

@@ -90,6 +90,7 @@ export const apiRoutes = {
     /** Variant B Task 11: cut.view-gated sheet-type lookup (no sheet_materials.view required). */
     sheetTypes: backendApiPath('/cut-jobs/sheet-types'),
     filmOptions: backendApiPath('/cut-jobs/film-options'),
+    eligibleDetailsPreview: backendApiPath('/cut-jobs/eligible-details'),
     byId: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}`),
     results: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/results`),
     result: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}`),

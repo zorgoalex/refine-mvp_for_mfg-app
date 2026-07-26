@@ -155,6 +155,20 @@ describe('CutController', () => {
     );
   });
 
+  it('previews eligible-details before a cut job exists', async () => {
+    const listEligibleDetails = vi.fn(async () => ({ details: [], noSheetSpecCount: 0 }));
+    const controller = createController({ service: { listEligibleDetails } });
+    const result = await controller.previewEligibleDetails(
+      { user: currentUser(), requestId: 'req-preview' } as never,
+      { filmIds: '7', dateFrom: '2026-07-01', dateTo: '2026-07-31' },
+    );
+    expect(result.details).toEqual([]);
+    expect(listEligibleDetails).toHaveBeenCalledWith(expect.objectContaining({
+      criteria: expect.objectContaining({ filmIds: [7], dateFrom: '2026-07-01', dateTo: '2026-07-31' }),
+      requestId: 'req-preview',
+    }));
+  });
+
   it('renders a sheet PNG to the response with the image content type', async () => {
     const png = Buffer.from('PNGDATA');
     const controller = createController({ service: { renderSheetPng: vi.fn(async () => png) } });

@@ -114,6 +114,12 @@ export const cutApi = {
     return httpClient.get<EligibleDetailsResponse>(query ? `${path}?${query}` : path);
   },
 
+  async listEligibleDetailsPreview(criteria: CutSelectionCriteria): Promise<EligibleDetailsResponse> {
+    const query = buildEligibleQuery(criteria);
+    const path = apiRoutes.cutJobs.eligibleDetailsPreview;
+    return httpClient.get<EligibleDetailsResponse>(query ? `${path}?${query}` : path);
+  },
+
   async fetchSheetPng(
     cutJobId: number,
     groupId: number,

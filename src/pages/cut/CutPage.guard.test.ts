@@ -143,6 +143,23 @@ describe('CutPage source guards', () => {
     expect(source).not.toContain('<Input placeholder="Плёнки"');
   });
 
+  it('previews selected cut details before creating the job', () => {
+    expect(source).toContain('listEligibleDetailsPreview');
+    expect(source).toContain('isCreationPreview');
+    expect(source).toContain('Проверка деталей перед созданием');
+    expect(source).toContain('data-testid="cut-create-preview-details"');
+    expect(source).toContain('createJobFromPreview');
+    expect(source).toContain('detailIds: selected');
+  });
+
+  it('suggests the cut job name from unique orders, films, and current date', () => {
+    expect(source).toContain('buildSuggestedCutName');
+    expect(source).toContain('раскрой ${orders.length');
+    expect(source).toContain('films.length > 0 ? films.join');
+    expect(source).toContain("now.format('DD.MM.YYYY')");
+    expect(source).toContain('data-testid="cut-preview-name"');
+  });
+
   it('supports embedded order mode: hard-scopes criteria and job list to one order', () => {
     expect(source).toContain('embeddedOrderId');
     expect(source).toContain('isEmbeddedOrder ? [embeddedOrderId!] : parseOrderIdsValue(values.orderIds)');

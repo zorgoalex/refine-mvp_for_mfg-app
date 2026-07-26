@@ -214,6 +214,20 @@ export class CutController {
     });
   }
 
+  @ApiOperation({ operationId: 'previewCutEligibleDetails', summary: 'Preview criteria-driven details before creating a cut job' })
+  @Get('eligible-details')
+  async previewEligibleDetails(
+    @Req() request: RequestWithCurrentUser,
+    @Query() query: Record<string, string>,
+  ): Promise<EligibleDetailsResponseDto> {
+    const currentUser = this.requireRead(request);
+    return this.cut.listEligibleDetails({
+      currentUser,
+      criteria: parseEligibleCriteria(query),
+      requestId: request.requestId,
+    });
+  }
+
   @ApiOperation({ operationId: 'getCutJob', summary: 'Get a cut job manifest' })
   @Get(':cutJobId')
   async get(

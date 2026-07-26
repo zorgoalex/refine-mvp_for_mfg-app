@@ -1120,11 +1120,29 @@ describe('PgCutRepository', () => {
     expect(result.noSheetSpecCount).toBe(1);
   });
 
-  it('listEligibleDetails carries the order name (users think in names, not ids)', async () => {
+  it('listEligibleDetails carries order/client and order-detail fields for preview', async () => {
     const db = createDatabase({
       readyStatusIds: [1],
       eligibleRows: [
-        { detail_id: 7, order_id: 9, order_name: 'Кухня Ивановых', quantity: 1, sheet_material_type_id: 9, film_id: null, production_status_id: 1, delete_flag: false },
+        {
+          detail_id: 7,
+          order_id: 9,
+          order_name: 'Кухня Ивановых',
+          client_name: 'Иванов',
+          detail_number: 12,
+          detail_name: 'Фасад',
+          width: 500,
+          height: 300,
+          quantity: 1,
+          area: '0.15',
+          material_name: 'МДФ 18',
+          film_id: 5,
+          film_name: 'Белый матовый',
+          production_status_name: 'Готов к раскрою',
+          sheet_material_type_id: 9,
+          production_status_id: 1,
+          delete_flag: false,
+        },
       ],
     });
     const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
@@ -1132,10 +1150,24 @@ describe('PgCutRepository', () => {
     const result = await repo.listEligibleDetails({ currentUser: currentUser(), criteria: { orderIds: [9] }, requestId: 'r-name' });
 
     expect(result.details[0].orderName).toBe('Кухня Ивановых');
+    expect(result.details[0]).toMatchObject({
+      clientName: 'Иванов',
+      detailNumber: 12,
+      detailName: 'Фасад',
+      width: 500,
+      height: 300,
+      area: 0.15,
+      materialName: 'МДФ 18',
+      filmId: 5,
+      filmName: 'Белый матовый',
+      productionStatusName: 'Готов к раскрою',
+    });
     const eligibleSql = db.queries
       .map((query) => query.text.replace(/\s+/g, ' ').trim())
       .find((sql) => sql.includes('FROM order_details od'));
     expect(eligibleSql).toContain('JOIN orders');
+    expect(eligibleSql).toContain('LEFT JOIN clients');
+    expect(eligibleSql).toContain('LEFT JOIN films');
     expect(eligibleSql).toContain('order_name');
   });
 

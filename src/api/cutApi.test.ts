@@ -56,6 +56,16 @@ describe('cutApi', () => {
     );
   });
 
+  it('previews eligible details before a cut job exists', async () => {
+    const fetchMock = mockFetch({ details: [], noSheetSpecCount: 0 });
+
+    await cutApi.listEligibleDetailsPreview({ dateFrom: '2026-07-01', dateTo: '2026-07-31', filmIds: [7] });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/v1/cut-jobs/eligible-details?filmIds=7&dateFrom=2026-07-01&dateTo=2026-07-31',
+    );
+  });
+
   it('fetches a per-sheet SVG and the preset PNG from the render endpoints', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('<svg/>', { status: 200, headers: { 'Content-Type': 'image/svg+xml' } }))

@@ -319,6 +319,23 @@ function buildCutFilmOption(film: { filmId: number; name: string }): CutFilmSele
   };
 }
 
+function uniqueNonBlank(values: Array<string | number | null | undefined>): string[] {
+  const set = new Set<string>();
+  for (const value of values) {
+    const text = value == null ? '' : String(value).trim();
+    if (text) set.add(text);
+  }
+  return [...set];
+}
+
+function buildSuggestedCutName(details: EligibleDetailDto[], now: Dayjs = dayjs()): string {
+  const candidates = details.filter((detail) => detail.eligible);
+  const source = candidates.length > 0 ? candidates : details;
+  const orders = uniqueNonBlank(source.map((detail) => detail.orderName || `#${detail.orderId}`));
+  const films = uniqueNonBlank(source.map((detail) => detail.filmName));
+  return `раскрой ${orders.length > 0 ? orders.join(', ') : 'без заказов'} - ${films.length > 0 ? films.join(', ') : 'без пленки'} - ${now.format('DD.MM.YYYY')}`;
+}
+
 async function fetchCutOrderOptions(dateFrom: string, dateTo: string): Promise<CutOrderSelectOption[]> {
   const firstPage = await ordersApi.list({
     page: 1,
@@ -423,6 +440,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [eligible, setEligible] = useState<EligibleDetailDto[] | null>(null);
   const [noSheetSpecCount, setNoSheetSpecCount] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
+  const [previewName, setPreviewName] = useState('');
   const [busy, setBusy] = useState(false);
   const [sheetImages, setSheetImages] = useState<Record<string, string>>({});
   // Auto-loaded small layout previews (preset 'thumb') for a ready job's sheets,
@@ -608,7 +626,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   useEffect(() => () => revokePdfPreviewUrl(), [revokePdfPreviewUrl]);
 
-  const applyPdfTemplateState = useCallback((nextJob: CutJobDto) => {
+  const applyPdfTemplateState = useCallback((nextJob: CutJobDto | null) => {
+    if (!nextJob) {
+      setPdfTemplateForJob('standard');
+      setPdfTemplateByGroup({});
+      return;
+    }
     setPdfTemplateForJob(nextJob.pdfTemplate ?? 'standard');
     setPdfTemplateByGroup(Object.fromEntries(nextJob.groups.map((group) => [group.cutGroupId, group.pdfTemplate ?? 'standard'])));
   }, []);
@@ -1048,25 +1071,57 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     [job, loadJobs, handleError, resetSheetViews],
   );
 
-  const createJob = useCallback(async () => {
+  const previewCreateJob = useCallback(async () => {
     setBusy(true);
     try {
-      const values = await form.validateFields();
-      const created = await cutApi.create({ name: values.name, criteria: criteriaFromForm() });
+      const response = await cutApi.listEligibleDetailsPreview(criteriaFromForm());
+      const selectable = selectableDetailIds(response.details);
+      setPreviewName(buildSuggestedCutName(response.details));
+      setJob(null);
+      setSelectedResult(null);
+      setIsFrozenResultSelection(false);
+      applyPdfTemplateState(null);
+      setEligible(response.details);
+      setNoSheetSpecCount(response.noSheetSpecCount);
+      setSelected(selectable);
+      resetSheetViews();
+      if (response.details.length === 0) {
+        message.warning('По выбранным критериям деталей не найдено');
+      }
+    } catch (error) {
+      handleError(error, 'Не удалось загрузить детали для проверки');
+    } finally {
+      setBusy(false);
+    }
+  }, [applyPdfTemplateState, criteriaFromForm, handleError, resetSheetViews]);
+
+  const createJobFromPreview = useCallback(async () => {
+    if (selected.length === 0) {
+      message.warning('Выберите детали для раскроя');
+      return;
+    }
+    const name = previewName.trim();
+    if (!name) {
+      message.warning('Укажите название раскроя');
+      return;
+    }
+    setBusy(true);
+    try {
+      const created = await cutApi.create({ name, detailIds: selected });
       setJob(created);
       applyPdfTemplateState(created);
       setEligible(null);
       setSelected([]);
+      setPreviewName('');
       resetSheetViews(); // new job context: drop any previewed prior job's blobs
       message.success('Раскрой создан');
       await loadJobs();
     } catch (error) {
-      if (error && (error as { errorFields?: unknown }).errorFields) return; // antd validation
       handleError(error, 'Не удалось создать раскрой');
     } finally {
       setBusy(false);
     }
-  }, [applyPdfTemplateState, form, criteriaFromForm, loadJobs, handleError, resetSheetViews]);
+  }, [applyPdfTemplateState, handleError, loadJobs, previewName, resetSheetViews, selected]);
 
   const loadEligible = useCallback(async () => {
     if (!job) return;
@@ -1695,26 +1750,95 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   );
 
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
-    () => [
-      { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detail' },
-      {
-        title: 'Заказ',
-        key: 'order',
-        render: (_: unknown, row: EligibleDetailDto) => row.orderName?.trim() || `#${row.orderId}`,
-      },
-      { title: 'Кол-во', dataIndex: 'quantity', key: 'qty' },
-      {
-        title: 'Статус',
-        key: 'status',
-        render: (_: unknown, row: EligibleDetailDto) =>
-          row.eligible ? (
-            <Tag color="green">Готова к раскрою</Tag>
-          ) : (
-            <Tag color="orange">{INELIGIBLE_LABELS[row.ineligibleReason ?? ''] ?? row.ineligibleReason}</Tag>
+    () => {
+      const dash = (value: unknown) => (value === null || value === undefined || value === '' ? '—' : String(value));
+      return [
+        {
+          title: 'Заказ',
+          key: 'order',
+          width: 150,
+          fixed: 'left',
+          render: (_: unknown, row: EligibleDetailDto) => (
+            <Button type="link" size="small" style={{ padding: 0 }} onClick={() => show('orders_view', row.orderId, 'push')}>
+              {row.orderName?.trim() || `#${row.orderId}`}
+            </Button>
           ),
-      },
-    ],
-    [],
+        },
+        { title: 'Клиент', key: 'client', width: 160, fixed: 'left', render: (_: unknown, row: EligibleDetailDto) => dash(row.clientName) },
+        { title: 'Поз.', key: 'pos', width: 60, render: (_: unknown, row: EligibleDetailDto) => dash(row.detailNumber) },
+        { title: 'Наименование', key: 'name', width: 180, render: (_: unknown, row: EligibleDetailDto) => dash(row.detailName) },
+        { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: 90 },
+        {
+          title: 'Размер (Ш×В)',
+          key: 'size',
+          width: 130,
+          render: (_: unknown, row: EligibleDetailDto) =>
+            row.width !== null || row.height !== null ? `${dash(row.width)}×${dash(row.height)}` : '—',
+        },
+        { title: 'Кол-во', dataIndex: 'quantity', key: 'qty', width: 80 },
+        { title: 'Площадь', key: 'area', width: 90, render: (_: unknown, row: EligibleDetailDto) => dash(row.area) },
+        { title: 'Материал', key: 'material', width: 160, render: (_: unknown, row: EligibleDetailDto) => dash(row.materialName) },
+        { title: 'Фрезеровка', key: 'milling', width: 140, render: (_: unknown, row: EligibleDetailDto) => dash(row.millingTypeName) },
+        { title: 'Кромка', key: 'edge', width: 120, render: (_: unknown, row: EligibleDetailDto) => dash(row.edgeTypeName) },
+        { title: 'Плёнка', key: 'film', width: 160, render: (_: unknown, row: EligibleDetailDto) => dash(row.filmName) },
+        { title: 'Статус произв.', key: 'pstatus', width: 130, render: (_: unknown, row: EligibleDetailDto) => dash(row.productionStatusName) },
+        { title: 'Приоритет', key: 'priority', width: 100, render: (_: unknown, row: EligibleDetailDto) => dash(row.priority) },
+        { title: 'Соед. заказ', key: 'joint', width: 110, render: (_: unknown, row: EligibleDetailDto) => dash(row.jointOrderId) },
+        {
+          title: 'Примечание',
+          key: 'note',
+          width: 200,
+          render: (_: unknown, row: EligibleDetailDto) =>
+            row.note ? (
+              <Tooltip title={row.note}>
+                <Text ellipsis style={{ maxWidth: 180, display: 'inline-block' }}>{row.note}</Text>
+              </Tooltip>
+            ) : (
+              '—'
+            ),
+        },
+        {
+          title: 'Файлы',
+          key: 'files',
+          width: 150,
+          render: (_: unknown, row: EligibleDetailDto) => {
+            const links: Array<[string, string | null | undefined]> = [
+              ['Рез', row.linkCuttingFile],
+              ['Фото', row.linkCuttingImageFile],
+              ['CAD', row.linkCadFile],
+              ['PDF', row.linkPdfFile],
+            ];
+            const present = links.filter(([, href]) => Boolean(href));
+            if (present.length === 0) return '—';
+            return (
+              <Space size={4} wrap>
+                {present.map(([label, href]) => {
+                  const safe = safeHttpHref(href);
+                  return safe ? (
+                    <a key={label} href={safe} target="_blank" rel="noreferrer">{label}</a>
+                  ) : (
+                    <Text key={label} type="secondary">{label}</Text>
+                  );
+                })}
+              </Space>
+            );
+          },
+        },
+        {
+          title: 'Статус',
+          key: 'status',
+          width: 160,
+          fixed: 'right',
+          render: (_: unknown, row: EligibleDetailDto) =>
+            row.eligible ? (
+              <Tag color="green">Готова к раскрою</Tag>
+            ) : (
+              <Tag color="orange">{INELIGIBLE_LABELS[row.ineligibleReason ?? ''] ?? row.ineligibleReason}</Tag>
+            ),
+        },
+      ];
+    },
+    [show],
   );
 
   // Archived jobs are genuinely read-only: all mutate controls are disabled so
@@ -1827,6 +1951,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   }, [busy, canManage, isArchivedJob, removeJobItem, show]);
 
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
+  const isCreationPreview = job === null && eligible !== null;
 
   // Dirty guard: any group has an active editor session OR its toggle differs
   // from the persisted isActive. While dirty, whole-job PDF is disabled.
@@ -1849,9 +1974,6 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
       <Card title="Критерии выборки" size="small">
         <Form form={form} layout="inline" disabled={busy || !canManage} initialValues={{ orderDateRange: defaultOrderDateRange }}>
-          <Form.Item name="name" rules={[{ required: true, message: 'Укажите название' }]}>
-            <Input placeholder="Название раскроя" />
-          </Form.Item>
           {!isEmbeddedOrder && (
             <Form.Item name="orderDateRange">
               <RangePicker
@@ -1928,12 +2050,53 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             />
           </Form.Item>
           <Form.Item>
-            <Button type="primary" onClick={createJob} loading={busy} disabled={!canManage}>
+            <Button type="primary" onClick={previewCreateJob} loading={busy} disabled={!canManage}>
               Создать раскрой
             </Button>
           </Form.Item>
         </Form>
       </Card>
+
+      {isCreationPreview && eligible && (
+        <Card
+          title="Проверка деталей перед созданием"
+          size="small"
+          extra={
+            <Space>
+              <Text type="secondary">Выбрано: {selected.length}</Text>
+              <Button type="primary" onClick={createJobFromPreview} disabled={!canManage || selected.length === 0} loading={busy}>
+                Создать
+              </Button>
+            </Space>
+          }
+        >
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Input
+              value={previewName}
+              onChange={(event) => setPreviewName(event.target.value)}
+              placeholder="Название раскроя"
+              data-testid="cut-preview-name"
+            />
+            {noSheetMsg && <Alert type="warning" showIcon message={noSheetMsg} />}
+            <TableTopScroll>
+              <Table<EligibleDetailDto>
+                size="small"
+                rowKey="orderDetailId"
+                columns={eligibleColumns}
+                dataSource={eligible}
+                pagination={false}
+                scroll={{ x: 1900 }}
+                rowSelection={{
+                  selectedRowKeys: selected,
+                  onChange: (keys) => setSelected(keys.map(Number)),
+                  getCheckboxProps: (row) => ({ disabled: !row.eligible }),
+                }}
+                data-testid="cut-create-preview-details"
+              />
+            </TableTopScroll>
+          </Space>
+        </Card>
+      )}
 
       <Card
         size="small"
@@ -2238,15 +2401,16 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         </Collapse>
       )}
 
-      {noSheetMsg && <Alert type="warning" showIcon message={noSheetMsg} />}
+      {!isCreationPreview && noSheetMsg && <Alert type="warning" showIcon message={noSheetMsg} />}
 
-      {eligible && (
+      {eligible && !isCreationPreview && (
         <Table<EligibleDetailDto>
           size="small"
           rowKey="orderDetailId"
           columns={eligibleColumns}
           dataSource={eligible}
           pagination={false}
+          scroll={{ x: 1900 }}
           rowSelection={{
             selectedRowKeys: selected,
             onChange: (keys) => setSelected(keys.map(Number)),
