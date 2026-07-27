@@ -131,21 +131,26 @@ describe('PgCncTelegramRepository', () => {
 
   it('returns only posted and completed columns for the daily CNC board', async () => {
     const database = {
-      query: vi.fn(async () => ({
-        rows: [
-          packetRow({
-            packet_id: '00000000-0000-0000-0000-000000000011',
-            completion_status: 'pending',
-            thumbs_up: false,
-            parse_status: 'needs_review',
-          }),
-          packetRow({
-            packet_id: '00000000-0000-0000-0000-000000000012',
-            completion_status: 'completed',
-            thumbs_up: true,
-          }),
-        ],
-      })),
+      query: vi.fn(async (text: string) => {
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000011',
+                completion_status: 'pending',
+                thumbs_up: false,
+                parse_status: 'needs_review',
+              }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000012',
+                completion_status: 'completed',
+                thumbs_up: true,
+              }),
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
     };
     const repo = new PgCncTelegramRepository(database as never);
 
@@ -154,21 +159,28 @@ describe('PgCncTelegramRepository', () => {
     expect(result.columns.map((column) => [column.key, column.title, column.total])).toEqual([
       ['parsed', 'Файлы на станке', 1],
       ['completed', 'Выполнено', 1],
+      ['baths', 'Ванны', 0],
+      ['baths_ready', 'Готовы к закатке', 0],
     ]);
   });
 
   it('hides noisy RapidOCR warning in the daily CNC board response', async () => {
     const database = {
-      query: vi.fn(async () => ({
-        rows: [
-          packetRow({
-            analysis_warnings_json: [
-              'RapidOCR found text, but no detail rows with order and size',
-              'Real operator-facing warning',
+      query: vi.fn(async (text: string) => {
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [
+              packetRow({
+                analysis_warnings_json: [
+                  'RapidOCR found text, but no detail rows with order and size',
+                  'Real operator-facing warning',
+                ],
+              }),
             ],
-          }),
-        ],
-      })),
+          };
+        }
+        return { rows: [] };
+      }),
     };
     const repo = new PgCncTelegramRepository(database as never);
 
@@ -177,6 +189,82 @@ describe('PgCncTelegramRepository', () => {
     expect(result.columns[1]?.packets[0]?.analysisWarnings).toEqual([
       'Real operator-facing warning',
     ]);
+  });
+
+  it('splits vacuum bath cards by completed detail quantities', async () => {
+    const queries: string[] = [];
+    const database = {
+      query: vi.fn(async (text: string) => {
+        queries.push(text);
+        if (/latest_vacuum_results/i.test(text)) {
+          return {
+            rows: [
+              bathPlacementRow({
+                cut_result_id: 500,
+                cut_job_id: 30,
+                result_no: 2,
+                order_detail_id: 3101,
+                detail_number: 31,
+                completed_quantity: 2,
+              }),
+              bathPlacementRow({
+                cut_result_id: 500,
+                cut_job_id: 30,
+                result_no: 2,
+                order_detail_id: 3101,
+                detail_number: 31,
+                completed_quantity: 2,
+                sheet_index: 1,
+                sheet_ordinal: 2,
+              }),
+              bathPlacementRow({
+                cut_result_id: 501,
+                cut_job_id: 31,
+                result_no: 1,
+                order_detail_id: 3201,
+                detail_number: 32,
+                completed_quantity: 0,
+              }),
+            ],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
+    const sql = queries.join('\n');
+
+    expect(sql).toContain("= 'vacuum_table'");
+    expect(sql).toContain('cut_result_placement');
+    expect(sql).toContain('cut_result_sheet_map');
+    expect(sql).toContain('cut_result_label_map_projection');
+    expect(result.columns.map((column) => [column.key, column.total])).toEqual([
+      ['parsed', 0],
+      ['completed', 0],
+      ['baths', 1],
+      ['baths_ready', 1],
+    ]);
+    expect(result.columns[2]?.baths[0]).toMatchObject({
+      cutJobId: 31,
+      ready: false,
+      itemQuantityTotal: 1,
+      positionCount: 1,
+    });
+    expect(result.columns[3]?.baths[0]).toMatchObject({
+      cutJobId: 30,
+      ready: true,
+      itemQuantityTotal: 2,
+      positionCount: 1,
+      sheets: [
+        { cutGroupId: 100, sheetIndex: 0, sheetNumber: 1 },
+        { cutGroupId: 100, sheetIndex: 1, sheetNumber: 2 },
+      ],
+    });
   });
 
   it('keeps sheet image metadata when updating a completed packet', async () => {
@@ -606,5 +694,30 @@ function packetRowBase() {
     match_detail_id: 3101,
     match_status: 'matched',
     review_note: null,
+  };
+}
+
+function bathPlacementRow(overrides: Record<string, unknown> = {}) {
+  return {
+    cut_result_id: 500,
+    cut_job_id: 30,
+    result_no: 2,
+    revision_no: 1,
+    result_created_at: '2026-07-24T09:00:00.000Z',
+    cut_job_name: 'Ванна 2689',
+    order_id: 2689,
+    order_detail_id: 3101,
+    order_name: '2689',
+    detail_number: 31,
+    width_mm: 497,
+    height_mm: 477,
+    completed_quantity: 2,
+    cut_group_id: 100,
+    variant: 'auto',
+    sheet_index: 0,
+    sheet_ordinal: 1,
+    sheet_width_mm: 2070,
+    sheet_height_mm: 2800,
+    ...overrides,
   };
 }

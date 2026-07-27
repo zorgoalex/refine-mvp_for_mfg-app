@@ -65,16 +65,32 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cncTelegramApi.today');
     expect(page).toContain('workday ? { date: workday } : {}');
     expect(page).toContain('<CncTelegramTodayColumns');
+    expect(page).toContain("label: 'МДФ-работы'");
+    expect(page).toContain("parsed: 'Файлы на станке'");
+    expect(page).toContain('CncTelegramBathCardView');
+    expect(page).toContain("baths_ready: 'Готовы к закатке'");
     expect(page).toContain('CNC_HISTORY_DAYS = 7');
     expect(page).toContain('aria-label="Дата CNC-работ"');
     expect(page).toContain('В чате {formatDateTime');
     expect(page).toContain('<Collapse.Panel');
-    expect(page).toContain('cncColumnDisplayTitle(column.key)');
-    expect(page).toContain("key === 'parsed' ? 'Файлы на станке' : 'Выполнено'");
-    expect(page).toContain("key === 'completed' ? '#389e0d' : undefined");
+    expect(page).toContain('cncColumnDisplayTitle(column)');
+    expect(page).toContain("baths: 'Ванны'");
+    expect(page).toContain("baths_ready: 'Готовы к закатке'");
     expect(page).not.toContain('Строка не сопоставлена с ERP');
     expect(page).not.toContain('items={[{');
     expect(page).not.toContain("board: 'cnc");
+  });
+
+  it('keeps bath cards printable with SVG and PDF previews', () => {
+    expect(page).toContain('cutApi.fetchSheetSvg');
+    expect(page).toContain('cutApi.fetchJobPdf');
+    expect(page).toContain("CNC_BATH_DEFAULT_PDF_TEMPLATE = 'bath_profiles'");
+    expect(page).toContain('Шаблон PDF ванны');
+    expect(page).toContain('data-testid="cnc-bath-pdf-preview-frame"');
+    expect(page).toContain('PrinterOutlined');
+    expect(page).toContain('DownloadOutlined');
+    expect(css).toContain('.cnc-bath-card__pdf-frame');
+    expect(css).toContain('.cnc-bath-card__ready-icon--pending');
   });
 
   it('keeps the completed CNC card check marker understandable', () => {
@@ -88,11 +104,10 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('shows CNC order totals directly on each card', () => {
     expect(page).toContain('buildCncOrderSummaries(packet.items)');
     expect(page).toContain('aria-label="Итоги по заказам"');
-    expect(page).toContain("formatCount(summary.positionCount, 'поз.')");
-    expect(page).toContain("formatCount(summary.detailQuantity, 'дет.')");
-    expect(css).toContain('.cnc-packet-card__order-summary');
-    expect(css).toContain('font-weight: 650');
-    expect(css).toContain('font-weight: 400');
+    expect(page).toContain('summary.label');
+    expect(css).toContain('.cnc-packet-card__summaries');
+    expect(css).toContain('.cnc-packet-card__summary');
+    expect(css).toContain('.cnc-packet-card__program');
   });
 
   it('keeps order cards dense, status-explicit and project-code-free', () => {

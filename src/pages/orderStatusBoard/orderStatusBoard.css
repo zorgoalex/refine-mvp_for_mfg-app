@@ -169,6 +169,14 @@
   --status-color: #389e0d;
 }
 
+.cnc-today-column--baths {
+  --status-color: #cf1322;
+}
+
+.cnc-today-column--baths_ready {
+  --status-color: #389e0d;
+}
+
 .status-board-column__header {
   min-height: 48px;
   padding: 9px 12px;
@@ -499,6 +507,19 @@
   overflow-wrap: anywhere;
 }
 
+.cnc-packet-card__summaries {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.25;
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+.cnc-packet-card__summary {
+  color: var(--app-text);
+}
+
 .cnc-packet-card__collapse,
 .cnc-packet-card__sheet {
   margin-top: 8px;
@@ -625,6 +646,71 @@
   object-fit: contain;
   border-radius: 6px;
   outline: 1px solid rgba(0, 0, 0, 0.1);
+  background: #fff;
+}
+
+.cnc-bath-card__job {
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.cnc-bath-card__ready-icon {
+  min-width: 22px;
+  font-size: 22px;
+}
+
+.cnc-bath-card__ready-icon--ready {
+  color: #389e0d;
+}
+
+.cnc-bath-card__ready-icon--pending {
+  color: #cf1322;
+}
+
+.cnc-bath-card__sheet-figure {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.cnc-bath-card__sheet-figure figcaption {
+  color: var(--app-text-muted);
+  font-size: 11px;
+}
+
+.cnc-bath-card__pdf-body {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.cnc-bath-card__pdf-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cnc-bath-card__pdf-toolbar .ant-select {
+  width: min(190px, 100%);
+}
+
+.cnc-bath-card__pdf-loading {
+  min-height: 80px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-surface-muted);
+}
+
+.cnc-bath-card__pdf-frame {
+  width: 100%;
+  min-height: 420px;
+  border: 1px solid var(--app-border-soft);
+  border-radius: 6px;
   background: #fff;
 }
 
