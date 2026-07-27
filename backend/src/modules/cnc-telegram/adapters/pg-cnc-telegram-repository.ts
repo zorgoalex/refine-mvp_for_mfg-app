@@ -26,6 +26,9 @@ import type {
 
 const SOURCE = 'backend-cnc-telegram-command';
 const COMMAND_NAME = 'cnc.telegram_packet.ingest';
+const IGNORED_ANALYSIS_WARNINGS = new Set([
+  'RapidOCR found text, but no detail rows with order and size',
+]);
 
 interface PacketJoinedRow extends QueryResultRow {
   packet_id: string;
@@ -34,11 +37,15 @@ interface PacketJoinedRow extends QueryResultRow {
   source_message_id: string | number | null;
   source_thread_id: string | number | null;
   source_version: string | number;
+  source_created_at: string | Date | null;
   source_updated_at: string | Date | null;
   workday: string | Date;
   machine: string | null;
   program_name: string | null;
   material_name: string;
+  sheet_image_storage_key: string | null;
+  sheet_image_content_type: string | null;
+  sheet_image_size_bytes: string | number | null;
   parse_status: CncTelegramPacketDto['parseStatus'];
   completion_status: CncTelegramPacketDto['completionStatus'];
   thumbs_up: boolean;
@@ -80,6 +87,26 @@ interface IdempotencyRow extends QueryResultRow {
 
 interface CurrentDateRow extends QueryResultRow {
   workday: string | Date;
+}
+
+interface DetailMatchRow extends QueryResultRow {
+  order_key: string;
+  order_id: string | number;
+  detail_id: string | number;
+  detail_number: string | number | null;
+  width: string | number | null;
+  height: string | number | null;
+}
+
+type IngestItemInput = CncTelegramStructuredIngestDto['items'][number];
+
+interface DetailMatch {
+  orderKey: string;
+  orderId: number;
+  detailId: number;
+  detailNumber: number | null;
+  width: number | null;
+  height: number | null;
 }
 
 export class PgCncTelegramRepository
@@ -169,22 +196,24 @@ export class PgCncTelegramRepository
         return response;
       }
 
-      await assertMatchedDetailsBelongToOrders(tx, command.dto);
+      const resolvedDto = aggregateMatchedItems(await resolveItemMatches(tx, command.dto));
+      const resolvedCommand = resolvedDto === command.dto ? command : { ...command, dto: resolvedDto };
+      await assertMatchedDetailsBelongToOrders(tx, resolvedDto);
 
-      const packetId = existing?.packet_id ?? await insertPacket(tx, command, payloadHash);
+      const packetId = existing?.packet_id ?? await insertPacket(tx, resolvedCommand, payloadHash);
       if (existing) {
-        await updatePacket(tx, packetId, command, payloadHash);
+        await updatePacket(tx, packetId, resolvedCommand, payloadHash);
       }
-      await replaceItems(tx, packetId, command.dto);
+      await replaceItems(tx, packetId, resolvedDto);
 
       const packet = await loadPacket(tx, packetId);
       const auditId = await writeIngestAudit(tx, {
-        command,
+        command: resolvedCommand,
         packet,
         requestId,
         previousSourceVersion: existing ? Number(existing.source_version) : null,
       });
-      await enqueuePacketEvents(tx, command, packet, requestId, auditId);
+      await enqueuePacketEvents(tx, resolvedCommand, packet, requestId, auditId);
 
       const response: CncTelegramIngestResponseDto = {
         packet,
@@ -226,11 +255,15 @@ function packetSelectSql(whereSql: string): string {
       p.source_message_id,
       p.source_thread_id,
       p.source_version,
+      p.source_created_at,
       p.source_updated_at,
       p.workday,
       p.machine,
       p.program_name,
       p.material_name,
+      p.sheet_image_storage_key,
+      p.sheet_image_content_type,
+      p.sheet_image_size_bytes,
       p.parse_status,
       p.completion_status,
       p.thumbs_up,
@@ -292,11 +325,15 @@ async function insertPacket(
       source_thread_id,
       source_version,
       source_updated_at,
+      source_created_at,
       payload_hash,
       workday,
       machine,
       program_name,
       material_name,
+      sheet_image_storage_key,
+      sheet_image_content_type,
+      sheet_image_size_bytes,
       parse_status,
       completion_status,
       thumbs_up,
@@ -312,13 +349,15 @@ async function insertPacket(
       updated_by
     )
     VALUES (
-      $1, $2, $3, $4, $5, $6::timestamptz, $7,
-      COALESCE($8::date, CURRENT_DATE),
-      $9, $10, COALESCE($11, 'МДФ 16мм'),
-      $12, $13, $14, $15::timestamptz, $16,
-      $17::jsonb, $18::jsonb, $19::jsonb, $20::jsonb,
-      $21, COALESCE($22, 'cnc-telegram-structured-v1'),
-      $23, $23
+      $1, $2, $3, $4, $5, $6::timestamptz, $7::timestamptz,
+      $8,
+      COALESCE($9::date, CURRENT_DATE),
+      $10, $11, COALESCE($12, 'МДФ 16мм'),
+      $13, $14, $15::bigint,
+      $16, $17, $18, $19::timestamptz, $20,
+      $21::jsonb, $22::jsonb, $23::jsonb, $24::jsonb,
+      $25, COALESCE($26, 'cnc-telegram-structured-v1'),
+      $27, $27
     )
     RETURNING packet_id
     `,
@@ -347,23 +386,27 @@ async function updatePacket(
       source_thread_id = $4,
       source_version = $5,
       source_updated_at = $6::timestamptz,
-      payload_hash = $7,
-      workday = COALESCE($8::date, workday),
-      machine = $9,
-      program_name = $10,
-      material_name = COALESCE($11, 'МДФ 16мм'),
-      parse_status = $12,
-      completion_status = $13,
-      thumbs_up = $14,
-      completed_at = $15::timestamptz,
-      rework = $16,
-      comments_json = $17::jsonb,
-      tools_json = $18::jsonb,
-      doweling_links_json = $19::jsonb,
-      analysis_warnings_json = $20::jsonb,
-      ocr_engine = $21,
-      parser_version = COALESCE($22, 'cnc-telegram-structured-v1'),
-      updated_by = $23,
+      source_created_at = COALESCE($7::timestamptz, source_created_at, $6::timestamptz),
+      payload_hash = $8,
+      workday = COALESCE($9::date, workday),
+      machine = $10,
+      program_name = $11,
+      material_name = COALESCE($12, 'МДФ 16мм'),
+      sheet_image_storage_key = $13,
+      sheet_image_content_type = $14,
+      sheet_image_size_bytes = $15::bigint,
+      parse_status = $16,
+      completion_status = $17,
+      thumbs_up = $18,
+      completed_at = $19::timestamptz,
+      rework = $20,
+      comments_json = $21::jsonb,
+      tools_json = $22::jsonb,
+      doweling_links_json = $23::jsonb,
+      analysis_warnings_json = $24::jsonb,
+      ocr_engine = $25,
+      parser_version = COALESCE($26, 'cnc-telegram-structured-v1'),
+      updated_by = $27,
       updated_at = now()
     WHERE packet_id = $1::uuid
     `,
@@ -382,21 +425,25 @@ function packetParams(
     dto.source.messageId ?? null,
     dto.source.threadId ?? null,
     dto.source.version,
-    dto.source.updatedAt ?? null,
+    dto.source.updatedAt ?? dto.source.createdAt ?? null,
+    dto.source.createdAt ?? dto.source.updatedAt ?? null,
     payloadHash,
     dto.workday ?? null,
     normalizeOptional(dto.machine),
     normalizeOptional(dto.programName),
     normalizeOptional(dto.materialName) ?? 'МДФ 16мм',
+    normalizeOptional(dto.sheetImage?.storageKey),
+    normalizeOptional(dto.sheetImage?.contentType),
+    dto.sheetImage?.sizeBytes ?? null,
     dto.parseStatus ?? deriveParseStatus(dto),
     dto.completionStatus ?? (dto.thumbsUp ? 'completed' : 'pending'),
     dto.thumbsUp === true,
-    dto.completedAt ?? (dto.thumbsUp ? dto.source.updatedAt ?? null : null),
+    dto.completedAt ?? (dto.thumbsUp ? dto.source.updatedAt ?? dto.source.createdAt ?? null : null),
     dto.rework === true,
     JSON.stringify(dto.comments ?? []),
     JSON.stringify(dto.tools ?? []),
     JSON.stringify(dto.dowelingLinks ?? []),
-    JSON.stringify(dto.analysisWarnings ?? []),
+    JSON.stringify(analysisWarningsArray(dto.analysisWarnings ?? [])),
     normalizeOptional(dto.ocrEngine),
     normalizeOptional(dto.parserVersion),
     Number(actorUserId),
@@ -448,6 +495,203 @@ async function replaceItems(
       ],
     );
   }
+}
+
+async function resolveItemMatches(
+  tx: TransactionClient,
+  dto: CncTelegramStructuredIngestDto,
+): Promise<CncTelegramStructuredIngestDto> {
+  const orderKeys = Array.from(
+    new Set(
+      dto.items
+        .filter(canResolveItem)
+        .map((item) => normalizeOrderKey(item.orderName))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+  if (orderKeys.length === 0) return dto;
+
+  const result = await tx.query<DetailMatchRow>(
+    `
+    SELECT
+      lower(trim(o.order_name)) AS order_key,
+      o.order_id,
+      od.detail_id,
+      od.detail_number,
+      od.width,
+      od.height
+    FROM orders o
+    JOIN order_details od ON od.order_id = o.order_id
+    WHERE lower(trim(o.order_name)) = ANY($1::text[])
+      AND o.delete_flag = false
+      AND od.delete_flag = false
+    ORDER BY o.order_id, od.detail_number NULLS LAST, od.detail_id
+    `,
+    [orderKeys],
+  );
+  if (result.rows.length === 0) return dto;
+
+  const detailsByOrder = new Map<string, DetailMatch[]>();
+  for (const row of result.rows) {
+    const detail = toDetailMatch(row);
+    if (!detail) continue;
+    const details = detailsByOrder.get(detail.orderKey) ?? [];
+    details.push(detail);
+    detailsByOrder.set(detail.orderKey, details);
+  }
+  if (detailsByOrder.size === 0) return dto;
+
+  let changed = false;
+  const items = dto.items.map((item) => {
+    const orderKey = normalizeOrderKey(item.orderName);
+    const details = orderKey ? detailsByOrder.get(orderKey) : undefined;
+    const match = details ? resolveItemMatch(item, details) : null;
+    if (!match) return item;
+    changed = true;
+    return {
+      ...item,
+      detailNumber: item.detailNumber ?? match.detailNumber,
+      matchOrderId: match.orderId,
+      matchDetailId: match.detailId,
+      matchStatus: 'matched' as const,
+      reviewNote: null,
+    };
+  });
+
+  return changed ? { ...dto, items } : dto;
+}
+
+function aggregateMatchedItems(dto: CncTelegramStructuredIngestDto): CncTelegramStructuredIngestDto {
+  const result: IngestItemInput[] = [];
+  const matchedByDetail = new Map<string, IngestItemInput>();
+  let changed = false;
+
+  for (const item of dto.items) {
+    const aggregateKey = matchedItemAggregateKey(item);
+    if (!aggregateKey) {
+      result.push(item);
+      continue;
+    }
+
+    const existing = matchedByDetail.get(aggregateKey);
+    if (!existing) {
+      const copy = { ...item };
+      matchedByDetail.set(aggregateKey, copy);
+      result.push(copy);
+      continue;
+    }
+
+    changed = true;
+    existing.quantity += item.quantity;
+    existing.confidence = Math.max(existing.confidence, item.confidence);
+    existing.detailNumber ??= item.detailNumber ?? null;
+    existing.widthMm ??= item.widthMm ?? null;
+    existing.heightMm ??= item.heightMm ?? null;
+    existing.source = preferredItemSource(existing.source, item.source);
+    existing.reviewNote = normalizeOptional(existing.reviewNote) ?? normalizeOptional(item.reviewNote);
+  }
+
+  return changed ? { ...dto, items: result } : dto;
+}
+
+function matchedItemAggregateKey(item: IngestItemInput): string | null {
+  if (
+    item.matchStatus !== 'matched' ||
+    item.matchOrderId == null ||
+    item.matchDetailId == null
+  ) {
+    return null;
+  }
+  return `${item.matchOrderId}:${item.matchDetailId}`;
+}
+
+function preferredItemSource(
+  left: IngestItemInput['source'],
+  right: IngestItemInput['source'],
+): IngestItemInput['source'] {
+  const priority: Record<IngestItemInput['source'], number> = {
+    vector: 4,
+    ocr: 3,
+    gcode: 2,
+    manual: 1,
+  };
+  return priority[right] > priority[left] ? right : left;
+}
+
+function canResolveItem(item: IngestItemInput): boolean {
+  if (item.matchOrderId != null || item.matchDetailId != null) return false;
+  if (item.matchStatus != null && item.matchStatus !== 'unmatched') return false;
+  if (!normalizeOrderKey(item.orderName)) return false;
+  return item.detailNumber != null || (item.widthMm != null && item.heightMm != null);
+}
+
+function toDetailMatch(row: DetailMatchRow): DetailMatch | null {
+  const orderKey = normalizeOrderKey(row.order_key);
+  const orderId = toPositiveInteger(row.order_id);
+  const detailId = toPositiveInteger(row.detail_id);
+  if (!orderKey || orderId === null || detailId === null) return null;
+  return {
+    orderKey,
+    orderId,
+    detailId,
+    detailNumber: toNullablePositiveInteger(row.detail_number),
+    width: toNullableFiniteNumber(row.width),
+    height: toNullableFiniteNumber(row.height),
+  };
+}
+
+function resolveItemMatch(item: IngestItemInput, details: DetailMatch[]): DetailMatch | null {
+  if (details.length === 0 || uniqueOrderId(details) === null) return null;
+
+  if (item.detailNumber != null) {
+    let candidates = details.filter((detail) => detail.detailNumber === item.detailNumber);
+    candidates = preferSizeMatches(item, candidates);
+    return uniqueDetail(candidates);
+  }
+
+  if (item.widthMm == null || item.heightMm == null) return null;
+  return uniqueDetail(details.filter((detail) => sameItemSize(item, detail)));
+}
+
+function preferSizeMatches(item: IngestItemInput, details: DetailMatch[]): DetailMatch[] {
+  if (item.widthMm == null || item.heightMm == null) return details;
+  const detailsWithSize = details.filter((detail) => detail.width != null && detail.height != null);
+  if (detailsWithSize.length === 0) return details;
+  return detailsWithSize.filter((detail) => sameItemSize(item, detail));
+}
+
+function uniqueOrderId(details: DetailMatch[]): number | null {
+  const orderIds = new Set(details.map((detail) => detail.orderId));
+  if (orderIds.size !== 1) return null;
+  return details[0]?.orderId ?? null;
+}
+
+function uniqueDetail(details: DetailMatch[]): DetailMatch | null {
+  const byId = new Map<number, DetailMatch>();
+  for (const detail of details) byId.set(detail.detailId, detail);
+  return byId.size === 1 ? Array.from(byId.values())[0] ?? null : null;
+}
+
+function sameItemSize(item: IngestItemInput, detail: DetailMatch): boolean {
+  const itemWidth = toNullableFiniteNumber(item.widthMm);
+  const itemHeight = toNullableFiniteNumber(item.heightMm);
+  if (itemWidth === null || itemHeight === null || detail.width === null || detail.height === null) {
+    return false;
+  }
+  return (
+    closeEnough(itemWidth, detail.width) && closeEnough(itemHeight, detail.height)
+  ) || (
+    closeEnough(itemWidth, detail.height) && closeEnough(itemHeight, detail.width)
+  );
+}
+
+function closeEnough(left: number, right: number): boolean {
+  return Math.abs(left - right) <= 3;
+}
+
+function normalizeOrderKey(value: string | null | undefined): string | null {
+  const normalized = normalizeOptional(value)?.toLowerCase();
+  return normalized ?? null;
 }
 
 async function assertMatchedDetailsBelongToOrders(
@@ -577,15 +821,6 @@ async function enqueuePacketEvents(
     });
   }
 
-  if (packetColumnKey(packet) === 'needs_review') {
-    await enqueueOutbox(tx, {
-      eventType: 'cnc.telegram_packet.needs_review',
-      aggregateType: 'cnc_telegram_packet',
-      aggregateId: packet.packetId,
-      idempotencyKey: `${command.dto.idempotencyKey}:needs-review`,
-      payload: packetOutboxPayload(packet, command, requestId, auditId, 'needs_review'),
-    });
-  }
 }
 
 function packetOutboxPayload(
@@ -737,9 +972,7 @@ async function enqueueOutbox(
 
 function buildTodayColumns(packets: CncTelegramPacketDto[]): CncTelegramTodayColumnDto[] {
   const definitions: Array<Pick<CncTelegramTodayColumnDto, 'key' | 'title'>> = [
-    { key: 'received', title: 'Получено' },
-    { key: 'parsed', title: 'Распознано' },
-    { key: 'needs_review', title: 'Нужна проверка' },
+    { key: 'parsed', title: 'Выложено' },
     { key: 'completed', title: 'Выполнено' },
   ];
   return definitions.map((definition) => {
@@ -753,15 +986,7 @@ function buildTodayColumns(packets: CncTelegramPacketDto[]): CncTelegramTodayCol
 }
 
 function packetColumnKey(packet: CncTelegramPacketDto): CncTelegramTodayColumnDto['key'] {
-  if (
-    packet.parseStatus === 'needs_review' ||
-    packet.analysisWarnings.length > 0 ||
-    packet.items.some((item) => item.matchStatus === 'conflict' || item.matchStatus === 'needs_review')
-  ) {
-    return 'needs_review';
-  }
   if (packet.completionStatus === 'completed' || packet.thumbsUp) return 'completed';
-  if (packet.parseStatus === 'received') return 'received';
   return 'parsed';
 }
 
@@ -777,11 +1002,17 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         sourceMessageId: toNullableNumber(row.source_message_id),
         sourceThreadId: toNullableNumber(row.source_thread_id),
         sourceVersion: toNumber(row.source_version),
+        sourceCreatedAt: toNullableIso(row.source_created_at),
         sourceUpdatedAt: toNullableIso(row.source_updated_at),
         workday: toDateOnly(row.workday),
         machine: row.machine,
         programName: row.program_name,
         materialName: row.material_name,
+        sheetImageUrl: row.sheet_image_storage_key
+          ? `/api/v1/cnc-telegram/media/${encodeURIComponent(row.sheet_image_storage_key)}`
+          : null,
+        sheetImageContentType: row.sheet_image_content_type,
+        sheetImageSizeBytes: toNullableNumber(row.sheet_image_size_bytes),
         parseStatus: row.parse_status,
         completionStatus: row.completion_status,
         thumbsUp: row.thumbs_up === true,
@@ -790,7 +1021,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         comments: stringArray(row.comments_json),
         tools: toolArray(row.tools_json),
         dowelingLinks: dowelingArray(row.doweling_links_json),
-        analysisWarnings: stringArray(row.analysis_warnings_json),
+        analysisWarnings: analysisWarningsArray(row.analysis_warnings_json),
         ocrEngine: row.ocr_engine,
         parserVersion: row.parser_version,
         itemCount: 0,
@@ -846,7 +1077,7 @@ function packetAuditSnapshot(packet: CncTelegramPacketDto): Record<string, unkno
 }
 
 function deriveParseStatus(dto: CncTelegramStructuredIngestDto): CncTelegramPacketDto['parseStatus'] {
-  if ((dto.analysisWarnings ?? []).length > 0) return 'needs_review';
+  if (analysisWarningsArray(dto.analysisWarnings ?? []).length > 0) return 'needs_review';
   if (dto.items.some((item) => item.matchStatus === 'conflict' || item.matchStatus === 'needs_review')) {
     return 'needs_review';
   }
@@ -908,6 +1139,10 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function analysisWarningsArray(value: unknown): string[] {
+  return stringArray(value).filter((warning) => !IGNORED_ANALYSIS_WARNINGS.has(warning));
+}
+
 function toolArray(value: unknown): CncTelegramToolDto[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is CncTelegramToolDto =>
@@ -935,6 +1170,24 @@ function toNumber(value: string | number | null | undefined): number {
 function toNullableNumber(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined || value === '') return null;
   return Number(value);
+}
+
+function toNullableFiniteNumber(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function toPositiveInteger(value: string | number | null | undefined): number | null {
+  const numberValue = toNullableFiniteNumber(value);
+  return numberValue !== null && Number.isInteger(numberValue) && numberValue > 0
+    ? numberValue
+    : null;
+}
+
+function toNullablePositiveInteger(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  return toPositiveInteger(value);
 }
 
 function toIso(value: string | Date): string {

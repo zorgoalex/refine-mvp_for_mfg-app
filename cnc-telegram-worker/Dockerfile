@@ -7,7 +7,7 @@ WORKDIR /app
 
 RUN addgroup --system worker \
   && adduser --system --ingroup worker worker \
-  && mkdir -p /data/tmp /data/session \
+  && mkdir -p /data/tmp /data/session /data/cnc-telegram-media \
   && chown -R worker:worker /app /data
 
 COPY requirements.txt ./
@@ -15,7 +15,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY cnc_telegram_worker ./cnc_telegram_worker
 
-USER worker
-
-ENTRYPOINT ["python", "-m", "cnc_telegram_worker"]
+ENTRYPOINT ["python", "-m", "cnc_telegram_worker.entrypoint"]
 CMD ["daemon"]

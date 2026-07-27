@@ -27,6 +27,14 @@ class SizeCandidate:
 
 
 @dataclass(frozen=True)
+class SheetPlacement:
+    xMm: float
+    yMm: float
+    widthMm: float
+    heightMm: float
+
+
+@dataclass(frozen=True)
 class GcodeAnalysis:
     tools: list[Tool]
     order_names: list[str]
@@ -34,6 +42,7 @@ class GcodeAnalysis:
     bounds_width_mm: float | None
     bounds_height_mm: float | None
     size_candidates: list[SizeCandidate]
+    sheet_placements: list[SheetPlacement]
     warnings: list[str]
 
 
@@ -54,6 +63,7 @@ def parse_gcode_text(text: str, program_name: str | None = None) -> GcodeAnalysi
         bounds_width_mm=bounds[0],
         bounds_height_mm=bounds[1],
         size_candidates=size_candidates(contour_boxes),
+        sheet_placements=sheet_placements(contour_boxes),
         warnings=[],
     )
 
@@ -146,13 +156,8 @@ def axis_bounds(points: list[tuple[float, float]]) -> tuple[float | None, float 
 
 
 def size_candidates(boxes: list[tuple[float, float, float, float]]) -> list[SizeCandidate]:
-    unique_boxes: set[tuple[int, int, int, int]] = set()
     counts: dict[tuple[float, float], int] = {}
-    for min_x, min_y, max_x, max_y in boxes:
-        box_key = (round(min_x), round(min_y), round(max_x), round(max_y))
-        if box_key in unique_boxes:
-            continue
-        unique_boxes.add(box_key)
+    for min_x, min_y, max_x, max_y in unique_contour_boxes(boxes):
         width = round(max_x - min_x, 2)
         height = round(max_y - min_y, 2)
         size_key = normalize_size(width, height)
@@ -161,6 +166,36 @@ def size_candidates(boxes: list[tuple[float, float, float, float]]) -> list[Size
         SizeCandidate(widthMm=width, heightMm=height, quantity=quantity)
         for (width, height), quantity in sorted(counts.items())
     ]
+
+
+def sheet_placements(boxes: list[tuple[float, float, float, float]]) -> list[SheetPlacement]:
+    unique_boxes = unique_contour_boxes(boxes)
+    if not unique_boxes:
+        return []
+    origin_x = min(box[0] for box in unique_boxes)
+    origin_y = min(box[1] for box in unique_boxes)
+    return [
+        SheetPlacement(
+            xMm=round(min_x - origin_x, 2),
+            yMm=round(min_y - origin_y, 2),
+            widthMm=round(max_x - min_x, 2),
+            heightMm=round(max_y - min_y, 2),
+        )
+        for min_x, min_y, max_x, max_y in sorted(unique_boxes, key=lambda box: (box[1], box[0]))
+    ]
+
+
+def unique_contour_boxes(boxes: list[tuple[float, float, float, float]]) -> list[tuple[float, float, float, float]]:
+    seen: set[tuple[int, int, int, int]] = set()
+    result: list[tuple[float, float, float, float]] = []
+    for box in boxes:
+        min_x, min_y, max_x, max_y = box
+        box_key = (round(min_x), round(min_y), round(max_x), round(max_y))
+        if box_key in seen:
+            continue
+        seen.add(box_key)
+        result.append(box)
+    return result
 
 
 def normalize_size(width: float, height: float) -> tuple[float, float]:

@@ -11,6 +11,7 @@ from .gcode import is_gcode_filename
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+VECTOR_EXTENSIONS = {".svg", ".dxf"}
 
 
 async def collect_day_messages(client: Any, entity: Any, workday: date, tz: ZoneInfo, max_messages: int) -> list[Any]:
@@ -71,18 +72,26 @@ def message_filename(message: Any) -> str | None:
 
 
 def is_image_message(message: Any) -> bool:
+    filename = message_filename(message)
+    suffix = Path(filename).suffix.lower() if filename else ""
+    if suffix in VECTOR_EXTENSIONS:
+        return False
     if getattr(message, "photo", None) is not None:
         return True
     file = getattr(message, "file", None)
     mime_type = getattr(file, "mime_type", None)
     if isinstance(mime_type, str) and mime_type.startswith("image/"):
         return True
-    filename = message_filename(message)
-    return filename is not None and Path(filename).suffix.lower() in IMAGE_EXTENSIONS
+    return suffix in IMAGE_EXTENSIONS
 
 
 def is_gcode_message(message: Any) -> bool:
     return is_gcode_filename(message_filename(message))
+
+
+def is_vector_message(message: Any) -> bool:
+    filename = message_filename(message)
+    return filename is not None and Path(filename).suffix.lower() in VECTOR_EXTENSIONS
 
 
 def has_thumbs_up(message: Any) -> bool:

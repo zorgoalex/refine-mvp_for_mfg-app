@@ -353,18 +353,16 @@
   gap: 2px;
 }
 
-.cnc-packet-card__machine {
-  font-variant-numeric: tabular-nums;
-}
-
 .cnc-packet-card__program {
-  color: var(--app-text-muted);
-  font-size: 12px;
+  color: var(--app-text);
+  font-size: 13px;
+  line-height: 1.3;
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .cnc-packet-card__status-icons {
-  min-width: 44px;
+  min-width: 40px;
   min-height: 40px;
   display: inline-flex;
   align-items: center;
@@ -374,8 +372,12 @@
   font-size: 16px;
 }
 
-.cnc-packet-card__notes,
-.cnc-packet-card__warnings {
+.cnc-packet-card__status-icon {
+  min-width: 18px;
+  min-height: 18px;
+}
+
+.cnc-packet-card__notes {
   display: grid;
   gap: 4px;
   margin: 8px 0;
@@ -384,14 +386,45 @@
   overflow-wrap: anywhere;
 }
 
-.cnc-packet-card__warnings {
-  color: #ad4e00;
+.cnc-packet-card__note-file {
+  color: var(--app-text);
+}
+
+.cnc-packet-card__collapse,
+.cnc-packet-card__sheet {
+  margin-top: 8px;
+  border-top: 1px solid var(--app-border-soft);
+}
+
+.cnc-packet-card__collapse.ant-collapse,
+.cnc-packet-card__sheet.ant-collapse {
+  background: transparent;
+}
+
+.cnc-packet-card__collapse .ant-collapse-header,
+.cnc-packet-card__sheet .ant-collapse-header {
+  min-height: 40px;
+  padding: 6px 0 !important;
+  align-items: center !important;
+}
+
+.cnc-packet-card__collapse .ant-collapse-content-box,
+.cnc-packet-card__sheet .ant-collapse-content-box {
+  padding: 0 0 4px !important;
+}
+
+.cnc-packet-card__collapse-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--app-text);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .cnc-packet-card__items {
-  margin-top: 8px;
   display: grid;
-  border-top: 1px solid var(--app-border-soft);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -399,7 +432,7 @@
 .cnc-packet-card__item {
   min-height: 34px;
   display: grid;
-  grid-template-columns: minmax(44px, 0.9fr) minmax(36px, 0.45fr) minmax(62px, 0.95fr) minmax(28px, 0.35fr) minmax(64px, 0.95fr);
+  grid-template-columns: minmax(46px, 0.85fr) minmax(98px, 1.25fr) minmax(34px, max-content);
   align-items: center;
   gap: 6px;
   padding: 5px 0;
@@ -428,10 +461,58 @@
   white-space: normal;
 }
 
-.cnc-packet-card__confidence {
-  margin-left: 4px;
+.cnc-packet-card__size {
+  display: block;
   color: var(--app-text-muted);
   font-size: 11px;
+  line-height: 1.25;
+}
+
+.cnc-packet-card__qty {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 2px;
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cnc-packet-card__qty-warning {
+  margin-left: 4px;
+  color: #ad4e00;
+  font-weight: 700;
+}
+
+.cnc-packet-card__sheet {
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.cnc-packet-card__sheet-body {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.cnc-packet-card__sheet-loading {
+  min-height: 80px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-surface-muted);
+}
+
+.cnc-packet-card__sheet-image {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 6px;
+  outline: 1px solid rgba(0, 0, 0, 0.1);
+  background: #fff;
 }
 
 .status-board-loading {

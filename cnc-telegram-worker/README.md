@@ -31,11 +31,11 @@ ERP_WORKER_PASSWORD=...
 
 `ERP_BEARER_TOKEN` can replace `ERP_WORKER_LOGIN/PASSWORD`.
 
-`CNC_OCR_COMMAND` defaults to the internal GLM runner command:
+`CNC_OCR_COMMAND` defaults to the internal RapidOCR service command:
 
 ```env
-CNC_OCR_COMMAND=python -m cnc_telegram_worker.glm_ocr_client --image {image}
-GLM_OCR_RUNNER_URL=http://glm-ocr-runner:8001/ocr
+CNC_OCR_COMMAND=python -m cnc_telegram_worker.rapid_ocr_client --image {image}
+CNC_RAPID_OCR_URL=http://ocr-service:8000/ocr
 ```
 
 Custom OCR commands must print JSON to stdout. Minimal supported shape:
@@ -61,6 +61,6 @@ Custom OCR commands must print JSON to stdout. Minimal supported shape:
 Custom example:
 
 ```env
-CNC_OCR_ENGINE=glm-ocr-0.9b-q8-llama.cpp
-CNC_OCR_COMMAND=/opt/glm-ocr/run-cnc-sheet-json --image {image}
+CNC_OCR_ENGINE=rapidocr-ppocrv5-eslav
+CNC_OCR_COMMAND=python -m cnc_telegram_worker.rapid_ocr_client --image {image}
 ```

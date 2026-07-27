@@ -26,8 +26,10 @@ class WorkerConfig:
     history_days: int
     poll_interval_seconds: int
     temp_ttl_hours: int
+    attachment_ttl_hours: int
     max_messages_per_scan: int
     temp_dir: Path
+    media_dir: Path
     state_path: Path
     resend_unchanged: bool
     backfill_on_start: bool
@@ -50,16 +52,18 @@ class WorkerConfig:
             erp_worker_login=env("ERP_WORKER_LOGIN"),
             erp_worker_password=env("ERP_WORKER_PASSWORD"),
             ocr_command=env("CNC_OCR_COMMAND"),
-            ocr_engine=env("CNC_OCR_ENGINE", "glm-ocr-0.9b-q8-llama.cpp"),
-            parser_version=env("CNC_PARSER_VERSION", "cnc-telegram-worker-v1"),
+            ocr_engine=env("CNC_OCR_ENGINE", "rapidocr-ppocrv5-eslav"),
+            parser_version=env("CNC_PARSER_VERSION", "cnc-telegram-worker-v10"),
             default_machine=env("CNC_MACHINE_DEFAULT"),
             default_material=env("CNC_DEFAULT_MATERIAL", "МДФ 16мм"),
             business_timezone_name=env("CNC_BUSINESS_TIMEZONE", "Asia/Almaty"),
             history_days=positive_int_env("CNC_HISTORY_DAYS", 7),
             poll_interval_seconds=positive_int_env("CNC_POLL_INTERVAL_SECONDS", 120),
             temp_ttl_hours=positive_int_env("CNC_TEMP_TTL_HOURS", 24),
+            attachment_ttl_hours=positive_int_env("CNC_ATTACHMENT_TTL_HOURS", 24 * 30),
             max_messages_per_scan=positive_int_env("CNC_MAX_MESSAGES_PER_SCAN", 1000),
             temp_dir=Path(env("CNC_TEMP_DIR", "/data/tmp")),
+            media_dir=Path(env("CNC_MEDIA_DIR", "/data/cnc-telegram-media")),
             state_path=Path(env("CNC_STATE_PATH", "/data/state.json")),
             resend_unchanged=bool_env("CNC_RESEND_UNCHANGED", False),
             backfill_on_start=bool_env("CNC_BACKFILL_ON_START", True),

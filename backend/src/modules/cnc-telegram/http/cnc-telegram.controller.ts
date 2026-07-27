@@ -1,4 +1,8 @@
-import { Body, Controller, Get, Headers, Inject, Post, Query, Req } from '@nestjs/common';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
+import { extname, resolve } from 'node:path';
+import { Body, Controller, Get, Headers, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   ApiBearerAuth,
   ApiHeader,
@@ -7,8 +11,10 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
+import type { BackendEnv } from '../../../config/env.validation';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { CncTelegramService } from '../application/cnc-telegram.service';
 import type {
@@ -19,6 +25,8 @@ import type {
 import { CncTelegramRuntimeConfigService } from './cnc-telegram-runtime-config.service';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const STORAGE_KEY_RE = /^[A-Za-z0-9._-]{1,220}$/;
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 
 const toolSchema = z.object({
   toolNumber: z.number().int().positive().max(999),
@@ -37,7 +45,7 @@ const itemSchema = z.object({
   widthMm: z.number().positive().max(10000).nullable().optional(),
   heightMm: z.number().positive().max(10000).nullable().optional(),
   quantity: z.number().int().positive().max(1000),
-  source: z.enum(['ocr', 'gcode', 'manual']),
+  source: z.enum(['vector', 'ocr', 'gcode', 'manual']),
   confidence: z.number().min(0).max(1),
   matchOrderId: z.number().int().positive().nullable().optional(),
   matchDetailId: z.number().int().positive().nullable().optional(),
@@ -78,12 +86,18 @@ const ingestSchema = z.object({
     messageId: z.number().int().positive().nullable().optional(),
     threadId: z.number().int().positive().nullable().optional(),
     version: z.number().int().positive(),
+    createdAt: z.string().datetime({ offset: true }).nullable().optional(),
     updatedAt: z.string().datetime({ offset: true }).nullable().optional(),
   }).strict(),
   workday: z.string().regex(DATE_ONLY).refine(isValidDateOnly).optional(),
   machine: z.string().trim().min(1).max(64).nullable().optional(),
   programName: z.string().trim().min(1).max(200).nullable().optional(),
   materialName: z.string().trim().min(1).max(120).nullable().optional(),
+  sheetImage: z.object({
+    storageKey: z.string().trim().regex(STORAGE_KEY_RE).max(220),
+    contentType: z.string().trim().min(1).max(120).nullable().optional(),
+    sizeBytes: z.number().int().positive().max(50 * 1024 * 1024).nullable().optional(),
+  }).strict().nullable().optional(),
   parseStatus: z.enum(['received', 'parsed', 'needs_review']).optional(),
   completionStatus: z.enum(['pending', 'completed']).optional(),
   thumbsUp: z.boolean().optional(),
@@ -107,6 +121,8 @@ export class CncTelegramController {
     private readonly cncTelegram: CncTelegramService,
     @Inject(CncTelegramRuntimeConfigService)
     private readonly runtimeConfig: CncTelegramRuntimeConfigService,
+    @Inject(ConfigService)
+    private readonly config: ConfigService<BackendEnv, true>,
   ) {}
 
   @ApiOperation({
@@ -157,6 +173,52 @@ export class CncTelegramController {
       dto: parseStructuredIngest(body, parseIdempotencyKey(idempotencyKey)),
       requestId: request.requestId,
     });
+  }
+
+  @ApiOperation({
+    operationId: 'getCncTelegramSheetImage',
+    summary: 'Get stored Telegram cutting sheet image',
+  })
+  @ApiResponse({ status: 200, description: 'Stored cutting sheet image' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 404, description: 'Image not found' })
+  @ApiResponse({ status: 422, description: 'Invalid storage key' })
+  @ApiResponse({ status: 503, description: 'CNC Telegram API is disabled' })
+  @Get('media/:storageKey')
+  async getMedia(
+    @Req() request: RequestWithCurrentUser,
+    @Param('storageKey') storageKey: string,
+    @Res() response: Response,
+  ): Promise<void> {
+    this.assertEnabled();
+    this.requireCurrentUser(request);
+    const safeKey = parseStorageKey(storageKey);
+    const mediaDir = this.config.get('CNC_TELEGRAM_MEDIA_DIR', { infer: true });
+    const absoluteDir = resolve(mediaDir);
+    const absolutePath = resolve(absoluteDir, safeKey);
+    if (!absolutePath.startsWith(`${absoluteDir}/`)) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid CNC Telegram media key', {
+        field: 'storageKey',
+      });
+    }
+    let fileStat;
+    try {
+      fileStat = await stat(absolutePath);
+    } catch {
+      throw new ApiError(404, 'NOT_FOUND', 'CNC Telegram media file not found', {
+        storageKey: safeKey,
+      });
+    }
+    if (!fileStat.isFile()) {
+      throw new ApiError(404, 'NOT_FOUND', 'CNC Telegram media file not found', {
+        storageKey: safeKey,
+      });
+    }
+    response.setHeader('Content-Type', contentTypeForStorageKey(safeKey));
+    response.setHeader('Cache-Control', 'private, max-age=300');
+    response.setHeader('Content-Length', String(fileStat.size));
+    response.setHeader('Content-Disposition', `inline; filename="${safeKey}"`);
+    createReadStream(absolutePath).pipe(response);
   }
 
   private assertEnabled(): void {
@@ -219,4 +281,25 @@ function isValidDateOnly(value: string): boolean {
   const timestamp = Date.parse(`${value}T00:00:00.000Z`);
   return Number.isFinite(timestamp) &&
     new Date(timestamp).toISOString().slice(0, 10) === value;
+}
+
+function parseStorageKey(value: string): string {
+  const key = value.trim();
+  if (!STORAGE_KEY_RE.test(key) || !IMAGE_EXTENSIONS.has(extname(key).toLowerCase())) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid CNC Telegram media key', {
+      field: 'storageKey',
+    });
+  }
+  return key;
+}
+
+function contentTypeForStorageKey(storageKey: string): string {
+  switch (extname(storageKey).toLowerCase()) {
+    case '.png':
+      return 'image/png';
+    case '.webp':
+      return 'image/webp';
+    default:
+      return 'image/jpeg';
+  }
 }

@@ -27,6 +27,18 @@ class StateStoreTest(unittest.TestCase):
             self.assertEqual(changed.source_version, 2)
             self.assertTrue(changed.changed)
 
+    def test_source_fingerprint_can_skip_before_ocr_after_successful_post(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "state.json"
+            state = StateStore(path)
+
+            self.assertFalse(state.source_unchanged("telegram:-100:1", "source-a"))
+            state.mark_posted("telegram:-100:1", "hash-a", 1, "source-a")
+
+            restored = StateStore(path)
+            self.assertTrue(restored.source_unchanged("telegram:-100:1", "source-a"))
+            self.assertFalse(restored.source_unchanged("telegram:-100:1", "source-b"))
+
     def test_cleanup_refuses_root(self) -> None:
         with self.assertRaises(ValueError):
             cleanup_temp_dir(Path("/"), 24)

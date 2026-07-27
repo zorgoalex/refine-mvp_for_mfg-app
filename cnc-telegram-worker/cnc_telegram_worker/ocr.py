@@ -22,7 +22,7 @@ async def run_ocr_command(command_template: str, image_path: Path, timeout_secon
     if not command_template:
         return OcrResult(analysis_warnings=["OCR command is not configured; packet needs review"])
 
-    command = shlex.split(command_template.format(image=str(image_path)))
+    command = shlex.split(command_template.replace("{image}", shlex.quote(str(image_path))))
     process = await asyncio.create_subprocess_exec(
         *command,
         stdout=asyncio.subprocess.PIPE,

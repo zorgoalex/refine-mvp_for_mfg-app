@@ -21,6 +21,9 @@ MATERIAL_RE = re.compile(
     r"\b(?P<name>ХДФ|HDF|ЛДСП|LДСП|МДФ|MDF|фанера|plywood)(?:\s*(?P<thickness>\d{1,2}(?:[.,]\d+)?)\s*мм?)?",
     re.IGNORECASE,
 )
+IGNORED_ANALYSIS_WARNINGS = {
+    "RapidOCR found text, but no detail rows with order and size",
+}
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,8 @@ def build_structured_packet(
     comments: list[str],
     ocr: OcrResult,
     gcode: GcodeMeta | None,
+    vector_items: list[dict[str, Any]] | None = None,
+    sheet_image: dict[str, Any] | None = None,
     default_machine: str,
     default_material: str,
     ocr_engine: str,
@@ -55,20 +60,31 @@ def build_structured_packet(
 ) -> dict[str, Any]:
     source_updated_at = image.edited_at or image.message_date
     gcode_analysis = gcode.analysis if gcode else None
-    comments = normalize_comments([image.text, *comments, *ocr.comments])
-    order_names = collect_order_names(comments, ocr.items, gcode_analysis)
-    last_order_names = detect_last_order_names(comments)
-    material_name = ocr.material_name or infer_material(comments, gcode.filename if gcode else "", default_material)
+    vector_items = vector_items or []
+    raw_comments = normalize_comments([image.text, *comments, *ocr.comments])
+    structured_order_names = collect_structured_order_names(vector_items, ocr.items, gcode_analysis)
+    order_names = collect_order_names(raw_comments, vector_items, ocr.items, gcode_analysis)
+    last_order_names = detect_last_order_names(raw_comments)
+    material_name = ocr.material_name or infer_material(raw_comments, gcode.filename if gcode else "", default_material)
     tools = [
         {"toolNumber": tool.toolNumber, "spindleRpm": tool.spindleRpm}
         for tool in (gcode_analysis.tools if gcode_analysis else [])
     ]
-    warnings = normalize_comments([
-        *ocr.analysis_warnings,
-        *(gcode_analysis.warnings if gcode_analysis else []),
-        *gcode_warnings(gcode_analysis, order_names),
-    ], limit=100)
-    items = normalize_ocr_items(ocr.items)
+    items = normalize_vector_items(vector_items) if vector_items else normalize_ocr_items(ocr.items)
+    warnings = [
+        warning
+        for warning in normalize_comments(
+            [
+                *ocr.analysis_warnings,
+                *(gcode_analysis.warnings if gcode_analysis else []),
+                *gcode_warnings(gcode_analysis, order_names, has_items=bool(items)),
+            ],
+            limit=100,
+        )
+        if warning not in IGNORED_ANALYSIS_WARNINGS
+    ]
+    if not vector_items:
+        items = reconcile_item_quantities_with_gcode(items, order_names, gcode_analysis)
     if not items:
         items = fallback_items(order_names, gcode_analysis)
     if not items:
@@ -86,15 +102,19 @@ def build_structured_packet(
         }]
         warnings.append("No order number found; packet needs manual review")
 
+    display_comments = [
+        comment
+        for comment in normalize_display_comments(raw_comments)
+        if comment not in order_names
+    ]
     for order_name in last_order_names:
-        comments.append(f"Весь заказ: {order_name}")
-
-    if gcode_analysis and gcode_analysis.size_candidates and len(order_names) != 1:
-        warnings.append(
-            f"G-code has {sum(candidate.quantity for candidate in gcode_analysis.size_candidates)} size candidate(s), but order mapping requires OCR review"
-        )
+        display_comments.append(f"Весь заказ: {order_name}")
+    display_comments = dedupe(display_comments)
 
     machine = ocr.machine or (gcode_analysis.machine if gcode_analysis else None) or default_machine or None
+    doweling_links = normalize_doweling_links(
+        correct_doweling_order_names([*detect_doweling_links(raw_comments), *ocr.doweling_links], structured_order_names)
+    )
 
     packet: dict[str, Any] = {
         "externalPacketKey": external_packet_key(image.chat_id, image.message_id),
@@ -103,6 +123,7 @@ def build_structured_packet(
             "messageId": image.message_id,
             "threadId": image.thread_id,
             "version": 1,
+            "createdAt": isoformat_utc(image.message_date),
             "updatedAt": isoformat_utc(source_updated_at),
         },
         "workday": workday.isoformat(),
@@ -113,13 +134,14 @@ def build_structured_packet(
         "completionStatus": "completed" if image.thumbs_up else "pending",
         "thumbsUp": image.thumbs_up,
         "completedAt": isoformat_utc(source_updated_at) if image.thumbs_up else None,
-        "rework": has_rework(comments),
-        "comments": comments[:50],
+        "rework": has_rework(raw_comments),
+        "comments": display_comments[:50],
         "tools": tools[:50],
-        "dowelingLinks": normalize_doweling_links([*detect_doweling_links(comments), *ocr.doweling_links]),
+        "dowelingLinks": doweling_links,
         "analysisWarnings": dedupe(warnings)[:100],
         "ocrEngine": ocr_engine,
         "parserVersion": parser_version,
+        "sheetImage": sheet_image,
         "items": items[:2000],
     }
     return packet
@@ -150,12 +172,17 @@ def idempotency_key(external_key: str, source_version: int) -> str:
 
 def collect_order_names(
     comments: list[str],
+    vector_items: list[dict[str, Any]],
     ocr_items: list[dict[str, Any]],
     gcode_analysis: GcodeAnalysis | None,
 ) -> list[str]:
     values: list[str] = []
     for comment in comments:
-        values.extend(extract_order_names(comment))
+        values.extend(extract_order_names_without_doweling_numbers(comment))
+    for item in vector_items:
+        order_name = item.get("orderName")
+        if isinstance(order_name, str):
+            values.extend(extract_order_names(order_name))
     for item in ocr_items:
         order_name = item.get("orderName")
         if isinstance(order_name, str):
@@ -165,12 +192,58 @@ def collect_order_names(
     return dedupe(values)
 
 
+def collect_structured_order_names(
+    vector_items: list[dict[str, Any]],
+    ocr_items: list[dict[str, Any]],
+    gcode_analysis: GcodeAnalysis | None,
+) -> list[str]:
+    values: list[str] = []
+    for item in vector_items:
+        order_name = item.get("orderName")
+        if isinstance(order_name, str):
+            values.extend(extract_order_names(order_name))
+    for item in ocr_items:
+        order_name = item.get("orderName")
+        if isinstance(order_name, str):
+            values.extend(extract_order_names(order_name))
+    if gcode_analysis:
+        values.extend(gcode_analysis.order_names)
+    return dedupe(values)
+
+
+def extract_order_names_without_doweling_numbers(comment: str) -> list[str]:
+    doweling_numbers = {
+        link["dowelingNumber"]
+        for link in detect_doweling_links([comment])
+    }
+    return [
+        order_name
+        for order_name in extract_order_names(comment)
+        if order_name not in doweling_numbers
+    ]
+
+
 def detect_last_order_names(comments: list[str]) -> list[str]:
     result: list[str] = []
     for comment in comments:
-        if "весь" in comment.casefold():
-            result.extend(extract_order_names(comment))
+        for segment in re.split(r"[.;\n]+", comment):
+            if "весь" in segment.casefold():
+                result.extend(extract_order_names(segment))
     return dedupe(result)
+
+
+def normalize_display_comments(comments: list[str]) -> list[str]:
+    result: list[str] = []
+    for comment in comments:
+        folded = comment.casefold()
+        if (
+            "весь" in folded
+            or "присад" in folded
+            or "сверл" in folded
+        ):
+            continue
+        result.append(comment)
+    return result
 
 
 def infer_material(comments: list[str], program_name: str, default_material: str) -> str:
@@ -221,7 +294,7 @@ def normalize_doweling_links(links: list[dict[str, Any]]) -> list[dict[str, str]
 
 
 def normalize_ocr_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    normalized: list[dict[str, Any]] = []
+    normalized_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
     for index, item in enumerate(items):
         order_name = clean_string(item.get("orderName"), 64)
         if not order_name:
@@ -233,10 +306,23 @@ def normalize_ocr_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         match_order_id = positive_int(item.get("matchOrderId"))
         match_detail_id = positive_int(item.get("matchDetailId"))
         match_status = normalize_match_status(item.get("matchStatus"), match_order_id, match_detail_id)
-        source_key = clean_string(item.get("sourceItemKey"), 120) or source_item_key(
-            "ocr", order_name, detail_number, width, height, index
+        aggregate_detail_key = detail_number if detail_number is not None else f"unlabeled:{index}"
+        aggregate_key = (
+            order_name,
+            aggregate_detail_key,
+            width,
+            height,
+            match_order_id,
+            match_detail_id if match_order_id is not None else None,
+            match_status,
         )
-        normalized.append({
+        existing = normalized_by_key.get(aggregate_key)
+        if existing is not None:
+            existing["quantity"] = int(existing["quantity"]) + quantity
+            existing["confidence"] = max(float(existing["confidence"]), confidence(item.get("confidence"), default=0.5))
+            continue
+        source_key = source_item_key("ocr", order_name, detail_number, width, height, len(normalized_by_key))
+        normalized_by_key[aggregate_key] = {
             "sourceItemKey": source_key,
             "orderName": order_name,
             "detailNumber": detail_number,
@@ -249,8 +335,44 @@ def normalize_ocr_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "matchDetailId": match_detail_id if match_order_id is not None else None,
             "matchStatus": match_status,
             "reviewNote": clean_string(item.get("reviewNote"), 500),
-        })
-    return normalized
+        }
+    return list(normalized_by_key.values())
+
+
+def normalize_vector_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for index, item in enumerate(items):
+        order_name = clean_string(item.get("orderName"), 64)
+        if not order_name:
+            continue
+        width = positive_float(item.get("widthMm"))
+        height = positive_float(item.get("heightMm"))
+        detail_number = positive_int(item.get("detailNumber"))
+        if detail_number is None:
+            continue
+        quantity = positive_int(item.get("quantity")) or 1
+        aggregate_key = (order_name, detail_number, width, height)
+        existing = normalized_by_key.get(aggregate_key)
+        if existing is not None:
+            existing["quantity"] = int(existing["quantity"]) + quantity
+            existing["confidence"] = max(float(existing["confidence"]), confidence(item.get("confidence"), default=0.99))
+            continue
+        source_key = source_item_key("vector", order_name, detail_number, width, height, len(normalized_by_key))
+        normalized_by_key[aggregate_key] = {
+            "sourceItemKey": source_key,
+            "orderName": order_name,
+            "detailNumber": detail_number,
+            "widthMm": width,
+            "heightMm": height,
+            "quantity": quantity,
+            "source": "vector",
+            "confidence": confidence(item.get("confidence"), default=0.99),
+            "matchOrderId": positive_int(item.get("matchOrderId")),
+            "matchDetailId": positive_int(item.get("matchDetailId")),
+            "matchStatus": normalize_match_status(item.get("matchStatus"), None, None),
+            "reviewNote": None,
+        }
+    return list(normalized_by_key.values())
 
 
 def fallback_items(order_names: list[str], gcode_analysis: GcodeAnalysis | None) -> list[dict[str, Any]]:
@@ -276,6 +398,92 @@ def fallback_items(order_names: list[str], gcode_analysis: GcodeAnalysis | None)
     ]
 
 
+def reconcile_item_quantities_with_gcode(
+    items: list[dict[str, Any]],
+    order_names: list[str],
+    gcode_analysis: GcodeAnalysis | None,
+) -> list[dict[str, Any]]:
+    if not items or not gcode_analysis or len(order_names) != 1:
+        return items
+    if any(item.get("orderName") != order_names[0] for item in items):
+        return items
+    candidates = gcode_analysis.size_candidates
+    if not candidates:
+        return items
+    result = [dict(item) for item in items]
+    item_indexes_by_candidate: dict[int, list[int]] = {}
+    for index, item in enumerate(result):
+        width = positive_float(item.get("widthMm"))
+        height = positive_float(item.get("heightMm"))
+        match_index = matching_size_candidate_index(width, height, candidates)
+        if match_index is not None:
+            item_indexes_by_candidate.setdefault(match_index, []).append(index)
+
+    for candidate_index, item_indexes in item_indexes_by_candidate.items():
+        if len(item_indexes) != 1:
+            continue
+        index = item_indexes[0]
+        candidate = candidates[candidate_index]
+        if candidate.quantity > int(result[index].get("quantity") or 0):
+            result[index] = {**result[index], "quantity": candidate.quantity}
+    return result
+
+
+def matching_size_candidate_index(
+    width: float | None,
+    height: float | None,
+    candidates: list[SizeCandidate],
+) -> int | None:
+    if width is None or height is None:
+        return None
+    matches = [
+        index
+        for index, candidate in enumerate(candidates)
+        if same_size(width, height, candidate.widthMm, candidate.heightMm)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def matching_size_candidate(
+    width: float | None,
+    height: float | None,
+    candidates: list[SizeCandidate],
+) -> SizeCandidate | None:
+    match_index = matching_size_candidate_index(width, height, candidates)
+    return candidates[match_index] if match_index is not None else None
+
+
+def correct_doweling_order_names(
+    links: list[dict[str, Any]],
+    order_names: list[str],
+) -> list[dict[str, Any]]:
+    known_orders = [order for order in order_names if isinstance(order, str) and order.isdigit()]
+    result: list[dict[str, Any]] = []
+    for link in links:
+        order_name = link.get("orderName")
+        if not isinstance(order_name, str) or order_name in known_orders:
+            result.append(link)
+            continue
+        replacement = nearest_known_order_name(order_name, known_orders)
+        result.append({**link, "orderName": replacement or order_name})
+    return result
+
+
+def nearest_known_order_name(value: str, known_orders: list[str]) -> str | None:
+    candidates = [
+        order_name
+        for order_name in known_orders
+        if len(order_name) == len(value) and sum(left != right for left, right in zip(order_name, value)) == 1
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def same_size(left_width: float, left_height: float, right_width: float, right_height: float) -> bool:
+    return abs(left_width - right_width) <= 3 and abs(left_height - right_height) <= 3
+
+
 def gcode_item(order_name: str, candidate: SizeCandidate, index: int) -> dict[str, Any]:
     return {
         "sourceItemKey": source_item_key("gcode", order_name, None, candidate.widthMm, candidate.heightMm, index),
@@ -286,17 +494,15 @@ def gcode_item(order_name: str, candidate: SizeCandidate, index: int) -> dict[st
         "quantity": candidate.quantity,
         "source": "gcode",
         "confidence": 0.35,
-        "matchStatus": "needs_review",
-        "reviewNote": "Size parsed from G-code; order/detail mapping requires OCR or manual review",
+        "matchStatus": "unmatched",
+        "reviewNote": None,
     }
 
 
-def gcode_warnings(gcode_analysis: GcodeAnalysis | None, order_names: list[str]) -> list[str]:
-    if not gcode_analysis:
-        return ["No matching G-code file found near Telegram screenshot"]
+def gcode_warnings(gcode_analysis: GcodeAnalysis | None, order_names: list[str], *, has_items: bool) -> list[str]:
     warnings: list[str] = []
-    if not gcode_analysis.tools:
-        warnings.append("G-code tool number not found")
+    if not gcode_analysis and not has_items:
+        warnings.append("No matching G-code file found near Telegram screenshot")
     if not order_names:
         warnings.append("Order number not found in screenshot comments or G-code filename")
     return warnings
@@ -306,6 +512,8 @@ def normalize_comments(values: list[str], limit: int = 50) -> list[str]:
     result: list[str] = []
     for value in values:
         text = clean_string(value, 500)
+        if text and text.casefold() in {"string", "null", "none"}:
+            continue
         if text:
             result.append(text)
     return dedupe(result)[:limit]

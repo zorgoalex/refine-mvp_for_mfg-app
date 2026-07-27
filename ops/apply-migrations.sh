@@ -662,17 +662,29 @@ probe_file() {
                      "$(q_con_def_on_safe chk_crm_sync_backfill_order_cursor crm_sync_backfill_checkpoint 'CHECK (((last_order_id IS NULL) OR (last_order_id ~ '\''^[0-9]+$'\''::text)))')" \
                      "$(q_con_def_on_safe chk_crm_sync_backfill_counts crm_sync_backfill_checkpoint 'CHECK (((processed_clients >= 0) AND (processed_orders >= 0)))')" \
                      "$(q_con_def_on_safe chk_crm_sync_backfill_completed_at crm_sync_backfill_checkpoint 'CHECK (((phase = '\''completed'\''::text) = (completed_at IS NOT NULL)))')" ;;
+    087_cnc_telegram_source_created_at*) probe_all "$(q_col cnc_telegram_packets source_created_at)" \
+                     "$(q_idx idx_cnc_telegram_packets_workday_source_created)" ;;
+    088_cnc_telegram_vector_media*) probe_all "$(q_col cnc_telegram_packets sheet_image_storage_key)" \
+                     "$(q_col cnc_telegram_packets sheet_image_content_type)" \
+                     "$(q_col cnc_telegram_packets sheet_image_size_bytes)" \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM pg_constraint
+                         WHERE conname = 'chk_cnc_telegram_packet_items_source'
+                           AND pg_get_constraintdef(oid) LIKE '%vector%'
+                      );" \
+                     "$(q_idx idx_cnc_telegram_packets_sheet_image_storage_key)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
 
-# 073/074/087 contain IF NOT EXISTS DDL. A partially-created object can therefore
+# 073/074/087/088 contain IF NOT EXISTS DDL. A partially-created object can therefore
 # let PostgreSQL finish the file without reaching the required end state. Never
 # record those migrations in the ledger until the complete effect probe passes.
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*)
+    073_*|074_*|087_*|088_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

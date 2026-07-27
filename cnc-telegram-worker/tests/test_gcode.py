@@ -42,6 +42,10 @@ G0 Z10
         self.assertEqual(analysis.bounds_width_mm, 260)
         self.assertEqual(analysis.bounds_height_mm, 100)
         self.assertEqual([(c.widthMm, c.heightMm, c.quantity) for c in analysis.size_candidates], [(60, 80, 1), (100, 50, 1)])
+        self.assertEqual(
+            [(p.xMm, p.yMm, p.widthMm, p.heightMm) for p in analysis.sheet_placements],
+            [(0, 0, 100, 50), (190, 0, 60, 80)],
+        )
 
     def test_extract_order_names_dedupes(self) -> None:
         self.assertEqual(extract_order_names("CNC#1_2670+2670+2698.TXT"), ["2670", "2698"])
