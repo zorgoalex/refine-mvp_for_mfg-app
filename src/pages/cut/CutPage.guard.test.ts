@@ -152,6 +152,16 @@ describe('CutPage source guards', () => {
     expect(source).toContain('detailIds: selected');
   });
 
+  it('keeps the create-preview detail table compact and shows grouped plus total summaries', () => {
+    expect(source).toContain('CUT_DETAIL_PREVIEW_VISIBLE_ROWS = 10');
+    expect(source).toContain('CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT');
+    expect(source).toContain('buildCutPreviewSummary');
+    expect(source).toContain('Итого по плёнкам и материалам');
+    expect(source).toContain('Итого по всем выбранным деталям');
+    expect(source).toContain('formatCutPreviewSummaryMetrics');
+    expect(source).toContain('area * quantity');
+  });
+
   it('suggests the cut job name from unique orders, films, and current date', () => {
     expect(source).toContain('buildSuggestedCutName');
     expect(source).toContain('раскрой ${orders.length');

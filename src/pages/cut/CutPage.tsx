@@ -117,6 +117,21 @@ type CutFilmSelectOption = {
   searchText: string;
 };
 
+type CutPreviewSummaryRow = {
+  key: string;
+  filmName: string;
+  materialName: string;
+  positions: number;
+  orders: string[];
+  details: number;
+  area: number;
+};
+
+type CutPreviewSummary = {
+  groups: CutPreviewSummaryRow[];
+  total: CutPreviewSummaryRow;
+};
+
 type PdfPreviewState = {
   open: boolean;
   group: CutGroupDto | null;
@@ -153,6 +168,9 @@ const STATUS_TAG_COLORS: Record<string, string> = {
 };
 
 const CUT_JOBS_TABLE_CONTAINER_HEIGHT = 317;
+const CUT_DETAIL_PREVIEW_VISIBLE_ROWS = 10;
+const CUT_DETAIL_PREVIEW_ROW_HEIGHT = 40;
+const CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT = CUT_DETAIL_PREVIEW_VISIBLE_ROWS * CUT_DETAIL_PREVIEW_ROW_HEIGHT;
 const MIN_EDITOR_VIEW_ZOOM = 0.25;
 const MAX_EDITOR_VIEW_ZOOM = 1.5;
 const EDITOR_VIEW_ZOOM_STEP = 0.25;
@@ -334,6 +352,86 @@ function buildSuggestedCutName(details: EligibleDetailDto[], now: Dayjs = dayjs(
   const orders = uniqueNonBlank(source.map((detail) => detail.orderName || `#${detail.orderId}`));
   const films = uniqueNonBlank(source.map((detail) => detail.filmName));
   return `раскрой ${orders.length > 0 ? orders.join(', ') : 'без заказов'} - ${films.length > 0 ? films.join(', ') : 'без пленки'} - ${now.format('DD.MM.YYYY')}`;
+}
+
+function cutPreviewOrderLabel(detail: EligibleDetailDto): string {
+  return detail.orderName?.trim() || `#${detail.orderId}`;
+}
+
+function normalizeCutSummaryLabel(value: string | null | undefined, fallback: string): string {
+  return value?.trim() || fallback;
+}
+
+function cutPreviewAreaTotal(detail: EligibleDetailDto): number {
+  const area = Number(detail.area);
+  const quantity = Number(detail.quantity);
+  if (!Number.isFinite(area) || !Number.isFinite(quantity)) return 0;
+  return area * quantity;
+}
+
+function buildCutPreviewSummary(details: EligibleDetailDto[], selectedDetailIds: number[]): CutPreviewSummary {
+  const selectedIds = new Set(selectedDetailIds);
+  const groups = new Map<string, Omit<CutPreviewSummaryRow, 'orders'> & { orderSet: Set<string> }>();
+  const total: Omit<CutPreviewSummaryRow, 'orders'> & { orderSet: Set<string> } = {
+    key: 'total',
+    filmName: 'Все плёнки',
+    materialName: 'Все материалы',
+    positions: 0,
+    orderSet: new Set(),
+    details: 0,
+    area: 0,
+  };
+
+  for (const detail of details) {
+    if (!selectedIds.has(detail.orderDetailId)) continue;
+    const filmName = normalizeCutSummaryLabel(detail.filmName, 'без плёнки');
+    const materialName = normalizeCutSummaryLabel(detail.materialName, 'без материала');
+    const groupKey = `${detail.filmId ?? filmName}::${detail.sheetMaterialTypeId ?? detail.materialId ?? materialName}`;
+    const quantity = Number.isFinite(Number(detail.quantity)) ? Number(detail.quantity) : 0;
+    const area = cutPreviewAreaTotal(detail);
+    const order = cutPreviewOrderLabel(detail);
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = {
+        key: groupKey,
+        filmName,
+        materialName,
+        positions: 0,
+        orderSet: new Set(),
+        details: 0,
+        area: 0,
+      };
+      groups.set(groupKey, group);
+    }
+    for (const bucket of [group, total]) {
+      bucket.positions += 1;
+      bucket.orderSet.add(order);
+      bucket.details += quantity;
+      bucket.area += area;
+    }
+  }
+
+  const finalize = (row: Omit<CutPreviewSummaryRow, 'orders'> & { orderSet: Set<string> }): CutPreviewSummaryRow => ({
+    key: row.key,
+    filmName: row.filmName,
+    materialName: row.materialName,
+    positions: row.positions,
+    orders: [...row.orderSet],
+    details: row.details,
+    area: row.area,
+  });
+
+  return {
+    groups: [...groups.values()]
+      .map(finalize)
+      .sort((a, b) => `${a.materialName} ${a.filmName}`.localeCompare(`${b.materialName} ${b.filmName}`, 'ru')),
+    total: finalize(total),
+  };
+}
+
+function formatCutPreviewSummaryMetrics(row: CutPreviewSummaryRow): string {
+  const orders = row.orders.length > 0 ? row.orders.join(', ') : '—';
+  return `позиций ${row.positions}; заказов ${row.orders.length} (${orders}); деталей ${row.details}; площадь ${formatArea(row.area)}`;
 }
 
 async function fetchCutOrderOptions(dateFrom: string, dateTo: string): Promise<CutOrderSelectOption[]> {
@@ -1952,6 +2050,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
   const isCreationPreview = job === null && eligible !== null;
+  const creationPreviewSummary = useMemo(
+    () => buildCutPreviewSummary(eligible ?? [], selected),
+    [eligible, selected],
+  );
 
   // Dirty guard: any group has an active editor session OR its toggle differs
   // from the persisted isActive. While dirty, whole-job PDF is disabled.
@@ -2085,7 +2187,35 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 columns={eligibleColumns}
                 dataSource={eligible}
                 pagination={false}
-                scroll={{ x: 1900 }}
+                scroll={{ x: 1900, y: CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT }}
+                summary={() => (
+                  <Table.Summary>
+                    <Table.Summary.Row>
+                      <Table.Summary.Cell index={0} colSpan={eligibleColumns.length}>
+                        <Space size={6} wrap>
+                          <Text strong>Итого по плёнкам и материалам:</Text>
+                          {creationPreviewSummary.groups.length === 0 ? (
+                            <Text type="secondary">нет выбранных деталей</Text>
+                          ) : (
+                            creationPreviewSummary.groups.map((group) => (
+                              <Tag key={group.key} color="blue" style={{ whiteSpace: 'normal', lineHeight: 1.5 }}>
+                                {group.materialName} / {group.filmName}: {formatCutPreviewSummaryMetrics(group)}
+                              </Tag>
+                            ))
+                          )}
+                        </Space>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                    <Table.Summary.Row>
+                      <Table.Summary.Cell index={0} colSpan={eligibleColumns.length}>
+                        <Space size={6} wrap>
+                          <Text strong>Итого по всем выбранным деталям:</Text>
+                          <Text>{formatCutPreviewSummaryMetrics(creationPreviewSummary.total)}</Text>
+                        </Space>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                )}
                 rowSelection={{
                   selectedRowKeys: selected,
                   onChange: (keys) => setSelected(keys.map(Number)),

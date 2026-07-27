@@ -30,6 +30,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-27",
+    title: "Раскрой: компактная проверка деталей",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Блок проверки деталей перед созданием раскроя теперь показывает 10 строк и прокручивает остальные детали внутри таблицы.",
+      "Под списком деталей добавлены итоги по сочетаниям плёнки и материала, а также общий итог по выбранным позициям.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-26",
     title: "Автостатусы по дедлайну конкретного этапа",
     services: ["ERP"],
