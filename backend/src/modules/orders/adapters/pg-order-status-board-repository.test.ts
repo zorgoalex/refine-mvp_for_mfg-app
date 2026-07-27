@@ -214,6 +214,27 @@ describe('PgOrderStatusBoardRepository', () => {
     );
   });
 
+  it('marks overdue cards by planned date without suppressing issued inconsistent rows', async () => {
+    const database = fakeDatabase([]);
+
+    await new PgOrderStatusBoardRepository(database.client).getBoard({
+      currentUser: user('admin'),
+      query: {
+        board: 'order',
+        limit: 24,
+        onlyMyOrders: false,
+        overdueOnly: true,
+      },
+    });
+
+    const sql = database.queries[0]?.text ?? '';
+    expect(sql).toContain(
+      '(ranked.planned_completion_date < CURRENT_DATE) AS past_planned_date',
+    );
+    expect(sql).toContain('o.planned_completion_date < CURRENT_DATE');
+    expect(sql).not.toContain('o.issue_date IS NULL');
+  });
+
   it('excludes production Done from catalog and order scan by default', async () => {
     const database = fakeDatabase([]);
 

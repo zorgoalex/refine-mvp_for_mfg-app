@@ -293,12 +293,26 @@
 }
 
 .status-board-card__number {
+  flex: 1 1 auto;
   height: auto;
   min-width: 0;
   padding: 3px 0;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   text-align: left;
+  white-space: normal;
+}
+
+.status-board-card__number.ant-btn {
+  height: auto;
+  min-height: 32px;
+  display: block;
+  line-height: 1.25;
+}
+
+.status-board-card__number.ant-btn > span {
+  display: block;
+  overflow-wrap: anywhere;
   white-space: normal;
 }
 

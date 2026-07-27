@@ -69,7 +69,6 @@ import type {
   CncTelegramTodayColumn,
   CncTelegramTodayResponse,
 } from '../../api/types/cncTelegramApi.types';
-import { CURRENCY_CODE } from '../../config/currency';
 import { featureFlags } from '../../config/featureFlags';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
 import {
@@ -1703,6 +1702,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
     resolveStatusBoardStatusColor(board, card, allColumns) ?? '#8c8c8c';
   const showCompactDetails = displayMode !== 'minimal';
   const showStandardDetails = displayMode === 'standard';
+  const paymentSummary = formatPaymentSummary(card);
   const showUrgentFlag = card.priority <= 50;
   const showAutoFlag =
     board === 'production' && card.productionStatusFromDetailsEnabled;
@@ -1833,20 +1833,10 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           <span className="status-board-card__standard-cell">
             {card.partsCount} дет. · {formatArea(card.totalArea)}
           </span>
-          {card.finalAmount !== null && (
-            <>
-              <span className="status-board-card__standard-cell">
-                {card.paymentStatusName || 'Оплата без статуса'}
-              </span>
-              <span className="status-board-card__standard-cell">
-                {formatMoney(card.paidAmount ?? 0)} / {formatMoney(card.finalAmount)}
-              </span>
-              {(card.debtAmount ?? 0) > 0 && (
-                <span className="status-board-card__standard-cell status-board-card__standard-cell--wide status-board-card__debt">
-                  Долг {formatMoney(card.debtAmount ?? 0)}
-                </span>
-              )}
-            </>
+          {paymentSummary && (
+            <span className="status-board-card__standard-cell">
+              {paymentSummary}
+            </span>
           )}
           {showFlags && (
             <div className="status-board-card__tags status-board-card__standard-tags">
@@ -1960,12 +1950,14 @@ function formatDateTime(value: string): string {
   return parsed.isValid() ? parsed.format('DD.MM.YYYY HH:mm') : '—';
 }
 
-function formatMoney(value: number): string {
-  return new Intl.NumberFormat('ru-RU', {
-    style: 'currency',
-    currency: CURRENCY_CODE,
-    maximumFractionDigits: 0,
-  }).format(value);
+function formatPaymentSummary(card: OrderStatusBoardCard): string | null {
+  if (card.finalAmount === null) return null;
+  const paidAmount = card.paidAmount ?? 0;
+  const debtAmount =
+    card.debtAmount ?? Math.max(card.finalAmount - paidAmount, 0);
+  if (debtAmount <= 0 || paidAmount >= card.finalAmount) return 'оплачен';
+  if (paidAmount <= 0) return 'не оплачен';
+  return 'частично оплачен';
 }
 
 function formatArea(value: number): string {

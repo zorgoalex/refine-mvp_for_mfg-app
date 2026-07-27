@@ -46,9 +46,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('overflow-x: auto');
   });
 
-  it('uses the application currency instead of a hardcoded foreign currency', () => {
-    expect(page).toContain('currency: CURRENCY_CODE');
-    expect(page).not.toContain("currency: 'RUB'");
+  it('summarizes payment without exposing money amounts in status-board cards', () => {
+    expect(page).toContain('formatPaymentSummary(card)');
+    expect(page).toContain("return 'оплачен'");
+    expect(page).toContain("return 'частично оплачен'");
+    expect(page).toContain("return 'не оплачен'");
+    expect(page).not.toContain('formatMoney(');
+    expect(page).not.toContain('CURRENCY_CODE');
+    expect(page).not.toContain('paymentStatusName ||');
   });
 
   it('shows the completed-status opt-in only on the production tab with a usable hit area', () => {
@@ -137,5 +142,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-card__status-row');
     expect(css).toContain('.status-board-card__status-badge.ant-tag');
     expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
+    expect(css).toContain('.status-board-card__number.ant-btn');
+    expect(css).toContain('overflow-wrap: anywhere');
   });
 });
