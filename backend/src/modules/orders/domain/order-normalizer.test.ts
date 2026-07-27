@@ -178,6 +178,22 @@ describe('normalizeSaveOrderDto', () => {
 });
 
 describe('normalizeSaveOrderDto sheetMaterialTypeId (SP3/Variant B)', () => {
+  it('preserves header projectId from incoming payload', () => {
+    const out = normalizeSaveOrderDto(
+      createRawOrder({
+        header: {
+          orderName: 'Test order',
+          clientId: 1001,
+          projectId: '77' as unknown as number,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+        },
+      }),
+    );
+
+    expect(out.header.projectId).toBe(77);
+  });
+
   it('normalizes detail sheetMaterialTypeId (optional)', () => {
     const out = normalizeSaveOrderDto(
       createRawOrder({

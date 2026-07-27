@@ -46,6 +46,7 @@ import type {
 } from '../dto/save-order.dto';
 import { prepareOrderSave } from '../domain/order-save-preparer';
 import { OrderNotFoundError } from '../errors/order.errors';
+import { insertAutoRoot } from './pg-order-transaction-manager';
 // Note: shadow-material helpers (resolveShadowMaterialId, buildShadowMaterialAuditEvent,
 // ShadowContext) and SNAPSHOT_IMPORT_SOURCE removed in Variant B (Task 4): post-034 migration
 // we no longer create/sync synthetic shadow materials during snapshot import.
@@ -435,7 +436,7 @@ async function importSnapshotInTransaction(
     details: snapshotDetails,
   });
 
-  const orderId = await upsertOrderHeader(tx, snapshot, clientId, payloadHash);
+  const orderId = await upsertOrderHeader(tx, snapshot, clientId, payloadHash, command);
   await upsertClientPhones(tx, snapshot, clientId, orderId, payloadHash);
   const dowelingOrderIds = await upsertDowelingOrders(tx, snapshot, orderId, payloadHash);
   await upsertOrderChildren(tx, snapshot, orderId, dowelingOrderIds, payloadHash, command);
@@ -504,6 +505,7 @@ async function upsertOrderHeader(
   snapshot: OrderSnapshotDto,
   clientId: number,
   payloadHash: string,
+  command: ImportOrderSnapshotCommand,
 ): Promise<number> {
   const source = snapshot.source.sourceInstanceId;
   const sourceId = snapshot.identity.order.sourceId;
@@ -525,9 +527,28 @@ async function upsertOrderHeader(
 
   const orderId = localOrderId
     ? await updateOrderHeader(tx, localOrderId, prepared.order.header, prepared.totals)
-    : await insertOrderHeader(tx, prepared.order.header, prepared.totals);
+    : await insertOrderHeader(
+        tx,
+        prepared.order.header,
+        prepared.totals,
+        await createImportProject(tx, prepared.order.header, command),
+      );
   await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.order, sourceId, localId: String(orderId), localOrderId: orderId, payloadHash });
   return orderId;
+}
+
+async function createImportProject(
+  tx: TransactionClient,
+  header: NormalizedSaveOrderHeaderDto,
+  command: ImportOrderSnapshotCommand,
+): Promise<number> {
+  const project = await insertAutoRoot(tx, {
+    orderName: header.orderName,
+    clientId: header.clientId,
+    currentUser: command.currentUser,
+    requestId: command.requestId ?? 'orders-snapshot-import',
+  });
+  return project.projectId;
 }
 
 async function upsertOrderChildren(
@@ -772,6 +793,7 @@ function mapOrderHeaderSnapshot(row: AnyRow) {
     linkPdfFile: toNullableString(row.link_pdf_file),
     notes: toNullableString(row.notes),
     refKey1c: toNullableString(row.ref_key_1c),
+    projectId: toNullableNumber(row.project_id),
     materialId: toNullableNumber(row.material_id),
     sheetMaterialTypeId: toNullableNumber(row.sheet_material_type_id),
     millingTypeId: toNullableNumber(row.milling_type_id),
@@ -924,6 +946,7 @@ async function insertOrderHeader(
   tx: TransactionClient,
   header: NormalizedSaveOrderHeaderDto,
   totals: OrderTotalsDto,
+  projectId: number,
 ): Promise<number> {
   const result = await tx.query<IdRow>(
     `
@@ -935,7 +958,7 @@ async function insertOrderHeader(
       discount, surcharge, total_amount, final_amount, paid_amount, parts_count, total_area,
       link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file,
       notes, material_id, milling_type_id, edge_type_id, film_id, ref_key_1c,
-      sheet_material_type_id, version
+      sheet_material_type_id, project_id, version
     )
     VALUES (
       $1, $2, $3, $4, $5,
@@ -944,11 +967,11 @@ async function insertOrderHeader(
       $14, $15, $16, $17, $18, $19, $20,
       $21, $22, $23, $24,
       $25, $26, $27, $28, $29, $30,
-      $31, 1
+      $31, $32, 1
     )
     RETURNING order_id AS id
     `,
-    orderHeaderParams(header, totals),
+    orderHeaderParams(header, totals, projectId),
   );
   return Number(result.rows[0].id);
 }
@@ -1001,8 +1024,8 @@ async function updateOrderHeader(
   return orderId;
 }
 
-/** Params for INSERT — includes production_status_from_details_enabled ($9) and sheet_material_type_id ($31). */
-function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTotalsDto) {
+/** Params for INSERT — includes production_status_from_details_enabled ($9), sheet_material_type_id ($31), project_id ($32). */
+function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTotalsDto, projectId: number) {
   return [
     header.orderName,
     header.clientId,
@@ -1038,6 +1061,7 @@ function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTo
     header.filmId,
     header.refKey1c,
     header.sheetMaterialTypeId ?? null,
+    projectId,
   ];
 }
 

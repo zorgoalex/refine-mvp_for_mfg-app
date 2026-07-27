@@ -2,6 +2,7 @@
  * Unit tests for SP3 sheet-material support in the snapshot path.
  * Covers:
  *  - mapOrderHeaderSnapshot includes sheetMaterialTypeId on export
+ *  - mapOrderHeaderSnapshot includes projectId on export
  *  - mapDetailSnapshot includes sheetMaterialTypeId on export (and materialId is null-safe)
  *  - orderHeaderInsertParams / orderHeaderUpdateParams include sheet_material_type_id
  *    and enforce the header invariant (force material_id NULL when sheetMaterialTypeId set)
@@ -59,6 +60,7 @@ function makeHeaderRow(overrides: Record<string, unknown> = {}): Record<string, 
     link_pdf_file: null,
     notes: null,
     ref_key_1c: null,
+    project_id: 500,
     material_id: null,
     sheet_material_type_id: null,
     milling_type_id: null,
@@ -120,6 +122,7 @@ function makeNormalizedHeader(overrides: Partial<NormalizedSaveOrderHeaderDto> =
     linkPdfFile: null,
     notes: null,
     refKey1c: null,
+    projectId: 500,
     materialId: null,
     sheetMaterialTypeId: null,
     millingTypeId: null,
@@ -177,6 +180,11 @@ function makeDetail(overrides: Partial<CalculatedOrderDetailDto> = {}): Calculat
 // ── mapOrderHeaderSnapshot tests ───────────────────────────────────────────
 
 describe('mapOrderHeaderSnapshot — SP3 sheetMaterialTypeId export', () => {
+  it('includes projectId from current order header', () => {
+    const result = mapHeaderSnapshot(makeHeaderRow({ project_id: 500 }));
+    expect(result).toHaveProperty('projectId', 500);
+  });
+
   it('includes sheetMaterialTypeId=null when column is null', () => {
     const result = mapHeaderSnapshot(makeHeaderRow({ sheet_material_type_id: null }));
     expect(result).toHaveProperty('sheetMaterialTypeId', null);
@@ -217,29 +225,33 @@ describe('mapDetailSnapshot — SP3 sheetMaterialTypeId export', () => {
 
 describe('orderHeaderInsertParams — sheet_material_type_id', () => {
   it('includes sheetMaterialTypeId=null at index 30 (placeholder $31)', () => {
-    const params = insertParams(makeNormalizedHeader({ sheetMaterialTypeId: null }), makeTotals());
-    expect(params).toHaveLength(31);
+    const params = insertParams(makeNormalizedHeader({ sheetMaterialTypeId: null }), makeTotals(), 500);
+    expect(params).toHaveLength(32);
     expect(params[30]).toBeNull();
+    expect(params[31]).toBe(500);
   });
 
   it('includes sheetMaterialTypeId=42 at index 30', () => {
-    const params = insertParams(makeNormalizedHeader({ sheetMaterialTypeId: 42 }), makeTotals());
+    const params = insertParams(makeNormalizedHeader({ sheetMaterialTypeId: 42 }), makeTotals(), 500);
     expect(params[30]).toBe(42);
+    expect(params[31]).toBe(500);
   });
 
   it('forces materialId to null when sheetMaterialTypeId is set (header invariant)', () => {
     // materialId is at index 25 in insertParams (after refKey1c shifted by sheetMaterialTypeId).
     // Position: $26 in SQL = index 25.
-    const params = insertParams(makeNormalizedHeader({ materialId: 7, sheetMaterialTypeId: 42 }), makeTotals());
+    const params = insertParams(makeNormalizedHeader({ materialId: 7, sheetMaterialTypeId: 42 }), makeTotals(), 500);
     expect(params[25]).toBeNull();  // materialId forced null
     expect(params[30]).toBe(42);   // sheetMaterialTypeId
+    expect(params[31]).toBe(500);  // projectId
   });
 
   it('always binds null for materialId regardless of sheetMaterialTypeId (Variant B sunset)', () => {
     // Variant B: header material_id is fully sunset — ALWAYS null, even when sheetMaterialTypeId is absent.
-    const params = insertParams(makeNormalizedHeader({ materialId: 3, sheetMaterialTypeId: null }), makeTotals());
+    const params = insertParams(makeNormalizedHeader({ materialId: 3, sheetMaterialTypeId: null }), makeTotals(), 500);
     expect(params[25]).toBeNull(); // materialId always null (Variant B invariant)
     expect(params[30]).toBeNull(); // sheetMaterialTypeId null
+    expect(params[31]).toBe(500); // projectId
   });
 });
 

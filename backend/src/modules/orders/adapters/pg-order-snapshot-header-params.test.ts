@@ -59,31 +59,33 @@ function totals(overrides: Partial<OrderTotalsDto> = {}): OrderTotalsDto {
 
 describe('pg-order-snapshot orderHeaderInsertParams', () => {
   it('includes production_status_from_details_enabled at index 8 (placeholder $9)', () => {
-    const params = insertParams(header({ productionStatusFromDetailsEnabled: true }), totals());
+    const params = insertParams(header({ productionStatusFromDetailsEnabled: true }), totals(), 501);
     // $9 in INSERT = index 8 of the returned array (0-based)
     expect(params[8]).toBe(true);
   });
 
   it('includes production_status_from_details_enabled = false when flag is false', () => {
-    const params = insertParams(header({ productionStatusFromDetailsEnabled: false }), totals());
+    const params = insertParams(header({ productionStatusFromDetailsEnabled: false }), totals(), 501);
     expect(params[8]).toBe(false);
   });
 
-  it('returns 31 elements matching INSERT columns ($1..$31, with sheet_material_type_id as $31)', () => {
-    const params = insertParams(header(), totals());
-    expect(params).toHaveLength(31);
+  it('returns 32 elements matching INSERT columns ($1..$32, with project_id as $32)', () => {
+    const params = insertParams(header(), totals(), 501);
+    expect(params).toHaveLength(32);
   });
 
-  it('places refKey1c at index 29 and sheetMaterialTypeId last (index 30)', () => {
-    const params = insertParams(header({ refKey1c: 'snap-key', sheetMaterialTypeId: null }), totals());
+  it('places refKey1c at index 29, sheetMaterialTypeId at index 30 and projectId last (index 31)', () => {
+    const params = insertParams(header({ refKey1c: 'snap-key', sheetMaterialTypeId: null }), totals(), 501);
     expect(params[29]).toBe('snap-key');
     expect(params[30]).toBeNull(); // sheetMaterialTypeId
+    expect(params[31]).toBe(501); // projectId
   });
 
   it('forces materialId to null when sheetMaterialTypeId is set (header invariant)', () => {
-    const params = insertParams(header({ materialId: 5, sheetMaterialTypeId: 42 }), totals());
+    const params = insertParams(header({ materialId: 5, sheetMaterialTypeId: 42 }), totals(), 501);
     expect(params[25]).toBeNull(); // materialId forced null
     expect(params[30]).toBe(42);  // sheetMaterialTypeId
+    expect(params[31]).toBe(501); // projectId
   });
 });
 
@@ -96,10 +98,10 @@ describe('pg-order-snapshot orderHeaderUpdateParams', () => {
     expect(params[8]).toBe('2026-06-01'); // plannedCompletionDate — was $11 before, now $10 (index 8)
   });
 
-  it('returns 30 elements (one fewer than insert params — no productionStatusFromDetailsEnabled)', () => {
-    const insert = insertParams(header(), totals());
+  it('returns 30 elements (insert has productionStatusFromDetailsEnabled and projectId, update does not)', () => {
+    const insert = insertParams(header(), totals(), 501);
     const update = updateParams(header(), totals());
-    expect(update).toHaveLength(insert.length - 1);
+    expect(update).toHaveLength(insert.length - 2);
     expect(update).toHaveLength(30);
   });
 
