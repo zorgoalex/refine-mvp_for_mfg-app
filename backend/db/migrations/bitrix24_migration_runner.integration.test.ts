@@ -115,7 +115,7 @@ describeIntegration('Bitrix24 migration runner end-state guards', () => {
     }
   }, 60_000);
 
-  it('never ledgers 073 or 074 when IF NOT EXISTS leaves a partial end state', async () => {
+  it('never ledgers Bitrix IF NOT EXISTS migrations with a partial end state', async () => {
     const dir073 = migrationOnlyDirectory('073_bitrix24_crm_sync.sql');
     temporaryDirectories.push(dir073);
 
@@ -165,12 +165,35 @@ describeIntegration('Bitrix24 migration runner end-state guards', () => {
     const repaired074 = runApply(dir074);
     expect(repaired074.status, repaired074.output).toBe(0);
 
+    const dir087 = migrationOnlyDirectory('087_bitrix24_backfill_checkpoint.sql');
+    temporaryDirectories.push(dir087);
+    await pool.query(`
+      CREATE TABLE crm_sync_backfill_checkpoint (
+        scope TEXT PRIMARY KEY
+      );
+    `);
+    const failed087 = runApply(dir087);
+    expect(failed087.status).not.toBe(0);
+    expect(failed087.output).toContain('end-state probe is still PENDING');
+    expect(failed087.output).toContain('was NOT recorded in schema_migrations');
+    const ledger087 = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM schema_migrations
+        WHERE filename = '087_bitrix24_backfill_checkpoint.sql'`,
+    );
+    expect(ledger087.rows[0].count).toBe('0');
+
+    await pool.query('DROP TABLE crm_sync_backfill_checkpoint');
+    const repaired087 = runApply(dir087);
+    expect(repaired087.status, repaired087.output).toBe(0);
+
     const finalLedger = await pool.query<{ filename: string }>(
       'SELECT filename FROM schema_migrations ORDER BY filename',
     );
     expect(finalLedger.rows.map((row) => row.filename)).toEqual([
       '073_bitrix24_crm_sync.sql',
       '074_bitrix24_payment_delivery_guards.sql',
+      '087_bitrix24_backfill_checkpoint.sql',
     ]);
   }, 120_000);
 });

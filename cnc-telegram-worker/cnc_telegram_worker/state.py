@@ -26,9 +26,24 @@ class StateStore:
         previous = int(packet.get("sourceVersion", 0)) if isinstance(packet, dict) else 0
         return VersionDecision(source_version=previous + 1, changed=True)
 
-    def mark_posted(self, external_packet_key: str, payload_hash: str, source_version: int) -> None:
+    def source_unchanged(self, external_packet_key: str, source_fingerprint: str) -> bool:
+        packet = self._state.setdefault("packets", {}).get(external_packet_key)
+        return (
+            isinstance(packet, dict)
+            and packet.get("sourceFingerprint") == source_fingerprint
+            and isinstance(packet.get("payloadHash"), str)
+        )
+
+    def mark_posted(
+        self,
+        external_packet_key: str,
+        payload_hash: str,
+        source_version: int,
+        source_fingerprint: str | None = None,
+    ) -> None:
         self._state.setdefault("packets", {})[external_packet_key] = {
             "payloadHash": payload_hash,
+            "sourceFingerprint": source_fingerprint,
             "sourceVersion": source_version,
             "postedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }

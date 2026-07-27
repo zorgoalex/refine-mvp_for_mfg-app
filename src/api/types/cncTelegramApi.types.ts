@@ -1,6 +1,6 @@
 export type CncTelegramParseStatus = 'received' | 'parsed' | 'needs_review';
 export type CncTelegramCompletionStatus = 'pending' | 'completed';
-export type CncTelegramItemSource = 'ocr' | 'gcode' | 'manual';
+export type CncTelegramItemSource = 'vector' | 'ocr' | 'gcode' | 'manual';
 export type CncTelegramMatchStatus = 'unmatched' | 'matched' | 'conflict' | 'needs_review';
 
 export interface CncTelegramTool {
@@ -36,11 +36,15 @@ export interface CncTelegramPacket {
   sourceMessageId: number | null;
   sourceThreadId: number | null;
   sourceVersion: number;
+  sourceCreatedAt: string | null;
   sourceUpdatedAt: string | null;
   workday: string;
   machine: string | null;
   programName: string | null;
   materialName: string;
+  sheetImageUrl: string | null;
+  sheetImageContentType: string | null;
+  sheetImageSizeBytes: number | null;
   parseStatus: CncTelegramParseStatus;
   completionStatus: CncTelegramCompletionStatus;
   thumbsUp: boolean;
@@ -59,7 +63,7 @@ export interface CncTelegramPacket {
 }
 
 export interface CncTelegramTodayColumn {
-  key: 'received' | 'parsed' | 'needs_review' | 'completed';
+  key: 'parsed' | 'completed';
   title: string;
   total: number;
   packets: CncTelegramPacket[];

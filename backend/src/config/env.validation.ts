@@ -174,6 +174,7 @@ export const envSchema = z
     BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
     BACKEND_ENABLE_CUT_JOBS: booleanFromEnv.default(false),
     BACKEND_ENABLE_CNC_TELEGRAM: booleanFromEnv.default(false),
+    CNC_TELEGRAM_MEDIA_DIR: z.string().trim().min(1).default('/data/cnc-telegram-media'),
     // Independent production workflow for persistent Basis-cut XLS export sets.
     // Default OFF; intentionally not an alias of BACKEND_ENABLE_CUT_JOBS.
     BACKEND_ENABLE_BAZIS_CUT: booleanFromEnv.default(false),
@@ -237,6 +238,20 @@ export const envSchema = z
     BACKEND_BITRIX24_SYNC_LEASE_MS: z.coerce.number().int().min(60000).default(300000),
     BITRIX24_WEBHOOK_URL: optionalUrlFromEnv,
     BITRIX24_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(30000),
+    BITRIX24_MAX_REQUESTS_PER_SECOND: z.coerce.number().int().min(1).max(5).default(2),
+    BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(11),
+    BITRIX24_QUERY_LIMIT_BASE_DELAY_MS: z.coerce
+      .number()
+      .int()
+      .min(100)
+      .max(60000)
+      .default(1000),
+    BITRIX24_OPERATION_LIMIT_FALLBACK_MS: z.coerce
+      .number()
+      .int()
+      .min(1000)
+      .max(600000)
+      .default(60000),
     BITRIX24_CURRENCY_ID: z.string().trim().length(3).transform((value) => value.toUpperCase()).default('KZT'),
     BITRIX24_PAY_SYSTEM_ID: z
       .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])

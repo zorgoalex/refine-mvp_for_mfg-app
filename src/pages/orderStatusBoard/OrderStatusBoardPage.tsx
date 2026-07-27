@@ -11,6 +11,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  Collapse,
   DatePicker,
   Dropdown,
   Empty,
@@ -26,13 +27,12 @@ import {
 } from 'antd';
 import {
   CalendarOutlined,
-  CheckCircleOutlined,
   ClockCircleOutlined,
   DragOutlined,
-  ExclamationCircleOutlined,
   FileTextOutlined,
   LeftOutlined,
   MoreOutlined,
+  PictureOutlined,
   ReloadOutlined,
   RightOutlined,
   UserOutlined,
@@ -832,33 +832,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
             {packet.programName ?? packet.externalPacketKey}
           </Typography.Text>
         </div>
-        <div className="cnc-packet-card__status-icons">
-          {packet.thumbsUp && (
-            <Tooltip title="Выполнено на станке: в Telegram стоит реакция 👍">
-              <CheckCircleOutlined
-                className="cnc-packet-card__status-icon"
-                aria-label="Выполнено на станке"
-              />
-            </Tooltip>
-          )}
-          {(packet.analysisWarnings.length > 0 ||
-            packet.parseStatus === 'needs_review') && (
-            <Tooltip title="Нужна ручная проверка распознавания">
-              <ExclamationCircleOutlined
-                className="cnc-packet-card__status-icon"
-                aria-label="Нужна ручная проверка"
-              />
-            </Tooltip>
-          )}
-        </div>
       </div>
-
-      <div className="status-board-card__tags">
-        <Tag>{packet.materialName}</Tag>
-        {packet.rework && <Tag color="volcano">Переделка</Tag>}
-        {packet.thumbsUp && <Tag color="green">👍 Выполнено</Tag>}
-      </div>
-
       {(displayComments.length > 0 || packet.dowelingLinks.length > 0) && (
         <div className="cnc-packet-card__notes">
           {displayComments.map((comment, index) => (
@@ -882,72 +856,159 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
         </div>
       )}
 
-      {packet.analysisWarnings.length > 0 && (
-        <div className="cnc-packet-card__warnings">
-          {packet.analysisWarnings.map((warning, index) => (
-            <span key={`${packet.packetId}:warning:${index}`}>
-              <ExclamationCircleOutlined /> {warning}
+      <Collapse
+        className="cnc-packet-card__collapse compact-collapse"
+        size="small"
+        ghost
+        items={[{
+          key: 'items',
+          label: (
+            <span className="cnc-packet-card__collapse-label">
+              <FileTextOutlined /> {packet.itemQuantityTotal} дет. · {packet.itemCount} поз
             </span>
-          ))}
-        </div>
+          ),
+          children: (
+            <div className="cnc-packet-card__items" role="table" aria-label="Результаты распознавания">
+              <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
+                <span>Заказ</span>
+                <span>Деталь / размер</span>
+                <span>Кол.</span>
+              </div>
+              {packet.items.map((item) => {
+                const quantityWarningTitle = cncItemQuantityWarningTitle(item);
+
+                return (
+                  <div className="cnc-packet-card__item" role="row" key={item.packetItemId}>
+                    <span>
+                      {item.matchOrderId ? (
+                        <Button
+                          type="link"
+                          className="cnc-packet-card__order-link"
+                          onClick={() => item.matchOrderId && onOpenOrder(item.matchOrderId)}
+                        >
+                          {item.orderName}
+                        </Button>
+                      ) : (
+                        item.orderName
+                      )}
+                    </span>
+                    <span>
+                      <span>{item.detailNumber ? `#${item.detailNumber}` : '—'}</span>
+                      <span className="cnc-packet-card__size">{formatCncSize(item.widthMm, item.heightMm)}</span>
+                    </span>
+                    <span className="cnc-packet-card__qty">
+                      {item.quantity}
+                      {quantityWarningTitle && (
+                        <Tooltip title={quantityWarningTitle}>
+                          <span
+                            className="cnc-packet-card__qty-warning"
+                            aria-label={quantityWarningTitle}
+                          >
+                            !
+                          </span>
+                        </Tooltip>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ),
+        }]}
+      />
+
+      {packet.sheetImageUrl && (
+        <CncTelegramSheetImagePreview
+          imageUrl={packet.sheetImageUrl}
+          title={packet.programName ?? packet.externalPacketKey}
+        />
       )}
 
-      <div className="cnc-packet-card__items" role="table" aria-label="Результаты распознавания">
-        <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
-          <span>Заказ</span>
-          <span>Деталь / размер</span>
-          <span>Кол.</span>
-        </div>
-        {packet.items.map((item) => {
-          const quantityWarningTitle = cncItemQuantityWarningTitle(item);
-
-          return (
-            <div className="cnc-packet-card__item" role="row" key={item.packetItemId}>
-              <span>
-                {item.matchOrderId ? (
-                  <Button
-                    type="link"
-                    className="cnc-packet-card__order-link"
-                    onClick={() => item.matchOrderId && onOpenOrder(item.matchOrderId)}
-                  >
-                    {item.orderName}
-                  </Button>
-                ) : (
-                  item.orderName
-                )}
-              </span>
-              <span>
-                <span>{item.detailNumber ? `#${item.detailNumber}` : '—'}</span>
-                <span className="cnc-packet-card__size">{formatCncSize(item.widthMm, item.heightMm)}</span>
-              </span>
-              <span className="cnc-packet-card__qty">
-                {item.quantity}
-                {quantityWarningTitle && (
-                  <Tooltip title={quantityWarningTitle}>
-                    <span
-                      className="cnc-packet-card__qty-warning"
-                      aria-label={quantityWarningTitle}
-                    >
-                      !
-                    </span>
-                  </Tooltip>
-                )}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
       <div className="status-board-card__footer">
-        <span>
-          <FileTextOutlined /> {packet.itemQuantityTotal} дет. · {packet.itemCount} строк
-        </span>
         <span>В чате {formatDateTime(packet.sourceCreatedAt ?? packet.sourceUpdatedAt ?? packet.updatedAt)}</span>
       </div>
     </div>
   );
 });
 CncTelegramPacketCard.displayName = 'CncTelegramPacketCard';
+
+interface CncTelegramSheetImagePreviewProps {
+  imageUrl: string;
+  title: string;
+}
+
+const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> = ({
+  imageUrl,
+  title,
+}) => {
+  const [open, setOpen] = useState(false);
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || objectUrl) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    cncTelegramApi.downloadSheetImage(imageUrl)
+      .then(({ blob }) => {
+        if (cancelled) return;
+        setObjectUrl(URL.createObjectURL(blob));
+      })
+      .catch((downloadError: unknown) => {
+        if (cancelled) return;
+        const messageText = isApiError(downloadError)
+          ? downloadError.message
+          : 'Не удалось загрузить скрин';
+        setError(messageText);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [imageUrl, objectUrl, open]);
+
+  useEffect(() => () => {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+  }, [objectUrl]);
+
+  return (
+    <Collapse
+      className="cnc-packet-card__sheet"
+      size="small"
+      ghost
+      onChange={(keys) => setOpen(Array.isArray(keys) ? keys.includes('sheet') : keys === 'sheet')}
+      items={[{
+        key: 'sheet',
+        label: (
+          <span className="cnc-packet-card__collapse-label">
+            <PictureOutlined /> Скрин листа
+          </span>
+        ),
+        children: (
+          <div className="cnc-packet-card__sheet-body">
+            {loading && (
+              <div className="cnc-packet-card__sheet-loading">
+                <Spin size="small" />
+              </div>
+            )}
+            {error && <Alert type="warning" showIcon message={error} />}
+            {objectUrl && (
+              <img
+                className="cnc-packet-card__sheet-image"
+                src={objectUrl}
+                alt={`Скрин листа ${title}`}
+              />
+            )}
+          </div>
+        ),
+      }]}
+    />
+  );
+};
 
 interface StatusBoardColumnViewProps {
   board: OrderStatusBoardType;

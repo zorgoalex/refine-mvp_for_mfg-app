@@ -24,6 +24,13 @@ export class CrmSyncRuntimeConfigService {
     return {
       webhookUrl: webhookUrl || null,
       requestTimeoutMs: this.config.get('BITRIX24_REQUEST_TIMEOUT_MS', { infer: true }),
+      maxRequestsPerSecond: this.config.get('BITRIX24_MAX_REQUESTS_PER_SECOND', { infer: true }),
+      limitRetryMaxAttempts: this.config.get('BITRIX24_LIMIT_RETRY_MAX_ATTEMPTS', { infer: true }),
+      queryLimitBaseDelayMs: this.config.get('BITRIX24_QUERY_LIMIT_BASE_DELAY_MS', { infer: true }),
+      operationLimitFallbackDelayMs: this.config.get(
+        'BITRIX24_OPERATION_LIMIT_FALLBACK_MS',
+        { infer: true },
+      ),
       currencyId: this.config.get('BITRIX24_CURRENCY_ID', { infer: true }),
       paySystemId: this.config.get('BITRIX24_PAY_SYSTEM_ID', { infer: true }) ?? null,
       assignedById: this.config.get('BITRIX24_ASSIGNED_BY_ID', { infer: true }) ?? null,

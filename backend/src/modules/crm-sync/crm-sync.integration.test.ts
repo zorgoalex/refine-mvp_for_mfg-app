@@ -9,11 +9,19 @@ import type { TransactionClient } from '../../database/database.types';
 import { PgCrmSourceRepository } from './adapters/pg-crm-source-repository';
 import { PgCrmSyncMappingRepository } from './adapters/pg-crm-sync-mapping-repository';
 import { PgCrmSyncOutboxRepository } from './adapters/pg-crm-sync-outbox-repository';
+import { PgCrmSyncBackfillCheckpointRepository } from './adapters/pg-crm-sync-backfill-checkpoint-repository';
+import {
+  BackfillWriterOwnershipLostError,
+  PgCrmSyncBackfillPersistence,
+} from './adapters/pg-crm-sync-backfill-persistence';
 import {
   Bitrix24ApiError,
   type Bitrix24ApiPort,
 } from './adapters/bitrix24-api-client';
-import { Bitrix24SyncConsumer } from './application/bitrix24-sync-consumer';
+import {
+  Bitrix24SyncConsumer,
+  type SyncIntent,
+} from './application/bitrix24-sync-consumer';
 import { CrmSyncRelayService } from './application/crm-sync-relay.service';
 import type { CrmSyncRuntimeConfigService } from './http/crm-sync-runtime-config.service';
 
@@ -118,6 +126,7 @@ async function bootstrap(pool: Pool): Promise<void> {
     '028_crm_sync_enqueue_field_fix.sql',
     '073_bitrix24_crm_sync.sql',
     '074_bitrix24_payment_delivery_guards.sql',
+    '087_bitrix24_backfill_checkpoint.sql',
   ]) {
     const sql = readFileSync(
       join(__dirname, `../../../db/migrations/${migration}`),
@@ -501,5 +510,82 @@ describeIntegration('Bitrix24 trigger → relay → mapping pipeline', () => {
       value.startsWith('crm:2:'));
     expect(paymentDelete).toBeGreaterThanOrEqual(0);
     expect(dealDelete).toBeGreaterThan(paymentDelete);
+  });
+
+  it('fences a stale backfill writer and rolls checkpoint back with its intents', async () => {
+    const db = database(pool);
+    const outbox = new PgCrmSyncOutboxRepository();
+    const mapping = new PgCrmSyncMappingRepository();
+    const checkpoints = new PgCrmSyncBackfillCheckpointRepository();
+    const persistence = new PgCrmSyncBackfillPersistence(
+      db,
+      outbox,
+      mapping,
+      new AuditService(),
+      checkpoints,
+    );
+
+    expect(await outbox.acquireWriterLock(db, 'stale-token', 60_000)).toBe(true);
+    await pool.query(
+      `UPDATE crm_sync_writer_lock
+          SET lock_token='replacement-token', locked_at=now()
+        WHERE lock_name='bitrix24-live-writer'`,
+    );
+    await expect(persistence.persist('stale-token', [], {
+      scope: 'clients',
+      phase: 'clients',
+      lastClientId: '1',
+      lastOrderId: null,
+      processedClients: 1,
+      processedOrders: 0,
+    })).rejects.toBeInstanceOf(BackfillWriterOwnershipLostError);
+    const afterFence = await pool.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM crm_sync_backfill_checkpoint',
+    );
+    expect(afterFence.rows[0].count).toBe('0');
+
+    const intent: SyncIntent = {
+      mapping: {
+        entityType: 'client',
+        erpId: '999998',
+        bitrixObject: 'contact',
+        bitrixId: '999998',
+        parentErpId: null,
+        status: 'active',
+        lastHash: 'atomic-test',
+      },
+      audit: {
+        event: 'crm_sync.upsert',
+        entityType: 'client',
+        entityId: '999998',
+        requestId: 'backfill-atomic-test',
+        source: 'crm-sync',
+        actorUserId: null,
+      },
+    };
+    await expect(persistence.persist('replacement-token', [intent], {
+      scope: 'clients',
+      phase: 'orders',
+      lastClientId: '999998',
+      lastOrderId: null,
+      processedClients: 1,
+      processedOrders: 0,
+    })).rejects.toThrow();
+    const rolledBack = await pool.query<{
+      mappings: string;
+      audits: string;
+      checkpoints: string;
+    }>(
+      `SELECT
+         (SELECT count(*) FROM crm_sync_mapping WHERE erp_id='999998')::text AS mappings,
+         (SELECT count(*) FROM audit_log WHERE request_id='backfill-atomic-test')::text AS audits,
+         (SELECT count(*) FROM crm_sync_backfill_checkpoint)::text AS checkpoints`,
+    );
+    expect(rolledBack.rows[0]).toEqual({
+      mappings: '0',
+      audits: '0',
+      checkpoints: '0',
+    });
+    await outbox.releaseWriterLock(db, 'replacement-token');
   });
 });

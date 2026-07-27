@@ -9,4 +9,7 @@ export const cncTelegramApi = {
       withQuery(apiRoutes.cncTelegram.today, query),
     );
   },
+  downloadSheetImage(path: string): Promise<{ blob: Blob; fileName: string | null; status: number }> {
+    return httpClient.download(path);
+  },
 };
