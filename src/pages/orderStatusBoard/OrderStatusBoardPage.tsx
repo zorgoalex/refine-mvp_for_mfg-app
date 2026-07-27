@@ -860,62 +860,62 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
         className="cnc-packet-card__collapse compact-collapse"
         size="small"
         ghost
-        items={[{
-          key: 'items',
-          label: (
+      >
+        <Collapse.Panel
+          key="items"
+          header={
             <span className="cnc-packet-card__collapse-label">
               <FileTextOutlined /> {packet.itemQuantityTotal} дет. · {packet.itemCount} поз
             </span>
-          ),
-          children: (
-            <div className="cnc-packet-card__items" role="table" aria-label="Результаты распознавания">
-              <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
-                <span>Заказ</span>
-                <span>Деталь / размер</span>
-                <span>Кол.</span>
-              </div>
-              {packet.items.map((item) => {
-                const quantityWarningTitle = cncItemQuantityWarningTitle(item);
-
-                return (
-                  <div className="cnc-packet-card__item" role="row" key={item.packetItemId}>
-                    <span>
-                      {item.matchOrderId ? (
-                        <Button
-                          type="link"
-                          className="cnc-packet-card__order-link"
-                          onClick={() => item.matchOrderId && onOpenOrder(item.matchOrderId)}
-                        >
-                          {item.orderName}
-                        </Button>
-                      ) : (
-                        item.orderName
-                      )}
-                    </span>
-                    <span>
-                      <span>{item.detailNumber ? `#${item.detailNumber}` : '—'}</span>
-                      <span className="cnc-packet-card__size">{formatCncSize(item.widthMm, item.heightMm)}</span>
-                    </span>
-                    <span className="cnc-packet-card__qty">
-                      {item.quantity}
-                      {quantityWarningTitle && (
-                        <Tooltip title={quantityWarningTitle}>
-                          <span
-                            className="cnc-packet-card__qty-warning"
-                            aria-label={quantityWarningTitle}
-                          >
-                            !
-                          </span>
-                        </Tooltip>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
+          }
+        >
+          <div className="cnc-packet-card__items" role="table" aria-label="Результаты распознавания">
+            <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
+              <span>Заказ</span>
+              <span>Деталь / размер</span>
+              <span>Кол.</span>
             </div>
-          ),
-        }]}
-      />
+            {packet.items.map((item) => {
+              const quantityWarningTitle = cncItemQuantityWarningTitle(item);
+
+              return (
+                <div className="cnc-packet-card__item" role="row" key={item.packetItemId}>
+                  <span>
+                    {item.matchOrderId ? (
+                      <Button
+                        type="link"
+                        className="cnc-packet-card__order-link"
+                        onClick={() => item.matchOrderId && onOpenOrder(item.matchOrderId)}
+                      >
+                        {item.orderName}
+                      </Button>
+                    ) : (
+                      item.orderName
+                    )}
+                  </span>
+                  <span>
+                    <span>{item.detailNumber ? `#${item.detailNumber}` : '—'}</span>
+                    <span className="cnc-packet-card__size">{formatCncSize(item.widthMm, item.heightMm)}</span>
+                  </span>
+                  <span className="cnc-packet-card__qty">
+                    {item.quantity}
+                    {quantityWarningTitle && (
+                      <Tooltip title={quantityWarningTitle}>
+                        <span
+                          className="cnc-packet-card__qty-warning"
+                          aria-label={quantityWarningTitle}
+                        >
+                          !
+                        </span>
+                      </Tooltip>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </Collapse.Panel>
+      </Collapse>
 
       {packet.sheetImageUrl && (
         <CncTelegramSheetImagePreview
@@ -981,32 +981,32 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
       size="small"
       ghost
       onChange={(keys) => setOpen(Array.isArray(keys) ? keys.includes('sheet') : keys === 'sheet')}
-      items={[{
-        key: 'sheet',
-        label: (
+    >
+      <Collapse.Panel
+        key="sheet"
+        header={
           <span className="cnc-packet-card__collapse-label">
             <PictureOutlined /> Скрин листа
           </span>
-        ),
-        children: (
-          <div className="cnc-packet-card__sheet-body">
-            {loading && (
-              <div className="cnc-packet-card__sheet-loading">
-                <Spin size="small" />
-              </div>
-            )}
-            {error && <Alert type="warning" showIcon message={error} />}
-            {objectUrl && (
-              <img
-                className="cnc-packet-card__sheet-image"
-                src={objectUrl}
-                alt={`Скрин листа ${title}`}
-              />
-            )}
-          </div>
-        ),
-      }]}
-    />
+        }
+      >
+        <div className="cnc-packet-card__sheet-body">
+          {loading && (
+            <div className="cnc-packet-card__sheet-loading">
+              <Spin size="small" />
+            </div>
+          )}
+          {error && <Alert type="warning" showIcon message={error} />}
+          {objectUrl && (
+            <img
+              className="cnc-packet-card__sheet-image"
+              src={objectUrl}
+              alt={`Скрин листа ${title}`}
+            />
+          )}
+        </div>
+      </Collapse.Panel>
+    </Collapse>
   );
 };
 
