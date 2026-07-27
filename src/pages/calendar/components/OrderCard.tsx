@@ -9,6 +9,7 @@ import {
   getMaterialColor,
   getProductionStageStyle,
   areAllProductionStagesReady,
+  hasDrawnProductionStatus,
   getMillingDisplayValue,
   getMaterialsForCard,
 } from '../utils/statusColors';
@@ -264,11 +265,8 @@ const OrderCard: React.FC<OrderCardProps> = ({
   const isIssued = order.order_status_name?.toLowerCase() === 'выдан';
   const isReadyToIssue = order.order_status_name?.toLowerCase() === 'готов к выдаче';
 
-  // Проверка статуса "Отрисован" для иконки карандашика
-  const isDrawn =
-    order.order_status_name?.toLowerCase() === 'отрисован' ||
-    order.production_status_name?.toLowerCase() === 'отрисован' ||
-    order.is_drawn;
+  // Проверка производственного статуса "Отрисован" для иконки карандашика
+  const isDrawn = hasDrawnProductionStatus(order);
 
   // Формируем строку даты + клиент
   const infoLine = [

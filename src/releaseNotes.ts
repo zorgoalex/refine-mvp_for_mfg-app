@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-27",
+    title: "Календарь: карандаш по производственному статусу",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Иконка карандашика на карточке заказа теперь включается по производственному статусу «Отрисован», включая этап, отмеченный в меню «Статус производства».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-27",
     title: "Доски статусов: бейджи и плотная панель фильтров",
     services: ["ERP"],
     repositories: ["repo_erp"],

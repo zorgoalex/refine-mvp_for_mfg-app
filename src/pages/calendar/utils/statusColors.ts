@@ -152,6 +152,37 @@ export function areAllProductionStagesReady(order: Record<string, any>): boolean
 }
 
 /**
+ * Проверяет производственный статус "Отрисован" для индикатора карандашика.
+ * Календарное меню пишет production_status_events, поэтому главный источник —
+ * passedProductionCodes, а order/detail production_status_name остаются fallback.
+ */
+export function hasDrawnProductionStatus(order: {
+  production_status_name?: string | null;
+  order_details?: Array<{ production_status_name?: string | null }>;
+  passedProductionCodes?: string[];
+}): boolean {
+  if (order.passedProductionCodes?.some((code) => normalizeStatusValue(code) === 'drawn')) {
+    return true;
+  }
+
+  if (isDrawnProductionStatusName(order.production_status_name)) {
+    return true;
+  }
+
+  return order.order_details?.some((detail) =>
+    isDrawnProductionStatusName(detail.production_status_name),
+  ) ?? false;
+}
+
+function isDrawnProductionStatusName(value: string | null | undefined): boolean {
+  return normalizeStatusValue(value) === 'отрисован';
+}
+
+function normalizeStatusValue(value: string | null | undefined): string {
+  return String(value ?? '').trim().toLocaleLowerCase('ru-RU');
+}
+
+/**
  * Тип детали заказа для вычисления фрезеровки и материалов
  */
 interface OrderDetailForDisplay {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { getMaterialsForCard } from './statusColors';
+import { getMaterialsForCard, hasDrawnProductionStatus } from './statusColors';
 
 describe('calendar material card tags', () => {
   it('renders short material tags from resolved sheet material names', () => {
@@ -61,5 +61,28 @@ describe('calendar material card tags', () => {
 
     expect(resolvedMaterialFetch).toContain("enabled: orderIds.length > 0");
     expect(resolvedMaterialFetch).not.toContain('sheetMaterialsReads');
+  });
+});
+
+describe('calendar drawn production indicator', () => {
+  it('uses the production stage event code for the pencil indicator', () => {
+    expect(hasDrawnProductionStatus({ passedProductionCodes: ['drawn'] })).toBe(true);
+    expect(hasDrawnProductionStatus({ passedProductionCodes: ['cut', 'paint'] })).toBe(false);
+  });
+
+  it('uses order and detail production status names as fallbacks', () => {
+    expect(hasDrawnProductionStatus({ production_status_name: ' Отрисован ' })).toBe(true);
+    expect(hasDrawnProductionStatus({
+      order_details: [{ production_status_name: 'Отрисован' }],
+    })).toBe(true);
+  });
+
+  it('does not use the renamed order status for the pencil indicator', () => {
+    const order = {
+      order_status_name: 'Отрисован',
+      production_status_name: 'В производстве',
+    };
+
+    expect(hasDrawnProductionStatus(order)).toBe(false);
   });
 });
