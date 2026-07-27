@@ -782,37 +782,54 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   onOpenOrder,
 }) => (
   <div className="status-board-columns status-board-columns--cnc">
-    {columns.map((column) => (
-      <article
-        key={column.key}
-        className={`status-board-column cnc-today-column cnc-today-column--${column.key}`}
-        aria-label={`${column.title}: ${column.total} CNC-пакетов`}
-      >
-        <header className="status-board-column__header">
-          <div className="status-board-column__title">
-            <span className="status-board-column__marker" aria-hidden="true" />
-            <Typography.Text strong>{column.title}</Typography.Text>
-          </div>
-          <Badge count={column.total} overflowCount={9999} showZero />
-        </header>
+    {columns.map((column) => {
+      const title = cncColumnDisplayTitle(column.key);
 
-        <div className="status-board-column__cards">
-          {column.packets.length === 0 ? (
-            <div className="status-board-column__empty">Пакетов нет</div>
-          ) : (
-            column.packets.map((packet) => (
-              <CncTelegramPacketCard
-                key={packet.packetId}
-                packet={packet}
-                onOpenOrder={onOpenOrder}
-              />
-            ))
-          )}
-        </div>
-      </article>
-    ))}
+      return (
+        <article
+          key={column.key}
+          className={`status-board-column cnc-today-column cnc-today-column--${column.key}`}
+          aria-label={`${title}: ${column.total} CNC-пакетов`}
+        >
+          <header className="status-board-column__header">
+            <div className="status-board-column__title">
+              <span className="status-board-column__marker" aria-hidden="true" />
+              <Typography.Text strong>{title}</Typography.Text>
+            </div>
+            <Badge
+              count={column.total}
+              overflowCount={9999}
+              showZero
+              color={cncColumnBadgeColor(column.key)}
+            />
+          </header>
+
+          <div className="status-board-column__cards">
+            {column.packets.length === 0 ? (
+              <div className="status-board-column__empty">Пакетов нет</div>
+            ) : (
+              column.packets.map((packet) => (
+                <CncTelegramPacketCard
+                  key={packet.packetId}
+                  packet={packet}
+                  onOpenOrder={onOpenOrder}
+                />
+              ))
+            )}
+          </div>
+        </article>
+      );
+    })}
   </div>
 );
+
+function cncColumnDisplayTitle(key: CncTelegramTodayColumn['key']): string {
+  return key === 'parsed' ? 'Файлы на станке' : 'Выполнено';
+}
+
+function cncColumnBadgeColor(key: CncTelegramTodayColumn['key']): string | undefined {
+  return key === 'completed' ? '#389e0d' : undefined;
+}
 
 interface CncTelegramPacketCardProps {
   packet: CncTelegramPacket;
@@ -1487,7 +1504,6 @@ function isCncProgramFilename(comment: string): boolean {
 function cncItemQuantityWarningTitle(item: CncTelegramPacket['items'][number]): string {
   if (item.matchStatus === 'conflict') return 'Конфликт сопоставления с ERP';
   if (item.matchStatus === 'needs_review') return 'Нужна ручная проверка строки';
-  if (item.matchStatus === 'unmatched') return 'Строка не сопоставлена с ERP';
   if (item.detailNumber == null) return 'Номер детали не распознан';
   if (item.confidence < CNC_DETAIL_CONFIDENCE_WARNING_THRESHOLD) {
     return 'Низкая уверенность распознавания';

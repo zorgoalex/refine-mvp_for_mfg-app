@@ -69,6 +69,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('aria-label="Дата CNC-работ"');
     expect(page).toContain('В чате {formatDateTime');
     expect(page).toContain('<Collapse.Panel');
+    expect(page).toContain('cncColumnDisplayTitle(column.key)');
+    expect(page).toContain("key === 'parsed' ? 'Файлы на станке' : 'Выполнено'");
+    expect(page).toContain("key === 'completed' ? '#389e0d' : undefined");
+    expect(page).not.toContain('Строка не сопоставлена с ERP');
     expect(page).not.toContain('items={[{');
     expect(page).not.toContain("board: 'cnc");
   });

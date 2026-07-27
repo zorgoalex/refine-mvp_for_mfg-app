@@ -118,7 +118,7 @@ G0 Z10
                 "detailNumber": 16,
                 "widthMm": 2215,
                 "heightMm": 493,
-                "quantity": 1,
+                "quantity": 9,
                 "confidence": 0.7,
             }]),
             gcode=GcodeMeta("CNC#1_1200.TXT", gcode_text, parse_gcode_text(gcode_text, "CNC#1_1200.TXT")),
@@ -147,6 +147,73 @@ G0 Z10
             "matchStatus": "unmatched",
             "reviewNote": None,
         }])
+
+    def test_vector_quantity_beats_larger_gcode_candidate_quantity(self) -> None:
+        image = ImageMeta(
+            chat_id="-100123",
+            message_id=562,
+            thread_id=None,
+            message_date=datetime(2026, 7, 24, 5, 0, tzinfo=timezone.utc),
+            edited_at=None,
+            text="1200",
+            thumbs_up=False,
+        )
+        gcode_text = """
+G0 X0 Y0 Z10
+G1 Z-2
+G1 X2215
+G1 Y493
+G1 X0
+G1 Y0
+G0 Z10
+G0 X2300 Y0 Z10
+G1 Z-2
+G1 X4515
+G1 Y493
+G1 X2300
+G1 Y0
+G0 Z10
+G0 X4600 Y0 Z10
+G1 Z-2
+G1 X6815
+G1 Y493
+G1 X4600
+G1 Y0
+G0 Z10
+G0 X6900 Y0 Z10
+G1 Z-2
+G1 X9115
+G1 Y493
+G1 X6900
+G1 Y0
+G0 Z10
+"""
+        packet = build_structured_packet(
+            image=image,
+            workday=date(2026, 7, 24),
+            comments=[],
+            ocr=OcrResult(items=[{
+                "orderName": "1200",
+                "detailNumber": 16,
+                "widthMm": 2215,
+                "heightMm": 493,
+                "quantity": 9,
+                "confidence": 0.7,
+            }]),
+            gcode=GcodeMeta("CNC#1_1200.TXT", gcode_text, parse_gcode_text(gcode_text, "CNC#1_1200.TXT")),
+            vector_items=[
+                {"orderName": "1200", "detailNumber": 16, "widthMm": 2215, "heightMm": 493},
+                {"orderName": "1200", "detailNumber": 16, "widthMm": 2215, "heightMm": 493},
+                {"orderName": "1200", "detailNumber": 16, "widthMm": 2215, "heightMm": 493},
+            ],
+            default_machine="",
+            default_material="МДФ 16мм",
+            ocr_engine="glm-ocr",
+            parser_version="test",
+        )
+
+        self.assertEqual(packet["items"][0]["source"], "vector")
+        self.assertEqual(packet["items"][0]["quantity"], 3)
 
     def test_ocr_items_without_gcode_do_not_need_review(self) -> None:
         image = ImageMeta(
