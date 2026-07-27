@@ -7,8 +7,7 @@ import {
   canManageNotificationRules,
   canViewNotificationRules,
   emptyDraft,
-  parseIdList,
-  parseRoleCodeList,
+  generateNotificationRuleCode,
   type NotificationRuleDraft,
 } from './notificationRulesView';
 
@@ -37,20 +36,10 @@ const baseRule: NotificationRuleDto = {
 };
 
 describe('notificationRulesView', () => {
-  describe('parseIdList', () => {
-    it('parses a comma/space id list, dropping blanks and non-numbers', () => {
-      expect(parseIdList('1, 2,  3')).toEqual([1, 2, 3]);
-      expect(parseIdList('')).toEqual([]);
-      expect(parseIdList('x, 4')).toEqual([4]);
-      expect(parseIdList(' 5 , 6,foo,0')).toEqual([5, 6]);
-    });
-  });
-
-  describe('parseRoleCodeList', () => {
-    it('parses a comma/space role code list, dropping blanks and trimming', () => {
-      expect(parseRoleCodeList('admin, top_manager  ')).toEqual(['admin', 'top_manager']);
-      expect(parseRoleCodeList('')).toEqual([]);
-      expect(parseRoleCodeList('   ')).toEqual([]);
+  describe('generateNotificationRuleCode', () => {
+    it('generates a stable technical code without user input', () => {
+      expect(generateNotificationRuleCode(0, 'ABC-123_test')).toBe('notification-rule-0-abc-123-test');
+      expect(generateNotificationRuleCode(123, '---')).toBe('notification-rule-3f-auto');
     });
   });
 
@@ -66,11 +55,11 @@ describe('notificationRulesView', () => {
         excludeCompletedOrders: true,
         deadlineEntityTypes: ['order'],
         requireCurrentDeadlineEvent: true,
-        allowedFromOrderStatusIdsText: '',
-        excludeOrderStatusIdsText: '7,8',
+        allowedFromOrderStatusIds: [],
+        excludeOrderStatusIds: [7, 8],
         resolvers: ['order_manager'],
-        roleCodesText: 'admin',
-        userIdsText: '',
+        roleCodes: ['admin'],
+        userIds: [],
         titleTemplate: '',
         messageTemplate: 'Order {orderId}',
       };
@@ -104,8 +93,8 @@ describe('notificationRulesView', () => {
         eventType: 'order.status_changed',
         deadlineEntityTypes: [],
         requireCurrentDeadlineEvent: true,
-        allowedFromOrderStatusIdsText: '1, 2',
-        userIdsText: '100, 200',
+        allowedFromOrderStatusIds: [1, 2],
+        userIds: [100, 200],
         resolvers: [],
         excludeCompletedOrders: false,
       };
@@ -139,7 +128,7 @@ describe('notificationRulesView', () => {
       const result = buildUpdatePayload(
         { priority: 50, isEnabled: false } as NotificationRuleDraft,
         'tuning',
-        '2026-06-10T00:00:00.000Z',
+        '2026-06-10T00:00:00.000Z'
       );
 
       expect(result.priority).toBe(50);
@@ -160,8 +149,8 @@ describe('notificationRulesView', () => {
       cleared.excludeCompletedOrders = false;
       cleared.deadlineEntityTypes = [];
       cleared.requireCurrentDeadlineEvent = true;
-      cleared.allowedFromOrderStatusIdsText = '';
-      cleared.excludeOrderStatusIdsText = '';
+      cleared.allowedFromOrderStatusIds = [];
+      cleared.excludeOrderStatusIds = [];
 
       const result = buildUpdatePayload(cleared, 'remove gating', '2026-06-10T00:00:00.000Z');
 
@@ -177,7 +166,7 @@ describe('notificationRulesView', () => {
           groupId: null,
         },
         'clear group',
-        '2026-06-14T00:00:00.000Z',
+        '2026-06-14T00:00:00.000Z'
       );
 
       expect(payload.groupId).toBeNull();
@@ -197,11 +186,11 @@ describe('notificationRulesView', () => {
         excludeCompletedOrders: true,
         deadlineEntityTypes: ['order'],
         requireCurrentDeadlineEvent: true,
-        allowedFromOrderStatusIdsText: '',
-        excludeOrderStatusIdsText: '7, 8',
+        allowedFromOrderStatusIds: [],
+        excludeOrderStatusIds: [7, 8],
         resolvers: ['order_manager'],
-        roleCodesText: 'admin',
-        userIdsText: '',
+        roleCodes: ['admin'],
+        userIds: [],
         titleTemplate: 'Deadline expired',
         messageTemplate: 'Order {orderId} deadline expired',
       });
@@ -218,11 +207,11 @@ describe('notificationRulesView', () => {
       expect(draft.excludeCompletedOrders).toBe(false);
       expect(draft.deadlineEntityTypes).toEqual([]);
       expect(draft.requireCurrentDeadlineEvent).toBe(true);
-      expect(draft.allowedFromOrderStatusIdsText).toBe('');
-      expect(draft.excludeOrderStatusIdsText).toBe('');
+      expect(draft.allowedFromOrderStatusIds).toEqual([]);
+      expect(draft.excludeOrderStatusIds).toEqual([]);
       expect(draft.resolvers).toEqual([]);
-      expect(draft.roleCodesText).toBe('');
-      expect(draft.userIdsText).toBe('');
+      expect(draft.roleCodes).toEqual([]);
+      expect(draft.userIds).toEqual([]);
       expect(draft.titleTemplate).toBe('');
       expect(draft.messageTemplate).toBe('');
     });
@@ -230,7 +219,11 @@ describe('notificationRulesView', () => {
 
   describe('canManageNotificationRules', () => {
     it('checks the notifications.manage_rules permission', () => {
-      expect(canManageNotificationRules({ permissions: ['notifications.manage_rules'] })).toBe(true);
+      expect(
+        canManageNotificationRules({
+          permissions: ['notifications.manage_rules'],
+        })
+      ).toBe(true);
       expect(canManageNotificationRules({ permissions: ['orders.view'] })).toBe(false);
       expect(canManageNotificationRules(undefined)).toBe(false);
       expect(canManageNotificationRules(null)).toBe(false);

@@ -18,11 +18,11 @@ export interface NotificationRuleDraft {
   excludeCompletedOrders: boolean;
   deadlineEntityTypes: DeadlineNotificationEntityType[];
   requireCurrentDeadlineEvent: boolean;
-  allowedFromOrderStatusIdsText: string;
-  excludeOrderStatusIdsText: string;
+  allowedFromOrderStatusIds: number[];
+  excludeOrderStatusIds: number[];
   resolvers: RecipientResolverKind[];
-  roleCodesText: string;
-  userIdsText: string;
+  roleCodes: string[];
+  userIds: number[];
   titleTemplate: string;
   messageTemplate: string;
 }
@@ -38,11 +38,11 @@ export function emptyDraft(): NotificationRuleDraft {
     excludeCompletedOrders: false,
     deadlineEntityTypes: [],
     requireCurrentDeadlineEvent: true,
-    allowedFromOrderStatusIdsText: '',
-    excludeOrderStatusIdsText: '',
+    allowedFromOrderStatusIds: [],
+    excludeOrderStatusIds: [],
     resolvers: [],
-    roleCodesText: '',
-    userIdsText: '',
+    roleCodes: [],
+    userIds: [],
     titleTemplate: '',
     messageTemplate: '',
   };
@@ -59,40 +59,27 @@ export function buildDraftFromRule(rule: NotificationRuleDto): NotificationRuleD
     excludeCompletedOrders: rule.conditions.excludeCompletedOrders ?? false,
     deadlineEntityTypes: rule.conditions.deadlineEntityTypes ?? [],
     requireCurrentDeadlineEvent: rule.conditions.requireCurrentDeadlineEvent ?? true,
-    allowedFromOrderStatusIdsText: formatIdList(rule.conditions.allowedFromOrderStatusIds),
-    excludeOrderStatusIdsText: formatIdList(rule.conditions.excludeOrderStatusIds),
+    allowedFromOrderStatusIds: [...(rule.conditions.allowedFromOrderStatusIds ?? [])],
+    excludeOrderStatusIds: [...(rule.conditions.excludeOrderStatusIds ?? [])],
     resolvers: rule.recipients.resolvers ?? [],
-    roleCodesText: formatStringList(rule.recipients.roleCodes),
-    userIdsText: formatIdList(rule.recipients.userIds),
+    roleCodes: [...(rule.recipients.roleCodes ?? [])],
+    userIds: [...(rule.recipients.userIds ?? [])],
     titleTemplate: rule.titleTemplate ?? '',
     messageTemplate: rule.messageTemplate ?? '',
   };
 }
 
-export function parseIdList(value: string | undefined): number[] {
-  if (!value) return [];
-  return value
-    .split(/[\s,]+/g)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => Number(part))
-    .filter((n) => Number.isFinite(n) && Number.isInteger(n) && n > 0);
-}
+export function generateNotificationRuleCode(
+  timestamp: number = Date.now(),
+  entropy: string = createRuleCodeEntropy()
+): string {
+  const safeEntropy = entropy
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 16);
 
-export function parseRoleCodeList(value: string | undefined): string[] {
-  if (!value) return [];
-  return value
-    .split(/[\s,]+/g)
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
-export function formatIdList(ids: number[] | null | undefined): string {
-  return ids?.length ? ids.join(', ') : '';
-}
-
-export function formatStringList(values: string[] | null | undefined): string {
-  return values?.length ? values.join(', ') : '';
+  return `notification-rule-${timestamp.toString(36)}-${safeEntropy || 'auto'}`;
 }
 
 function normalizeTemplate(value: string): string | null {
@@ -118,14 +105,12 @@ function buildConditions(draft: Partial<NotificationRuleDraft>) {
     conditions.requireCurrentDeadlineEvent = true;
   }
 
-  const allowed = parseIdList(draft.allowedFromOrderStatusIdsText);
-  if (allowed.length > 0) {
-    conditions.allowedFromOrderStatusIds = allowed;
+  if (draft.allowedFromOrderStatusIds?.length) {
+    conditions.allowedFromOrderStatusIds = [...draft.allowedFromOrderStatusIds];
   }
 
-  const excluded = parseIdList(draft.excludeOrderStatusIdsText);
-  if (excluded.length > 0) {
-    conditions.excludeOrderStatusIds = excluded;
+  if (draft.excludeOrderStatusIds?.length) {
+    conditions.excludeOrderStatusIds = [...draft.excludeOrderStatusIds];
   }
 
   if (draft.excludeCompletedOrders) {
@@ -146,14 +131,12 @@ function buildRecipients(draft: Partial<NotificationRuleDraft>) {
     recipients.resolvers = [...draft.resolvers];
   }
 
-  const roleCodes = parseRoleCodeList(draft.roleCodesText);
-  if (roleCodes.length > 0) {
-    recipients.roleCodes = roleCodes;
+  if (draft.roleCodes?.length) {
+    recipients.roleCodes = [...draft.roleCodes];
   }
 
-  const userIds = parseIdList(draft.userIdsText);
-  if (userIds.length > 0) {
-    recipients.userIds = userIds;
+  if (draft.userIds?.length) {
+    recipients.userIds = [...draft.userIds];
   }
 
   return recipients;
@@ -177,7 +160,7 @@ export function buildCreatePayload(draft: NotificationRuleDraft): CreateNotifica
 export function buildUpdatePayload(
   draft: NotificationRuleDraft,
   reason: string,
-  expectedUpdatedAt: string,
+  expectedUpdatedAt: string
 ): UpdateNotificationRuleRequest {
   const result: UpdateNotificationRuleRequest = {
     reason,
@@ -205,14 +188,18 @@ export function buildUpdatePayload(
   return result;
 }
 
-export function canManageNotificationRules(
-  user: PermissionCarrier | null | undefined,
-): boolean {
+export function canManageNotificationRules(user: PermissionCarrier | null | undefined): boolean {
   return canAny(['notifications.manage_rules'], user);
 }
 
-export function canViewNotificationRules(
-  user: PermissionCarrier | null | undefined,
-): boolean {
+export function canViewNotificationRules(user: PermissionCarrier | null | undefined): boolean {
   return canAny(['notifications.view_rules'], user);
+}
+
+function createRuleCodeEntropy(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return Math.random().toString(36).slice(2);
 }
