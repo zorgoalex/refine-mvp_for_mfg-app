@@ -145,7 +145,7 @@ export interface ImportOrderSnapshotBatchResponse {
   failed: number;
   results: Array<
     | ({ fileName: string } & ImportOrderSnapshotResponse)
-    | { fileName: string; success: false; errorCode: string; message: string }
+    | { fileName: string; success: false; errorCode: string; message: string; details?: Record<string, unknown> }
   >;
 }
 

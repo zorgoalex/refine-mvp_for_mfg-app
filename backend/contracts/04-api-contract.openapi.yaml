@@ -15502,6 +15502,9 @@ components:
                     type: string
                   message:
                     type: string
+                  details:
+                    type: object
+                    additionalProperties: true
 
     ExportOrderRequest:
       type: object

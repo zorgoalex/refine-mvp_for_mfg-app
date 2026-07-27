@@ -146,6 +146,7 @@ const orderSnapshotImportBatchResponseSwaggerSchema = {
               success: { type: 'boolean', enum: [false] },
               errorCode: { type: 'string' },
               message: { type: 'string' },
+              details: { type: 'object', additionalProperties: true },
             },
           },
         ],

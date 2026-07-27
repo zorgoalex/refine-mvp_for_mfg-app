@@ -155,16 +155,15 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
   ): Promise<ImportOrderSnapshotResponseDto> {
     const snapshot = assertSupportedSnapshot(command.snapshot);
     const payloadHash = calculateSnapshotHash(snapshot);
+    const runId = await startImportRun(this.database, snapshot, payloadHash, command);
 
-    return this.database.transaction(async (tx) => {
-      await setSessionUser(tx, command.currentUser.id);
-      await tx.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
-        snapshot.source.sourceInstanceId,
-        snapshot.identity.order.sourceId,
-      ]);
-
-      const runId = await startImportRun(tx, snapshot, payloadHash, command);
-      try {
+    try {
+      const result = await this.database.transaction(async (tx) => {
+        await setSessionUser(tx, command.currentUser.id);
+        await tx.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
+          snapshot.source.sourceInstanceId,
+          snapshot.identity.order.sourceId,
+        ]);
         const result = await importSnapshotInTransaction(tx, snapshot, payloadHash, runId, command);
         await finishImportRun(tx, runId, result.status, result.orderId, result.summary);
         await writeAudit(
@@ -183,12 +182,13 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
           },
           collectSnapshotSheetIds(snapshot),
         );
-        return { ...result, importRunId: runId };
-      } catch (error) {
-        await failImportRun(tx, runId, error);
-        throw error;
-      }
-    });
+        return result;
+      });
+      return { ...result, importRunId: runId };
+    } catch (error) {
+      await failImportRun(this.database, runId, error).catch(() => undefined);
+      throw error;
+    }
   }
 
   async importOrderSnapshotBatch(
@@ -207,12 +207,7 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
         const result = await this.importOrderSnapshot({ ...command, snapshot });
         results.push({ fileName: file.name, ...result });
       } catch (error) {
-        results.push({
-          fileName: file.name,
-          success: false,
-          errorCode: error instanceof ApiError ? error.code : 'ORDER_SNAPSHOT_IMPORT_FAILED',
-          message: error instanceof Error ? error.message : 'Order snapshot import failed',
-        });
+        results.push(snapshotBatchFailure(file.name, error));
       }
     }
 
@@ -270,6 +265,37 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
 
     return result.rows.map((row) => Number(row.id));
   }
+}
+
+function snapshotBatchFailure(
+  fileName: string,
+  error: unknown,
+): Extract<ImportOrderSnapshotBatchResponseDto['results'][number], { success: false }> {
+  const details = snapshotErrorDetails(error);
+  return {
+    fileName,
+    success: false,
+    errorCode: snapshotErrorCode(error),
+    message: snapshotErrorMessage(error),
+    ...(details ? { details } : {}),
+  };
+}
+
+function snapshotErrorCode(error: unknown): string {
+  return error instanceof ApiError ? error.code : 'ORDER_SNAPSHOT_IMPORT_FAILED';
+}
+
+function snapshotErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Order snapshot import failed';
+}
+
+function snapshotErrorDetails(error: unknown): Record<string, unknown> | undefined {
+  return error instanceof ApiError ? error.details : undefined;
+}
+
+function snapshotFailureSummary(error: unknown): Record<string, unknown> {
+  const details = snapshotErrorDetails(error);
+  return details ? { errorDetails: details } : {};
 }
 
 async function buildSnapshot(tx: TransactionClient, orderId: number): Promise<OrderSnapshotDto> {
@@ -1974,7 +2000,7 @@ async function deleteMissingImportedProductionEvents(
 }
 
 async function startImportRun(
-  tx: TransactionClient,
+  tx: DatabaseClient,
   snapshot: OrderSnapshotDto,
   payloadHash: string,
   command: ImportOrderSnapshotCommand,
@@ -2016,17 +2042,22 @@ async function finishImportRun(
   );
 }
 
-async function failImportRun(tx: TransactionClient, runId: string, error: unknown): Promise<void> {
+async function failImportRun(tx: DatabaseClient, runId: string, error: unknown): Promise<void> {
   await tx.query(
     `
     UPDATE order_import_runs
-    SET status = 'failed', error_code = $2, error_message = $3, completed_at = now()
+    SET status = 'failed',
+        error_code = $2,
+        error_message = $3,
+        summary_json = summary_json || $4::jsonb,
+        completed_at = now()
     WHERE import_run_id = $1
     `,
     [
       runId,
-      error instanceof ApiError ? error.code : 'ORDER_SNAPSHOT_IMPORT_FAILED',
-      error instanceof Error ? error.message : 'Order snapshot import failed',
+      snapshotErrorCode(error),
+      snapshotErrorMessage(error),
+      JSON.stringify(snapshotFailureSummary(error)),
     ],
   );
 }
@@ -2446,4 +2477,6 @@ export {
   detailValues as _testOnlyDetailValues,
   nullifyMaterialIdForSheetEntries as _testOnlyNullifyMaterialIdForSheetEntries,
   snapshotToSaveOrderDto as _testOnlySnapshotToSaveOrderDto,
+  snapshotBatchFailure as _testOnlySnapshotBatchFailure,
+  snapshotFailureSummary as _testOnlySnapshotFailureSummary,
 };

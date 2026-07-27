@@ -91,3 +91,32 @@
     background-color: var(--app-selection-bg);
   }
 }
+
+.orders-snapshot-import-report {
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.orders-snapshot-import-report__section + .orders-snapshot-import-report__section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--app-border);
+}
+
+.orders-snapshot-import-report__failure {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+}
+
+.orders-snapshot-import-report__failure + .orders-snapshot-import-report__failure {
+  border-top: 1px solid var(--app-border);
+}
+
+.orders-snapshot-import-report__details {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}

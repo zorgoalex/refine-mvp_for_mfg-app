@@ -29,6 +29,8 @@ import {
   _testOnlyOrderHeaderUpdateParams as updateParams,
   _testOnlyDetailValues as detailValues,
   _testOnlyNullifyMaterialIdForSheetEntries as nullifyMaterialIdForSheetEntries,
+  _testOnlySnapshotBatchFailure as snapshotBatchFailure,
+  _testOnlySnapshotFailureSummary as snapshotFailureSummary,
   _testOnlySnapshotToSaveOrderDto as snapshotToSaveOrderDto,
   buildSheetValidationDetails,
 } from './pg-order-snapshot';
@@ -545,6 +547,36 @@ describe('OrderSnapshotService — sheet_materials.view gate on BATCH import', (
       service.importOrderSnapshotBatch({ currentUser: makeUser({}), zipBase64 }),
     ).resolves.toMatchObject({ success: true });
     expect(snapshots.importOrderSnapshotBatch).toHaveBeenCalled();
+  });
+});
+
+describe('pg-order-snapshot batch import failures', () => {
+  it('keeps ApiError details so the UI can show field-level import causes', () => {
+    const error = new ApiError(422, 'VALIDATION_ERROR', 'Order payload validation failed', {
+      errors: [
+        { field: 'details[0].sheetMaterialTypeId', message: 'sheet_material_type 999 does not exist' },
+      ],
+    });
+    const failure = snapshotBatchFailure('bad-order.erp-order.json', error);
+
+    expect(failure).toEqual({
+      fileName: 'bad-order.erp-order.json',
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+      message: 'Order payload validation failed',
+      details: {
+        errors: [
+          { field: 'details[0].sheetMaterialTypeId', message: 'sheet_material_type 999 does not exist' },
+        ],
+      },
+    });
+    expect(snapshotFailureSummary(error)).toEqual({
+      errorDetails: {
+        errors: [
+          { field: 'details[0].sheetMaterialTypeId', message: 'sheet_material_type 999 does not exist' },
+        ],
+      },
+    });
   });
 });
 

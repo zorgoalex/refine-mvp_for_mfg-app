@@ -122,6 +122,8 @@ describe('orders OpenAPI contract', () => {
     expect(contract).toContain('operationId: importOrderSnapshot');
     expect(contract).toContain('  /api/v1/orders/snapshot/import-batch:');
     expect(contract).toContain('operationId: importOrderSnapshotBatch');
+    expect(contract).toContain('                  details:');
+    expect(contract).toContain('                    additionalProperties: true');
     expect(contract).not.toContain('passwordHash');
     expect(contract).not.toContain('refreshTokenHash');
     expect(contract).not.toContain('providerSecret');

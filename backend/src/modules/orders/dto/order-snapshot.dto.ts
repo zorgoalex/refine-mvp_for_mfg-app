@@ -157,6 +157,6 @@ export interface ImportOrderSnapshotBatchResponseDto {
   failed: number;
   results: Array<
     | ({ fileName: string } & ImportOrderSnapshotResponseDto)
-    | { fileName: string; success: false; errorCode: string; message: string }
+    | { fileName: string; success: false; errorCode: string; message: string; details?: Record<string, unknown> }
   >;
 }

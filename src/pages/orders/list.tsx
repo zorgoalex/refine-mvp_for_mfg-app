@@ -45,6 +45,7 @@ import { buildProductionStagesDisplayConfig } from "../../utils/productionWorkfl
 import type { ProductionStatusRef, ProductionWorkflowConfig } from "../../types/productionWorkflow";
 import { featureFlags } from "../../config/featureFlags";
 import { ordersApi } from "../../api/ordersApi";
+import { buildSnapshotImportBatchReport } from "./orderSnapshotImportReport";
 import { findOrderByName, countOrdersAfter } from "../../api/reports/ordersSearchReportApi";
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
@@ -452,7 +453,44 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       if (isZip) {
         const result = await ordersApi.importSnapshotBatchFile(file);
         if (result.failed > 0) {
-          message.warning(`Импортировано: ${result.imported}, ошибок: ${result.failed}`);
+          const report = buildSnapshotImportBatchReport(result);
+          Modal.warning({
+            title: report.title,
+            width: 780,
+            content: (
+              <div className="orders-snapshot-import-report">
+                <div className="orders-snapshot-import-report__section">
+                  {report.failures.map((failure) => (
+                    <div key={failure.fileName} className="orders-snapshot-import-report__failure">
+                      <Text strong>{failure.fileName}</Text>
+                      <Text type="secondary">
+                        {failure.errorCode}: {failure.message}
+                      </Text>
+                      {failure.detailLines.length > 0 && (
+                        <ul className="orders-snapshot-import-report__details">
+                          {failure.detailLines.map((line, lineIndex) => (
+                            <li key={`${failure.fileName}-${lineIndex}`}>{line}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {report.successes.length > 0 && (
+                  <div className="orders-snapshot-import-report__section">
+                    <Text type="secondary">Импортированы:</Text>
+                    <ul className="orders-snapshot-import-report__details">
+                      {report.successes.map((success) => (
+                        <li key={success.fileName}>
+                          {success.fileName} — заказ {success.orderName}: {success.statusLabel}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ),
+          });
         } else {
           message.success(`Импортировано заказов: ${result.imported}`);
         }

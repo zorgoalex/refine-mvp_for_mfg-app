@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-27",
+    title: "JSON импорт заказов: подробные ошибки ZIP",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "При загрузке ZIP с JSON snapshot заказов окно результата теперь показывает по каждому проблемному файлу код ошибки, текст причины и поля валидации.",
+      "Ошибки импорта теперь сохраняются в журнале `order_import_runs`, включая `summary_json.errorDetails`.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-27",
     title: "Доски статусов: плотные карточки заказов",
     services: ["ERP"],
     repositories: ["repo_erp"],
