@@ -972,7 +972,7 @@ async function enqueueOutbox(
 
 function buildTodayColumns(packets: CncTelegramPacketDto[]): CncTelegramTodayColumnDto[] {
   const definitions: Array<Pick<CncTelegramTodayColumnDto, 'key' | 'title'>> = [
-    { key: 'parsed', title: 'Выложено' },
+    { key: 'parsed', title: 'Файлы на станке' },
     { key: 'completed', title: 'Выполнено' },
   ];
   return definitions.map((definition) => {

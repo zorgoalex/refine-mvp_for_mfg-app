@@ -80,4 +80,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-packet-card__status-icon--completed');
     expect(css).toContain('border-radius: 50%');
   });
+
+  it('shows CNC order totals directly on each card', () => {
+    expect(page).toContain('buildCncOrderSummaries(packet.items)');
+    expect(page).toContain('aria-label="Итоги по заказам"');
+    expect(page).toContain("formatCount(summary.positionCount, 'поз.')");
+    expect(page).toContain("formatCount(summary.detailQuantity, 'дет.')");
+    expect(css).toContain('.cnc-packet-card__order-summary');
+    expect(css).toContain('font-weight: 650');
+    expect(css).toContain('font-weight: 400');
+  });
 });

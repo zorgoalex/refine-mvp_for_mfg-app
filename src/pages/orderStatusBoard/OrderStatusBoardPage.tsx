@@ -824,12 +824,23 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   onOpenOrder,
 }) => {
   const displayComments = packet.comments.filter(isCncDisplayComment);
+  const orderSummaries = useMemo(() => buildCncOrderSummaries(packet.items), [packet.items]);
 
   return (
     <div className="status-board-card cnc-packet-card">
       <div className="status-board-card__top">
         <div className="cnc-packet-card__title">
-          <Typography.Text strong className="cnc-packet-card__program">
+          {orderSummaries.length > 0 && (
+            <div className="cnc-packet-card__order-summary" aria-label="Итоги по заказам">
+              {orderSummaries.map((summary) => (
+                <span key={summary.orderName}>
+                  {summary.orderName}: {formatCount(summary.positionCount, 'поз.')} ·{' '}
+                  {formatCount(summary.detailQuantity, 'дет.')}
+                </span>
+              ))}
+            </div>
+          )}
+          <Typography.Text className="cnc-packet-card__program">
             {packet.programName ?? packet.externalPacketKey}
           </Typography.Text>
         </div>
@@ -1416,6 +1427,48 @@ function formatCncSize(width: number | null, height: number | null): string {
   if (!width || !height) return '—';
   const formatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
   return `${formatter.format(width)}×${formatter.format(height)}`;
+}
+
+interface CncOrderSummary {
+  orderName: string;
+  positionCount: number;
+  detailQuantity: number;
+}
+
+function buildCncOrderSummaries(items: CncTelegramPacket['items']): CncOrderSummary[] {
+  const summaries = new Map<string, {
+    orderName: string;
+    positionKeys: Set<string>;
+    detailQuantity: number;
+  }>();
+
+  items.forEach((item, index) => {
+    const orderName = item.orderName.trim() || 'Без заказа';
+    const summary = summaries.get(orderName) ?? {
+      orderName,
+      positionKeys: new Set<string>(),
+      detailQuantity: 0,
+    };
+    const positionKey = item.detailNumber != null
+      ? `detail:${item.detailNumber}`
+      : item.sourceItemKey || `row:${index}`;
+
+    summary.positionKeys.add(positionKey);
+    summary.detailQuantity += item.quantity;
+    summaries.set(orderName, summary);
+  });
+
+  return Array.from(summaries.values())
+    .map((summary) => ({
+      orderName: summary.orderName,
+      positionCount: summary.positionKeys.size,
+      detailQuantity: summary.detailQuantity,
+    }))
+    .sort((left, right) => left.orderName.localeCompare(right.orderName, 'ru', { numeric: true }));
+}
+
+function formatCount(value: number, unit: string): string {
+  return `${new Intl.NumberFormat('ru-RU').format(value)} ${unit}`;
 }
 
 function isCncDisplayComment(comment: string): boolean {

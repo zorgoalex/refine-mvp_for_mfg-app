@@ -152,7 +152,7 @@ describe('PgCncTelegramRepository', () => {
     const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
 
     expect(result.columns.map((column) => [column.key, column.title, column.total])).toEqual([
-      ['parsed', 'Выложено', 1],
+      ['parsed', 'Файлы на станке', 1],
       ['completed', 'Выполнено', 1],
     ]);
   });
