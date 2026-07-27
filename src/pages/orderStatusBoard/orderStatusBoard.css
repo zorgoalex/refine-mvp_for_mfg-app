@@ -373,8 +373,30 @@
 }
 
 .cnc-packet-card__status-icon {
-  min-width: 18px;
-  min-height: 18px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--status-color);
+  background: color-mix(in srgb, var(--status-color) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--status-color) 26%, transparent);
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease;
+}
+
+.cnc-packet-card__status-icon:focus-visible {
+  outline: 2px solid var(--status-color);
+  outline-offset: 2px;
+}
+
+.cnc-packet-card__status-icon--completed {
+  color: #389e0d;
+  background: color-mix(in srgb, #389e0d 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #389e0d 32%, transparent);
 }
 
 .cnc-packet-card__notes {

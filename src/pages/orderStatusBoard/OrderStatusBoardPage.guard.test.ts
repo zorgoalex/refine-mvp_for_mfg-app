@@ -72,4 +72,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('items={[{');
     expect(page).not.toContain("board: 'cnc");
   });
+
+  it('keeps the completed CNC card check marker understandable', () => {
+    expect(page).toContain("packet.completionStatus === 'completed'");
+    expect(page).toContain('<CheckCircleOutlined />');
+    expect(page).toContain('Выполнено на станке');
+    expect(css).toContain('.cnc-packet-card__status-icon--completed');
+    expect(css).toContain('border-radius: 50%');
+  });
 });

@@ -27,6 +27,7 @@ import {
 } from 'antd';
 import {
   CalendarOutlined,
+  CheckCircleOutlined,
   ClockCircleOutlined,
   DragOutlined,
   FileTextOutlined,
@@ -832,6 +833,20 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
             {packet.programName ?? packet.externalPacketKey}
           </Typography.Text>
         </div>
+        {packet.completionStatus === 'completed' && (
+          <div className="cnc-packet-card__status-icons" aria-label="Статусы листа">
+            <Tooltip title="Выполнено на станке">
+              <span
+                className="cnc-packet-card__status-icon cnc-packet-card__status-icon--completed"
+                role="img"
+                aria-label="Выполнено на станке"
+                tabIndex={0}
+              >
+                <CheckCircleOutlined />
+              </span>
+            </Tooltip>
+          </div>
+        )}
       </div>
       {(displayComments.length > 0 || packet.dowelingLinks.length > 0) && (
         <div className="cnc-packet-card__notes">
