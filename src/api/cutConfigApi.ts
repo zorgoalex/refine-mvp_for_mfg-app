@@ -32,7 +32,7 @@ export interface CutPdfTemplate {
 }
 export interface CutPdfFieldCatalogItem {
   id: string;
-  source: 'bazis' | 'dynamic' | 'detail' | 'order' | 'job' | 'group' | 'sheet' | 'cut' | 'custom';
+  source: 'bazis' | 'dynamic' | 'detail' | 'order' | 'job' | 'group' | 'sheet' | 'cut' | 'client' | 'computed' | 'custom';
   sourceColumn: string | null;
   label: string;
   type: 'string' | 'number' | 'boolean' | 'date';

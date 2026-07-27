@@ -15,7 +15,7 @@ export type CutPdfTemplateElementType =
 
 export interface CutPdfFieldCatalogItem {
   id: string;
-  source: LabelFieldCatalogItem['source'] | 'job' | 'group' | 'sheet' | 'cut' | 'custom';
+  source: LabelFieldCatalogItem['source'] | 'job' | 'group' | 'sheet' | 'cut' | 'client' | 'computed' | 'custom';
   sourceColumn: string | null;
   label: string;
   type: LabelFieldCatalogItem['type'];
@@ -174,6 +174,10 @@ const CUT_SPECIFIC_FIELD_CATALOG: CutPdfFieldCatalogItem[] = [
   { id: 'sheet.area', source: 'sheet', sourceColumn: null, label: 'Площадь деталей', category: 'Лист раскроя', type: 'number' },
   { id: 'sheet.thumbnail', source: 'sheet', sourceColumn: null, label: 'Миниатюра листа раскроя', category: 'Лист раскроя', type: 'string' },
   { id: 'sheet.machine_files', source: 'sheet', sourceColumn: null, label: 'Файлы станка на листе', category: 'Лист раскроя', type: 'string' },
+  { id: 'order.unique_names', source: 'order', sourceColumn: null, label: 'Заказы на листе', category: 'Заказ', type: 'string' },
+  { id: 'order.date', source: 'order', sourceColumn: null, label: 'Дата заказа', category: 'Заказ', type: 'date' },
+  { id: 'order.ready_date', source: 'order', sourceColumn: null, label: 'Дата готовности', category: 'Заказ', type: 'date' },
+  { id: 'client.unique_names', source: 'client', sourceColumn: null, label: 'Клиенты на листе', category: 'Клиент', type: 'string' },
   { id: 'detail.materials', source: 'detail', sourceColumn: null, label: 'Материалы деталей', category: 'Детали листа', type: 'string' },
   { id: 'detail.films', source: 'detail', sourceColumn: null, label: 'Пленки деталей', category: 'Детали листа', type: 'string' },
   { id: 'detail.thicknesses', source: 'detail', sourceColumn: null, label: 'Толщины деталей', category: 'Детали листа', type: 'string' },
@@ -192,7 +196,7 @@ const CUT_SPECIFIC_FIELD_CATALOG: CutPdfFieldCatalogItem[] = [
   { id: 'detail.orderDate', source: 'detail', sourceColumn: null, label: 'Дата заказа', category: 'Таблица деталей', type: 'date' },
   { id: 'detail.readyDate', source: 'detail', sourceColumn: null, label: 'Дата готовности', category: 'Таблица деталей', type: 'date' },
   { id: 'detail.thickness', source: 'detail', sourceColumn: null, label: 'Толщина', category: 'Таблица деталей', type: 'number' },
-  { id: 'computed.today', source: 'cut', sourceColumn: null, label: 'Текущая дата', category: 'Вычисляемые', type: 'date' },
-  { id: 'computed.page_number', source: 'cut', sourceColumn: null, label: 'Номер страницы', category: 'Вычисляемые', type: 'number' },
-  { id: 'computed.page_count', source: 'cut', sourceColumn: null, label: 'Всего страниц', category: 'Вычисляемые', type: 'number' },
+  { id: 'computed.today', source: 'computed', sourceColumn: null, label: 'Текущая дата', category: 'Вычисляемые', type: 'date' },
+  { id: 'computed.page_number', source: 'computed', sourceColumn: null, label: 'Номер страницы', category: 'Вычисляемые', type: 'number' },
+  { id: 'computed.page_count', source: 'computed', sourceColumn: null, label: 'Всего страниц', category: 'Вычисляемые', type: 'number' },
 ];

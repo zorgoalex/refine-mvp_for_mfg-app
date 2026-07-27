@@ -73,6 +73,10 @@ describe('CutConfigAdminService RBAC', () => {
     expect(fields.map((field) => field.id)).toEqual(expect.arrayContaining([
       'sheet.thumbnail',
       'sheet.machine_files',
+      'order.unique_names',
+      'order.date',
+      'order.ready_date',
+      'client.unique_names',
       'detail.table',
       'detail.doweling',
       'detail.machine_file',
@@ -80,7 +84,11 @@ describe('CutConfigAdminService RBAC', () => {
       'detail.materials',
       'detail.order',
       'detail.detail_name',
+      'computed.today',
     ]));
+    expect(fields.find((field) => field.id === 'order.unique_names')).toMatchObject({ source: 'order' });
+    expect(fields.find((field) => field.id === 'client.unique_names')).toMatchObject({ source: 'client' });
+    expect(fields.find((field) => field.id === 'computed.today')).toMatchObject({ source: 'computed' });
     expect(fields.find((field) => field.id === 'detail.order')).toMatchObject({ source: 'detail' });
     expect(fields.find((field) => field.id === 'detail.materials')).toMatchObject({ source: 'detail' });
     expect(fields.some((field) => field.source === 'bazis')).toBe(true);
@@ -137,6 +145,34 @@ describe('CutConfigAdminService RBAC', () => {
             page: { width: 297, height: 210 },
             customFieldSchema: {},
             elements: [
+              {
+                id: 'field-order',
+                type: 'field',
+                label: 'Заказ',
+                source: 'order.unique_names',
+                x: 12,
+                y: 10,
+                w: 84,
+                h: 8,
+                rotation: 0,
+                zIndex: 1,
+                align: 'left',
+                style: { fontSize: 10, color: '#111111' },
+              },
+              {
+                id: 'field-client',
+                type: 'field',
+                label: 'Клиент',
+                source: 'client.unique_names',
+                x: 108,
+                y: 10,
+                w: 78,
+                h: 8,
+                rotation: 0,
+                zIndex: 2,
+                align: 'left',
+                style: { fontSize: 10, color: '#111111' },
+              },
               {
                 id: 'detail-table',
                 type: 'detail_table',

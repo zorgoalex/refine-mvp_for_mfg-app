@@ -54,6 +54,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-27",
+    title: "PDF раскроя: сохранение шаблонов",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Существующие PDF-шаблоны раскроя снова сохраняются после редактирования, если в шапке используются поля заказов, клиентов, дат или вычисляемые поля листа.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-27",
     title: "Доски статусов: плотные карточки заказов",
     services: ["ERP"],
     repositories: ["repo_erp"],
