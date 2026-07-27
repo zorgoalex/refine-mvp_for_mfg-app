@@ -81,6 +81,7 @@ import {
   summarizeCustomFieldExpression,
   type CustomFieldSchemaRow,
 } from './labelTemplateEditorHelpers';
+import './CutConfigTab.css';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
@@ -450,6 +451,10 @@ type PdfTemplateEditorLayoutMode = 'standard' | 'wide' | 'rightAccordion';
 
 const PDF_TEMPLATE_DRAFTS_KEY = 'cut-pdf-template-drafts:v2';
 const CUT_PDF_FIELD_DRAG_TYPE = 'application/x-cut-pdf-field';
+const PDF_FIELD_PALETTE_DESKTOP_MAX_WIDTH = 228;
+const PDF_FIELD_PALETTE_DESKTOP_MIN_WIDTH = 168;
+const PDF_FIELD_PALETTE_LABEL_AVG_WIDTH = 5.9;
+const PDF_FIELD_PALETTE_COLUMN_CHROME = 50;
 const PDF_PAGE = { width: 297, height: 210 };
 const PDF_OLD_PAGE = { width: 842, height: 595 };
 const PDF_QR_ERROR_CORRECTION_OPTIONS = [
@@ -610,6 +615,11 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
       ...Object.fromEntries(Object.entries(evaluated).map(([key, value]) => [customFieldSourceId(key), value])),
     };
   }, [customFields]);
+  const fieldPaletteColumnWidth = useMemo(() => estimatePdfFieldPaletteColumnWidth(fields), [fields]);
+  const editorRowStyle = useMemo(
+    () => ({ '--cut-pdf-field-panel-width': `${fieldPaletteColumnWidth}px` }) as React.CSSProperties,
+    [fieldPaletteColumnWidth],
+  );
   const editingCustomField = customFields.find((field) => field.fieldId === editingCustomFieldId) ?? null;
 
   useEffect(() => {
@@ -992,6 +1002,11 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
       <Card size="small" title="Поля карты раскроя PDF">
         {renderFieldPalette()}
       </Card>
+    </Space>
+  );
+
+  const renderCustomFieldPanel = () => (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Collapse>
         <Panel header="Пользовательские поля" key="custom-fields">
           {renderCustomFields()}
@@ -1011,9 +1026,6 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     <Collapse accordion defaultActiveKey="elements">
       <Panel header="Поля карты раскроя PDF" key="fields">
         {renderFieldPalette()}
-      </Panel>
-      <Panel header="Пользовательские поля" key="custom-fields">
-        {renderCustomFields()}
       </Panel>
       <Panel header="Элементы шаблона" key="elements">
         {renderElementList(260)}
@@ -1072,67 +1084,70 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         </Button>
       </Space>
 
-      <Row gutter={[16, 16]} align="top">
+      <Row gutter={[16, 16]} align="top" className="cut-pdf-template-editor-row" style={editorRowStyle}>
         {!wideCanvas && !rightAccordionLayout && (
-          <Col xs={24} xl={6}>
+          <Col xs={24} className="cut-pdf-template-editor-field-col">
             {renderFieldPanel()}
           </Col>
         )}
-        <Col xs={24} xl={wideCanvas ? 24 : rightAccordionLayout ? 18 : 12}>
-          <Card
-            size="small"
-            title="Визуал карты раскроя PDF"
-            extra={(
-              <Space size={12} wrap>
-                <Checkbox checked={wideCanvas} onChange={(event) => setLayoutMode(event.target.checked ? 'wide' : 'standard')}>
-                  Широкий визуал
-                </Checkbox>
-                <Checkbox checked={rightAccordionLayout} onChange={(event) => setLayoutMode(event.target.checked ? 'rightAccordion' : 'standard')}>
-                  Панели справа 3:1
-                </Checkbox>
-                <Checkbox checked={showAllBounds} onChange={(event) => setShowAllBounds(event.target.checked)}>
-                  Границы
-                </Checkbox>
-              </Space>
-            )}
-          >
-            <PdfTemplateCanvas
-              draft={selected}
-              fields={fields}
-              previewValues={previewValues}
-              selectedElementId={selectedElementId}
-              canManage={canManage}
-              showAllBounds={showAllBounds}
-              wideCanvas={canvasFillsColumn}
-              draggingField={draggingField}
-              onSelect={setSelectedElementId}
-              onPatch={patchElementById}
-              onDelete={deleteElement}
-              onDuplicate={duplicateElement}
-              onMoveZ={moveZ}
-              onDropField={(field, x, y) => {
-                addFieldElement(field, x, y);
-                setDraggingField(null);
-              }}
-            />
-          </Card>
+        <Col xs={24} className={wideCanvas ? 'cut-pdf-template-editor-canvas-col cut-pdf-template-editor-canvas-col-wide' : 'cut-pdf-template-editor-canvas-col'}>
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Card
+              size="small"
+              title="Визуал карты раскроя PDF"
+              extra={(
+                <Space size={12} wrap>
+                  <Checkbox checked={wideCanvas} onChange={(event) => setLayoutMode(event.target.checked ? 'wide' : 'standard')}>
+                    Широкий визуал
+                  </Checkbox>
+                  <Checkbox checked={rightAccordionLayout} onChange={(event) => setLayoutMode(event.target.checked ? 'rightAccordion' : 'standard')}>
+                    Панели справа
+                  </Checkbox>
+                  <Checkbox checked={showAllBounds} onChange={(event) => setShowAllBounds(event.target.checked)}>
+                    Границы
+                  </Checkbox>
+                </Space>
+              )}
+            >
+              <PdfTemplateCanvas
+                draft={selected}
+                fields={fields}
+                previewValues={previewValues}
+                selectedElementId={selectedElementId}
+                canManage={canManage}
+                showAllBounds={showAllBounds}
+                wideCanvas={canvasFillsColumn}
+                draggingField={draggingField}
+                onSelect={setSelectedElementId}
+                onPatch={patchElementById}
+                onDelete={deleteElement}
+                onDuplicate={duplicateElement}
+                onMoveZ={moveZ}
+                onDropField={(field, x, y) => {
+                  addFieldElement(field, x, y);
+                  setDraggingField(null);
+                }}
+              />
+            </Card>
+            {renderCustomFieldPanel()}
+          </Space>
         </Col>
         {rightAccordionLayout && (
-          <Col xs={24} xl={6}>
+          <Col xs={24} className="cut-pdf-template-editor-field-col">
             {renderRightAccordionPanel()}
           </Col>
         )}
         {!wideCanvas && !rightAccordionLayout && (
-          <Col xs={24} xl={6}>
+          <Col xs={24} className="cut-pdf-template-editor-side-col">
             {renderElementPanel()}
           </Col>
         )}
         {wideCanvas && !rightAccordionLayout && (
           <>
-            <Col xs={24} xl={12}>
+            <Col xs={24} className="cut-pdf-template-editor-wide-half-col">
               {renderFieldPanel()}
             </Col>
-            <Col xs={24} xl={12}>
+            <Col xs={24} className="cut-pdf-template-editor-wide-half-col">
               {renderElementPanel()}
             </Col>
           </>
@@ -1610,7 +1625,7 @@ const PdfFieldPalette: React.FC<{
   const normalized = search.trim().toLowerCase();
   const visible = fields.filter((field) => !normalized || `${field.category} ${field.label} ${field.id}`.toLowerCase().includes(normalized));
   return (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+    <Space className="cut-pdf-template-editor-field-palette" direction="vertical" size={8} style={{ width: '100%' }}>
       <Input.Search value={search} onChange={(event) => onSearch(event.target.value)} allowClear />
       <div style={{ maxHeight: 420, overflowY: 'auto', paddingRight: 4 }}>
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -2178,6 +2193,18 @@ function formatPdfTemplateSaveError(error: unknown): string {
 
 function fieldLabelsFromList(fields: PdfFieldCatalogItem[]): Map<string, string> {
   return new Map(fields.map((field) => [field.id, field.label]));
+}
+
+function estimatePdfFieldPaletteColumnWidth(fields: PdfFieldCatalogItem[]): number {
+  const longestLabelLength = Math.max(
+    'Поля карты раскроя PDF'.length,
+    ...fields.map((field) => field.label.trim().length),
+  );
+  return Math.ceil(clamp(
+    longestLabelLength * PDF_FIELD_PALETTE_LABEL_AVG_WIDTH + PDF_FIELD_PALETTE_COLUMN_CHROME,
+    PDF_FIELD_PALETTE_DESKTOP_MIN_WIDTH,
+    PDF_FIELD_PALETTE_DESKTOP_MAX_WIDTH,
+  ));
 }
 
 function isPdfDetailTableField(field: PdfFieldCatalogItem): boolean {

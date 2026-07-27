@@ -143,8 +143,11 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/wideCanvas/);
     expect(tabSrc).toMatch(/Широкий визуал/);
     expect(tabSrc).toMatch(/rightAccordionLayout/);
-    expect(tabSrc).toMatch(/Панели справа 3:1/);
-    expect(tabSrc).toMatch(/xl=\{wideCanvas \? 24 : rightAccordionLayout \? 18 : 12\}/);
+    expect(tabSrc).toMatch(/Панели справа/);
+    expect(tabSrc).toMatch(/estimatePdfFieldPaletteColumnWidth/);
+    expect(tabSrc).toMatch(/cut-pdf-template-editor-field-col/);
+    expect(tabSrc).toMatch(/cut-pdf-template-editor-canvas-col/);
+    expect(tabSrc).toMatch(/renderCustomFieldPanel/);
     expect(tabSrc).toMatch(/ResizeObserver/);
     expect(tabSrc).toMatch(/isPdfDetailTableField/);
     expect(tabSrc).toMatch(/field\.source === 'detail'/);

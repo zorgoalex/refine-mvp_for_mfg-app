@@ -43,6 +43,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-27",
+    title: "PDF раскроя: компактная панель полей",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Панель «Поля карты раскроя PDF» в редакторе шаблонов стала уже и больше не забирает место у визуала.",
+      "Блок «Пользовательские поля» перенесён под визуал карты раскроя PDF.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-27",
     title: "PDF раскроя: файлы станка на листе",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
