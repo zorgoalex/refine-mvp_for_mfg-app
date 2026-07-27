@@ -26,6 +26,8 @@ import type {
   DeadlineListQuery,
   DeadlineRepositoryPort,
   DeleteGlobalTransitionRuleCommand,
+  DueDelayedDeadlineEvent,
+  FindDueDelayedDeadlineEventsCommand,
   FindDueDeadlinesCommand,
   ListDeadlinesCommand,
   OverrideDeadlineCommand,
@@ -83,6 +85,10 @@ interface DeadlineEventRow {
   idempotency_key: string | null;
   was_inserted?: boolean;
   created_at: string | Date;
+}
+
+interface DueDelayedDeadlineEventRow extends DeadlineEventRow {
+  action_rule_ids: string[];
 }
 
 interface DeadlinePolicyRow {
@@ -818,6 +824,122 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     );
 
     return result.rows.map(mapDeadline);
+  }
+
+  async findDueDelayedDeadlineEventsForUpdate(
+    command: FindDueDelayedDeadlineEventsCommand,
+  ): Promise<DueDelayedDeadlineEvent[]> {
+    const result = await this.database.query<DueDelayedDeadlineEventRow>(
+      `
+      WITH candidates AS (
+        SELECT e.*, due_rules.action_rule_ids
+        FROM deadline_events e
+        JOIN deadline_instances d ON d.deadline_id = e.deadline_id
+        CROSS JOIN LATERAL (
+          SELECT array_agg(
+            ar.action_rule_id::text
+            ORDER BY ar.priority ASC, ar.created_at ASC, ar.action_rule_id ASC
+          ) AS action_rule_ids
+          FROM deadline_action_rules ar
+          WHERE ar.event_type = 'DEADLINE_EXPIRED'
+            AND ar.action_type = 'change_order_status'
+            AND ar.is_enabled = true
+            AND jsonb_typeof(ar.config_json->'delayAfterDeadline') = 'object'
+            AND (
+              CASE
+                WHEN ar.config_json->'delayAfterDeadline'->>'days' ~ '^[0-9]+$'
+                  THEN LEAST((ar.config_json->'delayAfterDeadline'->>'days')::int, 3650)
+                ELSE 0
+              END
+              + CASE
+                  WHEN ar.config_json->'delayAfterDeadline'->>'hours' ~ '^[0-9]+$'
+                    THEN LEAST((ar.config_json->'delayAfterDeadline'->>'hours')::int, 23)
+                  ELSE 0
+                END
+              + CASE
+                  WHEN ar.config_json->'delayAfterDeadline'->>'minutes' ~ '^[0-9]+$'
+                    THEN LEAST((ar.config_json->'delayAfterDeadline'->>'minutes')::int, 59)
+                  ELSE 0
+                END
+            ) > 0
+            AND d.deadline_at + make_interval(
+              days => CASE
+                WHEN ar.config_json->'delayAfterDeadline'->>'days' ~ '^[0-9]+$'
+                  THEN LEAST((ar.config_json->'delayAfterDeadline'->>'days')::int, 3650)
+                ELSE 0
+              END,
+              hours => CASE
+                WHEN ar.config_json->'delayAfterDeadline'->>'hours' ~ '^[0-9]+$'
+                  THEN LEAST((ar.config_json->'delayAfterDeadline'->>'hours')::int, 23)
+                ELSE 0
+              END,
+              mins => CASE
+                WHEN ar.config_json->'delayAfterDeadline'->>'minutes' ~ '^[0-9]+$'
+                  THEN LEAST((ar.config_json->'delayAfterDeadline'->>'minutes')::int, 59)
+                ELSE 0
+              END
+            ) <= $1::timestamptz
+            AND (
+              ar.scope_type = d.entity_type
+              OR (
+                d.order_id IS NOT NULL
+                AND (
+                  (
+                    ar.policy_id IS NULL
+                    AND ar.config_json->'scope'->>'type' = 'global_orders'
+                  )
+                  OR ar.policy_id = d.policy_id
+                )
+              )
+            )
+            AND (ar.policy_id IS NULL OR ar.policy_id = d.policy_id)
+            AND (
+              COALESCE(
+                ar.config_json->'deadlineTarget'->>'type',
+                'all_order_deadlines'
+              ) = 'all_order_deadlines'
+              OR (
+                ar.config_json->'deadlineTarget'->>'type' = 'final_order'
+                AND d.entity_type = 'order'
+              )
+              OR (
+                ar.config_json->'deadlineTarget'->>'type' = 'production_stage'
+                AND d.entity_type = 'order_stage'
+                AND d.metadata_json->>'productionStatusId'
+                  = ar.config_json->'deadlineTarget'->>'productionStatusId'
+              )
+            )
+            AND (
+              NULLIF(BTRIM(ar.config_json->>'fixtureKey'), '') IS NULL
+              OR ar.config_json->>'fixtureKey' = e.payload_json->>'fixtureKey'
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM deadline_action_executions execution
+              WHERE execution.deadline_event_id = e.deadline_event_id
+                AND execution.action_rule_id = ar.action_rule_id
+            )
+        ) due_rules
+        WHERE e.event_type = 'DEADLINE_EXPIRED'
+          AND d.status = 'expired'
+          AND d.order_id IS NOT NULL
+          AND cardinality(due_rules.action_rule_ids) > 0
+          AND ($3::uuid IS NULL OR d.deadline_id = $3::uuid)
+        ORDER BY d.deadline_at ASC, e.created_at ASC, e.deadline_event_id ASC
+        LIMIT $2
+        FOR UPDATE OF e SKIP LOCKED
+      )
+      SELECT ${EVENT_COLUMNS}, action_rule_ids
+      FROM candidates
+      ORDER BY deadline_at ASC, created_at ASC, deadline_event_id ASC
+      `,
+      [command.now, command.limit, command.deadlineId ?? null],
+    );
+
+    return result.rows.map((row) => ({
+      event: mapEvent(row),
+      actionRuleIds: row.action_rule_ids,
+    }));
   }
 
   async markDeadlineExpired(input: { deadlineId: string; expiredAt: string }): Promise<DeadlineInstanceDto> {
@@ -1561,6 +1683,19 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     const targetStatusId = config.actionConfig?.targetOrderStatusId;
     const allowed = config.conditions?.allowedFromOrderStatusIds ?? [];
     const excluded = config.conditions?.excludeOrderStatusIds ?? [];
+    const delay = config.delayAfterDeadline;
+    const invalidDelay = delay
+      ? !Number.isInteger(delay.days)
+        || delay.days < 0
+        || delay.days > 3650
+        || !Number.isInteger(delay.hours)
+        || delay.hours < 0
+        || delay.hours > 23
+        || !Number.isInteger(delay.minutes)
+        || delay.minutes < 0
+        || delay.minutes > 59
+        || delay.days + delay.hours + delay.minutes === 0
+      : false;
     const invalid =
       !config.ruleName?.trim()
       || !targetStatusId
@@ -1571,7 +1706,8 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       || excluded.includes(targetStatusId)
       || allowed.some((statusId) => excluded.includes(statusId))
       || config.conditions?.excludeCompletedOrders !== true
-      || config.conditions?.requireCurrentDeadlineEvent !== true;
+      || config.conditions?.requireCurrentDeadlineEvent !== true
+      || invalidDelay;
     if (invalid) {
       throw new ApiError(
         422,
@@ -1935,6 +2071,9 @@ function buildCreateTransitionRuleConfig(
     ...(dto.ruleCode ? { ruleCode: dto.ruleCode } : {}),
     scope: { type: 'global_orders' },
     deadlineTarget: dto.deadlineTarget ?? { type: 'all_order_deadlines' },
+    ...(dto.delayAfterDeadline
+      ? { delayAfterDeadline: dto.delayAfterDeadline }
+      : {}),
     conditions: {
       allowedFromOrderStatusIds: dto.allowedFromOrderStatusIds,
       excludeOrderStatusIds: dto.excludeOrderStatusIds ?? [],
@@ -1951,7 +2090,7 @@ function buildTransitionRuleConfig(
   current: DeadlineActionRuleConfigDto | null | undefined,
   dto: UpdateGlobalTransitionRuleCommand['dto'],
 ): DeadlineActionRuleConfigDto {
-  return {
+  const config: DeadlineActionRuleConfigDto = {
     ...(current ?? {}),
     ...(hasOwn(dto, 'ruleName') ? { ruleName: dto.ruleName } : {}),
     ...(hasOwn(dto, 'ruleCode')
@@ -1988,6 +2127,16 @@ function buildTransitionRuleConfig(
         : {}),
     },
   };
+
+  if (hasOwn(dto, 'delayAfterDeadline')) {
+    if (dto.delayAfterDeadline) {
+      config.delayAfterDeadline = dto.delayAfterDeadline;
+    } else {
+      delete config.delayAfterDeadline;
+    }
+  }
+
+  return config;
 }
 
 function buildTransitionRuleAuditMetadata(
@@ -2007,6 +2156,7 @@ function buildTransitionRuleAuditMetadata(
     deadlineTarget: rule.config?.deadlineTarget ?? {
       type: 'all_order_deadlines',
     },
+    delayAfterDeadline: rule.config?.delayAfterDeadline ?? null,
     targetOrderStatusId: rule.config?.actionConfig?.targetOrderStatusId ?? null,
     allowedFromOrderStatusIds: rule.config?.conditions?.allowedFromOrderStatusIds ?? [],
     excludeOrderStatusIds: rule.config?.conditions?.excludeOrderStatusIds ?? [],

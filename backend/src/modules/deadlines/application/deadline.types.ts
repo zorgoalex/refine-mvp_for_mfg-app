@@ -218,6 +218,18 @@ export interface FindDueDeadlinesCommand {
   deadlineId?: string | null;
 }
 
+export interface FindDueDelayedDeadlineEventsCommand {
+  now: string;
+  limit: number;
+  workerId: string;
+  deadlineId?: string | null;
+}
+
+export interface DueDelayedDeadlineEvent {
+  event: DeadlineEventDto;
+  actionRuleIds: string[];
+}
+
 export interface DeadlineTargetRef {
   entityType: DeadlineEntityType;
   entityId: string;
@@ -298,6 +310,9 @@ export interface DeadlineRepositoryPort {
   resumeDeadline(command: ResumeDeadlineCommand): Promise<DeadlineInstanceDto>;
   cancelDeadline(command: CancelDeadlineCommand): Promise<DeadlineInstanceDto>;
   findDueDeadlinesForUpdate(command: FindDueDeadlinesCommand): Promise<DeadlineInstanceDto[]>;
+  findDueDelayedDeadlineEventsForUpdate?(
+    command: FindDueDelayedDeadlineEventsCommand,
+  ): Promise<DueDelayedDeadlineEvent[]>;
   markDeadlineExpired(input: {
     deadlineId: string;
     expiredAt: string;

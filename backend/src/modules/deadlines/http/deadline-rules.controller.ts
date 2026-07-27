@@ -26,6 +26,21 @@ const deadlineTargetSchema = z.discriminatedUnion('type', [
     productionStatusId: positiveIntSchema,
   }),
 ]);
+const delayAfterDeadlineSchema = z
+  .object({
+    days: z.number().int().min(0).max(3650).default(0),
+    hours: z.number().int().min(0).max(23).default(0),
+    minutes: z.number().int().min(0).max(59).default(0),
+  })
+  .superRefine((value, context) => {
+    if (value.days + value.hours + value.minutes === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['days'],
+        message: 'At least one delay value must be greater than zero',
+      });
+    }
+  });
 const isoTimestampSchema = z
   .string()
   .trim()
@@ -101,6 +116,7 @@ const createGlobalTransitionRuleSchema = z
     eventType: z.literal('DEADLINE_EXPIRED').default('DEADLINE_EXPIRED'),
     actionType: z.literal('change_order_status').default('change_order_status'),
     deadlineTarget: deadlineTargetSchema.default({ type: 'all_order_deadlines' }),
+    delayAfterDeadline: delayAfterDeadlineSchema.optional(),
     targetOrderStatusId: positiveIntSchema,
     allowedFromOrderStatusIds: z.array(positiveIntSchema).min(1),
     excludeOrderStatusIds: z.array(positiveIntSchema).default([]),
@@ -125,6 +141,7 @@ const updateGlobalTransitionRuleSchema = z
     eventType: z.literal('DEADLINE_EXPIRED').optional(),
     actionType: z.literal('change_order_status').optional(),
     deadlineTarget: deadlineTargetSchema.optional(),
+    delayAfterDeadline: delayAfterDeadlineSchema.nullable().optional(),
     targetOrderStatusId: positiveIntSchema.optional(),
     allowedFromOrderStatusIds: z.array(positiveIntSchema).optional(),
     excludeOrderStatusIds: z.array(positiveIntSchema).optional(),

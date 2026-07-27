@@ -142,6 +142,74 @@ describe('DeadlineActionDispatcherService', () => {
     });
   });
 
+  it('dispatches only explicitly selected delayed rule ids', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+
+    await dispatcher.dispatch({
+      event: createEvent(),
+      actionRuleIds: ['due-rule'],
+      repository: createRepository({
+        rules: [
+          createRule({ actionRuleId: 'already-handled-rule', priority: 1 }),
+          createRule({ actionRuleId: 'due-rule', priority: 2 }),
+        ],
+        executions,
+      }),
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    });
+
+    expect(executions).toHaveLength(1);
+    expect(executions[0].actionRuleId).toBe('due-rule');
+  });
+
+  it('does not consume delayed rule before its boundary', async () => {
+    const executions: DeadlineActionExecutionDto[] = [];
+    const dispatcher = new DeadlineActionDispatcherService();
+    const repository = createRepository({
+      rules: [
+        createRule({
+          actionRuleId: 'delayed-rule',
+          config: {
+            delayAfterDeadline: { days: 0, hours: 1, minutes: 0 },
+          },
+        }),
+      ],
+      deadline: createDeadline({
+        deadlineId: 'deadline-1',
+        deadlineAt: '2026-05-01T09:00:00.000Z',
+      }),
+      executions,
+    });
+    const command = {
+      event: createEvent({ deadlineId: 'deadline-1' }),
+      repository,
+      targetResolver: createTargetResolver(),
+      notificationPort: createNotificationPort(),
+      config: { actionsEnabled: true, notificationsEnabled: true },
+    };
+
+    await dispatcher.dispatch({
+      ...command,
+      evaluatedAt: '2026-05-01T09:59:59.999Z',
+    });
+    expect(executions).toEqual([]);
+
+    await dispatcher.dispatch({
+      ...command,
+      evaluatedAt: '2026-05-01T10:00:00.000Z',
+    });
+    expect(executions).toMatchObject([
+      {
+        actionRuleId: 'delayed-rule',
+        status: 'executed',
+        executedAt: '2026-05-01T10:00:00.000Z',
+      },
+    ]);
+  });
+
   it('executes set_overdue_flag by marking the deadline expired and recording the action execution', async () => {
     const executions: DeadlineActionExecutionDto[] = [];
     const overdueUpdates: Array<{ deadlineId: string; expiredAt: string }> = [];

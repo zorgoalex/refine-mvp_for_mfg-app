@@ -34,10 +34,12 @@ import {
   applyDeadlineTargetOption,
   buildDeadlineTargetOptions,
   canManageDeadlineTransitionRules,
+  describeRuleDelay,
   describeRuleScope,
   describeTransition,
   emptyTransitionRuleDraft,
   formatStatusNames,
+  getDeadlineRuleTimingKey,
   getDeadlineTargetOptionValue,
   type DeadlineTransitionRuleDraft,
 } from './deadlineTransitionRulesView';
@@ -155,14 +157,14 @@ export function DeadlineTransitionRulesConfig() {
     () => buildDeadlineTargetOptions(deadlineSchedule, policies),
     [deadlineSchedule, policies],
   );
-  const draftTargetKey = getDeadlineTargetOptionValue(draft);
+  const draftTimingKey = getDeadlineRuleTimingKey(draft);
   const priorityConflict =
     editor.kind !== 'closed'
     && rules.some(
       (rule) =>
         (editor.kind !== 'edit' || rule.actionRuleId !== editor.rule.actionRuleId)
         && rule.priority === draft.priority
-        && getDeadlineTargetOptionValue(buildTransitionRuleDraft(rule)) === draftTargetKey,
+        && getDeadlineRuleTimingKey(buildTransitionRuleDraft(rule)) === draftTimingKey,
     );
 
   const openCreate = () => {
@@ -342,7 +344,7 @@ export function DeadlineTransitionRulesConfig() {
           rowKey="actionRuleId"
           pagination={false}
           dataSource={rules}
-          scroll={{ x: 980 }}
+          scroll={{ x: 1080 }}
           columns={[
             {
               title: 'Правило',
@@ -366,6 +368,16 @@ export function DeadlineTransitionRulesConfig() {
               title: 'Переход',
               key: 'transition',
               render: (_, rule) => describeTransition(rule, { statusNames, policyNames: new Map() }),
+            },
+            {
+              title: 'Срок после дедлайна',
+              key: 'delay',
+              width: 145,
+              render: (_, rule) => (
+                <Text style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {describeRuleDelay(rule)}
+                </Text>
+              ),
             },
             {
               title: 'Исключения',
@@ -567,6 +579,79 @@ function RuleEditor(props: {
           message="Правило применяется ко всем дедлайнам, связанным с заказом"
         />
       )}
+      <Card size="small">
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
+            <div>
+              <Text strong>Добавить срок после дедлайна</Text>
+              <div>
+                <Text type="secondary">
+                  Отсчёт начинается от выбранного дедлайна.
+                </Text>
+              </div>
+            </div>
+            <Switch
+              checked={props.draft.delayAfterDeadlineEnabled}
+              aria-label="Добавить срок после дедлайна"
+              onChange={(checked) => patch({
+                delayAfterDeadlineEnabled: checked,
+                ...(!checked
+                  ? { delayDays: 0, delayHours: 0, delayMinutes: 0 }
+                  : {}),
+              })}
+            />
+          </Space>
+          {props.draft.delayAfterDeadlineEnabled && (
+            <>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                  gap: 12,
+                }}
+              >
+                <label>
+                  <Text strong>Дни</Text>
+                  <InputNumber
+                    min={0}
+                    max={3650}
+                    precision={0}
+                    value={props.draft.delayDays}
+                    onChange={(value) => patch({ delayDays: Number(value ?? 0) })}
+                    style={{ width: '100%', minHeight: 44 }}
+                  />
+                </label>
+                <label>
+                  <Text strong>Часы</Text>
+                  <InputNumber
+                    min={0}
+                    max={23}
+                    precision={0}
+                    value={props.draft.delayHours}
+                    onChange={(value) => patch({ delayHours: Number(value ?? 0) })}
+                    style={{ width: '100%', minHeight: 44 }}
+                  />
+                </label>
+                <label>
+                  <Text strong>Минуты</Text>
+                  <InputNumber
+                    min={0}
+                    max={59}
+                    precision={0}
+                    value={props.draft.delayMinutes}
+                    onChange={(value) => patch({ delayMinutes: Number(value ?? 0) })}
+                    style={{ width: '100%', minHeight: 44 }}
+                  />
+                </label>
+              </div>
+              <Text type="secondary">
+                Хотя бы одно значение должно быть больше нуля. Если срок уже прошёл,
+                правило сработает при ближайшем запуске планировщика.
+              </Text>
+            </>
+          )}
+        </Space>
+      </Card>
       {props.priorityConflict && (
         <Alert
           type="warning"

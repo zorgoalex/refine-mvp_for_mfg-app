@@ -947,6 +947,11 @@ describe('PgDeadlineRepository', () => {
       limit: 5,
       workerId: 'worker-1',
     });
+    await expect(repository.findDueDelayedDeadlineEventsForUpdate({
+      now: '2026-07-02T10:00:00.000Z',
+      limit: 5,
+      workerId: 'worker-1',
+    })).resolves.toEqual([]);
     await repository.createActionExecution({
       deadlineEventId: '22222222-2222-4222-8222-222222222222',
       actionRuleId: null,
@@ -960,6 +965,9 @@ describe('PgDeadlineRepository', () => {
 
     const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
     expect(sql).toContain('FOR UPDATE SKIP LOCKED');
+    expect(sql).toContain("config_json->'delayAfterDeadline'");
+    expect(sql).toContain('make_interval');
+    expect(sql).toContain('deadline_action_executions execution');
     expect(sql).toContain('ON CONFLICT (idempotency_key)');
   });
 
@@ -1635,6 +1643,11 @@ describe('PgDeadlineRepository', () => {
             type: 'production_stage',
             productionStatusId: 4,
           },
+          delayAfterDeadline: {
+            days: 60,
+            hours: 2,
+            minutes: 30,
+          },
           targetOrderStatusId: 7,
           allowedFromOrderStatusIds: [1, 2],
           reason: 'Configure stage-specific automation',
@@ -1650,6 +1663,11 @@ describe('PgDeadlineRepository', () => {
           type: 'production_stage',
           productionStatusId: 4,
         },
+        delayAfterDeadline: {
+          days: 60,
+          hours: 2,
+          minutes: 30,
+        },
       },
     });
 
@@ -1660,6 +1678,11 @@ describe('PgDeadlineRepository', () => {
       deadlineTarget: {
         type: 'production_stage',
         productionStatusId: 4,
+      },
+      delayAfterDeadline: {
+        days: 60,
+        hours: 2,
+        minutes: 30,
       },
     });
     expect(insert?.params[4]).toBeNull();
@@ -1852,6 +1875,7 @@ describe('PgDeadlineRepository', () => {
           priority: 5,
           eventType: 'DEADLINE_EXPIRED',
           actionType: 'change_order_status',
+          delayAfterDeadline: { days: 0, hours: 1, minutes: 15 },
           targetOrderStatusId: 7,
           allowedFromOrderStatusIds: [1, 2],
           excludeOrderStatusIds: [8],
@@ -1873,6 +1897,7 @@ describe('PgDeadlineRepository', () => {
           requireCurrentDeadlineEvent: true,
         },
         actionConfig: { targetOrderStatusId: 7 },
+        delayAfterDeadline: { days: 0, hours: 1, minutes: 15 },
       },
     });
 
@@ -1901,6 +1926,7 @@ describe('PgDeadlineRepository', () => {
         requireCurrentDeadlineEvent: true,
       },
       actionConfig: { targetOrderStatusId: 7 },
+      delayAfterDeadline: { days: 0, hours: 1, minutes: 15 },
     });
 
     const audit = database.queries.find((query) =>
@@ -2240,6 +2266,7 @@ function createDatabase(
       completion_date: string | Date | null;
       issue_date: string | Date | null;
     }>;
+    dueDelayedEventRows?: Array<Record<string, unknown>>;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -2250,6 +2277,10 @@ function createDatabase(
   const client = {
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
+
+      if (text.includes('WITH candidates AS') && text.includes('due_rules.action_rule_ids')) {
+        return { rows: options.dueDelayedEventRows ?? [] };
+      }
 
       if (text.includes('FROM deadline_action_rules') && text.includes('GROUP BY action_type')) {
         return {

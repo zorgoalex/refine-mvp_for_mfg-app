@@ -16,6 +16,7 @@ describe('evaluateDeadlineActionRules', () => {
       deadlineContext: {
         entityType: 'order_stage',
         productionStatusId: 4,
+        deadlineAt: '2026-07-26T00:00:00.000Z',
       },
       orderContext: { orderId: 42, orderStatusId: 1, isCompleted: false },
       isCurrentDeadlineEvent: true,
@@ -84,7 +85,11 @@ describe('evaluateDeadlineActionRules', () => {
         createdAt: '2026-07-25T00:00:00.000Z',
         updatedAt: '2026-07-25T00:00:00.000Z',
       }),
-    ).toEqual({ entityType: 'order_stage', productionStatusId: 4 });
+    ).toEqual({
+      entityType: 'order_stage',
+      productionStatusId: 4,
+      deadlineAt: '2026-07-26T00:00:00.000Z',
+    });
 
     const result = evaluateDeadlineActionRules({
       eventType: 'DEADLINE_EXPIRED',
@@ -110,6 +115,43 @@ describe('evaluateDeadlineActionRules', () => {
       wouldRun: false,
       skipReason: 'missing_deadline_target_context',
     });
+  });
+
+  it('waits for the configured deadline offset and runs at the exact boundary', () => {
+    const delayedRule = rule({
+      config: {
+        delayAfterDeadline: { days: 60, hours: 2, minutes: 30 },
+        conditions: {
+          allowedFromOrderStatusIds: [1],
+          excludeCompletedOrders: true,
+          requireCurrentDeadlineEvent: true,
+        },
+        actionConfig: { targetOrderStatusId: 7 },
+      },
+    });
+    const base = {
+      eventType: 'DEADLINE_EXPIRED' as const,
+      deadlineEventId: 'event-delayed',
+      deadlineId: 'deadline-delayed',
+      deadlineContext: {
+        entityType: 'order' as const,
+        productionStatusId: null,
+        deadlineAt: '2026-01-01T00:00:00.000Z',
+      },
+      orderContext: { orderId: 42, orderStatusId: 1, isCompleted: false },
+      isCurrentDeadlineEvent: true,
+      rules: [delayedRule],
+      overrides: [],
+    };
+
+    expect(evaluateDeadlineActionRules({
+      ...base,
+      evaluatedAt: '2026-03-02T02:29:59.999Z',
+    }).candidates[0].skipReason).toBe('rule_delay_not_elapsed');
+    expect(evaluateDeadlineActionRules({
+      ...base,
+      evaluatedAt: '2026-03-02T02:30:00.000Z',
+    }).candidates[0].skipReason).toBeNull();
   });
 
   it('sorts candidates deterministically and applies first applicable status rule wins', () => {

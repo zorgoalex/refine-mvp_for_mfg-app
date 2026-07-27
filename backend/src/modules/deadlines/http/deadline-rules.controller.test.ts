@@ -212,6 +212,11 @@ describe('DeadlineRulesController', () => {
         type: 'production_stage',
         productionStatusId: 4,
       },
+      delayAfterDeadline: {
+        days: 60,
+        hours: 0,
+        minutes: 0,
+      },
       targetOrderStatusId: 7,
       allowedFromOrderStatusIds: [1],
       reason: 'Enable approved automation',
@@ -221,7 +226,26 @@ describe('DeadlineRulesController', () => {
         type: 'production_stage',
         productionStatusId: 4,
       },
+      delayAfterDeadline: {
+        days: 60,
+        hours: 0,
+        minutes: 0,
+      },
     });
+    expect(() =>
+      parseCreateGlobalTransitionRuleRequest({
+        ruleName: 'Zero delay',
+        delayAfterDeadline: { days: 0, hours: 0, minutes: 0 },
+        targetOrderStatusId: 7,
+        allowedFromOrderStatusIds: [1],
+        reason: 'Reject empty delay',
+      }),
+    ).toThrow(ApiError);
+    expect(parseUpdateGlobalTransitionRuleRequest({
+      expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
+      delayAfterDeadline: null,
+      reason: 'Clear delay',
+    })).toMatchObject({ delayAfterDeadline: null });
     expect(() =>
       parseCreateGlobalTransitionRuleRequest({
         ruleName: 'Conflicting selector',

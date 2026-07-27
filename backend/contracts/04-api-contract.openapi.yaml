@@ -16683,6 +16683,27 @@ components:
           minimum: 1
           description: Required when type is production_stage.
 
+    DeadlineActionRuleDelayAfterDeadline:
+      type: object
+      required:
+        - days
+        - hours
+        - minutes
+      description: Optional delay measured from the selected deadline. At least one value must be greater than zero.
+      properties:
+        days:
+          type: integer
+          minimum: 0
+          maximum: 3650
+        hours:
+          type: integer
+          minimum: 0
+          maximum: 23
+        minutes:
+          type: integer
+          minimum: 0
+          maximum: 59
+
     DeadlineActionRuleConfig:
       type: object
       properties:
@@ -16701,6 +16722,8 @@ components:
                 - global_orders
         deadlineTarget:
           $ref: '#/components/schemas/DeadlineActionRuleDeadlineTarget'
+        delayAfterDeadline:
+          $ref: '#/components/schemas/DeadlineActionRuleDelayAfterDeadline'
         conditions:
           $ref: '#/components/schemas/DeadlineActionRuleConditions'
         actionConfig:
@@ -17082,6 +17105,8 @@ components:
             - change_order_status
         deadlineTarget:
           $ref: '#/components/schemas/DeadlineActionRuleDeadlineTarget'
+        delayAfterDeadline:
+          $ref: '#/components/schemas/DeadlineActionRuleDelayAfterDeadline'
         targetOrderStatusId:
           type: integer
           format: int64
@@ -17149,6 +17174,10 @@ components:
             - change_order_status
         deadlineTarget:
           $ref: '#/components/schemas/DeadlineActionRuleDeadlineTarget'
+        delayAfterDeadline:
+          allOf:
+            - $ref: '#/components/schemas/DeadlineActionRuleDelayAfterDeadline'
+          nullable: true
         targetOrderStatusId:
           type: integer
           format: int64

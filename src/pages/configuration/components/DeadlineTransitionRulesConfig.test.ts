@@ -14,9 +14,11 @@ import {
   buildTransitionRuleDraft,
   buildTransitionRuleUpdatePayload,
   canManageDeadlineTransitionRules,
+  describeRuleDelay,
   describeRuleScope,
   describeTransition,
   emptyTransitionRuleDraft,
+  getDeadlineRuleTimingKey,
   getDeadlineTargetOptionValue,
 } from './deadlineTransitionRulesView';
 
@@ -35,6 +37,10 @@ describe('deadlineTransitionRulesView', () => {
       ruleCode: 'overdue-issue',
       policyId: '22222222-2222-4222-8222-222222222222',
       deadlineTarget: { type: 'all_order_deadlines' },
+      delayAfterDeadlineEnabled: false,
+      delayDays: 0,
+      delayHours: 0,
+      delayMinutes: 0,
       isEnabled: true,
       priority: 10,
       targetOrderStatusId: 7,
@@ -160,6 +166,59 @@ describe('deadlineTransitionRulesView', () => {
     });
   });
 
+  it('round-trips a selected final deadline and 60-day delay', () => {
+    const delayedRule = rule({ policyId: null });
+    delayedRule.config = {
+      ...delayedRule.config,
+      deadlineTarget: { type: 'final_order' },
+      delayAfterDeadline: { days: 60, hours: 0, minutes: 0 },
+    };
+
+    const draft = buildTransitionRuleDraft(delayedRule);
+    expect(draft).toMatchObject({
+      deadlineTarget: { type: 'final_order' },
+      delayAfterDeadlineEnabled: true,
+      delayDays: 60,
+      delayHours: 0,
+      delayMinutes: 0,
+    });
+    expect(
+      buildTransitionRuleUpdatePayload(delayedRule, draft, 'Проверка срока'),
+    ).toMatchObject({
+      deadlineTarget: { type: 'final_order' },
+      delayAfterDeadline: { days: 60, hours: 0, minutes: 0 },
+    });
+    expect(describeRuleDelay(delayedRule)).toBe('60 дн.');
+  });
+
+  it('clears a disabled delay and treats different timings independently', () => {
+    const immediate = {
+      ...emptyTransitionRuleDraft(),
+      deadlineTarget: { type: 'final_order' } as const,
+    };
+    const delayed = {
+      ...immediate,
+      delayAfterDeadlineEnabled: true,
+      delayHours: 2,
+    };
+
+    expect(getDeadlineRuleTimingKey(immediate)).not.toBe(
+      getDeadlineRuleTimingKey(delayed),
+    );
+    expect(
+      buildTransitionRuleUpdatePayload(
+        rule(),
+        {
+          ...immediate,
+          ruleName: 'Без задержки',
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1],
+        },
+        'Убрать срок',
+      ).delayAfterDeadline,
+    ).toBeNull();
+  });
+
   it('builds selector options from configured production-stage durations', () => {
     expect(
       buildDeadlineTargetOptions(
@@ -244,6 +303,18 @@ describe('deadlineTransitionRulesView', () => {
         'Reason',
       ),
     ).toThrow('Целевой статус не должен быть исключён');
+    expect(() =>
+      buildTransitionRuleCreatePayload(
+        {
+          ...emptyTransitionRuleDraft(),
+          ruleName: 'Rule',
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1],
+          delayAfterDeadlineEnabled: true,
+        },
+        'Reason',
+      ),
+    ).toThrow('Укажите хотя бы один ненулевой срок');
   });
 
   it.each([

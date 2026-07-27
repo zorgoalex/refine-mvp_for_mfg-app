@@ -174,6 +174,7 @@ export class DeadlineQueryService {
       deadlineId: command.dto.deadlineId ?? null,
       targetType: 'order',
       targetId: String(command.orderId),
+      evaluatedAt: new Date().toISOString(),
       deadlineContext: buildDeadlineActionRuleDeadlineContext(deadline),
       orderContext,
       orderContextUnavailable: orderContext === null,

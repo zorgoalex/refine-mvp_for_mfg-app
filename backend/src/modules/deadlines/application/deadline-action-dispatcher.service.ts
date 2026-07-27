@@ -46,6 +46,8 @@ export interface DeadlineActionDispatcherConfig {
 
 export interface DispatchDeadlineActionsCommand {
   event: DeadlineEventDto;
+  actionRuleIds?: string[];
+  evaluatedAt?: string;
   repository: DeadlineRepositoryPort;
   targetResolver: DeadlineTargetResolverPort;
   notificationPort: DeadlineNotificationPort;
@@ -67,11 +69,23 @@ export class DeadlineActionDispatcherService {
       deadlineId: command.event.deadlineId,
       orderId: command.event.orderId,
     });
-    const rules = filterActionRulesForFixture(listedRules, getEventFixtureKey(command.event));
+    const fixtureRules = filterActionRulesForFixture(
+      listedRules,
+      getEventFixtureKey(command.event),
+    );
+    const selectedRuleIds = command.actionRuleIds
+      ? new Set(command.actionRuleIds)
+      : null;
+    const rules = selectedRuleIds
+      ? fixtureRules.filter((rule) => selectedRuleIds.has(rule.actionRuleId))
+      : fixtureRules;
 
     const evaluation = await this.evaluateRules(command, rules);
     const executions = [];
     for (const candidate of evaluation.candidates) {
+      if (candidate.skipReason === 'rule_delay_not_elapsed') {
+        continue;
+      }
       executions.push(await this.dispatchCandidate(command, candidate, evaluation.selectedActionRuleId));
     }
 
@@ -108,12 +122,13 @@ export class DeadlineActionDispatcherService {
             deadlineEventId: command.event.deadlineEventId,
           })
         : true;
-    const needsDeadlineTargetContext = rules.some((rule) => {
+    const needsDeadlineContext = rules.some((rule) => {
       const target = rule.config?.deadlineTarget;
-      return target && target.type !== 'all_order_deadlines';
+      return (target && target.type !== 'all_order_deadlines')
+        || Boolean(rule.config?.delayAfterDeadline);
     });
     const deadline =
-      needsDeadlineTargetContext && command.event.deadlineId
+      needsDeadlineContext && command.event.deadlineId
         ? await command.repository.getDeadlineById(command.event.deadlineId)
         : null;
 
@@ -123,6 +138,7 @@ export class DeadlineActionDispatcherService {
       deadlineId: command.event.deadlineId,
       targetType: command.event.entityType,
       targetId: command.event.entityId,
+      evaluatedAt: command.evaluatedAt ?? command.event.eventAt,
       deadlineContext: buildDeadlineActionRuleDeadlineContext(deadline),
       orderContext,
       orderContextUnavailable: Boolean(orderId && orderContextCandidateRules.length > 0 && !orderContext),
@@ -215,7 +231,7 @@ export class DeadlineActionDispatcherService {
         ruleVersionId: baseExecution.ruleVersionId ?? null,
         ruleConfigSnapshot: candidate.ruleSnapshot,
         idempotencyKey: baseExecution.idempotencyKey,
-        occurredAt: command.event.eventAt,
+        occurredAt: getDispatchOccurredAt(command),
         requestId: getEventRequestId(command.event),
       });
 
@@ -224,7 +240,7 @@ export class DeadlineActionDispatcherService {
         status: result.status,
         skipReason: result.status === 'skipped' ? result.skipReason ?? 'same_status' : null,
         result: result.result ?? null,
-        executedAt: result.status === 'executed' ? command.event.eventAt : null,
+        executedAt: result.status === 'executed' ? getDispatchOccurredAt(command) : null,
       });
     } catch (error) {
       const mapped = mapStatusActionError(error);
@@ -272,7 +288,7 @@ export class DeadlineActionDispatcherService {
         ...baseExecution,
         status: 'executed',
         result: { auditEventQueued: true },
-        executedAt: command.event.eventAt,
+        executedAt: getDispatchOccurredAt(command),
       });
     }
 
@@ -404,7 +420,7 @@ export class DeadlineActionDispatcherService {
       ...baseExecution,
       status: 'executed',
       skipReason: null,
-      executedAt: command.event.eventAt,
+      executedAt: getDispatchOccurredAt(command),
       result: {
         escalatedUserId: userId,
         notificationId: notification.notificationId,
@@ -426,7 +442,7 @@ export class DeadlineActionDispatcherService {
     return command.repository.createActionExecution({
       ...baseExecution,
       status: 'executed',
-      executedAt: command.event.eventAt,
+      executedAt: getDispatchOccurredAt(command),
       result: {
         overdueFlagSet: deadline.status === 'expired',
         deadlineId: command.event.deadlineId,
@@ -501,7 +517,7 @@ export class DeadlineActionDispatcherService {
         ruleVersionId: baseExecution.ruleVersionId ?? null,
         ruleConfigSnapshot: baseExecution.ruleConfigSnapshot ?? buildRuleConfigSnapshot(rule),
         idempotencyKey: baseExecution.idempotencyKey,
-        occurredAt: command.event.eventAt,
+        occurredAt: getDispatchOccurredAt(command),
         requestId: getEventRequestId(command.event),
       });
 
@@ -510,7 +526,7 @@ export class DeadlineActionDispatcherService {
         status: result.status,
         skipReason: result.status === 'skipped' ? result.skipReason ?? 'same_production_status' : null,
         result: result.result ?? null,
-        executedAt: result.status === 'executed' ? command.event.eventAt : null,
+        executedAt: result.status === 'executed' ? getDispatchOccurredAt(command) : null,
       });
     } catch (error) {
       const mapped = mapProductionStatusActionError(error);
@@ -579,7 +595,7 @@ export class DeadlineActionDispatcherService {
     return command.repository.createActionExecution({
       ...baseExecution,
       status: 'executed',
-      executedAt: command.event.eventAt,
+      executedAt: getDispatchOccurredAt(command),
       result: {
         notificationUserId: userId,
         notificationId: notification.notificationId,
@@ -721,6 +737,10 @@ function getEventFixtureKey(event: DeadlineEventDto): string | null {
   const fixtureKey = event.payload?.fixtureKey;
 
   return typeof fixtureKey === 'string' && fixtureKey.trim() !== '' ? fixtureKey : null;
+}
+
+function getDispatchOccurredAt(command: DispatchDeadlineActionsCommand): string {
+  return command.evaluatedAt ?? command.event.eventAt;
 }
 
 /**

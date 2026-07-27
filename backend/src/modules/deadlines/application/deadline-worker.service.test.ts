@@ -140,6 +140,50 @@ describe('DeadlineWorkerService', () => {
     expect(events[0]).toMatchObject({ eventType: 'DEADLINE_EXPIRED' });
   });
 
+  it('redispatches only due delayed rules for an already expired deadline', async () => {
+    const dispatch = vi.fn().mockResolvedValue([]);
+    const event = createEvent({
+      deadlineEventId: 'event-delayed',
+      deadlineId: 'deadline-delayed',
+      deadlineAt: '2026-01-01T00:00:00.000Z',
+    });
+    const repository = createRepository({
+      due: [],
+      events: [],
+      executions: [],
+      rules: [],
+    });
+    const worker = new DeadlineWorkerService({
+      transactions: transactionManager({
+        ...repository,
+        async findDueDelayedDeadlineEventsForUpdate() {
+          return [{ event, actionRuleIds: ['rule-after-60-days'] }];
+        },
+      }),
+      targetResolver: createTargetResolver({ isCompleted: false }),
+      notificationPort: createNotificationPort(),
+      dispatcher: { dispatch } as never,
+    });
+
+    await expect(worker.processDueDeadlines({
+      now: '2026-03-02T00:00:00.000Z',
+      limit: 100,
+      workerId: 'worker-delayed',
+      trigger: 'scheduler',
+      config: { actionsEnabled: true, notificationsEnabled: false },
+    })).resolves.toEqual({
+      scanned: 1,
+      processed: 1,
+      expired: 0,
+      completed: 0,
+    });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      event,
+      actionRuleIds: ['rule-after-60-days'],
+      evaluatedAt: '2026-03-02T00:00:00.000Z',
+    }));
+  });
+
   it('does not dispatch actions when terminal event creation returns an idempotent duplicate', async () => {
     const existingEvent = createEvent({
       deadlineEventId: 'event-existing',

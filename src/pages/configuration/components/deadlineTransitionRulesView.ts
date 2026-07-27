@@ -13,6 +13,10 @@ export interface DeadlineTransitionRuleDraft {
   ruleCode: string;
   policyId: string | null;
   deadlineTarget: DeadlineActionRuleDeadlineTargetDto;
+  delayAfterDeadlineEnabled: boolean;
+  delayDays: number;
+  delayHours: number;
+  delayMinutes: number;
   isEnabled: boolean;
   priority: number;
   targetOrderStatusId: number | null;
@@ -39,6 +43,10 @@ export function emptyTransitionRuleDraft(): DeadlineTransitionRuleDraft {
     ruleCode: '',
     policyId: null,
     deadlineTarget: { type: 'all_order_deadlines' },
+    delayAfterDeadlineEnabled: false,
+    delayDays: 0,
+    delayHours: 0,
+    delayMinutes: 0,
     isEnabled: false,
     priority: 100,
     targetOrderStatusId: null,
@@ -57,6 +65,10 @@ export function buildTransitionRuleDraft(rule: DeadlineActionRuleDto): DeadlineT
     deadlineTarget: rule.config?.deadlineTarget ?? {
       type: 'all_order_deadlines',
     },
+    delayAfterDeadlineEnabled: Boolean(rule.config?.delayAfterDeadline),
+    delayDays: rule.config?.delayAfterDeadline?.days ?? 0,
+    delayHours: rule.config?.delayAfterDeadline?.hours ?? 0,
+    delayMinutes: rule.config?.delayAfterDeadline?.minutes ?? 0,
     isEnabled: rule.isEnabled,
     priority: rule.priority,
     targetOrderStatusId: rule.config?.actionConfig?.targetOrderStatusId ?? null,
@@ -73,6 +85,7 @@ export function buildTransitionRuleCreatePayload(
   comment?: string | null,
 ): CreateGlobalTransitionRuleRequest {
   validateTransitionRuleDraft(draft, reason);
+  const delayAfterDeadline = buildDelayAfterDeadline(draft);
 
   return {
     ...buildMutablePayload(draft),
@@ -80,6 +93,9 @@ export function buildTransitionRuleCreatePayload(
     ruleCode: draft.ruleCode.trim() || undefined,
     policyId: draft.policyId,
     deadlineTarget: draft.deadlineTarget,
+    ...(delayAfterDeadline
+      ? { delayAfterDeadline }
+      : {}),
     reason: reason.trim(),
     comment: normalizeComment(comment),
   };
@@ -100,6 +116,7 @@ export function buildTransitionRuleUpdatePayload(
     ruleCode: draft.ruleCode.trim() || null,
     policyId: draft.policyId,
     deadlineTarget: draft.deadlineTarget,
+    delayAfterDeadline: buildDelayAfterDeadline(draft),
     reason: reason.trim(),
     comment: normalizeComment(comment),
   };
@@ -138,6 +155,16 @@ export function describeRuleScope(
     productionStatusNames.get(target.productionStatusId)
     ?? `#${target.productionStatusId}`
   }`;
+}
+
+export function describeRuleDelay(rule: DeadlineActionRuleDto): string {
+  const delay = rule.config?.delayAfterDeadline;
+  if (!delay) return 'Сразу';
+  return [
+    delay.days > 0 ? `${delay.days} дн.` : null,
+    delay.hours > 0 ? `${delay.hours} ч.` : null,
+    delay.minutes > 0 ? `${delay.minutes} мин.` : null,
+  ].filter(Boolean).join(' ');
 }
 
 export function formatStatusNames(ids: number[], names: Map<number, string>): string {
@@ -179,6 +206,18 @@ export function getDeadlineTargetOptionValue(
     return `production_stage:${draft.deadlineTarget.productionStatusId}`;
   }
   return 'all_order_deadlines';
+}
+
+export function getDeadlineRuleTimingKey(
+  draft: DeadlineTransitionRuleDraft,
+): string {
+  const delay = buildDelayAfterDeadline(draft);
+  return [
+    getDeadlineTargetOptionValue(draft),
+    delay?.days ?? 0,
+    delay?.hours ?? 0,
+    delay?.minutes ?? 0,
+  ].join(':');
 }
 
 export function applyDeadlineTargetOption(
@@ -268,9 +307,32 @@ function validateTransitionRuleDraft(
   if (!draft.excludeCompletedOrders || !draft.requireCurrentDeadlineEvent) {
     throw new Error('Обязательные защиты правила должны быть включены');
   }
+  if (draft.delayAfterDeadlineEnabled) {
+    const values = [draft.delayDays, draft.delayHours, draft.delayMinutes];
+    if (values.some((value) => !Number.isInteger(value) || value < 0)) {
+      throw new Error('Срок должен состоять из целых неотрицательных значений');
+    }
+    if (draft.delayDays > 3650 || draft.delayHours > 23 || draft.delayMinutes > 59) {
+      throw new Error('Допустимо: до 3650 дней, 23 часов и 59 минут');
+    }
+    if (draft.delayDays + draft.delayHours + draft.delayMinutes === 0) {
+      throw new Error('Укажите хотя бы один ненулевой срок');
+    }
+  }
   if (!Number.isInteger(draft.priority) || draft.priority < 0 || draft.priority > 100000) {
     throw new Error('Приоритет должен быть целым числом от 0 до 100000');
   }
+}
+
+function buildDelayAfterDeadline(
+  draft: DeadlineTransitionRuleDraft,
+): CreateGlobalTransitionRuleRequest['delayAfterDeadline'] | null {
+  if (!draft.delayAfterDeadlineEnabled) return null;
+  return {
+    days: draft.delayDays,
+    hours: draft.delayHours,
+    minutes: draft.delayMinutes,
+  };
 }
 
 function normalizeComment(comment?: string | null): string | null {
