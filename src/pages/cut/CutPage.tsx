@@ -170,6 +170,9 @@ const CUT_JOBS_TABLE_CONTAINER_HEIGHT = 317;
 const CUT_DETAIL_PREVIEW_VISIBLE_ROWS = 10;
 const CUT_DETAIL_PREVIEW_ROW_HEIGHT = 40;
 const CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT = CUT_DETAIL_PREVIEW_VISIBLE_ROWS * CUT_DETAIL_PREVIEW_ROW_HEIGHT;
+const CUT_JOB_DETAILS_VISIBLE_ROWS = 15;
+const CUT_JOB_DETAILS_TABLE_BODY_HEIGHT = CUT_JOB_DETAILS_VISIBLE_ROWS * CUT_DETAIL_PREVIEW_ROW_HEIGHT;
+const CUT_CREATE_PREVIEW_ORDER_TINT_COUNT = 8;
 const MIN_EDITOR_VIEW_ZOOM = 0.25;
 const MAX_EDITOR_VIEW_ZOOM = 1.5;
 const EDITOR_VIEW_ZOOM_STEP = 0.25;
@@ -394,6 +397,15 @@ function cutJobSheetTypeOptions(job: CutJobDto | null): Array<{ value: number; l
 
 function optionValues(options: Array<{ value: number }>): number[] {
   return options.map((option) => option.value);
+}
+
+function cutPreviewOrderTintByOrderId(details: EligibleDetailDto[]): Map<number, number> {
+  const byOrderId = new Map<number, number>();
+  for (const detail of details) {
+    if (byOrderId.has(detail.orderId)) continue;
+    byOrderId.set(detail.orderId, byOrderId.size % CUT_CREATE_PREVIEW_ORDER_TINT_COUNT);
+  }
+  return byOrderId;
 }
 
 function uniqueNonBlank(values: Array<string | number | null | undefined>): string[] {
@@ -2140,6 +2152,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     () => buildCutPreviewSummary(eligible ?? [], selected),
     [eligible, selected],
   );
+  const creationPreviewOrderTintByOrderId = useMemo(
+    () => cutPreviewOrderTintByOrderId(eligible ?? []),
+    [eligible],
+  );
 
   // Dirty guard: any group has an active editor session OR its toggle differs
   // from the persisted isActive. While dirty, whole-job PDF is disabled.
@@ -2239,7 +2255,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           </Form.Item>
           <Form.Item>
             <Button type="primary" onClick={previewCreateJob} loading={busy} disabled={!canManage}>
-              Создать раскрой
+              Подбор деталей на раскрой
             </Button>
           </Form.Item>
         </Form>
@@ -2268,40 +2284,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             {noSheetMsg && <Alert type="warning" showIcon message={noSheetMsg} />}
             <TableTopScroll>
               <Table<EligibleDetailDto>
+                className="cut-create-preview-details-table"
                 size="small"
                 rowKey="orderDetailId"
                 columns={eligibleColumns}
                 dataSource={eligible}
                 pagination={false}
                 scroll={{ x: 1900, y: CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT }}
-                summary={() => (
-                  <Table.Summary>
-                    <Table.Summary.Row>
-                      <Table.Summary.Cell index={0} colSpan={eligibleColumns.length}>
-                        <Space size={6} wrap>
-                          <Text strong>Итого по плёнкам и материалам:</Text>
-                          {creationPreviewSummary.groups.length === 0 ? (
-                            <Text type="secondary">нет выбранных деталей</Text>
-                          ) : (
-                            creationPreviewSummary.groups.map((group) => (
-                              <Tag key={group.key} color="blue" style={{ whiteSpace: 'normal', lineHeight: 1.5 }}>
-                                {group.materialName} / {group.filmName}: {formatCutPreviewSummaryMetrics(group)}
-                              </Tag>
-                            ))
-                          )}
-                        </Space>
-                      </Table.Summary.Cell>
-                    </Table.Summary.Row>
-                    <Table.Summary.Row>
-                      <Table.Summary.Cell index={0} colSpan={eligibleColumns.length}>
-                        <Space size={6} wrap>
-                          <Text strong>Итого по всем выбранным деталям:</Text>
-                          <Text>{formatCutPreviewSummaryMetrics(creationPreviewSummary.total)}</Text>
-                        </Space>
-                      </Table.Summary.Cell>
-                    </Table.Summary.Row>
-                  </Table.Summary>
-                )}
+                rowClassName={(row) => {
+                  const tint = creationPreviewOrderTintByOrderId.get(row.orderId) ?? 0;
+                  return `cut-create-preview-order-row cut-create-preview-order-tint-${tint}`;
+                }}
                 rowSelection={{
                   selectedRowKeys: selected,
                   onChange: (keys) => setSelected(keys.map(Number)),
@@ -2310,6 +2303,26 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 data-testid="cut-create-preview-details"
               />
             </TableTopScroll>
+            <div className="cut-create-preview-summary" data-testid="cut-create-preview-summary">
+              <div className="cut-create-preview-summary-row">
+                <Text strong>Итого по плёнкам и материалам:</Text>
+                <Space size={6} wrap>
+                  {creationPreviewSummary.groups.length === 0 ? (
+                    <Text type="secondary">нет выбранных деталей</Text>
+                  ) : (
+                    creationPreviewSummary.groups.map((group) => (
+                      <Tag key={group.key} color="blue" style={{ whiteSpace: 'normal', lineHeight: 1.5 }}>
+                        {group.materialName} / {group.filmName}: {formatCutPreviewSummaryMetrics(group)}
+                      </Tag>
+                    ))
+                  )}
+                </Space>
+              </div>
+              <div className="cut-create-preview-summary-row">
+                <Text strong>Итого по всем выбранным деталям:</Text>
+                <Text>{formatCutPreviewSummaryMetrics(creationPreviewSummary.total)}</Text>
+              </div>
+            </div>
           </Space>
         </Card>
       )}
@@ -2609,7 +2622,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 columns={jobItemColumns}
                 dataSource={job.items}
                 pagination={false}
-                scroll={{ x: 1900 }}
+                scroll={{ x: 1900, y: CUT_JOB_DETAILS_TABLE_BODY_HEIGHT }}
                 locale={{ emptyText: 'В задании пока нет деталей — добавьте их из заказа или через «Загрузить подходящие детали»' }}
               />
             </TableTopScroll>

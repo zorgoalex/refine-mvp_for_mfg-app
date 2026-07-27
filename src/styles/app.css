@@ -808,6 +808,64 @@ html {
 .details-grouped .ant-table-tbody > tr.detail-group-separator:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
 .details-grouped .ant-table-tbody > tr.detail-group-summary:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
 
+.cut-create-preview-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border-soft);
+  border-radius: 6px;
+  background: var(--app-surface-muted);
+}
+
+.cut-create-preview-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-0 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-0:hover > td {
+  background-color: var(--app-group-tint-0) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-1 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-1:hover > td {
+  background-color: var(--app-group-tint-1) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-2 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-2:hover > td {
+  background-color: var(--app-group-tint-2) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-3 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-3:hover > td {
+  background-color: var(--app-group-tint-3) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-4 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-4:hover > td {
+  background-color: var(--app-group-tint-4) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-5 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-5:hover > td {
+  background-color: var(--app-group-tint-5) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-6 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-6:hover > td {
+  background-color: var(--app-group-tint-6) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-7 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-7:hover > td {
+  background-color: var(--app-group-tint-7) !important;
+}
+
 .cut-jobs-table-container {
   overflow-y: auto;
 }

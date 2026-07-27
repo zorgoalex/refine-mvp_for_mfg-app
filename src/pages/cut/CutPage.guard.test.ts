@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 // no_sheet_spec onboarding signal (plan §5).
 const source = readFileSync(fileURLToPath(new URL('./CutPage.tsx', import.meta.url)), 'utf8');
 const sheetLabelSource = readFileSync(fileURLToPath(new URL('./CutSheetLabelGenerateAction.tsx', import.meta.url)), 'utf8');
+const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import.meta.url)), 'utf8');
 
 describe('CutPage source guards', () => {
   it('keeps manual-editor zoom controls in the sticky group navbar', () => {
@@ -153,6 +154,7 @@ describe('CutPage source guards', () => {
     expect(source).toContain('listEligibleDetailsPreview');
     expect(source).toContain('isCreationPreview');
     expect(source).toContain('Проверка деталей перед созданием');
+    expect(source).toContain('Подбор деталей на раскрой');
     expect(source).toContain('data-testid="cut-create-preview-details"');
     expect(source).toContain('createJobFromPreview');
     expect(source).toContain('detailIds: selected');
@@ -162,10 +164,21 @@ describe('CutPage source guards', () => {
     expect(source).toContain('CUT_DETAIL_PREVIEW_VISIBLE_ROWS = 10');
     expect(source).toContain('CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT');
     expect(source).toContain('buildCutPreviewSummary');
+    expect(source).toContain('data-testid="cut-create-preview-summary"');
+    expect(source).not.toContain('Table.Summary');
+    expect(source).toContain('cut-create-preview-order-tint-${tint}');
     expect(source).toContain('Итого по плёнкам и материалам');
     expect(source).toContain('Итого по всем выбранным деталям');
     expect(source).toContain('formatCutPreviewSummaryMetrics');
     expect(source).toContain('area * quantity');
+    expect(appCss).toContain('.cut-create-preview-summary');
+    expect(appCss).toContain('.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-0 > td');
+  });
+
+  it('keeps reopened job details under the spoiler compact with a 15-row internal scroll', () => {
+    expect(source).toContain('CUT_JOB_DETAILS_VISIBLE_ROWS = 15');
+    expect(source).toContain('CUT_JOB_DETAILS_TABLE_BODY_HEIGHT');
+    expect(source).toContain('scroll={{ x: 1900, y: CUT_JOB_DETAILS_TABLE_BODY_HEIGHT }}');
   });
 
   it('suggests the cut job name from unique orders, films, and current date', () => {
