@@ -56,7 +56,6 @@ import {
   cutJobCounts,
   cutJobSourceLabel,
   cutJobStatusLabel,
-  distinctOrderIdsFromItems,
   filterJobsByStatus,
   formatGroupSummary,
   noSheetSpecMessage,
@@ -335,6 +334,66 @@ function buildCutFilmOption(film: { filmId: number; name: string }): CutFilmSele
     title: film.name,
     searchText: film.name.toLowerCase(),
   };
+}
+
+function mergeCutSelectOptions<T extends { value: number }>(base: T[], extra: T[]): T[] {
+  const byValue = new Map<number, T>();
+  for (const option of base) byValue.set(option.value, option);
+  for (const option of extra) byValue.set(option.value, option);
+  return [...byValue.values()];
+}
+
+function cutJobOrderOptions(job: CutJobDto | null): CutOrderSelectOption[] {
+  const byId = new Map<number, CutOrderSelectOption>();
+  for (const item of job?.items ?? []) {
+    if (byId.has(item.orderId)) continue;
+    const label = item.orderName?.trim() || `#${item.orderId}`;
+    byId.set(item.orderId, {
+      value: item.orderId,
+      label,
+      title: label,
+      searchText: label.toLowerCase(),
+    });
+  }
+  return [...byId.values()];
+}
+
+function cutJobFilmOptions(job: CutJobDto | null): CutFilmSelectOption[] {
+  const byId = new Map<number, CutFilmSelectOption>();
+  for (const item of job?.items ?? []) {
+    const filmId = item.detail?.filmId;
+    if (typeof filmId !== 'number' || !Number.isInteger(filmId) || filmId <= 0 || byId.has(filmId)) continue;
+    const label = item.detail?.filmName?.trim() || `Плёнка #${filmId}`;
+    byId.set(filmId, {
+      value: filmId,
+      label,
+      title: label,
+      searchText: label.toLowerCase(),
+    });
+  }
+  return [...byId.values()];
+}
+
+function cutJobSheetTypeOptions(job: CutJobDto | null): Array<{ value: number; label: string }> {
+  const byId = new Map<number, { value: number; label: string }>();
+  for (const item of job?.items ?? []) {
+    const sheetMaterialTypeId = item.detail?.sheetMaterialTypeId;
+    if (
+      typeof sheetMaterialTypeId !== 'number'
+      || !Number.isInteger(sheetMaterialTypeId)
+      || sheetMaterialTypeId <= 0
+      || byId.has(sheetMaterialTypeId)
+    ) continue;
+    byId.set(sheetMaterialTypeId, {
+      value: sheetMaterialTypeId,
+      label: item.detail?.materialName?.trim() || `Тип листа #${sheetMaterialTypeId}`,
+    });
+  }
+  return [...byId.values()];
+}
+
+function optionValues(options: Array<{ value: number }>): number[] {
+  return options.map((option) => option.value);
 }
 
 function uniqueNonBlank(values: Array<string | number | null | undefined>): string[] {
@@ -650,6 +709,21 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [filmOptions, setFilmOptions] = useState<CutFilmSelectOption[]>([]);
   const [filmsLoading, setFilmsLoading] = useState(false);
   const filmOptionsSeqRef = useRef(0);
+  const currentJobOrderOptions = useMemo(() => cutJobOrderOptions(job), [job]);
+  const currentJobFilmOptions = useMemo(() => cutJobFilmOptions(job), [job]);
+  const currentJobSheetTypeOptions = useMemo(() => cutJobSheetTypeOptions(job), [job]);
+  const visibleOrderOptions = useMemo(
+    () => mergeCutSelectOptions(orderOptions, currentJobOrderOptions),
+    [currentJobOrderOptions, orderOptions],
+  );
+  const visibleFilmOptions = useMemo(
+    () => mergeCutSelectOptions(filmOptions, currentJobFilmOptions),
+    [currentJobFilmOptions, filmOptions],
+  );
+  const visibleSheetTypeOptions = useMemo(
+    () => mergeCutSelectOptions(sheetTypeOptions, currentJobSheetTypeOptions),
+    [currentJobSheetTypeOptions, sheetTypeOptions],
+  );
 
   // ── Manual layout editor state ──────────────────────────────────────────────
   // The group currently open for editing (null = no editor active).
@@ -1053,17 +1127,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setWorkingSheets([]);
         setViolations([]);
         setEditorHistory([]);
-        // Prefill the eligible-load criteria with the order(s) this job was built
-        // from (the reserved items' orders) so "Загрузить подходящие детали" is
-        // scoped to those orders instead of scanning everything. Material/film
-        // filters are cleared to avoid stale criteria leaking from a prior job.
-        const orderIds = isEmbeddedOrder ? [embeddedOrderId!] : distinctOrderIdsFromItems(fresh.items);
+        // Prefill the visible criteria from the opened job itself: operators see
+        // order numbers, films, and sheet materials already reserved into this job.
+        const openedOrderOptions = cutJobOrderOptions(openedJob);
+        const openedFilmIds = optionValues(cutJobFilmOptions(openedJob));
+        const openedSheetMaterialTypeIds = optionValues(cutJobSheetTypeOptions(openedJob));
+        const orderIds = isEmbeddedOrder ? [embeddedOrderId!] : optionValues(openedOrderOptions);
         form.setFieldsValue({
-          name: fresh.name,
+          name: openedJob.name,
           orderDateRange: undefined,
           orderIds: orderIds.length > 0 ? (canViewOrders ? orderIds : orderIds.join(',')) : undefined,
-          sheetMaterialTypeIds: undefined, // Variant B sunset: cleared the post-034 filter key
-          filmIds: undefined,
+          sheetMaterialTypeIds: openedSheetMaterialTypeIds.length > 0 ? openedSheetMaterialTypeIds : undefined,
+          filmIds: openedFilmIds.length > 0 ? openedFilmIds : undefined,
         });
         setEligible(null);
         setSelected([]);
@@ -1208,6 +1283,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const created = await cutApi.create({ name, detailIds: selected });
       setJob(created);
       applyPdfTemplateState(created);
+      const createdOrderOptions = cutJobOrderOptions(created);
+      const createdOrderIds = isEmbeddedOrder ? [embeddedOrderId!] : optionValues(createdOrderOptions);
+      const createdFilmIds = optionValues(cutJobFilmOptions(created));
+      const createdSheetMaterialTypeIds = optionValues(cutJobSheetTypeOptions(created));
+      form.setFieldsValue({
+        name: created.name,
+        orderDateRange: undefined,
+        orderIds: createdOrderIds.length > 0 ? (canViewOrders ? createdOrderIds : createdOrderIds.join(',')) : undefined,
+        sheetMaterialTypeIds: createdSheetMaterialTypeIds.length > 0 ? createdSheetMaterialTypeIds : undefined,
+        filmIds: createdFilmIds.length > 0 ? createdFilmIds : undefined,
+      });
       setEligible(null);
       setSelected([]);
       setPreviewName('');
@@ -1219,7 +1305,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     } finally {
       setBusy(false);
     }
-  }, [applyPdfTemplateState, handleError, loadJobs, previewName, resetSheetViews, selected]);
+  }, [applyPdfTemplateState, canViewOrders, embeddedOrderId, form, handleError, isEmbeddedOrder, loadJobs, previewName, resetSheetViews, selected]);
 
   const loadEligible = useCallback(async () => {
     if (!job) return;
@@ -2103,7 +2189,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 showSearch
                 maxTagCount="responsive"
                 placeholder="Заказ"
-                options={orderOptions}
+                options={visibleOrderOptions}
                 loading={ordersLoading}
                 onChange={() => form.setFieldsValue({ filmIds: undefined })}
                 filterOption={(input, option) =>
@@ -2125,7 +2211,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 mode="multiple"
                 allowClear
                 placeholder="Типы листов"
-                options={sheetTypeOptions}
+                options={visibleSheetTypeOptions}
                 fieldNames={{ label: 'label', value: 'value' }}
                 onChange={() => form.setFieldsValue({ filmIds: undefined })}
                 style={{ minWidth: 200 }}
@@ -2140,7 +2226,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               showSearch
               maxTagCount="responsive"
               placeholder="Плёнки"
-              options={filmOptions}
+              options={visibleFilmOptions}
               loading={filmsLoading}
               filterOption={(input, option) =>
                 String((option as CutFilmSelectOption | undefined)?.searchText ?? '')

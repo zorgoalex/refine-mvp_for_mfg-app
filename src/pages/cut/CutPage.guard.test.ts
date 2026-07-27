@@ -115,10 +115,16 @@ describe('CutPage source guards', () => {
     expect(source).not.toMatch(/href=\{href as string\}/);
   });
 
-  it('prefills the eligible-load criteria with the reserved orders when opening a job', () => {
-    // Opening a job must scope "Загрузить подходящие детали" to the order(s) the
-    // job was built from, not scan every order. Source of truth = reserved items.
-    expect(source).toContain('distinctOrderIdsFromItems');
+  it('prefills the criteria fields from reserved job details when opening a job', () => {
+    // Opening a job must show the operator the job's own order numbers, films,
+    // and sheet materials, even when the date-filter option lists are empty.
+    expect(source).toContain('cutJobOrderOptions');
+    expect(source).toContain('cutJobFilmOptions');
+    expect(source).toContain('cutJobSheetTypeOptions');
+    expect(source).toContain('visibleOrderOptions');
+    expect(source).toContain('visibleFilmOptions');
+    expect(source).toContain('visibleSheetTypeOptions');
+    expect(source).toContain('openedJob.name');
     expect(source).toContain('form.setFieldsValue');
   });
 
