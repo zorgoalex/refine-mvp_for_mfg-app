@@ -15363,6 +15363,10 @@ components:
           type: object
           additionalProperties: true
           description: Opaque erp.order.snapshot.v1 payload.
+        referenceMappings:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderSnapshotReferenceMapping'
 
     ImportOrderSnapshotBatchRequest:
       type: object
@@ -15375,6 +15379,43 @@ components:
         zipBase64:
           type: string
           format: byte
+        referenceMappings:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderSnapshotReferenceMapping'
+
+    OrderSnapshotReferenceMapping:
+      type: object
+      required:
+        - entityType
+        - sourceId
+        - targetId
+      properties:
+        entityType:
+          type: string
+          enum:
+            - material
+            - sheetMaterialType
+            - millingType
+            - edgeType
+            - film
+            - filmType
+            - unit
+            - materialType
+            - supplier
+            - vendor
+            - orderStatus
+            - paymentStatus
+            - paymentType
+            - productionStatus
+            - workshop
+            - employee
+            - resourceRequirementStatus
+        sourceId:
+          type: string
+        targetId:
+          type: integer
+          minimum: 1
 
     OrderImportSummary:
       type: object

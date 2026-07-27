@@ -19,6 +19,7 @@ import type { NormalizedSaveOrderHeaderDto, OrderTotalsDto, CalculatedOrderDetai
 import type { OrderSnapshotPort } from '../application/order-snapshot.types';
 import { OrderSnapshotService } from '../application/order-snapshot.service';
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { DatabaseClient } from '../../../database/database.types';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import { ApiError } from '../../../common/errors/api-error';
 import { ORDER_SNAPSHOT_FORMAT_VERSION, ORDER_SNAPSHOT_SCHEMA } from '../dto/order-snapshot.dto';
@@ -29,6 +30,7 @@ import {
   _testOnlyOrderHeaderUpdateParams as updateParams,
   _testOnlyDetailValues as detailValues,
   _testOnlyNullifyMaterialIdForSheetEntries as nullifyMaterialIdForSheetEntries,
+  _testOnlyRemapSnapshotReferencesForImport as remapSnapshotReferencesForImport,
   _testOnlySnapshotBatchFailure as snapshotBatchFailure,
   _testOnlySnapshotFailureSummary as snapshotFailureSummary,
   _testOnlySnapshotToSaveOrderDto as snapshotToSaveOrderDto,
@@ -739,3 +741,104 @@ describe('snapshotToSaveOrderDto — header-only legacy import (Critic R2 MAJOR 
     expect(dto.header.sheetMaterialTypeId).toBe(5);
   });
 });
+
+describe('remapSnapshotReferencesForImport — portable reference ids', () => {
+  it('throws mapping-required instead of falling through to stale source ids', async () => {
+    const tx = fakeReferenceTx({ overrideExists: false, uniqueMatchId: null });
+    const snapshot = minimalSnapshotWithOrderStatusReference(11);
+
+    await expect(remapSnapshotReferencesForImport(tx, snapshot, [])).rejects.toMatchObject({
+      code: 'ORDER_SNAPSHOT_REFERENCE_MAPPING_REQUIRED',
+      details: {
+        unmappedReferences: [
+          expect.objectContaining({
+            entityType: 'orderStatus',
+            sourceId: '11',
+            sourceName: 'Source status',
+            usageCount: 1,
+          }),
+        ],
+      },
+    });
+  });
+
+  it('uses manual reference mapping as target id', async () => {
+    const tx = fakeReferenceTx({ overrideExists: true, uniqueMatchId: null });
+    const snapshot = minimalSnapshotWithOrderStatusReference(11);
+
+    const remapped = await remapSnapshotReferencesForImport(tx, snapshot, [
+      { entityType: 'orderStatus', sourceId: '11', targetId: 22 },
+    ]);
+
+    expect(remapped.data.order.orderStatusId).toBe(22);
+  });
+});
+
+function minimalSnapshotWithOrderStatusReference(orderStatusId: number): import('../dto/order-snapshot.dto').OrderSnapshotDto {
+  return {
+    schema: ORDER_SNAPSHOT_SCHEMA,
+    formatVersion: ORDER_SNAPSHOT_FORMAT_VERSION,
+    exporterService: {
+      name: 'erp-order-snapshot' as const,
+      version: '1.0.0',
+      compatibleImportVersions: ['1.0.0'],
+    },
+    source: { sourceInstanceId: 'test-inst', exportedAt: '2026-06-22T00:00:00.000Z', payloadHash: '' },
+    identity: {
+      order: { sourceId: '42', refKey1c: null },
+      client: { sourceId: '10', refKey1c: null },
+    },
+    data: {
+      client: { sourceId: '10', clientName: 'Test Client', refKey1c: null, notes: null, isActive: true },
+      clientPhones: [],
+      order: {
+        sourceId: '42',
+        orderName: 'Portable-Refs',
+        clientId: 10,
+        orderDate: '2026-06-22',
+        orderStatusId,
+      } as import('../dto/order-snapshot.dto').OrderSnapshotHeaderDto,
+      details: [],
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingOrders: [],
+      dowelingLinks: [],
+      productionStatusEvents: [],
+      deadlineInstances: [],
+      deadlineEvents: [],
+    },
+    references: {
+      orderStatus: [
+        {
+          entityType: 'orderStatus',
+          sourceId: String(orderStatusId),
+          name: 'Source status',
+          code: null,
+          refKey1c: null,
+          data: { order_status_id: orderStatusId, order_status_name: 'Source status' },
+        },
+      ],
+    },
+  };
+}
+
+function fakeReferenceTx(options: { overrideExists: boolean; uniqueMatchId: number | null }): DatabaseClient {
+  return {
+    query: vi.fn(async (sql: string, params?: readonly unknown[]) => {
+      if (sql.includes('WHERE order_status_id::bigint = $1::bigint')) {
+        return { rows: options.overrideExists && params?.[0] === 22 ? [{ id: 22 }] : [] };
+      }
+
+      if (sql.includes('FROM order_statuses') && sql.includes('LIMIT 2')) {
+        return { rows: options.uniqueMatchId ? [{ id: options.uniqueMatchId }] : [] };
+      }
+
+      if (sql.includes('FROM order_statuses') && sql.includes('LIMIT 200')) {
+        return { rows: [{ id: 1, name: 'Existing status', code: null }] };
+      }
+
+      return { rows: [] };
+    }),
+  };
+}

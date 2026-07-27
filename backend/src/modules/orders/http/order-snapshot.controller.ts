@@ -78,6 +78,18 @@ const importOrderSnapshotRequestSwaggerSchema = {
   required: ['snapshot'],
   properties: {
     snapshot: orderSnapshotSwaggerSchema,
+    referenceMappings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['entityType', 'sourceId', 'targetId'],
+        properties: {
+          entityType: { type: 'string' },
+          sourceId: { type: 'string' },
+          targetId: { type: 'integer' },
+        },
+      },
+    },
   },
 } as const;
 
@@ -87,6 +99,18 @@ const importOrderSnapshotBatchRequestSwaggerSchema = {
   properties: {
     fileName: { type: 'string' },
     zipBase64: { type: 'string', format: 'byte' },
+    referenceMappings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['entityType', 'sourceId', 'targetId'],
+        properties: {
+          entityType: { type: 'string' },
+          sourceId: { type: 'string' },
+          targetId: { type: 'integer' },
+        },
+      },
+    },
   },
 } as const;
 
@@ -269,6 +293,7 @@ export class OrderSnapshotController {
     return this.snapshots.importOrderSnapshot({
       currentUser,
       snapshot: body.snapshot,
+      referenceMappings: body.referenceMappings,
       requestId: request.requestId,
     });
   }
@@ -295,6 +320,7 @@ export class OrderSnapshotController {
     return this.snapshots.importOrderSnapshotBatch({
       currentUser,
       zipBase64: body.zipBase64,
+      referenceMappings: body.referenceMappings,
       requestId: request.requestId,
     });
   }
