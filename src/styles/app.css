@@ -826,6 +826,28 @@ html {
   gap: 8px;
 }
 
+.cut-create-preview-details-table .ant-table-thead > tr > th,
+.cut-create-preview-details-table .ant-table-tbody > tr > td {
+  padding: 2px 6px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr > td {
+  height: 20px;
+}
+
+.cut-create-preview-details-table .ant-btn-link.ant-btn-sm {
+  height: 18px;
+  line-height: 16px;
+}
+
+.cut-create-preview-details-table .ant-tag {
+  margin-inline-end: 0;
+  padding: 0 4px;
+  line-height: 16px;
+}
+
 .cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-0 > td,
 .cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-0:hover > td {
   background-color: var(--app-group-tint-0) !important;

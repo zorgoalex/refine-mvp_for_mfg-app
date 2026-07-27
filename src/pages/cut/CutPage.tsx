@@ -90,8 +90,6 @@ const DEFAULT_PDF_TEMPLATE_OPTIONS = [
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
 
-const CUT_ORDER_LOOKBACK_DAYS = 10;
-
 type CutOrderDateRange = [Dayjs, Dayjs];
 type CutOrderDateRangeValue = [Dayjs | null, Dayjs | null] | null | undefined;
 type CutCriteriaForm = {
@@ -167,11 +165,13 @@ const STATUS_TAG_COLORS: Record<string, string> = {
 };
 
 const CUT_JOBS_TABLE_CONTAINER_HEIGHT = 317;
-const CUT_DETAIL_PREVIEW_VISIBLE_ROWS = 10;
-const CUT_DETAIL_PREVIEW_ROW_HEIGHT = 40;
+const CUT_DETAIL_PREVIEW_VISIBLE_ROWS = 20;
+const CUT_DETAIL_PREVIEW_ROW_HEIGHT = 20;
 const CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT = CUT_DETAIL_PREVIEW_VISIBLE_ROWS * CUT_DETAIL_PREVIEW_ROW_HEIGHT;
 const CUT_JOB_DETAILS_VISIBLE_ROWS = 15;
-const CUT_JOB_DETAILS_TABLE_BODY_HEIGHT = CUT_JOB_DETAILS_VISIBLE_ROWS * CUT_DETAIL_PREVIEW_ROW_HEIGHT;
+const CUT_JOB_DETAILS_ROW_HEIGHT = 40;
+const CUT_JOB_DETAILS_TABLE_BODY_HEIGHT = CUT_JOB_DETAILS_VISIBLE_ROWS * CUT_JOB_DETAILS_ROW_HEIGHT;
+const CUT_DETAIL_SELECTION_COLUMN_WIDTH = 64;
 const CUT_CREATE_PREVIEW_ORDER_TINT_COUNT = 8;
 const MIN_EDITOR_VIEW_ZOOM = 0.25;
 const MAX_EDITOR_VIEW_ZOOM = 1.5;
@@ -297,7 +297,7 @@ function formatJobMaterialNames(materialNames: string[] | undefined): string {
 }
 
 function defaultCutOrderDateRange(now: Dayjs = dayjs()): CutOrderDateRange {
-  return [now.subtract(CUT_ORDER_LOOKBACK_DAYS, 'day'), now];
+  return [now, now];
 }
 
 function cutDateRangeToCriteria(range: CutOrderDateRangeValue): { dateFrom?: string; dateTo?: string } {
@@ -503,6 +503,27 @@ function buildCutPreviewSummary(details: EligibleDetailDto[], selectedDetailIds:
 function formatCutPreviewSummaryMetrics(row: CutPreviewSummaryRow): string {
   const orders = row.orders.length > 0 ? row.orders.join(', ') : '—';
   return `позиций ${row.positions}; заказов ${row.orders.length} (${orders}); деталей ${row.details}; площадь ${formatArea(row.area)}`;
+}
+
+function cutDetailCellText(value: unknown): string {
+  return value === null || value === undefined || value === '' ? '—' : String(value);
+}
+
+function cutDetailColumnWidth<T>(
+  rows: T[],
+  title: string,
+  readValue: (row: T) => unknown,
+  options: { min: number; max: number; charWidth?: number; padding?: number },
+): number {
+  const charWidth = options.charWidth ?? 7;
+  const padding = options.padding ?? 28;
+  const longest = [title, ...rows.map((row) => cutDetailCellText(readValue(row)))]
+    .reduce((max, text) => Math.max(max, text.length), 0);
+  return Math.min(options.max, Math.max(options.min, Math.ceil(longest * charWidth + padding)));
+}
+
+function tableScrollX<T>(columns: ColumnsType<T>, selectionColumnWidth = 0): number {
+  return columns.reduce((total, column) => total + (typeof column.width === 'number' ? column.width : 0), selectionColumnWidth);
 }
 
 async function fetchCutOrderOptions(dateFrom: string, dateTo: string): Promise<CutOrderSelectOption[]> {
@@ -1947,12 +1968,47 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
     () => {
-      const dash = (value: unknown) => (value === null || value === undefined || value === '' ? '—' : String(value));
+      const rows = eligible ?? [];
+      const dash = cutDetailCellText;
+      const sizeText = (row: EligibleDetailDto) =>
+        row.width !== null || row.height !== null ? `${dash(row.width)}×${dash(row.height)}` : '—';
+      const statusText = (row: EligibleDetailDto) =>
+        row.eligible ? 'Готова к раскрою' : (INELIGIBLE_LABELS[row.ineligibleReason ?? ''] ?? row.ineligibleReason);
+      const filesText = (row: EligibleDetailDto) =>
+        [
+          ['Рез', row.linkCuttingFile],
+          ['Фото', row.linkCuttingImageFile],
+          ['CAD', row.linkCadFile],
+          ['PDF', row.linkPdfFile],
+        ]
+          .filter(([, href]) => Boolean(href))
+          .map(([label]) => label)
+          .join(', ');
+      const width = {
+        order: cutDetailColumnWidth(rows, 'Заказ', (row) => row.orderName?.trim() || `#${row.orderId}`, { min: 96, max: 190 }),
+        client: cutDetailColumnWidth(rows, 'Клиент', (row) => row.clientName, { min: 88, max: 220 }),
+        pos: cutDetailColumnWidth(rows, 'Поз.', (row) => row.detailNumber, { min: 52, max: 70 }),
+        name: cutDetailColumnWidth(rows, 'Наименование', (row) => row.detailName, { min: 116, max: 280 }),
+        detailId: cutDetailColumnWidth(rows, 'Деталь', (row) => row.orderDetailId, { min: 68, max: 95 }),
+        size: cutDetailColumnWidth(rows, 'Размер (Ш×В)', sizeText, { min: 100, max: 125 }),
+        qty: cutDetailColumnWidth(rows, 'Кол-во', (row) => row.quantity, { min: 66, max: 82 }),
+        area: cutDetailColumnWidth(rows, 'Площадь', (row) => row.area, { min: 76, max: 96 }),
+        film: cutDetailColumnWidth(rows, 'Плёнка', (row) => row.filmName, { min: 80, max: 220 }),
+        material: cutDetailColumnWidth(rows, 'Материал', (row) => row.materialName, { min: 90, max: 220 }),
+        milling: cutDetailColumnWidth(rows, 'Фрезеровка', (row) => row.millingTypeName, { min: 96, max: 190 }),
+        edge: cutDetailColumnWidth(rows, 'Кромка', (row) => row.edgeTypeName, { min: 80, max: 160 }),
+        productionStatus: cutDetailColumnWidth(rows, 'Статус произв.', (row) => row.productionStatusName, { min: 120, max: 170 }),
+        priority: cutDetailColumnWidth(rows, 'Приоритет', (row) => row.priority, { min: 84, max: 105 }),
+        joint: cutDetailColumnWidth(rows, 'Соед. заказ', (row) => row.jointOrderId, { min: 96, max: 120 }),
+        note: cutDetailColumnWidth(rows, 'Примечание', (row) => row.note, { min: 100, max: 260 }),
+        files: cutDetailColumnWidth(rows, 'Файлы', filesText, { min: 72, max: 130 }),
+        status: cutDetailColumnWidth(rows, 'Статус', statusText, { min: 130, max: 170 }),
+      };
       return [
         {
           title: 'Заказ',
           key: 'order',
-          width: 150,
+          width: width.order,
           fixed: 'left',
           render: (_: unknown, row: EligibleDetailDto) => (
             <Button type="link" size="small" style={{ padding: 0 }} onClick={() => show('orders_view', row.orderId, 'push')}>
@@ -1960,34 +2016,33 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             </Button>
           ),
         },
-        { title: 'Клиент', key: 'client', width: 160, fixed: 'left', render: (_: unknown, row: EligibleDetailDto) => dash(row.clientName) },
-        { title: 'Поз.', key: 'pos', width: 60, render: (_: unknown, row: EligibleDetailDto) => dash(row.detailNumber) },
-        { title: 'Наименование', key: 'name', width: 180, render: (_: unknown, row: EligibleDetailDto) => dash(row.detailName) },
-        { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: 90 },
+        { title: 'Клиент', key: 'client', width: width.client, fixed: 'left', render: (_: unknown, row: EligibleDetailDto) => dash(row.clientName) },
+        { title: 'Поз.', key: 'pos', width: width.pos, render: (_: unknown, row: EligibleDetailDto) => dash(row.detailNumber) },
+        { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: width.detailId },
         {
           title: 'Размер (Ш×В)',
           key: 'size',
-          width: 130,
-          render: (_: unknown, row: EligibleDetailDto) =>
-            row.width !== null || row.height !== null ? `${dash(row.width)}×${dash(row.height)}` : '—',
+          width: width.size,
+          render: (_: unknown, row: EligibleDetailDto) => sizeText(row),
         },
-        { title: 'Кол-во', dataIndex: 'quantity', key: 'qty', width: 80 },
-        { title: 'Площадь', key: 'area', width: 90, render: (_: unknown, row: EligibleDetailDto) => dash(row.area) },
-        { title: 'Материал', key: 'material', width: 160, render: (_: unknown, row: EligibleDetailDto) => dash(row.materialName) },
-        { title: 'Фрезеровка', key: 'milling', width: 140, render: (_: unknown, row: EligibleDetailDto) => dash(row.millingTypeName) },
-        { title: 'Кромка', key: 'edge', width: 120, render: (_: unknown, row: EligibleDetailDto) => dash(row.edgeTypeName) },
-        { title: 'Плёнка', key: 'film', width: 160, render: (_: unknown, row: EligibleDetailDto) => dash(row.filmName) },
-        { title: 'Статус произв.', key: 'pstatus', width: 130, render: (_: unknown, row: EligibleDetailDto) => dash(row.productionStatusName) },
-        { title: 'Приоритет', key: 'priority', width: 100, render: (_: unknown, row: EligibleDetailDto) => dash(row.priority) },
-        { title: 'Соед. заказ', key: 'joint', width: 110, render: (_: unknown, row: EligibleDetailDto) => dash(row.jointOrderId) },
+        { title: 'Кол-во', dataIndex: 'quantity', key: 'qty', width: width.qty },
+        { title: 'Площадь', key: 'area', width: width.area, render: (_: unknown, row: EligibleDetailDto) => dash(row.area) },
+        { title: 'Плёнка', key: 'film', width: width.film, render: (_: unknown, row: EligibleDetailDto) => dash(row.filmName) },
+        { title: 'Материал', key: 'material', width: width.material, render: (_: unknown, row: EligibleDetailDto) => dash(row.materialName) },
+        { title: 'Фрезеровка', key: 'milling', width: width.milling, render: (_: unknown, row: EligibleDetailDto) => dash(row.millingTypeName) },
+        { title: 'Наименование', key: 'name', width: width.name, render: (_: unknown, row: EligibleDetailDto) => dash(row.detailName) },
+        { title: 'Кромка', key: 'edge', width: width.edge, render: (_: unknown, row: EligibleDetailDto) => dash(row.edgeTypeName) },
+        { title: 'Статус произв.', key: 'pstatus', width: width.productionStatus, render: (_: unknown, row: EligibleDetailDto) => dash(row.productionStatusName) },
+        { title: 'Приоритет', key: 'priority', width: width.priority, render: (_: unknown, row: EligibleDetailDto) => dash(row.priority) },
+        { title: 'Соед. заказ', key: 'joint', width: width.joint, render: (_: unknown, row: EligibleDetailDto) => dash(row.jointOrderId) },
         {
           title: 'Примечание',
           key: 'note',
-          width: 200,
+          width: width.note,
           render: (_: unknown, row: EligibleDetailDto) =>
             row.note ? (
               <Tooltip title={row.note}>
-                <Text ellipsis style={{ maxWidth: 180, display: 'inline-block' }}>{row.note}</Text>
+                <Text ellipsis style={{ maxWidth: Math.max(80, width.note - 20), display: 'inline-block' }}>{row.note}</Text>
               </Tooltip>
             ) : (
               '—'
@@ -1996,7 +2051,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         {
           title: 'Файлы',
           key: 'files',
-          width: 150,
+          width: width.files,
           render: (_: unknown, row: EligibleDetailDto) => {
             const links: Array<[string, string | null | undefined]> = [
               ['Рез', row.linkCuttingFile],
@@ -2023,7 +2078,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         {
           title: 'Статус',
           key: 'status',
-          width: 160,
+          width: width.status,
           fixed: 'right',
           render: (_: unknown, row: EligibleDetailDto) =>
             row.eligible ? (
@@ -2034,7 +2089,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         },
       ];
     },
-    [show],
+    [eligible, show],
+  );
+  const eligibleTableScrollX = useMemo(
+    () => tableScrollX(eligibleColumns, CUT_DETAIL_SELECTION_COLUMN_WIDTH),
+    [eligibleColumns],
   );
 
   // Archived jobs are genuinely read-only: all mutate controls are disabled so
@@ -2290,7 +2349,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 columns={eligibleColumns}
                 dataSource={eligible}
                 pagination={false}
-                scroll={{ x: 1900, y: CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT }}
+                scroll={{ x: eligibleTableScrollX, y: CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT }}
                 rowClassName={(row) => {
                   const tint = creationPreviewOrderTintByOrderId.get(row.orderId) ?? 0;
                   return `cut-create-preview-order-row cut-create-preview-order-tint-${tint}`;
@@ -2639,7 +2698,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           columns={eligibleColumns}
           dataSource={eligible}
           pagination={false}
-          scroll={{ x: 1900 }}
+          scroll={{ x: eligibleTableScrollX }}
           rowSelection={{
             selectedRowKeys: selected,
             onChange: (keys) => setSelected(keys.map(Number)),

@@ -129,9 +129,9 @@ describe('CutPage source guards', () => {
     expect(source).toContain('form.setFieldsValue');
   });
 
-  it('filters cut creation orders by a default 10-day date range', () => {
-    expect(source).toContain('CUT_ORDER_LOOKBACK_DAYS = 10');
+  it('filters cut creation orders by the current-date range by default', () => {
     expect(source).toContain('defaultCutOrderDateRange');
+    expect(source).toContain('return [now, now]');
     expect(source).toContain('orderDateRange');
     expect(source).toContain('cutDateRangeToCriteria');
     expect(source).toContain('ordersApi.list');
@@ -161,8 +161,11 @@ describe('CutPage source guards', () => {
   });
 
   it('keeps the create-preview detail table compact and shows grouped plus total summaries', () => {
-    expect(source).toContain('CUT_DETAIL_PREVIEW_VISIBLE_ROWS = 10');
+    expect(source).toContain('CUT_DETAIL_PREVIEW_VISIBLE_ROWS = 20');
+    expect(source).toContain('CUT_DETAIL_PREVIEW_ROW_HEIGHT = 20');
     expect(source).toContain('CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT');
+    expect(source).toContain('eligibleTableScrollX');
+    expect(source).toContain('cutDetailColumnWidth(rows');
     expect(source).toContain('buildCutPreviewSummary');
     expect(source).toContain('data-testid="cut-create-preview-summary"');
     expect(source).not.toContain('Table.Summary');
@@ -172,7 +175,27 @@ describe('CutPage source guards', () => {
     expect(source).toContain('formatCutPreviewSummaryMetrics');
     expect(source).toContain('area * quantity');
     expect(appCss).toContain('.cut-create-preview-summary');
+    expect(appCss).toContain('.cut-create-preview-details-table .ant-table-tbody > tr > td');
+    expect(appCss).toContain('height: 20px');
     expect(appCss).toContain('.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-0 > td');
+  });
+
+  it('orders create-preview detail columns for fast scanning', () => {
+    const eligibleColumnsSource = source.slice(
+      source.indexOf('const eligibleColumns'),
+      source.indexOf('const jobItemColumns'),
+    );
+    const areaIndex = eligibleColumnsSource.indexOf("title: 'Площадь'");
+    const filmIndex = eligibleColumnsSource.indexOf("title: 'Плёнка'");
+    const materialIndex = eligibleColumnsSource.indexOf("title: 'Материал'");
+    const millingIndex = eligibleColumnsSource.indexOf("title: 'Фрезеровка'");
+    const nameIndex = eligibleColumnsSource.indexOf("title: 'Наименование'");
+
+    expect(areaIndex).toBeGreaterThanOrEqual(0);
+    expect(filmIndex).toBeGreaterThan(areaIndex);
+    expect(materialIndex).toBeGreaterThan(filmIndex);
+    expect(millingIndex).toBeGreaterThan(materialIndex);
+    expect(nameIndex).toBeGreaterThan(millingIndex);
   });
 
   it('keeps reopened job details under the spoiler compact with a 15-row internal scroll', () => {
