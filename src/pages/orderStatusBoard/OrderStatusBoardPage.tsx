@@ -35,7 +35,6 @@ import {
   MoreOutlined,
   ReloadOutlined,
   RightOutlined,
-  ToolOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -80,6 +79,8 @@ import {
 const BOARD_DRAG_TYPE = 'ORDER_STATUS_BOARD_CARD';
 const DATE_FORMAT = 'DD.MM.YYYY';
 const CNC_HISTORY_DAYS = 7;
+const CNC_DETAIL_CONFIDENCE_WARNING_THRESHOLD = 0.8;
+const CNC_TOOL_COMMENT_PATTERN = /^(?:T\d+\s*S\d+\s*,?\s*)+$/i;
 
 interface BoardDragItem {
   card: OrderStatusBoardCard;
@@ -821,40 +822,57 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   packet,
   onOpenOrder,
 }) => {
-  const toolsText = packet.tools.length > 0
-    ? packet.tools.map((tool) =>
-      `T${tool.toolNumber}${tool.spindleRpm ? ` S${tool.spindleRpm}` : ''}`,
-    ).join(', ')
-    : 'Фрезы не распознаны';
+  const displayComments = packet.comments.filter(isCncDisplayComment);
+
   return (
     <div className="status-board-card cnc-packet-card">
       <div className="status-board-card__top">
         <div className="cnc-packet-card__title">
-          <Typography.Text strong className="cnc-packet-card__machine">
-            {packet.machine ?? 'CNC'}
-          </Typography.Text>
-          <Typography.Text className="cnc-packet-card__program">
+          <Typography.Text strong className="cnc-packet-card__program">
             {packet.programName ?? packet.externalPacketKey}
           </Typography.Text>
         </div>
-        <div className="cnc-packet-card__status-icons" aria-hidden="true">
-          {packet.thumbsUp && <CheckCircleOutlined />}
+        <div className="cnc-packet-card__status-icons">
+          {packet.thumbsUp && (
+            <Tooltip title="Выполнено на станке: в Telegram стоит реакция 👍">
+              <CheckCircleOutlined
+                className="cnc-packet-card__status-icon"
+                aria-label="Выполнено на станке"
+              />
+            </Tooltip>
+          )}
           {(packet.analysisWarnings.length > 0 ||
-            packet.parseStatus === 'needs_review') && <ExclamationCircleOutlined />}
+            packet.parseStatus === 'needs_review') && (
+            <Tooltip title="Нужна ручная проверка распознавания">
+              <ExclamationCircleOutlined
+                className="cnc-packet-card__status-icon"
+                aria-label="Нужна ручная проверка"
+              />
+            </Tooltip>
+          )}
         </div>
       </div>
 
       <div className="status-board-card__tags">
         <Tag>{packet.materialName}</Tag>
-        <Tag icon={<ToolOutlined />}>{toolsText}</Tag>
         {packet.rework && <Tag color="volcano">Переделка</Tag>}
         {packet.thumbsUp && <Tag color="green">👍 Выполнено</Tag>}
       </div>
 
-      {(packet.comments.length > 0 || packet.dowelingLinks.length > 0) && (
+      {(displayComments.length > 0 || packet.dowelingLinks.length > 0) && (
         <div className="cnc-packet-card__notes">
-          {packet.comments.map((comment, index) => (
-            <span key={`${packet.packetId}:comment:${index}`}>{comment}</span>
+          {displayComments.map((comment, index) => (
+            isCncProgramFilename(comment) ? (
+              <Typography.Text
+                key={`${packet.packetId}:comment:${index}`}
+                strong
+                className="cnc-packet-card__note-file"
+              >
+                {comment}
+              </Typography.Text>
+            ) : (
+              <span key={`${packet.packetId}:comment:${index}`}>{comment}</span>
+            )
           ))}
           {packet.dowelingLinks.map((link, index) => (
             <span key={`${packet.packetId}:dowel:${index}`}>
@@ -877,46 +895,54 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
       <div className="cnc-packet-card__items" role="table" aria-label="Результаты распознавания">
         <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
           <span>Заказ</span>
-          <span>Деталь</span>
-          <span>Размер</span>
+          <span>Деталь / размер</span>
           <span>Кол.</span>
-          <span>Матч</span>
         </div>
-        {packet.items.map((item) => (
-          <div className="cnc-packet-card__item" role="row" key={item.packetItemId}>
-            <span>
-              {item.matchOrderId ? (
-                <Button
-                  type="link"
-                  className="cnc-packet-card__order-link"
-                  onClick={() => item.matchOrderId && onOpenOrder(item.matchOrderId)}
-                >
-                  {item.orderName}
-                </Button>
-              ) : (
-                item.orderName
-              )}
-            </span>
-            <span>{item.detailNumber ? `#${item.detailNumber}` : '—'}</span>
-            <span>{formatCncSize(item.widthMm, item.heightMm)}</span>
-            <span>{item.quantity}</span>
-            <span>
-              <Tag color={matchStatusColor(item.matchStatus)}>
-                {matchStatusLabel(item.matchStatus)}
-              </Tag>
-              <span className="cnc-packet-card__confidence">
-                {formatPercent(item.confidence)}
+        {packet.items.map((item) => {
+          const quantityWarningTitle = cncItemQuantityWarningTitle(item);
+
+          return (
+            <div className="cnc-packet-card__item" role="row" key={item.packetItemId}>
+              <span>
+                {item.matchOrderId ? (
+                  <Button
+                    type="link"
+                    className="cnc-packet-card__order-link"
+                    onClick={() => item.matchOrderId && onOpenOrder(item.matchOrderId)}
+                  >
+                    {item.orderName}
+                  </Button>
+                ) : (
+                  item.orderName
+                )}
               </span>
-            </span>
-          </div>
-        ))}
+              <span>
+                <span>{item.detailNumber ? `#${item.detailNumber}` : '—'}</span>
+                <span className="cnc-packet-card__size">{formatCncSize(item.widthMm, item.heightMm)}</span>
+              </span>
+              <span className="cnc-packet-card__qty">
+                {item.quantity}
+                {quantityWarningTitle && (
+                  <Tooltip title={quantityWarningTitle}>
+                    <span
+                      className="cnc-packet-card__qty-warning"
+                      aria-label={quantityWarningTitle}
+                    >
+                      !
+                    </span>
+                  </Tooltip>
+                )}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
       <div className="status-board-card__footer">
         <span>
           <FileTextOutlined /> {packet.itemQuantityTotal} дет. · {packet.itemCount} строк
         </span>
-        <span>{formatDateTime(packet.updatedAt)}</span>
+        <span>В чате {formatDateTime(packet.sourceCreatedAt ?? packet.sourceUpdatedAt ?? packet.updatedAt)}</span>
       </div>
     </div>
   );
@@ -1316,32 +1342,26 @@ function formatCncSize(width: number | null, height: number | null): string {
   return `${formatter.format(width)}×${formatter.format(height)}`;
 }
 
-function formatPercent(value: number): string {
-  return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(value * 100)}%`;
+function isCncDisplayComment(comment: string): boolean {
+  const trimmed = comment.trim();
+  return !CNC_TOOL_COMMENT_PATTERN.test(trimmed) && !isCncMachineOnlyComment(trimmed);
 }
 
-function matchStatusLabel(status: CncTelegramPacket['items'][number]['matchStatus']): string {
-  switch (status) {
-    case 'matched':
-      return 'ERP';
-    case 'conflict':
-      return 'Конфликт';
-    case 'needs_review':
-      return 'Проверка';
-    case 'unmatched':
-      return 'Нет';
-  }
+function isCncMachineOnlyComment(comment: string): boolean {
+  return /^CNC\s*#?\s*\d+$/i.test(comment.trim());
 }
 
-function matchStatusColor(status: CncTelegramPacket['items'][number]['matchStatus']): string {
-  switch (status) {
-    case 'matched':
-      return 'green';
-    case 'conflict':
-      return 'red';
-    case 'needs_review':
-      return 'orange';
-    case 'unmatched':
-      return 'default';
+function isCncProgramFilename(comment: string): boolean {
+  return /^CNC\s*#?\s*\d+_.+\.(?:txt|nc|cnc|iso)$/i.test(comment.trim());
+}
+
+function cncItemQuantityWarningTitle(item: CncTelegramPacket['items'][number]): string {
+  if (item.matchStatus === 'conflict') return 'Конфликт сопоставления с ERP';
+  if (item.matchStatus === 'needs_review') return 'Нужна ручная проверка строки';
+  if (item.matchStatus === 'unmatched') return 'Строка не сопоставлена с ERP';
+  if (item.detailNumber == null) return 'Номер детали не распознан';
+  if (item.confidence < CNC_DETAIL_CONFIDENCE_WARNING_THRESHOLD) {
+    return 'Низкая уверенность распознавания';
   }
+  return '';
 }

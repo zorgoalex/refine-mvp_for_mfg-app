@@ -353,18 +353,16 @@
   gap: 2px;
 }
 
-.cnc-packet-card__machine {
-  font-variant-numeric: tabular-nums;
-}
-
 .cnc-packet-card__program {
-  color: var(--app-text-muted);
-  font-size: 12px;
+  color: var(--app-text);
+  font-size: 13px;
+  line-height: 1.3;
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .cnc-packet-card__status-icons {
-  min-width: 44px;
+  min-width: 40px;
   min-height: 40px;
   display: inline-flex;
   align-items: center;
@@ -372,6 +370,11 @@
   gap: 8px;
   color: var(--status-color);
   font-size: 16px;
+}
+
+.cnc-packet-card__status-icon {
+  min-width: 18px;
+  min-height: 18px;
 }
 
 .cnc-packet-card__notes,
@@ -388,6 +391,10 @@
   color: #ad4e00;
 }
 
+.cnc-packet-card__note-file {
+  color: var(--app-text);
+}
+
 .cnc-packet-card__items {
   margin-top: 8px;
   display: grid;
@@ -399,7 +406,7 @@
 .cnc-packet-card__item {
   min-height: 34px;
   display: grid;
-  grid-template-columns: minmax(44px, 0.9fr) minmax(36px, 0.45fr) minmax(62px, 0.95fr) minmax(28px, 0.35fr) minmax(64px, 0.95fr);
+  grid-template-columns: minmax(46px, 0.85fr) minmax(98px, 1.25fr) minmax(34px, max-content);
   align-items: center;
   gap: 6px;
   padding: 5px 0;
@@ -428,10 +435,27 @@
   white-space: normal;
 }
 
-.cnc-packet-card__confidence {
-  margin-left: 4px;
+.cnc-packet-card__size {
+  display: block;
   color: var(--app-text-muted);
   font-size: 11px;
+  line-height: 1.25;
+}
+
+.cnc-packet-card__qty {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 2px;
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cnc-packet-card__qty-warning {
+  color: #ad4e00;
+  font-weight: 700;
 }
 
 .status-board-loading {
