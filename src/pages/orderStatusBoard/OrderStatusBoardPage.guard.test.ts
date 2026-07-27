@@ -68,6 +68,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('CNC_HISTORY_DAYS = 7');
     expect(page).toContain('aria-label="Дата CNC-работ"');
     expect(page).toContain('В чате {formatDateTime');
+    expect(page).toContain('<Collapse.Panel');
+    expect(page).not.toContain('items={[{');
     expect(page).not.toContain("board: 'cnc");
   });
 });
