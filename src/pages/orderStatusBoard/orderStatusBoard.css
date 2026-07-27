@@ -35,20 +35,29 @@
 .status-board-toolbar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 10px 16px;
+  flex-wrap: nowrap;
+  gap: 8px 10px;
   padding: 10px 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid var(--app-border-soft);
   border-radius: 10px;
   background: var(--app-surface);
 }
 
 .status-board-toolbar__search {
-  width: min(320px, 100%);
+  width: min(160px, 100%);
+  flex: 0 0 160px;
+}
+
+.status-board-toolbar__date-range {
+  width: 224px;
+  flex: 0 0 224px;
 }
 
 .status-board-toolbar__checkbox {
   min-height: 40px;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
 }
@@ -63,6 +72,7 @@
 
 .status-board-toolbar__switch {
   min-height: 32px;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -71,7 +81,7 @@
 
 .status-board-toolbar__display-mode {
   min-height: 32px;
-  margin-left: auto;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -326,34 +336,23 @@
 .status-board-card__status-row {
   min-width: 0;
   margin: 2px 0 7px;
-  display: grid;
-  grid-template-columns: 8px max-content minmax(0, 1fr);
+  display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  line-height: 1.35;
 }
 
 .status-board-card--minimal .status-board-card__status-row {
   margin-bottom: 0;
 }
 
-.status-board-card__status-marker {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--status-color);
-}
-
-.status-board-card__status-label {
-  color: var(--app-text-muted);
-  font-weight: 600;
-}
-
-.status-board-card__status-text {
+.status-board-card__status-badge.ant-tag {
+  max-width: 100%;
   min-width: 0;
-  color: var(--app-text);
+  margin: 0;
+  border-radius: 999px;
+  font-size: 12px;
   font-weight: 650;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .status-board-card__tags {
@@ -384,6 +383,38 @@
 
 .status-board-card--compact .status-board-card__meta {
   gap: 3px;
+}
+
+.status-board-card__standard-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-board-card__standard-cell {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-board-card__standard-client {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.status-board-card__standard-cell--wide,
+.status-board-card__standard-tags {
+  grid-column: 1 / -1;
+}
+
+.status-board-card__standard-tags {
+  margin-bottom: 0;
 }
 
 .status-board-card__meta > span {
@@ -753,10 +784,14 @@
 
   .status-board-toolbar {
     align-items: stretch;
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
 
   .status-board-toolbar__search,
-  .status-board-toolbar .ant-picker {
+  .status-board-toolbar .ant-picker,
+  .status-board-toolbar__date-range {
+    flex: 1 1 100%;
     width: 100%;
   }
 

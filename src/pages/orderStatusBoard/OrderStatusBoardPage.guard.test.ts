@@ -110,7 +110,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-packet-card__program');
   });
 
-  it('keeps order cards dense, status-explicit and project-code-free', () => {
+  it('keeps order cards dense, badge-based and project-code-free', () => {
     expect(page).toContain("type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal'");
     expect(page).toContain('STATUS_BOARD_CARD_DISPLAY_OPTIONS');
     expect(page).toContain('Вид карточек заказов');
@@ -120,11 +120,22 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('formatStatusBoardOrderNumber(card)');
     expect(page).toContain('card.orderName.trim() || String(card.orderId)');
     expect(page).not.toContain('card.fullNumber');
-    expect(page).toContain("board === 'order' ? 'Статус заказа' : 'Статус производства'");
+    expect(page).not.toContain('primaryStatusLabel');
+    expect(page).not.toContain('status-board-card__status-label');
+    expect(page).toContain('resolveStatusBoardStatusColor(board, card, allColumns)');
+    expect(page).toContain('color={primaryStatusColor}');
     expect(page).toContain('status-board-card__status-row');
+    expect(page).toContain('status-board-card__status-badge');
+    expect(page).toContain('status-board-card__standard-grid');
     expect(css).toContain('.status-board-toolbar__display-mode');
+    expect(css).toContain('width: min(160px, 100%)');
+    expect(css).toContain('.status-board-toolbar__date-range');
+    expect(css).toContain('width: 224px');
+    expect(css).toContain('flex-wrap: nowrap');
     expect(css).toContain('.status-board-card--compact');
     expect(css).toContain('.status-board-card--minimal');
     expect(css).toContain('.status-board-card__status-row');
+    expect(css).toContain('.status-board-card__status-badge.ant-tag');
+    expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
   });
 });

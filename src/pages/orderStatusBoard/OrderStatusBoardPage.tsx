@@ -616,6 +616,7 @@ export const OrderStatusBoardPage: React.FC = () => {
               </Checkbox>
             )}
             <DatePicker.RangePicker
+              className="status-board-toolbar__date-range"
               value={dateRange}
               format={DATE_FORMAT}
               allowEmpty={[true, true]}
@@ -1694,14 +1695,30 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   });
 
   const orderNumber = formatStatusBoardOrderNumber(card);
-  const primaryStatusLabel =
-    board === 'order' ? 'Статус заказа' : 'Статус производства';
   const primaryStatus =
     board === 'order'
       ? card.orderStatusName || 'Без статуса'
       : card.productionStatusName || 'Без статуса';
+  const primaryStatusColor =
+    resolveStatusBoardStatusColor(board, card, allColumns) ?? '#8c8c8c';
   const showCompactDetails = displayMode !== 'minimal';
   const showStandardDetails = displayMode === 'standard';
+  const showUrgentFlag = card.priority <= 50;
+  const showAutoFlag =
+    board === 'production' && card.productionStatusFromDetailsEnabled;
+  const showOverdueFlag = card.pastPlannedDate;
+  const showFlags = showUrgentFlag || showAutoFlag || showOverdueFlag;
+  const flagTags = (
+    <>
+      {showUrgentFlag && <Tag color="red">Срочный</Tag>}
+      {showAutoFlag && (
+        <Tooltip title="Статус рассчитывается по деталям заказа">
+          <Tag color="blue">Авто</Tag>
+        </Tooltip>
+      )}
+      {showOverdueFlag && <Tag color="volcano">Плановая дата прошла</Tag>}
+    </>
+  );
 
   return (
     <div
@@ -1784,32 +1801,68 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </span>
       )}
 
-      <div className="status-board-card__status-row">
-        <span className="status-board-card__status-marker" aria-hidden="true" />
-        <span className="status-board-card__status-label">{primaryStatusLabel}:</span>
-        <Typography.Text
-          className="status-board-card__status-text"
-          ellipsis={{ tooltip: primaryStatus }}
+      <div className="status-board-card__status-row" aria-label={`Текущий статус: ${primaryStatus}`}>
+        <Tag
+          className="status-board-card__status-badge"
+          color={primaryStatusColor}
         >
           {primaryStatus}
-        </Typography.Text>
+        </Tag>
       </div>
 
-      {showCompactDetails && (
+      {showCompactDetails && showStandardDetails && (
+        <div className="status-board-card__standard-grid">
+          <Typography.Text
+            className="status-board-card__client status-board-card__standard-client"
+            ellipsis={{ tooltip: card.clientName }}
+          >
+            {card.clientName || 'Клиент не указан'}
+          </Typography.Text>
+          <span className="status-board-card__standard-cell">
+            <ClockCircleOutlined />
+            {card.plannedCompletionDate
+              ? dayjs(card.plannedCompletionDate).format(DATE_FORMAT)
+              : 'План не задан'}
+          </span>
+          {card.managerName && (
+            <span className="status-board-card__standard-cell">
+              <UserOutlined />
+              {card.managerName}
+            </span>
+          )}
+          <span className="status-board-card__standard-cell">
+            {card.partsCount} дет. · {formatArea(card.totalArea)}
+          </span>
+          {card.finalAmount !== null && (
+            <>
+              <span className="status-board-card__standard-cell">
+                {card.paymentStatusName || 'Оплата без статуса'}
+              </span>
+              <span className="status-board-card__standard-cell">
+                {formatMoney(card.paidAmount ?? 0)} / {formatMoney(card.finalAmount)}
+              </span>
+              {(card.debtAmount ?? 0) > 0 && (
+                <span className="status-board-card__standard-cell status-board-card__standard-cell--wide status-board-card__debt">
+                  Долг {formatMoney(card.debtAmount ?? 0)}
+                </span>
+              )}
+            </>
+          )}
+          {showFlags && (
+            <div className="status-board-card__tags status-board-card__standard-tags">
+              {flagTags}
+            </div>
+          )}
+        </div>
+      )}
+
+      {showCompactDetails && !showStandardDetails && (
         <>
           <Typography.Text className="status-board-card__client" ellipsis={{ tooltip: card.clientName }}>
             {card.clientName || 'Клиент не указан'}
           </Typography.Text>
 
-          <div className="status-board-card__tags">
-            {card.priority <= 50 && <Tag color="red">Срочный</Tag>}
-            {board === 'production' && card.productionStatusFromDetailsEnabled && (
-              <Tooltip title="Статус рассчитывается по деталям заказа">
-                <Tag color="blue">Авто</Tag>
-              </Tooltip>
-            )}
-            {card.pastPlannedDate && <Tag color="volcano">Плановая дата прошла</Tag>}
-          </div>
+          {showFlags && <div className="status-board-card__tags">{flagTags}</div>}
 
           <div className="status-board-card__meta">
             <span>
@@ -1827,20 +1880,6 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
             <span>{card.partsCount} дет. · {formatArea(card.totalArea)}</span>
           </div>
         </>
-      )}
-
-      {showStandardDetails && card.finalAmount !== null && (
-        <div className="status-board-card__finance">
-          <span>{card.paymentStatusName || 'Оплата без статуса'}</span>
-          <span>
-            {formatMoney(card.paidAmount ?? 0)} / {formatMoney(card.finalAmount)}
-          </span>
-          {(card.debtAmount ?? 0) > 0 && (
-            <span className="status-board-card__debt">
-              Долг {formatMoney(card.debtAmount ?? 0)}
-            </span>
-          )}
-        </div>
       )}
 
       {pending && (
@@ -1881,6 +1920,18 @@ function confirmManualProductionMove(
 
 function formatStatusBoardOrderNumber(card: OrderStatusBoardCard): string {
   return card.orderName.trim() || String(card.orderId);
+}
+
+function resolveStatusBoardStatusColor(
+  board: OrderStatusBoardType,
+  card: OrderStatusBoardCard,
+  allColumns: OrderStatusBoardColumn[],
+): string | null {
+  const statusId = board === 'order'
+    ? card.orderStatusId
+    : card.productionStatusId;
+  if (statusId === null) return null;
+  return allColumns.find((column) => column.status.id === statusId)?.status.color ?? null;
 }
 
 function useFinePointer(): boolean {
