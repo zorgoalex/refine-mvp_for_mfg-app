@@ -17,6 +17,7 @@ import {
   Empty,
   Input,
   Modal,
+  Segmented,
   Spin,
   Switch,
   Tabs,
@@ -83,6 +84,17 @@ const CNC_HISTORY_DAYS = 7;
 const CNC_DETAIL_CONFIDENCE_WARNING_THRESHOLD = 0.8;
 const CNC_TOOL_COMMENT_PATTERN = /^(?:T\d+\s*S\d+\s*,?\s*)+$/i;
 
+type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
+
+const STATUS_BOARD_CARD_DISPLAY_OPTIONS: Array<{
+  label: string;
+  value: StatusBoardCardDisplayMode;
+}> = [
+  { label: 'Стандартный', value: 'standard' },
+  { label: 'Компактный', value: 'compact' },
+  { label: 'Минимальный', value: 'minimal' },
+];
+
 interface BoardDragItem {
   card: OrderStatusBoardCard;
   sourceColumn: string;
@@ -123,6 +135,8 @@ export const OrderStatusBoardPage: React.FC = () => {
   const finePointer = useFinePointer();
   const viewStateRef = useRef(viewState);
   viewStateRef.current = viewState;
+  const [cardDisplayMode, setCardDisplayMode] =
+    useState<StatusBoardCardDisplayMode>('standard');
 
   useEffect(() => {
     boardRef.current = board;
@@ -384,9 +398,10 @@ export const OrderStatusBoardPage: React.FC = () => {
         }
 
         if (result.kind === 'refreshed') {
-          message.success(`Заказ ${card.fullNumber}: статус «${targetName}» применён.`);
+          const orderNumber = formatStatusBoardOrderNumber(card);
+          message.success(`Заказ ${orderNumber}: статус «${targetName}» применён.`);
           setAnnouncement(
-            `Заказ ${card.fullNumber}. Актуальный статус загружен после изменения.`,
+            `Заказ ${orderNumber}. Актуальный статус загружен после изменения.`,
           );
         }
       } catch (error) {
@@ -606,6 +621,20 @@ export const OrderStatusBoardPage: React.FC = () => {
               />
               Скрыть пустые
             </label>
+            <div
+              className="status-board-toolbar__display-mode"
+              aria-label="Вид карточек заказов"
+            >
+              <Typography.Text type="secondary">Карточки</Typography.Text>
+              <Segmented
+                size="small"
+                value={cardDisplayMode}
+                options={STATUS_BOARD_CARD_DISPLAY_OPTIONS}
+                onChange={(value) =>
+                  setCardDisplayMode(value as StatusBoardCardDisplayMode)
+                }
+              />
+            </div>
           </div>
         )}
         {isCncToday && (
@@ -758,6 +787,7 @@ export const OrderStatusBoardPage: React.FC = () => {
                     pendingOrders.size === 0
                   }
                   pendingOrders={pendingOrders}
+                  cardDisplayMode={cardDisplayMode}
                   loadingMore={loadingColumns.has(column.key)}
                   onLoadMore={loadMore}
                   onMove={moveCard}
@@ -1060,6 +1090,7 @@ interface StatusBoardColumnViewProps {
   finePointer: boolean;
   mutationsEnabled: boolean;
   pendingOrders: Set<number>;
+  cardDisplayMode: StatusBoardCardDisplayMode;
   loadingMore: boolean;
   onLoadMore: (column: OrderStatusBoardColumn) => void;
   onMove: (
@@ -1078,6 +1109,7 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
   finePointer,
   mutationsEnabled,
   pendingOrders,
+  cardDisplayMode,
   loadingMore,
   onLoadMore,
   onMove,
@@ -1150,6 +1182,7 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
               finePointer={finePointer}
               mutationsEnabled={mutationsEnabled}
               pending={pendingOrders.has(card.orderId)}
+              displayMode={cardDisplayMode}
               onMove={onMove}
               onOpenOrder={onOpenOrder}
             />
@@ -1178,6 +1211,7 @@ interface StatusBoardCardViewProps {
   finePointer: boolean;
   mutationsEnabled: boolean;
   pending: boolean;
+  displayMode: StatusBoardCardDisplayMode;
   onMove: StatusBoardColumnViewProps['onMove'];
   onOpenOrder: (orderId: number) => void;
 }
@@ -1190,6 +1224,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   finePointer,
   mutationsEnabled,
   pending,
+  displayMode,
   onMove,
   onOpenOrder,
 }) => {
@@ -1231,15 +1266,21 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
     collect: (monitor) => ({ isDragging: monitor.isDragging() }),
   });
 
-  const secondaryStatus =
+  const orderNumber = formatStatusBoardOrderNumber(card);
+  const primaryStatusLabel =
+    board === 'order' ? 'Статус заказа' : 'Статус производства';
+  const primaryStatus =
     board === 'order'
-      ? card.productionStatusName ?? 'Производство: без статуса'
-      : card.orderStatusName;
+      ? card.orderStatusName || 'Без статуса'
+      : card.productionStatusName || 'Без статуса';
+  const showCompactDetails = displayMode !== 'minimal';
+  const showStandardDetails = displayMode === 'standard';
 
   return (
     <div
       className={[
         'status-board-card',
+        `status-board-card--${displayMode}`,
         isDragging ? 'status-board-card--dragging' : '',
         pending ? 'status-board-card--pending' : '',
       ].filter(Boolean).join(' ')}
@@ -1253,7 +1294,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           className="status-board-card__number"
           onClick={() => onOpenOrder(card.orderId)}
         >
-          {card.fullNumber}
+          {orderNumber}
         </Button>
         <div className="status-board-card__actions">
           {finePointer && (
@@ -1265,7 +1306,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
                 }}
                 type="text"
                 className="status-board-card__drag"
-                aria-label={`Перетащить заказ ${card.fullNumber}`}
+                aria-label={`Перетащить заказ ${orderNumber}`}
                 disabled={!moveAvailable}
                 icon={<DragOutlined />}
               />
@@ -1300,7 +1341,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
               <Button
                 ref={actionButtonRef}
                 type="text"
-                aria-label={`Переместить заказ ${card.fullNumber}`}
+                aria-label={`Переместить заказ ${orderNumber}`}
                 aria-describedby={!moveAvailable ? readonlyReasonId : undefined}
                 aria-disabled={!moveAvailable}
                 icon={<MoreOutlined />}
@@ -1316,38 +1357,52 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </span>
       )}
 
-      <Typography.Text className="status-board-card__client" ellipsis={{ tooltip: card.clientName }}>
-        {card.clientName || 'Клиент не указан'}
-      </Typography.Text>
-
-      <div className="status-board-card__tags">
-        {card.priority <= 50 && <Tag color="red">Срочный</Tag>}
-        <Tag>{secondaryStatus}</Tag>
-        {board === 'production' && card.productionStatusFromDetailsEnabled && (
-          <Tooltip title="Статус рассчитывается по деталям заказа">
-            <Tag color="blue">Авто</Tag>
-          </Tooltip>
-        )}
-        {card.pastPlannedDate && <Tag color="volcano">Плановая дата прошла</Tag>}
+      <div className="status-board-card__status-row">
+        <span className="status-board-card__status-marker" aria-hidden="true" />
+        <span className="status-board-card__status-label">{primaryStatusLabel}:</span>
+        <Typography.Text
+          className="status-board-card__status-text"
+          ellipsis={{ tooltip: primaryStatus }}
+        >
+          {primaryStatus}
+        </Typography.Text>
       </div>
 
-      <div className="status-board-card__meta">
-        <span>
-          <ClockCircleOutlined />
-          {card.plannedCompletionDate
-            ? dayjs(card.plannedCompletionDate).format(DATE_FORMAT)
-            : 'План не задан'}
-        </span>
-        {card.managerName && (
-          <span>
-            <UserOutlined />
-            {card.managerName}
-          </span>
-        )}
-        <span>{card.partsCount} дет. · {formatArea(card.totalArea)}</span>
-      </div>
+      {showCompactDetails && (
+        <>
+          <Typography.Text className="status-board-card__client" ellipsis={{ tooltip: card.clientName }}>
+            {card.clientName || 'Клиент не указан'}
+          </Typography.Text>
 
-      {card.finalAmount !== null && (
+          <div className="status-board-card__tags">
+            {card.priority <= 50 && <Tag color="red">Срочный</Tag>}
+            {board === 'production' && card.productionStatusFromDetailsEnabled && (
+              <Tooltip title="Статус рассчитывается по деталям заказа">
+                <Tag color="blue">Авто</Tag>
+              </Tooltip>
+            )}
+            {card.pastPlannedDate && <Tag color="volcano">Плановая дата прошла</Tag>}
+          </div>
+
+          <div className="status-board-card__meta">
+            <span>
+              <ClockCircleOutlined />
+              {card.plannedCompletionDate
+                ? dayjs(card.plannedCompletionDate).format(DATE_FORMAT)
+                : 'План не задан'}
+            </span>
+            {showStandardDetails && card.managerName && (
+              <span>
+                <UserOutlined />
+                {card.managerName}
+              </span>
+            )}
+            <span>{card.partsCount} дет. · {formatArea(card.totalArea)}</span>
+          </div>
+        </>
+      )}
+
+      {showStandardDetails && card.finalAmount !== null && (
         <div className="status-board-card__finance">
           <span>{card.paymentStatusName || 'Оплата без статуса'}</span>
           <span>
@@ -1360,11 +1415,6 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           )}
         </div>
       )}
-
-      <div className="status-board-card__footer">
-        <span>Обновлён {formatDateTime(card.updatedAt)}</span>
-        <span>v{card.version}</span>
-      </div>
 
       {pending && (
         <div className="status-board-card__pending-label">
@@ -1386,7 +1436,7 @@ function confirmManualProductionMove(
       title: 'Перевести заказ в ручной режим?',
       content: (
         <>
-          Заказ <strong>{card.fullNumber}</strong> использует автостатус по деталям.
+          Заказ <strong>{formatStatusBoardOrderNumber(card)}</strong> использует автостатус по деталям.
           Переход в «{targetName}» отключит авторасчёт и применит выбранный статус
           деталям заказа.
         </>
@@ -1400,6 +1450,10 @@ function confirmManualProductionMove(
       },
     });
   });
+}
+
+function formatStatusBoardOrderNumber(card: OrderStatusBoardCard): string {
+  return card.orderName.trim() || String(card.orderId);
 }
 
 function useFinePointer(): boolean {

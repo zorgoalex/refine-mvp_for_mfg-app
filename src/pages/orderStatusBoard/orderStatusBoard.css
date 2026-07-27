@@ -69,6 +69,19 @@
   cursor: pointer;
 }
 
+.status-board-toolbar__display-mode {
+  min-height: 32px;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.status-board-toolbar__display-mode .ant-segmented {
+  flex: 0 0 auto;
+}
+
 .status-board-scrollbar {
   min-height: 16px;
   flex: 0 0 16px;
@@ -240,12 +253,25 @@
   pointer-events: none;
 }
 
+.status-board-card--compact {
+  padding: 8px 10px;
+}
+
+.status-board-card--minimal {
+  padding: 8px 10px;
+}
+
 .status-board-card__top {
   min-height: 36px;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 6px;
+}
+
+.status-board-card--compact .status-board-card__top,
+.status-board-card--minimal .status-board-card__top {
+  min-height: 32px;
 }
 
 .status-board-card__number {
@@ -268,6 +294,12 @@
   height: 36px;
 }
 
+.status-board-card--compact .status-board-card__actions .ant-btn,
+.status-board-card--minimal .status-board-card__actions .ant-btn {
+  width: 32px;
+  height: 32px;
+}
+
 .status-board-card__drag {
   cursor: grab;
   touch-action: none;
@@ -281,6 +313,39 @@
   display: block;
   margin-bottom: 7px;
   color: var(--app-text-muted);
+}
+
+.status-board-card__status-row {
+  min-width: 0;
+  margin: 2px 0 7px;
+  display: grid;
+  grid-template-columns: 8px max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.status-board-card--minimal .status-board-card__status-row {
+  margin-bottom: 0;
+}
+
+.status-board-card__status-marker {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-color);
+}
+
+.status-board-card__status-label {
+  color: var(--app-text-muted);
+  font-weight: 600;
+}
+
+.status-board-card__status-text {
+  min-width: 0;
+  color: var(--app-text);
+  font-weight: 650;
 }
 
 .status-board-card__tags {
@@ -302,6 +367,15 @@
   color: var(--app-text-muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+
+.status-board-card--compact .status-board-card__client,
+.status-board-card--compact .status-board-card__tags {
+  margin-bottom: 5px;
+}
+
+.status-board-card--compact .status-board-card__meta {
+  gap: 3px;
 }
 
 .status-board-card__meta > span {
@@ -598,6 +672,26 @@
   .status-board-toolbar__search,
   .status-board-toolbar .ant-picker {
     width: 100%;
+  }
+
+  .status-board-toolbar__display-mode {
+    width: 100%;
+    margin-left: 0;
+    align-items: stretch;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .status-board-toolbar__display-mode .ant-segmented {
+    width: 100%;
+  }
+
+  .status-board-toolbar__display-mode .ant-segmented-group {
+    display: flex;
+  }
+
+  .status-board-toolbar__display-mode .ant-segmented-item {
+    flex: 1 1 0;
   }
 
   .status-board-viewport {

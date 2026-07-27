@@ -94,4 +94,22 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('font-weight: 650');
     expect(css).toContain('font-weight: 400');
   });
+
+  it('keeps order cards dense, status-explicit and project-code-free', () => {
+    expect(page).toContain("type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal'");
+    expect(page).toContain('STATUS_BOARD_CARD_DISPLAY_OPTIONS');
+    expect(page).toContain('Вид карточек заказов');
+    expect(page).toContain('Стандартный');
+    expect(page).toContain('Компактный');
+    expect(page).toContain('Минимальный');
+    expect(page).toContain('formatStatusBoardOrderNumber(card)');
+    expect(page).toContain('card.orderName.trim() || String(card.orderId)');
+    expect(page).not.toContain('card.fullNumber');
+    expect(page).toContain("board === 'order' ? 'Статус заказа' : 'Статус производства'");
+    expect(page).toContain('status-board-card__status-row');
+    expect(css).toContain('.status-board-toolbar__display-mode');
+    expect(css).toContain('.status-board-card--compact');
+    expect(css).toContain('.status-board-card--minimal');
+    expect(css).toContain('.status-board-card__status-row');
+  });
 });
