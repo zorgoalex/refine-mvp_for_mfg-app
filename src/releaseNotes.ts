@@ -30,6 +30,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-27",
+    title: "JSON snapshot заказов: актуальный импорт с проектами",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Импорт JSON snapshot нового заказа снова создаёт заказ в актуальной схеме ERP с обязательной привязкой к проекту.",
+      "Выгрузка snapshot включает projectId заказа, а импорт создаёт локальный проект для нового заказа вместо использования переносимого source-ID как локального ключа.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-25",
     title: "Надёжная первичная синхронизация с Битрикс24",
     services: ["ERP", "CRM"],

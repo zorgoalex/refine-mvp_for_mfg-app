@@ -86,6 +86,7 @@ function normalizeHeader(header: SaveOrderHeaderDto): NormalizedSaveOrderHeaderD
 
   return {
     orderId: optionalInteger(raw.orderId, 'header.orderId') ?? undefined,
+    projectId: optionalInteger(raw.projectId, 'header.projectId'),
     orderName: requiredString(raw.orderName),
     clientId: requiredNumber(raw.clientId, 'header.clientId'),
     orderDate: normalizeDateOnly(raw.orderDate) ?? '',
