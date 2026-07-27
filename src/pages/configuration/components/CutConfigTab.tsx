@@ -32,6 +32,7 @@ import {
   BorderOutlined,
   CopyOutlined,
   DeleteOutlined,
+  FileTextOutlined,
   MinusOutlined,
   PictureOutlined,
   PlusOutlined,
@@ -396,7 +397,7 @@ export const CutConfigTab: React.FC = () => {
   );
 };
 
-type PdfTemplateElementType = 'text' | 'field' | 'custom' | 'qr' | 'line' | 'rect' | 'sheet_thumbnail' | 'detail_table';
+type PdfTemplateElementType = 'text' | 'field' | 'custom' | 'qr' | 'line' | 'rect' | 'sheet_thumbnail' | 'detail_table' | 'machine_files_table';
 type PdfTextAlign = 'left' | 'center' | 'right';
 type PdfFieldSource = CutPdfFieldCatalogItem['source'] | 'client' | 'computed';
 
@@ -476,6 +477,7 @@ const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
   { id: 'sheet.details_count', source: 'sheet', label: 'Количество деталей на листе', category: 'Лист', type: 'number' },
   { id: 'sheet.area', source: 'sheet', label: 'Площадь деталей', category: 'Лист', type: 'number' },
   { id: 'sheet.thumbnail', source: 'sheet', label: 'Миниатюра листа раскроя', category: 'Лист', type: 'string' },
+  { id: 'sheet.machine_files', source: 'sheet', label: 'Файлы станка на листе', category: 'Лист', type: 'string' },
   { id: 'order.unique_names', source: 'order', label: 'Заказы на листе', category: 'Заказ', type: 'string' },
   { id: 'order.date', source: 'order', label: 'Дата заказа', category: 'Заказ', type: 'date' },
   { id: 'order.ready_date', source: 'order', label: 'Дата готовности', category: 'Заказ', type: 'date' },
@@ -483,6 +485,7 @@ const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
   { id: 'detail.materials', source: 'detail', label: 'Материалы деталей', category: 'Детали', type: 'string' },
   { id: 'detail.films', source: 'detail', label: 'Пленки деталей', category: 'Детали', type: 'string' },
   { id: 'detail.thicknesses', source: 'detail', label: 'Толщины деталей', category: 'Детали', type: 'string' },
+  { id: 'detail.machine_files', source: 'detail', label: 'Файлы станка деталей', category: 'Детали', type: 'string' },
   { id: 'detail.table', source: 'detail', label: 'Таблица деталей', category: 'Детали', type: 'string' },
   { id: 'detail.row_number', source: 'detail', label: 'Номер строки', category: 'Таблица деталей', type: 'number' },
   { id: 'detail.order', source: 'detail', label: 'Заказ', category: 'Таблица деталей', type: 'string' },
@@ -490,6 +493,8 @@ const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
   { id: 'detail.lengthMm', source: 'detail', label: 'Длина', category: 'Таблица деталей', type: 'number' },
   { id: 'detail.widthMm', source: 'detail', label: 'Ширина', category: 'Таблица деталей', type: 'number' },
   { id: 'detail.quantity', source: 'detail', label: 'Количество', category: 'Таблица деталей', type: 'number' },
+  { id: 'detail.doweling', source: 'detail', sourceColumn: 'doweling', label: 'Присадка', category: 'Таблица деталей', type: 'boolean' },
+  { id: 'detail.machine_file', source: 'detail', label: 'Файл станка', category: 'Таблица деталей', type: 'string' },
   { id: 'detail.material', source: 'detail', label: 'Материал', category: 'Таблица деталей', type: 'string' },
   { id: 'detail.film', source: 'detail', label: 'Пленка', category: 'Таблица деталей', type: 'string' },
   { id: 'detail.client', source: 'detail', label: 'Клиент', category: 'Таблица деталей', type: 'string' },
@@ -513,6 +518,7 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'sheet.details_count': '32',
   'sheet.area': '5.378 м.кв.',
   'sheet.thumbnail': '',
+  'sheet.machine_files': 'CNC#1_11380.TXT',
   'order.unique_names': '11380',
   'order.date': '03.07.2026',
   'order.ready_date': '10.07.2026',
@@ -520,6 +526,7 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'detail.materials': 'Ванна 2080x1050',
   'detail.films': 'Крем брюле -Декор+',
   'detail.thicknesses': '16',
+  'detail.machine_files': 'CNC#1_11380.TXT',
   'detail.table': '#  Длина  Ширина  Кол-во',
   'detail.row_number': '1',
   'detail.order': '11380',
@@ -527,6 +534,8 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'detail.lengthMm': '800',
   'detail.widthMm': '240',
   'detail.quantity': '2',
+  'detail.doweling': '✓',
+  'detail.machine_file': 'CNC#1_11380.TXT',
   'detail.material': 'Ванна 2080x1050',
   'detail.film': 'Крем брюле -Декор+',
   'detail.client': 'Тестовый клиент',
@@ -544,6 +553,8 @@ const DEFAULT_PDF_DETAIL_TABLE_COLUMNS: PdfDetailTableColumn[] = [
   { field: 'detail.lengthMm', label: 'Длина', width: 1.1, visible: true },
   { field: 'detail.widthMm', label: 'Ширина', width: 1.1, visible: true },
   { field: 'detail.quantity', label: 'Кол-во', width: 0.9, visible: true },
+  { field: 'detail.doweling', label: 'Присадка', width: 0.95, visible: true },
+  { field: 'detail.machine_file', label: 'Файл станка', width: 1.8, visible: true },
 ];
 const DEFAULT_PDF_ELEMENTS: PdfTemplateElement[] = [
   makePdfElement('field', { id: 'field-order', label: 'Заказ', source: 'order.unique_names', x: 12, y: 10, w: 84, h: 8, align: 'left' }),
@@ -552,6 +563,7 @@ const DEFAULT_PDF_ELEMENTS: PdfTemplateElement[] = [
   makePdfElement('line', { id: 'line-header', label: 'Линия шапки', x: 12, y: 22, w: 270, h: 0 }),
   makePdfElement('sheet_thumbnail', { id: 'sheet-thumbnail', label: 'Миниатюра листа', source: 'sheet.thumbnail', x: 12, y: 34, w: 202, h: 154 }),
   makePdfElement('detail_table', { id: 'detail-table', label: 'Таблица деталей', source: 'detail.table', x: 222, y: 34, w: 60, h: 78 }),
+  makePdfElement('machine_files_table', { id: 'machine-files-table', label: 'Файлы станка', source: 'sheet.machine_files', x: 222, y: 116, w: 60, h: 32 }),
 ];
 
 const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canManage }) => {
@@ -668,6 +680,8 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     (field: PdfFieldCatalogItem, x = 24, y = 28) => {
       const type: PdfTemplateElementType = field.id === 'sheet.thumbnail'
         ? 'sheet_thumbnail'
+        : field.id === 'sheet.machine_files' || field.id === 'detail.machine_files'
+          ? 'machine_files_table'
         : field.id === 'detail.table'
           ? 'detail_table'
           : field.source === 'custom'
@@ -678,8 +692,8 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         source: field.id,
         x,
         y,
-        w: type === 'sheet_thumbnail' ? 150 : type === 'detail_table' ? 82 : Math.min(80, Math.max(34, field.label.length * 3.2)),
-        h: type === 'sheet_thumbnail' ? 90 : type === 'detail_table' ? 64 : 8,
+        w: type === 'sheet_thumbnail' ? 150 : type === 'detail_table' || type === 'machine_files_table' ? 82 : Math.min(80, Math.max(34, field.label.length * 3.2)),
+        h: type === 'sheet_thumbnail' ? 90 : type === 'detail_table' ? 64 : type === 'machine_files_table' ? 28 : 8,
         align: 'left',
       });
     },
@@ -1046,6 +1060,9 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         </Button>
         <Button icon={<TableOutlined />} disabled={!canManage} onClick={() => addElement('detail_table')}>
           Таблица деталей
+        </Button>
+        <Button icon={<FileTextOutlined />} disabled={!canManage} onClick={() => addElement('machine_files_table')}>
+          Файлы станка
         </Button>
         <Button icon={<MinusOutlined />} disabled={!canManage} onClick={() => addElement('line')}>
           Линия
@@ -1513,6 +1530,30 @@ const PdfKonvaElement: React.FC<{
       </React.Fragment>
     );
   }
+  if (element.type === 'machine_files_table') {
+    const w = Math.max(element.w, 1);
+    const h = Math.max(element.h, 1);
+    const headerH = Math.min(7, h * 0.28);
+    const rowH = Math.max(4.5, Math.min(7, (h - headerH) / 3));
+    const files = ['CNC#1_11380.TXT', 'CNC#2_11380.TXT'];
+    return (
+      <React.Fragment>
+        <KonvaGroup {...common} width={w} height={h}>
+          <KonvaRect x={0} y={0} width={w} height={h} fill="#ffffff" stroke={String(element.style.color ?? '#111111')} strokeWidth={0.22} />
+          <KonvaRect x={0} y={0} width={w} height={headerH} fill="#f5f5f5" stroke="#111111" strokeWidth={0.16} listening={false} />
+          <KonvaText x={0.8} y={1} width={Math.max(1, w - 1.6)} height={headerH - 1} text="Файлы станка" fontFamily="Arial" fontSize={Math.max(2.2, Math.min(3.4, headerH * 0.42))} align="center" wrap="word" ellipsis listening={false} />
+          {files.map((file, rowIndex) => (
+            <React.Fragment key={file}>
+              <KonvaRect x={0} y={headerH + rowIndex * rowH} width={w} height={rowH} fill="#ffffff" stroke="#111111" strokeWidth={0.12} listening={false} />
+              <KonvaText x={0.8} y={headerH + rowIndex * rowH + 1} width={Math.max(1, w - 1.6)} height={rowH - 1} text={file} fontFamily="Arial" fontSize={Math.max(2, Math.min(3, rowH * 0.42))} align="center" wrap="word" ellipsis listening={false} />
+            </React.Fragment>
+          ))}
+        </KonvaGroup>
+        {selectedBox}
+        {boundsBox}
+      </React.Fragment>
+    );
+  }
   if (element.type === 'qr') {
     const side = Math.max(element.w, element.h, 8);
     const moduleSide = side / 7;
@@ -1647,6 +1688,7 @@ const PdfElementProperties: React.FC<{
               { value: 'qr', label: 'QR-код' },
               { value: 'sheet_thumbnail', label: 'Миниатюра листа' },
               { value: 'detail_table', label: 'Таблица деталей' },
+              { value: 'machine_files_table', label: 'Файлы станка' },
               { value: 'line', label: 'Линия' },
               { value: 'rect', label: 'Прямоугольник' },
             ]}
@@ -1776,8 +1818,8 @@ const PdfElementProperties: React.FC<{
         </Row>
         <Row gutter={8}>
           <Col span={8}><NumberBox label="Поворот" value={element.rotation} disabled={!canManage} onChange={(rotation) => onPatch({ rotation })} /></Col>
-          <Col span={8}><NumberBox label="Шрифт" value={Number(style.fontSize ?? 10)} disabled={!canManage || !['text', 'field', 'custom', 'detail_table'].includes(element.type)} onChange={(fontSize) => onPatch({ style: { ...style, fontSize } })} /></Col>
-          <Col span={8}><NumberBox label="Линия" value={Number(style.strokeWidth ?? 0.35)} disabled={!canManage || !['line', 'rect', 'sheet_thumbnail', 'detail_table'].includes(element.type)} onChange={(strokeWidth) => onPatch({ style: { ...style, strokeWidth } })} /></Col>
+          <Col span={8}><NumberBox label="Шрифт" value={Number(style.fontSize ?? 10)} disabled={!canManage || !['text', 'field', 'custom', 'detail_table', 'machine_files_table'].includes(element.type)} onChange={(fontSize) => onPatch({ style: { ...style, fontSize } })} /></Col>
+          <Col span={8}><NumberBox label="Линия" value={Number(style.strokeWidth ?? 0.35)} disabled={!canManage || !['line', 'rect', 'sheet_thumbnail', 'detail_table', 'machine_files_table'].includes(element.type)} onChange={(strokeWidth) => onPatch({ style: { ...style, strokeWidth } })} /></Col>
         </Row>
         <Form.Item label="Цвет" style={{ marginBottom: 10 }}>
           <Input type="color" value={String(style.color ?? '#111111')} disabled={!canManage} onChange={(event) => onPatch({ style: { ...style, color: event.target.value } })} />
@@ -1851,7 +1893,7 @@ function layoutToPdfDraftShape(layout: Record<string, unknown>): Pick<PdfTemplat
       ? layout.customFields.map(normalizeCustomField)
       : [];
   const rawElements = Array.isArray(layout.elements) ? layout.elements : DEFAULT_PDF_ELEMENTS;
-  return { page, customFields, elements: rawElements.map((element, index) => normalizePdfElement(element, index)) };
+  return { page, customFields, elements: upgradeDefaultPdfElements(rawElements.map((element, index) => normalizePdfElement(element, index))) };
 }
 
 function pdfDraftToLayout(draft: PdfTemplateDraft): Record<string, unknown> {
@@ -1884,7 +1926,7 @@ function normalizePdfDraft(raw: Partial<PdfTemplateDraft>): PdfTemplateDraft {
       height: Number(raw.page?.height ?? PDF_PAGE.height),
     },
     customFields: Array.isArray(raw.customFields) ? raw.customFields.map(normalizeCustomField) : [],
-    elements: (Array.isArray(raw.elements) && raw.elements.length > 0 ? raw.elements : DEFAULT_PDF_ELEMENTS).map((element, index) => normalizePdfElement(element, index)),
+    elements: upgradeDefaultPdfElements((Array.isArray(raw.elements) && raw.elements.length > 0 ? raw.elements : DEFAULT_PDF_ELEMENTS).map((element, index) => normalizePdfElement(element, index))),
   };
 }
 
@@ -1963,6 +2005,7 @@ function defaultPatchForType(type: PdfTemplateElementType): Partial<PdfTemplateE
   if (type === 'qr') return { label: 'QR-код', source: null, text: null, x: 18, y: 18, w: 22, h: 22, align: 'center', style: { qrName: 'QR', qrTemplate: '{order.unique_names}\\n{sheet.number}', qrErrorCorrection: 'M' } };
   if (type === 'sheet_thumbnail') return { label: 'Миниатюра листа', source: 'sheet.thumbnail', text: null, x: 18, y: 32, w: 150, h: 95, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fit: 'contain' } };
   if (type === 'detail_table') return { label: 'Таблица деталей', source: 'detail.table', text: null, x: 180, y: 32, w: 88, h: 72, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fontSize: 7, columns: DEFAULT_PDF_DETAIL_TABLE_COLUMNS, sort: { field: 'detail.order', direction: 'asc' } } };
+  if (type === 'machine_files_table') return { label: 'Файлы станка', source: 'sheet.machine_files', text: null, x: 180, y: 108, w: 88, h: 28, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fontSize: 7 } };
   if (type === 'line') return { label: 'Линия', source: null, text: null, x: 18, y: 18, w: 64, h: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.35 } };
   return { label: 'Прямоугольник', source: null, text: null, x: 18, y: 18, w: 48, h: 22, align: 'center', style: { color: '#111111', strokeWidth: 0.35, fill: 'transparent' } };
 }
@@ -1975,6 +2018,7 @@ function pdfElementTypeLabel(type: PdfTemplateElementType): string {
     qr: 'QR',
     sheet_thumbnail: 'Миниатюра листа',
     detail_table: 'Таблица деталей',
+    machine_files_table: 'Файлы станка',
     line: 'Линия',
     rect: 'Прямоугольник',
   };
@@ -1988,6 +2032,7 @@ function isPdfElementType(value: unknown): value is PdfTemplateElementType {
     || value === 'qr'
     || value === 'sheet_thumbnail'
     || value === 'detail_table'
+    || value === 'machine_files_table'
     || value === 'line'
     || value === 'rect';
 }
@@ -2046,7 +2091,7 @@ function readPdfDetailTableColumns(style: Record<string, unknown>, includeHidden
     : Array.isArray(style.columns)
       ? style.columns
       : DEFAULT_PDF_DETAIL_TABLE_COLUMNS;
-  return rawColumns
+  return upgradeDefaultPdfDetailTableColumns(rawColumns
     .map((raw): PdfDetailTableColumn | null => {
       if (!isRecord(raw)) return null;
       const field = typeof raw.field === 'string' && raw.field.trim() ? raw.field.trim() : 'detail.order';
@@ -2057,7 +2102,52 @@ function readPdfDetailTableColumns(style: Record<string, unknown>, includeHidden
         visible: raw.visible !== false,
       };
     })
-    .filter((column): column is PdfDetailTableColumn => Boolean(column) && (includeHidden || column.visible));
+    .filter((column): column is PdfDetailTableColumn => Boolean(column) && (includeHidden || column.visible)));
+}
+
+const LEGACY_DEFAULT_PDF_DETAIL_TABLE_COLUMN_FIELDS = [
+  'detail.row_number',
+  'detail.order',
+  'detail.position',
+  'detail.lengthMm',
+  'detail.widthMm',
+  'detail.quantity',
+];
+
+function upgradeDefaultPdfDetailTableColumns(columns: PdfDetailTableColumn[]): PdfDetailTableColumn[] {
+  const fields = columns.map((column) => column.field);
+  const isLegacyDefault =
+    fields.length === LEGACY_DEFAULT_PDF_DETAIL_TABLE_COLUMN_FIELDS.length &&
+    LEGACY_DEFAULT_PDF_DETAIL_TABLE_COLUMN_FIELDS.every((field, index) => fields[index] === field);
+  if (!isLegacyDefault) return columns;
+  return [
+    ...columns,
+    { field: 'detail.doweling', label: 'Присадка', width: 0.95, visible: true },
+    { field: 'detail.machine_file', label: 'Файл станка', width: 1.8, visible: true },
+  ];
+}
+
+function upgradeDefaultPdfElements(elements: PdfTemplateElement[]): PdfTemplateElement[] {
+  if (elements.some((element) => element.type === 'machine_files_table')) return elements;
+  const ids = new Set(elements.map((element) => element.id));
+  const isLegacyDefault = ['field-order', 'field-client', 'field-film', 'line-header', 'sheet-thumbnail', 'detail-table']
+    .every((id) => ids.has(id));
+  if (!isLegacyDefault) return elements;
+  const detailTable = elements.find((element) => element.id === 'detail-table' && element.type === 'detail_table');
+  if (!detailTable) return elements;
+  return [
+    ...elements,
+    makePdfElement('machine_files_table', {
+      id: 'machine-files-table',
+      label: 'Файлы станка',
+      source: 'sheet.machine_files',
+      x: detailTable.x,
+      y: detailTable.y + detailTable.h + 4,
+      w: detailTable.w,
+      h: 32,
+      zIndex: Math.max(...elements.map((element) => element.zIndex), detailTable.zIndex) + 1,
+    }),
+  ];
 }
 
 function readPdfDetailTableSort(style: Record<string, unknown>): { field: string; direction: 'asc' | 'desc' } {
@@ -2116,6 +2206,9 @@ function pdfDetailTablePreviewValue(field: string, rowIndex: number): string {
     'detail.height': String(800 - rowIndex * 20),
     'detail.width': String(240 + rowIndex * 15),
     'detail.quantity': String(rowIndex + 1),
+    'detail.doweling': rowIndex === 1 ? '' : '✓',
+    'detail.machine_file': rowIndex === 1 ? 'CNC#2_11380.TXT' : 'CNC#1_11380.TXT',
+    'detail.machine_files': 'CNC#1_11380.TXT, CNC#2_11380.TXT',
     'detail.area': String(((800 - rowIndex * 20) * (240 + rowIndex * 15) / 1_000_000).toFixed(3)),
     'detail.material': 'Ванна',
     'detail.material_name': 'Ванна',

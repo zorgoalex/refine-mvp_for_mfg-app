@@ -31,6 +31,20 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-27",
+    title: "PDF раскроя: файлы станка на листе",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В PDF-шаблоне раскроя добавлена отдельная таблица файлов станка для деталей текущего листа.",
+      "В таблицу деталей по умолчанию добавлены колонки «Присадка» и «Файл станка».",
+    ],
+    changed: [
+      "Список доступных полей PDF-шаблона теперь включает поля файлов станка на листе и в деталях.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-27",
     title: "Отложенная автосмена статуса после дедлайна",
     services: ["ERP"],
     repositories: ["repo_erp"],

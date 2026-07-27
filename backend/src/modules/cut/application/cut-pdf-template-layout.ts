@@ -10,7 +10,8 @@ export type CutPdfTemplateElementType =
   | 'line'
   | 'rect'
   | 'sheet_thumbnail'
-  | 'detail_table';
+  | 'detail_table'
+  | 'machine_files_table';
 
 export interface CutPdfFieldCatalogItem {
   id: string;
@@ -30,6 +31,7 @@ const ELEMENT_TYPES = new Set<CutPdfTemplateElementType>([
   'rect',
   'sheet_thumbnail',
   'detail_table',
+  'machine_files_table',
 ]);
 
 const TEXT_ALIGN = new Set(['left', 'center', 'right']);
@@ -171,9 +173,11 @@ const CUT_SPECIFIC_FIELD_CATALOG: CutPdfFieldCatalogItem[] = [
   { id: 'sheet.details_count', source: 'sheet', sourceColumn: null, label: 'Количество деталей на листе', category: 'Лист раскроя', type: 'number' },
   { id: 'sheet.area', source: 'sheet', sourceColumn: null, label: 'Площадь деталей', category: 'Лист раскроя', type: 'number' },
   { id: 'sheet.thumbnail', source: 'sheet', sourceColumn: null, label: 'Миниатюра листа раскроя', category: 'Лист раскроя', type: 'string' },
+  { id: 'sheet.machine_files', source: 'sheet', sourceColumn: null, label: 'Файлы станка на листе', category: 'Лист раскроя', type: 'string' },
   { id: 'detail.materials', source: 'detail', sourceColumn: null, label: 'Материалы деталей', category: 'Детали листа', type: 'string' },
   { id: 'detail.films', source: 'detail', sourceColumn: null, label: 'Пленки деталей', category: 'Детали листа', type: 'string' },
   { id: 'detail.thicknesses', source: 'detail', sourceColumn: null, label: 'Толщины деталей', category: 'Детали листа', type: 'string' },
+  { id: 'detail.machine_files', source: 'detail', sourceColumn: null, label: 'Файлы станка деталей', category: 'Детали листа', type: 'string' },
   { id: 'detail.table', source: 'detail', sourceColumn: null, label: 'Таблица деталей листа', category: 'Таблица деталей', type: 'string' },
   { id: 'detail.row_number', source: 'detail', sourceColumn: null, label: 'Номер строки', category: 'Таблица деталей', type: 'number' },
   { id: 'detail.order', source: 'detail', sourceColumn: null, label: 'Заказ', category: 'Таблица деталей', type: 'string' },
@@ -181,6 +185,7 @@ const CUT_SPECIFIC_FIELD_CATALOG: CutPdfFieldCatalogItem[] = [
   { id: 'detail.lengthMm', source: 'detail', sourceColumn: null, label: 'Длина', category: 'Таблица деталей', type: 'number' },
   { id: 'detail.widthMm', source: 'detail', sourceColumn: null, label: 'Ширина', category: 'Таблица деталей', type: 'number' },
   { id: 'detail.quantity', source: 'detail', sourceColumn: null, label: 'Количество', category: 'Таблица деталей', type: 'number' },
+  { id: 'detail.machine_file', source: 'detail', sourceColumn: null, label: 'Файл станка', category: 'Таблица деталей', type: 'string' },
   { id: 'detail.material', source: 'detail', sourceColumn: null, label: 'Материал', category: 'Таблица деталей', type: 'string' },
   { id: 'detail.film', source: 'detail', sourceColumn: null, label: 'Пленка', category: 'Таблица деталей', type: 'string' },
   { id: 'detail.client', source: 'detail', sourceColumn: null, label: 'Клиент', category: 'Таблица деталей', type: 'string' },

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { FreecutClient } from './freecut-client';
@@ -13,6 +14,8 @@ import {
   routingContractForCalcBasis,
   VACUUM_ROUTING_CONTRACT_VERSION,
 } from './pg-cut-repository';
+
+const repositorySource = readFileSync(new URL('./pg-cut-repository.ts', import.meta.url), 'utf8');
 
 describe('cut result number allocation', () => {
   const currentManual = {
@@ -140,6 +143,16 @@ describe('resolvePdfTemplateSelection', () => {
       code: 'standard',
       requiresActiveCheck: true,
     });
+  });
+});
+
+describe('cut PDF CNC enrichment contract', () => {
+  it('loads deterministic latest-day matched CNC machine files by order detail', () => {
+    expect(repositorySource).toContain('FROM cnc_telegram_packet_items cti');
+    expect(repositorySource).toContain('cti.match_detail_id = od.detail_id');
+    expect(repositorySource).toContain("cti.match_status = 'matched'");
+    expect(repositorySource).toContain('max(p2.workday) AS latest_workday');
+    expect(repositorySource).toContain("COALESCE(NULLIF(trim(p.program_name), ''), p.external_packet_key)");
   });
 });
 
@@ -299,6 +312,33 @@ function createDatabase(options: FakeDbOptions = {}) {
 
     if (sql.startsWith('SELECT cji.cut_job_item_id')) {
       return { rows: options.calcItems ?? [], rowCount: (options.calcItems ?? []).length };
+    }
+
+    if (sql.startsWith('SELECT cji.order_detail_id, cji.order_id,')) {
+      const rows = (options.calcItems ?? []).map((item) => ({
+        order_detail_id: item.order_detail_id,
+        order_id: item.order_id,
+        detail_fields: item.detail_fields ?? null,
+        detail_number: item.detail_number ?? null,
+        width: item.width_mm,
+        height: item.height_mm,
+        sheet_material_type_id: item.sheet_material_type_id,
+        material_id: item.material_id ?? null,
+        doweling: item.doweling ?? null,
+        material_name: item.material_name ?? null,
+        thickness_mm: item.thickness_mm ?? null,
+        film_name: item.film_name ?? null,
+        milling_type_name: item.milling_type_name ?? null,
+        edge_type_name: item.edge_type_name ?? null,
+        production_status_name: item.production_status_name ?? null,
+        machine_files: item.machine_files ?? null,
+        order_name: item.order_name ?? null,
+        order_date: item.order_date ?? null,
+        completion_date: item.completion_date ?? null,
+        planned_completion_date: item.planned_completion_date ?? null,
+        client_name: item.client_name ?? null,
+      }));
+      return { rows, rowCount: rows.length };
     }
 
     if (sql.startsWith('SELECT production_status_id FROM production_statuses')) {
@@ -686,6 +726,66 @@ describe('PgCutRepository', () => {
     expect(snapshot.unplaced).toEqual([{ itemId: 'det-1', instance: 2, reason: 'no_space' }]);
     expect(snapshot.groups[0]?.sheets[0]?.renderSnapshot?.contractVersion).toBe('cut_sheet_render_v1');
     expect(Object.keys(snapshot.groups[0]?.sheets[0]?.renderSnapshot?.views ?? {})).toHaveLength(12);
+  });
+
+  it('calculate freezes PDF detail rows with doweling and merged machine files', async () => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [{
+        cut_job_item_id: 501,
+        order_detail_id: 1,
+        order_id: 9,
+        qty: 2,
+        width_mm: 600,
+        height_mm: 400,
+        detail_number: 12,
+        sheet_material_type_id: 9,
+        film_id: null,
+        film_texture: null,
+        smt_width_mm: 2800,
+        smt_height_mm: 2070,
+        doweling: true,
+        machine_files: ['CNC#1_11380.TXT', 'CNC#2_11380.TXT'],
+        order_name: '11380',
+      }],
+    });
+    const repo = new PgCutRepository(db.service, echoFreecut());
+
+    await repo.calculate({
+      currentUser: currentUser(),
+      cutJobId: 42,
+      version: 0,
+      commandId: '55555555-5555-4555-8555-555555555555',
+      requestId: 'r-machine-files',
+    });
+
+    const resultInsert = db.queries.find((query) => normalize(query.text).startsWith('INSERT INTO cut_result ('));
+    const snapshot = JSON.parse(String(resultInsert?.params[9])) as {
+      groups: Array<{
+        sheets: Array<{
+          renderSnapshot?: {
+            pdfMeta?: { machineFiles?: string[] };
+            pdfDetailRows?: Array<{
+              quantity: number;
+              machineFiles?: string[];
+              fields?: Record<string, unknown>;
+            }>;
+          };
+        }>;
+      }>;
+    };
+    const renderSnapshot = snapshot.groups[0]?.sheets[0]?.renderSnapshot;
+    const row = renderSnapshot?.pdfDetailRows?.[0];
+
+    expect(renderSnapshot?.pdfMeta?.machineFiles).toEqual(['CNC#1_11380.TXT', 'CNC#2_11380.TXT']);
+    expect(row?.quantity).toBe(2);
+    expect(row?.machineFiles).toEqual(['CNC#1_11380.TXT', 'CNC#2_11380.TXT']);
+    expect(row?.fields).toMatchObject({
+      doweling: true,
+      sheet_quantity: 2,
+      machine_file: 'CNC#1_11380.TXT, CNC#2_11380.TXT',
+      machine_files: 'CNC#1_11380.TXT, CNC#2_11380.TXT',
+    });
   });
 
   it('reconciles expired calculate commands and only fails the job at the claimed version', async () => {

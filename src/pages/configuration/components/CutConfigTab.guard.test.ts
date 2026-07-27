@@ -120,8 +120,13 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/QR-код/);
     expect(tabSrc).toMatch(/sheet_thumbnail/);
     expect(tabSrc).toMatch(/detail_table/);
+    expect(tabSrc).toMatch(/machine_files_table/);
     expect(tabSrc).toMatch(/Миниатюра листа/);
     expect(tabSrc).toMatch(/Таблица деталей/);
+    expect(tabSrc).toMatch(/Файлы станка/);
+    expect(tabSrc).toMatch(/sheet\.machine_files/);
+    expect(tabSrc).toMatch(/detail\.machine_file/);
+    expect(tabSrc).toMatch(/detail\.doweling/);
     expect(tabSrc).toMatch(/Линия/);
     expect(tabSrc).toMatch(/Прямоугольник/);
     expect(tabSrc).toMatch(/PdfTemplateCanvas/);
@@ -131,6 +136,8 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/customFieldSchema/);
     expect(tabSrc).toMatch(/sort:\s*\{\s*field:\s*'detail\.order'/);
     expect(tabSrc).toMatch(/readPdfDetailTableColumns/);
+    expect(tabSrc).toMatch(/upgradeDefaultPdfDetailTableColumns/);
+    expect(tabSrc).toMatch(/upgradeDefaultPdfElements/);
     expect(tabSrc).toMatch(/CUT_PDF_FIELD_DRAG_TYPE/);
     expect(tabSrc).toMatch(/resolveDroppedPdfField/);
     expect(tabSrc).toMatch(/wideCanvas/);

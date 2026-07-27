@@ -155,6 +155,8 @@ interface RenderDetailInfo {
   widthMm: number | null;
   heightMm: number | null;
   detailFields: Record<string, unknown> | null;
+  doweling: boolean | null;
+  machineFiles: string[];
   materialName: string | null;
   thicknessMm: number | null;
   filmName: string | null;
@@ -2816,6 +2818,8 @@ export class PgCutRepository implements CutRepositoryPort {
       milling_type_name: string | null;
       edge_type_name: string | null;
       production_status_name: string | null;
+      doweling: boolean | null;
+      machine_files: string[] | null;
       order_name: string | null;
       order_date: string | Date | null;
       completion_date: string | Date | null;
@@ -2830,9 +2834,11 @@ export class PgCutRepository implements CutRepositoryPort {
               to_jsonb(od) AS detail_fields,
               od.detail_number, od.width, od.height,
               od.sheet_material_type_id, od.material_id,
+              od.doweling,
               COALESCE(smt.name, m.material_name) AS material_name,
               smt.thickness_mm, f.film_name,
               mt.milling_type_name, et.edge_type_name, ps.production_status_name,
+              cnc.machine_files,
               o.order_name, o.order_date, o.completion_date, o.planned_completion_date,
               c.client_name
        FROM cut_job_item cji
@@ -2843,6 +2849,23 @@ export class PgCutRepository implements CutRepositoryPort {
        LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
        LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
        LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
+       LEFT JOIN LATERAL (
+         SELECT array_agg(machine_file ORDER BY machine_file) AS machine_files
+         FROM (
+           SELECT DISTINCT COALESCE(NULLIF(trim(p.program_name), ''), p.external_packet_key) AS machine_file
+           FROM cnc_telegram_packet_items cti
+           JOIN cnc_telegram_packets p ON p.packet_id = cti.packet_id
+           JOIN (
+             SELECT max(p2.workday) AS latest_workday
+             FROM cnc_telegram_packet_items cti2
+             JOIN cnc_telegram_packets p2 ON p2.packet_id = cti2.packet_id
+             WHERE cti2.match_detail_id = od.detail_id
+               AND cti2.match_status = 'matched'
+           ) latest ON latest.latest_workday = p.workday
+           WHERE cti.match_detail_id = od.detail_id
+             AND cti.match_status = 'matched'
+         ) machine_file_rows
+       ) cnc ON true
        LEFT JOIN orders o ON o.order_id = cji.order_id
        LEFT JOIN clients c ON c.client_id = o.client_id
        WHERE cji.cut_group_id = $1
@@ -2863,6 +2886,8 @@ export class PgCutRepository implements CutRepositoryPort {
         widthMm: numOrNull(row.width),
         heightMm: numOrNull(row.height),
         detailFields: row.detail_fields ?? null,
+        doweling: row.doweling === null || row.doweling === undefined ? null : row.doweling === true,
+        machineFiles: normalizeMachineFiles(row.machine_files),
         materialName: row.material_name ?? null,
         thicknessMm: numOrNull(row.thickness_mm),
         filmName: row.film_name ?? null,
@@ -4120,6 +4145,7 @@ function buildPdfSheetMeta(
     materials: string[];
     thicknesses: string[];
     films: string[];
+    machineFiles: string[];
   } = {
     orders: [],
     clients: [],
@@ -4128,6 +4154,7 @@ function buildPdfSheetMeta(
     materials: [],
     thicknesses: [],
     films: [],
+    machineFiles: [],
   };
   const add = (list: string[], value: string | number | null | undefined) => {
     if (value === null || value === undefined) return;
@@ -4145,6 +4172,7 @@ function buildPdfSheetMeta(
     add(meta.materials, detail.materialName);
     add(meta.thicknesses, detail.thicknessMm);
     add(meta.films, detail.filmName);
+    for (const file of detail.machineFiles) add(meta.machineFiles, file);
   }
   return meta;
 }
@@ -4163,18 +4191,22 @@ function buildPdfDetailRows(
     const height = detail?.heightMm ?? piece.height_mm;
     const lengthMm = Math.max(width, height);
     const widthMm = Math.min(width, height);
+    const machineFiles = detail?.machineFiles ?? [];
+    const machineFile = machineFiles.join(', ');
     const row: PdfSheetDetailRow = {
       order,
       position,
       lengthMm,
       widthMm,
       quantity: 1,
+      machineFiles,
       fields: buildPdfDetailRowFields(detail, detailId, {
         order,
         position,
         lengthMm,
         widthMm,
         quantity: 1,
+        machineFile,
         material: detail?.materialName ?? null,
         film: detail?.filmName ?? null,
         client: detail?.clientName ?? null,
@@ -4205,7 +4237,15 @@ function buildPdfDetailRows(
     const existing = byKey.get(key);
     if (existing) {
       existing.quantity += 1;
-      existing.fields = { ...(existing.fields ?? {}), quantity: existing.quantity, sheet_quantity: existing.quantity };
+      const mergedMachineFiles = mergeMachineFiles(existing.machineFiles, row.machineFiles);
+      existing.machineFiles = mergedMachineFiles;
+      existing.fields = {
+        ...(existing.fields ?? {}),
+        quantity: existing.quantity,
+        sheet_quantity: existing.quantity,
+        machine_file: mergedMachineFiles.join(', '),
+        machine_files: mergedMachineFiles.join(', '),
+      };
     } else {
       byKey.set(key, row);
     }
@@ -4222,6 +4262,7 @@ function buildPdfDetailRowFields(
     lengthMm: number | null;
     widthMm: number | null;
     quantity: number;
+    machineFile: string;
     material: string | null;
     film: string | null;
     client: string | null;
@@ -4239,10 +4280,13 @@ function buildPdfDetailRowFields(
     detail_id: detailId,
     order_id: detail?.orderId ?? null,
     detail_number: detail?.detailNumber ?? null,
+    doweling: detail?.doweling ?? false,
     height: detail?.heightMm ?? null,
     width: detail?.widthMm ?? null,
     quantity: row.quantity,
     sheet_quantity: row.quantity,
+    machine_file: row.machineFile,
+    machine_files: row.machineFile,
     material_name: row.material,
     materials: row.material,
     film_name: row.film,
@@ -4262,6 +4306,28 @@ function buildPdfDetailRowFields(
     thickness: row.thickness,
     thicknesses: row.thickness,
   };
+}
+
+function normalizeMachineFiles(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const result: string[] = [];
+  for (const item of value) {
+    const text = String(item ?? '').trim();
+    if (text && !result.includes(text)) result.push(text);
+  }
+  return result;
+}
+
+function mergeMachineFiles(
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): string[] {
+  const result: string[] = [];
+  for (const value of [...(left ?? []), ...(right ?? [])]) {
+    const text = String(value ?? '').trim();
+    if (text && !result.includes(text)) result.push(text);
+  }
+  return result;
 }
 
 function pdfDetailScalar(value: unknown): LabelCustomExpressionScalar {

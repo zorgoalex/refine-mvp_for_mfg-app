@@ -148,6 +148,24 @@ describe('buildSheetsPdf', () => {
     expect(Number(mediaBox?.[1])).toBeGreaterThan(Number(mediaBox?.[2]));
   });
 
+  it('keeps empty bath profile layouts on the dedicated bath renderer', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('bath-empty-layout'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        template: 'bath_profiles',
+        templateLayout: {},
+        meta: { clients: ['Тестовый клиент'] },
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('Клиент:');
+    expect(rendered).toContain(' Тестовый клиент');
+  });
+
   it('prints the sheet number above the bath details table', async () => {
     const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
     await buildSheetsPdf([
@@ -318,6 +336,142 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('Название детали');
     expect(rendered).toContain('Фасад A');
     expect(rendered).toContain('К раскрою');
+  });
+
+  it('renders empty seeded template layouts with default detail and machine-file tables', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    const pdf = await buildSheetsPdf([
+      {
+        svg: SVG('seeded-empty-layout'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        template: 'standard',
+        templateLayout: {},
+        meta: {
+          orders: ['11380'],
+          clients: ['Тестовый клиент'],
+          films: ['Крем брюле -Декор+'],
+          machineFiles: ['CNC#1_11380.TXT'],
+        },
+        detailRows: [
+          {
+            order: '11380',
+            position: 12,
+            lengthMm: 800,
+            widthMm: 240,
+            quantity: 2,
+            machineFiles: ['CNC#1_11380.TXT'],
+            fields: { doweling: true, machine_file: 'CNC#1_11380.TXT' },
+          },
+        ],
+      },
+    ]);
+
+    const mediaBox = /\/MediaBox\s*\[\s*0\s+0\s+([0-9.]+)\s+([0-9.]+)\s*\]/.exec(pdf.toString('latin1'));
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(Number(mediaBox?.[1])).toBeCloseTo(841.89, 1);
+    expect(Number(mediaBox?.[2])).toBeCloseTo(595.28, 1);
+    expect(rendered).toContain('Присадка');
+    expect(rendered).toContain('Файл станка');
+    expect(rendered).toContain('Файлы станка');
+    expect(rendered).toContain('✓');
+    expect(rendered).toContain('CNC#1_11380.TXT');
+  });
+
+  it('upgrades legacy v3 detail table defaults with doweling and machine-file columns', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('v3-table-machine-defaults'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            {
+              id: 'table',
+              type: 'detail_table',
+              x: 10,
+              y: 20,
+              w: 120,
+              h: 45,
+              style: {
+                columns: [
+                  { field: 'detail.row_number', label: '#', width: 0.55, visible: true },
+                  { field: 'detail.order', label: 'Заказ', width: 1.6, visible: true },
+                  { field: 'detail.position', label: 'Поз.', width: 0.9, visible: true },
+                  { field: 'detail.lengthMm', label: 'Длина', width: 1.1, visible: true },
+                  { field: 'detail.widthMm', label: 'Ширина', width: 1.1, visible: true },
+                  { field: 'detail.quantity', label: 'Кол-во', width: 0.9, visible: true },
+                ],
+              },
+            },
+          ],
+        },
+        detailRows: [
+          {
+            order: '11380',
+            position: 12,
+            lengthMm: 800,
+            widthMm: 240,
+            quantity: 2,
+            machineFiles: ['CNC#1_11380.TXT'],
+            fields: { doweling: true, machine_file: 'CNC#1_11380.TXT' },
+          },
+        ],
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('Присадка');
+    expect(rendered).toContain('Файл станка');
+    expect(rendered).toContain('✓');
+    expect(rendered).toContain('CNC#1_11380.TXT');
+  });
+
+  it('renders v3 machine file tables with one unique file name per row', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('v3-machine-files'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            { id: 'files', type: 'machine_files_table', x: 10, y: 20, w: 70, h: 28, style: { fontSize: 7 } },
+          ],
+        },
+        meta: { machineFiles: ['CNC#2_11380.TXT'] },
+        detailRows: [
+          {
+            order: '11380',
+            position: 12,
+            lengthMm: 800,
+            widthMm: 240,
+            quantity: 1,
+            machineFiles: ['CNC#1_11380.TXT', 'CNC#2_11380.TXT'],
+            fields: { machine_file: 'CNC#1_11380.TXT' },
+          },
+          {
+            order: '11380',
+            position: 13,
+            lengthMm: 780,
+            widthMm: 255,
+            quantity: 1,
+            fields: { machine_files: 'CNC#1_11380.TXT, CNC#3_11380.TXT' },
+          },
+        ],
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('Файлы станка');
+    expect(rendered.filter((value) => value === 'CNC#1_11380.TXT')).toHaveLength(1);
+    expect(rendered).toContain('CNC#2_11380.TXT');
+    expect(rendered).toContain('CNC#3_11380.TXT');
   });
 
   it('renders v3 sheet thumbnail layouts on the configured PDF page size', async () => {

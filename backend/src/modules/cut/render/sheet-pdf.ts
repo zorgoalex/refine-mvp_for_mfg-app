@@ -39,6 +39,7 @@ export interface PdfSheetMeta {
   materials?: readonly string[];
   thicknesses?: readonly string[];
   films?: readonly string[];
+  machineFiles?: readonly string[];
 }
 
 export interface PdfSheetDetailRow {
@@ -48,6 +49,7 @@ export interface PdfSheetDetailRow {
   widthMm: number | null;
   quantity: number;
   fields?: Record<string, LabelCustomExpressionScalar>;
+  machineFiles?: readonly string[];
   due?: string | null;
   material?: string | null;
   film?: string | null;
@@ -66,7 +68,7 @@ interface PdfTemplateLayoutV3 {
 
 interface PdfLayoutElement {
   id?: string;
-  type: 'text' | 'field' | 'custom' | 'qr' | 'line' | 'rect' | 'sheet_thumbnail' | 'detail_table';
+  type: 'text' | 'field' | 'custom' | 'qr' | 'line' | 'rect' | 'sheet_thumbnail' | 'detail_table' | 'machine_files_table';
   label?: string;
   source?: string | null;
   text?: string | null;
@@ -129,8 +131,9 @@ function buildSheetsPdfV1(sheets: readonly PdfSheetInput[], useTemplateLayout = 
 
     try {
       for (const sheet of sheets) {
-        if (useTemplateLayout && isTemplateLayoutV3(sheet.templateLayout)) {
-          drawTemplateLayoutPage(doc, sheet, sheet.templateLayout, fontCallback);
+        const templateLayout = useTemplateLayout ? resolveTemplateLayoutV3(sheet.templateLayout, sheet.template) : null;
+        if (templateLayout) {
+          drawTemplateLayoutPage(doc, sheet, templateLayout, fontCallback);
         } else if (sheet.template === 'bath_profiles') {
           drawBathProfilePage(doc, sheet, fontCallback);
         } else {
@@ -174,9 +177,9 @@ function drawTemplateLayoutPage(
   const pageH = mmToPt(readNumber(page.height, 210, 20, 2000));
   const customFieldSchema = isRecord(layout.customFieldSchema) ? layout.customFieldSchema : {};
   const values = resolveCustomFieldValues(customFieldSchema, buildSheetFieldValues(sheet));
-  const elements = (layout.elements ?? [])
+  const elements = upgradeTemplateLayoutElements((layout.elements ?? [])
     .map((raw, index) => toLayoutElement(raw, index))
-    .filter((element): element is PdfLayoutElement => element !== null)
+    .filter((element): element is PdfLayoutElement => element !== null))
     .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
 
   doc.addPage({ size: [pageW, pageH], margin: 0 });
@@ -211,6 +214,9 @@ function drawTemplateElement(
         return;
       case 'detail_table':
         drawTemplateDetailsTable(doc, sheet.detailRows ?? [], w, h, style);
+        return;
+      case 'machine_files_table':
+        drawTemplateMachineFilesTable(doc, sheetMachineFileNames(sheet), w, h, style);
         return;
       case 'text':
       case 'field':
@@ -402,6 +408,32 @@ function drawTemplateDetailsTable(
   }
 }
 
+function drawTemplateMachineFilesTable(
+  doc: PDFKit.PDFDocument,
+  files: readonly string[],
+  w: number,
+  h: number,
+  style: Record<string, unknown>,
+): void {
+  if (w <= 0 || h <= 0) return;
+  const fontSize = readNumber(style.fontSize, 7, 3, 36);
+  const headerFontSize = readNumber(style.headerFontSize, fontSize, 3, 36);
+  const rowH = mmToPt(readNumber(style.rowHeight, 5.5, 2, 40));
+  const headerH = mmToPt(readNumber(style.headerHeight, 6, 2, 40));
+  const border = readColor(style.color, '#111111');
+  const headerFill = readColor(style.headerFill, '#f2f2f2');
+
+  let cy = 0;
+  drawDetailTableRow(doc, ['Файлы станка'], [w], cy, headerH, headerFontSize, border, headerFill);
+  cy += headerH;
+  const rows = files.length > 0 ? files : ['-'];
+  for (const file of rows) {
+    if (cy + rowH > h) break;
+    drawDetailTableRow(doc, [file], [w], cy, rowH, fontSize, border, 'transparent');
+    cy += rowH;
+  }
+}
+
 function drawDetailTableRow(
   doc: PDFKit.PDFDocument,
   values: readonly string[],
@@ -572,6 +604,15 @@ function isTemplateLayoutV3(layout: unknown): layout is PdfTemplateLayoutV3 {
   return isRecord(layout) && Number(layout.version ?? 0) >= 3 && Array.isArray(layout.elements);
 }
 
+function resolveTemplateLayoutV3(layout: unknown, template: string | undefined): PdfTemplateLayoutV3 | null {
+  if (isTemplateLayoutV3(layout)) return layout;
+  return isEmptyTemplateLayout(layout) && template !== 'bath_profiles' ? defaultTemplateLayoutV3() : null;
+}
+
+function isEmptyTemplateLayout(layout: unknown): boolean {
+  return isRecord(layout) && Object.keys(layout).length === 0;
+}
+
 function toLayoutElement(raw: unknown, index: number): PdfLayoutElement | null {
   if (!isRecord(raw) || !isPdfElementType(raw.type)) return null;
   return {
@@ -599,12 +640,14 @@ function isPdfElementType(value: unknown): value is PdfLayoutElement['type'] {
     || value === 'line'
     || value === 'rect'
     || value === 'sheet_thumbnail'
-    || value === 'detail_table';
+    || value === 'detail_table'
+    || value === 'machine_files_table';
 }
 
 function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustomExpressionScalar> {
   const rows = sheet.detailRows ?? [];
   const meta = sheet.meta ?? {};
+  const machineFiles = sheetMachineFileNames(sheet);
   const totalQuantity = totalDetailQuantity(rows);
   const detailsArea = rows.reduce((sum, row) => {
     if (row.lengthMm === null || row.widthMm === null) return sum;
@@ -623,6 +666,7 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
     'sheet.details_count': totalQuantity,
     'sheet.area': detailsArea > 0 ? Number(detailsArea.toFixed(3)) : null,
     'sheet.thumbnail': '',
+    'sheet.machine_files': joinBlank(machineFiles),
     'detail.table': '',
     'order.unique_names': joinBlank(meta.orders),
     'order.date': joinBlank(meta.dates),
@@ -631,6 +675,7 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
     'detail.materials': joinBlank(meta.materials),
     'detail.films': joinBlank(meta.films),
     'detail.thicknesses': joinBlank(meta.thicknesses),
+    'detail.machine_files': joinBlank(machineFiles),
     'computed.today': new Date().toISOString().slice(0, 10),
     'computed.page_number': sheet.sheetNumber ?? null,
     'computed.page_count': sheet.pageCount ?? null,
@@ -699,7 +744,7 @@ function readDetailTableColumns(style: Record<string, unknown>): DetailTableColu
     : Array.isArray(style.columns)
       ? style.columns
       : DEFAULT_DETAIL_TABLE_COLUMNS;
-  return rawColumns
+  return upgradeDefaultDetailTableColumns(rawColumns
     .map((raw): DetailTableColumn | null => {
       if (!isRecord(raw)) return null;
       const field = typeof raw.field === 'string' ? raw.field : '';
@@ -711,7 +756,7 @@ function readDetailTableColumns(style: Record<string, unknown>): DetailTableColu
         visible: raw.visible !== false,
       };
     })
-    .filter((column): column is DetailTableColumn => column !== null && column.visible);
+    .filter((column): column is DetailTableColumn => column !== null && column.visible));
 }
 
 function readDetailTableSort(style: Record<string, unknown>): { field: string; direction: 'asc' | 'desc' } {
@@ -746,6 +791,11 @@ function detailRowValue(row: PdfSheetDetailRow, field: string, index: number): s
       return formatMm(row.widthMm);
     case 'quantity':
       return String(row.quantity);
+    case 'doweling':
+      return checkboxMark(row.fields?.doweling ?? row.fields?.[field] ?? row.fields?.[normalized]);
+    case 'machine_file':
+    case 'machine_files':
+      return joinBlank(row.machineFiles) || stringify(row.fields?.[normalized] ?? row.fields?.[field] ?? row.fields?.[field.replace(/^detail\./, '')] ?? '');
     case 'material':
       return row.material ?? '';
     case 'film':
@@ -776,6 +826,11 @@ function detailSortValue(row: PdfSheetDetailRow, field: string): string | number
       return row.widthMm;
     case 'quantity':
       return row.quantity;
+    case 'doweling':
+      return row.fields?.doweling === true ? 1 : 0;
+    case 'machine_file':
+    case 'machine_files':
+      return joinBlank(row.machineFiles) || stringify(row.fields?.[normalized] ?? row.fields?.[field] ?? row.fields?.[field.replace(/^detail\./, '')] ?? '');
     case 'material':
       return row.material ?? '';
     case 'film':
@@ -855,7 +910,117 @@ const DEFAULT_DETAIL_TABLE_COLUMNS: DetailTableColumn[] = [
   { field: 'detail.lengthMm', label: 'Длина', width: 1.1, visible: true },
   { field: 'detail.widthMm', label: 'Ширина', width: 1.1, visible: true },
   { field: 'detail.quantity', label: 'Кол-во', width: 0.9, visible: true },
+  { field: 'detail.doweling', label: 'Присадка', width: 0.95, visible: true },
+  { field: 'detail.machine_file', label: 'Файл станка', width: 1.8, visible: true },
 ];
+
+function defaultTemplateLayoutV3(): PdfTemplateLayoutV3 {
+  return {
+    version: 3,
+    page: { width: 297, height: 210 },
+    elements: [
+      { id: 'field-order', type: 'field', label: 'Заказ', source: 'order.unique_names', x: 12, y: 10, w: 84, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } },
+      { id: 'field-client', type: 'field', label: 'Клиент', source: 'client.unique_names', x: 108, y: 10, w: 78, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } },
+      { id: 'field-film', type: 'field', label: 'Пленка', source: 'detail.films', x: 198, y: 10, w: 84, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } },
+      { id: 'line-header', type: 'line', label: 'Линия шапки', source: null, text: null, x: 12, y: 22, w: 270, h: 0, rotation: 0, zIndex: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.35 } },
+      { id: 'sheet-thumbnail', type: 'sheet_thumbnail', label: 'Миниатюра листа', source: 'sheet.thumbnail', x: 12, y: 34, w: 202, h: 154, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fit: 'contain' } },
+      {
+        id: 'detail-table',
+        type: 'detail_table',
+        label: 'Таблица деталей',
+        source: 'detail.table',
+        x: 222,
+        y: 34,
+        w: 60,
+        h: 78,
+        align: 'center',
+        style: { color: '#111111', strokeWidth: 0.25, fontSize: 7, columns: DEFAULT_DETAIL_TABLE_COLUMNS, sort: { field: 'detail.order', direction: 'asc' } },
+      },
+      { id: 'machine-files-table', type: 'machine_files_table', label: 'Файлы станка', source: 'sheet.machine_files', x: 222, y: 116, w: 60, h: 32, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fontSize: 7 } },
+    ],
+  };
+}
+
+const LEGACY_DEFAULT_DETAIL_TABLE_COLUMN_FIELDS = [
+  'detail.row_number',
+  'detail.order',
+  'detail.position',
+  'detail.lengthMm',
+  'detail.widthMm',
+  'detail.quantity',
+];
+
+function upgradeDefaultDetailTableColumns(columns: DetailTableColumn[]): DetailTableColumn[] {
+  const fields = columns.map((column) => column.field);
+  const isLegacyDefault =
+    fields.length === LEGACY_DEFAULT_DETAIL_TABLE_COLUMN_FIELDS.length &&
+    LEGACY_DEFAULT_DETAIL_TABLE_COLUMN_FIELDS.every((field, index) => fields[index] === field);
+  if (!isLegacyDefault) return columns;
+  return [
+    ...columns,
+    { field: 'detail.doweling', label: 'Присадка', width: 0.95, visible: true },
+    { field: 'detail.machine_file', label: 'Файл станка', width: 1.8, visible: true },
+  ];
+}
+
+function upgradeTemplateLayoutElements(elements: PdfLayoutElement[]): PdfLayoutElement[] {
+  if (elements.some((element) => element.type === 'machine_files_table')) return elements;
+  const ids = new Set(elements.map((element) => element.id).filter(Boolean));
+  const isLegacyDefault = ['field-order', 'field-client', 'field-film', 'line-header', 'sheet-thumbnail', 'detail-table']
+    .every((id) => ids.has(id));
+  if (!isLegacyDefault) return elements;
+  const detailTable = elements.find((element) => element.id === 'detail-table' && element.type === 'detail_table');
+  if (!detailTable) return elements;
+  return [
+    ...elements,
+    {
+      id: 'machine-files-table',
+      type: 'machine_files_table',
+      label: 'Файлы станка',
+      source: 'sheet.machine_files',
+      text: null,
+      x: detailTable.x,
+      y: detailTable.y + detailTable.h + 4,
+      w: detailTable.w,
+      h: 32,
+      rotation: 0,
+      zIndex: (detailTable.zIndex ?? 0) + 1,
+      align: 'center',
+      style: { color: '#111111', strokeWidth: 0.25, fontSize: 7 },
+    },
+  ];
+}
+
+function sheetMachineFileNames(sheet: PdfSheetInput): string[] {
+  const result: string[] = [];
+  const add = (value: unknown) => {
+    for (const part of splitMachineFileValue(value)) {
+      if (!result.includes(part)) result.push(part);
+    }
+  };
+  for (const file of sheet.meta?.machineFiles ?? []) add(file);
+  for (const row of sheet.detailRows ?? []) {
+    for (const file of row.machineFiles ?? []) add(file);
+    add(row.fields?.machine_file);
+    add(row.fields?.machine_files);
+  }
+  return result;
+}
+
+function splitMachineFileValue(value: unknown): string[] {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) return value.flatMap(splitMachineFileValue);
+  return String(value)
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function checkboxMark(value: unknown): string {
+  if (value === true || value === 1) return '✓';
+  if (typeof value === 'string' && ['true', 'yes', 'да', '1', '✓'].includes(value.trim().toLowerCase())) return '✓';
+  return '';
+}
 
 function joinBlank(values: readonly string[] | undefined): string {
   const uniq = Array.from(new Set((values ?? []).map((v) => v.trim()).filter(Boolean)));
