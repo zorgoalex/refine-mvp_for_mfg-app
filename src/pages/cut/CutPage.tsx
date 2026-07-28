@@ -871,6 +871,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     }
   }, []);
 
+  const refreshCutConfigOnPdfTemplateOpen = useCallback((open: boolean) => {
+    if (open) void loadCutConfig();
+  }, [loadCutConfig]);
+
   useEffect(() => {
     void loadCutConfig();
   }, [loadCutConfig]);
@@ -2669,6 +2673,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                     size="small"
                     value={pdfTemplateForJob}
                     onChange={setJobPdfTemplate}
+                    onDropdownVisibleChange={refreshCutConfigOnPdfTemplateOpen}
                     options={pdfTemplateOptions}
                     style={{ width: 180, flex: '0 0 180px' }}
                     disabled={busy}
@@ -2949,6 +2954,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                     size="small"
                     value={pdfTemplateByGroup[group.cutGroupId] ?? group.pdfTemplate ?? 'standard'}
                     onChange={(value) => setGroupPdfTemplate(group, value)}
+                    onDropdownVisibleChange={refreshCutConfigOnPdfTemplateOpen}
                     options={pdfTemplateOptions}
                     style={{ width: 180, flex: '0 0 180px' }}
                     disabled={busy}

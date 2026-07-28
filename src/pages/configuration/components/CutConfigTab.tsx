@@ -169,6 +169,20 @@ export const CutConfigTab: React.FC = () => {
     void reload();
   }, [reload]);
 
+  const updatePdfTemplateInConfig = useCallback((template: CutPdfTemplate) => {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      const exists = prev.pdfTemplates.some((item) => item.cutPdfTemplateId === template.cutPdfTemplateId || item.code === template.code);
+      const pdfTemplates = (exists
+        ? prev.pdfTemplates.map((item) => (
+          item.cutPdfTemplateId === template.cutPdfTemplateId || item.code === template.code ? template : item
+        ))
+        : [...prev.pdfTemplates, template]
+      ).slice().sort((a, b) => a.code.localeCompare(b.code));
+      return { ...prev, pdfTemplates };
+    });
+  }, []);
+
   const saveEligibility = useCallback(async () => {
     if (!config) return;
     const row = findSetting(config.settings, 'eligibility.statuses');
@@ -362,7 +376,7 @@ export const CutConfigTab: React.FC = () => {
           {
             key: 'pdf-template-editor',
             label: 'Редактирование шаблонов карт раскроя PDF',
-            children: <PdfTemplateEditor templates={config.pdfTemplates} canManage={canManage} />,
+            children: <PdfTemplateEditor templates={config.pdfTemplates} canManage={canManage} onTemplateSaved={updatePdfTemplateInConfig} />,
           },
         ]}
       />
@@ -445,6 +459,7 @@ interface PdfTemplateDraft {
 interface PdfTemplateEditorProps {
   templates: CutPdfTemplate[];
   canManage: boolean;
+  onTemplateSaved: (template: CutPdfTemplate) => void;
 }
 
 type PdfTemplateEditorLayoutMode = 'standard' | 'wide' | 'rightAccordion';
@@ -571,7 +586,7 @@ const DEFAULT_PDF_ELEMENTS: PdfTemplateElement[] = [
   makePdfElement('machine_files_table', { id: 'machine-files-table', label: 'Файлы станка', source: 'sheet.machine_files', x: 222, y: 116, w: 60, h: 32 }),
 ];
 
-const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canManage }) => {
+const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canManage, onTemplateSaved }) => {
   const [drafts, setDrafts] = useState<PdfTemplateDraft[]>(() => loadPdfTemplateDrafts(templates));
   const [savingDraft, setSavingDraft] = useState(false);
   const [selectedCode, setSelectedCode] = useState(() => templates[0]?.code ?? drafts[0]?.code ?? 'standard');
@@ -761,17 +776,53 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
 
   const copyTemplate = useCallback(() => {
     if (!selected) return;
-    const code = `${selected.code}_copy_${Date.now().toString(36)}`;
+    const code = makePdfTemplateCopyCode(selected.code);
     const copy = {
       ...selected,
       code,
-      name: `${selected.name} копия`,
+      name: makePdfTemplateCopyName(selected.name),
       elements: selected.elements.map((element, index) => ({ ...element, id: `${element.id}-copy-${index}` })),
     };
     setDrafts((prev) => [...prev, copy]);
     setSelectedCode(code);
     setSelectedElementId(copy.elements[0]?.id ?? null);
   }, [selected]);
+
+  const saveTemplateAsCopy = useCallback(async () => {
+    if (!selected) return;
+    if (!selected.name.trim()) {
+      message.error('Укажите название шаблона PDF');
+      return;
+    }
+    const templateName = makePdfTemplateCopyName(selected.name);
+    const code = makePdfTemplateCopyCode(selected.code);
+    const copy = normalizePdfDraft({
+      ...selected,
+      code,
+      name: templateName,
+      elements: selected.elements.map((element, index) => ({ ...element, id: `${element.id}-copy-${index}` })),
+    });
+    const layout = pdfDraftToLayout(copy);
+    setSavingDraft(true);
+    try {
+      const created = await cutConfigApi.createPdfTemplate({
+        code,
+        name: templateName,
+        layout,
+        isActive: true,
+      });
+      const draft = pdfTemplateToDraft(created);
+      setDrafts((prev) => [...prev.filter((item) => item.code !== created.code), draft]);
+      setSelectedCode(created.code);
+      setSelectedElementId(draft.elements[0]?.id ?? null);
+      onTemplateSaved(created);
+      message.success('Шаблон PDF создан');
+    } catch (error) {
+      message.error(formatPdfTemplateSaveError(error));
+    } finally {
+      setSavingDraft(false);
+    }
+  }, [onTemplateSaved, selected]);
 
   const saveDrafts = useCallback(async () => {
     if (!selected) return;
@@ -784,10 +835,23 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     const template = templates.find((item) => item.code === selected.code);
     const layout = pdfDraftToLayout(normalizedSelected);
     if (!template) {
-      const nextDrafts = drafts.map((draft) => (draft.code === selected.code ? normalizedSelected : draft));
-      setDrafts(nextDrafts);
-      window.localStorage.setItem(PDF_TEMPLATE_DRAFTS_KEY, JSON.stringify(nextDrafts.map((draft) => pdfDraftToStoredDraft(draft))));
-      message.success('Локальная копия шаблона PDF сохранена');
+      setSavingDraft(true);
+      try {
+        const created = await cutConfigApi.createPdfTemplate({
+          code: normalizedSelected.code,
+          name: templateName,
+          layout,
+          isActive: true,
+        });
+        setDrafts((prev) => prev.map((draft) => (draft.code === selected.code ? pdfTemplateToDraft(created) : draft)));
+        setSelectedCode(created.code);
+        onTemplateSaved(created);
+        message.success('Шаблон PDF создан');
+      } catch (error) {
+        message.error(formatPdfTemplateSaveError(error));
+      } finally {
+        setSavingDraft(false);
+      }
       return;
     }
     setSavingDraft(true);
@@ -798,13 +862,14 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         template.version,
       );
       setDrafts((prev) => prev.map((draft) => (draft.code === updated.code ? pdfTemplateToDraft(updated) : draft)));
+      onTemplateSaved(updated);
       message.success('Шаблон PDF сохранён');
     } catch (error) {
       message.error(formatPdfTemplateSaveError(error));
     } finally {
       setSavingDraft(false);
     }
-  }, [drafts, selected, templates]);
+  }, [onTemplateSaved, selected, templates]);
 
   const addCustomField = useCallback(() => {
     if (!selected) return;
@@ -1085,7 +1150,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         <Button icon={<CopyOutlined />} disabled={!canManage} onClick={copyTemplate}>
           Создать копию
         </Button>
-        <Button disabled={!canManage} onClick={copyTemplate}>
+        <Button disabled={!canManage || savingDraft || !selectedNameValid} loading={savingDraft} onClick={() => void saveTemplateAsCopy()}>
           Сохранить как
         </Button>
         <Button icon={<PlusOutlined />} disabled={!canManage} onClick={() => addElement('text')}>
@@ -1925,6 +1990,16 @@ function pdfTemplateToDraft(template: CutPdfTemplate): PdfTemplateDraft {
     name: template.name,
     ...layoutToPdfDraftShape(template.layout),
   });
+}
+
+function makePdfTemplateCopyCode(code: string): string {
+  const suffix = `_copy_${Date.now().toString(36)}`;
+  const base = code.slice(0, Math.max(1, 100 - suffix.length));
+  return `${base}${suffix}`;
+}
+
+function makePdfTemplateCopyName(name: string): string {
+  return `${name.trim()} копия`.trim().slice(0, 200);
 }
 
 function layoutToPdfDraftShape(layout: Record<string, unknown>): Pick<PdfTemplateDraft, 'page' | 'customFields' | 'elements'> {

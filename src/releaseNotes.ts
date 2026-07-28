@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-28",
+    title: "PDF раскроя: новые шаблоны в заданиях",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Новые PDF-шаблоны раскроя, созданные через «Сохранить как», теперь сохраняются на backend и появляются в выпадающем списке «Шаблон PDF» в заданиях раскроя.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-28",
     title: "Доски статусов: кликабельные номера заказов в МДФ-работах",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

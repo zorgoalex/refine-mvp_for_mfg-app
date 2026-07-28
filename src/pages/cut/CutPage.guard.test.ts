@@ -141,6 +141,13 @@ describe('CutPage source guards', () => {
     expect(source).toContain('data-testid="cut-order-select"');
   });
 
+  it('refreshes PDF template options when the job or group template selector opens', () => {
+    expect(source).toContain('refreshCutConfigOnPdfTemplateOpen');
+    expect(source.match(/onDropdownVisibleChange=\{refreshCutConfigOnPdfTemplateOpen\}/g)).toHaveLength(2);
+    expect(source).toContain('data-testid="pdf-template-select-job"');
+    expect(source).toContain('data-testid={`pdf-template-select-${group.cutGroupId}`}');
+  });
+
   it('loads the cut film filter as unique Select options under the current date criteria', () => {
     expect(source).toContain('cutApi.listFilmOptions');
     expect(source).toContain('filmOptions');
