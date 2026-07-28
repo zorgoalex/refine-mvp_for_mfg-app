@@ -21,6 +21,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
@@ -634,7 +635,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   const [fieldCatalogError, setFieldCatalogError] = useState<string | null>(null);
   const [editingCustomFieldId, setEditingCustomFieldId] = useState<string | null>(null);
   const selected = drafts.find((draft) => draft.code === selectedCode) ?? drafts[0];
-  const [selectedElementId, setSelectedElementId] = useState<string | null>(selected?.elements[0]?.id ?? null);
+  const [selectedElementIds, setSelectedElementIds] = useState<string[]>(() => selected?.elements[0]?.id ? [selected.elements[0].id] : []);
   const [fieldSearch, setFieldSearch] = useState('');
   const [draggingField, setDraggingField] = useState<PdfFieldCatalogItem | null>(null);
   const [showAllBounds, setShowAllBounds] = useState(false);
@@ -644,6 +645,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   const wideCanvas = layoutMode === 'wide';
   const rightAccordionLayout = layoutMode === 'rightAccordion';
   const canvasFillsColumn = wideCanvas || rightAccordionLayout;
+  const selectedElementId = selectedElementIds.at(-1) ?? null;
   const selectedElement = selected?.elements.find((element) => element.id === selectedElementId) ?? selected?.elements[0] ?? null;
   const customFields = selected?.customFields ?? [];
   const customFieldCatalog = useMemo<PdfFieldCatalogItem[]>(
@@ -706,9 +708,31 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     setSelectedCode(selected.code);
   }, [selected, selectedCode]);
 
+  useEffect(() => {
+    if (!selected) {
+      setSelectedElementIds([]);
+      return;
+    }
+    setSelectedElementIds((prev) => {
+      const existing = prev.filter((id) => selected.elements.some((element) => element.id === id));
+      return existing.length > 0 ? existing : selected.elements[0]?.id ? [selected.elements[0].id] : [];
+    });
+  }, [selected]);
+
   const updateSelected = useCallback((next: PdfTemplateDraft) => {
     setDrafts((prev) => prev.map((draft) => (draft.code === next.code ? next : draft)));
   }, []);
+
+  const selectPdfElement = useCallback(
+    (id: string | null, additive = false) => {
+      if (!id || !selected) {
+        setSelectedElementIds([]);
+        return;
+      }
+      setSelectedElementIds((current) => selectPdfElements(selected.elements, current, id, additive));
+    },
+    [selected],
+  );
 
   const renameSelectedTemplate = useCallback(
     (name: string) => {
@@ -721,9 +745,25 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   const patchElementById = useCallback(
     (id: string, patch: Partial<PdfTemplateElement>) => {
       if (!selected) return;
+      const cleanPatch = compactPdfElementPatch(patch);
       updateSelected({
         ...selected,
-        elements: selected.elements.map((element) => (element.id === id ? normalizePdfElement({ ...element, ...patch }) : element)),
+        elements: selected.elements.map((element) => (element.id === id ? normalizePdfElement({ ...element, ...cleanPatch }) : element)),
+      });
+    },
+    [selected, updateSelected],
+  );
+
+  const patchElementsById = useCallback(
+    (patches: Array<{ id: string; patch: Partial<PdfTemplateElement> }>) => {
+      if (!selected || patches.length === 0) return;
+      const byId = new Map(patches.map(({ id, patch }) => [id, compactPdfElementPatch(patch)]));
+      updateSelected({
+        ...selected,
+        elements: selected.elements.map((element) => {
+          const patch = byId.get(element.id);
+          return patch ? normalizePdfElement({ ...element, ...patch }) : element;
+        }),
       });
     },
     [selected, updateSelected],
@@ -746,7 +786,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         ...patch,
       });
       updateSelected({ ...selected, elements: [...selected.elements, element] });
-      setSelectedElementId(element.id);
+      setSelectedElementIds([element.id]);
     },
     [selected, updateSelected],
   );
@@ -778,42 +818,97 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   const deleteElement = useCallback(
     (id: string) => {
       if (!selected) return;
-      const nextElements = selected.elements.filter((element) => element.id !== id);
+      const ids = selectedElementIds.includes(id) ? selectedElementIds : selectPdfElements(selected.elements, [], id, false);
+      const removed = new Set(ids);
+      const nextElements = cleanupSingletonPdfGroups(selected.elements.filter((element) => !removed.has(element.id)));
       updateSelected({ ...selected, elements: nextElements });
-      setSelectedElementId(nextElements[0]?.id ?? null);
+      setSelectedElementIds(nextElements[0]?.id ? [nextElements[0].id] : []);
     },
-    [selected, updateSelected],
+    [selected, selectedElementIds, updateSelected],
   );
 
   const duplicateElement = useCallback(
     (id: string) => {
       if (!selected) return;
-      const source = selected.elements.find((element) => element.id === id);
-      if (!source) return;
-      const copy = normalizePdfElement({
-        ...source,
-        id: `${source.type}-${Date.now().toString(36)}`,
-        label: `${source.label} копия`,
-        x: source.x + 4,
-        y: source.y + 4,
-        zIndex: selected.elements.length,
-      });
-      updateSelected({ ...selected, elements: [...selected.elements, copy] });
-      setSelectedElementId(copy.id);
+      const ids = selectedElementIds.includes(id) ? selectedElementIds : selectPdfElements(selected.elements, [], id, false);
+      const source = selected.elements.filter((element) => ids.includes(element.id));
+      if (source.length === 0) return;
+      const groupId = source.length > 1 || source.some((element) => pdfElementGroupId(element))
+        ? `pdf-group-copy-${Date.now().toString(36)}`
+        : null;
+      let zIndex = Math.max(0, ...selected.elements.map((element) => Number(element.zIndex ?? 0))) + 1;
+      const copies = source.map((element, index) => normalizePdfElement(withPdfElementGroupId({
+        ...element,
+        id: `${element.type}-${Date.now().toString(36)}-${index}`,
+        label: `${element.label} копия`,
+        x: element.x + 4,
+        y: element.y + 4,
+        zIndex: zIndex++,
+        style: { ...element.style, locked: false },
+      }, groupId)));
+      updateSelected({ ...selected, elements: [...selected.elements, ...copies] });
+      setSelectedElementIds(copies.map((element) => element.id));
+    },
+    [selected, selectedElementIds, updateSelected],
+  );
+
+  const moveZ = useCallback(
+    (ids: string[], direction: 'front' | 'back') => {
+      if (!selected) return;
+      const selectedIds = new Set(ids);
+      const ordered = selected.elements.slice().sort((a, b) => a.zIndex - b.zIndex);
+      const targets = ordered.filter((element) => selectedIds.has(element.id));
+      if (targets.length === 0) return;
+      const rest = ordered.filter((element) => !selectedIds.has(element.id));
+      const next = direction === 'front' ? [...rest, ...targets] : [...targets, ...rest];
+      updateSelected({ ...selected, elements: next.map((element, index) => ({ ...element, zIndex: index })) });
     },
     [selected, updateSelected],
   );
 
-  const moveZ = useCallback(
-    (id: string, direction: 'front' | 'back') => {
-      if (!selected) return;
-      const target = selected.elements.find((element) => element.id === id);
-      if (!target) return;
-      const ordered = selected.elements.filter((element) => element.id !== id).sort((a, b) => a.zIndex - b.zIndex);
-      const next = direction === 'front' ? [...ordered, target] : [target, ...ordered];
-      updateSelected({ ...selected, elements: next.map((element, index) => ({ ...element, zIndex: index })) });
+  const groupPdfElements = useCallback(
+    (ids: string[]) => {
+      if (!selected || ids.length < 2) return;
+      const groupId = `pdf-group-${Date.now().toString(36)}`;
+      const idSet = expandPdfSelectionIds(selected.elements, ids);
+      const elements = selected.elements.map((element) => (idSet.has(element.id) ? withPdfElementGroupId(element, groupId) : element));
+      updateSelected({ ...selected, elements });
+      setSelectedElementIds(elements.filter((element) => pdfElementGroupId(element) === groupId).map((element) => element.id));
     },
     [selected, updateSelected],
+  );
+
+  const ungroupPdfElements = useCallback(
+    (ids: string[]) => {
+      if (!selected || ids.length === 0) return;
+      const idSet = expandPdfSelectionIds(selected.elements, ids);
+      updateSelected({
+        ...selected,
+        elements: selected.elements.map((element) => (idSet.has(element.id) ? withPdfElementGroupId(element, null) : element)),
+      });
+      setSelectedElementIds(selected.elements.filter((element) => idSet.has(element.id)).map((element) => element.id));
+    },
+    [selected, updateSelected],
+  );
+
+  const centerPdfElements = useCallback(
+    (ids: string[], axis: 'horizontal' | 'vertical') => {
+      if (!selected || ids.length === 0) return;
+      const idSet = expandPdfSelectionIds(selected.elements, ids);
+      const elements = selected.elements.filter((element) => idSet.has(element.id));
+      const bounds = pdfElementsBounds(elements);
+      if (!bounds) return;
+      const deltaX = axis === 'horizontal' ? selected.page.width / 2 - (bounds.minX + bounds.maxX) / 2 : 0;
+      const deltaY = axis === 'vertical' ? selected.page.height / 2 - (bounds.minY + bounds.maxY) / 2 : 0;
+      patchElementsById(elements.map((element) => ({
+        id: element.id,
+        patch: {
+          x: roundPdfMm(element.x + deltaX),
+          y: roundPdfMm(element.y + deltaY),
+        },
+      })));
+    },
+    [patchElementsById, selected],
   );
 
   const publishDraftAsTemplate = useCallback(
@@ -847,7 +942,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         });
         if (options.select !== false) {
           setSelectedCode(created.code);
-          setSelectedElementId(createdDraft.elements[0]?.id ?? null);
+          setSelectedElementIds(createdDraft.elements[0]?.id ? [createdDraft.elements[0].id] : []);
         }
         clearStoredPdfTemplateDrafts();
         onTemplateSaved(created);
@@ -1115,8 +1210,8 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
       dataSource={selected.elements.slice().sort((a, b) => a.zIndex - b.zIndex)}
       pagination={false}
       scroll={{ y: scrollY }}
-      rowClassName={(row) => (row.id === selectedElement?.id ? 'ant-table-row-selected' : '')}
-      onRow={(row) => ({ onClick: () => setSelectedElementId(row.id), style: { cursor: 'pointer' } })}
+      rowClassName={(row) => (selectedElementIds.includes(row.id) ? 'ant-table-row-selected' : '')}
+      onRow={(row) => ({ onClick: (event) => selectPdfElement(row.id, event.shiftKey), style: { cursor: 'pointer' } })}
     />
   );
 
@@ -1177,7 +1272,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
           onChange={(code) => {
             const draft = drafts.find((item) => item.code === code);
             setSelectedCode(code);
-            setSelectedElementId(draft?.elements[0]?.id ?? null);
+            setSelectedElementIds(draft?.elements[0]?.id ? [draft.elements[0].id] : []);
           }}
           options={drafts.map((draft) => ({ value: draft.code, label: draft.name }))}
           style={{ width: 320 }}
@@ -1259,16 +1354,20 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
                 draft={selected}
                 fields={fields}
                 previewValues={previewValues}
-                selectedElementId={selectedElementId}
+                selectedElementIds={selectedElementIds}
                 canManage={canManage}
                 showAllBounds={showAllBounds}
                 wideCanvas={canvasFillsColumn}
                 draggingField={draggingField}
-                onSelect={setSelectedElementId}
+                onSelect={selectPdfElement}
                 onPatch={patchElementById}
+                onPatchMany={patchElementsById}
                 onDelete={deleteElement}
                 onDuplicate={duplicateElement}
                 onMoveZ={moveZ}
+                onGroup={groupPdfElements}
+                onUngroup={ungroupPdfElements}
+                onCenter={centerPdfElements}
                 onDropField={(field, x, y) => {
                   addFieldElement(field, x, y);
                   setDraggingField(null);
@@ -1328,34 +1427,76 @@ const PdfTemplateCanvas: React.FC<{
   draft: PdfTemplateDraft;
   fields: PdfFieldCatalogItem[];
   previewValues: Record<string, string>;
-  selectedElementId: string | null;
+  selectedElementIds: string[];
   canManage: boolean;
   showAllBounds: boolean;
   wideCanvas: boolean;
   draggingField: PdfFieldCatalogItem | null;
-  onSelect: (id: string | null) => void;
+  onSelect: (id: string | null, additive?: boolean) => void;
   onPatch: (id: string, patch: Partial<PdfTemplateElement>) => void;
+  onPatchMany: (patches: Array<{ id: string; patch: Partial<PdfTemplateElement> }>) => void;
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
-  onMoveZ: (id: string, direction: 'front' | 'back') => void;
+  onMoveZ: (ids: string[], direction: 'front' | 'back') => void;
+  onGroup: (ids: string[]) => void;
+  onUngroup: (ids: string[]) => void;
+  onCenter: (ids: string[], axis: 'horizontal' | 'vertical') => void;
   onDropField: (field: PdfFieldCatalogItem, x: number, y: number) => void;
-}> = ({ draft, fields, previewValues, selectedElementId, canManage, showAllBounds, wideCanvas, draggingField, onSelect, onPatch, onDelete, onDuplicate, onMoveZ, onDropField }) => {
+}> = ({
+  draft,
+  fields,
+  previewValues,
+  selectedElementIds,
+  canManage,
+  showAllBounds,
+  wideCanvas,
+  draggingField,
+  onSelect,
+  onPatch,
+  onPatchMany,
+  onDelete,
+  onDuplicate,
+  onMoveZ,
+  onGroup,
+  onUngroup,
+  onCenter,
+  onDropField,
+}) => {
   const stageRef = useRef<Konva.Stage | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const nodeRefs = useRef(new Map<string, Konva.Node>());
+  const dragGestureRef = useRef<{
+    ownerId: string;
+    ownerStart: { x: number; y: number };
+    ids: string[];
+    starts: Map<string, { x: number; y: number }>;
+  } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [showGrid, setShowGrid] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(true);
-  const [contextMenu, setContextMenu] = useState<{ element: PdfTemplateElement; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ elementId: string; x: number; y: number } | null>(null);
   const page = draft.page;
   const defaultPreviewBaseWidth = Math.min(900, Math.max(520, page.width * 3));
   const widePreviewBaseWidth = viewportWidth > 0 ? Math.max(320, viewportWidth) : defaultPreviewBaseWidth;
   const previewWidth = Math.round((wideCanvas ? widePreviewBaseWidth : defaultPreviewBaseWidth) * zoom);
   const previewHeight = previewWidth * (page.height / page.width);
+  const selectedElementId = selectedElementIds.at(-1) ?? null;
+  const selectedElements = draft.elements.filter((element) => selectedElementIds.includes(element.id));
   const selected = draft.elements.find((element) => element.id === selectedElementId) ?? null;
-  const selectedLocked = Boolean(selected?.style.locked);
+  const selectedLocked = selectedElements.some((element) => Boolean(element.style.locked));
+  const contextElement = contextMenu ? draft.elements.find((element) => element.id === contextMenu.elementId) ?? null : null;
+  const contextIds = contextElement && selectedElementIds.includes(contextElement.id)
+    ? selectedElementIds
+    : contextElement
+      ? selectPdfElements(draft.elements, [], contextElement.id, false)
+      : [];
+  const contextElements = draft.elements.filter((element) => contextIds.includes(element.id));
+  const contextBounds = pdfElementsBounds(contextElements);
+  const contextTextElement = contextElements.find((element) => ['text', 'field', 'custom'].includes(element.type)) ?? null;
+  const contextHasGroup = contextElements.some((element) => Boolean(pdfElementGroupId(element)));
+  const contextAllLocked = contextElements.length > 0 && contextElements.every((element) => Boolean(element.style.locked));
   const fieldLabels = useMemo(() => new Map(fields.map((field) => [field.id, field.label])), [fields]);
   const sorted = draft.elements.slice().sort((a, b) => a.zIndex - b.zIndex);
 
@@ -1372,15 +1513,17 @@ const PdfTemplateCanvas: React.FC<{
   }, []);
 
   useEffect(() => {
-    if (!canManage || !selectedElementId || selectedLocked || draggingField) {
+    if (!canManage || selectedElementIds.length === 0 || selectedLocked || draggingField) {
       transformerRef.current?.nodes([]);
       transformerRef.current?.getLayer()?.batchDraw();
       return;
     }
-    const node = nodeRefs.current.get(selectedElementId);
-    transformerRef.current?.nodes(node ? [node] : []);
+    const nodes = selectedElementIds
+      .map((id) => nodeRefs.current.get(id))
+      .filter((node): node is Konva.Node => Boolean(node));
+    transformerRef.current?.nodes(nodes);
     transformerRef.current?.getLayer()?.batchDraw();
-  }, [canManage, draft.elements, draggingField, selectedElementId, selectedLocked]);
+  }, [canManage, draft.elements, draggingField, selectedElementIds, selectedLocked]);
 
   const pointFromEvent = (event: Pick<React.MouseEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>) => {
     const container = stageRef.current?.container();
@@ -1393,37 +1536,91 @@ const PdfTemplateCanvas: React.FC<{
   };
   const snap = (value: number, free?: boolean) => (snapToGrid && !free ? Math.round(value) : value);
   const patchGeometry = (element: PdfTemplateElement, patch: Partial<PdfTemplateElement>, free?: boolean) => {
-    onPatch(element.id, {
-      ...patch,
-      x: patch.x === undefined ? undefined : roundPdfMm(clamp(snap(patch.x, free), 0, page.width)),
-      y: patch.y === undefined ? undefined : roundPdfMm(clamp(snap(patch.y, free), 0, page.height)),
-      w: patch.w === undefined ? undefined : roundPdfMm(Math.max(0.5, snap(patch.w, free))),
-      h: patch.h === undefined ? undefined : roundPdfMm(Math.max(element.type === 'line' ? 0 : 0.5, snap(patch.h, free))),
-      rotation: patch.rotation === undefined ? undefined : roundPdfMm(patch.rotation),
-    });
+    const next: Partial<PdfTemplateElement> = {};
+    if (patch.x !== undefined) next.x = roundPdfMm(clamp(snap(patch.x, free), 0, page.width));
+    if (patch.y !== undefined) next.y = roundPdfMm(clamp(snap(patch.y, free), 0, page.height));
+    if (patch.w !== undefined) next.w = roundPdfMm(Math.max(0.5, snap(patch.w, free)));
+    if (patch.h !== undefined) next.h = roundPdfMm(Math.max(element.type === 'line' ? 0 : 0.5, snap(patch.h, free)));
+    if (patch.rotation !== undefined) next.rotation = roundPdfMm(patch.rotation);
+    onPatch(element.id, next);
   };
   const moveElement = (element: PdfTemplateElement, x: number, y: number, event?: { altKey?: boolean }) => {
     if (element.style.locked) return;
-    patchGeometry(element, {
-      x: clamp(x, 0, Math.max(0, page.width - element.w)),
-      y: clamp(y, 0, Math.max(0, page.height - Math.max(element.h, 1))),
-    }, event?.altKey);
+    const moving = selectedElementIds.includes(element.id) ? selectedElements : [element];
+    const bounds = pdfElementsBounds(moving);
+    if (!bounds) return;
+    const deltaX = clamp(x - element.x, -bounds.minX, page.width - bounds.maxX);
+    const deltaY = clamp(y - element.y, -bounds.minY, page.height - bounds.maxY);
+    onPatchMany(moving.map((item) => ({
+      id: item.id,
+      patch: {
+        x: roundPdfMm(snap(item.x + deltaX, event?.altKey)),
+        y: roundPdfMm(snap(item.y + deltaY, event?.altKey)),
+      },
+    })));
   };
-  const transformEnd = (element: PdfTemplateElement, node: Konva.Node, event: Konva.KonvaEventObject<Event>) => {
-    if (element.style.locked) return;
-    const scaleX = node.scaleX();
-    const scaleY = node.scaleY();
-    node.scaleX(1);
-    node.scaleY(1);
-    const nextW = element.type === 'line' ? element.w * scaleX : Math.max(1, Number(node.width() || element.w) * scaleX);
-    const nextH = element.type === 'line' ? element.h * scaleY : Math.max(1, Number(node.height() || element.h) * scaleY);
-    patchGeometry(element, {
-      x: clamp(node.x(), 0, page.width),
-      y: clamp(node.y(), 0, page.height),
-      w: nextW,
-      h: nextH,
-      rotation: Number(node.rotation() ?? 0),
-    }, (event.evt as MouseEvent | PointerEvent | undefined)?.altKey);
+  const beginDragElement = (element: PdfTemplateElement, node: Konva.Node, event: Konva.KonvaEventObject<DragEvent>) => {
+    onSelect(element.id, event.evt.shiftKey);
+    const ids = selectedElementIds.includes(element.id) ? selectedElementIds : selectPdfElements(draft.elements, [], element.id, false);
+    const starts = new Map<string, { x: number; y: number }>();
+    for (const id of ids) {
+      const selectedNode = nodeRefs.current.get(id);
+      if (selectedNode) starts.set(id, { x: selectedNode.x(), y: selectedNode.y() });
+    }
+    dragGestureRef.current = {
+      ownerId: element.id,
+      ownerStart: starts.get(element.id) ?? { x: node.x(), y: node.y() },
+      ids,
+      starts,
+    };
+  };
+  const dragMoveElement = (element: PdfTemplateElement, node: Konva.Node, event: Konva.KonvaEventObject<DragEvent>) => {
+    const gesture = dragGestureRef.current;
+    if (!gesture || gesture.ownerId !== element.id) return;
+    const moving = draft.elements.filter((item) => gesture.ids.includes(item.id));
+    const bounds = pdfElementsBounds(moving);
+    if (!bounds) return;
+    const targetX = snap(node.x(), event.evt.altKey);
+    const targetY = snap(node.y(), event.evt.altKey);
+    const deltaX = clamp(targetX - gesture.ownerStart.x, -bounds.minX, page.width - bounds.maxX);
+    const deltaY = clamp(targetY - gesture.ownerStart.y, -bounds.minY, page.height - bounds.maxY);
+    for (const [id, start] of gesture.starts.entries()) {
+      nodeRefs.current.get(id)?.position({ x: start.x + deltaX, y: start.y + deltaY });
+    }
+  };
+  const endDragElement = (element: PdfTemplateElement) => {
+    const gesture = dragGestureRef.current;
+    if (!gesture || gesture.ownerId !== element.id) return;
+    onPatchMany(Array.from(gesture.starts, ([id]) => {
+      const node = nodeRefs.current.get(id);
+      return node ? { id, patch: { x: roundPdfMm(node.x()), y: roundPdfMm(node.y()) } } : null;
+    }).filter((item): item is { id: string; patch: Partial<PdfTemplateElement> } => Boolean(item)));
+    dragGestureRef.current = null;
+  };
+  const transformSelectionEnd = (event: Konva.KonvaEventObject<Event>) => {
+    if (selectedElements.length === 0 || selectedLocked) return;
+    const free = (event.evt as MouseEvent | PointerEvent | undefined)?.altKey;
+    const patches = selectedElements.flatMap((element) => {
+      const node = nodeRefs.current.get(element.id);
+      if (!node) return [];
+      const scaleX = node.scaleX();
+      const scaleY = node.scaleY();
+      node.scaleX(1);
+      node.scaleY(1);
+      const nextW = element.type === 'line' ? element.w * scaleX : Math.max(1, Number(node.width() || element.w) * scaleX);
+      const nextH = element.type === 'line' ? element.h * scaleY : Math.max(1, Number(node.height() || element.h) * scaleY);
+      return [{
+        id: element.id,
+        patch: {
+          x: roundPdfMm(clamp(snap(node.x(), free), 0, page.width)),
+          y: roundPdfMm(clamp(snap(node.y(), free), 0, page.height)),
+          w: roundPdfMm(Math.max(0.5, snap(nextW, free))),
+          h: roundPdfMm(Math.max(element.type === 'line' ? 0 : 0.5, snap(nextH, free))),
+          rotation: roundPdfMm(Number(node.rotation() ?? 0)),
+        },
+      }];
+    });
+    onPatchMany(patches);
   };
   const openContextMenu = (point: { x: number; y: number }) => {
     if (!canManage) return;
@@ -1432,8 +1629,28 @@ const PdfTemplateCanvas: React.FC<{
       setContextMenu(null);
       return;
     }
-    onSelect(element.id);
-    setContextMenu({ element, x: (point.x / page.width) * previewWidth, y: (point.y / page.height) * previewHeight });
+    if (!selectedElementIds.includes(element.id)) onSelect(element.id);
+    setContextMenu({ elementId: element.id, x: (point.x / page.width) * previewWidth, y: (point.y / page.height) * previewHeight });
+  };
+  const patchContextStyle = (patch: Record<string, unknown>) => {
+    onPatchMany(contextElements.filter((element) => !element.style.locked).map((element) => ({
+      id: element.id,
+      patch: { style: { ...element.style, ...patch } },
+    })));
+  };
+  const setContextAlign = (align: PdfTextAlign) => {
+    onPatchMany(contextElements.filter((element) => isPdfTextElement(element) && !element.style.locked).map((element) => ({
+      id: element.id,
+      patch: { align },
+    })));
+    setContextMenu(null);
+  };
+  const toggleContextLock = () => {
+    onPatchMany(contextElements.map((element) => ({
+      id: element.id,
+      patch: { style: { ...element.style, locked: !contextAllLocked } },
+    })));
+    setContextMenu(null);
   };
   const keyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!selected || !canManage) return;
@@ -1532,16 +1749,17 @@ const PdfTemplateCanvas: React.FC<{
                   element={element}
                   fieldLabels={fieldLabels}
                   previewValues={previewValues}
-                  selected={element.id === selectedElementId}
+                  selected={selectedElementIds.includes(element.id)}
                   interactive={canManage && !draggingField}
                   showAllBounds={showAllBounds}
                   nodeRef={(node) => {
                     if (node) nodeRefs.current.set(element.id, node);
                     else nodeRefs.current.delete(element.id);
                   }}
-                  onSelect={() => onSelect(element.id)}
-                  onMove={(x, y, event) => moveElement(element, x, y, event)}
-                  onTransformEnd={(node, event) => transformEnd(element, node, event)}
+                  onSelect={(event) => onSelect(element.id, event.evt.shiftKey)}
+                  onDragStart={(node, event) => beginDragElement(element, node, event)}
+                  onDragMove={(node, event) => dragMoveElement(element, node, event)}
+                  onDragEnd={() => endDragElement(element)}
                 />
               ))}
               {canManage && !draggingField && (
@@ -1550,18 +1768,20 @@ const PdfTemplateCanvas: React.FC<{
                   rotateEnabled
                   enabledAnchors={selected?.type === 'line' ? ['middle-left', 'middle-right'] : undefined}
                   boundBoxFunc={(oldBox, newBox) => (newBox.width < 2 || newBox.height < 2 ? oldBox : newBox)}
+                  onTransformEnd={transformSelectionEnd}
                 />
               )}
             </Layer>
           </Stage>
-          {contextMenu && (
+          {contextMenu && contextElement && contextBounds && (
             <div
+              data-cut-pdf-context-menu
               style={{
                 position: 'absolute',
-                left: Math.min(contextMenu.x + 6, Math.max(8, previewWidth - 190)),
-                top: Math.min(contextMenu.y + 6, Math.max(8, previewHeight - 216)),
+                left: Math.min(contextMenu.x + 6, Math.max(8, previewWidth - 252)),
+                top: Math.min(contextMenu.y + 6, Math.max(8, previewHeight - 420)),
                 zIndex: 3,
-                minWidth: 180,
+                minWidth: 244,
                 padding: 4,
                 background: '#fff',
                 border: '1px solid #d9d9d9',
@@ -1570,13 +1790,91 @@ const PdfTemplateCanvas: React.FC<{
               }}
               onMouseLeave={() => setContextMenu(null)}
             >
-              <Button type="text" size="small" block onClick={() => { onPatch(contextMenu.element.id, { style: { ...contextMenu.element.style, locked: !contextMenu.element.style.locked } }); setContextMenu(null); }}>
-                {contextMenu.element.style.locked ? 'Разблокировать' : 'Заблокировать'}
+              <div style={{ padding: '4px 6px 7px', borderBottom: '1px solid #f0f0f0', marginBottom: 3 }}>
+                <Text strong style={{ display: 'block', fontSize: 12 }}>
+                  {contextElements.length > 1 ? `Выбрано: ${contextElements.length}` : pdfElementContextTitle(contextElement, fieldLabels)}
+                </Text>
+                <Text type="secondary" style={{ display: 'block', fontSize: 11, marginTop: 3 }}>
+                  X {roundPdfMm(contextBounds.minX)} · Y {roundPdfMm(contextBounds.minY)} · {roundPdfMm(contextBounds.width)} × {roundPdfMm(contextBounds.height)} мм
+                </Text>
+              </div>
+              {contextTextElement && (
+                <div style={{ padding: '4px 4px 6px' }}>
+                  <Text type="secondary" style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>
+                    Шрифт
+                  </Text>
+                  <Space.Compact block style={{ marginBottom: 6 }}>
+                    <InputNumber
+                      aria-label="Размер шрифта в контекстном меню PDF"
+                      min={2}
+                      max={96}
+                      addonAfter="pt"
+                      value={Number(contextTextElement.style.fontSize ?? 10)}
+                      disabled={contextElements.some((element) => Boolean(element.style.locked))}
+                      onChange={(value) => patchContextStyle({ fontSize: Number(value ?? 10) })}
+                    />
+                    <Button
+                      type={contextTextElement.style.fontWeight === 'bold' ? 'primary' : 'default'}
+                      disabled={contextElements.some((element) => Boolean(element.style.locked))}
+                      onClick={() => patchContextStyle({ fontWeight: contextTextElement.style.fontWeight === 'bold' ? 'normal' : 'bold' })}
+                    >
+                      <strong>Ж</strong>
+                    </Button>
+                    <Button
+                      type={contextTextElement.style.fontItalic === true ? 'primary' : 'default'}
+                      disabled={contextElements.some((element) => Boolean(element.style.locked))}
+                      onClick={() => patchContextStyle({ fontItalic: contextTextElement.style.fontItalic !== true })}
+                    >
+                      <em>К</em>
+                    </Button>
+                  </Space.Compact>
+                  <Text type="secondary" style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>
+                    Выравнивание значения
+                  </Text>
+                  <Space.Compact block>
+                    <Tooltip title="Выровнять значение по левой стороне поля">
+                      <Button size="small" icon={<AlignLeftOutlined />} type={contextTextElement.align === 'left' ? 'primary' : 'default'} disabled={contextElements.some((element) => Boolean(element.style.locked))} onClick={() => setContextAlign('left')} />
+                    </Tooltip>
+                    <Tooltip title="Выровнять значение по центру поля">
+                      <Button size="small" icon={<AlignCenterOutlined />} type={contextTextElement.align === 'center' ? 'primary' : 'default'} disabled={contextElements.some((element) => Boolean(element.style.locked))} onClick={() => setContextAlign('center')} />
+                    </Tooltip>
+                    <Tooltip title="Выровнять значение по правой стороне поля">
+                      <Button size="small" icon={<AlignRightOutlined />} type={contextTextElement.align === 'right' ? 'primary' : 'default'} disabled={contextElements.some((element) => Boolean(element.style.locked))} onClick={() => setContextAlign('right')} />
+                    </Tooltip>
+                  </Space.Compact>
+                </div>
+              )}
+              <Button type="text" size="small" block disabled={contextElements.some((element) => Boolean(element.style.locked))} onClick={() => { onCenter(contextIds, 'horizontal'); setContextMenu(null); }}>
+                По горизонтальному центру канваса
               </Button>
-              <Button type="text" size="small" block onClick={() => { onDuplicate(contextMenu.element.id); setContextMenu(null); }}>Сделать копию</Button>
-              <Button type="text" size="small" block onClick={() => { onMoveZ(contextMenu.element.id, 'front'); setContextMenu(null); }}>На передний план</Button>
-              <Button type="text" size="small" block onClick={() => { onMoveZ(contextMenu.element.id, 'back'); setContextMenu(null); }}>На задний план</Button>
-              <Button danger type="text" size="small" block onClick={() => { onDelete(contextMenu.element.id); setContextMenu(null); }}>Удалить</Button>
+              <Button type="text" size="small" block disabled={contextElements.some((element) => Boolean(element.style.locked))} onClick={() => { onCenter(contextIds, 'vertical'); setContextMenu(null); }}>
+                По вертикальному центру канваса
+              </Button>
+              {contextElements.length > 1 && (
+                <Button type="text" size="small" block disabled={contextElements.some((element) => Boolean(element.style.locked))} onClick={() => { onGroup(contextIds); setContextMenu(null); }}>
+                  {contextHasGroup ? 'Перегруппировать выделение' : 'Сгруппировать'}
+                </Button>
+              )}
+              {contextHasGroup && (
+                <Button type="text" size="small" block disabled={contextElements.some((element) => Boolean(element.style.locked))} onClick={() => { onUngroup(contextIds); setContextMenu(null); }}>
+                  Разгруппировать
+                </Button>
+              )}
+              <Button type="text" size="small" block onClick={toggleContextLock}>
+                {contextAllLocked ? 'Разблокировать' : 'Заблокировать'}
+              </Button>
+              <Button type="text" size="small" block onClick={() => { onDuplicate(contextElement.id); setContextMenu(null); }}>
+                Сделать копию
+              </Button>
+              <Button type="text" size="small" block onClick={() => { onMoveZ(contextIds, 'front'); setContextMenu(null); }}>
+                На передний план
+              </Button>
+              <Button type="text" size="small" block onClick={() => { onMoveZ(contextIds, 'back'); setContextMenu(null); }}>
+                На задний план
+              </Button>
+              <Button danger type="text" size="small" block onClick={() => { onDelete(contextElement.id); setContextMenu(null); }}>
+                Удалить
+              </Button>
             </div>
           )}
         </div>
@@ -1593,10 +1891,11 @@ const PdfKonvaElement: React.FC<{
   interactive: boolean;
   showAllBounds: boolean;
   nodeRef: (node: Konva.Node | null) => void;
-  onSelect: () => void;
-  onMove: (x: number, y: number, event?: { altKey?: boolean }) => void;
-  onTransformEnd: (node: Konva.Node, event: Konva.KonvaEventObject<Event>) => void;
-}> = ({ element, fieldLabels, previewValues, selected, interactive, showAllBounds, nodeRef, onSelect, onMove, onTransformEnd }) => {
+  onSelect: (event: Konva.KonvaEventObject<MouseEvent>) => void;
+  onDragStart: (node: Konva.Node, event: Konva.KonvaEventObject<DragEvent>) => void;
+  onDragMove: (node: Konva.Node, event: Konva.KonvaEventObject<DragEvent>) => void;
+  onDragEnd: () => void;
+}> = ({ element, fieldLabels, previewValues, selected, interactive, showAllBounds, nodeRef, onSelect, onDragStart, onDragMove, onDragEnd }) => {
   const common = {
     ref: nodeRef,
     x: element.x,
@@ -1606,9 +1905,9 @@ const PdfKonvaElement: React.FC<{
     draggable: interactive && !element.style.locked,
     onClick: onSelect,
     onTap: onSelect,
-    onDragStart: onSelect,
-    onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => onMove(event.target.x(), event.target.y(), event.evt),
-    onTransformEnd: (event: Konva.KonvaEventObject<Event>) => onTransformEnd(event.target, event),
+    onDragStart: (event: Konva.KonvaEventObject<DragEvent>) => onDragStart(event.target, event),
+    onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => onDragMove(event.target, event),
+    onDragEnd,
     onMouseEnter: (event: Konva.KonvaEventObject<MouseEvent>) => event.target.getStage()?.container().style.setProperty('cursor', interactive ? 'move' : 'default'),
     onMouseLeave: (event: Konva.KonvaEventObject<MouseEvent>) => event.target.getStage()?.container().style.setProperty('cursor', 'default'),
   };
@@ -1746,7 +2045,10 @@ const PdfKonvaElement: React.FC<{
         text={value}
         fontFamily="Arial"
         fontSize={fontSize}
-        fontStyle={element.style.fontWeight === 'bold' ? 'bold' : 'normal'}
+        fontStyle={[
+          element.style.fontWeight === 'bold' ? 'bold' : '',
+          element.style.fontItalic === true ? 'italic' : '',
+        ].filter(Boolean).join(' ') || 'normal'}
         fill={String(element.style.color ?? '#111111')}
         align={element.align}
         wrap="word"
@@ -1883,20 +2185,6 @@ const PdfElementProperties: React.FC<{
               <Select value={String(style.qrErrorCorrection ?? 'M')} disabled={!canManage} options={PDF_QR_ERROR_CORRECTION_OPTIONS} onChange={(qrErrorCorrection) => onPatch({ style: { ...style, qrErrorCorrection } })} />
             </Form.Item>
           </>
-        )}
-        {element.type === 'sheet_thumbnail' && (
-          <Form.Item label="Масштабирование" style={{ marginBottom: 10 }}>
-            <Select
-              value={String(style.fit ?? 'contain')}
-              disabled={!canManage}
-              options={[
-                { value: 'contain', label: 'Вписать' },
-                { value: 'cover', label: 'Заполнить' },
-                { value: 'stretch', label: 'Растянуть' },
-              ]}
-              onChange={(fit) => patchStyle({ fit })}
-            />
-          </Form.Item>
         )}
         {element.type === 'detail_table' && (
           <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 10 }}>
@@ -2135,9 +2423,10 @@ function normalizeCustomField(raw: unknown): CustomFieldSchemaRow {
 function normalizePdfElement(raw: unknown, index = 0): PdfTemplateElement {
   const r = isRecord(raw) ? raw : {};
   if (typeof r.type === 'string' && (r.type === 'field' || r.type === 'line' || r.type === 'rect') && typeof r.x === 'number' && r.x > PDF_PAGE.width) {
+    const type = r.type as PdfTemplateElementType;
     return makePdfElement(r.type as PdfTemplateElementType, {
       id: String(r.id ?? `${r.type}-${index}`),
-      label: String(r.label ?? pdfElementTypeLabel(r.type as PdfTemplateElementType)),
+      label: String(r.label ?? pdfElementTypeLabel(type)),
       source: typeof r.source === 'string' ? r.source : null,
       x: roundPdfMm((Number(r.x ?? 0) / PDF_OLD_PAGE.width) * PDF_PAGE.width),
       y: roundPdfMm((Number(r.y ?? 0) / PDF_OLD_PAGE.height) * PDF_PAGE.height),
@@ -2145,10 +2434,11 @@ function normalizePdfElement(raw: unknown, index = 0): PdfTemplateElement {
       h: roundPdfMm((Number(r.h ?? 8) / PDF_OLD_PAGE.height) * PDF_PAGE.height),
       align: r.align === 'right' || r.align === 'center' ? r.align : 'left',
       zIndex: Number(r.zIndex ?? index),
-      style: isRecord(r.style) ? r.style : {},
+      style: normalizePdfElementStyle(type, isRecord(r.style) ? r.style : {}),
     });
   }
   const type = isPdfElementType(r.type) ? r.type : 'field';
+  const style = normalizePdfElementStyle(type, isRecord(r.style) ? r.style : {});
   return makePdfElement(type, {
     id: String(r.id ?? `${type}-${index}`),
     label: String(r.label ?? pdfElementTypeLabel(type)),
@@ -2161,8 +2451,108 @@ function normalizePdfElement(raw: unknown, index = 0): PdfTemplateElement {
     rotation: Number(r.rotation ?? 0),
     zIndex: Number(r.zIndex ?? index),
     align: r.align === 'right' || r.align === 'center' ? r.align : 'left',
-    style: isRecord(r.style) ? r.style : {},
+    style,
   });
+}
+
+function normalizePdfElementStyle(type: PdfTemplateElementType, style: Record<string, unknown>): Record<string, unknown> {
+  return type === 'sheet_thumbnail' ? { ...style, fit: 'stretch' } : style;
+}
+
+function compactPdfElementPatch(patch: Partial<PdfTemplateElement>): Partial<PdfTemplateElement> {
+  return Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) as Partial<PdfTemplateElement>;
+}
+
+function isPdfTextElement(element: PdfTemplateElement): boolean {
+  return element.type === 'text' || element.type === 'field' || element.type === 'custom';
+}
+
+function pdfElementGroupId(element: PdfTemplateElement): string | null {
+  const value = element.style.groupId;
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function withPdfElementGroupId(element: PdfTemplateElement, groupId: string | null): PdfTemplateElement {
+  const style = { ...element.style };
+  if (groupId) style.groupId = groupId;
+  else delete style.groupId;
+  return { ...element, style };
+}
+
+function selectPdfElements(elements: PdfTemplateElement[], currentIds: string[], elementId: string, additive: boolean): string[] {
+  const unit = pdfSelectionUnit(elements, elementId);
+  if (!additive) return unit;
+  const selected = new Set(currentIds);
+  const remove = unit.length > 0 && unit.every((id) => selected.has(id));
+  for (const id of unit) {
+    if (remove) selected.delete(id);
+    else selected.add(id);
+  }
+  return elements.map((element) => element.id).filter((id) => selected.has(id));
+}
+
+function expandPdfSelectionIds(elements: PdfTemplateElement[], ids: string[]): Set<string> {
+  const expanded = new Set<string>();
+  for (const id of ids) {
+    for (const unitId of pdfSelectionUnit(elements, id)) expanded.add(unitId);
+  }
+  return expanded;
+}
+
+function cleanupSingletonPdfGroups(elements: PdfTemplateElement[]): PdfTemplateElement[] {
+  const counts = new Map<string, number>();
+  for (const element of elements) {
+    const groupId = pdfElementGroupId(element);
+    if (groupId) counts.set(groupId, (counts.get(groupId) ?? 0) + 1);
+  }
+  return elements.map((element) => {
+    const groupId = pdfElementGroupId(element);
+    return groupId && counts.get(groupId) === 1 ? withPdfElementGroupId(element, null) : element;
+  });
+}
+
+function pdfSelectionUnit(elements: PdfTemplateElement[], elementId: string): string[] {
+  const target = elements.find((element) => element.id === elementId);
+  if (!target) return [];
+  const groupId = pdfElementGroupId(target);
+  return groupId
+    ? elements.filter((element) => pdfElementGroupId(element) === groupId).map((element) => element.id)
+    : [elementId];
+}
+
+function pdfElementsBounds(elements: PdfTemplateElement[]): { minX: number; minY: number; maxX: number; maxY: number; width: number; height: number } | null {
+  if (elements.length === 0) return null;
+  const boxes = elements.map(pdfElementAabb);
+  const minX = Math.min(...boxes.map((box) => box.minX));
+  const minY = Math.min(...boxes.map((box) => box.minY));
+  const maxX = Math.max(...boxes.map((box) => box.maxX));
+  const maxY = Math.max(...boxes.map((box) => box.maxY));
+  return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
+}
+
+function pdfElementAabb(element: PdfTemplateElement): { minX: number; minY: number; maxX: number; maxY: number } {
+  const width = Math.max(element.w, 0);
+  const height = Math.max(element.h, 0);
+  const radians = (element.rotation ?? 0) * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const corners = [
+    [0, 0],
+    [width, 0],
+    [0, height],
+    [width, height],
+  ].map(([dx, dy]) => ({ x: element.x + dx * cos - dy * sin, y: element.y + dx * sin + dy * cos }));
+  return {
+    minX: Math.min(...corners.map((corner) => corner.x)),
+    minY: Math.min(...corners.map((corner) => corner.y)),
+    maxX: Math.max(...corners.map((corner) => corner.x)),
+    maxY: Math.max(...corners.map((corner) => corner.y)),
+  };
+}
+
+function pdfElementContextTitle(element: PdfTemplateElement, fieldLabels: Map<string, string>): string {
+  const source = element.source ? fieldLabels.get(element.source) ?? element.source : null;
+  return source ? `${element.label} · ${source}` : element.label;
 }
 
 function makePdfElement(type: PdfTemplateElementType, patch: Partial<PdfTemplateElement> = {}): PdfTemplateElement {
@@ -2190,7 +2580,7 @@ function defaultPatchForType(type: PdfTemplateElementType): Partial<PdfTemplateE
   if (type === 'field') return { label: 'Поле', source: 'order.unique_names', text: null, x: 18, y: 18, w: 58, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } };
   if (type === 'custom') return { label: 'Пользовательское поле', source: null, text: null, x: 18, y: 18, w: 58, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } };
   if (type === 'qr') return { label: 'QR-код', source: null, text: null, x: 18, y: 18, w: 22, h: 22, align: 'center', style: { qrName: 'QR', qrTemplate: '{order.unique_names}\\n{sheet.number}', qrErrorCorrection: 'M' } };
-  if (type === 'sheet_thumbnail') return { label: 'Миниатюра листа', source: 'sheet.thumbnail', text: null, x: 18, y: 32, w: 150, h: 95, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fit: 'contain' } };
+  if (type === 'sheet_thumbnail') return { label: 'Миниатюра листа', source: 'sheet.thumbnail', text: null, x: 18, y: 32, w: 150, h: 95, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fit: 'stretch' } };
   if (type === 'detail_table') return { label: 'Таблица деталей', source: 'detail.table', text: null, x: 180, y: 32, w: 88, h: 72, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fontSize: 7, columns: DEFAULT_PDF_DETAIL_TABLE_COLUMNS, sort: { field: 'detail.order', direction: 'asc' } } };
   if (type === 'machine_files_table') return { label: 'Файлы станка', source: 'sheet.machine_files', text: null, x: 180, y: 108, w: 88, h: 28, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fontSize: 7 } };
   if (type === 'line') return { label: 'Линия', source: null, text: null, x: 18, y: 18, w: 64, h: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.35 } };

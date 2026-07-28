@@ -128,7 +128,7 @@ function useMeasuredElementHeight<T extends HTMLElement>() {
     return () => ro.disconnect();
   }, [node]);
 
-  return [setNode, height] as const;
+  return [setNode, height, node] as const;
 }
 
 const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -414,20 +414,33 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
   const [orderShowSummaryTabsRef, orderShowSummaryTabsHeight] = useMeasuredElementHeight<HTMLDivElement>();
-  const [orderShowDetailsToolbarRef, orderShowDetailsToolbarHeight] = useMeasuredElementHeight<HTMLDivElement>();
+  const [orderShowDetailsToolbarRef, orderShowDetailsToolbarHeight, orderShowDetailsToolbarNode] = useMeasuredElementHeight<HTMLDivElement>();
   const [orderShowStickyEnabled, setOrderShowStickyEnabled] = useState(false);
   const [orderShowSummaryStuck, setOrderShowSummaryStuck] = useState(false);
+  const [orderShowTableHeaderTop, setOrderShowTableHeaderTop] = useState(0);
+  const updateOrderShowTableHeaderTop = useCallback((stuck = orderShowSummaryStuck) => {
+    const next =
+      stuck && orderShowDetailsToolbarNode
+        ? Math.max(0, Math.ceil(orderShowDetailsToolbarNode.getBoundingClientRect().bottom))
+        : 0;
+    setOrderShowTableHeaderTop((prev) => (prev === next ? prev : next));
+  }, [orderShowDetailsToolbarNode, orderShowSummaryStuck]);
   const orderShowStickyStyle = useMemo<OrderShowStickyStyle>(() => ({
     '--order-show-sticky-top': `${workspaceTabsHeight}px`,
     '--order-show-summary-tabs-height': `${orderShowSummaryTabsHeight}px`,
     '--order-show-details-toolbar-height': `${orderShowDetailsToolbarHeight}px`,
-    '--order-show-table-header-top': `${workspaceTabsHeight + orderShowSummaryTabsHeight + orderShowDetailsToolbarHeight}px`,
-  }), [orderShowDetailsToolbarHeight, orderShowSummaryTabsHeight, workspaceTabsHeight]);
+    '--order-show-table-header-top': `${orderShowTableHeaderTop}px`,
+  }), [orderShowDetailsToolbarHeight, orderShowSummaryTabsHeight, orderShowTableHeaderTop, workspaceTabsHeight]);
   const orderShowPageClassName = useMemo(() => [
     'order-show-page',
     orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
     orderShowSummaryStuck ? 'order-show-page--summary-stuck' : '',
   ].filter(Boolean).join(' '), [orderShowStickyEnabled, orderShowSummaryStuck]);
+  const orderShowDetailTableSticky = useMemo(() => (
+    orderShowSummaryStuck && orderShowTableHeaderTop > 0
+      ? { offsetHeader: orderShowTableHeaderTop }
+      : undefined
+  ), [orderShowSummaryStuck, orderShowTableHeaderTop]);
 
   useEffect(() => {
     const update = () => {
@@ -458,6 +471,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         orderShowStickyEnabled &&
         !!node &&
         node.getBoundingClientRect().top <= workspaceTabsHeight;
+      updateOrderShowTableHeaderTop(next);
       setOrderShowSummaryStuck((prev) => (prev === next ? prev : next));
     };
 
@@ -468,7 +482,21 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       window.removeEventListener('scroll', update);
       window.removeEventListener('resize', update);
     };
-  }, [orderShowStickyEnabled, workspaceTabsHeight]);
+  }, [orderShowStickyEnabled, updateOrderShowTableHeaderTop, workspaceTabsHeight]);
+
+  useEffect(() => {
+    const update = () => updateOrderShowTableHeaderTop();
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    if (orderShowDetailsToolbarNode) ro?.observe(orderShowDetailsToolbarNode);
+    return () => {
+      window.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+      ro?.disconnect();
+    };
+  }, [orderShowDetailsToolbarNode, updateOrderShowTableHeaderTop]);
 
   // Загрузка справочников для отображения названий
   const { data: millingTypesData } = useList({
@@ -1137,6 +1165,61 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         },
       })
     : null;
+  const orderShowDetailsToolbar = (
+    <div ref={orderShowDetailsToolbarRef} className="order-show-details-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
+        Детали заказа
+      </div>
+      <Space size="small" wrap>
+        {!isMobile && <>
+          <DetailGroupingControls
+            state={grouping.state}
+            onFieldChange={grouping.setField}
+            onToggleSeparation={grouping.setShowSeparation}
+          />
+          {detailSelectionEnabled && details.length > 0 && (
+            <>
+              <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
+                {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
+              </Button>
+              {cutSelectMode && (
+                <>
+                  <Button
+                    size="small"
+                    onClick={() =>
+                      setCutSelectedDetailIds(
+                        cutSelectedDetailIds.length === details.length
+                          ? []
+                          : details.map((d: any) => d.detail_id),
+                      )
+                    }
+                  >
+                    {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
+                  </Button>
+                  {cutEnabled && <Button size="small" type="primary" disabled={cutSelectedDetailIds.length === 0}
+                    onClick={() => setCutModalOpen(true)}>Добавить выбранные в раскрой ({cutSelectedDetailIds.length})</Button>}
+                </>
+              )}
+            </>
+          )}
+          <OrderDetailColumnSettingsButton
+            tableKey="orderShow"
+            definitions={ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS}
+            defaultOrder={ORDER_DETAIL_SHOW_DEFAULT_ORDER}
+            settings={showColumnSettings}
+            onChange={saveShowColumnSettings}
+          />
+        </>}
+        {isMobile && detailSelectionEnabled && details.length > 0 && <Button size="small" onClick={() => setCutSelectMode((value) => !value)}>
+          {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
+        </Button>}
+        {bazisCutVisible && <Tooltip title={!bazisCutManage ? 'Недостаточно прав' : undefined}>
+          <span><Button size="small" disabled={!bazisCutManage || cutSelectedDetailIds.length === 0}
+            onClick={() => setBazisCutModalOpen(true)}>Добавить в Базис раскрой</Button></span>
+        </Tooltip>}
+      </Space>
+    </div>
+  );
 
   return (
     <Show
@@ -1421,6 +1504,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               })}
             </div>
             </div>
+            {orderShowDetailsToolbar}
           </div>
 
             {activeInfoPanel && (
@@ -1657,59 +1741,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
           {/* Детали заказа - компактная таблица */}
           <div ref={orderShowDetailsBlockRef} className="order-show-details-section">
-            <div ref={orderShowDetailsToolbarRef} className="order-show-details-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
-                Детали заказа
-              </div>
-              <Space size="small" wrap>
-                {!isMobile && <>
-                  <DetailGroupingControls
-                    state={grouping.state}
-                    onFieldChange={grouping.setField}
-                    onToggleSeparation={grouping.setShowSeparation}
-                  />
-                  {detailSelectionEnabled && details.length > 0 && (
-                    <>
-                      <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
-                        {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
-                      </Button>
-                      {cutSelectMode && (
-                        <>
-                          <Button
-                            size="small"
-                            onClick={() =>
-                              setCutSelectedDetailIds(
-                                cutSelectedDetailIds.length === details.length
-                                  ? []
-                                  : details.map((d: any) => d.detail_id),
-                              )
-                            }
-                          >
-                            {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
-                          </Button>
-                          {cutEnabled && <Button size="small" type="primary" disabled={cutSelectedDetailIds.length === 0}
-                            onClick={() => setCutModalOpen(true)}>Добавить выбранные в раскрой ({cutSelectedDetailIds.length})</Button>}
-                        </>
-                      )}
-                    </>
-                  )}
-                  <OrderDetailColumnSettingsButton
-                    tableKey="orderShow"
-                    definitions={ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS}
-                    defaultOrder={ORDER_DETAIL_SHOW_DEFAULT_ORDER}
-                    settings={showColumnSettings}
-                    onChange={saveShowColumnSettings}
-                  />
-                </>}
-                {isMobile && detailSelectionEnabled && details.length > 0 && <Button size="small" onClick={() => setCutSelectMode((value) => !value)}>
-                  {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
-                </Button>}
-                {bazisCutVisible && <Tooltip title={!bazisCutManage ? 'Недостаточно прав' : undefined}>
-                  <span><Button size="small" disabled={!bazisCutManage || cutSelectedDetailIds.length === 0}
-                    onClick={() => setBazisCutModalOpen(true)}>Добавить в Базис раскрой</Button></span>
-                </Tooltip>}
-              </Space>
-            </div>
             {isMobile ? (
               <DetailCardList rows={details} lookups={detailCardLookups} highlightDetailId={highlightDetail}
                 selectionEnabled={cutSelectMode} selectedIds={cutSelectedDetailIds}
@@ -1753,6 +1784,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               size="small"
               pagination={false}
               bordered
+              sticky={orderShowDetailTableSticky}
               tableLayout="fixed"
               style={{ fontSize: 12 }}
               rowClassName={(row: any, index) => {

@@ -257,18 +257,22 @@ function drawTemplateText(
   const padding = mmToPt(readNumber(style.padding, 0, 0, 50));
   const textW = Math.max(1, w - padding * 2);
   const textH = Math.max(1, h - padding * 2);
+  const bold = style.fontWeight === 'bold';
+  const italic = style.fontItalic === true || style.italic === true;
+  const textOptions: PDFKit.Mixins.TextOptions = {
+    width: textW,
+    height: textH,
+    align: align ?? 'left',
+    lineBreak: true,
+    ellipsis: true,
+  };
   doc.save();
   doc.rect(0, 0, w, h).clip();
-  doc
-    .fontSize(fontSize)
-    .fillColor(readColor(style.color, '#111111'))
-    .text(text, padding, padding, {
-      width: textW,
-      height: textH,
-      align: align ?? 'left',
-      lineBreak: true,
-      ellipsis: true,
-    });
+  if (italic) doc.transform(1, 0, -0.18, 1, 0, 0);
+  doc.fontSize(fontSize).fillColor(readColor(style.color, '#111111')).text(text, padding, padding, textOptions);
+  if (bold) {
+    doc.text(text, padding + Math.max(0.18, fontSize * 0.025), padding, textOptions);
+  }
   doc.restore();
 }
 
@@ -305,23 +309,11 @@ function drawSheetThumbnail(
   fontCallback?: () => string,
 ): void {
   if (w <= 0 || h <= 0) return;
-  const sourceW = Math.max(1, sheet.sheetWidthMm * MM_TO_PT);
-  const sourceH = Math.max(1, sheet.sheetHeightMm * MM_TO_PT);
-  const fit = String(style.fit ?? 'contain');
-  const scale = fit === 'cover'
-    ? Math.max(w / sourceW, h / sourceH)
-    : fit === 'stretch'
-      ? 1
-      : Math.min(w / sourceW, h / sourceH);
-  const drawW = fit === 'stretch' ? w : sourceW * scale;
-  const drawH = fit === 'stretch' ? h : sourceH * scale;
-  const dx = (w - drawW) / 2;
-  const dy = (h - drawH) / 2;
   doc.save();
   doc.rect(0, 0, w, h).clip();
-  SVGtoPDF(doc, sheet.bathSvg ?? sheet.svg, dx, dy, {
-    width: drawW,
-    height: drawH,
+  SVGtoPDF(doc, sheet.bathSvg ?? sheet.svg, 0, 0, {
+    width: w,
+    height: h,
     assumePt: false,
     ...(fontCallback ? { fontCallback } : {}),
   });
@@ -930,7 +922,7 @@ function defaultTemplateLayoutV3(): PdfTemplateLayoutV3 {
       { id: 'field-client', type: 'field', label: 'Клиент', source: 'client.unique_names', x: 108, y: 10, w: 78, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } },
       { id: 'field-film', type: 'field', label: 'Пленка', source: 'detail.films', x: 198, y: 10, w: 84, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } },
       { id: 'line-header', type: 'line', label: 'Линия шапки', source: null, text: null, x: 12, y: 22, w: 270, h: 0, rotation: 0, zIndex: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.35 } },
-      { id: 'sheet-thumbnail', type: 'sheet_thumbnail', label: 'Миниатюра листа', source: 'sheet.thumbnail', x: 12, y: 34, w: 202, h: 154, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fit: 'contain' } },
+      { id: 'sheet-thumbnail', type: 'sheet_thumbnail', label: 'Миниатюра листа', source: 'sheet.thumbnail', x: 12, y: 34, w: 202, h: 154, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fit: 'stretch' } },
       {
         id: 'detail-table',
         type: 'detail_table',
@@ -969,7 +961,7 @@ function bathProfilesTemplateLayoutV3(): PdfTemplateLayoutV3 {
       { id: 'bath-line-header-2', type: 'line', label: 'Линия шапки 2', source: null, text: null, x: 9.9, y: 24.3, w: 277.3, h: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.25 } },
       { id: 'bath-label-film', type: 'text', label: 'Подпись Пленка', source: null, text: 'Пленка:', x: 9.9, y: 25.4, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
       { id: 'bath-field-film', type: 'field', label: 'Пленка', source: 'detail.films', text: null, x: 38.8, y: 25.4, w: 245.4, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
-      { id: 'bath-sheet-thumbnail', type: 'sheet_thumbnail', label: 'Миниатюра листа', source: 'sheet.thumbnail', text: null, x: 9.9, y: 37.4, w: 213.1, h: 150.6, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fit: 'contain' } },
+      { id: 'bath-sheet-thumbnail', type: 'sheet_thumbnail', label: 'Миниатюра листа', source: 'sheet.thumbnail', text: null, x: 9.9, y: 37.4, w: 213.1, h: 150.6, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fit: 'stretch' } },
       { id: 'bath-table-title', type: 'text', label: 'Заголовок листа', source: null, text: 'Лист', x: 227.9, y: 28.6, w: 24, h: 4.5, align: 'right', style: { fontSize: 10, color: '#111111' } },
       { id: 'bath-field-sheet-number', type: 'field', label: 'Номер листа', source: 'sheet.number', text: null, x: 252.5, y: 28.6, w: 34.7, h: 4.5, align: 'left', style: { fontSize: 10, color: '#111111' } },
       { id: 'bath-table-subtitle', type: 'text', label: 'Заголовок деталей', source: null, text: 'Детали', x: 227.9, y: 32.8, w: 59.3, h: 4.5, align: 'center', style: { fontSize: 9, color: '#111111' } },

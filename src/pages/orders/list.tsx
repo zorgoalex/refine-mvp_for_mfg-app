@@ -14,7 +14,7 @@ import {
   useSelect,
 } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin } from "antd";
+import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin, Badge } from "antd";
 import {
   EyeOutlined,
   EditOutlined,
@@ -57,6 +57,7 @@ import {
   snapshotReferenceMappingKey,
   type SnapshotUnmappedReferenceRow,
 } from "./orderSnapshotReferenceMapping";
+import { buildOrderListFilterFormSync } from "./orderListFilterFormSync";
 import { findOrderByName, countOrdersAfter } from "../../api/reports/ordersSearchReportApi";
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
@@ -158,25 +159,23 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
   const { show } = useNavigation();
   const isMobile = useIsMobile();
+  const orderFilterFormSync = useMemo(
+    () => buildOrderListFilterFormSync(filters, { useBackendOrdersRead, canViewUsers }),
+    [filters, useBackendOrdersRead, canViewUsers],
+  );
+  const hasActiveOrderFilters = orderFilterFormSync.hasActiveFilters;
 
-  // Синхронизация состояния чекбокса "Мои заказы" с фильтрами из URL при загрузке
+  // URL/useTable filters are source of truth after hard reload.
   useEffect(() => {
-    if (!currentUser?.id) return;
-
-    const createdByFilter = (filters || []).find((f: any) => f.field === "created_by");
-    const isMyOrdersFilter = createdByFilter && Number(createdByFilter.value) === Number(currentUser.id);
-
-    setShowMyOrders(!!isMyOrdersFilter);
-  }, [filters, currentUser?.id]);
-
-  useEffect(() => {
-    const modeFilter = (filters || []).find((f: any) => f.field === "group_mode");
-    const mode = modeFilter?.value;
-    if (mode === "any" || mode === "all" || mode === "primary" || mode === "none") {
-      setGroupMode(mode);
-      form.setFieldValue("group_mode", mode);
-    }
-  }, [filters, form]);
+    form.setFieldsValue(orderFilterFormSync.values);
+    setGroupMode(orderFilterFormSync.groupMode);
+    setShowResultCount(orderFilterFormSync.hasActiveFilters);
+    setShowMyOrders(Boolean(
+      currentUser?.id
+      && orderFilterFormSync.values.created_by !== undefined
+      && Number(orderFilterFormSync.values.created_by) === Number(currentUser.id),
+    ));
+  }, [currentUser?.id, form, orderFilterFormSync]);
 
   // Автоскролл к найденной строке после загрузки данных
   useEffect(() => {
@@ -1263,13 +1262,15 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             >
               Мои заказы
             </Checkbox>
-            <Button
-              type={filtersVisible ? "primary" : "default"}
-              icon={<FilterOutlined />}
-              onClick={() => setFiltersVisible(!filtersVisible)}
-            >
-              {filtersVisible ? "Скрыть фильтры" : "Фильтры"}
-            </Button>
+            <Badge dot={hasActiveOrderFilters} offset={[-2, 2]}>
+              <Button
+                type={filtersVisible || hasActiveOrderFilters ? "primary" : "default"}
+                icon={<FilterOutlined />}
+                onClick={() => setFiltersVisible(!filtersVisible)}
+              >
+                {filtersVisible ? "Скрыть фильтры" : hasActiveOrderFilters ? "Фильтры активны" : "Фильтры"}
+              </Button>
+            </Badge>
             <Button
               type="primary"
               icon={<PlusOutlined />}

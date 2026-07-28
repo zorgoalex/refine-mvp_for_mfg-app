@@ -775,6 +775,17 @@ html {
   margin-bottom: 16px;
 }
 
+.order-show-summary-tabs-sticky .order-show-tabs-shell {
+  margin-bottom: 0;
+}
+
+.order-show-summary-tabs-sticky .order-show-details-toolbar {
+  margin-bottom: 0 !important;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--app-border-soft);
+  background: var(--app-surface);
+}
+
 .order-show-header--compact-sticky {
   margin-bottom: 4px;
   border: 1px solid #1890ff;
@@ -879,24 +890,6 @@ html {
     box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
   }
 
-  .order-show-page--sticky-enabled .order-show-details-toolbar {
-    position: sticky;
-    top: calc(var(--order-show-sticky-top) + var(--order-show-summary-tabs-height));
-    z-index: 18;
-    margin-bottom: 0 !important;
-    padding: 6px 0;
-    border-bottom: 1px solid var(--app-border-soft);
-    background: var(--app-surface);
-    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
-  }
-
-  .order-show-page--summary-stuck .order-show-details-table .ant-table-thead > tr > th {
-    position: sticky !important;
-    top: var(--order-show-table-header-top);
-    z-index: 17;
-    background: var(--app-surface) !important;
-    box-shadow: 0 1px 0 var(--app-border-soft);
-  }
 }
 
 /* ----- Order-detail visual grouping (purely visual; non-functional rows) ----- */
@@ -1114,8 +1107,9 @@ html {
   vertical-align: middle;
 }
 
-.cut-jobs-table .cut-jobs-name-cell {
-  text-align: left;
+.cut-jobs-table .ant-table-tbody > tr > td.cut-jobs-name-cell,
+.cut-jobs-table .ant-table-thead > tr > th.cut-jobs-name-cell {
+  text-align: left !important;
 }
 
 .cut-jobs-table .cut-job-materials-cell {
