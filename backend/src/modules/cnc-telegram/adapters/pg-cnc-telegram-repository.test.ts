@@ -246,6 +246,9 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('fallback_target_details');
     expect(sql).toContain('lower(trim(i.order_name)) AS order_key');
     expect(sql).toContain('od.detail_number = item.detail_number');
+    expect(sql).toContain("item.source <> 'ocr'");
+    expect(sql).toContain('item.width_mm::numeric = od.width::numeric');
+    expect(sql).toContain("item.source = 'ocr'");
     expect(sql).toContain('ABS(item.width_mm::numeric - od.width::numeric) <= 3');
     expect(result.columns.map((column) => [column.key, column.total])).toEqual([
       ['parsed', 0],
@@ -399,6 +402,153 @@ describe('PgCncTelegramRepository', () => {
     expect(itemInsert?.params[10]).toBe(9006);
     expect(itemInsert?.params[11]).toBe('matched');
     expect(itemInsert?.params[12]).toBeNull();
+  });
+
+  it('uses OCR tolerance when resolving ERP detail size', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/FROM orders o\s+JOIN order_details od/i.test(text)) {
+          return {
+            rows: [
+              {
+                order_key: '2690',
+                order_id: 2690,
+                detail_id: 9006,
+                detail_number: 6,
+                width: 500,
+                height: 350,
+              },
+            ],
+          };
+        }
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [packetRow()] };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:ocr-size-tolerance',
+        items: [
+          {
+            sourceItemKey: '2690:none:502x350',
+            orderName: '2690',
+            detailNumber: null,
+            widthMm: 502,
+            heightMm: 350,
+            quantity: 1,
+            source: 'ocr' as const,
+            confidence: 0.71,
+            matchStatus: 'unmatched' as const,
+            reviewNote: 'OCR did not read detail number',
+          },
+        ],
+      },
+      requestId: 'request-cnc-1',
+    });
+
+    const itemInsert = queries.find((query) =>
+      /INSERT INTO cnc_telegram_packet_items/i.test(query.text),
+    );
+    expect(itemInsert?.params[3]).toBe(6);
+    expect(itemInsert?.params[9]).toBe(2690);
+    expect(itemInsert?.params[10]).toBe(9006);
+    expect(itemInsert?.params[11]).toBe('matched');
+  });
+
+  it('does not use size tolerance for non-OCR ERP detail resolution', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/FROM orders o\s+JOIN order_details od/i.test(text)) {
+          return {
+            rows: [
+              {
+                order_key: '2690',
+                order_id: 2690,
+                detail_id: 9006,
+                detail_number: 6,
+                width: 500,
+                height: 350,
+              },
+            ],
+          };
+        }
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [packetRow()] };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:vector-size-exact',
+        items: [
+          {
+            sourceItemKey: '2690:none:502x350',
+            orderName: '2690',
+            detailNumber: null,
+            widthMm: 502,
+            heightMm: 350,
+            quantity: 1,
+            source: 'vector' as const,
+            confidence: 1,
+            matchStatus: 'unmatched' as const,
+          },
+        ],
+      },
+      requestId: 'request-cnc-1',
+    });
+
+    const itemInsert = queries.find((query) =>
+      /INSERT INTO cnc_telegram_packet_items/i.test(query.text),
+    );
+    expect(itemInsert?.params[3]).toBeNull();
+    expect(itemInsert?.params[9]).toBeNull();
+    expect(itemInsert?.params[10]).toBeNull();
+    expect(itemInsert?.params[11]).toBe('unmatched');
   });
 
   it('aggregates repeated rows only after they resolve to the same ERP detail', async () => {

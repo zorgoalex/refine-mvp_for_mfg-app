@@ -704,11 +704,29 @@ function sameItemSize(item: IngestItemInput, detail: DetailMatch): boolean {
   if (itemWidth === null || itemHeight === null || detail.width === null || detail.height === null) {
     return false;
   }
+  const matchesSize = item.source === 'ocr' ? closeEnoughSize : exactSize;
   return (
-    closeEnough(itemWidth, detail.width) && closeEnough(itemHeight, detail.height)
-  ) || (
-    closeEnough(itemWidth, detail.height) && closeEnough(itemHeight, detail.width)
+    matchesSize(itemWidth, itemHeight, detail.width, detail.height)
+    || matchesSize(itemWidth, itemHeight, detail.height, detail.width)
   );
+}
+
+function exactSize(
+  itemWidth: number,
+  itemHeight: number,
+  detailWidth: number,
+  detailHeight: number,
+): boolean {
+  return itemWidth === detailWidth && itemHeight === detailHeight;
+}
+
+function closeEnoughSize(
+  itemWidth: number,
+  itemHeight: number,
+  detailWidth: number,
+  detailHeight: number,
+): boolean {
+  return closeEnough(itemWidth, detailWidth) && closeEnough(itemHeight, detailHeight);
 }
 
 function closeEnough(left: number, right: number): boolean {
@@ -1008,6 +1026,7 @@ async function loadBathCards(
         p.thumbs_up,
         i.match_order_id,
         i.match_detail_id,
+        i.source,
         lower(trim(i.order_name)) AS order_key,
         i.detail_number,
         i.width_mm,
@@ -1062,29 +1081,28 @@ async function loadBathCards(
        AND od.delete_flag = false
       WHERE item.match_order_id IS NULL
         AND item.match_detail_id IS NULL
+        AND item.detail_number IS NOT NULL
+        AND od.detail_number = item.detail_number
+        AND item.width_mm IS NOT NULL
+        AND item.height_mm IS NOT NULL
+        AND od.width IS NOT NULL
+        AND od.height IS NOT NULL
         AND (
           (
-            item.detail_number IS NOT NULL
-            AND od.detail_number = item.detail_number
+            item.source <> 'ocr'
             AND (
-              item.width_mm IS NULL
-              OR item.height_mm IS NULL
+              (
+                item.width_mm::numeric = od.width::numeric
+                AND item.height_mm::numeric = od.height::numeric
+              )
               OR (
-                (
-                  ABS(item.width_mm::numeric - od.width::numeric) <= 3
-                  AND ABS(item.height_mm::numeric - od.height::numeric) <= 3
-                )
-                OR (
-                  ABS(item.width_mm::numeric - od.height::numeric) <= 3
-                  AND ABS(item.height_mm::numeric - od.width::numeric) <= 3
-                )
+                item.width_mm::numeric = od.height::numeric
+                AND item.height_mm::numeric = od.width::numeric
               )
             )
           )
           OR (
-            item.detail_number IS NULL
-            AND item.width_mm IS NOT NULL
-            AND item.height_mm IS NOT NULL
+            item.source = 'ocr'
             AND (
               (
                 ABS(item.width_mm::numeric - od.width::numeric) <= 3
