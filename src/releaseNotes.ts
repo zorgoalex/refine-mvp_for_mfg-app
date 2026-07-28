@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-28",
+    title: "Заказы: обновление поля «Раскрой» после расчёта",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "После успешного расчёта задания на раскрой открытые карточки заказа сразу обновляют колонку «Раскрой» у деталей, вошедших в это задание.",
+      "В форме редактирования заказа список деталей получил read-only колонку «Раскрой» с тем же live-обновлением, что и форма просмотра.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-28",
     title: "Заказы: профиль раскроя в карточке",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

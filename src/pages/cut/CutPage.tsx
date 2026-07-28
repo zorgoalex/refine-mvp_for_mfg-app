@@ -74,6 +74,7 @@ import { can } from '../../utils/permissions';
 import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
 import { useTabStore } from '../../stores/tabStore';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
+import { emitCutJobReady } from './cutJobEvents';
 const { Panel } = Collapse;
 
 // Built-in fallback preset names (used until the backend config list loads).
@@ -1428,6 +1429,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       setIsFrozenResultSelection(false);
       applyPdfTemplateState(calculated);
       resetSheetViews();
+      emitCutJobReady(calculated);
       message.success('Раскрой рассчитан');
       await loadJobs();
     } catch (error) {
@@ -1461,6 +1463,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         applyPdfTemplateState(fresh);
         await loadJobs();
         if (responseWasLostAfterSuccess) {
+          emitCutJobReady(fresh);
           message.success('Раскрой рассчитан');
           return;
         }

@@ -27,6 +27,8 @@ describe('CutPage result history guard', () => {
     expect(source).toContain('calcCommandRef.current?.cutJobId !== job.cutJobId');
     expect(source).toContain('manualCommandRef.current?.key !== commandKey');
     expect(source).toContain('cutApi.calculate(job.cutJobId, commandVersion, commandId)');
+    expect(source).toContain('emitCutJobReady(calculated)');
+    expect(source).toContain('emitCutJobReady(fresh)');
     expect(source).toContain('version: job.version');
     expect(source).toContain('responseWasLostAfterSuccess');
   });

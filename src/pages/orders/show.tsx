@@ -31,10 +31,10 @@ import { AddToCutModal } from "./components/AddToCutModal";
 import { AddToBazisCutModal } from "../bazis-cut/AddToBazisCutModal";
 import { can, canAny } from "../../utils/permissions";
 import { cutApi } from "../../api/cutApi";
-import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.types";
+import type { CutJobRef } from "../../api/types/cutApi.types";
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
-import { buildCutJobByDetailId, cutJobDeepLink, cutJobProfileLabel } from "./cutColumnHelpers";
+import { cutJobDeepLink, cutJobProfileLabel } from "./cutColumnHelpers";
 import { calculateOrderTotalArea } from "../../utils/orderArea";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
@@ -59,6 +59,8 @@ import {
   useOrderDetailColumnPreferences,
   type OrderDetailColumnDefinition,
 } from "./components/tables/OrderDetailColumnSettings";
+import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from "../cut/cutJobEvents";
+import { useCutDetailLastReady } from "./useCutDetailLastReady";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 
@@ -477,15 +479,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // Read-only «Раскрой» column gate (cut.view; distinct from the cut.manage
   // add-to-cut button gate above). Off ⇒ no fetch, no column (legacy behavior).
   const cutColumnEnabled = featureFlags.useBackendCut && can('cut.view');
-  const [cutJobByDetailId, setCutJobByDetailId] = useState<Map<number, CutDetailLastReadyRef>>(
-    () => new Map(),
-  );
 
   // Stable positive detail ids + a primitive key so the fetch effect does NOT
-  // re-run on every rerender just because `details` is a fresh array identity
-  // (it is derived inline each render from backendOrder?.details or a sorted
-  // query array). Keying on the joined id string makes the fetch fire only when
-  // the actual set of detail ids changes.
+  // re-run on every rerender just because `details` is derived each render.
   const cutDetailIds = useMemo(
     () =>
       details
@@ -493,52 +489,45 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         .filter((id: unknown): id is number => Number.isInteger(id) && (id as number) > 0),
     [details],
   );
-  const cutDetailIdsKey = cutDetailIds.join(',');
-
-  useEffect(() => {
-    if (!cutColumnEnabled || cutDetailIds.length === 0) {
-      setCutJobByDetailId(new Map());
-      return;
-    }
-    let cancelled = false;
-    cutApi
-      .listDetailLastReady(cutDetailIds)
-      .then((res) => {
-        if (!cancelled) setCutJobByDetailId(buildCutJobByDetailId(res.details));
-      })
-      .catch(() => {
-        if (!cancelled) setCutJobByDetailId(new Map());
-      });
-    return () => {
-      cancelled = true;
-    };
-    // cutDetailIdsKey is the primitive identity of cutDetailIds; intentionally
-    // depend on it instead of the array to avoid redundant fetches.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cutColumnEnabled, cutDetailIdsKey]);
+  const cutJobByDetailId = useCutDetailLastReady({
+    enabled: cutColumnEnabled,
+    detailIds: cutDetailIds,
+    orderId: record?.order_id,
+  });
 
   // All distinct active cut jobs that contain details from THIS order (a detail
   // may be placed in several jobs — list them all). Same cut.view gate as the
   // column; powers the «Раскрой» sub-block in the additional-info panel.
   const [cutOrderJobs, setCutOrderJobs] = useState<CutJobRef[]>([]);
-  useEffect(() => {
-    if (!cutColumnEnabled || !record?.order_id) {
+  const refreshCutOrderJobs = useCallback(async (orderId?: number | null) => {
+    if (!cutColumnEnabled || !orderId) {
       setCutOrderJobs([]);
       return;
     }
-    let cancelled = false;
-    cutApi
-      .listPlacements({ orderIds: [record.order_id] })
-      .then((res) => {
-        if (!cancelled) setCutOrderJobs(res.jobs);
-      })
-      .catch(() => {
-        if (!cancelled) setCutOrderJobs([]);
-      });
-    return () => {
-      cancelled = true;
+    try {
+      const res = await cutApi.listPlacements({ orderIds: [orderId] });
+      setCutOrderJobs(res.jobs);
+    } catch {
+      setCutOrderJobs([]);
+    }
+  }, [cutColumnEnabled]);
+
+  useEffect(() => {
+    void refreshCutOrderJobs(record?.order_id);
+  }, [record?.order_id, refreshCutOrderJobs]);
+
+  useEffect(() => {
+    if (!cutColumnEnabled || typeof window === 'undefined') return undefined;
+    const handler = (event: Event) => {
+      const payload = readCutJobReadyEvent(event);
+      if (!payload || !cutJobReadyAffects(payload, { detailIds: cutDetailIds, orderId: record?.order_id })) return;
+      void refreshCutOrderJobs(record?.order_id);
     };
-  }, [cutColumnEnabled, record?.order_id]);
+    window.addEventListener(CUT_JOB_READY_EVENT, handler);
+    return () => {
+      window.removeEventListener(CUT_JOB_READY_EVENT, handler);
+    };
+  }, [cutColumnEnabled, cutDetailIds, record?.order_id, refreshCutOrderJobs]);
 
   // Detail grouping state (persisted per user+order; suppressed during cut selection).
   const groupingUserId = authSession.getUser()?.id ?? 'anon';

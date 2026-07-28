@@ -34,6 +34,7 @@ import { can } from '../../../../utils/permissions';
 import { useOrderFormData } from '../../../../hooks/useOrderFormData';
 import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { OrderToolbarLabel } from '../OrderDetailsToolbar';
+import { useCutDetailLastReady } from '../../useCutDetailLastReady';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -113,6 +114,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   const tableRef = useRef<OrderDetailTableRef>(null);
 
   const cutEnabled = featureFlags.useBackendCut && can('cut.manage');
+  const cutColumnEnabled = featureFlags.useBackendCut && can('cut.view');
   const [addToCutOpen, setAddToCutOpen] = useState(false);
   const bazisCutVisible = featureFlags.bazisCut;
   const bazisCutManage = can('cut.manage');
@@ -125,6 +127,18 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     () => (cutEnabled ? selectedDetailIds(details as any[], selectedRowKeys) : []),
     [cutEnabled, details, selectedRowKeys],
   );
+  const persistedDetailIds = useMemo(
+    () =>
+      details
+        .map((detail) => detail.detail_id)
+        .filter((detailId): detailId is number => Number.isInteger(detailId) && detailId > 0),
+    [details],
+  );
+  const cutJobByDetailId = useCutDetailLastReady({
+    enabled: cutColumnEnabled,
+    detailIds: persistedDetailIds,
+    orderId: header?.order_id,
+  });
   const sheetNameById = useMemo(
     () => new Map(orderFormData.references.sheetMaterialTypes.map((option) => [option.value, option.label])),
     [orderFormData.references.sheetMaterialTypes],
@@ -583,6 +597,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
           groupField={grouping.state.field}
           showSeparation={grouping.state.showSeparation}
           cutSelectable={cutEnabled}
+          cutJobByDetailId={cutColumnEnabled ? cutJobByDetailId : undefined}
           toolbarActions={
             <>
               <AccessibleToolbarTooltip title="Быстрое добавление">

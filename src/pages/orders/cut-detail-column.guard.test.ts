@@ -7,6 +7,8 @@ describe('cut detail column', () => {
     expect(show).toContain("title: 'Раскрой'");
     expect(show).toContain('cutJobDeepLink');
     expect(show).toContain("can('cut.view')");
+    expect(show).toContain('useCutDetailLastReady');
+    expect(show).toContain('CUT_JOB_READY_EVENT');
   });
 
   it('details table is horizontally scrollable with a synced top scrollbar', () => {
