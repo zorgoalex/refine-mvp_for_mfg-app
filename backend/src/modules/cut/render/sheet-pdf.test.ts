@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import PDFDocument from 'pdfkit';
 import { buildSheetsPdf } from './sheet-pdf';
 import { FONT_FAMILY } from './sheet-png';
 
 const SVG = (label: string) =>
   `<svg viewBox="0 0 2800 2070"><rect x="0" y="0" width="2800" height="2070" fill="#fff"/><text x="100" y="100">${label}</text></svg>`;
+const SHEET_PDF_SOURCE = readFileSync(new URL('./sheet-pdf.ts', import.meta.url), 'utf8');
 
 describe('buildSheetsPdf', () => {
   afterEach(() => {
@@ -502,5 +504,18 @@ describe('buildSheetsPdf', () => {
     expect(mediaBox).not.toBeNull();
     expect(Number(mediaBox?.[1])).toBeCloseTo(841.89, 1);
     expect(Number(mediaBox?.[2])).toBeCloseTo(595.28, 1);
+  });
+
+  it('forces sheet thumbnails to stretch over the full template element bounds', () => {
+    expect(SHEET_PDF_SOURCE).toContain('SVGtoPDF(doc, sheet.bathSvg ?? sheet.svg, 0, 0');
+    expect(SHEET_PDF_SOURCE).toContain('width: w');
+    expect(SHEET_PDF_SOURCE).toContain('height: h');
+    expect(SHEET_PDF_SOURCE).not.toContain("style.fit ?? 'contain'");
+  });
+
+  it('renders PDF template text style controls from the editor context menu', () => {
+    expect(SHEET_PDF_SOURCE).toContain("style.fontWeight === 'bold'");
+    expect(SHEET_PDF_SOURCE).toContain('style.fontItalic === true');
+    expect(SHEET_PDF_SOURCE).toContain('doc.transform(1, 0, -0.18, 1, 0, 0)');
   });
 });
