@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-28",
+    title: "Заказы: профиль раскроя в карточке",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В блоке «Дополнительная информация» карточки заказа рядом с названием задания на раскрой теперь показывается профиль раскроя этого задания.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-28",
     title: "PDF раскроя: новые шаблоны в заданиях",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

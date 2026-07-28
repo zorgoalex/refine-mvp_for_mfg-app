@@ -34,7 +34,7 @@ import { cutApi } from "../../api/cutApi";
 import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.types";
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
-import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
+import { buildCutJobByDetailId, cutJobDeepLink, cutJobProfileLabel } from "./cutColumnHelpers";
 import { calculateOrderTotalArea } from "../../utils/orderArea";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
@@ -1495,9 +1495,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                   <Link
                                     key={j.cutJobId}
                                     to={cutJobDeepLink(j.cutJobId)}
-                                    style={{ fontSize: 12 }}
+                                    style={{ fontSize: 12, lineHeight: 1.35 }}
                                   >
                                     {j.name}
+                                    <span style={{ color: 'var(--app-text-muted)' }}>
+                                      {' '}· Профиль: {cutJobProfileLabel(j)}
+                                    </span>
                                   </Link>
                                 ))}
                               </div>

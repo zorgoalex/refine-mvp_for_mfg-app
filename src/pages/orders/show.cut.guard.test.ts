@@ -25,6 +25,7 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(source).toContain('cutOrderJobs');
     // Each job is a deep-link into /cut?job=<id>.
     expect(source).toContain('cutJobDeepLink(j.cutJobId)');
+    expect(source).toContain('Профиль: {cutJobProfileLabel(j)}');
   });
 
   it('renders embedded cut screen as a top order info tab', () => {
