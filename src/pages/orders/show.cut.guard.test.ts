@@ -21,7 +21,8 @@ describe('OrderShow cut detail-picker guards', () => {
 
   it('renders a «Раскрой» sub-block listing all cut jobs for the order', () => {
     // cut.view-gated placements fetch for this order's details (multi-job).
-    expect(source).toContain('.listPlacements({ orderIds: [record.order_id] })');
+    expect(source).toContain('cutApi.listPlacements');
+    expect(source).toContain('orderIds: [orderId]');
     expect(source).toContain('cutOrderJobs');
     // Each job is a deep-link into /cut?job=<id>.
     expect(source).toContain('cutJobDeepLink(j.cutJobId)');

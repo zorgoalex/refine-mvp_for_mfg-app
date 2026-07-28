@@ -3,7 +3,7 @@ import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select, Popconfirm } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTabStore } from "../../stores/tabStore";
@@ -73,6 +73,63 @@ const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: strin
 ];
 
 const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 120;
+
+type OrderShowStickyStyle = CSSProperties & {
+  '--order-show-sticky-top': string;
+  '--order-show-summary-tabs-height': string;
+  '--order-show-details-toolbar-height': string;
+  '--order-show-table-header-top': string;
+};
+
+function useWorkspaceTabsHeight(): number {
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    let ro: ResizeObserver | null = null;
+    const attach = (): boolean => {
+      const tabs = document.querySelector('.workspace-tabs');
+      if (!tabs) return false;
+      const measure = () => setHeight(tabs.getBoundingClientRect().height);
+      measure();
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(measure);
+        ro.observe(tabs);
+      }
+      return true;
+    };
+    if (attach()) return () => ro?.disconnect();
+    const mo = new MutationObserver(() => {
+      if (attach()) mo.disconnect();
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      ro?.disconnect();
+    };
+  }, []);
+
+  return height;
+}
+
+function useMeasuredElementHeight<T extends HTMLElement>() {
+  const [node, setNode] = useState<T | null>(null);
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    if (!node) {
+      setHeight(0);
+      return;
+    }
+    const measure = () => setHeight(node.getBoundingClientRect().height);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [node]);
+
+  return [setNode, height] as const;
+}
 
 const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'detail_number', label: '№', lockVisible: true },
@@ -353,6 +410,65 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     detailsLoading,
     useBackendOrdersRead,
   });
+  const workspaceTabsHeight = useWorkspaceTabsHeight();
+  const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
+  const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
+  const [orderShowSummaryTabsRef, orderShowSummaryTabsHeight] = useMeasuredElementHeight<HTMLDivElement>();
+  const [orderShowDetailsToolbarRef, orderShowDetailsToolbarHeight] = useMeasuredElementHeight<HTMLDivElement>();
+  const [orderShowStickyEnabled, setOrderShowStickyEnabled] = useState(false);
+  const [orderShowSummaryStuck, setOrderShowSummaryStuck] = useState(false);
+  const orderShowStickyStyle = useMemo<OrderShowStickyStyle>(() => ({
+    '--order-show-sticky-top': `${workspaceTabsHeight}px`,
+    '--order-show-summary-tabs-height': `${orderShowSummaryTabsHeight}px`,
+    '--order-show-details-toolbar-height': `${orderShowDetailsToolbarHeight}px`,
+    '--order-show-table-header-top': `${workspaceTabsHeight + orderShowSummaryTabsHeight + orderShowDetailsToolbarHeight}px`,
+  }), [orderShowDetailsToolbarHeight, orderShowSummaryTabsHeight, workspaceTabsHeight]);
+  const orderShowPageClassName = useMemo(() => [
+    'order-show-page',
+    orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
+    orderShowSummaryStuck ? 'order-show-page--summary-stuck' : '',
+  ].filter(Boolean).join(' '), [orderShowStickyEnabled, orderShowSummaryStuck]);
+
+  useEffect(() => {
+    const update = () => {
+      const block = orderShowDetailsBlockRef.current;
+      const availableHeight = window.innerHeight - workspaceTabsHeight;
+      const next =
+        !isMobile &&
+        details.length > 0 &&
+        !!block &&
+        block.scrollHeight > Math.max(320, availableHeight);
+      setOrderShowStickyEnabled((prev) => (prev === next ? prev : next));
+    };
+
+    update();
+    window.addEventListener('resize', update);
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    if (orderShowDetailsBlockRef.current) ro?.observe(orderShowDetailsBlockRef.current);
+    return () => {
+      window.removeEventListener('resize', update);
+      ro?.disconnect();
+    };
+  }, [details.length, isMobile, workspaceTabsHeight]);
+
+  useEffect(() => {
+    const update = () => {
+      const node = orderShowStickySentinelRef.current;
+      const next =
+        orderShowStickyEnabled &&
+        !!node &&
+        node.getBoundingClientRect().top <= workspaceTabsHeight;
+      setOrderShowSummaryStuck((prev) => (prev === next ? prev : next));
+    };
+
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [orderShowStickyEnabled, workspaceTabsHeight]);
 
   // Загрузка справочников для отображения названий
   const { data: millingTypesData } = useList({
@@ -1231,20 +1347,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           canRestore={canRestore}
         />
       ) : record && (
-        <>
-          {/* Компактная шапка заказа (Read-only summary) */}
-          <div style={{ marginBottom: 4 }}>
+        <div className={orderShowPageClassName} style={orderShowStickyStyle}>
+          <div ref={orderShowStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
+          <div ref={orderShowSummaryTabsRef} className="order-show-summary-tabs-sticky">
             <OrderShowHeader
               record={record}
               details={details}
               dowelingLinks={dowelingLinks}
               disableLegacyOrderReads={useBackendOrdersRead}
+              compactSticky={orderShowStickyEnabled && orderShowSummaryStuck}
               detailMaterialNames={headerMaterialNames}
               headerMaterialName={headerMaterialName}
             />
-          </div>
 
-          <div style={{ marginBottom: 16 }}>
+            <div className="order-show-tabs-shell">
             <div
               role="tablist"
               aria-label="Секции заказа"
@@ -1304,9 +1420,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 );
               })}
             </div>
+            </div>
+          </div>
 
             {activeInfoPanel && (
               <div
+                className="order-show-info-panel"
                 role="tabpanel"
                 style={{
                   border: '1px solid var(--app-border)',
@@ -1535,11 +1654,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 )}
               </div>
             )}
-          </div>
 
           {/* Детали заказа - компактная таблица */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div ref={orderShowDetailsBlockRef} className="order-show-details-section">
+            <div ref={orderShowDetailsToolbarRef} className="order-show-details-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
                 Детали заказа
               </div>
@@ -1597,9 +1715,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 selectionEnabled={cutSelectMode} selectedIds={cutSelectedDetailIds}
                 onSelectionChange={setCutSelectedDetailIds} />
             ) : (
-            <TableTopScroll>
+            <TableTopScroll className="order-show-details-table-wrap">
             <Table
-              className={groupingActive ? 'details-grouped' : undefined}
+              className={`${groupingActive ? 'details-grouped ' : ''}order-show-details-table`}
               dataSource={groupedDataSource as any}
               rowKey={(row: any) =>
                 row?.kind === 'separator' || row?.kind === 'summary'
@@ -1814,7 +1932,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               </Space>
             </Modal>
           )}
-        </>
+        </div>
       )}
     </Show>
   );
