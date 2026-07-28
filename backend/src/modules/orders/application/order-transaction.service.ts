@@ -240,6 +240,15 @@ export class OrderTransactionService {
           (command.dto.idempotencyKey ? 'orders-create' : `orders-create-${orderId}`),
         sourceIdempotencyKey: command.dto.idempotencyKey ?? undefined,
       });
+      await this.emitPaymentCreatedAutomationEvents(unitOfWork, {
+        orderId,
+        order: prepared.order,
+        currentUser: command.currentUser,
+        requestId:
+          command.requestId ??
+          (command.dto.idempotencyKey ? 'orders-create' : `orders-create-${orderId}`),
+        sourceIdempotencyKey: command.dto.idempotencyKey ?? undefined,
+      });
       if (command.postPersistHook) {
         await command.postPersistHook(unitOfWork, { orderId, detailIdsByClientKey });
       }
@@ -512,6 +521,15 @@ export class OrderTransactionService {
           storedDetailSheetIds,
         ),
       });
+      await this.emitPaymentCreatedAutomationEvents(unitOfWork, {
+        orderId: command.orderId,
+        order: prepared.order,
+        currentUser: command.currentUser,
+        requestId:
+          command.requestId ??
+          (command.dto.idempotencyKey ? 'orders-update' : `orders-update-${command.orderId}-v${version}`),
+        sourceIdempotencyKey: command.dto.idempotencyKey ?? undefined,
+      });
       if (command.postPersistHook) {
         await command.postPersistHook(unitOfWork, {
           orderId: command.orderId,
@@ -737,7 +755,8 @@ export class OrderTransactionService {
   ): Promise<OrderDto> {
     const order = await unitOfWork.readOrder(orderId);
 
-    if (order.version !== version) {
+    // Status automation can bump order.version inside the same save transaction.
+    if (order.version < version) {
       throw new ApiError(500, 'ORDER_SAVE_FAILED', 'Не удалось сохранить заказ');
     }
 
@@ -749,6 +768,35 @@ export class OrderTransactionService {
       ...order,
       payments: [],
     };
+  }
+
+  private async emitPaymentCreatedAutomationEvents(
+    unitOfWork: OrderWriteUnitOfWork,
+    input: {
+      orderId: number;
+      order: NormalizedSaveOrderDto;
+      currentUser: CurrentUser;
+      requestId: string;
+      sourceIdempotencyKey?: string;
+    },
+  ): Promise<void> {
+    const createdPayments = input.order.payments.filter((payment) => payment.id === undefined);
+    if (createdPayments.length === 0) {
+      return;
+    }
+
+    const existingPaymentsCount = Math.max(0, input.order.payments.length - createdPayments.length);
+    for (const [index] of createdPayments.entries()) {
+      await unitOfWork.evaluateStatusAutomation({
+        eventType: 'payment.created',
+        origin: 'user',
+        orderId: input.orderId,
+        actor: input.currentUser,
+        requestId: input.requestId,
+        sourceIdempotencyKey: input.sourceIdempotencyKey,
+        paymentsCountAfter: existingPaymentsCount + index + 1,
+      });
+    }
   }
 
   private attachProjectToOrder(order: OrderDto, projectId: number, projectCode: string): OrderDto {

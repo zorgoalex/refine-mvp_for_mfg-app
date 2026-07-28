@@ -135,6 +135,7 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
     orderName?: string;
   }> = [];
   statusAutomationEvents: StatusAutomationEvent[] = [];
+  onEvaluateStatusAutomation?: (event: StatusAutomationEvent, state: FakeState) => void | Promise<void>;
   readonly transactionClient = { query: async () => ({ rows: [], rowCount: 0 }), raw: {} } as TransactionClient;
 
   async runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T> {
@@ -661,6 +662,7 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
   async evaluateStatusAutomation(event: StatusAutomationEvent): Promise<void> {
     this.call('evaluateStatusAutomation');
     this.owner.statusAutomationEvents.push(event);
+    await this.owner.onEvaluateStatusAutomation?.(event, this.state);
   }
 
   async writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string> {
@@ -1204,6 +1206,7 @@ describe('OrderTransactionService', () => {
       'loadOrderHeaderSnapshot',
       'writeAuditEvent',
       'evaluateStatusAutomation',
+      'evaluateStatusAutomation',
       'readOrder',
       'commit',
     ]);
@@ -1226,6 +1229,15 @@ describe('OrderTransactionService', () => {
         requestId: 'orders-create',
         sourceIdempotencyKey: 'order-create-key-1',
       }),
+      expect.objectContaining({
+        eventType: 'payment.created',
+        origin: 'user',
+        orderId: 100,
+        actor: currentUser('manager'),
+        requestId: 'orders-create',
+        sourceIdempotencyKey: 'order-create-key-1',
+        paymentsCountAfter: 1,
+      }),
     ]);
     expect(transactions.calls.indexOf('evaluateStatusAutomation')).toBe(
       transactions.calls.indexOf('writeAuditEvent') + 1,
@@ -1244,6 +1256,12 @@ describe('OrderTransactionService', () => {
       eventType: 'order.created',
       orderId: 100,
       requestId: 'orders-create-100',
+    });
+    expect(transactions.statusAutomationEvents[1]).toMatchObject({
+      eventType: 'payment.created',
+      orderId: 100,
+      requestId: 'orders-create-100',
+      paymentsCountAfter: 1,
     });
   });
 
@@ -1718,6 +1736,108 @@ describe('OrderTransactionService', () => {
       'assertChildOwnership',
       'updateOrderHeader',
     ]);
+  });
+
+  it('emits payment.created automation when order update adds a nested payment', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+      payments: [],
+    });
+
+    await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      requestId: 'req-update-payment',
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Updated order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+        payments: [
+          {
+            clientKey: 'new-payment',
+            typePaidId: 1001,
+            amount: 3000,
+            paymentDate: '2026-04-30',
+          },
+        ],
+        version: 3,
+      }),
+    });
+
+    expect(transactions.statusAutomationEvents).toEqual([
+      expect.objectContaining({
+        eventType: 'payment.created',
+        origin: 'user',
+        orderId: 42,
+        actor: currentUser('manager'),
+        requestId: 'req-update-payment',
+        paymentsCountAfter: 1,
+      }),
+    ]);
+    expect(transactions.calls.indexOf('evaluateStatusAutomation')).toBeGreaterThan(
+      transactions.calls.indexOf('writeAuditEvent'),
+    );
+  });
+
+  it('allows status automation to bump the order version before reading the save response', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+      payments: [],
+    });
+    transactions.onEvaluateStatusAutomation = (event, state) => {
+      if (event.eventType !== 'payment.created') {
+        return;
+      }
+      const order = state.orders.get(event.orderId);
+      if (!order) {
+        return;
+      }
+      order.header = { ...order.header, orderStatusId: 2002 };
+      order.version += 1;
+    };
+
+    const result = await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Updated order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+        payments: [
+          {
+            clientKey: 'new-payment',
+            typePaidId: 1001,
+            amount: 3000,
+            paymentDate: '2026-04-30',
+          },
+        ],
+        version: 3,
+      }),
+    });
+
+    expect(result.header.orderStatusId).toBe(2002);
+    expect(result.version).toBe(5);
+    expect(transactions.committed).toBe(1);
   });
 
   it('updates operational child workflow collections inside the order transaction', async () => {
