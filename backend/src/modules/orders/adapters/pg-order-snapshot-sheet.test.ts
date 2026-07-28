@@ -23,6 +23,7 @@ import type { DatabaseClient } from '../../../database/database.types';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import { ApiError } from '../../../common/errors/api-error';
 import { ORDER_SNAPSHOT_FORMAT_VERSION, ORDER_SNAPSHOT_SCHEMA } from '../dto/order-snapshot.dto';
+import { prepareOrderSave } from '../domain/order-save-preparer';
 import {
   _testOnlyMapOrderHeaderSnapshot as mapHeaderSnapshot,
   _testOnlyMapDetailSnapshot as mapDetailSnapshot,
@@ -31,6 +32,7 @@ import {
   _testOnlyDetailValues as detailValues,
   _testOnlyNullifyMaterialIdForSheetEntries as nullifyMaterialIdForSheetEntries,
   _testOnlyRemapSnapshotReferencesForImport as remapSnapshotReferencesForImport,
+  _testOnlySnapshotHeaderToSaveOrderDto as snapshotHeaderToSaveOrderDto,
   _testOnlySnapshotBatchFailure as snapshotBatchFailure,
   _testOnlySnapshotFailureSummary as snapshotFailureSummary,
   _testOnlySnapshotToSaveOrderDto as snapshotToSaveOrderDto,
@@ -739,6 +741,17 @@ describe('snapshotToSaveOrderDto — header-only legacy import (Critic R2 MAJOR 
     });
     expect(dto.header.materialId).toBeNull();
     expect(dto.header.sheetMaterialTypeId).toBe(5);
+  });
+});
+
+describe('snapshotHeaderToSaveOrderDto — update import version', () => {
+  it('carries the current DB version for existing-order header updates', () => {
+    const dto = snapshotHeaderToSaveOrderDto(minimalSnapshotWithSheet(null), 2, 7);
+
+    expect(dto.version).toBe(7);
+    expect(() =>
+      prepareOrderSave(dto, { mode: 'update', pathOrderId: 2665 }),
+    ).not.toThrow();
   });
 });
 

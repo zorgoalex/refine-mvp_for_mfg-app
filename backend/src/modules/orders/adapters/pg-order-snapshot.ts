@@ -1251,13 +1251,11 @@ async function upsertOrderHeader(
   const localOrderId = mapped
     ? Number(mapped.local_entity_id)
     : await findOrderForSnapshot(tx, snapshot, clientId);
-  const dto = snapshotToSaveOrderDto(snapshot, clientId, {
-    details: [],
-    payments: [],
-    workshops: [],
-    requirements: [],
-    dowelingLinks: [],
-  });
+  const dto = snapshotHeaderToSaveOrderDto(
+    snapshot,
+    clientId,
+    localOrderId ? await readOrderVersion(tx, localOrderId) : undefined,
+  );
   const prepared = prepareOrderSave(dto, {
     mode: localOrderId ? 'update' : 'create',
     pathOrderId: localOrderId ?? undefined,
@@ -1273,6 +1271,21 @@ async function upsertOrderHeader(
       );
   await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.order, sourceId, localId: String(orderId), localOrderId: orderId, payloadHash });
   return orderId;
+}
+
+function snapshotHeaderToSaveOrderDto(
+  snapshot: OrderSnapshotDto,
+  clientId: number,
+  version?: number,
+): SaveOrderDto {
+  const dto = snapshotToSaveOrderDto(snapshot, clientId, {
+    details: [],
+    payments: [],
+    workshops: [],
+    requirements: [],
+    dowelingLinks: [],
+  });
+  return version === undefined ? dto : { ...dto, version };
 }
 
 async function createImportProject(
@@ -3189,6 +3202,7 @@ export {
   detailValues as _testOnlyDetailValues,
   nullifyMaterialIdForSheetEntries as _testOnlyNullifyMaterialIdForSheetEntries,
   remapSnapshotReferencesForImport as _testOnlyRemapSnapshotReferencesForImport,
+  snapshotHeaderToSaveOrderDto as _testOnlySnapshotHeaderToSaveOrderDto,
   snapshotToSaveOrderDto as _testOnlySnapshotToSaveOrderDto,
   snapshotBatchFailure as _testOnlySnapshotBatchFailure,
   snapshotFailureSummary as _testOnlySnapshotFailureSummary,
