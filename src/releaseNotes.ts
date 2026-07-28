@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-28",
+    title: "Доски статусов: кликабельные номера заказов в МДФ-работах",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Во вкладке «МДФ-работы» номера заказов в карточках файлов станка открывают заказ по номеру заказа даже для CNC-строк без точного сопоставления с деталью.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-28",
     title: "PDF раскроя: переименование шаблонов",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
