@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-28",
+    title: "Раскрой: количество заказов в заданиях",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В списке заданий на раскрой добавлена колонка «Заказы» с количеством уникальных заказов в задании.",
+      "В карточке задания на раскрой строка суммарных данных теперь показывает количество уникальных заказов.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-28",
     title: "Карточка заказа: липкая шапка деталей",
     services: ["ERP"],
     repositories: ["repo_erp"],

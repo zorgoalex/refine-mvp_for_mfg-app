@@ -379,6 +379,9 @@ describe('CutPage source guards', () => {
 describe('CutPage profile + totals columns (source guard)', () => {
   it('renames the positions column and adds totals/profile/sheets columns', () => {
     expect(source).toContain("title: 'Позиции'");
+    expect(source).toContain("title: 'Заказы'");
+    expect(source).toContain('distinctOrderIdsFromItems(row.items).length');
+    expect(source).toContain('<span>Заказы: <b>{distinctOrderIdsFromItems(job.items).length}</b></span>');
     expect(source).toContain("title: 'Деталей'");
     expect(source).toContain("title: 'Площадь, итого'");
     expect(source).toContain("title: 'Кол-во листов раскроя'");

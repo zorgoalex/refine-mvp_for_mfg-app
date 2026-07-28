@@ -57,6 +57,7 @@ import {
   cutJobCounts,
   cutJobSourceLabel,
   cutJobStatusLabel,
+  distinctOrderIdsFromItems,
   filterJobsByStatus,
   formatGroupSummary,
   noSheetSpecMessage,
@@ -1923,6 +1924,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         render: (_: unknown, row: CutJobDto) => row.totals.positions,
       },
       {
+        title: 'Заказы',
+        key: 'orders',
+        width: 63,
+        render: (_: unknown, row: CutJobDto) => distinctOrderIdsFromItems(row.items).length,
+      },
+      {
         title: 'Группы',
         key: 'groups',
         width: 56,
@@ -2560,6 +2567,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               <>
                 <Space size="large" style={{ marginBottom: 12 }} wrap>
                   <span>Позиции: <b>{job.totals.positions}</b></span>
+                  <span>Заказы: <b>{distinctOrderIdsFromItems(job.items).length}</b></span>
                   <span>Деталей: <b>{job.totals.details}</b></span>
                   <span>Материалов: <b>{job.totals.materialsCount}</b></span>
                   <span>Плёнок: <b>{job.totals.filmsCount}</b></span>
