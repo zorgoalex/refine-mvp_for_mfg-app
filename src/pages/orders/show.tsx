@@ -1165,6 +1165,61 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         },
       })
     : null;
+  const orderShowDetailsToolbar = (
+    <div ref={orderShowDetailsToolbarRef} className="order-show-details-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
+        Детали заказа
+      </div>
+      <Space size="small" wrap>
+        {!isMobile && <>
+          <DetailGroupingControls
+            state={grouping.state}
+            onFieldChange={grouping.setField}
+            onToggleSeparation={grouping.setShowSeparation}
+          />
+          {detailSelectionEnabled && details.length > 0 && (
+            <>
+              <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
+                {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
+              </Button>
+              {cutSelectMode && (
+                <>
+                  <Button
+                    size="small"
+                    onClick={() =>
+                      setCutSelectedDetailIds(
+                        cutSelectedDetailIds.length === details.length
+                          ? []
+                          : details.map((d: any) => d.detail_id),
+                      )
+                    }
+                  >
+                    {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
+                  </Button>
+                  {cutEnabled && <Button size="small" type="primary" disabled={cutSelectedDetailIds.length === 0}
+                    onClick={() => setCutModalOpen(true)}>Добавить выбранные в раскрой ({cutSelectedDetailIds.length})</Button>}
+                </>
+              )}
+            </>
+          )}
+          <OrderDetailColumnSettingsButton
+            tableKey="orderShow"
+            definitions={ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS}
+            defaultOrder={ORDER_DETAIL_SHOW_DEFAULT_ORDER}
+            settings={showColumnSettings}
+            onChange={saveShowColumnSettings}
+          />
+        </>}
+        {isMobile && detailSelectionEnabled && details.length > 0 && <Button size="small" onClick={() => setCutSelectMode((value) => !value)}>
+          {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
+        </Button>}
+        {bazisCutVisible && <Tooltip title={!bazisCutManage ? 'Недостаточно прав' : undefined}>
+          <span><Button size="small" disabled={!bazisCutManage || cutSelectedDetailIds.length === 0}
+            onClick={() => setBazisCutModalOpen(true)}>Добавить в Базис раскрой</Button></span>
+        </Tooltip>}
+      </Space>
+    </div>
+  );
 
   return (
     <Show
@@ -1449,6 +1504,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               })}
             </div>
             </div>
+            {orderShowDetailsToolbar}
           </div>
 
             {activeInfoPanel && (
@@ -1685,59 +1741,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
           {/* Детали заказа - компактная таблица */}
           <div ref={orderShowDetailsBlockRef} className="order-show-details-section">
-            <div ref={orderShowDetailsToolbarRef} className="order-show-details-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
-                Детали заказа
-              </div>
-              <Space size="small" wrap>
-                {!isMobile && <>
-                  <DetailGroupingControls
-                    state={grouping.state}
-                    onFieldChange={grouping.setField}
-                    onToggleSeparation={grouping.setShowSeparation}
-                  />
-                  {detailSelectionEnabled && details.length > 0 && (
-                    <>
-                      <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
-                        {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
-                      </Button>
-                      {cutSelectMode && (
-                        <>
-                          <Button
-                            size="small"
-                            onClick={() =>
-                              setCutSelectedDetailIds(
-                                cutSelectedDetailIds.length === details.length
-                                  ? []
-                                  : details.map((d: any) => d.detail_id),
-                              )
-                            }
-                          >
-                            {cutSelectedDetailIds.length === details.length ? 'Снять все' : 'Выделить все'}
-                          </Button>
-                          {cutEnabled && <Button size="small" type="primary" disabled={cutSelectedDetailIds.length === 0}
-                            onClick={() => setCutModalOpen(true)}>Добавить выбранные в раскрой ({cutSelectedDetailIds.length})</Button>}
-                        </>
-                      )}
-                    </>
-                  )}
-                  <OrderDetailColumnSettingsButton
-                    tableKey="orderShow"
-                    definitions={ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS}
-                    defaultOrder={ORDER_DETAIL_SHOW_DEFAULT_ORDER}
-                    settings={showColumnSettings}
-                    onChange={saveShowColumnSettings}
-                  />
-                </>}
-                {isMobile && detailSelectionEnabled && details.length > 0 && <Button size="small" onClick={() => setCutSelectMode((value) => !value)}>
-                  {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
-                </Button>}
-                {bazisCutVisible && <Tooltip title={!bazisCutManage ? 'Недостаточно прав' : undefined}>
-                  <span><Button size="small" disabled={!bazisCutManage || cutSelectedDetailIds.length === 0}
-                    onClick={() => setBazisCutModalOpen(true)}>Добавить в Базис раскрой</Button></span>
-                </Tooltip>}
-              </Space>
-            </div>
             {isMobile ? (
               <DetailCardList rows={details} lookups={detailCardLookups} highlightDetailId={highlightDetail}
                 selectionEnabled={cutSelectMode} selectedIds={cutSelectedDetailIds}

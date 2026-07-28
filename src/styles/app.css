@@ -775,6 +775,17 @@ html {
   margin-bottom: 16px;
 }
 
+.order-show-summary-tabs-sticky .order-show-tabs-shell {
+  margin-bottom: 0;
+}
+
+.order-show-summary-tabs-sticky .order-show-details-toolbar {
+  margin-bottom: 0 !important;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--app-border-soft);
+  background: var(--app-surface);
+}
+
 .order-show-header--compact-sticky {
   margin-bottom: 4px;
   border: 1px solid #1890ff;
@@ -879,16 +890,6 @@ html {
     box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
   }
 
-  .order-show-page--sticky-enabled .order-show-details-toolbar {
-    position: sticky;
-    top: calc(var(--order-show-sticky-top) + var(--order-show-summary-tabs-height));
-    z-index: 18;
-    margin-bottom: 0 !important;
-    padding: 6px 0;
-    border-bottom: 1px solid var(--app-border-soft);
-    background: var(--app-surface);
-    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
-  }
 }
 
 /* ----- Order-detail visual grouping (purely visual; non-functional rows) ----- */
