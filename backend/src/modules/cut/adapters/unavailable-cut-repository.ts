@@ -84,6 +84,10 @@ export class UnavailableCutRepository implements CutRepositoryPort {
     return Promise.reject(unavailable());
   }
 
+  listFilmOptionsForCut() {
+    return Promise.reject(unavailable());
+  }
+
   setProfile() {
     return Promise.reject(unavailable());
   }
@@ -101,6 +105,10 @@ export class UnavailableCutRepository implements CutRepositoryPort {
   }
 
   setJobPdfTemplate() {
+    return Promise.reject(unavailable());
+  }
+
+  setName() {
     return Promise.reject(unavailable());
   }
 

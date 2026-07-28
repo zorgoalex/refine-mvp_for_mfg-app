@@ -22,6 +22,7 @@ import { ApiError } from '../../../api/apiError';
 import { deadlinesApi } from '../../../api/deadlinesApi';
 import type {
   DeadlineActionRuleDto,
+  DeadlineDefaultScheduleDto,
   DeadlinePolicyDto,
   DeadlineTransitionRulesReadinessDto,
 } from '../../../api/types/deadlineApi.types';
@@ -30,11 +31,16 @@ import {
   buildTransitionRuleCreatePayload,
   buildTransitionRuleDraft,
   buildTransitionRuleUpdatePayload,
+  applyDeadlineTargetOption,
+  buildDeadlineTargetOptions,
   canManageDeadlineTransitionRules,
+  describeRuleDelay,
   describeRuleScope,
   describeTransition,
   emptyTransitionRuleDraft,
   formatStatusNames,
+  getDeadlineRuleTimingKey,
+  getDeadlineTargetOptionValue,
   type DeadlineTransitionRuleDraft,
 } from './deadlineTransitionRulesView';
 
@@ -64,6 +70,8 @@ export function DeadlineTransitionRulesConfig() {
   const [loading, setLoading] = useState(false);
   const [rules, setRules] = useState<DeadlineActionRuleDto[]>([]);
   const [policies, setPolicies] = useState<DeadlinePolicyDto[]>([]);
+  const [deadlineSchedule, setDeadlineSchedule] =
+    useState<DeadlineDefaultScheduleDto | null>(null);
   const [readiness, setReadiness] = useState<DeadlineTransitionRulesReadinessDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorMode>({ kind: 'closed' });
@@ -110,9 +118,10 @@ export function DeadlineTransitionRulesConfig() {
     setLoading(true);
     setError(null);
     try {
-      const [rulesResponse, policiesResponse] = await Promise.all([
+      const [rulesResponse, policiesResponse, scheduleResponse] = await Promise.all([
         deadlinesApi.listDeadlineTransitionRules(),
         deadlinesApi.listPolicies(),
+        deadlinesApi.getDefaultSchedule(),
       ]);
       setRules(
         rulesResponse.data.filter(
@@ -121,6 +130,7 @@ export function DeadlineTransitionRulesConfig() {
         ),
       );
       setPolicies(policiesResponse.data);
+      setDeadlineSchedule(scheduleResponse.schedule);
       setReadiness(rulesResponse.readiness);
     } catch (loadError) {
       setError(errorText(loadError, 'Не удалось загрузить правила'));
@@ -133,25 +143,28 @@ export function DeadlineTransitionRulesConfig() {
     void load();
   }, [load]);
 
-  const policyOptions = useMemo(
-    () => [
-      { value: '__all__', label: 'Все дедлайны заказа' },
-      ...policies
-        .filter((policy) => ['order', 'order_stage', 'client_action'].includes(policy.scopeType))
-        .map((policy) => ({
-          value: policy.policyId,
-          label: `${policy.policyName}${policy.isEnabled ? '' : ' (выключена)'}`,
-        })),
-    ],
-    [policies],
+  const productionStatusNames = useMemo(
+    () =>
+      new Map(
+        (deadlineSchedule?.stages ?? []).map((stage) => [
+          stage.productionStatusId,
+          stage.productionStatusName,
+        ]),
+      ),
+    [deadlineSchedule],
   );
+  const deadlineTargetOptions = useMemo(
+    () => buildDeadlineTargetOptions(deadlineSchedule, policies),
+    [deadlineSchedule, policies],
+  );
+  const draftTimingKey = getDeadlineRuleTimingKey(draft);
   const priorityConflict =
     editor.kind !== 'closed'
     && rules.some(
       (rule) =>
         (editor.kind !== 'edit' || rule.actionRuleId !== editor.rule.actionRuleId)
         && rule.priority === draft.priority
-        && (rule.policyId ?? null) === draft.policyId,
+        && getDeadlineRuleTimingKey(buildTransitionRuleDraft(rule)) === draftTimingKey,
     );
 
   const openCreate = () => {
@@ -331,7 +344,7 @@ export function DeadlineTransitionRulesConfig() {
           rowKey="actionRuleId"
           pagination={false}
           dataSource={rules}
-          scroll={{ x: 980 }}
+          scroll={{ x: 1080 }}
           columns={[
             {
               title: 'Правило',
@@ -348,12 +361,23 @@ export function DeadlineTransitionRulesConfig() {
               title: 'Дедлайн',
               key: 'scope',
               width: 210,
-              render: (_, rule) => describeRuleScope(rule, policies),
+              render: (_, rule) =>
+                describeRuleScope(rule, policies, productionStatusNames),
             },
             {
               title: 'Переход',
               key: 'transition',
               render: (_, rule) => describeTransition(rule, { statusNames, policyNames: new Map() }),
+            },
+            {
+              title: 'Срок после дедлайна',
+              key: 'delay',
+              width: 145,
+              render: (_, rule) => (
+                <Text style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {describeRuleDelay(rule)}
+                </Text>
+              ),
             },
             {
               title: 'Исключения',
@@ -442,7 +466,7 @@ export function DeadlineTransitionRulesConfig() {
         <RuleEditor
           draft={draft}
           onChange={setDraft}
-          policyOptions={policyOptions}
+          deadlineTargetOptions={deadlineTargetOptions}
           statusOptions={statusOptions}
           reason={reason}
           comment={comment}
@@ -473,7 +497,9 @@ export function DeadlineTransitionRulesConfig() {
           )}
           {pendingAction?.kind === 'toggle'
             && pendingAction.nextEnabled
-            && !pendingAction.rule.policyId && (
+            && !pendingAction.rule.policyId
+            && (!pendingAction.rule.config?.deadlineTarget
+              || pendingAction.rule.config.deadlineTarget.type === 'all_order_deadlines') && (
               <Alert
                 type="warning"
                 showIcon
@@ -501,7 +527,7 @@ export function DeadlineTransitionRulesConfig() {
 function RuleEditor(props: {
   draft: DeadlineTransitionRuleDraft;
   onChange: (draft: DeadlineTransitionRuleDraft) => void;
-  policyOptions: Array<{ value: string; label: string }>;
+  deadlineTargetOptions: Array<{ value: string; label: string }>;
   statusOptions: Array<{ value: number; label: string; disabled: boolean }>;
   reason: string;
   comment: string;
@@ -535,21 +561,97 @@ function RuleEditor(props: {
       <label>
         <Text strong>Для какого дедлайна</Text>
         <Select
-          value={props.draft.policyId ?? '__all__'}
-          options={props.policyOptions}
-          onChange={(value) => patch({ policyId: value === '__all__' ? null : value })}
+          value={getDeadlineTargetOptionValue(props.draft)}
+          options={props.deadlineTargetOptions}
+          onChange={(value) =>
+            props.onChange(applyDeadlineTargetOption(props.draft, value))
+          }
           showSearch
           optionFilterProp="label"
           style={{ width: '100%', minHeight: 44 }}
         />
       </label>
-      {props.draft.policyId === null && (
+      {props.draft.policyId === null
+        && props.draft.deadlineTarget.type === 'all_order_deadlines' && (
         <Alert
           type="warning"
           showIcon
           message="Правило применяется ко всем дедлайнам, связанным с заказом"
         />
       )}
+      <Card size="small">
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
+            <div>
+              <Text strong>Добавить срок после дедлайна</Text>
+              <div>
+                <Text type="secondary">
+                  Отсчёт начинается от выбранного дедлайна.
+                </Text>
+              </div>
+            </div>
+            <Switch
+              checked={props.draft.delayAfterDeadlineEnabled}
+              aria-label="Добавить срок после дедлайна"
+              onChange={(checked) => patch({
+                delayAfterDeadlineEnabled: checked,
+                ...(!checked
+                  ? { delayDays: 0, delayHours: 0, delayMinutes: 0 }
+                  : {}),
+              })}
+            />
+          </Space>
+          {props.draft.delayAfterDeadlineEnabled && (
+            <>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                  gap: 12,
+                }}
+              >
+                <label>
+                  <Text strong>Дни</Text>
+                  <InputNumber
+                    min={0}
+                    max={3650}
+                    precision={0}
+                    value={props.draft.delayDays}
+                    onChange={(value) => patch({ delayDays: Number(value ?? 0) })}
+                    style={{ width: '100%', minHeight: 44 }}
+                  />
+                </label>
+                <label>
+                  <Text strong>Часы</Text>
+                  <InputNumber
+                    min={0}
+                    max={23}
+                    precision={0}
+                    value={props.draft.delayHours}
+                    onChange={(value) => patch({ delayHours: Number(value ?? 0) })}
+                    style={{ width: '100%', minHeight: 44 }}
+                  />
+                </label>
+                <label>
+                  <Text strong>Минуты</Text>
+                  <InputNumber
+                    min={0}
+                    max={59}
+                    precision={0}
+                    value={props.draft.delayMinutes}
+                    onChange={(value) => patch({ delayMinutes: Number(value ?? 0) })}
+                    style={{ width: '100%', minHeight: 44 }}
+                  />
+                </label>
+              </div>
+              <Text type="secondary">
+                Хотя бы одно значение должно быть больше нуля. Если срок уже прошёл,
+                правило сработает при ближайшем запуске планировщика.
+              </Text>
+            </>
+          )}
+        </Space>
+      </Card>
       {props.priorityConflict && (
         <Alert
           type="warning"

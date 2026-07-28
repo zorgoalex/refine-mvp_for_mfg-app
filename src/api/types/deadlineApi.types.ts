@@ -188,6 +188,7 @@ export interface DeadlineDefaultScheduleStageDto {
   productionStatusCode: string | null;
   sortOrder: number;
   durationDays: number | null;
+  parallelWithPrevious: boolean;
   cumulativeDeadlineDays: number | null;
 }
 
@@ -196,6 +197,7 @@ export interface DeadlineDefaultScheduleDto {
   hasStoredConfiguration: boolean;
   version: number;
   reserveDays: number;
+  transitionsOrder: Record<string, string[]>;
   totalProductionDays: number | null;
   plannedOrderDays: number | null;
   updatedAt: string | null;
@@ -213,6 +215,7 @@ export interface ReplaceDeadlineDefaultScheduleRequest {
   stages: Array<{
     productionStatusId: number;
     durationDays: number;
+    parallelWithPrevious: boolean;
   }>;
 }
 
@@ -227,10 +230,23 @@ export interface DeadlineActionRuleActionConfigDto {
   targetOrderStatusId?: number;
 }
 
+export type DeadlineActionRuleDeadlineTargetDto =
+  | { type: 'all_order_deadlines' }
+  | { type: 'final_order' }
+  | { type: 'production_stage'; productionStatusId: number };
+
+export interface DeadlineActionRuleDelayAfterDeadlineDto {
+  days: number;
+  hours: number;
+  minutes: number;
+}
+
 export interface DeadlineActionRuleConfigDto {
   scope?: {
     type: 'global_orders';
   };
+  deadlineTarget?: DeadlineActionRuleDeadlineTargetDto;
+  delayAfterDeadline?: DeadlineActionRuleDelayAfterDeadlineDto;
   conditions?: DeadlineActionRuleConditionsDto;
   actionConfig?: DeadlineActionRuleActionConfigDto;
   ruleName?: string;
@@ -374,6 +390,8 @@ export interface CreateGlobalTransitionRuleRequest {
   priority?: number;
   eventType?: 'DEADLINE_EXPIRED';
   actionType?: 'change_order_status';
+  deadlineTarget?: DeadlineActionRuleDeadlineTargetDto;
+  delayAfterDeadline?: DeadlineActionRuleDelayAfterDeadlineDto;
   targetOrderStatusId: number;
   allowedFromOrderStatusIds: number[];
   excludeOrderStatusIds?: number[];
@@ -392,6 +410,8 @@ export interface UpdateGlobalTransitionRuleRequest {
   priority?: number;
   eventType?: 'DEADLINE_EXPIRED';
   actionType?: 'change_order_status';
+  deadlineTarget?: DeadlineActionRuleDeadlineTargetDto;
+  delayAfterDeadline?: DeadlineActionRuleDelayAfterDeadlineDto | null;
   targetOrderStatusId?: number;
   allowedFromOrderStatusIds?: number[];
   excludeOrderStatusIds?: number[];

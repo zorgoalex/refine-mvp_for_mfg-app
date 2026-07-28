@@ -27,6 +27,7 @@ function repo(overrides: Partial<CutRepositoryPort> = {}): CutRepositoryPort {
     getJob: reject,
     listJobs: reject,
     listEligibleDetails: reject,
+    listFilmOptionsForCut: reject,
     renderSheetPng: reject,
     listDetailLastReady: () => Promise.resolve({ details: [] }),
     ...overrides,
@@ -73,6 +74,23 @@ describe('CutService RBAC (§8 principle 8)', () => {
     const service = new CutService({ cut: repo({ listEligibleDetails }) });
     await service.listEligibleDetails({ currentUser: user(['cut.view']), criteria: {} });
     expect(listEligibleDetails).toHaveBeenCalledOnce();
+  });
+
+  it('denies film-options read without cut.view', async () => {
+    const service = new CutService({ cut: repo() });
+    await expect(
+      service.listFilmOptionsForCut({ currentUser: user([]), criteria: {} }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('allows film-options read with cut.view and delegates', async () => {
+    const listFilmOptionsForCut = vi.fn(async () => [{ filmId: 7, name: 'Белый матовый' }]);
+    const service = new CutService({ cut: repo({ listFilmOptionsForCut }) });
+    await service.listFilmOptionsForCut({
+      currentUser: user(['cut.view']),
+      criteria: { dateFrom: '2026-07-01', dateTo: '2026-07-31' },
+    });
+    expect(listFilmOptionsForCut).toHaveBeenCalledOnce();
   });
 
   it('requires cut.manage for calculate/addItems/removeItem/archive', async () => {
@@ -147,6 +165,24 @@ describe('CutService RBAC (§8 principle 8)', () => {
       .rejects.toMatchObject({ statusCode: 403 });
     expect(setProfile).not.toHaveBeenCalled();
     // fire-and-forget — allow the microtask to run
+    await Promise.resolve();
+    expect(recordPermissionDenied).toHaveBeenCalled();
+  });
+
+  it('setName requires cut.manage and delegates to the repo', async () => {
+    const setName = vi.fn(async () => ({ cutJobId: 42, name: 'Раскрой 2709' }) as never);
+    const service = new CutService({ cut: repo({ setName }) });
+    await service.setName({ currentUser: user(['cut.manage']), cutJobId: 42, name: 'Раскрой 2709', version: 1 });
+    expect(setName).toHaveBeenCalledWith(expect.objectContaining({ cutJobId: 42, name: 'Раскрой 2709', version: 1 }));
+  });
+
+  it('setName denies a user without cut.manage (403 + denied audit, no repo call)', async () => {
+    const setName = vi.fn(async () => ({ cutJobId: 42 }) as never);
+    const recordPermissionDenied = vi.fn(async () => undefined);
+    const service = new CutService({ cut: repo({ setName, recordPermissionDenied }) });
+    await expect(service.setName({ currentUser: user(['cut.view']), cutJobId: 42, name: 'Раскрой 2709', version: 1 }))
+      .rejects.toMatchObject({ statusCode: 403 });
+    expect(setName).not.toHaveBeenCalled();
     await Promise.resolve();
     expect(recordPermissionDenied).toHaveBeenCalled();
   });

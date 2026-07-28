@@ -40,6 +40,8 @@ export const apiRoutes = {
   profile: {
     preferences: backendApiPath('/me/preferences'),
     referenceUsage: backendApiPath('/me/preferences/reference-usage'),
+    telegramNotifications: backendApiPath('/me/notification-channels/telegram'),
+    telegramNotificationsLink: backendApiPath('/me/notification-channels/telegram/link'),
   },
   orders: {
     list: backendApiPath('/orders'),
@@ -89,6 +91,8 @@ export const apiRoutes = {
     detailLastReady: backendApiPath('/cut-jobs/detail-last-ready'),
     /** Variant B Task 11: cut.view-gated sheet-type lookup (no sheet_materials.view required). */
     sheetTypes: backendApiPath('/cut-jobs/sheet-types'),
+    filmOptions: backendApiPath('/cut-jobs/film-options'),
+    eligibleDetailsPreview: backendApiPath('/cut-jobs/eligible-details'),
     byId: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}`),
     results: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/results`),
     result: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}`),
@@ -113,6 +117,7 @@ export const apiRoutes = {
     jobPdf: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/export.pdf`),
     resultJobPdf: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}/export.pdf`),
     jobPdfTemplate: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/pdf-template`),
+    name: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/name`),
     groupPdfTemplate: (cutJobId: number, groupId: number) =>
       backendApiPath(`/cut-jobs/${cutJobId}/groups/${groupId}/pdf-template`),
     profile: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/profile`),
@@ -129,6 +134,7 @@ export const apiRoutes = {
     paramProfile: (id: number) => backendApiPath(`/cut-config/param-profiles/${id}`),
     renderPresets: backendApiPath('/cut-config/render-presets'),
     renderPreset: (id: number) => backendApiPath(`/cut-config/render-presets/${id}`),
+    pdfTemplateFields: backendApiPath('/cut-config/pdf-template-fields'),
     pdfTemplates: backendApiPath('/cut-config/pdf-templates'),
     pdfTemplate: (id: number) => backendApiPath(`/cut-config/pdf-templates/${id}`),
   },

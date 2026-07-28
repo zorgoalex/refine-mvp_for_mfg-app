@@ -4,6 +4,7 @@ export interface DeadlineDefaultScheduleStageDto {
   productionStatusCode: string | null;
   sortOrder: number;
   durationDays: number | null;
+  parallelWithPrevious: boolean;
   cumulativeDeadlineDays: number | null;
 }
 
@@ -12,6 +13,11 @@ export interface DeadlineDefaultScheduleDto {
   hasStoredConfiguration: boolean;
   version: number;
   reserveDays: number;
+  /**
+   * Saved order-status graph from production.workflow.default.
+   * Stage layout/order is intentionally not used for deadline calculations.
+   */
+  transitionsOrder: Record<string, string[]>;
   totalProductionDays: number | null;
   plannedOrderDays: number | null;
   updatedAt: string | null;
@@ -25,6 +31,7 @@ export interface ReplaceDeadlineDefaultScheduleRequestDto {
   stages: Array<{
     productionStatusId: number;
     durationDays: number;
+    parallelWithPrevious: boolean;
   }>;
 }
 

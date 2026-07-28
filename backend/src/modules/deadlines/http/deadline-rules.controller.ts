@@ -18,6 +18,29 @@ import { DeadlinesRuntimeConfigService } from './deadlines-runtime-config.servic
 const uuidSchema = z.string().trim().refine(isUuid, { message: 'Invalid UUID' });
 const positiveIntSchema = z.number().int().positive();
 const reasonSchema = z.string().trim().min(1).max(1000);
+const deadlineTargetSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('all_order_deadlines') }),
+  z.object({ type: z.literal('final_order') }),
+  z.object({
+    type: z.literal('production_stage'),
+    productionStatusId: positiveIntSchema,
+  }),
+]);
+const delayAfterDeadlineSchema = z
+  .object({
+    days: z.number().int().min(0).max(3650).default(0),
+    hours: z.number().int().min(0).max(23).default(0),
+    minutes: z.number().int().min(0).max(59).default(0),
+  })
+  .superRefine((value, context) => {
+    if (value.days + value.hours + value.minutes === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['days'],
+        message: 'At least one delay value must be greater than zero',
+      });
+    }
+  });
 const isoTimestampSchema = z
   .string()
   .trim()
@@ -92,6 +115,8 @@ const createGlobalTransitionRuleSchema = z
     priority: z.number().int().min(0).max(100000).default(100),
     eventType: z.literal('DEADLINE_EXPIRED').default('DEADLINE_EXPIRED'),
     actionType: z.literal('change_order_status').default('change_order_status'),
+    deadlineTarget: deadlineTargetSchema.default({ type: 'all_order_deadlines' }),
+    delayAfterDeadline: delayAfterDeadlineSchema.optional(),
     targetOrderStatusId: positiveIntSchema,
     allowedFromOrderStatusIds: z.array(positiveIntSchema).min(1),
     excludeOrderStatusIds: z.array(positiveIntSchema).default([]),
@@ -100,7 +125,10 @@ const createGlobalTransitionRuleSchema = z
     reason: reasonSchema,
     comment: z.string().trim().max(2000).nullable().optional(),
   })
-  .superRefine(validateTransitionRuleStatuses);
+  .superRefine((value, context) => {
+    validateTransitionRuleStatuses(value, context);
+    validateTransitionRuleDeadlineTarget(value, context);
+  });
 
 const updateGlobalTransitionRuleSchema = z
   .object({
@@ -112,6 +140,8 @@ const updateGlobalTransitionRuleSchema = z
     priority: z.number().int().min(0).max(100000).optional(),
     eventType: z.literal('DEADLINE_EXPIRED').optional(),
     actionType: z.literal('change_order_status').optional(),
+    deadlineTarget: deadlineTargetSchema.optional(),
+    delayAfterDeadline: delayAfterDeadlineSchema.nullable().optional(),
     targetOrderStatusId: positiveIntSchema.optional(),
     allowedFromOrderStatusIds: z.array(positiveIntSchema).optional(),
     excludeOrderStatusIds: z.array(positiveIntSchema).optional(),
@@ -129,6 +159,7 @@ const updateGlobalTransitionRuleSchema = z
       });
     }
     validateTransitionRuleStatuses(value, context);
+    validateTransitionRuleDeadlineTarget(value, context);
   });
 
 const deleteGlobalTransitionRuleSchema = z.object({
@@ -387,6 +418,25 @@ function validateTransitionRuleStatuses(
       code: 'custom',
       path: ['requireCurrentDeadlineEvent'],
       message: 'Current-deadline-event protection is mandatory',
+    });
+  }
+}
+
+function validateTransitionRuleDeadlineTarget(
+  value: {
+    policyId?: string | null;
+    deadlineTarget?: {
+      type: 'all_order_deadlines' | 'final_order' | 'production_stage';
+      productionStatusId?: number;
+    };
+  },
+  context: z.RefinementCtx,
+): void {
+  if (value.policyId && value.deadlineTarget?.type !== 'all_order_deadlines') {
+    context.addIssue({
+      code: 'custom',
+      path: ['deadlineTarget'],
+      message: 'deadlineTarget cannot be combined with policyId',
     });
   }
 }

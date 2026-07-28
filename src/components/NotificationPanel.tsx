@@ -87,7 +87,7 @@ export const NotificationPanel: React.FC<{
     }
   };
 
-  if (!loading && error) {
+  if (!loading && error && notifications.length === 0) {
     return (
       <div style={{ width: 315, padding: 12, backgroundColor: 'var(--app-surface)' }}>
         <Alert
@@ -121,6 +121,15 @@ export const NotificationPanel: React.FC<{
 
   return (
     <div style={{ width: 315, backgroundColor: 'var(--app-surface)' }}>
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message="Не удалось обновить серверные уведомления"
+          action={<Button size="small" danger onClick={() => void refresh()}>Повторить</Button>}
+          style={{ margin: 8 }}
+        />
+      )}
       {/* Заголовок с действиями */}
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--app-border-soft)', backgroundColor: 'var(--app-surface)' }}>
         <Space style={{ width: '100%', justifyContent: 'space-between' }}>

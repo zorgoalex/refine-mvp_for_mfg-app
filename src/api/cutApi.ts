@@ -3,6 +3,7 @@ import { httpClient } from './httpClient';
 import type {
   AddCutItemsRequest,
   CreateCutJobRequest,
+  CutFilmOption,
   CutDetailLastReadyResponse,
   CutDetailPlacements,
   CutJobDto,
@@ -76,6 +77,12 @@ export const cutApi = {
     return httpClient.get<CutSheetTypeOption[]>(apiRoutes.cutJobs.sheetTypes);
   },
 
+  listFilmOptions(criteria: CutSelectionCriteria): Promise<CutFilmOption[]> {
+    const query = buildEligibleQuery(criteria);
+    const path = apiRoutes.cutJobs.filmOptions;
+    return httpClient.get<CutFilmOption[]>(query ? `${path}?${query}` : path);
+  },
+
   /**
    * Where the given details/orders are already placed (informational, non-exclusive).
    * Pass detailIds (detail-level) or orderIds (whole order). No job id needed.
@@ -104,6 +111,12 @@ export const cutApi = {
   ): Promise<EligibleDetailsResponse> {
     const query = buildEligibleQuery(criteria);
     const path = apiRoutes.cutJobs.eligibleDetails(validateCutJobId(cutJobId));
+    return httpClient.get<EligibleDetailsResponse>(query ? `${path}?${query}` : path);
+  },
+
+  async listEligibleDetailsPreview(criteria: CutSelectionCriteria): Promise<EligibleDetailsResponse> {
+    const query = buildEligibleQuery(criteria);
+    const path = apiRoutes.cutJobs.eligibleDetailsPreview;
     return httpClient.get<EligibleDetailsResponse>(query ? `${path}?${query}` : path);
   },
 
@@ -266,6 +279,13 @@ export const cutApi = {
     });
   },
 
+  async setName(cutJobId: number, name: string, version: number): Promise<CutJobDto> {
+    return httpClient.patch<CutJobDto>(apiRoutes.cutJobs.name(validateCutJobId(cutJobId)), {
+      name,
+      version,
+    });
+  },
+
   async setGroupPdfTemplate(cutJobId: number, cutGroupId: number, pdfTemplate: string): Promise<CutJobDto> {
     return httpClient.patch<CutJobDto>(
       apiRoutes.cutJobs.groupPdfTemplate(validateCutJobId(cutJobId), validateCutJobId(cutGroupId)),
@@ -292,12 +312,20 @@ export function buildEligibleQuery(criteria: CutSelectionCriteria): string {
   appendCsv(params, 'sheetMaterialTypeIds', criteria.sheetMaterialTypeIds);
   appendCsv(params, 'filmIds', criteria.filmIds);
   appendCsv(params, 'productionStatusIds', criteria.productionStatusIds);
+  appendDate(params, 'dateFrom', criteria.dateFrom);
+  appendDate(params, 'dateTo', criteria.dateTo);
   return params.toString();
 }
 
 function appendCsv(params: URLSearchParams, key: string, values: number[] | undefined): void {
   if (values && values.length > 0) {
     params.append(key, values.join(','));
+  }
+}
+
+function appendDate(params: URLSearchParams, key: string, value: string | undefined): void {
+  if (value) {
+    params.append(key, value);
   }
 }
 

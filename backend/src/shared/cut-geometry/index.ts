@@ -529,9 +529,9 @@ export type MoveBlockReason = 'material' | 'film';
 
 /**
  * Guard for moving a piece onto a target sheet. Mirrors the cut grouping rules:
- * when splitByMaterial, materials must match; when combineFilms is off, films
- * must match. In the per-group editor these always hold; the guard defends
- * against data anomalies and documents the invariant.
+ * splitByMaterial=true groups by material, and with combineFilms=false also by
+ * film. splitByMaterial=false uses one all-details group with null material/film
+ * group ids, so neither material nor film can be enforced here.
  */
 export function moveAllowed(args: {
   pieceMaterialTypeId: number | null;
@@ -544,7 +544,7 @@ export function moveAllowed(args: {
   if (args.splitByMaterial && args.pieceMaterialTypeId !== args.targetMaterialTypeId) {
     return { ok: false, reason: 'material' };
   }
-  if (!args.combineFilms && args.pieceFilmId !== args.targetFilmId) {
+  if (args.splitByMaterial && !args.combineFilms && args.pieceFilmId !== args.targetFilmId) {
     return { ok: false, reason: 'film' };
   }
   return { ok: true };

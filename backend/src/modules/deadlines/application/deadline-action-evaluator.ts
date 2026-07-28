@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
 import type {
+  DeadlineActionRuleDeadlineTargetDto,
   DeadlineActionRuleConfigDto,
   DeadlineActionRuleDto,
   DeadlineOrderOverrideDto,
   DeadlineRuleConfigSnapshotDto,
 } from '../dto/deadline-action-rule.dto';
+import type { DeadlineInstanceDto } from '../dto/deadline-instance.dto';
+import type { DeadlineEntityType } from '../domain/deadline-validation';
 import type { DeadlineActionType } from '../domain/deadline-actions';
 import type { DeadlineEventType } from '../domain/deadline-events';
 import type { OrderDeadlineEvaluationContext } from './deadline.types';
@@ -46,12 +49,20 @@ export interface EvaluateDeadlineActionRulesInput {
   deadlineId?: string | null;
   targetType?: string | null;
   targetId?: string | null;
+  evaluatedAt?: string | null;
+  deadlineContext?: DeadlineActionRuleDeadlineContext | null;
   orderContext?: OrderDeadlineEvaluationContext | null;
   orderContextUnavailable?: boolean;
   isCurrentDeadlineEvent: boolean;
   actionsEnabled?: boolean;
   rules: DeadlineActionRuleDto[];
   overrides: DeadlineOrderOverrideDto[];
+}
+
+export interface DeadlineActionRuleDeadlineContext {
+  entityType: DeadlineEntityType;
+  productionStatusId: number | null;
+  deadlineAt: string;
 }
 
 export function evaluateDeadlineActionRules(
@@ -74,6 +85,8 @@ export function evaluateDeadlineActionRules(
       orderContextUnavailable: input.orderContextUnavailable ?? false,
       targetStatusId,
       isCurrentDeadlineEvent: input.isCurrentDeadlineEvent,
+      deadlineContext: input.deadlineContext ?? null,
+      evaluatedAt: input.evaluatedAt ?? null,
     });
 
     if (!skipReason && rule.actionType === 'change_order_status' && selectedActionRuleId) {
@@ -172,6 +185,10 @@ export function buildRuleConfigSnapshot(rule: DeadlineActionRuleDto): DeadlineRu
     priority: rule.priority,
     eventType: rule.eventType,
     actionType: rule.actionType,
+    deadlineTarget: rule.config?.deadlineTarget ?? {
+      type: 'all_order_deadlines',
+    },
+    delayAfterDeadline: rule.config?.delayAfterDeadline,
     conditions: rule.config?.conditions ?? {},
     actionConfig: rule.config?.actionConfig ?? {},
     createdAt: rule.createdAt,
@@ -279,6 +296,8 @@ function getRuleSkipReason(input: {
   orderContextUnavailable: boolean;
   targetStatusId: number | null;
   isCurrentDeadlineEvent: boolean;
+  deadlineContext: DeadlineActionRuleDeadlineContext | null;
+  evaluatedAt: string | null;
 }): string | null {
   if (!input.actionsEnabled) {
     return 'global_actions_disabled';
@@ -291,6 +310,21 @@ function getRuleSkipReason(input: {
   }
   if (input.override?.isDisabled) {
     return 'order_override_disabled';
+  }
+  const deadlineTargetSkipReason = getDeadlineTargetSkipReason(
+    input.rule.config?.deadlineTarget,
+    input.deadlineContext,
+  );
+  if (deadlineTargetSkipReason) {
+    return deadlineTargetSkipReason;
+  }
+  const deadlineDelaySkipReason = getDeadlineDelaySkipReason(
+    input.rule.config?.delayAfterDeadline,
+    input.deadlineContext,
+    input.evaluatedAt,
+  );
+  if (deadlineDelaySkipReason) {
+    return deadlineDelaySkipReason;
   }
   if (input.rule.actionType === 'set_overdue_flag' || input.rule.actionType === 'change_production_status') {
     return getMutatingActionConditionSkipReason(input);
@@ -337,6 +371,81 @@ function getRuleSkipReason(input: {
   }
 
   return null;
+}
+
+export function buildDeadlineActionRuleDeadlineContext(
+  deadline: DeadlineInstanceDto | null | undefined,
+): DeadlineActionRuleDeadlineContext | null {
+  if (!deadline) return null;
+  const rawProductionStatusId = deadline.metadata?.productionStatusId;
+  const productionStatusId =
+    typeof rawProductionStatusId === 'number'
+    && Number.isInteger(rawProductionStatusId)
+    && rawProductionStatusId > 0
+      ? rawProductionStatusId
+      : typeof rawProductionStatusId === 'string'
+        && /^\d+$/.test(rawProductionStatusId)
+        && Number(rawProductionStatusId) > 0
+        ? Number(rawProductionStatusId)
+        : null;
+  return {
+    entityType: deadline.entityType,
+    productionStatusId,
+    deadlineAt: deadline.deadlineAt,
+  };
+}
+
+export function getDeadlineDelaySkipReason(
+  delay: DeadlineActionRuleConfigDto['delayAfterDeadline'],
+  context: DeadlineActionRuleDeadlineContext | null,
+  evaluatedAt: string | null,
+): string | null {
+  if (!delay) return null;
+  if (
+    !Number.isInteger(delay.days)
+    || delay.days < 0
+    || delay.days > 3650
+    || !Number.isInteger(delay.hours)
+    || delay.hours < 0
+    || delay.hours > 23
+    || !Number.isInteger(delay.minutes)
+    || delay.minutes < 0
+    || delay.minutes > 59
+    || delay.days + delay.hours + delay.minutes === 0
+  ) {
+    return 'invalid_rule_delay';
+  }
+  if (!context || !evaluatedAt) return 'missing_deadline_delay_context';
+
+  const deadlineAtMs = Date.parse(context.deadlineAt);
+  const evaluatedAtMs = Date.parse(evaluatedAt);
+  if (Number.isNaN(deadlineAtMs) || Number.isNaN(evaluatedAtMs)) {
+    return 'invalid_rule_delay_context';
+  }
+
+  const delayMs = (
+    delay.days * 24 * 60
+    + delay.hours * 60
+    + delay.minutes
+  ) * 60_000;
+  return evaluatedAtMs < deadlineAtMs + delayMs
+    ? 'rule_delay_not_elapsed'
+    : null;
+}
+
+export function getDeadlineTargetSkipReason(
+  target: DeadlineActionRuleDeadlineTargetDto | null | undefined,
+  context: DeadlineActionRuleDeadlineContext | null,
+): string | null {
+  if (!target || target.type === 'all_order_deadlines') return null;
+  if (!context) return 'missing_deadline_target_context';
+  if (target.type === 'final_order') {
+    return context.entityType === 'order' ? null : 'deadline_target_mismatch';
+  }
+  return context.entityType === 'order_stage'
+    && context.productionStatusId === target.productionStatusId
+    ? null
+    : 'deadline_target_mismatch';
 }
 
 function stableStringify(value: unknown): string {

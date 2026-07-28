@@ -9,6 +9,7 @@ import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, forwardRe
 import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider, Checkbox } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined } from '@ant-design/icons';
+import { Link } from 'react-router-dom';
 import { useDragSelection } from '../../../../hooks/useDragSelection';
 import { FilmQuickCreate } from '../modals/FilmQuickCreate';
 import type { ColumnsType } from 'antd/es/table';
@@ -37,6 +38,8 @@ import {
 } from './OrderDetailColumnSettings';
 import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
+import type { CutDetailLastReadyRef } from '../../../../api/types/cutApi.types';
+import { cutJobDeepLink } from '../../cutColumnHelpers';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -52,6 +55,7 @@ interface OrderDetailTableProps {
   groupField?: GroupField | null;
   showSeparation?: boolean;
   cutSelectable?: boolean;
+  cutJobByDetailId?: ReadonlyMap<number, CutDetailLastReadyRef>;
   /** Grouping controls rendered inline on the same right-aligned row as the column-settings gear. */
   groupingControls?: React.ReactNode;
   /** All order-detail actions rendered in the same adaptive row as table controls. */
@@ -129,6 +133,7 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'milling_cost_per_sqm', label: 'Цена за кв.м.' },
   { key: 'detail_cost', label: 'Сумма' },
   { key: 'film_id', label: 'Пленка' },
+  { key: 'cut_job', label: 'Раскрой' },
   { key: 'priority', label: 'Пр-т' },
   { key: 'production_status_id', label: 'Статус' },
   { key: 'basis_project', label: 'Базис проект' },
@@ -243,6 +248,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   groupField = null,
   showSeparation = true,
   cutSelectable = false,
+  cutJobByDetailId,
   groupingControls,
   toolbarActions,
 }, ref) => {
@@ -1186,6 +1192,23 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         );
       },
     },
+    ...(cutJobByDetailId
+      ? [
+          {
+            title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Раскрой</div>,
+            key: 'cut_job',
+            width: 150,
+            onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+            render: (_: any, row: any) => {
+              const d = asDetail(row);
+              if (!d?.detail_id) return null;
+              const ref = cutJobByDetailId.get(d.detail_id);
+              if (!ref) return '—';
+              return <Link to={cutJobDeepLink(ref.cutJobId)}>{ref.name}</Link>;
+            },
+          },
+        ]
+      : []),
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Пр-т</div>,
       dataIndex: 'priority',

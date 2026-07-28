@@ -947,6 +947,11 @@ describe('PgDeadlineRepository', () => {
       limit: 5,
       workerId: 'worker-1',
     });
+    await expect(repository.findDueDelayedDeadlineEventsForUpdate({
+      now: '2026-07-02T10:00:00.000Z',
+      limit: 5,
+      workerId: 'worker-1',
+    })).resolves.toEqual([]);
     await repository.createActionExecution({
       deadlineEventId: '22222222-2222-4222-8222-222222222222',
       actionRuleId: null,
@@ -960,6 +965,9 @@ describe('PgDeadlineRepository', () => {
 
     const sql = database.queries.map((query) => normalizeSql(query.text)).join('\n');
     expect(sql).toContain('FOR UPDATE SKIP LOCKED');
+    expect(sql).toContain("config_json->'delayAfterDeadline'");
+    expect(sql).toContain('make_interval');
+    expect(sql).toContain('deadline_action_executions execution');
     expect(sql).toContain('ON CONFLICT (idempotency_key)');
   });
 
@@ -1577,6 +1585,7 @@ describe('PgDeadlineRepository', () => {
       priority: 100,
       config: {
         scope: { type: 'global_orders' },
+        deadlineTarget: { type: 'all_order_deadlines' },
         conditions: {
           allowedFromOrderStatusIds: [1, 2],
           excludeOrderStatusIds: [8],
@@ -1602,6 +1611,7 @@ describe('PgDeadlineRepository', () => {
     expect(insert?.params[1]).toBe(100);
     expect(JSON.parse(String(insert?.params[2]))).toMatchObject({
       scope: { type: 'global_orders' },
+      deadlineTarget: { type: 'all_order_deadlines' },
       conditions: {
         allowedFromOrderStatusIds: [1, 2],
         excludeOrderStatusIds: [8],
@@ -1617,6 +1627,96 @@ describe('PgDeadlineRepository', () => {
     expect(audit?.params[0]).toBe('DEADLINE_TRANSITION_RULE_CREATED');
     expect(audit?.params[1]).toBe('deadline_transition_rule');
     expect(audit?.params[4]).toBe('req-transition-create');
+  });
+
+  it('persists a production-stage selector without creating deadline policies', async () => {
+    const database = createDatabase();
+    const repository = new PgDeadlineRepository(database.client);
+
+    await expect(
+      repository.createGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-stage',
+        dto: {
+          ruleName: 'Просрочен распил',
+          deadlineTarget: {
+            type: 'production_stage',
+            productionStatusId: 4,
+          },
+          delayAfterDeadline: {
+            days: 60,
+            hours: 2,
+            minutes: 30,
+          },
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1, 2],
+          reason: 'Configure stage-specific automation',
+        },
+        audit: transitionRuleAudit(
+          'DEADLINE_TRANSITION_RULE_CREATED',
+          'req-transition-stage',
+        ),
+      }),
+    ).resolves.toMatchObject({
+      config: {
+        deadlineTarget: {
+          type: 'production_stage',
+          productionStatusId: 4,
+        },
+        delayAfterDeadline: {
+          days: 60,
+          hours: 2,
+          minutes: 30,
+        },
+      },
+    });
+
+    const insert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO deadline_action_rules'),
+    );
+    expect(JSON.parse(String(insert?.params[2]))).toMatchObject({
+      deadlineTarget: {
+        type: 'production_stage',
+        productionStatusId: 4,
+      },
+      delayAfterDeadline: {
+        days: 60,
+        hours: 2,
+        minutes: 30,
+      },
+    });
+    expect(insert?.params[4]).toBeNull();
+  });
+
+  it('rejects an inactive or missing production-stage selector', async () => {
+    const repository = new PgDeadlineRepository(
+      createDatabase({ missingProductionStatusIds: [4] }).client,
+    );
+
+    await expect(
+      repository.createGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-missing-stage',
+        dto: {
+          ruleName: 'Просрочен отсутствующий этап',
+          deadlineTarget: {
+            type: 'production_stage',
+            productionStatusId: 4,
+          },
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1],
+          reason: 'Reject missing production status',
+        },
+        audit: transitionRuleAudit(
+          'DEADLINE_TRANSITION_RULE_CREATED',
+          'req-transition-missing-stage',
+        ),
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'DEADLINE_TRANSITION_RULE_PRODUCTION_STATUS_NOT_FOUND',
+      details: { productionStatusId: 4 },
+    } satisfies Partial<ApiError>);
   });
 
   it('rejects transition rule status ids that are missing or inactive', async () => {
@@ -1695,6 +1795,35 @@ describe('PgDeadlineRepository', () => {
     });
   });
 
+  it('rejects combining a legacy policy with a stage selector', async () => {
+    const repository = new PgDeadlineRepository(createDatabase().client);
+
+    await expect(
+      repository.createGlobalTransitionRule({
+        currentUser: currentUser(),
+        requestId: 'req-transition-target-conflict',
+        dto: {
+          ruleName: 'Ambiguous transition',
+          policyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          deadlineTarget: {
+            type: 'production_stage',
+            productionStatusId: 4,
+          },
+          targetOrderStatusId: 7,
+          allowedFromOrderStatusIds: [1],
+          reason: 'Reject ambiguous configuration',
+        },
+        audit: transitionRuleAudit(
+          'DEADLINE_TRANSITION_RULE_CREATED',
+          'req-transition-target-conflict',
+        ),
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'DEADLINE_TRANSITION_RULE_TARGET_CONFLICT',
+    } satisfies Partial<ApiError>);
+  });
+
   it.each([
     {
       name: 'missing',
@@ -1746,6 +1875,7 @@ describe('PgDeadlineRepository', () => {
           priority: 5,
           eventType: 'DEADLINE_EXPIRED',
           actionType: 'change_order_status',
+          delayAfterDeadline: { days: 0, hours: 1, minutes: 15 },
           targetOrderStatusId: 7,
           allowedFromOrderStatusIds: [1, 2],
           excludeOrderStatusIds: [8],
@@ -1767,6 +1897,7 @@ describe('PgDeadlineRepository', () => {
           requireCurrentDeadlineEvent: true,
         },
         actionConfig: { targetOrderStatusId: 7 },
+        delayAfterDeadline: { days: 0, hours: 1, minutes: 15 },
       },
     });
 
@@ -1787,6 +1918,7 @@ describe('PgDeadlineRepository', () => {
     expect(update?.params[4]).toBe('2026-05-01T10:00:00.000Z');
     expect(JSON.parse(String(update?.params[3]))).toMatchObject({
       scope: { type: 'global_orders' },
+      deadlineTarget: { type: 'all_order_deadlines' },
       conditions: {
         allowedFromOrderStatusIds: [1, 2],
         excludeOrderStatusIds: [8],
@@ -1794,6 +1926,7 @@ describe('PgDeadlineRepository', () => {
         requireCurrentDeadlineEvent: true,
       },
       actionConfig: { targetOrderStatusId: 7 },
+      delayAfterDeadline: { days: 0, hours: 1, minutes: 15 },
     });
 
     const audit = database.queries.find((query) =>
@@ -2117,6 +2250,7 @@ function createDatabase(
     emptyTransitionRuleUpdate?: boolean;
     emptyTransitionRuleDelete?: boolean;
     missingOrderStatusIds?: number[];
+    missingProductionStatusIds?: number[];
     missingTransitionPolicy?: boolean;
     transitionPolicyScope?: 'order' | 'order_stage' | 'client_action' | 'project';
     transitionRuleDependencyCount?: number;
@@ -2132,6 +2266,7 @@ function createDatabase(
       completion_date: string | Date | null;
       issue_date: string | Date | null;
     }>;
+    dueDelayedEventRows?: Array<Record<string, unknown>>;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -2142,6 +2277,10 @@ function createDatabase(
   const client = {
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
+
+      if (text.includes('WITH candidates AS') && text.includes('due_rules.action_rule_ids')) {
+        return { rows: options.dueDelayedEventRows ?? [] };
+      }
 
       if (text.includes('FROM deadline_action_rules') && text.includes('GROUP BY action_type')) {
         return {
@@ -2158,6 +2297,16 @@ function createDatabase(
           rows: requested
             .filter((statusId) => !missing.has(statusId))
             .map((statusId) => ({ order_status_id: statusId })),
+        };
+      }
+
+      if (text.includes('FROM production_statuses')) {
+        const productionStatusId = Number(params[0]);
+        const missing = new Set(options.missingProductionStatusIds ?? []);
+        return {
+          rows: missing.has(productionStatusId)
+            ? []
+            : [{ production_status_id: productionStatusId }],
         };
       }
 

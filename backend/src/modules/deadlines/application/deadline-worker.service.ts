@@ -58,8 +58,15 @@ export class DeadlineWorkerService {
         workerId: command.workerId,
         deadlineId: command.deadlineId ?? null,
       });
+      const dueDelayedEvents =
+        await unitOfWork.deadlines.findDueDelayedDeadlineEventsForUpdate?.({
+          now: command.now,
+          limit: command.limit,
+          workerId: command.workerId,
+          deadlineId: command.deadlineId ?? null,
+        }) ?? [];
       const result: ProcessDueDeadlinesResult = {
-        scanned: dueDeadlines.length,
+        scanned: dueDeadlines.length + dueDelayedEvents.length,
         processed: 0,
         expired: 0,
         completed: 0,
@@ -153,6 +160,19 @@ export class DeadlineWorkerService {
         } else {
           result.completed += 1;
         }
+      }
+
+      for (const delayed of dueDelayedEvents) {
+        await this.createDispatcher(unitOfWork).dispatch({
+          event: delayed.event,
+          actionRuleIds: delayed.actionRuleIds,
+          evaluatedAt: command.now,
+          repository: unitOfWork.deadlines,
+          targetResolver: this.ports.targetResolver,
+          notificationPort: this.ports.notificationPort,
+          config: command.config,
+        });
+        result.processed += 1;
       }
 
       return result;

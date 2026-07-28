@@ -14,7 +14,7 @@ import {
   useSelect,
 } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown } from "antd";
+import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin } from "antd";
 import {
   EyeOutlined,
   EditOutlined,
@@ -45,6 +45,18 @@ import { buildProductionStagesDisplayConfig } from "../../utils/productionWorkfl
 import type { ProductionStatusRef, ProductionWorkflowConfig } from "../../types/productionWorkflow";
 import { featureFlags } from "../../config/featureFlags";
 import { ordersApi } from "../../api/ordersApi";
+import type {
+  ImportOrderSnapshotBatchResponse,
+  ImportOrderSnapshotReferenceMapping,
+} from "../../api/types/orderApi.types";
+import { buildSnapshotImportBatchReport } from "./orderSnapshotImportReport";
+import { OrderSnapshotReferenceMappingModal } from "./OrderSnapshotReferenceMappingModal";
+import {
+  extractUnmappedReferencesFromApiError,
+  extractUnmappedReferencesFromBatch,
+  snapshotReferenceMappingKey,
+  type SnapshotUnmappedReferenceRow,
+} from "./orderSnapshotReferenceMapping";
 import { findOrderByName, countOrdersAfter } from "../../api/reports/ordersSearchReportApi";
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
@@ -109,6 +121,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [snapshotBatchRange, setSnapshotBatchRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [snapshotBatchExporting, setSnapshotBatchExporting] = useState(false);
   const [snapshotImporting, setSnapshotImporting] = useState(false);
+  const [snapshotImportFileName, setSnapshotImportFileName] = useState<string | null>(null);
+  const [snapshotReferenceMapping, setSnapshotReferenceMapping] = useState<{
+    file: File;
+    rows: SnapshotUnmappedReferenceRow[];
+  } | null>(null);
+  const [snapshotReferenceMappingValues, setSnapshotReferenceMappingValues] = useState<Record<string, number | null>>({});
+  const [snapshotReferenceMappingSubmitting, setSnapshotReferenceMappingSubmitting] = useState(false);
 
   // Получаем текущего пользователя для фильтра "Мои заказы"
   const currentUser = authStorage.getUser();
@@ -445,32 +464,163 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     }
   };
 
-  const handleSnapshotImport = async (file: File) => {
-    setSnapshotImporting(true);
+  const showSnapshotImportBatchReport = (result: ImportOrderSnapshotBatchResponse) => {
+    const report = buildSnapshotImportBatchReport(result);
+    const openReport = report.failures.length > 0 ? Modal.warning : Modal.info;
+    openReport({
+      title: report.title,
+      width: 780,
+      content: (
+        <div className="orders-snapshot-import-report">
+          {report.failures.length > 0 && (
+            <div className="orders-snapshot-import-report__section">
+              {report.failures.map((failure) => (
+                <div key={failure.fileName} className="orders-snapshot-import-report__failure">
+                  <Text strong>{failure.fileName}</Text>
+                  <Text type="secondary">
+                    {failure.errorCode}: {failure.message}
+                  </Text>
+                  {failure.detailLines.length > 0 && (
+                    <ul className="orders-snapshot-import-report__details">
+                      {failure.detailLines.map((line, lineIndex) => (
+                        <li key={`${failure.fileName}-${lineIndex}`}>{line}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {report.successes.length > 0 && (
+            <div className="orders-snapshot-import-report__section">
+              <Text type="secondary">Импортированы:</Text>
+              <ul className="orders-snapshot-import-report__details">
+                {report.successes.map((success) => (
+                  <li key={success.fileName}>
+                    {success.fileName} — заказ {success.orderName}: {success.statusLabel}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {report.skipped.length > 0 && (
+            <div className="orders-snapshot-import-report__section">
+              <Text type="secondary">Уже есть, не импортированы:</Text>
+              <ul className="orders-snapshot-import-report__details">
+                {report.skipped.map((skip) => (
+                  <li key={skip.fileName}>
+                    {skip.fileName} — заказ {skip.orderName}: {skip.statusLabel}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      ),
+    });
+  };
+
+  const clearSnapshotReferenceMapping = () => {
+    setSnapshotReferenceMapping(null);
+    setSnapshotReferenceMappingValues({});
+  };
+
+  const openSnapshotReferenceMapping = (file: File, rows: SnapshotUnmappedReferenceRow[]) => {
+    setSnapshotReferenceMapping({ file, rows });
+    setSnapshotReferenceMappingValues((currentValues) => {
+      const nextValues: Record<string, number | null> = {};
+      for (const row of rows) {
+        const key = snapshotReferenceMappingKey(row);
+        nextValues[key] = currentValues[key] ?? null;
+      }
+      return nextValues;
+    });
+  };
+
+  const handleSnapshotImport = async (
+    file: File,
+    referenceMappings: ImportOrderSnapshotReferenceMapping[] = [],
+    options: { fromMapping?: boolean } = {},
+  ) => {
+    if (!options.fromMapping) {
+      clearSnapshotReferenceMapping();
+    }
+    const setLoading = options.fromMapping
+      ? setSnapshotReferenceMappingSubmitting
+      : setSnapshotImporting;
+    setSnapshotImportFileName(file.name);
+    setLoading(true);
     try {
       const isZip = file.name.toLowerCase().endsWith(".zip");
       if (isZip) {
-        const result = await ordersApi.importSnapshotBatchFile(file);
-        if (result.failed > 0) {
-          message.warning(`Импортировано: ${result.imported}, ошибок: ${result.failed}`);
+        const result = await ordersApi.importSnapshotBatchFile(file, referenceMappings);
+        if (result.failed > 0 || result.skipped > 0) {
+          const unmappedReferences = extractUnmappedReferencesFromBatch(result);
+          if (unmappedReferences.length > 0) {
+            openSnapshotReferenceMapping(file, unmappedReferences);
+            message.warning("Требуется ручное сопоставление справочников");
+            return;
+          }
+
+          clearSnapshotReferenceMapping();
+          showSnapshotImportBatchReport(result);
         } else {
+          clearSnapshotReferenceMapping();
           message.success(`Импортировано заказов: ${result.imported}`);
         }
       } else {
-        const result = await ordersApi.importSnapshotFile(file);
-        message.success(`Заказ ${result.orderName}: ${result.status}`);
+        const result = await ordersApi.importSnapshotFile(file, referenceMappings);
+        clearSnapshotReferenceMapping();
+        if (result.status === "noop" || result.status === "skipped") {
+          message.info(`Заказ ${result.orderName} уже есть, импорт не выполнялся`);
+        } else {
+          message.success(`Заказ ${result.orderName} импортирован`);
+        }
       }
       setCurrent(1);
     } catch (error) {
+      const unmappedReferences = extractUnmappedReferencesFromApiError(error, file.name);
+      if (unmappedReferences.length > 0) {
+        openSnapshotReferenceMapping(file, unmappedReferences);
+        message.warning("Требуется ручное сопоставление справочников");
+        return;
+      }
+
+      if (options.fromMapping) {
+        clearSnapshotReferenceMapping();
+      }
       message.error("Не удалось импортировать snapshot");
       console.error("Ошибка импорта snapshot:", error);
     } finally {
-      setSnapshotImporting(false);
+      setLoading(false);
+      setSnapshotImportFileName(null);
     }
+  };
+
+  const handleSnapshotReferenceMappingSubmit = async () => {
+    if (!snapshotReferenceMapping) return;
+
+    const missingRows = snapshotReferenceMapping.rows.filter(
+      (row) => snapshotReferenceMappingValues[snapshotReferenceMappingKey(row)] == null,
+    );
+    if (missingRows.length > 0) {
+      message.warning("Заполните все сопоставления");
+      return;
+    }
+
+    const referenceMappings: ImportOrderSnapshotReferenceMapping[] = snapshotReferenceMapping.rows.map((row) => ({
+      entityType: row.entityType,
+      sourceId: row.sourceId,
+      targetId: Number(snapshotReferenceMappingValues[snapshotReferenceMappingKey(row)]),
+    }));
+
+    await handleSnapshotImport(snapshotReferenceMapping.file, referenceMappings, { fromMapping: true });
   };
 
   const { settings: orderListColumnSettings, saveSettings: saveOrderListColumnSettings } =
     useOrderDetailColumnPreferences('orderList', ORDER_LIST_DEFAULT_ORDER, ORDER_LIST_COLUMN_DEFINITIONS);
+  const snapshotImportBusy = snapshotImporting || snapshotReferenceMappingSubmitting;
+  const snapshotImportBusyFileName = snapshotImportFileName ?? snapshotReferenceMapping?.file.name ?? null;
 
   // Количество записей
   const totalRecords = tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination.total || 0 : 0;
@@ -1188,6 +1338,44 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
               />
             </Form.Item>
           </Form>
+        </Modal>
+        <OrderSnapshotReferenceMappingModal
+          open={Boolean(snapshotReferenceMapping)}
+          rows={snapshotReferenceMapping?.rows ?? []}
+          values={snapshotReferenceMappingValues}
+          confirmLoading={snapshotReferenceMappingSubmitting}
+          onChange={(mappingKey, targetId) => {
+            setSnapshotReferenceMappingValues((currentValues) => ({
+              ...currentValues,
+              [mappingKey]: targetId,
+            }));
+          }}
+          onCancel={clearSnapshotReferenceMapping}
+          onSubmit={handleSnapshotReferenceMappingSubmit}
+        />
+        <Modal
+          title="Импорт JSON заказа"
+          open={snapshotImportBusy}
+          footer={null}
+          closable={false}
+          maskClosable={false}
+          keyboard={false}
+          destroyOnClose
+        >
+          <div className="orders-snapshot-import-progress" role="status" aria-live="polite">
+            <Spin size="large" />
+            <div>
+              <Text strong>Импорт выполняется</Text>
+              <Text type="secondary">
+                Проверяем файл, справочники и связанные записи. Окно результата появится после завершения.
+              </Text>
+              {snapshotImportBusyFileName && (
+                <Text type="secondary" className="orders-snapshot-import-progress__file">
+                  {snapshotImportBusyFileName}
+                </Text>
+              )}
+            </div>
+          </div>
         </Modal>
         {filtersVisible && (
           <Card style={{ marginBottom: 16 }}>

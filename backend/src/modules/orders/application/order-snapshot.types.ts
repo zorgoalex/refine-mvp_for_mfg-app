@@ -1,6 +1,7 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type {
   ImportOrderSnapshotBatchResponseDto,
+  ImportOrderSnapshotReferenceMappingDto,
   ImportOrderSnapshotResponseDto,
   OrderSnapshotDto,
 } from '../dto/order-snapshot.dto';
@@ -21,12 +22,14 @@ export interface ExportOrderSnapshotBatchCommand {
 export interface ImportOrderSnapshotCommand {
   currentUser: CurrentUser;
   snapshot: OrderSnapshotDto;
+  referenceMappings?: ImportOrderSnapshotReferenceMappingDto[];
   requestId?: string;
 }
 
 export interface ImportOrderSnapshotBatchCommand {
   currentUser: CurrentUser;
   zipBase64: string;
+  referenceMappings?: ImportOrderSnapshotReferenceMappingDto[];
   requestId?: string;
 }
 

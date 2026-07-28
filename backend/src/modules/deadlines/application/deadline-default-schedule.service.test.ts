@@ -8,6 +8,7 @@ const schedule: DeadlineDefaultScheduleDto = {
   hasStoredConfiguration: true,
   version: 2,
   reserveDays: 1,
+  transitionsOrder: {},
   totalProductionDays: 5,
   plannedOrderDays: 6,
   updatedAt: null,
@@ -52,7 +53,13 @@ describe('DeadlineDefaultScheduleService', () => {
           expectedVersion: 1,
           reserveDays: 0,
           reason: 'test reason',
-          stages: [{ productionStatusId: 1, durationDays: 1 }],
+          stages: [
+            {
+              productionStatusId: 1,
+              durationDays: 1,
+              parallelWithPrevious: false,
+            },
+          ],
         },
       }),
     ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });

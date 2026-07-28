@@ -35,20 +35,29 @@
 .status-board-toolbar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 10px 16px;
+  flex-wrap: nowrap;
+  gap: 8px 10px;
   padding: 10px 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid var(--app-border-soft);
   border-radius: 10px;
   background: var(--app-surface);
 }
 
 .status-board-toolbar__search {
-  width: min(320px, 100%);
+  width: min(160px, 100%);
+  flex: 0 0 160px;
+}
+
+.status-board-toolbar__date-range {
+  width: 224px;
+  flex: 0 0 224px;
 }
 
 .status-board-toolbar__checkbox {
   min-height: 40px;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
 }
@@ -61,12 +70,31 @@
   width: 156px;
 }
 
+.status-board-toolbar__cnc-order-search {
+  width: 220px;
+  flex: 0 0 220px;
+}
+
 .status-board-toolbar__switch {
   min-height: 32px;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
+}
+
+.status-board-toolbar__display-mode {
+  min-height: 32px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.status-board-toolbar__display-mode .ant-segmented {
+  flex: 0 0 auto;
 }
 
 .status-board-scrollbar {
@@ -146,6 +174,7 @@
 
 .cnc-today-column--parsed {
   --status-color: #1677ff;
+  background: #edf7ff;
 }
 
 .cnc-today-column--needs_review {
@@ -154,6 +183,51 @@
 
 .cnc-today-column--completed {
   --status-color: #389e0d;
+  background: #edf7ff;
+}
+
+.cnc-today-column--baths {
+  --status-color: #cf1322;
+  background: #fff7e6;
+}
+
+.cnc-today-column--baths_ready {
+  --status-color: #389e0d;
+  background: #fff7e6;
+}
+
+.cnc-today-column--parsed .status-board-column__header,
+.cnc-today-column--completed .status-board-column__header {
+  background: #f7fbff;
+}
+
+.cnc-today-column--baths .status-board-column__header,
+.cnc-today-column--baths_ready .status-board-column__header {
+  background: #fffaf0;
+}
+
+.cnc-today-column .status-board-column__header {
+  min-height: 64px;
+  align-items: stretch;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.cnc-today-column__header-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cnc-today-column__totals {
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .status-board-column__header {
@@ -231,6 +305,56 @@
   outline-offset: 2px;
 }
 
+.cnc-relation-card {
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    filter 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.cnc-relation-card--active,
+.cnc-relation-card--related {
+  opacity: 1;
+  filter: none;
+}
+
+.cnc-relation-card--active {
+  border-color: #722ed1;
+  box-shadow:
+    0 0 0 2px #722ed1,
+    0 4px 12px var(--app-shadow);
+}
+
+.cnc-relation-card--related {
+  border-color: #722ed1;
+  box-shadow:
+    0 0 0 2px #722ed1,
+    0 2px 8px var(--app-shadow);
+}
+
+.cnc-relation-card--dimmed {
+  background: color-mix(in srgb, var(--app-surface) 80%, var(--app-bg));
+  opacity: 0.62;
+  filter: grayscale(0.9);
+}
+
+.cnc-relation-card--dimmed,
+.cnc-relation-card--dimmed .ant-typography,
+.cnc-relation-card--dimmed .cnc-packet-card__summary-order,
+.cnc-relation-card--dimmed .cnc-packet-card__summary-meta,
+.cnc-relation-card--dimmed .cnc-packet-card__program,
+.cnc-relation-card--dimmed .cnc-packet-card__notes,
+.cnc-relation-card--dimmed .cnc-packet-card__note-file,
+.cnc-relation-card--dimmed .cnc-bath-card__job,
+.cnc-relation-card--dimmed .status-board-card__footer,
+.cnc-relation-card--dimmed .cnc-packet-card__order-link {
+  color: var(--app-text-muted) !important;
+}
+
 .status-board-card--dragging {
   opacity: 0.46;
   transform: rotate(1deg);
@@ -238,6 +362,14 @@
 
 .status-board-card--pending {
   pointer-events: none;
+}
+
+.status-board-card--compact {
+  padding: 6px 8px;
+}
+
+.status-board-card--minimal {
+  padding: 8px 10px;
 }
 
 .status-board-card__top {
@@ -248,13 +380,32 @@
   gap: 6px;
 }
 
+.status-board-card--compact .status-board-card__top,
+.status-board-card--minimal .status-board-card__top {
+  min-height: 32px;
+}
+
 .status-board-card__number {
+  flex: 1 1 auto;
   height: auto;
   min-width: 0;
   padding: 3px 0;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   text-align: left;
+  white-space: normal;
+}
+
+.status-board-card__number.ant-btn {
+  height: auto;
+  min-height: 32px;
+  display: block;
+  line-height: 1.25;
+}
+
+.status-board-card__number.ant-btn > span {
+  display: block;
+  overflow-wrap: anywhere;
   white-space: normal;
 }
 
@@ -266,6 +417,12 @@
 .status-board-card__actions .ant-btn {
   width: 36px;
   height: 36px;
+}
+
+.status-board-card--compact .status-board-card__actions .ant-btn,
+.status-board-card--minimal .status-board-card__actions .ant-btn {
+  width: 32px;
+  height: 32px;
 }
 
 .status-board-card__drag {
@@ -281,6 +438,32 @@
   display: block;
   margin-bottom: 7px;
   color: var(--app-text-muted);
+}
+
+.status-board-card__status-row {
+  min-width: 0;
+  margin: 2px 0 7px;
+  display: flex;
+  align-items: center;
+}
+
+.status-board-card--minimal .status-board-card__status-row {
+  margin-bottom: 0;
+}
+
+.status-board-card--compact .status-board-card__status-row {
+  margin: 1px 0 4px;
+}
+
+.status-board-card__status-badge.ant-tag {
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .status-board-card__tags {
@@ -302,6 +485,58 @@
   color: var(--app-text-muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+
+.status-board-card--compact .status-board-card__client,
+.status-board-card--compact .status-board-card__tags {
+  margin-bottom: 5px;
+}
+
+.status-board-card--compact .status-board-card__meta {
+  gap: 3px;
+}
+
+.status-board-card__compact-text {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-board-card__standard-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-board-card__standard-cell {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-board-card__standard-client {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.status-board-card__standard-cell--wide,
+.status-board-card__standard-tags {
+  grid-column: 1 / -1;
+}
+
+.status-board-card__standard-tags {
+  margin-bottom: 0;
 }
 
 .status-board-card__meta > span {
@@ -354,8 +589,9 @@
 }
 
 .cnc-packet-card__program {
-  color: var(--app-text);
+  color: var(--app-text-muted);
   font-size: 13px;
+  font-weight: 400;
   line-height: 1.3;
   overflow-wrap: anywhere;
   text-wrap: balance;
@@ -373,8 +609,30 @@
 }
 
 .cnc-packet-card__status-icon {
-  min-width: 18px;
-  min-height: 18px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--status-color);
+  background: color-mix(in srgb, var(--status-color) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--status-color) 26%, transparent);
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease;
+}
+
+.cnc-packet-card__status-icon:focus-visible {
+  outline: 2px solid var(--status-color);
+  outline-offset: 2px;
+}
+
+.cnc-packet-card__status-icon--completed {
+  color: #389e0d;
+  background: color-mix(in srgb, #389e0d 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #389e0d 32%, transparent);
 }
 
 .cnc-packet-card__notes {
@@ -387,7 +645,58 @@
 }
 
 .cnc-packet-card__note-file {
+  color: var(--app-text-muted);
+}
+
+.cnc-packet-card__order-summary {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 5px;
   color: var(--app-text);
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.cnc-packet-card__summaries {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.cnc-packet-card__summary {
+  color: var(--app-text);
+  font-weight: 400;
+  font-style: normal;
+}
+
+.cnc-packet-card__summary-order {
+  color: #1677ff;
+  font-weight: 650;
+}
+
+.cnc-packet-card__summary-order.ant-btn {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+  vertical-align: baseline;
+}
+
+.cnc-packet-card__summary-order.ant-btn:hover,
+.cnc-packet-card__summary-order.ant-btn:focus-visible {
+  color: #0958d9;
+}
+
+.cnc-packet-card__summary-meta {
+  color: var(--app-text);
+  font-weight: 400;
 }
 
 .cnc-packet-card__collapse,
@@ -421,6 +730,10 @@
   font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.cnc-packet-card__note-file {
+  color: var(--app-text-muted);
 }
 
 .cnc-packet-card__items {
@@ -515,6 +828,90 @@
   background: #fff;
 }
 
+.cnc-bath-card__job {
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.cnc-bath-card__ready-icon {
+  min-width: 22px;
+  font-size: 22px;
+}
+
+.cnc-bath-card__ready-icon--ready {
+  color: #389e0d;
+}
+
+.cnc-bath-card__ready-icon--pending {
+  color: #cf1322;
+}
+
+.cnc-bath-card__sheet-figure {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.cnc-bath-card__sheet-figure figcaption {
+  color: var(--app-text-muted);
+  font-size: 11px;
+}
+
+.cnc-bath-card__pdf-body {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.cnc-bath-card__pdf-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cnc-bath-card__pdf-toolbar .ant-select {
+  width: min(190px, 100%);
+}
+
+.cnc-bath-card__pdf-loading {
+  min-height: 80px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-surface-muted);
+}
+
+.cnc-bath-card__pdf-pages {
+  display: grid;
+  gap: 10px;
+}
+
+.cnc-bath-card__pdf-page {
+  min-width: 0;
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.cnc-bath-card__pdf-page figcaption {
+  color: var(--app-text-muted);
+  font-size: 11px;
+}
+
+.cnc-bath-card__pdf-page-image {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  border-radius: 6px;
+  outline: 1px solid rgba(0, 0, 0, 0.1);
+  background: #fff;
+}
+
 .status-board-loading {
   height: 100%;
   min-height: 320px;
@@ -554,11 +951,36 @@
 
   .status-board-toolbar {
     align-items: stretch;
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
 
   .status-board-toolbar__search,
-  .status-board-toolbar .ant-picker {
+  .status-board-toolbar__cnc-order-search,
+  .status-board-toolbar .ant-picker,
+  .status-board-toolbar__date-range {
+    flex: 1 1 100%;
     width: 100%;
+  }
+
+  .status-board-toolbar__display-mode {
+    width: 100%;
+    margin-left: 0;
+    align-items: stretch;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .status-board-toolbar__display-mode .ant-segmented {
+    width: 100%;
+  }
+
+  .status-board-toolbar__display-mode .ant-segmented-group {
+    display: flex;
+  }
+
+  .status-board-toolbar__display-mode .ant-segmented-item {
+    flex: 1 1 0;
   }
 
   .status-board-viewport {

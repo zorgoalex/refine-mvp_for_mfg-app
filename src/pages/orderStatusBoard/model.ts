@@ -1,4 +1,7 @@
 import type {
+  CncTelegramTodayColumn,
+} from '../../api/types/cncTelegramApi.types';
+import type {
   OrderStatusBoardColumn,
   OrderStatusBoardQuery,
   OrderStatusBoardResponse,
@@ -17,6 +20,7 @@ export interface OrderStatusBoardViewState {
   plannedFrom?: string;
   plannedTo?: string;
   cncWorkday?: string;
+  cncOrderFilters: string[];
   hideEmpty: boolean;
 }
 
@@ -59,6 +63,7 @@ export function parseOrderStatusBoardViewState(
     ...(plannedFrom ? { plannedFrom } : {}),
     ...(plannedTo ? { plannedTo } : {}),
     ...(cncWorkday ? { cncWorkday } : {}),
+    cncOrderFilters: normalizeCncOrderFilterValues(params.getAll('order')),
     hideEmpty: params.get('hideEmpty') === '1',
   };
 }
@@ -79,6 +84,11 @@ export function serializeOrderStatusBoardViewState(
   if (state.plannedFrom) params.set('plannedFrom', state.plannedFrom);
   if (state.plannedTo) params.set('plannedTo', state.plannedTo);
   if (state.view === 'cnc_today' && state.cncWorkday) params.set('date', state.cncWorkday);
+  if (state.view === 'cnc_today') {
+    for (const orderName of normalizeCncOrderFilterValues(state.cncOrderFilters)) {
+      params.append('order', orderName);
+    }
+  }
   if (state.hideEmpty) params.set('hideEmpty', '1');
   return params;
 }
@@ -100,6 +110,50 @@ export function toOrderStatusBoardQuery(
     ...(state.plannedTo ? { plannedTo: state.plannedTo } : {}),
     ...override,
   };
+}
+
+export function buildCncOrderFilterOptions(
+  columns: CncTelegramTodayColumn[],
+): string[] {
+  const orderNamesByKey = new Map<string, string>();
+  for (const column of columns) {
+    for (const packet of column.packets ?? []) {
+      for (const item of packet.items) {
+        addCncOrderFilterOption(orderNamesByKey, item.orderName);
+      }
+    }
+    for (const bath of column.baths ?? []) {
+      for (const item of bath.items) {
+        addCncOrderFilterOption(orderNamesByKey, item.orderName);
+      }
+    }
+  }
+  return Array.from(orderNamesByKey.values()).sort(compareCncOrderNames);
+}
+
+export function filterCncTodayColumnsByOrders(
+  columns: CncTelegramTodayColumn[],
+  orderFilters: readonly string[],
+): CncTelegramTodayColumn[] {
+  const orderKeys = new Set(
+    normalizeCncOrderFilterValues(orderFilters).map((value) =>
+      normalizeCncOrderKey(value),
+    ),
+  );
+  if (orderKeys.size === 0) return columns;
+
+  return columns.map((column) => {
+    const baths = (column.baths ?? []).filter((bath) =>
+      bath.items.some((item) => orderKeys.has(normalizeCncOrderKey(item.orderName))),
+    );
+    const packets = (column.packets ?? []).filter((packet) =>
+      packet.items.some((item) => orderKeys.has(normalizeCncOrderKey(item.orderName))),
+    );
+    const total = column.key === 'baths' || column.key === 'baths_ready'
+      ? baths.length
+      : packets.length;
+    return { ...column, baths, packets, total };
+  });
 }
 
 function isDoneProductionStatus(column: OrderStatusBoardColumn): boolean {
@@ -200,4 +254,40 @@ function dateOnly(value: string | null): string | undefined {
     new Date(timestamp).toISOString().slice(0, 10) === value
     ? value
     : undefined;
+}
+
+function normalizeCncOrderKey(value: string | null | undefined): string {
+  return (value ?? '').trim().toLocaleLowerCase('ru-RU');
+}
+
+function normalizeCncOrderFilterValues(values: readonly string[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const rawValue of values) {
+    for (const part of rawValue.split(',')) {
+      const value = part.trim();
+      const key = normalizeCncOrderKey(value);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      result.push(value);
+    }
+  }
+  return result;
+}
+
+function addCncOrderFilterOption(
+  orderNamesByKey: Map<string, string>,
+  value: string | null | undefined,
+) {
+  const orderName = (value ?? '').trim();
+  const orderKey = normalizeCncOrderKey(orderName);
+  if (!orderKey || orderNamesByKey.has(orderKey)) return;
+  orderNamesByKey.set(orderKey, orderName);
+}
+
+function compareCncOrderNames(a: string, b: string): number {
+  return a.localeCompare(b, 'ru-RU', {
+    numeric: true,
+    sensitivity: 'base',
+  });
 }

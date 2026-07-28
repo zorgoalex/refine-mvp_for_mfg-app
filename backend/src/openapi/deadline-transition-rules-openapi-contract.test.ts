@@ -32,13 +32,36 @@ describe('deadline transition rules OpenAPI contract', () => {
     expect(create).toContain('- targetOrderStatusId');
     expect(create).toContain('- allowedFromOrderStatusIds');
     expect(create).toContain('policyId:');
+    expect(create).toContain('deadlineTarget:');
+    expect(create).toContain('delayAfterDeadline:');
     expect(create).toContain('nullable: true');
     expect(create).toContain('isEnabled:');
     expect(create).toContain('requireCurrentDeadlineEvent:');
     expect(update).toContain('- expectedUpdatedAt');
     expect(update).toContain('- reason');
+    expect(update).toContain('deadlineTarget:');
+    expect(update).toContain('delayAfterDeadline:');
     expect(remove).toContain('- expectedUpdatedAt');
     expect(remove).toContain('- reason');
+  });
+
+  it('documents final-order and production-stage deadline selectors', () => {
+    const target = schemaSection('DeadlineActionRuleDeadlineTarget');
+
+    expect(target).toContain('- all_order_deadlines');
+    expect(target).toContain('- final_order');
+    expect(target).toContain('- production_stage');
+    expect(target).toContain('productionStatusId:');
+  });
+
+  it('documents optional days, hours and minutes after a deadline', () => {
+    const delay = schemaSection('DeadlineActionRuleDelayAfterDeadline');
+
+    expect(delay).toContain('- days');
+    expect(delay).toContain('- hours');
+    expect(delay).toContain('- minutes');
+    expect(delay).toContain('maximum: 23');
+    expect(delay).toContain('maximum: 59');
   });
 
   it('documents readiness and exact-deadline manual canary targeting', () => {

@@ -200,6 +200,7 @@ describe('DeadlineRulesController', () => {
       priority: 100,
       eventType: 'DEADLINE_EXPIRED',
       actionType: 'change_order_status',
+      deadlineTarget: { type: 'all_order_deadlines' },
       excludeOrderStatusIds: [],
       excludeCompletedOrders: true,
       requireCurrentDeadlineEvent: true,
@@ -207,10 +208,63 @@ describe('DeadlineRulesController', () => {
     expect(parseCreateGlobalTransitionRuleRequest({
       ruleName: 'Approved enabled rule',
       isEnabled: true,
+      deadlineTarget: {
+        type: 'production_stage',
+        productionStatusId: 4,
+      },
+      delayAfterDeadline: {
+        days: 60,
+        hours: 0,
+        minutes: 0,
+      },
       targetOrderStatusId: 7,
       allowedFromOrderStatusIds: [1],
       reason: 'Enable approved automation',
-    })).toMatchObject({ isEnabled: true });
+    })).toMatchObject({
+      isEnabled: true,
+      deadlineTarget: {
+        type: 'production_stage',
+        productionStatusId: 4,
+      },
+      delayAfterDeadline: {
+        days: 60,
+        hours: 0,
+        minutes: 0,
+      },
+    });
+    expect(() =>
+      parseCreateGlobalTransitionRuleRequest({
+        ruleName: 'Zero delay',
+        delayAfterDeadline: { days: 0, hours: 0, minutes: 0 },
+        targetOrderStatusId: 7,
+        allowedFromOrderStatusIds: [1],
+        reason: 'Reject empty delay',
+      }),
+    ).toThrow(ApiError);
+    expect(parseUpdateGlobalTransitionRuleRequest({
+      expectedUpdatedAt: '2026-06-14T00:00:00.000Z',
+      delayAfterDeadline: null,
+      reason: 'Clear delay',
+    })).toMatchObject({ delayAfterDeadline: null });
+    expect(() =>
+      parseCreateGlobalTransitionRuleRequest({
+        ruleName: 'Conflicting selector',
+        policyId: '11111111-1111-4111-8111-111111111111',
+        deadlineTarget: { type: 'final_order' },
+        targetOrderStatusId: 7,
+        allowedFromOrderStatusIds: [1],
+        reason: 'Reject ambiguous target',
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      parseCreateGlobalTransitionRuleRequest({
+        ruleName: 'Missing stage',
+        deadlineTarget: { type: 'production_stage' },
+        targetOrderStatusId: 7,
+        allowedFromOrderStatusIds: [1],
+        reason: 'Reject incomplete target',
+      }),
+    ).toThrow(ApiError);
     expect(() =>
       parseUpdateGlobalTransitionRuleRequest({
         expectedUpdatedAt: 'not-a-date',

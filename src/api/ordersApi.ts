@@ -5,6 +5,7 @@ import type {
   DeleteOrderRequest,
   DeleteOrderResponse,
   ImportOrderSnapshotBatchResponse,
+  ImportOrderSnapshotReferenceMapping,
   ImportOrderSnapshotResponse,
   OrderDto,
   OrderFormDataResponse,
@@ -96,19 +97,27 @@ export const ordersApi = {
     saveBlob(response.blob, response.fileName ?? `orders-${dateFrom}-${dateTo}.erp-order-batch.zip`);
   },
 
-  async importSnapshotFile(file: File): Promise<ImportOrderSnapshotResponse> {
+  async importSnapshotFile(
+    file: File,
+    referenceMappings: ImportOrderSnapshotReferenceMapping[] = [],
+  ): Promise<ImportOrderSnapshotResponse> {
     const snapshot = JSON.parse(await file.text());
     return httpClient.post<ImportOrderSnapshotResponse>(apiRoutes.orders.importSnapshot, {
       snapshot,
+      referenceMappings,
     });
   },
 
-  async importSnapshotBatchFile(file: File): Promise<ImportOrderSnapshotBatchResponse> {
+  async importSnapshotBatchFile(
+    file: File,
+    referenceMappings: ImportOrderSnapshotReferenceMapping[] = [],
+  ): Promise<ImportOrderSnapshotBatchResponse> {
     return httpClient.post<ImportOrderSnapshotBatchResponse>(
       apiRoutes.orders.importSnapshotBatch,
       {
         fileName: file.name,
         zipBase64: await fileToBase64(file),
+        referenceMappings,
       },
     );
   },

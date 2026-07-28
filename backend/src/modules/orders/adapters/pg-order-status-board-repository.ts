@@ -195,10 +195,7 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
         c.client_name,
         ranked.priority,
         ranked.planned_completion_date,
-        (
-          o.planned_completion_date < CURRENT_DATE
-          AND o.issue_date IS NULL
-        ) AS past_planned_date,
+        (ranked.planned_completion_date < CURRENT_DATE) AS past_planned_date,
         o.order_status_id,
         os.order_status_name,
         o.production_status_id,
@@ -300,7 +297,6 @@ function appendUserFilters(
   }
   if (query.overdueOnly) {
     filters.push('o.planned_completion_date < CURRENT_DATE');
-    filters.push('o.issue_date IS NULL');
   }
   if (query.plannedFrom) {
     filters.push(`o.planned_completion_date >= $${params.push(query.plannedFrom)}::date`);

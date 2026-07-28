@@ -19,9 +19,11 @@ import type { NormalizedSaveOrderHeaderDto, OrderTotalsDto, CalculatedOrderDetai
 import type { OrderSnapshotPort } from '../application/order-snapshot.types';
 import { OrderSnapshotService } from '../application/order-snapshot.service';
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import { ApiError } from '../../../common/errors/api-error';
 import { ORDER_SNAPSHOT_FORMAT_VERSION, ORDER_SNAPSHOT_SCHEMA } from '../dto/order-snapshot.dto';
+import { prepareOrderSave } from '../domain/order-save-preparer';
 import {
   _testOnlyMapOrderHeaderSnapshot as mapHeaderSnapshot,
   _testOnlyMapDetailSnapshot as mapDetailSnapshot,
@@ -29,6 +31,12 @@ import {
   _testOnlyOrderHeaderUpdateParams as updateParams,
   _testOnlyDetailValues as detailValues,
   _testOnlyNullifyMaterialIdForSheetEntries as nullifyMaterialIdForSheetEntries,
+  _testOnlyRemapSnapshotReferencesForImport as remapSnapshotReferencesForImport,
+  _testOnlySnapshotHeaderToSaveOrderDto as snapshotHeaderToSaveOrderDto,
+  _testOnlySnapshotBatchFailure as snapshotBatchFailure,
+  _testOnlySnapshotFailureSummary as snapshotFailureSummary,
+  _testOnlyFindExistingOrderForSnapshotImport as findExistingOrderForSnapshotImport,
+  _testOnlySummarizeSnapshotBatchResults as summarizeSnapshotBatchResults,
   _testOnlySnapshotToSaveOrderDto as snapshotToSaveOrderDto,
   buildSheetValidationDetails,
 } from './pg-order-snapshot';
@@ -351,7 +359,7 @@ function fakeSnapshots(): OrderSnapshotPort {
       importRunId: 'r',
       summary: { details: 0, payments: 0, workshops: 0, requirements: 0, dowelingLinks: 0, productionStatusEvents: 0, clientPhones: 0, deadlineInstances: 0, deadlineEvents: 0 },
     })),
-    importOrderSnapshotBatch: vi.fn(async () => ({ success: true as const, total: 0, imported: 0, failed: 0, results: [] })),
+    importOrderSnapshotBatch: vi.fn(async () => ({ success: true as const, total: 0, imported: 0, skipped: 0, failed: 0, results: [] })),
   };
 }
 
@@ -548,6 +556,73 @@ describe('OrderSnapshotService — sheet_materials.view gate on BATCH import', (
   });
 });
 
+describe('pg-order-snapshot batch import failures', () => {
+  it('does not count noop/skipped existing orders as imported', () => {
+    const summary = {
+      details: 0,
+      payments: 0,
+      workshops: 0,
+      requirements: 0,
+      dowelingLinks: 0,
+      productionStatusEvents: 0,
+      clientPhones: 0,
+      deadlineInstances: 0,
+      deadlineEvents: 0,
+    };
+
+    expect(
+      summarizeSnapshotBatchResults([
+        { fileName: 'created.erp-order.json', success: true, status: 'created', orderId: 1, orderName: '2701', payloadHash: 'h1', importRunId: 'r1', summary },
+        { fileName: 'same.erp-order.json', success: true, status: 'noop', orderId: 2, orderName: '2702', payloadHash: 'h2', importRunId: 'r2', summary },
+        { fileName: 'exists.erp-order.json', success: true, status: 'skipped', orderId: 3, orderName: '2703', payloadHash: 'h3', importRunId: 'r3', summary },
+        { fileName: 'bad.erp-order.json', success: false, errorCode: 'VALIDATION_ERROR', message: 'bad' },
+      ]),
+    ).toEqual({ imported: 1, skipped: 2 });
+  });
+
+  it('finds an existing order by order name before reference remap/import writes', async () => {
+    const tx = fakeExistingOrderLookupTx({
+      mappedRows: [],
+      refRows: [],
+      nameRows: [{ order_id: 2704, order_name: '2704', payload_hash: null }],
+    });
+
+    await expect(
+      findExistingOrderForSnapshotImport(tx, minimalSnapshotWithSheet(null), 'incoming-hash'),
+    ).resolves.toEqual({ orderId: 2704, orderName: '2704', status: 'skipped' });
+
+    expect(tx.query).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps ApiError details so the UI can show field-level import causes', () => {
+    const error = new ApiError(422, 'VALIDATION_ERROR', 'Order payload validation failed', {
+      errors: [
+        { field: 'details[0].sheetMaterialTypeId', message: 'sheet_material_type 999 does not exist' },
+      ],
+    });
+    const failure = snapshotBatchFailure('bad-order.erp-order.json', error);
+
+    expect(failure).toEqual({
+      fileName: 'bad-order.erp-order.json',
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+      message: 'Order payload validation failed',
+      details: {
+        errors: [
+          { field: 'details[0].sheetMaterialTypeId', message: 'sheet_material_type 999 does not exist' },
+        ],
+      },
+    });
+    expect(snapshotFailureSummary(error)).toEqual({
+      errorDetails: {
+        errors: [
+          { field: 'details[0].sheetMaterialTypeId', message: 'sheet_material_type 999 does not exist' },
+        ],
+      },
+    });
+  });
+});
+
 // ── Variant B (Task 4): export null-safe materialId ───────────────────────
 // Post-034 migration, material_id IS NULL in the DB for all order_details.
 // The export serializer must emit materialId: null, not NaN or 0.
@@ -707,3 +782,132 @@ describe('snapshotToSaveOrderDto — header-only legacy import (Critic R2 MAJOR 
     expect(dto.header.sheetMaterialTypeId).toBe(5);
   });
 });
+
+describe('snapshotHeaderToSaveOrderDto — update import version', () => {
+  it('carries the current DB version for existing-order header updates', () => {
+    const dto = snapshotHeaderToSaveOrderDto(minimalSnapshotWithSheet(null), 2, 7);
+
+    expect(dto.version).toBe(7);
+    expect(() =>
+      prepareOrderSave(dto, { mode: 'update', pathOrderId: 2665 }),
+    ).not.toThrow();
+  });
+});
+
+describe('remapSnapshotReferencesForImport — portable reference ids', () => {
+  it('throws mapping-required instead of falling through to stale source ids', async () => {
+    const tx = fakeReferenceTx({ overrideExists: false, uniqueMatchId: null });
+    const snapshot = minimalSnapshotWithOrderStatusReference(11);
+
+    await expect(remapSnapshotReferencesForImport(tx, snapshot, [])).rejects.toMatchObject({
+      code: 'ORDER_SNAPSHOT_REFERENCE_MAPPING_REQUIRED',
+      details: {
+        unmappedReferences: [
+          expect.objectContaining({
+            entityType: 'orderStatus',
+            sourceId: '11',
+            sourceName: 'Source status',
+            usageCount: 1,
+          }),
+        ],
+      },
+    });
+  });
+
+  it('uses manual reference mapping as target id', async () => {
+    const tx = fakeReferenceTx({ overrideExists: true, uniqueMatchId: null });
+    const snapshot = minimalSnapshotWithOrderStatusReference(11);
+
+    const remapped = await remapSnapshotReferencesForImport(tx, snapshot, [
+      { entityType: 'orderStatus', sourceId: '11', targetId: 22 },
+    ]);
+
+    expect(remapped.data.order.orderStatusId).toBe(22);
+  });
+});
+
+function minimalSnapshotWithOrderStatusReference(orderStatusId: number): import('../dto/order-snapshot.dto').OrderSnapshotDto {
+  return {
+    schema: ORDER_SNAPSHOT_SCHEMA,
+    formatVersion: ORDER_SNAPSHOT_FORMAT_VERSION,
+    exporterService: {
+      name: 'erp-order-snapshot' as const,
+      version: '1.0.0',
+      compatibleImportVersions: ['1.0.0'],
+    },
+    source: { sourceInstanceId: 'test-inst', exportedAt: '2026-06-22T00:00:00.000Z', payloadHash: '' },
+    identity: {
+      order: { sourceId: '42', refKey1c: null },
+      client: { sourceId: '10', refKey1c: null },
+    },
+    data: {
+      client: { sourceId: '10', clientName: 'Test Client', refKey1c: null, notes: null, isActive: true },
+      clientPhones: [],
+      order: {
+        sourceId: '42',
+        orderName: 'Portable-Refs',
+        clientId: 10,
+        orderDate: '2026-06-22',
+        orderStatusId,
+      } as import('../dto/order-snapshot.dto').OrderSnapshotHeaderDto,
+      details: [],
+      payments: [],
+      workshops: [],
+      requirements: [],
+      dowelingOrders: [],
+      dowelingLinks: [],
+      productionStatusEvents: [],
+      deadlineInstances: [],
+      deadlineEvents: [],
+    },
+    references: {
+      orderStatus: [
+        {
+          entityType: 'orderStatus',
+          sourceId: String(orderStatusId),
+          name: 'Source status',
+          code: null,
+          refKey1c: null,
+          data: { order_status_id: orderStatusId, order_status_name: 'Source status' },
+        },
+      ],
+    },
+  };
+}
+
+type ExistingOrderLookupRow = { order_id: number; order_name: string; payload_hash: string | null };
+
+function fakeExistingOrderLookupTx(options: {
+  mappedRows: ExistingOrderLookupRow[];
+  refRows: ExistingOrderLookupRow[];
+  nameRows: ExistingOrderLookupRow[];
+}): TransactionClient & { query: ReturnType<typeof vi.fn> } {
+  const query = vi.fn(async (sql: string) => {
+    if (sql.includes('FROM order_import_entity_map')) return { rows: options.mappedRows };
+    if (sql.includes('WHERE ref_key_1c')) return { rows: options.refRows };
+    if (sql.includes('WHERE order_name = $1')) return { rows: options.nameRows };
+    return { rows: [] };
+  });
+
+  return { query } as unknown as TransactionClient & { query: typeof query };
+}
+
+function fakeReferenceTx(options: { overrideExists: boolean; uniqueMatchId: number | null }): DatabaseClient {
+  return {
+    query: vi.fn(async (sql: string, params?: readonly unknown[]) => {
+      if (sql.includes('WHERE order_status_id::bigint = $1::bigint')) {
+        return { rows: options.overrideExists && params?.[0] === 22 ? [{ id: 22 }] : [] };
+      }
+
+      if (sql.includes('FROM order_statuses') && sql.includes('LIMIT 2')) {
+        return { rows: options.uniqueMatchId ? [{ id: options.uniqueMatchId }] : [] };
+      }
+
+      if (sql.includes('FROM order_statuses') && sql.includes('LIMIT 200')) {
+        return { rows: [{ id: 1, name: 'Existing status', code: null }] };
+      }
+
+      return { rows: [] };
+    }),
+  };
+}

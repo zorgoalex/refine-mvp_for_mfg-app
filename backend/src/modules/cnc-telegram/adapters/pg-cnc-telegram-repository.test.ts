@@ -131,44 +131,95 @@ describe('PgCncTelegramRepository', () => {
 
   it('returns only posted and completed columns for the daily CNC board', async () => {
     const database = {
-      query: vi.fn(async () => ({
-        rows: [
-          packetRow({
-            packet_id: '00000000-0000-0000-0000-000000000011',
-            completion_status: 'pending',
-            thumbs_up: false,
-            parse_status: 'needs_review',
-          }),
-          packetRow({
-            packet_id: '00000000-0000-0000-0000-000000000012',
-            completion_status: 'completed',
-            thumbs_up: true,
-          }),
-        ],
-      })),
+      query: vi.fn(async (text: string) => {
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000011',
+                completion_status: 'pending',
+                thumbs_up: false,
+                parse_status: 'needs_review',
+              }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000012',
+                completion_status: 'completed',
+                thumbs_up: true,
+              }),
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
     };
     const repo = new PgCncTelegramRepository(database as never);
 
     const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
 
     expect(result.columns.map((column) => [column.key, column.title, column.total])).toEqual([
-      ['parsed', 'Выложено', 1],
+      ['parsed', 'Файлы на станке', 1],
       ['completed', 'Выполнено', 1],
+      ['baths', 'Ванны', 0],
+      ['baths_ready', 'Готовы к закатке', 0],
     ]);
+  });
+
+  it('exposes unique ERP order ids for unmatched CNC packet item order names', async () => {
+    const queries: string[] = [];
+    const database = {
+      query: vi.fn(async (text: string) => {
+        queries.push(text);
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [
+              packetRow({
+                order_name: '2706',
+                item_order_id: 11450,
+                match_order_id: null,
+                match_detail_id: null,
+                match_status: 'unmatched',
+              }),
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-28' });
+    const sql = queries.join('\n');
+    const item = result.columns.flatMap((column) => column.packets)
+      .flatMap((packet) => packet.items)[0];
+
+    expect(sql).toContain('COALESCE(i.match_order_id, item_order.order_id) AS item_order_id');
+    expect(sql).toContain('HAVING COUNT(*) = 1');
+    expect(item).toMatchObject({
+      orderName: '2706',
+      orderId: 11450,
+      matchOrderId: null,
+      matchDetailId: null,
+      matchStatus: 'unmatched',
+    });
   });
 
   it('hides noisy RapidOCR warning in the daily CNC board response', async () => {
     const database = {
-      query: vi.fn(async () => ({
-        rows: [
-          packetRow({
-            analysis_warnings_json: [
-              'RapidOCR found text, but no detail rows with order and size',
-              'Real operator-facing warning',
+      query: vi.fn(async (text: string) => {
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [
+              packetRow({
+                analysis_warnings_json: [
+                  'RapidOCR found text, but no detail rows with order and size',
+                  'Real operator-facing warning',
+                ],
+              }),
             ],
-          }),
-        ],
-      })),
+          };
+        }
+        return { rows: [] };
+      }),
     };
     const repo = new PgCncTelegramRepository(database as never);
 
@@ -177,6 +228,97 @@ describe('PgCncTelegramRepository', () => {
     expect(result.columns[1]?.packets[0]?.analysisWarnings).toEqual([
       'Real operator-facing warning',
     ]);
+  });
+
+  it('splits vacuum bath cards by completed detail quantities', async () => {
+    const queries: string[] = [];
+    const database = {
+      query: vi.fn(async (text: string) => {
+        queries.push(text);
+        if (/latest_vacuum_results/i.test(text)) {
+          return {
+            rows: [
+              bathPlacementRow({
+                cut_result_id: 500,
+                cut_job_id: 30,
+                result_no: 2,
+                order_detail_id: 3101,
+                detail_number: 31,
+                completed_quantity: 2,
+              }),
+              bathPlacementRow({
+                cut_result_id: 500,
+                cut_job_id: 30,
+                result_no: 2,
+                order_detail_id: 3101,
+                detail_number: 31,
+                completed_quantity: 2,
+                sheet_index: 1,
+                sheet_ordinal: 2,
+              }),
+              bathPlacementRow({
+                cut_result_id: 501,
+                cut_job_id: 31,
+                result_no: 1,
+                order_detail_id: 3201,
+                detail_number: 32,
+                completed_quantity: 0,
+              }),
+            ],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
+    const sql = queries.join('\n');
+
+    expect(sql).toContain("= 'vacuum_table'");
+    expect(sql).toContain('cut_result_placement');
+    expect(sql).toContain('cut_result_sheet_map');
+    expect(sql).toContain('cut_result_label_map_projection');
+    expect(sql).toContain('fallback_target_details');
+    expect(sql).toContain('lower(trim(i.order_name)) AS order_key');
+    expect(sql).toContain('od.detail_number = item.detail_number');
+    expect(sql).toContain('jsonb_array_elements_text(p.comments_json)');
+    expect(sql).toContain('item.mdf_relevant');
+    expect(sql).toContain('%hdf%');
+    expect(sql).toContain('%хдф%');
+    expect(sql).toContain('%лдсп%');
+    expect(sql).toContain('%ldsp%');
+    expect(sql).toContain('%fanera%');
+    expect(sql).toContain('%фанера%');
+    expect(sql).toContain("item.source <> 'ocr'");
+    expect(sql).toContain('item.width_mm::numeric = od.width::numeric');
+    expect(sql).toContain("item.source = 'ocr'");
+    expect(sql).toContain('ABS(item.width_mm::numeric - od.width::numeric) <= 3');
+    expect(result.columns.map((column) => [column.key, column.total])).toEqual([
+      ['parsed', 0],
+      ['completed', 0],
+      ['baths', 1],
+      ['baths_ready', 1],
+    ]);
+    expect(result.columns[2]?.baths[0]).toMatchObject({
+      cutJobId: 31,
+      ready: false,
+      itemQuantityTotal: 1,
+      positionCount: 1,
+    });
+    expect(result.columns[3]?.baths[0]).toMatchObject({
+      cutJobId: 30,
+      ready: true,
+      itemQuantityTotal: 2,
+      positionCount: 1,
+      sheets: [
+        { cutGroupId: 100, sheetIndex: 0, sheetNumber: 1 },
+        { cutGroupId: 100, sheetIndex: 1, sheetNumber: 2 },
+      ],
+    });
   });
 
   it('keeps sheet image metadata when updating a completed packet', async () => {
@@ -307,6 +449,153 @@ describe('PgCncTelegramRepository', () => {
     expect(itemInsert?.params[10]).toBe(9006);
     expect(itemInsert?.params[11]).toBe('matched');
     expect(itemInsert?.params[12]).toBeNull();
+  });
+
+  it('uses OCR tolerance when resolving ERP detail size', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/FROM orders o\s+JOIN order_details od/i.test(text)) {
+          return {
+            rows: [
+              {
+                order_key: '2690',
+                order_id: 2690,
+                detail_id: 9006,
+                detail_number: 6,
+                width: 500,
+                height: 350,
+              },
+            ],
+          };
+        }
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [packetRow()] };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:ocr-size-tolerance',
+        items: [
+          {
+            sourceItemKey: '2690:none:502x350',
+            orderName: '2690',
+            detailNumber: null,
+            widthMm: 502,
+            heightMm: 350,
+            quantity: 1,
+            source: 'ocr' as const,
+            confidence: 0.71,
+            matchStatus: 'unmatched' as const,
+            reviewNote: 'OCR did not read detail number',
+          },
+        ],
+      },
+      requestId: 'request-cnc-1',
+    });
+
+    const itemInsert = queries.find((query) =>
+      /INSERT INTO cnc_telegram_packet_items/i.test(query.text),
+    );
+    expect(itemInsert?.params[3]).toBe(6);
+    expect(itemInsert?.params[9]).toBe(2690);
+    expect(itemInsert?.params[10]).toBe(9006);
+    expect(itemInsert?.params[11]).toBe('matched');
+  });
+
+  it('does not use size tolerance for non-OCR ERP detail resolution', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/FROM orders o\s+JOIN order_details od/i.test(text)) {
+          return {
+            rows: [
+              {
+                order_key: '2690',
+                order_id: 2690,
+                detail_id: 9006,
+                detail_number: 6,
+                width: 500,
+                height: 350,
+              },
+            ],
+          };
+        }
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [packetRow()] };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:vector-size-exact',
+        items: [
+          {
+            sourceItemKey: '2690:none:502x350',
+            orderName: '2690',
+            detailNumber: null,
+            widthMm: 502,
+            heightMm: 350,
+            quantity: 1,
+            source: 'vector' as const,
+            confidence: 1,
+            matchStatus: 'unmatched' as const,
+          },
+        ],
+      },
+      requestId: 'request-cnc-1',
+    });
+
+    const itemInsert = queries.find((query) =>
+      /INSERT INTO cnc_telegram_packet_items/i.test(query.text),
+    );
+    expect(itemInsert?.params[3]).toBeNull();
+    expect(itemInsert?.params[9]).toBeNull();
+    expect(itemInsert?.params[10]).toBeNull();
+    expect(itemInsert?.params[11]).toBe('unmatched');
   });
 
   it('aggregates repeated rows only after they resolve to the same ERP detail', async () => {
@@ -596,6 +885,7 @@ function packetRowBase() {
     packet_item_id: '00000000-0000-0000-0000-000000000002',
     source_item_key: '2689:31:497x477',
     order_name: '2689',
+    item_order_id: 2689,
     detail_number: 31,
     width_mm: 497,
     height_mm: 477,
@@ -606,5 +896,30 @@ function packetRowBase() {
     match_detail_id: 3101,
     match_status: 'matched',
     review_note: null,
+  };
+}
+
+function bathPlacementRow(overrides: Record<string, unknown> = {}) {
+  return {
+    cut_result_id: 500,
+    cut_job_id: 30,
+    result_no: 2,
+    revision_no: 1,
+    result_created_at: '2026-07-24T09:00:00.000Z',
+    cut_job_name: 'Ванна 2689',
+    order_id: 2689,
+    order_detail_id: 3101,
+    order_name: '2689',
+    detail_number: 31,
+    width_mm: 497,
+    height_mm: 477,
+    completed_quantity: 2,
+    cut_group_id: 100,
+    variant: 'auto',
+    sheet_index: 0,
+    sheet_ordinal: 1,
+    sheet_width_mm: 2070,
+    sheet_height_mm: 2800,
+    ...overrides,
   };
 }

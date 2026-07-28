@@ -8,6 +8,15 @@ export interface CutSelectionCriteriaDto {
   orderIds?: number[];
   filmIds?: number[];
   productionStatusIds?: number[];
+  /** Inclusive filter by orders.order_date. */
+  dateFrom?: string;
+  /** Inclusive filter by orders.order_date. */
+  dateTo?: string;
+}
+
+export interface CutFilmOptionDto {
+  filmId: number;
+  name: string;
 }
 
 export interface CreateCutJobRequestDto {
@@ -214,6 +223,9 @@ export interface CutResultDto extends CutResultSummaryDto {
 export interface CutJobRefDto {
   cutJobId: number;
   name: string;
+  paramProfileId: number | null;
+  profileName: string | null;
+  profileIsActive: boolean | null;
 }
 
 export interface EligibleDetailDto {
@@ -221,15 +233,36 @@ export interface EligibleDetailDto {
   orderId: number;
   /** orders.order_name — пользователи мыслят названиями, не ID. */
   orderName: string | null;
+  /** clients.client_name — needed when preview spans many orders. */
+  clientName: string | null;
+  detailNumber: number | null;
+  detailName: string | null;
+  height: number | null;
+  width: number | null;
   quantity: number;
+  area: number | null;
   /** NULL post-034 (Variant B: material_id sunsetted on order_details). */
   materialId: number | null;
   sheetMaterialTypeId: number | null;
+  materialName: string | null;
+  millingTypeName: string | null;
+  edgeTypeName: string | null;
   filmId: number | null;
+  filmName: string | null;
+  productionStatusName: string | null;
+  priority: number | null;
+  jointOrderId: number | null;
+  note: string | null;
+  linkCuttingFile: string | null;
+  linkCuttingImageFile: string | null;
+  linkCadFile: string | null;
+  linkPdfFile: string | null;
   eligible: boolean;
   ineligibleReason: IneligibleReason | null;
   /** active (non-archived) cut jobs this detail is already placed in */
   activeJobs: CutJobRefDto[];
+  /** archived cut jobs this detail is already placed in */
+  archivedJobs: CutJobRefDto[];
   /** true when this detail also exists in at least one archived cut job */
   inArchivedJob: boolean;
 }

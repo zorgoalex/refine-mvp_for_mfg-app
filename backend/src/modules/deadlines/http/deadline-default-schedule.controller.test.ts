@@ -9,8 +9,16 @@ describe('deadline default schedule HTTP parser', () => {
         reserveDays: 3,
         reason: 'Новый производственный цикл',
         stages: [
-          { productionStatusId: 10, durationDays: 2 },
-          { productionStatusId: 20, durationDays: 4 },
+          {
+            productionStatusId: 10,
+            durationDays: 0,
+            parallelWithPrevious: false,
+          },
+          {
+            productionStatusId: 20,
+            durationDays: 4,
+            parallelWithPrevious: true,
+          },
         ],
       }),
     ).toEqual({
@@ -18,8 +26,16 @@ describe('deadline default schedule HTTP parser', () => {
       reserveDays: 3,
       reason: 'Новый производственный цикл',
       stages: [
-        { productionStatusId: 10, durationDays: 2 },
-        { productionStatusId: 20, durationDays: 4 },
+        {
+          productionStatusId: 10,
+          durationDays: 0,
+          parallelWithPrevious: false,
+        },
+        {
+          productionStatusId: 20,
+          durationDays: 4,
+          parallelWithPrevious: true,
+        },
       ],
     });
   });
@@ -40,11 +56,33 @@ describe('deadline default schedule HTTP parser', () => {
     });
   });
 
+  it('defers route-total validation to the saved transition graph', () => {
+    expect(() =>
+      parseReplaceDeadlineDefaultScheduleRequest({
+        expectedVersion: 4,
+        reserveDays: 0,
+        reason: 'Параллельный длинный цикл',
+        stages: [
+          {
+            productionStatusId: 10,
+            durationDays: 3000,
+            parallelWithPrevious: false,
+          },
+          {
+            productionStatusId: 20,
+            durationDays: 3000,
+            parallelWithPrevious: true,
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
   it.each([
-    [{ expectedVersion: 0, reserveDays: 1, reason: 'reason', stages: [{ productionStatusId: 1, durationDays: 1 }] }],
-    [{ expectedVersion: 1, reserveDays: -1, reason: 'reason', stages: [{ productionStatusId: 1, durationDays: 1 }] }],
+    [{ expectedVersion: 0, reserveDays: 1, reason: 'reason', stages: [{ productionStatusId: 1, durationDays: 1, parallelWithPrevious: false }] }],
+    [{ expectedVersion: 1, reserveDays: -1, reason: 'reason', stages: [{ productionStatusId: 1, durationDays: 1, parallelWithPrevious: false }] }],
     [{ expectedVersion: 1, reserveDays: 1, reason: 'reason', stages: [] }],
-    [{ expectedVersion: 1, reserveDays: 1, reason: 'reason', stages: [{ productionStatusId: 1, durationDays: 3651 }] }],
+    [{ expectedVersion: 1, reserveDays: 1, reason: 'reason', stages: [{ productionStatusId: 1, durationDays: 3651, parallelWithPrevious: false }] }],
   ])('rejects invalid payload %#', (body) => {
     expect(() => parseReplaceDeadlineDefaultScheduleRequest(body)).toThrow();
   });

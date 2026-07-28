@@ -8,6 +8,7 @@ import { CutService } from '../application/cut.service';
 import type {
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
+  CutFilmOptionDto,
   CutJobDto,
   CutResultDto,
   CutResultSummaryDto,
@@ -30,6 +31,8 @@ const criteriaSchema = z
     orderIds: idArray.optional(),
     filmIds: idArray.optional(),
     productionStatusIds: idArray.optional(),
+    dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   })
   .strict();
 
@@ -85,6 +88,13 @@ const setSplitByMaterialBodySchema = z
 const setPdfTemplateBodySchema = z
   .object({
     pdfTemplate: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
+  })
+  .strict();
+
+const setNameBodySchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    version: z.number().int().nonnegative(),
   })
   .strict();
 
@@ -191,6 +201,39 @@ export class CutController {
     // Gated on cut.view: worker can populate the cut filter without sheet_materials.view (Variant B Task 11).
     const currentUser = this.requireRead(request);
     return this.cut.listSheetTypesForCut({ currentUser, requestId: request.requestId });
+  }
+
+  @ApiOperation({
+    operationId: 'listCutFilmOptions',
+    summary: 'List distinct films for the cut filter under current criteria',
+  })
+  @Get('film-options')
+  async listFilmOptions(
+    @Req() request: RequestWithCurrentUser,
+    @Query() query: Record<string, string>,
+  ): Promise<CutFilmOptionDto[]> {
+    // Registered BEFORE ':cutJobId' so the literal 'film-options' path is not captured as an id.
+    const currentUser = this.requireRead(request);
+    return this.cut.listFilmOptionsForCut({
+      currentUser,
+      criteria: parseEligibleCriteria(query),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'previewCutEligibleDetails', summary: 'Preview criteria-driven details before creating a cut job' })
+  @Get('eligible-details')
+  async previewEligibleDetails(
+    @Req() request: RequestWithCurrentUser,
+    @Query() query: Record<string, string>,
+  ): Promise<EligibleDetailsResponseDto> {
+    const currentUser = this.requireRead(request);
+    return this.cut.listEligibleDetails({
+      currentUser,
+      criteria: parseEligibleCriteria(query),
+      includeAllStatuses: true,
+      requestId: request.requestId,
+    });
   }
 
   @ApiOperation({ operationId: 'getCutJob', summary: 'Get a cut job manifest' })
@@ -525,6 +568,24 @@ export class CutController {
       currentUser,
       cutJobId: parseCutJobId(cutJobId),
       pdfTemplate,
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'setCutJobName', summary: 'Rename a cut job' })
+  @Patch(':cutJobId/name')
+  async setName(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const { name, version } = parseSetNameBody(body);
+    return this.cut.setName({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      name,
+      version,
       requestId: request.requestId,
     });
   }
@@ -908,6 +969,10 @@ export function parseSetPdfTemplateBody(body: unknown): { pdfTemplate: string } 
   return parse(setPdfTemplateBodySchema, body);
 }
 
+export function parseSetNameBody(body: unknown): { name: string; version: number } {
+  return parse(setNameBodySchema, body);
+}
+
 export function parseSaveManualLayoutBody(body: unknown): { jobVersion: number; active: boolean; placements: ManualMove[]; sheetTransforms: SheetViewTransform[]; commandId: string } {
   return parse(saveManualLayoutBodySchema, body);
 }
@@ -919,6 +984,8 @@ export function parseEligibleCriteria(query: Record<string, string>): CutSelecti
     orderIds: parseCsvIds(query.orderIds),
     filmIds: parseCsvIds(query.filmIds),
     productionStatusIds: parseCsvIds(query.productionStatusIds),
+    dateFrom: parseOptionalDateOnly(query.dateFrom, 'dateFrom'),
+    dateTo: parseOptionalDateOnly(query.dateTo, 'dateTo'),
   };
 }
 
@@ -929,6 +996,16 @@ function parseCsvIds(value: string | undefined): number[] | undefined {
     .map((part) => Number(part.trim()))
     .filter((n) => Number.isInteger(n) && n > 0);
   return ids.length ? ids : undefined;
+}
+
+function parseOptionalDateOnly(value: string | undefined, field: string): string | undefined {
+  if (!value) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Cut job payload validation failed', {
+      errors: [{ field, message: `${field} must use YYYY-MM-DD format` }],
+    });
+  }
+  return value;
 }
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {

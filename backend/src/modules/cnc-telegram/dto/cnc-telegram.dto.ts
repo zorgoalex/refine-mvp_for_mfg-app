@@ -17,6 +17,7 @@ export interface CncTelegramPacketItemDto {
   packetItemId: string;
   sourceItemKey: string;
   orderName: string;
+  orderId: number | null;
   detailNumber: number | null;
   widthMm: number | null;
   heightMm: number | null;
@@ -62,11 +63,51 @@ export interface CncTelegramPacketDto {
   items: CncTelegramPacketItemDto[];
 }
 
+export interface CncTelegramBathItemDto {
+  bathItemId: string;
+  orderId: number;
+  orderName: string;
+  detailId: number;
+  detailNumber: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  quantity: number;
+  completedQuantity: number;
+  ready: boolean;
+}
+
+export interface CncTelegramBathSheetDto {
+  cutGroupId: number;
+  sheetIndex: number;
+  sheetNumber: number;
+  variant: 'auto' | 'manual';
+  sheetWidthMm: number | null;
+  sheetHeightMm: number | null;
+}
+
+export interface CncTelegramBathCardDto {
+  bathCardId: string;
+  cutJobId: number;
+  cutResultId: number;
+  resultNo: number;
+  revisionNo: number;
+  cutNumber: string;
+  cutJobName: string;
+  createdAt: string;
+  ready: boolean;
+  orderCount: number;
+  positionCount: number;
+  itemQuantityTotal: number;
+  items: CncTelegramBathItemDto[];
+  sheets: CncTelegramBathSheetDto[];
+}
+
 export interface CncTelegramTodayColumnDto {
-  key: 'parsed' | 'completed';
+  key: 'parsed' | 'completed' | 'baths' | 'baths_ready';
   title: string;
   total: number;
   packets: CncTelegramPacketDto[];
+  baths: CncTelegramBathCardDto[];
 }
 
 export interface CncTelegramTodayResponseDto {

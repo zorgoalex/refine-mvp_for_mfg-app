@@ -5,7 +5,7 @@ const CALENDAR_KEY = '/calendar';
 // /bazis: минимизируемые модалки (визард импорта / создание заказа) держат
 // state на странице; ремаунт при dirty-переключении закрывал бы их — страница
 // должна быть eligible ВСЕГДА, чтобы not-eligible→eligible ремаунта не было.
-const ALWAYS_KEEP = new Set(['/orders', '/cut', '/bazis']);
+const ALWAYS_KEEP = new Set(['/orders', '/cut', '/bazis', '/configuration']);
 
 const isOrderFormKey = (key: string): boolean =>
   key === '/orders/create' || key.startsWith('/orders/edit/');

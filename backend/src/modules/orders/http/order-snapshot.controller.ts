@@ -78,6 +78,18 @@ const importOrderSnapshotRequestSwaggerSchema = {
   required: ['snapshot'],
   properties: {
     snapshot: orderSnapshotSwaggerSchema,
+    referenceMappings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['entityType', 'sourceId', 'targetId'],
+        properties: {
+          entityType: { type: 'string' },
+          sourceId: { type: 'string' },
+          targetId: { type: 'integer' },
+        },
+      },
+    },
   },
 } as const;
 
@@ -87,6 +99,18 @@ const importOrderSnapshotBatchRequestSwaggerSchema = {
   properties: {
     fileName: { type: 'string' },
     zipBase64: { type: 'string', format: 'byte' },
+    referenceMappings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['entityType', 'sourceId', 'targetId'],
+        properties: {
+          entityType: { type: 'string' },
+          sourceId: { type: 'string' },
+          targetId: { type: 'integer' },
+        },
+      },
+    },
   },
 } as const;
 
@@ -111,7 +135,7 @@ const orderSnapshotImportResponseSwaggerSchema = {
   required: ['success', 'status', 'orderId', 'orderName', 'payloadHash', 'importRunId', 'summary'],
   properties: {
     success: { type: 'boolean', enum: [true] },
-    status: { type: 'string', enum: ['created', 'updated', 'noop'] },
+    status: { type: 'string', enum: ['created', 'updated', 'noop', 'skipped'] },
     orderId: { type: 'integer' },
     orderName: { type: 'string' },
     payloadHash: { type: 'string' },
@@ -122,11 +146,12 @@ const orderSnapshotImportResponseSwaggerSchema = {
 
 const orderSnapshotImportBatchResponseSwaggerSchema = {
   type: 'object',
-  required: ['success', 'total', 'imported', 'failed', 'results'],
+  required: ['success', 'total', 'imported', 'skipped', 'failed', 'results'],
   properties: {
     success: { type: 'boolean', enum: [true] },
     total: { type: 'integer' },
     imported: { type: 'integer' },
+    skipped: { type: 'integer' },
     failed: { type: 'integer' },
     results: {
       type: 'array',
@@ -146,6 +171,7 @@ const orderSnapshotImportBatchResponseSwaggerSchema = {
               success: { type: 'boolean', enum: [false] },
               errorCode: { type: 'string' },
               message: { type: 'string' },
+              details: { type: 'object', additionalProperties: true },
             },
           },
         ],
@@ -268,6 +294,7 @@ export class OrderSnapshotController {
     return this.snapshots.importOrderSnapshot({
       currentUser,
       snapshot: body.snapshot,
+      referenceMappings: body.referenceMappings,
       requestId: request.requestId,
     });
   }
@@ -294,6 +321,7 @@ export class OrderSnapshotController {
     return this.snapshots.importOrderSnapshotBatch({
       currentUser,
       zipBase64: body.zipBase64,
+      referenceMappings: body.referenceMappings,
       requestId: request.requestId,
     });
   }

@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 // no_sheet_spec onboarding signal (plan §5).
 const source = readFileSync(fileURLToPath(new URL('./CutPage.tsx', import.meta.url)), 'utf8');
 const sheetLabelSource = readFileSync(fileURLToPath(new URL('./CutSheetLabelGenerateAction.tsx', import.meta.url)), 'utf8');
+const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import.meta.url)), 'utf8');
+const pdfTemplateEventsSource = readFileSync(fileURLToPath(new URL('../../api/cutPdfTemplateEvents.ts', import.meta.url)), 'utf8');
 
 describe('CutPage source guards', () => {
   it('keeps manual-editor zoom controls in the sticky group navbar', () => {
@@ -115,16 +117,146 @@ describe('CutPage source guards', () => {
     expect(source).not.toMatch(/href=\{href as string\}/);
   });
 
-  it('prefills the eligible-load criteria with the reserved orders when opening a job', () => {
-    // Opening a job must scope "Загрузить подходящие детали" to the order(s) the
-    // job was built from, not scan every order. Source of truth = reserved items.
-    expect(source).toContain('distinctOrderIdsFromItems');
+  it('prefills the criteria fields from reserved job details when opening a job', () => {
+    // Opening a job must show the operator the job's own order numbers, films,
+    // and sheet materials, even when the date-filter option lists are empty.
+    expect(source).toContain('cutJobOrderOptions');
+    expect(source).toContain('cutJobFilmOptions');
+    expect(source).toContain('cutJobSheetTypeOptions');
+    expect(source).toContain('visibleOrderOptions');
+    expect(source).toContain('visibleFilmOptions');
+    expect(source).toContain('visibleSheetTypeOptions');
+    expect(source).toContain('openedJob.name');
     expect(source).toContain('form.setFieldsValue');
+  });
+
+  it('filters cut creation orders by the current-date range by default', () => {
+    expect(source).toContain('defaultCutOrderDateRange');
+    expect(source).toContain('return [now, now]');
+    expect(source).toContain('orderDateRange');
+    expect(source).toContain('cutDateRangeToCriteria');
+    expect(source).toContain('ordersApi.list');
+    expect(source).toContain('dateFrom');
+    expect(source).toContain('dateTo');
+    expect(source).toContain('data-testid="cut-order-date-range"');
+    expect(source).toContain('data-testid="cut-order-select"');
+  });
+
+  it('refreshes PDF template options when the job or group template selector opens', () => {
+    expect(source).toContain('refreshCutConfigOnPdfTemplateOpen');
+    expect(source).toContain('subscribeCutPdfTemplatesChanged');
+    expect(source.match(/onDropdownVisibleChange=\{refreshCutConfigOnPdfTemplateOpen\}/g)).toHaveLength(2);
+    expect(source).toContain('data-testid="pdf-template-select-job"');
+    expect(source).toContain('data-testid={`pdf-template-select-${group.cutGroupId}`}');
+    expect(pdfTemplateEventsSource).toContain('notifyCutPdfTemplatesChanged');
+    expect(pdfTemplateEventsSource).toContain('CustomEvent');
+    expect(pdfTemplateEventsSource).toContain('BroadcastChannel');
+    expect(pdfTemplateEventsSource).toContain('CUT_PDF_TEMPLATE_CHANGED_STORAGE_KEY');
+  });
+
+  it('loads the cut film filter as unique Select options under the current date criteria', () => {
+    expect(source).toContain('cutApi.listFilmOptions');
+    expect(source).toContain('filmOptions');
+    expect(source).toContain('buildCutFilmOption');
+    expect(source).toContain('data-testid="cut-film-select"');
+    expect(source).toContain('form.setFieldsValue({ filmIds: undefined })');
+    expect(source).not.toContain('<Input placeholder="Плёнки"');
+  });
+
+  it('previews selected cut details before creating the job', () => {
+    expect(source).toContain('listEligibleDetailsPreview');
+    expect(source).toContain('isCreationPreview');
+    expect(source).toContain('Проверка деталей перед созданием');
+    expect(source).toContain('Подбор деталей на раскрой');
+    expect(source).toContain('data-testid="cut-create-preview-details"');
+    expect(source).toContain('createJobFromPreview');
+    expect(source).toContain('detailIds: selected');
+  });
+
+  it('keeps the create-preview detail table compact and shows grouped plus total summaries', () => {
+    expect(source).toContain('CUT_DETAIL_PREVIEW_VISIBLE_ROWS = 20');
+    expect(source).toContain('CUT_DETAIL_PREVIEW_ROW_HEIGHT = 20');
+    expect(source).toContain('CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT');
+    expect(source).toContain('eligibleTableScrollX');
+    expect(source).toContain('cutDetailColumnWidth(rows');
+    expect(source).toContain('buildCutPreviewSummary(eligible ?? [])');
+    expect(source).toContain('buildCutPreviewSummary');
+    expect(source).toContain('data-testid="cut-create-preview-summary"');
+    expect(source).not.toContain('Table.Summary');
+    expect(source).toContain('cut-create-preview-order-tint-${tint}');
+    expect(source).toContain('cut-create-preview-row-ineligible');
+    expect(source).toContain('cutDetailExistingJobsText');
+    expect(source).toContain('cutJobRefProfileLabel');
+    expect(source).toContain("title: 'Уже в раскроях'");
+    expect(source).toContain('Итого по плёнкам и материалам');
+    expect(source).toContain('Итого по всем деталям в выборке');
+    expect(source).toContain('formatCutPreviewSummaryMetrics');
+    expect(source).toContain('area * quantity');
+    expect(appCss).toContain('.cut-create-preview-summary');
+    expect(appCss).toContain('.cut-create-preview-details-table .ant-table-tbody > tr > td');
+    expect(appCss).toContain('height: 20px');
+    expect(appCss).toContain('.cut-create-preview-row-ineligible');
+    expect(appCss).toContain('.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-0 > td');
+  });
+
+  it('orders create-preview detail columns for fast scanning', () => {
+    const eligibleColumnsSource = source.slice(
+      source.indexOf('const eligibleColumns'),
+      source.indexOf('const jobItemColumns'),
+    );
+    const areaIndex = eligibleColumnsSource.indexOf("title: 'Площадь'");
+    const filmIndex = eligibleColumnsSource.indexOf("title: 'Плёнка'");
+    const materialIndex = eligibleColumnsSource.indexOf("title: 'Материал'");
+    const millingIndex = eligibleColumnsSource.indexOf("title: 'Фрезеровка'");
+    const nameIndex = eligibleColumnsSource.indexOf("title: 'Наименование'");
+
+    expect(areaIndex).toBeGreaterThanOrEqual(0);
+    expect(filmIndex).toBeGreaterThan(areaIndex);
+    expect(materialIndex).toBeGreaterThan(filmIndex);
+    expect(millingIndex).toBeGreaterThan(materialIndex);
+    expect(nameIndex).toBeGreaterThan(millingIndex);
+  });
+
+  it('keeps reopened job details under the spoiler compact with a 15-row internal scroll', () => {
+    expect(source).toContain('CUT_JOB_DETAILS_VISIBLE_ROWS = 15');
+    expect(source).toContain('CUT_JOB_DETAILS_TABLE_BODY_HEIGHT');
+    expect(source).toContain('scroll={{ x: 1900, y: CUT_JOB_DETAILS_TABLE_BODY_HEIGHT }}');
+    expect(source).toContain('cutJobItemOrderTintByOrderId(job?.items ?? [])');
+    expect(source).toContain('className="cut-job-details-table details-grouped"');
+    expect(source).toContain('detail-group-tint-${jobItemOrderTintByOrderId.get(row.orderId) ?? 0}');
+  });
+
+  it('shows only the latest completed cut result and hides full history under a spoiler', () => {
+    expect(source).toContain('const latestCutResult = jobCutResults[0] ?? null');
+    expect(source).toContain('className="cut-results-latest-table"');
+    expect(source).toContain('dataSource={latestCutResult ? [latestCutResult] : []}');
+    expect(source).toContain('className="cut-results-history-collapse"');
+    expect(source).toContain('Все сохранённые раскрои (${jobCutResults.length})');
+    expect(source).not.toContain('<Card size="small" title="Выполненные раскрои"');
+  });
+
+  it('allows renaming the opened cut job from the job card title', () => {
+    expect(source).toContain('data-testid="cut-job-name-edit"');
+    expect(source).toContain('data-testid="cut-job-name-input"');
+    expect(source).toContain('data-testid="cut-job-name-save"');
+    expect(source).toContain('cutApi.setName(job.cutJobId, name, job.version)');
+    expect(source).toContain("message.warning('Введите название задания на раскрой')");
+    expect(appCss).toContain('.cut-job-card-name');
+    expect(appCss).toContain('.cut-job-name-editor');
+    expect(appCss).toContain('.cut-results-block');
+  });
+
+  it('suggests the cut job name from unique orders, films, and current date', () => {
+    expect(source).toContain('buildSuggestedCutName');
+    expect(source).toContain('раскрой ${orders.length');
+    expect(source).toContain('films.length > 0 ? films.join');
+    expect(source).toContain("now.format('DD.MM.YYYY')");
+    expect(source).toContain('data-testid="cut-preview-name"');
   });
 
   it('supports embedded order mode: hard-scopes criteria and job list to one order', () => {
     expect(source).toContain('embeddedOrderId');
-    expect(source).toContain('isEmbeddedOrder ? [embeddedOrderId!] : parseIdCsv(values.orderIds');
+    expect(source).toContain('isEmbeddedOrder ? [embeddedOrderId!] : parseOrderIdsValue(values.orderIds)');
     expect(source).toContain("cutApi.listPlacements({ orderIds: [embeddedOrderId!] })");
     expect(source).toContain('embeddedJobIds?.has(candidate.cutJobId)');
     expect(source).toContain('candidate.items?.some((item) => item.orderId === embeddedOrderId)');
@@ -270,6 +402,9 @@ describe('CutPage source guards', () => {
 describe('CutPage profile + totals columns (source guard)', () => {
   it('renames the positions column and adds totals/profile/sheets columns', () => {
     expect(source).toContain("title: 'Позиции'");
+    expect(source).toContain("title: 'Заказы'");
+    expect(source).toContain('distinctOrderIdsFromItems(row.items).length');
+    expect(source).toContain('<span>Заказы: <b>{distinctOrderIdsFromItems(job.items).length}</b></span>');
     expect(source).toContain("title: 'Деталей'");
     expect(source).toContain("title: 'Площадь, итого'");
     expect(source).toContain("title: 'Кол-во листов раскроя'");

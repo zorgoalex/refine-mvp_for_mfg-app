@@ -25,12 +25,17 @@ import {
   type ClientPhoneSnapshotDto,
   type DowelingOrderSnapshotDto,
   type ImportOrderSnapshotBatchResponseDto,
+  type ImportOrderSnapshotReferenceMappingDto,
+  type ImportOrderSnapshotUnmappedReferenceDto,
   type ImportOrderSnapshotResponseDto,
   type OrderSnapshotDetailDto,
   type OrderSnapshotDto,
   type OrderSnapshotDowelingLinkDto,
   type OrderSnapshotPaymentDto,
   type OrderSnapshotRequirementDto,
+  type OrderSnapshotReferenceDto,
+  type OrderSnapshotReferenceEntityType,
+  type OrderSnapshotReferencesDto,
   type OrderSnapshotWorkshopDto,
   type ProductionStatusEventSnapshotDto,
 } from '../dto/order-snapshot.dto';
@@ -59,7 +64,7 @@ import {
 } from '../domain/sheet-order-validation';
 
 type AnyRow = QueryResultRow & Record<string, unknown>;
-type ImportStatus = 'created' | 'updated' | 'noop';
+type ImportStatus = 'created' | 'updated' | 'noop' | 'skipped';
 
 const SOURCE = 'backend-orders-command';
 // SNAPSHOT_IMPORT_SOURCE removed in Variant B (Task 4): no longer used after shadow material removal.
@@ -79,6 +84,223 @@ const SNAPSHOT_ENTITY_TYPES = {
   deadlineEvent: 'deadline_event',
 } as const;
 
+interface SnapshotReferenceConfig {
+  entityType: OrderSnapshotReferenceEntityType;
+  table: string;
+  idColumn: string;
+  nameColumn: string;
+  codeColumn?: string;
+  refKeyColumn?: string;
+  sortColumn?: string;
+  activeColumn?: string;
+  selectColumns: string[];
+}
+
+const SNAPSHOT_REFERENCE_CONFIGS: Record<OrderSnapshotReferenceEntityType, SnapshotReferenceConfig> = {
+  material: {
+    entityType: 'material',
+    table: 'materials',
+    idColumn: 'material_id',
+    nameColumn: 'material_name',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: [
+      'material_id',
+      'material_name',
+      'unit_id',
+      'default_supplier_id',
+      'description',
+      'material_type_id',
+      'vendor_id',
+      'is_active',
+      'ref_key_1c',
+      'sheet_material_type_id',
+      'sort_order',
+    ],
+  },
+  sheetMaterialType: {
+    entityType: 'sheetMaterialType',
+    table: 'sheet_material_types',
+    idColumn: 'sheet_material_type_id',
+    nameColumn: 'name',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: [
+      'sheet_material_type_id',
+      'name',
+      'material_type_id',
+      'thickness_mm',
+      'width_mm',
+      'height_mm',
+      'is_active',
+      'ref_key_1c',
+      'unit_id',
+      'supplier_id',
+      'vendor_id',
+      'supplier_article',
+      'texture',
+      'color',
+      'conversion_key',
+      'is_cuttable',
+      'sort_order',
+    ],
+  },
+  millingType: {
+    entityType: 'millingType',
+    table: 'milling_types',
+    idColumn: 'milling_type_id',
+    nameColumn: 'milling_type_name',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['milling_type_id', 'milling_type_name', 'cost_per_sqm', 'description', 'sort_order', 'is_active', 'ref_key_1c'],
+  },
+  edgeType: {
+    entityType: 'edgeType',
+    table: 'edge_types',
+    idColumn: 'edge_type_id',
+    nameColumn: 'edge_type_name',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['edge_type_id', 'edge_type_name', 'description', 'sort_order', 'is_active', 'ref_key_1c'],
+  },
+  film: {
+    entityType: 'film',
+    table: 'films',
+    idColumn: 'film_id',
+    nameColumn: 'film_name',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['film_id', 'film_name', 'film_type_id', 'film_texture', 'is_active', 'ref_key_1c', 'vendor_id', 'sort_order'],
+  },
+  filmType: {
+    entityType: 'filmType',
+    table: 'film_types',
+    idColumn: 'film_type_id',
+    nameColumn: 'film_type_name',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['film_type_id', 'film_type_name', 'is_active', 'ref_key_1c', 'sort_order'],
+  },
+  unit: {
+    entityType: 'unit',
+    table: 'units',
+    idColumn: 'unit_id',
+    nameColumn: 'unit_name',
+    codeColumn: 'unit_code',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    selectColumns: ['unit_id', 'unit_code', 'unit_name', 'unit_symbol', 'decimals', 'ref_key_1c', 'sort_order'],
+  },
+  materialType: {
+    entityType: 'materialType',
+    table: 'material_types',
+    idColumn: 'material_type_id',
+    nameColumn: 'material_type_name',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['material_type_id', 'material_type_name', 'description', 'sort_order', 'is_active', 'ref_key_1c'],
+  },
+  supplier: {
+    entityType: 'supplier',
+    table: 'suppliers',
+    idColumn: 'supplier_id',
+    nameColumn: 'supplier_name',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['supplier_id', 'supplier_name', 'address', 'contact_person', 'phone', 'description', 'is_active', 'ref_key_1c', 'sort_order'],
+  },
+  vendor: {
+    entityType: 'vendor',
+    table: 'vendors',
+    idColumn: 'vendor_id',
+    nameColumn: 'vendor_name',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['vendor_id', 'vendor_name', 'contact_info', 'is_active', 'ref_key_1c', 'material_type_id', 'sort_order'],
+  },
+  orderStatus: {
+    entityType: 'orderStatus',
+    table: 'order_statuses',
+    idColumn: 'order_status_id',
+    nameColumn: 'order_status_name',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['order_status_id', 'order_status_name', 'sort_order', 'color', 'description', 'is_active', 'ref_key_1c'],
+  },
+  paymentStatus: {
+    entityType: 'paymentStatus',
+    table: 'payment_statuses',
+    idColumn: 'payment_status_id',
+    nameColumn: 'payment_status_name',
+    codeColumn: 'payment_status_code',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['payment_status_id', 'payment_status_name', 'payment_status_code', 'sort_order', 'color', 'description', 'is_active', 'ref_key_1c'],
+  },
+  paymentType: {
+    entityType: 'paymentType',
+    table: 'payment_types',
+    idColumn: 'type_paid_id',
+    nameColumn: 'type_paid_name',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['type_paid_id', 'type_paid_name', 'sort_order', 'is_active', 'ref_key_1c'],
+  },
+  productionStatus: {
+    entityType: 'productionStatus',
+    table: 'production_statuses',
+    idColumn: 'production_status_id',
+    nameColumn: 'production_status_name',
+    codeColumn: 'production_status_code',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['production_status_id', 'production_status_name', 'production_status_code', 'sort_order', 'color', 'description', 'is_active', 'ref_key_1c'],
+  },
+  workshop: {
+    entityType: 'workshop',
+    table: 'workshops',
+    idColumn: 'workshop_id',
+    nameColumn: 'workshop_name',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['workshop_id', 'workshop_name', 'address', 'responsible_employee_id', 'is_active', 'ref_key_1c', 'sort_order'],
+  },
+  employee: {
+    entityType: 'employee',
+    table: 'employees',
+    idColumn: 'employee_id',
+    nameColumn: 'full_name',
+    refKeyColumn: 'ref_key_1c',
+    activeColumn: 'is_active',
+    selectColumns: ['employee_id', 'position', 'full_name', 'note', 'is_active', 'ref_key_1c'],
+  },
+  resourceRequirementStatus: {
+    entityType: 'resourceRequirementStatus',
+    table: 'resource_requirements_statuses',
+    idColumn: 'requirement_status_id',
+    nameColumn: 'requirement_status_name',
+    codeColumn: 'requirement_status_code',
+    refKeyColumn: 'ref_key_1c',
+    sortColumn: 'sort_order',
+    activeColumn: 'is_active',
+    selectColumns: ['requirement_status_id', 'requirement_status_code', 'requirement_status_name', 'sort_order', 'is_active', 'description', 'ref_key_1c'],
+  },
+};
+
 interface ImportMapRow extends QueryResultRow {
   local_entity_id: string;
   payload_hash: string | null;
@@ -86,6 +308,18 @@ interface ImportMapRow extends QueryResultRow {
 
 interface IdRow extends QueryResultRow {
   id: string | number;
+}
+
+interface ExistingOrderRow extends QueryResultRow {
+  order_id: string | number;
+  order_name: string;
+  payload_hash: string | null;
+}
+
+interface ExistingSnapshotOrder {
+  orderId: number;
+  orderName: string;
+  status: Extract<ImportStatus, 'noop' | 'skipped'>;
 }
 
 interface SourceInstanceRow extends QueryResultRow {
@@ -155,21 +389,54 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
   ): Promise<ImportOrderSnapshotResponseDto> {
     const snapshot = assertSupportedSnapshot(command.snapshot);
     const payloadHash = calculateSnapshotHash(snapshot);
+    const runId = await startImportRun(this.database, snapshot, payloadHash, command);
 
-    return this.database.transaction(async (tx) => {
-      await setSessionUser(tx, command.currentUser.id);
-      await tx.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
-        snapshot.source.sourceInstanceId,
-        snapshot.identity.order.sourceId,
-      ]);
+    try {
+      const result = await this.database.transaction(async (tx) => {
+        await setSessionUser(tx, command.currentUser.id);
+        await tx.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
+          snapshot.source.sourceInstanceId,
+          snapshot.identity.order.sourceId,
+        ]);
+        const existingOrder = await findExistingOrderForSnapshotImport(tx, snapshot, payloadHash);
+        if (existingOrder) {
+          const result = response(
+            existingOrder.status,
+            existingOrder.orderId,
+            existingOrder.orderName,
+            payloadHash,
+            snapshot,
+          );
+          await finishImportRun(tx, runId, result.status, result.orderId, result.summary);
+          await writeAudit(
+            tx,
+            snapshotImportAuditEvent(result.status),
+            command.currentUser,
+            result.orderId,
+            null,
+            {
+              requestId: command.requestId,
+              payloadHash,
+              importRunId: runId,
+              status: result.status,
+              formatVersion: snapshot.formatVersion,
+              serviceVersion: snapshot.exporterService.version,
+            },
+            collectSnapshotSheetIds(snapshot),
+          );
+          return result;
+        }
 
-      const runId = await startImportRun(tx, snapshot, payloadHash, command);
-      try {
-        const result = await importSnapshotInTransaction(tx, snapshot, payloadHash, runId, command);
+        const remappedSnapshot = await remapSnapshotReferencesForImport(
+          tx,
+          snapshot,
+          command.referenceMappings ?? [],
+        );
+        const result = await importSnapshotInTransaction(tx, remappedSnapshot, payloadHash, runId, command);
         await finishImportRun(tx, runId, result.status, result.orderId, result.summary);
         await writeAudit(
           tx,
-          result.status === 'noop' ? 'orders.snapshot_import.noop' : 'orders.snapshot_import',
+          snapshotImportAuditEvent(result.status),
           command.currentUser,
           result.orderId,
           null, // relatedClientId unavailable before payload build; local clientId not returned from importSnapshotInTransaction
@@ -181,14 +448,15 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
             formatVersion: snapshot.formatVersion,
             serviceVersion: snapshot.exporterService.version,
           },
-          collectSnapshotSheetIds(snapshot),
+          collectSnapshotSheetIds(remappedSnapshot),
         );
-        return { ...result, importRunId: runId };
-      } catch (error) {
-        await failImportRun(tx, runId, error);
-        throw error;
-      }
-    });
+        return result;
+      });
+      return { ...result, importRunId: runId };
+    } catch (error) {
+      await failImportRun(this.database, runId, error).catch(() => undefined);
+      throw error;
+    }
   }
 
   async importOrderSnapshotBatch(
@@ -207,21 +475,18 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
         const result = await this.importOrderSnapshot({ ...command, snapshot });
         results.push({ fileName: file.name, ...result });
       } catch (error) {
-        results.push({
-          fileName: file.name,
-          success: false,
-          errorCode: error instanceof ApiError ? error.code : 'ORDER_SNAPSHOT_IMPORT_FAILED',
-          message: error instanceof Error ? error.message : 'Order snapshot import failed',
-        });
+        results.push(snapshotBatchFailure(file.name, error));
       }
     }
 
     const failed = results.filter((result) => result.success === false).length;
+    const { imported, skipped } = summarizeSnapshotBatchResults(results);
 
     return {
       success: true,
       total: results.length,
-      imported: results.length - failed,
+      imported,
+      skipped,
       failed,
       results,
     };
@@ -270,6 +535,60 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
 
     return result.rows.map((row) => Number(row.id));
   }
+}
+
+function snapshotBatchFailure(
+  fileName: string,
+  error: unknown,
+): Extract<ImportOrderSnapshotBatchResponseDto['results'][number], { success: false }> {
+  const details = snapshotErrorDetails(error);
+  return {
+    fileName,
+    success: false,
+    errorCode: snapshotErrorCode(error),
+    message: snapshotErrorMessage(error),
+    ...(details ? { details } : {}),
+  };
+}
+
+function summarizeSnapshotBatchResults(
+  results: ImportOrderSnapshotBatchResponseDto['results'],
+): Pick<ImportOrderSnapshotBatchResponseDto, 'imported' | 'skipped'> {
+  let imported = 0;
+  let skipped = 0;
+
+  for (const result of results) {
+    if (result.success !== true) continue;
+    if (isImportedSnapshotStatus(result.status)) imported += 1;
+    if (isSkippedSnapshotStatus(result.status)) skipped += 1;
+  }
+
+  return { imported, skipped };
+}
+
+function isImportedSnapshotStatus(status: ImportStatus): boolean {
+  return status === 'created' || status === 'updated';
+}
+
+function isSkippedSnapshotStatus(status: ImportStatus): boolean {
+  return status === 'noop' || status === 'skipped';
+}
+
+function snapshotErrorCode(error: unknown): string {
+  return error instanceof ApiError ? error.code : 'ORDER_SNAPSHOT_IMPORT_FAILED';
+}
+
+function snapshotErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Order snapshot import failed';
+}
+
+function snapshotErrorDetails(error: unknown): Record<string, unknown> | undefined {
+  return error instanceof ApiError ? error.details : undefined;
+}
+
+function snapshotFailureSummary(error: unknown): Record<string, unknown> {
+  const details = snapshotErrorDetails(error);
+  return details ? { errorDetails: details } : {};
 }
 
 async function buildSnapshot(tx: TransactionClient, orderId: number): Promise<OrderSnapshotDto> {
@@ -332,6 +651,26 @@ async function buildSnapshot(tx: TransactionClient, orderId: number): Promise<Or
     [orderId],
   );
   const exportedAt = new Date().toISOString();
+  const data: OrderSnapshotDto['data'] = {
+    client: {
+      sourceId: String(header.client_id),
+      clientName: toStringValue(header.client_name),
+      refKey1c: toNullableString(header.client_ref_key_1c),
+      notes: toNullableString(header.client_notes),
+      isActive: toBoolean(header.client_is_active, true),
+    },
+    clientPhones: clientPhones.map(mapClientPhoneSnapshot),
+    order: mapOrderHeaderSnapshot(header),
+    details: details.map(mapDetailSnapshot),
+    payments: payments.map(mapPaymentSnapshot),
+    workshops: workshops.map(mapWorkshopSnapshot),
+    requirements: requirements.map(mapRequirementSnapshot),
+    dowelingOrders: dowelingOrders.map(mapDowelingOrderSnapshot),
+    dowelingLinks: dowelingLinks.map(mapDowelingLinkSnapshot),
+    productionStatusEvents: productionEvents.map(mapProductionEventSnapshot),
+    deadlineInstances,
+    deadlineEvents,
+  };
   const snapshot: OrderSnapshotDto = {
     schema: ORDER_SNAPSHOT_SCHEMA,
     formatVersion: ORDER_SNAPSHOT_FORMAT_VERSION,
@@ -355,30 +694,495 @@ async function buildSnapshot(tx: TransactionClient, orderId: number): Promise<Or
         refKey1c: toNullableString(header.client_ref_key_1c),
       },
     },
-    data: {
-      client: {
-        sourceId: String(header.client_id),
-        clientName: toStringValue(header.client_name),
-        refKey1c: toNullableString(header.client_ref_key_1c),
-        notes: toNullableString(header.client_notes),
-        isActive: toBoolean(header.client_is_active, true),
-      },
-      clientPhones: clientPhones.map(mapClientPhoneSnapshot),
-      order: mapOrderHeaderSnapshot(header),
-      details: details.map(mapDetailSnapshot),
-      payments: payments.map(mapPaymentSnapshot),
-      workshops: workshops.map(mapWorkshopSnapshot),
-      requirements: requirements.map(mapRequirementSnapshot),
-      dowelingOrders: dowelingOrders.map(mapDowelingOrderSnapshot),
-      dowelingLinks: dowelingLinks.map(mapDowelingLinkSnapshot),
-      productionStatusEvents: productionEvents.map(mapProductionEventSnapshot),
-      deadlineInstances,
-      deadlineEvents,
-    },
-    references: {},
+    data,
+    references: await buildSnapshotReferences(tx, data),
   };
   snapshot.source.payloadHash = calculateSnapshotHash(snapshot);
   return snapshot;
+}
+
+async function buildSnapshotReferences(
+  tx: TransactionClient,
+  data: OrderSnapshotDto['data'],
+): Promise<OrderSnapshotReferencesDto> {
+  const ids = collectSnapshotReferenceIds(data);
+  const loaded = new Map<OrderSnapshotReferenceEntityType, Set<number>>();
+  const references: OrderSnapshotReferencesDto = {};
+  let progressed = true;
+
+  while (progressed) {
+    progressed = false;
+
+    for (const config of Object.values(SNAPSHOT_REFERENCE_CONFIGS)) {
+      const wanted = [...(ids.get(config.entityType) ?? [])].filter(
+        (id) => !(loaded.get(config.entityType) ?? new Set<number>()).has(id),
+      );
+      if (wanted.length === 0) continue;
+
+      for (const id of wanted) {
+        addReferenceIdToSet(loaded, config.entityType, id);
+      }
+
+      const rows = await readSnapshotReferenceRows(tx, config, wanted);
+      if (rows.length === 0) continue;
+
+      references[config.entityType] = [
+        ...(references[config.entityType] ?? []),
+        ...rows,
+      ];
+      for (const row of rows) {
+        addSnapshotReferenceDependencies(ids, row);
+      }
+      progressed = true;
+    }
+  }
+
+  return references;
+}
+
+function collectSnapshotReferenceIds(data: OrderSnapshotDto['data']): Map<OrderSnapshotReferenceEntityType, Set<number>> {
+  const ids = new Map<OrderSnapshotReferenceEntityType, Set<number>>();
+  const add = (type: OrderSnapshotReferenceEntityType, value: unknown) =>
+    addReferenceIdToSet(ids, type, toNullableNumber(value));
+
+  add('orderStatus', data.order.orderStatusId);
+  add('paymentStatus', data.order.paymentStatusId);
+  add('productionStatus', data.order.productionStatusId);
+  add('material', data.order.materialId);
+  add('sheetMaterialType', data.order.sheetMaterialTypeId);
+  add('millingType', data.order.millingTypeId);
+  add('edgeType', data.order.edgeTypeId);
+  add('film', data.order.filmId);
+
+  for (const detail of data.details) {
+    add('material', detail.materialId);
+    add('sheetMaterialType', detail.sheetMaterialTypeId);
+    add('millingType', detail.millingTypeId);
+    add('edgeType', detail.edgeTypeId);
+    add('film', detail.filmId);
+    add('productionStatus', detail.productionStatusId);
+  }
+
+  for (const payment of data.payments) {
+    add('paymentType', payment.typePaidId);
+  }
+
+  for (const workshop of data.workshops) {
+    add('workshop', workshop.workshopId);
+    add('productionStatus', workshop.productionStatusId);
+    add('employee', workshop.responsibleEmployeeId);
+  }
+
+  for (const requirement of data.requirements) {
+    add('material', requirement.materialId);
+    add('film', requirement.filmId);
+    add('edgeType', requirement.edgeTypeId);
+    add('unit', requirement.unitId);
+    add('supplier', requirement.supplierId);
+    add('resourceRequirementStatus', requirement.requirementStatusId);
+  }
+
+  for (const dowelingOrder of data.dowelingOrders) {
+    add('paymentStatus', dowelingOrder.paymentStatusId);
+    add('productionStatus', dowelingOrder.productionStatusId);
+    add('employee', dowelingOrder.designEngineerId);
+    add('employee', dowelingOrder.operatorId);
+  }
+
+  for (const event of data.productionStatusEvents) {
+    add('productionStatus', event.productionStatusId);
+  }
+
+  return ids;
+}
+
+function addSnapshotReferenceDependencies(
+  ids: Map<OrderSnapshotReferenceEntityType, Set<number>>,
+  reference: OrderSnapshotReferenceDto,
+): void {
+  const add = (type: OrderSnapshotReferenceEntityType, value: unknown) =>
+    addReferenceIdToSet(ids, type, toNullableNumber(value));
+
+  switch (reference.entityType) {
+    case 'material':
+      add('unit', reference.data.unit_id);
+      add('materialType', reference.data.material_type_id);
+      add('supplier', reference.data.default_supplier_id);
+      add('vendor', reference.data.vendor_id);
+      add('sheetMaterialType', reference.data.sheet_material_type_id);
+      break;
+    case 'sheetMaterialType':
+      add('unit', reference.data.unit_id);
+      add('materialType', reference.data.material_type_id);
+      add('supplier', reference.data.supplier_id);
+      add('vendor', reference.data.vendor_id);
+      break;
+    case 'film':
+      add('filmType', reference.data.film_type_id);
+      add('vendor', reference.data.vendor_id);
+      break;
+    case 'vendor':
+      add('materialType', reference.data.material_type_id);
+      break;
+    case 'workshop':
+      add('employee', reference.data.responsible_employee_id);
+      break;
+    default:
+      break;
+  }
+}
+
+async function readSnapshotReferenceRows(
+  tx: DatabaseClient,
+  config: SnapshotReferenceConfig,
+  ids: number[],
+): Promise<OrderSnapshotReferenceDto[]> {
+  if (ids.length === 0) return [];
+  const result = await tx.query<AnyRow>(
+    `
+    SELECT ${config.selectColumns.join(', ')}
+    FROM ${config.table}
+    WHERE ${config.idColumn}::bigint = ANY($1::bigint[])
+    ORDER BY ${config.idColumn}
+    `,
+    [ids],
+  );
+
+  return result.rows.map((row) => snapshotReferenceFromRow(config, row));
+}
+
+function snapshotReferenceFromRow(
+  config: SnapshotReferenceConfig,
+  row: AnyRow,
+): OrderSnapshotReferenceDto {
+  const sourceId = toStringValue(row[config.idColumn]);
+  const name = toStringValue(row[config.nameColumn] ?? `#${sourceId}`);
+  const code = config.codeColumn ? toNullableString(row[config.codeColumn]) : null;
+  const refKey1c = config.refKeyColumn ? toNullableString(row[config.refKeyColumn]) : null;
+  const data: Record<string, unknown> = {};
+
+  for (const column of config.selectColumns) {
+    data[column] = normalizeReferenceValue(row[column]);
+  }
+
+  return {
+    entityType: config.entityType,
+    sourceId,
+    name,
+    code,
+    refKey1c,
+    data,
+  };
+}
+
+function normalizeReferenceValue(value: unknown): unknown {
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+async function remapSnapshotReferencesForImport(
+  tx: DatabaseClient,
+  snapshot: OrderSnapshotDto,
+  mappings: readonly ImportOrderSnapshotReferenceMappingDto[],
+): Promise<OrderSnapshotDto> {
+  const resolver = new SnapshotReferenceResolver(tx, snapshot, mappings);
+  const data = snapshot.data;
+  const order = data.order;
+  const mappedData: OrderSnapshotDto['data'] = {
+    ...data,
+    order: {
+      ...order,
+      managerId: await existingOptionalId(tx, 'users', 'user_id', order.managerId),
+      orderStatusId: await resolver.required('orderStatus', order.orderStatusId),
+      paymentStatusId: await resolver.optional('paymentStatus', order.paymentStatusId),
+      productionStatusId: await resolver.optional('productionStatus', order.productionStatusId),
+      materialId: await resolver.optional('material', order.materialId),
+      sheetMaterialTypeId: await resolver.optional('sheetMaterialType', order.sheetMaterialTypeId),
+      millingTypeId: await resolver.optional('millingType', order.millingTypeId),
+      edgeTypeId: await resolver.optional('edgeType', order.edgeTypeId),
+      filmId: await resolver.optional('film', order.filmId),
+    },
+    details: await mapSeries(data.details, async (detail) => ({
+      ...detail,
+      materialId: await resolver.optional('material', detail.materialId),
+      sheetMaterialTypeId: await resolver.optional('sheetMaterialType', detail.sheetMaterialTypeId),
+      millingTypeId: await resolver.required('millingType', detail.millingTypeId),
+      edgeTypeId: await resolver.required('edgeType', detail.edgeTypeId),
+      filmId: await resolver.optional('film', detail.filmId),
+      productionStatusId: await resolver.optional('productionStatus', detail.productionStatusId),
+      jointOrderId: null,
+    })),
+    payments: await mapSeries(data.payments, async (payment) => ({
+      ...payment,
+      typePaidId: await resolver.required('paymentType', payment.typePaidId),
+    })),
+    workshops: await mapSeries(data.workshops, async (workshop) => ({
+      ...workshop,
+      workshopId: await resolver.required('workshop', workshop.workshopId),
+      productionStatusId: await resolver.required('productionStatus', workshop.productionStatusId),
+      responsibleEmployeeId: await resolver.optional('employee', workshop.responsibleEmployeeId),
+    })),
+    requirements: await mapSeries(data.requirements, async (requirement) => ({
+      ...requirement,
+      materialId: await resolver.optional('material', requirement.materialId),
+      filmId: await resolver.optional('film', requirement.filmId),
+      edgeTypeId: await resolver.optional('edgeType', requirement.edgeTypeId),
+      unitId: await resolver.required('unit', requirement.unitId),
+      requirementStatusId: await resolver.required('resourceRequirementStatus', requirement.requirementStatusId),
+      supplierId: await resolver.optional('supplier', requirement.supplierId),
+      requisitionId: null,
+      warehouseId: null,
+    })),
+    dowelingOrders: await mapSeries(data.dowelingOrders, async (item) => ({
+      ...item,
+      paymentStatusId: await resolver.required('paymentStatus', item.paymentStatusId),
+      productionStatusId: await resolver.optional('productionStatus', item.productionStatusId),
+      designEngineerId: await resolver.optional('employee', item.designEngineerId),
+      operatorId: await resolver.optional('employee', item.operatorId),
+    })),
+    productionStatusEvents: await mapSeries(data.productionStatusEvents, async (event) => ({
+      ...event,
+      productionStatusId: await resolver.required('productionStatus', event.productionStatusId),
+      eventBy: await existingOptionalId(tx, 'users', 'user_id', event.eventBy),
+    })),
+    deadlineInstances: data.deadlineInstances.map(remapDeadlineReferenceFields),
+    deadlineEvents: data.deadlineEvents.map(remapDeadlineReferenceFields),
+  };
+
+  resolver.throwIfMissing();
+  return { ...snapshot, data: mappedData };
+}
+
+function remapDeadlineReferenceFields(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...raw,
+    order_workshop_id: null,
+    client_id: null,
+    responsible_user_id: null,
+    created_by_user_id: null,
+    updated_by_user_id: null,
+  };
+}
+
+async function mapSeries<T, R>(
+  items: readonly T[],
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const result: R[] = [];
+  for (const item of items) {
+    result.push(await mapper(item));
+  }
+  return result;
+}
+
+class SnapshotReferenceResolver {
+  private readonly overrides = new Map<string, number>();
+  private readonly resolved = new Map<string, number | null>();
+  private readonly missing = new Map<string, ImportOrderSnapshotUnmappedReferenceDto>();
+
+  constructor(
+    private readonly tx: DatabaseClient,
+    private readonly snapshot: OrderSnapshotDto,
+    mappings: readonly ImportOrderSnapshotReferenceMappingDto[],
+  ) {
+    for (const mapping of mappings) {
+      if (!Number.isInteger(mapping.targetId) || mapping.targetId < 1) continue;
+      this.overrides.set(referenceMapKey(mapping.entityType, mapping.sourceId), mapping.targetId);
+    }
+  }
+
+  async required(type: OrderSnapshotReferenceEntityType, value: unknown): Promise<number> {
+    const sourceId = toNullableNumber(value);
+    if (!sourceId) return toNumber(value);
+    return (await this.resolve(type, sourceId)) ?? sourceId;
+  }
+
+  async optional(type: OrderSnapshotReferenceEntityType, value: unknown): Promise<number | null> {
+    const sourceId = toNullableNumber(value);
+    if (!sourceId) return null;
+    return (await this.resolve(type, sourceId)) ?? sourceId;
+  }
+
+  throwIfMissing(): void {
+    if (this.missing.size === 0) return;
+
+    throw new ApiError(422, 'ORDER_SNAPSHOT_REFERENCE_MAPPING_REQUIRED', 'Order snapshot reference mapping required', {
+      unmappedReferences: [...this.missing.values()],
+    });
+  }
+
+  private async resolve(
+    type: OrderSnapshotReferenceEntityType,
+    sourceIdNumber: number,
+  ): Promise<number | null> {
+    const sourceId = String(sourceIdNumber);
+    const key = referenceMapKey(type, sourceId);
+    const missing = this.missing.get(key);
+    if (missing) {
+      missing.usageCount += 1;
+      return null;
+    }
+    if (this.resolved.has(key)) {
+      return this.resolved.get(key) ?? null;
+    }
+
+    const overrideTargetId = this.overrides.get(key);
+    if (overrideTargetId) {
+      const validOverride = await readReferenceIdIfExists(this.tx, type, overrideTargetId);
+      if (validOverride) {
+        this.resolved.set(key, validOverride);
+        return validOverride;
+      }
+    }
+
+    const reference = findSnapshotReference(this.snapshot, type, sourceId);
+    const targetId = reference
+      ? await findTargetReferenceId(this.tx, type, reference)
+      : await readReferenceIdIfExists(this.tx, type, sourceIdNumber);
+
+    if (targetId) {
+      this.resolved.set(key, targetId);
+      return targetId;
+    }
+
+    this.missing.set(key, {
+      entityType: type,
+      sourceId,
+      sourceName: reference?.name ?? `#${sourceId}`,
+      usageCount: 1,
+      candidates: await readReferenceCandidates(this.tx, type),
+    });
+    this.resolved.set(key, null);
+    return null;
+  }
+}
+
+function referenceMapKey(type: OrderSnapshotReferenceEntityType, sourceId: string): string {
+  return `${type}:${sourceId}`;
+}
+
+function findSnapshotReference(
+  snapshot: OrderSnapshotDto,
+  type: OrderSnapshotReferenceEntityType,
+  sourceId: string,
+): OrderSnapshotReferenceDto | null {
+  return snapshot.references?.[type]?.find((item) => item.sourceId === sourceId) ?? null;
+}
+
+async function findTargetReferenceId(
+  tx: DatabaseClient,
+  type: OrderSnapshotReferenceEntityType,
+  reference: OrderSnapshotReferenceDto,
+): Promise<number | null> {
+  const config = SNAPSHOT_REFERENCE_CONFIGS[type];
+
+  const refKey1c = nullableUuid(reference.refKey1c);
+  if (config.refKeyColumn && refKey1c) {
+    const byRef = await readOptionalId(
+      tx,
+      `SELECT ${config.idColumn} AS id FROM ${config.table} WHERE ${config.refKeyColumn} = $1::uuid`,
+      [refKey1c],
+    );
+    if (byRef) return byRef;
+  }
+
+  if (config.codeColumn && reference.code) {
+    const byCode = await readUniqueReferenceIdByField(tx, config, config.codeColumn, reference.code);
+    if (byCode) return byCode;
+  }
+
+  if (type === 'sheetMaterialType') {
+    const conversionKey = toNullableString(reference.data.conversion_key);
+    if (conversionKey) {
+      const byConversionKey = await readUniqueReferenceIdByField(tx, config, 'conversion_key', conversionKey);
+      if (byConversionKey) return byConversionKey;
+    }
+  }
+
+  return readUniqueReferenceIdByField(tx, config, config.nameColumn, reference.name);
+}
+
+async function readUniqueReferenceIdByField(
+  tx: DatabaseClient,
+  config: SnapshotReferenceConfig,
+  column: string,
+  value: string,
+): Promise<number | null> {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  const result = await tx.query<IdRow>(
+    `
+    SELECT ${config.idColumn} AS id
+    FROM ${config.table}
+    WHERE lower(${column}::text) = lower($1)
+    ORDER BY ${config.idColumn}
+    LIMIT 2
+    `,
+    [normalized],
+  );
+  return result.rows.length === 1 ? Number(result.rows[0].id) : null;
+}
+
+async function readReferenceIdIfExists(
+  tx: DatabaseClient,
+  type: OrderSnapshotReferenceEntityType,
+  id: number,
+): Promise<number | null> {
+  const config = SNAPSHOT_REFERENCE_CONFIGS[type];
+  return readOptionalId(
+    tx,
+    `SELECT ${config.idColumn} AS id FROM ${config.table} WHERE ${config.idColumn}::bigint = $1::bigint`,
+    [id],
+  );
+}
+
+async function readReferenceCandidates(
+  tx: DatabaseClient,
+  type: OrderSnapshotReferenceEntityType,
+): Promise<ImportOrderSnapshotUnmappedReferenceDto['candidates']> {
+  const config = SNAPSHOT_REFERENCE_CONFIGS[type];
+  const activeOrder = config.activeColumn ? `${config.activeColumn} DESC,` : '';
+  const sortOrder = config.sortColumn ? `${config.sortColumn},` : '';
+  const codeSelect = config.codeColumn ? `${config.codeColumn}::text AS code` : `NULL::text AS code`;
+  const result = await tx.query<{ id: string | number; name: string | null; code: string | null }>(
+    `
+    SELECT ${config.idColumn} AS id, ${config.nameColumn}::text AS name, ${codeSelect}
+    FROM ${config.table}
+    ORDER BY ${activeOrder} ${sortOrder} ${config.nameColumn}::text
+    LIMIT 200
+    `,
+  );
+
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    name: row.name ?? `#${row.id}`,
+    code: row.code,
+  }));
+}
+
+async function existingOptionalId(
+  tx: DatabaseClient,
+  table: string,
+  idColumn: string,
+  value: unknown,
+): Promise<number | null> {
+  const id = toNullableNumber(value);
+  if (!id) return null;
+  return readOptionalId(
+    tx,
+    `SELECT ${idColumn} AS id FROM ${table} WHERE ${idColumn}::bigint = $1::bigint`,
+    [id],
+  );
+}
+
+function addReferenceIdToSet(
+  ids: Map<OrderSnapshotReferenceEntityType, Set<number>>,
+  type: OrderSnapshotReferenceEntityType,
+  value: number | null,
+): void {
+  if (!value || !Number.isInteger(value) || value < 1) return;
+  const bucket = ids.get(type) ?? new Set<number>();
+  bucket.add(value);
+  ids.set(type, bucket);
 }
 
 async function importSnapshotInTransaction(
@@ -392,21 +1196,23 @@ async function importSnapshotInTransaction(
   const orderSourceId = snapshot.identity.order.sourceId;
   const existingOrderMap = await getMap(tx, source, SNAPSHOT_ENTITY_TYPES.order, orderSourceId);
 
-  if (existingOrderMap?.payload_hash === payloadHash) {
+  if (existingOrderMap) {
     const orderId = Number(existingOrderMap.local_entity_id);
     const orderName = await readOrderName(tx, orderId);
-    return response('noop', orderId, orderName, payloadHash, snapshot);
+    return response(
+      existingOrderMap.payload_hash === payloadHash ? 'noop' : 'skipped',
+      orderId,
+      orderName,
+      payloadHash,
+      snapshot,
+    );
   }
 
   const clientId = await upsertClient(tx, snapshot, payloadHash);
 
   // SP3: pre-read stored sheet state BEFORE writing (same as order-transaction.service).
   // For brand-new orders (no localOrderId yet), stored state = empty + eligible=true.
-  const existingOrderMapForSheet = await getMap(tx, source, SNAPSHOT_ENTITY_TYPES.order, orderSourceId);
-  const localOrderIdForSheet = existingOrderMapForSheet
-    ? Number(existingOrderMapForSheet.local_entity_id)
-    : await findOrderForSnapshot(tx, snapshot, clientId);
-  const storedSheet = await readStoredSheetState(tx, localOrderIdForSheet);
+  const storedSheet = await readStoredSheetState(tx, null);
 
   // Build the validation header/details from incoming snapshot data.
   const snapshotHeader: SheetValidationHeader = {
@@ -513,13 +1319,7 @@ async function upsertOrderHeader(
   const localOrderId = mapped
     ? Number(mapped.local_entity_id)
     : await findOrderForSnapshot(tx, snapshot, clientId);
-  const dto = snapshotToSaveOrderDto(snapshot, clientId, {
-    details: [],
-    payments: [],
-    workshops: [],
-    requirements: [],
-    dowelingLinks: [],
-  });
+  const dto = snapshotHeaderToSaveOrderDto(snapshot, clientId, undefined);
   const prepared = prepareOrderSave(dto, {
     mode: localOrderId ? 'update' : 'create',
     pathOrderId: localOrderId ?? undefined,
@@ -535,6 +1335,21 @@ async function upsertOrderHeader(
       );
   await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.order, sourceId, localId: String(orderId), localOrderId: orderId, payloadHash });
   return orderId;
+}
+
+function snapshotHeaderToSaveOrderDto(
+  snapshot: OrderSnapshotDto,
+  clientId: number,
+  version?: number,
+): SaveOrderDto {
+  const dto = snapshotToSaveOrderDto(snapshot, clientId, {
+    details: [],
+    payments: [],
+    workshops: [],
+    requirements: [],
+    dowelingLinks: [],
+  });
+  return version === undefined ? dto : { ...dto, version };
 }
 
 async function createImportProject(
@@ -1783,22 +2598,64 @@ async function upsertProductionEvent(
   return Number(result.rows[0].id);
 }
 
-async function findOrderForSnapshot(
+async function findExistingOrderForSnapshotImport(
   tx: TransactionClient,
   snapshot: OrderSnapshotDto,
-  clientId: number,
-): Promise<number | null> {
-  const refKey = snapshot.identity.order.refKey1c ?? snapshot.data.order.refKey1c ?? null;
-  if (refKey) {
-    const byRef = await readOptionalId(tx, 'SELECT order_id AS id FROM orders WHERE ref_key_1c = $1::uuid AND delete_flag = false', [refKey]);
-    if (byRef) return byRef;
+  payloadHash: string,
+): Promise<ExistingSnapshotOrder | null> {
+  const source = snapshot.source.sourceInstanceId;
+  const sourceId = snapshot.identity.order.sourceId;
+  const mapped = await tx.query<ExistingOrderRow>(
+    `
+    SELECT o.order_id, o.order_name, m.payload_hash
+    FROM order_import_entity_map m
+    JOIN orders o ON o.order_id::text = m.local_entity_id
+    WHERE m.source_instance_id = $1
+      AND m.entity_type = $2
+      AND m.source_entity_id = $3
+      AND o.delete_flag = false
+    ORDER BY o.order_id
+    LIMIT 1
+    `,
+    [source, SNAPSHOT_ENTITY_TYPES.order, sourceId],
+  );
+  const mappedRow = mapped.rows[0];
+  if (mappedRow) {
+    return {
+      orderId: Number(mappedRow.order_id),
+      orderName: mappedRow.order_name,
+      status: mappedRow.payload_hash === payloadHash ? 'noop' : 'skipped',
+    };
   }
 
-  return readOptionalId(
-    tx,
-    'SELECT order_id AS id FROM orders WHERE client_id = $1 AND order_name = $2 AND delete_flag = false',
-    [clientId, snapshot.data.order.orderName],
+  const refKey = snapshot.identity.order.refKey1c ?? snapshot.data.order.refKey1c ?? null;
+  if (refKey) {
+    const byRef = await tx.query<ExistingOrderRow>(
+      `
+      SELECT order_id, order_name, NULL::text AS payload_hash
+      FROM orders
+      WHERE ref_key_1c = $1::uuid AND delete_flag = false
+      ORDER BY order_id
+      LIMIT 1
+      `,
+      [refKey],
+    );
+    const row = byRef.rows[0];
+    if (row) return { orderId: Number(row.order_id), orderName: row.order_name, status: 'skipped' };
+  }
+
+  const byName = await tx.query<ExistingOrderRow>(
+    `
+    SELECT order_id, order_name, NULL::text AS payload_hash
+    FROM orders
+    WHERE order_name = $1 AND delete_flag = false
+    ORDER BY order_id
+    LIMIT 1
+    `,
+    [snapshot.data.order.orderName],
   );
+  const row = byName.rows[0];
+  return row ? { orderId: Number(row.order_id), orderName: row.order_name, status: 'skipped' } : null;
 }
 
 async function getMap(
@@ -1974,7 +2831,7 @@ async function deleteMissingImportedProductionEvents(
 }
 
 async function startImportRun(
-  tx: TransactionClient,
+  tx: DatabaseClient,
   snapshot: OrderSnapshotDto,
   payloadHash: string,
   command: ImportOrderSnapshotCommand,
@@ -2012,21 +2869,32 @@ async function finishImportRun(
     SET status = $2, local_order_id = $3, summary_json = $4::jsonb, completed_at = now()
     WHERE import_run_id = $1
     `,
-    [runId, status === 'noop' ? 'noop' : 'completed', orderId, JSON.stringify(summary)],
+    [runId, isSkippedSnapshotStatus(status) ? 'noop' : 'completed', orderId, JSON.stringify(summary)],
   );
 }
 
-async function failImportRun(tx: TransactionClient, runId: string, error: unknown): Promise<void> {
+function snapshotImportAuditEvent(status: ImportStatus): string {
+  if (status === 'noop') return 'orders.snapshot_import.noop';
+  if (status === 'skipped') return 'orders.snapshot_import.skipped';
+  return 'orders.snapshot_import';
+}
+
+async function failImportRun(tx: DatabaseClient, runId: string, error: unknown): Promise<void> {
   await tx.query(
     `
     UPDATE order_import_runs
-    SET status = 'failed', error_code = $2, error_message = $3, completed_at = now()
+    SET status = 'failed',
+        error_code = $2,
+        error_message = $3,
+        summary_json = summary_json || $4::jsonb,
+        completed_at = now()
     WHERE import_run_id = $1
     `,
     [
       runId,
-      error instanceof ApiError ? error.code : 'ORDER_SNAPSHOT_IMPORT_FAILED',
-      error instanceof Error ? error.message : 'Order snapshot import failed',
+      snapshotErrorCode(error),
+      snapshotErrorMessage(error),
+      JSON.stringify(snapshotFailureSummary(error)),
     ],
   );
 }
@@ -2282,7 +3150,7 @@ async function tableExists(tx: TransactionClient, tableName: string): Promise<bo
 }
 
 async function readOptionalId(
-  tx: TransactionClient,
+  tx: DatabaseClient,
   sql: string,
   params: readonly unknown[],
 ): Promise<number | null> {
@@ -2445,5 +3313,11 @@ export {
   mapDetailSnapshot as _testOnlyMapDetailSnapshot,
   detailValues as _testOnlyDetailValues,
   nullifyMaterialIdForSheetEntries as _testOnlyNullifyMaterialIdForSheetEntries,
+  remapSnapshotReferencesForImport as _testOnlyRemapSnapshotReferencesForImport,
+  snapshotHeaderToSaveOrderDto as _testOnlySnapshotHeaderToSaveOrderDto,
   snapshotToSaveOrderDto as _testOnlySnapshotToSaveOrderDto,
+  snapshotBatchFailure as _testOnlySnapshotBatchFailure,
+  snapshotFailureSummary as _testOnlySnapshotFailureSummary,
+  findExistingOrderForSnapshotImport as _testOnlyFindExistingOrderForSnapshotImport,
+  summarizeSnapshotBatchResults as _testOnlySummarizeSnapshotBatchResults,
 };

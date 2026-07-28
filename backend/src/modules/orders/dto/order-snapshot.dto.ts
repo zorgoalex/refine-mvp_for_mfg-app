@@ -8,6 +8,56 @@ export const ORDER_SNAPSHOT_SUPPORTED_IMPORT_VERSIONS = [
   ORDER_SNAPSHOT_FORMAT_VERSION,
 ] as const;
 
+export const ORDER_SNAPSHOT_REFERENCE_ENTITY_TYPES = [
+  'material',
+  'sheetMaterialType',
+  'millingType',
+  'edgeType',
+  'film',
+  'filmType',
+  'unit',
+  'materialType',
+  'supplier',
+  'vendor',
+  'orderStatus',
+  'paymentStatus',
+  'paymentType',
+  'productionStatus',
+  'workshop',
+  'employee',
+  'resourceRequirementStatus',
+] as const;
+
+export type OrderSnapshotReferenceEntityType =
+  typeof ORDER_SNAPSHOT_REFERENCE_ENTITY_TYPES[number];
+
+export interface OrderSnapshotReferenceDto {
+  entityType: OrderSnapshotReferenceEntityType;
+  sourceId: string;
+  name: string;
+  code: string | null;
+  refKey1c: string | null;
+  data: Record<string, unknown>;
+}
+
+export type OrderSnapshotReferencesDto = Partial<
+  Record<OrderSnapshotReferenceEntityType, OrderSnapshotReferenceDto[]>
+>;
+
+export interface ImportOrderSnapshotReferenceMappingDto {
+  entityType: OrderSnapshotReferenceEntityType;
+  sourceId: string;
+  targetId: number;
+}
+
+export interface ImportOrderSnapshotUnmappedReferenceDto {
+  entityType: OrderSnapshotReferenceEntityType;
+  sourceId: string;
+  sourceName: string;
+  usageCount: number;
+  candidates: Array<{ id: number; name: string; code: string | null }>;
+}
+
 export interface OrderSnapshotDto {
   schema: typeof ORDER_SNAPSHOT_SCHEMA;
   formatVersion: typeof ORDER_SNAPSHOT_FORMAT_VERSION;
@@ -39,7 +89,7 @@ export interface OrderSnapshotDto {
     deadlineInstances: Record<string, unknown>[];
     deadlineEvents: Record<string, unknown>[];
   };
-  references: Record<string, unknown[]>;
+  references: OrderSnapshotReferencesDto;
 }
 
 export interface SnapshotIdentity {
@@ -123,11 +173,12 @@ export interface ProductionStatusEventSnapshotDto {
 
 export interface ImportOrderSnapshotRequestDto {
   snapshot?: OrderSnapshotDto;
+  referenceMappings?: ImportOrderSnapshotReferenceMappingDto[];
 }
 
 export interface ImportOrderSnapshotResponseDto {
   success: true;
-  status: 'created' | 'updated' | 'noop';
+  status: 'created' | 'updated' | 'noop' | 'skipped';
   orderId: number;
   orderName: string;
   payloadHash: string;
@@ -148,15 +199,17 @@ export interface ImportOrderSnapshotResponseDto {
 export interface ImportOrderSnapshotBatchRequestDto {
   fileName?: string;
   zipBase64: string;
+  referenceMappings?: ImportOrderSnapshotReferenceMappingDto[];
 }
 
 export interface ImportOrderSnapshotBatchResponseDto {
   success: true;
   total: number;
   imported: number;
+  skipped: number;
   failed: number;
   results: Array<
     | ({ fileName: string } & ImportOrderSnapshotResponseDto)
-    | { fileName: string; success: false; errorCode: string; message: string }
+    | { fileName: string; success: false; errorCode: string; message: string; details?: Record<string, unknown> }
   >;
 }

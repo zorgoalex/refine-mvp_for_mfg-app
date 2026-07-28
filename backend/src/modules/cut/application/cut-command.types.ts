@@ -5,6 +5,7 @@ import type {
   CreateCutJobRequestDto,
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
+  CutFilmOptionDto,
   CutJobDto,
   CutResultDto,
   CutResultSummaryDto,
@@ -104,6 +105,12 @@ export interface ListCutJobsQuery {
 export interface EligibleDetailsQuery {
   currentUser: CurrentUser;
   criteria: CutSelectionCriteriaDto;
+  /**
+   * Preview-before-create mode: show every detail matching explicit criteria
+   * regardless of production status, while still classifying wrong statuses as
+   * ineligible. Add/reserve paths keep the ready-status filter.
+   */
+  includeAllStatuses?: boolean;
   requestId?: string;
 }
 
@@ -231,6 +238,12 @@ export interface ListSheetTypesForCutQuery {
   requestId?: string;
 }
 
+export interface ListFilmOptionsForCutQuery {
+  currentUser: CurrentUser;
+  criteria: CutSelectionCriteriaDto;
+  requestId?: string;
+}
+
 export interface SetCutJobProfileCommand {
   currentUser: CurrentUser;
   cutJobId: number;
@@ -280,6 +293,14 @@ export interface SetCutJobPdfTemplateCommand {
   requestId?: string;
 }
 
+export interface SetCutJobNameCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  name: string;
+  version: number;
+  requestId?: string;
+}
+
 export interface SetCutGroupPdfTemplateCommand {
   currentUser: CurrentUser;
   cutJobId: number;
@@ -311,12 +332,14 @@ export interface CutRepositoryPort {
   setCombineFilms(command: SetCutJobCombineFilmsCommand): Promise<CutJobDto>;
   setSplitByMaterial(command: SetCutJobSplitByMaterialCommand): Promise<CutJobDto>;
   setJobPdfTemplate(command: SetCutJobPdfTemplateCommand): Promise<CutJobDto>;
+  setName(command: SetCutJobNameCommand): Promise<CutJobDto>;
   setGroupPdfTemplate(command: SetCutGroupPdfTemplateCommand): Promise<CutJobDto>;
   getJob(query: GetCutJobQuery): Promise<CutJobDto>;
   listResults(query: ListCutResultsQuery): Promise<CutResultSummaryDto[]>;
   getResult(query: GetCutResultQuery): Promise<CutResultDto>;
   listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]>;
   listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto>;
+  listFilmOptionsForCut(query: ListFilmOptionsForCutQuery): Promise<CutFilmOptionDto[]>;
   listDetailPlacements(query: DetailPlacementsQuery): Promise<CutDetailPlacementsResponseDto>;
   listDetailLastReady(query: DetailLastReadyQuery): Promise<CutDetailLastReadyResponseDto>;
   renderSheetPng(query: RenderSheetPngQuery): Promise<Buffer>;

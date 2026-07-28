@@ -4,6 +4,13 @@ export interface CutSelectionCriteria {
   orderIds?: number[];
   filmIds?: number[];
   productionStatusIds?: number[];
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export interface CutFilmOption {
+  filmId: number;
+  name: string;
 }
 
 export interface CreateCutJobRequest {
@@ -241,6 +248,9 @@ export type CutIneligibleReason = 'deleted' | 'wrong_status' | 'not_cuttable' | 
 export interface CutJobRef {
   cutJobId: number;
   name: string;
+  paramProfileId: number | null;
+  profileName: string | null;
+  profileIsActive: boolean | null;
 }
 
 export interface EligibleDetailDto {
@@ -248,15 +258,35 @@ export interface EligibleDetailDto {
   orderId: number;
   /** orders.order_name — пользователи мыслят названиями, не ID. */
   orderName?: string | null;
+  clientName: string | null;
+  detailNumber: number | null;
+  detailName: string | null;
+  height: number | null;
+  width: number | null;
   quantity: number;
+  area: number | null;
   /** NULL post-034 (Variant B: material_id sunsetted on order_details). */
   materialId: number | null;
   sheetMaterialTypeId: number | null;
+  materialName: string | null;
+  millingTypeName: string | null;
+  edgeTypeName: string | null;
   filmId: number | null;
+  filmName: string | null;
+  productionStatusName: string | null;
+  priority: number | null;
+  jointOrderId: number | null;
+  note: string | null;
+  linkCuttingFile: string | null;
+  linkCuttingImageFile: string | null;
+  linkCadFile: string | null;
+  linkPdfFile: string | null;
   eligible: boolean;
   ineligibleReason: CutIneligibleReason | null;
   /** active (non-archived) cut jobs this detail is already placed in */
   activeJobs: CutJobRef[];
+  /** archived cut jobs this detail is already placed in */
+  archivedJobs: CutJobRef[];
   /** true when this detail also exists in at least one archived cut job */
   inArchivedJob: boolean;
 }

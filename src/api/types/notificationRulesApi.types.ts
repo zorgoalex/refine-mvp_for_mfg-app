@@ -1,4 +1,5 @@
 export type NotificationLevel = 'info' | 'warning' | 'error';
+export type NotificationChannel = 'in_app' | 'telegram';
 export type DeadlineNotificationEntityType = 'order' | 'order_stage';
 
 export type RecipientResolverKind =
@@ -30,6 +31,7 @@ export interface NotificationRuleDto {
   isEnabled: boolean;
   priority: number;
   level: NotificationLevel;
+  channels: NotificationChannel[];
   conditions: NotificationRuleConditions;
   recipients: NotificationRuleRecipients;
   titleTemplate: string | null;
@@ -54,6 +56,7 @@ export interface CreateNotificationRuleRequest {
   level: NotificationLevel;
   priority: number;
   isEnabled: boolean;
+  channels: NotificationChannel[];
   conditions: NotificationRuleConditions;
   recipients: NotificationRuleRecipients;
   titleTemplate?: string | null;
@@ -65,6 +68,7 @@ export interface UpdateNotificationRuleRequest {
   level?: NotificationLevel;
   priority?: number;
   isEnabled?: boolean;
+  channels?: NotificationChannel[];
   conditions?: NotificationRuleConditions;
   recipients?: NotificationRuleRecipients;
   titleTemplate?: string | null;

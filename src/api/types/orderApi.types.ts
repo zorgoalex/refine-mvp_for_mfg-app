@@ -118,9 +118,46 @@ export interface ExportOrderResponse {
   externalId?: string | null;
 }
 
+export type OrderSnapshotReferenceEntityType =
+  | 'material'
+  | 'sheetMaterialType'
+  | 'millingType'
+  | 'edgeType'
+  | 'film'
+  | 'filmType'
+  | 'unit'
+  | 'materialType'
+  | 'supplier'
+  | 'vendor'
+  | 'orderStatus'
+  | 'paymentStatus'
+  | 'paymentType'
+  | 'productionStatus'
+  | 'workshop'
+  | 'employee'
+  | 'resourceRequirementStatus';
+
+export interface ImportOrderSnapshotReferenceMapping {
+  entityType: OrderSnapshotReferenceEntityType;
+  sourceId: string;
+  targetId: number;
+}
+
+export interface ImportOrderSnapshotUnmappedReference {
+  entityType: OrderSnapshotReferenceEntityType;
+  sourceId: string;
+  sourceName: string;
+  usageCount: number;
+  candidates: Array<{ id: number; name: string; code: string | null }>;
+}
+
+export interface ImportOrderSnapshotFailureDetails extends Record<string, unknown> {
+  unmappedReferences?: ImportOrderSnapshotUnmappedReference[];
+}
+
 export interface ImportOrderSnapshotResponse {
   success: true;
-  status: 'created' | 'updated' | 'noop';
+  status: 'created' | 'updated' | 'noop' | 'skipped';
   orderId: number;
   orderName: string;
   payloadHash: string;
@@ -142,10 +179,11 @@ export interface ImportOrderSnapshotBatchResponse {
   success: true;
   total: number;
   imported: number;
+  skipped: number;
   failed: number;
   results: Array<
     | ({ fileName: string } & ImportOrderSnapshotResponse)
-    | { fileName: string; success: false; errorCode: string; message: string }
+    | { fileName: string; success: false; errorCode: string; message: string; details?: ImportOrderSnapshotFailureDetails }
   >;
 }
 

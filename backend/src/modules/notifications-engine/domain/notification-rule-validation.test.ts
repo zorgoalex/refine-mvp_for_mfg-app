@@ -22,6 +22,26 @@ describe('validateNotificationRuleInput', () => {
     expect(validateNotificationRuleInput({ ...base, recipients: {} }, { knownRoleCodes: [] }))
       .toEqual({ ok: false, code: 'EMPTY_RECIPIENTS' });
   });
+  it('accepts Telegram and rejects empty, duplicate, or unsupported channels', () => {
+    expect(
+      validateNotificationRuleInput({ ...base, channels: ['telegram'] }, { knownRoleCodes: [] }),
+    ).toEqual({ ok: true });
+    expect(
+      validateNotificationRuleInput({ ...base, channels: [] }, { knownRoleCodes: [] }),
+    ).toEqual({ ok: false, code: 'EMPTY_CHANNELS' });
+    expect(
+      validateNotificationRuleInput(
+        { ...base, channels: ['in_app', 'in_app'] },
+        { knownRoleCodes: [] },
+      ),
+    ).toEqual({ ok: false, code: 'DUPLICATE_CHANNEL' });
+    expect(
+      validateNotificationRuleInput(
+        { ...base, channels: ['email' as never] },
+        { knownRoleCodes: [] },
+      ),
+    ).toEqual({ ok: false, code: 'UNSUPPORTED_CHANNEL', detail: 'email' });
+  });
   it('rejects an unsupported resolver', () => {
     expect(validateNotificationRuleInput({ ...base, recipients: { resolvers: ['nonexistent' as never] } }, { knownRoleCodes: [] }))
       .toEqual({ ok: false, code: 'UNSUPPORTED_RESOLVER', detail: 'nonexistent' });

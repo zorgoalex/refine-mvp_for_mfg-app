@@ -147,6 +147,7 @@ function fakeSnapshots(): OrderSnapshotPort {
       success: true,
       total: 0,
       imported: 0,
+      skipped: 0,
       failed: 0,
       results: [],
     })),

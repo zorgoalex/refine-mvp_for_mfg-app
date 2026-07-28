@@ -16,4 +16,12 @@ describe('buildNotificationDeliveryKey', () => {
     expect(buildNotificationDeliveryKey(base)).not.toBe(buildNotificationDeliveryKey({ ...base, ruleId: 'rule-4' }));
     expect(buildNotificationDeliveryKey(base)).not.toBe(buildNotificationDeliveryKey({ ...base, outboxEventId: 'evt-4' }));
   });
+
+  it('keeps legacy in-app keys and namespaces external channels', () => {
+    const base = { outboxEventId: 'evt-5', ruleId: 'rule-5', userId: 3 };
+    expect(buildNotificationDeliveryKey({ ...base, channel: 'in_app' }))
+      .toBe(buildNotificationDeliveryKey(base));
+    expect(buildNotificationDeliveryKey({ ...base, channel: 'telegram' }))
+      .toBe('notif-rule:evt-5:rule-5:3:telegram');
+  });
 });

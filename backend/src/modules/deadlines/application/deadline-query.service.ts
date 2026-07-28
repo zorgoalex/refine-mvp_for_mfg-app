@@ -21,6 +21,7 @@ import type {
   PreviewOrderDeadlineActionRulesCommand,
 } from './deadline.types';
 import {
+  buildDeadlineActionRuleDeadlineContext,
   evaluateDeadlineActionRules,
   filterActionRulesForFixture,
 } from './deadline-action-evaluator';
@@ -173,6 +174,8 @@ export class DeadlineQueryService {
       deadlineId: command.dto.deadlineId ?? null,
       targetType: 'order',
       targetId: String(command.orderId),
+      evaluatedAt: new Date().toISOString(),
+      deadlineContext: buildDeadlineActionRuleDeadlineContext(deadline),
       orderContext,
       orderContextUnavailable: orderContext === null,
       isCurrentDeadlineEvent,

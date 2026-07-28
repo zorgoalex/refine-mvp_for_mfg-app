@@ -231,6 +231,7 @@ describe('deadlinesApi', () => {
       hasStoredConfiguration: false,
       version: 1,
       reserveDays: 0,
+      transitionsOrder: {},
       totalProductionDays: null,
       plannedOrderDays: null,
       updatedAt: null,
@@ -243,7 +244,13 @@ describe('deadlinesApi', () => {
       expectedVersion: 1,
       reserveDays: 2,
       reason: 'Новый производственный цикл',
-      stages: [{ productionStatusId: 10, durationDays: 3 }],
+      stages: [
+        {
+          productionStatusId: 10,
+          durationDays: 3,
+          parallelWithPrevious: false,
+        },
+      ],
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -260,7 +267,13 @@ describe('deadlinesApi', () => {
           expectedVersion: 1,
           reserveDays: 2,
           reason: 'Новый производственный цикл',
-          stages: [{ productionStatusId: 10, durationDays: 3 }],
+          stages: [
+            {
+              productionStatusId: 10,
+              durationDays: 3,
+              parallelWithPrevious: false,
+            },
+          ],
         }),
       }),
     );

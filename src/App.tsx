@@ -11,6 +11,7 @@ import "./styles/app.css";
 import "./styles/mobile.css";
 import { createNotificationProvider } from "./providers/notificationProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { WarningNotificationBridge } from "./components/WarningNotificationBridge";
 import { LoginPage } from "./pages/login";
 import { WorkosCallbackPage } from "./pages/login/WorkosCallback";
 import { dataProvider } from "./utils/dataProvider";
@@ -242,6 +243,7 @@ const ThemedApp = () => {
             tooltip={{ mouseEnterDelay: 1 }}
             table={{ showSorterTooltip: { mouseEnterDelay: 1 } }}
           >
+            <WarningNotificationBridge />
             <Refine
               dataProvider={dataProvider(API_URL)}
               notificationProvider={createNotificationProvider()}

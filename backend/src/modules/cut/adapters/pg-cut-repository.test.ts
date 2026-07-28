@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { FreecutClient } from './freecut-client';
@@ -7,12 +8,15 @@ import type { CutConfigPort } from '../application/cut-config';
 import { StaticCutConfig } from '../application/cut-config';
 import {
   PgCutRepository,
+  nameChangedOutboxKey,
   planCutResultAllocation,
   profileChangedOutboxKey,
   resolvePdfTemplateSelection,
   routingContractForCalcBasis,
   VACUUM_ROUTING_CONTRACT_VERSION,
 } from './pg-cut-repository';
+
+const repositorySource = readFileSync(new URL('./pg-cut-repository.ts', import.meta.url), 'utf8');
 
 describe('cut result number allocation', () => {
   const currentManual = {
@@ -143,6 +147,16 @@ describe('resolvePdfTemplateSelection', () => {
   });
 });
 
+describe('cut PDF CNC enrichment contract', () => {
+  it('loads deterministic latest-day matched CNC machine files by order detail', () => {
+    expect(repositorySource).toContain('FROM cnc_telegram_packet_items cti');
+    expect(repositorySource).toContain('cti.match_detail_id = od.detail_id');
+    expect(repositorySource).toContain("cti.match_status = 'matched'");
+    expect(repositorySource).toContain('max(p2.workday) AS latest_workday');
+    expect(repositorySource).toContain("COALESCE(NULLIF(trim(p.program_name), ''), p.external_packet_key)");
+  });
+});
+
 interface FakeRow {
   [key: string]: unknown;
 }
@@ -160,6 +174,10 @@ interface FakeDbOptions {
   reserveConflict?: boolean;
   /** rows for listEligibleDetails */
   eligibleRows?: FakeRow[];
+  /** rows for per-detail cut-job placement lookup */
+  placementRows?: FakeRow[];
+  /** rows for listFilmOptionsForCut */
+  filmOptionRows?: FakeRow[];
   /** whether the cut_param_profiles SELECT returns a row (profile is active) */
   profileActive?: boolean;
   /** expired calculate commands returned to the reconciliation worker */
@@ -297,6 +315,33 @@ function createDatabase(options: FakeDbOptions = {}) {
 
     if (sql.startsWith('SELECT cji.cut_job_item_id')) {
       return { rows: options.calcItems ?? [], rowCount: (options.calcItems ?? []).length };
+    }
+
+    if (sql.startsWith('SELECT cji.order_detail_id, cji.order_id,')) {
+      const rows = (options.calcItems ?? []).map((item) => ({
+        order_detail_id: item.order_detail_id,
+        order_id: item.order_id,
+        detail_fields: item.detail_fields ?? null,
+        detail_number: item.detail_number ?? null,
+        width: item.width_mm,
+        height: item.height_mm,
+        sheet_material_type_id: item.sheet_material_type_id,
+        material_id: item.material_id ?? null,
+        doweling: item.doweling ?? null,
+        material_name: item.material_name ?? null,
+        thickness_mm: item.thickness_mm ?? null,
+        film_name: item.film_name ?? null,
+        milling_type_name: item.milling_type_name ?? null,
+        edge_type_name: item.edge_type_name ?? null,
+        production_status_name: item.production_status_name ?? null,
+        machine_files: item.machine_files ?? null,
+        order_name: item.order_name ?? null,
+        order_date: item.order_date ?? null,
+        completion_date: item.completion_date ?? null,
+        planned_completion_date: item.planned_completion_date ?? null,
+        client_name: item.client_name ?? null,
+      }));
+      return { rows, rowCount: rows.length };
     }
 
     if (sql.startsWith('SELECT production_status_id FROM production_statuses')) {
@@ -450,6 +495,14 @@ function createDatabase(options: FakeDbOptions = {}) {
     }
     if (sql.startsWith('SELECT DISTINCT ON (r.result_no)') || sql.startsWith('SELECT r.cut_result_id')) {
       return storedResult ? { rows: [{ ...storedResult, computed_digest: storedResult.snapshot_digest, is_current: currentResultId === 900 }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+
+    if (sql.startsWith('SELECT DISTINCT od.film_id')) {
+      return { rows: options.filmOptionRows ?? [], rowCount: (options.filmOptionRows ?? []).length };
+    }
+
+    if (sql.startsWith('SELECT cji.order_detail_id, cj.cut_job_id')) {
+      return { rows: options.placementRows ?? [], rowCount: (options.placementRows ?? []).length };
     }
 
     if (sql.startsWith('SELECT od.detail_id')) {
@@ -680,6 +733,66 @@ describe('PgCutRepository', () => {
     expect(snapshot.unplaced).toEqual([{ itemId: 'det-1', instance: 2, reason: 'no_space' }]);
     expect(snapshot.groups[0]?.sheets[0]?.renderSnapshot?.contractVersion).toBe('cut_sheet_render_v1');
     expect(Object.keys(snapshot.groups[0]?.sheets[0]?.renderSnapshot?.views ?? {})).toHaveLength(12);
+  });
+
+  it('calculate freezes PDF detail rows with doweling and merged machine files', async () => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },
+      calcItems: [{
+        cut_job_item_id: 501,
+        order_detail_id: 1,
+        order_id: 9,
+        qty: 2,
+        width_mm: 600,
+        height_mm: 400,
+        detail_number: 12,
+        sheet_material_type_id: 9,
+        film_id: null,
+        film_texture: null,
+        smt_width_mm: 2800,
+        smt_height_mm: 2070,
+        doweling: true,
+        machine_files: ['CNC#1_11380.TXT', 'CNC#2_11380.TXT'],
+        order_name: '11380',
+      }],
+    });
+    const repo = new PgCutRepository(db.service, echoFreecut());
+
+    await repo.calculate({
+      currentUser: currentUser(),
+      cutJobId: 42,
+      version: 0,
+      commandId: '55555555-5555-4555-8555-555555555555',
+      requestId: 'r-machine-files',
+    });
+
+    const resultInsert = db.queries.find((query) => normalize(query.text).startsWith('INSERT INTO cut_result ('));
+    const snapshot = JSON.parse(String(resultInsert?.params[9])) as {
+      groups: Array<{
+        sheets: Array<{
+          renderSnapshot?: {
+            pdfMeta?: { machineFiles?: string[] };
+            pdfDetailRows?: Array<{
+              quantity: number;
+              machineFiles?: string[];
+              fields?: Record<string, unknown>;
+            }>;
+          };
+        }>;
+      }>;
+    };
+    const renderSnapshot = snapshot.groups[0]?.sheets[0]?.renderSnapshot;
+    const row = renderSnapshot?.pdfDetailRows?.[0];
+
+    expect(renderSnapshot?.pdfMeta?.machineFiles).toEqual(['CNC#1_11380.TXT', 'CNC#2_11380.TXT']);
+    expect(row?.quantity).toBe(2);
+    expect(row?.machineFiles).toEqual(['CNC#1_11380.TXT', 'CNC#2_11380.TXT']);
+    expect(row?.fields).toMatchObject({
+      doweling: true,
+      sheet_quantity: 2,
+      machine_file: 'CNC#1_11380.TXT, CNC#2_11380.TXT',
+      machine_files: 'CNC#1_11380.TXT, CNC#2_11380.TXT',
+    });
   });
 
   it('reconciles expired calculate commands and only fails the job at the claimed version', async () => {
@@ -1114,11 +1227,57 @@ describe('PgCutRepository', () => {
     expect(result.noSheetSpecCount).toBe(1);
   });
 
-  it('listEligibleDetails carries the order name (users think in names, not ids)', async () => {
+  it('listEligibleDetails defaults to ready statuses unless preview asks for all statuses', async () => {
     const db = createDatabase({
       readyStatusIds: [1],
       eligibleRows: [
-        { detail_id: 7, order_id: 9, order_name: 'Кухня Ивановых', quantity: 1, sheet_material_type_id: 9, film_id: null, production_status_id: 1, delete_flag: false },
+        { detail_id: 1, order_id: 9, quantity: 1, sheet_material_type_id: 9, film_id: null, production_status_id: 1, delete_flag: false },
+        { detail_id: 2, order_id: 9, quantity: 1, sheet_material_type_id: 9, film_id: null, production_status_id: 99, delete_flag: false },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    await repo.listEligibleDetails({ currentUser: currentUser(), criteria: { orderIds: [9] }, requestId: 'r-ready-only' });
+    const readyOnlyQuery = db.queries.find((q) => normalize(q.text).includes('FROM order_details od'));
+    expect(normalize(readyOnlyQuery?.text ?? '')).toContain('od.production_status_id = ANY');
+
+    db.queries.length = 0;
+    const preview = await repo.listEligibleDetails({
+      currentUser: currentUser(),
+      criteria: { orderIds: [9] },
+      includeAllStatuses: true,
+      requestId: 'r-all-statuses',
+    });
+
+    const previewQuery = db.queries.find((q) => normalize(q.text).includes('FROM order_details od'));
+    expect(normalize(previewQuery?.text ?? '')).not.toContain('od.production_status_id = ANY');
+    expect(preview.details.find((d) => d.orderDetailId === 1)?.eligible).toBe(true);
+    expect(preview.details.find((d) => d.orderDetailId === 2)?.ineligibleReason).toBe('wrong_status');
+  });
+
+  it('listEligibleDetails carries order/client and order-detail fields for preview', async () => {
+    const db = createDatabase({
+      readyStatusIds: [1],
+      eligibleRows: [
+        {
+          detail_id: 7,
+          order_id: 9,
+          order_name: 'Кухня Ивановых',
+          client_name: 'Иванов',
+          detail_number: 12,
+          detail_name: 'Фасад',
+          width: 500,
+          height: 300,
+          quantity: 1,
+          area: '0.15',
+          material_name: 'МДФ 18',
+          film_id: 5,
+          film_name: 'Белый матовый',
+          production_status_name: 'Готов к раскрою',
+          sheet_material_type_id: 9,
+          production_status_id: 1,
+          delete_flag: false,
+        },
       ],
     });
     const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
@@ -1126,10 +1285,24 @@ describe('PgCutRepository', () => {
     const result = await repo.listEligibleDetails({ currentUser: currentUser(), criteria: { orderIds: [9] }, requestId: 'r-name' });
 
     expect(result.details[0].orderName).toBe('Кухня Ивановых');
+    expect(result.details[0]).toMatchObject({
+      clientName: 'Иванов',
+      detailNumber: 12,
+      detailName: 'Фасад',
+      width: 500,
+      height: 300,
+      area: 0.15,
+      materialName: 'МДФ 18',
+      filmId: 5,
+      filmName: 'Белый матовый',
+      productionStatusName: 'Готов к раскрою',
+    });
     const eligibleSql = db.queries
       .map((query) => query.text.replace(/\s+/g, ' ').trim())
       .find((sql) => sql.includes('FROM order_details od'));
     expect(eligibleSql).toContain('JOIN orders');
+    expect(eligibleSql).toContain('LEFT JOIN clients');
+    expect(eligibleSql).toContain('LEFT JOIN films');
     expect(eligibleSql).toContain('order_name');
   });
 
@@ -1148,6 +1321,49 @@ describe('PgCutRepository', () => {
 
     expect(result.details.map((d) => d.orderDetailId)).toContain(5);
     expect(result.details.find((d) => d.orderDetailId === 5)?.eligible).toBe(true);
+  });
+
+  it('listEligibleDetails includes existing cut jobs with their profile for each detail', async () => {
+    const db = createDatabase({
+      readyStatusIds: [1],
+      eligibleRows: [
+        { detail_id: 5, order_id: 11, quantity: 1, sheet_material_type_id: 2, film_id: null, production_status_id: 1, delete_flag: false },
+      ],
+      placementRows: [
+        {
+          order_detail_id: 5,
+          cut_job_id: 42,
+          name: 'Раскрой 42',
+          status: 'ready',
+          is_active: true,
+          param_profile_id: 7,
+          profile_name: 'Вакуум Авто',
+          profile_is_active: true,
+        },
+        {
+          order_detail_id: 5,
+          cut_job_id: 41,
+          name: 'Старый раскрой',
+          status: 'archived',
+          is_active: true,
+          param_profile_id: null,
+          profile_name: null,
+          profile_is_active: null,
+        },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    const result = await repo.listEligibleDetails({ currentUser: currentUser(), criteria: { orderIds: [11] }, requestId: 'r-placement-profile' });
+    const detail = result.details.find((d) => d.orderDetailId === 5);
+
+    expect(detail?.activeJobs).toEqual([
+      { cutJobId: 42, name: 'Раскрой 42', paramProfileId: 7, profileName: 'Вакуум Авто', profileIsActive: true },
+    ]);
+    expect(detail?.archivedJobs).toEqual([
+      { cutJobId: 41, name: 'Старый раскрой', paramProfileId: null, profileName: null, profileIsActive: null },
+    ]);
+    expect(detail?.inArchivedJob).toBe(true);
   });
 
   it('Variant B: filters eligible details by sheetMaterialTypeIds (replaces materialIds filter)', async () => {
@@ -1173,12 +1389,71 @@ describe('PgCutRepository', () => {
     expect(sheetFilterQuery).toBeDefined();
     expect(result.details.every((d) => d.sheetMaterialTypeId === 2)).toBe(true);
   });
+
+  it('filters eligible details by inclusive order date range', async () => {
+    const db = createDatabase({
+      readyStatusIds: [1],
+      eligibleRows: [
+        { detail_id: 12, order_id: 11, order_name: '2561', quantity: 1, sheet_material_type_id: 2, film_id: null, production_status_id: 1, delete_flag: false },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    await repo.listEligibleDetails({
+      currentUser: currentUser(),
+      criteria: { dateFrom: '2026-07-16', dateTo: '2026-07-26' },
+      requestId: 'r-date',
+    });
+
+    const eligibleQuery = db.queries.find((q) => normalize(q.text).includes('FROM order_details od'));
+    expect(normalize(eligibleQuery?.text ?? '')).toContain('ord.order_date >= $');
+    expect(normalize(eligibleQuery?.text ?? '')).toContain('ord.order_date <= $');
+    expect(eligibleQuery?.params).toContain('2026-07-16');
+    expect(eligibleQuery?.params).toContain('2026-07-26');
+  });
+
+  it('listFilmOptionsForCut returns distinct film options filtered by order date range', async () => {
+    const db = createDatabase({
+      filmOptionRows: [
+        { film_id: '7', film_name: 'Белый матовый' },
+        { film_id: '8', film_name: 'Дуб натуральный' },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    const result = await repo.listFilmOptionsForCut({
+      currentUser: currentUser(),
+      criteria: { dateFrom: '2026-07-01', dateTo: '2026-07-31', sheetMaterialTypeIds: [3] },
+      requestId: 'r-films',
+    });
+
+    expect(result).toEqual([
+      { filmId: 7, name: 'Белый матовый' },
+      { filmId: 8, name: 'Дуб натуральный' },
+    ]);
+    const filmQuery = db.queries.find((q) => normalize(q.text).includes('SELECT DISTINCT od.film_id'));
+    expect(normalize(filmQuery?.text ?? '')).toContain('JOIN orders');
+    expect(normalize(filmQuery?.text ?? '')).toContain('JOIN films');
+    expect(normalize(filmQuery?.text ?? '')).toContain('ord.order_date >= $');
+    expect(normalize(filmQuery?.text ?? '')).toContain('ord.order_date <= $');
+    expect(normalize(filmQuery?.text ?? '')).toContain('od.sheet_material_type_id = ANY');
+    expect(normalize(filmQuery?.text ?? '')).not.toContain('od.production_status_id = ANY');
+    expect(filmQuery?.params).toContain('2026-07-01');
+    expect(filmQuery?.params).toContain('2026-07-31');
+  });
 });
 
 describe('profileChangedOutboxKey', () => {
   it('is stable per (job, requestId), falls back to version', () => {
     expect(profileChangedOutboxKey(7, 'req-9', 3)).toBe('cut_job.profile_changed:7:req-9');
     expect(profileChangedOutboxKey(7, undefined, 3)).toBe('cut_job.profile_changed:7:v3');
+  });
+});
+
+describe('nameChangedOutboxKey', () => {
+  it('is stable per (job, requestId), falls back to version', () => {
+    expect(nameChangedOutboxKey(7, 'req-9', 3)).toBe('cut_job.name_changed:7:req-9');
+    expect(nameChangedOutboxKey(7, undefined, 3)).toBe('cut_job.name_changed:7:v3');
   });
 });
 

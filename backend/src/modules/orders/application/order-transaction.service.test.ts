@@ -135,6 +135,7 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
     orderName?: string;
   }> = [];
   statusAutomationEvents: StatusAutomationEvent[] = [];
+  onEvaluateStatusAutomation?: (event: StatusAutomationEvent, state: FakeState) => void | Promise<void>;
   readonly transactionClient = { query: async () => ({ rows: [], rowCount: 0 }), raw: {} } as TransactionClient;
 
   async runInTransaction<T>(handler: (unitOfWork: OrderWriteUnitOfWork) => Promise<T>): Promise<T> {
@@ -661,6 +662,7 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
   async evaluateStatusAutomation(event: StatusAutomationEvent): Promise<void> {
     this.call('evaluateStatusAutomation');
     this.owner.statusAutomationEvents.push(event);
+    await this.owner.onEvaluateStatusAutomation?.(event, this.state);
   }
 
   async writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string> {
@@ -904,11 +906,19 @@ describe('OrderTransactionService', () => {
         async getConfiguredSchedule() {
           return {
             version: 4,
-            plannedOrderDays: 9,
-            stageDeadlineDaysByProductionStatusId: new Map([
-              [10, 2],
-              [20, 7],
-            ]),
+            reserveDays: 2,
+            stages: [
+              {
+                productionStatusId: 10,
+                durationDays: 2,
+                parallelWithPrevious: false,
+              },
+              {
+                productionStatusId: 20,
+                durationDays: 5,
+                parallelWithPrevious: false,
+              },
+            ],
           };
         },
       },
@@ -949,8 +959,14 @@ describe('OrderTransactionService', () => {
         async getConfiguredSchedule() {
           return {
             version: 4,
-            plannedOrderDays: 9,
-            stageDeadlineDaysByProductionStatusId: new Map([[10, 2]]),
+            reserveDays: 7,
+            stages: [
+              {
+                productionStatusId: 10,
+                durationDays: 2,
+                parallelWithPrevious: false,
+              },
+            ],
           };
         },
       },
@@ -975,6 +991,128 @@ describe('OrderTransactionService', () => {
     expect(result.workshops[0]?.plannedCompletionDate).toBe('2026-05-20');
   });
 
+  it('calculates dates only from stages present in the order', async () => {
+    const transactions = new FakeOrderTransactions();
+    const result = await new OrderTransactionService({
+      transactions,
+      defaultSchedule: {
+        async getConfiguredSchedule() {
+          return {
+            version: 5,
+            reserveDays: 1,
+            stages: [
+              {
+                productionStatusId: 10,
+                durationDays: 3,
+                parallelWithPrevious: false,
+              },
+              {
+                productionStatusId: 20,
+                durationDays: 4,
+                parallelWithPrevious: false,
+              },
+              {
+                productionStatusId: 30,
+                durationDays: 8,
+                parallelWithPrevious: false,
+              },
+            ],
+          };
+        },
+      },
+    }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({
+        workshops: [{ workshopId: 2, productionStatusId: 20 }],
+      }),
+    });
+
+    expect(result.workshops[0]?.plannedCompletionDate).toBe('2026-05-04');
+    expect(result.header.plannedCompletionDate).toBe('2026-05-05');
+  });
+
+  it('uses the transition-graph critical path instead of visual stage order', async () => {
+    const transactions = new FakeOrderTransactions();
+    const result = await new OrderTransactionService({
+      transactions,
+      defaultSchedule: {
+        async getConfiguredSchedule() {
+          return {
+            version: 6,
+            reserveDays: 2,
+            transitionsOrder: {
+              drawn: ['packed'],
+              cut: ['packed'],
+            },
+            stages: [
+              {
+                productionStatusId: 30,
+                productionStatusCode: 'packed',
+                durationDays: 1,
+                parallelWithPrevious: false,
+              },
+              {
+                productionStatusId: 10,
+                productionStatusCode: 'drawn',
+                durationDays: 2,
+                parallelWithPrevious: false,
+              },
+              {
+                productionStatusId: 20,
+                productionStatusCode: 'cut',
+                durationDays: 5,
+                parallelWithPrevious: false,
+              },
+            ],
+          };
+        },
+      },
+    }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({
+        workshops: [
+          { workshopId: 1, productionStatusId: 10 },
+          { workshopId: 2, productionStatusId: 20 },
+          { workshopId: 3, productionStatusId: 30 },
+        ],
+      }),
+    });
+
+    expect(result.workshops.map((workshop) => workshop.plannedCompletionDate)).toEqual([
+      '2026-05-02',
+      '2026-05-05',
+      '2026-05-06',
+    ]);
+    expect(result.header.plannedCompletionDate).toBe('2026-05-08');
+  });
+
+  it('does not set an automatic order date when no production stages apply', async () => {
+    const transactions = new FakeOrderTransactions();
+    const result = await new OrderTransactionService({
+      transactions,
+      defaultSchedule: {
+        async getConfiguredSchedule() {
+          return {
+            version: 7,
+            reserveDays: 2,
+            stages: [
+              {
+                productionStatusId: 10,
+                durationDays: 2,
+                parallelWithPrevious: false,
+              },
+            ],
+          };
+        },
+      },
+    }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({ workshops: [] }),
+    });
+
+    expect(result.header.plannedCompletionDate).toBeNull();
+  });
+
   it.each([
     {
       name: 'non-date planned completion',
@@ -992,8 +1130,8 @@ describe('OrderTransactionService', () => {
     const transactions = new FakeOrderTransactions();
     const getConfiguredSchedule = vi.fn(async () => ({
       version: 4,
-      plannedOrderDays: 9,
-      stageDeadlineDaysByProductionStatusId: new Map<number, number>(),
+      reserveDays: 0,
+      stages: [],
     }));
     const dto = createSaveDto();
     mutate(dto);
@@ -1068,6 +1206,7 @@ describe('OrderTransactionService', () => {
       'loadOrderHeaderSnapshot',
       'writeAuditEvent',
       'evaluateStatusAutomation',
+      'evaluateStatusAutomation',
       'readOrder',
       'commit',
     ]);
@@ -1090,6 +1229,15 @@ describe('OrderTransactionService', () => {
         requestId: 'orders-create',
         sourceIdempotencyKey: 'order-create-key-1',
       }),
+      expect.objectContaining({
+        eventType: 'payment.created',
+        origin: 'user',
+        orderId: 100,
+        actor: currentUser('manager'),
+        requestId: 'orders-create',
+        sourceIdempotencyKey: 'order-create-key-1',
+        paymentsCountAfter: 1,
+      }),
     ]);
     expect(transactions.calls.indexOf('evaluateStatusAutomation')).toBe(
       transactions.calls.indexOf('writeAuditEvent') + 1,
@@ -1108,6 +1256,12 @@ describe('OrderTransactionService', () => {
       eventType: 'order.created',
       orderId: 100,
       requestId: 'orders-create-100',
+    });
+    expect(transactions.statusAutomationEvents[1]).toMatchObject({
+      eventType: 'payment.created',
+      orderId: 100,
+      requestId: 'orders-create-100',
+      paymentsCountAfter: 1,
     });
   });
 
@@ -1582,6 +1736,108 @@ describe('OrderTransactionService', () => {
       'assertChildOwnership',
       'updateOrderHeader',
     ]);
+  });
+
+  it('emits payment.created automation when order update adds a nested payment', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+      payments: [],
+    });
+
+    await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      requestId: 'req-update-payment',
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Updated order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+        payments: [
+          {
+            clientKey: 'new-payment',
+            typePaidId: 1001,
+            amount: 3000,
+            paymentDate: '2026-04-30',
+          },
+        ],
+        version: 3,
+      }),
+    });
+
+    expect(transactions.statusAutomationEvents).toEqual([
+      expect.objectContaining({
+        eventType: 'payment.created',
+        origin: 'user',
+        orderId: 42,
+        actor: currentUser('manager'),
+        requestId: 'req-update-payment',
+        paymentsCountAfter: 1,
+      }),
+    ]);
+    expect(transactions.calls.indexOf('evaluateStatusAutomation')).toBeGreaterThan(
+      transactions.calls.indexOf('writeAuditEvent'),
+    );
+  });
+
+  it('allows status automation to bump the order version before reading the save response', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+      payments: [],
+    });
+    transactions.onEvaluateStatusAutomation = (event, state) => {
+      if (event.eventType !== 'payment.created') {
+        return;
+      }
+      const order = state.orders.get(event.orderId);
+      if (!order) {
+        return;
+      }
+      order.header = { ...order.header, orderStatusId: 2002 };
+      order.version += 1;
+    };
+
+    const result = await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Updated order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+        payments: [
+          {
+            clientKey: 'new-payment',
+            typePaidId: 1001,
+            amount: 3000,
+            paymentDate: '2026-04-30',
+          },
+        ],
+        version: 3,
+      }),
+    });
+
+    expect(result.header.orderStatusId).toBe(2002);
+    expect(result.version).toBe(5);
+    expect(transactions.committed).toBe(1);
   });
 
   it('updates operational child workflow collections inside the order transaction', async () => {

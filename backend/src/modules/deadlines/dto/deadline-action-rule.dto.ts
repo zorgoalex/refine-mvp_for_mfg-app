@@ -20,10 +20,23 @@ export interface DeadlineActionRuleActionConfigDto {
   productionStatusScope?: 'order';
 }
 
+export type DeadlineActionRuleDeadlineTargetDto =
+  | { type: 'all_order_deadlines' }
+  | { type: 'final_order' }
+  | { type: 'production_stage'; productionStatusId: number };
+
+export interface DeadlineActionRuleDelayAfterDeadlineDto {
+  days: number;
+  hours: number;
+  minutes: number;
+}
+
 export interface DeadlineActionRuleConfigDto {
   scope?: {
     type: 'global_orders';
   };
+  deadlineTarget?: DeadlineActionRuleDeadlineTargetDto;
+  delayAfterDeadline?: DeadlineActionRuleDelayAfterDeadlineDto;
   conditions?: DeadlineActionRuleConditionsDto;
   actionConfig?: DeadlineActionRuleActionConfigDto;
   ruleName?: string;
@@ -41,6 +54,8 @@ export interface DeadlineRuleConfigSnapshotDto {
   priority: number;
   eventType: DeadlineEventType;
   actionType: DeadlineActionType;
+  deadlineTarget?: DeadlineActionRuleDeadlineTargetDto;
+  delayAfterDeadline?: DeadlineActionRuleDelayAfterDeadlineDto;
   conditions: DeadlineActionRuleConditionsDto;
   actionConfig: DeadlineActionRuleActionConfigDto;
   createdAt: string;
@@ -149,6 +164,8 @@ export interface CreateGlobalTransitionRuleRequestDto {
   priority?: number;
   eventType?: 'DEADLINE_EXPIRED';
   actionType?: 'change_order_status';
+  deadlineTarget?: DeadlineActionRuleDeadlineTargetDto;
+  delayAfterDeadline?: DeadlineActionRuleDelayAfterDeadlineDto;
   targetOrderStatusId: number;
   allowedFromOrderStatusIds: number[];
   excludeOrderStatusIds?: number[];
@@ -167,6 +184,8 @@ export interface UpdateGlobalTransitionRuleRequestDto {
   priority?: number;
   eventType?: 'DEADLINE_EXPIRED';
   actionType?: 'change_order_status';
+  deadlineTarget?: DeadlineActionRuleDeadlineTargetDto;
+  delayAfterDeadline?: DeadlineActionRuleDelayAfterDeadlineDto | null;
   targetOrderStatusId?: number;
   allowedFromOrderStatusIds?: number[];
   excludeOrderStatusIds?: number[];

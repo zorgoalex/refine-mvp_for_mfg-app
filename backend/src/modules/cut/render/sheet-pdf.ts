@@ -1,5 +1,11 @@
 import PDFDocument from 'pdfkit';
+import QRCode, { type QRCodeErrorCorrectionLevel } from 'qrcode';
 import SVGtoPDF from 'svg-to-pdfkit';
+import {
+  evaluateCustomFieldExpression,
+  readCustomFieldExpressionV1,
+  type LabelCustomExpressionScalar,
+} from '../../labels/application/label-custom-field-expression';
 import { FONT_FAMILY, resolveFontPath } from './sheet-png';
 
 /**
@@ -18,7 +24,9 @@ export interface PdfSheetInput {
   sheetWidthMm: number;
   sheetHeightMm: number;
   sheetNumber?: number;
+  pageCount?: number;
   template?: string;
+  templateLayout?: Record<string, unknown> | null;
   meta?: PdfSheetMeta;
   detailRows?: PdfSheetDetailRow[];
 }
@@ -31,6 +39,7 @@ export interface PdfSheetMeta {
   materials?: readonly string[];
   thicknesses?: readonly string[];
   films?: readonly string[];
+  machineFiles?: readonly string[];
 }
 
 export interface PdfSheetDetailRow {
@@ -39,7 +48,45 @@ export interface PdfSheetDetailRow {
   lengthMm: number | null;
   widthMm: number | null;
   quantity: number;
+  fields?: Record<string, LabelCustomExpressionScalar>;
+  machineFiles?: readonly string[];
   due?: string | null;
+  material?: string | null;
+  film?: string | null;
+  client?: string | null;
+  orderDate?: string | null;
+  readyDate?: string | null;
+  thickness?: number | null;
+}
+
+interface PdfTemplateLayoutV3 {
+  version: number;
+  page?: Record<string, unknown>;
+  customFieldSchema?: Record<string, unknown>;
+  elements?: unknown[];
+}
+
+interface PdfLayoutElement {
+  id?: string;
+  type: 'text' | 'field' | 'custom' | 'qr' | 'line' | 'rect' | 'sheet_thumbnail' | 'detail_table' | 'machine_files_table';
+  label?: string;
+  source?: string | null;
+  text?: string | null;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation?: number;
+  zIndex?: number;
+  align?: 'left' | 'center' | 'right';
+  style?: Record<string, unknown>;
+}
+
+interface DetailTableColumn {
+  field: string;
+  label: string;
+  width: number;
+  visible: boolean;
 }
 
 export type FrozenPdfRenderContract = 'cut_sheet_render_v1';
@@ -59,10 +106,10 @@ export function buildFrozenSheetsPdf(
 }
 
 export function buildSheetsPdf(sheets: readonly PdfSheetInput[]): Promise<Buffer> {
-  return buildSheetsPdfV1(sheets);
+  return buildSheetsPdfV1(sheets, true);
 }
 
-function buildSheetsPdfV1(sheets: readonly PdfSheetInput[]): Promise<Buffer> {
+function buildSheetsPdfV1(sheets: readonly PdfSheetInput[], useTemplateLayout = false): Promise<Buffer> {
   return new Promise<Buffer>((resolvePdf, reject) => {
     if (sheets.length === 0) {
       reject(new Error('Cannot render a cut PDF with no sheets'));
@@ -84,7 +131,10 @@ function buildSheetsPdfV1(sheets: readonly PdfSheetInput[]): Promise<Buffer> {
 
     try {
       for (const sheet of sheets) {
-        if (sheet.template === 'bath_profiles') {
+        const templateLayout = useTemplateLayout ? resolveTemplateLayoutV3(sheet.templateLayout, sheet.template) : null;
+        if (templateLayout) {
+          drawTemplateLayoutPage(doc, sheet, templateLayout, fontCallback);
+        } else if (sheet.template === 'bath_profiles') {
           drawBathProfilePage(doc, sheet, fontCallback);
         } else {
           const sourceWidthPt = sheet.sheetWidthMm * MM_TO_PT;
@@ -114,6 +164,303 @@ function buildSheetsPdfV1(sheets: readonly PdfSheetInput[]): Promise<Buffer> {
       reject(error);
     }
   });
+}
+
+function drawTemplateLayoutPage(
+  doc: PDFKit.PDFDocument,
+  sheet: PdfSheetInput,
+  layout: PdfTemplateLayoutV3,
+  fontCallback?: () => string,
+): void {
+  const page = isRecord(layout.page) ? layout.page : {};
+  const pageW = mmToPt(readNumber(page.width, 297, 20, 2000));
+  const pageH = mmToPt(readNumber(page.height, 210, 20, 2000));
+  const customFieldSchema = isRecord(layout.customFieldSchema) ? layout.customFieldSchema : {};
+  const values = resolveCustomFieldValues(customFieldSchema, buildSheetFieldValues(sheet));
+  const elements = upgradeTemplateLayoutElements((layout.elements ?? [])
+    .map((raw, index) => toLayoutElement(raw, index))
+    .filter((element): element is PdfLayoutElement => element !== null))
+    .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+
+  doc.addPage({ size: [pageW, pageH], margin: 0 });
+  doc.rect(0, 0, pageW, pageH).fillColor('#ffffff').fill();
+
+  for (const element of elements) {
+    drawTemplateElement(doc, sheet, element, values, fontCallback);
+  }
+}
+
+function drawTemplateElement(
+  doc: PDFKit.PDFDocument,
+  sheet: PdfSheetInput,
+  element: PdfLayoutElement,
+  values: Record<string, LabelCustomExpressionScalar>,
+  fontCallback?: () => string,
+): void {
+  const style = isRecord(element.style) ? element.style : {};
+  withElementTransform(doc, element, (w, h) => {
+    switch (element.type) {
+      case 'line':
+        drawTemplateLine(doc, w, h, style);
+        return;
+      case 'rect':
+        drawTemplateRect(doc, w, h, style);
+        return;
+      case 'qr':
+        drawTemplateQr(doc, element, w, h, style, values);
+        return;
+      case 'sheet_thumbnail':
+        drawSheetThumbnail(doc, sheet, w, h, style, fontCallback);
+        return;
+      case 'detail_table':
+        drawTemplateDetailsTable(doc, sheet.detailRows ?? [], w, h, style);
+        return;
+      case 'machine_files_table':
+        drawTemplateMachineFilesTable(doc, sheetMachineFileNames(sheet), w, h, style);
+        return;
+      case 'text':
+      case 'field':
+      case 'custom':
+        drawTemplateText(doc, resolveElementText(element, values), w, h, element.align, style);
+        return;
+    }
+  });
+}
+
+function withElementTransform(
+  doc: PDFKit.PDFDocument,
+  element: PdfLayoutElement,
+  draw: (w: number, h: number) => void,
+): void {
+  const x = mmToPt(element.x);
+  const y = mmToPt(element.y);
+  const w = mmToPt(Math.max(element.w, 0));
+  const h = mmToPt(Math.max(element.h, 0));
+  doc.save();
+  doc.translate(x + w / 2, y + h / 2);
+  if (element.rotation) doc.rotate(element.rotation);
+  doc.translate(-w / 2, -h / 2);
+  draw(w, h);
+  doc.restore();
+}
+
+function drawTemplateText(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  w: number,
+  h: number,
+  align: PdfLayoutElement['align'],
+  style: Record<string, unknown>,
+): void {
+  if (w <= 0 || h <= 0) return;
+  const fontSize = readNumber(style.fontSize, 10, 2, 96);
+  const padding = mmToPt(readNumber(style.padding, 0, 0, 50));
+  const textW = Math.max(1, w - padding * 2);
+  const textH = Math.max(1, h - padding * 2);
+  doc.save();
+  doc.rect(0, 0, w, h).clip();
+  doc
+    .fontSize(fontSize)
+    .fillColor(readColor(style.color, '#111111'))
+    .text(text, padding, padding, {
+      width: textW,
+      height: textH,
+      align: align ?? 'left',
+      lineBreak: true,
+      ellipsis: true,
+    });
+  doc.restore();
+}
+
+function drawTemplateLine(doc: PDFKit.PDFDocument, w: number, h: number, style: Record<string, unknown>): void {
+  doc
+    .save()
+    .lineWidth(mmToPt(readNumber(style.strokeWidth, 0.35, 0.01, 20)))
+    .strokeColor(readColor(style.color, '#111111'))
+    .moveTo(0, 0)
+    .lineTo(w, h)
+    .stroke()
+    .restore();
+}
+
+function drawTemplateRect(doc: PDFKit.PDFDocument, w: number, h: number, style: Record<string, unknown>): void {
+  if (w <= 0 || h <= 0) return;
+  const stroke = readColor(style.color, '#111111');
+  const fill = readColor(style.fill, 'transparent');
+  doc.save().lineWidth(mmToPt(readNumber(style.strokeWidth, 0.35, 0.01, 20)));
+  if (fill === 'transparent') {
+    doc.rect(0, 0, w, h).strokeColor(stroke).stroke();
+  } else {
+    doc.rect(0, 0, w, h).fillAndStroke(fill, stroke);
+  }
+  doc.restore();
+}
+
+function drawSheetThumbnail(
+  doc: PDFKit.PDFDocument,
+  sheet: PdfSheetInput,
+  w: number,
+  h: number,
+  style: Record<string, unknown>,
+  fontCallback?: () => string,
+): void {
+  if (w <= 0 || h <= 0) return;
+  const sourceW = Math.max(1, sheet.sheetWidthMm * MM_TO_PT);
+  const sourceH = Math.max(1, sheet.sheetHeightMm * MM_TO_PT);
+  const fit = String(style.fit ?? 'contain');
+  const scale = fit === 'cover'
+    ? Math.max(w / sourceW, h / sourceH)
+    : fit === 'stretch'
+      ? 1
+      : Math.min(w / sourceW, h / sourceH);
+  const drawW = fit === 'stretch' ? w : sourceW * scale;
+  const drawH = fit === 'stretch' ? h : sourceH * scale;
+  const dx = (w - drawW) / 2;
+  const dy = (h - drawH) / 2;
+  doc.save();
+  doc.rect(0, 0, w, h).clip();
+  SVGtoPDF(doc, sheet.bathSvg ?? sheet.svg, dx, dy, {
+    width: drawW,
+    height: drawH,
+    assumePt: false,
+    ...(fontCallback ? { fontCallback } : {}),
+  });
+  doc.restore();
+  doc.save()
+    .lineWidth(mmToPt(readNumber(style.strokeWidth, 0.25, 0, 20)))
+    .strokeColor(readColor(style.color, '#111111'))
+    .rect(0, 0, w, h)
+    .stroke()
+    .restore();
+}
+
+function drawTemplateQr(
+  doc: PDFKit.PDFDocument,
+  element: PdfLayoutElement,
+  w: number,
+  h: number,
+  style: Record<string, unknown>,
+  values: Record<string, LabelCustomExpressionScalar>,
+): void {
+  const side = Math.max(1, Math.min(w, h));
+  const x = (w - side) / 2;
+  const y = (h - side) / 2;
+  const payload = renderTemplateString(String(style.qrTemplate ?? element.text ?? element.source ?? ''), values);
+  doc.save().rect(x, y, side, side).fillAndStroke('#ffffff', '#111111');
+  if (payload) {
+    const code = QRCode.create(payload, { errorCorrectionLevel: readQrErrorCorrection(style.qrErrorCorrection) });
+    const moduleCount = code.modules.size;
+    const quietZoneModules = 4;
+    const moduleSide = side / (moduleCount + quietZoneModules * 2);
+    doc.fillColor('#111111');
+    for (let row = 0; row < moduleCount; row += 1) {
+      for (let col = 0; col < moduleCount; col += 1) {
+        if (code.modules.get(row, col) !== 1) continue;
+        doc.rect(
+          x + (col + quietZoneModules) * moduleSide,
+          y + (row + quietZoneModules) * moduleSide,
+          moduleSide,
+          moduleSide,
+        ).fill();
+      }
+    }
+  }
+  doc.restore();
+}
+
+function drawTemplateDetailsTable(
+  doc: PDFKit.PDFDocument,
+  rows: readonly PdfSheetDetailRow[],
+  w: number,
+  h: number,
+  style: Record<string, unknown>,
+): void {
+  if (w <= 0 || h <= 0) return;
+  const columns = readDetailTableColumns(style);
+  if (columns.length === 0) return;
+  const sort = readDetailTableSort(style);
+  const sortedRows = sortDetailRows(rows, sort.field, sort.direction);
+  const fontSize = readNumber(style.fontSize, 7, 3, 36);
+  const headerFontSize = readNumber(style.headerFontSize, fontSize, 3, 36);
+  const rowH = mmToPt(readNumber(style.rowHeight, 5.5, 2, 40));
+  const headerH = mmToPt(readNumber(style.headerHeight, 6, 2, 40));
+  const border = readColor(style.color, '#111111');
+  const headerFill = readColor(style.headerFill, '#f2f2f2');
+  const totalWidth = columns.reduce((sum, column) => sum + Math.max(column.width, 0.1), 0);
+  const widths = columns.map((column) => (w * Math.max(column.width, 0.1)) / totalWidth);
+
+  let cy = 0;
+  drawDetailTableRow(doc, columns.map((column) => column.label), widths, cy, headerH, headerFontSize, border, headerFill);
+  cy += headerH;
+  for (const [index, row] of sortedRows.entries()) {
+    if (cy + rowH > h) break;
+    drawDetailTableRow(
+      doc,
+      columns.map((column) => detailRowValue(row, column.field, index)),
+      widths,
+      cy,
+      rowH,
+      fontSize,
+      border,
+      'transparent',
+    );
+    cy += rowH;
+  }
+}
+
+function drawTemplateMachineFilesTable(
+  doc: PDFKit.PDFDocument,
+  files: readonly string[],
+  w: number,
+  h: number,
+  style: Record<string, unknown>,
+): void {
+  if (w <= 0 || h <= 0) return;
+  const fontSize = readNumber(style.fontSize, 7, 3, 36);
+  const headerFontSize = readNumber(style.headerFontSize, fontSize, 3, 36);
+  const rowH = mmToPt(readNumber(style.rowHeight, 5.5, 2, 40));
+  const headerH = mmToPt(readNumber(style.headerHeight, 6, 2, 40));
+  const border = readColor(style.color, '#111111');
+  const headerFill = readColor(style.headerFill, '#f2f2f2');
+
+  let cy = 0;
+  drawDetailTableRow(doc, ['Файлы станка'], [w], cy, headerH, headerFontSize, border, headerFill);
+  cy += headerH;
+  const rows = files.length > 0 ? files : ['-'];
+  for (const file of rows) {
+    if (cy + rowH > h) break;
+    drawDetailTableRow(doc, [file], [w], cy, rowH, fontSize, border, 'transparent');
+    cy += rowH;
+  }
+}
+
+function drawDetailTableRow(
+  doc: PDFKit.PDFDocument,
+  values: readonly string[],
+  widths: readonly number[],
+  y: number,
+  h: number,
+  fontSize: number,
+  border: string,
+  fill: string,
+): void {
+  let x = 0;
+  for (let i = 0; i < widths.length; i += 1) {
+    const w = widths[i];
+    doc.save().lineWidth(0.5);
+    if (fill === 'transparent') doc.rect(x, y, w, h).strokeColor(border).stroke();
+    else doc.rect(x, y, w, h).fillAndStroke(fill, border);
+    doc.rect(x, y, w, h).clip();
+    doc.fontSize(fontSize).fillColor('#111111').text(values[i] ?? '', x + 1.8, y + 2, {
+      width: Math.max(1, w - 3.6),
+      height: Math.max(1, h - 3),
+      align: 'center',
+      lineBreak: true,
+      ellipsis: true,
+    });
+    doc.restore();
+    x += w;
+  }
 }
 
 function drawBathProfilePage(doc: PDFKit.PDFDocument, sheet: PdfSheetInput, fontCallback?: () => string): void {
@@ -251,6 +598,483 @@ function drawFooter(doc: PDFKit.PDFDocument, sheet: PdfSheetInput, x: number, y:
   doc.moveTo(x, y - 6).lineTo(x + 610, y - 6).stroke();
   doc.fontSize(9).text(`${formatMm(sheet.sheetWidthMm)} X ${formatMm(sheet.sheetHeightMm)}  -  1  |  Кол-во - 1`, x + 20, y);
   doc.text(`Количество деталей: ${count}  |  Площадь деталей: ${area.toFixed(3)} м.кв.  |  ${fill.toFixed(2)} %`, x + 20, y + 14);
+}
+
+function isTemplateLayoutV3(layout: unknown): layout is PdfTemplateLayoutV3 {
+  return isRecord(layout) && Number(layout.version ?? 0) >= 3 && Array.isArray(layout.elements);
+}
+
+function resolveTemplateLayoutV3(layout: unknown, template: string | undefined): PdfTemplateLayoutV3 | null {
+  if (isTemplateLayoutV3(layout)) return layout;
+  if (template === 'bath_profiles' && (layout === undefined || layout === null || isEmptyTemplateLayout(layout))) {
+    return bathProfilesTemplateLayoutV3();
+  }
+  if (!isEmptyTemplateLayout(layout)) return null;
+  return defaultTemplateLayoutV3();
+}
+
+function isEmptyTemplateLayout(layout: unknown): boolean {
+  return isRecord(layout) && Object.keys(layout).length === 0;
+}
+
+function toLayoutElement(raw: unknown, index: number): PdfLayoutElement | null {
+  if (!isRecord(raw) || !isPdfElementType(raw.type)) return null;
+  return {
+    id: typeof raw.id === 'string' ? raw.id : `${raw.type}-${index}`,
+    type: raw.type,
+    label: typeof raw.label === 'string' ? raw.label : undefined,
+    source: typeof raw.source === 'string' ? raw.source : null,
+    text: typeof raw.text === 'string' ? raw.text : null,
+    x: Number(raw.x ?? 0),
+    y: Number(raw.y ?? 0),
+    w: Number(raw.w ?? 0),
+    h: Number(raw.h ?? 0),
+    rotation: Number(raw.rotation ?? 0),
+    zIndex: Number(raw.zIndex ?? index),
+    align: raw.align === 'right' || raw.align === 'center' ? raw.align : 'left',
+    style: isRecord(raw.style) ? raw.style : {},
+  };
+}
+
+function isPdfElementType(value: unknown): value is PdfLayoutElement['type'] {
+  return value === 'text'
+    || value === 'field'
+    || value === 'custom'
+    || value === 'qr'
+    || value === 'line'
+    || value === 'rect'
+    || value === 'sheet_thumbnail'
+    || value === 'detail_table'
+    || value === 'machine_files_table';
+}
+
+function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustomExpressionScalar> {
+  const rows = sheet.detailRows ?? [];
+  const meta = sheet.meta ?? {};
+  const machineFiles = sheetMachineFileNames(sheet);
+  const totalQuantity = totalDetailQuantity(rows);
+  const detailsArea = rows.reduce((sum, row) => {
+    if (row.lengthMm === null || row.widthMm === null) return sum;
+    return sum + row.lengthMm * row.widthMm * row.quantity;
+  }, 0) / 1_000_000;
+  const sheetArea = (sheet.sheetWidthMm * sheet.sheetHeightMm) / 1_000_000;
+  const utilization = sheetArea > 0 ? (detailsArea / sheetArea) * 100 : null;
+  return {
+    'job.name': '',
+    'job.number': '',
+    'job.pdf_template': sheet.template ?? '',
+    'group.number': '',
+    'group.material': joinBlank(meta.materials),
+    'group.film': joinBlank(meta.films),
+    'sheet.number': sheet.sheetNumber ?? null,
+    'sheet.page_count': sheet.pageCount ?? null,
+    'sheet.size': `${formatMm(sheet.sheetWidthMm)}x${formatMm(sheet.sheetHeightMm)}`,
+    'sheet.details_count': totalQuantity,
+    'sheet.area': detailsArea > 0 ? Number(detailsArea.toFixed(3)) : null,
+    'sheet.utilization': utilization === null ? null : Number(utilization.toFixed(2)),
+    'sheet.thumbnail': '',
+    'sheet.machine_files': joinBlank(machineFiles),
+    'detail.table': '',
+    'order.unique_names': joinBlank(meta.orders),
+    'order.date': joinBlank(meta.dates),
+    'order.ready_date': joinBlank(meta.readyDates),
+    'client.unique_names': joinBlank(meta.clients),
+    'detail.materials': joinBlank(meta.materials),
+    'detail.films': joinBlank(meta.films),
+    'detail.thicknesses': joinBlank(meta.thicknesses),
+    'detail.machine_files': joinBlank(machineFiles),
+    'computed.today': new Date().toISOString().slice(0, 10),
+    'computed.page_number': sheet.sheetNumber ?? null,
+    'computed.page_count': sheet.pageCount ?? null,
+  };
+}
+
+function resolveCustomFieldValues(
+  customFieldSchema: Record<string, unknown>,
+  baseValues: Record<string, LabelCustomExpressionScalar>,
+): Record<string, LabelCustomExpressionScalar> {
+  const values: Record<string, LabelCustomExpressionScalar> = { ...baseValues };
+  const resolving = new Set<string>();
+  const resolved = new Set<string>();
+  const schemaKeys = new Set(Object.keys(customFieldSchema));
+
+  const resolveCustom = (rawFieldId: string): LabelCustomExpressionScalar => {
+    const fieldId = rawFieldId.replace(/^custom\./, '');
+    if (resolved.has(fieldId)) return scalar(values[`custom.${fieldId}`] ?? values[fieldId]);
+    if (resolving.has(fieldId)) return '';
+    const schema = customFieldSchema[fieldId] ?? customFieldSchema[`custom.${fieldId}`];
+    if (!isRecord(schema)) return '';
+    resolving.add(fieldId);
+    let value: LabelCustomExpressionScalar = '';
+    const expression = readCustomFieldExpressionV1(schema);
+    if (expression) {
+      value = evaluateCustomFieldExpression(expression, (dependency) => {
+        const dep = dependency.replace(/^custom\./, '');
+        if (schemaKeys.has(dependency) || schemaKeys.has(dep)) return resolveCustom(dep);
+        return scalar(values[dependency] ?? values[dep] ?? values[`custom.${dep}`]);
+      });
+    } else if (typeof schema.sourceField === 'string') {
+      value = scalar(values[schema.sourceField] ?? values[schema.sourceField.replace(/^custom\./, '')]);
+    } else if (Object.prototype.hasOwnProperty.call(schema, 'defaultValue')) {
+      value = scalar(schema.defaultValue);
+    } else if (Object.prototype.hasOwnProperty.call(schema, 'value')) {
+      value = scalar(schema.value);
+    }
+    values[fieldId] = value;
+    values[`custom.${fieldId}`] = value;
+    resolved.add(fieldId);
+    resolving.delete(fieldId);
+    return value;
+  };
+
+  for (const fieldId of schemaKeys) resolveCustom(fieldId);
+  return values;
+}
+
+function resolveElementText(element: PdfLayoutElement, values: Record<string, LabelCustomExpressionScalar>): string {
+  if (element.type === 'text') return element.text ?? '';
+  if (!element.source) return '';
+  return stringify(values[element.source] ?? values[element.source.replace(/^custom\./, '')]);
+}
+
+function renderTemplateString(template: string, values: Record<string, LabelCustomExpressionScalar>): string {
+  return template.replace(/\{([^}]+)\}/g, (_match, rawField: string) => {
+    const field = rawField.trim();
+    return stringify(values[field] ?? values[field.replace(/^custom\./, '')]);
+  });
+}
+
+function readDetailTableColumns(style: Record<string, unknown>): DetailTableColumn[] {
+  const table = isRecord(style.table) ? style.table : {};
+  const rawColumns = Array.isArray(table.columns)
+    ? table.columns
+    : Array.isArray(style.columns)
+      ? style.columns
+      : DEFAULT_DETAIL_TABLE_COLUMNS;
+  return upgradeDefaultDetailTableColumns(rawColumns
+    .map((raw): DetailTableColumn | null => {
+      if (!isRecord(raw)) return null;
+      const field = typeof raw.field === 'string' ? raw.field : '';
+      if (!field) return null;
+      return {
+        field,
+        label: String(raw.label ?? defaultDetailColumnLabel(field)),
+        width: readNumber(raw.width, 1, 0.1, 100),
+        visible: raw.visible !== false,
+      };
+    })
+    .filter((column): column is DetailTableColumn => column !== null && column.visible));
+}
+
+function readDetailTableSort(style: Record<string, unknown>): { field: string; direction: 'asc' | 'desc' } {
+  const table = isRecord(style.table) ? style.table : {};
+  const raw = isRecord(table.sort) ? table.sort : isRecord(style.sort) ? style.sort : {};
+  const direction = raw.direction === 'desc' ? 'desc' : 'asc';
+  return { field: typeof raw.field === 'string' ? raw.field : 'detail.order', direction };
+}
+
+function sortDetailRows(
+  rows: readonly PdfSheetDetailRow[],
+  field: string,
+  direction: 'asc' | 'desc',
+): PdfSheetDetailRow[] {
+  const normalized = normalizeDetailField(field);
+  const factor = direction === 'desc' ? -1 : 1;
+  return [...rows].sort((a, b) => factor * compareDetailValues(detailSortValue(a, normalized), detailSortValue(b, normalized)));
+}
+
+function detailRowValue(row: PdfSheetDetailRow, field: string, index: number): string {
+  const normalized = normalizeDetailField(field);
+  switch (normalized) {
+    case 'row_number':
+      return String(index + 1);
+    case 'order':
+      return row.order;
+    case 'position':
+      return String(row.position ?? '');
+    case 'lengthMm':
+      return formatMm(row.lengthMm);
+    case 'widthMm':
+      return formatMm(row.widthMm);
+    case 'quantity':
+      return String(row.quantity);
+    case 'doweling':
+      return checkboxMark(row.fields?.doweling ?? row.fields?.[field] ?? row.fields?.[normalized]);
+    case 'machine_file':
+    case 'machine_files':
+      return joinBlank(row.machineFiles) || stringify(row.fields?.[normalized] ?? row.fields?.[field] ?? row.fields?.[field.replace(/^detail\./, '')] ?? '');
+    case 'material':
+      return row.material ?? '';
+    case 'film':
+      return row.film ?? '';
+    case 'client':
+      return row.client ?? '';
+    case 'orderDate':
+      return row.orderDate ?? '';
+    case 'readyDate':
+      return row.readyDate ?? row.due ?? '';
+    case 'thickness':
+      return formatMm(row.thickness);
+    default:
+      return stringify(row.fields?.[normalized] ?? row.fields?.[field] ?? row.fields?.[field.replace(/^detail\./, '')] ?? '');
+  }
+}
+
+function detailSortValue(row: PdfSheetDetailRow, field: string): string | number | null {
+  const normalized = normalizeDetailField(field);
+  switch (normalized) {
+    case 'order':
+      return row.order;
+    case 'position':
+      return Number(row.position) || String(row.position ?? '');
+    case 'lengthMm':
+      return row.lengthMm;
+    case 'widthMm':
+      return row.widthMm;
+    case 'quantity':
+      return row.quantity;
+    case 'doweling':
+      return row.fields?.doweling === true ? 1 : 0;
+    case 'machine_file':
+    case 'machine_files':
+      return joinBlank(row.machineFiles) || stringify(row.fields?.[normalized] ?? row.fields?.[field] ?? row.fields?.[field.replace(/^detail\./, '')] ?? '');
+    case 'material':
+      return row.material ?? '';
+    case 'film':
+      return row.film ?? '';
+    case 'client':
+      return row.client ?? '';
+    case 'orderDate':
+      return row.orderDate ?? '';
+    case 'readyDate':
+      return row.readyDate ?? row.due ?? '';
+    case 'thickness':
+      return row.thickness ?? null;
+    default:
+      return stringify(row.fields?.[normalized] ?? row.fields?.[field] ?? row.fields?.[field.replace(/^detail\./, '')] ?? '');
+  }
+}
+
+function compareDetailValues(left: string | number | null, right: string | number | null): number {
+  if (typeof left === 'number' && typeof right === 'number') return left - right;
+  return stringify(left).localeCompare(stringify(right), 'ru', { numeric: true, sensitivity: 'base' });
+}
+
+function normalizeDetailField(field: string): string {
+  const raw = field.replace(/^detail\./, '');
+  if (raw === 'rowNumber' || raw === 'rowNo' || raw === 'number') return 'row_number';
+  if (raw === 'length' || raw === 'length_mm') return 'lengthMm';
+  if (raw === 'width' || raw === 'width_mm') return 'widthMm';
+  if (raw === 'order_date') return 'orderDate';
+  if (raw === 'ready_date') return 'readyDate';
+  return raw;
+}
+
+function defaultDetailColumnLabel(field: string): string {
+  return DEFAULT_DETAIL_TABLE_COLUMNS.find((column) => column.field === field)?.label ?? field;
+}
+
+function readQrErrorCorrection(value: unknown): QRCodeErrorCorrectionLevel {
+  return value === 'L' || value === 'Q' || value === 'H' ? value : 'M';
+}
+
+function readNumber(value: unknown, fallback: number, min = -Infinity, max = Infinity): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function readColor(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') return fallback;
+  if (value === 'transparent' || /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(value)) return value;
+  return fallback;
+}
+
+function scalar(value: unknown): LabelCustomExpressionScalar {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  return String(value);
+}
+
+function stringify(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'boolean') return value ? 'Да' : 'Нет';
+  return String(value);
+}
+
+function mmToPt(value: number): number {
+  return value * MM_TO_PT;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const DEFAULT_DETAIL_TABLE_COLUMNS: DetailTableColumn[] = [
+  { field: 'detail.row_number', label: '#', width: 0.55, visible: true },
+  { field: 'detail.order', label: 'Заказ', width: 1.6, visible: true },
+  { field: 'detail.position', label: 'Поз.', width: 0.9, visible: true },
+  { field: 'detail.lengthMm', label: 'Длина', width: 1.1, visible: true },
+  { field: 'detail.widthMm', label: 'Ширина', width: 1.1, visible: true },
+  { field: 'detail.quantity', label: 'Кол-во', width: 0.9, visible: true },
+  { field: 'detail.doweling', label: 'Присадка', width: 0.95, visible: true },
+  { field: 'detail.machine_file', label: 'Файл станка', width: 1.8, visible: true },
+];
+
+function defaultTemplateLayoutV3(): PdfTemplateLayoutV3 {
+  return {
+    version: 3,
+    page: { width: 297, height: 210 },
+    elements: [
+      { id: 'field-order', type: 'field', label: 'Заказ', source: 'order.unique_names', x: 12, y: 10, w: 84, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } },
+      { id: 'field-client', type: 'field', label: 'Клиент', source: 'client.unique_names', x: 108, y: 10, w: 78, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } },
+      { id: 'field-film', type: 'field', label: 'Пленка', source: 'detail.films', x: 198, y: 10, w: 84, h: 8, align: 'left', style: { fontSize: 10, color: '#111111' } },
+      { id: 'line-header', type: 'line', label: 'Линия шапки', source: null, text: null, x: 12, y: 22, w: 270, h: 0, rotation: 0, zIndex: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.35 } },
+      { id: 'sheet-thumbnail', type: 'sheet_thumbnail', label: 'Миниатюра листа', source: 'sheet.thumbnail', x: 12, y: 34, w: 202, h: 154, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fit: 'contain' } },
+      {
+        id: 'detail-table',
+        type: 'detail_table',
+        label: 'Таблица деталей',
+        source: 'detail.table',
+        x: 222,
+        y: 34,
+        w: 60,
+        h: 78,
+        align: 'center',
+        style: { color: '#111111', strokeWidth: 0.25, fontSize: 7, columns: DEFAULT_DETAIL_TABLE_COLUMNS, sort: { field: 'detail.order', direction: 'asc' } },
+      },
+      { id: 'machine-files-table', type: 'machine_files_table', label: 'Файлы станка', source: 'sheet.machine_files', x: 222, y: 116, w: 60, h: 32, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fontSize: 7 } },
+    ],
+  };
+}
+
+function bathProfilesTemplateLayoutV3(): PdfTemplateLayoutV3 {
+  return {
+    version: 3,
+    page: { width: 297, height: 210 },
+    elements: [
+      { id: 'bath-label-order', type: 'text', label: 'Подпись Заказ', source: null, text: 'Заказ:', x: 9.9, y: 9.9, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-order', type: 'field', label: 'Заказ', source: 'order.unique_names', text: null, x: 38.8, y: 9.9, w: 60.5, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-label-client', type: 'text', label: 'Подпись Клиент', source: null, text: 'Клиент:', x: 102.3, y: 9.9, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-client', type: 'field', label: 'Клиент', source: 'client.unique_names', text: null, x: 131.2, y: 9.9, w: 60.5, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-label-order-date', type: 'text', label: 'Подпись Дата заказа', source: null, text: 'Дата:', x: 194.7, y: 9.9, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-order-date', type: 'field', label: 'Дата заказа', source: 'order.date', text: null, x: 223.7, y: 9.9, w: 60.5, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-line-header-1', type: 'line', label: 'Линия шапки 1', source: null, text: null, x: 9.9, y: 16.6, w: 277.3, h: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.25 } },
+      { id: 'bath-label-ready-date', type: 'text', label: 'Подпись Дата готовности', source: null, text: 'Дата готовности:', x: 9.9, y: 17.7, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-ready-date', type: 'field', label: 'Дата готовности', source: 'order.ready_date', text: null, x: 38.8, y: 17.7, w: 60.5, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-label-material', type: 'text', label: 'Подпись Материал', source: null, text: 'Материал:', x: 102.3, y: 17.7, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-material', type: 'field', label: 'Материал', source: 'detail.materials', text: null, x: 131.2, y: 17.7, w: 60.5, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-label-thickness', type: 'text', label: 'Подпись Толщина', source: null, text: 'Толщина:', x: 194.7, y: 17.7, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-thickness', type: 'field', label: 'Толщина', source: 'detail.thicknesses', text: null, x: 223.7, y: 17.7, w: 60.5, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-line-header-2', type: 'line', label: 'Линия шапки 2', source: null, text: null, x: 9.9, y: 24.3, w: 277.3, h: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.25 } },
+      { id: 'bath-label-film', type: 'text', label: 'Подпись Пленка', source: null, text: 'Пленка:', x: 9.9, y: 25.4, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-film', type: 'field', label: 'Пленка', source: 'detail.films', text: null, x: 38.8, y: 25.4, w: 245.4, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-sheet-thumbnail', type: 'sheet_thumbnail', label: 'Миниатюра листа', source: 'sheet.thumbnail', text: null, x: 9.9, y: 37.4, w: 213.1, h: 150.6, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fit: 'contain' } },
+      { id: 'bath-table-title', type: 'text', label: 'Заголовок листа', source: null, text: 'Лист', x: 227.9, y: 28.6, w: 24, h: 4.5, align: 'right', style: { fontSize: 10, color: '#111111' } },
+      { id: 'bath-field-sheet-number', type: 'field', label: 'Номер листа', source: 'sheet.number', text: null, x: 252.5, y: 28.6, w: 34.7, h: 4.5, align: 'left', style: { fontSize: 10, color: '#111111' } },
+      { id: 'bath-table-subtitle', type: 'text', label: 'Заголовок деталей', source: null, text: 'Детали', x: 227.9, y: 32.8, w: 59.3, h: 4.5, align: 'center', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-detail-table', type: 'detail_table', label: 'Таблица деталей', source: 'detail.table', text: null, x: 227.9, y: 37.4, w: 59.3, h: 118, align: 'center', style: { color: '#111111', strokeWidth: 0.18, fontSize: 6.8, headerFontSize: 6, rowHeight: 5.3, headerHeight: 5.6, columns: DEFAULT_DETAIL_TABLE_COLUMNS, sort: { field: 'detail.order', direction: 'asc' } } },
+      { id: 'bath-machine-files-table', type: 'machine_files_table', label: 'Файлы станка', source: 'sheet.machine_files', text: null, x: 227.9, y: 158, w: 59.3, h: 24, align: 'center', style: { color: '#111111', strokeWidth: 0.18, fontSize: 6.8, headerFontSize: 6.8, rowHeight: 5.5, headerHeight: 5.8 } },
+      { id: 'bath-line-footer', type: 'line', label: 'Линия итогов', source: null, text: null, x: 9.9, y: 181.3, w: 215.2, h: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.25 } },
+      { id: 'bath-label-sheet-size', type: 'text', label: 'Подпись Размер листа', source: null, text: 'Размер листа:', x: 16.9, y: 183.4, w: 35, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-field-sheet-size', type: 'field', label: 'Размер листа', source: 'sheet.size', text: null, x: 52.5, y: 183.4, w: 40, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-label-sheet-copy-count', type: 'text', label: 'Количество листов', source: null, text: '|  Кол-во - 1', x: 94, y: 183.4, w: 38, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-label-detail-count', type: 'text', label: 'Подпись Количество деталей', source: null, text: 'Количество деталей:', x: 16.9, y: 188.4, w: 50, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-field-detail-count', type: 'field', label: 'Количество деталей', source: 'sheet.details_count', text: null, x: 66.5, y: 188.4, w: 16, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-label-detail-area', type: 'text', label: 'Подпись Площадь деталей', source: null, text: '|  Площадь деталей:', x: 83, y: 188.4, w: 49, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-field-detail-area', type: 'field', label: 'Площадь деталей', source: 'sheet.area', text: null, x: 132, y: 188.4, w: 21, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-label-area-unit', type: 'text', label: 'Ед. площади', source: null, text: 'м.кв.  |', x: 153.5, y: 188.4, w: 20, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-label-utilization', type: 'text', label: 'Подпись Утилизация', source: null, text: 'Утилизация:', x: 174, y: 188.4, w: 34, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-field-utilization', type: 'field', label: 'Утилизация', source: 'sheet.utilization', text: null, x: 208.5, y: 188.4, w: 17, h: 4.8, align: 'right', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-label-utilization-unit', type: 'text', label: 'Процент утилизации', source: null, text: '%', x: 226, y: 188.4, w: 6, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+    ],
+  };
+}
+
+const LEGACY_DEFAULT_DETAIL_TABLE_COLUMN_FIELDS = [
+  'detail.row_number',
+  'detail.order',
+  'detail.position',
+  'detail.lengthMm',
+  'detail.widthMm',
+  'detail.quantity',
+];
+
+function upgradeDefaultDetailTableColumns(columns: DetailTableColumn[]): DetailTableColumn[] {
+  const fields = columns.map((column) => column.field);
+  const isLegacyDefault =
+    fields.length === LEGACY_DEFAULT_DETAIL_TABLE_COLUMN_FIELDS.length &&
+    LEGACY_DEFAULT_DETAIL_TABLE_COLUMN_FIELDS.every((field, index) => fields[index] === field);
+  if (!isLegacyDefault) return columns;
+  return [
+    ...columns,
+    { field: 'detail.doweling', label: 'Присадка', width: 0.95, visible: true },
+    { field: 'detail.machine_file', label: 'Файл станка', width: 1.8, visible: true },
+  ];
+}
+
+function upgradeTemplateLayoutElements(elements: PdfLayoutElement[]): PdfLayoutElement[] {
+  if (elements.some((element) => element.type === 'machine_files_table')) return elements;
+  const ids = new Set(elements.map((element) => element.id).filter(Boolean));
+  const isLegacyDefault = ['field-order', 'field-client', 'field-film', 'line-header', 'sheet-thumbnail', 'detail-table']
+    .every((id) => ids.has(id));
+  if (!isLegacyDefault) return elements;
+  const detailTable = elements.find((element) => element.id === 'detail-table' && element.type === 'detail_table');
+  if (!detailTable) return elements;
+  return [
+    ...elements,
+    {
+      id: 'machine-files-table',
+      type: 'machine_files_table',
+      label: 'Файлы станка',
+      source: 'sheet.machine_files',
+      text: null,
+      x: detailTable.x,
+      y: detailTable.y + detailTable.h + 4,
+      w: detailTable.w,
+      h: 32,
+      rotation: 0,
+      zIndex: (detailTable.zIndex ?? 0) + 1,
+      align: 'center',
+      style: { color: '#111111', strokeWidth: 0.25, fontSize: 7 },
+    },
+  ];
+}
+
+function sheetMachineFileNames(sheet: PdfSheetInput): string[] {
+  const result: string[] = [];
+  const add = (value: unknown) => {
+    for (const part of splitMachineFileValue(value)) {
+      if (!result.includes(part)) result.push(part);
+    }
+  };
+  for (const file of sheet.meta?.machineFiles ?? []) add(file);
+  for (const row of sheet.detailRows ?? []) {
+    for (const file of row.machineFiles ?? []) add(file);
+    add(row.fields?.machine_file);
+    add(row.fields?.machine_files);
+  }
+  return result;
+}
+
+function splitMachineFileValue(value: unknown): string[] {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) return value.flatMap(splitMachineFileValue);
+  return String(value)
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function checkboxMark(value: unknown): string {
+  if (value === true || value === 1) return '✓';
+  if (typeof value === 'string' && ['true', 'yes', 'да', '1', '✓'].includes(value.trim().toLowerCase())) return '✓';
+  return '';
+}
+
+function joinBlank(values: readonly string[] | undefined): string {
+  const uniq = Array.from(new Set((values ?? []).map((v) => v.trim()).filter(Boolean)));
+  return uniq.join(', ');
 }
 
 function join(values: readonly string[] | undefined): string {

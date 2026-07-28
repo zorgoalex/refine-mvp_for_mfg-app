@@ -3,8 +3,10 @@ import type { DeadlineDefaultScheduleDto } from '../../../api/types/deadlineApi.
 import {
   buildDefaultSchedulePayload,
   calculateCumulativeHints,
+  calculateScheduleDraft,
   canViewDeadlineDefaultSchedule,
   computePlannedCompletionDate,
+  isDeadlineScheduleDraftComplete,
   shouldApplyComputedPlannedCompletion,
 } from './deadlineDefaultScheduleView';
 
@@ -13,6 +15,10 @@ const schedule: DeadlineDefaultScheduleDto = {
   hasStoredConfiguration: false,
   version: 3,
   reserveDays: 0,
+  transitionsOrder: {
+    drawn: ['cut'],
+    cut: ['packed'],
+  },
   totalProductionDays: null,
   plannedOrderDays: null,
   updatedAt: null,
@@ -30,8 +36,38 @@ describe('deadline default schedule view', () => {
   });
 
   it('shows cumulative days from the order date', () => {
-    const hints = calculateCumulativeHints(schedule, { 1: 2, 2: 3, 3: 1 });
+    const hints = calculateCumulativeHints(
+      schedule,
+      { 1: 2, 2: 3, 3: 1 },
+    );
     expect([...hints.values()]).toEqual([2, 5, 6]);
+  });
+
+  it('treats zero-day stages as a complete schedule', () => {
+    const calculation = calculateScheduleDraft(
+      schedule,
+      { 1: 0, 2: 0, 3: 0 },
+    );
+
+    expect([...calculation.cumulativeHints.values()]).toEqual([0, 0, 0]);
+    expect(calculation.totalProductionDays).toBe(0);
+    expect(isDeadlineScheduleDraftComplete(calculation, 0)).toBe(true);
+  });
+
+  it('uses the longest incoming transition path at a merge', () => {
+    const calculation = calculateScheduleDraft(
+      {
+        ...schedule,
+        transitionsOrder: {
+          drawn: ['packed'],
+          cut: ['packed'],
+        },
+      },
+      { 1: 2, 2: 5, 3: 1 },
+    );
+
+    expect([...calculation.cumulativeHints.values()]).toEqual([2, 5, 6]);
+    expect(calculation.totalProductionDays).toBe(6);
   });
 
   it('does not build a partial schedule payload', () => {
@@ -58,17 +94,23 @@ describe('deadline default schedule view', () => {
       reserveDays: 2,
       reason: 'Новый цикл',
       stages: [
-        { productionStatusId: 1, durationDays: 2 },
-        { productionStatusId: 2, durationDays: 3 },
-        { productionStatusId: 3, durationDays: 1 },
+        { productionStatusId: 1, durationDays: 2, parallelWithPrevious: false },
+        { productionStatusId: 2, durationDays: 3, parallelWithPrevious: false },
+        { productionStatusId: 3, durationDays: 1, parallelWithPrevious: false },
       ],
     });
     expect(
       computePlannedCompletionDate('2026-12-29', {
         ...schedule,
         configured: true,
+        reserveDays: 2,
         totalProductionDays: 6,
         plannedOrderDays: 8,
+        stages: [
+          { ...stage(1, 'Отрисован'), durationDays: 2 },
+          { ...stage(2, 'Распилен'), durationDays: 3 },
+          { ...stage(3, 'Упакован'), durationDays: 1 },
+        ],
       }),
     ).toBe('2027-01-06');
   });
@@ -94,15 +136,83 @@ describe('deadline default schedule view', () => {
       shouldApplyComputedPlannedCompletion('2026-07-09', '2026-07-09'),
     ).toBe(true);
   });
+
+  it('calculates readiness only from stages present in an order', () => {
+    const configuredSchedule: DeadlineDefaultScheduleDto = {
+      ...schedule,
+      configured: true,
+      reserveDays: 1,
+      stages: [
+        { ...stage(1, 'Отрисован'), durationDays: 3 },
+        { ...stage(2, 'Распилен'), durationDays: 4 },
+        { ...stage(3, 'Упакован'), durationDays: 8 },
+      ],
+    };
+
+    expect(
+      computePlannedCompletionDate(
+        '2026-07-01',
+        configuredSchedule,
+        [2],
+      ),
+    ).toBe('2026-07-06');
+    expect(
+      computePlannedCompletionDate('2026-07-01', configuredSchedule, []),
+    ).toBeNull();
+  });
+
+  it('does not add a stage that is absent from the order route', () => {
+    const configuredSchedule: DeadlineDefaultScheduleDto = {
+      ...schedule,
+      configured: true,
+      reserveDays: 0,
+      stages: [
+        { ...stage(1, 'Отрисован'), durationDays: 3 },
+        { ...stage(2, 'Распилен'), durationDays: 20 },
+        { ...stage(3, 'Упакован'), durationDays: 8 },
+      ],
+    };
+
+    expect(
+      computePlannedCompletionDate(
+        '2026-07-01',
+        configuredSchedule,
+        [1, 3],
+      ),
+    ).toBe('2026-07-09');
+  });
+
+  it('fails closed when transitions contain a cycle', () => {
+    const calculation = calculateScheduleDraft(
+      {
+        ...schedule,
+        transitionsOrder: {
+          drawn: ['cut'],
+          cut: ['drawn'],
+        },
+      },
+      { 1: 2, 2: 3, 3: 1 },
+    );
+
+    expect(calculation.hasCycle).toBe(true);
+    expect(calculation.totalProductionDays).toBeNull();
+    expect([...calculation.cumulativeHints.values()]).toEqual([null, null, null]);
+  });
 });
 
 function stage(productionStatusId: number, productionStatusName: string) {
   return {
     productionStatusId,
     productionStatusName,
-    productionStatusCode: null,
+    productionStatusCode:
+      productionStatusId === 1
+        ? 'drawn'
+        : productionStatusId === 2
+          ? 'cut'
+          : 'packed',
     sortOrder: productionStatusId,
     durationDays: null,
     cumulativeDeadlineDays: null,
+    parallelWithPrevious: false,
   };
 }

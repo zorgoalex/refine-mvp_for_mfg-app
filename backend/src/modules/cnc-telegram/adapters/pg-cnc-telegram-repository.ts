@@ -12,6 +12,9 @@ import type {
   RecordCncTelegramDeniedAuditCommand,
 } from '../application/cnc-telegram.types';
 import type {
+  CncTelegramBathCardDto,
+  CncTelegramBathItemDto,
+  CncTelegramBathSheetDto,
   CncTelegramDowelingLinkDto,
   CncTelegramIngestResponseDto,
   CncTelegramItemSource,
@@ -61,6 +64,7 @@ interface PacketJoinedRow extends QueryResultRow {
   packet_item_id: string | null;
   source_item_key: string | null;
   order_name: string | null;
+  item_order_id: string | number | null;
   detail_number: string | number | null;
   width_mm: string | number | null;
   height_mm: string | number | null;
@@ -87,6 +91,28 @@ interface IdempotencyRow extends QueryResultRow {
 
 interface CurrentDateRow extends QueryResultRow {
   workday: string | Date;
+}
+
+interface BathJoinedRow extends QueryResultRow {
+  cut_result_id: string | number;
+  cut_job_id: string | number;
+  result_no: string | number;
+  revision_no: string | number;
+  result_created_at: string | Date;
+  cut_job_name: string | null;
+  order_id: string | number;
+  order_detail_id: string | number;
+  order_name: string | null;
+  detail_number: string | number | null;
+  width_mm: string | number | null;
+  height_mm: string | number | null;
+  completed_quantity: string | number | null;
+  cut_group_id: string | number;
+  variant: 'auto' | 'manual';
+  sheet_index: string | number;
+  sheet_ordinal: string | number;
+  sheet_width_mm: string | number | null;
+  sheet_height_mm: string | number | null;
 }
 
 interface DetailMatchRow extends QueryResultRow {
@@ -121,10 +147,11 @@ export class PgCncTelegramRepository
       [workday],
     );
     const packets = mapPacketRows(rows.rows);
+    const baths = await loadBathCards(this.database, workday);
     return {
       workday,
       generatedAt: new Date().toISOString(),
-      columns: buildTodayColumns(packets),
+      columns: buildTodayColumns(packets, baths),
     };
   }
 
@@ -279,6 +306,7 @@ function packetSelectSql(whereSql: string): string {
       i.packet_item_id,
       i.source_item_key,
       i.order_name,
+      COALESCE(i.match_order_id, item_order.order_id) AS item_order_id,
       i.detail_number,
       i.width_mm,
       i.height_mm,
@@ -291,6 +319,17 @@ function packetSelectSql(whereSql: string): string {
       i.review_note
     FROM cnc_telegram_packets p
     LEFT JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
+    LEFT JOIN (
+      SELECT
+        lower(trim(o.order_name)) AS order_key,
+        MIN(o.order_id)::bigint AS order_id
+      FROM orders o
+      WHERE o.delete_flag = false
+        AND NULLIF(trim(o.order_name), '') IS NOT NULL
+      GROUP BY lower(trim(o.order_name))
+      HAVING COUNT(*) = 1
+    ) item_order
+      ON item_order.order_key = lower(trim(i.order_name))
     WHERE ${whereSql}
     ORDER BY p.updated_at DESC, p.packet_id, i.order_name ASC NULLS LAST, i.detail_number ASC NULLS LAST
   `;
@@ -678,11 +717,29 @@ function sameItemSize(item: IngestItemInput, detail: DetailMatch): boolean {
   if (itemWidth === null || itemHeight === null || detail.width === null || detail.height === null) {
     return false;
   }
+  const matchesSize = item.source === 'ocr' ? closeEnoughSize : exactSize;
   return (
-    closeEnough(itemWidth, detail.width) && closeEnough(itemHeight, detail.height)
-  ) || (
-    closeEnough(itemWidth, detail.height) && closeEnough(itemHeight, detail.width)
+    matchesSize(itemWidth, itemHeight, detail.width, detail.height)
+    || matchesSize(itemWidth, itemHeight, detail.height, detail.width)
   );
+}
+
+function exactSize(
+  itemWidth: number,
+  itemHeight: number,
+  detailWidth: number,
+  detailHeight: number,
+): boolean {
+  return itemWidth === detailWidth && itemHeight === detailHeight;
+}
+
+function closeEnoughSize(
+  itemWidth: number,
+  itemHeight: number,
+  detailWidth: number,
+  detailHeight: number,
+): boolean {
+  return closeEnough(itemWidth, detailWidth) && closeEnough(itemHeight, detailHeight);
 }
 
 function closeEnough(left: number, right: number): boolean {
@@ -970,22 +1027,384 @@ async function enqueueOutbox(
   );
 }
 
-function buildTodayColumns(packets: CncTelegramPacketDto[]): CncTelegramTodayColumnDto[] {
+async function loadBathCards(
+  database: DatabaseService,
+  workday: string,
+): Promise<CncTelegramBathCardDto[]> {
+  const result = await database.query<BathJoinedRow>(
+    `
+    WITH packet_items AS (
+      SELECT
+        p.completion_status,
+        p.thumbs_up,
+        NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(p.comments_json) AS packet_comment(comment_text)
+          WHERE lower(packet_comment.comment_text) LIKE ANY (
+            ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
+          )
+        ) AS mdf_relevant,
+        i.match_order_id,
+        i.match_detail_id,
+        i.source,
+        lower(trim(i.order_name)) AS order_key,
+        i.detail_number,
+        i.width_mm,
+        i.height_mm,
+        i.quantity
+      FROM cnc_telegram_packets p
+      JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
+      WHERE p.workday = $1::date
+    ),
+    matched_target_details AS (
+      SELECT
+        item.match_order_id::bigint AS order_id,
+        item.match_detail_id::bigint AS detail_id,
+        SUM(
+          CASE
+            WHEN item.mdf_relevant
+              AND (item.completion_status = 'completed' OR item.thumbs_up = true)
+              THEN GREATEST(item.quantity, 0)
+            ELSE 0
+          END
+        )::integer AS completed_quantity
+      FROM packet_items item
+      WHERE item.match_order_id IS NOT NULL
+        AND item.match_detail_id IS NOT NULL
+      GROUP BY item.match_order_id, item.match_detail_id
+    ),
+    unique_order_keys AS (
+      SELECT
+        lower(trim(o.order_name)) AS order_key,
+        MIN(o.order_id)::bigint AS order_id
+      FROM orders o
+      WHERE o.delete_flag = false
+        AND NULLIF(trim(o.order_name), '') IS NOT NULL
+      GROUP BY lower(trim(o.order_name))
+      HAVING COUNT(*) = 1
+    ),
+    fallback_target_details AS (
+      SELECT
+        order_key.order_id,
+        od.detail_id::bigint AS detail_id,
+        SUM(
+          CASE
+            WHEN item.mdf_relevant
+              AND (item.completion_status = 'completed' OR item.thumbs_up = true)
+              THEN GREATEST(item.quantity, 0)
+            ELSE 0
+          END
+        )::integer AS completed_quantity
+      FROM packet_items item
+      JOIN unique_order_keys order_key
+        ON order_key.order_key = item.order_key
+      JOIN order_details od
+        ON od.order_id = order_key.order_id
+       AND od.delete_flag = false
+      WHERE item.match_order_id IS NULL
+        AND item.match_detail_id IS NULL
+        AND item.detail_number IS NOT NULL
+        AND od.detail_number = item.detail_number
+        AND item.width_mm IS NOT NULL
+        AND item.height_mm IS NOT NULL
+        AND od.width IS NOT NULL
+        AND od.height IS NOT NULL
+        AND (
+          (
+            item.source <> 'ocr'
+            AND (
+              (
+                item.width_mm::numeric = od.width::numeric
+                AND item.height_mm::numeric = od.height::numeric
+              )
+              OR (
+                item.width_mm::numeric = od.height::numeric
+                AND item.height_mm::numeric = od.width::numeric
+              )
+            )
+          )
+          OR (
+            item.source = 'ocr'
+            AND (
+              (
+                ABS(item.width_mm::numeric - od.width::numeric) <= 3
+                AND ABS(item.height_mm::numeric - od.height::numeric) <= 3
+              )
+              OR (
+                ABS(item.width_mm::numeric - od.height::numeric) <= 3
+                AND ABS(item.height_mm::numeric - od.width::numeric) <= 3
+              )
+            )
+          )
+        )
+      GROUP BY order_key.order_id, od.detail_id
+    ),
+    target_details AS (
+      SELECT
+        target.order_id,
+        target.detail_id,
+        SUM(target.completed_quantity)::integer AS completed_quantity
+      FROM (
+        SELECT * FROM matched_target_details
+        UNION ALL
+        SELECT * FROM fallback_target_details
+      ) target
+      GROUP BY target.order_id, target.detail_id
+    ),
+    latest_vacuum_results AS (
+      SELECT DISTINCT ON (j.cut_job_id)
+        r.cut_result_id,
+        r.cut_job_id,
+        r.result_no,
+        r.revision_no,
+        r.created_at AS result_created_at,
+        COALESCE(r.snapshot_job ->> 'name', j.name, 'Раскрой ' || j.cut_job_id::text) AS cut_job_name
+      FROM cut_job j
+      JOIN cut_result r ON r.cut_job_id = j.cut_job_id
+      LEFT JOIN cut_param_profiles profile
+        ON profile.cut_param_profile_id = j.param_profile_id
+      JOIN cut_result_label_map_projection projection
+        ON projection.cut_result_id = r.cut_result_id
+       AND projection.snapshot_digest = r.snapshot_digest
+      WHERE r.snapshot_job IS NOT NULL
+        AND COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+      ORDER BY
+        j.cut_job_id,
+        (j.current_cut_result_id = r.cut_result_id) DESC NULLS LAST,
+        r.created_at DESC,
+        r.result_no DESC,
+        r.revision_no DESC,
+        r.cut_result_id DESC
+    ),
+    candidate_results AS (
+      SELECT latest.*
+      FROM latest_vacuum_results latest
+      WHERE EXISTS (
+        SELECT 1
+        FROM cut_result_placement placement
+        JOIN cut_result_sheet_map sheet
+          ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+         AND sheet.is_effective = true
+        JOIN target_details target
+          ON target.order_id = placement.order_id
+         AND target.detail_id = placement.order_detail_id
+        WHERE placement.cut_result_id = latest.cut_result_id
+      )
+    )
+    SELECT
+      result.cut_result_id,
+      result.cut_job_id,
+      result.result_no,
+      result.revision_no,
+      result.result_created_at,
+      result.cut_job_name,
+      placement.order_id,
+      placement.order_detail_id,
+      COALESCE(NULLIF(trim(o.order_name), ''), placement.order_id::text) AS order_name,
+      od.detail_number,
+      COALESCE(od.width, placement.detail_width_mm) AS width_mm,
+      COALESCE(od.height, placement.detail_height_mm) AS height_mm,
+      COALESCE(target.completed_quantity, 0) AS completed_quantity,
+      sheet.cut_group_id,
+      sheet.variant,
+      sheet.sheet_index,
+      sheet.sheet_ordinal,
+      sheet.sheet_width_mm,
+      sheet.sheet_height_mm
+    FROM candidate_results result
+    JOIN cut_result_placement placement
+      ON placement.cut_result_id = result.cut_result_id
+    JOIN cut_result_sheet_map sheet
+      ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+     AND sheet.is_effective = true
+    LEFT JOIN orders o
+      ON o.order_id = placement.order_id
+     AND o.delete_flag = false
+    LEFT JOIN order_details od
+      ON od.detail_id = placement.order_detail_id
+     AND od.delete_flag = false
+    LEFT JOIN target_details target
+      ON target.order_id = placement.order_id
+     AND target.detail_id = placement.order_detail_id
+    ORDER BY
+      result.result_created_at DESC,
+      result.cut_result_id DESC,
+      sheet.sheet_ordinal ASC,
+      placement.order_id ASC,
+      od.detail_number ASC NULLS LAST,
+      placement.order_detail_id ASC,
+      placement.instance ASC
+    `,
+    [workday],
+  );
+  return mapBathRows(result.rows);
+}
+
+function buildTodayColumns(
+  packets: CncTelegramPacketDto[],
+  baths: CncTelegramBathCardDto[],
+): CncTelegramTodayColumnDto[] {
   const definitions: Array<Pick<CncTelegramTodayColumnDto, 'key' | 'title'>> = [
-    { key: 'parsed', title: 'Выложено' },
+    { key: 'parsed', title: 'Файлы на станке' },
     { key: 'completed', title: 'Выполнено' },
   ];
-  return definitions.map((definition) => {
+  const packetColumns = definitions.map((definition) => {
     const columnPackets = packets.filter((packet) => packetColumnKey(packet) === definition.key);
     return {
       ...definition,
       total: columnPackets.length,
       packets: columnPackets,
+      baths: [],
     };
   });
+
+  const pendingBaths = baths.filter((bath) => !bath.ready);
+  const readyBaths = baths.filter((bath) => bath.ready);
+  return [
+    ...packetColumns,
+    {
+      key: 'baths',
+      title: 'Ванны',
+      total: pendingBaths.length,
+      packets: [],
+      baths: pendingBaths,
+    },
+    {
+      key: 'baths_ready',
+      title: 'Готовы к закатке',
+      total: readyBaths.length,
+      packets: [],
+      baths: readyBaths,
+    },
+  ];
 }
 
-function packetColumnKey(packet: CncTelegramPacketDto): CncTelegramTodayColumnDto['key'] {
+function mapBathRows(rows: BathJoinedRow[]): CncTelegramBathCardDto[] {
+  const cards = new Map<string, {
+    card: CncTelegramBathCardDto;
+    itemsByKey: Map<string, CncTelegramBathItemDto>;
+    sheetKeys: Set<string>;
+    orderIds: Set<number>;
+  }>();
+
+  for (const row of rows) {
+    const cutResultId = toPositiveInteger(row.cut_result_id);
+    const cutJobId = toPositiveInteger(row.cut_job_id);
+    const resultNo = toPositiveInteger(row.result_no);
+    const revisionNo = toPositiveInteger(row.revision_no);
+    if (cutResultId === null || cutJobId === null || resultNo === null || revisionNo === null) {
+      continue;
+    }
+
+    const bathCardId = `cut-result:${cutResultId}`;
+    let accumulator = cards.get(bathCardId);
+    if (!accumulator) {
+      const card: CncTelegramBathCardDto = {
+        bathCardId,
+        cutJobId,
+        cutResultId,
+        resultNo,
+        revisionNo,
+        cutNumber: `${cutJobId}-${resultNo}`,
+        cutJobName: normalizeOptional(row.cut_job_name) ?? `Раскрой ${cutJobId}`,
+        createdAt: toIso(row.result_created_at),
+        ready: false,
+        orderCount: 0,
+        positionCount: 0,
+        itemQuantityTotal: 0,
+        items: [],
+        sheets: [],
+      };
+      accumulator = {
+        card,
+        itemsByKey: new Map(),
+        sheetKeys: new Set(),
+        orderIds: new Set(),
+      };
+      cards.set(bathCardId, accumulator);
+    }
+
+    const sheet = bathSheetFromRow(row);
+    if (sheet) {
+      const sheetKey = `${sheet.cutGroupId}:${sheet.variant}:${sheet.sheetIndex}`;
+      if (!accumulator.sheetKeys.has(sheetKey)) {
+        accumulator.sheetKeys.add(sheetKey);
+        accumulator.card.sheets.push(sheet);
+      }
+    }
+
+    const orderId = toPositiveInteger(row.order_id);
+    const detailId = toPositiveInteger(row.order_detail_id);
+    if (orderId === null || detailId === null) continue;
+
+    const itemKey = `${orderId}:${detailId}`;
+    let item = accumulator.itemsByKey.get(itemKey);
+    if (!item) {
+      item = {
+        bathItemId: `${bathCardId}:detail:${itemKey}`,
+        orderId,
+        orderName: normalizeOptional(row.order_name) ?? String(orderId),
+        detailId,
+        detailNumber: toNullableNumber(row.detail_number),
+        widthMm: toNullableNumber(row.width_mm),
+        heightMm: toNullableNumber(row.height_mm),
+        quantity: 0,
+        completedQuantity: Math.max(0, toNumber(row.completed_quantity)),
+        ready: false,
+      };
+      accumulator.itemsByKey.set(itemKey, item);
+      accumulator.orderIds.add(orderId);
+    }
+    item.quantity += 1;
+  }
+
+  const result: CncTelegramBathCardDto[] = [];
+  for (const accumulator of cards.values()) {
+    const items = Array.from(accumulator.itemsByKey.values()).sort(compareBathItems);
+    for (const item of items) {
+      item.ready = item.completedQuantity >= item.quantity;
+    }
+    const card = accumulator.card;
+    card.items = items;
+    card.sheets.sort(compareBathSheets);
+    card.orderCount = accumulator.orderIds.size;
+    card.positionCount = items.length;
+    card.itemQuantityTotal = items.reduce((sum, item) => sum + item.quantity, 0);
+    card.ready = items.length > 0 && items.every((item) => item.ready);
+    result.push(card);
+  }
+
+  return result;
+}
+
+function bathSheetFromRow(row: BathJoinedRow): CncTelegramBathSheetDto | null {
+  const cutGroupId = toPositiveInteger(row.cut_group_id);
+  const sheetIndex = toNullableNumber(row.sheet_index);
+  const sheetNumber = toPositiveInteger(row.sheet_ordinal);
+  if (cutGroupId === null || sheetIndex === null || sheetNumber === null) return null;
+  return {
+    cutGroupId,
+    sheetIndex,
+    sheetNumber,
+    variant: row.variant === 'manual' ? 'manual' : 'auto',
+    sheetWidthMm: toNullableNumber(row.sheet_width_mm),
+    sheetHeightMm: toNullableNumber(row.sheet_height_mm),
+  };
+}
+
+function compareBathItems(left: CncTelegramBathItemDto, right: CncTelegramBathItemDto): number {
+  return (
+    left.orderName.localeCompare(right.orderName, 'ru', { numeric: true }) ||
+    (left.detailNumber ?? Number.MAX_SAFE_INTEGER) - (right.detailNumber ?? Number.MAX_SAFE_INTEGER) ||
+    left.detailId - right.detailId
+  );
+}
+
+function compareBathSheets(left: CncTelegramBathSheetDto, right: CncTelegramBathSheetDto): number {
+  return left.sheetNumber - right.sheetNumber || left.cutGroupId - right.cutGroupId;
+}
+
+function packetColumnKey(packet: CncTelegramPacketDto): 'parsed' | 'completed' {
   if (packet.completionStatus === 'completed' || packet.thumbsUp) return 'completed';
   return 'parsed';
 }
@@ -1037,6 +1456,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         packetItemId: row.packet_item_id,
         sourceItemKey: row.source_item_key ?? '',
         orderName: row.order_name ?? '',
+        orderId: toNullableNumber(row.item_order_id),
         detailNumber: toNullableNumber(row.detail_number),
         widthMm: toNullableNumber(row.width_mm),
         heightMm: toNullableNumber(row.height_mm),

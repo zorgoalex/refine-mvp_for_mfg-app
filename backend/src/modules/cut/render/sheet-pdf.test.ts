@@ -69,7 +69,10 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('Заказ');
     expect(rendered).toContain('Поз.');
     expect(rendered).toContain('1001');
-    expect(rendered).toContain('Итого: 3');
+    expect(rendered).toContain('Количество деталей:');
+    expect(rendered).toContain('3');
+    expect(rendered).toContain('Площадь деталей:');
+    expect(rendered).toContain('Утилизация');
   });
 
   it('renders bath header values as one field text call instead of continued fragments', async () => {
@@ -98,7 +101,7 @@ describe('buildSheetsPdf', () => {
         (call[2] as PDFKit.Mixins.TextOptions | undefined)?.continued ||
         (call[3] as PDFKit.Mixins.TextOptions | undefined)?.continued,
     );
-    const clientValueCall = textSpy.mock.calls.find((call) => call[0] === ' Тлек Бакенов');
+    const clientValueCall = textSpy.mock.calls.find((call) => call[0] === 'Тлек Бакенов');
 
     expect(continuedCalls).toHaveLength(0);
     expect(clientValueCall?.[1]).toBeTypeOf('number');
@@ -125,7 +128,7 @@ describe('buildSheetsPdf', () => {
       String(call[0]).includes('Крем брюле -Декор+, Белый глянец, Олива софт -МС групп'),
     );
 
-    expect(filmValueCall?.[0]).toBe(' Крем брюле -Декор+, Белый глянец, Олива софт -МС групп');
+    expect(filmValueCall?.[0]).toBe('Крем брюле -Декор+, Белый глянец, Олива софт -МС групп');
     expect((filmValueCall?.[3] as PDFKit.Mixins.TextOptions | undefined)?.width).toBeGreaterThan(600);
     expect((filmValueCall?.[3] as PDFKit.Mixins.TextOptions | undefined)?.lineBreak).toBe(true);
   });
@@ -148,6 +151,27 @@ describe('buildSheetsPdf', () => {
     expect(Number(mediaBox?.[1])).toBeGreaterThan(Number(mediaBox?.[2]));
   });
 
+  it('resolves empty bath profile layouts to the editable bath v3 layout', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('bath-empty-layout'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        template: 'bath_profiles',
+        templateLayout: {},
+        meta: { clients: ['Тестовый клиент'] },
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(rendered).toContain('Клиент:');
+    expect(rendered).toContain('Тестовый клиент');
+    expect(rendered).toContain('Количество деталей:');
+    expect(rendered).toContain('Площадь деталей:');
+    expect(rendered).toContain('Утилизация');
+  });
+
   it('prints the sheet number above the bath details table', async () => {
     const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
     await buildSheetsPdf([
@@ -160,11 +184,12 @@ describe('buildSheetsPdf', () => {
       },
     ]);
 
-    const rendered = textSpy.mock.calls.map((call) => String(call[0])).join('\n');
-    expect(rendered).toContain('Лист 3');
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('Лист');
+    expect(rendered).toContain('3');
   });
 
-  it('keeps bath detail table cells on one line with fitted font', async () => {
+  it('keeps bath detail table cells inside bounded wrapping boxes', async () => {
     const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
     await buildSheetsPdf([
       {
@@ -177,7 +202,7 @@ describe('buildSheetsPdf', () => {
     ]);
 
     const orderCall = textSpy.mock.calls.find((call) => call[0] === 'импорт 68');
-    expect(orderCall?.[3]).toMatchObject({ lineBreak: false, align: 'center' });
+    expect(orderCall?.[3]).toMatchObject({ lineBreak: true, ellipsis: true, align: 'center' });
   });
 
   it('numbers bath detail table rows and prints total detail quantity', async () => {
@@ -199,6 +224,283 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('#');
     expect(rendered).toContain('1');
     expect(rendered).toContain('2');
-    expect(rendered).toContain('Итого: 5');
+    expect(rendered).toContain('Количество деталей:');
+    expect(rendered).toContain('5');
+  });
+
+  it('renders v3 template text inside bounded wrapping boxes', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    const longText = 'Очень длинный заголовок заказа, который должен переноситься внутри своего поля';
+    await buildSheetsPdf([
+      {
+        svg: SVG('v3-text'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            { id: 't', type: 'text', text: longText, x: 10, y: 10, w: 45, h: 12, style: { fontSize: 10 } },
+          ],
+        },
+      },
+    ]);
+
+    const call = textSpy.mock.calls.find((entry) => entry[0] === longText);
+    expect(call?.[3]).toMatchObject({
+      width: expect.any(Number),
+      height: expect.any(Number),
+      lineBreak: true,
+      ellipsis: true,
+    });
+  });
+
+  it('renders v3 detail tables with configured columns sorted by order', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('v3-table'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            {
+              id: 'table',
+              type: 'detail_table',
+              x: 10,
+              y: 20,
+              w: 80,
+              h: 45,
+              style: {
+                sort: { field: 'detail.order', direction: 'asc' },
+                columns: [
+                  { field: 'detail.order', label: 'Заказ', width: 2, visible: true },
+                  { field: 'detail.quantity', label: 'Кол-во', width: 1, visible: true },
+                ],
+              },
+            },
+          ],
+        },
+        detailRows: [
+          { order: '2002', position: 2, lengthMm: 300, widthMm: 100, quantity: 1 },
+          { order: '1001', position: 1, lengthMm: 500, widthMm: 200, quantity: 3 },
+        ],
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('Заказ');
+    expect(rendered).toContain('Кол-во');
+    expect(rendered).not.toContain('Поз.');
+    expect(rendered.indexOf('1001')).toBeGreaterThan(-1);
+    expect(rendered.indexOf('2002')).toBeGreaterThan(-1);
+    expect(rendered.indexOf('1001')).toBeLessThan(rendered.indexOf('2002'));
+  });
+
+  it('renders v3 detail tables with generic detail field columns', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('v3-table-generic-detail'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            {
+              id: 'table',
+              type: 'detail_table',
+              x: 10,
+              y: 20,
+              w: 90,
+              h: 45,
+              style: {
+                sort: { field: 'detail.detail_name', direction: 'asc' },
+                columns: [
+                  { field: 'detail.detail_name', label: 'Название детали', width: 2, visible: true },
+                  { field: 'detail.production_status_name', label: 'Статус', width: 1, visible: true },
+                ],
+              },
+            },
+          ],
+        },
+        detailRows: [
+          {
+            order: '1001',
+            position: 1,
+            lengthMm: 500,
+            widthMm: 200,
+            quantity: 1,
+            fields: { detail_name: 'Фасад A', production_status_name: 'К раскрою' },
+          },
+        ],
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('Название детали');
+    expect(rendered).toContain('Фасад A');
+    expect(rendered).toContain('К раскрою');
+  });
+
+  it('renders empty seeded template layouts with default detail and machine-file tables', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    const pdf = await buildSheetsPdf([
+      {
+        svg: SVG('seeded-empty-layout'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        template: 'standard',
+        templateLayout: {},
+        meta: {
+          orders: ['11380'],
+          clients: ['Тестовый клиент'],
+          films: ['Крем брюле -Декор+'],
+          machineFiles: ['CNC#1_11380.TXT'],
+        },
+        detailRows: [
+          {
+            order: '11380',
+            position: 12,
+            lengthMm: 800,
+            widthMm: 240,
+            quantity: 2,
+            machineFiles: ['CNC#1_11380.TXT'],
+            fields: { doweling: true, machine_file: 'CNC#1_11380.TXT' },
+          },
+        ],
+      },
+    ]);
+
+    const mediaBox = /\/MediaBox\s*\[\s*0\s+0\s+([0-9.]+)\s+([0-9.]+)\s*\]/.exec(pdf.toString('latin1'));
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(Number(mediaBox?.[1])).toBeCloseTo(841.89, 1);
+    expect(Number(mediaBox?.[2])).toBeCloseTo(595.28, 1);
+    expect(rendered).toContain('Присадка');
+    expect(rendered).toContain('Файл станка');
+    expect(rendered).toContain('Файлы станка');
+    expect(rendered).toContain('✓');
+    expect(rendered).toContain('CNC#1_11380.TXT');
+  });
+
+  it('upgrades legacy v3 detail table defaults with doweling and machine-file columns', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('v3-table-machine-defaults'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            {
+              id: 'table',
+              type: 'detail_table',
+              x: 10,
+              y: 20,
+              w: 120,
+              h: 45,
+              style: {
+                columns: [
+                  { field: 'detail.row_number', label: '#', width: 0.55, visible: true },
+                  { field: 'detail.order', label: 'Заказ', width: 1.6, visible: true },
+                  { field: 'detail.position', label: 'Поз.', width: 0.9, visible: true },
+                  { field: 'detail.lengthMm', label: 'Длина', width: 1.1, visible: true },
+                  { field: 'detail.widthMm', label: 'Ширина', width: 1.1, visible: true },
+                  { field: 'detail.quantity', label: 'Кол-во', width: 0.9, visible: true },
+                ],
+              },
+            },
+          ],
+        },
+        detailRows: [
+          {
+            order: '11380',
+            position: 12,
+            lengthMm: 800,
+            widthMm: 240,
+            quantity: 2,
+            machineFiles: ['CNC#1_11380.TXT'],
+            fields: { doweling: true, machine_file: 'CNC#1_11380.TXT' },
+          },
+        ],
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('Присадка');
+    expect(rendered).toContain('Файл станка');
+    expect(rendered).toContain('✓');
+    expect(rendered).toContain('CNC#1_11380.TXT');
+  });
+
+  it('renders v3 machine file tables with one unique file name per row', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('v3-machine-files'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            { id: 'files', type: 'machine_files_table', x: 10, y: 20, w: 70, h: 28, style: { fontSize: 7 } },
+          ],
+        },
+        meta: { machineFiles: ['CNC#2_11380.TXT'] },
+        detailRows: [
+          {
+            order: '11380',
+            position: 12,
+            lengthMm: 800,
+            widthMm: 240,
+            quantity: 1,
+            machineFiles: ['CNC#1_11380.TXT', 'CNC#2_11380.TXT'],
+            fields: { machine_file: 'CNC#1_11380.TXT' },
+          },
+          {
+            order: '11380',
+            position: 13,
+            lengthMm: 780,
+            widthMm: 255,
+            quantity: 1,
+            fields: { machine_files: 'CNC#1_11380.TXT, CNC#3_11380.TXT' },
+          },
+        ],
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('Файлы станка');
+    expect(rendered.filter((value) => value === 'CNC#1_11380.TXT')).toHaveLength(1);
+    expect(rendered).toContain('CNC#2_11380.TXT');
+    expect(rendered).toContain('CNC#3_11380.TXT');
+  });
+
+  it('renders v3 sheet thumbnail layouts on the configured PDF page size', async () => {
+    const pdf = await buildSheetsPdf([
+      {
+        svg: SVG('thumb'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            { id: 'thumb', type: 'sheet_thumbnail', x: 20, y: 30, w: 120, h: 80, rotation: 12, style: { fit: 'contain' } },
+          ],
+        },
+      },
+    ]);
+
+    const mediaBox = /\/MediaBox\s*\[\s*0\s+0\s+([0-9.]+)\s+([0-9.]+)\s*\]/.exec(pdf.toString('latin1'));
+    expect(mediaBox).not.toBeNull();
+    expect(Number(mediaBox?.[1])).toBeCloseTo(841.89, 1);
+    expect(Number(mediaBox?.[2])).toBeCloseTo(595.28, 1);
   });
 });

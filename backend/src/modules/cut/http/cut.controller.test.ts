@@ -12,6 +12,7 @@ import {
   parseSetProfileBody,
   parseSetSheetMaterialBody,
   parseSetCombineFilmsBody,
+  parseSetNameBody,
   parseSetPdfTemplateBody,
   parseSetSplitByMaterialBody,
   parseSaveManualLayoutBody,
@@ -138,11 +139,36 @@ describe('CutController', () => {
   it('serves eligible-details as a backend read (no Hasura)', async () => {
     const listEligibleDetails = vi.fn(async () => ({ details: [], noSheetSpecCount: 4 }));
     const controller = createController({ service: { listEligibleDetails } });
-    const result = await controller.eligibleDetails({ user: currentUser() } as never, '42', { orderIds: '9,10' });
+    const result = await controller.eligibleDetails(
+      { user: currentUser() } as never,
+      '42',
+      { orderIds: '9,10', dateFrom: '2026-07-16', dateTo: '2026-07-26' },
+    );
     expect(result.noSheetSpecCount).toBe(4);
     expect(listEligibleDetails).toHaveBeenCalledWith(
-      expect.objectContaining({ criteria: expect.objectContaining({ orderIds: [9, 10] }) }),
+      expect.objectContaining({
+        criteria: expect.objectContaining({
+          orderIds: [9, 10],
+          dateFrom: '2026-07-16',
+          dateTo: '2026-07-26',
+        }),
+      }),
     );
+  });
+
+  it('previews eligible-details before a cut job exists', async () => {
+    const listEligibleDetails = vi.fn(async () => ({ details: [], noSheetSpecCount: 0 }));
+    const controller = createController({ service: { listEligibleDetails } });
+    const result = await controller.previewEligibleDetails(
+      { user: currentUser(), requestId: 'req-preview' } as never,
+      { filmIds: '7', dateFrom: '2026-07-01', dateTo: '2026-07-31' },
+    );
+    expect(result.details).toEqual([]);
+    expect(listEligibleDetails).toHaveBeenCalledWith(expect.objectContaining({
+      criteria: expect.objectContaining({ filmIds: [7], dateFrom: '2026-07-01', dateTo: '2026-07-31' }),
+      includeAllStatuses: true,
+      requestId: 'req-preview',
+    }));
   });
 
   it('renders a sheet PNG to the response with the image content type', async () => {
@@ -391,7 +417,13 @@ describe('CutController', () => {
     expect(parseCreateCutJobRequest({ name: 'Тест', detailIds: [1, 2] }).detailIds).toEqual([1, 2]);
     expect(() => parseCreateCutJobRequest({ name: '' })).toThrow(ApiError);
     expect(parseAddItemsRequest({ detailIds: [3], version: 2 }).version).toBe(2);
-    expect(parseEligibleCriteria({ orderIds: '9,10', filmIds: '5' })).toMatchObject({ orderIds: [9, 10], filmIds: [5] });
+    expect(parseEligibleCriteria({ orderIds: '9,10', filmIds: '5', dateFrom: '2026-07-16', dateTo: '2026-07-26' })).toMatchObject({
+      orderIds: [9, 10],
+      filmIds: [5],
+      dateFrom: '2026-07-16',
+      dateTo: '2026-07-26',
+    });
+    expect(() => parseEligibleCriteria({ dateFrom: '16.07.2026' })).toThrow(ApiError);
   });
 
   // Task 7: parseVariant
@@ -540,6 +572,36 @@ describe('CutController', () => {
       controller.listSheetTypes({ user: currentUser() } as never),
     ).rejects.toMatchObject({ statusCode: 503, code: 'SERVICE_UNAVAILABLE' } satisfies Partial<ApiError>);
   });
+
+  it('listFilmOptions: delegates date-filtered criteria to the service', async () => {
+    const films = [
+      { filmId: 7, name: 'Белый матовый' },
+      { filmId: 8, name: 'Дуб натуральный' },
+    ];
+    const listFilmOptionsForCut = vi.fn(async () => films);
+    const controller = createController({ service: { listFilmOptionsForCut } });
+    const request = { user: currentUser(), requestId: 'req-films' } as never;
+
+    const result = await controller.listFilmOptions(request, {
+      dateFrom: '2026-07-01',
+      dateTo: '2026-07-31',
+      orderIds: '10,11',
+      sheetMaterialTypeIds: '3',
+    });
+
+    expect(result).toEqual(films);
+    expect(listFilmOptionsForCut).toHaveBeenCalledWith(expect.objectContaining({
+      criteria: {
+        dateFrom: '2026-07-01',
+        dateTo: '2026-07-31',
+        orderIds: [10, 11],
+        sheetMaterialTypeIds: [3],
+        filmIds: undefined,
+        productionStatusIds: undefined,
+      },
+      requestId: 'req-films',
+    }));
+  });
 });
 
 describe('parseSetProfileBody', () => {
@@ -673,6 +735,30 @@ it('PATCH setJobPdfTemplate delegates parsed args to CutService.setJobPdfTemplat
   const dto = await controller.setJobPdfTemplate(request, '42', { pdfTemplate: 'bath_profiles' });
   expect(service.setJobPdfTemplate).toHaveBeenCalledWith(expect.objectContaining({
     cutJobId: 42, pdfTemplate: 'bath_profiles', requestId: 'req-job-template',
+  }));
+  expect(dto).toBe(serviceReturn);
+});
+
+describe('parseSetNameBody', () => {
+  it('trims and accepts a non-empty name + version', () => {
+    expect(parseSetNameBody({ name: '  Раскрой 2709  ', version: 4 })).toEqual({ name: 'Раскрой 2709', version: 4 });
+  });
+  it('rejects an empty name and unknown fields', () => {
+    expect(() => parseSetNameBody({ name: '   ', version: 0 })).toThrow();
+    expect(() => parseSetNameBody({ name: 'Раскрой', version: 0, extra: true })).toThrow();
+  });
+});
+
+it('PATCH setName delegates parsed args to CutService.setName', async () => {
+  const serviceReturn = jobDto();
+  const service = {
+    setName: vi.fn(async () => serviceReturn),
+  };
+  const controller = createController({ service });
+  const request = { user: currentUser(), requestId: 'req-name' } as never;
+  const dto = await controller.setName(request, '42', { name: 'Раскрой 2709', version: 3 });
+  expect(service.setName).toHaveBeenCalledWith(expect.objectContaining({
+    cutJobId: 42, name: 'Раскрой 2709', version: 3, requestId: 'req-name',
   }));
   expect(dto).toBe(serviceReturn);
 });

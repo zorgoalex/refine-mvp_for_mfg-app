@@ -14,6 +14,7 @@ import type {
   EligibleDetailsQuery,
   GetCutJobQuery,
   GetCutResultQuery,
+  ListFilmOptionsForCutQuery,
   ListCutJobsQuery,
   ListCutResultsQuery,
   ListSheetTypesForCutQuery,
@@ -27,6 +28,7 @@ import type {
   SetCutJobSheetMaterialCommand,
   SetCutJobCombineFilmsCommand,
   SetCutJobPdfTemplateCommand,
+  SetCutJobNameCommand,
   SetCutJobSplitByMaterialCommand,
   SetCutGroupPdfTemplateCommand,
   SetPdfPrewarmStateQuery,
@@ -126,6 +128,11 @@ export class CutService implements OnModuleInit, OnModuleDestroy {
     return this.ports.cut.listEligibleDetails(query);
   }
 
+  async listFilmOptionsForCut(query: ListFilmOptionsForCutQuery) {
+    this.require(query.currentUser, 'cut.view', { requestId: query.requestId });
+    return this.ports.cut.listFilmOptionsForCut(query);
+  }
+
   async listDetailPlacements(query: DetailPlacementsQuery) {
     this.require(query.currentUser, 'cut.view', { requestId: query.requestId });
     return this.ports.cut.listDetailPlacements(query);
@@ -194,6 +201,11 @@ export class CutService implements OnModuleInit, OnModuleDestroy {
   async setJobPdfTemplate(command: SetCutJobPdfTemplateCommand) {
     this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
     return this.ports.cut.setJobPdfTemplate(command);
+  }
+
+  async setName(command: SetCutJobNameCommand) {
+    this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
+    return this.ports.cut.setName(command);
   }
 
   async setGroupPdfTemplate(command: SetCutGroupPdfTemplateCommand) {

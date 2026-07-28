@@ -1,5 +1,5 @@
 import type { DatabaseClient } from '../../../database/database.types';
-import type { NotificationRule } from '../domain/notification-rule.types';
+import type { NotificationChannel, NotificationRule } from '../domain/notification-rule.types';
 
 export interface CreateNotificationRuleInput {
   ruleCode: string;
@@ -8,6 +8,7 @@ export interface CreateNotificationRuleInput {
   level: 'info' | 'warning' | 'error';
   priority: number;
   isEnabled: boolean;
+  channels: NotificationChannel[];
   conditions: Record<string, unknown>;
   recipients: Record<string, unknown>;
   titleTemplate: string | null;
@@ -20,6 +21,7 @@ export interface UpdateNotificationRuleInput {
   level?: 'info' | 'warning' | 'error';
   priority?: number;
   isEnabled?: boolean;
+  channels?: NotificationChannel[];
   conditions?: Record<string, unknown>;
   recipients?: Record<string, unknown>;
   titleTemplate?: string | null;

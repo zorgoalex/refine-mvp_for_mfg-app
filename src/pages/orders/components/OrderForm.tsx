@@ -215,6 +215,19 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       deletedDowelingLinks,
     ],
   );
+  const applicableProductionStatusIds = useMemo(
+    () => [
+      ...new Set(
+        workshops
+          .map((workshop) => Number(workshop.production_status_id))
+          .filter(
+            (productionStatusId) =>
+              Number.isInteger(productionStatusId) && productionStatusId > 0,
+          ),
+      ),
+    ],
+    [workshops],
+  );
   const bazisDraftClientLocked = mode === 'create' && (bazisDraft?.clientId ?? null) != null;
   const bazisDraftProjectLocked = mode === 'create' && bazisDraft != null;
 
@@ -525,6 +538,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       const plannedCompletion = computePlannedCompletionDate(
         orderDate,
         deadlineDefaultSchedule.schedule,
+        applicableProductionStatusIds,
       );
       automaticPlannedCompletionRef.current =
         currentPlannedCompletion === null ? plannedCompletion : null;
@@ -552,6 +566,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     defaultOrderStatus,
     defaultPaymentStatus,
     deadlineDefaultSchedule.schedule,
+    applicableProductionStatusIds,
     orderKey,
     setDirty,
     setHeader,
@@ -574,6 +589,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     const plannedCompletion = computePlannedCompletionDate(
       orderDate,
       deadlineDefaultSchedule.schedule,
+      [],
     );
     automaticPlannedCompletionRef.current = plannedCompletion;
     const seededHeader: Record<string, unknown> = {
@@ -670,12 +686,25 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     const nextAutomaticDate = computePlannedCompletionDate(
       String(header.order_date),
       deadlineDefaultSchedule.schedule,
+      applicableProductionStatusIds,
     );
+    const previousAutomaticDate = automaticPlannedCompletionRef.current;
+    const currentDate =
+      typeof header.planned_completion_date === 'string' &&
+      header.planned_completion_date.trim().length > 0
+        ? header.planned_completion_date
+        : null;
     if (!nextAutomaticDate) {
+      if (
+        previousAutomaticDate !== null &&
+        currentDate === previousAutomaticDate
+      ) {
+        automaticPlannedCompletionRef.current = null;
+        updateHeaderField('planned_completion_date', null);
+      }
       return;
     }
 
-    const previousAutomaticDate = automaticPlannedCompletionRef.current;
     if (
       !shouldApplyComputedPlannedCompletion(
         header.planned_completion_date,
@@ -684,11 +713,6 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     ) {
       return;
     }
-    const currentDate =
-      typeof header.planned_completion_date === 'string' &&
-      header.planned_completion_date.trim().length > 0
-        ? header.planned_completion_date
-        : null;
     automaticPlannedCompletionRef.current = nextAutomaticDate;
     if (currentDate !== nextAutomaticDate) {
       updateHeaderField('planned_completion_date', nextAutomaticDate);
@@ -696,6 +720,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   }, [
     deadlineDefaultSchedule.loaded,
     deadlineDefaultSchedule.schedule,
+    applicableProductionStatusIds,
     header.order_date,
     header.planned_completion_date,
     mode,

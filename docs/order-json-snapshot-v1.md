@@ -67,6 +67,13 @@ Feature/runtime requirements:
 Batch import posts a base64 ZIP in JSON. The backend body limit is set to
 `50mb` in `backend/src/main.ts`.
 
+Batch import always returns per-file `results[]`. Failed items include
+`fileName`, `errorCode`, `message`, and optional `details.errors[]` with field
+validation causes; the UI shows these rows in the import result modal.
+Failed import runs are persisted in `order_import_runs` after the import
+transaction rolls back. Structured failure details are stored under
+`summary_json.errorDetails`.
+
 ## Stage Deployment Notes
 
 Snapshot routes are served by the VPS NestJS backend container, while the UI is

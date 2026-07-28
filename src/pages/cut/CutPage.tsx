@@ -5,6 +5,7 @@ import {
   Card,
   Checkbox,
   Collapse,
+  DatePicker,
   Form,
   Input,
   Modal,
@@ -20,12 +21,16 @@ import {
   theme,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { MinusOutlined, PlusOutlined, UndoOutlined, UpOutlined } from '@ant-design/icons';
+import { CloseOutlined, EditOutlined, MinusOutlined, PlusOutlined, SaveOutlined, UndoOutlined, UpOutlined } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
+import dayjs, { type Dayjs } from 'dayjs';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
+import { subscribeCutPdfTemplatesChanged } from '../../api/cutPdfTemplateEvents';
+import { ordersApi } from '../../api/ordersApi';
 import type { CutParamProfile, CutPdfTemplate, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
+import type { OrderListItemDto } from '../../api/types/orderApi.types';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
 import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, loadSheetAxisOrigin, saveSheetAxisOrigin, selectVariantSheets } from './cutPreviewHelpers';
@@ -70,6 +75,7 @@ import { can } from '../../utils/permissions';
 import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
 import { useTabStore } from '../../stores/tabStore';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
+import { emitCutJobReady } from './cutJobEvents';
 const { Panel } = Collapse;
 
 // Built-in fallback preset names (used until the backend config list loads).
@@ -85,6 +91,46 @@ const DEFAULT_PDF_TEMPLATE_OPTIONS = [
 ];
 
 const { Title, Text } = Typography;
+const { RangePicker } = DatePicker;
+
+type CutOrderDateRange = [Dayjs, Dayjs];
+type CutOrderDateRangeValue = [Dayjs | null, Dayjs | null] | null | undefined;
+type CutCriteriaForm = {
+  name: string;
+  orderDateRange?: CutOrderDateRangeValue;
+  orderIds?: string | number[];
+  sheetMaterialTypeIds?: number[];
+  filmIds?: number[];
+};
+
+type CutOrderSelectOption = {
+  value: number;
+  label: string;
+  title: string;
+  searchText: string;
+};
+
+type CutFilmSelectOption = {
+  value: number;
+  label: string;
+  title: string;
+  searchText: string;
+};
+
+type CutPreviewSummaryRow = {
+  key: string;
+  filmName: string;
+  materialName: string;
+  positions: number;
+  orders: string[];
+  details: number;
+  area: number;
+};
+
+type CutPreviewSummary = {
+  groups: CutPreviewSummaryRow[];
+  total: CutPreviewSummaryRow;
+};
 
 type PdfPreviewState = {
   open: boolean;
@@ -122,6 +168,14 @@ const STATUS_TAG_COLORS: Record<string, string> = {
 };
 
 const CUT_JOBS_TABLE_CONTAINER_HEIGHT = 317;
+const CUT_DETAIL_PREVIEW_VISIBLE_ROWS = 20;
+const CUT_DETAIL_PREVIEW_ROW_HEIGHT = 20;
+const CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT = CUT_DETAIL_PREVIEW_VISIBLE_ROWS * CUT_DETAIL_PREVIEW_ROW_HEIGHT;
+const CUT_JOB_DETAILS_VISIBLE_ROWS = 15;
+const CUT_JOB_DETAILS_ROW_HEIGHT = 40;
+const CUT_JOB_DETAILS_TABLE_BODY_HEIGHT = CUT_JOB_DETAILS_VISIBLE_ROWS * CUT_JOB_DETAILS_ROW_HEIGHT;
+const CUT_DETAIL_SELECTION_COLUMN_WIDTH = 64;
+const CUT_CREATE_PREVIEW_ORDER_TINT_COUNT = 8;
 const MIN_EDITOR_VIEW_ZOOM = 0.25;
 const MAX_EDITOR_VIEW_ZOOM = 1.5;
 const EDITOR_VIEW_ZOOM_STEP = 0.25;
@@ -245,6 +299,279 @@ function formatJobMaterialNames(materialNames: string[] | undefined): string {
   return names.length > 0 ? names.join(', ') : '—';
 }
 
+function defaultCutOrderDateRange(now: Dayjs = dayjs()): CutOrderDateRange {
+  return [now, now];
+}
+
+function cutDateRangeToCriteria(range: CutOrderDateRangeValue): { dateFrom?: string; dateTo?: string } {
+  const from = range?.[0];
+  const to = range?.[1];
+  if (!from || !to) return {};
+  return {
+    dateFrom: from.format('YYYY-MM-DD'),
+    dateTo: to.format('YYYY-MM-DD'),
+  };
+}
+
+function parseOrderIdsValue(value: string | number[] | undefined): number[] | undefined {
+  if (Array.isArray(value)) {
+    const ids = value.filter((id) => Number.isInteger(id) && id > 0);
+    return ids.length > 0 ? ids : undefined;
+  }
+  const ids = parseIdCsv(value ?? '');
+  return ids.length > 0 ? ids : undefined;
+}
+
+function buildCutOrderOption(order: OrderListItemDto): CutOrderSelectOption {
+  const client = order.clientName ? ` · ${order.clientName}` : '';
+  const title = `${order.orderName} · ${order.orderDate}${client}`;
+  return {
+    value: order.orderId,
+    label: order.orderName,
+    title,
+    searchText: title.toLowerCase(),
+  };
+}
+
+function buildCutFilmOption(film: { filmId: number; name: string }): CutFilmSelectOption {
+  return {
+    value: film.filmId,
+    label: film.name,
+    title: film.name,
+    searchText: film.name.toLowerCase(),
+  };
+}
+
+function mergeCutSelectOptions<T extends { value: number }>(base: T[], extra: T[]): T[] {
+  const byValue = new Map<number, T>();
+  for (const option of base) byValue.set(option.value, option);
+  for (const option of extra) byValue.set(option.value, option);
+  return [...byValue.values()];
+}
+
+function cutJobOrderOptions(job: CutJobDto | null): CutOrderSelectOption[] {
+  const byId = new Map<number, CutOrderSelectOption>();
+  for (const item of job?.items ?? []) {
+    if (byId.has(item.orderId)) continue;
+    const label = item.orderName?.trim() || `#${item.orderId}`;
+    byId.set(item.orderId, {
+      value: item.orderId,
+      label,
+      title: label,
+      searchText: label.toLowerCase(),
+    });
+  }
+  return [...byId.values()];
+}
+
+function cutJobFilmOptions(job: CutJobDto | null): CutFilmSelectOption[] {
+  const byId = new Map<number, CutFilmSelectOption>();
+  for (const item of job?.items ?? []) {
+    const filmId = item.detail?.filmId;
+    if (typeof filmId !== 'number' || !Number.isInteger(filmId) || filmId <= 0 || byId.has(filmId)) continue;
+    const label = item.detail?.filmName?.trim() || `Плёнка #${filmId}`;
+    byId.set(filmId, {
+      value: filmId,
+      label,
+      title: label,
+      searchText: label.toLowerCase(),
+    });
+  }
+  return [...byId.values()];
+}
+
+function cutJobSheetTypeOptions(job: CutJobDto | null): Array<{ value: number; label: string }> {
+  const byId = new Map<number, { value: number; label: string }>();
+  for (const item of job?.items ?? []) {
+    const sheetMaterialTypeId = item.detail?.sheetMaterialTypeId;
+    if (
+      typeof sheetMaterialTypeId !== 'number'
+      || !Number.isInteger(sheetMaterialTypeId)
+      || sheetMaterialTypeId <= 0
+      || byId.has(sheetMaterialTypeId)
+    ) continue;
+    byId.set(sheetMaterialTypeId, {
+      value: sheetMaterialTypeId,
+      label: item.detail?.materialName?.trim() || `Тип листа #${sheetMaterialTypeId}`,
+    });
+  }
+  return [...byId.values()];
+}
+
+function optionValues(options: Array<{ value: number }>): number[] {
+  return options.map((option) => option.value);
+}
+
+function cutPreviewOrderTintByOrderId(details: EligibleDetailDto[]): Map<number, number> {
+  const byOrderId = new Map<number, number>();
+  for (const detail of details) {
+    if (byOrderId.has(detail.orderId)) continue;
+    byOrderId.set(detail.orderId, byOrderId.size % CUT_CREATE_PREVIEW_ORDER_TINT_COUNT);
+  }
+  return byOrderId;
+}
+
+function cutJobItemOrderTintByOrderId(items: CutJobItemDto[]): Map<number, number> {
+  const byOrderId = new Map<number, number>();
+  for (const item of items) {
+    if (byOrderId.has(item.orderId)) continue;
+    byOrderId.set(item.orderId, byOrderId.size % CUT_CREATE_PREVIEW_ORDER_TINT_COUNT);
+  }
+  return byOrderId;
+}
+
+function uniqueNonBlank(values: Array<string | number | null | undefined>): string[] {
+  const set = new Set<string>();
+  for (const value of values) {
+    const text = value == null ? '' : String(value).trim();
+    if (text) set.add(text);
+  }
+  return [...set];
+}
+
+function buildSuggestedCutName(details: EligibleDetailDto[], now: Dayjs = dayjs()): string {
+  const candidates = details.filter((detail) => detail.eligible);
+  const source = candidates.length > 0 ? candidates : details;
+  const orders = uniqueNonBlank(source.map((detail) => detail.orderName || `#${detail.orderId}`));
+  const films = uniqueNonBlank(source.map((detail) => detail.filmName));
+  return `раскрой ${orders.length > 0 ? orders.join(', ') : 'без заказов'} - ${films.length > 0 ? films.join(', ') : 'без пленки'} - ${now.format('DD.MM.YYYY')}`;
+}
+
+function cutPreviewOrderLabel(detail: EligibleDetailDto): string {
+  return detail.orderName?.trim() || `#${detail.orderId}`;
+}
+
+function normalizeCutSummaryLabel(value: string | null | undefined, fallback: string): string {
+  return value?.trim() || fallback;
+}
+
+function cutPreviewAreaTotal(detail: EligibleDetailDto): number {
+  const area = Number(detail.area);
+  const quantity = Number(detail.quantity);
+  if (!Number.isFinite(area) || !Number.isFinite(quantity)) return 0;
+  return area * quantity;
+}
+
+function buildCutPreviewSummary(details: EligibleDetailDto[]): CutPreviewSummary {
+  const groups = new Map<string, Omit<CutPreviewSummaryRow, 'orders'> & { orderSet: Set<string> }>();
+  const total: Omit<CutPreviewSummaryRow, 'orders'> & { orderSet: Set<string> } = {
+    key: 'total',
+    filmName: 'Все плёнки',
+    materialName: 'Все материалы',
+    positions: 0,
+    orderSet: new Set(),
+    details: 0,
+    area: 0,
+  };
+
+  for (const detail of details) {
+    const filmName = normalizeCutSummaryLabel(detail.filmName, 'без плёнки');
+    const materialName = normalizeCutSummaryLabel(detail.materialName, 'без материала');
+    const groupKey = `${detail.filmId ?? filmName}::${detail.sheetMaterialTypeId ?? detail.materialId ?? materialName}`;
+    const quantity = Number.isFinite(Number(detail.quantity)) ? Number(detail.quantity) : 0;
+    const area = cutPreviewAreaTotal(detail);
+    const order = cutPreviewOrderLabel(detail);
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = {
+        key: groupKey,
+        filmName,
+        materialName,
+        positions: 0,
+        orderSet: new Set(),
+        details: 0,
+        area: 0,
+      };
+      groups.set(groupKey, group);
+    }
+    for (const bucket of [group, total]) {
+      bucket.positions += 1;
+      bucket.orderSet.add(order);
+      bucket.details += quantity;
+      bucket.area += area;
+    }
+  }
+
+  const finalize = (row: Omit<CutPreviewSummaryRow, 'orders'> & { orderSet: Set<string> }): CutPreviewSummaryRow => ({
+    key: row.key,
+    filmName: row.filmName,
+    materialName: row.materialName,
+    positions: row.positions,
+    orders: [...row.orderSet],
+    details: row.details,
+    area: row.area,
+  });
+
+  return {
+    groups: [...groups.values()]
+      .map(finalize)
+      .sort((a, b) => `${a.materialName} ${a.filmName}`.localeCompare(`${b.materialName} ${b.filmName}`, 'ru')),
+    total: finalize(total),
+  };
+}
+
+function formatCutPreviewSummaryMetrics(row: CutPreviewSummaryRow): string {
+  const orders = row.orders.length > 0 ? row.orders.join(', ') : '—';
+  return `позиций ${row.positions}; заказов ${row.orders.length} (${orders}); деталей ${row.details}; площадь ${formatArea(row.area)}`;
+}
+
+function cutDetailCellText(value: unknown): string {
+  return value === null || value === undefined || value === '' ? '—' : String(value);
+}
+
+function cutDetailColumnWidth<T>(
+  rows: T[],
+  title: string,
+  readValue: (row: T) => unknown,
+  options: { min: number; max: number; charWidth?: number; padding?: number },
+): number {
+  const charWidth = options.charWidth ?? 7;
+  const padding = options.padding ?? 28;
+  const longest = [title, ...rows.map((row) => cutDetailCellText(readValue(row)))]
+    .reduce((max, text) => Math.max(max, text.length), 0);
+  return Math.min(options.max, Math.max(options.min, Math.ceil(longest * charWidth + padding)));
+}
+
+function tableScrollX<T>(columns: ColumnsType<T>, selectionColumnWidth = 0): number {
+  return columns.reduce((total, column) => total + (typeof column.width === 'number' ? column.width : 0), selectionColumnWidth);
+}
+
+function cutJobRefProfileLabel(job: { profileName: string | null; profileIsActive: boolean | null }): string {
+  if (!job.profileName) return 'По умолчанию';
+  return job.profileIsActive === false ? `${job.profileName} (неактивен)` : job.profileName;
+}
+
+function cutDetailExistingJobsText(detail: EligibleDetailDto): string {
+  const active = (detail.activeJobs ?? []).map((job) => `${job.name} / ${cutJobRefProfileLabel(job)}`);
+  const archived = (detail.archivedJobs ?? []).map((job) => `${job.name} / ${cutJobRefProfileLabel(job)} (архив)`);
+  const jobs = [...active, ...archived];
+  return jobs.length > 0 ? jobs.join(', ') : '—';
+}
+
+async function fetchCutOrderOptions(dateFrom: string, dateTo: string): Promise<CutOrderSelectOption[]> {
+  const firstPage = await ordersApi.list({
+    page: 1,
+    pageSize: 200,
+    sortBy: 'orderDate',
+    sortOrder: 'desc',
+    dateFrom,
+    dateTo,
+  });
+  const orders = [...firstPage.data];
+  for (let page = 2; page <= firstPage.pagination.totalPages; page += 1) {
+    const nextPage = await ordersApi.list({
+      page,
+      pageSize: 200,
+      sortBy: 'orderDate',
+      sortOrder: 'desc',
+      dateFrom,
+      dateTo,
+    });
+    orders.push(...nextPage.data);
+  }
+  return orders.map(buildCutOrderOption);
+}
+
 /**
  * Backend-owned /cut page (CLAUDE.md principle 2/3): all reads and commands go
  * through cutApi (`/api/v1/cut-jobs`); the read-layer is never written from here.
@@ -257,6 +584,7 @@ interface CutPageProps {
 
 export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const canManage = can('cut.manage');
+  const canViewOrders = can('orders.view');
   const isEmbeddedOrder = Number.isInteger(embeddedOrderId) && (embeddedOrderId ?? 0) > 0;
   // Theme-aware bg for the sticky group header (app uses AntD dark/default
   // algorithm, no CSS vars — read the token directly).
@@ -298,8 +626,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // Open orders inside the app's keep-alive workspace tabs (same as the orders
   // list double-click), not a new browser tab.
   const { show } = useNavigation();
-  const [form] = Form.useForm<{ name: string; orderIds?: string; sheetMaterialTypeIds?: number[]; filmIds?: string }>();
+  const [form] = Form.useForm<CutCriteriaForm>();
+  const defaultOrderDateRange = useMemo(defaultCutOrderDateRange, []);
+  const watchedOrderDateRange = Form.useWatch('orderDateRange', form) as CutOrderDateRangeValue;
+  const watchedOrderIds = Form.useWatch('orderIds', form) as CutCriteriaForm['orderIds'];
+  const watchedSheetMaterialTypeIds = Form.useWatch('sheetMaterialTypeIds', form) as number[] | undefined;
+  const orderDateCriteria = cutDateRangeToCriteria(watchedOrderDateRange ?? defaultOrderDateRange);
+  const orderDateFrom = orderDateCriteria.dateFrom;
+  const orderDateTo = orderDateCriteria.dateTo;
   const [job, setJob] = useState<CutJobDto | null>(null);
+  const [isEditingJobName, setIsEditingJobName] = useState(false);
+  const [jobNameDraft, setJobNameDraft] = useState('');
+  const [jobNameSaving, setJobNameSaving] = useState(false);
   const [selectedResult, setSelectedResult] = useState<CutResultSummary | null>(null);
   const [isFrozenResultSelection, setIsFrozenResultSelection] = useState(false);
   const calcCommandRef = useRef<{ cutJobId: number; version: number; commandId: string } | null>(null);
@@ -317,6 +655,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [eligible, setEligible] = useState<EligibleDetailDto[] | null>(null);
   const [noSheetSpecCount, setNoSheetSpecCount] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
+  const [previewName, setPreviewName] = useState('');
   const [busy, setBusy] = useState(false);
   const [sheetImages, setSheetImages] = useState<Record<string, string>>({});
   // Auto-loaded small layout previews (preset 'thumb') for a ready job's sheets,
@@ -373,6 +712,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.cutJobId]);
 
+  useEffect(() => {
+    if (!job) {
+      setIsEditingJobName(false);
+      setJobNameDraft('');
+      return;
+    }
+    setIsEditingJobName(false);
+    setJobNameDraft(job.name);
+  }, [job?.cutJobId]);
+
+  useEffect(() => {
+    if (job && !isEditingJobName) setJobNameDraft(job.name);
+  }, [isEditingJobName, job?.name]);
+
   // Toggle + persist orientation; drop cached previews so they re-fetch oriented.
   const toggleSheetPortrait = useCallback(
     (portrait: boolean) => {
@@ -422,6 +775,27 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [embeddedJobIds, setEmbeddedJobIds] = useState<Set<number> | null>(null);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
+  const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const orderOptionsSeqRef = useRef(0);
+  const [filmOptions, setFilmOptions] = useState<CutFilmSelectOption[]>([]);
+  const [filmsLoading, setFilmsLoading] = useState(false);
+  const filmOptionsSeqRef = useRef(0);
+  const currentJobOrderOptions = useMemo(() => cutJobOrderOptions(job), [job]);
+  const currentJobFilmOptions = useMemo(() => cutJobFilmOptions(job), [job]);
+  const currentJobSheetTypeOptions = useMemo(() => cutJobSheetTypeOptions(job), [job]);
+  const visibleOrderOptions = useMemo(
+    () => mergeCutSelectOptions(orderOptions, currentJobOrderOptions),
+    [currentJobOrderOptions, orderOptions],
+  );
+  const visibleFilmOptions = useMemo(
+    () => mergeCutSelectOptions(filmOptions, currentJobFilmOptions),
+    [currentJobFilmOptions, filmOptions],
+  );
+  const visibleSheetTypeOptions = useMemo(
+    () => mergeCutSelectOptions(sheetTypeOptions, currentJobSheetTypeOptions),
+    [currentJobSheetTypeOptions, sheetTypeOptions],
+  );
 
   // ── Manual layout editor state ──────────────────────────────────────────────
   // The group currently open for editing (null = no editor active).
@@ -496,7 +870,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   useEffect(() => () => revokePdfPreviewUrl(), [revokePdfPreviewUrl]);
 
-  const applyPdfTemplateState = useCallback((nextJob: CutJobDto) => {
+  const applyPdfTemplateState = useCallback((nextJob: CutJobDto | null) => {
+    if (!nextJob) {
+      setPdfTemplateForJob('standard');
+      setPdfTemplateByGroup({});
+      return;
+    }
     setPdfTemplateForJob(nextJob.pdfTemplate ?? 'standard');
     setPdfTemplateByGroup(Object.fromEntries(nextJob.groups.map((group) => [group.cutGroupId, group.pdfTemplate ?? 'standard'])));
   }, []);
@@ -521,9 +900,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     }
   }, []);
 
+  const refreshCutConfigOnPdfTemplateOpen = useCallback((open: boolean) => {
+    if (open) void loadCutConfig();
+  }, [loadCutConfig]);
+
   useEffect(() => {
     void loadCutConfig();
   }, [loadCutConfig]);
+
+  useEffect(() => subscribeCutPdfTemplatesChanged(() => {
+    void loadCutConfig();
+  }), [loadCutConfig]);
 
   // The /cut tab is kept alive (not remounted) when switching tabs, so profiles
   // created elsewhere (e.g. /configuration "Раскрой") would otherwise stay stale.
@@ -546,9 +933,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         ? values.sheetMaterialTypeIds
         : undefined;
     return {
-      orderIds: isEmbeddedOrder ? [embeddedOrderId!] : parseIdCsv(values.orderIds ?? ''),
+      orderIds: isEmbeddedOrder ? [embeddedOrderId!] : parseOrderIdsValue(values.orderIds),
       sheetMaterialTypeIds,
-      filmIds: parseIdCsv(values.filmIds ?? ''),
+      filmIds: parseOrderIdsValue(values.filmIds),
+      ...(!isEmbeddedOrder ? cutDateRangeToCriteria(values.orderDateRange) : {}),
     };
   }, [embeddedOrderId, form, isEmbeddedOrder]);
 
@@ -556,6 +944,76 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     const text = error instanceof ApiError ? error.message : fallback;
     message.error(text);
   }, []);
+
+  const filmCriteriaOrderIds = useMemo(
+    () => (isEmbeddedOrder ? [embeddedOrderId!] : parseOrderIdsValue(watchedOrderIds)),
+    [embeddedOrderId, isEmbeddedOrder, watchedOrderIds],
+  );
+  const filmCriteriaSheetMaterialTypeIds = useMemo(
+    () => {
+      const ids = (watchedSheetMaterialTypeIds ?? []).filter((id) => Number.isInteger(id) && id > 0);
+      return ids.length > 0 ? ids : undefined;
+    },
+    [watchedSheetMaterialTypeIds],
+  );
+  const filmCriteriaOrderIdsKey = filmCriteriaOrderIds?.join(',') ?? '';
+  const filmCriteriaSheetMaterialTypeIdsKey = filmCriteriaSheetMaterialTypeIds?.join(',') ?? '';
+
+  useEffect(() => {
+    if (isEmbeddedOrder || !canViewOrders || !orderDateFrom || !orderDateTo) {
+      setOrderOptions([]);
+      return;
+    }
+    const seq = ++orderOptionsSeqRef.current;
+    setOrdersLoading(true);
+    fetchCutOrderOptions(orderDateFrom, orderDateTo)
+      .then((options) => {
+        if (orderOptionsSeqRef.current !== seq) return;
+        setOrderOptions(options);
+      })
+      .catch((error) => {
+        if (orderOptionsSeqRef.current !== seq) return;
+        handleError(error, 'Не удалось загрузить заказы для раскроя');
+      })
+      .finally(() => {
+        if (orderOptionsSeqRef.current === seq) setOrdersLoading(false);
+      });
+  }, [canViewOrders, handleError, isEmbeddedOrder, orderDateFrom, orderDateTo]);
+
+  useEffect(() => {
+    if (!isEmbeddedOrder && (!orderDateFrom || !orderDateTo)) {
+      setFilmOptions([]);
+      return;
+    }
+    const seq = ++filmOptionsSeqRef.current;
+    setFilmsLoading(true);
+    cutApi.listFilmOptions({
+      orderIds: filmCriteriaOrderIds,
+      sheetMaterialTypeIds: filmCriteriaSheetMaterialTypeIds,
+      ...(!isEmbeddedOrder ? { dateFrom: orderDateFrom, dateTo: orderDateTo } : {}),
+    })
+      .then((options) => {
+        if (filmOptionsSeqRef.current !== seq) return;
+        setFilmOptions(options.map(buildCutFilmOption));
+      })
+      .catch((error) => {
+        if (filmOptionsSeqRef.current !== seq) return;
+        setFilmOptions([]);
+        handleError(error, 'Не удалось загрузить плёнки для раскроя');
+      })
+      .finally(() => {
+        if (filmOptionsSeqRef.current === seq) setFilmsLoading(false);
+      });
+  }, [
+    filmCriteriaOrderIds,
+    filmCriteriaOrderIdsKey,
+    filmCriteriaSheetMaterialTypeIds,
+    filmCriteriaSheetMaterialTypeIdsKey,
+    handleError,
+    isEmbeddedOrder,
+    orderDateFrom,
+    orderDateTo,
+  ]);
 
   const loadJobs = useCallback(async () => {
     setJobsLoading(true);
@@ -702,6 +1160,47 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     [applyPdfTemplateState, job, pdfTemplateByGroup, pdfTemplateIsRequestOnly, handleError, loadJobs],
   );
 
+  const startJobNameEdit = useCallback(() => {
+    if (!job) return;
+    setJobNameDraft(job.name);
+    setIsEditingJobName(true);
+  }, [job]);
+
+  const cancelJobNameEdit = useCallback(() => {
+    setJobNameDraft(job?.name ?? '');
+    setIsEditingJobName(false);
+  }, [job?.name]);
+
+  const saveJobName = useCallback(async () => {
+    if (!job) return;
+    const name = jobNameDraft.trim();
+    if (!name) {
+      message.warning('Введите название задания на раскрой');
+      return;
+    }
+    if (name === job.name) {
+      setJobNameDraft(job.name);
+      setIsEditingJobName(false);
+      return;
+    }
+    setBusy(true);
+    setJobNameSaving(true);
+    try {
+      const updated = await cutApi.setName(job.cutJobId, name, job.version);
+      setJob(updated);
+      setJobNameDraft(updated.name);
+      setIsEditingJobName(false);
+      applyPdfTemplateState(updated);
+      void loadJobs();
+      message.success('Название задания сохранено');
+    } catch (error) {
+      handleError(error, 'Не удалось сохранить название задания');
+    } finally {
+      setJobNameSaving(false);
+      setBusy(false);
+    }
+  }, [applyPdfTemplateState, handleError, job, jobNameDraft, loadJobs]);
+
   // Load the existing (non-archived) jobs on mount so an operator can reopen a
   // job created earlier — including jobs staged from the Orders "Добавить в
   // раскрой" action, which previously had no surface to be reopened on.
@@ -749,16 +1248,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setWorkingSheets([]);
         setViolations([]);
         setEditorHistory([]);
-        // Prefill the eligible-load criteria with the order(s) this job was built
-        // from (the reserved items' orders) so "Загрузить подходящие детали" is
-        // scoped to those orders instead of scanning everything. Material/film
-        // filters are cleared to avoid stale criteria leaking from a prior job.
-        const orderIds = isEmbeddedOrder ? [embeddedOrderId!] : distinctOrderIdsFromItems(fresh.items);
+        // Prefill the visible criteria from the opened job itself: operators see
+        // order numbers, films, and sheet materials already reserved into this job.
+        const openedOrderOptions = cutJobOrderOptions(openedJob);
+        const openedFilmIds = optionValues(cutJobFilmOptions(openedJob));
+        const openedSheetMaterialTypeIds = optionValues(cutJobSheetTypeOptions(openedJob));
+        const orderIds = isEmbeddedOrder ? [embeddedOrderId!] : optionValues(openedOrderOptions);
         form.setFieldsValue({
-          name: fresh.name,
-          orderIds: orderIds.length > 0 ? orderIds.join(',') : undefined,
-          sheetMaterialTypeIds: undefined, // Variant B sunset: cleared the post-034 filter key
-          filmIds: undefined,
+          name: openedJob.name,
+          orderDateRange: undefined,
+          orderIds: orderIds.length > 0 ? (canViewOrders ? orderIds : orderIds.join(',')) : undefined,
+          sheetMaterialTypeIds: openedSheetMaterialTypeIds.length > 0 ? openedSheetMaterialTypeIds : undefined,
+          filmIds: openedFilmIds.length > 0 ? openedFilmIds : undefined,
         });
         setEligible(null);
         setSelected([]);
@@ -771,7 +1272,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         if (openSeqRef.current === seq) setBusy(false);
       }
     },
-    [embeddedOrderId, form, handleError, isEmbeddedOrder, loadJobs, resetSheetViews],
+    [canViewOrders, embeddedOrderId, form, handleError, isEmbeddedOrder, loadJobs, resetSheetViews],
   );
 
   const openResult = useCallback(
@@ -798,6 +1299,39 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     window.history.pushState(null, '', path);
     useTabStore.getState().openTab({ key: '/cut', path, label: 'Раскрой', resource: 'cut' });
   }, [isEmbeddedOrder, job, openJob]);
+
+  const cutResultColumns: ColumnsType<CutResultSummary> = useMemo(
+    () => [
+      { title: 'Номер', dataIndex: 'cutNumber', key: 'cutNumber', width: 110 },
+      {
+        title: 'Тип',
+        dataIndex: 'resultKind',
+        key: 'resultKind',
+        width: 110,
+        render: (kind: CutResultSummary['resultKind']) => kind === 'auto' ? 'Авто' : kind === 'manual' ? 'Ручной' : 'Существующий',
+      },
+      {
+        title: 'Создан',
+        dataIndex: 'createdAt',
+        key: 'createdAt',
+        render: (value: string) => new Date(value).toLocaleString('ru-RU'),
+      },
+      { title: 'Автор', dataIndex: 'createdByName', key: 'createdByName', render: (value: string | null) => value || '—' },
+      { title: 'Листы', key: 'sheets', width: 80, render: (_: unknown, row: CutResultSummary) => row.totals.sheets },
+      { title: 'Статус', key: 'current', width: 100, render: (_: unknown, row: CutResultSummary) => row.isCurrent ? <Tag color="green">Текущий</Tag> : null },
+      {
+        title: 'Действие',
+        key: 'action',
+        width: 100,
+        render: (_: unknown, row: CutResultSummary) => (
+          <Button size="small" type="link" disabled={busy || selectedResult?.cutResultId === row.cutResultId} onClick={() => void openResult(row)}>
+            Открыть
+          </Button>
+        ),
+      },
+    ],
+    [busy, openResult, selectedResult?.cutResultId],
+  );
 
   // Deep-link: /cut?job=<id> opens that job (e.g. from the order show page
   // «Раскрой» column). The workspace keeps /cut mounted (keyed by pathname), so
@@ -864,25 +1398,68 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     [job, loadJobs, handleError, resetSheetViews],
   );
 
-  const createJob = useCallback(async () => {
+  const previewCreateJob = useCallback(async () => {
     setBusy(true);
     try {
-      const values = await form.validateFields();
-      const created = await cutApi.create({ name: values.name, criteria: criteriaFromForm() });
+      const response = await cutApi.listEligibleDetailsPreview(criteriaFromForm());
+      const selectable = selectableDetailIds(response.details);
+      setPreviewName(buildSuggestedCutName(response.details));
+      setJob(null);
+      setSelectedResult(null);
+      setIsFrozenResultSelection(false);
+      applyPdfTemplateState(null);
+      setEligible(response.details);
+      setNoSheetSpecCount(response.noSheetSpecCount);
+      setSelected(selectable);
+      resetSheetViews();
+      if (response.details.length === 0) {
+        message.warning('По выбранным критериям деталей не найдено');
+      }
+    } catch (error) {
+      handleError(error, 'Не удалось загрузить детали для проверки');
+    } finally {
+      setBusy(false);
+    }
+  }, [applyPdfTemplateState, criteriaFromForm, handleError, resetSheetViews]);
+
+  const createJobFromPreview = useCallback(async () => {
+    if (selected.length === 0) {
+      message.warning('Выберите детали для раскроя');
+      return;
+    }
+    const name = previewName.trim();
+    if (!name) {
+      message.warning('Укажите название раскроя');
+      return;
+    }
+    setBusy(true);
+    try {
+      const created = await cutApi.create({ name, detailIds: selected });
       setJob(created);
       applyPdfTemplateState(created);
+      const createdOrderOptions = cutJobOrderOptions(created);
+      const createdOrderIds = isEmbeddedOrder ? [embeddedOrderId!] : optionValues(createdOrderOptions);
+      const createdFilmIds = optionValues(cutJobFilmOptions(created));
+      const createdSheetMaterialTypeIds = optionValues(cutJobSheetTypeOptions(created));
+      form.setFieldsValue({
+        name: created.name,
+        orderDateRange: undefined,
+        orderIds: createdOrderIds.length > 0 ? (canViewOrders ? createdOrderIds : createdOrderIds.join(',')) : undefined,
+        sheetMaterialTypeIds: createdSheetMaterialTypeIds.length > 0 ? createdSheetMaterialTypeIds : undefined,
+        filmIds: createdFilmIds.length > 0 ? createdFilmIds : undefined,
+      });
       setEligible(null);
       setSelected([]);
+      setPreviewName('');
       resetSheetViews(); // new job context: drop any previewed prior job's blobs
       message.success('Раскрой создан');
       await loadJobs();
     } catch (error) {
-      if (error && (error as { errorFields?: unknown }).errorFields) return; // antd validation
       handleError(error, 'Не удалось создать раскрой');
     } finally {
       setBusy(false);
     }
-  }, [applyPdfTemplateState, form, criteriaFromForm, loadJobs, handleError, resetSheetViews]);
+  }, [applyPdfTemplateState, canViewOrders, embeddedOrderId, form, handleError, isEmbeddedOrder, loadJobs, previewName, resetSheetViews, selected]);
 
   const loadEligible = useCallback(async () => {
     if (!job) return;
@@ -953,6 +1530,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       setIsFrozenResultSelection(false);
       applyPdfTemplateState(calculated);
       resetSheetViews();
+      emitCutJobReady(calculated);
       message.success('Раскрой рассчитан');
       await loadJobs();
     } catch (error) {
@@ -986,6 +1564,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         applyPdfTemplateState(fresh);
         await loadJobs();
         if (responseWasLostAfterSuccess) {
+          emitCutJobReady(fresh);
           message.success('Раскрой рассчитан');
           return;
         }
@@ -1445,6 +2024,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         render: (_: unknown, row: CutJobDto) => row.totals.positions,
       },
       {
+        title: 'Заказы',
+        key: 'orders',
+        width: 63,
+        render: (_: unknown, row: CutJobDto) => distinctOrderIdsFromItems(row.items).length,
+      },
+      {
         title: 'Группы',
         key: 'groups',
         width: 56,
@@ -1511,26 +2096,151 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   );
 
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
-    () => [
-      { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detail' },
-      {
-        title: 'Заказ',
-        key: 'order',
-        render: (_: unknown, row: EligibleDetailDto) => row.orderName?.trim() || `#${row.orderId}`,
-      },
-      { title: 'Кол-во', dataIndex: 'quantity', key: 'qty' },
-      {
-        title: 'Статус',
-        key: 'status',
-        render: (_: unknown, row: EligibleDetailDto) =>
-          row.eligible ? (
-            <Tag color="green">Готова к раскрою</Tag>
-          ) : (
-            <Tag color="orange">{INELIGIBLE_LABELS[row.ineligibleReason ?? ''] ?? row.ineligibleReason}</Tag>
+    () => {
+      const rows = eligible ?? [];
+      const dash = cutDetailCellText;
+      const sizeText = (row: EligibleDetailDto) =>
+        row.width !== null || row.height !== null ? `${dash(row.width)}×${dash(row.height)}` : '—';
+      const statusText = (row: EligibleDetailDto) =>
+        row.eligible ? 'Готова к раскрою' : (INELIGIBLE_LABELS[row.ineligibleReason ?? ''] ?? row.ineligibleReason);
+      const filesText = (row: EligibleDetailDto) =>
+        [
+          ['Рез', row.linkCuttingFile],
+          ['Фото', row.linkCuttingImageFile],
+          ['CAD', row.linkCadFile],
+          ['PDF', row.linkPdfFile],
+        ]
+          .filter(([, href]) => Boolean(href))
+          .map(([label]) => label)
+          .join(', ');
+      const width = {
+        order: cutDetailColumnWidth(rows, 'Заказ', (row) => row.orderName?.trim() || `#${row.orderId}`, { min: 96, max: 190 }),
+        client: cutDetailColumnWidth(rows, 'Клиент', (row) => row.clientName, { min: 88, max: 220 }),
+        pos: cutDetailColumnWidth(rows, 'Поз.', (row) => row.detailNumber, { min: 52, max: 70 }),
+        name: cutDetailColumnWidth(rows, 'Наименование', (row) => row.detailName, { min: 116, max: 280 }),
+        detailId: cutDetailColumnWidth(rows, 'Деталь', (row) => row.orderDetailId, { min: 68, max: 95 }),
+        size: cutDetailColumnWidth(rows, 'Размер (Ш×В)', sizeText, { min: 100, max: 125 }),
+        qty: cutDetailColumnWidth(rows, 'Кол-во', (row) => row.quantity, { min: 66, max: 82 }),
+        area: cutDetailColumnWidth(rows, 'Площадь', (row) => row.area, { min: 76, max: 96 }),
+        film: cutDetailColumnWidth(rows, 'Плёнка', (row) => row.filmName, { min: 80, max: 220 }),
+        material: cutDetailColumnWidth(rows, 'Материал', (row) => row.materialName, { min: 90, max: 220 }),
+        milling: cutDetailColumnWidth(rows, 'Фрезеровка', (row) => row.millingTypeName, { min: 96, max: 190 }),
+        edge: cutDetailColumnWidth(rows, 'Кромка', (row) => row.edgeTypeName, { min: 80, max: 160 }),
+        productionStatus: cutDetailColumnWidth(rows, 'Статус произв.', (row) => row.productionStatusName, { min: 120, max: 170 }),
+        priority: cutDetailColumnWidth(rows, 'Приоритет', (row) => row.priority, { min: 84, max: 105 }),
+        joint: cutDetailColumnWidth(rows, 'Соед. заказ', (row) => row.jointOrderId, { min: 96, max: 120 }),
+        note: cutDetailColumnWidth(rows, 'Примечание', (row) => row.note, { min: 100, max: 260 }),
+        existingJobs: cutDetailColumnWidth(rows, 'Уже в раскроях', cutDetailExistingJobsText, { min: 140, max: 320 }),
+        files: cutDetailColumnWidth(rows, 'Файлы', filesText, { min: 72, max: 130 }),
+        status: cutDetailColumnWidth(rows, 'Статус', statusText, { min: 130, max: 170 }),
+      };
+      return [
+        {
+          title: 'Заказ',
+          key: 'order',
+          width: width.order,
+          fixed: 'left',
+          render: (_: unknown, row: EligibleDetailDto) => (
+            <Button type="link" size="small" style={{ padding: 0 }} onClick={() => show('orders_view', row.orderId, 'push')}>
+              {row.orderName?.trim() || `#${row.orderId}`}
+            </Button>
           ),
-      },
-    ],
-    [],
+        },
+        { title: 'Клиент', key: 'client', width: width.client, fixed: 'left', render: (_: unknown, row: EligibleDetailDto) => dash(row.clientName) },
+        { title: 'Поз.', key: 'pos', width: width.pos, render: (_: unknown, row: EligibleDetailDto) => dash(row.detailNumber) },
+        { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: width.detailId },
+        {
+          title: 'Размер (Ш×В)',
+          key: 'size',
+          width: width.size,
+          render: (_: unknown, row: EligibleDetailDto) => sizeText(row),
+        },
+        { title: 'Кол-во', dataIndex: 'quantity', key: 'qty', width: width.qty },
+        { title: 'Площадь', key: 'area', width: width.area, render: (_: unknown, row: EligibleDetailDto) => dash(row.area) },
+        { title: 'Плёнка', key: 'film', width: width.film, render: (_: unknown, row: EligibleDetailDto) => dash(row.filmName) },
+        { title: 'Материал', key: 'material', width: width.material, render: (_: unknown, row: EligibleDetailDto) => dash(row.materialName) },
+        { title: 'Фрезеровка', key: 'milling', width: width.milling, render: (_: unknown, row: EligibleDetailDto) => dash(row.millingTypeName) },
+        { title: 'Наименование', key: 'name', width: width.name, render: (_: unknown, row: EligibleDetailDto) => dash(row.detailName) },
+        { title: 'Кромка', key: 'edge', width: width.edge, render: (_: unknown, row: EligibleDetailDto) => dash(row.edgeTypeName) },
+        { title: 'Статус произв.', key: 'pstatus', width: width.productionStatus, render: (_: unknown, row: EligibleDetailDto) => dash(row.productionStatusName) },
+        { title: 'Приоритет', key: 'priority', width: width.priority, render: (_: unknown, row: EligibleDetailDto) => dash(row.priority) },
+        { title: 'Соед. заказ', key: 'joint', width: width.joint, render: (_: unknown, row: EligibleDetailDto) => dash(row.jointOrderId) },
+        {
+          title: 'Примечание',
+          key: 'note',
+          width: width.note,
+          render: (_: unknown, row: EligibleDetailDto) =>
+            row.note ? (
+              <Tooltip title={row.note}>
+                <Text ellipsis style={{ maxWidth: Math.max(80, width.note - 20), display: 'inline-block' }}>{row.note}</Text>
+              </Tooltip>
+            ) : (
+              '—'
+            ),
+        },
+        {
+          title: 'Уже в раскроях',
+          key: 'existingJobs',
+          width: width.existingJobs,
+          render: (_: unknown, row: EligibleDetailDto) => {
+            const text = cutDetailExistingJobsText(row);
+            return text === '—' ? (
+              '—'
+            ) : (
+              <Tooltip title={text}>
+                <Text ellipsis style={{ maxWidth: Math.max(110, width.existingJobs - 20), display: 'inline-block' }}>
+                  {text}
+                </Text>
+              </Tooltip>
+            );
+          },
+        },
+        {
+          title: 'Файлы',
+          key: 'files',
+          width: width.files,
+          render: (_: unknown, row: EligibleDetailDto) => {
+            const links: Array<[string, string | null | undefined]> = [
+              ['Рез', row.linkCuttingFile],
+              ['Фото', row.linkCuttingImageFile],
+              ['CAD', row.linkCadFile],
+              ['PDF', row.linkPdfFile],
+            ];
+            const present = links.filter(([, href]) => Boolean(href));
+            if (present.length === 0) return '—';
+            return (
+              <Space size={4} wrap>
+                {present.map(([label, href]) => {
+                  const safe = safeHttpHref(href);
+                  return safe ? (
+                    <a key={label} href={safe} target="_blank" rel="noreferrer">{label}</a>
+                  ) : (
+                    <Text key={label} type="secondary">{label}</Text>
+                  );
+                })}
+              </Space>
+            );
+          },
+        },
+        {
+          title: 'Статус',
+          key: 'status',
+          width: width.status,
+          fixed: 'right',
+          render: (_: unknown, row: EligibleDetailDto) =>
+            row.eligible ? (
+              <Tag color="green">Готова к раскрою</Tag>
+            ) : (
+              <Tag color="orange">{INELIGIBLE_LABELS[row.ineligibleReason ?? ''] ?? row.ineligibleReason}</Tag>
+            ),
+        },
+      ];
+    },
+    [eligible, show],
+  );
+  const eligibleTableScrollX = useMemo(
+    () => tableScrollX(eligibleColumns, CUT_DETAIL_SELECTION_COLUMN_WIDTH),
+    [eligibleColumns],
   );
 
   // Archived jobs are genuinely read-only: all mutate controls are disabled so
@@ -1643,6 +2353,19 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   }, [busy, canManage, isArchivedJob, removeJobItem, show]);
 
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
+  const isCreationPreview = job === null && eligible !== null;
+  const creationPreviewSummary = useMemo(
+    () => buildCutPreviewSummary(eligible ?? []),
+    [eligible],
+  );
+  const creationPreviewOrderTintByOrderId = useMemo(
+    () => cutPreviewOrderTintByOrderId(eligible ?? []),
+    [eligible],
+  );
+  const jobItemOrderTintByOrderId = useMemo(
+    () => cutJobItemOrderTintByOrderId(job?.items ?? []),
+    [job?.items],
+  );
 
   // Dirty guard: any group has an active editor session OR its toggle differs
   // from the persisted isActive. While dirty, whole-job PDF is disabled.
@@ -1654,6 +2377,64 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       return (showAlternativeByGroup[g.cutGroupId] ?? false) !== g.manualLayout.isActive;
     });
 
+  const jobCutResults = job?.cutResults ?? [];
+  const latestCutResult = jobCutResults[0] ?? null;
+  const jobCardTitle = job ? (
+    <Space className="cut-job-card-title" size={8} wrap>
+      <Text strong>Задание на раскрой #{job.cutJobId}</Text>
+      <Text type="secondary">—</Text>
+      {isEditingJobName ? (
+        <Space.Compact className="cut-job-name-editor">
+          <Input
+            size="small"
+            value={jobNameDraft}
+            onChange={(event) => setJobNameDraft(event.target.value)}
+            onPressEnter={() => void saveJobName()}
+            maxLength={200}
+            autoFocus
+            disabled={jobNameSaving}
+            data-testid="cut-job-name-input"
+          />
+          <Tooltip title="Сохранить название">
+            <Button
+              size="small"
+              icon={<SaveOutlined />}
+              onClick={() => void saveJobName()}
+              loading={jobNameSaving}
+              disabled={jobNameSaving}
+              data-testid="cut-job-name-save"
+            />
+          </Tooltip>
+          <Tooltip title="Отменить">
+            <Button
+              size="small"
+              icon={<CloseOutlined />}
+              onClick={cancelJobNameEdit}
+              disabled={jobNameSaving}
+              data-testid="cut-job-name-cancel"
+            />
+          </Tooltip>
+        </Space.Compact>
+      ) : (
+        <>
+          <Text className="cut-job-card-name">{job.name}</Text>
+          {canManage && !isArchivedJob && (
+            <Tooltip title="Редактировать название">
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={startJobNameEdit}
+                disabled={busy || job.status === 'calculating'}
+                data-testid="cut-job-name-edit"
+              />
+            </Tooltip>
+          )}
+        </>
+      )}
+    </Space>
+  ) : undefined;
+
   if (!can('cut.view')) {
     return <Alert type="error" message="Недостаточно прав для просмотра раскроя" showIcon />;
   }
@@ -1664,17 +2445,48 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         {!isEmbeddedOrder && <Title level={3}>Раскрой</Title>}
 
       <Card title="Критерии выборки" size="small">
-        <Form form={form} layout="inline" disabled={busy || !canManage}>
-          <Form.Item name="name" rules={[{ required: true, message: 'Укажите название' }]}>
-            <Input placeholder="Название раскроя" />
-          </Form.Item>
+        <Form form={form} layout="inline" disabled={busy || !canManage} initialValues={{ orderDateRange: defaultOrderDateRange }}>
+          {!isEmbeddedOrder && (
+            <Form.Item name="orderDateRange">
+              <RangePicker
+                allowClear={false}
+                format="DD.MM.YYYY"
+                placeholder={['Дата от', 'Дата до']}
+                onChange={() => {
+                  if (canViewOrders) form.setFieldsValue({ orderIds: undefined });
+                  form.setFieldsValue({ filmIds: undefined });
+                }}
+                style={{ width: 250 }}
+                data-testid="cut-order-date-range"
+              />
+            </Form.Item>
+          )}
           {isEmbeddedOrder ? (
             <Form.Item name="orderIds" hidden>
               <Input />
             </Form.Item>
+          ) : canViewOrders ? (
+            <Form.Item name="orderIds">
+              <Select<number[]>
+                mode="multiple"
+                allowClear
+                showSearch
+                maxTagCount="responsive"
+                placeholder="Заказ"
+                options={visibleOrderOptions}
+                loading={ordersLoading}
+                onChange={() => form.setFieldsValue({ filmIds: undefined })}
+                filterOption={(input, option) =>
+                  String((option as CutOrderSelectOption | undefined)?.searchText ?? '')
+                    .includes(input.trim().toLowerCase())
+                }
+                style={{ minWidth: 240 }}
+                data-testid="cut-order-select"
+              />
+            </Form.Item>
           ) : (
             <Form.Item name="orderIds">
-              <Input placeholder="Заказы (9,10)" />
+              <Input placeholder="Заказы (9,10)" onChange={() => form.setFieldsValue({ filmIds: undefined })} />
             </Form.Item>
           )}
           {sheetFilterEnabled && (
@@ -1683,23 +2495,105 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 mode="multiple"
                 allowClear
                 placeholder="Типы листов"
-                options={sheetTypeOptions}
+                options={visibleSheetTypeOptions}
                 fieldNames={{ label: 'label', value: 'value' }}
+                onChange={() => form.setFieldsValue({ filmIds: undefined })}
                 style={{ minWidth: 200 }}
                 data-testid="cut-sheet-type-filter"
               />
             </Form.Item>
           )}
           <Form.Item name="filmIds">
-            <Input placeholder="Плёнки" />
+            <Select<number[]>
+              mode="multiple"
+              allowClear
+              showSearch
+              maxTagCount="responsive"
+              placeholder="Плёнки"
+              options={visibleFilmOptions}
+              loading={filmsLoading}
+              filterOption={(input, option) =>
+                String((option as CutFilmSelectOption | undefined)?.searchText ?? '')
+                  .includes(input.trim().toLowerCase())
+              }
+              notFoundContent={filmsLoading ? <Spin size="small" /> : 'Нет плёнок'}
+              style={{ minWidth: 220 }}
+              data-testid="cut-film-select"
+            />
           </Form.Item>
           <Form.Item>
-            <Button type="primary" onClick={createJob} loading={busy} disabled={!canManage}>
-              Создать раскрой
+            <Button type="primary" onClick={previewCreateJob} loading={busy} disabled={!canManage}>
+              Подбор деталей на раскрой
             </Button>
           </Form.Item>
         </Form>
       </Card>
+
+      {isCreationPreview && eligible && (
+        <Card
+          title="Проверка деталей перед созданием"
+          size="small"
+          extra={
+            <Space>
+              <Text type="secondary">Выбрано: {selected.length}</Text>
+              <Button type="primary" onClick={createJobFromPreview} disabled={!canManage || selected.length === 0} loading={busy}>
+                Создать
+              </Button>
+            </Space>
+          }
+        >
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Input
+              value={previewName}
+              onChange={(event) => setPreviewName(event.target.value)}
+              placeholder="Название раскроя"
+              data-testid="cut-preview-name"
+            />
+            {noSheetMsg && <Alert type="warning" showIcon message={noSheetMsg} />}
+            <TableTopScroll>
+              <Table<EligibleDetailDto>
+                className="cut-create-preview-details-table"
+                size="small"
+                rowKey="orderDetailId"
+                columns={eligibleColumns}
+                dataSource={eligible}
+                pagination={false}
+                scroll={{ x: eligibleTableScrollX, y: CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT }}
+                rowClassName={(row) => {
+                  const tint = creationPreviewOrderTintByOrderId.get(row.orderId) ?? 0;
+                  return `cut-create-preview-order-row cut-create-preview-order-tint-${tint}${row.eligible ? '' : ' cut-create-preview-row-ineligible'}`;
+                }}
+                rowSelection={{
+                  selectedRowKeys: selected,
+                  onChange: (keys) => setSelected(keys.map(Number)),
+                  getCheckboxProps: (row) => ({ disabled: !row.eligible }),
+                }}
+                data-testid="cut-create-preview-details"
+              />
+            </TableTopScroll>
+            <div className="cut-create-preview-summary" data-testid="cut-create-preview-summary">
+              <div className="cut-create-preview-summary-row">
+                <Text strong>Итого по плёнкам и материалам:</Text>
+                <Space size={6} wrap>
+                  {creationPreviewSummary.groups.length === 0 ? (
+                    <Text type="secondary">нет деталей в выборке</Text>
+                  ) : (
+                    creationPreviewSummary.groups.map((group) => (
+                      <Tag key={group.key} color="blue" style={{ whiteSpace: 'normal', lineHeight: 1.5 }}>
+                        {group.materialName} / {group.filmName}: {formatCutPreviewSummaryMetrics(group)}
+                      </Tag>
+                    ))
+                  )}
+                </Space>
+              </div>
+              <div className="cut-create-preview-summary-row">
+                <Text strong>Итого по всем деталям в выборке:</Text>
+                <Text>{formatCutPreviewSummaryMetrics(creationPreviewSummary.total)}</Text>
+              </div>
+            </div>
+          </Space>
+        </Card>
+      )}
 
       <Card
         size="small"
@@ -1741,7 +2635,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       {job && (
         <Card
           size="small"
-          title={`Задание на раскрой #${job.cutJobId} — ${job.name}`}
+          title={jobCardTitle}
           extra={
             <Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>
           }
@@ -1763,44 +2657,31 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               }
             />
           )}
-          {(job.cutResults?.length ?? 0) > 0 && (
-            <Card size="small" title="Выполненные раскрои" style={{ marginBottom: 12 }}>
+          {jobCutResults.length > 0 && (
+            <div className="cut-results-block" data-testid="cut-results-block">
+              <div className="cut-results-block-title">Выполненные раскрои</div>
               <Table<CutResultSummary>
+                className="cut-results-latest-table"
                 size="small"
                 rowKey="cutResultId"
                 pagination={false}
-                dataSource={job.cutResults ?? []}
-                columns={[
-                  { title: 'Номер', dataIndex: 'cutNumber', key: 'cutNumber', width: 110 },
-                  {
-                    title: 'Тип',
-                    dataIndex: 'resultKind',
-                    key: 'resultKind',
-                    width: 110,
-                    render: (kind: CutResultSummary['resultKind']) => kind === 'auto' ? 'Авто' : kind === 'manual' ? 'Ручной' : 'Существующий',
-                  },
-                  {
-                    title: 'Создан',
-                    dataIndex: 'createdAt',
-                    key: 'createdAt',
-                    render: (value: string) => new Date(value).toLocaleString('ru-RU'),
-                  },
-                  { title: 'Автор', dataIndex: 'createdByName', key: 'createdByName', render: (value: string | null) => value || '—' },
-                  { title: 'Листы', key: 'sheets', width: 80, render: (_: unknown, row: CutResultSummary) => row.totals.sheets },
-                  { title: 'Статус', key: 'current', width: 100, render: (_: unknown, row: CutResultSummary) => row.isCurrent ? <Tag color="green">Текущий</Tag> : null },
-                  {
-                    title: 'Действие',
-                    key: 'action',
-                    width: 100,
-                    render: (_: unknown, row: CutResultSummary) => (
-                      <Button size="small" type="link" disabled={busy || selectedResult?.cutResultId === row.cutResultId} onClick={() => void openResult(row)}>
-                        Открыть
-                      </Button>
-                    ),
-                  },
-                ]}
+                dataSource={latestCutResult ? [latestCutResult] : []}
+                columns={cutResultColumns}
               />
-            </Card>
+              {jobCutResults.length > 1 && (
+                <Collapse size="small" className="cut-results-history-collapse" defaultActiveKey={[]}>
+                  <Panel header={`Все сохранённые раскрои (${jobCutResults.length})`} key="cut-results-history">
+                    <Table<CutResultSummary>
+                      size="small"
+                      rowKey="cutResultId"
+                      pagination={false}
+                      dataSource={jobCutResults}
+                      columns={cutResultColumns}
+                    />
+                  </Panel>
+                </Collapse>
+              )}
+            </div>
           )}
           {job.status === 'failed' && job.failureReason && (
             <Alert
@@ -1835,6 +2716,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               <>
                 <Space size="large" style={{ marginBottom: 12 }} wrap>
                   <span>Позиции: <b>{job.totals.positions}</b></span>
+                  <span>Заказы: <b>{distinctOrderIdsFromItems(job.items).length}</b></span>
                   <span>Деталей: <b>{job.totals.details}</b></span>
                   <span>Материалов: <b>{job.totals.materialsCount}</b></span>
                   <span>Плёнок: <b>{job.totals.filmsCount}</b></span>
@@ -1956,6 +2838,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                     size="small"
                     value={pdfTemplateForJob}
                     onChange={setJobPdfTemplate}
+                    onDropdownVisibleChange={refreshCutConfigOnPdfTemplateOpen}
                     options={pdfTemplateOptions}
                     style={{ width: 180, flex: '0 0 180px' }}
                     disabled={busy}
@@ -1991,12 +2874,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           <Panel header={`Детали задания (${job.items.length})`} key="cut-job-details">
             <TableTopScroll>
               <Table<CutJobItemDto>
+                className="cut-job-details-table details-grouped"
                 size="small"
                 rowKey="cutJobItemId"
                 columns={jobItemColumns}
                 dataSource={job.items}
                 pagination={false}
-                scroll={{ x: 1900 }}
+                scroll={{ x: 1900, y: CUT_JOB_DETAILS_TABLE_BODY_HEIGHT }}
+                rowClassName={(row) => `detail-group-tint-${jobItemOrderTintByOrderId.get(row.orderId) ?? 0}`}
                 locale={{ emptyText: 'В задании пока нет деталей — добавьте их из заказа или через «Загрузить подходящие детали»' }}
               />
             </TableTopScroll>
@@ -2004,15 +2889,16 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         </Collapse>
       )}
 
-      {noSheetMsg && <Alert type="warning" showIcon message={noSheetMsg} />}
+      {!isCreationPreview && noSheetMsg && <Alert type="warning" showIcon message={noSheetMsg} />}
 
-      {eligible && (
+      {eligible && !isCreationPreview && (
         <Table<EligibleDetailDto>
           size="small"
           rowKey="orderDetailId"
           columns={eligibleColumns}
           dataSource={eligible}
           pagination={false}
+          scroll={{ x: eligibleTableScrollX }}
           rowSelection={{
             selectedRowKeys: selected,
             onChange: (keys) => setSelected(keys.map(Number)),
@@ -2235,6 +3121,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                     size="small"
                     value={pdfTemplateByGroup[group.cutGroupId] ?? group.pdfTemplate ?? 'standard'}
                     onChange={(value) => setGroupPdfTemplate(group, value)}
+                    onDropdownVisibleChange={refreshCutConfigOnPdfTemplateOpen}
                     options={pdfTemplateOptions}
                     style={{ width: 180, flex: '0 0 180px' }}
                     disabled={busy}

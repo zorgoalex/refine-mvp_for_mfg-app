@@ -1,7 +1,8 @@
-import { useGetIdentity } from '@refinedev/core';
+import { useGetIdentity, useList } from '@refinedev/core';
 import {
   Alert,
   Button,
+  Card,
   Checkbox,
   Empty,
   Form,
@@ -25,11 +26,13 @@ import { groupsApi } from '../../../api/groupsApi';
 import type {
   DeadlineNotificationEntityType,
   NotificationEventTypeDto,
+  NotificationChannel,
   NotificationLevel,
   NotificationRuleDto,
   RecipientResolverKind,
 } from '../../../api/types/notificationRulesApi.types';
 import type { UserIdentity } from '../../../types/auth';
+import { normalizeRoleKey } from '../../../utils/resourceVisibility';
 import {
   buildCreatePayload,
   buildDraftFromRule,
@@ -37,6 +40,7 @@ import {
   canManageNotificationRules,
   canViewNotificationRules,
   emptyDraft,
+  generateNotificationRuleCode,
   type NotificationRuleDraft,
 } from './notificationRulesView';
 
@@ -44,6 +48,21 @@ const { Text } = Typography;
 const { TextArea } = Input;
 
 const TEMPLATE_PLACEHOLDERS = ['{orderId}', '{clientId}', '{orderStatusId}', '{eventType}'];
+
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  'order.status_changed': 'Изменение статуса заказа',
+  'order.production_status_changed': 'Изменение статуса производства',
+  'order.payment_status_changed': 'Изменение статуса оплаты',
+  DEADLINE_EXPIRED: 'Истечение срока',
+  GROUP_DEADLINE_OVERDUE: 'Просрочка срока группы',
+};
+
+const TEMPLATE_PLACEHOLDER_LABELS: Record<string, string> = {
+  '{orderId}': 'заказ',
+  '{clientId}': 'клиент',
+  '{orderStatusId}': 'статус заказа',
+  '{eventType}': 'тип события',
+};
 
 const RESOLVER_LABELS: Record<RecipientResolverKind, string> = {
   order_manager: 'Менеджер заказа',
@@ -54,9 +73,14 @@ const RESOLVER_LABELS: Record<RecipientResolverKind, string> = {
 };
 
 const LEVEL_LABELS: Record<NotificationLevel, string> = {
-  info: 'Инфо',
+  info: 'Информационное',
   warning: 'Предупреждение',
   error: 'Ошибка',
+};
+
+const CHANNEL_LABELS: Record<NotificationChannel, string> = {
+  in_app: 'В приложении',
+  telegram: 'Telegram',
 };
 
 const DEADLINE_ENTITY_TYPE_LABELS: Record<DeadlineNotificationEntityType, string> = {
@@ -64,32 +88,76 @@ const DEADLINE_ENTITY_TYPE_LABELS: Record<DeadlineNotificationEntityType, string
   order_stage: 'Срок этапа заказа',
 };
 
-type EditorMode =
-  | { kind: 'closed' }
-  | { kind: 'create' }
-  | { kind: 'edit'; rule: NotificationRuleDto };
+const ALL_REFERENCE_FILTER = [{ field: 'is_active', operator: 'in' as const, value: [true, false] }];
 
-function describeRecipients(rule: NotificationRuleDto): string {
+interface OrderStatusRow {
+  order_status_id: number;
+  order_status_name: string;
+  is_active?: boolean;
+}
+
+interface RoleRow {
+  role_id: number;
+  role_name: string;
+  is_active?: boolean;
+}
+
+interface UserRow {
+  user_id: number;
+  username: string;
+  full_name?: string | null;
+  employee?: { full_name?: string | null } | null;
+  is_active?: boolean;
+}
+
+interface SelectOption<T extends string | number> {
+  value: T;
+  label: string;
+}
+
+type EditorMode = { kind: 'closed' } | { kind: 'create' } | { kind: 'edit'; rule: NotificationRuleDto };
+
+function eventTypeLabel(eventType: string): string {
+  return EVENT_TYPE_LABELS[eventType] ?? 'Событие уведомления';
+}
+
+function describeRecipients(
+  rule: NotificationRuleDto,
+  roleNameByCode: ReadonlyMap<string, string>,
+  userNameById: ReadonlyMap<number, string>
+): string {
   const parts: string[] = [];
   if (rule.recipients.resolvers?.length) {
-    parts.push(rule.recipients.resolvers.map((r) => RESOLVER_LABELS[r] ?? r).join(', '));
+    parts.push(
+      rule.recipients.resolvers
+        .map((resolver) => RESOLVER_LABELS[resolver] ?? 'Способ определения получателя')
+        .join(', ')
+    );
   }
   if (rule.recipients.roleCodes?.length) {
-    parts.push(`roles: ${rule.recipients.roleCodes.join(', ')}`);
+    parts.push(
+      `роли: ${rule.recipients.roleCodes
+        .map((code) => roleNameByCode.get(code) ?? 'Роль удалена из справочника')
+        .join(', ')}`
+    );
   }
   if (rule.recipients.userIds?.length) {
-    parts.push(`users: ${rule.recipients.userIds.join(', ')}`);
+    parts.push(
+      `пользователи: ${rule.recipients.userIds
+        .map((id) => userNameById.get(id) ?? 'Пользователь удалён из справочника')
+        .join(', ')}`
+    );
   }
   return parts.length > 0 ? parts.join(' · ') : '—';
 }
 
-function describeConditions(rule: NotificationRuleDto): string {
+function describeConditions(rule: NotificationRuleDto, orderStatusNameById: ReadonlyMap<number, string>): string {
   const parts: string[] = [];
   if (rule.conditions.deadlineEntityTypes?.length) {
     parts.push(
-      `deadline: ${rule.conditions.deadlineEntityTypes
-        .map((type) => DEADLINE_ENTITY_TYPE_LABELS[type] ?? type)
-        .join(', ')}`,
+      `сроки: ${rule.conditions.deadlineEntityTypes
+        .map((type) => DEADLINE_ENTITY_TYPE_LABELS[type] ?? 'Тип срока')
+        .join(', ')}`
     );
   }
   if (rule.conditions.requireCurrentDeadlineEvent !== undefined) {
@@ -99,19 +167,46 @@ function describeConditions(rule: NotificationRuleDto): string {
     parts.push('без завершённых');
   }
   if (rule.conditions.allowedFromOrderStatusIds?.length) {
-    parts.push(`из статусов: ${rule.conditions.allowedFromOrderStatusIds.join(', ')}`);
+    parts.push(
+      `из статусов: ${rule.conditions.allowedFromOrderStatusIds
+        .map((id) => orderStatusNameById.get(id) ?? 'Статус удалён из справочника')
+        .join(', ')}`
+    );
   }
   if (rule.conditions.excludeOrderStatusIds?.length) {
-    parts.push(`исключить статусы: ${rule.conditions.excludeOrderStatusIds.join(', ')}`);
+    parts.push(
+      `исключить статусы: ${rule.conditions.excludeOrderStatusIds
+        .map((id) => orderStatusNameById.get(id) ?? 'Статус удалён из справочника')
+        .join(', ')}`
+    );
   }
   return parts.length > 0 ? parts.join(' · ') : '—';
 }
 
 function isRecipientDraftValid(draft: NotificationRuleDraft): boolean {
   if (draft.resolvers.length > 0) return true;
-  if (draft.roleCodesText.trim() !== '') return true;
-  if (draft.userIdsText.trim() !== '') return true;
+  if (draft.roleCodes.length > 0) return true;
+  if (draft.userIds.length > 0) return true;
   return false;
+}
+
+function withMissingOptions<T extends string | number>(
+  options: Array<SelectOption<T>>,
+  selectedValues: T[],
+  missingLabel: string
+): Array<SelectOption<T>> {
+  const knownValues = new Set(options.map((option) => option.value));
+  return [
+    ...options,
+    ...selectedValues.filter((value) => !knownValues.has(value)).map((value) => ({ value, label: missingLabel })),
+  ];
+}
+
+function mergeOptions<T extends string | number>(
+  current: Array<SelectOption<T>>,
+  incoming: Array<SelectOption<T>>
+): Array<SelectOption<T>> {
+  return Array.from(new Map([...current, ...incoming].map((option) => [option.value, option])).values());
 }
 
 export function NotificationRulesConfig() {
@@ -124,7 +219,10 @@ export function NotificationRulesConfig() {
   const [eventTypes, setEventTypes] = useState<NotificationEventTypeDto[]>([]);
   const [groupOptions, setGroupOptions] = useState<Array<{ label: string; value: string }>>([]);
   const [groupOptionsLoading, setGroupOptionsLoading] = useState(false);
-  const [error, setError] = useState<{ kind: 'engine_disabled' | 'other'; message: string } | null>(null);
+  const [error, setError] = useState<{
+    kind: 'engine_disabled' | 'other';
+    message: string;
+  } | null>(null);
 
   const [editor, setEditor] = useState<EditorMode>({ kind: 'closed' });
   const [draft, setDraft] = useState<NotificationRuleDraft>(emptyDraft());
@@ -133,6 +231,43 @@ export function NotificationRulesConfig() {
   const [reasonRuleId, setReasonRuleId] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [deletingRuleId, setDeletingRuleId] = useState<string | null>(null);
+
+  const {
+    data: orderStatusesData,
+    isLoading: orderStatusesLoading,
+    error: orderStatusesError,
+  } = useList<OrderStatusRow>({
+    resource: 'order_statuses',
+    pagination: { pageSize: 200 },
+    filters: ALL_REFERENCE_FILTER,
+    sorters: [
+      { field: 'sort_order', order: 'asc' },
+      { field: 'order_status_id', order: 'asc' },
+    ],
+    queryOptions: { enabled: canView },
+  });
+  const {
+    data: rolesData,
+    isLoading: rolesLoading,
+    error: rolesError,
+  } = useList<RoleRow>({
+    resource: 'roles',
+    pagination: { mode: 'off' },
+    filters: ALL_REFERENCE_FILTER,
+    sorters: [{ field: 'role_name', order: 'asc' }],
+    queryOptions: { enabled: canView },
+  });
+  const {
+    data: usersData,
+    isLoading: usersLoading,
+    error: usersError,
+  } = useList<UserRow>({
+    resource: 'users',
+    pagination: { pageSize: 200 },
+    filters: ALL_REFERENCE_FILTER,
+    sorters: [{ field: 'username', order: 'asc' }],
+    queryOptions: { enabled: canView },
+  });
 
   const eventTypeByName = useMemo(() => {
     const map = new Map<string, NotificationEventTypeDto>();
@@ -150,6 +285,63 @@ export function NotificationRulesConfig() {
     }
     return map;
   }, [groupOptions]);
+  const orderStatusOptions = useMemo<Array<SelectOption<number>>>(
+    () =>
+      (orderStatusesData?.data ?? []).map((status) => ({
+        value: status.order_status_id,
+        label: `${status.order_status_name}${status.is_active === false ? ' (неактивен)' : ''}`,
+      })),
+    [orderStatusesData]
+  );
+  const roleOptions = useMemo<Array<SelectOption<string>>>(
+    () =>
+      (rolesData?.data ?? [])
+        .map((role) => ({
+          value: normalizeRoleKey(role),
+          label: `${role.role_name}${role.is_active === false ? ' (неактивна)' : ''}`,
+        })),
+    [rolesData]
+  );
+  const userOptions = useMemo<Array<SelectOption<number>>>(
+    () =>
+      (usersData?.data ?? []).map((user) => {
+        const fullName = user.full_name?.trim() || user.employee?.full_name?.trim();
+        return {
+          value: user.user_id,
+          label: `${fullName || user.username}${fullName ? ` · ${user.username}` : ''}${
+            user.is_active === false ? ' (неактивен)' : ''
+          }`,
+        };
+      }),
+    [usersData]
+  );
+  const orderStatusNameById = useMemo(
+    () => new Map(orderStatusOptions.map((option) => [option.value, option.label])),
+    [orderStatusOptions]
+  );
+  const roleNameByCode = useMemo(
+    () => new Map(roleOptions.map((option) => [option.value, option.label])),
+    [roleOptions]
+  );
+  const userNameById = useMemo(() => new Map(userOptions.map((option) => [option.value, option.label])), [userOptions]);
+  const selectedOrderStatusOptions = useMemo(
+    () =>
+      withMissingOptions(
+        orderStatusOptions,
+        [...draft.allowedFromOrderStatusIds, ...draft.excludeOrderStatusIds],
+        'Статус удалён из справочника'
+      ),
+    [draft.allowedFromOrderStatusIds, draft.excludeOrderStatusIds, orderStatusOptions]
+  );
+  const selectedRoleOptions = useMemo(
+    () => withMissingOptions(roleOptions, draft.roleCodes, 'Роль удалена из справочника'),
+    [draft.roleCodes, roleOptions]
+  );
+  const selectedUserOptions = useMemo(
+    () => withMissingOptions(userOptions, draft.userIds, 'Пользователь удалён из справочника'),
+    [draft.userIds, userOptions]
+  );
+  const referencesError = orderStatusesError ?? rolesError ?? usersError;
 
   const loadGroupOptions = useCallback(async (search?: string) => {
     setGroupOptionsLoading(true);
@@ -157,9 +349,9 @@ export function NotificationRulesConfig() {
       const groups = await groupsApi.listGroupOptions({
         ...(search?.trim() ? { search: search.trim() } : {}),
       });
-      setGroupOptions(groups);
+      setGroupOptions((current) => mergeOptions(current, groups));
     } catch {
-      setGroupOptions([]);
+      // Keep already loaded names so list rows never fall back to raw identifiers.
     } finally {
       setGroupOptionsLoading(false);
     }
@@ -218,7 +410,11 @@ export function NotificationRulesConfig() {
   }, [canView]);
 
   const openCreate = () => {
-    setDraft({ ...emptyDraft(), eventType: eventTypes[0]?.eventType ?? '' });
+    setDraft({
+      ...emptyDraft(),
+      eventType: eventTypes[0]?.eventType ?? '',
+      ruleCode: generateNotificationRuleCode(),
+    });
     setEditor({ kind: 'create' });
   };
 
@@ -241,12 +437,12 @@ export function NotificationRulesConfig() {
       message.warning('Укажите хотя бы один источник получателей');
       return;
     }
-    if (draft.ruleCode.trim() === '') {
-      message.warning('Укажите ruleCode');
-      return;
-    }
     if (draft.eventType.trim() === '') {
       message.warning('Выберите тип события');
+      return;
+    }
+    if (draft.channels.length === 0) {
+      message.warning('Выберите хотя бы один канал уведомлений');
       return;
     }
 
@@ -275,12 +471,10 @@ export function NotificationRulesConfig() {
       try {
         const updated = await notificationRulesApi.update(
           editor.rule.notificationRuleId,
-          buildUpdatePayload(draft, trimmedReason, editor.rule.updatedAt),
+          buildUpdatePayload(draft, trimmedReason, editor.rule.updatedAt)
         );
         setRules((current) =>
-          current.map((rule) =>
-            rule.notificationRuleId === updated.notificationRuleId ? updated : rule,
-          ),
+          current.map((rule) => (rule.notificationRuleId === updated.notificationRuleId ? updated : rule))
         );
         message.success('Правило сохранено');
         setReasonRuleId(null);
@@ -314,9 +508,7 @@ export function NotificationRulesConfig() {
     setDeletingRuleId(rule.notificationRuleId);
     try {
       await notificationRulesApi.remove(rule.notificationRuleId);
-      setRules((current) =>
-        current.filter((r) => r.notificationRuleId !== rule.notificationRuleId),
-      );
+      setRules((current) => current.filter((r) => r.notificationRuleId !== rule.notificationRuleId));
       message.success('Правило удалено');
     } catch (deleteError) {
       message.error(deleteError instanceof Error ? deleteError.message : 'Не удалось удалить правило');
@@ -331,7 +523,7 @@ export function NotificationRulesConfig() {
         type="info"
         showIcon
         message="Нет доступа к настройкам уведомлений"
-        description="Для просмотра нужен notifications.view_rules."
+        description="Обратитесь к администратору, чтобы получить право просмотра правил уведомлений."
       />
     );
   }
@@ -350,7 +542,7 @@ export function NotificationRulesConfig() {
         type="info"
         showIcon
         message="Движок уведомлений выключен на сервере"
-        description="Включите BACKEND_ENABLE_NOTIFICATION_ENGINE, чтобы управлять правилами."
+        description="Включите серверную настройку движка уведомлений, чтобы управлять правилами."
       />
     );
   }
@@ -373,6 +565,15 @@ export function NotificationRulesConfig() {
         )}
       </Space>
 
+      {referencesError && (
+        <Alert
+          type="warning"
+          showIcon
+          message="Не удалось загрузить часть справочников"
+          description="Проверьте доступ к справочникам статусов, ролей и пользователей."
+        />
+      )}
+
       {rules.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -386,16 +587,11 @@ export function NotificationRulesConfig() {
           dataSource={rules}
           columns={[
             {
-              title: 'ruleCode',
-              dataIndex: 'ruleCode',
-              key: 'ruleCode',
-              width: 220,
-            },
-            {
-              title: 'Event',
+              title: 'Событие',
               dataIndex: 'eventType',
               key: 'eventType',
               width: 220,
+              render: (value: string) => eventTypeLabel(value),
             },
             {
               title: 'Группа',
@@ -403,16 +599,16 @@ export function NotificationRulesConfig() {
               key: 'groupId',
               width: 180,
               render: (groupId: string | null) =>
-                groupId ? groupNameById.get(groupId) ?? groupId : 'Все группы',
+                groupId ? groupNameById.get(groupId) ?? 'Группа недоступна' : 'Все группы',
             },
             {
-              title: 'Level',
+              title: 'Важность',
               dataIndex: 'level',
               key: 'level',
               width: 110,
               render: (value: NotificationLevel) => (
                 <Tag color={value === 'error' ? 'red' : value === 'warning' ? 'orange' : 'blue'}>
-                  {LEVEL_LABELS[value] ?? value}
+                  {LEVEL_LABELS[value] ?? 'Неизвестная'}
                 </Tag>
               ),
             },
@@ -423,20 +619,36 @@ export function NotificationRulesConfig() {
               width: 100,
             },
             {
-              title: 'Вкл',
+              title: 'Каналы',
+              key: 'channels',
+              width: 170,
+              render: (_, rule) => (
+                <Space size={[4, 4]} wrap>
+                  {(rule.channels ?? ['in_app']).map((channel) => (
+                    <Tag key={channel} color={channel === 'telegram' ? 'cyan' : 'blue'}>
+                      {CHANNEL_LABELS[channel]}
+                    </Tag>
+                  ))}
+                </Space>
+              ),
+            },
+            {
+              title: 'Включено',
               key: 'isEnabled',
-              width: 70,
+              width: 90,
               render: (_, rule) => <Switch size="small" checked={rule.isEnabled} disabled />,
             },
             {
               title: 'Получатели',
               key: 'recipients',
-              render: (_, rule) => <Text type="secondary">{describeRecipients(rule)}</Text>,
+              render: (_, rule) => (
+                <Text type="secondary">{describeRecipients(rule, roleNameByCode, userNameById)}</Text>
+              ),
             },
             {
               title: 'Условия',
               key: 'conditions',
-              render: (_, rule) => <Text type="secondary">{describeConditions(rule)}</Text>,
+              render: (_, rule) => <Text type="secondary">{describeConditions(rule, orderStatusNameById)}</Text>,
             },
             {
               title: '',
@@ -480,14 +692,15 @@ export function NotificationRulesConfig() {
         destroyOnClose
       >
         <Form layout="vertical">
-          <Form.Item label="ruleCode" required>
-            <Input
-              value={draft.ruleCode}
-              onChange={(event) => updateDraft({ ruleCode: event.target.value })}
-              disabled={editor.kind === 'edit'}
-              maxLength={200}
-            />
-          </Form.Item>
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <Space direction="vertical" size={2}>
+              <Text type="secondary">Код правила</Text>
+              <Text code copyable>
+                {draft.ruleCode}
+              </Text>
+              <Text type="secondary">Создаётся автоматически и после сохранения не меняется.</Text>
+            </Space>
+          </Card>
 
           <Form.Item label="Тип события" required>
             <Select
@@ -496,7 +709,7 @@ export function NotificationRulesConfig() {
               disabled={editor.kind === 'edit'}
               options={eventTypes.map((eventType) => ({
                 value: eventType.eventType,
-                label: `${eventType.eventType} (${eventType.aggregateType})`,
+                label: eventTypeLabel(eventType.eventType),
               }))}
               placeholder="Выберите событие"
               showSearch
@@ -520,7 +733,7 @@ export function NotificationRulesConfig() {
           </Form.Item>
 
           <Space size={12} style={{ width: '100%' }}>
-            <Form.Item label="Level" style={{ width: 180 }}>
+            <Form.Item label="Важность" style={{ width: 180 }}>
               <Select<NotificationLevel>
                 value={draft.level}
                 onChange={(value) => updateDraft({ level: value })}
@@ -541,12 +754,28 @@ export function NotificationRulesConfig() {
               />
             </Form.Item>
             <Form.Item label="Включено" style={{ width: 100 }}>
-              <Switch
-                checked={draft.isEnabled}
-                onChange={(checked) => updateDraft({ isEnabled: checked })}
-              />
+              <Switch checked={draft.isEnabled} onChange={(checked) => updateDraft({ isEnabled: checked })} />
             </Form.Item>
           </Space>
+
+          <Form.Item
+            label="Канал уведомлений"
+            required
+            extra="Для Telegram получатель один раз подключает свой аккаунт в личном кабинете. Если Telegram не подключён, доставка этому получателю будет пропущена."
+          >
+            <Checkbox.Group
+              value={draft.channels}
+              onChange={(values) =>
+                updateDraft({ channels: values as NotificationChannel[] })
+              }
+              style={{ width: '100%' }}
+            >
+              <Space direction="vertical" size={8}>
+                <Checkbox value="in_app">В приложении</Checkbox>
+                <Checkbox value="telegram">Telegram</Checkbox>
+              </Space>
+            </Checkbox.Group>
+          </Form.Item>
 
           <Form.Item label="Условия">
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
@@ -572,23 +801,37 @@ export function NotificationRulesConfig() {
               <Checkbox
                 checked={draft.requireCurrentDeadlineEvent}
                 disabled={selectedEventType ? !selectedEventType.supportsDeadlineConditions : true}
-                onChange={(event) => updateDraft({ requireCurrentDeadlineEvent: event.target.checked })}
+                onChange={(event) =>
+                  updateDraft({
+                    requireCurrentDeadlineEvent: event.target.checked,
+                  })
+                }
               >
                 Только текущее событие срока
               </Checkbox>
-              <Input
-                addonBefore="Из статусов"
-                value={draft.allowedFromOrderStatusIdsText}
+              <Select<number[]>
+                mode="multiple"
+                value={draft.allowedFromOrderStatusIds}
                 disabled={selectedEventType ? !selectedEventType.supportsOrderConditions : false}
-                onChange={(event) => updateDraft({ allowedFromOrderStatusIdsText: event.target.value })}
-                placeholder="1, 2, 3"
+                onChange={(values) => updateDraft({ allowedFromOrderStatusIds: values })}
+                options={selectedOrderStatusOptions}
+                placeholder="Разрешённые исходные статусы заказа"
+                loading={orderStatusesLoading}
+                optionFilterProp="label"
+                showSearch
+                allowClear
               />
-              <Input
-                addonBefore="Исключить статусы"
-                value={draft.excludeOrderStatusIdsText}
+              <Select<number[]>
+                mode="multiple"
+                value={draft.excludeOrderStatusIds}
                 disabled={selectedEventType ? !selectedEventType.supportsOrderConditions : false}
-                onChange={(event) => updateDraft({ excludeOrderStatusIdsText: event.target.value })}
-                placeholder="7, 8"
+                onChange={(values) => updateDraft({ excludeOrderStatusIds: values })}
+                options={selectedOrderStatusOptions}
+                placeholder="Исключённые статусы заказа"
+                loading={orderStatusesLoading}
+                optionFilterProp="label"
+                showSearch
+                allowClear
               />
             </Space>
           </Form.Item>
@@ -601,32 +844,38 @@ export function NotificationRulesConfig() {
                 onChange={(values) => updateDraft({ resolvers: values })}
                 options={(selectedEventType?.supportedResolvers ?? []).map((resolver) => ({
                   value: resolver,
-                  label: RESOLVER_LABELS[resolver] ?? resolver,
+                  label: RESOLVER_LABELS[resolver] ?? 'Способ определения получателя',
                 }))}
-                placeholder={
-                  selectedEventType
-                    ? 'Резолверы для выбранного события'
-                    : 'Сначала выберите тип события'
-                }
+                placeholder={selectedEventType ? 'Способы определения получателей' : 'Сначала выберите тип события'}
                 disabled={!selectedEventType}
                 allowClear
               />
-              <Input
-                addonBefore="Role codes"
-                value={draft.roleCodesText}
-                onChange={(event) => updateDraft({ roleCodesText: event.target.value })}
-                placeholder="admin, top_manager"
+              <Select<string[]>
+                mode="multiple"
+                value={draft.roleCodes}
+                onChange={(values) => updateDraft({ roleCodes: values })}
+                options={selectedRoleOptions}
+                placeholder="Роли получателей"
+                loading={rolesLoading}
+                optionFilterProp="label"
+                showSearch
+                allowClear
               />
-              <Input
-                addonBefore="User IDs"
-                value={draft.userIdsText}
-                onChange={(event) => updateDraft({ userIdsText: event.target.value })}
-                placeholder="100, 200"
+              <Select<number[]>
+                mode="multiple"
+                value={draft.userIds}
+                onChange={(values) => updateDraft({ userIds: values })}
+                options={selectedUserOptions}
+                placeholder="Пользователи-получатели"
+                loading={usersLoading}
+                optionFilterProp="label"
+                showSearch
+                allowClear
               />
             </Space>
           </Form.Item>
 
-          <Form.Item label="Заголовок (titleTemplate)">
+          <Form.Item label="Заголовок уведомления">
             <Input
               value={draft.titleTemplate}
               onChange={(event) => updateDraft({ titleTemplate: event.target.value })}
@@ -635,11 +884,14 @@ export function NotificationRulesConfig() {
           </Form.Item>
 
           <Form.Item
-            label="Текст (messageTemplate)"
+            label="Текст уведомления"
             extra={
               <Text type="secondary">
-                Допустимые плейсхолдеры: {TEMPLATE_PLACEHOLDERS.join(', ')}. Прочие плейсхолдеры будут
-                очищены движком.
+                Допустимые переменные:{' '}
+                {TEMPLATE_PLACEHOLDERS.map(
+                  (placeholder) => `${TEMPLATE_PLACEHOLDER_LABELS[placeholder]} — ${placeholder}`
+                ).join('; ')}
+                . Прочие переменные будут удалены движком.
               </Text>
             }
           >
@@ -647,7 +899,7 @@ export function NotificationRulesConfig() {
               value={draft.messageTemplate}
               onChange={(event) => updateDraft({ messageTemplate: event.target.value })}
               rows={3}
-              placeholder="Order {orderId} deadline expired at {eventType}"
+              placeholder="У заказа {orderId} истёк срок"
             />
           </Form.Item>
 

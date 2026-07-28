@@ -23,7 +23,13 @@ interface ConfigRow {
     productionStatusCode: string | null;
     sortOrder: number;
     durationDays: number | null;
+    parallelWithPrevious: boolean;
   }>;
+}
+
+interface WorkflowSettingRow {
+  is_active: boolean;
+  value_json: unknown;
 }
 
 export class PgDeadlineDefaultScheduleRepository
@@ -62,7 +68,9 @@ export class PgDeadlineDefaultScheduleRepository
           before.stages.every(
             (stage, index) =>
               input.dto.stages[index]?.productionStatusId === stage.productionStatusId &&
-              input.dto.stages[index]?.durationDays === stage.durationDays,
+              input.dto.stages[index]?.durationDays === stage.durationDays &&
+              input.dto.stages[index]?.parallelWithPrevious ===
+                stage.parallelWithPrevious,
           ));
       if (same) {
         return before;
@@ -83,11 +91,18 @@ export class PgDeadlineDefaultScheduleRepository
         await tx.query(
           `
           INSERT INTO deadline_default_stage_durations (
-            production_status_id, position, duration_days, updated_by_user_id
+            production_status_id, position, duration_days,
+            parallel_with_previous, updated_by_user_id
           )
-          VALUES ($1, $2, $3, $4)
+          VALUES ($1, $2, $3, $4, $5)
           `,
-          [stage.productionStatusId, index + 1, stage.durationDays, actorUserId],
+          [
+            stage.productionStatusId,
+            index + 1,
+            stage.durationDays,
+            stage.parallelWithPrevious,
+            actorUserId,
+          ],
         );
       }
       await tx.query(
@@ -103,6 +118,13 @@ export class PgDeadlineDefaultScheduleRepository
       );
 
       const after = (await loadScheduleSnapshot(tx)).schedule;
+      if (input.dto.stages.length > 0 && !after.configured) {
+        throw new ApiError(
+          422,
+          'DEADLINE_DEFAULT_SCHEDULE_GRAPH_INVALID',
+          'Сроки не образуют корректный маршрут. Проверьте переходы и длительности этапов.',
+        );
+      }
       const changedProductionStatusIds = changedStageIds(before, after);
       const auditId = await this.audit.record(tx, {
         event: 'deadline.default_schedule.updated',
@@ -190,7 +212,8 @@ async function loadScheduleSnapshot(database: DatabaseClient): Promise<{
             'productionStatusName', ps.production_status_name,
             'productionStatusCode', ps.production_status_code,
             'sortOrder', COALESCE(durations.position, ps.sort_order, 100),
-            'durationDays', durations.duration_days
+            'durationDays', durations.duration_days,
+            'parallelWithPrevious', COALESCE(durations.parallel_with_previous, false)
           )
           ORDER BY
             CASE WHEN durations.position IS NULL THEN 1 ELSE 0 END,
@@ -228,12 +251,14 @@ async function loadScheduleSnapshot(database: DatabaseClient): Promise<{
   const configuredRowCount = Number(row.configured_row_count);
   const activeStatusCount = Number(row.active_status_count);
   const activeConfiguredCount = Number(row.active_configured_count);
+  const transitionsOrder = await loadTransitionsOrder(database);
   return {
     configuredRowCount,
     schedule: buildDeadlineDefaultSchedule({
       reserveDays: Number(row.reserve_days),
       version: Number(row.version),
       updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+      transitionsOrder,
       hasStoredConfiguration:
         configuredRowCount > 0 || Number(row.reserve_days) > 0,
       catalogAligned:
@@ -246,9 +271,53 @@ async function loadScheduleSnapshot(database: DatabaseClient): Promise<{
         productionStatusCode: stage.productionStatusCode,
         sortOrder: Number(stage.sortOrder),
         durationDays: stage.durationDays === null ? null : Number(stage.durationDays),
+        parallelWithPrevious: stage.parallelWithPrevious,
       })),
     }),
   };
+}
+
+async function loadTransitionsOrder(
+  database: DatabaseClient,
+): Promise<Record<string, string[]>> {
+  const result = await database.query<WorkflowSettingRow>(
+    `
+    SELECT is_active, value_json
+    FROM app_settings
+    WHERE setting_key = $1
+    LIMIT 1
+    `,
+    ['production.workflow.default'],
+  );
+  const row = result.rows[0];
+  if (!row?.is_active || !row.value_json || typeof row.value_json !== 'object') {
+    return {};
+  }
+  const raw = row.value_json as Record<string, unknown>;
+  const workflow =
+    raw.value && typeof raw.value === 'object'
+      ? (raw.value as Record<string, unknown>)
+      : raw;
+  const transitions = workflow.transitions_order;
+  if (!transitions || typeof transitions !== 'object' || Array.isArray(transitions)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(transitions as Record<string, unknown>).flatMap(
+      ([fromCode, targets]) =>
+        Array.isArray(targets)
+          ? [
+              [
+                fromCode,
+                targets.filter(
+                  (target): target is string => typeof target === 'string',
+                ),
+              ],
+            ]
+          : [],
+    ),
+  );
 }
 
 function assertExactStageSet(activeIds: number[], requestedIds: number[]): void {
@@ -278,15 +347,19 @@ function changedStageIds(
   after: DeadlineDefaultScheduleDto,
 ): number[] {
   const beforeById = new Map(
-    before.stages.map((stage, index) => [
+    before.stages.map((stage) => [
       stage.productionStatusId,
-      { durationDays: stage.durationDays, position: index + 1 },
+      {
+        durationDays: stage.durationDays,
+      },
     ]),
   );
   const afterById = new Map(
-    after.stages.map((stage, index) => [
+    after.stages.map((stage) => [
       stage.productionStatusId,
-      { durationDays: stage.durationDays, position: index + 1 },
+      {
+        durationDays: stage.durationDays,
+      },
     ]),
   );
   return [...new Set([...beforeById.keys(), ...afterById.keys()])]
@@ -294,8 +367,7 @@ function changedStageIds(
       const previous = beforeById.get(id);
       const next = afterById.get(id);
       return (
-        previous?.durationDays !== next?.durationDays ||
-        previous?.position !== next?.position
+        previous?.durationDays !== next?.durationDays
       );
     })
     .sort((left, right) => left - right);

@@ -5,6 +5,7 @@ import { PgNotificationRuleRepository } from './adapters/pg-notification-rule-re
 import { PgRecipientSourceAdapter } from './adapters/pg-recipient-source';
 import { PgVisibilityAdapter } from './adapters/pg-visibility';
 import { PgNotificationWriteAdapter } from './adapters/pg-notification-write';
+import { PgNotificationChannelDeliveryAdapter } from './adapters/pg-notification-channel-delivery';
 import { PgNotificationContextBuilder } from './adapters/pg-notification-context';
 import { PgOutboxRepository } from './adapters/pg-outbox-repository';
 import { NotificationRulesService } from './application/notification-rules.service';
@@ -16,12 +17,24 @@ import { isEngineOwnedEvent } from './domain/notification-event-registry';
 import { NotificationRulesController } from './http/notification-rules.controller';
 import { NotificationsRuntimeConfigService } from './http/notifications-runtime-config.service';
 import { OutboxRelayController } from './http/outbox-relay.controller';
+import { PgTelegramNotificationsRepository } from './telegram/pg-telegram-notifications.repository';
+import { TelegramBotApiClient } from './telegram/telegram-bot-api.client';
+import { TelegramNotificationDeliverySchedulerService } from './telegram/telegram-notification-delivery-scheduler.service';
+import { TelegramNotificationDeliveryService } from './telegram/telegram-notification-delivery.service';
+import { TelegramNotificationsController } from './telegram/telegram-notifications.controller';
+import { TelegramNotificationsRuntimeConfigService } from './telegram/telegram-notifications-runtime-config.service';
+import { TelegramNotificationsService } from './telegram/telegram-notifications.service';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [NotificationRulesController, OutboxRelayController],
+  controllers: [
+    NotificationRulesController,
+    OutboxRelayController,
+    TelegramNotificationsController,
+  ],
   providers: [
     NotificationsRuntimeConfigService,
+    TelegramNotificationsRuntimeConfigService,
     {
       provide: NotificationRulesService,
       useFactory: (database: DatabaseService) =>
@@ -42,6 +55,7 @@ import { OutboxRelayController } from './http/outbox-relay.controller';
             new PgVisibilityAdapter(),
           ),
           notificationWrite: new PgNotificationWriteAdapter(),
+          channelDelivery: new PgNotificationChannelDeliveryAdapter(),
           runtimeConfig,
         }),
       inject: [NotificationsRuntimeConfigService],
@@ -87,6 +101,59 @@ import { OutboxRelayController } from './http/outbox-relay.controller';
       useFactory: (relay: OutboxRelayService, runtimeConfig: NotificationsRuntimeConfigService) =>
         new OutboxRelaySchedulerService(relay, runtimeConfig),
       inject: [OutboxRelayService, NotificationsRuntimeConfigService],
+    },
+    {
+      provide: TelegramBotApiClient,
+      useFactory: (runtimeConfig: TelegramNotificationsRuntimeConfigService) => {
+        const config = runtimeConfig.getConfig();
+        return new TelegramBotApiClient({
+          apiBase: config.apiBase,
+          botToken: config.botToken ?? '',
+          timeoutMs: config.requestTimeoutMs,
+        });
+      },
+      inject: [TelegramNotificationsRuntimeConfigService],
+    },
+    {
+      provide: PgTelegramNotificationsRepository,
+      useFactory: (database: DatabaseService) => new PgTelegramNotificationsRepository(database),
+      inject: [DatabaseService],
+    },
+    {
+      provide: TelegramNotificationsService,
+      useFactory: (
+        database: DatabaseService,
+        repository: PgTelegramNotificationsRepository,
+        runtimeConfig: TelegramNotificationsRuntimeConfigService,
+        botApi: TelegramBotApiClient,
+      ) => new TelegramNotificationsService(database, repository, runtimeConfig, botApi),
+      inject: [
+        DatabaseService,
+        PgTelegramNotificationsRepository,
+        TelegramNotificationsRuntimeConfigService,
+        TelegramBotApiClient,
+      ],
+    },
+    {
+      provide: TelegramNotificationDeliveryService,
+      useFactory: (
+        repository: PgTelegramNotificationsRepository,
+        runtimeConfig: TelegramNotificationsRuntimeConfigService,
+        botApi: TelegramBotApiClient,
+      ) => new TelegramNotificationDeliveryService(repository, runtimeConfig, botApi),
+      inject: [
+        PgTelegramNotificationsRepository,
+        TelegramNotificationsRuntimeConfigService,
+        TelegramBotApiClient,
+      ],
+    },
+    {
+      provide: TelegramNotificationDeliverySchedulerService,
+      useFactory: (
+        delivery: TelegramNotificationDeliveryService,
+        runtimeConfig: TelegramNotificationsRuntimeConfigService,
+      ) => new TelegramNotificationDeliverySchedulerService(delivery, runtimeConfig),
+      inject: [TelegramNotificationDeliveryService, TelegramNotificationsRuntimeConfigService],
     },
   ],
 })

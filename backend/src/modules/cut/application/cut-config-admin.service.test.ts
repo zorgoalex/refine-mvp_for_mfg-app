@@ -65,4 +65,195 @@ describe('CutConfigAdminService RBAC', () => {
     ).resolves.toMatchObject({ cutPdfTemplateId: 1, layout: {} });
     expect(port.upsertPdfTemplate).toHaveBeenCalledWith(expect.objectContaining({ id: 1, expectedVersion: 0 }));
   });
+
+  it('lists PDF template fields with cut.view only', async () => {
+    const service = new CutConfigAdminService({ config: fakePort() });
+    const fields = await service.listPdfTemplateFields({ currentUser: user(['cut.view']) });
+
+    expect(fields.map((field) => field.id)).toEqual(expect.arrayContaining([
+      'sheet.thumbnail',
+      'sheet.machine_files',
+      'sheet.utilization',
+      'order.unique_names',
+      'order.date',
+      'order.ready_date',
+      'client.unique_names',
+      'detail.table',
+      'detail.doweling',
+      'detail.machine_file',
+      'detail.machine_files',
+      'detail.materials',
+      'detail.order',
+      'detail.detail_name',
+      'computed.today',
+    ]));
+    expect(fields.find((field) => field.id === 'order.unique_names')).toMatchObject({ source: 'order' });
+    expect(fields.find((field) => field.id === 'client.unique_names')).toMatchObject({ source: 'client' });
+    expect(fields.find((field) => field.id === 'computed.today')).toMatchObject({ source: 'computed' });
+    expect(fields.find((field) => field.id === 'detail.order')).toMatchObject({ source: 'detail' });
+    expect(fields.find((field) => field.id === 'detail.materials')).toMatchObject({ source: 'detail' });
+    expect(fields.some((field) => field.source === 'bazis')).toBe(true);
+  });
+
+  it('denies PDF template fields without cut.view', async () => {
+    const service = new CutConfigAdminService({ config: fakePort() });
+    await expect(service.listPdfTemplateFields({ currentUser: user([]) })).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+    });
+  });
+
+  it('rejects invalid v3 PDF layouts before persistence', async () => {
+    const port = fakePort();
+    const service = new CutConfigAdminService({ config: port });
+    await expect(
+      service.upsertPdfTemplate({
+        currentUser: user(['cut.view', 'cut.manage']),
+        id: 1,
+        expectedVersion: 0,
+        input: {
+          name: 'bad',
+          layout: {
+            version: 3,
+            page: { width: 297, height: 210 },
+            customFieldSchema: {
+              bad: {
+                type: 'string',
+                expression: { type: 'custom_expression', version: 1, root: { type: 'concat', parts: [] } },
+              },
+            },
+            elements: [],
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'LABEL_CUSTOM_EXPRESSION_INVALID' });
+    expect(port.upsertPdfTemplate).not.toHaveBeenCalled();
+  });
+
+  it('accepts v3 PDF layouts using the editor default detail table columns', async () => {
+    const port = fakePort();
+    const service = new CutConfigAdminService({ config: port });
+
+    await expect(
+      service.upsertPdfTemplate({
+        currentUser: user(['cut.view', 'cut.manage']),
+        id: 2,
+        expectedVersion: 3,
+        input: {
+          name: 'standard',
+          layout: {
+            version: 3,
+            page: { width: 297, height: 210 },
+            customFieldSchema: {},
+            elements: [
+              {
+                id: 'field-order',
+                type: 'field',
+                label: 'Заказ',
+                source: 'order.unique_names',
+                x: 12,
+                y: 10,
+                w: 84,
+                h: 8,
+                rotation: 0,
+                zIndex: 1,
+                align: 'left',
+                style: { fontSize: 10, color: '#111111' },
+              },
+              {
+                id: 'field-client',
+                type: 'field',
+                label: 'Клиент',
+                source: 'client.unique_names',
+                x: 108,
+                y: 10,
+                w: 78,
+                h: 8,
+                rotation: 0,
+                zIndex: 2,
+                align: 'left',
+                style: { fontSize: 10, color: '#111111' },
+              },
+              {
+                id: 'detail-table',
+                type: 'detail_table',
+                source: 'detail.table',
+                x: 222,
+                y: 34,
+                w: 60,
+                h: 78,
+                rotation: 0,
+                zIndex: 1,
+                align: 'center',
+                style: {
+                  columns: [
+                    { field: 'detail.row_number', label: '#', width: 0.55, visible: true },
+                    { field: 'detail.order', label: 'Заказ', width: 1.6, visible: true },
+                    { field: 'detail.detail_name', label: 'Название детали', width: 1.8, visible: true },
+                    { field: 'detail.doweling', label: 'Присадка', width: 0.95, visible: true },
+                    { field: 'detail.machine_file', label: 'Файл станка', width: 1.8, visible: true },
+                  ],
+                  sort: { field: 'detail.detail_name', direction: 'asc' },
+                },
+              },
+              {
+                id: 'machine-files-table',
+                type: 'machine_files_table',
+                source: 'sheet.machine_files',
+                x: 222,
+                y: 116,
+                w: 60,
+                h: 32,
+                rotation: 0,
+                zIndex: 2,
+                align: 'center',
+                style: { fontSize: 7, color: '#111111' },
+              },
+            ],
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ cutPdfTemplateId: 1 });
+    expect(port.upsertPdfTemplate).toHaveBeenCalledWith(expect.objectContaining({ id: 2, expectedVersion: 3 }));
+  });
+
+  it('rejects non-detail fields in v3 PDF detail table columns', async () => {
+    const port = fakePort();
+    const service = new CutConfigAdminService({ config: port });
+
+    await expect(
+      service.upsertPdfTemplate({
+        currentUser: user(['cut.view', 'cut.manage']),
+        id: 2,
+        expectedVersion: 3,
+        input: {
+          name: 'standard',
+          layout: {
+            version: 3,
+            page: { width: 297, height: 210 },
+            customFieldSchema: {},
+            elements: [
+              {
+                id: 'detail-table',
+                type: 'detail_table',
+                source: 'detail.table',
+                x: 222,
+                y: 34,
+                w: 60,
+                h: 78,
+                rotation: 0,
+                zIndex: 1,
+                align: 'center',
+                style: {
+                  columns: [{ field: 'order.unique_names', label: 'Заказ', width: 1.6, visible: true }],
+                  sort: { field: 'detail.order', direction: 'asc' },
+                },
+              },
+            ],
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'CUT_PDF_TEMPLATE_LAYOUT_INVALID' });
+    expect(port.upsertPdfTemplate).not.toHaveBeenCalled();
+  });
 });

@@ -203,6 +203,86 @@ export const envSchema = z
     BACKEND_OUTBOX_RELAY_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(100),
     BACKEND_OUTBOX_RELAY_WORKER_ID: z.string().trim().min(1).default('backend-local'),
     BACKEND_OUTBOX_RELAY_MAX_ATTEMPTS: z.coerce.number().int().positive().max(100).default(10),
+    BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS: booleanFromEnv.default(false),
+    TELEGRAM_NOTIFICATION_BOT_TOKEN: optionalTrimmedStringFromEnv,
+    TELEGRAM_NOTIFICATION_BOT_USERNAME: z
+      .union([
+        z.string().trim().regex(/^[A-Za-z0-9_]{2,29}bot$/i),
+        emptyTrimmedStringFromEnv,
+      ])
+      .optional(),
+    TELEGRAM_NOTIFICATION_WEBHOOK_SECRET: z
+      .union([
+        z.string().trim().min(32).max(256).regex(/^[A-Za-z0-9_-]+$/),
+        emptyTrimmedStringFromEnv,
+      ])
+      .optional(),
+    TELEGRAM_NOTIFICATION_WEBHOOK_PUBLIC_URL: optionalUrlFromEnv,
+    TELEGRAM_NOTIFICATION_API_BASE: z
+      .string()
+      .trim()
+      .url()
+      .refine((value) => {
+        const url = new URL(value);
+        if (url.protocol === 'https:') {
+          return (
+            url.hostname === 'api.telegram.org' &&
+            url.port === '' &&
+            url.pathname === '/' &&
+            !url.username &&
+            !url.password &&
+            !url.search &&
+            !url.hash
+          );
+        }
+        return (
+          url.protocol === 'http:' &&
+          (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+        );
+      }, 'TELEGRAM_NOTIFICATION_API_BASE must be https://api.telegram.org (or http://localhost for local mocks)')
+      .default('https://api.telegram.org'),
+    TELEGRAM_NOTIFICATION_REQUEST_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(1000)
+      .max(30000)
+      .default(10000),
+    TELEGRAM_NOTIFICATION_LINK_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(60)
+      .max(3600)
+      .default(600),
+    BACKEND_TELEGRAM_NOTIFICATION_RELAY_OWNER: z
+      .enum(['none', 'in_process', 'external'])
+      .default('none'),
+    BACKEND_TELEGRAM_NOTIFICATION_RELAY_POLL_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(1000)
+      .default(10000),
+    BACKEND_TELEGRAM_NOTIFICATION_RELAY_BATCH_SIZE: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(1000)
+      .default(50),
+    BACKEND_TELEGRAM_NOTIFICATION_RELAY_WORKER_ID: z
+      .string()
+      .trim()
+      .min(1)
+      .default('telegram-notifications-local'),
+    BACKEND_TELEGRAM_NOTIFICATION_RELAY_MAX_ATTEMPTS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(100)
+      .default(10),
+    BACKEND_TELEGRAM_NOTIFICATION_RELAY_STALE_LOCK_MS: z.coerce
+      .number()
+      .int()
+      .min(60000)
+      .default(600000),
     FREECUT_BASE_URL: optionalUrlFromEnv,
     FREECUT_OPTIMIZE_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
     /** Auto engine=heuristic for cut groups with >= this many item instances; 0 disables auto mode. */
@@ -348,6 +428,60 @@ export const envSchema = z
         code: 'custom',
         message: 'WORKOS_API_BASE must be https://*.workos.com in staging/production',
         path: ['WORKOS_API_BASE'],
+      });
+    }
+
+    if (
+      (env.NODE_ENV === 'production' || env.NODE_ENV === 'staging') &&
+      env.TELEGRAM_NOTIFICATION_API_BASE !== 'https://api.telegram.org'
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'TELEGRAM_NOTIFICATION_API_BASE must be https://api.telegram.org in staging/production',
+        path: ['TELEGRAM_NOTIFICATION_API_BASE'],
+      });
+    }
+
+    if (env.BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS) {
+      if (!env.DATABASE_URL) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'DATABASE_URL is required when BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS is true',
+          path: ['DATABASE_URL'],
+        });
+      }
+      if (!env.BACKEND_ENABLE_NOTIFICATION_ENGINE) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'BACKEND_ENABLE_NOTIFICATION_ENGINE=true is required when BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS is true',
+          path: ['BACKEND_ENABLE_NOTIFICATION_ENGINE'],
+        });
+      }
+      for (const key of [
+        'TELEGRAM_NOTIFICATION_BOT_TOKEN',
+        'TELEGRAM_NOTIFICATION_BOT_USERNAME',
+        'TELEGRAM_NOTIFICATION_WEBHOOK_SECRET',
+      ] as const) {
+        if (!env[key]) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `${key} is required when BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS is true`,
+            path: [key],
+          });
+        }
+      }
+    }
+
+    if (
+      env.BACKEND_TELEGRAM_NOTIFICATION_RELAY_OWNER !== 'none' &&
+      !env.BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS=true is required when Telegram notification relay owns scheduling',
+        path: ['BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS'],
       });
     }
 

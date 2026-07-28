@@ -55,6 +55,7 @@ import type {
   DetailLastReadyQuery,
   DetailPlacementsQuery,
   EligibleDetailsQuery,
+  ListFilmOptionsForCutQuery,
   GetCutJobQuery,
   GetCutResultQuery,
   GetRenderCacheTokenArgs,
@@ -70,6 +71,7 @@ import type {
   SetCutJobSheetMaterialCommand,
   SetCutJobCombineFilmsCommand,
   SetCutJobPdfTemplateCommand,
+  SetCutJobNameCommand,
   SetCutJobSplitByMaterialCommand,
   SetCutGroupPdfTemplateCommand,
   SetPdfPrewarmStateQuery,
@@ -78,6 +80,7 @@ import type {
   CutDetailInfoDto,
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
+  CutFilmOptionDto,
   CutEditorParamsDto,
   CutGroupDto,
   CutJobDto,
@@ -124,6 +127,7 @@ import {
   CutSheetMaterialNotCuttableError,
   CutStaleVersionError,
 } from '../errors/cut.errors';
+import type { LabelCustomExpressionScalar } from '../../labels/application/label-custom-field-expression';
 
 const AUDIT_SOURCE = 'backend-cut-command';
 
@@ -151,9 +155,15 @@ interface RenderDetailInfo {
   detailNumber: number | null;
   widthMm: number | null;
   heightMm: number | null;
+  detailFields: Record<string, unknown> | null;
+  doweling: boolean | null;
+  machineFiles: string[];
   materialName: string | null;
   thicknessMm: number | null;
   filmName: string | null;
+  millingTypeName: string | null;
+  edgeTypeName: string | null;
+  productionStatusName: string | null;
   orderName: string | null;
   orderDate: string | null;
   readyDate: string | null;
@@ -340,6 +350,11 @@ export function combineFilmsChangedOutboxKey(cutJobId: number, requestId: string
  *  rule: stable per (job, request), version fallback. */
 export function splitByMaterialChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
   return `${CUT_AUDIT_EVENTS.splitByMaterialChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
+}
+
+/** Idempotency key for cut-job rename events. Stable per (job, request), version fallback. */
+export function nameChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.nameChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
 }
 
 /** Idempotency key for the manual-layout-saved outbox event. Keyed by the
@@ -2117,9 +2132,21 @@ export class PgCutRepository implements CutRepositoryPort {
     addArrayFilter('od.order_id', query.criteria.orderIds);
     addArrayFilter('od.sheet_material_type_id', query.criteria.sheetMaterialTypeIds);
     addArrayFilter('od.film_id', query.criteria.filmIds);
+    if (query.criteria.dateFrom) {
+      params.push(query.criteria.dateFrom);
+      conditions.push(`ord.order_date >= $${params.length}::date`);
+    }
+    if (query.criteria.dateTo) {
+      params.push(query.criteria.dateTo);
+      conditions.push(`ord.order_date <= $${params.length}::date`);
+    }
     if (query.criteria.productionStatusIds && query.criteria.productionStatusIds.length > 0) {
       // Operator override: explicit status filter wins over the ready-set default.
       addArrayFilter('od.production_status_id', query.criteria.productionStatusIds);
+    } else if (query.includeAllStatuses) {
+      // Create-preview mode: show every detail matching explicit criteria so the
+      // operator can see why some rows cannot be selected. Eligibility below
+      // still marks wrong statuses as disabled.
     } else if (readyStatusIds.length > 0) {
       // Default: only ready-to-cut statuses, so the LIMIT can never be exhausted
       // by thousands of wrong-status rows and silently hide the eligible subset
@@ -2137,11 +2164,24 @@ export class PgCutRepository implements CutRepositoryPort {
       `
       SELECT od.detail_id, od.order_id, ord.order_name, od.quantity, od.material_id,
              od.sheet_material_type_id,
+             clients.client_name,
+             od.detail_number, od.detail_name, od.height, od.width, od.area,
+             COALESCE(smt.name, materials.material_name) AS material_name,
+             mt.milling_type_name, et.edge_type_name,
              od.film_id, od.production_status_id, od.delete_flag,
-             s.is_cuttable
+             films.film_name, ps.production_status_name,
+             od.priority, od.joint_order_id, od.note,
+             od.link_cutting_file, od.link_cutting_image_file, od.link_cad_file, od.link_pdf_file,
+             smt.is_cuttable
       FROM order_details od
       JOIN orders ord ON ord.order_id = od.order_id
-      LEFT JOIN sheet_material_types s ON s.sheet_material_type_id = od.sheet_material_type_id
+      LEFT JOIN clients ON clients.client_id = ord.client_id
+      LEFT JOIN materials ON materials.material_id = od.material_id
+      LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+      LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
+      LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
+      LEFT JOIN films ON films.film_id = od.film_id
+      LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
       WHERE ${conditions.join(' AND ')}
       ORDER BY od.detail_id
       LIMIT 2000
@@ -2179,18 +2219,83 @@ export class PgCutRepository implements CutRepositoryPort {
         orderDetailId: candidate.detailId,
         orderId: toNum(row.order_id),
         orderName: row.order_name ?? null,
+        clientName: row.client_name ?? null,
+        detailNumber: numOrNull(row.detail_number),
+        detailName: row.detail_name ?? null,
+        height: numOrNull(row.height),
+        width: numOrNull(row.width),
         quantity: toNum(row.quantity),
+        area: numOrNull(row.area),
         materialId: row.material_id === null || row.material_id === undefined ? null : toNum(row.material_id),
         sheetMaterialTypeId: candidate.sheetMaterialTypeId,
+        materialName: row.material_name ?? null,
+        millingTypeName: row.milling_type_name ?? null,
+        edgeTypeName: row.edge_type_name ?? null,
         filmId: row.film_id === null ? null : toNum(row.film_id),
+        filmName: row.film_name ?? null,
+        productionStatusName: row.production_status_name ?? null,
+        priority: numOrNull(row.priority),
+        jointOrderId: numOrNull(row.joint_order_id),
+        note: row.note ?? null,
+        linkCuttingFile: row.link_cutting_file ?? null,
+        linkCuttingImageFile: row.link_cutting_image_file ?? null,
+        linkCadFile: row.link_cad_file ?? null,
+        linkPdfFile: row.link_pdf_file ?? null,
         eligible,
         ineligibleReason: reason,
         activeJobs: placement?.activeJobs ?? [],
+        archivedJobs: placement?.archivedJobs ?? [],
         inArchivedJob: placement?.inArchivedJob ?? false,
       };
     });
 
     return { details, noSheetSpecCount };
+  }
+
+  async listFilmOptionsForCut(query: ListFilmOptionsForCutQuery): Promise<CutFilmOptionDto[]> {
+    const conditions: string[] = [
+      'od.delete_flag = false',
+      'od.film_id IS NOT NULL',
+      'f.film_name IS NOT NULL',
+      `btrim(f.film_name) <> ''`,
+    ];
+    const params: unknown[] = [];
+    const addArrayFilter = (column: string, values: number[] | undefined) => {
+      if (values && values.length > 0) {
+        params.push(values);
+        conditions.push(`${column} = ANY($${params.length}::bigint[])`);
+      }
+    };
+    addArrayFilter('od.order_id', query.criteria.orderIds);
+    addArrayFilter('od.sheet_material_type_id', query.criteria.sheetMaterialTypeIds);
+    if (query.criteria.dateFrom) {
+      params.push(query.criteria.dateFrom);
+      conditions.push(`ord.order_date >= $${params.length}::date`);
+    }
+    if (query.criteria.dateTo) {
+      params.push(query.criteria.dateTo);
+      conditions.push(`ord.order_date <= $${params.length}::date`);
+    }
+    if (query.criteria.productionStatusIds && query.criteria.productionStatusIds.length > 0) {
+      addArrayFilter('od.production_status_id', query.criteria.productionStatusIds);
+    }
+
+    const result = await this.database.query<{ film_id: string | number; film_name: string }>(
+      `
+      SELECT DISTINCT od.film_id, f.film_name
+      FROM order_details od
+      JOIN orders ord ON ord.order_id = od.order_id
+      JOIN films f ON f.film_id = od.film_id
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY f.film_name, od.film_id
+      LIMIT 500
+      `,
+      params,
+    );
+    return result.rows.map((row) => ({
+      filmId: toNum(row.film_id),
+      name: row.film_name,
+    }));
   }
 
   /**
@@ -2201,8 +2306,8 @@ export class PgCutRepository implements CutRepositoryPort {
   private async loadDetailPlacements(
     client: DatabaseClient,
     detailIds: readonly number[],
-  ): Promise<Map<number, { activeJobs: CutJobRefDto[]; inArchivedJob: boolean }>> {
-    const map = new Map<number, { activeJobs: CutJobRefDto[]; inArchivedJob: boolean }>();
+  ): Promise<Map<number, { activeJobs: CutJobRefDto[]; archivedJobs: CutJobRefDto[]; inArchivedJob: boolean }>> {
+    const map = new Map<number, { activeJobs: CutJobRefDto[]; archivedJobs: CutJobRefDto[]; inArchivedJob: boolean }>();
     if (detailIds.length === 0) return map;
     const rows = await client.query<{
       order_detail_id: string | number;
@@ -2210,11 +2315,16 @@ export class PgCutRepository implements CutRepositoryPort {
       name: string;
       status: string;
       is_active: boolean;
+      param_profile_id: string | number | null;
+      profile_name: string | null;
+      profile_is_active: boolean | null;
     }>(
       `
-      SELECT cji.order_detail_id, cj.cut_job_id, cj.name, cj.status, cji.is_active
+      SELECT cji.order_detail_id, cj.cut_job_id, cj.name, cj.status, cji.is_active,
+             cj.param_profile_id, cpp.name AS profile_name, cpp.is_active AS profile_is_active
       FROM cut_job_item cji
       JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
+      LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = cj.param_profile_id
       WHERE cji.order_detail_id = ANY($1::bigint[])
       ORDER BY cj.cut_job_id
       `,
@@ -2222,14 +2332,24 @@ export class PgCutRepository implements CutRepositoryPort {
     );
     for (const row of rows.rows) {
       const detailId = toNum(row.order_detail_id);
-      const entry = map.get(detailId) ?? { activeJobs: [], inArchivedJob: false };
+      const entry = map.get(detailId) ?? { activeJobs: [], archivedJobs: [], inArchivedJob: false };
       const isArchived = row.status === 'archived';
+      const ref: CutJobRefDto = {
+        cutJobId: toNum(row.cut_job_id),
+        name: row.name,
+        paramProfileId: row.param_profile_id === null ? null : toNum(row.param_profile_id),
+        profileName: row.profile_name ?? null,
+        profileIsActive: row.profile_is_active ?? null,
+      };
       if (isArchived) {
         entry.inArchivedJob = true;
+        if (!entry.archivedJobs.some((j) => j.cutJobId === ref.cutJobId)) {
+          entry.archivedJobs.push(ref);
+        }
       } else if (row.is_active) {
         // a detail can appear once per active job; ORDER BY keeps these stable
-        if (!entry.activeJobs.some((j) => j.cutJobId === toNum(row.cut_job_id))) {
-          entry.activeJobs.push({ cutJobId: toNum(row.cut_job_id), name: row.name });
+        if (!entry.activeJobs.some((j) => j.cutJobId === ref.cutJobId)) {
+          entry.activeJobs.push(ref);
         }
       }
       map.set(detailId, entry);
@@ -2408,6 +2528,7 @@ export class PgCutRepository implements CutRepositoryPort {
     );
     const pdfTemplate = templateSelection.code;
     if (templateSelection.requiresActiveCheck) await this.assertPdfTemplateActive(pdfTemplate);
+    const templateLayout = frozenContext ? null : await this.loadPdfTemplateLayout(pdfTemplate);
     const sheets = frozenContext?.sheets ?? currentContext!.sheets;
     const rotate90 = frozenContext ? (query.rotate90 ?? false) : currentContext!.rotate90;
     // Rule 5: group PDF is blocked while the job requires recalculation.
@@ -2428,7 +2549,9 @@ export class PgCutRepository implements CutRepositoryPort {
         sheetWidthMm: rotate90 ? s.placements.sheet_height_mm : s.placements.sheet_width_mm,
         sheetHeightMm: rotate90 ? s.placements.sheet_width_mm : s.placements.sheet_height_mm,
         sheetNumber: index + 1,
+        pageCount: printableSheets.length,
         template: pdfTemplate,
+        templateLayout,
         meta: s.pdfMeta,
         detailRows: s.pdfDetailRows,
       }));
@@ -2468,6 +2591,7 @@ export class PgCutRepository implements CutRepositoryPort {
     );
     const pdfTemplate = templateSelection.code;
     if (templateSelection.requiresActiveCheck) await this.assertPdfTemplateActive(pdfTemplate);
+    const templateLayout = frozen ? null : await this.loadPdfTemplateLayout(pdfTemplate);
     const groupIds = frozen
       ? frozen.job.groups.map((group) => group.cutGroupId)
       : (await this.database.query<{ cut_group_id: string | number }>(
@@ -2520,7 +2644,9 @@ export class PgCutRepository implements CutRepositoryPort {
           sheetWidthMm: rotate90 ? sheet.placements.sheet_height_mm : sheet.placements.sheet_width_mm,
           sheetHeightMm: rotate90 ? sheet.placements.sheet_width_mm : sheet.placements.sheet_height_mm,
           sheetNumber,
+          pageCount: 0,
           template: pdfTemplate,
+          templateLayout,
           meta: sheet.pdfMeta,
           detailRows: sheet.pdfDetailRows,
         });
@@ -2530,6 +2656,7 @@ export class PgCutRepository implements CutRepositoryPort {
     if (pdfSheets.length === 0) {
       throw new CutJobNotFoundError(query.cutJobId);
     }
+    for (const sheet of pdfSheets) sheet.pageCount = pdfSheets.length;
     return frozen
       ? buildFrozenSheetsPdf('cut_sheet_render_v1', pdfSheets)
       : buildSheetsPdf(pdfSheets);
@@ -2558,6 +2685,15 @@ export class PgCutRepository implements CutRepositoryPort {
     if (row.rowCount === 0) {
       throw new ApiError(422, 'CUT_PDF_TEMPLATE_NOT_FOUND', 'Выбранный шаблон PDF не найден или неактивен', { code });
     }
+  }
+
+  private async loadPdfTemplateLayout(code: string, client: DatabaseClient | TransactionClient = this.database): Promise<Record<string, unknown> | null> {
+    const row = await client.query<{ layout: Record<string, unknown> | null }>(
+      `SELECT layout FROM cut_pdf_templates WHERE code = $1 AND is_active = true LIMIT 1`,
+      [code],
+    );
+    const layout = row.rows[0]?.layout;
+    return layout && typeof layout === 'object' && !Array.isArray(layout) ? layout : null;
   }
 
   async setPdfPrewarmState(query: SetPdfPrewarmStateQuery): Promise<void> {
@@ -2696,6 +2832,7 @@ export class PgCutRepository implements CutRepositoryPort {
     const items = await client.query<{
       order_detail_id: string | number;
       order_id: string | number;
+      detail_fields: Record<string, unknown> | null;
       detail_number: string | number | null;
       width: string | number | null;
       height: string | number | null;
@@ -2704,6 +2841,11 @@ export class PgCutRepository implements CutRepositoryPort {
       material_name: string | null;
       thickness_mm: string | number | null;
       film_name: string | null;
+      milling_type_name: string | null;
+      edge_type_name: string | null;
+      production_status_name: string | null;
+      doweling: boolean | null;
+      machine_files: string[] | null;
       order_name: string | null;
       order_date: string | Date | null;
       completion_date: string | Date | null;
@@ -2715,10 +2857,14 @@ export class PgCutRepository implements CutRepositoryPort {
       // IDENTITY for mixed-material detection (two catalog rows can share a name).
       // Matches the FE preview overlay and the ENRICHED_ITEMS_QUERY resolution.
       `SELECT cji.order_detail_id, cji.order_id,
+              to_jsonb(od) AS detail_fields,
               od.detail_number, od.width, od.height,
               od.sheet_material_type_id, od.material_id,
+              od.doweling,
               COALESCE(smt.name, m.material_name) AS material_name,
               smt.thickness_mm, f.film_name,
+              mt.milling_type_name, et.edge_type_name, ps.production_status_name,
+              cnc.machine_files,
               o.order_name, o.order_date, o.completion_date, o.planned_completion_date,
               c.client_name
        FROM cut_job_item cji
@@ -2726,6 +2872,26 @@ export class PgCutRepository implements CutRepositoryPort {
        LEFT JOIN materials m ON m.material_id = od.material_id
        LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
        LEFT JOIN films f ON f.film_id = od.film_id
+       LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
+       LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
+       LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
+       LEFT JOIN LATERAL (
+         SELECT array_agg(machine_file ORDER BY machine_file) AS machine_files
+         FROM (
+           SELECT DISTINCT COALESCE(NULLIF(trim(p.program_name), ''), p.external_packet_key) AS machine_file
+           FROM cnc_telegram_packet_items cti
+           JOIN cnc_telegram_packets p ON p.packet_id = cti.packet_id
+           JOIN (
+             SELECT max(p2.workday) AS latest_workday
+             FROM cnc_telegram_packet_items cti2
+             JOIN cnc_telegram_packets p2 ON p2.packet_id = cti2.packet_id
+             WHERE cti2.match_detail_id = od.detail_id
+               AND cti2.match_status = 'matched'
+           ) latest ON latest.latest_workday = p.workday
+           WHERE cti.match_detail_id = od.detail_id
+             AND cti.match_status = 'matched'
+         ) machine_file_rows
+       ) cnc ON true
        LEFT JOIN orders o ON o.order_id = cji.order_id
        LEFT JOIN clients c ON c.client_id = o.client_id
        WHERE cji.cut_group_id = $1
@@ -2745,9 +2911,15 @@ export class PgCutRepository implements CutRepositoryPort {
         detailNumber: numOrNull(row.detail_number),
         widthMm: numOrNull(row.width),
         heightMm: numOrNull(row.height),
+        detailFields: row.detail_fields ?? null,
+        doweling: row.doweling === null || row.doweling === undefined ? null : row.doweling === true,
+        machineFiles: normalizeMachineFiles(row.machine_files),
         materialName: row.material_name ?? null,
         thicknessMm: numOrNull(row.thickness_mm),
         filmName: row.film_name ?? null,
+        millingTypeName: row.milling_type_name ?? null,
+        edgeTypeName: row.edge_type_name ?? null,
+        productionStatusName: row.production_status_name ?? null,
         orderName: row.order_name ?? null,
         orderDate: dateOnly(row.order_date),
         readyDate: dateOnly(row.completion_date) ?? dateOnly(row.planned_completion_date),
@@ -3343,6 +3515,64 @@ export class PgCutRepository implements CutRepositoryPort {
     return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
+  async setName(command: SetCutJobNameCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ status: string; version: string | number; name: string }>(
+        `SELECT status, version, name FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      const nextName = command.name.trim();
+      const beforeName = row.name;
+
+      if (beforeName === nextName) {
+        return;
+      }
+
+      await tx.query(
+        `UPDATE cut_job SET name = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId, nextName],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.nameChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        before: { name: beforeName },
+        after: { name: nextName },
+        metadata: { beforeName, afterName: nextName },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.nameChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeName,
+            afterName: nextName,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          nameChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
+    });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
+  }
+
   async setGroupPdfTemplate(command: SetCutGroupPdfTemplateCommand): Promise<CutJobDto> {
     await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
@@ -3778,11 +4008,29 @@ interface EligibleRow extends QueryResultRow {
   detail_id: string | number;
   order_id: string | number;
   order_name?: string | null;
+  client_name?: string | null;
+  detail_number?: string | number | null;
+  detail_name?: string | null;
+  height?: string | number | null;
+  width?: string | number | null;
   quantity: string | number;
+  area?: string | number | null;
   material_id: string | number | null;
   sheet_material_type_id: string | number | null;
+  material_name?: string | null;
+  milling_type_name?: string | null;
+  edge_type_name?: string | null;
   film_id: string | number | null;
+  film_name?: string | null;
   production_status_id: string | number | null;
+  production_status_name?: string | null;
+  priority?: string | number | null;
+  joint_order_id?: string | number | null;
+  note?: string | null;
+  link_cutting_file?: string | null;
+  link_cutting_image_file?: string | null;
+  link_cad_file?: string | null;
+  link_pdf_file?: string | null;
   delete_flag: boolean;
   /** NULL when sheet_material_type_id is NULL (LEFT JOIN produces no row). */
   is_cuttable: boolean | null;
@@ -3981,6 +4229,7 @@ function buildPdfSheetMeta(
     materials: string[];
     thicknesses: string[];
     films: string[];
+    machineFiles: string[];
   } = {
     orders: [],
     clients: [],
@@ -3989,6 +4238,7 @@ function buildPdfSheetMeta(
     materials: [],
     thicknesses: [],
     films: [],
+    machineFiles: [],
   };
   const add = (list: string[], value: string | number | null | undefined) => {
     if (value === null || value === undefined) return;
@@ -4006,6 +4256,7 @@ function buildPdfSheetMeta(
     add(meta.materials, detail.materialName);
     add(meta.thicknesses, detail.thicknessMm);
     add(meta.films, detail.filmName);
+    for (const file of detail.machineFiles) add(meta.machineFiles, file);
   }
   return meta;
 }
@@ -4024,15 +4275,150 @@ function buildPdfDetailRows(
     const height = detail?.heightMm ?? piece.height_mm;
     const lengthMm = Math.max(width, height);
     const widthMm = Math.min(width, height);
-    const key = `${order}:${position}:${lengthMm}:${widthMm}`;
+    const machineFiles = detail?.machineFiles ?? [];
+    const machineFile = machineFiles.join(', ');
+    const row: PdfSheetDetailRow = {
+      order,
+      position,
+      lengthMm,
+      widthMm,
+      quantity: 1,
+      machineFiles,
+      fields: buildPdfDetailRowFields(detail, detailId, {
+        order,
+        position,
+        lengthMm,
+        widthMm,
+        quantity: 1,
+        machineFile,
+        material: detail?.materialName ?? null,
+        film: detail?.filmName ?? null,
+        client: detail?.clientName ?? null,
+        orderDate: detail?.orderDate ?? null,
+        readyDate: detail?.readyDate ?? null,
+        thickness: detail?.thicknessMm ?? null,
+      }),
+      material: detail?.materialName ?? null,
+      film: detail?.filmName ?? null,
+      client: detail?.clientName ?? null,
+      orderDate: detail?.orderDate ?? null,
+      readyDate: detail?.readyDate ?? null,
+      due: detail?.readyDate ?? null,
+      thickness: detail?.thicknessMm ?? null,
+    };
+    const key = [
+      row.order,
+      row.position,
+      row.lengthMm,
+      row.widthMm,
+      row.material ?? '',
+      row.film ?? '',
+      row.client ?? '',
+      row.orderDate ?? '',
+      row.readyDate ?? '',
+      row.thickness ?? '',
+    ].join(':');
     const existing = byKey.get(key);
     if (existing) {
       existing.quantity += 1;
+      const mergedMachineFiles = mergeMachineFiles(existing.machineFiles, row.machineFiles);
+      existing.machineFiles = mergedMachineFiles;
+      existing.fields = {
+        ...(existing.fields ?? {}),
+        quantity: existing.quantity,
+        sheet_quantity: existing.quantity,
+        machine_file: mergedMachineFiles.join(', '),
+        machine_files: mergedMachineFiles.join(', '),
+      };
     } else {
-      byKey.set(key, { order, position, lengthMm, widthMm, quantity: 1 });
+      byKey.set(key, row);
     }
   }
   return [...byKey.values()].sort((a, b) => Number(a.position) - Number(b.position));
+}
+
+function buildPdfDetailRowFields(
+  detail: RenderDetailInfo | null,
+  detailId: number | null,
+  row: {
+    order: string;
+    position: number | string;
+    lengthMm: number | null;
+    widthMm: number | null;
+    quantity: number;
+    machineFile: string;
+    material: string | null;
+    film: string | null;
+    client: string | null;
+    orderDate: string | null;
+    readyDate: string | null;
+    thickness: number | null;
+  },
+): Record<string, LabelCustomExpressionScalar> {
+  const fields: Record<string, LabelCustomExpressionScalar> = {};
+  for (const [key, value] of Object.entries(detail?.detailFields ?? {})) {
+    fields[key] = pdfDetailScalar(value);
+  }
+  return {
+    ...fields,
+    detail_id: detailId,
+    order_id: detail?.orderId ?? null,
+    detail_number: detail?.detailNumber ?? null,
+    doweling: detail?.doweling ?? false,
+    height: detail?.heightMm ?? null,
+    width: detail?.widthMm ?? null,
+    quantity: row.quantity,
+    sheet_quantity: row.quantity,
+    machine_file: row.machineFile,
+    machine_files: row.machineFile,
+    material_name: row.material,
+    materials: row.material,
+    film_name: row.film,
+    films: row.film,
+    milling_type_name: detail?.millingTypeName ?? null,
+    edge_type_name: detail?.edgeTypeName ?? null,
+    production_status_name: detail?.productionStatusName ?? null,
+    order: row.order,
+    position: row.position,
+    lengthMm: row.lengthMm,
+    widthMm: row.widthMm,
+    material: row.material,
+    film: row.film,
+    client: row.client,
+    orderDate: row.orderDate,
+    readyDate: row.readyDate,
+    thickness: row.thickness,
+    thicknesses: row.thickness,
+  };
+}
+
+function normalizeMachineFiles(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const result: string[] = [];
+  for (const item of value) {
+    const text = String(item ?? '').trim();
+    if (text && !result.includes(text)) result.push(text);
+  }
+  return result;
+}
+
+function mergeMachineFiles(
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): string[] {
+  const result: string[] = [];
+  for (const value of [...(left ?? []), ...(right ?? [])]) {
+    const text = String(value ?? '').trim();
+    if (text && !result.includes(text)) result.push(text);
+  }
+  return result;
+}
+
+function pdfDetailScalar(value: unknown): LabelCustomExpressionScalar {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value);
 }
 
 interface ItemRow extends QueryResultRow {

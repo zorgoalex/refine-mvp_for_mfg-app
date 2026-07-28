@@ -3,7 +3,7 @@ import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select, Popconfirm } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTabStore } from "../../stores/tabStore";
@@ -31,10 +31,10 @@ import { AddToCutModal } from "./components/AddToCutModal";
 import { AddToBazisCutModal } from "../bazis-cut/AddToBazisCutModal";
 import { can, canAny } from "../../utils/permissions";
 import { cutApi } from "../../api/cutApi";
-import type { CutDetailLastReadyRef, CutJobRef } from "../../api/types/cutApi.types";
+import type { CutJobRef } from "../../api/types/cutApi.types";
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
-import { buildCutJobByDetailId, cutJobDeepLink } from "./cutColumnHelpers";
+import { cutJobDeepLink, cutJobProfileLabel } from "./cutColumnHelpers";
 import { calculateOrderTotalArea } from "../../utils/orderArea";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
@@ -59,6 +59,8 @@ import {
   useOrderDetailColumnPreferences,
   type OrderDetailColumnDefinition,
 } from "./components/tables/OrderDetailColumnSettings";
+import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from "../cut/cutJobEvents";
+import { useCutDetailLastReady } from "./useCutDetailLastReady";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 
@@ -71,6 +73,63 @@ const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: strin
 ];
 
 const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 120;
+
+type OrderShowStickyStyle = CSSProperties & {
+  '--order-show-sticky-top': string;
+  '--order-show-summary-tabs-height': string;
+  '--order-show-details-toolbar-height': string;
+  '--order-show-table-header-top': string;
+};
+
+function useWorkspaceTabsHeight(): number {
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    let ro: ResizeObserver | null = null;
+    const attach = (): boolean => {
+      const tabs = document.querySelector('.workspace-tabs');
+      if (!tabs) return false;
+      const measure = () => setHeight(tabs.getBoundingClientRect().height);
+      measure();
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(measure);
+        ro.observe(tabs);
+      }
+      return true;
+    };
+    if (attach()) return () => ro?.disconnect();
+    const mo = new MutationObserver(() => {
+      if (attach()) mo.disconnect();
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      ro?.disconnect();
+    };
+  }, []);
+
+  return height;
+}
+
+function useMeasuredElementHeight<T extends HTMLElement>() {
+  const [node, setNode] = useState<T | null>(null);
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    if (!node) {
+      setHeight(0);
+      return;
+    }
+    const measure = () => setHeight(node.getBoundingClientRect().height);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [node]);
+
+  return [setNode, height] as const;
+}
 
 const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'detail_number', label: '№', lockVisible: true },
@@ -351,6 +410,65 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     detailsLoading,
     useBackendOrdersRead,
   });
+  const workspaceTabsHeight = useWorkspaceTabsHeight();
+  const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
+  const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
+  const [orderShowSummaryTabsRef, orderShowSummaryTabsHeight] = useMeasuredElementHeight<HTMLDivElement>();
+  const [orderShowDetailsToolbarRef, orderShowDetailsToolbarHeight] = useMeasuredElementHeight<HTMLDivElement>();
+  const [orderShowStickyEnabled, setOrderShowStickyEnabled] = useState(false);
+  const [orderShowSummaryStuck, setOrderShowSummaryStuck] = useState(false);
+  const orderShowStickyStyle = useMemo<OrderShowStickyStyle>(() => ({
+    '--order-show-sticky-top': `${workspaceTabsHeight}px`,
+    '--order-show-summary-tabs-height': `${orderShowSummaryTabsHeight}px`,
+    '--order-show-details-toolbar-height': `${orderShowDetailsToolbarHeight}px`,
+    '--order-show-table-header-top': `${workspaceTabsHeight + orderShowSummaryTabsHeight + orderShowDetailsToolbarHeight}px`,
+  }), [orderShowDetailsToolbarHeight, orderShowSummaryTabsHeight, workspaceTabsHeight]);
+  const orderShowPageClassName = useMemo(() => [
+    'order-show-page',
+    orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
+    orderShowSummaryStuck ? 'order-show-page--summary-stuck' : '',
+  ].filter(Boolean).join(' '), [orderShowStickyEnabled, orderShowSummaryStuck]);
+
+  useEffect(() => {
+    const update = () => {
+      const block = orderShowDetailsBlockRef.current;
+      const availableHeight = window.innerHeight - workspaceTabsHeight;
+      const next =
+        !isMobile &&
+        details.length > 0 &&
+        !!block &&
+        block.scrollHeight > Math.max(320, availableHeight);
+      setOrderShowStickyEnabled((prev) => (prev === next ? prev : next));
+    };
+
+    update();
+    window.addEventListener('resize', update);
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    if (orderShowDetailsBlockRef.current) ro?.observe(orderShowDetailsBlockRef.current);
+    return () => {
+      window.removeEventListener('resize', update);
+      ro?.disconnect();
+    };
+  }, [details.length, isMobile, workspaceTabsHeight]);
+
+  useEffect(() => {
+    const update = () => {
+      const node = orderShowStickySentinelRef.current;
+      const next =
+        orderShowStickyEnabled &&
+        !!node &&
+        node.getBoundingClientRect().top <= workspaceTabsHeight;
+      setOrderShowSummaryStuck((prev) => (prev === next ? prev : next));
+    };
+
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [orderShowStickyEnabled, workspaceTabsHeight]);
 
   // Загрузка справочников для отображения названий
   const { data: millingTypesData } = useList({
@@ -477,15 +595,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // Read-only «Раскрой» column gate (cut.view; distinct from the cut.manage
   // add-to-cut button gate above). Off ⇒ no fetch, no column (legacy behavior).
   const cutColumnEnabled = featureFlags.useBackendCut && can('cut.view');
-  const [cutJobByDetailId, setCutJobByDetailId] = useState<Map<number, CutDetailLastReadyRef>>(
-    () => new Map(),
-  );
 
   // Stable positive detail ids + a primitive key so the fetch effect does NOT
-  // re-run on every rerender just because `details` is a fresh array identity
-  // (it is derived inline each render from backendOrder?.details or a sorted
-  // query array). Keying on the joined id string makes the fetch fire only when
-  // the actual set of detail ids changes.
+  // re-run on every rerender just because `details` is derived each render.
   const cutDetailIds = useMemo(
     () =>
       details
@@ -493,52 +605,45 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         .filter((id: unknown): id is number => Number.isInteger(id) && (id as number) > 0),
     [details],
   );
-  const cutDetailIdsKey = cutDetailIds.join(',');
-
-  useEffect(() => {
-    if (!cutColumnEnabled || cutDetailIds.length === 0) {
-      setCutJobByDetailId(new Map());
-      return;
-    }
-    let cancelled = false;
-    cutApi
-      .listDetailLastReady(cutDetailIds)
-      .then((res) => {
-        if (!cancelled) setCutJobByDetailId(buildCutJobByDetailId(res.details));
-      })
-      .catch(() => {
-        if (!cancelled) setCutJobByDetailId(new Map());
-      });
-    return () => {
-      cancelled = true;
-    };
-    // cutDetailIdsKey is the primitive identity of cutDetailIds; intentionally
-    // depend on it instead of the array to avoid redundant fetches.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cutColumnEnabled, cutDetailIdsKey]);
+  const cutJobByDetailId = useCutDetailLastReady({
+    enabled: cutColumnEnabled,
+    detailIds: cutDetailIds,
+    orderId: record?.order_id,
+  });
 
   // All distinct active cut jobs that contain details from THIS order (a detail
   // may be placed in several jobs — list them all). Same cut.view gate as the
   // column; powers the «Раскрой» sub-block in the additional-info panel.
   const [cutOrderJobs, setCutOrderJobs] = useState<CutJobRef[]>([]);
-  useEffect(() => {
-    if (!cutColumnEnabled || !record?.order_id) {
+  const refreshCutOrderJobs = useCallback(async (orderId?: number | null) => {
+    if (!cutColumnEnabled || !orderId) {
       setCutOrderJobs([]);
       return;
     }
-    let cancelled = false;
-    cutApi
-      .listPlacements({ orderIds: [record.order_id] })
-      .then((res) => {
-        if (!cancelled) setCutOrderJobs(res.jobs);
-      })
-      .catch(() => {
-        if (!cancelled) setCutOrderJobs([]);
-      });
-    return () => {
-      cancelled = true;
+    try {
+      const res = await cutApi.listPlacements({ orderIds: [orderId] });
+      setCutOrderJobs(res.jobs);
+    } catch {
+      setCutOrderJobs([]);
+    }
+  }, [cutColumnEnabled]);
+
+  useEffect(() => {
+    void refreshCutOrderJobs(record?.order_id);
+  }, [record?.order_id, refreshCutOrderJobs]);
+
+  useEffect(() => {
+    if (!cutColumnEnabled || typeof window === 'undefined') return undefined;
+    const handler = (event: Event) => {
+      const payload = readCutJobReadyEvent(event);
+      if (!payload || !cutJobReadyAffects(payload, { detailIds: cutDetailIds, orderId: record?.order_id })) return;
+      void refreshCutOrderJobs(record?.order_id);
     };
-  }, [cutColumnEnabled, record?.order_id]);
+    window.addEventListener(CUT_JOB_READY_EVENT, handler);
+    return () => {
+      window.removeEventListener(CUT_JOB_READY_EVENT, handler);
+    };
+  }, [cutColumnEnabled, cutDetailIds, record?.order_id, refreshCutOrderJobs]);
 
   // Detail grouping state (persisted per user+order; suppressed during cut selection).
   const groupingUserId = authSession.getUser()?.id ?? 'anon';
@@ -1242,20 +1347,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           canRestore={canRestore}
         />
       ) : record && (
-        <>
-          {/* Компактная шапка заказа (Read-only summary) */}
-          <div style={{ marginBottom: 4 }}>
+        <div className={orderShowPageClassName} style={orderShowStickyStyle}>
+          <div ref={orderShowStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
+          <div ref={orderShowSummaryTabsRef} className="order-show-summary-tabs-sticky">
             <OrderShowHeader
               record={record}
               details={details}
               dowelingLinks={dowelingLinks}
               disableLegacyOrderReads={useBackendOrdersRead}
+              compactSticky={orderShowStickyEnabled && orderShowSummaryStuck}
               detailMaterialNames={headerMaterialNames}
               headerMaterialName={headerMaterialName}
             />
-          </div>
 
-          <div style={{ marginBottom: 16 }}>
+            <div className="order-show-tabs-shell">
             <div
               role="tablist"
               aria-label="Секции заказа"
@@ -1315,9 +1420,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 );
               })}
             </div>
+            </div>
+          </div>
 
             {activeInfoPanel && (
               <div
+                className="order-show-info-panel"
                 role="tabpanel"
                 style={{
                   border: '1px solid var(--app-border)',
@@ -1495,9 +1603,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                   <Link
                                     key={j.cutJobId}
                                     to={cutJobDeepLink(j.cutJobId)}
-                                    style={{ fontSize: 12 }}
+                                    style={{ fontSize: 12, lineHeight: 1.35 }}
                                   >
                                     {j.name}
+                                    <span style={{ color: 'var(--app-text-muted)' }}>
+                                      {' '}· Профиль: {cutJobProfileLabel(j)}
+                                    </span>
                                   </Link>
                                 ))}
                               </div>
@@ -1543,11 +1654,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 )}
               </div>
             )}
-          </div>
 
           {/* Детали заказа - компактная таблица */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div ref={orderShowDetailsBlockRef} className="order-show-details-section">
+            <div ref={orderShowDetailsToolbarRef} className="order-show-details-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
                 Детали заказа
               </div>
@@ -1605,9 +1715,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 selectionEnabled={cutSelectMode} selectedIds={cutSelectedDetailIds}
                 onSelectionChange={setCutSelectedDetailIds} />
             ) : (
-            <TableTopScroll>
+            <TableTopScroll className="order-show-details-table-wrap">
             <Table
-              className={groupingActive ? 'details-grouped' : undefined}
+              className={`${groupingActive ? 'details-grouped ' : ''}order-show-details-table`}
               dataSource={groupedDataSource as any}
               rowKey={(row: any) =>
                 row?.kind === 'separator' || row?.kind === 'summary'
@@ -1822,7 +1932,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               </Space>
             </Modal>
           )}
-        </>
+        </div>
       )}
     </Show>
   );

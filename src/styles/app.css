@@ -756,6 +756,149 @@ html {
   line-height: 16px;
 }
 
+/* ----- Order show sticky summary + detail table header ----- */
+.order-show-page {
+  --order-show-sticky-top: 0px;
+  --order-show-summary-tabs-height: 0px;
+  --order-show-details-toolbar-height: 0px;
+  --order-show-table-header-top: 0px;
+}
+
+.order-show-sticky-sentinel {
+  height: 1px;
+  pointer-events: none;
+}
+
+.order-show-tabs-shell,
+.order-show-info-panel,
+.order-show-details-section {
+  margin-bottom: 16px;
+}
+
+.order-show-header--compact-sticky {
+  margin-bottom: 4px;
+  border: 1px solid #1890ff;
+  border-radius: 6px;
+  background: var(--app-surface);
+  overflow: hidden;
+}
+
+.order-show-header__compact-line {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 0;
+  overflow: hidden;
+  overflow-y: hidden;
+  padding: 4px 8px;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+.order-show-header__compact-primary,
+.order-show-header__compact-item {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  padding: 0 10px;
+  color: var(--app-text);
+  text-overflow: ellipsis;
+}
+
+.order-show-header__compact-primary {
+  flex: 0 0 auto;
+  padding-left: 0;
+  font-size: 13px;
+}
+
+.order-show-header__compact-item {
+  border-left: 1px solid var(--app-border-soft);
+}
+
+.order-show-header__compact-muted {
+  color: var(--app-text-muted);
+}
+
+.order-show-header__compact-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-show-header__compact-priority {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  color: var(--app-text-muted);
+}
+
+.order-show-header__compact-client {
+  flex: 1 2 170px;
+}
+
+.order-show-header__compact-money {
+  flex: 1 2 220px;
+}
+
+.order-show-header__compact-dates,
+.order-show-header__compact-doweling,
+.order-show-header__compact-metrics {
+  flex: 0 1 auto;
+}
+
+.order-show-header__compact-material {
+  flex: 1 3 140px;
+}
+
+.order-show-header--compact-sticky .ant-tag {
+  margin-inline-end: 0;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 18px;
+}
+
+@media (min-width: 768px) {
+  .order-show-page--sticky-enabled .order-show-summary-tabs-sticky {
+    position: sticky;
+    top: var(--order-show-sticky-top);
+    z-index: 19;
+    background: var(--app-surface);
+    transition-property: box-shadow;
+    transition-duration: 160ms;
+    transition-timing-function: ease;
+  }
+
+  .order-show-page--summary-stuck .order-show-summary-tabs-sticky {
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+  }
+
+  .order-show-page--sticky-enabled .order-show-details-toolbar {
+    position: sticky;
+    top: calc(var(--order-show-sticky-top) + var(--order-show-summary-tabs-height));
+    z-index: 18;
+    margin-bottom: 0 !important;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--app-border-soft);
+    background: var(--app-surface);
+    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+  }
+
+  .order-show-page--summary-stuck .order-show-details-table .ant-table-thead > tr > th {
+    position: sticky !important;
+    top: var(--order-show-table-header-top);
+    z-index: 17;
+    background: var(--app-surface) !important;
+    box-shadow: 0 1px 0 var(--app-border-soft);
+  }
+}
+
 /* ----- Order-detail visual grouping (purely visual; non-functional rows) ----- */
 /* Under a grouped table, neutralize the global per-row zebra so group tints win. */
 .details-grouped .ant-table-tbody > tr:nth-child(even) > td,
@@ -807,6 +950,146 @@ html {
 .details-grouped .ant-table-tbody > tr.detail-group-tint-7:hover > td { background-color: var(--app-group-tint-7) !important; }
 .details-grouped .ant-table-tbody > tr.detail-group-separator:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
 .details-grouped .ant-table-tbody > tr.detail-group-summary:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
+
+.cut-create-preview-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border-soft);
+  border-radius: 6px;
+  background: var(--app-surface-muted);
+}
+
+.cut-create-preview-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cut-job-card-title {
+  max-width: 100%;
+}
+
+.cut-job-card-name {
+  display: inline-block;
+  max-width: min(720px, 58vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.cut-job-name-editor {
+  width: min(640px, 58vw);
+}
+
+.cut-job-name-editor .ant-input {
+  min-width: 260px;
+}
+
+.cut-results-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border-soft);
+  border-radius: 6px;
+  background: var(--app-surface-muted);
+}
+
+.cut-results-block-title {
+  font-weight: 600;
+}
+
+.cut-results-history-collapse .ant-collapse-content-box {
+  padding: 8px 0 0;
+}
+
+.cut-create-preview-details-table .ant-table-thead > tr > th,
+.cut-create-preview-details-table .ant-table-tbody > tr > td {
+  padding: 2px 6px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr > td {
+  height: 20px;
+}
+
+.cut-create-preview-details-table .ant-btn-link.ant-btn-sm {
+  height: 18px;
+  line-height: 16px;
+}
+
+.cut-create-preview-details-table .ant-tag {
+  margin-inline-end: 0;
+  padding: 0 4px;
+  line-height: 16px;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-0 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-0:hover > td {
+  background-color: var(--app-group-tint-0) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-1 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-1:hover > td {
+  background-color: var(--app-group-tint-1) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-2 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-2:hover > td {
+  background-color: var(--app-group-tint-2) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-3 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-3:hover > td {
+  background-color: var(--app-group-tint-3) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-4 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-4:hover > td {
+  background-color: var(--app-group-tint-4) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-5 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-5:hover > td {
+  background-color: var(--app-group-tint-5) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-6 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-6:hover > td {
+  background-color: var(--app-group-tint-6) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-7 > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-7:hover > td {
+  background-color: var(--app-group-tint-7) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-row-ineligible > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-row-ineligible:hover > td {
+  background-color: var(--app-surface-muted) !important;
+  color: var(--app-text-muted) !important;
+  opacity: 0.58;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-row-ineligible a,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-row-ineligible .ant-btn-link,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-row-ineligible .ant-typography {
+  color: var(--app-text-muted) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-row-ineligible .ant-tag {
+  color: var(--app-text-muted);
+  border-color: var(--app-border-soft);
+  background: transparent;
+}
 
 .cut-jobs-table-container {
   overflow-y: auto;

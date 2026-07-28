@@ -11,6 +11,7 @@ import type {
   UpsertCutParamProfileCommand,
   UpsertCutRenderPresetCommand,
 } from './cut-config-admin.types';
+import { cutPdfFieldCatalog, validateCutPdfTemplateLayout } from './cut-pdf-template-layout';
 
 export interface CutConfigAdminServicePorts {
   config: CutConfigAdminPort;
@@ -32,6 +33,11 @@ export class CutConfigAdminService {
   async getConfig(context: CutConfigContext) {
     this.require(context.currentUser, 'cut.view', context.requestId);
     return this.ports.config.getConfig(context);
+  }
+
+  async listPdfTemplateFields(context: CutConfigContext) {
+    this.require(context.currentUser, 'cut.view', context.requestId);
+    return cutPdfFieldCatalog();
   }
 
   async updateSetting(command: UpdateCutSettingCommand) {
@@ -61,6 +67,7 @@ export class CutConfigAdminService {
 
   async upsertPdfTemplate(command: UpsertCutPdfTemplateCommand) {
     this.require(command.currentUser, 'cut.manage', command.requestId);
+    validateCutPdfTemplateLayout(command.input.layout);
     return this.ports.config.upsertPdfTemplate(command);
   }
 

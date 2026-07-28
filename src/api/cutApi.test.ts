@@ -15,6 +15,7 @@ describe('cutApi', () => {
 
   it('builds a CSV eligible-details query string from criteria', () => {
     expect(buildEligibleQuery({ orderIds: [9, 10], filmIds: [5] })).toBe('orderIds=9%2C10&filmIds=5');
+    expect(buildEligibleQuery({ dateFrom: '2026-07-16', dateTo: '2026-07-26' })).toBe('dateFrom=2026-07-16&dateTo=2026-07-26');
     expect(buildEligibleQuery({})).toBe('');
   });
 
@@ -41,6 +42,28 @@ describe('cutApi', () => {
     expect(fetchMock.mock.calls[3][0]).toBe('/api/v1/cut-jobs/42');
     expect(fetchMock.mock.calls[3][1]?.method).toBe('DELETE');
     expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/cut-jobs/42/eligible-details?orderIds=9');
+  });
+
+  it('fetches date-filtered cut film options from the backend', async () => {
+    const fetchMock = mockFetch([{ filmId: 7, name: 'Белый матовый' }]);
+
+    await expect(
+      cutApi.listFilmOptions({ dateFrom: '2026-07-01', dateTo: '2026-07-31', sheetMaterialTypeIds: [3] }),
+    ).resolves.toEqual([{ filmId: 7, name: 'Белый матовый' }]);
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/v1/cut-jobs/film-options?sheetMaterialTypeIds=3&dateFrom=2026-07-01&dateTo=2026-07-31',
+    );
+  });
+
+  it('previews eligible details before a cut job exists', async () => {
+    const fetchMock = mockFetch({ details: [], noSheetSpecCount: 0 });
+
+    await cutApi.listEligibleDetailsPreview({ dateFrom: '2026-07-01', dateTo: '2026-07-31', filmIds: [7] });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/v1/cut-jobs/eligible-details?filmIds=7&dateFrom=2026-07-01&dateTo=2026-07-31',
+    );
   });
 
   it('fetches a per-sheet SVG and the preset PNG from the render endpoints', async () => {

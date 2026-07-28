@@ -6,6 +6,7 @@ import { buildNotificationDeliveryKey } from '../domain/notification-idempotency
 import type { NotificationEventContext, NotificationRule } from '../domain/notification-rule.types';
 import type { OutboxEventRecord } from '../domain/outbox-event.types';
 import type { NotificationContextBuilderPort } from '../ports/notification-context.port';
+import type { NotificationChannelDeliveryPort } from '../ports/notification-channel-delivery.port';
 import type { NotificationRuleRepositoryPort } from '../ports/notification-rule-repository.port';
 import type { NotificationWritePort } from '../ports/notification-write.port';
 import type { RecipientResolverService } from './recipient-resolver.service';
@@ -23,6 +24,7 @@ export interface NotificationRuleEngineDeps {
   contextBuilder: NotificationContextBuilderPort;
   recipientResolver: Pick<RecipientResolverService, 'resolve'>;
   notificationWrite: NotificationWritePort;
+  channelDelivery: NotificationChannelDeliveryPort;
   /**
    * Optional runtime configuration for flag-driven event-type ownership.
    * When omitted, the engine falls back to the static registry defaults
@@ -133,23 +135,46 @@ export class NotificationRuleEngineService {
       const recipientUserIds = await this.deps.recipientResolver.resolve(client, rule.recipients, ctx);
 
       for (const userId of recipientUserIds) {
-        const idempotencyKey = buildNotificationDeliveryKey({
-          outboxEventId: event.outboxEventId,
-          ruleId: rule.notificationRuleId,
-          userId,
-        });
-        const result = await this.deps.notificationWrite.insertIfAbsent(client, {
-          userId,
-          level: rule.level,
-          title,
-          message,
-          entityType: 'order',
-          entityId: ctx.orderId != null ? String(ctx.orderId) : null,
-          sourceType: SOURCE_TYPE,
-          sourceId: rule.notificationRuleId,
-          idempotencyKey,
-        });
-        if (result.created) created += 1;
+        for (const channel of rule.channels) {
+          const idempotencyKey = buildNotificationDeliveryKey({
+            outboxEventId: event.outboxEventId,
+            ruleId: rule.notificationRuleId,
+            userId,
+            channel,
+          });
+
+          if (channel === 'in_app') {
+            const result = await this.deps.notificationWrite.insertIfAbsent(client, {
+              userId,
+              level: rule.level,
+              title,
+              message,
+              entityType: 'order',
+              entityId: ctx.orderId != null ? String(ctx.orderId) : null,
+              sourceType: SOURCE_TYPE,
+              sourceId: rule.notificationRuleId,
+              idempotencyKey,
+            });
+            if (result.created) created += 1;
+            continue;
+          }
+
+          const result = await this.deps.channelDelivery.enqueueIfAbsent(client, {
+            notificationRuleId: rule.notificationRuleId,
+            outboxEventId: event.outboxEventId,
+            userId,
+            channel,
+            level: rule.level,
+            title,
+            message,
+            entityType: 'order',
+            entityId: ctx.orderId != null ? String(ctx.orderId) : null,
+            sourceType: SOURCE_TYPE,
+            sourceId: rule.notificationRuleId,
+            idempotencyKey,
+          });
+          if (result.created) created += 1;
+        }
       }
     }
 

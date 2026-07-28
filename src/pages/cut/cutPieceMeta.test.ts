@@ -52,4 +52,19 @@ describe('buildPieceMetaByItemId', () => {
     });
     expect(verdict).toEqual({ ok: false, reason: 'material' });
   });
+
+  it('vacuum all-details group: split off keeps cross-sheet move allowed even when group film is null', () => {
+    const meta = buildPieceMetaByItemId([
+      { orderDetailId: 2709, detail: { sheetMaterialTypeId: 13, filmId: 4108 } },
+    ], 13).get('det-2709')!;
+    const verdict = moveAllowed({
+      pieceMaterialTypeId: meta.materialTypeId,
+      pieceFilmId: meta.filmId,
+      targetMaterialTypeId: 13,
+      targetFilmId: null,
+      splitByMaterial: false,
+      combineFilms: false,
+    });
+    expect(verdict).toEqual({ ok: true });
+  });
 });

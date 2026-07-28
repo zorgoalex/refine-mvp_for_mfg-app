@@ -11,7 +11,6 @@ import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { DeadlineDefaultScheduleService } from '../application/deadline-default-schedule.service';
-import { MAX_DEADLINE_DEFAULT_SCHEDULE_DAYS } from '../domain/deadline-default-schedule';
 import type { ReplaceDeadlineDefaultScheduleRequestDto } from '../dto/deadline-default-schedule.dto';
 import { DeadlinesRuntimeConfigService } from './deadlines-runtime-config.service';
 
@@ -25,6 +24,7 @@ const requestSchema = z.object({
       z.object({
         productionStatusId: z.number().int().positive(),
         durationDays: z.number().int().min(0).max(3650),
+        parallelWithPrevious: z.boolean(),
       }),
     ),
 }).superRefine((value, context) => {
@@ -33,15 +33,6 @@ const requestSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ['reserveDays'],
       message: 'reserveDays must be 0 when stages is empty',
-    });
-  }
-  const total =
-    value.reserveDays + value.stages.reduce((sum, stage) => sum + stage.durationDays, 0);
-  if (total > MAX_DEADLINE_DEFAULT_SCHEDULE_DAYS) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['stages'],
-      message: `total schedule must not exceed ${MAX_DEADLINE_DEFAULT_SCHEDULE_DAYS} days`,
     });
   }
   if (new Set(value.stages.map((stage) => stage.productionStatusId)).size !== value.stages.length) {
@@ -64,6 +55,7 @@ const responseSwaggerSchema = {
         'hasStoredConfiguration',
         'version',
         'reserveDays',
+        'transitionsOrder',
         'totalProductionDays',
         'plannedOrderDays',
         'updatedAt',
@@ -74,6 +66,13 @@ const responseSwaggerSchema = {
         hasStoredConfiguration: { type: 'boolean' },
         version: { type: 'integer', minimum: 1 },
         reserveDays: { type: 'integer', minimum: 0, maximum: 3650 },
+        transitionsOrder: {
+          type: 'object',
+          additionalProperties: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+        },
         totalProductionDays: { type: 'integer', nullable: true },
         plannedOrderDays: { type: 'integer', nullable: true },
         updatedAt: { type: 'string', format: 'date-time', nullable: true },
@@ -87,6 +86,7 @@ const responseSwaggerSchema = {
               'productionStatusCode',
               'sortOrder',
               'durationDays',
+              'parallelWithPrevious',
               'cumulativeDeadlineDays',
             ],
             properties: {
@@ -95,6 +95,7 @@ const responseSwaggerSchema = {
               productionStatusCode: { type: 'string', nullable: true },
               sortOrder: { type: 'integer' },
               durationDays: { type: 'integer', nullable: true },
+              parallelWithPrevious: { type: 'boolean' },
               cumulativeDeadlineDays: { type: 'integer', nullable: true },
             },
           },
@@ -138,10 +139,15 @@ export class DeadlineDefaultScheduleController {
           type: 'array',
           items: {
             type: 'object',
-            required: ['productionStatusId', 'durationDays'],
+            required: [
+              'productionStatusId',
+              'durationDays',
+              'parallelWithPrevious',
+            ],
             properties: {
               productionStatusId: { type: 'integer', minimum: 1 },
               durationDays: { type: 'integer', minimum: 0, maximum: 3650 },
+              parallelWithPrevious: { type: 'boolean' },
             },
           },
         },
