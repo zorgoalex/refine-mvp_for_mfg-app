@@ -125,6 +125,26 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(cncFileNameRules.every((rule) => rule.includes('color: var(--app-text-muted);'))).toBe(true);
   });
 
+  it('keeps CNC relation highlighting behind the Links switch', () => {
+    expect(page).toContain('const [cncRelationsEnabled, setCncRelationsEnabled] = useState(false)');
+    expect(page).toContain('const [activeCncRelation, setActiveCncRelation]');
+    expect(page).toContain('Связи');
+    expect(page).toContain('checked={cncRelationsEnabled}');
+    expect(page).toContain('if (!cncRelationsEnabled) setActiveCncRelation(null)');
+    expect(page).toContain('cncRelationsEnabled');
+    expect(page).toContain('? buildCncRelationContext(cncColumns, activeCncRelation)');
+    expect(page).toContain('const bathCards = relationContext');
+    expect(page).toContain('const packetCards = relationContext');
+    expect(page).toContain('sortCncRelationCards');
+    expect(page).toContain('getCncPacketRelationState');
+    expect(page).toContain('getCncBathRelationState');
+    expect(page).toContain('event.stopPropagation()');
+    expect(css).toContain('.cnc-relation-card--dimmed');
+    expect(css).toContain('filter: grayscale(0.9)');
+    expect(css).toContain('opacity: 0.62');
+    expect(css).not.toContain('transition: all');
+  });
+
   it('keeps order cards dense, badge-based and project-code-free', () => {
     expect(page).toContain("type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal'");
     expect(page).toContain('STATUS_BOARD_CARD_DISPLAY_OPTIONS');

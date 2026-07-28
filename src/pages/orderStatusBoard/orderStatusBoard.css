@@ -262,6 +262,53 @@
   outline-offset: 2px;
 }
 
+.cnc-relation-card {
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    filter 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.cnc-relation-card--active,
+.cnc-relation-card--related {
+  opacity: 1;
+  filter: none;
+}
+
+.cnc-relation-card--active {
+  border-color: color-mix(in srgb, #1677ff 58%, var(--app-border-soft));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #1677ff 28%, transparent),
+    0 4px 12px var(--app-shadow);
+}
+
+.cnc-relation-card--related {
+  border-color: color-mix(in srgb, #1677ff 34%, var(--app-border-soft));
+}
+
+.cnc-relation-card--dimmed {
+  background: color-mix(in srgb, var(--app-surface) 80%, var(--app-bg));
+  opacity: 0.62;
+  filter: grayscale(0.9);
+}
+
+.cnc-relation-card--dimmed,
+.cnc-relation-card--dimmed .ant-typography,
+.cnc-relation-card--dimmed .cnc-packet-card__summary-order,
+.cnc-relation-card--dimmed .cnc-packet-card__summary-meta,
+.cnc-relation-card--dimmed .cnc-packet-card__program,
+.cnc-relation-card--dimmed .cnc-packet-card__notes,
+.cnc-relation-card--dimmed .cnc-packet-card__note-file,
+.cnc-relation-card--dimmed .cnc-bath-card__job,
+.cnc-relation-card--dimmed .status-board-card__footer,
+.cnc-relation-card--dimmed .cnc-packet-card__order-link {
+  color: var(--app-text-muted) !important;
+}
+
 .status-board-card--dragging {
   opacity: 0.46;
   transform: rotate(1deg);
