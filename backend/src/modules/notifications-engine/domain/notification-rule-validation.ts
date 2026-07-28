@@ -1,5 +1,10 @@
 import { getEventDefinition } from './notification-event-registry';
-import type { NotificationRuleConditions, NotificationRuleRecipients } from './notification-rule.types';
+import {
+  NOTIFICATION_CHANNELS,
+  type NotificationChannel,
+  type NotificationRuleConditions,
+  type NotificationRuleRecipients,
+} from './notification-rule.types';
 
 export interface ValidateRuleContext {
   knownRoleCodes: readonly string[];
@@ -11,6 +16,7 @@ export interface NotificationRuleInput {
   groupId?: string | null;
   level: 'info' | 'warning' | 'error';
   priority: number;
+  channels?: NotificationChannel[];
   conditions: NotificationRuleConditions;
   recipients: NotificationRuleRecipients;
   titleTemplate?: string | null;
@@ -33,6 +39,19 @@ export function validateNotificationRuleInput(
   }
   if (!Number.isInteger(input.priority)) {
     return { ok: false, code: 'INVALID_PRIORITY' };
+  }
+
+  const channels = input.channels ?? ['in_app'];
+  if (channels.length === 0) {
+    return { ok: false, code: 'EMPTY_CHANNELS' };
+  }
+  if (new Set(channels).size !== channels.length) {
+    return { ok: false, code: 'DUPLICATE_CHANNEL' };
+  }
+  for (const channel of channels) {
+    if (!(NOTIFICATION_CHANNELS as readonly string[]).includes(channel)) {
+      return { ok: false, code: 'UNSUPPORTED_CHANNEL', detail: channel };
+    }
   }
 
   const { resolvers = [], roleCodes = [], userIds = [] } = input.recipients ?? {};

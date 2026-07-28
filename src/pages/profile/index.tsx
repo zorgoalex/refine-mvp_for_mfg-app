@@ -7,6 +7,7 @@ import { featureFlags } from "../../config/featureFlags";
 import { WorkosLinkCard } from "./WorkosLinkCard";
 import { useUiVariantPreference } from "../../ui-variant/useUiVariantPreference";
 import type { UiVariant } from "../../ui-variant/uiVariant";
+import { TelegramNotificationsCard } from "./TelegramNotificationsCard";
 
 const roleNames: Record<string, string> = {
   admin: "Администратор",
@@ -42,6 +43,7 @@ export const ProfilePage: React.FC = () => {
         </Descriptions>
       </Card>
       {featureFlags.workosAuth && <WorkosLinkCard />}
+      <TelegramNotificationsCard />
       <Card title="Настройки интерфейса">
         <Space direction="vertical" size="small">
           <Checkbox

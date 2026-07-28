@@ -1,6 +1,8 @@
 import type { RecipientResolverKind } from './notification-event-registry';
 
 export type NotificationLevel = 'info' | 'warning' | 'error';
+export const NOTIFICATION_CHANNELS = ['in_app', 'telegram'] as const;
+export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 export type DeadlineNotificationEntityType = 'order' | 'order_stage';
 
 export interface NotificationRuleConditions {
@@ -33,6 +35,7 @@ export interface NotificationRule {
   isEnabled: boolean;
   priority: number;
   level: NotificationLevel;
+  channels: NotificationChannel[];
   conditions: NotificationRuleConditions;
   recipients: NotificationRuleRecipients;
   titleTemplate: string | null;

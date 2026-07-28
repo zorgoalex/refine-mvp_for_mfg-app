@@ -32,3 +32,4 @@ Ant Design; command API — на NestJS; read/report/reference слой — Hasu
 - [Order export cutover](docs/order-export-cutover-readiness.md)
 - [VLM cutover](docs/vlm-cutover-readiness.md)
 - [Deadline status-transition rules](docs/deadline-status-transition-rules-runbook.md)
+- [Канал уведомлений Telegram: настройка бота и эксплуатация](../spec_erp/plans/telegram-notification-channel.md)

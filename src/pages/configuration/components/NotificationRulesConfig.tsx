@@ -26,6 +26,7 @@ import { groupsApi } from '../../../api/groupsApi';
 import type {
   DeadlineNotificationEntityType,
   NotificationEventTypeDto,
+  NotificationChannel,
   NotificationLevel,
   NotificationRuleDto,
   RecipientResolverKind,
@@ -75,6 +76,11 @@ const LEVEL_LABELS: Record<NotificationLevel, string> = {
   info: 'Информационное',
   warning: 'Предупреждение',
   error: 'Ошибка',
+};
+
+const CHANNEL_LABELS: Record<NotificationChannel, string> = {
+  in_app: 'В приложении',
+  telegram: 'Telegram',
 };
 
 const DEADLINE_ENTITY_TYPE_LABELS: Record<DeadlineNotificationEntityType, string> = {
@@ -435,6 +441,10 @@ export function NotificationRulesConfig() {
       message.warning('Выберите тип события');
       return;
     }
+    if (draft.channels.length === 0) {
+      message.warning('Выберите хотя бы один канал уведомлений');
+      return;
+    }
 
     if (editor.kind === 'create') {
       setSaving(true);
@@ -609,6 +619,20 @@ export function NotificationRulesConfig() {
               width: 100,
             },
             {
+              title: 'Каналы',
+              key: 'channels',
+              width: 170,
+              render: (_, rule) => (
+                <Space size={[4, 4]} wrap>
+                  {(rule.channels ?? ['in_app']).map((channel) => (
+                    <Tag key={channel} color={channel === 'telegram' ? 'cyan' : 'blue'}>
+                      {CHANNEL_LABELS[channel]}
+                    </Tag>
+                  ))}
+                </Space>
+              ),
+            },
+            {
               title: 'Включено',
               key: 'isEnabled',
               width: 90,
@@ -733,6 +757,25 @@ export function NotificationRulesConfig() {
               <Switch checked={draft.isEnabled} onChange={(checked) => updateDraft({ isEnabled: checked })} />
             </Form.Item>
           </Space>
+
+          <Form.Item
+            label="Канал уведомлений"
+            required
+            extra="Для Telegram получатель один раз подключает свой аккаунт в личном кабинете. Если Telegram не подключён, доставка этому получателю будет пропущена."
+          >
+            <Checkbox.Group
+              value={draft.channels}
+              onChange={(values) =>
+                updateDraft({ channels: values as NotificationChannel[] })
+              }
+              style={{ width: '100%' }}
+            >
+              <Space direction="vertical" size={8}>
+                <Checkbox value="in_app">В приложении</Checkbox>
+                <Checkbox value="telegram">Telegram</Checkbox>
+              </Space>
+            </Checkbox.Group>
+          </Form.Item>
 
           <Form.Item label="Условия">
             <Space direction="vertical" size={6} style={{ width: '100%' }}>

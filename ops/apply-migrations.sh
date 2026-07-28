@@ -677,17 +677,27 @@ probe_file() {
                            AND pg_get_constraintdef(oid) LIKE '%vector%'
                       );" \
                      "$(q_idx idx_cnc_telegram_packets_sheet_image_storage_key)" ;;
+    089_notification_channels_telegram*) probe_all \
+                     "$(q_col notification_rules channels_json)" \
+                     "$(q_con chk_notification_rules_channels_nonempty)" \
+                     "$(q_tbl notification_channel_bindings)" \
+                     "$(q_tbl notification_channel_link_tokens)" \
+                     "$(q_tbl notification_channel_deliveries)" \
+                     "$(q_tbl telegram_notification_webhook_updates)" \
+                     "$(q_idx uq_notification_channel_link_token_active)" \
+                     "$(q_idx idx_notification_channel_deliveries_pending)" \
+                     "$(q_con chk_notification_channel_delivery_status)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
 
-# 073/074/087/088 contain IF NOT EXISTS DDL. A partially-created object can therefore
+# 073/074/087/088/089 contain IF NOT EXISTS DDL. A partially-created object can therefore
 # let PostgreSQL finish the file without reaching the required end state. Never
 # record those migrations in the ledger until the complete effect probe passes.
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*)
+    073_*|074_*|087_*|088_*|089_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

@@ -40,6 +40,8 @@ export const apiRoutes = {
   profile: {
     preferences: backendApiPath('/me/preferences'),
     referenceUsage: backendApiPath('/me/preferences/reference-usage'),
+    telegramNotifications: backendApiPath('/me/notification-channels/telegram'),
+    telegramNotificationsLink: backendApiPath('/me/notification-channels/telegram/link'),
   },
   orders: {
     list: backendApiPath('/orders'),

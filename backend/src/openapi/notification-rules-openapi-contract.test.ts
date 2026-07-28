@@ -60,6 +60,20 @@ describe('notification rules OpenAPI contract', () => {
     expect(section).toContain('supportsDeadlineConditions:');
     expect(section).toContain('type: boolean');
   });
+
+  it('documents extensible notification channels on rules and mutations', () => {
+    for (const schemaName of [
+      'NotificationRule:',
+      'CreateNotificationRuleRequest:',
+      'UpdateNotificationRuleRequest:',
+    ]) {
+      const section = sectionBetween(`    ${schemaName}`, '\n\n    ');
+      const channels = sectionBetweenIn(section, '        channels:', '        conditions:');
+      expect(channels).toContain('type: array');
+      expect(channels).toContain('minItems: 1');
+      expect(Array.from(new Set(extractEnumValues(channels)))).toEqual(['in_app', 'telegram']);
+    }
+  });
 });
 
 function sectionBetweenIn(source: string, start: string, end: string): string {

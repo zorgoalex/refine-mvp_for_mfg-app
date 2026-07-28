@@ -56,9 +56,11 @@ function rule(overrides: Partial<NotificationRule> = {}): NotificationRule {
     notificationRuleId: 'rule-1',
     ruleCode: 'rule-1',
     eventType: 'DEADLINE_EXPIRED',
+    groupId: null,
     isEnabled: true,
     priority: 100,
     level: 'warning',
+    channels: ['in_app'],
     conditions: {},
     recipients: { resolvers: ['order_manager'] },
     titleTemplate: null,
@@ -74,6 +76,7 @@ interface Fakes {
   contextBuilder: { buildContext: ReturnType<typeof vi.fn> };
   recipientResolver: { resolve: ReturnType<typeof vi.fn> };
   notificationWrite: { insertIfAbsent: ReturnType<typeof vi.fn> };
+  channelDelivery: { enqueueIfAbsent: ReturnType<typeof vi.fn> };
   runtimeConfig?: NotificationRuleEngineRuntimeConfig;
 }
 
@@ -83,6 +86,7 @@ function fakes(overrides: Partial<Fakes> = {}): Fakes {
     contextBuilder: { buildContext: vi.fn(async () => deadlineContext()) },
     recipientResolver: { resolve: vi.fn(async () => []) },
     notificationWrite: { insertIfAbsent: vi.fn(async () => ({ created: true, notificationId: 'n-1' })) },
+    channelDelivery: { enqueueIfAbsent: vi.fn(async () => ({ created: true, deliveryId: 'd-1' })) },
     ...overrides,
   };
 }

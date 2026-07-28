@@ -40,6 +40,7 @@ function rule(overrides: Partial<NotificationRule> = {}): NotificationRule {
     isEnabled: true,
     priority: 100,
     level: 'info',
+    channels: ['in_app'],
     conditions: {},
     recipients: { resolvers: ['order_manager'] },
     titleTemplate: null,
@@ -67,6 +68,7 @@ interface Fakes {
   contextBuilder: { buildContext: ReturnType<typeof vi.fn> };
   recipientResolver: { resolve: ReturnType<typeof vi.fn> };
   notificationWrite: { insertIfAbsent: ReturnType<typeof vi.fn> };
+  channelDelivery: { enqueueIfAbsent: ReturnType<typeof vi.fn> };
   runtimeConfig?: { isEngineOwnsDeadline(): boolean };
 }
 
@@ -76,6 +78,7 @@ function fakes(overrides: Partial<Fakes> = {}): Fakes {
     contextBuilder: { buildContext: vi.fn(async () => ctx()) },
     recipientResolver: { resolve: vi.fn(async () => []) },
     notificationWrite: { insertIfAbsent: vi.fn(async () => ({ created: true, notificationId: 'notif-1' })) },
+    channelDelivery: { enqueueIfAbsent: vi.fn(async () => ({ created: true, deliveryId: 'delivery-1' })) },
     ...overrides,
   };
 }
@@ -229,6 +232,35 @@ describe('NotificationRuleEngineService.processEvent', () => {
     expect(result.matched).toBe(1);
     expect(result.created).toBe(0);
     expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(2);
+  });
+
+  it('routes Telegram through durable external delivery without creating an in-app row', async () => {
+    const telegramRule = rule({
+      notificationRuleId: 'rule-telegram',
+      channels: ['telegram'],
+      recipients: { userIds: [42] },
+    });
+    const deps = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [telegramRule]) },
+      recipientResolver: { resolve: vi.fn(async () => [42]) },
+    });
+
+    const result = await service(deps).processEvent(
+      client,
+      event({ outboxEventId: '00000000-0000-0000-0000-000000000077' }),
+    );
+
+    expect(result).toMatchObject({ matched: 1, created: 1 });
+    expect(deps.notificationWrite.insertIfAbsent).not.toHaveBeenCalled();
+    expect(deps.channelDelivery.enqueueIfAbsent).toHaveBeenCalledWith(
+      client,
+      expect.objectContaining({
+        userId: 42,
+        channel: 'telegram',
+        idempotencyKey:
+          'notif-rule:00000000-0000-0000-0000-000000000077:rule-telegram:42:telegram',
+      }),
+    );
   });
 
   it('redacts unknown placeholders: never emits payload/phone/secret values, only whitelisted fields', () => {

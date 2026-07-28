@@ -6260,6 +6260,131 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/me/notification-channels/telegram:
+    get:
+      tags:
+        - Notification Channels
+      operationId: getCurrentUserTelegramNotificationChannel
+      summary: Get current user Telegram notification channel status
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Telegram channel status without Telegram identifiers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelegramNotificationChannelStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Notification Channels
+      operationId: disconnectCurrentUserTelegramNotificationChannel
+      summary: Disconnect current user Telegram notification channel
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Telegram channel disconnected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelegramNotificationChannelDisconnectResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/me/notification-channels/telegram/link:
+    post:
+      tags:
+        - Notification Channels
+      operationId: startCurrentUserTelegramNotificationChannelLink
+      summary: Create a one-time Telegram linking URL
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: One-time Telegram link
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelegramNotificationChannelLink'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/notification-channels/telegram/webhook:
+    post:
+      tags:
+        - Notification Channels
+      operationId: receiveTelegramNotificationWebhook
+      summary: Receive Telegram bot webhook updates
+      parameters:
+        - name: X-Telegram-Bot-Api-Secret-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '201':
+          description: Update accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                properties:
+                  ok:
+                    type: boolean
+                    enum:
+                      - true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/notification-channels/telegram/process-now:
+    post:
+      tags:
+        - Notification Channels
+      operationId: processTelegramNotificationDeliveriesNow
+      summary: Process one Telegram notification delivery batch
+      security:
+        - bearerAuth: []
+      x-permission: notifications.manage_rules
+      responses:
+        '201':
+          description: Delivery batch summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelegramNotificationDeliverySummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/outbox-relay/process-now:
     post:
       tags:
@@ -16147,6 +16272,7 @@ components:
         - isEnabled
         - priority
         - level
+        - channels
         - conditions
         - recipients
         - titleTemplate
@@ -16176,6 +16302,15 @@ components:
             - info
             - warning
             - error
+        channels:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: string
+            enum:
+              - in_app
+              - telegram
         conditions:
           $ref: '#/components/schemas/NotificationRuleConditions'
         recipients:
@@ -16414,6 +16549,17 @@ components:
         isEnabled:
           type: boolean
           default: true
+        channels:
+          type: array
+          minItems: 1
+          maxItems: 10
+          default:
+            - in_app
+          items:
+            type: string
+            enum:
+              - in_app
+              - telegram
         conditions:
           $ref: '#/components/schemas/NotificationRuleConditions'
         recipients:
@@ -16438,6 +16584,15 @@ components:
           type: integer
         isEnabled:
           type: boolean
+        channels:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: string
+            enum:
+              - in_app
+              - telegram
         groupId:
           type: string
           format: uuid
@@ -16458,6 +16613,78 @@ components:
         expectedUpdatedAt:
           type: string
           format: date-time
+
+    TelegramNotificationChannelStatus:
+      type: object
+      required:
+        - available
+        - connected
+      properties:
+        available:
+          type: boolean
+        connected:
+          type: boolean
+        botUsername:
+          type: string
+        displayName:
+          type: string
+        linkedAt:
+          type: string
+          format: date-time
+
+    TelegramNotificationChannelLink:
+      type: object
+      required:
+        - linkUrl
+        - expiresAt
+      properties:
+        linkUrl:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
+
+    TelegramNotificationChannelDisconnectResponse:
+      type: object
+      required:
+        - disconnected
+      properties:
+        disconnected:
+          type: boolean
+
+    TelegramNotificationDeliverySummary:
+      type: object
+      required:
+        - claimed
+        - delivered
+        - skipped
+        - failed
+        - unknown
+        - rescheduled
+        - staleMarkedUnknown
+      properties:
+        claimed:
+          type: integer
+          minimum: 0
+        delivered:
+          type: integer
+          minimum: 0
+        skipped:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        unknown:
+          type: integer
+          minimum: 0
+        rescheduled:
+          type: integer
+          minimum: 0
+        staleMarkedUnknown:
+          type: integer
+          minimum: 0
 
     NotificationEventType:
       type: object

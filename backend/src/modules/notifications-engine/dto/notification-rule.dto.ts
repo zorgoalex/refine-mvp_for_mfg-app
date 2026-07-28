@@ -2,9 +2,11 @@ import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { NotificationRuleInput } from '../domain/notification-rule-validation';
 import type {
+  NotificationChannel,
   NotificationRuleConditions,
   NotificationRuleRecipients,
 } from '../domain/notification-rule.types';
+import { NOTIFICATION_CHANNELS } from '../domain/notification-rule.types';
 
 /**
  * Structural-only parse result for `recipients`. `resolvers` is kept as
@@ -38,6 +40,7 @@ const stringArraySchema = z.array(z.string());
 const nullableTemplateSchema = z.string().nullable();
 const groupIdSchema = z.string().uuid().nullable();
 const deadlineEntityTypesSchema = z.array(z.enum(['order', 'order_stage'])).min(1);
+const channelsSchema = z.array(z.enum(NOTIFICATION_CHANNELS)).min(1).max(10);
 
 const conditionsSchema = z
   .object({
@@ -64,6 +67,7 @@ const createNotificationRuleSchema = z.object({
   level: levelSchema.default('info'),
   priority: z.number().int().default(100),
   isEnabled: z.boolean().default(true),
+  channels: channelsSchema.default(['in_app']),
   conditions: conditionsSchema.default({}),
   recipients: recipientsSchema.default({}),
   titleTemplate: nullableTemplateSchema.optional(),
@@ -75,6 +79,7 @@ const updateNotificationRuleSchema = z
     level: levelSchema.optional(),
     priority: z.number().int().optional(),
     isEnabled: z.boolean().optional(),
+    channels: channelsSchema.optional(),
     groupId: groupIdSchema.optional(),
     conditions: conditionsSchema.optional(),
     recipients: recipientsSchema.optional(),
@@ -88,6 +93,7 @@ const updateNotificationRuleSchema = z
       value.level !== undefined ||
       value.priority !== undefined ||
       value.isEnabled !== undefined ||
+      value.channels !== undefined ||
       value.groupId !== undefined ||
       value.conditions !== undefined ||
       value.recipients !== undefined ||
@@ -108,6 +114,7 @@ export interface UpdateNotificationRulePatch {
   level?: 'info' | 'warning' | 'error';
   priority?: number;
   isEnabled?: boolean;
+  channels?: NotificationChannel[];
   conditions?: NotificationRuleConditions;
   recipients?: NotificationRuleRecipients;
   titleTemplate?: string | null;
@@ -137,6 +144,7 @@ export function parseCreateNotificationRuleRequest(
     level: data.level,
     priority: data.priority,
     isEnabled: data.isEnabled,
+    channels: data.channels,
     conditions: data.conditions,
     recipients: toNotificationRuleRecipients(data.recipients),
   };
@@ -167,6 +175,7 @@ export function parseUpdateNotificationRuleRequest(body: unknown): UpdateNotific
   if (data.level !== undefined) patch.level = data.level;
   if (data.priority !== undefined) patch.priority = data.priority;
   if (data.isEnabled !== undefined) patch.isEnabled = data.isEnabled;
+  if (data.channels !== undefined) patch.channels = data.channels;
   if (data.groupId !== undefined) patch.groupId = data.groupId;
   if (data.conditions !== undefined) patch.conditions = data.conditions;
   if (data.recipients !== undefined) patch.recipients = toNotificationRuleRecipients(data.recipients);

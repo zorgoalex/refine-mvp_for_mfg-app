@@ -30,6 +30,7 @@ describe('parseCreateNotificationRuleRequest', () => {
       level: 'info',
       priority: 100,
       isEnabled: true,
+      channels: ['in_app'],
       conditions: {},
       recipients: {},
     });
@@ -42,6 +43,7 @@ describe('parseCreateNotificationRuleRequest', () => {
       level: 'warning',
       priority: 50,
       isEnabled: false,
+      channels: ['in_app', 'telegram'],
       conditions: {
         allowedFromOrderStatusIds: [1, 2],
         excludeOrderStatusIds: [7],
@@ -63,6 +65,7 @@ describe('parseCreateNotificationRuleRequest', () => {
       level: 'warning',
       priority: 50,
       isEnabled: false,
+      channels: ['in_app', 'telegram'],
       conditions: {
         allowedFromOrderStatusIds: [1, 2],
         excludeOrderStatusIds: [7],
@@ -188,6 +191,23 @@ describe('parseCreateNotificationRuleRequest', () => {
         ruleCode: 'notify-order-overdue-manager',
         eventType: 'order.production_status_changed',
         isEnabled: 'yes',
+      }),
+    );
+  });
+
+  it('rejects empty or unsupported notification channels', () => {
+    expectInvalidPayloadError(() =>
+      parseCreateNotificationRuleRequest({
+        ruleCode: 'empty-channels',
+        eventType: 'order.status_changed',
+        channels: [],
+      }),
+    );
+    expectInvalidPayloadError(() =>
+      parseCreateNotificationRuleRequest({
+        ruleCode: 'unknown-channel',
+        eventType: 'order.status_changed',
+        channels: ['email'],
       }),
     );
   });
@@ -335,6 +355,12 @@ describe('parseUpdateNotificationRuleRequest', () => {
     expect(result).toEqual({
       patch: { isEnabled: false },
       expectedUpdatedAt: '2026-06-01T10:00:00.000Z',
+    });
+  });
+
+  it('parses Telegram channel selection on update', () => {
+    expect(parseUpdateNotificationRuleRequest({ channels: ['telegram'] })).toEqual({
+      patch: { channels: ['telegram'] },
     });
   });
 

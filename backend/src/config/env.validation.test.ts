@@ -672,4 +672,62 @@ describe('backend env validation', () => {
       }),
     ).toThrow(/WORKOS_API_KEY is required when BACKEND_ENABLE_WORKOS_AUTH is true/);
   });
+
+  it('keeps Telegram notifications fail-closed and requires complete bot configuration', () => {
+    expect(validateEnv({})).toMatchObject({
+      BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS: false,
+      TELEGRAM_NOTIFICATION_API_BASE: 'https://api.telegram.org',
+      TELEGRAM_NOTIFICATION_REQUEST_TIMEOUT_MS: 10000,
+      TELEGRAM_NOTIFICATION_LINK_TTL_SECONDS: 600,
+      BACKEND_TELEGRAM_NOTIFICATION_RELAY_OWNER: 'none',
+      BACKEND_TELEGRAM_NOTIFICATION_RELAY_BATCH_SIZE: 50,
+      BACKEND_TELEGRAM_NOTIFICATION_RELAY_MAX_ATTEMPTS: 10,
+    });
+
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS: 'true',
+        BACKEND_ENABLE_NOTIFICATION_ENGINE: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+      }),
+    ).toThrow(/TELEGRAM_NOTIFICATION_BOT_TOKEN is required/);
+
+    expect(
+      validateEnv({
+        BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS: 'true',
+        BACKEND_ENABLE_NOTIFICATION_ENGINE: 'true',
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+        TELEGRAM_NOTIFICATION_BOT_TOKEN: '123456:abcdefghijklmnopqrstuvwxyz',
+        TELEGRAM_NOTIFICATION_BOT_USERNAME: 'erp_notice_bot',
+        TELEGRAM_NOTIFICATION_WEBHOOK_SECRET: 'x'.repeat(32),
+        BACKEND_TELEGRAM_NOTIFICATION_RELAY_OWNER: 'in_process',
+      }),
+    ).toMatchObject({
+      BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS: true,
+      BACKEND_TELEGRAM_NOTIFICATION_RELAY_OWNER: 'in_process',
+      TELEGRAM_NOTIFICATION_BOT_USERNAME: 'erp_notice_bot',
+    });
+  });
+
+  it('pins Telegram Bot API host and validates scheduler ownership', () => {
+    expect(() =>
+      validateEnv({ TELEGRAM_NOTIFICATION_API_BASE: 'https://evil.example.com' }),
+    ).toThrow(/api\.telegram\.org/);
+    expect(
+      validateEnv({ TELEGRAM_NOTIFICATION_API_BASE: 'http://localhost:8788' })
+        .TELEGRAM_NOTIFICATION_API_BASE,
+    ).toBe('http://localhost:8788');
+    expect(() =>
+      validateEnv({
+        NODE_ENV: 'production',
+        FRONTEND_ORIGIN: 'https://app.example',
+        BACKEND_RATE_LIMIT_STORE: 'redis',
+        REDIS_URL: 'redis://localhost:6379',
+        TELEGRAM_NOTIFICATION_API_BASE: 'http://localhost:8788',
+      }),
+    ).toThrow(/staging\/production/);
+    expect(() =>
+      validateEnv({ BACKEND_TELEGRAM_NOTIFICATION_RELAY_OWNER: 'in_process' }),
+    ).toThrow(/BACKEND_ENABLE_TELEGRAM_NOTIFICATIONS=true/);
+  });
 });

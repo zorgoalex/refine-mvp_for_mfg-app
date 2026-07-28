@@ -19,6 +19,7 @@ const baseRule: NotificationRuleDto = {
   isEnabled: true,
   priority: 100,
   level: 'warning',
+  channels: ['in_app', 'telegram'],
   conditions: {
     deadlineEntityTypes: ['order'],
     excludeCompletedOrders: true,
@@ -52,6 +53,7 @@ describe('notificationRulesView', () => {
         level: 'warning',
         priority: 100,
         isEnabled: true,
+        channels: ['telegram'],
         excludeCompletedOrders: true,
         deadlineEntityTypes: ['order'],
         requireCurrentDeadlineEvent: true,
@@ -71,6 +73,7 @@ describe('notificationRulesView', () => {
         level: 'warning',
         priority: 100,
         isEnabled: true,
+        channels: ['telegram'],
         conditions: {
           deadlineEntityTypes: ['order'],
           excludeCompletedOrders: true,
@@ -183,6 +186,7 @@ describe('notificationRulesView', () => {
         level: 'warning',
         priority: 100,
         isEnabled: true,
+        channels: ['in_app', 'telegram'],
         excludeCompletedOrders: true,
         deadlineEntityTypes: ['order'],
         requireCurrentDeadlineEvent: true,
@@ -204,6 +208,7 @@ describe('notificationRulesView', () => {
       expect(draft.level).toBe('info');
       expect(draft.priority).toBe(100);
       expect(draft.isEnabled).toBe(true);
+      expect(draft.channels).toEqual(['in_app']);
       expect(draft.excludeCompletedOrders).toBe(false);
       expect(draft.deadlineEntityTypes).toEqual([]);
       expect(draft.requireCurrentDeadlineEvent).toBe(true);

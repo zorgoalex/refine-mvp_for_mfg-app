@@ -10,7 +10,8 @@
     "smoke:db-cutover": "node scripts/smoke-db-cutover-readiness.js",
     "test": "vitest run",
     "crm-sync:backfill": "tsx scripts/crm-sync-backfill.ts",
-    "cut-results:backfill": "tsx scripts/backfill-cut-result-history.ts"
+    "cut-results:backfill": "tsx scripts/backfill-cut-result-history.ts",
+    "telegram-notifications:webhook": "tsx scripts/configure-telegram-notification-webhook.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.19",
