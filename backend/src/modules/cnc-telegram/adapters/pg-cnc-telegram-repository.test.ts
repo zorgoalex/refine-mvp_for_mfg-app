@@ -164,6 +164,45 @@ describe('PgCncTelegramRepository', () => {
     ]);
   });
 
+  it('exposes unique ERP order ids for unmatched CNC packet item order names', async () => {
+    const queries: string[] = [];
+    const database = {
+      query: vi.fn(async (text: string) => {
+        queries.push(text);
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [
+              packetRow({
+                order_name: '2706',
+                item_order_id: 11450,
+                match_order_id: null,
+                match_detail_id: null,
+                match_status: 'unmatched',
+              }),
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-28' });
+    const sql = queries.join('\n');
+    const item = result.columns.flatMap((column) => column.packets)
+      .flatMap((packet) => packet.items)[0];
+
+    expect(sql).toContain('COALESCE(i.match_order_id, item_order.order_id) AS item_order_id');
+    expect(sql).toContain('HAVING COUNT(*) = 1');
+    expect(item).toMatchObject({
+      orderName: '2706',
+      orderId: 11450,
+      matchOrderId: null,
+      matchDetailId: null,
+      matchStatus: 'unmatched',
+    });
+  });
+
   it('hides noisy RapidOCR warning in the daily CNC board response', async () => {
     const database = {
       query: vi.fn(async (text: string) => {
@@ -838,6 +877,7 @@ function packetRowBase() {
     packet_item_id: '00000000-0000-0000-0000-000000000002',
     source_item_key: '2689:31:497x477',
     order_name: '2689',
+    item_order_id: 2689,
     detail_number: 31,
     width_mm: 497,
     height_mm: 477,

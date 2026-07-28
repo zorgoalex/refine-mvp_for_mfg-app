@@ -64,6 +64,7 @@ interface PacketJoinedRow extends QueryResultRow {
   packet_item_id: string | null;
   source_item_key: string | null;
   order_name: string | null;
+  item_order_id: string | number | null;
   detail_number: string | number | null;
   width_mm: string | number | null;
   height_mm: string | number | null;
@@ -305,6 +306,7 @@ function packetSelectSql(whereSql: string): string {
       i.packet_item_id,
       i.source_item_key,
       i.order_name,
+      COALESCE(i.match_order_id, item_order.order_id) AS item_order_id,
       i.detail_number,
       i.width_mm,
       i.height_mm,
@@ -317,6 +319,17 @@ function packetSelectSql(whereSql: string): string {
       i.review_note
     FROM cnc_telegram_packets p
     LEFT JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
+    LEFT JOIN (
+      SELECT
+        lower(trim(o.order_name)) AS order_key,
+        MIN(o.order_id)::bigint AS order_id
+      FROM orders o
+      WHERE o.delete_flag = false
+        AND NULLIF(trim(o.order_name), '') IS NOT NULL
+      GROUP BY lower(trim(o.order_name))
+      HAVING COUNT(*) = 1
+    ) item_order
+      ON item_order.order_key = lower(trim(i.order_name))
     WHERE ${whereSql}
     ORDER BY p.updated_at DESC, p.packet_id, i.order_name ASC NULLS LAST, i.detail_number ASC NULLS LAST
   `;
@@ -1434,6 +1447,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         packetItemId: row.packet_item_id,
         sourceItemKey: row.source_item_key ?? '',
         orderName: row.order_name ?? '',
+        orderId: toNullableNumber(row.item_order_id),
         detailNumber: toNullableNumber(row.detail_number),
         widthMm: toNullableNumber(row.width_mm),
         heightMm: toNullableNumber(row.height_mm),

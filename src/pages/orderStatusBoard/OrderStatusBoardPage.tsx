@@ -1086,17 +1086,18 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
             </div>
             {packet.items.map((item) => {
               const quantityWarningTitle = cncItemQuantityWarningTitle(item);
+              const orderId = item.orderId ?? item.matchOrderId;
 
               return (
                 <div className="cnc-packet-card__item" role="row" key={item.packetItemId}>
                   <span>
-                    {item.matchOrderId ? (
+                    {orderId ? (
                       <Button
                         type="link"
                         className="cnc-packet-card__order-link"
                         onClick={(event) => {
                           event.stopPropagation();
-                          if (item.matchOrderId) onOpenOrder(item.matchOrderId);
+                          onOpenOrder(orderId);
                         }}
                       >
                         {item.orderName}

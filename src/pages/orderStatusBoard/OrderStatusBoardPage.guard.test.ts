@@ -121,6 +121,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('summary.positions');
     expect(page).toContain('summary.details');
     expect(page).toContain('summary.orderId ??= item.orderId ?? item.matchOrderId ?? null');
+    expect(page).toContain('const orderId = item.orderId ?? item.matchOrderId');
     expect(css).toContain('.cnc-packet-card__summaries');
     expect(css).toContain('.cnc-packet-card__summary');
     expect(css).toContain('.cnc-packet-card__summary-order');

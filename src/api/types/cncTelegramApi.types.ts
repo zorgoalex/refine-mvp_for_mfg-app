@@ -17,6 +17,7 @@ export interface CncTelegramPacketItem {
   packetItemId: string;
   sourceItemKey: string;
   orderName: string;
+  orderId: number | null;
   detailNumber: number | null;
   widthMm: number | null;
   heightMm: number | null;
