@@ -35,14 +35,25 @@ export interface Bitrix24LimitRetryEvent {
   delayMs: number;
 }
 
+export interface Bitrix24NetworkRetryEvent {
+  method: string;
+  code: 'NETWORK_ERROR' | 'RESPONSE_READ_ERROR';
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+}
+
 export interface Bitrix24ApiClientOptions {
   maxRequestsPerSecond?: number;
   limitRetryMaxAttempts?: number;
   queryLimitBaseDelayMs?: number;
   operationLimitFallbackDelayMs?: number;
+  networkRetryMaxAttempts?: number;
+  networkRetryBaseDelayMs?: number;
   now?: () => number;
   sleep?: Bitrix24SleepFn;
   onLimitRetry?: (event: Bitrix24LimitRetryEvent) => void;
+  onNetworkRetry?: (event: Bitrix24NetworkRetryEvent) => void;
 }
 
 interface BitrixTime {
@@ -55,6 +66,20 @@ interface BitrixEnvelope<T> {
   error_description?: string;
   time?: BitrixTime;
 }
+
+// Create methods are intentionally absent: a lost response can hide a successful
+// create, so repeating crm.item.add or crm.item.payment.add could create a duplicate.
+const NETWORK_RETRY_SAFE_METHODS = new Set([
+  'crm.item.get',
+  'crm.item.update',
+  'crm.item.list',
+  'crm.item.delete',
+  'crm.item.productrow.set',
+  'sale.payment.list',
+  'sale.payment.update',
+  'crm.item.payment.list',
+  'crm.item.payment.delete',
+]);
 
 export class Bitrix24ApiError extends Error {
   constructor(
@@ -90,9 +115,12 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   private readonly limitRetryMaxAttempts: number;
   private readonly queryLimitBaseDelayMs: number;
   private readonly operationLimitFallbackDelayMs: number;
+  private readonly networkRetryMaxAttempts: number;
+  private readonly networkRetryBaseDelayMs: number;
   private readonly now: () => number;
   private readonly sleep: Bitrix24SleepFn;
   private readonly onLimitRetry?: (event: Bitrix24LimitRetryEvent) => void;
+  private readonly onNetworkRetry?: (event: Bitrix24NetworkRetryEvent) => void;
   private readonly operatingResetAtByMethod = new Map<string, number>();
   private readonly operationBlockedUntilByMethod = new Map<string, number>();
   private admissionTail: Promise<void> = Promise.resolve();
@@ -125,10 +153,19 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
       options.operationLimitFallbackDelayMs ?? 60_000,
       'operationLimitFallbackDelayMs',
     );
+    this.networkRetryMaxAttempts = positiveInteger(
+      options.networkRetryMaxAttempts ?? 5,
+      'networkRetryMaxAttempts',
+    );
+    this.networkRetryBaseDelayMs = positiveInteger(
+      options.networkRetryBaseDelayMs ?? 1000,
+      'networkRetryBaseDelayMs',
+    );
     this.now = options.now ?? Date.now;
     this.sleep = options.sleep ?? ((delayMs) =>
       new Promise((resolve) => setTimeout(resolve, delayMs)));
     this.onLimitRetry = options.onLimitRetry;
+    this.onNetworkRetry = options.onNetworkRetry;
   }
 
   withRequestGuard<T>(
@@ -271,33 +308,68 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   }
 
   private async call<T = unknown>(method: string, params: Record<string, unknown>): Promise<T> {
-    for (let attempt = 1; ; attempt++) {
+    let limitAttempt = 0;
+    let networkAttempt = 0;
+    for (;;) {
       try {
         return await this.callOnce<T>(method, params);
       } catch (error) {
-        if (!(error instanceof Bitrix24ApiError) || !isRetryableLimitCode(error.code)) {
+        if (!(error instanceof Bitrix24ApiError)) {
           throw error;
         }
 
-        const code = error.code.toUpperCase() as Bitrix24LimitRetryEvent['code'];
-        const delayMs = code === 'QUERY_LIMIT_EXCEEDED'
-          ? Math.min(this.queryLimitBaseDelayMs * 2 ** (attempt - 1), 60_000)
-          : this.operationLimitDelayMs(method, error.operatingResetAt);
-        this.extendLimitCooldown(method, code, delayMs);
-        if (attempt >= this.limitRetryMaxAttempts) {
+        if (isRetryableLimitCode(error.code)) {
+          limitAttempt += 1;
+          const code = error.code.toUpperCase() as Bitrix24LimitRetryEvent['code'];
+          const delayMs = code === 'QUERY_LIMIT_EXCEEDED'
+            ? Math.min(this.queryLimitBaseDelayMs * 2 ** (limitAttempt - 1), 60_000)
+            : this.operationLimitDelayMs(method, error.operatingResetAt);
+          this.extendLimitCooldown(method, code, delayMs);
+          if (limitAttempt >= this.limitRetryMaxAttempts) {
+            throw error;
+          }
+          try {
+            this.onLimitRetry?.({
+              method,
+              code,
+              attempt: limitAttempt,
+              maxAttempts: this.limitRetryMaxAttempts,
+              delayMs,
+            });
+          } catch {
+            // Observability must never change delivery semantics.
+          }
+          continue;
+        }
+
+        if (
+          !NETWORK_RETRY_SAFE_METHODS.has(method) ||
+          !isRetryableNetworkCode(error.code)
+        ) {
           throw error;
         }
+
+        networkAttempt += 1;
+        if (networkAttempt >= this.networkRetryMaxAttempts) {
+          throw error;
+        }
+        const code = error.code.toUpperCase() as Bitrix24NetworkRetryEvent['code'];
+        const delayMs = Math.min(
+          this.networkRetryBaseDelayMs * 2 ** (networkAttempt - 1),
+          30_000,
+        );
         try {
-          this.onLimitRetry?.({
+          this.onNetworkRetry?.({
             method,
             code,
-            attempt,
-            maxAttempts: this.limitRetryMaxAttempts,
+            attempt: networkAttempt,
+            maxAttempts: this.networkRetryMaxAttempts,
             delayMs,
           });
         } catch {
           // Observability must never change delivery semantics.
         }
+        await this.sleep(delayMs);
       }
     }
   }
@@ -480,6 +552,11 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
 function isRetryableLimitCode(code: string): boolean {
   const normalized = code.toUpperCase();
   return normalized === 'QUERY_LIMIT_EXCEEDED' || normalized === 'OPERATION_TIME_LIMIT';
+}
+
+function isRetryableNetworkCode(code: string): boolean {
+  const normalized = code.toUpperCase();
+  return normalized === 'NETWORK_ERROR' || normalized === 'RESPONSE_READ_ERROR';
 }
 
 function positiveInteger(value: number, field: string): number {

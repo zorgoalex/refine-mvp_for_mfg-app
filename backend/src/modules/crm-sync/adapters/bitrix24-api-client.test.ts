@@ -99,6 +99,35 @@ describe('Bitrix24ApiClient', () => {
     });
   });
 
+  it('retries a transient crm.item.get failure before updating Contact phones', async () => {
+    const fetchFn = vi.fn<FetchFn>()
+      .mockRejectedValueOnce(new Error('temporary network failure'))
+      .mockResolvedValueOnce(jsonResponse({
+        result: {
+          item: {
+            fm: [{ id: 71, typeId: 'PHONE', value: '+70000000001' }],
+          },
+        },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ result: { item: { id: 42 } } }));
+    const client = new Bitrix24ApiClient(
+      'https://portal/rest/1/token',
+      fetchFn,
+      30_000,
+      noWait,
+    );
+
+    await expect(client.updateCrmItem(3, '42', {
+      name: 'Иван',
+      fm: [{ typeId: 'PHONE', valueType: 'MOBILE', value: '+77001234567' }],
+    })).resolves.toBeUndefined();
+    expect(fetchFn.mock.calls.map(([url]) => url)).toEqual([
+      'https://portal/rest/1/token/crm.item.get',
+      'https://portal/rest/1/token/crm.item.get',
+      'https://portal/rest/1/token/crm.item.update',
+    ]);
+  });
+
   it('deletes the last existing phone with a keyed empty-value mutation', async () => {
     const fetchFn = vi.fn<FetchFn>()
       .mockResolvedValueOnce(jsonResponse({
@@ -215,6 +244,123 @@ describe('Bitrix24ApiClient', () => {
     await expect(client.findPaymentByXmlId('MEBELKZ_ERP_PAYMENT_7')).resolves.toBe('99');
   });
 
+  it('retries a transient network failure for an idempotent payment lookup', async () => {
+    let now = 0;
+    const sleeps: number[] = [];
+    const retries: unknown[] = [];
+    const fetchFn = vi.fn<FetchFn>()
+      .mockRejectedValueOnce(new Error('temporary network failure'))
+      .mockResolvedValueOnce(
+        jsonResponse({ result: { payments: [{ id: 99, xmlId: 'MEBELKZ_ERP_PAYMENT_7' }] } }),
+      );
+    const client = new Bitrix24ApiClient(
+      'https://portal/rest/1/token',
+      fetchFn,
+      30_000,
+      {
+        networkRetryMaxAttempts: 3,
+        networkRetryBaseDelayMs: 1000,
+        now: () => now,
+        sleep: async (delayMs) => {
+          sleeps.push(delayMs);
+          now += delayMs;
+        },
+        onNetworkRetry: (event) => retries.push(event),
+      },
+    );
+
+    await expect(client.findPaymentByXmlId('MEBELKZ_ERP_PAYMENT_7')).resolves.toBe('99');
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(sleeps).toEqual([1000]);
+    expect(retries).toEqual([
+      expect.objectContaining({
+        method: 'sale.payment.list',
+        code: 'NETWORK_ERROR',
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 1000,
+      }),
+    ]);
+  });
+
+  it('retries a response-body read failure for an idempotent payment lookup', async () => {
+    const fetchFn = vi.fn<FetchFn>()
+      .mockResolvedValueOnce({
+        status: 200,
+        text: vi.fn().mockRejectedValue(new Error('response stream reset')),
+      } as unknown as Response)
+      .mockResolvedValueOnce(
+        jsonResponse({ result: { payments: [{ id: 99, xmlId: 'MEBELKZ_ERP_PAYMENT_7' }] } }),
+      );
+    const client = new Bitrix24ApiClient(
+      'https://portal/rest/1/token',
+      fetchFn,
+      30_000,
+      noWait,
+    );
+
+    await expect(client.findPaymentByXmlId('MEBELKZ_ERP_PAYMENT_7')).resolves.toBe('99');
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops retrying transient network failures after the configured bound', async () => {
+    let now = 0;
+    const sleeps: number[] = [];
+    const fetchFn = vi.fn<FetchFn>().mockRejectedValue(
+      new Error('persistent network failure'),
+    );
+    const client = new Bitrix24ApiClient(
+      'https://portal/rest/1/token',
+      fetchFn,
+      30_000,
+      {
+        networkRetryMaxAttempts: 3,
+        networkRetryBaseDelayMs: 1000,
+        now: () => now,
+        sleep: async (delayMs) => {
+          sleeps.push(delayMs);
+          now += delayMs;
+        },
+      },
+    );
+
+    await expect(
+      client.findPaymentByXmlId('MEBELKZ_ERP_PAYMENT_7'),
+    ).rejects.toThrow(/NETWORK_ERROR/);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(sleeps).toEqual([1000, 2000]);
+  });
+
+  it('re-proves writer ownership after a network retry wait', async () => {
+    let now = 0;
+    const fetchFn = vi.fn<FetchFn>().mockRejectedValueOnce(
+      new Error('temporary network failure'),
+    );
+    const guard = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('writer ownership lost'));
+    const client = new Bitrix24ApiClient(
+      'https://portal/rest/1/token',
+      fetchFn,
+      30_000,
+      {
+        networkRetryMaxAttempts: 3,
+        networkRetryBaseDelayMs: 1000,
+        now: () => now,
+        sleep: async (delayMs) => {
+          now += delayMs;
+        },
+      },
+    );
+
+    await expect(client.withRequestGuard(
+      guard,
+      () => client.findPaymentByXmlId('MEBELKZ_ERP_PAYMENT_7'),
+    )).rejects.toThrow('writer ownership lost');
+    expect(guard).toHaveBeenCalledTimes(2);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
   it('surfaces Bitrix error without leaking webhook URL', async () => {
     const fetchFn = vi.fn<FetchFn>().mockResolvedValue(
       jsonResponse({ error: 'ACCESS_DENIED', error_description: 'Denied' }, 403),
@@ -242,6 +388,7 @@ describe('Bitrix24ApiClient', () => {
     const error = await client.createCrmItem(3, {}).catch((value) => value);
     expect(String(error)).toContain('[redacted-webhook]');
     expect(String(error)).not.toContain('top-secret-token');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
   it('wraps and redacts failures while reading the response body', async () => {

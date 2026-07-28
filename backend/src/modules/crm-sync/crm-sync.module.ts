@@ -52,6 +52,12 @@ import { CrmSyncRelaySchedulerService } from './application/crm-sync-relay-sched
                   `attempt=${attempt}/${maxAttempts} delayMs=${delayMs}`,
                 );
               },
+              onNetworkRetry: ({ method, code, attempt, maxAttempts, delayMs }) => {
+                bitrixLogger.warn(
+                  `network retry method=${method} code=${code} ` +
+                  `attempt=${attempt}/${maxAttempts} delayMs=${delayMs}`,
+                );
+              },
             },
           )
           : new FailingBitrix24ApiClient();

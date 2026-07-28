@@ -229,6 +229,12 @@ const bitrix = dryRun
           `attempt=${attempt}/${maxAttempts} delayMs=${delayMs}`,
         );
       },
+      onNetworkRetry: ({ method, code, attempt, maxAttempts, delayMs }) => {
+        console.warn(
+          `[crm-sync-backfill] Bitrix network retry method=${method} code=${code} ` +
+          `attempt=${attempt}/${maxAttempts} delayMs=${delayMs}`,
+        );
+      },
     },
   );
 
