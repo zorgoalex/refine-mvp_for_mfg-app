@@ -14,7 +14,7 @@ import {
   useSelect,
 } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown } from "antd";
+import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin } from "antd";
 import {
   EyeOutlined,
   EditOutlined,
@@ -121,6 +121,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [snapshotBatchRange, setSnapshotBatchRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [snapshotBatchExporting, setSnapshotBatchExporting] = useState(false);
   const [snapshotImporting, setSnapshotImporting] = useState(false);
+  const [snapshotImportFileName, setSnapshotImportFileName] = useState<string | null>(null);
   const [snapshotReferenceMapping, setSnapshotReferenceMapping] = useState<{
     file: File;
     rows: SnapshotUnmappedReferenceRow[];
@@ -547,6 +548,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     const setLoading = options.fromMapping
       ? setSnapshotReferenceMappingSubmitting
       : setSnapshotImporting;
+    setSnapshotImportFileName(file.name);
     setLoading(true);
     try {
       const isZip = file.name.toLowerCase().endsWith(".zip");
@@ -591,6 +593,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       console.error("Ошибка импорта snapshot:", error);
     } finally {
       setLoading(false);
+      setSnapshotImportFileName(null);
     }
   };
 
@@ -616,6 +619,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
   const { settings: orderListColumnSettings, saveSettings: saveOrderListColumnSettings } =
     useOrderDetailColumnPreferences('orderList', ORDER_LIST_DEFAULT_ORDER, ORDER_LIST_COLUMN_DEFINITIONS);
+  const snapshotImportBusy = snapshotImporting || snapshotReferenceMappingSubmitting;
+  const snapshotImportBusyFileName = snapshotImportFileName ?? snapshotReferenceMapping?.file.name ?? null;
 
   // Количество записей
   const totalRecords = tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination.total || 0 : 0;
@@ -1348,6 +1353,30 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           onCancel={clearSnapshotReferenceMapping}
           onSubmit={handleSnapshotReferenceMappingSubmit}
         />
+        <Modal
+          title="Импорт JSON заказа"
+          open={snapshotImportBusy}
+          footer={null}
+          closable={false}
+          maskClosable={false}
+          keyboard={false}
+          destroyOnClose
+        >
+          <div className="orders-snapshot-import-progress" role="status" aria-live="polite">
+            <Spin size="large" />
+            <div>
+              <Text strong>Импорт выполняется</Text>
+              <Text type="secondary">
+                Проверяем файл, справочники и связанные записи. Окно результата появится после завершения.
+              </Text>
+              {snapshotImportBusyFileName && (
+                <Text type="secondary" className="orders-snapshot-import-progress__file">
+                  {snapshotImportBusyFileName}
+                </Text>
+              )}
+            </div>
+          </div>
+        </Modal>
         {filtersVisible && (
           <Card style={{ marginBottom: 16 }}>
             <Form form={form} layout="vertical" onFinish={handleFilter}>

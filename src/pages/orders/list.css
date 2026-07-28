@@ -120,3 +120,20 @@
   padding-left: 18px;
   overflow-wrap: anywhere;
 }
+
+.orders-snapshot-import-progress {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  min-height: 72px;
+}
+
+.orders-snapshot-import-progress > div:last-child {
+  display: grid;
+  gap: 4px;
+}
+
+.orders-snapshot-import-progress__file {
+  overflow-wrap: anywhere;
+}
