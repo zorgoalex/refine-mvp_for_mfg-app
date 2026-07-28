@@ -26,6 +26,7 @@ import { useNavigation } from '@refinedev/core';
 import dayjs, { type Dayjs } from 'dayjs';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
+import { subscribeCutPdfTemplatesChanged } from '../../api/cutPdfTemplateEvents';
 import { ordersApi } from '../../api/ordersApi';
 import type { CutParamProfile, CutPdfTemplate, CutSettingRow } from '../../api/cutConfigApi';
 import { ApiError } from '../../api/httpClient';
@@ -878,6 +879,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   useEffect(() => {
     void loadCutConfig();
   }, [loadCutConfig]);
+
+  useEffect(() => subscribeCutPdfTemplatesChanged(() => {
+    void loadCutConfig();
+  }), [loadCutConfig]);
 
   // The /cut tab is kept alive (not remounted) when switching tabs, so profiles
   // created elsewhere (e.g. /configuration "Раскрой") would otherwise stay stale.

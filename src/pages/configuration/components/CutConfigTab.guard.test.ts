@@ -118,11 +118,16 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/Создать копию/);
     expect(tabSrc).toMatch(/onTemplateSaved/);
     expect(tabSrc).toMatch(/updatePdfTemplateInConfig/);
+    expect(tabSrc).toMatch(/notifyCutPdfTemplatesChanged/);
+    expect(tabSrc).toMatch(/publishDraftAsTemplate/);
+    expect(tabSrc).toMatch(/autoPublishingDraftCodesRef/);
+    expect(tabSrc).toMatch(/clearStoredPdfTemplateDrafts/);
     expect(tabSrc).toMatch(/renameSelectedTemplate/);
     expect(tabSrc).toMatch(/Название шаблона PDF/);
     expect(tabSrc).toMatch(/Укажите название шаблона PDF/);
     expect(tabSrc).toMatch(/createPdfTemplate/);
     expect(tabSrc).toMatch(/Шаблон PDF создан/);
+    expect(tabSrc).not.toMatch(/const copyTemplate/);
     expect(tabSrc).not.toMatch(/Локальная копия шаблона PDF сохранена/);
     expect(tabSrc).toMatch(/\{\s*name:\s*templateName,\s*layout,\s*isActive:\s*template\.isActive\s*\}/);
     expect(tabSrc).toMatch(/Поля карты раскроя PDF/);

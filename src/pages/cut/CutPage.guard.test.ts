@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(fileURLToPath(new URL('./CutPage.tsx', import.meta.url)), 'utf8');
 const sheetLabelSource = readFileSync(fileURLToPath(new URL('./CutSheetLabelGenerateAction.tsx', import.meta.url)), 'utf8');
 const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import.meta.url)), 'utf8');
+const pdfTemplateEventsSource = readFileSync(fileURLToPath(new URL('../../api/cutPdfTemplateEvents.ts', import.meta.url)), 'utf8');
 
 describe('CutPage source guards', () => {
   it('keeps manual-editor zoom controls in the sticky group navbar', () => {
@@ -143,9 +144,14 @@ describe('CutPage source guards', () => {
 
   it('refreshes PDF template options when the job or group template selector opens', () => {
     expect(source).toContain('refreshCutConfigOnPdfTemplateOpen');
+    expect(source).toContain('subscribeCutPdfTemplatesChanged');
     expect(source.match(/onDropdownVisibleChange=\{refreshCutConfigOnPdfTemplateOpen\}/g)).toHaveLength(2);
     expect(source).toContain('data-testid="pdf-template-select-job"');
     expect(source).toContain('data-testid={`pdf-template-select-${group.cutGroupId}`}');
+    expect(pdfTemplateEventsSource).toContain('notifyCutPdfTemplatesChanged');
+    expect(pdfTemplateEventsSource).toContain('CustomEvent');
+    expect(pdfTemplateEventsSource).toContain('BroadcastChannel');
+    expect(pdfTemplateEventsSource).toContain('CUT_PDF_TEMPLATE_CHANGED_STORAGE_KEY');
   });
 
   it('loads the cut film filter as unique Select options under the current date criteria', () => {

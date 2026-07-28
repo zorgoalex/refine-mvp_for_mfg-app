@@ -51,6 +51,7 @@ import {
   type CutPdfTemplate,
   type CutRenderPreset,
 } from '../../../api/cutConfigApi';
+import { notifyCutPdfTemplatesChanged } from '../../../api/cutPdfTemplateEvents';
 import type { LabelCustomExpressionNode, LabelFieldCatalogItem } from '../../../api/types/labelsApi.types';
 import { ApiError } from '../../../api/httpClient';
 import { can } from '../../../utils/permissions';
@@ -181,6 +182,7 @@ export const CutConfigTab: React.FC = () => {
       ).slice().sort((a, b) => a.code.localeCompare(b.code));
       return { ...prev, pdfTemplates };
     });
+    notifyCutPdfTemplatesChanged();
   }, []);
 
   const saveEligibility = useCallback(async () => {
@@ -599,6 +601,8 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   const [draggingField, setDraggingField] = useState<PdfFieldCatalogItem | null>(null);
   const [showAllBounds, setShowAllBounds] = useState(false);
   const [layoutMode, setLayoutMode] = useState<PdfTemplateEditorLayoutMode>('standard');
+  const autoPublishingDraftCodesRef = useRef<Set<string>>(new Set());
+  const templateCodes = useMemo(() => new Set(templates.map((template) => template.code)), [templates]);
   const wideCanvas = layoutMode === 'wide';
   const rightAccordionLayout = layoutMode === 'rightAccordion';
   const canvasFillsColumn = wideCanvas || rightAccordionLayout;
@@ -774,19 +778,52 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     [selected, updateSelected],
   );
 
-  const copyTemplate = useCallback(() => {
-    if (!selected) return;
-    const code = makePdfTemplateCopyCode(selected.code);
-    const copy = {
-      ...selected,
-      code,
-      name: makePdfTemplateCopyName(selected.name),
-      elements: selected.elements.map((element, index) => ({ ...element, id: `${element.id}-copy-${index}` })),
-    };
-    setDrafts((prev) => [...prev, copy]);
-    setSelectedCode(code);
-    setSelectedElementId(copy.elements[0]?.id ?? null);
-  }, [selected]);
+  const publishDraftAsTemplate = useCallback(
+    async (
+      draft: PdfTemplateDraft,
+      options: { code?: string; name?: string; select?: boolean; successMessage?: string } = {},
+    ): Promise<CutPdfTemplate | null> => {
+      const templateName = (options.name ?? draft.name).trim();
+      if (!templateName) {
+        message.error('Укажите название шаблона PDF');
+        return null;
+      }
+      const normalizedDraft = normalizePdfDraft({
+        ...draft,
+        code: options.code ?? draft.code,
+        name: templateName,
+      });
+      const layout = pdfDraftToLayout(normalizedDraft);
+      setSavingDraft(true);
+      try {
+        const created = await cutConfigApi.createPdfTemplate({
+          code: normalizedDraft.code,
+          name: templateName,
+          layout,
+          isActive: true,
+        });
+        const createdDraft = pdfTemplateToDraft(created);
+        setDrafts((prev) => {
+          const next = prev.filter((item) => item.code !== draft.code && item.code !== created.code);
+          return [...next, createdDraft];
+        });
+        if (options.select !== false) {
+          setSelectedCode(created.code);
+          setSelectedElementId(createdDraft.elements[0]?.id ?? null);
+        }
+        clearStoredPdfTemplateDrafts();
+        onTemplateSaved(created);
+        message.success(options.successMessage ?? 'Шаблон PDF создан');
+        return created;
+      } catch (error) {
+        message.error(formatPdfTemplateSaveError(error));
+        return null;
+      } finally {
+        setSavingDraft(false);
+      }
+    },
+    [onTemplateSaved],
+  );
 
   const saveTemplateAsCopy = useCallback(async () => {
     if (!selected) return;
@@ -802,27 +839,19 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
       name: templateName,
       elements: selected.elements.map((element, index) => ({ ...element, id: `${element.id}-copy-${index}` })),
     });
-    const layout = pdfDraftToLayout(copy);
-    setSavingDraft(true);
-    try {
-      const created = await cutConfigApi.createPdfTemplate({
-        code,
-        name: templateName,
-        layout,
-        isActive: true,
-      });
-      const draft = pdfTemplateToDraft(created);
-      setDrafts((prev) => [...prev.filter((item) => item.code !== created.code), draft]);
-      setSelectedCode(created.code);
-      setSelectedElementId(draft.elements[0]?.id ?? null);
-      onTemplateSaved(created);
-      message.success('Шаблон PDF создан');
-    } catch (error) {
-      message.error(formatPdfTemplateSaveError(error));
-    } finally {
-      setSavingDraft(false);
-    }
-  }, [onTemplateSaved, selected]);
+    await publishDraftAsTemplate(copy, { code, name: templateName });
+  }, [publishDraftAsTemplate, selected]);
+
+  useEffect(() => {
+    if (!canManage || savingDraft) return;
+    const localDraft = drafts.find((draft) => !templateCodes.has(draft.code) && !autoPublishingDraftCodesRef.current.has(draft.code));
+    if (!localDraft) return;
+    autoPublishingDraftCodesRef.current.add(localDraft.code);
+    void publishDraftAsTemplate(localDraft, {
+      select: selectedCode === localDraft.code,
+      successMessage: `Шаблон PDF «${localDraft.name}» опубликован`,
+    });
+  }, [canManage, drafts, publishDraftAsTemplate, savingDraft, selectedCode, templateCodes]);
 
   const saveDrafts = useCallback(async () => {
     if (!selected) return;
@@ -835,23 +864,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     const template = templates.find((item) => item.code === selected.code);
     const layout = pdfDraftToLayout(normalizedSelected);
     if (!template) {
-      setSavingDraft(true);
-      try {
-        const created = await cutConfigApi.createPdfTemplate({
-          code: normalizedSelected.code,
-          name: templateName,
-          layout,
-          isActive: true,
-        });
-        setDrafts((prev) => prev.map((draft) => (draft.code === selected.code ? pdfTemplateToDraft(created) : draft)));
-        setSelectedCode(created.code);
-        onTemplateSaved(created);
-        message.success('Шаблон PDF создан');
-      } catch (error) {
-        message.error(formatPdfTemplateSaveError(error));
-      } finally {
-        setSavingDraft(false);
-      }
+      await publishDraftAsTemplate(normalizedSelected, { name: templateName });
       return;
     }
     setSavingDraft(true);
@@ -869,7 +882,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     } finally {
       setSavingDraft(false);
     }
-  }, [onTemplateSaved, selected, templates]);
+  }, [publishDraftAsTemplate, selected, templates]);
 
   const addCustomField = useCallback(() => {
     if (!selected) return;
@@ -1147,7 +1160,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         <Button icon={<SaveOutlined />} type="primary" disabled={!canManage || !selectedNameValid} loading={savingDraft} onClick={() => void saveDrafts()}>
           Сохранить
         </Button>
-        <Button icon={<CopyOutlined />} disabled={!canManage} onClick={copyTemplate}>
+        <Button icon={<CopyOutlined />} disabled={!canManage || savingDraft || !selectedNameValid} loading={savingDraft} onClick={() => void saveTemplateAsCopy()}>
           Создать копию
         </Button>
         <Button disabled={!canManage || savingDraft || !selectedNameValid} loading={savingDraft} onClick={() => void saveTemplateAsCopy()}>
@@ -1973,6 +1986,15 @@ function loadPdfTemplateDrafts(templates: CutPdfTemplate[]): PdfTemplateDraft[] 
     }
   }
   return mergePdfTemplateDrafts([], templates);
+}
+
+function clearStoredPdfTemplateDrafts(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(PDF_TEMPLATE_DRAFTS_KEY);
+  } catch {
+    // Storage may be unavailable; backend templates remain authoritative.
+  }
 }
 
 function mergePdfTemplateDrafts(drafts: PdfTemplateDraft[], templates: CutPdfTemplate[]): PdfTemplateDraft[] {
