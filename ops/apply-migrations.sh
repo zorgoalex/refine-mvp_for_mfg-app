@@ -227,6 +227,7 @@ production-go-live runbook), then clear with:
 q_col()   { echo "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='$1' AND column_name='$2');"; }
 q_tbl()   { echo "SELECT to_regclass('public.$1') IS NOT NULL;"; }
 q_con()   { echo "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='$1');"; }
+q_con_on(){ echo "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='$2' AND conrelid='public.$1'::regclass);"; }
 q_idx()   { echo "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='$1');"; }
 q_trg()   { echo "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='$1');"; }
 q_con_def() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)='$2' FROM pg_constraint WHERE conname='$1'), false);"; }
@@ -684,9 +685,54 @@ probe_file() {
                      "$(q_tbl notification_channel_link_tokens)" \
                      "$(q_tbl notification_channel_deliveries)" \
                      "$(q_tbl telegram_notification_webhook_updates)" \
+                     "$(q_col notification_channel_deliveries notification_channel_delivery_id)" \
+                     "$(q_col notification_channel_deliveries notification_rule_id)" \
+                     "$(q_col notification_channel_deliveries outbox_event_id)" \
+                     "$(q_col notification_channel_deliveries user_id)" \
+                     "$(q_col notification_channel_deliveries channel)" \
+                     "$(q_col notification_channel_deliveries level)" \
+                     "$(q_col notification_channel_deliveries title)" \
+                     "$(q_col notification_channel_deliveries message)" \
+                     "$(q_col notification_channel_deliveries entity_type)" \
+                     "$(q_col notification_channel_deliveries entity_id)" \
+                     "$(q_col notification_channel_deliveries source_type)" \
+                     "$(q_col notification_channel_deliveries source_id)" \
+                     "$(q_col notification_channel_deliveries idempotency_key)" \
+                     "$(q_col notification_channel_deliveries status)" \
+                     "$(q_col notification_channel_deliveries attempts)" \
+                     "$(q_col notification_channel_deliveries next_attempt_at)" \
+                     "$(q_col notification_channel_deliveries locked_at)" \
+                     "$(q_col notification_channel_deliveries locked_by)" \
+                     "$(q_col notification_channel_deliveries send_started_at)" \
+                     "$(q_col notification_channel_deliveries delivered_at)" \
+                     "$(q_col notification_channel_deliveries external_message_id)" \
+                     "$(q_col notification_channel_deliveries last_error_code)" \
+                     "$(q_col notification_channel_deliveries last_error_message)" \
+                     "$(q_col notification_channel_deliveries created_at)" \
+                     "$(q_col notification_channel_deliveries updated_at)" \
+                     "SELECT count(*) = 13
+                        FROM information_schema.columns
+                       WHERE table_schema='public'
+                         AND table_name='notification_channel_deliveries'
+                         AND column_name IN (
+                           'notification_channel_delivery_id', 'user_id', 'channel',
+                           'level', 'title', 'message', 'source_type', 'idempotency_key',
+                           'status', 'attempts', 'next_attempt_at', 'created_at', 'updated_at'
+                         )
+                         AND is_nullable='NO';" \
+                     "$(q_con_on notification_channel_deliveries notification_channel_deliveries_pkey)" \
+                     "$(q_con_on notification_channel_deliveries fk_notification_channel_delivery_rule)" \
+                     "$(q_con_on notification_channel_deliveries fk_notification_channel_delivery_outbox_event)" \
+                     "$(q_con_on notification_channel_deliveries fk_notification_channel_delivery_user)" \
+                     "$(q_con_on notification_channel_deliveries uq_notification_channel_delivery_idempotency)" \
+                     "$(q_con_on notification_channel_deliveries chk_notification_channel_delivery_channel)" \
+                     "$(q_con_on notification_channel_deliveries chk_notification_channel_delivery_level)" \
+                     "$(q_con_on notification_channel_deliveries chk_notification_channel_delivery_status)" \
+                     "$(q_con_on notification_channel_deliveries chk_notification_channel_delivery_attempts)" \
                      "$(q_idx uq_notification_channel_link_token_active)" \
                      "$(q_idx idx_notification_channel_deliveries_pending)" \
-                     "$(q_con chk_notification_channel_delivery_status)" ;;
+                     "$(q_idx idx_notification_channel_deliveries_processing)" \
+                     "$(q_idx idx_notification_channel_deliveries_user)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

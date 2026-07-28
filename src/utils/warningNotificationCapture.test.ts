@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { formatWarningText } from './warningNotificationCapture';
+import {
+  formatWarningText,
+  WARNING_MARKER_SELECTOR,
+  WARNING_OBSERVER_OPTIONS,
+} from './warningNotificationCapture';
 
 describe('warning notification capture helpers', () => {
   it('joins warning title and description', () => {
@@ -16,5 +20,14 @@ describe('warning notification capture helpers', () => {
     expect(formatWarningText([], '  Данные   заказа устарели ')).toBe(
       'Данные заказа устарели',
     );
+  });
+
+  it('captures Ant Design status warnings and class-only transitions', () => {
+    expect(WARNING_MARKER_SELECTOR).toContain('[class*="-status-warning"]');
+    expect(WARNING_OBSERVER_OPTIONS).toMatchObject({
+      attributes: true,
+      attributeFilter: ['class'],
+      subtree: true,
+    });
   });
 });

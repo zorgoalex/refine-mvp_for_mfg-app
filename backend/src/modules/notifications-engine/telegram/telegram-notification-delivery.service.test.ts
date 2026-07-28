@@ -52,6 +52,50 @@ describe('TelegramNotificationDeliveryService', () => {
     );
     expect(unknownRepository.rescheduleRateLimited).not.toHaveBeenCalled();
   });
+
+  it('retries failures before send without calling Telegram', async () => {
+    const repository = fakeRepository({ destination: '123' });
+    repository.findDestination.mockRejectedValueOnce(new Error('database unavailable'));
+    const botApi = { sendMessage: vi.fn() };
+    const service = createService(repository, botApi);
+
+    await expect(service.processBatchOnce()).resolves.toMatchObject({
+      claimed: 1,
+      rescheduled: 1,
+      unknown: 0,
+    });
+    expect(botApi.sendMessage).not.toHaveBeenCalled();
+    expect(repository.markSendStarted).not.toHaveBeenCalled();
+    expect(repository.reschedulePreSendFailure).toHaveBeenCalledWith(
+      'delivery-1',
+      expect.any(Date),
+      'TELEGRAM_PRE_SEND_INTERNAL_FAILURE',
+      expect.any(String),
+    );
+    expect(repository.markUnknown).not.toHaveBeenCalled();
+  });
+
+  it('marks failures after persisted send start as unknown', async () => {
+    const repository = fakeRepository({ destination: '123' });
+    const service = createService(repository, {
+      sendMessage: vi.fn(async () => {
+        throw new Error('connection reset');
+      }),
+    });
+
+    await expect(service.processBatchOnce()).resolves.toMatchObject({
+      claimed: 1,
+      rescheduled: 0,
+      unknown: 1,
+    });
+    expect(repository.markSendStarted).toHaveBeenCalledWith('delivery-1');
+    expect(repository.reschedulePreSendFailure).not.toHaveBeenCalled();
+    expect(repository.markUnknown).toHaveBeenCalledWith(
+      'delivery-1',
+      'TELEGRAM_DELIVERY_INTERNAL_UNCERTAIN',
+      expect.any(String),
+    );
+  });
 });
 
 function createService(
@@ -84,7 +128,11 @@ function createService(
 
 function fakeRepository(input: { destination: string | null }) {
   return {
-    markStaleProcessingUnknown: vi.fn(async () => 0),
+    recoverStaleProcessing: vi.fn(async () => ({
+      rescheduled: 0,
+      failed: 0,
+      unknown: 0,
+    })),
     claimPending: vi.fn(async () => [
       {
         deliveryId: 'delivery-1',
@@ -95,10 +143,12 @@ function fakeRepository(input: { destination: string | null }) {
       },
     ]),
     findDestination: vi.fn(async () => input.destination),
+    markSendStarted: vi.fn(async () => true),
     markDelivered: vi.fn(async () => undefined),
     markSkipped: vi.fn(async () => undefined),
     markFailed: vi.fn(async () => undefined),
     markUnknown: vi.fn(async () => undefined),
     rescheduleRateLimited: vi.fn(async () => undefined),
+    reschedulePreSendFailure: vi.fn(async () => undefined),
   };
 }

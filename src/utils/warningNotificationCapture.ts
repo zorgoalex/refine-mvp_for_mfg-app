@@ -1,11 +1,20 @@
-const WARNING_MARKER_SELECTOR = [
+export const WARNING_MARKER_SELECTOR = [
   '.ant-alert-warning',
   '.ant-message-warning',
   '.ant-modal-confirm-warning',
   '.ant-notification-notice-icon-warning',
   '.ant-form-item-explain-warning',
   '.ant-typography-warning',
+  '[class*="-status-warning"]',
 ].join(',');
+
+export const WARNING_OBSERVER_OPTIONS: MutationObserverInit = {
+  childList: true,
+  subtree: true,
+  characterData: true,
+  attributes: true,
+  attributeFilter: ['class'],
+};
 
 type WarningListener = (message: string) => void;
 
@@ -49,14 +58,14 @@ export function observeUserWarnings(
         scan(mutation.target);
         continue;
       }
+      if (mutation.type === 'attributes') {
+        scan(mutation.target);
+        continue;
+      }
       mutation.addedNodes.forEach(scan);
     }
   });
-  observer.observe(root, {
-    childList: true,
-    subtree: true,
-    characterData: true,
-  });
+  observer.observe(root, WARNING_OBSERVER_OPTIONS);
 
   return () => observer.disconnect();
 }

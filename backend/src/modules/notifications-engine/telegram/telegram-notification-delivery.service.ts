@@ -12,6 +12,8 @@ export interface TelegramDeliverySummary {
   unknown: number;
   rescheduled: number;
   staleMarkedUnknown: number;
+  staleRescheduled: number;
+  staleFailed: number;
 }
 
 export class TelegramNotificationDeliveryService {
@@ -34,12 +36,18 @@ export class TelegramNotificationDeliveryService {
       unknown: 0,
       rescheduled: 0,
       staleMarkedUnknown: 0,
+      staleRescheduled: 0,
+      staleFailed: 0,
     };
     if (!config.enabled || !config.botToken) return summary;
 
-    summary.staleMarkedUnknown = await this.repository.markStaleProcessingUnknown(
+    const stale = await this.repository.recoverStaleProcessing(
       new Date(Date.now() - config.relayStaleLockMs),
+      config.relayMaxAttempts,
     );
+    summary.staleMarkedUnknown = stale.unknown;
+    summary.staleRescheduled = stale.rescheduled;
+    summary.staleFailed = stale.failed;
     const deliveries = await this.repository.claimPending({
       workerId: config.relayWorkerId,
       batchSize: config.relayBatchSize,
@@ -48,6 +56,7 @@ export class TelegramNotificationDeliveryService {
     summary.claimed = deliveries.length;
 
     for (const delivery of deliveries) {
+      let sendStarted = false;
       try {
         const destination = await this.repository.findDestination(delivery.userId);
         if (!destination) {
@@ -60,6 +69,10 @@ export class TelegramNotificationDeliveryService {
           continue;
         }
 
+        sendStarted = await this.repository.markSendStarted(delivery.deliveryId);
+        if (!sendStarted) {
+          throw new Error('Delivery claim was lost before Telegram send');
+        }
         const result = await this.botApi.sendMessage(
           destination,
           formatTelegramNotification(delivery.title, delivery.message),
@@ -94,12 +107,29 @@ export class TelegramNotificationDeliveryService {
           summary.unknown += 1;
         }
       } catch (error) {
-        await this.repository.markUnknown(
-          delivery.deliveryId,
-          'TELEGRAM_DELIVERY_INTERNAL_UNCERTAIN',
-          'Delivery outcome is unknown after an internal failure',
-        );
-        summary.unknown += 1;
+        if (!sendStarted && delivery.attempts < config.relayMaxAttempts) {
+          await this.repository.reschedulePreSendFailure(
+            delivery.deliveryId,
+            new Date(Date.now() + preSendRetryDelayMs(delivery.attempts)),
+            'TELEGRAM_PRE_SEND_INTERNAL_FAILURE',
+            'Internal failure before Telegram send; delivery scheduled for retry',
+          );
+          summary.rescheduled += 1;
+        } else if (!sendStarted) {
+          await this.repository.markFailed(
+            delivery.deliveryId,
+            'TELEGRAM_PRE_SEND_RETRY_EXHAUSTED',
+            'Internal failure before Telegram send; retry limit exhausted',
+          );
+          summary.failed += 1;
+        } else {
+          await this.repository.markUnknown(
+            delivery.deliveryId,
+            'TELEGRAM_DELIVERY_INTERNAL_UNCERTAIN',
+            'Delivery outcome is unknown after an internal failure',
+          );
+          summary.unknown += 1;
+        }
         this.logger.error(
           redactLogFields({
             event: 'telegram_notification_delivery_failed',
@@ -111,4 +141,8 @@ export class TelegramNotificationDeliveryService {
     }
     return summary;
   }
+}
+
+function preSendRetryDelayMs(attempts: number): number {
+  return Math.min(5 * 60_000, 5_000 * 2 ** Math.max(0, attempts - 1));
 }

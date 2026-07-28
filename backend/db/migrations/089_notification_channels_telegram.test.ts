@@ -19,9 +19,18 @@ describe('089 notification channels and Telegram migration', () => {
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS notification_channel_bindings');
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS notification_channel_link_tokens');
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS notification_channel_deliveries');
-    expect(sql).toContain('idempotency_key TEXT NOT NULL UNIQUE');
+    expect(sql).toContain('idempotency_key TEXT NOT NULL');
+    expect(sql).toContain('ADD CONSTRAINT uq_notification_channel_delivery_idempotency');
+    expect(sql).toContain('UNIQUE (idempotency_key)');
     expect(sql).toContain("status IN ('pending', 'processing', 'delivered', 'skipped', 'failed', 'unknown')");
     expect(sql).not.toContain('FOR UPDATE');
+  });
+
+  it('repairs partial delivery tables and persists the send boundary', () => {
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS idempotency_key TEXT');
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS send_started_at TIMESTAMPTZ');
+    expect(sql).toContain('ALTER COLUMN idempotency_key SET NOT NULL');
+    expect(sql).toContain('ADD CONSTRAINT fk_notification_channel_delivery_user');
   });
 
   it('deduplicates Telegram webhook update replays', () => {
@@ -35,5 +44,17 @@ describe('089 notification channels and Telegram migration', () => {
     expect(runner).toContain('$(q_tbl notification_channel_bindings)');
     expect(runner).toContain('$(q_tbl notification_channel_deliveries)');
     expect(runner).toContain('$(q_tbl telegram_notification_webhook_updates)');
+    expect(runner).toContain(
+      '$(q_col notification_channel_deliveries idempotency_key)',
+    );
+    expect(runner).toContain(
+      '$(q_col notification_channel_deliveries send_started_at)',
+    );
+    expect(runner).toContain(
+      '$(q_con_on notification_channel_deliveries uq_notification_channel_delivery_idempotency)',
+    );
+    expect(runner).toContain(
+      '$(q_con_on notification_channel_deliveries fk_notification_channel_delivery_user)',
+    );
   });
 });

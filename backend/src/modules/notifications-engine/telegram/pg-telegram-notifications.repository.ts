@@ -16,6 +16,12 @@ export interface TelegramDelivery {
   attempts: number;
 }
 
+export interface TelegramStaleRecoverySummary {
+  rescheduled: number;
+  failed: number;
+  unknown: number;
+}
+
 interface BindingRow extends QueryResultRow {
   user_id: string;
   destination: string;
@@ -29,6 +35,12 @@ interface DeliveryRow extends QueryResultRow {
   title: string;
   message: string;
   attempts: number;
+}
+
+interface StaleRecoveryRow extends QueryResultRow {
+  rescheduled: string | number;
+  failed: string | number;
+  unknown: string | number;
 }
 
 export class PgTelegramNotificationsRepository {
@@ -190,23 +202,61 @@ export class PgTelegramNotificationsRepository {
     return Boolean(result.rows[0]);
   }
 
-  async markStaleProcessingUnknown(staleBefore: Date): Promise<number> {
-    const result = await this.database.query(
+  async recoverStaleProcessing(
+    staleBefore: Date,
+    maxAttempts: number,
+  ): Promise<TelegramStaleRecoverySummary> {
+    const result = await this.database.query<StaleRecoveryRow>(
       `
-      UPDATE notification_channel_deliveries
-      SET status = 'unknown',
-          last_error_code = 'STALE_PROCESSING_OUTCOME_UNKNOWN',
-          last_error_message = 'Worker stopped after send may have started; automatic resend disabled',
-          locked_at = NULL,
-          locked_by = NULL,
-          updated_at = now()
-      WHERE channel = 'telegram'
-        AND status = 'processing'
-        AND locked_at < $1
+      WITH recovered AS (
+        UPDATE notification_channel_deliveries
+        SET status = CASE
+              WHEN send_started_at IS NOT NULL THEN 'unknown'
+              WHEN attempts >= $2 THEN 'failed'
+              ELSE 'pending'
+            END,
+            next_attempt_at = CASE
+              WHEN send_started_at IS NULL AND attempts < $2 THEN now()
+              ELSE next_attempt_at
+            END,
+            last_error_code = CASE
+              WHEN send_started_at IS NOT NULL THEN 'STALE_PROCESSING_OUTCOME_UNKNOWN'
+              WHEN attempts >= $2 THEN 'TELEGRAM_PRE_SEND_RETRY_EXHAUSTED'
+              ELSE 'TELEGRAM_PRE_SEND_STALE_RETRY'
+            END,
+            last_error_message = CASE
+              WHEN send_started_at IS NOT NULL
+                THEN 'Worker stopped after send may have started; automatic resend disabled'
+              WHEN attempts >= $2
+                THEN 'Worker stopped before send and retry limit was exhausted'
+              ELSE 'Worker stopped before send; delivery returned to pending'
+            END,
+            send_started_at = CASE
+              WHEN send_started_at IS NULL AND attempts < $2 THEN NULL
+              ELSE send_started_at
+            END,
+            locked_at = NULL,
+            locked_by = NULL,
+            updated_at = now()
+        WHERE channel = 'telegram'
+          AND status = 'processing'
+          AND locked_at < $1
+        RETURNING status
+      )
+      SELECT
+        count(*) FILTER (WHERE status = 'pending') AS rescheduled,
+        count(*) FILTER (WHERE status = 'failed') AS failed,
+        count(*) FILTER (WHERE status = 'unknown') AS unknown
+      FROM recovered
       `,
-      [staleBefore.toISOString()],
+      [staleBefore.toISOString(), maxAttempts],
     );
-    return result.rowCount ?? 0;
+    const row = result.rows[0];
+    return {
+      rescheduled: Number(row?.rescheduled ?? 0),
+      failed: Number(row?.failed ?? 0),
+      unknown: Number(row?.unknown ?? 0),
+    };
   }
 
   async claimPending(input: {
@@ -232,6 +282,7 @@ export class PgTelegramNotificationsRepository {
           attempts = delivery.attempts + 1,
           locked_at = now(),
           locked_by = $3,
+          send_started_at = NULL,
           updated_at = now()
       FROM candidates
       WHERE delivery.notification_channel_delivery_id = candidates.notification_channel_delivery_id
@@ -254,6 +305,22 @@ export class PgTelegramNotificationsRepository {
 
   async findDestination(userId: string): Promise<string | null> {
     return (await findBinding(this.database, userId))?.destination ?? null;
+  }
+
+  async markSendStarted(deliveryId: string): Promise<boolean> {
+    const result = await this.database.query(
+      `
+      UPDATE notification_channel_deliveries
+      SET send_started_at = now(),
+          updated_at = now()
+      WHERE notification_channel_delivery_id = $1
+        AND status = 'processing'
+        AND send_started_at IS NULL
+      RETURNING notification_channel_delivery_id
+      `,
+      [deliveryId],
+    );
+    return Boolean(result.rows[0]);
   }
 
   async markDelivered(deliveryId: string, externalMessageId: string): Promise<void> {
@@ -305,10 +372,36 @@ export class PgTelegramNotificationsRepository {
           next_attempt_at = $2,
           locked_at = NULL,
           locked_by = NULL,
+          send_started_at = NULL,
           last_error_code = $3,
           last_error_message = $4,
           updated_at = now()
       WHERE notification_channel_delivery_id = $1 AND status = 'processing'
+      `,
+      [deliveryId, retryAt.toISOString(), code, message.slice(0, 500)],
+    );
+  }
+
+  async reschedulePreSendFailure(
+    deliveryId: string,
+    retryAt: Date,
+    code: string,
+    message: string,
+  ): Promise<void> {
+    await this.database.query(
+      `
+      UPDATE notification_channel_deliveries
+      SET status = 'pending',
+          next_attempt_at = $2,
+          locked_at = NULL,
+          locked_by = NULL,
+          send_started_at = NULL,
+          last_error_code = $3,
+          last_error_message = $4,
+          updated_at = now()
+      WHERE notification_channel_delivery_id = $1
+        AND status = 'processing'
+        AND send_started_at IS NULL
       `,
       [deliveryId, retryAt.toISOString(), code, message.slice(0, 500)],
     );
