@@ -91,10 +91,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cutApi.fetchJobPdf');
     expect(page).toContain("CNC_BATH_DEFAULT_PDF_TEMPLATE = 'bath_profiles'");
     expect(page).toContain('Шаблон PDF ванны');
-    expect(page).toContain('data-testid="cnc-bath-pdf-preview-frame"');
+    expect(page).toContain("import('pdfjs-dist')");
+    expect(page).toContain('renderCncPdfPagePreviews(result.blob)');
+    expect(page).toContain('data-testid="cnc-bath-pdf-preview-pages"');
+    expect(page).not.toContain('<iframe');
     expect(page).toContain('PrinterOutlined');
     expect(page).toContain('DownloadOutlined');
-    expect(css).toContain('.cnc-bath-card__pdf-frame');
+    expect(css).toContain('.cnc-bath-card__pdf-pages');
+    expect(css).toContain('.cnc-bath-card__pdf-page-image');
     expect(css).toContain('.cnc-bath-card__ready-icon--pending');
   });
 

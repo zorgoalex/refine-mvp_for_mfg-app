@@ -96,10 +96,12 @@ const CNC_BATH_PDF_TEMPLATE_OPTIONS = [
   { value: CNC_BATH_DEFAULT_PDF_TEMPLATE, label: 'Профили ванн' },
   { value: 'standard', label: 'Стандартный' },
 ];
+const CNC_PDF_WORKER_SRC = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
 type CncRelationTarget = { kind: 'packet'; id: string } | { kind: 'bath'; id: string };
 type CncRelationCardState = 'normal' | 'active' | 'related' | 'dimmed';
+type CncPdfjsModule = typeof import('pdfjs-dist');
 
 const STATUS_BOARD_CARD_DISPLAY_OPTIONS: Array<{
   label: string;
@@ -1478,23 +1480,36 @@ interface CncBathPdfPreviewProps {
   bath: CncTelegramBathCard;
 }
 
+interface CncBathPdfPagePreview {
+  pageNumber: number;
+  url: string;
+}
+
 const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const requestSeqRef = useRef(0);
+  const pagePreviewUrlsRef = useRef<string[]>([]);
   const [open, setOpen] = useState(false);
   const [template, setTemplate] = useState(CNC_BATH_DEFAULT_PDF_TEMPLATE);
   const [templateOptions, setTemplateOptions] = useState(CNC_BATH_PDF_TEMPLATE_OPTIONS);
   const [url, setUrl] = useState<string | null>(null);
+  const [pagePreviews, setPagePreviews] = useState<CncBathPdfPagePreview[]>([]);
   const [blob, setBlob] = useState<Blob | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const revokePreviewUrl = useCallback(() => {
     setUrl((current) => {
       if (current) URL.revokeObjectURL(current);
       return null;
     });
+  }, []);
+
+  const revokePagePreviews = useCallback(() => {
+    pagePreviewUrlsRef.current.forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
+    pagePreviewUrlsRef.current = [];
+    setPagePreviews([]);
   }, []);
 
   useEffect(() => {
@@ -1514,13 +1529,16 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     const requestSeq = requestSeqRef.current + 1;
     requestSeqRef.current = requestSeq;
     setLoading(true);
     setError(null);
+    setPreviewError(null);
     setBlob(null);
     setFileName(null);
     revokePreviewUrl();
+    revokePagePreviews();
 
     pollPdf(
       () =>
@@ -1535,29 +1553,56 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
         ),
       { maxAttempts: 12, delayMs: 1500 },
     )
-      .then((result) => {
-        if (requestSeqRef.current !== requestSeq) return;
+      .then(async (result) => {
+        if (cancelled || requestSeqRef.current !== requestSeq) return;
         const nextUrl = URL.createObjectURL(result.blob);
         setUrl(nextUrl);
         setBlob(result.blob);
         setFileName(result.fileName ?? `bath-cut-${bath.cutNumber}.pdf`);
+
+        try {
+          const nextPagePreviews = await renderCncPdfPagePreviews(result.blob);
+          if (cancelled || requestSeqRef.current !== requestSeq) {
+            revokeCncPdfPagePreviewUrls(nextPagePreviews);
+            return;
+          }
+          pagePreviewUrlsRef.current = nextPagePreviews.map((preview) => preview.url);
+          setPagePreviews(nextPagePreviews);
+        } catch (renderError) {
+          if (!cancelled && requestSeqRef.current === requestSeq) {
+            setPreviewError(errorMessage(renderError, 'Не удалось показать предпросмотр PDF'));
+          }
+        }
       })
       .catch((previewError: unknown) => {
-        if (requestSeqRef.current === requestSeq) {
+        if (!cancelled && requestSeqRef.current === requestSeq) {
           setError(errorMessage(previewError, 'Не удалось загрузить PDF'));
         }
       })
       .finally(() => {
-        if (requestSeqRef.current === requestSeq) {
+        if (!cancelled && requestSeqRef.current === requestSeq) {
           setLoading(false);
         }
       });
-  }, [bath.cutJobId, bath.cutNumber, bath.resultNo, open, revokePreviewUrl, template]);
+    return () => {
+      cancelled = true;
+      requestSeqRef.current += 1;
+    };
+  }, [
+    bath.cutJobId,
+    bath.cutNumber,
+    bath.resultNo,
+    open,
+    revokePagePreviews,
+    revokePreviewUrl,
+    template,
+  ]);
 
   useEffect(() => () => {
     requestSeqRef.current += 1;
+    revokePagePreviews();
     revokePreviewUrl();
-  }, [revokePreviewUrl]);
+  }, [revokePagePreviews, revokePreviewUrl]);
 
   const downloadPdf = useCallback(() => {
     if (!blob) return;
@@ -1565,14 +1610,18 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
   }, [bath.cutNumber, blob, fileName]);
 
   const printPdf = useCallback(() => {
-    const frameWindow = iframeRef.current?.contentWindow;
-    if (!frameWindow) {
+    if (!url) {
       message.warning('PDF ещё не готов для печати');
       return;
     }
-    frameWindow.focus();
-    frameWindow.print();
-  }, []);
+    const printWindow = window.open(url, '_blank');
+    if (!printWindow) {
+      message.warning('Браузер заблокировал окно PDF. Разрешите всплывающие окна.');
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.focus();
+  }, [url]);
 
   return (
     <Collapse
@@ -1607,13 +1656,13 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
                 aria-label="Скачать PDF ванны"
               />
             </Tooltip>
-            <Tooltip title="Печать PDF">
+            <Tooltip title="Открыть PDF для печати">
               <Button
                 size="small"
                 icon={<PrinterOutlined />}
                 disabled={!url}
                 onClick={printPdf}
-                aria-label="Печать PDF ванны"
+                aria-label="Открыть PDF ванны для печати"
               />
             </Tooltip>
           </div>
@@ -1623,14 +1672,26 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
             </div>
           )}
           {error && <Alert type="warning" showIcon message={error} />}
-          {url && (
-            <iframe
-              ref={iframeRef}
-              className="cnc-bath-card__pdf-frame"
-              src={url}
-              title={`PDF ${bath.cutJobName} ${bath.cutNumber}`}
-              data-testid="cnc-bath-pdf-preview-frame"
-            />
+          {previewError && !error && (
+            <Alert type="warning" showIcon message={previewError} />
+          )}
+          {pagePreviews.length > 0 && (
+            <div
+              className="cnc-bath-card__pdf-pages"
+              aria-label={`PDF ${bath.cutJobName} ${bath.cutNumber}`}
+              data-testid="cnc-bath-pdf-preview-pages"
+            >
+              {pagePreviews.map((preview) => (
+                <figure className="cnc-bath-card__pdf-page" key={preview.pageNumber}>
+                  <figcaption>Страница {preview.pageNumber}</figcaption>
+                  <img
+                    className="cnc-bath-card__pdf-page-image"
+                    src={preview.url}
+                    alt={`PDF ${bath.cutJobName} ${bath.cutNumber}, страница ${preview.pageNumber}`}
+                  />
+                </figure>
+              ))}
+            </div>
           )}
         </div>
       </Collapse.Panel>
@@ -2328,6 +2389,74 @@ function cncSheetPreviewRotate90(
 
 type CncBathPdfTemplateOption = { value: string; label: string };
 let cncBathPdfTemplateOptionsPromise: Promise<CncBathPdfTemplateOption[]> | null = null;
+let cncPdfjsPromise: Promise<CncPdfjsModule> | null = null;
+let cncPdfjsWorkerConfigured = false;
+
+async function loadCncPdfjs(): Promise<CncPdfjsModule> {
+  if (!cncPdfjsPromise) {
+    cncPdfjsPromise = import('pdfjs-dist');
+  }
+  const pdfjsLib = await cncPdfjsPromise;
+  if (!cncPdfjsWorkerConfigured) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = CNC_PDF_WORKER_SRC;
+    cncPdfjsWorkerConfigured = true;
+  }
+  return pdfjsLib;
+}
+
+async function renderCncPdfPagePreviews(blob: Blob): Promise<CncBathPdfPagePreview[]> {
+  const pdfjsLib = await loadCncPdfjs();
+  const pdf = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise;
+  const previews: CncBathPdfPagePreview[] = [];
+
+  try {
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1.35 });
+      const ratio = window.devicePixelRatio || 1;
+      const canvas = document.createElement('canvas');
+      const canvasContext = canvas.getContext('2d');
+      if (!canvasContext) throw new Error('Canvas недоступен для предпросмотра PDF');
+
+      canvas.width = Math.floor(viewport.width * ratio);
+      canvas.height = Math.floor(viewport.height * ratio);
+      await page.render({
+        canvasContext,
+        transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
+        viewport,
+      }).promise;
+
+      const imageBlob = await canvasToPngBlob(canvas);
+      previews.push({
+        pageNumber,
+        url: URL.createObjectURL(imageBlob),
+      });
+    }
+  } catch (error) {
+    revokeCncPdfPagePreviewUrls(previews);
+    throw error;
+  } finally {
+    await pdf.destroy();
+  }
+
+  return previews;
+}
+
+function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error('Не удалось подготовить изображение PDF'));
+      }
+    }, 'image/png');
+  });
+}
+
+function revokeCncPdfPagePreviewUrls(previews: CncBathPdfPagePreview[]): void {
+  previews.forEach((preview) => URL.revokeObjectURL(preview.url));
+}
 
 async function loadCncBathPdfTemplateOptions(): Promise<CncBathPdfTemplateOption[]> {
   if (!cncBathPdfTemplateOptionsPromise) {

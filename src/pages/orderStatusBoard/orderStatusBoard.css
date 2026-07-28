@@ -839,11 +839,30 @@
   background: var(--app-surface-muted);
 }
 
-.cnc-bath-card__pdf-frame {
+.cnc-bath-card__pdf-pages {
+  display: grid;
+  gap: 10px;
+}
+
+.cnc-bath-card__pdf-page {
+  min-width: 0;
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.cnc-bath-card__pdf-page figcaption {
+  color: var(--app-text-muted);
+  font-size: 11px;
+}
+
+.cnc-bath-card__pdf-page-image {
+  display: block;
   width: 100%;
-  min-height: 420px;
-  border: 1px solid var(--app-border-soft);
+  max-height: 520px;
+  object-fit: contain;
   border-radius: 6px;
+  outline: 1px solid rgba(0, 0, 0, 0.1);
   background: #fff;
 }
 
