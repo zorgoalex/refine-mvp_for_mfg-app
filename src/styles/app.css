@@ -1114,8 +1114,9 @@ html {
   vertical-align: middle;
 }
 
-.cut-jobs-table .cut-jobs-name-cell {
-  text-align: left;
+.cut-jobs-table .ant-table-tbody > tr > td.cut-jobs-name-cell,
+.cut-jobs-table .ant-table-thead > tr > th.cut-jobs-name-cell {
+  text-align: left !important;
 }
 
 .cut-jobs-table .cut-job-materials-cell {

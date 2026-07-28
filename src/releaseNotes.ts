@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-28",
+    title: "Раскрой: выравнивание названий заданий",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В списке заданий на раскрой значения в колонке «Название» прижаты к левому краю ячейки.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-28",
     title: "Доски статусов: мультифильтр и итоги в МДФ-работах",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

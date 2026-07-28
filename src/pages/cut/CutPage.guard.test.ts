@@ -409,6 +409,8 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain("title: 'Площадь, итого'");
     expect(source).toContain("title: 'Кол-во листов раскроя'");
     expect(source).toContain("className: 'cut-jobs-name-cell'");
+    expect(appCss).toContain('td.cut-jobs-name-cell');
+    expect(appCss).toContain('text-align: left !important');
     expect(source).toContain('width: 63');
     expect(source).toContain('width: 56');
     expect(source).toContain('width: 84');
