@@ -109,12 +109,18 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('shows CNC order totals directly on each card', () => {
     expect(page).toContain('buildCncOrderSummaries(packet.items)');
     expect(page).toContain('aria-label="Итоги по заказам"');
+    expect(page).toContain('<CncOrderSummaryLine');
+    expect(page).toContain('aria-label={`Открыть заказ ${summary.orderName}`}');
+    expect(page).toContain('onOpenOrder(orderId)');
     expect(page).toContain('summary.orderName');
+    expect(page).toContain('summary.orderId');
     expect(page).toContain('summary.positions');
     expect(page).toContain('summary.details');
+    expect(page).toContain('summary.orderId ??= item.orderId ?? item.matchOrderId ?? null');
     expect(css).toContain('.cnc-packet-card__summaries');
     expect(css).toContain('.cnc-packet-card__summary');
     expect(css).toContain('.cnc-packet-card__summary-order');
+    expect(css).toContain('.cnc-packet-card__summary-order.ant-btn');
     expect(css).toContain('color: #1677ff');
     expect(css).toContain('.cnc-packet-card__summary-meta');
     expect(css).toContain('font-weight: 400');

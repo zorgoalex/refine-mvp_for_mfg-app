@@ -943,6 +943,43 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   </div>
 );
 
+interface CncOrderSummaryLineProps {
+  summary: CncOrderSummary;
+  onOpenOrder: (orderId: number) => void;
+}
+
+const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
+  summary,
+  onOpenOrder,
+}) => {
+  const orderId = summary.orderId;
+
+  return (
+    <Typography.Text className="cnc-packet-card__summary">
+      {orderId !== null ? (
+        <Button
+          type="link"
+          className="cnc-packet-card__summary-order"
+          aria-label={`Открыть заказ ${summary.orderName}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenOrder(orderId);
+          }}
+        >
+          {summary.orderName}
+        </Button>
+      ) : (
+        <span className="cnc-packet-card__summary-order">
+          {summary.orderName}
+        </span>
+      )}
+      <span className="cnc-packet-card__summary-meta">
+        : {summary.positions} поз · {summary.details} дет.
+      </span>
+    </Typography.Text>
+  );
+};
+
 interface CncTelegramPacketCardProps {
   packet: CncTelegramPacket;
   relationState: CncRelationCardState;
@@ -977,17 +1014,11 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
         <div className="cnc-packet-card__title">
           <div className="cnc-packet-card__summaries" aria-label="Итоги по заказам">
             {orderSummaries.map((summary) => (
-              <Typography.Text
+              <CncOrderSummaryLine
                 key={summary.orderName}
-                className="cnc-packet-card__summary"
-              >
-                <span className="cnc-packet-card__summary-order">
-                  {summary.orderName}
-                </span>
-                <span className="cnc-packet-card__summary-meta">
-                  : {summary.positions} поз · {summary.details} дет.
-                </span>
-              </Typography.Text>
+                summary={summary}
+                onOpenOrder={onOpenOrder}
+              />
             ))}
           </div>
           <Typography.Text className="cnc-packet-card__program">
@@ -1220,17 +1251,11 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
         <div className="cnc-packet-card__title">
           <div className="cnc-packet-card__summaries" aria-label="Итоги по заказам">
             {orderSummaries.map((summary) => (
-              <Typography.Text
+              <CncOrderSummaryLine
                 key={summary.orderName}
-                className="cnc-packet-card__summary"
-              >
-                <span className="cnc-packet-card__summary-order">
-                  {summary.orderName}
-                </span>
-                <span className="cnc-packet-card__summary-meta">
-                  : {summary.positions} поз · {summary.details} дет.
-                </span>
-              </Typography.Text>
+                summary={summary}
+                onOpenOrder={onOpenOrder}
+              />
             ))}
           </div>
           <Typography.Text className="cnc-bath-card__job">
@@ -2088,11 +2113,14 @@ function cncColumnDisplayTitle(column: CncTelegramTodayColumn): string {
 
 interface CncSummaryItem {
   orderName: string;
+  orderId?: number | null;
+  matchOrderId?: number | null;
   quantity: number;
 }
 
 interface CncOrderSummary {
   orderName: string;
+  orderId: number | null;
   positions: number;
   details: number;
 }
@@ -2108,10 +2136,15 @@ interface CncRelationContext {
 }
 
 function buildCncOrderSummaries(items: CncSummaryItem[]): CncOrderSummary[] {
-  const summaries = new Map<string, { positions: number; details: number }>();
+  const summaries = new Map<string, { orderId: number | null; positions: number; details: number }>();
   for (const item of items) {
     const orderName = item.orderName.trim() || 'Без заказа';
-    const summary = summaries.get(orderName) ?? { positions: 0, details: 0 };
+    const summary = summaries.get(orderName) ?? {
+      orderId: null,
+      positions: 0,
+      details: 0,
+    };
+    summary.orderId ??= item.orderId ?? item.matchOrderId ?? null;
     summary.positions += 1;
     summary.details += item.quantity;
     summaries.set(orderName, summary);
@@ -2121,6 +2154,7 @@ function buildCncOrderSummaries(items: CncSummaryItem[]): CncOrderSummary[] {
     .sort(([left], [right]) => left.localeCompare(right, 'ru', { numeric: true }))
     .map(([orderName, summary]) => ({
       orderName,
+      orderId: summary.orderId,
       positions: summary.positions,
       details: summary.details,
     }));

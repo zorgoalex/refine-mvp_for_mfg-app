@@ -633,6 +633,21 @@
   font-weight: 650;
 }
 
+.cnc-packet-card__summary-order.ant-btn {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+  vertical-align: baseline;
+}
+
+.cnc-packet-card__summary-order.ant-btn:hover,
+.cnc-packet-card__summary-order.ant-btn:focus-visible {
+  color: #0958d9;
+}
+
 .cnc-packet-card__summary-meta {
   color: var(--app-text);
   font-weight: 400;
