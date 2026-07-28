@@ -340,6 +340,9 @@ describe('moveAllowed', () => {
   it('ignores material mismatch when splitByMaterial is false', () => {
     expect(moveAllowed({ ...base, targetMaterialTypeId: 2, splitByMaterial: false })).toEqual({ ok: true });
   });
+  it('ignores film mismatch when splitByMaterial is false because the all-details group has null film', () => {
+    expect(moveAllowed({ ...base, targetMaterialTypeId: null, targetFilmId: null, splitByMaterial: false })).toEqual({ ok: true });
+  });
   it('blocks different film when combineFilms is false', () => {
     expect(moveAllowed({ ...base, targetFilmId: 20 })).toEqual({ ok: false, reason: 'film' });
   });

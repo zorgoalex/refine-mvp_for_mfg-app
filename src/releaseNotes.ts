@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-28",
+    title: "Раскрой: перемещение деталей на вакуумном столе",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "В ручном редакторе раскроя детали снова можно переносить между листами внутри общей группы вакуумного стола, если группа создана без разделения по материалам.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-28",
     title: "Раскрой: проверка деталей перед созданием",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
