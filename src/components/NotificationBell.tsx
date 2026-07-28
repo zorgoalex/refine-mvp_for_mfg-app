@@ -3,18 +3,18 @@ import { Badge, Dropdown } from 'antd';
 import { BellOutlined } from '@ant-design/icons';
 import { useGetIdentity } from '@refinedev/core';
 import { NotificationPanel } from './NotificationPanel';
-import { useBackendNotifications } from '../hooks/useBackendNotifications';
+import { useNavbarNotifications } from '../hooks/useNavbarNotifications';
 import type { UserIdentity } from '../types/auth';
 
 export const NotificationBell: React.FC = () => {
   const { data: user } = useGetIdentity<UserIdentity>();
-  const backendNotifications = useBackendNotifications(Boolean(user?.id));
+  const notifications = useNavbarNotifications(user?.id);
 
   return (
     <Dropdown
       dropdownRender={() => (
         <NotificationPanel
-          notificationsState={backendNotifications}
+          notificationsState={notifications}
         />
       )}
       trigger={['click']}
@@ -33,7 +33,7 @@ export const NotificationBell: React.FC = () => {
           height: '100%',
         }}
       >
-        <Badge count={backendNotifications.unreadCount} offset={[0, 0]} size="small">
+        <Badge count={notifications.unreadCount} offset={[0, 0]} size="small">
           <BellOutlined style={{ fontSize: 18 }} />
         </Badge>
       </div>
