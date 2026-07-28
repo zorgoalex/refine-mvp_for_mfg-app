@@ -119,6 +119,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-packet-card__summary-meta');
     expect(css).toContain('font-weight: 400');
     expect(css).toContain('.cnc-packet-card__program');
+    expect(css).toMatch(/\.cnc-packet-card__program\s*\{[^}]*color: var\(--app-text-muted\);/);
+    const cncFileNameRules = css.match(/\.cnc-packet-card__note-file\s*\{[^}]*\}/g) ?? [];
+    expect(cncFileNameRules.length).toBeGreaterThan(0);
+    expect(cncFileNameRules.every((rule) => rule.includes('color: var(--app-text-muted);'))).toBe(true);
   });
 
   it('keeps order cards dense, badge-based and project-code-free', () => {
