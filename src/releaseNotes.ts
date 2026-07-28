@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-28",
+    title: "Доски статусов: ванны МДФ для несопоставленных CNC-строк",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Во вкладке «МДФ-работы» карточки ванн теперь находятся и для CNC-строк без точного `match_detail_id`, если совпадают номер заказа, номер позиции и размеры детали.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-28",
     title: "Раскрой: перемещение деталей на вакуумном столе",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

@@ -1002,23 +1002,114 @@ async function loadBathCards(
 ): Promise<CncTelegramBathCardDto[]> {
   const result = await database.query<BathJoinedRow>(
     `
-    WITH target_details AS (
+    WITH packet_items AS (
       SELECT
-        i.match_order_id::bigint AS order_id,
-        i.match_detail_id::bigint AS detail_id,
-        SUM(
-          CASE
-            WHEN p.completion_status = 'completed' OR p.thumbs_up = true
-              THEN GREATEST(i.quantity, 0)
-            ELSE 0
-          END
-        )::integer AS completed_quantity
+        p.completion_status,
+        p.thumbs_up,
+        i.match_order_id,
+        i.match_detail_id,
+        lower(trim(i.order_name)) AS order_key,
+        i.detail_number,
+        i.width_mm,
+        i.height_mm,
+        i.quantity
       FROM cnc_telegram_packets p
       JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
       WHERE p.workday = $1::date
-        AND i.match_order_id IS NOT NULL
-        AND i.match_detail_id IS NOT NULL
-      GROUP BY i.match_order_id, i.match_detail_id
+    ),
+    matched_target_details AS (
+      SELECT
+        item.match_order_id::bigint AS order_id,
+        item.match_detail_id::bigint AS detail_id,
+        SUM(
+          CASE
+            WHEN item.completion_status = 'completed' OR item.thumbs_up = true
+              THEN GREATEST(item.quantity, 0)
+            ELSE 0
+          END
+        )::integer AS completed_quantity
+      FROM packet_items item
+      WHERE item.match_order_id IS NOT NULL
+        AND item.match_detail_id IS NOT NULL
+      GROUP BY item.match_order_id, item.match_detail_id
+    ),
+    unique_order_keys AS (
+      SELECT
+        lower(trim(o.order_name)) AS order_key,
+        MIN(o.order_id)::bigint AS order_id
+      FROM orders o
+      WHERE o.delete_flag = false
+        AND NULLIF(trim(o.order_name), '') IS NOT NULL
+      GROUP BY lower(trim(o.order_name))
+      HAVING COUNT(*) = 1
+    ),
+    fallback_target_details AS (
+      SELECT
+        order_key.order_id,
+        od.detail_id::bigint AS detail_id,
+        SUM(
+          CASE
+            WHEN item.completion_status = 'completed' OR item.thumbs_up = true
+              THEN GREATEST(item.quantity, 0)
+            ELSE 0
+          END
+        )::integer AS completed_quantity
+      FROM packet_items item
+      JOIN unique_order_keys order_key
+        ON order_key.order_key = item.order_key
+      JOIN order_details od
+        ON od.order_id = order_key.order_id
+       AND od.delete_flag = false
+      WHERE item.match_order_id IS NULL
+        AND item.match_detail_id IS NULL
+        AND (
+          (
+            item.detail_number IS NOT NULL
+            AND od.detail_number = item.detail_number
+            AND (
+              item.width_mm IS NULL
+              OR item.height_mm IS NULL
+              OR (
+                (
+                  ABS(item.width_mm::numeric - od.width::numeric) <= 3
+                  AND ABS(item.height_mm::numeric - od.height::numeric) <= 3
+                )
+                OR (
+                  ABS(item.width_mm::numeric - od.height::numeric) <= 3
+                  AND ABS(item.height_mm::numeric - od.width::numeric) <= 3
+                )
+              )
+            )
+          )
+          OR (
+            item.detail_number IS NULL
+            AND item.width_mm IS NOT NULL
+            AND item.height_mm IS NOT NULL
+            AND (
+              (
+                ABS(item.width_mm::numeric - od.width::numeric) <= 3
+                AND ABS(item.height_mm::numeric - od.height::numeric) <= 3
+              )
+              OR (
+                ABS(item.width_mm::numeric - od.height::numeric) <= 3
+                AND ABS(item.height_mm::numeric - od.width::numeric) <= 3
+              )
+            )
+          )
+        )
+      GROUP BY order_key.order_id, od.detail_id
+    ),
+    target_details AS (
+      SELECT
+        target.order_id,
+        target.detail_id,
+        SUM(target.completed_quantity)::integer AS completed_quantity
+      FROM (
+        SELECT * FROM matched_target_details
+        UNION ALL
+        SELECT * FROM fallback_target_details
+      ) target
+      GROUP BY target.order_id, target.detail_id
     ),
     latest_vacuum_results AS (
       SELECT DISTINCT ON (j.cut_job_id)

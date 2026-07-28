@@ -243,6 +243,10 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('cut_result_placement');
     expect(sql).toContain('cut_result_sheet_map');
     expect(sql).toContain('cut_result_label_map_projection');
+    expect(sql).toContain('fallback_target_details');
+    expect(sql).toContain('lower(trim(i.order_name)) AS order_key');
+    expect(sql).toContain('od.detail_number = item.detail_number');
+    expect(sql).toContain('ABS(item.width_mm::numeric - od.width::numeric) <= 3');
     expect(result.columns.map((column) => [column.key, column.total])).toEqual([
       ['parsed', 0],
       ['completed', 0],
