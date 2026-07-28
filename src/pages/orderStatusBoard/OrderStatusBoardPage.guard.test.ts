@@ -109,9 +109,15 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('shows CNC order totals directly on each card', () => {
     expect(page).toContain('buildCncOrderSummaries(packet.items)');
     expect(page).toContain('aria-label="Итоги по заказам"');
-    expect(page).toContain('summary.label');
+    expect(page).toContain('summary.orderName');
+    expect(page).toContain('summary.positions');
+    expect(page).toContain('summary.details');
     expect(css).toContain('.cnc-packet-card__summaries');
     expect(css).toContain('.cnc-packet-card__summary');
+    expect(css).toContain('.cnc-packet-card__summary-order');
+    expect(css).toContain('color: #1677ff');
+    expect(css).toContain('.cnc-packet-card__summary-meta');
+    expect(css).toContain('font-weight: 400');
     expect(css).toContain('.cnc-packet-card__program');
   });
 
@@ -144,5 +150,23 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
     expect(css).toContain('.status-board-card__number.ant-btn');
     expect(css).toContain('overflow-wrap: anywhere');
+  });
+
+  it('keeps compact order cards as plain text except for the status badge', () => {
+    const compactStart = page.indexOf('{showCompactDetails && !showStandardDetails && (');
+    const compactEnd = page.indexOf('{pending &&', compactStart);
+    expect(compactStart).toBeGreaterThanOrEqual(0);
+    expect(compactEnd).toBeGreaterThan(compactStart);
+    const compactSection = page.slice(compactStart, compactEnd);
+
+    expect(compactSection).toContain('status-board-card__compact-text');
+    expect(compactSection).toContain('compactDetailText');
+    expect(compactSection).not.toContain('Typography.Text');
+    expect(compactSection).not.toContain('ClockCircleOutlined');
+    expect(compactSection).not.toContain('status-board-card__tags');
+    expect(compactSection).not.toContain('<Tag');
+    expect(css).toContain('.status-board-card__compact-text');
+    expect(css).toContain('white-space: nowrap');
+    expect(css).toContain('text-overflow: ellipsis');
   });
 });

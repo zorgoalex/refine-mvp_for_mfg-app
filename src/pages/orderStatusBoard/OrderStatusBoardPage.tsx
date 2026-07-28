@@ -904,10 +904,14 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
             {orderSummaries.map((summary) => (
               <Typography.Text
                 key={summary.orderName}
-                strong
                 className="cnc-packet-card__summary"
               >
-                {summary.label}
+                <span className="cnc-packet-card__summary-order">
+                  {summary.orderName}
+                </span>
+                <span className="cnc-packet-card__summary-meta">
+                  : {summary.positions} поз · {summary.details} дет.
+                </span>
               </Typography.Text>
             ))}
           </div>
@@ -1126,10 +1130,14 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
             {orderSummaries.map((summary) => (
               <Typography.Text
                 key={summary.orderName}
-                strong
                 className="cnc-packet-card__summary"
               >
-                {summary.label}
+                <span className="cnc-packet-card__summary-order">
+                  {summary.orderName}
+                </span>
+                <span className="cnc-packet-card__summary-meta">
+                  : {summary.positions} поз · {summary.details} дет.
+                </span>
               </Typography.Text>
             ))}
           </div>
@@ -1708,6 +1716,20 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
     board === 'production' && card.productionStatusFromDetailsEnabled;
   const showOverdueFlag = card.pastPlannedDate;
   const showFlags = showUrgentFlag || showAutoFlag || showOverdueFlag;
+  const compactFlagText = [
+    showUrgentFlag ? 'Срочный' : null,
+    showAutoFlag ? 'Авто' : null,
+    showOverdueFlag ? 'Плановая дата прошла' : null,
+  ].filter((item): item is string => item !== null);
+  const compactDetailText = [
+    card.clientName || 'Клиент не указан',
+    card.plannedCompletionDate
+      ? dayjs(card.plannedCompletionDate).format(DATE_FORMAT)
+      : 'План не задан',
+    `${card.partsCount} дет.`,
+    formatArea(card.totalArea),
+    ...compactFlagText,
+  ].join(' · ');
   const flagTags = (
     <>
       {showUrgentFlag && <Tag color="red">Срочный</Tag>}
@@ -1847,29 +1869,12 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
       )}
 
       {showCompactDetails && !showStandardDetails && (
-        <>
-          <Typography.Text className="status-board-card__client" ellipsis={{ tooltip: card.clientName }}>
-            {card.clientName || 'Клиент не указан'}
-          </Typography.Text>
-
-          {showFlags && <div className="status-board-card__tags">{flagTags}</div>}
-
-          <div className="status-board-card__meta">
-            <span>
-              <ClockCircleOutlined />
-              {card.plannedCompletionDate
-                ? dayjs(card.plannedCompletionDate).format(DATE_FORMAT)
-                : 'План не задан'}
-            </span>
-            {showStandardDetails && card.managerName && (
-              <span>
-                <UserOutlined />
-                {card.managerName}
-              </span>
-            )}
-            <span>{card.partsCount} дет. · {formatArea(card.totalArea)}</span>
-          </div>
-        </>
+        <div
+          className="status-board-card__compact-text"
+          title={compactDetailText}
+        >
+          {compactDetailText}
+        </div>
       )}
 
       {pending && (
@@ -1993,7 +1998,8 @@ interface CncSummaryItem {
 
 interface CncOrderSummary {
   orderName: string;
-  label: string;
+  positions: number;
+  details: number;
 }
 
 function buildCncOrderSummaries(items: CncSummaryItem[]): CncOrderSummary[] {
@@ -2010,7 +2016,8 @@ function buildCncOrderSummaries(items: CncSummaryItem[]): CncOrderSummary[] {
     .sort(([left], [right]) => left.localeCompare(right, 'ru', { numeric: true }))
     .map(([orderName, summary]) => ({
       orderName,
-      label: `${orderName}: ${summary.positions} поз · ${summary.details} дет.`,
+      positions: summary.positions,
+      details: summary.details,
     }));
 }
 

@@ -30,6 +30,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-28",
+    title: "Доски статусов: компактная карточка стала ниже",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В компактном виде карточки заказа на доске статусов цветным остаётся только бейдж статуса; клиент, дата, объём и флаги выводятся одной текстовой строкой.",
+      "Во вкладке «МДФ-работы» агрегированные номера заказов в карточках файлов станка выделены синим, а позиции и детали показываются обычным чёрным текстом.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-27",
     title: "Календарь: карандаш по производственному статусу",
     services: ["ERP"],
