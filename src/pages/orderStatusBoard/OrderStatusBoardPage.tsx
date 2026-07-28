@@ -42,6 +42,7 @@ import {
   PrinterOutlined,
   ReloadOutlined,
   RightOutlined,
+  SearchOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -78,8 +79,9 @@ import {
   restoreOrderStatusBoardFocus,
 } from './interaction';
 import {
+  buildCncOrderFilterOptions,
   filterBoardColumns,
-  filterCncTodayColumnsByOrder,
+  filterCncTodayColumnsByOrders,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
@@ -129,7 +131,11 @@ export const OrderStatusBoardPage: React.FC = () => {
     }),
     [searchParams],
   );
-  const viewKey = searchParams.toString();
+  const datasetKey = useMemo(() => {
+    const params = new URLSearchParams(searchParams);
+    if (params.get('flow') === 'cnc') params.delete('order');
+    return params.toString();
+  }, [searchParams]);
   const [searchDraft, setSearchDraft] = useState(viewState.search);
   const [board, setBoard] = useState<OrderStatusBoardResponse | null>(null);
   const boardRef = useRef<OrderStatusBoardResponse | null>(null);
@@ -271,9 +277,9 @@ export const OrderStatusBoardPage: React.FC = () => {
     setStale(false);
     loadingColumnTokensRef.current.clear();
     void fetchInitial();
-    // viewKey is the canonical dataset revision trigger.
+    // datasetKey is the canonical backend data revision trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewKey]);
+  }, [datasetKey]);
 
   useEffect(() => {
     const refreshWhenVisible = () => {
@@ -472,9 +478,19 @@ export const OrderStatusBoardPage: React.FC = () => {
     [boardColumns, viewState.hideEmpty],
   );
   const cncColumns = cncToday?.columns ?? [];
+  const cncOrderFilters = viewState.cncOrderFilters;
+  const cncOrderFilterKey = cncOrderFilters.join('\u0000');
+  const cncOrderFilterOptions = useMemo(
+    () =>
+      buildCncOrderFilterOptions(cncColumns).map((orderName) => ({
+        label: orderName,
+        value: orderName,
+      })),
+    [cncColumns],
+  );
   const cncFilteredColumns = useMemo(
-    () => filterCncTodayColumnsByOrder(cncColumns, viewState.cncOrderSearch),
-    [cncColumns, viewState.cncOrderSearch],
+    () => filterCncTodayColumnsByOrders(cncColumns, cncOrderFilters),
+    [cncColumns, cncOrderFilterKey],
   );
   const cncRelationContext = useMemo(
     () =>
@@ -499,7 +515,7 @@ export const OrderStatusBoardPage: React.FC = () => {
 
   useEffect(() => {
     setActiveCncRelation(null);
-  }, [isCncToday, viewState.cncOrderSearch, viewState.cncWorkday]);
+  }, [cncOrderFilterKey, isCncToday, viewState.cncWorkday]);
 
   useEffect(() => {
     const topScrollbar = topScrollbarRef.current;
@@ -519,7 +535,7 @@ export const OrderStatusBoardPage: React.FC = () => {
       resizeObserver.observe(viewport.firstElementChild);
     }
     return () => resizeObserver.disconnect();
-  }, [cncVisibleColumns.length, columns.length, loading, viewKey]);
+  }, [cncVisibleColumns.length, columns.length, datasetKey, loading]);
 
   const scrollBoardFromTop = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
@@ -556,7 +572,7 @@ export const OrderStatusBoardPage: React.FC = () => {
   const cncCanStepBack = cncNavigationDate.startOf('day').isAfter(cncMinDate);
   const cncCanStepForward = cncNavigationDate.startOf('day').isBefore(cncMaxDate);
   const updateCncWorkday = (date: Dayjs) =>
-    updateViewState({ cncWorkday: date.format('YYYY-MM-DD') });
+    updateViewState({ cncWorkday: date.format('YYYY-MM-DD'), cncOrderFilters: [] });
 
   return (
     <DndProvider backend={HTML5Backend}>
@@ -722,14 +738,18 @@ export const OrderStatusBoardPage: React.FC = () => {
             <Button onClick={() => updateCncWorkday(dayjs().subtract(1, 'day'))}>
               Вчера
             </Button>
-            <Input
+            <Select
               allowClear
+              mode="multiple"
+              showSearch
               className="status-board-toolbar__cnc-order-search"
-              placeholder="Номер заказа"
-              value={viewState.cncOrderSearch}
-              onChange={(event) =>
-                updateViewState({ cncOrderSearch: event.target.value })
-              }
+              maxTagCount="responsive"
+              optionFilterProp="label"
+              options={cncOrderFilterOptions}
+              placeholder="Номера заказов"
+              suffixIcon={<SearchOutlined />}
+              value={cncOrderFilters}
+              onChange={(values) => updateViewState({ cncOrderFilters: values })}
               aria-label="Фильтр МДФ-работ по номеру заказа"
             />
             <label className="status-board-toolbar__switch">
@@ -826,7 +846,7 @@ export const OrderStatusBoardPage: React.FC = () => {
             cncVisibleColumns.length === 0 ? (
               <Empty
                 description={
-                  viewState.cncOrderSearch.trim()
+                  cncOrderFilters.length > 0
                     ? 'По выбранному заказу МДФ-работ нет'
                     : 'CNC-работ на сегодня нет'
                 }
@@ -891,6 +911,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     {columns.map((column) => {
       const bathColumn = column.key === 'baths' || column.key === 'baths_ready';
       const title = cncColumnDisplayTitle(column);
+      const totals = buildCncColumnTotals(column);
       const bathSourceCards = column.baths ?? [];
       const packetSourceCards = column.packets ?? [];
       const bathCards = relationContext
@@ -913,16 +934,21 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           aria-label={`${title}: ${column.total} ${bathColumn ? 'ванн' : 'CNC-пакетов'}`}
         >
           <header className="status-board-column__header">
-            <div className="status-board-column__title">
-              <span className="status-board-column__marker" aria-hidden="true" />
-              <Typography.Text strong>{title}</Typography.Text>
+            <div className="cnc-today-column__header-main">
+              <div className="status-board-column__title">
+                <span className="status-board-column__marker" aria-hidden="true" />
+                <Typography.Text strong>{title}</Typography.Text>
+              </div>
+              <Badge
+                count={column.total}
+                overflowCount={9999}
+                showZero
+                color={cncColumnBadgeColor(column.key)}
+              />
             </div>
-            <Badge
-              count={column.total}
-              overflowCount={9999}
-              showZero
-              color={cncColumnBadgeColor(column.key)}
-            />
+            <Typography.Text className="cnc-today-column__totals" type="secondary">
+              {totals.details} дет. · {formatArea(totals.areaM2)}
+            </Typography.Text>
           </header>
 
           <div className="status-board-column__cards">
@@ -2192,6 +2218,43 @@ function cncColumnDisplayTitle(column: CncTelegramTodayColumn): string {
     baths_ready: 'Готовы к закатке',
   };
   return titles[column.key] ?? column.title;
+}
+
+interface CncColumnTotals {
+  details: number;
+  areaM2: number;
+}
+
+interface CncColumnTotalItem {
+  widthMm: number | null;
+  heightMm: number | null;
+  quantity: number;
+}
+
+function buildCncColumnTotals(column: CncTelegramTodayColumn): CncColumnTotals {
+  const items: CncColumnTotalItem[] =
+    column.key === 'baths' || column.key === 'baths_ready'
+      ? column.baths.flatMap((bath) => bath.items)
+      : column.packets.flatMap((packet) => packet.items);
+
+  return items.reduce<CncColumnTotals>(
+    (totals, item) => {
+      const quantity = Math.max(0, Number.isFinite(item.quantity) ? item.quantity : 0);
+      totals.details += quantity;
+      totals.areaM2 += cncItemAreaM2(item, quantity);
+      return totals;
+    },
+    { details: 0, areaM2: 0 },
+  );
+}
+
+function cncItemAreaM2(item: CncColumnTotalItem, quantity: number): number {
+  const width = item.widthMm ?? 0;
+  const height = item.heightMm ?? 0;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return 0;
+  }
+  return (width * height * quantity) / 1_000_000;
 }
 
 interface CncSummaryItem {

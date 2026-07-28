@@ -71,8 +71,8 @@
 }
 
 .status-board-toolbar__cnc-order-search {
-  width: 156px;
-  flex: 0 0 156px;
+  width: 220px;
+  flex: 0 0 220px;
 }
 
 .status-board-toolbar__switch {
@@ -204,6 +204,30 @@
 .cnc-today-column--baths .status-board-column__header,
 .cnc-today-column--baths_ready .status-board-column__header {
   background: #fffaf0;
+}
+
+.cnc-today-column .status-board-column__header {
+  min-height: 64px;
+  align-items: stretch;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.cnc-today-column__header-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cnc-today-column__totals {
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .status-board-column__header {
