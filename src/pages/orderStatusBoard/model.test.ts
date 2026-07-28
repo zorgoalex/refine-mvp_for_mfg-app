@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import type { CncTelegramTodayColumn } from '../../api/types/cncTelegramApi.types';
 import type {
   OrderStatusBoardCard,
   OrderStatusBoardResponse,
 } from '../../api/types/orderStatusBoardApi.types';
 import {
   filterBoardColumns,
+  filterCncTodayColumnsByOrder,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
@@ -79,16 +81,58 @@ describe('order status board model', () => {
 
   it('keeps CNC today as visual flow without changing status-board API type', () => {
     const disabled = parseOrderStatusBoardViewState(new URLSearchParams('flow=cnc'));
-    const state = parseOrderStatusBoardViewState(new URLSearchParams('flow=cnc&date=2026-07-23'), {
-      cncTelegram: true,
-    });
+    const state = parseOrderStatusBoardViewState(
+      new URLSearchParams('flow=cnc&date=2026-07-23&order=2706'),
+      {
+        cncTelegram: true,
+      },
+    );
 
     expect(disabled.view).toBe('order');
     expect(state.view).toBe('cnc_today');
     expect(state.cncWorkday).toBe('2026-07-23');
+    expect(state.cncOrderSearch).toBe('2706');
     expect(serializeOrderStatusBoardViewState(state).toString()).toContain('flow=cnc');
     expect(serializeOrderStatusBoardViewState(state).toString()).toContain('date=2026-07-23');
+    expect(serializeOrderStatusBoardViewState(state).toString()).toContain('order=2706');
     expect(toOrderStatusBoardQuery(state)).toMatchObject({ board: 'order' });
+  });
+
+  it('filters CNC packet and bath cards by exact order number', () => {
+    const columns = [
+      {
+        key: 'parsed',
+        title: 'Файлы на станке',
+        total: 2,
+        packets: [
+          cncPacket('p-2706', ['2706', '2707']),
+          cncPacket('p-2712', ['2712']),
+        ],
+        baths: [],
+      },
+      {
+        key: 'baths',
+        title: 'Ванны',
+        total: 2,
+        packets: [],
+        baths: [
+          cncBath('b-2706', ['2706']),
+          cncBath('b-2712', ['2712']),
+        ],
+      },
+    ] as CncTelegramTodayColumn[];
+
+    const filtered = filterCncTodayColumnsByOrder(columns, ' 2706 ');
+    expect(filtered[0]?.packets.map((packet) => packet.packetId)).toEqual(['p-2706']);
+    expect(filtered[0]?.total).toBe(1);
+    expect(filtered[1]?.baths.map((bath) => bath.bathCardId)).toEqual(['b-2706']);
+    expect(filtered[1]?.total).toBe(1);
+
+    const partial = filterCncTodayColumnsByOrder(columns, '270');
+    expect(partial[0]?.packets).toEqual([]);
+    expect(partial[0]?.total).toBe(0);
+    expect(partial[1]?.baths).toEqual([]);
+    expect(partial[1]?.total).toBe(0);
   });
 
   it('drops impossible dates from a hand-edited shared URL', () => {
@@ -191,5 +235,25 @@ function card(orderId: number): OrderStatusBoardCard {
     version: 1,
     canChangeOrderStatus: false,
     canChangeProductionStatus: false,
+  };
+}
+
+function cncPacket(packetId: string, orderNames: string[]) {
+  return {
+    packetId,
+    items: orderNames.map((orderName, index) => ({
+      packetItemId: `${packetId}-${index}`,
+      orderName,
+    })),
+  };
+}
+
+function cncBath(bathCardId: string, orderNames: string[]) {
+  return {
+    bathCardId,
+    items: orderNames.map((orderName, index) => ({
+      bathItemId: `${bathCardId}-${index}`,
+      orderName,
+    })),
   };
 }

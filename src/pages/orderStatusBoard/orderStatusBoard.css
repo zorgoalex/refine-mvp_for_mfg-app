@@ -70,6 +70,11 @@
   width: 156px;
 }
 
+.status-board-toolbar__cnc-order-search {
+  width: 156px;
+  flex: 0 0 156px;
+}
+
 .status-board-toolbar__switch {
   min-height: 32px;
   flex: 0 0 auto;
@@ -169,6 +174,7 @@
 
 .cnc-today-column--parsed {
   --status-color: #1677ff;
+  background: #edf7ff;
 }
 
 .cnc-today-column--needs_review {
@@ -177,14 +183,27 @@
 
 .cnc-today-column--completed {
   --status-color: #389e0d;
+  background: #edf7ff;
 }
 
 .cnc-today-column--baths {
   --status-color: #cf1322;
+  background: #fff7e6;
 }
 
 .cnc-today-column--baths_ready {
   --status-color: #389e0d;
+  background: #fff7e6;
+}
+
+.cnc-today-column--parsed .status-board-column__header,
+.cnc-today-column--completed .status-board-column__header {
+  background: #f7fbff;
+}
+
+.cnc-today-column--baths .status-board-column__header,
+.cnc-today-column--baths_ready .status-board-column__header {
+  background: #fffaf0;
 }
 
 .status-board-column__header {
@@ -280,14 +299,17 @@
 }
 
 .cnc-relation-card--active {
-  border-color: color-mix(in srgb, #1677ff 58%, var(--app-border-soft));
+  border-color: #722ed1;
   box-shadow:
-    0 0 0 1px color-mix(in srgb, #1677ff 28%, transparent),
+    0 0 0 2px #722ed1,
     0 4px 12px var(--app-shadow);
 }
 
 .cnc-relation-card--related {
-  border-color: color-mix(in srgb, #1677ff 34%, var(--app-border-soft));
+  border-color: #722ed1;
+  box-shadow:
+    0 0 0 2px #722ed1,
+    0 2px 8px var(--app-shadow);
 }
 
 .cnc-relation-card--dimmed {
@@ -910,6 +932,7 @@
   }
 
   .status-board-toolbar__search,
+  .status-board-toolbar__cnc-order-search,
   .status-board-toolbar .ant-picker,
   .status-board-toolbar__date-range {
     flex: 1 1 100%;

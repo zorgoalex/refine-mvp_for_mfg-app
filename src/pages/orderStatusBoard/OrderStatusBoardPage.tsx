@@ -79,6 +79,7 @@ import {
 } from './interaction';
 import {
   filterBoardColumns,
+  filterCncTodayColumnsByOrder,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
@@ -471,17 +472,21 @@ export const OrderStatusBoardPage: React.FC = () => {
     [boardColumns, viewState.hideEmpty],
   );
   const cncColumns = cncToday?.columns ?? [];
+  const cncFilteredColumns = useMemo(
+    () => filterCncTodayColumnsByOrder(cncColumns, viewState.cncOrderSearch),
+    [cncColumns, viewState.cncOrderSearch],
+  );
   const cncRelationContext = useMemo(
     () =>
       cncRelationsEnabled
-        ? buildCncRelationContext(cncColumns, activeCncRelation)
+        ? buildCncRelationContext(cncFilteredColumns, activeCncRelation)
         : null,
-    [activeCncRelation, cncColumns, cncRelationsEnabled],
+    [activeCncRelation, cncFilteredColumns, cncRelationsEnabled],
   );
   const cncVisibleColumns = useMemo(
     () =>
-      cncColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
-    [cncColumns, viewState.hideEmpty],
+      cncFilteredColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
+    [cncFilteredColumns, viewState.hideEmpty],
   );
   const isCncToday = viewState.view === 'cnc_today';
   const activeBoard: OrderStatusBoardType =
@@ -494,7 +499,7 @@ export const OrderStatusBoardPage: React.FC = () => {
 
   useEffect(() => {
     setActiveCncRelation(null);
-  }, [isCncToday, viewState.cncWorkday]);
+  }, [isCncToday, viewState.cncOrderSearch, viewState.cncWorkday]);
 
   useEffect(() => {
     const topScrollbar = topScrollbarRef.current;
@@ -717,6 +722,16 @@ export const OrderStatusBoardPage: React.FC = () => {
             <Button onClick={() => updateCncWorkday(dayjs().subtract(1, 'day'))}>
               Вчера
             </Button>
+            <Input
+              allowClear
+              className="status-board-toolbar__cnc-order-search"
+              placeholder="Номер заказа"
+              value={viewState.cncOrderSearch}
+              onChange={(event) =>
+                updateViewState({ cncOrderSearch: event.target.value })
+              }
+              aria-label="Фильтр МДФ-работ по номеру заказа"
+            />
             <label className="status-board-toolbar__switch">
               <Switch
                 size="small"
@@ -809,7 +824,13 @@ export const OrderStatusBoardPage: React.FC = () => {
             </div>
           ) : isCncToday ? (
             cncVisibleColumns.length === 0 ? (
-              <Empty description="CNC-работ на сегодня нет" />
+              <Empty
+                description={
+                  viewState.cncOrderSearch.trim()
+                    ? 'По выбранному заказу МДФ-работ нет'
+                    : 'CNC-работ на сегодня нет'
+                }
+              />
             ) : (
               <CncTelegramTodayColumns
                 columns={cncVisibleColumns}

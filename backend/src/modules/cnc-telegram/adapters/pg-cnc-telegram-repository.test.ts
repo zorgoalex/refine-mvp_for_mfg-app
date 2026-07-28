@@ -285,6 +285,14 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('fallback_target_details');
     expect(sql).toContain('lower(trim(i.order_name)) AS order_key');
     expect(sql).toContain('od.detail_number = item.detail_number');
+    expect(sql).toContain('jsonb_array_elements_text(p.comments_json)');
+    expect(sql).toContain('item.mdf_relevant');
+    expect(sql).toContain('%hdf%');
+    expect(sql).toContain('%хдф%');
+    expect(sql).toContain('%лдсп%');
+    expect(sql).toContain('%ldsp%');
+    expect(sql).toContain('%fanera%');
+    expect(sql).toContain('%фанера%');
     expect(sql).toContain("item.source <> 'ocr'");
     expect(sql).toContain('item.width_mm::numeric = od.width::numeric');
     expect(sql).toContain("item.source = 'ocr'");

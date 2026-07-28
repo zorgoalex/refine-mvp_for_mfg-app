@@ -1037,6 +1037,13 @@ async function loadBathCards(
       SELECT
         p.completion_status,
         p.thumbs_up,
+        NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(p.comments_json) AS packet_comment(comment_text)
+          WHERE lower(packet_comment.comment_text) LIKE ANY (
+            ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
+          )
+        ) AS mdf_relevant,
         i.match_order_id,
         i.match_detail_id,
         i.source,
@@ -1055,7 +1062,8 @@ async function loadBathCards(
         item.match_detail_id::bigint AS detail_id,
         SUM(
           CASE
-            WHEN item.completion_status = 'completed' OR item.thumbs_up = true
+            WHEN item.mdf_relevant
+              AND (item.completion_status = 'completed' OR item.thumbs_up = true)
               THEN GREATEST(item.quantity, 0)
             ELSE 0
           END
@@ -1081,7 +1089,8 @@ async function loadBathCards(
         od.detail_id::bigint AS detail_id,
         SUM(
           CASE
-            WHEN item.completion_status = 'completed' OR item.thumbs_up = true
+            WHEN item.mdf_relevant
+              AND (item.completion_status = 'completed' OR item.thumbs_up = true)
               THEN GREATEST(item.quantity, 0)
             ELSE 0
           END

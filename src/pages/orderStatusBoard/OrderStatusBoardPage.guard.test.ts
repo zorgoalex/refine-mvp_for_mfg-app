@@ -76,6 +76,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("baths_ready: 'Готовы к закатке'");
     expect(page).toContain('CNC_HISTORY_DAYS = 7');
     expect(page).toContain('aria-label="Дата CNC-работ"');
+    expect(page).toContain('filterCncTodayColumnsByOrder');
+    expect(page).toContain('status-board-toolbar__cnc-order-search');
+    expect(page).toContain('aria-label="Фильтр МДФ-работ по номеру заказа"');
+    expect(page).toContain('По выбранному заказу МДФ-работ нет');
     expect(page).toContain('В чате {formatDateTime');
     expect(page).toContain('<Collapse.Panel');
     expect(page).toContain('cncColumnDisplayTitle(column)');
@@ -143,7 +147,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('checked={cncRelationsEnabled}');
     expect(page).toContain('if (!cncRelationsEnabled) setActiveCncRelation(null)');
     expect(page).toContain('cncRelationsEnabled');
-    expect(page).toContain('? buildCncRelationContext(cncColumns, activeCncRelation)');
+    expect(page).toContain('? buildCncRelationContext(cncFilteredColumns, activeCncRelation)');
     expect(page).toContain('const bathCards = relationContext');
     expect(page).toContain('const packetCards = relationContext');
     expect(page).toContain('sortCncRelationCards');
@@ -153,6 +157,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-relation-card--dimmed');
     expect(css).toContain('filter: grayscale(0.9)');
     expect(css).toContain('opacity: 0.62');
+    expect(css).toContain('.cnc-today-column--parsed');
+    expect(css).toContain('.cnc-today-column--completed');
+    expect(css).toContain('background: #edf7ff');
+    expect(css).toContain('.cnc-today-column--baths');
+    expect(css).toContain('.cnc-today-column--baths_ready');
+    expect(css).toContain('background: #fff7e6');
+    expect(css).toContain('border-color: #722ed1');
+    expect(css).toContain('0 0 0 2px #722ed1');
     expect(css).not.toContain('transition: all');
   });
 

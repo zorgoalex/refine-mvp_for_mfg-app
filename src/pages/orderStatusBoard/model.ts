@@ -1,4 +1,7 @@
 import type {
+  CncTelegramTodayColumn,
+} from '../../api/types/cncTelegramApi.types';
+import type {
   OrderStatusBoardColumn,
   OrderStatusBoardQuery,
   OrderStatusBoardResponse,
@@ -17,6 +20,7 @@ export interface OrderStatusBoardViewState {
   plannedFrom?: string;
   plannedTo?: string;
   cncWorkday?: string;
+  cncOrderSearch: string;
   hideEmpty: boolean;
 }
 
@@ -59,6 +63,7 @@ export function parseOrderStatusBoardViewState(
     ...(plannedFrom ? { plannedFrom } : {}),
     ...(plannedTo ? { plannedTo } : {}),
     ...(cncWorkday ? { cncWorkday } : {}),
+    cncOrderSearch: params.get('order')?.trim() ?? '',
     hideEmpty: params.get('hideEmpty') === '1',
   };
 }
@@ -79,6 +84,9 @@ export function serializeOrderStatusBoardViewState(
   if (state.plannedFrom) params.set('plannedFrom', state.plannedFrom);
   if (state.plannedTo) params.set('plannedTo', state.plannedTo);
   if (state.view === 'cnc_today' && state.cncWorkday) params.set('date', state.cncWorkday);
+  if (state.view === 'cnc_today' && state.cncOrderSearch.trim()) {
+    params.set('order', state.cncOrderSearch.trim());
+  }
   if (state.hideEmpty) params.set('hideEmpty', '1');
   return params;
 }
@@ -100,6 +108,27 @@ export function toOrderStatusBoardQuery(
     ...(state.plannedTo ? { plannedTo: state.plannedTo } : {}),
     ...override,
   };
+}
+
+export function filterCncTodayColumnsByOrder(
+  columns: CncTelegramTodayColumn[],
+  orderSearch: string,
+): CncTelegramTodayColumn[] {
+  const orderKey = normalizeCncOrderKey(orderSearch);
+  if (!orderKey) return columns;
+
+  return columns.map((column) => {
+    const baths = (column.baths ?? []).filter((bath) =>
+      bath.items.some((item) => normalizeCncOrderKey(item.orderName) === orderKey),
+    );
+    const packets = (column.packets ?? []).filter((packet) =>
+      packet.items.some((item) => normalizeCncOrderKey(item.orderName) === orderKey),
+    );
+    const total = column.key === 'baths' || column.key === 'baths_ready'
+      ? baths.length
+      : packets.length;
+    return { ...column, baths, packets, total };
+  });
 }
 
 function isDoneProductionStatus(column: OrderStatusBoardColumn): boolean {
@@ -200,4 +229,8 @@ function dateOnly(value: string | null): string | undefined {
     new Date(timestamp).toISOString().slice(0, 10) === value
     ? value
     : undefined;
+}
+
+function normalizeCncOrderKey(value: string | null | undefined): string {
+  return (value ?? '').trim().toLocaleLowerCase('ru-RU');
 }
