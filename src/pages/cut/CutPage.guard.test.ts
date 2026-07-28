@@ -221,6 +221,29 @@ describe('CutPage source guards', () => {
     expect(source).toContain('CUT_JOB_DETAILS_VISIBLE_ROWS = 15');
     expect(source).toContain('CUT_JOB_DETAILS_TABLE_BODY_HEIGHT');
     expect(source).toContain('scroll={{ x: 1900, y: CUT_JOB_DETAILS_TABLE_BODY_HEIGHT }}');
+    expect(source).toContain('cutJobItemOrderTintByOrderId(job?.items ?? [])');
+    expect(source).toContain('className="cut-job-details-table details-grouped"');
+    expect(source).toContain('detail-group-tint-${jobItemOrderTintByOrderId.get(row.orderId) ?? 0}');
+  });
+
+  it('shows only the latest completed cut result and hides full history under a spoiler', () => {
+    expect(source).toContain('const latestCutResult = jobCutResults[0] ?? null');
+    expect(source).toContain('className="cut-results-latest-table"');
+    expect(source).toContain('dataSource={latestCutResult ? [latestCutResult] : []}');
+    expect(source).toContain('className="cut-results-history-collapse"');
+    expect(source).toContain('Все сохранённые раскрои (${jobCutResults.length})');
+    expect(source).not.toContain('<Card size="small" title="Выполненные раскрои"');
+  });
+
+  it('allows renaming the opened cut job from the job card title', () => {
+    expect(source).toContain('data-testid="cut-job-name-edit"');
+    expect(source).toContain('data-testid="cut-job-name-input"');
+    expect(source).toContain('data-testid="cut-job-name-save"');
+    expect(source).toContain('cutApi.setName(job.cutJobId, name, job.version)');
+    expect(source).toContain("message.warning('Введите название задания на раскрой')");
+    expect(appCss).toContain('.cut-job-card-name');
+    expect(appCss).toContain('.cut-job-name-editor');
+    expect(appCss).toContain('.cut-results-block');
   });
 
   it('suggests the cut job name from unique orders, films, and current date', () => {

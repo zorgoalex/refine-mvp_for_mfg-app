@@ -279,6 +279,13 @@ export const cutApi = {
     });
   },
 
+  async setName(cutJobId: number, name: string, version: number): Promise<CutJobDto> {
+    return httpClient.patch<CutJobDto>(apiRoutes.cutJobs.name(validateCutJobId(cutJobId)), {
+      name,
+      version,
+    });
+  },
+
   async setGroupPdfTemplate(cutJobId: number, cutGroupId: number, pdfTemplate: string): Promise<CutJobDto> {
     return httpClient.patch<CutJobDto>(
       apiRoutes.cutJobs.groupPdfTemplate(validateCutJobId(cutJobId), validateCutJobId(cutGroupId)),

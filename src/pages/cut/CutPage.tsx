@@ -21,7 +21,7 @@ import {
   theme,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { MinusOutlined, PlusOutlined, UndoOutlined, UpOutlined } from '@ant-design/icons';
+import { CloseOutlined, EditOutlined, MinusOutlined, PlusOutlined, SaveOutlined, UndoOutlined, UpOutlined } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
 import dayjs, { type Dayjs } from 'dayjs';
 import { cutApi } from '../../api/cutApi';
@@ -411,6 +411,15 @@ function cutPreviewOrderTintByOrderId(details: EligibleDetailDto[]): Map<number,
   return byOrderId;
 }
 
+function cutJobItemOrderTintByOrderId(items: CutJobItemDto[]): Map<number, number> {
+  const byOrderId = new Map<number, number>();
+  for (const item of items) {
+    if (byOrderId.has(item.orderId)) continue;
+    byOrderId.set(item.orderId, byOrderId.size % CUT_CREATE_PREVIEW_ORDER_TINT_COUNT);
+  }
+  return byOrderId;
+}
+
 function uniqueNonBlank(values: Array<string | number | null | undefined>): string[] {
   const set = new Set<string>();
   for (const value of values) {
@@ -626,6 +635,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const orderDateFrom = orderDateCriteria.dateFrom;
   const orderDateTo = orderDateCriteria.dateTo;
   const [job, setJob] = useState<CutJobDto | null>(null);
+  const [isEditingJobName, setIsEditingJobName] = useState(false);
+  const [jobNameDraft, setJobNameDraft] = useState('');
+  const [jobNameSaving, setJobNameSaving] = useState(false);
   const [selectedResult, setSelectedResult] = useState<CutResultSummary | null>(null);
   const [isFrozenResultSelection, setIsFrozenResultSelection] = useState(false);
   const calcCommandRef = useRef<{ cutJobId: number; version: number; commandId: string } | null>(null);
@@ -699,6 +711,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     setSheetAxisOrigin(loadSheetAxisOrigin(uid, job.cutJobId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.cutJobId]);
+
+  useEffect(() => {
+    if (!job) {
+      setIsEditingJobName(false);
+      setJobNameDraft('');
+      return;
+    }
+    setIsEditingJobName(false);
+    setJobNameDraft(job.name);
+  }, [job?.cutJobId]);
+
+  useEffect(() => {
+    if (job && !isEditingJobName) setJobNameDraft(job.name);
+  }, [isEditingJobName, job?.name]);
 
   // Toggle + persist orientation; drop cached previews so they re-fetch oriented.
   const toggleSheetPortrait = useCallback(
@@ -1134,6 +1160,47 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     [applyPdfTemplateState, job, pdfTemplateByGroup, pdfTemplateIsRequestOnly, handleError, loadJobs],
   );
 
+  const startJobNameEdit = useCallback(() => {
+    if (!job) return;
+    setJobNameDraft(job.name);
+    setIsEditingJobName(true);
+  }, [job]);
+
+  const cancelJobNameEdit = useCallback(() => {
+    setJobNameDraft(job?.name ?? '');
+    setIsEditingJobName(false);
+  }, [job?.name]);
+
+  const saveJobName = useCallback(async () => {
+    if (!job) return;
+    const name = jobNameDraft.trim();
+    if (!name) {
+      message.warning('Введите название задания на раскрой');
+      return;
+    }
+    if (name === job.name) {
+      setJobNameDraft(job.name);
+      setIsEditingJobName(false);
+      return;
+    }
+    setBusy(true);
+    setJobNameSaving(true);
+    try {
+      const updated = await cutApi.setName(job.cutJobId, name, job.version);
+      setJob(updated);
+      setJobNameDraft(updated.name);
+      setIsEditingJobName(false);
+      applyPdfTemplateState(updated);
+      void loadJobs();
+      message.success('Название задания сохранено');
+    } catch (error) {
+      handleError(error, 'Не удалось сохранить название задания');
+    } finally {
+      setJobNameSaving(false);
+      setBusy(false);
+    }
+  }, [applyPdfTemplateState, handleError, job, jobNameDraft, loadJobs]);
+
   // Load the existing (non-archived) jobs on mount so an operator can reopen a
   // job created earlier — including jobs staged from the Orders "Добавить в
   // раскрой" action, which previously had no surface to be reopened on.
@@ -1232,6 +1299,39 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     window.history.pushState(null, '', path);
     useTabStore.getState().openTab({ key: '/cut', path, label: 'Раскрой', resource: 'cut' });
   }, [isEmbeddedOrder, job, openJob]);
+
+  const cutResultColumns: ColumnsType<CutResultSummary> = useMemo(
+    () => [
+      { title: 'Номер', dataIndex: 'cutNumber', key: 'cutNumber', width: 110 },
+      {
+        title: 'Тип',
+        dataIndex: 'resultKind',
+        key: 'resultKind',
+        width: 110,
+        render: (kind: CutResultSummary['resultKind']) => kind === 'auto' ? 'Авто' : kind === 'manual' ? 'Ручной' : 'Существующий',
+      },
+      {
+        title: 'Создан',
+        dataIndex: 'createdAt',
+        key: 'createdAt',
+        render: (value: string) => new Date(value).toLocaleString('ru-RU'),
+      },
+      { title: 'Автор', dataIndex: 'createdByName', key: 'createdByName', render: (value: string | null) => value || '—' },
+      { title: 'Листы', key: 'sheets', width: 80, render: (_: unknown, row: CutResultSummary) => row.totals.sheets },
+      { title: 'Статус', key: 'current', width: 100, render: (_: unknown, row: CutResultSummary) => row.isCurrent ? <Tag color="green">Текущий</Tag> : null },
+      {
+        title: 'Действие',
+        key: 'action',
+        width: 100,
+        render: (_: unknown, row: CutResultSummary) => (
+          <Button size="small" type="link" disabled={busy || selectedResult?.cutResultId === row.cutResultId} onClick={() => void openResult(row)}>
+            Открыть
+          </Button>
+        ),
+      },
+    ],
+    [busy, openResult, selectedResult?.cutResultId],
+  );
 
   // Deep-link: /cut?job=<id> opens that job (e.g. from the order show page
   // «Раскрой» column). The workspace keeps /cut mounted (keyed by pathname), so
@@ -2262,6 +2362,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     () => cutPreviewOrderTintByOrderId(eligible ?? []),
     [eligible],
   );
+  const jobItemOrderTintByOrderId = useMemo(
+    () => cutJobItemOrderTintByOrderId(job?.items ?? []),
+    [job?.items],
+  );
 
   // Dirty guard: any group has an active editor session OR its toggle differs
   // from the persisted isActive. While dirty, whole-job PDF is disabled.
@@ -2272,6 +2376,64 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       if (!g.manualLayout) return false;
       return (showAlternativeByGroup[g.cutGroupId] ?? false) !== g.manualLayout.isActive;
     });
+
+  const jobCutResults = job?.cutResults ?? [];
+  const latestCutResult = jobCutResults[0] ?? null;
+  const jobCardTitle = job ? (
+    <Space className="cut-job-card-title" size={8} wrap>
+      <Text strong>Задание на раскрой #{job.cutJobId}</Text>
+      <Text type="secondary">—</Text>
+      {isEditingJobName ? (
+        <Space.Compact className="cut-job-name-editor">
+          <Input
+            size="small"
+            value={jobNameDraft}
+            onChange={(event) => setJobNameDraft(event.target.value)}
+            onPressEnter={() => void saveJobName()}
+            maxLength={200}
+            autoFocus
+            disabled={jobNameSaving}
+            data-testid="cut-job-name-input"
+          />
+          <Tooltip title="Сохранить название">
+            <Button
+              size="small"
+              icon={<SaveOutlined />}
+              onClick={() => void saveJobName()}
+              loading={jobNameSaving}
+              disabled={jobNameSaving}
+              data-testid="cut-job-name-save"
+            />
+          </Tooltip>
+          <Tooltip title="Отменить">
+            <Button
+              size="small"
+              icon={<CloseOutlined />}
+              onClick={cancelJobNameEdit}
+              disabled={jobNameSaving}
+              data-testid="cut-job-name-cancel"
+            />
+          </Tooltip>
+        </Space.Compact>
+      ) : (
+        <>
+          <Text className="cut-job-card-name">{job.name}</Text>
+          {canManage && !isArchivedJob && (
+            <Tooltip title="Редактировать название">
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={startJobNameEdit}
+                disabled={busy || job.status === 'calculating'}
+                data-testid="cut-job-name-edit"
+              />
+            </Tooltip>
+          )}
+        </>
+      )}
+    </Space>
+  ) : undefined;
 
   if (!can('cut.view')) {
     return <Alert type="error" message="Недостаточно прав для просмотра раскроя" showIcon />;
@@ -2473,7 +2635,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       {job && (
         <Card
           size="small"
-          title={`Задание на раскрой #${job.cutJobId} — ${job.name}`}
+          title={jobCardTitle}
           extra={
             <Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>
           }
@@ -2495,44 +2657,31 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               }
             />
           )}
-          {(job.cutResults?.length ?? 0) > 0 && (
-            <Card size="small" title="Выполненные раскрои" style={{ marginBottom: 12 }}>
+          {jobCutResults.length > 0 && (
+            <div className="cut-results-block" data-testid="cut-results-block">
+              <div className="cut-results-block-title">Выполненные раскрои</div>
               <Table<CutResultSummary>
+                className="cut-results-latest-table"
                 size="small"
                 rowKey="cutResultId"
                 pagination={false}
-                dataSource={job.cutResults ?? []}
-                columns={[
-                  { title: 'Номер', dataIndex: 'cutNumber', key: 'cutNumber', width: 110 },
-                  {
-                    title: 'Тип',
-                    dataIndex: 'resultKind',
-                    key: 'resultKind',
-                    width: 110,
-                    render: (kind: CutResultSummary['resultKind']) => kind === 'auto' ? 'Авто' : kind === 'manual' ? 'Ручной' : 'Существующий',
-                  },
-                  {
-                    title: 'Создан',
-                    dataIndex: 'createdAt',
-                    key: 'createdAt',
-                    render: (value: string) => new Date(value).toLocaleString('ru-RU'),
-                  },
-                  { title: 'Автор', dataIndex: 'createdByName', key: 'createdByName', render: (value: string | null) => value || '—' },
-                  { title: 'Листы', key: 'sheets', width: 80, render: (_: unknown, row: CutResultSummary) => row.totals.sheets },
-                  { title: 'Статус', key: 'current', width: 100, render: (_: unknown, row: CutResultSummary) => row.isCurrent ? <Tag color="green">Текущий</Tag> : null },
-                  {
-                    title: 'Действие',
-                    key: 'action',
-                    width: 100,
-                    render: (_: unknown, row: CutResultSummary) => (
-                      <Button size="small" type="link" disabled={busy || selectedResult?.cutResultId === row.cutResultId} onClick={() => void openResult(row)}>
-                        Открыть
-                      </Button>
-                    ),
-                  },
-                ]}
+                dataSource={latestCutResult ? [latestCutResult] : []}
+                columns={cutResultColumns}
               />
-            </Card>
+              {jobCutResults.length > 1 && (
+                <Collapse size="small" className="cut-results-history-collapse" defaultActiveKey={[]}>
+                  <Panel header={`Все сохранённые раскрои (${jobCutResults.length})`} key="cut-results-history">
+                    <Table<CutResultSummary>
+                      size="small"
+                      rowKey="cutResultId"
+                      pagination={false}
+                      dataSource={jobCutResults}
+                      columns={cutResultColumns}
+                    />
+                  </Panel>
+                </Collapse>
+              )}
+            </div>
           )}
           {job.status === 'failed' && job.failureReason && (
             <Alert
@@ -2725,12 +2874,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           <Panel header={`Детали задания (${job.items.length})`} key="cut-job-details">
             <TableTopScroll>
               <Table<CutJobItemDto>
+                className="cut-job-details-table details-grouped"
                 size="small"
                 rowKey="cutJobItemId"
                 columns={jobItemColumns}
                 dataSource={job.items}
                 pagination={false}
                 scroll={{ x: 1900, y: CUT_JOB_DETAILS_TABLE_BODY_HEIGHT }}
+                rowClassName={(row) => `detail-group-tint-${jobItemOrderTintByOrderId.get(row.orderId) ?? 0}`}
                 locale={{ emptyText: 'В задании пока нет деталей — добавьте их из заказа или через «Загрузить подходящие детали»' }}
               />
             </TableTopScroll>

@@ -8,6 +8,7 @@ import type { CutConfigPort } from '../application/cut-config';
 import { StaticCutConfig } from '../application/cut-config';
 import {
   PgCutRepository,
+  nameChangedOutboxKey,
   planCutResultAllocation,
   profileChangedOutboxKey,
   resolvePdfTemplateSelection,
@@ -1446,6 +1447,13 @@ describe('profileChangedOutboxKey', () => {
   it('is stable per (job, requestId), falls back to version', () => {
     expect(profileChangedOutboxKey(7, 'req-9', 3)).toBe('cut_job.profile_changed:7:req-9');
     expect(profileChangedOutboxKey(7, undefined, 3)).toBe('cut_job.profile_changed:7:v3');
+  });
+});
+
+describe('nameChangedOutboxKey', () => {
+  it('is stable per (job, requestId), falls back to version', () => {
+    expect(nameChangedOutboxKey(7, 'req-9', 3)).toBe('cut_job.name_changed:7:req-9');
+    expect(nameChangedOutboxKey(7, undefined, 3)).toBe('cut_job.name_changed:7:v3');
   });
 });
 

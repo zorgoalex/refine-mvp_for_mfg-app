@@ -969,6 +969,47 @@ html {
   gap: 8px;
 }
 
+.cut-job-card-title {
+  max-width: 100%;
+}
+
+.cut-job-card-name {
+  display: inline-block;
+  max-width: min(720px, 58vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.cut-job-name-editor {
+  width: min(640px, 58vw);
+}
+
+.cut-job-name-editor .ant-input {
+  min-width: 260px;
+}
+
+.cut-results-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border-soft);
+  border-radius: 6px;
+  background: var(--app-surface-muted);
+}
+
+.cut-results-block-title {
+  font-weight: 600;
+}
+
+.cut-results-history-collapse .ant-collapse-content-box {
+  padding: 8px 0 0;
+}
+
 .cut-create-preview-details-table .ant-table-thead > tr > th,
 .cut-create-preview-details-table .ant-table-tbody > tr > td {
   padding: 2px 6px;

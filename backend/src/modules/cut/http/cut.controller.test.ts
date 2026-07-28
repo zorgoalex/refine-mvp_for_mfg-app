@@ -12,6 +12,7 @@ import {
   parseSetProfileBody,
   parseSetSheetMaterialBody,
   parseSetCombineFilmsBody,
+  parseSetNameBody,
   parseSetPdfTemplateBody,
   parseSetSplitByMaterialBody,
   parseSaveManualLayoutBody,
@@ -734,6 +735,30 @@ it('PATCH setJobPdfTemplate delegates parsed args to CutService.setJobPdfTemplat
   const dto = await controller.setJobPdfTemplate(request, '42', { pdfTemplate: 'bath_profiles' });
   expect(service.setJobPdfTemplate).toHaveBeenCalledWith(expect.objectContaining({
     cutJobId: 42, pdfTemplate: 'bath_profiles', requestId: 'req-job-template',
+  }));
+  expect(dto).toBe(serviceReturn);
+});
+
+describe('parseSetNameBody', () => {
+  it('trims and accepts a non-empty name + version', () => {
+    expect(parseSetNameBody({ name: '  Раскрой 2709  ', version: 4 })).toEqual({ name: 'Раскрой 2709', version: 4 });
+  });
+  it('rejects an empty name and unknown fields', () => {
+    expect(() => parseSetNameBody({ name: '   ', version: 0 })).toThrow();
+    expect(() => parseSetNameBody({ name: 'Раскрой', version: 0, extra: true })).toThrow();
+  });
+});
+
+it('PATCH setName delegates parsed args to CutService.setName', async () => {
+  const serviceReturn = jobDto();
+  const service = {
+    setName: vi.fn(async () => serviceReturn),
+  };
+  const controller = createController({ service });
+  const request = { user: currentUser(), requestId: 'req-name' } as never;
+  const dto = await controller.setName(request, '42', { name: 'Раскрой 2709', version: 3 });
+  expect(service.setName).toHaveBeenCalledWith(expect.objectContaining({
+    cutJobId: 42, name: 'Раскрой 2709', version: 3, requestId: 'req-name',
   }));
   expect(dto).toBe(serviceReturn);
 });

@@ -17,6 +17,7 @@ describe('cut audit contract (§11)', () => {
       archived: 'cut_job.archived',
       calculateFailed: 'cut_job.calculate_failed',
       permissionDenied: 'cut_job.permission_denied',
+      nameChanged: 'cut_job.name_changed',
     });
   });
 

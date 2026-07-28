@@ -28,6 +28,7 @@ import type {
   SetCutJobSheetMaterialCommand,
   SetCutJobCombineFilmsCommand,
   SetCutJobPdfTemplateCommand,
+  SetCutJobNameCommand,
   SetCutJobSplitByMaterialCommand,
   SetCutGroupPdfTemplateCommand,
   SetPdfPrewarmStateQuery,
@@ -200,6 +201,11 @@ export class CutService implements OnModuleInit, OnModuleDestroy {
   async setJobPdfTemplate(command: SetCutJobPdfTemplateCommand) {
     this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
     return this.ports.cut.setJobPdfTemplate(command);
+  }
+
+  async setName(command: SetCutJobNameCommand) {
+    this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
+    return this.ports.cut.setName(command);
   }
 
   async setGroupPdfTemplate(command: SetCutGroupPdfTemplateCommand) {

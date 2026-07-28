@@ -117,6 +117,7 @@ export const apiRoutes = {
     jobPdf: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/export.pdf`),
     resultJobPdf: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}/export.pdf`),
     jobPdfTemplate: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/pdf-template`),
+    name: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/name`),
     groupPdfTemplate: (cutJobId: number, groupId: number) =>
       backendApiPath(`/cut-jobs/${cutJobId}/groups/${groupId}/pdf-template`),
     profile: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/profile`),

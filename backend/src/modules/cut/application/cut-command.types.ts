@@ -293,6 +293,14 @@ export interface SetCutJobPdfTemplateCommand {
   requestId?: string;
 }
 
+export interface SetCutJobNameCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  name: string;
+  version: number;
+  requestId?: string;
+}
+
 export interface SetCutGroupPdfTemplateCommand {
   currentUser: CurrentUser;
   cutJobId: number;
@@ -324,6 +332,7 @@ export interface CutRepositoryPort {
   setCombineFilms(command: SetCutJobCombineFilmsCommand): Promise<CutJobDto>;
   setSplitByMaterial(command: SetCutJobSplitByMaterialCommand): Promise<CutJobDto>;
   setJobPdfTemplate(command: SetCutJobPdfTemplateCommand): Promise<CutJobDto>;
+  setName(command: SetCutJobNameCommand): Promise<CutJobDto>;
   setGroupPdfTemplate(command: SetCutGroupPdfTemplateCommand): Promise<CutJobDto>;
   getJob(query: GetCutJobQuery): Promise<CutJobDto>;
   listResults(query: ListCutResultsQuery): Promise<CutResultSummaryDto[]>;

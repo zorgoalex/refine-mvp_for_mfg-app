@@ -71,6 +71,7 @@ import type {
   SetCutJobSheetMaterialCommand,
   SetCutJobCombineFilmsCommand,
   SetCutJobPdfTemplateCommand,
+  SetCutJobNameCommand,
   SetCutJobSplitByMaterialCommand,
   SetCutGroupPdfTemplateCommand,
   SetPdfPrewarmStateQuery,
@@ -349,6 +350,11 @@ export function combineFilmsChangedOutboxKey(cutJobId: number, requestId: string
  *  rule: stable per (job, request), version fallback. */
 export function splitByMaterialChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
   return `${CUT_AUDIT_EVENTS.splitByMaterialChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
+}
+
+/** Idempotency key for cut-job rename events. Stable per (job, request), version fallback. */
+export function nameChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.nameChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
 }
 
 /** Idempotency key for the manual-layout-saved outbox event. Keyed by the
@@ -3505,6 +3511,64 @@ export class PgCutRepository implements CutRepositoryPort {
         [command.cutJobId, command.pdfTemplate],
       );
       if (updated.rows.length === 0) throw new CutJobNotFoundError(command.cutJobId);
+    });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
+  }
+
+  async setName(command: SetCutJobNameCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ status: string; version: string | number; name: string }>(
+        `SELECT status, version, name FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      const nextName = command.name.trim();
+      const beforeName = row.name;
+
+      if (beforeName === nextName) {
+        return;
+      }
+
+      await tx.query(
+        `UPDATE cut_job SET name = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId, nextName],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.nameChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        before: { name: beforeName },
+        after: { name: nextName },
+        metadata: { beforeName, afterName: nextName },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.nameChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeName,
+            afterName: nextName,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          nameChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
     });
     return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }

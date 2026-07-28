@@ -169,6 +169,24 @@ describe('CutService RBAC (§8 principle 8)', () => {
     expect(recordPermissionDenied).toHaveBeenCalled();
   });
 
+  it('setName requires cut.manage and delegates to the repo', async () => {
+    const setName = vi.fn(async () => ({ cutJobId: 42, name: 'Раскрой 2709' }) as never);
+    const service = new CutService({ cut: repo({ setName }) });
+    await service.setName({ currentUser: user(['cut.manage']), cutJobId: 42, name: 'Раскрой 2709', version: 1 });
+    expect(setName).toHaveBeenCalledWith(expect.objectContaining({ cutJobId: 42, name: 'Раскрой 2709', version: 1 }));
+  });
+
+  it('setName denies a user without cut.manage (403 + denied audit, no repo call)', async () => {
+    const setName = vi.fn(async () => ({ cutJobId: 42 }) as never);
+    const recordPermissionDenied = vi.fn(async () => undefined);
+    const service = new CutService({ cut: repo({ setName, recordPermissionDenied }) });
+    await expect(service.setName({ currentUser: user(['cut.view']), cutJobId: 42, name: 'Раскрой 2709', version: 1 }))
+      .rejects.toMatchObject({ statusCode: 403 });
+    expect(setName).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(recordPermissionDenied).toHaveBeenCalled();
+  });
+
   it('denies detail-last-ready read without cut.view', async () => {
     const service = new CutService({ cut: repo() });
     await expect(

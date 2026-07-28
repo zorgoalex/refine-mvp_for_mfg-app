@@ -91,6 +91,13 @@ const setPdfTemplateBodySchema = z
   })
   .strict();
 
+const setNameBodySchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    version: z.number().int().nonnegative(),
+  })
+  .strict();
+
 const manualMoveSchema = z
   .object({
     itemId: z.string().min(1),
@@ -565,6 +572,24 @@ export class CutController {
     });
   }
 
+  @ApiOperation({ operationId: 'setCutJobName', summary: 'Rename a cut job' })
+  @Patch(':cutJobId/name')
+  async setName(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const { name, version } = parseSetNameBody(body);
+    return this.cut.setName({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      name,
+      version,
+      requestId: request.requestId,
+    });
+  }
+
   @ApiOperation({ operationId: 'setCutGroupPdfTemplate', summary: 'Set the PDF template for a cut group export' })
   @Patch(':cutJobId/groups/:groupId/pdf-template')
   async setGroupPdfTemplate(
@@ -942,6 +967,10 @@ export function parseSetSplitByMaterialBody(body: unknown): { splitByMaterial: b
 
 export function parseSetPdfTemplateBody(body: unknown): { pdfTemplate: string } {
   return parse(setPdfTemplateBodySchema, body);
+}
+
+export function parseSetNameBody(body: unknown): { name: string; version: number } {
+  return parse(setNameBodySchema, body);
 }
 
 export function parseSaveManualLayoutBody(body: unknown): { jobVersion: number; active: boolean; placements: ManualMove[]; sheetTransforms: SheetViewTransform[]; commandId: string } {
