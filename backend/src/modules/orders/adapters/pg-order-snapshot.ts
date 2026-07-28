@@ -1315,24 +1315,17 @@ async function upsertOrderHeader(
 ): Promise<number> {
   const source = snapshot.source.sourceInstanceId;
   const sourceId = snapshot.identity.order.sourceId;
-  const mapped = await getMap(tx, source, SNAPSHOT_ENTITY_TYPES.order, sourceId);
-  const localOrderId = mapped
-    ? Number(mapped.local_entity_id)
-    : await findOrderForSnapshot(tx, snapshot, clientId);
   const dto = snapshotHeaderToSaveOrderDto(snapshot, clientId, undefined);
   const prepared = prepareOrderSave(dto, {
-    mode: localOrderId ? 'update' : 'create',
-    pathOrderId: localOrderId ?? undefined,
+    mode: 'create',
   });
 
-  const orderId = localOrderId
-    ? await updateOrderHeader(tx, localOrderId, prepared.order.header, prepared.totals)
-    : await insertOrderHeader(
-        tx,
-        prepared.order.header,
-        prepared.totals,
-        await createImportProject(tx, prepared.order.header, command),
-      );
+  const orderId = await insertOrderHeader(
+    tx,
+    prepared.order.header,
+    prepared.totals,
+    await createImportProject(tx, prepared.order.header, command),
+  );
   await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.order, sourceId, localId: String(orderId), localOrderId: orderId, payloadHash });
   return orderId;
 }
