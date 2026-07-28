@@ -19,7 +19,7 @@ import type { NormalizedSaveOrderHeaderDto, OrderTotalsDto, CalculatedOrderDetai
 import type { OrderSnapshotPort } from '../application/order-snapshot.types';
 import { OrderSnapshotService } from '../application/order-snapshot.service';
 import type { CurrentUser } from '../../../permissions/current-user';
-import type { DatabaseClient } from '../../../database/database.types';
+import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import { ApiError } from '../../../common/errors/api-error';
 import { ORDER_SNAPSHOT_FORMAT_VERSION, ORDER_SNAPSHOT_SCHEMA } from '../dto/order-snapshot.dto';
@@ -35,6 +35,8 @@ import {
   _testOnlySnapshotHeaderToSaveOrderDto as snapshotHeaderToSaveOrderDto,
   _testOnlySnapshotBatchFailure as snapshotBatchFailure,
   _testOnlySnapshotFailureSummary as snapshotFailureSummary,
+  _testOnlyFindExistingOrderForSnapshotImport as findExistingOrderForSnapshotImport,
+  _testOnlySummarizeSnapshotBatchResults as summarizeSnapshotBatchResults,
   _testOnlySnapshotToSaveOrderDto as snapshotToSaveOrderDto,
   buildSheetValidationDetails,
 } from './pg-order-snapshot';
@@ -357,7 +359,7 @@ function fakeSnapshots(): OrderSnapshotPort {
       importRunId: 'r',
       summary: { details: 0, payments: 0, workshops: 0, requirements: 0, dowelingLinks: 0, productionStatusEvents: 0, clientPhones: 0, deadlineInstances: 0, deadlineEvents: 0 },
     })),
-    importOrderSnapshotBatch: vi.fn(async () => ({ success: true as const, total: 0, imported: 0, failed: 0, results: [] })),
+    importOrderSnapshotBatch: vi.fn(async () => ({ success: true as const, total: 0, imported: 0, skipped: 0, failed: 0, results: [] })),
   };
 }
 
@@ -555,6 +557,43 @@ describe('OrderSnapshotService — sheet_materials.view gate on BATCH import', (
 });
 
 describe('pg-order-snapshot batch import failures', () => {
+  it('does not count noop/skipped existing orders as imported', () => {
+    const summary = {
+      details: 0,
+      payments: 0,
+      workshops: 0,
+      requirements: 0,
+      dowelingLinks: 0,
+      productionStatusEvents: 0,
+      clientPhones: 0,
+      deadlineInstances: 0,
+      deadlineEvents: 0,
+    };
+
+    expect(
+      summarizeSnapshotBatchResults([
+        { fileName: 'created.erp-order.json', success: true, status: 'created', orderId: 1, orderName: '2701', payloadHash: 'h1', importRunId: 'r1', summary },
+        { fileName: 'same.erp-order.json', success: true, status: 'noop', orderId: 2, orderName: '2702', payloadHash: 'h2', importRunId: 'r2', summary },
+        { fileName: 'exists.erp-order.json', success: true, status: 'skipped', orderId: 3, orderName: '2703', payloadHash: 'h3', importRunId: 'r3', summary },
+        { fileName: 'bad.erp-order.json', success: false, errorCode: 'VALIDATION_ERROR', message: 'bad' },
+      ]),
+    ).toEqual({ imported: 1, skipped: 2 });
+  });
+
+  it('finds an existing order by order name before reference remap/import writes', async () => {
+    const tx = fakeExistingOrderLookupTx({
+      mappedRows: [],
+      refRows: [],
+      nameRows: [{ order_id: 2704, order_name: '2704', payload_hash: null }],
+    });
+
+    await expect(
+      findExistingOrderForSnapshotImport(tx, minimalSnapshotWithSheet(null), 'incoming-hash'),
+    ).resolves.toEqual({ orderId: 2704, orderName: '2704', status: 'skipped' });
+
+    expect(tx.query).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps ApiError details so the UI can show field-level import causes', () => {
     const error = new ApiError(422, 'VALIDATION_ERROR', 'Order payload validation failed', {
       errors: [
@@ -834,6 +873,23 @@ function minimalSnapshotWithOrderStatusReference(orderStatusId: number): import(
       ],
     },
   };
+}
+
+type ExistingOrderLookupRow = { order_id: number; order_name: string; payload_hash: string | null };
+
+function fakeExistingOrderLookupTx(options: {
+  mappedRows: ExistingOrderLookupRow[];
+  refRows: ExistingOrderLookupRow[];
+  nameRows: ExistingOrderLookupRow[];
+}): TransactionClient & { query: ReturnType<typeof vi.fn> } {
+  const query = vi.fn(async (sql: string) => {
+    if (sql.includes('FROM order_import_entity_map')) return { rows: options.mappedRows };
+    if (sql.includes('WHERE ref_key_1c')) return { rows: options.refRows };
+    if (sql.includes('WHERE order_name = $1')) return { rows: options.nameRows };
+    return { rows: [] };
+  });
+
+  return { query } as unknown as TransactionClient & { query: typeof query };
 }
 
 function fakeReferenceTx(options: { overrideExists: boolean; uniqueMatchId: number | null }): DatabaseClient {

@@ -2,6 +2,10 @@ import type { ImportOrderSnapshotBatchResponse } from "../../api/types/orderApi.
 
 type BatchResult = ImportOrderSnapshotBatchResponse["results"][number];
 type FailureResult = Extract<BatchResult, { success: false }>;
+type SuccessResult = Extract<BatchResult, { success: true }>;
+type SnapshotImportStatus = SuccessResult["status"];
+type ImportedResult = SuccessResult & { status: "created" | "updated" };
+type SkippedResult = SuccessResult & { status: "noop" | "skipped" };
 
 export interface SnapshotImportFailureReport {
   fileName: string;
@@ -16,7 +20,13 @@ export interface SnapshotImportBatchReport {
   successes: Array<{
     fileName: string;
     orderName: string;
-    status: "created" | "updated" | "noop";
+    status: "created" | "updated";
+    statusLabel: string;
+  }>;
+  skipped: Array<{
+    fileName: string;
+    orderName: string;
+    status: "noop" | "skipped";
     statusLabel: string;
   }>;
 }
@@ -34,7 +44,9 @@ export function buildSnapshotImportBatchReport(
     }));
 
   const successes = result.results
-    .filter((item): item is Extract<BatchResult, { success: true }> => item.success === true)
+    .filter((item): item is ImportedResult => (
+      item.success === true && isImportedSnapshotStatus(item.status)
+    ))
     .map((success) => ({
       fileName: success.fileName,
       orderName: success.orderName,
@@ -42,12 +54,22 @@ export function buildSnapshotImportBatchReport(
       statusLabel: snapshotImportStatusLabel(success.status),
     }));
 
+  const skipped = result.results
+    .filter((item): item is SkippedResult => (
+      item.success === true && isSkippedSnapshotStatus(item.status)
+    ))
+    .map((skip) => ({
+      fileName: skip.fileName,
+      orderName: skip.orderName,
+      status: skip.status,
+      statusLabel: snapshotImportStatusLabel(skip.status),
+    }));
+
   return {
-    title: result.failed > 0
-      ? `Импортировано: ${result.imported}, ошибок: ${result.failed}`
-      : `Импортировано заказов: ${result.imported}`,
+    title: snapshotImportBatchTitle(result),
     failures,
     successes,
+    skipped,
   };
 }
 
@@ -68,15 +90,34 @@ export function extractFailureDetailLines(details: Record<string, unknown> | und
     .filter((line): line is string => Boolean(line));
 }
 
-function snapshotImportStatusLabel(status: "created" | "updated" | "noop"): string {
+function snapshotImportBatchTitle(result: ImportOrderSnapshotBatchResponse): string {
+  const parts = [
+    result.imported > 0 ? `Импортировано: ${result.imported}` : null,
+    result.skipped > 0 ? `уже есть: ${result.skipped}` : null,
+    result.failed > 0 ? `ошибок: ${result.failed}` : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.length > 0 ? parts.join(", ") : "Нет заказов для импорта";
+}
+
+function snapshotImportStatusLabel(status: "created" | "updated" | "noop" | "skipped"): string {
   switch (status) {
     case "created":
       return "создан";
     case "updated":
       return "обновлен";
     case "noop":
-      return "без изменений";
+    case "skipped":
+      return "уже есть, импорт не выполнялся";
   }
+}
+
+function isImportedSnapshotStatus(status: SnapshotImportStatus): status is "created" | "updated" {
+  return status === "created" || status === "updated";
+}
+
+function isSkippedSnapshotStatus(status: SnapshotImportStatus): status is "noop" | "skipped" {
+  return status === "noop" || status === "skipped";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

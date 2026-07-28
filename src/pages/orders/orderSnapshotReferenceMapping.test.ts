@@ -14,6 +14,7 @@ describe("orderSnapshotReferenceMapping", () => {
       success: true,
       total: 3,
       imported: 1,
+      skipped: 0,
       failed: 2,
       results: [
         {

@@ -135,7 +135,7 @@ const orderSnapshotImportResponseSwaggerSchema = {
   required: ['success', 'status', 'orderId', 'orderName', 'payloadHash', 'importRunId', 'summary'],
   properties: {
     success: { type: 'boolean', enum: [true] },
-    status: { type: 'string', enum: ['created', 'updated', 'noop'] },
+    status: { type: 'string', enum: ['created', 'updated', 'noop', 'skipped'] },
     orderId: { type: 'integer' },
     orderName: { type: 'string' },
     payloadHash: { type: 'string' },
@@ -146,11 +146,12 @@ const orderSnapshotImportResponseSwaggerSchema = {
 
 const orderSnapshotImportBatchResponseSwaggerSchema = {
   type: 'object',
-  required: ['success', 'total', 'imported', 'failed', 'results'],
+  required: ['success', 'total', 'imported', 'skipped', 'failed', 'results'],
   properties: {
     success: { type: 'boolean', enum: [true] },
     total: { type: 'integer' },
     imported: { type: 'integer' },
+    skipped: { type: 'integer' },
     failed: { type: 'integer' },
     results: {
       type: 'array',

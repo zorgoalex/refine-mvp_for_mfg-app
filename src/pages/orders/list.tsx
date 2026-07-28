@@ -465,28 +465,31 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
   const showSnapshotImportBatchReport = (result: ImportOrderSnapshotBatchResponse) => {
     const report = buildSnapshotImportBatchReport(result);
-    Modal.warning({
+    const openReport = report.failures.length > 0 ? Modal.warning : Modal.info;
+    openReport({
       title: report.title,
       width: 780,
       content: (
         <div className="orders-snapshot-import-report">
-          <div className="orders-snapshot-import-report__section">
-            {report.failures.map((failure) => (
-              <div key={failure.fileName} className="orders-snapshot-import-report__failure">
-                <Text strong>{failure.fileName}</Text>
-                <Text type="secondary">
-                  {failure.errorCode}: {failure.message}
-                </Text>
-                {failure.detailLines.length > 0 && (
-                  <ul className="orders-snapshot-import-report__details">
-                    {failure.detailLines.map((line, lineIndex) => (
-                      <li key={`${failure.fileName}-${lineIndex}`}>{line}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ))}
-          </div>
+          {report.failures.length > 0 && (
+            <div className="orders-snapshot-import-report__section">
+              {report.failures.map((failure) => (
+                <div key={failure.fileName} className="orders-snapshot-import-report__failure">
+                  <Text strong>{failure.fileName}</Text>
+                  <Text type="secondary">
+                    {failure.errorCode}: {failure.message}
+                  </Text>
+                  {failure.detailLines.length > 0 && (
+                    <ul className="orders-snapshot-import-report__details">
+                      {failure.detailLines.map((line, lineIndex) => (
+                        <li key={`${failure.fileName}-${lineIndex}`}>{line}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           {report.successes.length > 0 && (
             <div className="orders-snapshot-import-report__section">
               <Text type="secondary">Импортированы:</Text>
@@ -494,6 +497,18 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 {report.successes.map((success) => (
                   <li key={success.fileName}>
                     {success.fileName} — заказ {success.orderName}: {success.statusLabel}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {report.skipped.length > 0 && (
+            <div className="orders-snapshot-import-report__section">
+              <Text type="secondary">Уже есть, не импортированы:</Text>
+              <ul className="orders-snapshot-import-report__details">
+                {report.skipped.map((skip) => (
+                  <li key={skip.fileName}>
+                    {skip.fileName} — заказ {skip.orderName}: {skip.statusLabel}
                   </li>
                 ))}
               </ul>
@@ -537,7 +552,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       const isZip = file.name.toLowerCase().endsWith(".zip");
       if (isZip) {
         const result = await ordersApi.importSnapshotBatchFile(file, referenceMappings);
-        if (result.failed > 0) {
+        if (result.failed > 0 || result.skipped > 0) {
           const unmappedReferences = extractUnmappedReferencesFromBatch(result);
           if (unmappedReferences.length > 0) {
             openSnapshotReferenceMapping(file, unmappedReferences);
@@ -554,7 +569,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       } else {
         const result = await ordersApi.importSnapshotFile(file, referenceMappings);
         clearSnapshotReferenceMapping();
-        message.success(`Заказ ${result.orderName}: ${result.status}`);
+        if (result.status === "noop" || result.status === "skipped") {
+          message.info(`Заказ ${result.orderName} уже есть, импорт не выполнялся`);
+        } else {
+          message.success(`Заказ ${result.orderName} импортирован`);
+        }
       }
       setCurrent(1);
     } catch (error) {

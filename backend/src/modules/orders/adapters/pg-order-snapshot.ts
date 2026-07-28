@@ -64,7 +64,7 @@ import {
 } from '../domain/sheet-order-validation';
 
 type AnyRow = QueryResultRow & Record<string, unknown>;
-type ImportStatus = 'created' | 'updated' | 'noop';
+type ImportStatus = 'created' | 'updated' | 'noop' | 'skipped';
 
 const SOURCE = 'backend-orders-command';
 // SNAPSHOT_IMPORT_SOURCE removed in Variant B (Task 4): no longer used after shadow material removal.
@@ -310,6 +310,18 @@ interface IdRow extends QueryResultRow {
   id: string | number;
 }
 
+interface ExistingOrderRow extends QueryResultRow {
+  order_id: string | number;
+  order_name: string;
+  payload_hash: string | null;
+}
+
+interface ExistingSnapshotOrder {
+  orderId: number;
+  orderName: string;
+  status: Extract<ImportStatus, 'noop' | 'skipped'>;
+}
+
 interface SourceInstanceRow extends QueryResultRow {
   source_instance_id: string;
 }
@@ -386,6 +398,35 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
           snapshot.source.sourceInstanceId,
           snapshot.identity.order.sourceId,
         ]);
+        const existingOrder = await findExistingOrderForSnapshotImport(tx, snapshot, payloadHash);
+        if (existingOrder) {
+          const result = response(
+            existingOrder.status,
+            existingOrder.orderId,
+            existingOrder.orderName,
+            payloadHash,
+            snapshot,
+          );
+          await finishImportRun(tx, runId, result.status, result.orderId, result.summary);
+          await writeAudit(
+            tx,
+            snapshotImportAuditEvent(result.status),
+            command.currentUser,
+            result.orderId,
+            null,
+            {
+              requestId: command.requestId,
+              payloadHash,
+              importRunId: runId,
+              status: result.status,
+              formatVersion: snapshot.formatVersion,
+              serviceVersion: snapshot.exporterService.version,
+            },
+            collectSnapshotSheetIds(snapshot),
+          );
+          return result;
+        }
+
         const remappedSnapshot = await remapSnapshotReferencesForImport(
           tx,
           snapshot,
@@ -395,7 +436,7 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
         await finishImportRun(tx, runId, result.status, result.orderId, result.summary);
         await writeAudit(
           tx,
-          result.status === 'noop' ? 'orders.snapshot_import.noop' : 'orders.snapshot_import',
+          snapshotImportAuditEvent(result.status),
           command.currentUser,
           result.orderId,
           null, // relatedClientId unavailable before payload build; local clientId not returned from importSnapshotInTransaction
@@ -439,11 +480,13 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
     }
 
     const failed = results.filter((result) => result.success === false).length;
+    const { imported, skipped } = summarizeSnapshotBatchResults(results);
 
     return {
       success: true,
       total: results.length,
-      imported: results.length - failed,
+      imported,
+      skipped,
       failed,
       results,
     };
@@ -506,6 +549,29 @@ function snapshotBatchFailure(
     message: snapshotErrorMessage(error),
     ...(details ? { details } : {}),
   };
+}
+
+function summarizeSnapshotBatchResults(
+  results: ImportOrderSnapshotBatchResponseDto['results'],
+): Pick<ImportOrderSnapshotBatchResponseDto, 'imported' | 'skipped'> {
+  let imported = 0;
+  let skipped = 0;
+
+  for (const result of results) {
+    if (result.success !== true) continue;
+    if (isImportedSnapshotStatus(result.status)) imported += 1;
+    if (isSkippedSnapshotStatus(result.status)) skipped += 1;
+  }
+
+  return { imported, skipped };
+}
+
+function isImportedSnapshotStatus(status: ImportStatus): boolean {
+  return status === 'created' || status === 'updated';
+}
+
+function isSkippedSnapshotStatus(status: ImportStatus): boolean {
+  return status === 'noop' || status === 'skipped';
 }
 
 function snapshotErrorCode(error: unknown): string {
@@ -1130,21 +1196,23 @@ async function importSnapshotInTransaction(
   const orderSourceId = snapshot.identity.order.sourceId;
   const existingOrderMap = await getMap(tx, source, SNAPSHOT_ENTITY_TYPES.order, orderSourceId);
 
-  if (existingOrderMap?.payload_hash === payloadHash) {
+  if (existingOrderMap) {
     const orderId = Number(existingOrderMap.local_entity_id);
     const orderName = await readOrderName(tx, orderId);
-    return response('noop', orderId, orderName, payloadHash, snapshot);
+    return response(
+      existingOrderMap.payload_hash === payloadHash ? 'noop' : 'skipped',
+      orderId,
+      orderName,
+      payloadHash,
+      snapshot,
+    );
   }
 
   const clientId = await upsertClient(tx, snapshot, payloadHash);
 
   // SP3: pre-read stored sheet state BEFORE writing (same as order-transaction.service).
   // For brand-new orders (no localOrderId yet), stored state = empty + eligible=true.
-  const existingOrderMapForSheet = await getMap(tx, source, SNAPSHOT_ENTITY_TYPES.order, orderSourceId);
-  const localOrderIdForSheet = existingOrderMapForSheet
-    ? Number(existingOrderMapForSheet.local_entity_id)
-    : await findOrderForSnapshot(tx, snapshot, clientId);
-  const storedSheet = await readStoredSheetState(tx, localOrderIdForSheet);
+  const storedSheet = await readStoredSheetState(tx, null);
 
   // Build the validation header/details from incoming snapshot data.
   const snapshotHeader: SheetValidationHeader = {
@@ -1247,28 +1315,17 @@ async function upsertOrderHeader(
 ): Promise<number> {
   const source = snapshot.source.sourceInstanceId;
   const sourceId = snapshot.identity.order.sourceId;
-  const mapped = await getMap(tx, source, SNAPSHOT_ENTITY_TYPES.order, sourceId);
-  const localOrderId = mapped
-    ? Number(mapped.local_entity_id)
-    : await findOrderForSnapshot(tx, snapshot, clientId);
-  const dto = snapshotHeaderToSaveOrderDto(
-    snapshot,
-    clientId,
-    localOrderId ? await readOrderVersion(tx, localOrderId) : undefined,
-  );
+  const dto = snapshotHeaderToSaveOrderDto(snapshot, clientId, undefined);
   const prepared = prepareOrderSave(dto, {
-    mode: localOrderId ? 'update' : 'create',
-    pathOrderId: localOrderId ?? undefined,
+    mode: 'create',
   });
 
-  const orderId = localOrderId
-    ? await updateOrderHeader(tx, localOrderId, prepared.order.header, prepared.totals)
-    : await insertOrderHeader(
-        tx,
-        prepared.order.header,
-        prepared.totals,
-        await createImportProject(tx, prepared.order.header, command),
-      );
+  const orderId = await insertOrderHeader(
+    tx,
+    prepared.order.header,
+    prepared.totals,
+    await createImportProject(tx, prepared.order.header, command),
+  );
   await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.order, sourceId, localId: String(orderId), localOrderId: orderId, payloadHash });
   return orderId;
 }
@@ -2534,22 +2591,64 @@ async function upsertProductionEvent(
   return Number(result.rows[0].id);
 }
 
-async function findOrderForSnapshot(
+async function findExistingOrderForSnapshotImport(
   tx: TransactionClient,
   snapshot: OrderSnapshotDto,
-  clientId: number,
-): Promise<number | null> {
-  const refKey = snapshot.identity.order.refKey1c ?? snapshot.data.order.refKey1c ?? null;
-  if (refKey) {
-    const byRef = await readOptionalId(tx, 'SELECT order_id AS id FROM orders WHERE ref_key_1c = $1::uuid AND delete_flag = false', [refKey]);
-    if (byRef) return byRef;
+  payloadHash: string,
+): Promise<ExistingSnapshotOrder | null> {
+  const source = snapshot.source.sourceInstanceId;
+  const sourceId = snapshot.identity.order.sourceId;
+  const mapped = await tx.query<ExistingOrderRow>(
+    `
+    SELECT o.order_id, o.order_name, m.payload_hash
+    FROM order_import_entity_map m
+    JOIN orders o ON o.order_id::text = m.local_entity_id
+    WHERE m.source_instance_id = $1
+      AND m.entity_type = $2
+      AND m.source_entity_id = $3
+      AND o.delete_flag = false
+    ORDER BY o.order_id
+    LIMIT 1
+    `,
+    [source, SNAPSHOT_ENTITY_TYPES.order, sourceId],
+  );
+  const mappedRow = mapped.rows[0];
+  if (mappedRow) {
+    return {
+      orderId: Number(mappedRow.order_id),
+      orderName: mappedRow.order_name,
+      status: mappedRow.payload_hash === payloadHash ? 'noop' : 'skipped',
+    };
   }
 
-  return readOptionalId(
-    tx,
-    'SELECT order_id AS id FROM orders WHERE client_id = $1 AND order_name = $2 AND delete_flag = false',
-    [clientId, snapshot.data.order.orderName],
+  const refKey = snapshot.identity.order.refKey1c ?? snapshot.data.order.refKey1c ?? null;
+  if (refKey) {
+    const byRef = await tx.query<ExistingOrderRow>(
+      `
+      SELECT order_id, order_name, NULL::text AS payload_hash
+      FROM orders
+      WHERE ref_key_1c = $1::uuid AND delete_flag = false
+      ORDER BY order_id
+      LIMIT 1
+      `,
+      [refKey],
+    );
+    const row = byRef.rows[0];
+    if (row) return { orderId: Number(row.order_id), orderName: row.order_name, status: 'skipped' };
+  }
+
+  const byName = await tx.query<ExistingOrderRow>(
+    `
+    SELECT order_id, order_name, NULL::text AS payload_hash
+    FROM orders
+    WHERE order_name = $1 AND delete_flag = false
+    ORDER BY order_id
+    LIMIT 1
+    `,
+    [snapshot.data.order.orderName],
   );
+  const row = byName.rows[0];
+  return row ? { orderId: Number(row.order_id), orderName: row.order_name, status: 'skipped' } : null;
 }
 
 async function getMap(
@@ -2763,8 +2862,14 @@ async function finishImportRun(
     SET status = $2, local_order_id = $3, summary_json = $4::jsonb, completed_at = now()
     WHERE import_run_id = $1
     `,
-    [runId, status === 'noop' ? 'noop' : 'completed', orderId, JSON.stringify(summary)],
+    [runId, isSkippedSnapshotStatus(status) ? 'noop' : 'completed', orderId, JSON.stringify(summary)],
   );
+}
+
+function snapshotImportAuditEvent(status: ImportStatus): string {
+  if (status === 'noop') return 'orders.snapshot_import.noop';
+  if (status === 'skipped') return 'orders.snapshot_import.skipped';
+  return 'orders.snapshot_import';
 }
 
 async function failImportRun(tx: DatabaseClient, runId: string, error: unknown): Promise<void> {
@@ -3206,4 +3311,6 @@ export {
   snapshotToSaveOrderDto as _testOnlySnapshotToSaveOrderDto,
   snapshotBatchFailure as _testOnlySnapshotBatchFailure,
   snapshotFailureSummary as _testOnlySnapshotFailureSummary,
+  findExistingOrderForSnapshotImport as _testOnlyFindExistingOrderForSnapshotImport,
+  summarizeSnapshotBatchResults as _testOnlySummarizeSnapshotBatchResults,
 };

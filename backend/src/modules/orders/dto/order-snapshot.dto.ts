@@ -178,7 +178,7 @@ export interface ImportOrderSnapshotRequestDto {
 
 export interface ImportOrderSnapshotResponseDto {
   success: true;
-  status: 'created' | 'updated' | 'noop';
+  status: 'created' | 'updated' | 'noop' | 'skipped';
   orderId: number;
   orderName: string;
   payloadHash: string;
@@ -206,6 +206,7 @@ export interface ImportOrderSnapshotBatchResponseDto {
   success: true;
   total: number;
   imported: number;
+  skipped: number;
   failed: number;
   results: Array<
     | ({ fileName: string } & ImportOrderSnapshotResponseDto)
