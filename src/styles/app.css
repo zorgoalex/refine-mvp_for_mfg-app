@@ -888,6 +888,25 @@ html {
   background-color: var(--app-group-tint-7) !important;
 }
 
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-row-ineligible > td,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-row-ineligible:hover > td {
+  background-color: var(--app-surface-muted) !important;
+  color: var(--app-text-muted) !important;
+  opacity: 0.58;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-row-ineligible a,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-row-ineligible .ant-btn-link,
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-row-ineligible .ant-typography {
+  color: var(--app-text-muted) !important;
+}
+
+.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-row-ineligible .ant-tag {
+  color: var(--app-text-muted);
+  border-color: var(--app-border-soft);
+  background: transparent;
+}
+
 .cut-jobs-table-container {
   overflow-y: auto;
 }

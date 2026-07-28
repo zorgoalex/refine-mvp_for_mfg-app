@@ -224,6 +224,7 @@ export class CutController {
     return this.cut.listEligibleDetails({
       currentUser,
       criteria: parseEligibleCriteria(query),
+      includeAllStatuses: true,
       requestId: request.requestId,
     });
   }

@@ -165,6 +165,7 @@ describe('CutController', () => {
     expect(result.details).toEqual([]);
     expect(listEligibleDetails).toHaveBeenCalledWith(expect.objectContaining({
       criteria: expect.objectContaining({ filmIds: [7], dateFrom: '2026-07-01', dateTo: '2026-07-31' }),
+      includeAllStatuses: true,
       requestId: 'req-preview',
     }));
   });

@@ -440,8 +440,7 @@ function cutPreviewAreaTotal(detail: EligibleDetailDto): number {
   return area * quantity;
 }
 
-function buildCutPreviewSummary(details: EligibleDetailDto[], selectedDetailIds: number[]): CutPreviewSummary {
-  const selectedIds = new Set(selectedDetailIds);
+function buildCutPreviewSummary(details: EligibleDetailDto[]): CutPreviewSummary {
   const groups = new Map<string, Omit<CutPreviewSummaryRow, 'orders'> & { orderSet: Set<string> }>();
   const total: Omit<CutPreviewSummaryRow, 'orders'> & { orderSet: Set<string> } = {
     key: 'total',
@@ -454,7 +453,6 @@ function buildCutPreviewSummary(details: EligibleDetailDto[], selectedDetailIds:
   };
 
   for (const detail of details) {
-    if (!selectedIds.has(detail.orderDetailId)) continue;
     const filmName = normalizeCutSummaryLabel(detail.filmName, 'без плёнки');
     const materialName = normalizeCutSummaryLabel(detail.materialName, 'без материала');
     const groupKey = `${detail.filmId ?? filmName}::${detail.sheetMaterialTypeId ?? detail.materialId ?? materialName}`;
@@ -524,6 +522,18 @@ function cutDetailColumnWidth<T>(
 
 function tableScrollX<T>(columns: ColumnsType<T>, selectionColumnWidth = 0): number {
   return columns.reduce((total, column) => total + (typeof column.width === 'number' ? column.width : 0), selectionColumnWidth);
+}
+
+function cutJobRefProfileLabel(job: { profileName: string | null; profileIsActive: boolean | null }): string {
+  if (!job.profileName) return 'По умолчанию';
+  return job.profileIsActive === false ? `${job.profileName} (неактивен)` : job.profileName;
+}
+
+function cutDetailExistingJobsText(detail: EligibleDetailDto): string {
+  const active = (detail.activeJobs ?? []).map((job) => `${job.name} / ${cutJobRefProfileLabel(job)}`);
+  const archived = (detail.archivedJobs ?? []).map((job) => `${job.name} / ${cutJobRefProfileLabel(job)} (архив)`);
+  const jobs = [...active, ...archived];
+  return jobs.length > 0 ? jobs.join(', ') : '—';
 }
 
 async function fetchCutOrderOptions(dateFrom: string, dateTo: string): Promise<CutOrderSelectOption[]> {
@@ -2001,6 +2011,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         priority: cutDetailColumnWidth(rows, 'Приоритет', (row) => row.priority, { min: 84, max: 105 }),
         joint: cutDetailColumnWidth(rows, 'Соед. заказ', (row) => row.jointOrderId, { min: 96, max: 120 }),
         note: cutDetailColumnWidth(rows, 'Примечание', (row) => row.note, { min: 100, max: 260 }),
+        existingJobs: cutDetailColumnWidth(rows, 'Уже в раскроях', cutDetailExistingJobsText, { min: 140, max: 320 }),
         files: cutDetailColumnWidth(rows, 'Файлы', filesText, { min: 72, max: 130 }),
         status: cutDetailColumnWidth(rows, 'Статус', statusText, { min: 130, max: 170 }),
       };
@@ -2047,6 +2058,23 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             ) : (
               '—'
             ),
+        },
+        {
+          title: 'Уже в раскроях',
+          key: 'existingJobs',
+          width: width.existingJobs,
+          render: (_: unknown, row: EligibleDetailDto) => {
+            const text = cutDetailExistingJobsText(row);
+            return text === '—' ? (
+              '—'
+            ) : (
+              <Tooltip title={text}>
+                <Text ellipsis style={{ maxWidth: Math.max(110, width.existingJobs - 20), display: 'inline-block' }}>
+                  {text}
+                </Text>
+              </Tooltip>
+            );
+          },
         },
         {
           title: 'Файлы',
@@ -2208,8 +2236,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
   const isCreationPreview = job === null && eligible !== null;
   const creationPreviewSummary = useMemo(
-    () => buildCutPreviewSummary(eligible ?? [], selected),
-    [eligible, selected],
+    () => buildCutPreviewSummary(eligible ?? []),
+    [eligible],
   );
   const creationPreviewOrderTintByOrderId = useMemo(
     () => cutPreviewOrderTintByOrderId(eligible ?? []),
@@ -2352,7 +2380,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 scroll={{ x: eligibleTableScrollX, y: CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT }}
                 rowClassName={(row) => {
                   const tint = creationPreviewOrderTintByOrderId.get(row.orderId) ?? 0;
-                  return `cut-create-preview-order-row cut-create-preview-order-tint-${tint}`;
+                  return `cut-create-preview-order-row cut-create-preview-order-tint-${tint}${row.eligible ? '' : ' cut-create-preview-row-ineligible'}`;
                 }}
                 rowSelection={{
                   selectedRowKeys: selected,
@@ -2367,7 +2395,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 <Text strong>Итого по плёнкам и материалам:</Text>
                 <Space size={6} wrap>
                   {creationPreviewSummary.groups.length === 0 ? (
-                    <Text type="secondary">нет выбранных деталей</Text>
+                    <Text type="secondary">нет деталей в выборке</Text>
                   ) : (
                     creationPreviewSummary.groups.map((group) => (
                       <Tag key={group.key} color="blue" style={{ whiteSpace: 'normal', lineHeight: 1.5 }}>
@@ -2378,7 +2406,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 </Space>
               </div>
               <div className="cut-create-preview-summary-row">
-                <Text strong>Итого по всем выбранным деталям:</Text>
+                <Text strong>Итого по всем деталям в выборке:</Text>
                 <Text>{formatCutPreviewSummaryMetrics(creationPreviewSummary.total)}</Text>
               </div>
             </div>

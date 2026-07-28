@@ -248,6 +248,9 @@ export type CutIneligibleReason = 'deleted' | 'wrong_status' | 'not_cuttable' | 
 export interface CutJobRef {
   cutJobId: number;
   name: string;
+  paramProfileId: number | null;
+  profileName: string | null;
+  profileIsActive: boolean | null;
 }
 
 export interface EligibleDetailDto {
@@ -282,6 +285,8 @@ export interface EligibleDetailDto {
   ineligibleReason: CutIneligibleReason | null;
   /** active (non-archived) cut jobs this detail is already placed in */
   activeJobs: CutJobRef[];
+  /** archived cut jobs this detail is already placed in */
+  archivedJobs: CutJobRef[];
   /** true when this detail also exists in at least one archived cut job */
   inArchivedJob: boolean;
 }

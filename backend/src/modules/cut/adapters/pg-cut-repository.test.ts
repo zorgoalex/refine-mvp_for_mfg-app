@@ -173,6 +173,8 @@ interface FakeDbOptions {
   reserveConflict?: boolean;
   /** rows for listEligibleDetails */
   eligibleRows?: FakeRow[];
+  /** rows for per-detail cut-job placement lookup */
+  placementRows?: FakeRow[];
   /** rows for listFilmOptionsForCut */
   filmOptionRows?: FakeRow[];
   /** whether the cut_param_profiles SELECT returns a row (profile is active) */
@@ -496,6 +498,10 @@ function createDatabase(options: FakeDbOptions = {}) {
 
     if (sql.startsWith('SELECT DISTINCT od.film_id')) {
       return { rows: options.filmOptionRows ?? [], rowCount: (options.filmOptionRows ?? []).length };
+    }
+
+    if (sql.startsWith('SELECT cji.order_detail_id, cj.cut_job_id')) {
+      return { rows: options.placementRows ?? [], rowCount: (options.placementRows ?? []).length };
     }
 
     if (sql.startsWith('SELECT od.detail_id')) {
@@ -1220,6 +1226,34 @@ describe('PgCutRepository', () => {
     expect(result.noSheetSpecCount).toBe(1);
   });
 
+  it('listEligibleDetails defaults to ready statuses unless preview asks for all statuses', async () => {
+    const db = createDatabase({
+      readyStatusIds: [1],
+      eligibleRows: [
+        { detail_id: 1, order_id: 9, quantity: 1, sheet_material_type_id: 9, film_id: null, production_status_id: 1, delete_flag: false },
+        { detail_id: 2, order_id: 9, quantity: 1, sheet_material_type_id: 9, film_id: null, production_status_id: 99, delete_flag: false },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    await repo.listEligibleDetails({ currentUser: currentUser(), criteria: { orderIds: [9] }, requestId: 'r-ready-only' });
+    const readyOnlyQuery = db.queries.find((q) => normalize(q.text).includes('FROM order_details od'));
+    expect(normalize(readyOnlyQuery?.text ?? '')).toContain('od.production_status_id = ANY');
+
+    db.queries.length = 0;
+    const preview = await repo.listEligibleDetails({
+      currentUser: currentUser(),
+      criteria: { orderIds: [9] },
+      includeAllStatuses: true,
+      requestId: 'r-all-statuses',
+    });
+
+    const previewQuery = db.queries.find((q) => normalize(q.text).includes('FROM order_details od'));
+    expect(normalize(previewQuery?.text ?? '')).not.toContain('od.production_status_id = ANY');
+    expect(preview.details.find((d) => d.orderDetailId === 1)?.eligible).toBe(true);
+    expect(preview.details.find((d) => d.orderDetailId === 2)?.ineligibleReason).toBe('wrong_status');
+  });
+
   it('listEligibleDetails carries order/client and order-detail fields for preview', async () => {
     const db = createDatabase({
       readyStatusIds: [1],
@@ -1286,6 +1320,49 @@ describe('PgCutRepository', () => {
 
     expect(result.details.map((d) => d.orderDetailId)).toContain(5);
     expect(result.details.find((d) => d.orderDetailId === 5)?.eligible).toBe(true);
+  });
+
+  it('listEligibleDetails includes existing cut jobs with their profile for each detail', async () => {
+    const db = createDatabase({
+      readyStatusIds: [1],
+      eligibleRows: [
+        { detail_id: 5, order_id: 11, quantity: 1, sheet_material_type_id: 2, film_id: null, production_status_id: 1, delete_flag: false },
+      ],
+      placementRows: [
+        {
+          order_detail_id: 5,
+          cut_job_id: 42,
+          name: 'Раскрой 42',
+          status: 'ready',
+          is_active: true,
+          param_profile_id: 7,
+          profile_name: 'Вакуум Авто',
+          profile_is_active: true,
+        },
+        {
+          order_detail_id: 5,
+          cut_job_id: 41,
+          name: 'Старый раскрой',
+          status: 'archived',
+          is_active: true,
+          param_profile_id: null,
+          profile_name: null,
+          profile_is_active: null,
+        },
+      ],
+    });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    const result = await repo.listEligibleDetails({ currentUser: currentUser(), criteria: { orderIds: [11] }, requestId: 'r-placement-profile' });
+    const detail = result.details.find((d) => d.orderDetailId === 5);
+
+    expect(detail?.activeJobs).toEqual([
+      { cutJobId: 42, name: 'Раскрой 42', paramProfileId: 7, profileName: 'Вакуум Авто', profileIsActive: true },
+    ]);
+    expect(detail?.archivedJobs).toEqual([
+      { cutJobId: 41, name: 'Старый раскрой', paramProfileId: null, profileName: null, profileIsActive: null },
+    ]);
+    expect(detail?.inArchivedJob).toBe(true);
   });
 
   it('Variant B: filters eligible details by sheetMaterialTypeIds (replaces materialIds filter)', async () => {

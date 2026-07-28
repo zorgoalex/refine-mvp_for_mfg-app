@@ -105,6 +105,12 @@ export interface ListCutJobsQuery {
 export interface EligibleDetailsQuery {
   currentUser: CurrentUser;
   criteria: CutSelectionCriteriaDto;
+  /**
+   * Preview-before-create mode: show every detail matching explicit criteria
+   * regardless of production status, while still classifying wrong statuses as
+   * ineligible. Add/reserve paths keep the ready-status filter.
+   */
+  includeAllStatuses?: boolean;
   requestId?: string;
 }
 

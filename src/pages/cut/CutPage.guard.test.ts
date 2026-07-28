@@ -166,17 +166,23 @@ describe('CutPage source guards', () => {
     expect(source).toContain('CUT_DETAIL_PREVIEW_TABLE_BODY_HEIGHT');
     expect(source).toContain('eligibleTableScrollX');
     expect(source).toContain('cutDetailColumnWidth(rows');
+    expect(source).toContain('buildCutPreviewSummary(eligible ?? [])');
     expect(source).toContain('buildCutPreviewSummary');
     expect(source).toContain('data-testid="cut-create-preview-summary"');
     expect(source).not.toContain('Table.Summary');
     expect(source).toContain('cut-create-preview-order-tint-${tint}');
+    expect(source).toContain('cut-create-preview-row-ineligible');
+    expect(source).toContain('cutDetailExistingJobsText');
+    expect(source).toContain('cutJobRefProfileLabel');
+    expect(source).toContain("title: 'Уже в раскроях'");
     expect(source).toContain('Итого по плёнкам и материалам');
-    expect(source).toContain('Итого по всем выбранным деталям');
+    expect(source).toContain('Итого по всем деталям в выборке');
     expect(source).toContain('formatCutPreviewSummaryMetrics');
     expect(source).toContain('area * quantity');
     expect(appCss).toContain('.cut-create-preview-summary');
     expect(appCss).toContain('.cut-create-preview-details-table .ant-table-tbody > tr > td');
     expect(appCss).toContain('height: 20px');
+    expect(appCss).toContain('.cut-create-preview-row-ineligible');
     expect(appCss).toContain('.cut-create-preview-details-table .ant-table-tbody > tr.cut-create-preview-order-tint-0 > td');
   });
 

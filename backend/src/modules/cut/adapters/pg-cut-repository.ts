@@ -2137,6 +2137,10 @@ export class PgCutRepository implements CutRepositoryPort {
     if (query.criteria.productionStatusIds && query.criteria.productionStatusIds.length > 0) {
       // Operator override: explicit status filter wins over the ready-set default.
       addArrayFilter('od.production_status_id', query.criteria.productionStatusIds);
+    } else if (query.includeAllStatuses) {
+      // Create-preview mode: show every detail matching explicit criteria so the
+      // operator can see why some rows cannot be selected. Eligibility below
+      // still marks wrong statuses as disabled.
     } else if (readyStatusIds.length > 0) {
       // Default: only ready-to-cut statuses, so the LIMIT can never be exhausted
       // by thousands of wrong-status rows and silently hide the eligible subset
@@ -2234,6 +2238,7 @@ export class PgCutRepository implements CutRepositoryPort {
         eligible,
         ineligibleReason: reason,
         activeJobs: placement?.activeJobs ?? [],
+        archivedJobs: placement?.archivedJobs ?? [],
         inArchivedJob: placement?.inArchivedJob ?? false,
       };
     });
@@ -2295,8 +2300,8 @@ export class PgCutRepository implements CutRepositoryPort {
   private async loadDetailPlacements(
     client: DatabaseClient,
     detailIds: readonly number[],
-  ): Promise<Map<number, { activeJobs: CutJobRefDto[]; inArchivedJob: boolean }>> {
-    const map = new Map<number, { activeJobs: CutJobRefDto[]; inArchivedJob: boolean }>();
+  ): Promise<Map<number, { activeJobs: CutJobRefDto[]; archivedJobs: CutJobRefDto[]; inArchivedJob: boolean }>> {
+    const map = new Map<number, { activeJobs: CutJobRefDto[]; archivedJobs: CutJobRefDto[]; inArchivedJob: boolean }>();
     if (detailIds.length === 0) return map;
     const rows = await client.query<{
       order_detail_id: string | number;
@@ -2304,11 +2309,16 @@ export class PgCutRepository implements CutRepositoryPort {
       name: string;
       status: string;
       is_active: boolean;
+      param_profile_id: string | number | null;
+      profile_name: string | null;
+      profile_is_active: boolean | null;
     }>(
       `
-      SELECT cji.order_detail_id, cj.cut_job_id, cj.name, cj.status, cji.is_active
+      SELECT cji.order_detail_id, cj.cut_job_id, cj.name, cj.status, cji.is_active,
+             cj.param_profile_id, cpp.name AS profile_name, cpp.is_active AS profile_is_active
       FROM cut_job_item cji
       JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
+      LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = cj.param_profile_id
       WHERE cji.order_detail_id = ANY($1::bigint[])
       ORDER BY cj.cut_job_id
       `,
@@ -2316,14 +2326,24 @@ export class PgCutRepository implements CutRepositoryPort {
     );
     for (const row of rows.rows) {
       const detailId = toNum(row.order_detail_id);
-      const entry = map.get(detailId) ?? { activeJobs: [], inArchivedJob: false };
+      const entry = map.get(detailId) ?? { activeJobs: [], archivedJobs: [], inArchivedJob: false };
       const isArchived = row.status === 'archived';
+      const ref: CutJobRefDto = {
+        cutJobId: toNum(row.cut_job_id),
+        name: row.name,
+        paramProfileId: row.param_profile_id === null ? null : toNum(row.param_profile_id),
+        profileName: row.profile_name ?? null,
+        profileIsActive: row.profile_is_active ?? null,
+      };
       if (isArchived) {
         entry.inArchivedJob = true;
+        if (!entry.archivedJobs.some((j) => j.cutJobId === ref.cutJobId)) {
+          entry.archivedJobs.push(ref);
+        }
       } else if (row.is_active) {
         // a detail can appear once per active job; ORDER BY keeps these stable
-        if (!entry.activeJobs.some((j) => j.cutJobId === toNum(row.cut_job_id))) {
-          entry.activeJobs.push({ cutJobId: toNum(row.cut_job_id), name: row.name });
+        if (!entry.activeJobs.some((j) => j.cutJobId === ref.cutJobId)) {
+          entry.activeJobs.push(ref);
         }
       }
       map.set(detailId, entry);

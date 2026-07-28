@@ -223,6 +223,9 @@ export interface CutResultDto extends CutResultSummaryDto {
 export interface CutJobRefDto {
   cutJobId: number;
   name: string;
+  paramProfileId: number | null;
+  profileName: string | null;
+  profileIsActive: boolean | null;
 }
 
 export interface EligibleDetailDto {
@@ -258,6 +261,8 @@ export interface EligibleDetailDto {
   ineligibleReason: IneligibleReason | null;
   /** active (non-archived) cut jobs this detail is already placed in */
   activeJobs: CutJobRefDto[];
+  /** archived cut jobs this detail is already placed in */
+  archivedJobs: CutJobRefDto[];
   /** true when this detail also exists in at least one archived cut job */
   inArchivedJob: boolean;
 }
