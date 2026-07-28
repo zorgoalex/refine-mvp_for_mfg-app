@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-28",
+    title: "PDF раскроя: переименование шаблонов",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В редакторе PDF-шаблонов раскроя добавлено поле для изменения названия выбранного шаблона.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-28",
     title: "Доски статусов: ванны МДФ для несопоставленных CNC-строк",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

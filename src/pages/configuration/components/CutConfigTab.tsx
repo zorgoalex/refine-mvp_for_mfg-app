@@ -653,6 +653,14 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     setDrafts((prev) => prev.map((draft) => (draft.code === next.code ? next : draft)));
   }, []);
 
+  const renameSelectedTemplate = useCallback(
+    (name: string) => {
+      if (!selected) return;
+      updateSelected({ ...selected, name });
+    },
+    [selected, updateSelected],
+  );
+
   const patchElementById = useCallback(
     (id: string, patch: Partial<PdfTemplateElement>) => {
       if (!selected) return;
@@ -767,10 +775,18 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
 
   const saveDrafts = useCallback(async () => {
     if (!selected) return;
+    const templateName = selected.name.trim();
+    if (!templateName) {
+      message.error('Укажите название шаблона PDF');
+      return;
+    }
+    const normalizedSelected = { ...selected, name: templateName };
     const template = templates.find((item) => item.code === selected.code);
-    const layout = pdfDraftToLayout(selected);
+    const layout = pdfDraftToLayout(normalizedSelected);
     if (!template) {
-      window.localStorage.setItem(PDF_TEMPLATE_DRAFTS_KEY, JSON.stringify(drafts.map((draft) => pdfDraftToStoredDraft(draft))));
+      const nextDrafts = drafts.map((draft) => (draft.code === selected.code ? normalizedSelected : draft));
+      setDrafts(nextDrafts);
+      window.localStorage.setItem(PDF_TEMPLATE_DRAFTS_KEY, JSON.stringify(nextDrafts.map((draft) => pdfDraftToStoredDraft(draft))));
       message.success('Локальная копия шаблона PDF сохранена');
       return;
     }
@@ -778,7 +794,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     try {
       const updated = await cutConfigApi.updatePdfTemplate(
         template.cutPdfTemplateId,
-        { name: selected.name, layout, isActive: template.isActive },
+        { name: templateName, layout, isActive: template.isActive },
         template.version,
       );
       setDrafts((prev) => prev.map((draft) => (draft.code === updated.code ? pdfTemplateToDraft(updated) : draft)));
@@ -849,6 +865,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   if (!selected) {
     return <Alert type="warning" showIcon message="Нет активных шаблонов PDF" />;
   }
+  const selectedNameValid = selected.name.trim().length > 0;
 
   const elementRows: ColumnsType<PdfTemplateElement> = [
     { title: 'Элемент', dataIndex: 'label', key: 'label' },
@@ -1049,7 +1066,20 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
           options={drafts.map((draft) => ({ value: draft.code, label: draft.name }))}
           style={{ width: 320 }}
         />
-        <Button icon={<SaveOutlined />} type="primary" disabled={!canManage} loading={savingDraft} onClick={() => void saveDrafts()}>
+        <Space align="center" size={6}>
+          <Text type="secondary">Название</Text>
+          <Input
+            value={selected.name}
+            disabled={!canManage || savingDraft}
+            maxLength={200}
+            status={selectedNameValid ? undefined : 'error'}
+            placeholder="Название шаблона PDF"
+            style={{ width: 280 }}
+            onChange={(event) => renameSelectedTemplate(event.target.value)}
+            onPressEnter={() => void saveDrafts()}
+          />
+        </Space>
+        <Button icon={<SaveOutlined />} type="primary" disabled={!canManage || !selectedNameValid} loading={savingDraft} onClick={() => void saveDrafts()}>
           Сохранить
         </Button>
         <Button icon={<CopyOutlined />} disabled={!canManage} onClick={copyTemplate}>

@@ -116,6 +116,10 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(apiSrc).toMatch(/listPdfTemplateFields\(/);
     expect(tabSrc).toMatch(/Сохранить как/);
     expect(tabSrc).toMatch(/Создать копию/);
+    expect(tabSrc).toMatch(/renameSelectedTemplate/);
+    expect(tabSrc).toMatch(/Название шаблона PDF/);
+    expect(tabSrc).toMatch(/Укажите название шаблона PDF/);
+    expect(tabSrc).toMatch(/\{\s*name:\s*templateName,\s*layout,\s*isActive:\s*template\.isActive\s*\}/);
     expect(tabSrc).toMatch(/Поля карты раскроя PDF/);
     expect(tabSrc).toMatch(/QR-код/);
     expect(tabSrc).toMatch(/sheet_thumbnail/);
