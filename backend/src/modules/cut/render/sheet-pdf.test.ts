@@ -69,7 +69,10 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('Заказ');
     expect(rendered).toContain('Поз.');
     expect(rendered).toContain('1001');
-    expect(rendered).toContain('Итого: 3');
+    expect(rendered).toContain('Количество деталей:');
+    expect(rendered).toContain('3');
+    expect(rendered).toContain('Площадь деталей:');
+    expect(rendered).toContain('Утилизация');
   });
 
   it('renders bath header values as one field text call instead of continued fragments', async () => {
@@ -98,7 +101,7 @@ describe('buildSheetsPdf', () => {
         (call[2] as PDFKit.Mixins.TextOptions | undefined)?.continued ||
         (call[3] as PDFKit.Mixins.TextOptions | undefined)?.continued,
     );
-    const clientValueCall = textSpy.mock.calls.find((call) => call[0] === ' Тлек Бакенов');
+    const clientValueCall = textSpy.mock.calls.find((call) => call[0] === 'Тлек Бакенов');
 
     expect(continuedCalls).toHaveLength(0);
     expect(clientValueCall?.[1]).toBeTypeOf('number');
@@ -125,7 +128,7 @@ describe('buildSheetsPdf', () => {
       String(call[0]).includes('Крем брюле -Декор+, Белый глянец, Олива софт -МС групп'),
     );
 
-    expect(filmValueCall?.[0]).toBe(' Крем брюле -Декор+, Белый глянец, Олива софт -МС групп');
+    expect(filmValueCall?.[0]).toBe('Крем брюле -Декор+, Белый глянец, Олива софт -МС групп');
     expect((filmValueCall?.[3] as PDFKit.Mixins.TextOptions | undefined)?.width).toBeGreaterThan(600);
     expect((filmValueCall?.[3] as PDFKit.Mixins.TextOptions | undefined)?.lineBreak).toBe(true);
   });
@@ -148,7 +151,7 @@ describe('buildSheetsPdf', () => {
     expect(Number(mediaBox?.[1])).toBeGreaterThan(Number(mediaBox?.[2]));
   });
 
-  it('keeps empty bath profile layouts on the dedicated bath renderer', async () => {
+  it('resolves empty bath profile layouts to the editable bath v3 layout', async () => {
     const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
     await buildSheetsPdf([
       {
@@ -161,9 +164,12 @@ describe('buildSheetsPdf', () => {
       },
     ]);
 
-    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    const rendered = textSpy.mock.calls.map((call) => String(call[0])).join('\n');
     expect(rendered).toContain('Клиент:');
-    expect(rendered).toContain(' Тестовый клиент');
+    expect(rendered).toContain('Тестовый клиент');
+    expect(rendered).toContain('Количество деталей:');
+    expect(rendered).toContain('Площадь деталей:');
+    expect(rendered).toContain('Утилизация');
   });
 
   it('prints the sheet number above the bath details table', async () => {
@@ -178,11 +184,12 @@ describe('buildSheetsPdf', () => {
       },
     ]);
 
-    const rendered = textSpy.mock.calls.map((call) => String(call[0])).join('\n');
-    expect(rendered).toContain('Лист 3');
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('Лист');
+    expect(rendered).toContain('3');
   });
 
-  it('keeps bath detail table cells on one line with fitted font', async () => {
+  it('keeps bath detail table cells inside bounded wrapping boxes', async () => {
     const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
     await buildSheetsPdf([
       {
@@ -195,7 +202,7 @@ describe('buildSheetsPdf', () => {
     ]);
 
     const orderCall = textSpy.mock.calls.find((call) => call[0] === 'импорт 68');
-    expect(orderCall?.[3]).toMatchObject({ lineBreak: false, align: 'center' });
+    expect(orderCall?.[3]).toMatchObject({ lineBreak: true, ellipsis: true, align: 'center' });
   });
 
   it('numbers bath detail table rows and prints total detail quantity', async () => {
@@ -217,7 +224,8 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('#');
     expect(rendered).toContain('1');
     expect(rendered).toContain('2');
-    expect(rendered).toContain('Итого: 5');
+    expect(rendered).toContain('Количество деталей:');
+    expect(rendered).toContain('5');
   });
 
   it('renders v3 template text inside bounded wrapping boxes', async () => {

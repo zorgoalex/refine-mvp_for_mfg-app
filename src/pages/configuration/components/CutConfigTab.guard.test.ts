@@ -139,6 +139,13 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/Таблица деталей/);
     expect(tabSrc).toMatch(/Файлы станка/);
     expect(tabSrc).toMatch(/sheet\.machine_files/);
+    expect(tabSrc).toMatch(/sheet\.utilization/);
+    expect(tabSrc).toMatch(/BATH_PROFILE_PDF_ELEMENTS/);
+    expect(tabSrc).toMatch(/defaultPdfElementsForTemplateCode/);
+    expect(tabSrc).toMatch(/bath-label-ready-date/);
+    expect(tabSrc).toMatch(/bath-field-material/);
+    expect(tabSrc).toMatch(/bath-field-thickness/);
+    expect(tabSrc).toMatch(/bath-field-utilization/);
     expect(tabSrc).toMatch(/detail\.machine_file/);
     expect(tabSrc).toMatch(/detail\.doweling/);
     expect(tabSrc).toMatch(/Линия/);

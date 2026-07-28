@@ -73,6 +73,7 @@ describe('CutConfigAdminService RBAC', () => {
     expect(fields.map((field) => field.id)).toEqual(expect.arrayContaining([
       'sheet.thumbnail',
       'sheet.machine_files',
+      'sheet.utilization',
       'order.unique_names',
       'order.date',
       'order.ready_date',

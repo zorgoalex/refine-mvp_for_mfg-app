@@ -172,6 +172,7 @@ const CUT_SPECIFIC_FIELD_CATALOG: CutPdfFieldCatalogItem[] = [
   { id: 'sheet.size', source: 'sheet', sourceColumn: null, label: 'Размер листа', category: 'Лист раскроя', type: 'string' },
   { id: 'sheet.details_count', source: 'sheet', sourceColumn: null, label: 'Количество деталей на листе', category: 'Лист раскроя', type: 'number' },
   { id: 'sheet.area', source: 'sheet', sourceColumn: null, label: 'Площадь деталей', category: 'Лист раскроя', type: 'number' },
+  { id: 'sheet.utilization', source: 'sheet', sourceColumn: null, label: 'Утилизация листа, %', category: 'Лист раскроя', type: 'number' },
   { id: 'sheet.thumbnail', source: 'sheet', sourceColumn: null, label: 'Миниатюра листа раскроя', category: 'Лист раскроя', type: 'string' },
   { id: 'sheet.machine_files', source: 'sheet', sourceColumn: null, label: 'Файлы станка на листе', category: 'Лист раскроя', type: 'string' },
   { id: 'order.unique_names', source: 'order', sourceColumn: null, label: 'Заказы на листе', category: 'Заказ', type: 'string' },

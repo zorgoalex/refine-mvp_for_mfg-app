@@ -498,6 +498,7 @@ const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
   { id: 'sheet.size', source: 'sheet', label: 'Размер листа', category: 'Лист', type: 'string' },
   { id: 'sheet.details_count', source: 'sheet', label: 'Количество деталей на листе', category: 'Лист', type: 'number' },
   { id: 'sheet.area', source: 'sheet', label: 'Площадь деталей', category: 'Лист', type: 'number' },
+  { id: 'sheet.utilization', source: 'sheet', label: 'Утилизация листа, %', category: 'Лист', type: 'number' },
   { id: 'sheet.thumbnail', source: 'sheet', label: 'Миниатюра листа раскроя', category: 'Лист', type: 'string' },
   { id: 'sheet.machine_files', source: 'sheet', label: 'Файлы станка на листе', category: 'Лист', type: 'string' },
   { id: 'order.unique_names', source: 'order', label: 'Заказы на листе', category: 'Заказ', type: 'string' },
@@ -538,7 +539,8 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'sheet.page_count': '3',
   'sheet.size': '2080x1050',
   'sheet.details_count': '32',
-  'sheet.area': '5.378 м.кв.',
+  'sheet.area': '5.378',
+  'sheet.utilization': '48.76',
   'sheet.thumbnail': '',
   'sheet.machine_files': 'CNC#1_11380.TXT',
   'order.unique_names': '11380',
@@ -586,6 +588,42 @@ const DEFAULT_PDF_ELEMENTS: PdfTemplateElement[] = [
   makePdfElement('sheet_thumbnail', { id: 'sheet-thumbnail', label: 'Миниатюра листа', source: 'sheet.thumbnail', x: 12, y: 34, w: 202, h: 154 }),
   makePdfElement('detail_table', { id: 'detail-table', label: 'Таблица деталей', source: 'detail.table', x: 222, y: 34, w: 60, h: 78 }),
   makePdfElement('machine_files_table', { id: 'machine-files-table', label: 'Файлы станка', source: 'sheet.machine_files', x: 222, y: 116, w: 60, h: 32 }),
+];
+const BATH_PROFILE_PDF_ELEMENTS: PdfTemplateElement[] = [
+  makePdfElement('text', { id: 'bath-label-order', label: 'Подпись Заказ', text: 'Заказ:', x: 9.9, y: 9.9, w: 28.9, h: 5.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('field', { id: 'bath-field-order', label: 'Заказ', source: 'order.unique_names', x: 38.8, y: 9.9, w: 60.5, h: 6.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('text', { id: 'bath-label-client', label: 'Подпись Клиент', text: 'Клиент:', x: 102.3, y: 9.9, w: 28.9, h: 5.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('field', { id: 'bath-field-client', label: 'Клиент', source: 'client.unique_names', x: 131.2, y: 9.9, w: 60.5, h: 6.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('text', { id: 'bath-label-order-date', label: 'Подпись Дата заказа', text: 'Дата:', x: 194.7, y: 9.9, w: 28.9, h: 5.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('field', { id: 'bath-field-order-date', label: 'Дата заказа', source: 'order.date', x: 223.7, y: 9.9, w: 60.5, h: 6.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('line', { id: 'bath-line-header-1', label: 'Линия шапки 1', x: 9.9, y: 16.6, w: 277.3, h: 0, style: { color: '#111111', strokeWidth: 0.25 } }),
+  makePdfElement('text', { id: 'bath-label-ready-date', label: 'Подпись Дата готовности', text: 'Дата готовности:', x: 9.9, y: 17.7, w: 28.9, h: 5.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('field', { id: 'bath-field-ready-date', label: 'Дата готовности', source: 'order.ready_date', x: 38.8, y: 17.7, w: 60.5, h: 6.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('text', { id: 'bath-label-material', label: 'Подпись Материал', text: 'Материал:', x: 102.3, y: 17.7, w: 28.9, h: 5.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('field', { id: 'bath-field-material', label: 'Материал', source: 'detail.materials', x: 131.2, y: 17.7, w: 60.5, h: 6.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('text', { id: 'bath-label-thickness', label: 'Подпись Толщина', text: 'Толщина:', x: 194.7, y: 17.7, w: 28.9, h: 5.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('field', { id: 'bath-field-thickness', label: 'Толщина', source: 'detail.thicknesses', x: 223.7, y: 17.7, w: 60.5, h: 6.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('line', { id: 'bath-line-header-2', label: 'Линия шапки 2', x: 9.9, y: 24.3, w: 277.3, h: 0, style: { color: '#111111', strokeWidth: 0.25 } }),
+  makePdfElement('text', { id: 'bath-label-film', label: 'Подпись Пленка', text: 'Пленка:', x: 9.9, y: 25.4, w: 28.9, h: 5.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('field', { id: 'bath-field-film', label: 'Пленка', source: 'detail.films', x: 38.8, y: 25.4, w: 245.4, h: 6.4, style: { fontSize: 10.5, color: '#111111' } }),
+  makePdfElement('sheet_thumbnail', { id: 'bath-sheet-thumbnail', label: 'Миниатюра листа', source: 'sheet.thumbnail', x: 9.9, y: 37.4, w: 213.1, h: 150.6 }),
+  makePdfElement('text', { id: 'bath-table-title', label: 'Заголовок листа', text: 'Лист', x: 227.9, y: 28.6, w: 24, h: 4.5, align: 'right', style: { fontSize: 10, color: '#111111' } }),
+  makePdfElement('field', { id: 'bath-field-sheet-number', label: 'Номер листа', source: 'sheet.number', x: 252.5, y: 28.6, w: 34.7, h: 4.5, style: { fontSize: 10, color: '#111111' } }),
+  makePdfElement('text', { id: 'bath-table-subtitle', label: 'Заголовок деталей', text: 'Детали', x: 227.9, y: 32.8, w: 59.3, h: 4.5, align: 'center', style: { fontSize: 9, color: '#111111' } }),
+  makePdfElement('detail_table', { id: 'bath-detail-table', label: 'Таблица деталей', source: 'detail.table', x: 227.9, y: 37.4, w: 59.3, h: 118, style: { color: '#111111', strokeWidth: 0.18, fontSize: 6.8, headerFontSize: 6, rowHeight: 5.3, headerHeight: 5.6, columns: DEFAULT_PDF_DETAIL_TABLE_COLUMNS, sort: { field: 'detail.order', direction: 'asc' } } }),
+  makePdfElement('machine_files_table', { id: 'bath-machine-files-table', label: 'Файлы станка', source: 'sheet.machine_files', x: 227.9, y: 158, w: 59.3, h: 24, style: { color: '#111111', strokeWidth: 0.18, fontSize: 6.8, headerFontSize: 6.8, rowHeight: 5.5, headerHeight: 5.8 } }),
+  makePdfElement('line', { id: 'bath-line-footer', label: 'Линия итогов', x: 9.9, y: 181.3, w: 215.2, h: 0, style: { color: '#111111', strokeWidth: 0.25 } }),
+  makePdfElement('text', { id: 'bath-label-sheet-size', label: 'Подпись Размер листа', text: 'Размер листа:', x: 16.9, y: 183.4, w: 35, h: 4.8, style: { fontSize: 9, color: '#111111' } }),
+  makePdfElement('field', { id: 'bath-field-sheet-size', label: 'Размер листа', source: 'sheet.size', x: 52.5, y: 183.4, w: 40, h: 4.8, style: { fontSize: 9, color: '#111111' } }),
+  makePdfElement('text', { id: 'bath-label-sheet-copy-count', label: 'Количество листов', text: '|  Кол-во - 1', x: 94, y: 183.4, w: 38, h: 4.8, style: { fontSize: 9, color: '#111111' } }),
+  makePdfElement('text', { id: 'bath-label-detail-count', label: 'Подпись Количество деталей', text: 'Количество деталей:', x: 16.9, y: 188.4, w: 50, h: 4.8, style: { fontSize: 9, color: '#111111' } }),
+  makePdfElement('field', { id: 'bath-field-detail-count', label: 'Количество деталей', source: 'sheet.details_count', x: 66.5, y: 188.4, w: 16, h: 4.8, style: { fontSize: 9, color: '#111111' } }),
+  makePdfElement('text', { id: 'bath-label-detail-area', label: 'Подпись Площадь деталей', text: '|  Площадь деталей:', x: 83, y: 188.4, w: 49, h: 4.8, style: { fontSize: 9, color: '#111111' } }),
+  makePdfElement('field', { id: 'bath-field-detail-area', label: 'Площадь деталей', source: 'sheet.area', x: 132, y: 188.4, w: 21, h: 4.8, style: { fontSize: 9, color: '#111111' } }),
+  makePdfElement('text', { id: 'bath-label-area-unit', label: 'Ед. площади', text: 'м.кв.  |', x: 153.5, y: 188.4, w: 20, h: 4.8, style: { fontSize: 9, color: '#111111' } }),
+  makePdfElement('text', { id: 'bath-label-utilization', label: 'Подпись Утилизация', text: 'Утилизация:', x: 174, y: 188.4, w: 34, h: 4.8, style: { fontSize: 9, color: '#111111' } }),
+  makePdfElement('field', { id: 'bath-field-utilization', label: 'Утилизация', source: 'sheet.utilization', x: 208.5, y: 188.4, w: 17, h: 4.8, align: 'right', style: { fontSize: 9, color: '#111111' } }),
+  makePdfElement('text', { id: 'bath-label-utilization-unit', label: 'Процент утилизации', text: '%', x: 226, y: 188.4, w: 6, h: 4.8, style: { fontSize: 9, color: '#111111' } }),
 ];
 
 const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canManage, onTemplateSaved }) => {
@@ -2010,7 +2048,7 @@ function pdfTemplateToDraft(template: CutPdfTemplate): PdfTemplateDraft {
   return normalizePdfDraft({
     code: template.code,
     name: template.name,
-    ...layoutToPdfDraftShape(template.layout),
+    ...layoutToPdfDraftShape(template.layout, template.code),
   });
 }
 
@@ -2024,7 +2062,8 @@ function makePdfTemplateCopyName(name: string): string {
   return `${name.trim()} копия`.trim().slice(0, 200);
 }
 
-function layoutToPdfDraftShape(layout: Record<string, unknown>): Pick<PdfTemplateDraft, 'page' | 'customFields' | 'elements'> {
+function layoutToPdfDraftShape(layout: Record<string, unknown>, templateCode = 'standard'): Pick<PdfTemplateDraft, 'page' | 'customFields' | 'elements'> {
+  const fallbackElements = defaultPdfElementsForTemplateCode(templateCode);
   const page = isRecord(layout.page) ? {
     width: Number(layout.page.width ?? PDF_PAGE.width),
     height: Number(layout.page.height ?? PDF_PAGE.height),
@@ -2034,7 +2073,7 @@ function layoutToPdfDraftShape(layout: Record<string, unknown>): Pick<PdfTemplat
     : Array.isArray(layout.customFields)
       ? layout.customFields.map(normalizeCustomField)
       : [];
-  const rawElements = Array.isArray(layout.elements) ? layout.elements : DEFAULT_PDF_ELEMENTS;
+  const rawElements = Array.isArray(layout.elements) && layout.elements.length > 0 ? layout.elements : fallbackElements;
   return { page, customFields, elements: upgradeDefaultPdfElements(rawElements.map((element, index) => normalizePdfElement(element, index))) };
 }
 
@@ -2060,16 +2099,22 @@ function pdfDraftToStoredDraft(draft: PdfTemplateDraft): PdfTemplateDraft {
 }
 
 function normalizePdfDraft(raw: Partial<PdfTemplateDraft>): PdfTemplateDraft {
+  const code = String(raw.code ?? 'standard');
+  const fallbackElements = defaultPdfElementsForTemplateCode(code);
   return {
-    code: String(raw.code ?? 'standard'),
+    code,
     name: String(raw.name ?? 'Стандартный'),
     page: {
       width: Number(raw.page?.width ?? PDF_PAGE.width),
       height: Number(raw.page?.height ?? PDF_PAGE.height),
     },
     customFields: Array.isArray(raw.customFields) ? raw.customFields.map(normalizeCustomField) : [],
-    elements: upgradeDefaultPdfElements((Array.isArray(raw.elements) && raw.elements.length > 0 ? raw.elements : DEFAULT_PDF_ELEMENTS).map((element, index) => normalizePdfElement(element, index))),
+    elements: upgradeDefaultPdfElements((Array.isArray(raw.elements) && raw.elements.length > 0 ? raw.elements : fallbackElements).map((element, index) => normalizePdfElement(element, index))),
   };
+}
+
+function defaultPdfElementsForTemplateCode(templateCode: string): PdfTemplateElement[] {
+  return templateCode === 'bath_profiles' ? BATH_PROFILE_PDF_ELEMENTS : DEFAULT_PDF_ELEMENTS;
 }
 
 function normalizeCustomField(raw: unknown): CustomFieldSchemaRow {

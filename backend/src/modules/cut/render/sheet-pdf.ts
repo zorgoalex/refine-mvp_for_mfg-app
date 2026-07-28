@@ -319,7 +319,7 @@ function drawSheetThumbnail(
   const dy = (h - drawH) / 2;
   doc.save();
   doc.rect(0, 0, w, h).clip();
-  SVGtoPDF(doc, sheet.svg, dx, dy, {
+  SVGtoPDF(doc, sheet.bathSvg ?? sheet.svg, dx, dy, {
     width: drawW,
     height: drawH,
     assumePt: false,
@@ -606,7 +606,11 @@ function isTemplateLayoutV3(layout: unknown): layout is PdfTemplateLayoutV3 {
 
 function resolveTemplateLayoutV3(layout: unknown, template: string | undefined): PdfTemplateLayoutV3 | null {
   if (isTemplateLayoutV3(layout)) return layout;
-  return isEmptyTemplateLayout(layout) && template !== 'bath_profiles' ? defaultTemplateLayoutV3() : null;
+  if (template === 'bath_profiles' && (layout === undefined || layout === null || isEmptyTemplateLayout(layout))) {
+    return bathProfilesTemplateLayoutV3();
+  }
+  if (!isEmptyTemplateLayout(layout)) return null;
+  return defaultTemplateLayoutV3();
 }
 
 function isEmptyTemplateLayout(layout: unknown): boolean {
@@ -653,6 +657,8 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
     if (row.lengthMm === null || row.widthMm === null) return sum;
     return sum + row.lengthMm * row.widthMm * row.quantity;
   }, 0) / 1_000_000;
+  const sheetArea = (sheet.sheetWidthMm * sheet.sheetHeightMm) / 1_000_000;
+  const utilization = sheetArea > 0 ? (detailsArea / sheetArea) * 100 : null;
   return {
     'job.name': '',
     'job.number': '',
@@ -665,6 +671,7 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
     'sheet.size': `${formatMm(sheet.sheetWidthMm)}x${formatMm(sheet.sheetHeightMm)}`,
     'sheet.details_count': totalQuantity,
     'sheet.area': detailsArea > 0 ? Number(detailsArea.toFixed(3)) : null,
+    'sheet.utilization': utilization === null ? null : Number(utilization.toFixed(2)),
     'sheet.thumbnail': '',
     'sheet.machine_files': joinBlank(machineFiles),
     'detail.table': '',
@@ -937,6 +944,49 @@ function defaultTemplateLayoutV3(): PdfTemplateLayoutV3 {
         style: { color: '#111111', strokeWidth: 0.25, fontSize: 7, columns: DEFAULT_DETAIL_TABLE_COLUMNS, sort: { field: 'detail.order', direction: 'asc' } },
       },
       { id: 'machine-files-table', type: 'machine_files_table', label: 'Файлы станка', source: 'sheet.machine_files', x: 222, y: 116, w: 60, h: 32, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fontSize: 7 } },
+    ],
+  };
+}
+
+function bathProfilesTemplateLayoutV3(): PdfTemplateLayoutV3 {
+  return {
+    version: 3,
+    page: { width: 297, height: 210 },
+    elements: [
+      { id: 'bath-label-order', type: 'text', label: 'Подпись Заказ', source: null, text: 'Заказ:', x: 9.9, y: 9.9, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-order', type: 'field', label: 'Заказ', source: 'order.unique_names', text: null, x: 38.8, y: 9.9, w: 60.5, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-label-client', type: 'text', label: 'Подпись Клиент', source: null, text: 'Клиент:', x: 102.3, y: 9.9, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-client', type: 'field', label: 'Клиент', source: 'client.unique_names', text: null, x: 131.2, y: 9.9, w: 60.5, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-label-order-date', type: 'text', label: 'Подпись Дата заказа', source: null, text: 'Дата:', x: 194.7, y: 9.9, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-order-date', type: 'field', label: 'Дата заказа', source: 'order.date', text: null, x: 223.7, y: 9.9, w: 60.5, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-line-header-1', type: 'line', label: 'Линия шапки 1', source: null, text: null, x: 9.9, y: 16.6, w: 277.3, h: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.25 } },
+      { id: 'bath-label-ready-date', type: 'text', label: 'Подпись Дата готовности', source: null, text: 'Дата готовности:', x: 9.9, y: 17.7, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-ready-date', type: 'field', label: 'Дата готовности', source: 'order.ready_date', text: null, x: 38.8, y: 17.7, w: 60.5, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-label-material', type: 'text', label: 'Подпись Материал', source: null, text: 'Материал:', x: 102.3, y: 17.7, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-material', type: 'field', label: 'Материал', source: 'detail.materials', text: null, x: 131.2, y: 17.7, w: 60.5, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-label-thickness', type: 'text', label: 'Подпись Толщина', source: null, text: 'Толщина:', x: 194.7, y: 17.7, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-thickness', type: 'field', label: 'Толщина', source: 'detail.thicknesses', text: null, x: 223.7, y: 17.7, w: 60.5, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-line-header-2', type: 'line', label: 'Линия шапки 2', source: null, text: null, x: 9.9, y: 24.3, w: 277.3, h: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.25 } },
+      { id: 'bath-label-film', type: 'text', label: 'Подпись Пленка', source: null, text: 'Пленка:', x: 9.9, y: 25.4, w: 28.9, h: 5.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-field-film', type: 'field', label: 'Пленка', source: 'detail.films', text: null, x: 38.8, y: 25.4, w: 245.4, h: 6.4, align: 'left', style: { fontSize: 10.5, color: '#111111' } },
+      { id: 'bath-sheet-thumbnail', type: 'sheet_thumbnail', label: 'Миниатюра листа', source: 'sheet.thumbnail', text: null, x: 9.9, y: 37.4, w: 213.1, h: 150.6, align: 'center', style: { color: '#111111', strokeWidth: 0.25, fit: 'contain' } },
+      { id: 'bath-table-title', type: 'text', label: 'Заголовок листа', source: null, text: 'Лист', x: 227.9, y: 28.6, w: 24, h: 4.5, align: 'right', style: { fontSize: 10, color: '#111111' } },
+      { id: 'bath-field-sheet-number', type: 'field', label: 'Номер листа', source: 'sheet.number', text: null, x: 252.5, y: 28.6, w: 34.7, h: 4.5, align: 'left', style: { fontSize: 10, color: '#111111' } },
+      { id: 'bath-table-subtitle', type: 'text', label: 'Заголовок деталей', source: null, text: 'Детали', x: 227.9, y: 32.8, w: 59.3, h: 4.5, align: 'center', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-detail-table', type: 'detail_table', label: 'Таблица деталей', source: 'detail.table', text: null, x: 227.9, y: 37.4, w: 59.3, h: 118, align: 'center', style: { color: '#111111', strokeWidth: 0.18, fontSize: 6.8, headerFontSize: 6, rowHeight: 5.3, headerHeight: 5.6, columns: DEFAULT_DETAIL_TABLE_COLUMNS, sort: { field: 'detail.order', direction: 'asc' } } },
+      { id: 'bath-machine-files-table', type: 'machine_files_table', label: 'Файлы станка', source: 'sheet.machine_files', text: null, x: 227.9, y: 158, w: 59.3, h: 24, align: 'center', style: { color: '#111111', strokeWidth: 0.18, fontSize: 6.8, headerFontSize: 6.8, rowHeight: 5.5, headerHeight: 5.8 } },
+      { id: 'bath-line-footer', type: 'line', label: 'Линия итогов', source: null, text: null, x: 9.9, y: 181.3, w: 215.2, h: 0, align: 'left', style: { color: '#111111', strokeWidth: 0.25 } },
+      { id: 'bath-label-sheet-size', type: 'text', label: 'Подпись Размер листа', source: null, text: 'Размер листа:', x: 16.9, y: 183.4, w: 35, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-field-sheet-size', type: 'field', label: 'Размер листа', source: 'sheet.size', text: null, x: 52.5, y: 183.4, w: 40, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-label-sheet-copy-count', type: 'text', label: 'Количество листов', source: null, text: '|  Кол-во - 1', x: 94, y: 183.4, w: 38, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-label-detail-count', type: 'text', label: 'Подпись Количество деталей', source: null, text: 'Количество деталей:', x: 16.9, y: 188.4, w: 50, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-field-detail-count', type: 'field', label: 'Количество деталей', source: 'sheet.details_count', text: null, x: 66.5, y: 188.4, w: 16, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-label-detail-area', type: 'text', label: 'Подпись Площадь деталей', source: null, text: '|  Площадь деталей:', x: 83, y: 188.4, w: 49, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-field-detail-area', type: 'field', label: 'Площадь деталей', source: 'sheet.area', text: null, x: 132, y: 188.4, w: 21, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-label-area-unit', type: 'text', label: 'Ед. площади', source: null, text: 'м.кв.  |', x: 153.5, y: 188.4, w: 20, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-label-utilization', type: 'text', label: 'Подпись Утилизация', source: null, text: 'Утилизация:', x: 174, y: 188.4, w: 34, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-field-utilization', type: 'field', label: 'Утилизация', source: 'sheet.utilization', text: null, x: 208.5, y: 188.4, w: 17, h: 4.8, align: 'right', style: { fontSize: 9, color: '#111111' } },
+      { id: 'bath-label-utilization-unit', type: 'text', label: 'Процент утилизации', source: null, text: '%', x: 226, y: 188.4, w: 6, h: 4.8, align: 'left', style: { fontSize: 9, color: '#111111' } },
     ],
   };
 }
