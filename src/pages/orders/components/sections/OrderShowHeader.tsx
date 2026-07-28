@@ -256,34 +256,46 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   const remainingAmount = Math.max(0, finalAmount - paidAmount);
   const compactFinanceItems = [
     `${formatNumber(finalAmount, 2)} ${CURRENCY_SYMBOL}`,
-    discount > 0 ? `скидка ${formatNumber(discount, 2)} ${CURRENCY_SYMBOL}` : null,
-    surcharge > 0 ? `наценка ${formatNumber(surcharge, 2)} ${CURRENCY_SYMBOL}` : null,
-    paidAmount > 0 ? `оплачено ${formatNumber(paidAmount, 2)} ${CURRENCY_SYMBOL}` : null,
-    remainingAmount > 0 ? `остаток ${formatNumber(remainingAmount, 2)} ${CURRENCY_SYMBOL}` : null,
+    discount > 0 ? `скид. ${formatNumber(discount, 2)} ${CURRENCY_SYMBOL}` : null,
+    surcharge > 0 ? `нац. ${formatNumber(surcharge, 2)} ${CURRENCY_SYMBOL}` : null,
+    paidAmount > 0 ? `опл. ${formatNumber(paidAmount, 2)} ${CURRENCY_SYMBOL}` : null,
+    remainingAmount > 0 ? `ост. ${formatNumber(remainingAmount, 2)} ${CURRENCY_SYMBOL}` : null,
   ].filter(Boolean);
+  const compactBasisProjectsSummary = basisProjects.join(', ');
+  const compactMaterialSummary = [
+    materialsSummary,
+    basisProjects.length > 0 ? `Базис: ${compactBasisProjectsSummary}` : null,
+  ].filter(Boolean).join(' · ');
 
   if (compactSticky) {
     return (
       <div className="order-show-header order-show-header--compact-sticky" aria-label="Сводка заказа">
         <div className="order-show-header__compact-line">
           <span className="order-show-header__compact-primary">
-            <Text strong>{record?.order_name || 'Заказ'}</Text>
-            <span className="order-show-header__compact-muted">приоритет {record?.priority !== undefined ? formatNumber(record.priority, 0) : '—'}</span>
+            <Text strong className="order-show-header__compact-text">{record?.order_name || 'Заказ'}</Text>
+            <span
+              className="order-show-header__compact-priority"
+              title={`Приоритет ${record?.priority !== undefined ? formatNumber(record.priority, 0) : '—'}`}
+              aria-label={`Приоритет ${record?.priority !== undefined ? formatNumber(record.priority, 0) : '—'}`}
+            >
+              <StarOutlined aria-hidden style={{ color: record?.priority && record.priority <= 50 ? '#D97706' : 'var(--app-text-muted)' }} />
+              {record?.priority !== undefined ? formatNumber(record.priority, 0) : '—'}
+            </span>
             <Tag color={record?.order_status_name === 'Готов к выдаче' ? '#059669' : record?.order_status_name === 'Предварительный' ? '#91caff' : '#4F46E5'}>
               {record?.order_status_name || 'Не назначен'}
             </Tag>
           </span>
-          <span className="order-show-header__compact-item">
-            <Text strong>{record?.client_name || '—'}</Text>
+          <span className="order-show-header__compact-item order-show-header__compact-client" title={record?.client_name || ''}>
+            <Text strong className="order-show-header__compact-text">{record?.client_name || '—'}</Text>
             {primaryPhone ? <a href={`tel:${primaryPhone.replace(/[^+\d]/g, '')}`}>{primaryPhone}</a> : null}
           </span>
           <span className="order-show-header__compact-item order-show-header__compact-money">
-            {compactFinanceItems.join(' / ')}
+            <span className="order-show-header__compact-text">{compactFinanceItems.join(' / ')}</span>
             <Tag color={record?.payment_status_name === 'Оплачен' ? '#059669' : '#D97706'}>
               {record?.payment_status_name || 'Не назначен'}
             </Tag>
           </span>
-          <span className="order-show-header__compact-item">
+          <span className="order-show-header__compact-item order-show-header__compact-dates">
             {record?.order_date ? dayjs(record.order_date).format('DD.MM.YYYY') : '—'}
             {' → '}
             {record?.planned_completion_date ? dayjs(record.planned_completion_date).format('DD.MM.YYYY') : '—'}
@@ -299,24 +311,20 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
               />
             ) : null}
           </span>
-          <span className="order-show-header__compact-item" title={record?.notes || ''}>
-            Примечание: {record?.notes || '—'}
-          </span>
           {compactDowelingName ? (
-            <span className="order-show-header__compact-item">
-              Присадка: <Text strong>{compactDowelingName}</Text>
+            <span className="order-show-header__compact-item order-show-header__compact-doweling" title={compactDowelingName}>
+              Присадка: <Text strong className="order-show-header__compact-text">{compactDowelingName}</Text>
             </span>
           ) : null}
-          <span className="order-show-header__compact-item" title={materialsSummary}>
-            Материал: <Text strong>{materialsSummary}</Text>
-            {basisProjects.length > 0 ? <span> · Базис-проект: {basisProjects.join(', ')}</span> : null}
+          <span className="order-show-header__compact-item order-show-header__compact-material" title={compactMaterialSummary}>
+            <Text strong className="order-show-header__compact-text">{compactMaterialSummary}</Text>
           </span>
           <span className="order-show-header__compact-item order-show-header__compact-metrics">
-            Позиций: <Text strong>{formatNumber(totals.positions_count, 0)}</Text>
+            поз. <Text strong>{formatNumber(totals.positions_count, 0)}</Text>
             {' · '}
-            Деталей: <Text strong>{formatNumber(totals.parts_count, 0)}</Text>
+            дет. <Text strong>{formatNumber(totals.parts_count, 0)}</Text>
             {' · '}
-            Площадь: <Text strong>{formatNumber(totals.total_area, 2)} м²</Text>
+            <Text strong>{formatNumber(totals.total_area, 2)} м²</Text>
           </span>
         </div>
       </div>
