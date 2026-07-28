@@ -128,7 +128,7 @@ function useMeasuredElementHeight<T extends HTMLElement>() {
     return () => ro.disconnect();
   }, [node]);
 
-  return [setNode, height] as const;
+  return [setNode, height, node] as const;
 }
 
 const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -414,20 +414,29 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
   const [orderShowSummaryTabsRef, orderShowSummaryTabsHeight] = useMeasuredElementHeight<HTMLDivElement>();
-  const [orderShowDetailsToolbarRef, orderShowDetailsToolbarHeight] = useMeasuredElementHeight<HTMLDivElement>();
+  const [orderShowDetailsToolbarRef, orderShowDetailsToolbarHeight, orderShowDetailsToolbarNode] = useMeasuredElementHeight<HTMLDivElement>();
   const [orderShowStickyEnabled, setOrderShowStickyEnabled] = useState(false);
   const [orderShowSummaryStuck, setOrderShowSummaryStuck] = useState(false);
+  const [orderShowTableHeaderTop, setOrderShowTableHeaderTop] = useState(0);
+  const updateOrderShowTableHeaderTop = useCallback((stuck = orderShowSummaryStuck) => {
+    const next =
+      stuck && orderShowDetailsToolbarNode
+        ? Math.max(0, Math.ceil(orderShowDetailsToolbarNode.getBoundingClientRect().bottom))
+        : 0;
+    setOrderShowTableHeaderTop((prev) => (prev === next ? prev : next));
+  }, [orderShowDetailsToolbarNode, orderShowSummaryStuck]);
   const orderShowStickyStyle = useMemo<OrderShowStickyStyle>(() => ({
     '--order-show-sticky-top': `${workspaceTabsHeight}px`,
     '--order-show-summary-tabs-height': `${orderShowSummaryTabsHeight}px`,
     '--order-show-details-toolbar-height': `${orderShowDetailsToolbarHeight}px`,
-    '--order-show-table-header-top': `${workspaceTabsHeight + orderShowSummaryTabsHeight + orderShowDetailsToolbarHeight}px`,
-  }), [orderShowDetailsToolbarHeight, orderShowSummaryTabsHeight, workspaceTabsHeight]);
+    '--order-show-table-header-top': `${orderShowTableHeaderTop}px`,
+  }), [orderShowDetailsToolbarHeight, orderShowSummaryTabsHeight, orderShowTableHeaderTop, workspaceTabsHeight]);
   const orderShowPageClassName = useMemo(() => [
     'order-show-page',
     orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
     orderShowSummaryStuck ? 'order-show-page--summary-stuck' : '',
-  ].filter(Boolean).join(' '), [orderShowStickyEnabled, orderShowSummaryStuck]);
+    orderShowTableHeaderTop > 0 ? 'order-show-page--table-header-ready' : '',
+  ].filter(Boolean).join(' '), [orderShowStickyEnabled, orderShowSummaryStuck, orderShowTableHeaderTop]);
 
   useEffect(() => {
     const update = () => {
@@ -468,7 +477,21 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       window.removeEventListener('scroll', update);
       window.removeEventListener('resize', update);
     };
-  }, [orderShowStickyEnabled, workspaceTabsHeight]);
+  }, [orderShowStickyEnabled, updateOrderShowTableHeaderTop, workspaceTabsHeight]);
+
+  useEffect(() => {
+    const update = () => updateOrderShowTableHeaderTop();
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    if (orderShowDetailsToolbarNode) ro?.observe(orderShowDetailsToolbarNode);
+    return () => {
+      window.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+      ro?.disconnect();
+    };
+  }, [orderShowDetailsToolbarNode, updateOrderShowTableHeaderTop]);
 
   // Загрузка справочников для отображения названий
   const { data: millingTypesData } = useList({
