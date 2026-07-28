@@ -15,7 +15,6 @@ describe('OrderShow sticky detail header guards', () => {
     expect(showSource).toContain('order-show-details-toolbar');
     expect(showSource).toContain('order-show-details-table');
     expect(showSource).toContain('orderShowStickyEnabled');
-    expect(showSource).toContain('orderShowTableHeaderTop > 0 ? \'order-show-page--table-header-ready\'');
   });
 
   it('switches the order summary to the compact one-line variant only when stuck', () => {
@@ -43,10 +42,13 @@ describe('OrderShow sticky detail header guards', () => {
     expect(appCss).toMatch(/\.order-show-page--sticky-enabled \.order-show-summary-tabs-sticky[\s\S]*position:\s*sticky/);
     expect(appCss).toContain('top: var(--order-show-sticky-top)');
     expect(appCss).toContain('top: calc(var(--order-show-sticky-top) + var(--order-show-summary-tabs-height))');
-    expect(appCss).toContain('top: var(--order-show-table-header-top)');
+    expect(showSource).toContain('const orderShowDetailTableSticky = useMemo');
+    expect(showSource).toContain('sticky={orderShowDetailTableSticky}');
+    expect(showSource).toContain('offsetHeader: orderShowTableHeaderTop');
     expect(showSource).toContain('orderShowDetailsToolbarNode.getBoundingClientRect().bottom');
     expect(showSource).not.toContain('workspaceTabsHeight + orderShowSummaryTabsHeight + orderShowDetailsToolbarHeight');
-    expect(appCss).toMatch(/\.order-show-page--summary-stuck\.order-show-page--table-header-ready \.order-show-details-table \.ant-table-thead > tr > th[\s\S]*position:\s*sticky/);
+    expect(appCss).not.toMatch(/\.order-show-details-table \.ant-table-thead > tr > th[\s\S]*position:\s*sticky/);
+    expect(appCss).not.toContain('order-show-page--table-header-ready');
     expect(appCss).not.toMatch(/\.order-show-page--sticky-enabled \.order-show-details-table \.ant-table-thead > tr > th[\s\S]*position:\s*sticky/);
   });
 });

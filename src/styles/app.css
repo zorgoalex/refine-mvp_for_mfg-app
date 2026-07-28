@@ -889,14 +889,6 @@ html {
     background: var(--app-surface);
     box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
   }
-
-  .order-show-page--summary-stuck.order-show-page--table-header-ready .order-show-details-table .ant-table-thead > tr > th {
-    position: sticky !important;
-    top: var(--order-show-table-header-top);
-    z-index: 17;
-    background: var(--app-surface) !important;
-    box-shadow: 0 1px 0 var(--app-border-soft);
-  }
 }
 
 /* ----- Order-detail visual grouping (purely visual; non-functional rows) ----- */

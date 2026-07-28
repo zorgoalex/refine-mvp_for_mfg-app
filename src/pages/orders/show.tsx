@@ -435,8 +435,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     'order-show-page',
     orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
     orderShowSummaryStuck ? 'order-show-page--summary-stuck' : '',
-    orderShowTableHeaderTop > 0 ? 'order-show-page--table-header-ready' : '',
-  ].filter(Boolean).join(' '), [orderShowStickyEnabled, orderShowSummaryStuck, orderShowTableHeaderTop]);
+  ].filter(Boolean).join(' '), [orderShowStickyEnabled, orderShowSummaryStuck]);
+  const orderShowDetailTableSticky = useMemo(() => (
+    orderShowSummaryStuck && orderShowTableHeaderTop > 0
+      ? { offsetHeader: orderShowTableHeaderTop }
+      : undefined
+  ), [orderShowSummaryStuck, orderShowTableHeaderTop]);
 
   useEffect(() => {
     const update = () => {
@@ -467,6 +471,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         orderShowStickyEnabled &&
         !!node &&
         node.getBoundingClientRect().top <= workspaceTabsHeight;
+      updateOrderShowTableHeaderTop(next);
       setOrderShowSummaryStuck((prev) => (prev === next ? prev : next));
     };
 
@@ -1776,6 +1781,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               size="small"
               pagination={false}
               bordered
+              sticky={orderShowDetailTableSticky}
               tableLayout="fixed"
               style={{ fontSize: 12 }}
               rowClassName={(row: any, index) => {
