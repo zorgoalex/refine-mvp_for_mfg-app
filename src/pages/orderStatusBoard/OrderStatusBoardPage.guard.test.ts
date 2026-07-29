@@ -164,6 +164,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('sortCncRelationCards');
     expect(page).toContain('getCncPacketRelationState');
     expect(page).toContain('getCncBathRelationState');
+    expect(page).toContain('orderKeys: Set<string>');
+    expect(page).toContain('addCncOrderRelationKeys(fingerprint, item.orderName, item.orderId, item.matchOrderId)');
+    expect(page).toContain('addCncOrderRelationKeys(fingerprint, item.orderName, item.orderId)');
+    expect(page).toContain('cncWholeOrderCommentOrderKeys');
+    expect(page).toContain('right.orderKeys.has(orderKey)');
     expect(page).toContain('event.stopPropagation()');
     expect(css).toContain('.cnc-relation-card--dimmed');
     expect(css).toContain('filter: grayscale(0.9)');

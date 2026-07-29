@@ -2285,6 +2285,7 @@ interface CncOrderSummary {
 interface CncRelationFingerprint {
   detailIds: Set<number>;
   fallbackKeys: Set<string>;
+  orderKeys: Set<string>;
 }
 
 interface CncRelationContext {
@@ -2388,8 +2389,14 @@ function buildCncPacketFingerprint(packet: CncTelegramPacket): CncRelationFinger
   const fingerprint = emptyCncRelationFingerprint();
   for (const item of packet.items) {
     if (item.matchDetailId != null) fingerprint.detailIds.add(item.matchDetailId);
+    addCncOrderRelationKeys(fingerprint, item.orderName, item.orderId, item.matchOrderId);
     for (const fallbackKey of cncPacketItemFallbackKeys(item)) {
       fingerprint.fallbackKeys.add(fallbackKey);
+    }
+  }
+  for (const comment of packet.comments) {
+    for (const orderKey of cncWholeOrderCommentOrderKeys(comment)) {
+      fingerprint.orderKeys.add(orderKey);
     }
   }
   return fingerprint;
@@ -2399,6 +2406,7 @@ function buildCncBathFingerprint(bath: CncTelegramBathCard): CncRelationFingerpr
   const fingerprint = emptyCncRelationFingerprint();
   for (const item of bath.items) {
     fingerprint.detailIds.add(item.detailId);
+    addCncOrderRelationKeys(fingerprint, item.orderName, item.orderId);
     for (const fallbackKey of cncBathItemFallbackKeys(item)) {
       fingerprint.fallbackKeys.add(fallbackKey);
     }
@@ -2407,13 +2415,15 @@ function buildCncBathFingerprint(bath: CncTelegramBathCard): CncRelationFingerpr
 }
 
 function emptyCncRelationFingerprint(): CncRelationFingerprint {
-  return { detailIds: new Set<number>(), fallbackKeys: new Set<string>() };
+  return {
+    detailIds: new Set<number>(),
+    fallbackKeys: new Set<string>(),
+    orderKeys: new Set<string>(),
+  };
 }
 
 function cncPacketItemFallbackKeys(item: CncTelegramPacket['items'][number]): string[] {
-  const orderKeys = item.matchOrderId
-    ? [`id:${item.matchOrderId}`, cncOrderNameFallbackKey(item.orderName)]
-    : [cncOrderNameFallbackKey(item.orderName)];
+  const orderKeys = cncRelationOrderKeys(item.orderName, item.orderId, item.matchOrderId);
   return orderKeys
     .map((orderKey) =>
       cncRelationFallbackKey(orderKey, item.detailNumber, item.widthMm, item.heightMm),
@@ -2422,11 +2432,46 @@ function cncPacketItemFallbackKeys(item: CncTelegramPacket['items'][number]): st
 }
 
 function cncBathItemFallbackKeys(item: CncTelegramBathCard['items'][number]): string[] {
-  return [`id:${item.orderId}`, cncOrderNameFallbackKey(item.orderName)]
+  return cncRelationOrderKeys(item.orderName, item.orderId)
     .map((orderKey) =>
       cncRelationFallbackKey(orderKey, item.detailNumber, item.widthMm, item.heightMm),
     )
     .filter((key): key is string => key !== null);
+}
+
+function addCncOrderRelationKeys(
+  fingerprint: CncRelationFingerprint,
+  orderName: string,
+  ...orderIds: Array<number | null | undefined>
+): void {
+  for (const orderKey of cncRelationOrderKeys(orderName, ...orderIds)) {
+    fingerprint.orderKeys.add(orderKey);
+  }
+}
+
+function cncRelationOrderKeys(
+  orderName: string,
+  ...orderIds: Array<number | null | undefined>
+): string[] {
+  const keys = new Set<string>();
+  for (const orderId of orderIds) {
+    if (Number.isInteger(orderId) && Number(orderId) > 0) {
+      keys.add(`id:${orderId}`);
+    }
+  }
+  const normalizedOrderName = orderName.trim();
+  if (normalizedOrderName) {
+    keys.add(cncOrderNameFallbackKey(normalizedOrderName));
+  }
+  return Array.from(keys);
+}
+
+function cncWholeOrderCommentOrderKeys(comment: string): string[] {
+  if (!comment.toLocaleLowerCase('ru-RU').includes('весь')) return [];
+  return Array.from(comment.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g))
+    .map((match) => match[2])
+    .filter((orderName): orderName is string => Boolean(orderName))
+    .map((orderName) => cncOrderNameFallbackKey(orderName));
 }
 
 function cncRelationFallbackKey(
@@ -2456,6 +2501,9 @@ function cncFingerprintsIntersect(
   }
   for (const fallbackKey of left.fallbackKeys) {
     if (right.fallbackKeys.has(fallbackKey)) return true;
+  }
+  for (const orderKey of left.orderKeys) {
+    if (right.orderKeys.has(orderKey)) return true;
   }
   return false;
 }
