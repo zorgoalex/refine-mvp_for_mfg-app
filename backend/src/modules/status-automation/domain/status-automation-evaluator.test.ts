@@ -101,6 +101,39 @@ describe('evaluateRuleConditions', () => {
     expect(result).toEqual({ matched: false, reason: 'production_status_not_in_list' });
   });
 
+  it.each([
+    {
+      name: 'order status',
+      conditions: { currentOrderStatusNotIn: [1, 7] },
+      reason: 'order_status_excluded',
+    },
+    {
+      name: 'payment status',
+      conditions: { currentPaymentStatusNotIn: [2, 8] },
+      reason: 'payment_status_excluded',
+    },
+    {
+      name: 'production status',
+      conditions: { currentProductionStatusNotIn: [3, 9] },
+      reason: 'production_status_excluded',
+    },
+  ])('$name exclusion list mismatch returns its condition reason', ({ conditions, reason }) => {
+    expect(evaluateRuleConditions(makeRule({ conditions }), makeState(), makeEvent())).toEqual({
+      matched: false,
+      reason,
+    });
+  });
+
+  it('does not match a production exclusion when production status is null', () => {
+    const result = evaluateRuleConditions(
+      makeRule({ conditions: { currentProductionStatusNotIn: [3, 9] } }),
+      makeState({ productionStatusId: null }),
+      makeEvent(),
+    );
+
+    expect(result).toEqual({ matched: true });
+  });
+
   it('uses the paid-share threshold with a 0.01 tolerance', () => {
     const rule = makeRule({ conditions: { paidShareGte: 50 } });
 
@@ -158,8 +191,11 @@ describe('evaluateRuleConditions', () => {
   it('does not check empty list conditions', () => {
     const conditions: StatusAutomationConditions = {
       currentOrderStatusIn: [],
+      currentOrderStatusNotIn: [],
       currentPaymentStatusIn: [],
+      currentPaymentStatusNotIn: [],
       currentProductionStatusIn: [],
+      currentProductionStatusNotIn: [],
       orderSourceIn: [],
     };
 

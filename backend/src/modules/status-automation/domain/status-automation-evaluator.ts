@@ -35,11 +35,27 @@ export function evaluateRuleConditions(
   }
 
   if (
+    conditions.currentOrderStatusNotIn !== undefined &&
+    conditions.currentOrderStatusNotIn.length > 0 &&
+    conditions.currentOrderStatusNotIn.includes(state.orderStatusId)
+  ) {
+    return failed('order_status_excluded');
+  }
+
+  if (
     conditions.currentPaymentStatusIn !== undefined &&
     conditions.currentPaymentStatusIn.length > 0 &&
     !conditions.currentPaymentStatusIn.includes(state.paymentStatusId)
   ) {
     return failed('payment_status_not_in_list');
+  }
+
+  if (
+    conditions.currentPaymentStatusNotIn !== undefined &&
+    conditions.currentPaymentStatusNotIn.length > 0 &&
+    conditions.currentPaymentStatusNotIn.includes(state.paymentStatusId)
+  ) {
+    return failed('payment_status_excluded');
   }
 
   if (
@@ -49,6 +65,15 @@ export function evaluateRuleConditions(
       !conditions.currentProductionStatusIn.includes(state.productionStatusId))
   ) {
     return failed('production_status_not_in_list');
+  }
+
+  if (
+    conditions.currentProductionStatusNotIn !== undefined &&
+    conditions.currentProductionStatusNotIn.length > 0 &&
+    state.productionStatusId !== null &&
+    conditions.currentProductionStatusNotIn.includes(state.productionStatusId)
+  ) {
+    return failed('production_status_excluded');
   }
 
   if (conditions.paidShareGte !== undefined) {

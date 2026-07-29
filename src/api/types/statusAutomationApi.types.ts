@@ -14,8 +14,11 @@ export type StatusAutomationOrderSource = 'manual' | 'bazis' | 'import';
 
 export interface StatusAutomationConditionsDto {
   currentOrderStatusIn?: number[];
+  currentOrderStatusNotIn?: number[];
   currentPaymentStatusIn?: number[];
+  currentPaymentStatusNotIn?: number[];
   currentProductionStatusIn?: number[];
+  currentProductionStatusNotIn?: number[];
   paidShareGte?: number;
   orderSourceIn?: StatusAutomationOrderSource[];
   firstPaymentOnly?: boolean;
