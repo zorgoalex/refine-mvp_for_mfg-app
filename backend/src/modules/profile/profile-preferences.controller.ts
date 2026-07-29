@@ -6,6 +6,7 @@ import type { RequestWithCurrentUser } from '../../permissions/current-user';
 import { ProfilePreferencesService } from './profile-preferences.service';
 import {
   RECENT_REFERENCE_RESOURCES,
+  UI_VARIANTS,
   type RecentReferenceResource,
   type UserPreferencesDto,
   type UserPreferencesResponseDto,
@@ -16,7 +17,7 @@ const MAX_PAGE_SIZE_PREFERENCES_PER_REQUEST = 32;
 const updatePreferencesSchema = z.object({
   themeMode: z.enum(['light', 'dark']).optional(),
   uiSize: z.enum(['default', 'small']).optional(),
-  uiVariant: z.enum(['legacy', 'evolution']).optional(),
+  uiVariant: z.enum(UI_VARIANTS).optional(),
   orderDetailColumns: z.record(
     z.string().min(1).max(80),
     z.object({

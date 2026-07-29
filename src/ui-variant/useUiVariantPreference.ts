@@ -5,7 +5,7 @@ import { authStorage } from '../utils/auth';
 import { getLoadedRuntimeConfig } from '../config/runtimeConfig';
 import { hasAnyDirty, useTabStore } from '../stores/tabStore';
 import { useUiVariant } from './UiVariantProvider';
-import { isEvolutionAvailable, isUiVariant, type UiVariant } from './uiVariant';
+import { isModernUiAvailable, isModernUiVariant, isUiVariant, type UiVariant } from './uiVariant';
 import { setStoredUiVariant } from './uiVariantStorage';
 
 export type UiVariantSwitchBlockReason =
@@ -20,7 +20,7 @@ interface UiVariantSwitchGuardInput {
   current: UiVariant;
   requested: UiVariant;
   isSaving: boolean;
-  evolutionAvailable: boolean;
+  modernUiAvailable: boolean;
   hasDirtyTabs: boolean;
   userId: string | null;
   hasAccessToken: boolean;
@@ -41,7 +41,7 @@ export function useUiVariantPreference() {
   const { variant } = useUiVariant();
   const [isSaving, setIsSaving] = useState(false);
   const savingRef = useRef(false);
-  const evolutionAvailable = isEvolutionAvailable(getLoadedRuntimeConfig()?.ui);
+  const modernUiAvailable = isModernUiAvailable(getLoadedRuntimeConfig()?.ui);
 
   const setVariant = useCallback(async (requested: UiVariant) => {
     const userId = getCurrentUserId();
@@ -49,7 +49,7 @@ export function useUiVariantPreference() {
       current: variant,
       requested,
       isSaving: savingRef.current,
-      evolutionAvailable,
+      modernUiAvailable,
       hasDirtyTabs: hasAnyDirty(useTabStore.getState().tabs),
       userId,
       hasAccessToken: Boolean(authStorage.getAccessToken()),
@@ -59,8 +59,8 @@ export function useUiVariantPreference() {
 
     if (blockReason === 'unavailable') {
       notification.warning({
-        message: 'Новый дизайн временно недоступен',
-        description: 'Администратор отключил его для безопасного обновления.',
+        message: 'Дизайн временно недоступен',
+        description: 'Администратор отключил новые варианты для безопасного обновления.',
       });
       return;
     }
@@ -101,11 +101,11 @@ export function useUiVariantPreference() {
       savingRef.current = false;
       setIsSaving(false);
     }
-  }, [evolutionAvailable, variant]);
+  }, [modernUiAvailable, variant]);
 
   return {
     variant,
-    evolutionAvailable,
+    modernUiAvailable,
     isSaving,
     setVariant,
   };
@@ -122,7 +122,7 @@ export function getUiVariantSwitchBlockReason(
 ): UiVariantSwitchBlockReason {
   if (input.requested === input.current) return 'same';
   if (input.isSaving) return 'saving';
-  if (input.requested === 'evolution' && !input.evolutionAvailable) return 'unavailable';
+  if (isModernUiVariant(input.requested) && !input.modernUiAvailable) return 'unavailable';
   if (input.hasDirtyTabs) return 'dirty';
   if (!input.hasAccessToken || !input.userId) return 'unauthenticated';
   return null;

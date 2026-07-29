@@ -101,6 +101,8 @@ describe('ProfilePreferencesController', () => {
     expect(parseUpdateUserPreferencesRequest({ uiSize: 'default' })).toEqual({ uiSize: 'default' });
     expect(parseUpdateUserPreferencesRequest({ uiVariant: 'legacy' })).toEqual({ uiVariant: 'legacy' });
     expect(parseUpdateUserPreferencesRequest({ uiVariant: 'evolution' })).toEqual({ uiVariant: 'evolution' });
+    expect(parseUpdateUserPreferencesRequest({ uiVariant: 'line' })).toEqual({ uiVariant: 'line' });
+    expect(parseUpdateUserPreferencesRequest({ uiVariant: 'air' })).toEqual({ uiVariant: 'air' });
     expect(parseUpdateUserPreferencesRequest({ pageSizePreferences: { 'refine:orders_view': 50 } }))
       .toEqual({ pageSizePreferences: { 'refine:orders_view': 50 } });
     expect(() => parseUpdateUserPreferencesRequest({ uiSize: 'huge' })).toThrowError();

@@ -742,17 +742,36 @@ probe_file() {
                            AND column_name='ui_variant'
                            AND column_default='''evolution''::text'
                       );" ;;
+    091_user_preferences_line_air_ui_variants*) probe_all "$(q_col user_preferences ui_variant)" \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM information_schema.columns
+                         WHERE table_schema='public'
+                           AND table_name='user_preferences'
+                           AND column_name='ui_variant'
+                           AND column_default='''evolution''::text'
+                      );" \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM pg_constraint
+                         WHERE conname = 'chk_user_preferences_ui_variant'
+                           AND conrelid = 'user_preferences'::regclass
+                           AND pg_get_constraintdef(oid) LIKE '%legacy%'
+                           AND pg_get_constraintdef(oid) LIKE '%evolution%'
+                           AND pg_get_constraintdef(oid) LIKE '%line%'
+                           AND pg_get_constraintdef(oid) LIKE '%air%'
+                      );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
 
-# 073/074/087/088/089 contain IF NOT EXISTS DDL. A partially-created object can therefore
+# 073/074/087/088/089/091 contain conditional or multi-step DDL. A partial object can therefore
 # let PostgreSQL finish the file without reaching the required end state. Never
 # record those migrations in the ledger until the complete effect probe passes.
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*)
+    073_*|074_*|087_*|088_*|089_*|091_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

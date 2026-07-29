@@ -90,14 +90,20 @@ describe('PgProfilePreferencesRepository', () => {
 
   it('upserts UI variant and normalizes unknown stored values to evolution default', async () => {
     const database = new FakeDatabase([{
-      rows: [{ theme_mode: 'light', ui_variant: 'evolution', order_detail_columns: {} }],
+      rows: [{ theme_mode: 'light', ui_variant: 'line', order_detail_columns: {} }],
     }]);
     const repository = new PgProfilePreferencesRepository(database);
 
-    await expect(repository.updateUserPreferences(7, { uiVariant: 'evolution' }))
-      .resolves.toMatchObject({ uiVariant: 'evolution' });
-    expect(database.queries[0].params).toEqual([7, null, null, 'evolution', null, null]);
+    await expect(repository.updateUserPreferences(7, { uiVariant: 'line' }))
+      .resolves.toMatchObject({ uiVariant: 'line' });
+    expect(database.queries[0].params).toEqual([7, null, null, 'line', null, null]);
     expect(database.queries[0].text).toContain('ui_variant = COALESCE($4, user_preferences.ui_variant)');
+
+    const air = new FakeDatabase([{
+      rows: [{ theme_mode: 'light', ui_variant: 'air', order_detail_columns: {} }],
+    }]);
+    await expect(new PgProfilePreferencesRepository(air).getUserPreferences(7))
+      .resolves.toMatchObject({ uiVariant: 'air' });
 
     const garbage = new FakeDatabase([{
       rows: [{ theme_mode: 'light', ui_variant: 'future', order_detail_columns: {} }],

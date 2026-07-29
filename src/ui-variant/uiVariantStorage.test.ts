@@ -14,11 +14,13 @@ describe('per-user UI variant cache', () => {
     };
 
     setStoredUiVariant('7', 'evolution', storage);
-    setStoredUiVariant('8', 'legacy', storage);
+    setStoredUiVariant('8', 'line', storage);
+    setStoredUiVariant('9', 'air', storage);
 
     expect(uiVariantStorageKey('7')).not.toBe(uiVariantStorageKey('8'));
     expect(getStoredUiVariant('7', storage)).toBe('evolution');
-    expect(getStoredUiVariant('8', storage)).toBe('legacy');
+    expect(getStoredUiVariant('8', storage)).toBe('line');
+    expect(getStoredUiVariant('9', storage)).toBe('air');
 
     values.set(uiVariantStorageKey('7'), 'future');
     expect(getStoredUiVariant('7', storage)).toBeNull();

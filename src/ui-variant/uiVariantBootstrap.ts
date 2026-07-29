@@ -4,7 +4,7 @@ import { profileApi } from '../api/profileApi';
 import { featureFlags } from '../config/featureFlags';
 import type { FrontendUiRuntimeConfig } from '../config/runtimeConfig';
 import { authStorage } from '../utils/auth';
-import { isEvolutionAvailable, isUiVariant, resolveUiVariant, type UiVariant } from './uiVariant';
+import { isModernUiAvailable, isUiVariant, resolveUiVariant, type UiVariant } from './uiVariant';
 import { getStoredUiVariant, setStoredUiVariant } from './uiVariantStorage';
 
 const DEFAULT_UI_VARIANT_BOOTSTRAP_TIMEOUT_MS = 2500;
@@ -30,7 +30,7 @@ export async function resolveInitialUiVariant(
   config: FrontendUiRuntimeConfig | null | undefined,
   dependencies: UiVariantBootstrapDependencies = defaultDependencies(),
 ): Promise<UiVariant> {
-  if (!isEvolutionAvailable(config)) return resolveUiVariant(config);
+  if (!isModernUiAvailable(config)) return resolveUiVariant(config);
 
   const now = dependencies.now ?? Date.now;
   const deadline = now() + (

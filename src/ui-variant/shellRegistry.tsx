@@ -4,18 +4,24 @@ import type { UiVariant } from './uiVariant';
 
 type ShellModule = { default: React.ComponentType };
 
+const evolutionShellLoader = async (): Promise<ShellModule> => ({
+  default: (await import('../ui-evolution/shell/EvolutionWorkspaceLayout')).EvolutionWorkspaceLayout,
+});
+
 export const shellLoaders: Record<UiVariant, () => Promise<ShellModule>> = {
   legacy: async () => ({
     default: (await import('../components/workspace/WorkspaceLayout')).WorkspaceLayout,
   }),
-  evolution: async () => ({
-    default: (await import('../ui-evolution/shell/EvolutionWorkspaceLayout')).EvolutionWorkspaceLayout,
-  }),
+  evolution: evolutionShellLoader,
+  line: evolutionShellLoader,
+  air: evolutionShellLoader,
 };
 
 const shellRegistry: Record<UiVariant, React.LazyExoticComponent<React.ComponentType>> = {
   legacy: lazy(shellLoaders.legacy),
   evolution: lazy(shellLoaders.evolution),
+  line: lazy(shellLoaders.line),
+  air: lazy(shellLoaders.air),
 };
 
 const ShellLoadingFallback: React.FC = () => (

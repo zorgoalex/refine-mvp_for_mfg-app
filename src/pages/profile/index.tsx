@@ -6,7 +6,7 @@ import { useAppTheme } from "../../theme/ThemeProvider";
 import { featureFlags } from "../../config/featureFlags";
 import { WorkosLinkCard } from "./WorkosLinkCard";
 import { useUiVariantPreference } from "../../ui-variant/useUiVariantPreference";
-import type { UiVariant } from "../../ui-variant/uiVariant";
+import { isModernUiVariant, type UiVariant } from "../../ui-variant/uiVariant";
 import { TelegramNotificationsCard } from "./TelegramNotificationsCard";
 
 const roleNames: Record<string, string> = {
@@ -18,12 +18,19 @@ const roleNames: Record<string, string> = {
   viewer: "Наблюдатель",
 };
 
+const uiVariantOptions: Array<{ label: string; value: UiVariant }> = [
+  { label: "Классический", value: "legacy" },
+  { label: "Новый (Evolutionary)", value: "evolution" },
+  { label: "LINE · Деловой минимализм", value: "line" },
+  { label: "AIR · Светлая динамика", value: "air" },
+];
+
 export const ProfilePage: React.FC = () => {
   const { data: identity } = useGetIdentity<UserIdentity>();
   const { mode, setMode, uiSize, setUiSize } = useAppTheme();
   const {
     variant,
-    evolutionAvailable,
+    modernUiAvailable,
     isSaving: isVariantSaving,
     setVariant,
   } = useUiVariantPreference();
@@ -67,25 +74,22 @@ export const ProfilePage: React.FC = () => {
               onChange={(event) => void setVariant(event.target.value as UiVariant)}
             >
               <Space direction="vertical" size={0}>
-                <Radio
-                  value="legacy"
-                  style={{ minHeight: 40, display: "flex", alignItems: "center" }}
-                >
-                  Классический
-                </Radio>
-                <Radio
-                  value="evolution"
-                  disabled={!evolutionAvailable}
-                  style={{ minHeight: 40, display: "flex", alignItems: "center" }}
-                >
-                  Новый
-                </Radio>
+                {uiVariantOptions.map((option) => (
+                  <Radio
+                    disabled={isModernUiVariant(option.value) && !modernUiAvailable}
+                    key={option.value}
+                    value={option.value}
+                    style={{ minHeight: 40, display: "flex", alignItems: "center" }}
+                  >
+                    {option.label}
+                  </Radio>
+                ))}
               </Space>
             </Radio.Group>
             <Typography.Text type="secondary">
-              {evolutionAvailable
+              {modernUiAvailable
                 ? "После сохранения страница перезагрузится в выбранном дизайне."
-                : "Новый дизайн временно отключён администратором."}
+                : "Новые варианты дизайна временно отключены администратором."}
             </Typography.Text>
           </Space>
         </Space>

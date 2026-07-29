@@ -6,26 +6,28 @@
 - `src/App.tsx` содержит один набор public/business routes и один authenticated `WorkspaceLayout`.
 - Profile preferences (`GET/PATCH /api/v1/me/preferences`) поддерживают
   `themeMode`, `uiSize`, `uiVariant`, order columns, recent references и
-  `pageSizePreferences` (migration 084).
+  `pageSizePreferences` (migrations 084, 090, 091).
 - Tabs/dirty state живут независимо от shell в Zustand/sessionStorage и hooks.
 - Feature flags могут приходить из Vite env и runtime config; неизвестный/отсутствующий key безопасно получает fallback.
 
 ## Тип и границы
 
 ```ts
-export type UiVariant = 'legacy' | 'evolution';
+export type UiVariant = 'legacy' | 'evolution' | 'line' | 'air';
 ```
 
 Variant управляет только presentation composition и theme tokens. Он не передаётся в API clients, data hooks, validation, permission helpers, status transitions, accounting/cut calculations или route guards.
+
+`evolution`, `line` и `air` образуют modern family. `line` и `air` используют тот же application shell и route tree, что Evolutionary, но получают отдельные CSS variables и Ant Design tokens по мотивам `01_LINE_business_minimal` и `02_AIR_luminous_modern`.
 
 ## Текущий resolver
 
 ```text
 runtime forceLegacy === true                 -> legacy
 runtime evolutionEnabled !== true            -> legacy
-confirmed user preference legacy|evolution   -> selected value
+confirmed user preference legacy|evolution|line|air -> selected value
 same-user confirmed cache while GET fails    -> cached value
-missing/invalid/timeout/user-change           -> legacy
+missing/invalid/timeout/user-change           -> evolution when modern UI is available, legacy otherwise
 ```
 
 Runtime config, session restore и preferences GET завершаются до импорта
@@ -54,19 +56,22 @@ GET /api/v1/me/preferences
     "themeMode": "light",
     "uiSize": "default",
     "pageSizePreferences": { "refine:orders_view": 20 },
-    "uiVariant": "legacy"
+    "uiVariant": "evolution"
   }
 }
 ```
 
 ```json
 PATCH /api/v1/me/preferences
-{ "uiVariant": "evolution" }
+{ "uiVariant": "line" }
 ```
 
-- Zod принимает только `legacy|evolution`.
+- Zod принимает только `legacy|evolution|line|air`.
 - Migration 084 добавляет `user_preferences.ui_variant` с default `legacy`,
   `NOT NULL` и check constraint.
+- Migration 090 меняет DB default на `evolution`; migration 091 расширяет
+  check constraint до `legacy|evolution|line|air` и сохраняет default
+  `evolution`.
 - Partial PATCH semantics сохранены.
 - Старый backend может ответить 200 без нового поля; frontend считает такой
   ответ неподтверждённым, не пишет cache и не перезагружает shell.
@@ -74,17 +79,19 @@ PATCH /api/v1/me/preferences
 ## Provider and registry
 
 - `UiVariantProvider` owns immutable boot variant.
-- `useUiVariant()` returns value for shell selection and conditional Ant tokens.
+- `useUiVariant()` returns value plus modern/evolution booleans for shell selection and conditional Ant tokens.
 - `App.tsx` keeps one route tree and selects only layout component.
-- Shell registry dynamically imports both `WorkspaceLayout` and `EvolutionWorkspaceLayout`; выбранный boot variant загружает только свой shell chunk.
+- Shell registry dynamically imports `WorkspaceLayout` for legacy and `EvolutionWorkspaceLayout` for `evolution|line|air`; выбранный boot variant загружает только свой shell chunk.
 - Later screen migrations use a registry keyed by route capability, not duplicate routes. Domain hooks stay above or outside variant views.
 - No silent legacy fallback inside an enabled evolution shell after general launch. During staged screen work, coverage matrix explicitly marks shared legacy body under evolution shell.
 
 ## CSS isolation
 
 - Legacy CSS remains as-is.
-- Every new selector starts under `[data-ui-variant="evolution"]`.
-- Evolution Ant tokens are passed conditionally through existing `ConfigProvider`.
+- Every modern selector starts under `[data-ui-variant="evolution"]`,
+  `[data-ui-variant="line"]`, `[data-ui-variant="air"]` or their shared
+  `:root:where(...)` marker.
+- Modern Ant tokens are passed conditionally through existing `ConfigProvider`.
 - Portals (dropdown/modal/tooltip) inherit Ant tokens; any custom portal selectors include a root/overlay variant class rather than unscoped overrides.
 - No target hex values in ten screen files.
 
@@ -110,8 +117,9 @@ PATCH /api/v1/me/preferences
 
 ## Rollout boundary
 
-- Existing and new users remain on `legacy` by database default.
-- `RUNTIME_CONFIG_UI_EVOLUTION=true` only makes evolution selectable.
+- Existing and new users without a stored choice use `evolution` by database
+  and frontend default.
+- `RUNTIME_CONFIG_UI_EVOLUTION=true` makes `evolution|line|air` selectable.
 - `RUNTIME_CONFIG_UI_FORCE_LEGACY=true` immediately overrides all stored
   preferences without deleting them.
 - Migration must precede backend; backend and the new resolver must precede the
