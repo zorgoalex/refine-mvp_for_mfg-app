@@ -760,7 +760,6 @@ html {
 .order-show-page {
   --order-show-sticky-top: 0px;
   --order-show-summary-tabs-height: 0px;
-  --order-show-details-toolbar-height: 0px;
   --order-show-table-header-top: 0px;
 }
 

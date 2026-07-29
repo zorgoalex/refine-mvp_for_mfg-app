@@ -53,7 +53,9 @@ describe('OrderShow sticky detail header guards', () => {
     expect(showSource).toContain('const orderShowDetailTableSticky = useMemo');
     expect(showSource).toContain('sticky={orderShowDetailTableSticky}');
     expect(showSource).toContain('offsetHeader: orderShowTableHeaderTop');
-    expect(showSource).toContain('orderShowDetailsToolbarNode.getBoundingClientRect().bottom');
+    expect(showSource).toContain('Math.ceil(workspaceTabsHeight + orderShowSummaryTabsHeight)');
+    expect(showSource).not.toContain('orderShowDetailsToolbarNode.getBoundingClientRect().bottom');
+    expect(showSource).not.toContain('updateOrderShowTableHeaderTop');
     expect(showSource).not.toContain('workspaceTabsHeight + orderShowSummaryTabsHeight + orderShowDetailsToolbarHeight');
     expect(appCss).not.toMatch(/\.order-show-page--sticky-enabled \.order-show-details-toolbar[\s\S]*position:\s*sticky/);
     expect(appCss).not.toMatch(/\.order-show-details-table \.ant-table-thead > tr > th[\s\S]*position:\s*sticky/);

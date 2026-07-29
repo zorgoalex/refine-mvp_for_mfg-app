@@ -77,7 +77,6 @@ const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 120;
 type OrderShowStickyStyle = CSSProperties & {
   '--order-show-sticky-top': string;
   '--order-show-summary-tabs-height': string;
-  '--order-show-details-toolbar-height': string;
   '--order-show-table-header-top': string;
 };
 
@@ -414,33 +413,29 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
   const [orderShowSummaryTabsRef, orderShowSummaryTabsHeight] = useMeasuredElementHeight<HTMLDivElement>();
-  const [orderShowDetailsToolbarRef, orderShowDetailsToolbarHeight, orderShowDetailsToolbarNode] = useMeasuredElementHeight<HTMLDivElement>();
+  const orderShowDetailsToolbarRef = useRef<HTMLDivElement>(null);
   const [orderShowStickyEnabled, setOrderShowStickyEnabled] = useState(false);
   const [orderShowSummaryStuck, setOrderShowSummaryStuck] = useState(false);
-  const [orderShowTableHeaderTop, setOrderShowTableHeaderTop] = useState(0);
-  const updateOrderShowTableHeaderTop = useCallback((stuck = orderShowSummaryStuck) => {
-    const next =
-      stuck && orderShowDetailsToolbarNode
-        ? Math.max(0, Math.ceil(orderShowDetailsToolbarNode.getBoundingClientRect().bottom))
-        : 0;
-    setOrderShowTableHeaderTop((prev) => (prev === next ? prev : next));
-  }, [orderShowDetailsToolbarNode, orderShowSummaryStuck]);
+  const orderShowTableHeaderTop = useMemo(() => (
+    orderShowStickyEnabled
+      ? Math.max(0, Math.ceil(workspaceTabsHeight + orderShowSummaryTabsHeight))
+      : 0
+  ), [orderShowStickyEnabled, orderShowSummaryTabsHeight, workspaceTabsHeight]);
   const orderShowStickyStyle = useMemo<OrderShowStickyStyle>(() => ({
     '--order-show-sticky-top': `${workspaceTabsHeight}px`,
     '--order-show-summary-tabs-height': `${orderShowSummaryTabsHeight}px`,
-    '--order-show-details-toolbar-height': `${orderShowDetailsToolbarHeight}px`,
     '--order-show-table-header-top': `${orderShowTableHeaderTop}px`,
-  }), [orderShowDetailsToolbarHeight, orderShowSummaryTabsHeight, orderShowTableHeaderTop, workspaceTabsHeight]);
+  }), [orderShowSummaryTabsHeight, orderShowTableHeaderTop, workspaceTabsHeight]);
   const orderShowPageClassName = useMemo(() => [
     'order-show-page',
     orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
     orderShowSummaryStuck ? 'order-show-page--summary-stuck' : '',
   ].filter(Boolean).join(' '), [orderShowStickyEnabled, orderShowSummaryStuck]);
   const orderShowDetailTableSticky = useMemo(() => (
-    orderShowSummaryStuck && orderShowTableHeaderTop > 0
+    orderShowStickyEnabled && orderShowTableHeaderTop > 0
       ? { offsetHeader: orderShowTableHeaderTop }
       : undefined
-  ), [orderShowSummaryStuck, orderShowTableHeaderTop]);
+  ), [orderShowStickyEnabled, orderShowTableHeaderTop]);
 
   useEffect(() => {
     const update = () => {
@@ -471,7 +466,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         orderShowStickyEnabled &&
         !!node &&
         node.getBoundingClientRect().top <= workspaceTabsHeight;
-      updateOrderShowTableHeaderTop(next);
       setOrderShowSummaryStuck((prev) => (prev === next ? prev : next));
     };
 
@@ -482,21 +476,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       window.removeEventListener('scroll', update);
       window.removeEventListener('resize', update);
     };
-  }, [orderShowStickyEnabled, updateOrderShowTableHeaderTop, workspaceTabsHeight]);
-
-  useEffect(() => {
-    const update = () => updateOrderShowTableHeaderTop();
-    update();
-    window.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', update);
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
-    if (orderShowDetailsToolbarNode) ro?.observe(orderShowDetailsToolbarNode);
-    return () => {
-      window.removeEventListener('scroll', update);
-      window.removeEventListener('resize', update);
-      ro?.disconnect();
-    };
-  }, [orderShowDetailsToolbarNode, updateOrderShowTableHeaderTop]);
+  }, [orderShowStickyEnabled, workspaceTabsHeight]);
 
   // Загрузка справочников для отображения названий
   const { data: millingTypesData } = useList({
