@@ -585,98 +585,114 @@ export function StatusAutomationConfig() {
 
           <Form.Item label="Условия">
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Select<number[]>
-                mode="multiple"
-                value={form.currentOrderStatusIn ?? []}
-                onChange={(value) => updateForm({ currentOrderStatusIn: value })}
-                options={orderStatusOptions}
-                disabled={!allowedConditionSet.has('currentOrderStatusIn')}
-                placeholder="Статусы заказа"
-                style={{ width: '100%' }}
-                allowClear
-                showSearch
-                optionFilterProp="label"
-              />
-              <Select<number[]>
-                mode="multiple"
-                value={form.currentOrderStatusNotIn ?? []}
-                onChange={(value) => updateForm({ currentOrderStatusNotIn: value })}
-                options={orderStatusOptions}
-                disabled={!allowedConditionSet.has('currentOrderStatusNotIn')}
-                placeholder="Исключить статусы заказа"
-                style={{ width: '100%' }}
-                allowClear
-                showSearch
-                optionFilterProp="label"
-              />
-              <Select<number[]>
-                mode="multiple"
-                value={form.currentPaymentStatusIn ?? []}
-                onChange={(value) => updateForm({ currentPaymentStatusIn: value })}
-                options={paymentStatusOptions}
-                disabled={!allowedConditionSet.has('currentPaymentStatusIn')}
-                placeholder="Статусы оплаты"
-                style={{ width: '100%' }}
-                allowClear
-                showSearch
-                optionFilterProp="label"
-              />
-              <Select<number[]>
-                mode="multiple"
-                value={form.currentPaymentStatusNotIn ?? []}
-                onChange={(value) => updateForm({ currentPaymentStatusNotIn: value })}
-                options={paymentStatusOptions}
-                disabled={!allowedConditionSet.has('currentPaymentStatusNotIn')}
-                placeholder="Исключить статусы оплаты"
-                style={{ width: '100%' }}
-                allowClear
-                showSearch
-                optionFilterProp="label"
-              />
-              <Select<number[]>
-                mode="multiple"
-                value={form.currentProductionStatusIn ?? []}
-                onChange={(value) => updateForm({ currentProductionStatusIn: value })}
-                options={productionStatusOptions}
-                disabled={!allowedConditionSet.has('currentProductionStatusIn')}
-                placeholder="Статусы производства"
-                style={{ width: '100%' }}
-                allowClear
-                showSearch
-                optionFilterProp="label"
-              />
-              <Select<number[]>
-                mode="multiple"
-                value={form.currentProductionStatusNotIn ?? []}
-                onChange={(value) => updateForm({ currentProductionStatusNotIn: value })}
-                options={productionStatusOptions}
-                disabled={!allowedConditionSet.has('currentProductionStatusNotIn')}
-                placeholder="Исключить статусы производства"
-                style={{ width: '100%' }}
-                allowClear
-                showSearch
-                optionFilterProp="label"
-              />
-              <Space wrap>
-                <InputNumber
-                  addonBefore="Оплачено ≥"
-                  addonAfter="%"
-                  min={0}
-                  max={100}
-                  value={form.paidShareGte}
-                  onChange={(value) => updateForm({ paidShareGte: value ?? undefined })}
-                  disabled={!allowedConditionSet.has('paidShareGte')}
-                />
-                <Select<StatusAutomationOrderSource[]>
+              <Form.Item label="Текущие статусы заказа" style={{ marginBottom: 0 }}>
+                <Select<number[]>
                   mode="multiple"
-                  value={form.orderSourceIn ?? []}
-                  onChange={(value) => updateForm({ orderSourceIn: value })}
-                  options={SOURCE_OPTIONS}
-                  disabled={!allowedConditionSet.has('orderSourceIn')}
-                  placeholder="Источник"
-                  style={{ minWidth: 230 }}
+                  value={form.currentOrderStatusIn ?? []}
+                  onChange={(value) => updateForm({ currentOrderStatusIn: value })}
+                  options={orderStatusOptions}
+                  disabled={!allowedConditionSet.has('currentOrderStatusIn')}
+                  placeholder="Статусы заказа"
+                  style={{ width: '100%' }}
                   allowClear
+                  showSearch
+                  optionFilterProp="label"
                 />
+              </Form.Item>
+              <Form.Item label="Исключающие статусы заказа" style={{ marginBottom: 0 }}>
+                <Select<number[]>
+                  mode="multiple"
+                  value={form.currentOrderStatusNotIn ?? []}
+                  onChange={(value) => updateForm({ currentOrderStatusNotIn: value })}
+                  options={orderStatusOptions}
+                  disabled={!allowedConditionSet.has('currentOrderStatusNotIn')}
+                  placeholder="Исключить статусы заказа"
+                  style={{ width: '100%' }}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+              <Form.Item label="Текущие статусы оплаты" style={{ marginBottom: 0 }}>
+                <Select<number[]>
+                  mode="multiple"
+                  value={form.currentPaymentStatusIn ?? []}
+                  onChange={(value) => updateForm({ currentPaymentStatusIn: value })}
+                  options={paymentStatusOptions}
+                  disabled={!allowedConditionSet.has('currentPaymentStatusIn')}
+                  placeholder="Статусы оплаты"
+                  style={{ width: '100%' }}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+              <Form.Item label="Исключающие статусы оплаты" style={{ marginBottom: 0 }}>
+                <Select<number[]>
+                  mode="multiple"
+                  value={form.currentPaymentStatusNotIn ?? []}
+                  onChange={(value) => updateForm({ currentPaymentStatusNotIn: value })}
+                  options={paymentStatusOptions}
+                  disabled={!allowedConditionSet.has('currentPaymentStatusNotIn')}
+                  placeholder="Исключить статусы оплаты"
+                  style={{ width: '100%' }}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+              <Form.Item label="Текущие статусы производства" style={{ marginBottom: 0 }}>
+                <Select<number[]>
+                  mode="multiple"
+                  value={form.currentProductionStatusIn ?? []}
+                  onChange={(value) => updateForm({ currentProductionStatusIn: value })}
+                  options={productionStatusOptions}
+                  disabled={!allowedConditionSet.has('currentProductionStatusIn')}
+                  placeholder="Статусы производства"
+                  style={{ width: '100%' }}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+              <Form.Item label="Исключающие статусы производства" style={{ marginBottom: 0 }}>
+                <Select<number[]>
+                  mode="multiple"
+                  value={form.currentProductionStatusNotIn ?? []}
+                  onChange={(value) => updateForm({ currentProductionStatusNotIn: value })}
+                  options={productionStatusOptions}
+                  disabled={!allowedConditionSet.has('currentProductionStatusNotIn')}
+                  placeholder="Исключить статусы производства"
+                  style={{ width: '100%' }}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+              <Space wrap align="start">
+                <Form.Item label="Доля оплаты" style={{ marginBottom: 0 }}>
+                  <InputNumber
+                    addonBefore="Оплачено ≥"
+                    addonAfter="%"
+                    min={0}
+                    max={100}
+                    value={form.paidShareGte}
+                    onChange={(value) => updateForm({ paidShareGte: value ?? undefined })}
+                    disabled={!allowedConditionSet.has('paidShareGte')}
+                  />
+                </Form.Item>
+                <Form.Item label="Источник заказа" style={{ marginBottom: 0, minWidth: 230 }}>
+                  <Select<StatusAutomationOrderSource[]>
+                    mode="multiple"
+                    value={form.orderSourceIn ?? []}
+                    onChange={(value) => updateForm({ orderSourceIn: value })}
+                    options={SOURCE_OPTIONS}
+                    disabled={!allowedConditionSet.has('orderSourceIn')}
+                    placeholder="Источник"
+                    style={{ width: '100%' }}
+                    allowClear
+                  />
+                </Form.Item>
               </Space>
               <Checkbox
                 checked={form.firstPaymentOnly === true}
