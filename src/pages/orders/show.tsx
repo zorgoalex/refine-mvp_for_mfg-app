@@ -1,7 +1,7 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select, Popconfirm } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined, DeleteOutlined } from "@ant-design/icons";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -61,6 +61,7 @@ import {
 } from "./components/tables/OrderDetailColumnSettings";
 import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from "../cut/cutJobEvents";
 import { useCutDetailLastReady } from "./useCutDetailLastReady";
+import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 
@@ -208,6 +209,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         "priority",
         "order_status_name",
         "payment_status_name",
+        "production_status_id",
+        "production_status_name",
         "manager_id",
         "material_name",
         "milling_type_name",
@@ -240,6 +243,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const backendOrder = useBackendOrdersRead ? record?.__backendOrder : null;
   const labelsEnabled = featureFlags.labels && canAny(['labels.view', 'labels.generate']);
   const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
+  const canCreatePayment = !featureFlags.useBackendPermissions || can('payments.create');
   const deletedOrderModel = deletedOrder ? buildDeletedOrderCardModel(deletedOrder) : null;
   const canRestore = canManageOrderTrash && featureFlags.useBackendOrdersWrite;
   const showTitle = deletedOrder
@@ -1417,7 +1421,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               record={record}
               details={details}
               dowelingLinks={dowelingLinks}
-              disableLegacyOrderReads={useBackendOrdersRead}
               compactSticky={orderShowStickyEnabled && orderShowSummaryStuck}
               detailMaterialNames={headerMaterialNames}
               headerMaterialName={headerMaterialName}
@@ -1523,6 +1526,22 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     }}
                     style={{ cursor: 'pointer' }}
                   >
+                    {record?.order_id && canCreatePayment ? (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                        <Button
+                          type="primary"
+                          icon={<PlusOutlined />}
+                          style={{ minHeight: 40 }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            navigate(buildOrderEditAddPaymentPath(Number(record.order_id)));
+                          }}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                        >
+                          Добавить платёж
+                        </Button>
+                      </div>
+                    ) : null}
                     <OrderFinanceBlock record={record} payments={payments} />
                   </div>
                 )}

@@ -11,7 +11,7 @@ import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
 import { resolveHeaderMaterialName } from '../../../../utils/materialDisplayName';
-import { ProductionStagesDisplay, getPassedCodesFromStatusName } from '../../../../components/ProductionStagesDisplay';
+import { ProductionStagesDisplay } from '../../../../components/ProductionStagesDisplay';
 import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
@@ -19,6 +19,7 @@ import { RowSeparator } from './RowSeparator';
 import { collectOrderBasisProjects } from './orderBasisProjects';
 import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
+import { resolveCurrentProductionStatusCodes } from '../../currentProductionStatus';
 
 const { Text } = Typography;
 
@@ -26,7 +27,6 @@ interface OrderShowHeaderProps {
   record: any; // order record from orders_view
   details: any[]; // order details array
   dowelingLinks?: any[]; // doweling links with nested doweling_order
-  disableLegacyOrderReads?: boolean;
   compactSticky?: boolean;
   // SP3: server-resolved COALESCE(sheet, material) display names from the parent
   // (order_details_view per detail / orders_view header). Preferred over the
@@ -39,7 +39,6 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   record,
   details,
   dowelingLinks = [],
-  disableLegacyOrderReads = false,
   compactSticky = false,
   detailMaterialNames,
   headerMaterialName,
@@ -170,18 +169,6 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     : '—';
   const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);
 
-  // Load production status events for this order (all recorded statuses)
-  const { data: productionEventsData } = useList({
-    resource: 'production_status_events',
-    filters: record?.order_id
-      ? [{ field: 'order_id', operator: 'eq', value: record.order_id }]
-      : [],
-    pagination: { pageSize: 100 },
-    queryOptions: {
-      enabled: !!record?.order_id && !disableLegacyOrderReads,
-    },
-  });
-
   // Load all production statuses for mapping
   const { data: allProductionStatusesData } = useList({
     resource: 'production_statuses',
@@ -222,27 +209,14 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     }).display;
   }, [workflow, statusesForWorkflow]);
 
-  // Get passed production stage codes from events or fallback to current status
-  const passedProductionCodes = useMemo(() => {
-    // First try to get from events
-    const events = productionEventsData?.data || [];
-    if (events.length > 0) {
-      const codes: string[] = [];
-      events.forEach((event: any) => {
-        const code = productionStatusIdToCode.get(event.production_status_id);
-        if (code) codes.push(code);
-      });
-      return codes;
-    }
-
-    // Fallback: use current status name to infer passed stages (legacy)
-    const statusName = record?.production_status_name;
-    if (statusName) {
-      return getPassedCodesFromStatusName(statusName);
-    }
-
-    return [];
-  }, [productionEventsData, record?.production_status_name, productionStatusIdToCode]);
+  const currentProductionStatusCodes = useMemo(
+    () => resolveCurrentProductionStatusCodes({
+      statusId: record?.production_status_id,
+      statusName: record?.production_status_name,
+      statusIdToCode: productionStatusIdToCode,
+    }),
+    [productionStatusIdToCode, record?.production_status_id, record?.production_status_name],
+  );
 
   const compactDowelingName =
     latestDowelingLink?.doweling_order?.doweling_order_name ||
@@ -299,9 +273,9 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             {record?.order_date ? dayjs(record.order_date).format('DD.MM.YYYY') : '—'}
             {' → '}
             {record?.planned_completion_date ? dayjs(record.planned_completion_date).format('DD.MM.YYYY') : '—'}
-            {passedProductionCodes.length > 0 ? (
+            {currentProductionStatusCodes.length > 0 ? (
               <ProductionStagesDisplay
-                passedCodes={passedProductionCodes}
+                passedCodes={currentProductionStatusCodes}
                 displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
                 codeToLetter={productionWorkflowDisplay?.codeToLetter}
                 codeToName={productionWorkflowDisplay?.codeToName}
@@ -462,11 +436,11 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             {record?.planned_completion_date ? dayjs(record.planned_completion_date).format('DD.MM.YYYY') : '—'}
           </Text>
           {/* Production stages display */}
-          {passedProductionCodes.length > 0 && (
+          {currentProductionStatusCodes.length > 0 && (
             <>
               <span style={{ color: 'var(--app-border)' }}>|</span>
               <ProductionStagesDisplay
-                passedCodes={passedProductionCodes}
+                passedCodes={currentProductionStatusCodes}
                 displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
                 codeToLetter={productionWorkflowDisplay?.codeToLetter}
                 codeToName={productionWorkflowDisplay?.codeToName}

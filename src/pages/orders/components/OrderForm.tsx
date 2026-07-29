@@ -57,6 +57,10 @@ import { makeOrderDeleteHandler } from '../orderDeleteAction';
 import { OrderDetailsTab, OrderDetailsTabRef } from './tabs/OrderDetailsTab';
 import { OrderPaymentsTab, OrderPaymentsTabRef } from './tabs/OrderPaymentsTab';
 import { CutPage } from '../../cut/CutPage';
+import {
+  clearAddPaymentIntent,
+  readAddPaymentIntent,
+} from '../orderPaymentIntent';
 
 interface OrderFormProps {
   mode: OrderFormMode;
@@ -128,6 +132,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   // Refs for tabs to apply current edits before save
   const detailsTabRef = useRef<OrderDetailsTabRef>(null);
   const paymentsTabRef = useRef<OrderPaymentsTabRef>(null);
+  const handledAddPaymentIntentRef = useRef<string | null>(null);
   const saveKeyRef = useRef<string | undefined>(undefined);
   const saveKeySignatureRef = useRef<string | undefined>(undefined);
   const bazisDraftRuntimeRef = useRef<BazisDraftRuntime | null>(null);
@@ -344,6 +349,46 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     if (t && t !== activeTab) setActiveTab(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search]);
+
+  useEffect(() => {
+    const intentId = readAddPaymentIntent(location.search);
+    const isLoadedOrder =
+      mode === 'edit' &&
+      typeof orderId === 'number' &&
+      Number(header.order_id) === orderId;
+
+    if (
+      !intentId ||
+      handledAddPaymentIntentRef.current === intentId ||
+      activeTab !== 'finance' ||
+      !isLoadedOrder ||
+      !paymentsTabRef.current
+    ) {
+      return;
+    }
+
+    handledAddPaymentIntentRef.current = intentId;
+    void paymentsTabRef.current.addInlinePayment();
+    navigate(
+      {
+        pathname: location.pathname,
+        search: clearAddPaymentIntent(location.search),
+      },
+      {
+        replace: true,
+        state: location.state,
+      },
+    );
+  }, [
+    activeTab,
+    header.order_id,
+    location.pathname,
+    location.search,
+    location.state,
+    mode,
+    navigate,
+    orderId,
+  ]);
 
 
   // Load existing order data in edit mode
