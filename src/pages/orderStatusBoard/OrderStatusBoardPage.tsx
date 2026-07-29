@@ -32,6 +32,7 @@ import {
   CheckCircleFilled,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  CloseOutlined,
   DownloadOutlined,
   DragOutlined,
   FilePdfOutlined,
@@ -1633,6 +1634,8 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
   const [blob, setBlob] = useState<Blob | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [downloadLoading, setDownloadLoading] = useState(false);
+  const [printLoading, setPrintLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
@@ -1664,6 +1667,24 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
     };
   }, [open]);
 
+  const fetchFreshPdf = useCallback(
+    () =>
+      pollPdf(
+        () =>
+          cutApi.fetchJobPdf(
+            bath.cutJobId,
+            true,
+            undefined,
+            false,
+            template,
+            'bottom-left',
+            bath.resultNo,
+          ),
+        { maxAttempts: 12, delayMs: 1500 },
+      ),
+    [bath.cutJobId, bath.resultNo, template],
+  );
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -1677,19 +1698,7 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
     revokePreviewUrl();
     revokePagePreviews();
 
-    pollPdf(
-      () =>
-        cutApi.fetchJobPdf(
-          bath.cutJobId,
-          true,
-          undefined,
-          false,
-          template,
-          'bottom-left',
-          bath.resultNo,
-        ),
-      { maxAttempts: 12, delayMs: 1500 },
-    )
+    fetchFreshPdf()
       .then(async (result) => {
         if (cancelled || requestSeqRef.current !== requestSeq) return;
         const nextUrl = URL.createObjectURL(result.blob);
@@ -1729,10 +1738,10 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
     bath.cutJobId,
     bath.cutNumber,
     bath.resultNo,
+    fetchFreshPdf,
     open,
     revokePagePreviews,
     revokePreviewUrl,
-    template,
   ]);
 
   useEffect(() => () => {
@@ -1741,24 +1750,44 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
     revokePreviewUrl();
   }, [revokePagePreviews, revokePreviewUrl]);
 
-  const downloadPdf = useCallback(() => {
+  const downloadPdf = useCallback(async () => {
     if (!blob) return;
-    triggerBlobDownload(blob, fileName ?? `bath-cut-${bath.cutNumber}.pdf`);
-  }, [bath.cutNumber, blob, fileName]);
+    setDownloadLoading(true);
+    try {
+      const result = await fetchFreshPdf();
+      triggerBlobDownload(result.blob, result.fileName ?? fileName ?? `bath-cut-${bath.cutNumber}.pdf`);
+    } catch (downloadError) {
+      message.error(errorMessage(downloadError, 'Не удалось скачать PDF'));
+    } finally {
+      setDownloadLoading(false);
+    }
+  }, [bath.cutNumber, blob, fetchFreshPdf, fileName]);
 
-  const printPdf = useCallback(() => {
+  const printPdf = useCallback(async () => {
     if (!url) {
       message.warning('PDF ещё не готов для печати');
       return;
     }
-    const printWindow = window.open(url, '_blank');
+    const printWindow = window.open('', '_blank');
     if (!printWindow) {
       message.warning('Браузер заблокировал окно PDF. Разрешите всплывающие окна.');
       return;
     }
     printWindow.opener = null;
-    printWindow.focus();
-  }, [url]);
+    setPrintLoading(true);
+    try {
+      const result = await fetchFreshPdf();
+      const freshUrl = URL.createObjectURL(result.blob);
+      printWindow.location.href = freshUrl;
+      printWindow.focus();
+      window.setTimeout(() => URL.revokeObjectURL(freshUrl), 60_000);
+    } catch (printError) {
+      printWindow.close();
+      message.error(errorMessage(printError, 'Не удалось открыть PDF для печати'));
+    } finally {
+      setPrintLoading(false);
+    }
+  }, [fetchFreshPdf, url]);
 
   return (
     <Collapse
@@ -1788,7 +1817,8 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
               <Button
                 size="small"
                 icon={<DownloadOutlined />}
-                disabled={!blob}
+                disabled={!blob || downloadLoading}
+                loading={downloadLoading}
                 onClick={downloadPdf}
                 aria-label="Скачать PDF ванны"
               />
@@ -1797,7 +1827,8 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
               <Button
                 size="small"
                 icon={<PrinterOutlined />}
-                disabled={!url}
+                disabled={!url || printLoading}
+                loading={printLoading}
                 onClick={printPdf}
                 aria-label="Открыть PDF ванны для печати"
               />

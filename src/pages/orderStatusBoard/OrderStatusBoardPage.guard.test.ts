@@ -113,12 +113,19 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('keeps bath cards printable with SVG and PDF previews', () => {
     expect(page).toContain('cutApi.fetchSheetSvg');
     expect(page).toContain('cutApi.fetchJobPdf');
+    expect(page).toContain('const fetchFreshPdf = useCallback');
+    expect(page).toContain('const downloadPdf = useCallback(async () =>');
+    expect(page).toContain('const printPdf = useCallback(async () =>');
+    expect(page).toContain('triggerBlobDownload(result.blob');
+    expect(page).toContain('const freshUrl = URL.createObjectURL(result.blob)');
     expect(page).toContain("CNC_BATH_DEFAULT_PDF_TEMPLATE = 'bath_profiles'");
     expect(page).toContain('Шаблон PDF ванны');
     expect(page).toContain("import('pdfjs-dist')");
     expect(page).toContain('renderCncPdfPagePreviews(result.blob)');
     expect(page).toContain('data-testid="cnc-bath-pdf-preview-pages"');
     expect(page).not.toContain('<iframe');
+    expect(page).not.toContain('triggerBlobDownload(blob, fileName');
+    expect(page).not.toContain("window.open(url, '_blank')");
     expect(page).toContain('PrinterOutlined');
     expect(page).toContain('DownloadOutlined');
     expect(css).toContain('.cnc-bath-card__pdf-pages');
