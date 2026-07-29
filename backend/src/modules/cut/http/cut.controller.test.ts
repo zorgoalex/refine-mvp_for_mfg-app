@@ -267,148 +267,100 @@ describe('CutController', () => {
     expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({ pdfTemplate: undefined }));
   });
 
-  it('group PDF: 202 + Retry-After on a cold cache, then 200 application/pdf once warm', async () => {
-    const pdf = Buffer.from('%PDF-1');
-    const renderGroupPdf = vi.fn(async () => pdf);
-    const pdfCache = new CutPdfCache({ ttlMs: 1000 });
-    const controller = createController({ service: { renderGroupPdf }, pdfCache });
+  it('group PDF: renders fresh on every export request', async () => {
+    let renderNo = 0;
+    const renderGroupPdf = vi.fn(async () => Buffer.from(`%PDF-${++renderNo}`));
+    const controller = createController({ service: { renderGroupPdf } });
 
-    const cold = fakeResponse();
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, cold.res as never);
-    expect(cold.state.status).toBe(202);
-    expect(cold.headers['Retry-After']).toBe('2');
-    expect(cold.headers['Cache-Control']).toBe('private, no-store, max-age=0');
+    const first = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, first.res as never);
+    expect(first.headers['Content-Type']).toBe('application/pdf');
+    expect(first.headers['Cache-Control']).toBe('private, no-store, max-age=0');
+    expect(first.state.sent).toEqual(Buffer.from('%PDF-1'));
 
-    await pdfCache.whenIdle();
-
-    const warm = fakeResponse();
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, warm.res as never);
-    expect(warm.headers['Content-Type']).toBe('application/pdf');
-    expect(warm.headers['Cache-Control']).toBe('private, no-store, max-age=0');
-    expect(warm.state.sent).toBe(pdf);
-    expect(renderGroupPdf).toHaveBeenCalledTimes(1);
+    const second = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, second.res as never);
+    expect(second.headers['Content-Type']).toBe('application/pdf');
+    expect(second.state.sent).toEqual(Buffer.from('%PDF-2'));
+    expect(renderGroupPdf).toHaveBeenCalledTimes(2);
   });
 
-  it('group PDF: surfaces a deterministic render failure as an error (no 202 loop)', async () => {
+  it('group PDF: surfaces a deterministic render failure immediately', async () => {
     const renderGroupPdf = vi.fn(async () => { throw new ApiError(404, 'CUT_GROUP_SHEET_NOT_FOUND', 'no sheets'); });
-    const pdfCache = new CutPdfCache({ ttlMs: 1000, failureTtlMs: 5000 });
-    const controller = createController({ service: { renderGroupPdf }, pdfCache });
+    const controller = createController({ service: { renderGroupPdf } });
 
-    // First call kicks the render and returns 202.
-    const cold = fakeResponse();
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, cold.res as never);
-    expect(cold.state.status).toBe(202);
-    await pdfCache.whenIdle();
-
-    // Retry surfaces the ApiError instead of looping 202 forever.
-    const warm = fakeResponse();
     await expect(
-      controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, warm.res as never),
+      controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, fakeResponse().res as never),
     ).rejects.toMatchObject({ statusCode: 404, code: 'CUT_GROUP_SHEET_NOT_FOUND' });
   });
 
-  it('job PDF: discriminates the cache by version and serves the whole-job PDF when warm', async () => {
-    const pdf = Buffer.from('%PDF-job');
-    const renderJobPdf = vi.fn(async () => pdf);
-    const getJob = vi.fn(async () => ({ ...jobDto(), status: 'ready', version: 7 }));
-    const setPdfPrewarmState = vi.fn(async () => undefined);
-    const pdfCache = new CutPdfCache({ ttlMs: 1000 });
-    const controller = createController({ service: { renderJobPdf, getJob, setPdfPrewarmState }, pdfCache });
+  it('job PDF: renders fresh on every export request', async () => {
+    let renderNo = 0;
+    const renderJobPdf = vi.fn(async () => Buffer.from(`%PDF-job-${++renderNo}`));
+    const controller = createController({ service: { renderJobPdf } });
 
-    const cold = fakeResponse();
-    await controller.exportJobPdf({ user: currentUser() } as never, '42', {}, cold.res as never);
-    expect(cold.state.status).toBe(202);
+    const first = fakeResponse();
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', {}, first.res as never);
+    expect(first.headers['Content-Type']).toBe('application/pdf');
+    expect(first.state.sent).toEqual(Buffer.from('%PDF-job-1'));
 
-    await pdfCache.whenIdle();
-
-    const warm = fakeResponse();
-    await controller.exportJobPdf({ user: currentUser() } as never, '42', {}, warm.res as never);
-    expect(warm.headers['Content-Type']).toBe('application/pdf');
-    expect(warm.state.sent).toBe(pdf);
-    expect(renderJobPdf).toHaveBeenCalledTimes(1);
+    const second = fakeResponse();
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', {}, second.res as never);
+    expect(second.headers['Content-Type']).toBe('application/pdf');
+    expect(second.state.sent).toEqual(Buffer.from('%PDF-job-2'));
+    expect(renderJobPdf).toHaveBeenCalledTimes(2);
   });
 
-  // Task 7 FIX 2: variant is a cache-key dimension — auto and active must not collide.
-  it('FIX 2: group PDF auto and active do NOT share a cache slot (same layout token)', async () => {
+  it('group PDF: passes auto and active variants to separate fresh renders', async () => {
     const renderGroupPdf = vi.fn(async (q: { variant?: string }) =>
       Buffer.from(q.variant === 'active' ? '%PDF-active' : '%PDF-auto'));
-    // Same token for both → only `variant` separates the keys.
-    const getRenderCacheToken = vi.fn(async () => 'tok');
-    const pdfCache = new CutPdfCache({ ttlMs: 5000 });
-    const controller = createController({ service: { renderGroupPdf, getRenderCacheToken }, pdfCache });
+    const controller = createController({ service: { renderGroupPdf } });
 
-    // Warm both variants.
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'auto' }, fakeResponse().res as never);
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active' }, fakeResponse().res as never);
-    await pdfCache.whenIdle();
+    const auto = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'auto' }, auto.res as never);
+    const active = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active' }, active.res as never);
 
-    const autoWarm = fakeResponse();
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'auto' }, autoWarm.res as never);
-    const activeWarm = fakeResponse();
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active' }, activeWarm.res as never);
-
-    // Each variant gets ITS OWN bytes — no cross-serving from one shared slot.
-    expect(autoWarm.state.sent).toEqual(Buffer.from('%PDF-auto'));
-    expect(activeWarm.state.sent).toEqual(Buffer.from('%PDF-active'));
+    expect(auto.state.sent).toEqual(Buffer.from('%PDF-auto'));
+    expect(active.state.sent).toEqual(Buffer.from('%PDF-active'));
     expect(renderGroupPdf).toHaveBeenCalledTimes(2);
   });
 
-  // Task 7 FIX 2: a render-token change (manual save / active flip) busts the cache.
-  it('FIX 2: group PDF re-renders after the render token changes', async () => {
+  it('group PDF: re-renders repeated active exports even when layout token is unchanged', async () => {
     let n = 0;
     const renderGroupPdf = vi.fn(async () => Buffer.from(`%PDF-${++n}`));
-    let token = 'tok-v1';
-    const getRenderCacheToken = vi.fn(async () => token);
-    const pdfCache = new CutPdfCache({ ttlMs: 5000 });
-    const controller = createController({ service: { renderGroupPdf, getRenderCacheToken }, pdfCache });
+    const controller = createController({ service: { renderGroupPdf } });
 
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active' }, fakeResponse().res as never);
-    await pdfCache.whenIdle();
-    // Manual save changes the layout token.
-    token = 'tok-v2';
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active' }, fakeResponse().res as never);
-    await pdfCache.whenIdle();
+    const first = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active', renderVersion: 'tok-v1' }, first.res as never);
+    const second = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active', renderVersion: 'tok-v1' }, second.res as never);
 
-    const after = fakeResponse();
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { variant: 'active' }, after.res as never);
-    expect(after.state.sent).toEqual(Buffer.from('%PDF-2'));
+    expect(first.state.sent).toEqual(Buffer.from('%PDF-1'));
+    expect(second.state.sent).toEqual(Buffer.from('%PDF-2'));
     expect(renderGroupPdf).toHaveBeenCalledTimes(2);
   });
 
-  // Task 7 FIX 3 + FIX 4: prewarm (post-calculate) and the REAL FE export must share
-  // the SAME key — same token AND same `variant` dimension. The FE always passes
-  // job.renderToken → variant=active, so the prewarm must warm the `active` slot,
-  // not `auto`. Otherwise the first export is a cold synchronous miss.
-  it('FIX 3/4: post-calculate prewarm warms the variant=active key the FE export reads (first export is warm)', async () => {
+  it('post-calculate readiness render uses the surfaced active variant, while export still renders fresh', async () => {
     const pdf = Buffer.from('%PDF-job');
     const renderJobPdf = vi.fn(async () => pdf);
     const calculate = vi.fn(async () => ({ ...jobDto(), status: 'ready' as const, version: 7 }));
-    const getJob = vi.fn(async () => ({ ...jobDto(), status: 'ready' as const, version: 7, renderToken: 'jtok' }));
-    // getRenderCacheToken({cutJobId}) === job.renderToken from getJob.
-    const getRenderCacheToken = vi.fn(async () => 'jtok');
     const setPdfPrewarmState = vi.fn(async () => undefined);
-    const pdfCache = new CutPdfCache({ ttlMs: 5000 });
     const controller = createController({
-      service: { calculate, renderJobPdf, getJob, getRenderCacheToken, setPdfPrewarmState },
-      pdfCache,
+      service: { calculate, renderJobPdf, setPdfPrewarmState },
     });
 
-    // calculate → fires fire-and-forget prewarm (status ready).
     await controller.calculate({ user: currentUser() } as never, '42', { version: 0, commandId: TEST_COMMAND_ID });
-    // Wait for the async prewarm chain (getRenderCacheToken → ensure → render) to register.
-    for (let i = 0; i < 50 && renderJobPdf.mock.calls.length === 0; i++) await Promise.resolve();
-    await pdfCache.whenIdle();
+    for (let i = 0; i < 50 && setPdfPrewarmState.mock.calls.length === 0; i++) await Promise.resolve();
 
-    // FIX 4: the prewarm rendered the ACTIVE variant (what the FE surfaces), not auto.
     expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({ variant: 'active' }));
+    expect(setPdfPrewarmState).toHaveBeenCalledWith(expect.objectContaining({ state: 'ready', version: 7 }));
 
-    // The REAL FE export passes job.renderToken → variant=active. It must be served WARM
-    // from the prewarmed slot (identical id + variant + token + orientation).
-    const warm = fakeResponse();
-    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active', axisOrigin: 'bottom-left' }, warm.res as never);
-    expect(warm.headers['Content-Type']).toBe('application/pdf');
-    expect(warm.state.sent).toBe(pdf);
-    expect(renderJobPdf).toHaveBeenCalledTimes(1); // prewarm rendered once; export reused it
+    const fresh = fakeResponse();
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active', axisOrigin: 'bottom-left' }, fresh.res as never);
+    expect(fresh.headers['Content-Type']).toBe('application/pdf');
+    expect(fresh.state.sent).toBe(pdf);
+    expect(renderJobPdf).toHaveBeenCalledTimes(2);
   });
 
   it('parses ids, bodies, and criteria', () => {
@@ -484,46 +436,32 @@ describe('CutController', () => {
     expect(svgCalls).toEqual([true, false, false]);
   });
 
-  // R1: origin (TL/RAW) is a PDF cache-key dimension — a top-left and a raw render
-  // produce different bytes for the same layout+orientation and must not collide.
-  it('group PDF: origin=tl and origin=raw do NOT share a cache slot (same token)', async () => {
+  it('group PDF: origin=tl and origin=raw are passed to separate fresh renders', async () => {
     const renderGroupPdf = vi.fn(async (q: { originTopLeft?: boolean }) =>
       Buffer.from(q.originTopLeft ? '%PDF-tl' : '%PDF-raw'));
-    const getRenderCacheToken = vi.fn(async () => 'tok');
-    const pdfCache = new CutPdfCache({ ttlMs: 5000 });
-    const controller = createController({ service: { renderGroupPdf, getRenderCacheToken }, pdfCache });
+    const controller = createController({ service: { renderGroupPdf } });
 
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, fakeResponse().res as never); // default tl
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { origin: 'raw' }, fakeResponse().res as never);
-    await pdfCache.whenIdle();
+    const tl = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, tl.res as never); // default tl
+    const raw = fakeResponse();
+    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { origin: 'raw' }, raw.res as never);
 
-    const tlWarm = fakeResponse();
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', {}, tlWarm.res as never);
-    const rawWarm = fakeResponse();
-    await controller.exportGroupPdf({ user: currentUser() } as never, '42', '100', { origin: 'raw' }, rawWarm.res as never);
-
-    expect(tlWarm.state.sent).toEqual(Buffer.from('%PDF-tl'));
-    expect(rawWarm.state.sent).toEqual(Buffer.from('%PDF-raw'));
+    expect(tl.state.sent).toEqual(Buffer.from('%PDF-tl'));
+    expect(raw.state.sent).toEqual(Buffer.from('%PDF-raw'));
     expect(renderGroupPdf).toHaveBeenCalledTimes(2);
   });
 
-  // The current FE surfaces RAW/CW layout transform plus bottom-left display axis.
-  it('prewarm warms the surfaced bottom-left axis and that export is served warm', async () => {
+  it('prewarm uses the surfaced bottom-left axis and export still renders fresh', async () => {
     const pdf = Buffer.from('%PDF-job-tl');
     const renderJobPdf = vi.fn(async () => pdf);
     const calculate = vi.fn(async () => ({ ...jobDto(), status: 'ready' as const, version: 7 }));
-    const getJob = vi.fn(async () => ({ ...jobDto(), status: 'ready' as const, version: 7, renderToken: 'jtok' }));
-    const getRenderCacheToken = vi.fn(async () => 'jtok');
     const setPdfPrewarmState = vi.fn(async () => undefined);
-    const pdfCache = new CutPdfCache({ ttlMs: 5000 });
     const controller = createController({
-      service: { calculate, renderJobPdf, getJob, getRenderCacheToken, setPdfPrewarmState },
-      pdfCache,
+      service: { calculate, renderJobPdf, setPdfPrewarmState },
     });
 
     await controller.calculate({ user: currentUser() } as never, '42', { version: 0, commandId: TEST_COMMAND_ID });
-    for (let i = 0; i < 50 && renderJobPdf.mock.calls.length === 0; i++) await Promise.resolve();
-    await pdfCache.whenIdle();
+    for (let i = 0; i < 50 && setPdfPrewarmState.mock.calls.length === 0; i++) await Promise.resolve();
 
     expect(renderJobPdf).toHaveBeenCalledWith(expect.objectContaining({
       originTopLeft: false,
@@ -531,10 +469,10 @@ describe('CutController', () => {
     }));
 
     // FE explicitly sends bottom-left; absent axisOrigin remains top-left for old clients.
-    const warm = fakeResponse();
-    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active', axisOrigin: 'bottom-left' }, warm.res as never);
-    expect(warm.state.sent).toBe(pdf);
-    expect(renderJobPdf).toHaveBeenCalledTimes(1);
+    const fresh = fakeResponse();
+    await controller.exportJobPdf({ user: currentUser() } as never, '42', { variant: 'active', axisOrigin: 'bottom-left' }, fresh.res as never);
+    expect(fresh.state.sent).toBe(pdf);
+    expect(renderJobPdf).toHaveBeenCalledTimes(2);
   });
 
   // Variant B Task 11: GET /cut-jobs/sheet-types — cut.view-gated sheet lookup.

@@ -314,9 +314,8 @@ export interface GetRenderCacheTokenArgs {
   cutGroupId?: number;
   // NOTE: no `variant` here on purpose. The token encodes the layout STATE
   // (job version + per-group manual layout version + effectiveActive) and is
-  // variant-independent. The controller adds the requested variant as a separate
-  // cache-key dimension so `auto` and `active` (which can render different bytes
-  // for the same state) never collide on one cache slot.
+  // variant-independent. Clients append it to render URLs to bust browser/request
+  // state after layout changes; current PDF exports still render fresh each time.
 }
 
 export interface CutRepositoryPort {
@@ -366,10 +365,10 @@ export interface CutRepositoryPort {
   ): Promise<Array<{ groupKey: string; sheets: CutManualSheetDto[]; isActive: boolean; isStale: boolean; version: number }>>;
   // ── Task 5: manual-layout save command ───────────────────────────────────
   saveManualLayout(command: SaveManualLayoutCommand): Promise<CutJobDto>;
-  // ── Task 7: render variant + server-side render cache token ──────────────
+  // ── Task 7: render variant + render state token ─────────────────────────
   /** Returns an opaque server-owned token that changes whenever the rendered
    *  output would change (job version + per-group manual layout version +
-   *  effectiveActive). Used by the controller to build cache keys so a manual
-   *  save or active-selector flip busts the in-process PDF cache. */
+   *  effectiveActive). Used by clients as a renderVersion URL discriminator;
+   *  current PDF exports render fresh and do not serve cached PDF bytes. */
   getRenderCacheToken(args: GetRenderCacheTokenArgs): Promise<string>;
 }

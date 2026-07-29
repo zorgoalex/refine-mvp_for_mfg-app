@@ -177,9 +177,8 @@ export const cutApi = {
   },
 
   /**
-   * Group PDF. 202 (cold cache) -> `{ pending: true }`; caller retries.
-   * When `renderToken` is given, appends `variant=active&renderVersion=<token>`
-   * so the browser fetches the active layout and busts the render cache.
+   * Group PDF. Current-job exports are freshly rendered by the backend each
+   * time; 202 is still accepted for older/result paths that may answer pending.
    */
   fetchGroupPdf(
     cutJobId: number,
@@ -208,9 +207,8 @@ export const cutApi = {
   },
 
   /**
-   * Whole-job PDF. 202 (cold cache) -> `{ pending: true }`; caller retries.
-   * When `renderToken` is given, appends `variant=active&renderVersion=<token>`
-   * so the browser fetches the active layout and busts the render cache.
+   * Whole-job PDF. Current-job exports are freshly rendered by the backend each
+   * time; 202 is still accepted for older/result paths that may answer pending.
    */
   fetchJobPdf(cutJobId: number, landscape = false, renderToken?: string, originTopLeft = true, pdfTemplate?: string, axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left', resultNo?: number): Promise<CutPdfResult> {
     const path = resultNo === undefined

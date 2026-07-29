@@ -1720,7 +1720,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       revokePdfPreviewUrl();
       setPdfPreview({ ...EMPTY_PDF_PREVIEW, open: true, group, title: `Предпросмотр PDF · группа #${group.cutGroupId}`, loading: true });
       try {
-        // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
+        // Pass renderToken so the backend uses the active layout variant; PDF bytes are rendered fresh.
         const pdfTemplate = pdfTemplateByGroup[group.cutGroupId] ?? 'standard';
         const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetAxisOrigin === 'bottom-left' ? false : sheetOriginTopLeft, pdfTemplate, sheetAxisOrigin, isHistoricalResult ? selectedResult?.resultNo : undefined));
         if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
@@ -1772,7 +1772,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       fileName: `cut-job-${job.cutJobId}.pdf`,
     });
     try {
-      // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
+      // Pass renderToken so the backend uses the active layout variant; PDF bytes are rendered fresh.
       const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetAxisOrigin === 'bottom-left' ? false : sheetOriginTopLeft, pdfTemplateForJob, sheetAxisOrigin, isHistoricalResult ? selectedResult?.resultNo : undefined));
       if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
       const url = URL.createObjectURL(result.blob);
@@ -2991,7 +2991,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         // effectiveManual: which variant the preview/print actually shows.
         // isActive drives PRINT; isStale means the pieces drifted (recalc needed).
         const effectiveManual = !!(group.manualLayout?.isActive && !group.manualLayout?.isStale);
-        // Render token for cache-busting (absent on groups without a manual layout).
+        // Render token for request URL/state discrimination (absent on groups without a manual layout).
         const renderVersion = group.renderToken;
         // Stale: the manual layout pieces may not match the current auto set.
         // (Declared before displayVariant below, which reads it.)

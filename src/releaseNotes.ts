@@ -30,6 +30,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-29",
+    title: "Раскрой: PDF всегда пересчитывает динамические поля",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Предпросмотр и формирование PDF раскроя заново читают динамические поля деталей и связи с файлами станка для каждой страницы PDF.",
+      "PDF больше не отдаёт старую версию из in-memory cache, когда связи деталей с карточками файлов станка изменились после предыдущего предпросмотра.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-28",
     title: "Раскрой: редактор PDF-шаблонов",
     services: ["ERP", "Cutting"],
