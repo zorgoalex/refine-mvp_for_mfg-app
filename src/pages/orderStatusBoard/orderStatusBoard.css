@@ -139,6 +139,10 @@
   align-items: flex-start;
 }
 
+.status-board-columns--cnc .cnc-today-column--baths {
+  margin-left: 24px;
+}
+
 .status-board-column {
   --status-color: #8c8c8c;
   width: 304px;

@@ -191,6 +191,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-today-column--baths');
     expect(css).toContain('.cnc-today-column--baths_ready');
     expect(css).toContain('background: #fff7e6');
+    expect(css).toContain('.status-board-columns--cnc .cnc-today-column--baths');
+    expect(css).toContain('margin-left: 24px');
     expect(css).toContain('.cnc-today-column__header-main');
     expect(css).toContain('.cnc-today-column__totals');
     expect(css).toContain('font-variant-numeric: tabular-nums');
