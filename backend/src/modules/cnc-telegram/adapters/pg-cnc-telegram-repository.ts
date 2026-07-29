@@ -1083,6 +1083,38 @@ async function loadBathCards(
       GROUP BY lower(trim(o.order_name))
       HAVING COUNT(*) = 1
     ),
+    completed_whole_order_keys AS (
+      SELECT DISTINCT lower(trim(order_match.match[2])) AS order_key
+      FROM cnc_telegram_packets p
+      CROSS JOIN LATERAL jsonb_array_elements_text(p.comments_json) AS packet_comment(comment_text)
+      CROSS JOIN LATERAL regexp_matches(
+        packet_comment.comment_text,
+        '(^|[^0-9])([0-9]{4,})([^0-9]|$)',
+        'g'
+      ) AS order_match(match)
+      WHERE p.workday = $1::date
+        AND (p.completion_status = 'completed' OR p.thumbs_up = true)
+        AND lower(packet_comment.comment_text) LIKE '%весь%'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(p.comments_json) AS material_comment(comment_text)
+          WHERE lower(material_comment.comment_text) LIKE ANY (
+            ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
+          )
+        )
+    ),
+    whole_order_target_details AS (
+      SELECT
+        order_key.order_id,
+        od.detail_id::bigint AS detail_id,
+        1000000000::integer AS completed_quantity
+      FROM completed_whole_order_keys whole_order
+      JOIN unique_order_keys order_key
+        ON order_key.order_key = whole_order.order_key
+      JOIN order_details od
+        ON od.order_id = order_key.order_id
+       AND od.delete_flag = false
+    ),
     fallback_target_details AS (
       SELECT
         order_key.order_id,
@@ -1143,11 +1175,13 @@ async function loadBathCards(
       SELECT
         target.order_id,
         target.detail_id,
-        SUM(target.completed_quantity)::integer AS completed_quantity
+        LEAST(SUM(target.completed_quantity), 1000000000::bigint)::integer AS completed_quantity
       FROM (
         SELECT * FROM matched_target_details
         UNION ALL
         SELECT * FROM fallback_target_details
+        UNION ALL
+        SELECT * FROM whole_order_target_details
       ) target
       GROUP BY target.order_id, target.detail_id
     ),

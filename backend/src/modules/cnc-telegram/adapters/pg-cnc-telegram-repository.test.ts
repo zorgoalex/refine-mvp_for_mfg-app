@@ -283,6 +283,12 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('cut_result_sheet_map');
     expect(sql).toContain('cut_result_label_map_projection');
     expect(sql).toContain('fallback_target_details');
+    expect(sql).toContain('completed_whole_order_keys');
+    expect(sql).toContain('whole_order_target_details');
+    expect(sql).toContain("lower(packet_comment.comment_text) LIKE '%весь%'");
+    expect(sql).toContain("regexp_matches(\n        packet_comment.comment_text,\n        '(^|[^0-9])([0-9]{4,})([^0-9]|$)'");
+    expect(sql).toContain('1000000000::integer AS completed_quantity');
+    expect(sql).toContain('LEAST(SUM(target.completed_quantity), 1000000000::bigint)::integer');
     expect(sql).toContain('lower(trim(i.order_name)) AS order_key');
     expect(sql).toContain('od.detail_number = item.detail_number');
     expect(sql).toContain('jsonb_array_elements_text(p.comments_json)');
