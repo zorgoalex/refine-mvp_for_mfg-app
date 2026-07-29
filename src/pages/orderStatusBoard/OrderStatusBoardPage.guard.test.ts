@@ -98,6 +98,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('dateTo: searchRange.dateTo');
     expect(page).toContain('datasetKey');
     expect(page).toContain('buildCncColumnTotals(column, relationContext, detailedContext)');
+    expect(page).toContain('buildCncDetailedDisplayColumns(columns)');
+    expect(page).toContain("key: 'machine_files'");
+    expect(page).toContain("machine_files: 'Файлы станка'");
     expect(page).toContain("getCncBathRelationState(bath, relationContext) !== 'dimmed'");
     expect(page).toContain("getCncPacketDisplayState(packet, relationContext, detailedContext) !== 'dimmed'");
     expect(page).toContain('cnc-today-column__header-main');
@@ -210,6 +213,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('opacity: 0.62');
     expect(css).toContain('.cnc-today-column--parsed');
     expect(css).toContain('.cnc-today-column--completed');
+    expect(css).toContain('.cnc-today-column--machine_files');
     expect(css).toContain('background: #edf7ff');
     expect(css).toContain('.cnc-today-column--baths');
     expect(css).toContain('.cnc-today-column--baths_ready');
@@ -242,6 +246,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('CNC_BATH_DETAIL_ORDER_FILL_COLORS');
     expect(page).toContain("rect.setAttribute('fill', fill)");
     expect(page).toContain("rect.setAttribute('data-cnc-order-fill', 'true')");
+    expect(page).toContain('enlargeCncBathDetailText(piece, 2)');
+    expect(page).toContain("text.setAttribute('data-cnc-detailed-font-scale'");
     expect(page).toContain('cncBathDetailCheckPoint');
     expect(page).toContain('cncClampSvgCoordinate');
     expect(cutApi).toContain('pieceMetadata');
@@ -253,10 +259,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cncDetailFingerprintsIntersect');
     expect(page).toContain('cncPacketWholeOrderIntersects');
     expect(css).toContain('.status-board-columns--cnc-detailed .cnc-today-column--detailed');
+    expect(css).toContain('--cnc-machine-area-width-detailed: 30vw');
+    expect(css).toContain('--cnc-bath-detail-width: 70vw');
+    expect(css).toContain('.status-board-columns--cnc-detailed .cnc-today-column--parsed');
+    expect(css).toContain('width: var(--cnc-machine-column-width-detailed);');
     expect(css).toContain('.cnc-bath-card--detailed');
-    expect(css).toContain('width: calc(200% + var(--cnc-bath-detail-span-extra, 34px));');
-    expect(css).toContain('margin-left: calc(-100% - var(--cnc-bath-detail-span-extra, 34px));');
+    expect(css).toContain('width: var(--cnc-bath-detail-width);');
+    expect(css).toContain('margin-left: calc(-1 * (var(--cnc-bath-column-width) + var(--cnc-bath-column-gap)));');
     expect(css).toContain('isolation: isolate');
+    expect(css).toContain('font-size: 10px');
     expect(css).toContain('.cnc-bath-card__detail-close');
     expect(css).toContain('.cnc-bath-card__sheet-svg [data-detail-id]');
     expect(css).toContain('.cnc-bath-card__sheet-svg [data-cnc-order-fill="true"]');

@@ -1057,6 +1057,18 @@ interface CncTelegramTodayColumnsProps {
   onOpenOrder: (orderId: number) => void;
 }
 
+type CncTelegramTodayDisplayColumnKey =
+  | CncTelegramTodayColumn['key']
+  | 'machine_files';
+
+interface CncTelegramTodayDisplayColumn {
+  key: CncTelegramTodayDisplayColumnKey;
+  title: string;
+  total: number;
+  packets: CncTelegramPacket[];
+  baths: CncTelegramBathCard[];
+}
+
 const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   columns,
   relationContext,
@@ -1069,19 +1081,28 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   onSelectDetailedDetail,
   onOpenOrder,
 }) => {
+  const detailedBathActive = detailedEnabled && Boolean(detailedContext?.activeBathId);
+  const displayColumns = useMemo(
+    () =>
+      detailedBathActive
+        ? buildCncDetailedDisplayColumns(columns)
+        : columns,
+    [columns, detailedBathActive],
+  );
   const detailedPacketHighlightEnabled = cncDetailedContextHasActiveDetail(detailedContext);
 
   return (
     <div
       className={[
         'status-board-columns status-board-columns--cnc',
-        detailedEnabled && detailedContext?.activeBathId
-          ? 'status-board-columns--cnc-detailed'
-          : '',
+        detailedBathActive ? 'status-board-columns--cnc-detailed' : '',
       ].filter(Boolean).join(' ')}
     >
-      {columns.map((column) => {
+      {displayColumns.map((column) => {
         const bathColumn = column.key === 'baths' || column.key === 'baths_ready';
+        const columnClassNames = column.key === 'machine_files'
+          ? ['cnc-today-column--machine_files', 'cnc-today-column--parsed']
+          : [`cnc-today-column--${column.key}`];
         const title = cncColumnDisplayTitle(column);
         const totals = buildCncColumnTotals(column, relationContext, detailedContext);
         const bathSourceCards = column.baths ?? [];
@@ -1106,7 +1127,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
             key={column.key}
             className={[
               'status-board-column cnc-today-column',
-              `cnc-today-column--${column.key}`,
+              ...columnClassNames,
               columnDetailed ? 'cnc-today-column--detailed' : '',
             ].filter(Boolean).join(' ')}
             aria-label={`${title}: ${column.total} ${bathColumn ? 'ванн' : 'CNC-пакетов'}`}
@@ -1914,6 +1935,7 @@ function decorateCncBathSheetSvg(
     const detailId = Number(piece.getAttribute('data-detail-id'));
     if (!Number.isInteger(detailId) || detailId <= 0) continue;
     if (selectedDetailId === detailId) piece.setAttribute('data-cnc-selected-detail', 'true');
+    enlargeCncBathDetailText(piece, 2);
 
     const fill = orderFillByDetailId.get(detailId);
     const rect = piece.querySelector('rect');
@@ -1929,6 +1951,15 @@ function decorateCncBathSheetSvg(
     appendCncBathDetailCheck(document, piece);
   }
   return new XMLSerializer().serializeToString(svg);
+}
+
+function enlargeCncBathDetailText(piece: SVGElement, scale: number): void {
+  for (const text of Array.from(piece.querySelectorAll<SVGElement>('text'))) {
+    const fontSize = cncSvgNumber(text.getAttribute('font-size'));
+    if (fontSize === null) continue;
+    text.setAttribute('font-size', formatCncSvgNumber(fontSize * scale));
+    text.setAttribute('data-cnc-detailed-font-scale', formatCncSvgNumber(scale));
+  }
 }
 
 function appendCncBathDetailCheck(document: Document, piece: SVGElement): void {
@@ -2736,16 +2767,49 @@ function formatCncSize(width: number | null, height: number | null): string {
   return `${formatter.format(width)}×${formatter.format(height)}`;
 }
 
-function cncColumnBadgeColor(columnKey: CncTelegramTodayColumn['key']): string {
+function buildCncDetailedDisplayColumns(
+  columns: CncTelegramTodayColumn[],
+): CncTelegramTodayDisplayColumn[] {
+  const machineColumns = columns.filter(
+    (column) => column.key === 'parsed' || column.key === 'completed',
+  );
+  if (machineColumns.length === 0) return columns;
+
+  const machineColumn: CncTelegramTodayDisplayColumn = {
+    key: 'machine_files',
+    title: 'Файлы станка',
+    total: machineColumns.reduce((sum, column) => sum + column.total, 0),
+    packets: machineColumns.flatMap((column) => column.packets),
+    baths: [],
+  };
+  const displayColumns: CncTelegramTodayDisplayColumn[] = [];
+  let machineColumnInserted = false;
+
+  for (const column of columns) {
+    if (column.key === 'parsed' || column.key === 'completed') {
+      if (!machineColumnInserted) {
+        displayColumns.push(machineColumn);
+        machineColumnInserted = true;
+      }
+      continue;
+    }
+    displayColumns.push(column);
+  }
+
+  return displayColumns;
+}
+
+function cncColumnBadgeColor(columnKey: CncTelegramTodayDisplayColumnKey): string {
   if (columnKey === 'completed' || columnKey === 'baths_ready') return '#389e0d';
   if (columnKey === 'baths') return '#cf1322';
   return '#1677ff';
 }
 
-function cncColumnDisplayTitle(column: CncTelegramTodayColumn): string {
-  const titles: Record<CncTelegramTodayColumn['key'], string> = {
+function cncColumnDisplayTitle(column: CncTelegramTodayDisplayColumn): string {
+  const titles: Record<CncTelegramTodayDisplayColumnKey, string> = {
     parsed: 'Файлы на станке',
     completed: 'Распилено',
+    machine_files: 'Файлы станка',
     baths: 'Карты ванн',
     baths_ready: 'Готовы к закатке',
   };
@@ -2764,7 +2828,7 @@ interface CncColumnTotalItem {
 }
 
 function buildCncColumnTotals(
-  column: CncTelegramTodayColumn,
+  column: CncTelegramTodayDisplayColumn,
   relationContext: CncRelationContext | null,
   detailedContext: CncDetailedContext | null = null,
 ): CncColumnTotals {
