@@ -317,7 +317,8 @@
 }
 
 .cnc-relation-card--active,
-.cnc-relation-card--related {
+.cnc-relation-card--related,
+.cnc-relation-card--order-mentioned {
   opacity: 1;
   filter: none;
 }
@@ -334,6 +335,13 @@
   box-shadow:
     0 0 0 2px #722ed1,
     0 2px 8px var(--app-shadow);
+}
+
+.cnc-relation-card--order-mentioned {
+  border-color: #fa541c;
+  box-shadow:
+    0 0 0 2px #fa541c,
+    0 2px 8px rgba(250, 84, 28, 0.28);
 }
 
 .cnc-relation-card--dimmed {

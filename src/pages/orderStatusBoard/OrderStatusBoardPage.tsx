@@ -95,6 +95,7 @@ const DATE_FORMAT = 'DD.MM.YYYY';
 const CNC_HISTORY_DAYS = 7;
 const CNC_DETAIL_CONFIDENCE_WARNING_THRESHOLD = 0.8;
 const CNC_TOOL_COMMENT_PATTERN = /^(?:T\d+\s*S\d+\s*,?\s*)+$/i;
+const CNC_OTHER_MATERIAL_MARKER_PATTERN = /(?:hdf|хдф|лдсп|ldsp|fanera|фанера)/i;
 const CNC_BATH_DEFAULT_PDF_TEMPLATE = 'bath_profiles';
 const CNC_BATH_PDF_TEMPLATE_OPTIONS = [
   { value: CNC_BATH_DEFAULT_PDF_TEMPLATE, label: 'Профили ванн' },
@@ -104,7 +105,7 @@ const CNC_PDF_WORKER_SRC = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
 type CncRelationTarget = { kind: 'packet'; id: string } | { kind: 'bath'; id: string };
-type CncRelationCardState = 'normal' | 'active' | 'related' | 'dimmed';
+type CncRelationCardState = 'normal' | 'active' | 'related' | 'order-mentioned' | 'dimmed';
 type CncPdfjsModule = typeof import('pdfjs-dist');
 
 const STATUS_BOARD_CARD_DISPLAY_OPTIONS: Array<{
@@ -2295,6 +2296,7 @@ interface CncRelationFingerprint {
   detailIds: Set<number>;
   fallbackKeys: Set<string>;
   orderKeys: Set<string>;
+  mentionedOrderKeys: Set<string>;
 }
 
 interface CncRelationContext {
@@ -2379,7 +2381,15 @@ function getCncPacketRelationState(
   if (context.active.kind === 'packet') {
     return packet.packetId === context.active.id ? 'active' : 'dimmed';
   }
-  return cncFingerprintsIntersect(buildCncPacketFingerprint(packet), context.fingerprint)
+  const packetFingerprint = buildCncPacketFingerprint(packet);
+  const packetMentionedOrderMatch = cncMentionedOrderKeysIntersect(
+    packetFingerprint,
+    context.fingerprint,
+  );
+  if (packetMentionedOrderMatch && cncPacketHasOtherMaterialMarker(packet)) {
+    return 'order-mentioned';
+  }
+  return cncFingerprintsIntersect(packetFingerprint, context.fingerprint) || packetMentionedOrderMatch
     ? 'related'
     : 'dimmed';
 }
@@ -2392,7 +2402,9 @@ function getCncBathRelationState(
   if (context.active.kind === 'bath') {
     return bath.bathCardId === context.active.id ? 'active' : 'dimmed';
   }
-  return cncFingerprintsIntersect(buildCncBathFingerprint(bath), context.fingerprint)
+  const bathFingerprint = buildCncBathFingerprint(bath);
+  return cncFingerprintsIntersect(bathFingerprint, context.fingerprint) ||
+    cncMentionedOrderKeysIntersect(context.fingerprint, bathFingerprint)
     ? 'related'
     : 'dimmed';
 }
@@ -2410,6 +2422,9 @@ function buildCncPacketFingerprint(packet: CncTelegramPacket): CncRelationFinger
     for (const orderKey of cncWholeOrderCommentOrderKeys(comment)) {
       fingerprint.orderKeys.add(orderKey);
     }
+  }
+  for (const orderKey of cncPacketTitleCommentOrderKeys(packet)) {
+    fingerprint.mentionedOrderKeys.add(orderKey);
   }
   return fingerprint;
 }
@@ -2431,6 +2446,7 @@ function emptyCncRelationFingerprint(): CncRelationFingerprint {
     detailIds: new Set<number>(),
     fallbackKeys: new Set<string>(),
     orderKeys: new Set<string>(),
+    mentionedOrderKeys: new Set<string>(),
   };
 }
 
@@ -2480,10 +2496,33 @@ function cncRelationOrderKeys(
 
 function cncWholeOrderCommentOrderKeys(comment: string): string[] {
   if (!comment.toLocaleLowerCase('ru-RU').includes('весь')) return [];
-  return Array.from(comment.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g))
+  return cncOrderMentionKeysFromText(comment);
+}
+
+function cncPacketTitleCommentOrderKeys(packet: CncTelegramPacket): string[] {
+  const keys = new Set<string>();
+  for (const text of [packet.programName, packet.externalPacketKey, ...packet.comments]) {
+    for (const orderKey of cncOrderMentionKeysFromText(text ?? '')) {
+      keys.add(orderKey);
+    }
+  }
+  return Array.from(keys);
+}
+
+function cncOrderMentionKeysFromText(text: string): string[] {
+  return Array.from(text.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g))
     .map((match) => match[2])
     .filter((orderName): orderName is string => Boolean(orderName))
     .map((orderName) => cncOrderNameFallbackKey(orderName));
+}
+
+function cncPacketHasOtherMaterialMarker(packet: CncTelegramPacket): boolean {
+  return [
+    packet.materialName,
+    packet.programName ?? '',
+    packet.externalPacketKey,
+    ...packet.comments,
+  ].some((text) => CNC_OTHER_MATERIAL_MARKER_PATTERN.test(text));
 }
 
 function cncRelationFallbackKey(
@@ -2516,6 +2555,19 @@ function cncFingerprintsIntersect(
   }
   for (const orderKey of left.orderKeys) {
     if (right.orderKeys.has(orderKey)) return true;
+  }
+  return false;
+}
+
+function cncMentionedOrderKeysIntersect(
+  left: CncRelationFingerprint,
+  right: CncRelationFingerprint,
+): boolean {
+  for (const orderKey of left.mentionedOrderKeys) {
+    if (right.orderKeys.has(orderKey)) return true;
+  }
+  for (const orderKey of right.mentionedOrderKeys) {
+    if (left.orderKeys.has(orderKey)) return true;
   }
   return false;
 }
