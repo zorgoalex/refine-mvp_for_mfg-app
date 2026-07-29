@@ -1081,11 +1081,11 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
         </div>
         {packet.completionStatus === 'completed' && (
           <div className="cnc-packet-card__status-icons" aria-label="Статусы листа">
-            <Tooltip title="Выполнено на станке">
+            <Tooltip title="Распилено на станке">
               <span
                 className="cnc-packet-card__status-icon cnc-packet-card__status-icon--completed"
                 role="img"
-                aria-label="Выполнено на станке"
+                aria-label="Распилено на станке"
                 tabIndex={0}
               >
                 <CheckCircleOutlined />
@@ -1321,7 +1321,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           </Typography.Text>
         </div>
         <Tooltip
-          title={bath.ready ? 'Все детали ванны уже в колонке «Выполнено»' : 'Не все детали ванны распилены'}
+          title={bath.ready ? 'Все детали ванны уже в колонке «Распилено»' : 'Не все детали ванны распилены'}
         >
           <CheckCircleFilled
             className={[
@@ -2221,8 +2221,8 @@ function cncColumnBadgeColor(columnKey: CncTelegramTodayColumn['key']): string {
 function cncColumnDisplayTitle(column: CncTelegramTodayColumn): string {
   const titles: Record<CncTelegramTodayColumn['key'], string> = {
     parsed: 'Файлы на станке',
-    completed: 'Выполнено',
-    baths: 'Ванны',
+    completed: 'Распилено',
+    baths: 'Карты ванн',
     baths_ready: 'Готовы к закатке',
   };
   return titles[column.key] ?? column.title;

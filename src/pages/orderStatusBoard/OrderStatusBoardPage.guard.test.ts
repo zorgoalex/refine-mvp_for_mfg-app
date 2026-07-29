@@ -94,7 +94,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('В чате {formatDateTime');
     expect(page).toContain('<Collapse.Panel');
     expect(page).toContain('cncColumnDisplayTitle(column)');
-    expect(page).toContain("baths: 'Ванны'");
+    expect(page).toContain("baths: 'Карты ванн'");
     expect(page).toContain("baths_ready: 'Готовы к закатке'");
     expect(page).not.toContain('Строка не сопоставлена с ERP');
     expect(page).not.toContain('items={[{');
@@ -120,7 +120,7 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('keeps the completed CNC card check marker understandable', () => {
     expect(page).toContain("packet.completionStatus === 'completed'");
     expect(page).toContain('<CheckCircleOutlined />');
-    expect(page).toContain('Выполнено на станке');
+    expect(page).toContain('Распилено на станке');
     expect(css).toContain('.cnc-packet-card__status-icon--completed');
     expect(css).toContain('border-radius: 50%');
   });
