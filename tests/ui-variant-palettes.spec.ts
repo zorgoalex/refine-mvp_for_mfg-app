@@ -27,6 +27,8 @@ const variants: Array<{
 ];
 
 test.describe('LINE/AIR UI palettes', () => {
+    test.setTimeout(60000);
+
     for (const palette of variants) {
         test(`${palette.variant} boots modern shell with scoped palette tokens`, async ({ page }) => {
             const consoleErrors: string[] = [];
@@ -40,9 +42,19 @@ test.describe('LINE/AIR UI palettes', () => {
             await setupVariantPaletteMocks(page, palette.variant);
 
             await page.goto('/orders', { waitUntil: 'domcontentloaded' });
-            await expect(page.locator('.evolution-sider')).toBeVisible({ timeout: 30000 });
             await expect(page.locator('.ant-layout-content')).toBeVisible({ timeout: 30000 });
             await expect(page.locator('html')).toHaveAttribute('data-ui-variant', palette.variant);
+            await expect(page.locator(`.evolution-shell--${palette.variant}`)).toBeVisible();
+            await expect(page.locator('.evolution-screen-frame[data-modern-route="orders"]')).toBeVisible();
+
+            if (palette.variant === 'air') {
+                await expect(page.locator('.evolution-air-topnav')).toBeVisible({ timeout: 30000 });
+                await expect(page.locator('.evolution-air-rail')).toBeVisible({ timeout: 30000 });
+                await expect(page.locator('.evolution-sider')).toHaveCount(0);
+            } else {
+                await expect(page.locator('.evolution-sider')).toBeVisible({ timeout: 30000 });
+                await expect(page.locator('.evolution-air-topnav')).toHaveCount(0);
+            }
 
             const tokens = await page.evaluate(() => {
                 const styles = getComputedStyle(document.documentElement);
@@ -66,6 +78,34 @@ test.describe('LINE/AIR UI palettes', () => {
             expect(consoleErrors.filter((message) => !isAllowedConsoleError(message))).toEqual([]);
         });
     }
+
+    test('AIR keeps route-aware operational screen structure beyond color tokens', async ({ page }) => {
+        await setupVariantPaletteMocks(page, 'air');
+
+        await page.goto('/calendar', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('.evolution-air-topnav')).toBeVisible({ timeout: 30000 });
+        await expect(page.locator('.evolution-air-rail')).toBeVisible({ timeout: 30000 });
+        await expect(page.locator('.evolution-screen-frame[data-modern-route="calendar"]')).toBeVisible();
+        await expect(page.locator('.calendar-navigation')).toBeVisible({ timeout: 30000 });
+        await expect(page.locator('.day-column').first()).toBeVisible({ timeout: 30000 });
+
+        const shellMetrics = await page.evaluate(() => {
+            const main = document.querySelector<HTMLElement>('.evolution-shell__main');
+            const rail = document.querySelector<HTMLElement>('.evolution-air-rail');
+            const topnav = document.querySelector<HTMLElement>('.evolution-air-topnav');
+            return {
+                mainMarginLeft: main ? getComputedStyle(main).marginLeft : '',
+                railWidth: rail ? getComputedStyle(rail).width : '',
+                topnavHeight: topnav ? getComputedStyle(topnav).height : '',
+            };
+        });
+
+        expect(shellMetrics).toMatchObject({
+            mainMarginLeft: '64px',
+            railWidth: '64px',
+            topnavHeight: '74px',
+        });
+    });
 
     test('profile exposes all four UI design choices', async ({ page }) => {
         await setupVariantPaletteMocks(page, 'air');

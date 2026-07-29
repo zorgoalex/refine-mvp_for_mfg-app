@@ -129,8 +129,8 @@ export const BazisCutSetPage: React.FC = () => {
   }, [set, setId]);
 
   const columns = useMemo<ColumnsType<BazisCutSetDetailDto>>(() => buildColumns(canManage, startEdit, remove), [canManage, remove, startEdit]);
-  if (!valid) return <div style={{ padding: 24 }}><Alert type="error" showIcon message="Некорректный номер набора" /></div>;
-  return <div style={{ padding: 24 }}><Space direction="vertical" size="middle" style={{ width: '100%' }}>
+  if (!valid) return <div className="bazis-cut-set-modern"><Alert type="error" showIcon message="Некорректный номер набора" /></div>;
+  return <div className="bazis-cut-set-modern"><Space direction="vertical" size="middle" style={{ width: '100%' }}>
     <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}><Title level={3} style={{ margin: 0 }}>Базис-раскрой #{setId}</Title>
       <Button type="primary" icon={<DownloadOutlined />} loading={exporting} disabled={!set || set.positionCount === 0} onClick={() => void exportXls()}>Экспорт XLS</Button></Space>
     <Card loading={loading} title="Набор"><Form form={nameForm} layout="inline" onFinish={() => void saveName()}>

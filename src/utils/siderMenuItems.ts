@@ -18,6 +18,8 @@ export interface SiderMenuData {
   canCreateOrders: boolean;
   canViewSettings: boolean;
   ordersRoute: string;
+  calendarRoute: string;
+  statusBoardRoute: string | null;
   handleNavigate: (route: string) => void;
   handleNewOrder: () => void;
 }
@@ -365,6 +367,8 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
     canCreateOrders,
     canViewSettings,
     ordersRoute,
+    calendarRoute,
+    statusBoardRoute: statusBoard?.route ?? null,
     handleNavigate,
     handleNewOrder,
   };

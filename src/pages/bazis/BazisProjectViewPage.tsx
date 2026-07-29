@@ -262,6 +262,7 @@ export const BazisProjectViewPage: React.FC = () => {
 
   return (
     <Card
+      className="bazis-project-modern-card"
       title={(
         <Space direction="vertical" size={4}>
           <Space align="center" size={12}>

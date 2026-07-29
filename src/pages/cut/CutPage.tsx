@@ -2468,7 +2468,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   return (
     <>
-      <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <Space className="cut-page-modern" direction="vertical" size="large" style={{ width: '100%' }}>
         {!isEmbeddedOrder && <Title level={3}>Раскрой</Title>}
 
       <Card title="Критерии выборки" size="small">

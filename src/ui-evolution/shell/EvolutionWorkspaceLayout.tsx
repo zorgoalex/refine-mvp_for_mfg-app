@@ -1,11 +1,14 @@
 import React from 'react';
 import { Layout, Skeleton } from 'antd';
+import { useLocation } from 'react-router-dom';
 import { AppFooter } from '../../components/AppFooter';
 import { GlobalTableTopScrollbars } from '../../components/GlobalTableTopScrollbars';
 import { KeepAliveOutlet } from '../../components/workspace/KeepAliveOutlet';
 import { useIsMobile } from '../../hooks/useDeviceTier';
 import { useTabSync } from '../../hooks/useTabSync';
 import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
+import { useUiVariant } from '../../ui-variant/UiVariantProvider';
+import { EvolutionAirNavigation } from './EvolutionAirNavigation';
 import { EvolutionHeader } from './EvolutionHeader';
 import { EvolutionMobileNavigation } from './EvolutionMobileNavigation';
 import { EvolutionSider } from './EvolutionSider';
@@ -45,10 +48,30 @@ const getInitialCollapsed = (): boolean => {
   }
 };
 
+function resolveModernRouteFamily(pathname: string): string {
+  if (pathname.startsWith('/calendar')) return 'calendar';
+  if (pathname.startsWith('/orders/show')) return 'order-detail';
+  if (pathname.startsWith('/orders/edit')) return 'order-edit';
+  if (pathname.startsWith('/orders/create')) return 'order-edit';
+  if (pathname.startsWith('/orders')) return 'orders';
+  if (pathname.startsWith('/cut-jobs') || pathname.startsWith('/cut')) return 'cut';
+  if (pathname.startsWith('/bazis-cut')) return 'bazis-cut';
+  if (pathname.startsWith('/bazis')) return 'bazis';
+  if (pathname.startsWith('/order-status-board')) return 'status-board';
+  if (pathname.startsWith('/configuration')) return 'configuration';
+  if (pathname.startsWith('/profile')) return 'profile';
+  if (pathname.startsWith('/scan')) return 'scan';
+  return 'crud';
+}
+
 export const EvolutionWorkspaceLayout: React.FC = () => {
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(getInitialCollapsed);
   const isMobile = useIsMobile();
+  const { variant } = useUiVariant();
+  const location = useLocation();
+  const routeFamily = resolveModernRouteFamily(location.pathname);
+  const isAirDesktop = variant === 'air' && !isMobile;
 
   useTabSync();
   useGlobalUnloadGuard();
@@ -62,18 +85,40 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
     }
   };
 
+  const shellClassName = [
+    'evolution-shell',
+    `evolution-shell--${variant}`,
+    collapsed && !isAirDesktop ? 'evolution-shell--collapsed' : '',
+    isAirDesktop ? 'evolution-shell--air-desktop' : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <Layout className={`evolution-shell${collapsed ? ' evolution-shell--collapsed' : ''}`}>
+    <Layout className={shellClassName}>
       <a className="evolution-skip-link" href="#evolution-main-content">Перейти к содержимому</a>
-      {!isMobile ? <EvolutionSider collapsed={collapsed} onCollapse={handleCollapse} /> : null}
+      {!isMobile ? (
+        isAirDesktop ? (
+          <EvolutionAirNavigation />
+        ) : (
+          <EvolutionSider collapsed={collapsed} onCollapse={handleCollapse} />
+        )
+      ) : null}
       <Layout className="evolution-shell__main">
-        <EvolutionHeader onOpenSider={isMobile ? () => setIsMobileNavigationOpen(true) : undefined} />
+        {!isAirDesktop ? (
+          <EvolutionHeader onOpenSider={isMobile ? () => setIsMobileNavigationOpen(true) : undefined} />
+        ) : null}
         <EvolutionWorkspaceTabs />
-        <Layout.Content className="evolution-shell__content" id="evolution-main-content" tabIndex={-1}>
+        <Layout.Content
+          className="evolution-shell__content"
+          data-modern-route={routeFamily}
+          id="evolution-main-content"
+          tabIndex={-1}
+        >
           <GlobalTableTopScrollbars />
-          <React.Suspense fallback={<EvolutionRouteSkeleton />}>
-            <KeepAliveOutlet />
-          </React.Suspense>
+          <div className="evolution-screen-frame" data-modern-route={routeFamily}>
+            <React.Suspense fallback={<EvolutionRouteSkeleton />}>
+              <KeepAliveOutlet />
+            </React.Suspense>
+          </div>
         </Layout.Content>
         <AppFooter />
       </Layout>
