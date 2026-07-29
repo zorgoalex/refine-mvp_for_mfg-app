@@ -5,7 +5,7 @@ import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
-import { OrderDeletedTag } from "../../components/OrderDeletedTag";
+import { OrderDeletedTag, orderDeletedReferenceClassName } from "../../components/OrderDeletedTag";
 
 export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -37,6 +37,12 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
         {...tableProps}
         {...highlightProps}
         rowKey="requirement_id"
+        rowClassName={(record: any) =>
+          orderDeletedReferenceClassName(
+            orderMap[record?.order_id]?.deleted,
+            highlightProps.rowClassName(record),
+          )
+        }
         onRow={(record) => ({
           onDoubleClick: () => {
             show("order_resource_requirements", record.requirement_id);

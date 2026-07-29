@@ -9,7 +9,7 @@ import { Link, useParams } from 'react-router-dom';
 import {
   bazisCutApi, type BazisCutDetailFields, type BazisCutSetCardDto, type BazisCutSetDetailDto,
 } from '../../api/bazisCutApi';
-import { OrderDeletedTag } from '../../components/OrderDeletedTag';
+import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
 import { buildBazisCutQrCode, summarizeBazisCutDetails } from './bazisCutDetailPresentation';
@@ -150,6 +150,7 @@ export const BazisCutSetPage: React.FC = () => {
       style={{ '--bazis-cut-sticky-qr-left': `${QR_CODE_STICKY_LEFT_PX}px` } as React.CSSProperties}
       rowKey="bazisCutSetDetailId" columns={columns} dataSource={set?.details ?? []}
       loading={loading} pagination={false} scroll={{ x: 5320, y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
+      rowClassName={(row) => orderDeletedReferenceClassName(row.sourceOrderDeleted)}
       summary={(details) => <DetailTableSummary details={details} canManage={canManage} />}
       size="small" locale={{ emptyText: 'В наборе нет деталей' }} /></Card>
   </Space>

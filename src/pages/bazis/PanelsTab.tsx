@@ -17,7 +17,7 @@ import { isApiError } from '../../api/apiError';
 import { authSession } from '../../api/authSession';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
-import { OrderDeletedTag } from '../../components/OrderDeletedTag';
+import { OrderDeletedTag, hasDeletedOrderReference, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { AddToOrderModal } from './AddToOrderModal';
 import { NodeCard } from './NodeCard';
 import { PanelNotesCell } from './PanelNotesCell';
@@ -748,7 +748,10 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           // Фон-отличие только у ВЛОЖЕННЫХ строк группировки; в плоском
           // режиме все строки — верхний уровень, подкраска не нужна
           const childClass = grouped && row.rowType === 'panel' ? 'bazis-panel-child-row' : '';
-          return [childClass, selectedClass].filter(Boolean).join(' ');
+          return orderDeletedReferenceClassName(
+            hasDeletedOrderReference(row.orders),
+            [childClass, selectedClass].filter(Boolean).join(' '),
+          );
         }}
         onRow={(row) => ({
           onClick: () => {

@@ -4,7 +4,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisRevisionOrder } from '../../api/types/bazisApi.types';
-import { OrderDeletedTag } from '../../components/OrderDeletedTag';
+import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 
 interface RevisionOrdersTabProps {
   revisionId: number;
@@ -104,6 +104,7 @@ export const RevisionOrdersTab: React.FC<RevisionOrdersTabProps> = ({ revisionId
       pagination={false}
       columns={columns}
       dataSource={rows}
+      rowClassName={(row) => orderDeletedReferenceClassName(row.orderDeleted)}
     />
   );
 };

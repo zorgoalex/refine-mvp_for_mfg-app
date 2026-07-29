@@ -35,7 +35,7 @@ import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfil
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
 import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, loadSheetAxisOrigin, saveSheetAxisOrigin, selectVariantSheets } from './cutPreviewHelpers';
 import { TableTopScroll } from '../../components/TableTopScroll';
-import { OrderDeletedTag } from '../../components/OrderDeletedTag';
+import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
 import { buildPieceMetaByItemId } from './cutPieceMeta';
@@ -2908,7 +2908,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 dataSource={job.items}
                 pagination={false}
                 scroll={{ x: 1900, y: CUT_JOB_DETAILS_TABLE_BODY_HEIGHT }}
-                rowClassName={(row) => `detail-group-tint-${jobItemOrderTintByOrderId.get(row.orderId) ?? 0}`}
+                rowClassName={(row) =>
+                  orderDeletedReferenceClassName(
+                    row.orderDeleted,
+                    `detail-group-tint-${jobItemOrderTintByOrderId.get(row.orderId) ?? 0}`,
+                  )
+                }
                 locale={{ emptyText: 'В задании пока нет деталей — добавьте их из заказа или через «Загрузить подходящие детали»' }}
               />
             </TableTopScroll>

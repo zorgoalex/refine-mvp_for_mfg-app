@@ -109,6 +109,8 @@ describe('CutPage source guards', () => {
     expect(source).toContain("show('orders_view', r.orderId, 'push')");
     expect(source).toContain('OrderDeletedTag');
     expect(source).toContain('orderDeleted={r.orderDeleted}');
+    expect(source).toContain('orderDeletedReferenceClassName');
+    expect(appCss).toContain('.ant-table-tbody > tr.order-deleted-reference-row > td');
     expect(source).not.toContain('react-router-dom');
   });
 

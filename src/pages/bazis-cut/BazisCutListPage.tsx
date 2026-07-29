@@ -3,7 +3,7 @@ import { Card, Input, Space, Table, Typography, message } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { Link, useNavigate } from 'react-router-dom';
 import { bazisCutApi, type BazisCutSetListItemDto, type BazisCutSourceRefDto } from '../../api/bazisCutApi';
-import { OrderDeletedTag } from '../../components/OrderDeletedTag';
+import { OrderDeletedTag, hasDeletedOrderReference, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 
 const { Title, Text } = Typography;
@@ -57,6 +57,7 @@ export const BazisCutListPage: React.FC = () => {
       placeholder="Набор, заказ или Базис-проект" style={{ maxWidth: 420 }} /></Card>
     <Table rowKey="bazisCutSetId" columns={columns} dataSource={items} loading={loading} pagination={pagination}
       locale={{ emptyText: search ? 'Ничего не найдено' : 'Наборы ещё не сформированы' }}
+      rowClassName={(row) => orderDeletedReferenceClassName(hasDeletedOrderReference(row.orders))}
       onRow={(row) => ({ onClick: () => navigate(`/bazis-cut/${row.bazisCutSetId}`), style: { cursor: 'pointer' } })} />
   </Space></div>;
 };

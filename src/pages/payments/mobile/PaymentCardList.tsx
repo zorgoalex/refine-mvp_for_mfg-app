@@ -1,6 +1,7 @@
 import React from 'react';
 import { Card, List, Typography } from 'antd';
 import type { TablePaginationConfig } from 'antd';
+import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../../components/OrderDeletedTag';
 import { buildPaymentCardModel, PaymentCardLookups } from './paymentCardModel';
 
 export interface PaymentCardListProps {
@@ -29,13 +30,14 @@ export const PaymentCardList: React.FC<PaymentCardListProps> = ({ rows, loading,
       return (
         <Card
           size="small"
+          className={m.orderDeleted ? ORDER_DELETED_REFERENCE_LINE_CLASS : undefined}
           style={{ marginBottom: 8 }}
           onClick={() => onOpen(m.id)}
           hoverable
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
             <Typography.Text strong ellipsis style={{ minWidth: 0 }}>
-              {m.orderLabel}
+              {m.orderLabel} <OrderDeletedTag deleted={m.orderDeleted} />
             </Typography.Text>
             <Typography.Text strong>{m.amount}</Typography.Text>
           </div>

@@ -12,3 +12,8 @@
 .bazis-cut-set-details-table.ant-table-wrapper .ant-table-summary .ant-table-cell.bazis-cut-sticky-qr {
   background: var(--app-surface-muted);
 }
+
+.bazis-cut-set-details-table.ant-table-wrapper .ant-table-tbody > tr.order-deleted-reference-row > td.bazis-cut-sticky-qr,
+.bazis-cut-set-details-table.ant-table-wrapper .ant-table-tbody > tr.order-deleted-reference-row:hover > td.bazis-cut-sticky-qr {
+  background: var(--app-deleted-reference-bg) !important;
+}

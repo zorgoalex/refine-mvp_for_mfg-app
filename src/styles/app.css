@@ -944,6 +944,38 @@ html {
 .details-grouped .ant-table-tbody > tr.detail-group-separator:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
 .details-grouped .ant-table-tbody > tr.detail-group-summary:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
 
+:root {
+  --app-deleted-reference-bg: #f3f4f6;
+  --app-deleted-reference-text: var(--app-text-muted);
+}
+
+[data-theme="dark"] {
+  --app-deleted-reference-bg: #24272c;
+}
+
+.ant-table-tbody > tr.order-deleted-reference-row,
+.order-deleted-reference-line {
+  filter: grayscale(0.9);
+  opacity: 0.64;
+}
+
+.ant-table-tbody > tr.order-deleted-reference-row > td,
+.ant-table-tbody > tr.order-deleted-reference-row:hover > td,
+.details-grouped .ant-table-tbody > tr.order-deleted-reference-row > td,
+.details-grouped .ant-table-tbody > tr.order-deleted-reference-row:hover > td {
+  background-color: var(--app-deleted-reference-bg) !important;
+  color: var(--app-deleted-reference-text) !important;
+}
+
+.ant-table-tbody > tr.order-deleted-reference-row a,
+.ant-table-tbody > tr.order-deleted-reference-row .ant-btn-link,
+.ant-table-tbody > tr.order-deleted-reference-row .ant-typography,
+.order-deleted-reference-line a,
+.order-deleted-reference-line .ant-btn-link,
+.order-deleted-reference-line .ant-typography {
+  color: var(--app-deleted-reference-text) !important;
+}
+
 .cut-create-preview-summary {
   display: flex;
   flex-direction: column;

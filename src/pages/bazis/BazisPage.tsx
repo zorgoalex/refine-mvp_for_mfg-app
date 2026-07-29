@@ -4,7 +4,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { Link, useNavigate } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisProjectCard, BazisProjectListItem } from '../../api/types/bazisApi.types';
-import { OrderDeletedTag } from '../../components/OrderDeletedTag';
+import { OrderDeletedTag, hasDeletedOrderReference, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 import { useTabStore } from '../../stores/tabStore';
@@ -317,6 +317,7 @@ export const BazisPage: React.FC = () => {
               columns={columns}
               dataSource={rows}
               loading={loading}
+              rowClassName={(record) => orderDeletedReferenceClassName(hasDeletedOrderReference(record.linkedOrders))}
               pagination={{
                 current: currentPage,
                 pageSize,

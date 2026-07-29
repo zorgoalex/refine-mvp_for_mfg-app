@@ -61,5 +61,7 @@ describe('projects pages source guards', () => {
     expect(showSource).toContain('Сохранить');
     expect(showSource).toContain('Объединить с…');
     expect(showSource).toContain('/orders/show/${');
+    expect(showSource).toContain('OrderDeletedTag');
+    expect(showSource).toContain('orderDeletedReferenceClassName(row.deleteFlag)');
   });
 });

@@ -4,6 +4,7 @@ import type { DataNode, EventDataNode } from 'antd/es/tree';
 import type RcTree from 'rc-tree';
 import { bazisApi } from '../../api/bazisApi';
 import { Dropdown, Tag } from 'antd';
+import { hasDeletedOrderReference, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { attachChildren, mapTreeNode, type BazisTreeDataNode } from './bazisTreeUtils';
 import type { SubtreeSummary } from './useRevisionData';
 
@@ -132,8 +133,12 @@ export const ViewerTree = forwardRef<ViewerTreeHandle, ViewerTreeProps>(({
         const summary = !dataNode.isLeaf && getNodeSummary ? getNodeSummary(dataNode.bazisNodeId) : null;
         const showBadges = summary != null
           && (summary.panels.length > 0 || summary.hardware.length > 0 || summary.materials.length > 0);
+        const deletedOrderReference = hasDeletedOrderReference(dataNode.orders);
         return (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span
+            className={deletedOrderReference ? ORDER_DELETED_REFERENCE_LINE_CLASS : undefined}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
             <span>{dataNode.title as React.ReactNode}</span>
             {dataNode.orders.length > 0 ? (
               // Узел уже добавлен в ERP-заказ(ы) созданной деталью — показываем названия

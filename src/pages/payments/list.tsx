@@ -11,7 +11,7 @@ import { authStorage } from "../../utils/auth";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import { useIsMobile } from "../../hooks/useDeviceTier";
 import { PaymentCardList } from "./mobile/PaymentCardList";
-import { OrderDeletedTag } from "../../components/OrderDeletedTag";
+import { OrderDeletedTag, orderDeletedReferenceClassName } from "../../components/OrderDeletedTag";
 import dayjs from "dayjs";
 import "./list.css";
 
@@ -63,6 +63,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   const paymentCardLookups = useMemo(
     () => ({
       orderLabelOf: (oid: unknown) => orderMap[oid as any]?.label ?? String(oid ?? "—"),
+      orderDeletedOf: (oid: unknown) => orderMap[oid as any]?.deleted === true,
       typeLabelOf: (tid: unknown) => typeMap[tid as any] ?? String(tid ?? "—"),
     }),
     [orderMap, typeMap]
@@ -283,6 +284,12 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
           {...tableProps}
           {...highlightProps}
           rowKey="payment_id"
+          rowClassName={(record: any) =>
+            orderDeletedReferenceClassName(
+              orderMap[record?.order_id]?.deleted,
+              highlightProps.rowClassName(record),
+            )
+          }
           onRow={(record: any) => ({
             onDoubleClick: () => {
               show("payments", record.payment_id);

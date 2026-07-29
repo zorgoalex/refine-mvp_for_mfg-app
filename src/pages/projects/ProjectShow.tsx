@@ -5,7 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ApiError } from '../../api/apiError';
 import { projectsApi } from '../../api/projectsApi';
 import type { ProjectCard, ProjectDto, ProjectOrderSummary } from '../../api/projectsApi';
-import { OrderDeletedTag } from '../../components/OrderDeletedTag';
+import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { formatNumber } from '../../utils/numberFormat';
 import { canMergeInto } from './projectHelpers';
 
@@ -252,6 +252,7 @@ export const ProjectShow: React.FC = () => {
             dataSource={project?.orders ?? []}
             loading={loading}
             pagination={false}
+            rowClassName={(row) => orderDeletedReferenceClassName(row.deleteFlag)}
           />
         </Card>
       </Space>
