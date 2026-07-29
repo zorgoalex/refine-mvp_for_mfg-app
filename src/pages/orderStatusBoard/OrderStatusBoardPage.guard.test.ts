@@ -84,7 +84,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('options={cncOrderFilterOptions}');
     expect(page).toContain('aria-label="Фильтр МДФ-работ по номеру заказа"');
     expect(page).toContain('datasetKey');
-    expect(page).toContain('buildCncColumnTotals(column)');
+    expect(page).toContain('buildCncColumnTotals(column, relationContext)');
+    expect(page).toContain("getCncBathRelationState(bath, relationContext) !== 'dimmed'");
+    expect(page).toContain("getCncPacketRelationState(packet, relationContext) !== 'dimmed'");
     expect(page).toContain('cnc-today-column__header-main');
     expect(page).toContain('cnc-today-column__totals');
     expect(page).toContain("{totals.details} дет. · {formatArea(totals.areaM2)}");

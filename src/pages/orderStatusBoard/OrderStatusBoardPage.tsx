@@ -911,7 +911,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     {columns.map((column) => {
       const bathColumn = column.key === 'baths' || column.key === 'baths_ready';
       const title = cncColumnDisplayTitle(column);
-      const totals = buildCncColumnTotals(column);
+      const totals = buildCncColumnTotals(column, relationContext);
       const bathSourceCards = column.baths ?? [];
       const packetSourceCards = column.packets ?? [];
       const bathCards = relationContext
@@ -2231,11 +2231,22 @@ interface CncColumnTotalItem {
   quantity: number;
 }
 
-function buildCncColumnTotals(column: CncTelegramTodayColumn): CncColumnTotals {
+function buildCncColumnTotals(
+  column: CncTelegramTodayColumn,
+  relationContext: CncRelationContext | null,
+): CncColumnTotals {
   const items: CncColumnTotalItem[] =
     column.key === 'baths' || column.key === 'baths_ready'
-      ? column.baths.flatMap((bath) => bath.items)
-      : column.packets.flatMap((packet) => packet.items);
+      ? column.baths
+        .filter((bath) =>
+          !relationContext || getCncBathRelationState(bath, relationContext) !== 'dimmed',
+        )
+        .flatMap((bath) => bath.items)
+      : column.packets
+        .filter((packet) =>
+          !relationContext || getCncPacketRelationState(packet, relationContext) !== 'dimmed',
+        )
+        .flatMap((packet) => packet.items);
 
   return items.reduce<CncColumnTotals>(
     (totals, item) => {
