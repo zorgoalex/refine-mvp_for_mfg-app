@@ -733,6 +733,15 @@ probe_file() {
                      "$(q_idx idx_notification_channel_deliveries_pending)" \
                      "$(q_idx idx_notification_channel_deliveries_processing)" \
                      "$(q_idx idx_notification_channel_deliveries_user)" ;;
+    090_user_preferences_ui_variant_default_evolution*) probe_all "$(q_col user_preferences ui_variant)" \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM information_schema.columns
+                         WHERE table_schema='public'
+                           AND table_name='user_preferences'
+                           AND column_name='ui_variant'
+                           AND column_default='''evolution''::text'
+                      );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

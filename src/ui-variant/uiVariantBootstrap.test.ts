@@ -56,36 +56,36 @@ describe('UI variant bootstrap', () => {
     )).resolves.toBe('evolution');
   });
 
-  it('fails closed when an old backend returns 200 without uiVariant', async () => {
+  it('uses evolution default when an old backend returns 200 without uiVariant', async () => {
     const dependencies = makeDependencies({
       getPreferences: async () => ({ preferences: {} }),
-      getCached: () => 'evolution',
+      getCached: () => 'legacy',
     });
 
     await expect(resolveInitialUiVariant(
       { evolutionEnabled: true },
       dependencies,
-    )).resolves.toBe('legacy');
+    )).resolves.toBe('evolution');
   });
 
-  it('fails closed when the authenticated user changes during the request', async () => {
+  it('uses the default when the authenticated user changes during the request', async () => {
     let userId = '7';
     const dependencies = makeDependencies({
       getCurrentUserId: () => userId,
-      getCached: () => 'evolution',
+      getCached: () => 'legacy',
       getPreferences: async () => {
         userId = '8';
-        return { preferences: { uiVariant: 'evolution' } };
+        return { preferences: { uiVariant: 'legacy' } };
       },
     });
 
     await expect(resolveInitialUiVariant(
       { evolutionEnabled: true },
       dependencies,
-    )).resolves.toBe('legacy');
+    )).resolves.toBe('evolution');
   });
 
-  it('bounds boot waiting and falls back to legacy without a confirmed cache', async () => {
+  it('bounds boot waiting and falls back to evolution when runtime allows it', async () => {
     const dependencies = makeDependencies({
       restoreSession: () => new Promise<void>(() => undefined),
       timeoutMs: 5,
@@ -94,7 +94,7 @@ describe('UI variant bootstrap', () => {
     await expect(resolveInitialUiVariant(
       { evolutionEnabled: true },
       dependencies,
-    )).resolves.toBe('legacy');
+    )).resolves.toBe('evolution');
   });
 });
 

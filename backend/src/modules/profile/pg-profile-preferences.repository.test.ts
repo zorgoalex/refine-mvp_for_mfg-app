@@ -3,11 +3,11 @@ import type { QueryResult, QueryResultRow } from 'pg';
 import { PgProfilePreferencesRepository } from './pg-profile-preferences.repository';
 
 describe('PgProfilePreferencesRepository', () => {
-  it('returns light when user has no stored preferences', async () => {
+  it('returns default preferences when user has no stored preferences', async () => {
     const database = new FakeDatabase([{ rows: [] }]);
     const repository = new PgProfilePreferencesRepository(database);
 
-    await expect(repository.getUserPreferences(7)).resolves.toEqual({ themeMode: 'light', uiSize: 'default', uiVariant: 'legacy', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} });
+    await expect(repository.getUserPreferences(7)).resolves.toEqual({ themeMode: 'light', uiSize: 'default', uiVariant: 'evolution', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} });
     expect(database.queries[0].text).toContain('FROM user_preferences');
     expect(database.queries[0].params).toEqual([7]);
   });
@@ -33,7 +33,7 @@ describe('PgProfilePreferencesRepository', () => {
     await expect(repository.updateUserPreferences(7, { themeMode: 'dark' })).resolves.toEqual({
       themeMode: 'dark',
       uiSize: 'default',
-      uiVariant: 'legacy',
+      uiVariant: 'evolution',
       orderDetailColumns: {},
       recentReferences: {},
       pageSizePreferences: {},
@@ -52,7 +52,7 @@ describe('PgProfilePreferencesRepository', () => {
     })).resolves.toEqual({
       themeMode: 'light',
       uiSize: 'default',
-      uiVariant: 'legacy',
+      uiVariant: 'evolution',
       orderDetailColumns: { orderEdit: { order: ['width'], hidden: [] } },
       recentReferences: {},
       pageSizePreferences: {},
@@ -74,7 +74,7 @@ describe('PgProfilePreferencesRepository', () => {
     await expect(repository.updateUserPreferences(7, { uiSize: 'small' })).resolves.toEqual({
       themeMode: 'light',
       uiSize: 'small',
-      uiVariant: 'legacy',
+      uiVariant: 'evolution',
       orderDetailColumns: {},
       recentReferences: {},
       pageSizePreferences: {},
@@ -84,11 +84,11 @@ describe('PgProfilePreferencesRepository', () => {
     const garbage = new FakeDatabase([{ rows: [{ theme_mode: 'light', ui_size: 'huge', order_detail_columns: {} }] }]);
     await expect(new PgProfilePreferencesRepository(garbage).getUserPreferences(7)).resolves.toMatchObject({
       uiSize: 'default',
-      uiVariant: 'legacy',
+      uiVariant: 'evolution',
     });
   });
 
-  it('upserts UI variant and normalizes unknown stored values to legacy', async () => {
+  it('upserts UI variant and normalizes unknown stored values to evolution default', async () => {
     const database = new FakeDatabase([{
       rows: [{ theme_mode: 'light', ui_variant: 'evolution', order_detail_columns: {} }],
     }]);
@@ -103,7 +103,7 @@ describe('PgProfilePreferencesRepository', () => {
       rows: [{ theme_mode: 'light', ui_variant: 'future', order_detail_columns: {} }],
     }]);
     await expect(new PgProfilePreferencesRepository(garbage).getUserPreferences(7))
-      .resolves.toMatchObject({ uiVariant: 'legacy' });
+      .resolves.toMatchObject({ uiVariant: 'evolution' });
   });
 
   it('atomically merges one list page size without replacing other list preferences', async () => {

@@ -14,6 +14,8 @@ import type {
   UserPreferencesRepositoryPort,
 } from './profile-preferences.types';
 
+const DEFAULT_UI_VARIANT: UiVariant = 'evolution';
+
 interface PreferenceRow extends QueryResultRow {
   theme_mode: string | null;
   ui_size: string | null;
@@ -60,7 +62,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
         $1,
         COALESCE($2, 'light'),
         $3,
-        COALESCE($4, 'legacy'),
+        COALESCE($4, 'evolution'),
         COALESCE($5::jsonb, '{}'::jsonb),
         COALESCE($6::jsonb, '{}'::jsonb)
       )
@@ -217,7 +219,7 @@ function normalizeUiSize(value: unknown): UiSize {
 }
 
 function normalizeUiVariant(value: unknown): UiVariant {
-  return value === 'evolution' ? 'evolution' : 'legacy';
+  return value === 'legacy' || value === 'evolution' ? value : DEFAULT_UI_VARIANT;
 }
 
 function normalizeOrderDetailColumns(value: unknown): OrderDetailColumnPreferencesDto {
