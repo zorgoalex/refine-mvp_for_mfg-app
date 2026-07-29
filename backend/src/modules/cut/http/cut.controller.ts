@@ -16,11 +16,8 @@ import type {
   EligibleDetailsResponseDto,
 } from '../dto/cut.dto';
 import type { CutSheetTypeOption, ManualMove, SheetViewTransform } from '../application/cut-command.types';
-import { CutPdfCache, type PdfEnsureResult } from '../application/cut-pdf-cache';
+import { CutPdfCache } from '../application/cut-pdf-cache';
 import { CutRuntimeConfigService } from './cut-runtime-config.service';
-
-/** Cold-cache PDF retry hint (seconds). */
-const PDF_RETRY_AFTER_SECONDS = 2;
 
 const idArray = z.array(z.number().int().positive()).max(5000);
 
@@ -327,6 +324,7 @@ export class CutController {
       originTopLeft: canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin),
       axisOrigin,
       variant: parseVariant(query.variant),
+      pieceMetadata: query.pieceMetadata === 'on',
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/svg+xml');
@@ -458,9 +456,8 @@ export class CutController {
       commandId: parsed.commandId,
       requestId: request.requestId,
     });
-    // Pre-warm the whole-job PDF (plan §7): cache-warming optimization, not
-    // persistence (DB placements stay the source of truth, PDF re-derivable).
-    // Fire-and-forget; the export.pdf endpoint also renders on a cold cache.
+    // Fire-and-forget readiness render. User-facing PDF exports render fresh on
+    // every request so volatile dynamic fields/CNC relations never come from cache.
     if (job.status === 'ready') {
       this.prewarmJobPdf(currentUser, job.cutJobId, job.version, request.requestId);
     }
@@ -689,6 +686,7 @@ export class CutController {
       originTopLeft: canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin),
       axisOrigin,
       variant: parseVariant(query.variant),
+      pieceMetadata: query.pieceMetadata === 'on',
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/svg+xml');
@@ -696,7 +694,7 @@ export class CutController {
     response.send(svg);
   }
 
-  @ApiOperation({ operationId: 'exportCutGroupPdf', summary: 'Export a per-group multi-page PDF (on-demand, cached)' })
+  @ApiOperation({ operationId: 'exportCutGroupPdf', summary: 'Export a per-group multi-page PDF (fresh on-demand render)' })
   @Get(':cutJobId/groups/:groupId/export.pdf')
   async exportGroupPdf(
     @Req() request: RequestWithCurrentUser,
@@ -713,21 +711,21 @@ export class CutController {
     const originTopLeft = canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin);
     const variant = parseVariant(query.variant);
     const pdfTemplate = parsePdfTemplate(query.template);
-    // Task 7 Rule 9: cache key includes the server-owned render token (layout state)
-    // so a manual save or active-selector flip busts the in-process cache. FIX 2:
-    // the requested `variant` is a SEPARATE key dimension — `auto` and `active` can
-    // render different bytes for the same layout state and must not share a slot.
-    // origin (TL/RAW) is ALSO a separate key dimension: a top-left (transpose) and
-    // a raw 90° CW render produce different bytes for the same layout+orientation.
-    const renderToken = await this.cut.getRenderCacheToken({ cutGroupId });
-    const result = this.pdfCache.ensure(
-      `group:${cutGroupId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}:${axisOrigin === 'bottom-left' ? 'BL' : 'TOP'}:${pdfTemplate}`,
-      () => this.cut.renderGroupPdf({ currentUser, cutGroupId, cutJobId: parsedJobId, rotate90, originTopLeft, axisOrigin, variant, pdfTemplate, requestId: request.requestId }),
-    );
-    this.sendPdf(response, result, `cut-group-${cutGroupId}.pdf`);
+    const pdf = await this.cut.renderGroupPdf({
+      currentUser,
+      cutGroupId,
+      cutJobId: parsedJobId,
+      rotate90,
+      originTopLeft,
+      axisOrigin,
+      variant,
+      pdfTemplate,
+      requestId: request.requestId,
+    });
+    this.sendPdfBuffer(response, pdf, `cut-group-${cutGroupId}.pdf`);
   }
 
-  @ApiOperation({ operationId: 'exportCutJobPdf', summary: 'Export a whole-job PDF (all groups; on-demand, cached, pre-warmed)' })
+  @ApiOperation({ operationId: 'exportCutJobPdf', summary: 'Export a whole-job PDF (all groups; fresh on-demand render)' })
   @Get(':cutJobId/export.pdf')
   async exportJobPdf(
     @Req() request: RequestWithCurrentUser,
@@ -742,56 +740,24 @@ export class CutController {
     const originTopLeft = canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin);
     const variant = parseVariant(query.variant);
     const pdfTemplate = parsePdfTemplate(query.template);
-    // getJob gives the current version + renderToken (cache discriminator for manual layouts).
-    const job = await this.cut.getJob({ currentUser, cutJobId: id, requestId: request.requestId });
-    // Task 7 Rule 10: renderToken aggregates job version + all per-group manual tokens;
-    // any manual save or active-selector flip changes the token → busts the cache.
-    const renderToken = job.renderToken ?? `v${job.version}`;
-    const result = this.ensureJobPdf(currentUser, id, renderToken, job.version, request.requestId, rotate90, variant, originTopLeft, axisOrigin, pdfTemplate);
-    this.sendPdf(response, result, `cut-job-${id}.pdf`);
+    const pdf = await this.cut.renderJobPdf({
+      currentUser,
+      cutJobId: id,
+      rotate90,
+      originTopLeft,
+      axisOrigin,
+      variant,
+      pdfTemplate,
+      requestId: request.requestId,
+    });
+    this.sendPdfBuffer(response, pdf, `cut-job-${id}.pdf`);
   }
 
-  private ensureJobPdf(
-    currentUser: RequestWithCurrentUser['user'],
-    cutJobId: number,
-    renderToken: string,
-    version: number,
-    requestId: string | undefined,
-    rotate90 = false,
-    variant: 'auto' | 'manual' | 'active' = 'auto',
-    originTopLeft = false,
-    axisOrigin: 'top-left' | 'bottom-left' = 'top-left',
-    pdfTemplate = 'standard',
-  ) {
-    // Task 7: cache key uses renderToken (job version + per-group manual tokens)
-    // so a manual save or active-selector flip always busts the in-process cache.
-    // FIX 2: `variant` is a separate key dimension (auto vs active can differ).
-    // Orientation AND origin (TL/RAW) discriminate the cache. pdf_prewarm_state
-    // tracks only the default surfaced job PDF (portrait + bottom-left axis,
-    // canonically RAW so landscape rotates clockwise).
-    return this.pdfCache.ensure(
-      `job:${cutJobId}:${variant}:${renderToken}:${rotate90 ? 'L' : 'P'}:${originTopLeft ? 'TL' : 'RAW'}:${axisOrigin === 'bottom-left' ? 'BL' : 'TOP'}:${pdfTemplate}`,
-      () => this.cut.renderJobPdf({ currentUser: currentUser!, cutJobId, rotate90, originTopLeft, axisOrigin, variant, pdfTemplate, requestId }),
-      (state, reason) => {
-        if (rotate90 || originTopLeft || axisOrigin !== 'bottom-left') return;
-        void this.cut.setPdfPrewarmState({ cutJobId, version, state, reason }).catch(() => undefined);
-      },
-    );
-  }
-
-  /** Fire-and-forget whole-job PDF pre-warm (kicked after a successful calculate
-   *  or manual save). FIX 3: the prewarm MUST key on the same render token the
-   *  export reads (`getRenderCacheToken({cutJobId})` === `job.renderToken`),
-   *  otherwise the prewarm warms a key the export never looks up and the first
-   *  export is a cold synchronous miss.
-   *  FIX 4: it must ALSO warm the same `variant` dimension. The FE `fetchJobPdf`
-   *  always passes `job.renderToken` (always present on the single-job GET), so it
-   *  always requests `variant=active` → export key `job:{id}:active:{token}:P`.
-   *  Warming with the default `auto` would warm a slot the real download never
-   *  reads. `active` resolves per-group `effectiveActive` — exactly the surfaced
-   *  whole-job PDF. Orientation is unchanged (portrait, as before). FIX 5: it must
-   *  ALSO warm the surfaced origin dimension: bottom-left is canonicalized to
-   *  RAW so landscape always rotates clockwise and prewarm/export share a key.
+  /** Fire-and-forget whole-job readiness render (kicked after a successful
+   *  calculate or manual save). It updates pdf_prewarm_state only; current
+   *  user-facing exports ignore warmed bytes and render fresh so dynamic fields
+   *  and CNC file-card relations are recalculated on every preview/download.
+   *  The active variant and bottom-left axis match the surfaced whole-job PDF.
    */
   private prewarmJobPdf(
     currentUser: RequestWithCurrentUser['user'],
@@ -800,31 +766,27 @@ export class CutController {
     requestId: string | undefined,
   ): void {
     void this.cut
-      .getRenderCacheToken({ cutJobId })
-      .then((renderToken) => {
-        this.ensureJobPdf(currentUser, cutJobId, renderToken, version, requestId, false, 'active', false, 'bottom-left');
+      .renderJobPdf({
+        currentUser: currentUser!,
+        cutJobId,
+        rotate90: false,
+        originTopLeft: false,
+        axisOrigin: 'bottom-left',
+        variant: 'active',
+        requestId,
       })
-      .catch(() => undefined);
+      .then(() => this.cut.setPdfPrewarmState({ cutJobId, version, state: 'ready' }))
+      .catch((error: unknown) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        void this.cut.setPdfPrewarmState({ cutJobId, version, state: 'failed', reason }).catch(() => undefined);
+      });
   }
 
-  private sendPdf(response: Response, result: PdfEnsureResult, filename: string): void {
+  private sendPdfBuffer(response: Response, buffer: Buffer, filename: string): void {
     response.setHeader('Cache-Control', 'private, no-store, max-age=0');
-    if (result.status === 'ready') {
-      response.setHeader('Content-Type', 'application/pdf');
-      response.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-      response.send(result.buffer);
-      return;
-    }
-    if (result.status === 'failed') {
-      // Surface a deterministic render failure (e.g. empty group/job) instead of
-      // looping 202 forever. Re-throw the original ApiError; wrap anything else.
-      throw result.error instanceof ApiError
-        ? result.error
-        : new ApiError(500, 'CUT_PDF_RENDER_FAILED', 'Не удалось сформировать PDF раскроя');
-    }
-    // Cold cache: render is in-flight; ask the client to retry (plan §7/§8).
-    response.setHeader('Retry-After', String(PDF_RETRY_AFTER_SECONDS));
-    response.status(202).json({ status: 'pending', retryAfterSeconds: PDF_RETRY_AFTER_SECONDS });
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    response.send(buffer);
   }
 
   private requireRead(request: RequestWithCurrentUser) {

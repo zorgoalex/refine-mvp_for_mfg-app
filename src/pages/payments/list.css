@@ -16,6 +16,12 @@
   background-color: var(--app-row-hover) !important;
 }
 
+.ant-table-tbody > tr.order-deleted-reference-row > td,
+.ant-table-tbody > tr.order-deleted-reference-row:hover > td {
+  background-color: var(--app-deleted-reference-bg) !important;
+  color: var(--app-deleted-reference-text) !important;
+}
+
 /* Стиль строки-заголовка группы (как в Excel) - оставлено для будущего */
 .payment-group-header td {
   background-color: var(--app-selection-bg) !important;

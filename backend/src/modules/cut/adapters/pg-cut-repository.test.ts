@@ -336,6 +336,7 @@ function createDatabase(options: FakeDbOptions = {}) {
         production_status_name: item.production_status_name ?? null,
         machine_files: item.machine_files ?? null,
         order_name: item.order_name ?? null,
+        order_delete_flag: item.order_delete_flag ?? null,
         order_date: item.order_date ?? null,
         completion_date: item.completion_date ?? null,
         planned_completion_date: item.planned_completion_date ?? null,
@@ -448,6 +449,7 @@ function createDatabase(options: FakeDbOptions = {}) {
         joint_order_id: null,
         note: null,
         order_name: null,
+        order_delete_flag: item.order_delete_flag ?? null,
       }));
       return { rows, rowCount: rows.length };
     }
@@ -1304,6 +1306,7 @@ describe('PgCutRepository', () => {
     expect(eligibleSql).toContain('LEFT JOIN clients');
     expect(eligibleSql).toContain('LEFT JOIN films');
     expect(eligibleSql).toContain('order_name');
+    expect(eligibleSql).toContain('ord.delete_flag = false');
   });
 
   it('Variant B: treats a sheet detail with NULL material_id as eligible (no mandatory materials JOIN)', async () => {

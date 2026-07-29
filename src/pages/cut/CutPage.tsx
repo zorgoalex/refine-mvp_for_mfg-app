@@ -35,6 +35,7 @@ import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfil
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
 import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, loadSheetAxisOrigin, saveSheetAxisOrigin, selectVariantSheets } from './cutPreviewHelpers';
 import { TableTopScroll } from '../../components/TableTopScroll';
+import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
 import { buildPieceMetaByItemId } from './cutPieceMeta';
@@ -354,14 +355,37 @@ function cutJobOrderOptions(job: CutJobDto | null): CutOrderSelectOption[] {
   for (const item of job?.items ?? []) {
     if (byId.has(item.orderId)) continue;
     const label = item.orderName?.trim() || `#${item.orderId}`;
+    const title = item.orderDeleted ? `${label} · удалён` : label;
     byId.set(item.orderId, {
       value: item.orderId,
       label,
-      title: label,
+      title,
       searchText: label.toLowerCase(),
     });
   }
   return [...byId.values()];
+}
+
+function CutOrderReference({
+  orderId,
+  orderName,
+  orderDeleted,
+  onOpen,
+}: {
+  orderId: number;
+  orderName?: string | null;
+  orderDeleted?: boolean | null;
+  onOpen: () => void;
+}): JSX.Element {
+  const label = orderName?.trim() || `#${orderId}`;
+  return (
+    <Space size={4} wrap>
+      <Button type="link" size="small" style={{ padding: 0 }} onClick={onOpen}>
+        {label}
+      </Button>
+      <OrderDeletedTag deleted={orderDeleted} />
+    </Space>
+  );
 }
 
 function cutJobFilmOptions(job: CutJobDto | null): CutFilmSelectOption[] {
@@ -1696,7 +1720,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       revokePdfPreviewUrl();
       setPdfPreview({ ...EMPTY_PDF_PREVIEW, open: true, group, title: `Предпросмотр PDF · группа #${group.cutGroupId}`, loading: true });
       try {
-        // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
+        // Pass renderToken so the backend uses the active layout variant; PDF bytes are rendered fresh.
         const pdfTemplate = pdfTemplateByGroup[group.cutGroupId] ?? 'standard';
         const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetAxisOrigin === 'bottom-left' ? false : sheetOriginTopLeft, pdfTemplate, sheetAxisOrigin, isHistoricalResult ? selectedResult?.resultNo : undefined));
         if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
@@ -1748,7 +1772,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       fileName: `cut-job-${job.cutJobId}.pdf`,
     });
     try {
-      // Pass renderToken so a post-save PDF render-cache is busted (variant=active).
+      // Pass renderToken so the backend uses the active layout variant; PDF bytes are rendered fresh.
       const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetAxisOrigin === 'bottom-left' ? false : sheetOriginTopLeft, pdfTemplateForJob, sheetAxisOrigin, isHistoricalResult ? selectedResult?.resultNo : undefined));
       if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
       const url = URL.createObjectURL(result.blob);
@@ -2261,13 +2285,16 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         title: 'Заказ',
         dataIndex: 'orderId',
         key: 'order',
-        width: 140,
+        width: 178,
         // Click the order name to open its card as an in-app workspace tab
         // (push = new keep-alive tab, same as the orders list double-click).
         render: (_: unknown, r: CutJobItemDto) => (
-          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => show('orders_view', r.orderId, 'push')}>
-            {r.orderName?.trim() || `#${r.orderId}`}
-          </Button>
+          <CutOrderReference
+            orderId={r.orderId}
+            orderName={r.orderName}
+            orderDeleted={r.orderDeleted}
+            onOpen={() => show('orders_view', r.orderId, 'push')}
+          />
         ),
       },
       { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: 90 },
@@ -2881,7 +2908,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 dataSource={job.items}
                 pagination={false}
                 scroll={{ x: 1900, y: CUT_JOB_DETAILS_TABLE_BODY_HEIGHT }}
-                rowClassName={(row) => `detail-group-tint-${jobItemOrderTintByOrderId.get(row.orderId) ?? 0}`}
+                rowClassName={(row) =>
+                  orderDeletedReferenceClassName(
+                    row.orderDeleted,
+                    `detail-group-tint-${jobItemOrderTintByOrderId.get(row.orderId) ?? 0}`,
+                  )
+                }
                 locale={{ emptyText: 'В задании пока нет деталей — добавьте их из заказа или через «Загрузить подходящие детали»' }}
               />
             </TableTopScroll>
@@ -2964,7 +2996,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         // effectiveManual: which variant the preview/print actually shows.
         // isActive drives PRINT; isStale means the pieces drifted (recalc needed).
         const effectiveManual = !!(group.manualLayout?.isActive && !group.manualLayout?.isStale);
-        // Render token for cache-busting (absent on groups without a manual layout).
+        // Render token for request URL/state discrimination (absent on groups without a manual layout).
         const renderVersion = group.renderToken;
         // Stale: the manual layout pieces may not match the current auto set.
         // (Declared before displayVariant below, which reads it.)

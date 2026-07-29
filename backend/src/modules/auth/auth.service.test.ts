@@ -9,6 +9,7 @@ function createPorts(
   passwordValid = true,
   auditWrites: unknown[] = [],
   rateLimitCalls: string[] = [],
+  tokenIssueCalls: unknown[] = [],
 ): AuthServicePorts {
   return {
     rateLimits: {
@@ -44,7 +45,8 @@ function createPorts(
       },
     },
     tokens: {
-      async issueAccessToken(currentUser) {
+      async issueAccessToken(currentUser, options) {
+        tokenIssueCalls.push({ currentUser, options });
         return {
           accessToken: `access_for_${currentUser.id}`,
           expiresAt: new Date('2026-05-01T12:15:00.000Z'),
@@ -73,7 +75,10 @@ describe('AuthService login contract', () => {
   };
 
   it('returns access token, user and permissions without refresh token in response', async () => {
-    const result = await new AuthService(createPorts(activeUser)).login({
+    const tokenIssueCalls: unknown[] = [];
+    const result = await new AuthService(
+      createPorts(activeUser, true, [], [], tokenIssueCalls),
+    ).login({
       username: ' superadmin ',
       password: 'password',
     });
@@ -91,6 +96,13 @@ describe('AuthService login contract', () => {
     expect(result.response.user.permissions).toContain('system.superadmin');
     expect(result.response).not.toHaveProperty('refreshToken');
     expect(result.refreshToken).toBe('refresh_secret');
+    expect(tokenIssueCalls).toEqual([
+      expect.objectContaining({
+        options: {
+          notAfter: new Date('2026-05-07T00:00:00.000Z'),
+        },
+      }),
+    ]);
   });
 
   it('rejects unknown users and wrong passwords with same public error', async () => {

@@ -34,6 +34,8 @@ interface RefreshSessionRow extends QueryResultRow {
   session_id: string;
   token_family_id: string;
   expires_at: Date;
+  session_created_at: Date;
+  session_expires_at: Date;
   revoked_at: Date | null;
   session_status: string;
   username: string;
@@ -63,6 +65,7 @@ const DEFAULT_REQUEST_ID = 'auth-command';
 export interface PgAuthSessionManagerOptions {
   refreshTokenPepper: string;
   refreshTokenTtlDays: number;
+  sessionTtlSeconds: number;
   /**
    * auth_sessions.provider_session_id exists only after migration 052; the
    * column is written/read only when the schema capability says it exists so
@@ -87,7 +90,8 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
   async createLoginSession(user: AuthUserRecord, context: LoginSessionContext): Promise<AuthSessionRecord> {
     const refreshToken = this.tokenService.generateRefreshToken();
     const tokenHash = this.hashRefreshToken(refreshToken);
-    const expiresAt = this.refreshTokenExpiresAt();
+    const sessionExpiresAt = this.sessionExpiresAt();
+    const refreshTokenExpiresAt = this.refreshTokenExpiresAt(sessionExpiresAt);
     return this.database.transaction(async (tx) => {
       // TOCTOU guard: the service checked is_active/login_policy on a stale
       // snapshot BEFORE bcrypt; re-prove both under a row lock in the same
@@ -148,7 +152,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
             `,
             [
               user.id,
-              expiresAt,
+              sessionExpiresAt,
               context.ipAddress ?? null,
               context.userAgent ?? null,
               context.providerSessionId ?? null,
@@ -161,7 +165,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
             VALUES ($1, $2, $3, $4)
             RETURNING session_id::text, token_family_id::text
             `,
-            [user.id, expiresAt, context.ipAddress ?? null, context.userAgent ?? null],
+            [user.id, sessionExpiresAt, context.ipAddress ?? null, context.userAgent ?? null],
           );
       const sessionRow = session.rows[0];
 
@@ -183,7 +187,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
           sessionRow.session_id,
           tokenHash,
           sessionRow.token_family_id,
-          expiresAt,
+          refreshTokenExpiresAt,
           context.userAgent ?? null,
           context.ipAddress ?? null,
         ],
@@ -211,7 +215,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         sessionId: sessionRow.session_id,
         userId: user.id,
         refreshToken,
-        refreshTokenExpiresAt: expiresAt,
+        refreshTokenExpiresAt,
       };
     });
   }
@@ -235,7 +239,13 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         );
       }
 
-      if (current.expires_at.getTime() <= Date.now()) {
+      const nowMs = Date.now();
+      const sessionExpiresAt = this.effectiveSessionExpiresAt(current);
+
+      if (
+        current.expires_at.getTime() <= nowMs
+        || sessionExpiresAt.getTime() <= nowMs
+      ) {
         await this.expireSession(tx, current);
         throw new ApiError(401, 'REFRESH_TOKEN_EXPIRED', 'Refresh token expired');
       }
@@ -251,7 +261,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
 
       const newRefreshToken = this.tokenService.generateRefreshToken();
       const newTokenHash = this.hashRefreshToken(newRefreshToken);
-      const newRefreshTokenExpiresAt = this.refreshTokenExpiresAt();
+      const newRefreshTokenExpiresAt = this.refreshTokenExpiresAt(sessionExpiresAt, nowMs);
 
       await tx.query(
         `
@@ -319,7 +329,9 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       });
 
       const currentUser = this.toCurrentUser(current, current.session_id);
-      const issuedAccessToken = await this.accessTokens.issueAccessToken(currentUser);
+      const issuedAccessToken = await this.accessTokens.issueAccessToken(currentUser, {
+        notAfter: sessionExpiresAt,
+      });
 
       return {
         response: this.toAuthResponse(currentUser, issuedAccessToken),
@@ -468,6 +480,8 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         rt.expires_at,
         rt.revoked_at,
         s.status AS session_status,
+        s.created_at AS session_created_at,
+        s.expires_at AS session_expires_at,
         u.username,
         u.role_id,
         u.is_active${this.options.supportsProviderSessions ? ',\n        s.auth_source' : ''}
@@ -567,8 +581,26 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     );
   }
 
-  private refreshTokenExpiresAt(): Date {
-    return new Date(Date.now() + this.options.refreshTokenTtlDays * 24 * 60 * 60 * 1000);
+  private sessionExpiresAt(nowMs = Date.now()): Date {
+    return new Date(nowMs + this.options.sessionTtlSeconds * 1000);
+  }
+
+  private effectiveSessionExpiresAt(current: RefreshSessionRow): Date {
+    const configuredExpiresAt = new Date(
+      current.session_created_at.getTime() + this.options.sessionTtlSeconds * 1000,
+    );
+    return configuredExpiresAt.getTime() < current.session_expires_at.getTime()
+      ? configuredExpiresAt
+      : current.session_expires_at;
+  }
+
+  private refreshTokenExpiresAt(sessionExpiresAt: Date, nowMs = Date.now()): Date {
+    const tokenExpiresAt = new Date(
+      nowMs + this.options.refreshTokenTtlDays * 24 * 60 * 60 * 1000,
+    );
+    return tokenExpiresAt.getTime() < sessionExpiresAt.getTime()
+      ? tokenExpiresAt
+      : sessionExpiresAt;
   }
 
   private hashRefreshToken(refreshToken: string): string {

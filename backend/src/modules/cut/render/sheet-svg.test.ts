@@ -130,6 +130,17 @@ describe('buildSheetSvg multi-line labels', () => {
     expect(svg).toContain('>X</tspan>');
   });
 
+  it('adds piece metadata for interactive sheet previews', () => {
+    const svg = buildSheetSvg({ sheet, labelFor: () => 'X' });
+
+    expect(svg).toContain('class="cut-sheet-piece"');
+    expect(svg).toContain('data-item-id="det-999"');
+    expect(svg).toContain('data-detail-id="999"');
+    expect(svg).toContain('data-piece-instance="1"');
+    expect(svg).toContain('data-piece-cx="310"');
+    expect(svg).toContain('data-piece-cy="215"');
+  });
+
   it('uses deterministic per-order fills when provided', () => {
     const svg = buildSheetSvg({
       sheet,
@@ -160,6 +171,7 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
   it('puts dimensions along sides and keeps only order/position in the centre', () => {
     const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['11300', 'поз. 5', '600X400'] });
 
+    expect(svg).toContain('data-detail-id="999"');
     expect(svg).toMatch(/fill="#7f1d1d"[^>]*font-weight="700"[^>]*>11300<\/text>/);
     expect(svg).toMatch(/font-size="[^"]+"[^>]*fill="#14532d"[^>]*>#<\/text>/);
     expect(svg).toMatch(/font-size="[^"]+"[^>]*fill="#14532d"[^>]*> 5<\/text>/);

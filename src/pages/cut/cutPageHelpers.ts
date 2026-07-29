@@ -228,10 +228,10 @@ export interface PollPdfOptions {
 }
 
 /**
- * Poll an on-demand PDF endpoint that answers 202 (`{ pending: true }`) on a
- * cold cache (plan §7/§8). Retries up to `maxAttempts`, sleeping between tries,
- * and resolves with the ready result. The sleep is injectable so the polling
- * loop is unit-testable without timers. Throws if still pending after the cap.
+ * Poll an on-demand PDF endpoint that may answer 202 (`{ pending: true }`).
+ * Retries up to `maxAttempts`, sleeping between tries, and resolves with the
+ * ready result. The sleep is injectable so the polling loop is unit-testable
+ * without timers. Throws if still pending after the cap.
  */
 export async function pollPdf(
   fetchPdf: () => Promise<PdfFetchResult>,

@@ -143,7 +143,7 @@ async function request<T>(
       return request<T>(path, options, false);
     }
 
-    authSession.clear();
+    authSession.expire();
   }
 
   if (!response.ok) {
@@ -182,7 +182,7 @@ async function download(
       return download(path, options, false);
     }
 
-    authSession.clear();
+    authSession.expire();
   }
 
   if (!response.ok) {

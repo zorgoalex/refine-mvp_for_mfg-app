@@ -34,6 +34,7 @@ describe('PgOrderReadRepository', () => {
           notes: 'List note',
           materialIds: [10, 11],
           materialNames: ['MDF 16', 'MDF 18'],
+          basisProjects: ['1491', '1492'],
           filmNames: ['Film A', 'Film B'],
           millingTypeId: 1,
           millingTypeName: 'Modern',
@@ -61,6 +62,8 @@ describe('PgOrderReadRepository', () => {
     expect(listQuery).toContain("(mp.code || '-' || o.order_name) AS full_number");
     expect(listQuery).toContain('LEFT JOIN LATERAL');
     expect(listQuery).toContain('FROM order_details od');
+    expect(listQuery).toContain('AS basis_projects');
+    expect(listQuery).toContain('NULLIF(BTRIM(od.basis_project), \'\') IS NOT NULL');
     expect(listQuery).toContain('FROM order_doweling_links odl');
     expect(listQuery).toContain('FROM production_status_events pse');
     expect(listQuery).toContain('ORDER BY (o.final_amount - o.paid_amount) ASC');
@@ -871,6 +874,7 @@ function orderRow() {
     deleted_by_name: 'Trash Manager',
     material_ids: [10, 11],
     material_names: ['MDF 16', 'MDF 18'],
+    basis_projects: ['1491', '1492'],
     film_names: ['Film A', 'Film B'],
     milling_type_id: 1,
     milling_type_name: 'Modern',
@@ -927,6 +931,7 @@ function mergeBaseDefaultListSql(): string {
     '        o.*,',
     '        material_projection.material_ids,',
     '        material_projection.material_names,',
+    '        basis_projection.basis_projects,',
     '        film_projection.film_names,',
     '        material_projection.sheet_material_type_ids,',
     '        milling_projection.milling_type_id,',
@@ -956,6 +961,20 @@ function mergeBaseDefaultListSql(): string {
     '          GROUP BY od.sheet_material_type_id, smt.name',
     '        ) materials',
     '      ) material_projection ON true',
+    '      LEFT JOIN LATERAL (',
+    '        SELECT ARRAY_AGG(projects.basis_project ORDER BY projects.first_detail_number, projects.first_detail_id) AS basis_projects',
+    '        FROM (',
+    '          SELECT DISTINCT ON (LOWER(BTRIM(od.basis_project)))',
+    '            BTRIM(od.basis_project) AS basis_project,',
+    '            od.detail_number AS first_detail_number,',
+    '            od.detail_id AS first_detail_id',
+    '          FROM order_details od',
+    '          WHERE od.order_id = o.order_id',
+    '            AND od.delete_flag = false',
+    "            AND NULLIF(BTRIM(od.basis_project), '') IS NOT NULL",
+    '          ORDER BY LOWER(BTRIM(od.basis_project)), od.detail_number, od.detail_id',
+    '        ) projects',
+    '      ) basis_projection ON true',
     '      LEFT JOIN LATERAL (',
     '        SELECT ARRAY_AGG(films.film_name ORDER BY films.first_detail_number, films.first_detail_id) AS film_names',
     '        FROM (',

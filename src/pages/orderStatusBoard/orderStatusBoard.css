@@ -75,6 +75,20 @@
   flex: 0 0 220px;
 }
 
+.status-board-toolbar__cnc-period {
+  min-height: 32px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.status-board-toolbar__cnc-period-chip {
+  min-width: 46px;
+  font-variant-numeric: tabular-nums;
+}
+
 .status-board-toolbar__switch {
   min-height: 32px;
   flex: 0 0 auto;
@@ -136,7 +150,37 @@
 }
 
 .status-board-columns--cnc {
+  --cnc-machine-area-width-detailed: 30vw;
+  --cnc-machine-column-width-detailed: var(--cnc-machine-area-width-detailed);
+  --cnc-bath-detail-width: 70vw;
+  --cnc-bath-column-width: 304px;
+  --cnc-bath-column-gap: 12px;
   align-items: flex-start;
+}
+
+.status-board-columns--cnc .cnc-today-column--baths {
+  margin-left: 24px;
+}
+
+.status-board-columns--cnc-detailed {
+  isolation: isolate;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed,
+.status-board-columns--cnc-detailed .cnc-today-column--completed {
+  width: var(--cnc-machine-column-width-detailed);
+  min-width: var(--cnc-machine-column-width-detailed);
+  max-width: var(--cnc-machine-column-width-detailed);
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--detailed {
+  position: relative;
+  overflow: visible;
+  z-index: 12;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--detailed .status-board-column__cards {
+  overflow: visible;
 }
 
 .status-board-column {
@@ -183,6 +227,11 @@
 
 .cnc-today-column--completed {
   --status-color: #389e0d;
+  background: #edf7ff;
+}
+
+.cnc-today-column--machine_files {
+  --status-color: #1677ff;
   background: #edf7ff;
 }
 
@@ -306,7 +355,6 @@
 }
 
 .cnc-relation-card {
-  cursor: pointer;
   transition:
     background-color 140ms ease,
     border-color 140ms ease,
@@ -316,8 +364,14 @@
     transform 140ms ease;
 }
 
+.cnc-relation-card[data-cnc-clickable="true"],
+.cnc-bath-card--detailed-selectable {
+  cursor: pointer;
+}
+
 .cnc-relation-card--active,
-.cnc-relation-card--related {
+.cnc-relation-card--related,
+.cnc-relation-card--order-mentioned {
   opacity: 1;
   filter: none;
 }
@@ -334,6 +388,13 @@
   box-shadow:
     0 0 0 2px #722ed1,
     0 2px 8px var(--app-shadow);
+}
+
+.cnc-relation-card--order-mentioned {
+  border-color: #fa541c;
+  box-shadow:
+    0 0 0 2px #fa541c,
+    0 2px 8px rgba(250, 84, 28, 0.28);
 }
 
 .cnc-relation-card--dimmed {
@@ -588,6 +649,71 @@
   gap: 2px;
 }
 
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .status-board-column__header,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .status-board-column__header {
+  min-height: 52px;
+  padding: 7px 8px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .status-board-column__cards,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .status-board-column__cards {
+  padding: 7px;
+  gap: 6px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .status-board-column__title,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .status-board-column__title {
+  gap: 5px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .status-board-column__title .ant-typography,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .status-board-column__title .ant-typography {
+  font-size: 12px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-today-column__totals,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-today-column__totals {
+  padding-left: 13px;
+  font-size: 10px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .ant-badge-count,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .ant-badge-count {
+  transform: scale(0.86);
+  transform-origin: right center;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card {
+  padding: 7px 8px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card .status-board-card__top,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card .status-board-card__top {
+  min-height: 28px;
+  gap: 4px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__program,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__program {
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__status-icons,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__status-icons {
+  min-width: 28px;
+  min-height: 28px;
+  gap: 5px;
+  font-size: 13px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__status-icon,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__status-icon {
+  width: 19px;
+  height: 19px;
+}
+
 .cnc-packet-card__program {
   color: var(--app-text-muted);
   font-size: 13px;
@@ -699,6 +825,38 @@
   font-weight: 400;
 }
 
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__summaries,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__summaries,
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__summary-order.ant-btn,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__summary-order.ant-btn,
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__summary-meta,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__summary-meta {
+  font-size: 10px;
+  line-height: 1.18;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__notes,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__notes {
+  gap: 2px;
+  margin: 5px 0;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__collapse,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__collapse,
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__sheet,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__sheet {
+  margin-top: 5px;
+}
+
+.cnc-packet-card__summary.order-deleted-reference-line,
+.cnc-packet-card__summary.order-deleted-reference-line .cnc-packet-card__summary-order,
+.cnc-packet-card__summary.order-deleted-reference-line .cnc-packet-card__summary-order.ant-btn,
+.cnc-packet-card__summary.order-deleted-reference-line .cnc-packet-card__summary-meta {
+  color: var(--app-deleted-reference-text) !important;
+}
+
 .cnc-packet-card__collapse,
 .cnc-packet-card__sheet {
   margin-top: 8px;
@@ -730,6 +888,20 @@
   font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__collapse .ant-collapse-header,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__collapse .ant-collapse-header,
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__sheet .ant-collapse-header,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__sheet .ant-collapse-header {
+  min-height: 30px;
+  padding: 4px 0 !important;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__collapse-label,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__collapse-label {
+  gap: 4px;
+  font-size: 10px;
 }
 
 .cnc-packet-card__note-file {
@@ -774,6 +946,13 @@
   white-space: normal;
 }
 
+.cnc-packet-card__item.order-deleted-reference-line,
+.cnc-packet-card__item.order-deleted-reference-line .cnc-packet-card__order-link,
+.cnc-packet-card__item.order-deleted-reference-line .cnc-packet-card__size,
+.cnc-packet-card__item.order-deleted-reference-line .cnc-packet-card__qty {
+  color: var(--app-deleted-reference-text) !important;
+}
+
 .cnc-packet-card__size {
   display: block;
   color: var(--app-text-muted);
@@ -796,6 +975,40 @@
   margin-left: 4px;
   color: #ad4e00;
   font-weight: 700;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__items,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__items {
+  font-size: 10px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__item,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__item {
+  min-height: 27px;
+  grid-template-columns: minmax(34px, 0.8fr) minmax(62px, 1.25fr) minmax(26px, max-content);
+  gap: 4px;
+  padding: 3px 0;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__item--head,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__item--head {
+  min-height: 24px;
+  font-size: 9px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__order-link,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__order-link {
+  min-height: 24px;
+  font-size: 10px;
+  line-height: 1.15;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__size,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__size,
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .status-board-card__footer,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .status-board-card__footer {
+  font-size: 9px;
+  line-height: 1.15;
 }
 
 .cnc-packet-card__sheet {
@@ -836,6 +1049,42 @@
   overflow-wrap: anywhere;
 }
 
+.cnc-bath-card--detailed {
+  width: var(--cnc-bath-detail-width);
+  max-width: var(--cnc-bath-detail-width);
+  align-self: flex-start;
+  z-index: 20;
+  border-color: #722ed1;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 2px #722ed1,
+    0 16px 34px rgba(23, 15, 56, 0.22),
+    0 4px 14px var(--app-shadow);
+}
+
+.cnc-bath-card--detailed-left {
+  margin-left: calc(-1 * (var(--cnc-bath-column-width) + var(--cnc-bath-column-gap)));
+}
+
+.cnc-bath-card--detailed-right {
+  margin-left: 0;
+}
+
+.cnc-bath-card__actions {
+  min-width: 40px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.cnc-bath-card__detail-close.ant-btn {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+}
+
 .cnc-bath-card__ready-icon {
   min-width: 22px;
   font-size: 22px;
@@ -858,6 +1107,46 @@
 .cnc-bath-card__sheet-figure figcaption {
   color: var(--app-text-muted);
   font-size: 11px;
+}
+
+.cnc-bath-card__sheet-svg {
+  min-width: 0;
+  width: 100%;
+  max-height: 720px;
+  overflow: auto;
+  border-radius: 6px;
+  outline: 1px solid rgba(0, 0, 0, 0.1);
+  background: #fff;
+}
+
+.cnc-bath-card--detailed .cnc-bath-card__sheet-svg {
+  max-height: min(72vh, 760px);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 8px 18px rgba(0, 0, 0, 0.08);
+}
+
+.cnc-bath-card__sheet-svg svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.cnc-bath-card__sheet-svg [data-detail-id] {
+  cursor: pointer;
+}
+
+.cnc-bath-card__sheet-svg [data-cnc-order-fill="true"] {
+  fill-opacity: 0.96;
+}
+
+.cnc-bath-card__sheet-svg [data-cnc-selected-detail="true"] > rect:first-child {
+  stroke: #fa541c;
+  stroke-width: 8;
+}
+
+.cnc-bath-card__sheet-svg text {
+  pointer-events: none;
 }
 
 .cnc-bath-card__pdf-body {
@@ -992,6 +1281,20 @@
     width: calc(100vw - 48px);
     min-width: calc(100vw - 48px);
     scroll-snap-align: start;
+  }
+
+  .cnc-bath-card--detailed {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+  }
+
+  .status-board-columns--cnc-detailed .cnc-today-column--detailed {
+    overflow: hidden;
+  }
+
+  .status-board-columns--cnc-detailed .cnc-today-column--detailed .status-board-column__cards {
+    overflow-y: auto;
   }
 
   .status-board-card__actions .ant-btn {

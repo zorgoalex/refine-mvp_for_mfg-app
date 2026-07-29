@@ -3,7 +3,9 @@ import type { UserIdentity } from '../types/auth';
 let accessToken: string | null = null;
 let accessTokenVersion = 0;
 let currentUser: UserIdentity | null = null;
+let expired = false;
 const listeners = new Set<() => void>();
+const expiredListeners = new Set<() => void>();
 
 function notifyListeners(): void {
   listeners.forEach((listener) => listener());
@@ -17,6 +19,7 @@ export const authSession = {
   setAccessToken(token: string | null): void {
     if (accessToken === token) return;
     accessToken = token;
+    if (token) expired = false;
     accessTokenVersion += 1;
     notifyListeners();
   },
@@ -45,10 +48,24 @@ export const authSession = {
     notifyListeners();
   },
 
+  expire(): void {
+    this.clear();
+    if (expired) return;
+    expired = true;
+    expiredListeners.forEach((listener) => listener());
+  },
+
   subscribe(listener: () => void): () => void {
     listeners.add(listener);
     return () => {
       listeners.delete(listener);
+    };
+  },
+
+  subscribeExpired(listener: () => void): () => void {
+    expiredListeners.add(listener);
+    return () => {
+      expiredListeners.delete(listener);
     };
   },
 };

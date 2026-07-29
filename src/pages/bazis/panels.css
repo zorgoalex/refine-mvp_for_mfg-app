@@ -16,6 +16,13 @@
   background-color: var(--bazis-panel-child-bg) !important;
 }
 
+.bazis-panels-table .ant-table-tbody > tr.order-deleted-reference-row > td,
+.bazis-panels-table .ant-table-tbody > tr.order-deleted-reference-row:hover > td,
+.bazis-panels-table .ant-table-tbody > tr.bazis-panel-child-row.order-deleted-reference-row:not(.ant-table-row-selected) > td {
+  background-color: var(--app-deleted-reference-bg) !important;
+  color: var(--app-deleted-reference-text) !important;
+}
+
 /* Заголовки таблицы панелей — в два раза мельче стандартного (просьба
    пользователя: шапка не должна раздувать ширину колонок). */
 .bazis-panels-table .ant-table-thead > tr > th {

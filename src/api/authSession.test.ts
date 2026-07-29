@@ -38,4 +38,26 @@ describe('authSession subscriptions', () => {
 
     expect(authSession.getAccessTokenVersion()).toBe(before + 1);
   });
+
+  it('notifies expiry listeners only for an expired session', () => {
+    const listener = vi.fn();
+    const unsubscribe = authSession.subscribeExpired(listener);
+
+    authSession.clear();
+    expect(listener).not.toHaveBeenCalled();
+
+    authSession.expire();
+    expect(listener).toHaveBeenCalledTimes(1);
+    authSession.expire();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    authSession.setAccessToken('new-session');
+    authSession.expire();
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    unsubscribe();
+    authSession.setAccessToken('newer-session');
+    authSession.expire();
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
 });

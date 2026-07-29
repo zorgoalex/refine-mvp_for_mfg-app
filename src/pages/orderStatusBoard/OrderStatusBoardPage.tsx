@@ -32,6 +32,7 @@ import {
   CheckCircleFilled,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  CloseOutlined,
   DownloadOutlined,
   DragOutlined,
   FilePdfOutlined,
@@ -71,6 +72,7 @@ import type {
   CncTelegramTodayResponse,
 } from '../../api/types/cncTelegramApi.types';
 import { featureFlags } from '../../config/featureFlags';
+import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
 import {
   classifyOrderStatusBoardMoveFailure,
@@ -79,6 +81,7 @@ import {
   restoreOrderStatusBoardFocus,
 } from './interaction';
 import {
+  buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
   filterBoardColumns,
   filterCncTodayColumnsByOrders,
@@ -86,6 +89,7 @@ import {
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
   toOrderStatusBoardQuery,
+  type CncOrderSearchPeriod,
   type OrderStatusBoardViewState,
 } from './model';
 
@@ -94,16 +98,40 @@ const DATE_FORMAT = 'DD.MM.YYYY';
 const CNC_HISTORY_DAYS = 7;
 const CNC_DETAIL_CONFIDENCE_WARNING_THRESHOLD = 0.8;
 const CNC_TOOL_COMMENT_PATTERN = /^(?:T\d+\s*S\d+\s*,?\s*)+$/i;
+const CNC_OTHER_MATERIAL_MARKER_PATTERN = /(?:hdf|хдф|лдсп|ldsp|fanera|фанера)/i;
 const CNC_BATH_DEFAULT_PDF_TEMPLATE = 'bath_profiles';
 const CNC_BATH_PDF_TEMPLATE_OPTIONS = [
   { value: CNC_BATH_DEFAULT_PDF_TEMPLATE, label: 'Профили ванн' },
   { value: 'standard', label: 'Стандартный' },
 ];
 const CNC_PDF_WORKER_SRC = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+const CNC_ORDER_SEARCH_PERIOD_OPTIONS: Array<{
+  label: string;
+  value: CncOrderSearchPeriod;
+}> = [
+  { label: '1нед', value: '1w' },
+  { label: '2нед', value: '2w' },
+  { label: '1м', value: '1m' },
+];
+const CNC_SVG_NS = 'http://www.w3.org/2000/svg';
+const CNC_BATH_DETAIL_ORDER_FILL_COLORS = [
+  '#d7e9ff',
+  '#dff3d7',
+  '#ffe6b8',
+  '#f7d5e8',
+  '#d9f0ef',
+  '#eadcff',
+  '#ffe0d2',
+  '#e8edc9',
+  '#d5e5f2',
+  '#f2ddd5',
+] as const;
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
 type CncRelationTarget = { kind: 'packet'; id: string } | { kind: 'bath'; id: string };
-type CncRelationCardState = 'normal' | 'active' | 'related' | 'dimmed';
+type CncDetailedDetailTarget = { bathId: string; detailId: number };
+type CncRelationCardState = 'normal' | 'active' | 'related' | 'order-mentioned' | 'dimmed';
+type CncDetailedBathPlacement = 'left' | 'right';
 type CncPdfjsModule = typeof import('pdfjs-dist');
 
 const STATUS_BOARD_CARD_DISPLAY_OPTIONS: Array<{
@@ -141,6 +169,9 @@ export const OrderStatusBoardPage: React.FC = () => {
   const boardRef = useRef<OrderStatusBoardResponse | null>(null);
   const [cncToday, setCncToday] = useState<CncTelegramTodayResponse | null>(null);
   const cncTodayRef = useRef<CncTelegramTodayResponse | null>(null);
+  const [cncOrderSearchToday, setCncOrderSearchToday] =
+    useState<CncTelegramTodayResponse | null>(null);
+  const cncOrderSearchTodayRef = useRef<CncTelegramTodayResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
@@ -164,6 +195,11 @@ export const OrderStatusBoardPage: React.FC = () => {
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(false);
   const [activeCncRelation, setActiveCncRelation] =
     useState<CncRelationTarget | null>(null);
+  const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
+  const [activeCncDetailedBathId, setActiveCncDetailedBathId] =
+    useState<string | null>(null);
+  const [activeCncDetailedDetail, setActiveCncDetailedDetail] =
+    useState<CncDetailedDetailTarget | null>(null);
 
   useEffect(() => {
     boardRef.current = board;
@@ -172,6 +208,10 @@ export const OrderStatusBoardPage: React.FC = () => {
   useEffect(() => {
     cncTodayRef.current = cncToday;
   }, [cncToday]);
+
+  useEffect(() => {
+    cncOrderSearchTodayRef.current = cncOrderSearchToday;
+  }, [cncOrderSearchToday]);
 
   useEffect(() => {
     setSearchDraft(viewState.search);
@@ -211,9 +251,22 @@ export const OrderStatusBoardPage: React.FC = () => {
           const response = await cncTelegramApi.today(
             workday ? { date: workday } : {},
           );
+          const searchRange = buildCncOrderSearchDateRange(
+            response.workday,
+            viewStateRef.current.cncOrderSearchPeriod,
+          );
+          const searchResponse =
+            searchRange.dateFrom === response.workday && searchRange.dateTo === response.workday
+              ? response
+              : await cncTelegramApi.today({
+                dateFrom: searchRange.dateFrom,
+                dateTo: searchRange.dateTo,
+              });
           if (datasetRevisionRef.current !== revision) return false;
           cncTodayRef.current = response;
+          cncOrderSearchTodayRef.current = searchResponse;
           setCncToday(response);
+          setCncOrderSearchToday(searchResponse);
           boardRef.current = null;
           setBoard(null);
           setStale(false);
@@ -229,7 +282,9 @@ export const OrderStatusBoardPage: React.FC = () => {
         boardRef.current = response;
         setBoard(response);
         cncTodayRef.current = null;
+        cncOrderSearchTodayRef.current = null;
         setCncToday(null);
+        setCncOrderSearchToday(null);
         setStale(false);
         if (!commandInFlightRef.current && pendingRef.current.size > 0) {
           replacePending(new Set());
@@ -274,6 +329,8 @@ export const OrderStatusBoardPage: React.FC = () => {
     boardRef.current = null;
     setCncToday(null);
     cncTodayRef.current = null;
+    setCncOrderSearchToday(null);
+    cncOrderSearchTodayRef.current = null;
     setStale(false);
     loadingColumnTokensRef.current.clear();
     void fetchInitial();
@@ -477,16 +534,21 @@ export const OrderStatusBoardPage: React.FC = () => {
       boardColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
     [boardColumns, viewState.hideEmpty],
   );
-  const cncColumns = cncToday?.columns ?? [];
   const cncOrderFilters = viewState.cncOrderFilters;
   const cncOrderFilterKey = cncOrderFilters.join('\u0000');
+  const cncSingleDayColumns = cncToday?.columns ?? [];
+  const cncSearchColumns = cncOrderSearchToday?.columns ?? cncSingleDayColumns;
+  const cncColumns =
+    cncOrderFilters.length > 0
+      ? cncSearchColumns
+      : cncSingleDayColumns;
   const cncOrderFilterOptions = useMemo(
     () =>
-      buildCncOrderFilterOptions(cncColumns).map((orderName) => ({
+      buildCncOrderFilterOptions(cncSearchColumns).map((orderName) => ({
         label: orderName,
         value: orderName,
       })),
-    [cncColumns],
+    [cncSearchColumns],
   );
   const cncFilteredColumns = useMemo(
     () => filterCncTodayColumnsByOrders(cncColumns, cncOrderFilters),
@@ -499,6 +561,22 @@ export const OrderStatusBoardPage: React.FC = () => {
         : null,
     [activeCncRelation, cncFilteredColumns, cncRelationsEnabled],
   );
+  const cncDetailedContext = useMemo(
+    () =>
+      cncDetailedEnabled
+        ? buildCncDetailedContext(
+            cncFilteredColumns,
+            activeCncDetailedBathId,
+            activeCncDetailedDetail,
+          )
+        : null,
+    [
+      activeCncDetailedBathId,
+      activeCncDetailedDetail,
+      cncDetailedEnabled,
+      cncFilteredColumns,
+    ],
+  );
   const cncVisibleColumns = useMemo(
     () =>
       cncFilteredColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
@@ -507,7 +585,11 @@ export const OrderStatusBoardPage: React.FC = () => {
   const isCncToday = viewState.view === 'cnc_today';
   const activeBoard: OrderStatusBoardType =
     viewState.view === 'production' ? 'production' : 'order';
-  const generatedAt = isCncToday ? cncToday?.generatedAt : board?.generatedAt;
+  const generatedAt = isCncToday
+    ? cncOrderFilters.length > 0
+      ? cncOrderSearchToday?.generatedAt
+      : cncToday?.generatedAt
+    : board?.generatedAt;
 
   useEffect(() => {
     if (!cncRelationsEnabled) setActiveCncRelation(null);
@@ -515,7 +597,38 @@ export const OrderStatusBoardPage: React.FC = () => {
 
   useEffect(() => {
     setActiveCncRelation(null);
-  }, [cncOrderFilterKey, isCncToday, viewState.cncWorkday]);
+  }, [cncOrderFilterKey, isCncToday, viewState.cncOrderSearchPeriod, viewState.cncWorkday]);
+
+  useEffect(() => {
+    if (!cncDetailedEnabled) {
+      setActiveCncDetailedBathId(null);
+      setActiveCncDetailedDetail(null);
+    }
+  }, [cncDetailedEnabled]);
+
+  useEffect(() => {
+    setActiveCncDetailedBathId(null);
+    setActiveCncDetailedDetail(null);
+  }, [cncOrderFilterKey, isCncToday, viewState.cncOrderSearchPeriod, viewState.cncWorkday]);
+
+  const selectCncDetailedBath = useCallback((bathId: string) => {
+    setActiveCncDetailedBathId(bathId);
+    setActiveCncDetailedDetail((current) =>
+      current?.bathId === bathId ? current : null,
+    );
+  }, []);
+
+  const closeCncDetailedBath = useCallback((bathId: string) => {
+    setActiveCncDetailedBathId((current) => (current === bathId ? null : current));
+    setActiveCncDetailedDetail((current) =>
+      current?.bathId === bathId ? null : current,
+    );
+  }, []);
+
+  const selectCncDetailedDetail = useCallback((target: CncDetailedDetailTarget) => {
+    setActiveCncDetailedBathId(target.bathId);
+    setActiveCncDetailedDetail(target);
+  }, []);
 
   useEffect(() => {
     const topScrollbar = topScrollbarRef.current;
@@ -752,6 +865,32 @@ export const OrderStatusBoardPage: React.FC = () => {
               onChange={(values) => updateViewState({ cncOrderFilters: values })}
               aria-label="Фильтр МДФ-работ по номеру заказа"
             />
+            <div
+              className="status-board-toolbar__cnc-period"
+              aria-label="Период поиска по номеру заказа"
+            >
+              <Typography.Text type="secondary">Период</Typography.Text>
+              {CNC_ORDER_SEARCH_PERIOD_OPTIONS.map((option) => {
+                const active = viewState.cncOrderSearchPeriod === option.value;
+                return (
+                  <Button
+                    key={option.value}
+                    size="small"
+                    shape="round"
+                    type={active ? 'primary' : 'default'}
+                    aria-pressed={active}
+                    className="status-board-toolbar__cnc-period-chip"
+                    onClick={() =>
+                      updateViewState({
+                        cncOrderSearchPeriod: active ? undefined : option.value,
+                      })
+                    }
+                  >
+                    {option.label}
+                  </Button>
+                );
+              })}
+            </div>
             <label className="status-board-toolbar__switch">
               <Switch
                 size="small"
@@ -767,6 +906,14 @@ export const OrderStatusBoardPage: React.FC = () => {
                 onChange={setCncRelationsEnabled}
               />
               Связи
+            </label>
+            <label className="status-board-toolbar__switch">
+              <Switch
+                size="small"
+                checked={cncDetailedEnabled}
+                onChange={setCncDetailedEnabled}
+              />
+              Подробный
             </label>
           </div>
         )}
@@ -856,7 +1003,12 @@ export const OrderStatusBoardPage: React.FC = () => {
                 columns={cncVisibleColumns}
                 relationContext={cncRelationContext}
                 relationsEnabled={cncRelationsEnabled}
+                detailedContext={cncDetailedContext}
+                detailedEnabled={cncDetailedEnabled}
                 onSelectRelation={setActiveCncRelation}
+                onSelectDetailedBath={selectCncDetailedBath}
+                onCloseDetailedBath={closeCncDetailedBath}
+                onSelectDetailedDetail={selectCncDetailedDetail}
                 onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}
               />
             )
@@ -896,101 +1048,172 @@ interface CncTelegramTodayColumnsProps {
   columns: CncTelegramTodayColumn[];
   relationContext: CncRelationContext | null;
   relationsEnabled: boolean;
+  detailedContext: CncDetailedContext | null;
+  detailedEnabled: boolean;
   onSelectRelation: (target: CncRelationTarget) => void;
+  onSelectDetailedBath: (bathId: string) => void;
+  onCloseDetailedBath: (bathId: string) => void;
+  onSelectDetailedDetail: (target: CncDetailedDetailTarget) => void;
   onOpenOrder: (orderId: number) => void;
+}
+
+type CncTelegramTodayDisplayColumnKey =
+  | CncTelegramTodayColumn['key']
+  | 'machine_files';
+
+interface CncTelegramTodayDisplayColumn {
+  key: CncTelegramTodayDisplayColumnKey;
+  title: string;
+  total: number;
+  packets: CncTelegramPacket[];
+  baths: CncTelegramBathCard[];
 }
 
 const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   columns,
   relationContext,
   relationsEnabled,
+  detailedContext,
+  detailedEnabled,
   onSelectRelation,
+  onSelectDetailedBath,
+  onCloseDetailedBath,
+  onSelectDetailedDetail,
   onOpenOrder,
-}) => (
-  <div className="status-board-columns status-board-columns--cnc">
-    {columns.map((column) => {
-      const bathColumn = column.key === 'baths' || column.key === 'baths_ready';
-      const title = cncColumnDisplayTitle(column);
-      const totals = buildCncColumnTotals(column);
-      const bathSourceCards = column.baths ?? [];
-      const packetSourceCards = column.packets ?? [];
-      const bathCards = relationContext
-        ? sortCncRelationCards(
-          bathSourceCards,
-          (bath) => getCncBathRelationState(bath, relationContext),
-        )
-        : bathSourceCards;
-      const packetCards = relationContext
-        ? sortCncRelationCards(
-          packetSourceCards,
-          (packet) => getCncPacketRelationState(packet, relationContext),
-        )
-        : packetSourceCards;
+}) => {
+  const detailedBathActive = detailedEnabled && Boolean(detailedContext?.activeBathId);
+  const displayColumns = useMemo(
+    () =>
+      detailedBathActive
+        ? buildCncDetailedDisplayColumns(columns)
+        : columns,
+    [columns, detailedBathActive],
+  );
+  const detailedPacketHighlightEnabled = cncDetailedContextHasActiveDetail(detailedContext);
 
-      return (
-        <article
-          key={column.key}
-          className={`status-board-column cnc-today-column cnc-today-column--${column.key}`}
-          aria-label={`${title}: ${column.total} ${bathColumn ? 'ванн' : 'CNC-пакетов'}`}
-        >
-          <header className="status-board-column__header">
-            <div className="cnc-today-column__header-main">
-              <div className="status-board-column__title">
-                <span className="status-board-column__marker" aria-hidden="true" />
-                <Typography.Text strong>{title}</Typography.Text>
+  return (
+    <div
+      className={[
+        'status-board-columns status-board-columns--cnc',
+        detailedBathActive ? 'status-board-columns--cnc-detailed' : '',
+      ].filter(Boolean).join(' ')}
+    >
+      {displayColumns.map((column) => {
+        const bathColumn = column.key === 'baths' || column.key === 'baths_ready';
+        const columnClassNames = column.key === 'machine_files'
+          ? ['cnc-today-column--machine_files', 'cnc-today-column--parsed']
+          : [`cnc-today-column--${column.key}`];
+        const title = cncColumnDisplayTitle(column);
+        const totals = buildCncColumnTotals(column, relationContext, detailedContext);
+        const bathSourceCards = column.baths ?? [];
+        const packetSourceCards = column.packets ?? [];
+        const packetStateFor = (packet: CncTelegramPacket) =>
+          getCncPacketDisplayState(packet, relationContext, detailedContext);
+        const bathCards = relationContext
+          ? sortCncRelationCards(
+            bathSourceCards,
+            (bath) => getCncBathRelationState(bath, relationContext),
+          )
+          : bathSourceCards;
+        const packetCards = relationContext || detailedPacketHighlightEnabled
+          ? sortCncRelationCards(packetSourceCards, packetStateFor)
+          : packetSourceCards;
+        const columnDetailed = detailedEnabled && bathColumn && bathSourceCards.some(
+          (bath) => bath.bathCardId === detailedContext?.activeBathId,
+        );
+
+        return (
+          <article
+            key={column.key}
+            className={[
+              'status-board-column cnc-today-column',
+              ...columnClassNames,
+              columnDetailed ? 'cnc-today-column--detailed' : '',
+            ].filter(Boolean).join(' ')}
+            aria-label={`${title}: ${column.total} ${bathColumn ? 'ванн' : 'CNC-пакетов'}`}
+          >
+            <header className="status-board-column__header">
+              <div className="cnc-today-column__header-main">
+                <div className="status-board-column__title">
+                  <span className="status-board-column__marker" aria-hidden="true" />
+                  <Typography.Text strong>{title}</Typography.Text>
+                </div>
+                <Badge
+                  count={column.total}
+                  overflowCount={9999}
+                  showZero
+                  color={cncColumnBadgeColor(column.key)}
+                />
               </div>
-              <Badge
-                count={column.total}
-                overflowCount={9999}
-                showZero
-                color={cncColumnBadgeColor(column.key)}
-              />
-            </div>
-            <Typography.Text className="cnc-today-column__totals" type="secondary">
-              {totals.details} дет. · {formatArea(totals.areaM2)}
-            </Typography.Text>
-          </header>
+              <Typography.Text className="cnc-today-column__totals" type="secondary">
+                {totals.details} дет. · {formatArea(totals.areaM2)}
+              </Typography.Text>
+            </header>
 
-          <div className="status-board-column__cards">
-            {bathColumn ? (
-              bathCards.length === 0 ? (
-                <div className="status-board-column__empty">Ванн нет</div>
+            <div className="status-board-column__cards">
+              {bathColumn ? (
+                bathCards.length === 0 ? (
+                  <div className="status-board-column__empty">Ванн нет</div>
+                ) : (
+                  bathCards.map((bath) => {
+                    const detailed = detailedContext?.activeBathId === bath.bathCardId;
+                    const detailedPlacement: CncDetailedBathPlacement =
+                      column.key === 'baths_ready' ? 'left' : 'right';
+                    const selectedDetailId =
+                      detailedContext?.activeDetail?.bathId === bath.bathCardId
+                        ? detailedContext.activeDetail.detailId
+                        : null;
+
+                    return (
+                      <CncTelegramBathCardView
+                        key={bath.bathCardId}
+                        bath={bath}
+                        relationState={getCncBathRelationState(bath, relationContext)}
+                        relationsEnabled={relationsEnabled}
+                        highlightEnabled={relationsEnabled}
+                        detailed={detailed}
+                        detailedEnabled={detailedEnabled}
+                        detailedPlacement={detailedPlacement}
+                        selectedDetailId={selectedDetailId}
+                        onSelect={() => {
+                          if (relationsEnabled) {
+                            onSelectRelation({ kind: 'bath', id: bath.bathCardId });
+                          }
+                          if (detailedEnabled) onSelectDetailedBath(bath.bathCardId);
+                        }}
+                        onCloseDetailed={() => onCloseDetailedBath(bath.bathCardId)}
+                        onSelectDetail={(detailId) =>
+                          onSelectDetailedDetail({ bathId: bath.bathCardId, detailId })
+                        }
+                        onOpenOrder={onOpenOrder}
+                      />
+                    );
+                  })
+                )
+              ) : packetCards.length === 0 ? (
+                <div className="status-board-column__empty">Пакетов нет</div>
               ) : (
-                bathCards.map((bath) => (
-                  <CncTelegramBathCardView
-                    key={bath.bathCardId}
-                    bath={bath}
-                    relationState={getCncBathRelationState(bath, relationContext)}
+                packetCards.map((packet) => (
+                  <CncTelegramPacketCard
+                    key={packet.packetId}
+                    packet={packet}
+                    relationState={packetStateFor(packet)}
                     relationsEnabled={relationsEnabled}
+                    highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
                     onSelectRelation={() =>
-                      onSelectRelation({ kind: 'bath', id: bath.bathCardId })
+                      onSelectRelation({ kind: 'packet', id: packet.packetId })
                     }
                     onOpenOrder={onOpenOrder}
                   />
                 ))
-              )
-            ) : packetCards.length === 0 ? (
-              <div className="status-board-column__empty">Пакетов нет</div>
-            ) : (
-              packetCards.map((packet) => (
-                <CncTelegramPacketCard
-                  key={packet.packetId}
-                  packet={packet}
-                  relationState={getCncPacketRelationState(packet, relationContext)}
-                  relationsEnabled={relationsEnabled}
-                  onSelectRelation={() =>
-                    onSelectRelation({ kind: 'packet', id: packet.packetId })
-                  }
-                  onOpenOrder={onOpenOrder}
-                />
-              ))
-            )}
-          </div>
-        </article>
-      );
-    })}
-  </div>
-);
+              )}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+};
 
 interface CncOrderSummaryLineProps {
   summary: CncOrderSummary;
@@ -1004,24 +1227,32 @@ const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
   const orderId = summary.orderId;
 
   return (
-    <Typography.Text className="cnc-packet-card__summary">
-      {orderId !== null ? (
-        <Button
-          type="link"
-          className="cnc-packet-card__summary-order"
-          aria-label={`Открыть заказ ${summary.orderName}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenOrder(orderId);
-          }}
-        >
-          {summary.orderName}
-        </Button>
-      ) : (
-        <span className="cnc-packet-card__summary-order">
-          {summary.orderName}
-        </span>
-      )}
+    <Typography.Text
+      className={[
+        'cnc-packet-card__summary',
+        summary.orderDeleted ? ORDER_DELETED_REFERENCE_LINE_CLASS : '',
+      ].filter(Boolean).join(' ')}
+    >
+      <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+        {orderId !== null ? (
+          <Button
+            type="link"
+            className="cnc-packet-card__summary-order"
+            aria-label={`Открыть заказ ${summary.orderName}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenOrder(orderId);
+            }}
+          >
+            {summary.orderName}
+          </Button>
+        ) : (
+          <span className="cnc-packet-card__summary-order">
+            {summary.orderName}
+          </span>
+        )}
+        <OrderDeletedTag deleted={summary.orderDeleted} />
+      </span>
       <span className="cnc-packet-card__summary-meta">
         : {summary.positions} поз · {summary.details} дет.
       </span>
@@ -1033,6 +1264,7 @@ interface CncTelegramPacketCardProps {
   packet: CncTelegramPacket;
   relationState: CncRelationCardState;
   relationsEnabled: boolean;
+  highlightEnabled: boolean;
   onSelectRelation: () => void;
   onOpenOrder: (orderId: number) => void;
 }
@@ -1041,6 +1273,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   packet,
   relationState,
   relationsEnabled,
+  highlightEnabled,
   onSelectRelation,
   onOpenOrder,
 }) => {
@@ -1054,9 +1287,10 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
       className={cncRelationCardClassName(
         'status-board-card cnc-packet-card',
         relationState,
-        relationsEnabled,
+        highlightEnabled,
       )}
-      data-cnc-relation-state={relationsEnabled ? relationState : undefined}
+      data-cnc-relation-state={highlightEnabled ? relationState : undefined}
+      data-cnc-clickable={relationsEnabled ? 'true' : undefined}
       onClick={relationsEnabled ? onSelectRelation : undefined}
     >
       <div className="status-board-card__top">
@@ -1076,11 +1310,11 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
         </div>
         {packet.completionStatus === 'completed' && (
           <div className="cnc-packet-card__status-icons" aria-label="Статусы листа">
-            <Tooltip title="Выполнено на станке">
+            <Tooltip title="Распилено на станке">
               <span
                 className="cnc-packet-card__status-icon cnc-packet-card__status-icon--completed"
                 role="img"
-                aria-label="Выполнено на станке"
+                aria-label="Распилено на станке"
                 tabIndex={0}
               >
                 <CheckCircleOutlined />
@@ -1136,22 +1370,32 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               const orderId = item.orderId ?? item.matchOrderId;
 
               return (
-                <div className="cnc-packet-card__item" role="row" key={item.packetItemId}>
+                <div
+                  className={[
+                    'cnc-packet-card__item',
+                    item.orderDeleted ? ORDER_DELETED_REFERENCE_LINE_CLASS : '',
+                  ].filter(Boolean).join(' ')}
+                  role="row"
+                  key={item.packetItemId}
+                >
                   <span>
-                    {orderId ? (
-                      <Button
-                        type="link"
-                        className="cnc-packet-card__order-link"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpenOrder(orderId);
-                        }}
-                      >
-                        {item.orderName}
-                      </Button>
-                    ) : (
-                      item.orderName
-                    )}
+                    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {orderId ? (
+                        <Button
+                          type="link"
+                          className="cnc-packet-card__order-link"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenOrder(orderId);
+                          }}
+                        >
+                          {item.orderName}
+                        </Button>
+                      ) : (
+                        item.orderName
+                      )}
+                      <OrderDeletedTag deleted={item.orderDeleted} />
+                    </span>
                   </span>
                   <span>
                     <span>{item.detailNumber ? `#${item.detailNumber}` : '—'}</span>
@@ -1274,7 +1518,14 @@ interface CncTelegramBathCardViewProps {
   bath: CncTelegramBathCard;
   relationState: CncRelationCardState;
   relationsEnabled: boolean;
-  onSelectRelation: () => void;
+  highlightEnabled: boolean;
+  detailed: boolean;
+  detailedEnabled: boolean;
+  detailedPlacement: CncDetailedBathPlacement;
+  selectedDetailId: number | null;
+  onSelect: () => void;
+  onCloseDetailed: () => void;
+  onSelectDetail: (detailId: number) => void;
   onOpenOrder: (orderId: number) => void;
 }
 
@@ -1282,20 +1533,35 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   bath,
   relationState,
   relationsEnabled,
-  onSelectRelation,
+  highlightEnabled,
+  detailed,
+  detailedEnabled,
+  detailedPlacement,
+  selectedDetailId,
+  onSelect,
+  onCloseDetailed,
+  onSelectDetail,
   onOpenOrder,
 }) => {
   const orderSummaries = buildCncOrderSummaries(bath.items);
+  const interactive = relationsEnabled || detailedEnabled;
 
   return (
     <div
       className={cncRelationCardClassName(
-        'status-board-card cnc-bath-card',
+        [
+          'status-board-card cnc-bath-card',
+          detailed ? 'cnc-bath-card--detailed' : '',
+          detailed ? `cnc-bath-card--detailed-${detailedPlacement}` : '',
+          detailedEnabled ? 'cnc-bath-card--detailed-selectable' : '',
+        ].filter(Boolean).join(' '),
         relationState,
-        relationsEnabled,
+        highlightEnabled,
       )}
-      data-cnc-relation-state={relationsEnabled ? relationState : undefined}
-      onClick={relationsEnabled ? onSelectRelation : undefined}
+      data-cnc-relation-state={highlightEnabled ? relationState : undefined}
+      data-cnc-detailed-state={detailed ? 'active' : detailedEnabled ? 'selectable' : undefined}
+      data-cnc-clickable={interactive ? 'true' : undefined}
+      onClick={interactive ? onSelect : undefined}
     >
       <div className="status-board-card__top">
         <div className="cnc-packet-card__title">
@@ -1312,17 +1578,34 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
             {bath.cutJobName} · раскрой №{bath.cutNumber}
           </Typography.Text>
         </div>
-        <Tooltip
-          title={bath.ready ? 'Все детали ванны уже в колонке «Выполнено»' : 'Не все детали ванны распилены'}
-        >
-          <CheckCircleFilled
-            className={[
-              'cnc-bath-card__ready-icon',
-              bath.ready ? 'cnc-bath-card__ready-icon--ready' : 'cnc-bath-card__ready-icon--pending',
-            ].join(' ')}
-            aria-label={bath.ready ? 'Ванна готова к закатке' : 'Ванна не готова к закатке'}
-          />
-        </Tooltip>
+        <div className="cnc-bath-card__actions">
+          {detailed && (
+            <Tooltip title="Свернуть раскладку">
+              <Button
+                type="text"
+                size="small"
+                className="cnc-bath-card__detail-close"
+                icon={<CloseOutlined />}
+                aria-label="Свернуть подробный вид ванны"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCloseDetailed();
+                }}
+              />
+            </Tooltip>
+          )}
+          <Tooltip
+            title={bath.ready ? 'Все детали ванны уже в колонке «Распилено»' : 'Не все детали ванны распилены'}
+          >
+            <CheckCircleFilled
+              className={[
+                'cnc-bath-card__ready-icon',
+                bath.ready ? 'cnc-bath-card__ready-icon--ready' : 'cnc-bath-card__ready-icon--pending',
+              ].join(' ')}
+              aria-label={bath.ready ? 'Ванна готова к закатке' : 'Ванна не готова к закатке'}
+            />
+          </Tooltip>
+        </div>
       </div>
 
       <Collapse
@@ -1385,7 +1668,12 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
 
       <CncBathPdfPreview bath={bath} />
       {bath.sheets.length > 0 && (
-        <CncBathSheetPreview bath={bath} />
+        <CncBathSheetPreview
+          bath={bath}
+          detailed={detailed}
+          selectedDetailId={selectedDetailId}
+          onSelectDetail={onSelectDetail}
+        />
       )}
 
       <div className="status-board-card__footer">
@@ -1398,28 +1686,52 @@ CncTelegramBathCardView.displayName = 'CncTelegramBathCardView';
 
 interface CncBathSheetPreviewProps {
   bath: CncTelegramBathCard;
+  detailed: boolean;
+  selectedDetailId: number | null;
+  onSelectDetail: (detailId: number) => void;
 }
 
 interface CncBathSheetPreviewItem {
   key: string;
   title: string;
-  url: string;
+  url?: string;
+  svgText?: string;
 }
 
-const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({ bath }) => {
+const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
+  bath,
+  detailed,
+  selectedDetailId,
+  onSelectDetail,
+}) => {
   const [open, setOpen] = useState(false);
   const [previews, setPreviews] = useState<CncBathSheetPreviewItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const previewUrlsRef = useRef<string[]>([]);
   const loadedPreviewKeyRef = useRef<string | null>(null);
+  const completedKey = useMemo(
+    () =>
+      bath.items
+        .map((item) => `${item.detailId}:${item.completedQuantity}:${item.quantity}`)
+        .join('|'),
+    [bath.items],
+  );
+  const orderFillKey = useMemo(
+    () =>
+      bath.items
+        .map((item) => `${item.detailId}:${item.orderId}:${item.orderName}`)
+        .join('|'),
+    [bath.items],
+  );
   const previewKey = useMemo(
     () =>
-      `${bath.cutJobId}:${bath.resultNo}:${bath.sheets
+      `${bath.cutJobId}:${bath.resultNo}:${detailed ? 'd' : 's'}:${selectedDetailId ?? '-'}:${completedKey}:${orderFillKey}:${bath.sheets
         .map((sheet) => `${sheet.cutGroupId}:${sheet.variant}:${sheet.sheetIndex}`)
         .join('|')}`,
-    [bath.cutJobId, bath.resultNo, bath.sheets],
+    [bath.cutJobId, bath.resultNo, bath.sheets, completedKey, detailed, orderFillKey, selectedDetailId],
   );
+  const expanded = detailed || open;
 
   const revokePreviewUrls = useCallback(() => {
     previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
@@ -1427,7 +1739,7 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({ bath }) => {
   }, []);
 
   useEffect(() => {
-    if (!open || loadedPreviewKeyRef.current === previewKey || error) return;
+    if (!expanded || loadedPreviewKeyRef.current === previewKey) return;
     let cancelled = false;
     loadedPreviewKeyRef.current = previewKey;
     revokePreviewUrls();
@@ -1435,12 +1747,14 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({ bath }) => {
     setLoading(true);
     setError(null);
     void (async () => {
+      const completedDetailCounts = buildCompletedBathDetailCounts(bath);
+      const orderFillByDetailId = buildCncBathDetailOrderFillMap(bath);
       for (const sheet of bath.sheets) {
         if (cancelled) return;
         const rotate90 = cncSheetPreviewRotate90(
           sheet.sheetWidthMm,
           sheet.sheetHeightMm,
-          true,
+          detailed ? false : true,
         );
         const blob = await cutApi.fetchSheetSvg(
           bath.cutJobId,
@@ -1452,19 +1766,29 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({ bath }) => {
           false,
           'bottom-left',
           bath.resultNo,
+          detailed,
         );
-        const url = URL.createObjectURL(blob);
+        const svgText = detailed
+          ? decorateCncBathSheetSvg(
+              await blob.text(),
+              completedDetailCounts,
+              orderFillByDetailId,
+              selectedDetailId,
+            )
+          : undefined;
+        const url = detailed ? undefined : URL.createObjectURL(blob);
         if (cancelled) {
-          URL.revokeObjectURL(url);
+          if (url) URL.revokeObjectURL(url);
           return;
         }
-        previewUrlsRef.current.push(url);
+        if (url) previewUrlsRef.current.push(url);
         setPreviews((current) => [
           ...current,
           {
             key: `${sheet.cutGroupId}:${sheet.variant}:${sheet.sheetIndex}`,
             title: `Лист ${sheet.sheetNumber}`,
-            url,
+            ...(url ? { url } : {}),
+            ...(svgText ? { svgText } : {}),
           },
         ]);
       }
@@ -1480,18 +1804,47 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({ bath }) => {
     return () => {
       cancelled = true;
     };
-  }, [bath.cutJobId, bath.resultNo, bath.sheets, error, open, previewKey, revokePreviewUrls]);
+  }, [
+    bath,
+    detailed,
+    expanded,
+    previewKey,
+    revokePreviewUrls,
+    selectedDetailId,
+  ]);
 
   useEffect(() => () => {
     revokePreviewUrls();
   }, [revokePreviewUrls]);
+
+  const handleCollapseChange = useCallback(
+    (keys: string | string[]) => {
+      if (detailed) return;
+      setOpen(Array.isArray(keys) ? keys.includes('bath-sheet') : keys === 'bath-sheet');
+    },
+    [detailed],
+  );
+
+  const handleSheetClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!detailed) return;
+      event.stopPropagation();
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const piece = target.closest('[data-detail-id]');
+      const detailId = Number(piece?.getAttribute('data-detail-id'));
+      if (Number.isInteger(detailId) && detailId > 0) onSelectDetail(detailId);
+    },
+    [detailed, onSelectDetail],
+  );
 
   return (
     <Collapse
       className="cnc-packet-card__sheet"
       size="small"
       ghost
-      onChange={(keys) => setOpen(Array.isArray(keys) ? keys.includes('bath-sheet') : keys === 'bath-sheet')}
+      activeKey={expanded ? ['bath-sheet'] : []}
+      onChange={handleCollapseChange}
     >
       <Collapse.Panel
         key="bath-sheet"
@@ -1511,11 +1864,24 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({ bath }) => {
           {previews.map((preview) => (
             <figure className="cnc-bath-card__sheet-figure" key={preview.key}>
               <figcaption>{preview.title}</figcaption>
-              <img
-                className="cnc-packet-card__sheet-image"
-                src={preview.url}
-                alt={`${preview.title} · ${bath.cutJobName}`}
-              />
+              {preview.svgText ? (
+                <div
+                  className={[
+                    'cnc-bath-card__sheet-svg',
+                    detailed ? 'cnc-bath-card__sheet-svg--detailed' : '',
+                  ].filter(Boolean).join(' ')}
+                  role="img"
+                  aria-label={`${preview.title} · ${bath.cutJobName}`}
+                  onClick={handleSheetClick}
+                  dangerouslySetInnerHTML={{ __html: preview.svgText }}
+                />
+              ) : preview.url ? (
+                <img
+                  className="cnc-packet-card__sheet-image"
+                  src={preview.url}
+                  alt={`${preview.title} · ${bath.cutJobName}`}
+                />
+              ) : null}
             </figure>
           ))}
         </div>
@@ -1523,6 +1889,173 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({ bath }) => {
     </Collapse>
   );
 };
+
+function buildCompletedBathDetailCounts(bath: CncTelegramBathCard): Map<number, number> {
+  const counts = new Map<number, number>();
+  for (const item of bath.items) {
+    const completed = Math.min(
+      Math.max(0, Number.isFinite(item.completedQuantity) ? item.completedQuantity : 0),
+      Math.max(0, Number.isFinite(item.quantity) ? item.quantity : 0),
+    );
+    if (completed <= 0) continue;
+    counts.set(item.detailId, (counts.get(item.detailId) ?? 0) + completed);
+  }
+  return counts;
+}
+
+function buildCncBathDetailOrderFillMap(bath: CncTelegramBathCard): Map<number, string> {
+  const fillByOrder = new Map<string, string>();
+  const fillByDetailId = new Map<number, string>();
+  for (const item of bath.items) {
+    const orderKey = `id:${item.orderId}`;
+    let fill = fillByOrder.get(orderKey);
+    if (!fill) {
+      fill = CNC_BATH_DETAIL_ORDER_FILL_COLORS[
+        fillByOrder.size % CNC_BATH_DETAIL_ORDER_FILL_COLORS.length
+      ];
+      fillByOrder.set(orderKey, fill);
+    }
+    fillByDetailId.set(item.detailId, fill);
+  }
+  return fillByDetailId;
+}
+
+function decorateCncBathSheetSvg(
+  svgText: string,
+  completedDetailCounts: ReadonlyMap<number, number>,
+  orderFillByDetailId: ReadonlyMap<number, string>,
+  selectedDetailId: number | null,
+): string {
+  const document = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+  if (document.getElementsByTagName('parsererror').length > 0) return svgText;
+  const svg = document.documentElement;
+  svg.setAttribute('data-cnc-bath-detailed', 'true');
+  const pieces = Array.from(svg.querySelectorAll<SVGElement>('[data-detail-id]'));
+  for (const piece of pieces) {
+    const detailId = Number(piece.getAttribute('data-detail-id'));
+    if (!Number.isInteger(detailId) || detailId <= 0) continue;
+    if (selectedDetailId === detailId) piece.setAttribute('data-cnc-selected-detail', 'true');
+    enlargeCncBathDetailText(piece, 2);
+
+    const fill = orderFillByDetailId.get(detailId);
+    const rect = piece.querySelector('rect');
+    if (fill && rect) {
+      rect.setAttribute('fill', fill);
+      rect.setAttribute('data-cnc-order-fill', 'true');
+    }
+
+    const completedQuantity = completedDetailCounts.get(detailId) ?? 0;
+    if (completedQuantity <= 0) continue;
+    const instance = Number(piece.getAttribute('data-piece-instance') ?? '1');
+    if (Number.isFinite(instance) && instance > completedQuantity) continue;
+    appendCncBathDetailCheck(document, piece);
+  }
+  return new XMLSerializer().serializeToString(svg);
+}
+
+function enlargeCncBathDetailText(piece: SVGElement, scale: number): void {
+  for (const text of Array.from(piece.querySelectorAll<SVGElement>('text'))) {
+    const fontSize = cncSvgNumber(text.getAttribute('font-size'));
+    if (fontSize === null) continue;
+    text.setAttribute('font-size', formatCncSvgNumber(fontSize * scale));
+    text.setAttribute('data-cnc-detailed-font-scale', formatCncSvgNumber(scale));
+  }
+}
+
+function appendCncBathDetailCheck(document: Document, piece: SVGElement): void {
+  const rect = piece.querySelector('rect');
+  const box = rect ? cncSvgRectBox(rect) : null;
+  const radius = cncBathDetailCheckRadius(rect);
+  const point = box
+    ? cncBathDetailCheckPoint(box, radius)
+    : {
+        cx: cncSvgNumber(piece.getAttribute('data-piece-cx')),
+        cy: cncSvgNumber(piece.getAttribute('data-piece-cy')),
+      };
+  if (point.cx === null || point.cy === null) return;
+  const marker = document.createElementNS(CNC_SVG_NS, 'g');
+  marker.setAttribute('class', 'cnc-bath-detail-check');
+  marker.setAttribute('pointer-events', 'none');
+  marker.setAttribute(
+    'transform',
+    `translate(${formatCncSvgNumber(point.cx)} ${formatCncSvgNumber(point.cy)})`,
+  );
+
+  const title = document.createElementNS(CNC_SVG_NS, 'title');
+  title.textContent = 'Распилено';
+  marker.append(title);
+
+  const circle = document.createElementNS(CNC_SVG_NS, 'circle');
+  circle.setAttribute('r', formatCncSvgNumber(radius));
+  circle.setAttribute('fill', '#16a34a');
+  circle.setAttribute('stroke', '#ffffff');
+  circle.setAttribute('stroke-width', formatCncSvgNumber(Math.max(4, radius * 0.16)));
+  marker.append(circle);
+
+  const check = document.createElementNS(CNC_SVG_NS, 'path');
+  check.setAttribute(
+    'd',
+    [
+      `M ${formatCncSvgNumber(-radius * 0.46)} ${formatCncSvgNumber(-radius * 0.02)}`,
+      `L ${formatCncSvgNumber(-radius * 0.14)} ${formatCncSvgNumber(radius * 0.32)}`,
+      `L ${formatCncSvgNumber(radius * 0.5)} ${formatCncSvgNumber(-radius * 0.38)}`,
+    ].join(' '),
+  );
+  check.setAttribute('fill', 'none');
+  check.setAttribute('stroke', '#ffffff');
+  check.setAttribute('stroke-width', formatCncSvgNumber(Math.max(5, radius * 0.18)));
+  check.setAttribute('stroke-linecap', 'round');
+  check.setAttribute('stroke-linejoin', 'round');
+  marker.append(check);
+  piece.append(marker);
+}
+
+function cncSvgRectBox(
+  rect: SVGElement,
+): { x: number; y: number; width: number; height: number } | null {
+  const x = cncSvgNumber(rect.getAttribute('x'));
+  const y = cncSvgNumber(rect.getAttribute('y'));
+  const width = cncSvgNumber(rect.getAttribute('width'));
+  const height = cncSvgNumber(rect.getAttribute('height'));
+  return x === null || y === null || width === null || height === null
+    ? null
+    : { x, y, width: Math.abs(width), height: Math.abs(height) };
+}
+
+function cncBathDetailCheckPoint(
+  box: { x: number; y: number; width: number; height: number },
+  radius: number,
+): { cx: number; cy: number } {
+  return {
+    cx: box.x + cncClampSvgCoordinate(box.width - radius * 1.24, radius, box.width - radius),
+    cy: box.y + cncClampSvgCoordinate(radius * 1.24, radius, box.height - radius),
+  };
+}
+
+function cncClampSvgCoordinate(value: number, min: number, max: number): number {
+  if (max < min) return (min + max) / 2;
+  return Math.min(Math.max(value, min), max);
+}
+
+function cncBathDetailCheckRadius(rect: SVGElement | null): number {
+  const width = rect ? cncSvgNumber(rect.getAttribute('width')) : null;
+  const height = rect ? cncSvgNumber(rect.getAttribute('height')) : null;
+  const minSide =
+    width !== null && height !== null
+      ? Math.min(Math.abs(width), Math.abs(height))
+      : 180;
+  return Math.max(16, Math.min(44, minSide * 0.16));
+}
+
+function cncSvgNumber(value: string | null, fallback: number | null = null): number | null {
+  if (value === null) return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function formatCncSvgNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
+}
 
 interface CncBathPdfPreviewProps {
   bath: CncTelegramBathCard;
@@ -1544,6 +2077,8 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
   const [blob, setBlob] = useState<Blob | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [downloadLoading, setDownloadLoading] = useState(false);
+  const [printLoading, setPrintLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
@@ -1575,6 +2110,24 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
     };
   }, [open]);
 
+  const fetchFreshPdf = useCallback(
+    () =>
+      pollPdf(
+        () =>
+          cutApi.fetchJobPdf(
+            bath.cutJobId,
+            true,
+            undefined,
+            false,
+            template,
+            'bottom-left',
+            bath.resultNo,
+          ),
+        { maxAttempts: 12, delayMs: 1500 },
+      ),
+    [bath.cutJobId, bath.resultNo, template],
+  );
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -1588,19 +2141,7 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
     revokePreviewUrl();
     revokePagePreviews();
 
-    pollPdf(
-      () =>
-        cutApi.fetchJobPdf(
-          bath.cutJobId,
-          true,
-          undefined,
-          false,
-          template,
-          'bottom-left',
-          bath.resultNo,
-        ),
-      { maxAttempts: 12, delayMs: 1500 },
-    )
+    fetchFreshPdf()
       .then(async (result) => {
         if (cancelled || requestSeqRef.current !== requestSeq) return;
         const nextUrl = URL.createObjectURL(result.blob);
@@ -1640,10 +2181,10 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
     bath.cutJobId,
     bath.cutNumber,
     bath.resultNo,
+    fetchFreshPdf,
     open,
     revokePagePreviews,
     revokePreviewUrl,
-    template,
   ]);
 
   useEffect(() => () => {
@@ -1652,24 +2193,44 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
     revokePreviewUrl();
   }, [revokePagePreviews, revokePreviewUrl]);
 
-  const downloadPdf = useCallback(() => {
+  const downloadPdf = useCallback(async () => {
     if (!blob) return;
-    triggerBlobDownload(blob, fileName ?? `bath-cut-${bath.cutNumber}.pdf`);
-  }, [bath.cutNumber, blob, fileName]);
+    setDownloadLoading(true);
+    try {
+      const result = await fetchFreshPdf();
+      triggerBlobDownload(result.blob, result.fileName ?? fileName ?? `bath-cut-${bath.cutNumber}.pdf`);
+    } catch (downloadError) {
+      message.error(errorMessage(downloadError, 'Не удалось скачать PDF'));
+    } finally {
+      setDownloadLoading(false);
+    }
+  }, [bath.cutNumber, blob, fetchFreshPdf, fileName]);
 
-  const printPdf = useCallback(() => {
+  const printPdf = useCallback(async () => {
     if (!url) {
       message.warning('PDF ещё не готов для печати');
       return;
     }
-    const printWindow = window.open(url, '_blank');
+    const printWindow = window.open('', '_blank');
     if (!printWindow) {
       message.warning('Браузер заблокировал окно PDF. Разрешите всплывающие окна.');
       return;
     }
     printWindow.opener = null;
-    printWindow.focus();
-  }, [url]);
+    setPrintLoading(true);
+    try {
+      const result = await fetchFreshPdf();
+      const freshUrl = URL.createObjectURL(result.blob);
+      printWindow.location.href = freshUrl;
+      printWindow.focus();
+      window.setTimeout(() => URL.revokeObjectURL(freshUrl), 60_000);
+    } catch (printError) {
+      printWindow.close();
+      message.error(errorMessage(printError, 'Не удалось открыть PDF для печати'));
+    } finally {
+      setPrintLoading(false);
+    }
+  }, [fetchFreshPdf, url]);
 
   return (
     <Collapse
@@ -1699,7 +2260,8 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
               <Button
                 size="small"
                 icon={<DownloadOutlined />}
-                disabled={!blob}
+                disabled={!blob || downloadLoading}
+                loading={downloadLoading}
                 onClick={downloadPdf}
                 aria-label="Скачать PDF ванны"
               />
@@ -1708,7 +2270,8 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
               <Button
                 size="small"
                 icon={<PrinterOutlined />}
-                disabled={!url}
+                disabled={!url || printLoading}
+                loading={printLoading}
                 onClick={printPdf}
                 aria-label="Открыть PDF ванны для печати"
               />
@@ -2204,17 +2767,50 @@ function formatCncSize(width: number | null, height: number | null): string {
   return `${formatter.format(width)}×${formatter.format(height)}`;
 }
 
-function cncColumnBadgeColor(columnKey: CncTelegramTodayColumn['key']): string {
+function buildCncDetailedDisplayColumns(
+  columns: CncTelegramTodayColumn[],
+): CncTelegramTodayDisplayColumn[] {
+  const machineColumns = columns.filter(
+    (column) => column.key === 'parsed' || column.key === 'completed',
+  );
+  if (machineColumns.length === 0) return columns;
+
+  const machineColumn: CncTelegramTodayDisplayColumn = {
+    key: 'machine_files',
+    title: 'Файлы станка',
+    total: machineColumns.reduce((sum, column) => sum + column.total, 0),
+    packets: machineColumns.flatMap((column) => column.packets),
+    baths: [],
+  };
+  const displayColumns: CncTelegramTodayDisplayColumn[] = [];
+  let machineColumnInserted = false;
+
+  for (const column of columns) {
+    if (column.key === 'parsed' || column.key === 'completed') {
+      if (!machineColumnInserted) {
+        displayColumns.push(machineColumn);
+        machineColumnInserted = true;
+      }
+      continue;
+    }
+    displayColumns.push(column);
+  }
+
+  return displayColumns;
+}
+
+function cncColumnBadgeColor(columnKey: CncTelegramTodayDisplayColumnKey): string {
   if (columnKey === 'completed' || columnKey === 'baths_ready') return '#389e0d';
   if (columnKey === 'baths') return '#cf1322';
   return '#1677ff';
 }
 
-function cncColumnDisplayTitle(column: CncTelegramTodayColumn): string {
-  const titles: Record<CncTelegramTodayColumn['key'], string> = {
+function cncColumnDisplayTitle(column: CncTelegramTodayDisplayColumn): string {
+  const titles: Record<CncTelegramTodayDisplayColumnKey, string> = {
     parsed: 'Файлы на станке',
-    completed: 'Выполнено',
-    baths: 'Ванны',
+    completed: 'Распилено',
+    machine_files: 'Файлы станка',
+    baths: 'Карты ванн',
     baths_ready: 'Готовы к закатке',
   };
   return titles[column.key] ?? column.title;
@@ -2231,11 +2827,25 @@ interface CncColumnTotalItem {
   quantity: number;
 }
 
-function buildCncColumnTotals(column: CncTelegramTodayColumn): CncColumnTotals {
+function buildCncColumnTotals(
+  column: CncTelegramTodayDisplayColumn,
+  relationContext: CncRelationContext | null,
+  detailedContext: CncDetailedContext | null = null,
+): CncColumnTotals {
+  const detailedPacketHighlightEnabled = cncDetailedContextHasActiveDetail(detailedContext);
   const items: CncColumnTotalItem[] =
     column.key === 'baths' || column.key === 'baths_ready'
-      ? column.baths.flatMap((bath) => bath.items)
-      : column.packets.flatMap((packet) => packet.items);
+      ? column.baths
+        .filter((bath) =>
+          !relationContext || getCncBathRelationState(bath, relationContext) !== 'dimmed',
+        )
+        .flatMap((bath) => bath.items)
+      : column.packets
+        .filter((packet) =>
+          (!relationContext && !detailedPacketHighlightEnabled) ||
+          getCncPacketDisplayState(packet, relationContext, detailedContext) !== 'dimmed',
+        )
+        .flatMap((packet) => packet.items);
 
   return items.reduce<CncColumnTotals>(
     (totals, item) => {
@@ -2261,12 +2871,14 @@ interface CncSummaryItem {
   orderName: string;
   orderId?: number | null;
   matchOrderId?: number | null;
+  orderDeleted?: boolean;
   quantity: number;
 }
 
 interface CncOrderSummary {
   orderName: string;
   orderId: number | null;
+  orderDeleted?: boolean;
   positions: number;
   details: number;
 }
@@ -2274,6 +2886,8 @@ interface CncOrderSummary {
 interface CncRelationFingerprint {
   detailIds: Set<number>;
   fallbackKeys: Set<string>;
+  orderKeys: Set<string>;
+  mentionedOrderKeys: Set<string>;
 }
 
 interface CncRelationContext {
@@ -2281,16 +2895,24 @@ interface CncRelationContext {
   fingerprint: CncRelationFingerprint;
 }
 
+interface CncDetailedContext {
+  activeBathId: string;
+  activeDetail: CncDetailedDetailTarget | null;
+  fingerprint: CncRelationFingerprint | null;
+}
+
 function buildCncOrderSummaries(items: CncSummaryItem[]): CncOrderSummary[] {
-  const summaries = new Map<string, { orderId: number | null; positions: number; details: number }>();
+  const summaries = new Map<string, { orderId: number | null; orderDeleted: boolean; positions: number; details: number }>();
   for (const item of items) {
     const orderName = item.orderName.trim() || 'Без заказа';
     const summary = summaries.get(orderName) ?? {
       orderId: null,
+      orderDeleted: false,
       positions: 0,
       details: 0,
     };
     summary.orderId ??= item.orderId ?? item.matchOrderId ?? null;
+    summary.orderDeleted ||= item.orderDeleted === true;
     summary.positions += 1;
     summary.details += item.quantity;
     summaries.set(orderName, summary);
@@ -2301,6 +2923,7 @@ function buildCncOrderSummaries(items: CncSummaryItem[]): CncOrderSummary[] {
     .map(([orderName, summary]) => ({
       orderName,
       orderId: summary.orderId,
+      ...(summary.orderDeleted ? { orderDeleted: true } : {}),
       positions: summary.positions,
       details: summary.details,
     }));
@@ -2329,6 +2952,48 @@ function buildCncRelationContext(
   return null;
 }
 
+function buildCncDetailedContext(
+  columns: CncTelegramTodayColumn[],
+  activeBathId: string | null,
+  activeDetail: CncDetailedDetailTarget | null,
+): CncDetailedContext | null {
+  if (!activeBathId) return null;
+  const activeBath = columns
+    .flatMap((column) => column.baths)
+    .find((bath) => bath.bathCardId === activeBathId);
+  if (!activeBath) return null;
+  if (!activeDetail || activeDetail.bathId !== activeBathId) {
+    return { activeBathId, activeDetail: null, fingerprint: null };
+  }
+
+  const fingerprint = emptyCncRelationFingerprint();
+  const selectedItems = activeBath.items.filter(
+    (item) => item.detailId === activeDetail.detailId,
+  );
+  if (selectedItems.length === 0) {
+    fingerprint.detailIds.add(activeDetail.detailId);
+  } else {
+    for (const item of selectedItems) {
+      fingerprint.detailIds.add(item.detailId);
+      addCncOrderRelationKeys(fingerprint, item.orderName, item.orderId);
+      for (const fallbackKey of cncBathItemFallbackKeys(item)) {
+        fingerprint.fallbackKeys.add(fallbackKey);
+      }
+    }
+  }
+
+  return { activeBathId, activeDetail, fingerprint };
+}
+
+function cncDetailedContextHasActiveDetail(
+  context: CncDetailedContext | null,
+): context is CncDetailedContext & {
+  activeDetail: CncDetailedDetailTarget;
+  fingerprint: CncRelationFingerprint;
+} {
+  return context !== null && context.activeDetail !== null && context.fingerprint !== null;
+}
+
 function sortCncRelationCards<T>(
   cards: T[],
   getState: (card: T) => CncRelationCardState,
@@ -2355,7 +3020,38 @@ function getCncPacketRelationState(
   if (context.active.kind === 'packet') {
     return packet.packetId === context.active.id ? 'active' : 'dimmed';
   }
-  return cncFingerprintsIntersect(buildCncPacketFingerprint(packet), context.fingerprint)
+  const packetFingerprint = buildCncPacketFingerprint(packet);
+  const packetMentionedOrderMatch = cncMentionedOrderKeysIntersect(
+    packetFingerprint,
+    context.fingerprint,
+  );
+  if (packetMentionedOrderMatch && cncPacketHasOtherMaterialMarker(packet)) {
+    return 'order-mentioned';
+  }
+  return cncFingerprintsIntersect(packetFingerprint, context.fingerprint) || packetMentionedOrderMatch
+    ? 'related'
+    : 'dimmed';
+}
+
+function getCncPacketDisplayState(
+  packet: CncTelegramPacket,
+  relationContext: CncRelationContext | null,
+  detailedContext: CncDetailedContext | null,
+): CncRelationCardState {
+  const detailedState = getCncDetailedPacketState(packet, detailedContext);
+  return detailedState !== 'normal'
+    ? detailedState
+    : getCncPacketRelationState(packet, relationContext);
+}
+
+function getCncDetailedPacketState(
+  packet: CncTelegramPacket,
+  context: CncDetailedContext | null,
+): CncRelationCardState {
+  if (!cncDetailedContextHasActiveDetail(context)) return 'normal';
+  const packetFingerprint = buildCncPacketFingerprint(packet);
+  return cncDetailFingerprintsIntersect(packetFingerprint, context.fingerprint) ||
+    cncPacketWholeOrderIntersects(packet, context.fingerprint)
     ? 'related'
     : 'dimmed';
 }
@@ -2368,7 +3064,9 @@ function getCncBathRelationState(
   if (context.active.kind === 'bath') {
     return bath.bathCardId === context.active.id ? 'active' : 'dimmed';
   }
-  return cncFingerprintsIntersect(buildCncBathFingerprint(bath), context.fingerprint)
+  const bathFingerprint = buildCncBathFingerprint(bath);
+  return cncFingerprintsIntersect(bathFingerprint, context.fingerprint) ||
+    cncMentionedOrderKeysIntersect(context.fingerprint, bathFingerprint)
     ? 'related'
     : 'dimmed';
 }
@@ -2377,9 +3075,18 @@ function buildCncPacketFingerprint(packet: CncTelegramPacket): CncRelationFinger
   const fingerprint = emptyCncRelationFingerprint();
   for (const item of packet.items) {
     if (item.matchDetailId != null) fingerprint.detailIds.add(item.matchDetailId);
+    addCncOrderRelationKeys(fingerprint, item.orderName, item.orderId, item.matchOrderId);
     for (const fallbackKey of cncPacketItemFallbackKeys(item)) {
       fingerprint.fallbackKeys.add(fallbackKey);
     }
+  }
+  for (const comment of packet.comments) {
+    for (const orderKey of cncWholeOrderCommentOrderKeys(comment)) {
+      fingerprint.orderKeys.add(orderKey);
+    }
+  }
+  for (const orderKey of cncPacketTitleCommentOrderKeys(packet)) {
+    fingerprint.mentionedOrderKeys.add(orderKey);
   }
   return fingerprint;
 }
@@ -2388,6 +3095,7 @@ function buildCncBathFingerprint(bath: CncTelegramBathCard): CncRelationFingerpr
   const fingerprint = emptyCncRelationFingerprint();
   for (const item of bath.items) {
     fingerprint.detailIds.add(item.detailId);
+    addCncOrderRelationKeys(fingerprint, item.orderName, item.orderId);
     for (const fallbackKey of cncBathItemFallbackKeys(item)) {
       fingerprint.fallbackKeys.add(fallbackKey);
     }
@@ -2396,13 +3104,16 @@ function buildCncBathFingerprint(bath: CncTelegramBathCard): CncRelationFingerpr
 }
 
 function emptyCncRelationFingerprint(): CncRelationFingerprint {
-  return { detailIds: new Set<number>(), fallbackKeys: new Set<string>() };
+  return {
+    detailIds: new Set<number>(),
+    fallbackKeys: new Set<string>(),
+    orderKeys: new Set<string>(),
+    mentionedOrderKeys: new Set<string>(),
+  };
 }
 
 function cncPacketItemFallbackKeys(item: CncTelegramPacket['items'][number]): string[] {
-  const orderKeys = item.matchOrderId
-    ? [`id:${item.matchOrderId}`, cncOrderNameFallbackKey(item.orderName)]
-    : [cncOrderNameFallbackKey(item.orderName)];
+  const orderKeys = cncRelationOrderKeys(item.orderName, item.orderId, item.matchOrderId);
   return orderKeys
     .map((orderKey) =>
       cncRelationFallbackKey(orderKey, item.detailNumber, item.widthMm, item.heightMm),
@@ -2411,11 +3122,69 @@ function cncPacketItemFallbackKeys(item: CncTelegramPacket['items'][number]): st
 }
 
 function cncBathItemFallbackKeys(item: CncTelegramBathCard['items'][number]): string[] {
-  return [`id:${item.orderId}`, cncOrderNameFallbackKey(item.orderName)]
+  return cncRelationOrderKeys(item.orderName, item.orderId)
     .map((orderKey) =>
       cncRelationFallbackKey(orderKey, item.detailNumber, item.widthMm, item.heightMm),
     )
     .filter((key): key is string => key !== null);
+}
+
+function addCncOrderRelationKeys(
+  fingerprint: CncRelationFingerprint,
+  orderName: string,
+  ...orderIds: Array<number | null | undefined>
+): void {
+  for (const orderKey of cncRelationOrderKeys(orderName, ...orderIds)) {
+    fingerprint.orderKeys.add(orderKey);
+  }
+}
+
+function cncRelationOrderKeys(
+  orderName: string,
+  ...orderIds: Array<number | null | undefined>
+): string[] {
+  const keys = new Set<string>();
+  for (const orderId of orderIds) {
+    if (Number.isInteger(orderId) && Number(orderId) > 0) {
+      keys.add(`id:${orderId}`);
+    }
+  }
+  const normalizedOrderName = orderName.trim();
+  if (normalizedOrderName) {
+    keys.add(cncOrderNameFallbackKey(normalizedOrderName));
+  }
+  return Array.from(keys);
+}
+
+function cncWholeOrderCommentOrderKeys(comment: string): string[] {
+  if (!comment.toLocaleLowerCase('ru-RU').includes('весь')) return [];
+  return cncOrderMentionKeysFromText(comment);
+}
+
+function cncPacketTitleCommentOrderKeys(packet: CncTelegramPacket): string[] {
+  const keys = new Set<string>();
+  for (const text of [packet.programName, packet.externalPacketKey, ...packet.comments]) {
+    for (const orderKey of cncOrderMentionKeysFromText(text ?? '')) {
+      keys.add(orderKey);
+    }
+  }
+  return Array.from(keys);
+}
+
+function cncOrderMentionKeysFromText(text: string): string[] {
+  return Array.from(text.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g))
+    .map((match) => match[2])
+    .filter((orderName): orderName is string => Boolean(orderName))
+    .map((orderName) => cncOrderNameFallbackKey(orderName));
+}
+
+function cncPacketHasOtherMaterialMarker(packet: CncTelegramPacket): boolean {
+  return [
+    packet.materialName,
+    packet.programName ?? '',
+    packet.externalPacketKey,
+    ...packet.comments,
+  ].some((text) => CNC_OTHER_MATERIAL_MARKER_PATTERN.test(text));
 }
 
 function cncRelationFallbackKey(
@@ -2445,6 +3214,47 @@ function cncFingerprintsIntersect(
   }
   for (const fallbackKey of left.fallbackKeys) {
     if (right.fallbackKeys.has(fallbackKey)) return true;
+  }
+  for (const orderKey of left.orderKeys) {
+    if (right.orderKeys.has(orderKey)) return true;
+  }
+  return false;
+}
+
+function cncDetailFingerprintsIntersect(
+  left: CncRelationFingerprint,
+  right: CncRelationFingerprint,
+): boolean {
+  for (const detailId of left.detailIds) {
+    if (right.detailIds.has(detailId)) return true;
+  }
+  for (const fallbackKey of left.fallbackKeys) {
+    if (right.fallbackKeys.has(fallbackKey)) return true;
+  }
+  return false;
+}
+
+function cncPacketWholeOrderIntersects(
+  packet: CncTelegramPacket,
+  detailFingerprint: CncRelationFingerprint,
+): boolean {
+  for (const comment of packet.comments) {
+    for (const orderKey of cncWholeOrderCommentOrderKeys(comment)) {
+      if (detailFingerprint.orderKeys.has(orderKey)) return true;
+    }
+  }
+  return false;
+}
+
+function cncMentionedOrderKeysIntersect(
+  left: CncRelationFingerprint,
+  right: CncRelationFingerprint,
+): boolean {
+  for (const orderKey of left.mentionedOrderKeys) {
+    if (right.orderKeys.has(orderKey)) return true;
+  }
+  for (const orderKey of right.mentionedOrderKeys) {
+    if (left.orderKeys.has(orderKey)) return true;
   }
   return false;
 }

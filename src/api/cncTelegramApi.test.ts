@@ -33,4 +33,27 @@ describe('cncTelegramApi', () => {
       expect.objectContaining({ method: 'GET' }),
     );
   });
+
+  it('loads CNC Telegram projection for an order-search date range', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          workday: '2026-07-24',
+          generatedAt: '2026-07-24T08:00:00.000Z',
+          columns: [],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cncTelegramApi.today({
+      dateFrom: '2026-07-18',
+      dateTo: '2026-07-24',
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/v1/cnc-telegram/today?dateFrom=2026-07-18&dateTo=2026-07-24',
+    );
+  });
 });

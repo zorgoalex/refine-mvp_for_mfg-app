@@ -101,6 +101,33 @@ describe('auth refresh cutover behavior', () => {
     expect(authSession.getAccessToken()).toBe('new-login-token');
     expect(authSession.getUser()).toMatchObject({ id: '2', username: 'new-user' });
   });
+
+  it('publishes session expiry when proactive backend refresh fails', async () => {
+    vi.doMock('../config/featureFlags', () => ({
+      featureFlags: {
+        useBackendAuth: true,
+        useBackendPermissions: true,
+        enableLegacyHasura: true,
+      },
+    }));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: { code: 'REFRESH_TOKEN_EXPIRED', message: 'Expired' } }),
+        { status: 401, statusText: 'Unauthorized', headers: { 'Content-Type': 'application/json' } },
+      ),
+    ));
+    const { refreshAccessToken } = await import('./auth');
+    const { authSession } = await import('../api/authSession');
+    const expiredListener = vi.fn();
+    authSession.subscribeExpired(expiredListener);
+    authSession.setAccessToken('expired-access-token');
+
+    await expect(refreshAccessToken()).resolves.toBeNull();
+
+    expect(authSession.getAccessToken()).toBeNull();
+    expect(expiredListener).toHaveBeenCalledTimes(1);
+  });
 });
 
 function mockFetch(body: unknown) {

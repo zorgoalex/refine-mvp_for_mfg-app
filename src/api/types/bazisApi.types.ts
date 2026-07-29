@@ -24,6 +24,7 @@ export interface BazisImportResponse {
 export interface BazisOrderRef {
   orderId: number;
   orderName: string;
+  orderDeleted?: boolean;
 }
 
 export interface BazisProjectListItem {
@@ -102,6 +103,7 @@ export interface BazisNodeOrderLink {
   orderId: number;
   orderDetailId: number | null;
   mappingKind: string;
+  orderDeleted?: boolean;
 }
 
 export interface BazisNodeCard {
@@ -188,6 +190,7 @@ export interface BazisRevisionMaterialsSummary {
 export interface BazisRevisionOrder {
   orderId: number;
   orderName: string | null;
+  orderDeleted?: boolean;
   createdAt: string;
   nodesMapped: number;
   detailsCreated: number;

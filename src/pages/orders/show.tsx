@@ -1,7 +1,7 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select, Popconfirm } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined, DeleteOutlined } from "@ant-design/icons";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -61,6 +61,7 @@ import {
 } from "./components/tables/OrderDetailColumnSettings";
 import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from "../cut/cutJobEvents";
 import { useCutDetailLastReady } from "./useCutDetailLastReady";
+import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 
@@ -73,10 +74,12 @@ const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: strin
 ];
 
 const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 120;
+const ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT = 40;
 
 type OrderShowStickyStyle = CSSProperties & {
   '--order-show-sticky-top': string;
-  '--order-show-summary-tabs-height': string;
+  '--order-show-compact-header-height': string;
+  '--order-show-tabs-shell-height': string;
   '--order-show-details-toolbar-height': string;
   '--order-show-table-header-top': string;
 };
@@ -209,6 +212,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         "priority",
         "order_status_name",
         "payment_status_name",
+        "production_status_id",
+        "production_status_name",
         "manager_id",
         "material_name",
         "milling_type_name",
@@ -241,6 +246,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const backendOrder = useBackendOrdersRead ? record?.__backendOrder : null;
   const labelsEnabled = featureFlags.labels && canAny(['labels.view', 'labels.generate']);
   const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
+  const canCreatePayment = !featureFlags.useBackendPermissions || can('payments.create');
   const deletedOrderModel = deletedOrder ? buildDeletedOrderCardModel(deletedOrder) : null;
   const canRestore = canManageOrderTrash && featureFlags.useBackendOrdersWrite;
   const showTitle = deletedOrder
@@ -413,34 +419,45 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
-  const [orderShowSummaryTabsRef, orderShowSummaryTabsHeight] = useMeasuredElementHeight<HTMLDivElement>();
-  const [orderShowDetailsToolbarRef, orderShowDetailsToolbarHeight, orderShowDetailsToolbarNode] = useMeasuredElementHeight<HTMLDivElement>();
+  const orderShowSummaryTabsRef = useRef<HTMLDivElement>(null);
+  const [orderShowTabsShellRef, orderShowTabsShellHeight] = useMeasuredElementHeight<HTMLDivElement>();
+  const [orderShowDetailsToolbarRef, orderShowDetailsToolbarHeight] = useMeasuredElementHeight<HTMLDivElement>();
   const [orderShowStickyEnabled, setOrderShowStickyEnabled] = useState(false);
   const [orderShowSummaryStuck, setOrderShowSummaryStuck] = useState(false);
-  const [orderShowTableHeaderTop, setOrderShowTableHeaderTop] = useState(0);
-  const updateOrderShowTableHeaderTop = useCallback((stuck = orderShowSummaryStuck) => {
-    const next =
-      stuck && orderShowDetailsToolbarNode
-        ? Math.max(0, Math.ceil(orderShowDetailsToolbarNode.getBoundingClientRect().bottom))
-        : 0;
-    setOrderShowTableHeaderTop((prev) => (prev === next ? prev : next));
-  }, [orderShowDetailsToolbarNode, orderShowSummaryStuck]);
+  const orderShowStickyStackMeasured = orderShowTabsShellHeight > 0 && orderShowDetailsToolbarHeight > 0;
+  const orderShowTableHeaderTop = useMemo(() => (
+    orderShowStickyEnabled && orderShowStickyStackMeasured
+      ? Math.max(0, Math.ceil(
+          workspaceTabsHeight +
+          ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT +
+          orderShowTabsShellHeight +
+          orderShowDetailsToolbarHeight,
+        ))
+      : 0
+  ), [
+    orderShowDetailsToolbarHeight,
+    orderShowStickyEnabled,
+    orderShowStickyStackMeasured,
+    orderShowTabsShellHeight,
+    workspaceTabsHeight,
+  ]);
   const orderShowStickyStyle = useMemo<OrderShowStickyStyle>(() => ({
     '--order-show-sticky-top': `${workspaceTabsHeight}px`,
-    '--order-show-summary-tabs-height': `${orderShowSummaryTabsHeight}px`,
+    '--order-show-compact-header-height': `${ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT}px`,
+    '--order-show-tabs-shell-height': `${orderShowTabsShellHeight}px`,
     '--order-show-details-toolbar-height': `${orderShowDetailsToolbarHeight}px`,
     '--order-show-table-header-top': `${orderShowTableHeaderTop}px`,
-  }), [orderShowDetailsToolbarHeight, orderShowSummaryTabsHeight, orderShowTableHeaderTop, workspaceTabsHeight]);
+  }), [orderShowDetailsToolbarHeight, orderShowTableHeaderTop, orderShowTabsShellHeight, workspaceTabsHeight]);
   const orderShowPageClassName = useMemo(() => [
     'order-show-page',
     orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
     orderShowSummaryStuck ? 'order-show-page--summary-stuck' : '',
   ].filter(Boolean).join(' '), [orderShowStickyEnabled, orderShowSummaryStuck]);
   const orderShowDetailTableSticky = useMemo(() => (
-    orderShowSummaryStuck && orderShowTableHeaderTop > 0
+    orderShowStickyEnabled && orderShowTableHeaderTop > 0
       ? { offsetHeader: orderShowTableHeaderTop }
       : undefined
-  ), [orderShowSummaryStuck, orderShowTableHeaderTop]);
+  ), [orderShowStickyEnabled, orderShowTableHeaderTop]);
 
   useEffect(() => {
     const update = () => {
@@ -471,7 +488,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         orderShowStickyEnabled &&
         !!node &&
         node.getBoundingClientRect().top <= workspaceTabsHeight;
-      updateOrderShowTableHeaderTop(next);
       setOrderShowSummaryStuck((prev) => (prev === next ? prev : next));
     };
 
@@ -482,21 +498,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       window.removeEventListener('scroll', update);
       window.removeEventListener('resize', update);
     };
-  }, [orderShowStickyEnabled, updateOrderShowTableHeaderTop, workspaceTabsHeight]);
-
-  useEffect(() => {
-    const update = () => updateOrderShowTableHeaderTop();
-    update();
-    window.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', update);
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
-    if (orderShowDetailsToolbarNode) ro?.observe(orderShowDetailsToolbarNode);
-    return () => {
-      window.removeEventListener('scroll', update);
-      window.removeEventListener('resize', update);
-      ro?.disconnect();
-    };
-  }, [orderShowDetailsToolbarNode, updateOrderShowTableHeaderTop]);
+  }, [orderShowStickyEnabled, workspaceTabsHeight]);
 
   // Загрузка справочников для отображения названий
   const { data: millingTypesData } = useList({
@@ -1437,13 +1439,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               record={record}
               details={details}
               dowelingLinks={dowelingLinks}
-              disableLegacyOrderReads={useBackendOrdersRead}
               compactSticky={orderShowStickyEnabled && orderShowSummaryStuck}
               detailMaterialNames={headerMaterialNames}
               headerMaterialName={headerMaterialName}
             />
 
-            <div className="order-show-tabs-shell">
+            <div ref={orderShowTabsShellRef} className="order-show-tabs-shell">
             <div
               role="tablist"
               aria-label="Секции заказа"
@@ -1543,6 +1544,22 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     }}
                     style={{ cursor: 'pointer' }}
                   >
+                    {record?.order_id && canCreatePayment ? (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                        <Button
+                          type="primary"
+                          icon={<PlusOutlined />}
+                          style={{ minHeight: 40 }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            navigate(buildOrderEditAddPaymentPath(Number(record.order_id)));
+                          }}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                        >
+                          Добавить платёж
+                        </Button>
+                      </div>
+                    ) : null}
                     <OrderFinanceBlock record={record} payments={payments} />
                   </div>
                 )}

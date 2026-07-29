@@ -17,6 +17,7 @@ import { isApiError } from '../../api/apiError';
 import { authSession } from '../../api/authSession';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
+import { OrderDeletedTag, hasDeletedOrderReference, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { AddToOrderModal } from './AddToOrderModal';
 import { NodeCard } from './NodeCard';
 import { PanelNotesCell } from './PanelNotesCell';
@@ -487,13 +488,15 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           row.orders.length > 0 ? (
             <Space wrap size={4}>
               {row.orders.map((order) => (
-                <RouterLink
-                  key={order.orderId}
-                  to={`/orders/show/${order.orderId}`}
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  {order.orderName?.trim() || `#${order.orderId}`}
-                </RouterLink>
+                <Space key={order.orderId} size={4} wrap>
+                  <RouterLink
+                    to={`/orders/show/${order.orderId}`}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {order.orderName?.trim() || `#${order.orderId}`}
+                  </RouterLink>
+                  <OrderDeletedTag deleted={order.orderDeleted} />
+                </Space>
               ))}
             </Space>
           ) : (
@@ -745,7 +748,10 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           // Фон-отличие только у ВЛОЖЕННЫХ строк группировки; в плоском
           // режиме все строки — верхний уровень, подкраска не нужна
           const childClass = grouped && row.rowType === 'panel' ? 'bazis-panel-child-row' : '';
-          return [childClass, selectedClass].filter(Boolean).join(' ');
+          return orderDeletedReferenceClassName(
+            hasDeletedOrderReference(row.orders),
+            [childClass, selectedClass].filter(Boolean).join(' '),
+          );
         }}
         onRow={(row) => ({
           onClick: () => {

@@ -4,6 +4,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { Link, useNavigate } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisProjectCard, BazisProjectListItem } from '../../api/types/bazisApi.types';
+import { OrderDeletedTag, hasDeletedOrderReference, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 import { useTabStore } from '../../stores/tabStore';
@@ -216,9 +217,12 @@ export const BazisPage: React.FC = () => {
           record.linkedOrders.length > 0 ? (
             <Space wrap>
               {record.linkedOrders.map((order) => (
-                <Link key={order.orderId} to={`/orders/show/${order.orderId}`}>
-                  {order.orderName?.trim() || `#${order.orderId}`}
-                </Link>
+                <Space key={order.orderId} size={4} wrap>
+                  <Link to={`/orders/show/${order.orderId}`}>
+                    {order.orderName?.trim() || `#${order.orderId}`}
+                  </Link>
+                  <OrderDeletedTag deleted={order.orderDeleted} />
+                </Space>
               ))}
             </Space>
           ) : '—'
@@ -229,13 +233,16 @@ export const BazisPage: React.FC = () => {
         dataIndex: 'linkedOrderIds',
         key: 'linkedOrderIds',
         width: 110,
-        render: (value: number[]) => (
+        render: (value: number[], record) => (
           value.length > 0 ? (
             <Space wrap>
               {value.map((orderId) => (
-                <Link key={orderId} to={`/orders/show/${orderId}`}>
-                  #{orderId}
-                </Link>
+                <Space key={orderId} size={4} wrap>
+                  <Link to={`/orders/show/${orderId}`}>
+                    #{orderId}
+                  </Link>
+                  <OrderDeletedTag deleted={record.linkedOrders.find((order) => order.orderId === orderId)?.orderDeleted} />
+                </Space>
               ))}
             </Space>
           ) : '—'
@@ -310,6 +317,7 @@ export const BazisPage: React.FC = () => {
               columns={columns}
               dataSource={rows}
               loading={loading}
+              rowClassName={(record) => orderDeletedReferenceClassName(hasDeletedOrderReference(record.linkedOrders))}
               pagination={{
                 current: currentPage,
                 pageSize,

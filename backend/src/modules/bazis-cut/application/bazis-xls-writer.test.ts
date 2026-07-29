@@ -54,7 +54,7 @@ describe('buildBazisCutXls', () => {
 function detail(overrides: Partial<BazisCutSetDetailDto> = {}): BazisCutSetDetailDto {
   return {
     bazisCutSetDetailId: 1, bazisCutSetId: 1, sortOrder: 0,
-    sourceOrderDetailId: 7, sourceOrderId: 14, sourceProjectId: 3,
+    sourceOrderDetailId: 7, sourceOrderId: 14, sourceOrderDeleted: false, sourceProjectId: 3,
     sourceBazisProjectId: 2, sourceBazisRevisionId: 4, sourceBazisNodeId: 5,
     sourceOrderName: '1491', sourceOrderFullNumber: 'МП-1-1491', sourceProjectCode: 'МП-1',
     sourceBazisProjectName: '1319', sourceBazisOrderNo: '1319', sourceBazisProductName: 'Кухня',

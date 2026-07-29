@@ -50,6 +50,7 @@ interface Harness {
     }>;
     userById: AuthUserRecord | null;
     sessions: ReturnType<typeof vi.fn>;
+    issueAccessToken: ReturnType<typeof vi.fn>;
     loginFailed: ReturnType<typeof vi.fn>;
     linkFailed: ReturnType<typeof vi.fn>;
     insertLink: ReturnType<typeof vi.fn>;
@@ -80,6 +81,10 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
       userId: '42',
       refreshToken: 'refresh-1',
       refreshTokenExpiresAt: new Date('2026-08-01T00:00:00Z'),
+    })),
+    issueAccessToken: vi.fn(async () => ({
+      accessToken: 'access-1',
+      expiresAt: new Date('2026-07-03T13:00:00Z'),
     })),
     loginFailed: vi.fn(async () => undefined),
     linkFailed: vi.fn(async () => undefined),
@@ -134,7 +139,7 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
     } as never,
     sessions: { createLoginSession: state.sessions },
     tokens: {
-      issueAccessToken: async () => ({ accessToken: 'access-1', expiresAt: new Date('2026-07-03T13:00:00Z') }),
+      issueAccessToken: state.issueAccessToken,
     },
     audit: { writeLoginFailed: state.loginFailed },
     passwords: { verify: async () => state.passwordValid },
@@ -156,6 +161,10 @@ describe('WorkosAuthService.loginWithCode', () => {
     expect(harness.ports.sessions).toHaveBeenCalledWith(
       expect.objectContaining({ id: '42' }),
       expect.objectContaining({ authSource: 'workos', providerSessionId: 'sid-1', requestId: 'req-1' }),
+    );
+    expect(harness.ports.issueAccessToken).toHaveBeenCalledWith(
+      expect.objectContaining({ id: '42', sessionId: 'session-1' }),
+      { notAfter: new Date('2026-08-01T00:00:00.000Z') },
     );
     expect(harness.ports.loginFailed).not.toHaveBeenCalled();
   });

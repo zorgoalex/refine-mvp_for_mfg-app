@@ -83,6 +83,7 @@ import type {
   CutFilmOptionDto,
   CutEditorParamsDto,
   CutGroupDto,
+  CutJobItemDto,
   CutJobDto,
   CutJobRefDto,
   CutJobTotals,
@@ -152,6 +153,7 @@ const PROFILE_EDITABLE_STATUSES = new Set(['draft', 'ready', 'failed']);
 
 interface RenderDetailInfo {
   orderId: number;
+  orderDeleted: boolean;
   detailNumber: number | null;
   widthMm: number | null;
   heightMm: number | null;
@@ -440,6 +442,27 @@ function frozenRenderViewKey(view: {
     view.axisOrigin ?? 'top-left',
     view.showLabels === false ? 'labels-off' : 'labels-on',
   ].join(':');
+}
+
+function frozenPieceLabelLines(
+  piece: FreecutPlacement,
+  itemByItemId: ReadonlyMap<string, CutJobItemDto>,
+  quantities: ReadonlyMap<string, number>,
+): string[] {
+  const item = itemByItemId.get(piece.item_id);
+  const label = (piece as { label?: PieceLabelSnapshot }).label;
+  const detailId = parseFreecutItemId(piece.item_id);
+  return composePieceLabelLines({
+    orderId: label?.orderId ?? item?.orderId ?? null,
+    orderName: item?.orderName ?? null,
+    detailId,
+    detailNumber: label?.detailNumber ?? item?.detail?.detailNumber ?? null,
+    widthMm: label?.widthMm ?? item?.detail?.width ?? null,
+    heightMm: label?.heightMm ?? item?.detail?.height ?? null,
+    itemId: piece.item_id,
+    instance: piece.instance,
+    qty: quantities.get(piece.item_id) ?? item?.qty ?? 1,
+  });
 }
 
 const FROZEN_RENDER_VIEW_COUNT = 12;
@@ -1639,6 +1662,8 @@ export class PgCutRepository implements CutRepositoryPort {
     originTopLeft?: boolean;
     axisOrigin?: import('../../../shared/cut-geometry').CutAxisOrigin;
     showLabels?: boolean;
+    pieceMetadata?: boolean;
+    refreshPdfDynamicFields?: boolean;
   }): Promise<{
     job: CutJobDto;
     group: CutGroupDto;
@@ -1664,6 +1689,19 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new ApiError(409, 'CUT_MANUAL_LAYOUT_UNAVAILABLE', 'Ручной вариант раскроя недоступен');
     }
     const sourceSheets = useManual ? manual!.sheets : group.sheets;
+    const rebuildSvgWithPieceMetadata = args.pieceMetadata === true;
+    const frozenQuantities = rebuildSvgWithPieceMetadata
+      ? computeGroupItemQuantities(sourceSheets.map((sheet) => ({
+          sheetIndex: sheet.sheetIndex,
+          placements: sheet.placements,
+        })))
+      : new Map<string, number>();
+    const frozenItemByItemId = rebuildSvgWithPieceMetadata
+      ? new Map(frozen.job.items.map((item) => [freecutItemId(item.orderDetailId), item]))
+      : new Map<string, CutJobItemDto>();
+    const frozenFillByOrder = rebuildSvgWithPieceMetadata
+      ? createOrderFillResolver(frozen.job.items.map((item) => item.orderId))
+      : (() => '#eef3f8');
     const sheets = sourceSheets.map((sheet) => {
       const placements = sheet.placements;
       const renderSnapshot = sheet.renderSnapshot;
@@ -1676,16 +1714,34 @@ export class PgCutRepository implements CutRepositoryPort {
       if (!renderSnapshot || renderSnapshot.contractVersion !== 'cut_sheet_render_v1' || !view) {
         throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_CORRUPT', `Нет frozen render листа ${sheet.sheetIndex}`);
       }
+      const svg = rebuildSvgWithPieceMetadata && !view.svg.includes('data-detail-id=')
+        ? buildSheetSvg({
+            sheet: placements,
+            labelFor: (piece) => frozenPieceLabelLines(piece, frozenItemByItemId, frozenQuantities),
+            fillFor: (piece) => {
+              const item = frozenItemByItemId.get(piece.item_id);
+              const orderId = (piece as { label?: PieceLabelSnapshot }).label?.orderId ?? item?.orderId ?? null;
+              return frozenFillByOrder(orderId);
+            },
+            rotate90: args.rotate90,
+            originTopLeft: args.originTopLeft,
+            axisOrigin: args.axisOrigin,
+            showLabels: args.showLabels,
+          })
+        : view.svg;
       return {
         sheetIndex: sheet.sheetIndex,
         placements,
-        svg: view.svg,
+        svg,
         bathSvg: view.bathSvg,
         pdfMeta: renderSnapshot.pdfMeta as PdfSheetMeta,
         pdfDetailRows: renderSnapshot.pdfDetailRows as PdfSheetDetailRow[],
       };
     });
-    return { job: frozen.job, group, sheets, renderContractVersion: 'cut_sheet_render_v1' };
+    const resolvedSheets = args.refreshPdfDynamicFields
+      ? await this.refreshPdfDynamicFieldsForSheets(args.cutGroupId, sheets)
+      : sheets;
+    return { job: frozen.job, group, sheets: resolvedSheets, renderContractVersion: 'cut_sheet_render_v1' };
   }
 
   private async attachFrozenRenderSnapshots(tx: TransactionClient, snapshot: CutJobDto): Promise<CutJobDto> {
@@ -2121,7 +2177,7 @@ export class PgCutRepository implements CutRepositoryPort {
   async listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto> {
     const readyStatusIds = await this.resolveReadyStatusIds();
 
-    const conditions: string[] = ['od.delete_flag = false'];
+    const conditions: string[] = ['od.delete_flag = false', 'ord.delete_flag = false'];
     const params: unknown[] = [];
     const addArrayFilter = (column: string, values: number[] | undefined) => {
       if (values && values.length > 0) {
@@ -2255,6 +2311,7 @@ export class PgCutRepository implements CutRepositoryPort {
   async listFilmOptionsForCut(query: ListFilmOptionsForCutQuery): Promise<CutFilmOptionDto[]> {
     const conditions: string[] = [
       'od.delete_flag = false',
+      'ord.delete_flag = false',
       'od.film_id IS NOT NULL',
       'f.film_name IS NOT NULL',
       `btrim(f.film_name) <> ''`,
@@ -2489,6 +2546,7 @@ export class PgCutRepository implements CutRepositoryPort {
           rotate90: query.rotate90,
           originTopLeft: query.originTopLeft,
           axisOrigin: query.axisOrigin,
+          pieceMetadata: query.pieceMetadata,
         })
       : await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, query.axisOrigin, variant, query.cutJobId);
     // Rule 8: blank sheets are index-stable and never 404 for SVG.
@@ -2515,6 +2573,7 @@ export class PgCutRepository implements CutRepositoryPort {
           rotate90: query.rotate90,
           originTopLeft: query.originTopLeft,
           axisOrigin: query.axisOrigin,
+          refreshPdfDynamicFields: true,
         })
       : null;
     const currentContext = frozenContext === null
@@ -2609,6 +2668,7 @@ export class PgCutRepository implements CutRepositoryPort {
             variant,
             originTopLeft: query.originTopLeft,
             axisOrigin: query.axisOrigin,
+            refreshPdfDynamicFields: true,
           })
         : null;
       const currentContext = frozenContext === null
@@ -2631,6 +2691,7 @@ export class PgCutRepository implements CutRepositoryPort {
           rotate90: true,
           originTopLeft: query.originTopLeft,
           axisOrigin: query.axisOrigin,
+          refreshPdfDynamicFields: true,
         });
       }
       const sheets = frozenContext?.sheets ?? currentContext!.sheets;
@@ -2704,6 +2765,142 @@ export class PgCutRepository implements CutRepositoryPort {
        WHERE cut_job_id = $1 AND version = $4`,
       [query.cutJobId, query.state, query.reason ?? null, query.version],
     );
+  }
+
+  private async loadRenderDetailsForGroup(
+    cutGroupId: number,
+    client: DatabaseClient = this.database,
+  ): Promise<{
+    detailById: Map<number, RenderDetailInfo>;
+    fillByOrder: (orderId: number | null) => string;
+    orderNameForOrderId: (orderId: number | null) => string | null;
+  }> {
+    // Live detail/dynamic-field lookup. PDF render paths call this on every
+    // render so volatile relations (especially CNC packet/card matches) do not
+    // come from stale render snapshots or warmed PDF bytes.
+    const items = await client.query<{
+      order_detail_id: string | number;
+      order_id: string | number;
+      detail_fields: Record<string, unknown> | null;
+      detail_number: string | number | null;
+      width: string | number | null;
+      height: string | number | null;
+      sheet_material_type_id: string | number | null;
+      material_id: string | number | null;
+      material_name: string | null;
+      thickness_mm: string | number | null;
+      film_name: string | null;
+      milling_type_name: string | null;
+      edge_type_name: string | null;
+      production_status_name: string | null;
+      doweling: boolean | null;
+      machine_files: string[] | null;
+      order_name: string | null;
+      order_date: string | Date | null;
+      completion_date: string | Date | null;
+      planned_completion_date: string | Date | null;
+      client_name: string | null;
+      order_delete_flag: boolean | null;
+    }>(
+      // material_name = sheet-material name (COALESCE sheet_material_type, legacy
+      // material) for the 4th label line; the id columns give a stable material
+      // IDENTITY for mixed-material detection (two catalog rows can share a name).
+      // Matches the FE preview overlay and the ENRICHED_ITEMS_QUERY resolution.
+      `SELECT cji.order_detail_id, cji.order_id,
+              to_jsonb(od) AS detail_fields,
+              od.detail_number, od.width, od.height,
+              od.sheet_material_type_id, od.material_id,
+              od.doweling,
+              COALESCE(smt.name, m.material_name) AS material_name,
+              smt.thickness_mm, f.film_name,
+              mt.milling_type_name, et.edge_type_name, ps.production_status_name,
+              cnc.machine_files,
+              o.order_name, o.delete_flag AS order_delete_flag,
+              o.order_date, o.completion_date, o.planned_completion_date,
+              c.client_name
+       FROM cut_job_item cji
+       LEFT JOIN order_details od ON od.detail_id = cji.order_detail_id AND od.delete_flag = false
+       LEFT JOIN materials m ON m.material_id = od.material_id
+       LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+       LEFT JOIN films f ON f.film_id = od.film_id
+       LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
+       LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
+       LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
+       LEFT JOIN LATERAL (
+         SELECT array_agg(machine_file ORDER BY machine_file) AS machine_files
+         FROM (
+           SELECT DISTINCT COALESCE(NULLIF(trim(p.program_name), ''), p.external_packet_key) AS machine_file
+           FROM cnc_telegram_packet_items cti
+           JOIN cnc_telegram_packets p ON p.packet_id = cti.packet_id
+           JOIN (
+             SELECT max(p2.workday) AS latest_workday
+             FROM cnc_telegram_packet_items cti2
+             JOIN cnc_telegram_packets p2 ON p2.packet_id = cti2.packet_id
+             WHERE cti2.match_detail_id = od.detail_id
+               AND cti2.match_status = 'matched'
+           ) latest ON latest.latest_workday = p.workday
+           WHERE cti.match_detail_id = od.detail_id
+             AND cti.match_status = 'matched'
+         ) machine_file_rows
+       ) cnc ON true
+       LEFT JOIN orders o ON o.order_id = cji.order_id
+       LEFT JOIN clients c ON c.client_id = o.client_id
+       WHERE cji.cut_group_id = $1
+       ORDER BY cji.cut_job_item_id`,
+      [cutGroupId],
+    );
+    const detailById = new Map<number, RenderDetailInfo>();
+    for (const row of items.rows) {
+      // Prefer the sheet-material-type id (Variant-B primary ref); fall back to the
+      // legacy material id; else the trimmed name; else null (unknown → ignored).
+      const smtId = numOrNull(row.sheet_material_type_id);
+      const matId = numOrNull(row.material_id);
+      const nm = row.material_name?.trim();
+      const materialKey = smtId !== null ? `s${smtId}` : matId !== null ? `m${matId}` : nm ? `n${nm}` : null;
+      detailById.set(toNum(row.order_detail_id), {
+        orderId: toNum(row.order_id),
+        detailNumber: numOrNull(row.detail_number),
+        widthMm: numOrNull(row.width),
+        heightMm: numOrNull(row.height),
+        detailFields: row.detail_fields ?? null,
+        doweling: row.doweling === null || row.doweling === undefined ? null : row.doweling === true,
+        machineFiles: normalizeMachineFiles(row.machine_files),
+        materialName: row.material_name ?? null,
+        thicknessMm: numOrNull(row.thickness_mm),
+        filmName: row.film_name ?? null,
+        millingTypeName: row.milling_type_name ?? null,
+        edgeTypeName: row.edge_type_name ?? null,
+        productionStatusName: row.production_status_name ?? null,
+        orderName: row.order_name ?? null,
+        orderDeleted: row.order_delete_flag === true,
+        orderDate: dateOnly(row.order_date),
+        readyDate: dateOnly(row.completion_date) ?? dateOnly(row.planned_completion_date),
+        clientName: row.client_name ?? null,
+        materialKey,
+      });
+    }
+    const fillByOrder = createOrderFillResolver(items.rows.map((row) => toNum(row.order_id)));
+    const orderNameById = new Map<number, string>();
+    for (const row of items.rows) {
+      const name = row.order_name?.trim();
+      if (name) orderNameById.set(toNum(row.order_id), name);
+    }
+    const orderNameForOrderId = (orderId: number | null): string | null =>
+      orderId === null ? null : orderNameById.get(orderId) ?? null;
+    return { detailById, fillByOrder, orderNameForOrderId };
+  }
+
+  private async refreshPdfDynamicFieldsForSheets(
+    cutGroupId: number,
+    sheets: RenderedSheetContext[],
+    client: DatabaseClient = this.database,
+  ): Promise<RenderedSheetContext[]> {
+    const { detailById } = await this.loadRenderDetailsForGroup(cutGroupId, client);
+    return sheets.map((sheet) => ({
+      ...sheet,
+      pdfMeta: buildPdfSheetMeta(sheet.placements, detailById),
+      pdfDetailRows: buildPdfDetailRows(sheet.placements, detailById),
+    }));
   }
 
   /**
@@ -2829,117 +3026,7 @@ export class PgCutRepository implements CutRepositoryPort {
 
     // Rule 7: build live detail lookup for LEGACY rows (pre-Task 4) that lack
     // a frozen label snapshot. New rows written by calculate always have piece.label.
-    const items = await client.query<{
-      order_detail_id: string | number;
-      order_id: string | number;
-      detail_fields: Record<string, unknown> | null;
-      detail_number: string | number | null;
-      width: string | number | null;
-      height: string | number | null;
-      sheet_material_type_id: string | number | null;
-      material_id: string | number | null;
-      material_name: string | null;
-      thickness_mm: string | number | null;
-      film_name: string | null;
-      milling_type_name: string | null;
-      edge_type_name: string | null;
-      production_status_name: string | null;
-      doweling: boolean | null;
-      machine_files: string[] | null;
-      order_name: string | null;
-      order_date: string | Date | null;
-      completion_date: string | Date | null;
-      planned_completion_date: string | Date | null;
-      client_name: string | null;
-    }>(
-      // material_name = sheet-material name (COALESCE sheet_material_type, legacy
-      // material) for the 4th label line; the id columns give a stable material
-      // IDENTITY for mixed-material detection (two catalog rows can share a name).
-      // Matches the FE preview overlay and the ENRICHED_ITEMS_QUERY resolution.
-      `SELECT cji.order_detail_id, cji.order_id,
-              to_jsonb(od) AS detail_fields,
-              od.detail_number, od.width, od.height,
-              od.sheet_material_type_id, od.material_id,
-              od.doweling,
-              COALESCE(smt.name, m.material_name) AS material_name,
-              smt.thickness_mm, f.film_name,
-              mt.milling_type_name, et.edge_type_name, ps.production_status_name,
-              cnc.machine_files,
-              o.order_name, o.order_date, o.completion_date, o.planned_completion_date,
-              c.client_name
-       FROM cut_job_item cji
-       LEFT JOIN order_details od ON od.detail_id = cji.order_detail_id AND od.delete_flag = false
-       LEFT JOIN materials m ON m.material_id = od.material_id
-       LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
-       LEFT JOIN films f ON f.film_id = od.film_id
-       LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
-       LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
-       LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
-       LEFT JOIN LATERAL (
-         SELECT array_agg(machine_file ORDER BY machine_file) AS machine_files
-         FROM (
-           SELECT DISTINCT COALESCE(NULLIF(trim(p.program_name), ''), p.external_packet_key) AS machine_file
-           FROM cnc_telegram_packet_items cti
-           JOIN cnc_telegram_packets p ON p.packet_id = cti.packet_id
-           JOIN (
-             SELECT max(p2.workday) AS latest_workday
-             FROM cnc_telegram_packet_items cti2
-             JOIN cnc_telegram_packets p2 ON p2.packet_id = cti2.packet_id
-             WHERE cti2.match_detail_id = od.detail_id
-               AND cti2.match_status = 'matched'
-           ) latest ON latest.latest_workday = p.workday
-           WHERE cti.match_detail_id = od.detail_id
-             AND cti.match_status = 'matched'
-         ) machine_file_rows
-       ) cnc ON true
-       LEFT JOIN orders o ON o.order_id = cji.order_id
-       LEFT JOIN clients c ON c.client_id = o.client_id
-       WHERE cji.cut_group_id = $1
-       ORDER BY cji.cut_job_item_id`,
-      [cutGroupId],
-    );
-    const detailById = new Map<number, RenderDetailInfo>();
-    for (const row of items.rows) {
-      // Prefer the sheet-material-type id (Variant-B primary ref); fall back to the
-      // legacy material id; else the trimmed name; else null (unknown → ignored).
-      const smtId = numOrNull(row.sheet_material_type_id);
-      const matId = numOrNull(row.material_id);
-      const nm = row.material_name?.trim();
-      const materialKey = smtId !== null ? `s${smtId}` : matId !== null ? `m${matId}` : nm ? `n${nm}` : null;
-      detailById.set(toNum(row.order_detail_id), {
-        orderId: toNum(row.order_id),
-        detailNumber: numOrNull(row.detail_number),
-        widthMm: numOrNull(row.width),
-        heightMm: numOrNull(row.height),
-        detailFields: row.detail_fields ?? null,
-        doweling: row.doweling === null || row.doweling === undefined ? null : row.doweling === true,
-        machineFiles: normalizeMachineFiles(row.machine_files),
-        materialName: row.material_name ?? null,
-        thicknessMm: numOrNull(row.thickness_mm),
-        filmName: row.film_name ?? null,
-        millingTypeName: row.milling_type_name ?? null,
-        edgeTypeName: row.edge_type_name ?? null,
-        productionStatusName: row.production_status_name ?? null,
-        orderName: row.order_name ?? null,
-        orderDate: dateOnly(row.order_date),
-        readyDate: dateOnly(row.completion_date) ?? dateOnly(row.planned_completion_date),
-        clientName: row.client_name ?? null,
-        materialKey,
-      });
-    }
-    const fillByOrder = createOrderFillResolver(items.rows.map((row) => toNum(row.order_id)));
-
-    // order_id -> order_name, so a piece's label line 1 shows the human order name
-    // (live orders.order_name) instead of the numeric id. Keyed by order id so the
-    // frozen-snapshot path (which carries orderId, not the name) resolves it too,
-    // without a recalc of pre-existing jobs.
-    const orderNameById = new Map<number, string>();
-    for (const row of items.rows) {
-      const name = row.order_name?.trim();
-      if (name) orderNameById.set(toNum(row.order_id), name);
-    }
-    const orderNameForOrderId = (orderId: number | null): string | null =>
-      orderId === null ? null : orderNameById.get(orderId) ?? null;
+    const { detailById, fillByOrder, orderNameForOrderId } = await this.loadRenderDetailsForGroup(cutGroupId, client);
 
     // Resolve a piece's sheet-material name (live join; the frozen snapshot has no
     // material). Blank/unknown → null so no material line is added. Material is read
@@ -4459,6 +4546,8 @@ interface ItemRow extends QueryResultRow {
   link_pdf_file?: string | null;
   /** Present only on the enriched path (ENRICHED_ITEMS_QUERY). */
   order_name?: string | null;
+  /** Present only on the enriched path (ENRICHED_ITEMS_QUERY). */
+  order_delete_flag?: boolean | null;
 }
 
 // Enriched item query: joins order_details + dictionaries to resolve the order
@@ -4480,7 +4569,8 @@ const ENRICHED_ITEMS_QUERY = `
          od.priority, od.production_status_id, ps.production_status_name,
          od.joint_order_id, od.note,
          od.link_cutting_file, od.link_cutting_image_file, od.link_cad_file, od.link_pdf_file,
-         o.order_name AS order_name
+         o.order_name AS order_name,
+         o.delete_flag AS order_delete_flag
   FROM cut_job_item i
   -- delete_flag in the JOIN (not WHERE): a reserved detail that was later soft-
   -- deleted must still return its item row, but with detail: null (canonical
@@ -4664,8 +4754,8 @@ async function loadJob(
     qty: toNum(row.qty),
     cutGroupId: row.cut_group_id === null ? null : toNum(row.cut_group_id),
     detail: includeItemDetails ? mapItemDetail(row) : null,
-    // orderName is only present on the enriched (single-job) path; undefined on the light/list path.
-    ...(includeItemDetails ? { orderName: row.order_name ?? null } : {}),
+    // orderName/orderDeleted are only present on the enriched (single-job) path; undefined on the light/list path.
+    ...(includeItemDetails ? { orderName: row.order_name ?? null, orderDeleted: row.order_delete_flag === true } : {}),
   }));
   const resolvedMaterialNames = materialNames ?? uniqueSorted(
     itemDtos.map((item) => item.detail?.materialName ?? null),

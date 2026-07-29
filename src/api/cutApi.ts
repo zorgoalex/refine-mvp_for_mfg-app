@@ -131,6 +131,7 @@ export const cutApi = {
     originTopLeft = true,
     axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
     resultNo?: number,
+    pieceMetadata = false,
   ): Promise<Blob> {
     const path = resultNo === undefined
       ? apiRoutes.cutJobs.sheetPng(validateCutJobId(cutJobId), validateCutJobId(groupId), sheetIndex)
@@ -161,6 +162,7 @@ export const cutApi = {
     originTopLeft = true,
     axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
     resultNo?: number,
+    pieceMetadata = false,
   ): Promise<Blob> {
     const path = resultNo === undefined
       ? apiRoutes.cutJobs.sheetSvg(validateCutJobId(cutJobId), validateCutJobId(groupId), sheetIndex)
@@ -171,15 +173,15 @@ export const cutApi = {
     params.append('axisOrigin', axisOrigin);
     if (variant) params.append('variant', variant);
     if (renderToken) params.append('renderVersion', renderToken);
+    if (pieceMetadata) params.append('pieceMetadata', 'on');
     const qs = params.toString();
     const { blob } = await httpClient.download(qs ? `${path}?${qs}` : path);
     return blob;
   },
 
   /**
-   * Group PDF. 202 (cold cache) -> `{ pending: true }`; caller retries.
-   * When `renderToken` is given, appends `variant=active&renderVersion=<token>`
-   * so the browser fetches the active layout and busts the render cache.
+   * Group PDF. Current-job exports are freshly rendered by the backend each
+   * time; 202 is still accepted for older/result paths that may answer pending.
    */
   fetchGroupPdf(
     cutJobId: number,
@@ -208,9 +210,8 @@ export const cutApi = {
   },
 
   /**
-   * Whole-job PDF. 202 (cold cache) -> `{ pending: true }`; caller retries.
-   * When `renderToken` is given, appends `variant=active&renderVersion=<token>`
-   * so the browser fetches the active layout and busts the render cache.
+   * Whole-job PDF. Current-job exports are freshly rendered by the backend each
+   * time; 202 is still accepted for older/result paths that may answer pending.
    */
   fetchJobPdf(cutJobId: number, landscape = false, renderToken?: string, originTopLeft = true, pdfTemplate?: string, axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left', resultNo?: number): Promise<CutPdfResult> {
     const path = resultNo === undefined

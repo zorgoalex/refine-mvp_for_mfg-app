@@ -79,12 +79,14 @@ export interface BazisTreeNodeDto {
 export interface BazisOrderRefDto {
   orderId: number;
   orderName: string;
+  orderDeleted?: boolean;
 }
 
 export interface BazisNodeOrderLinkDto {
   orderId: number;
   orderDetailId: number | null;
   mappingKind: string;
+  orderDeleted?: boolean;
 }
 
 export interface BazisNodeCardDto {
@@ -211,6 +213,7 @@ export interface BazisRevisionEstimateDto {
 export interface BazisRevisionOrderDto {
   orderId: number;
   orderName: string | null;
+  orderDeleted?: boolean;
   createdAt: string;
   nodesMapped: number;
   detailsCreated: number;

@@ -52,6 +52,7 @@ const updateDetailSchema: SchemaObject = { type: 'object', additionalProperties:
   properties: { ...detailProperties, expectedVersion: { type: 'integer', minimum: 0 } } };
 const sourceRefSchema: SchemaObject = { type: 'object', required: ['id', 'label'], properties: {
   id: { type: 'integer', format: 'int64' }, label: { type: 'string' },
+  deleted: { type: 'boolean' },
 } };
 const sourceRefs = (): SchemaObject => ({ type: 'array', items: sourceRefSchema });
 const summaryProperties: NonNullable<SchemaObject['properties']> = {
@@ -65,7 +66,7 @@ const summaryRequired = Object.keys(summaryProperties);
 const detailResponseSchema: SchemaObject = { type: 'object', additionalProperties: false,
   required: [...detailFieldNames, 'bazisCutSetDetailId', 'bazisCutSetId', 'sortOrder', 'sourceOrderDetailId',
     'sourceOrderId', 'sourceProjectId', 'sourceBazisProjectId', 'sourceBazisRevisionId', 'sourceBazisNodeId',
-    'sourceOrderName', 'sourceOrderFullNumber', 'sourceProjectCode', 'sourceBazisProjectName', 'sourceBazisOrderNo',
+    'sourceOrderDeleted', 'sourceOrderName', 'sourceOrderFullNumber', 'sourceProjectCode', 'sourceBazisProjectName', 'sourceBazisOrderNo',
     'sourceBazisProductName',
     'createdAt', 'updatedAt'],
   properties: { ...detailProperties,
@@ -73,6 +74,7 @@ const detailResponseSchema: SchemaObject = { type: 'object', additionalPropertie
     sortOrder: { type: 'integer', minimum: 0 },
     sourceOrderDetailId: { type: 'integer', format: 'int64', nullable: true },
     sourceOrderId: { type: 'integer', format: 'int64', nullable: true },
+    sourceOrderDeleted: { type: 'boolean' },
     sourceProjectId: { type: 'integer', format: 'int64', nullable: true },
     sourceBazisProjectId: { type: 'integer', format: 'int64', nullable: true },
     sourceBazisRevisionId: { type: 'integer', format: 'int64', nullable: true },

@@ -120,7 +120,7 @@ interface ProjectListRow {
   last_imported_at: string | null;
   bazis_order_no: string | null;
   linked_order_ids: Array<number | string> | null;
-  linked_orders?: Array<{ orderId: number | string; orderName: string | null }> | null;
+  linked_orders?: Array<{ orderId: number | string; orderName: string | null; orderDeleted?: boolean | null }> | null;
 }
 
 interface ProjectRevisionRow {
@@ -155,7 +155,7 @@ interface TreeNodeRow {
   notes: string | null;
   edge_count: number | string;
   has_drilling: boolean;
-  linked_orders: Array<{ orderId: number | string; orderName: string | null }> | null;
+  linked_orders: Array<{ orderId: number | string; orderName: string | null; orderDeleted?: boolean | null }> | null;
   children_count: number | string;
 }
 
@@ -253,6 +253,7 @@ interface NodeOrderLinkRow {
   order_id: number | string;
   order_detail_id: number | string | null;
   mapping_kind: string;
+  order_delete_flag: boolean | null;
 }
 
 interface MaterialLookupRow {
@@ -288,6 +289,7 @@ interface RawUsageRow {
 interface RevisionOrderRow {
   order_id: number | string;
   order_name: string | null;
+  order_delete_flag: boolean | null;
   created_at: string;
   nodes_mapped: number | string;
   details_created: number | string;
@@ -1061,7 +1063,11 @@ export class PgBazisRepository implements BazisRepositoryPort {
              ) AS bazis_order_no,
              COALESCE(array_remove(array_agg(DISTINCT bol.order_id), NULL), '{}') AS linked_order_ids,
              COALESCE((
-               SELECT jsonb_agg(jsonb_build_object('orderId', l.order_id, 'orderName', o.order_name) ORDER BY l.order_id)
+               SELECT jsonb_agg(jsonb_build_object(
+                 'orderId', l.order_id,
+                 'orderName', o.order_name,
+                 'orderDeleted', COALESCE(o.delete_flag, false)
+               ) ORDER BY l.order_id)
                FROM bazis_order_links l
                JOIN orders o ON o.order_id = l.order_id
                WHERE l.bazis_project_id = bp.bazis_project_id
@@ -1111,7 +1117,11 @@ export class PgBazisRepository implements BazisRepositoryPort {
              ) AS bazis_order_no,
              COALESCE(array_remove(array_agg(DISTINCT bol.order_id), NULL), '{}') AS linked_order_ids,
              COALESCE((
-               SELECT jsonb_agg(jsonb_build_object('orderId', l.order_id, 'orderName', o.order_name) ORDER BY l.order_id)
+               SELECT jsonb_agg(jsonb_build_object(
+                 'orderId', l.order_id,
+                 'orderName', o.order_name,
+                 'orderDeleted', COALESCE(o.delete_flag, false)
+               ) ORDER BY l.order_id)
                FROM bazis_order_links l
                JOIN orders o ON o.order_id = l.order_id
                WHERE l.bazis_project_id = bp.bazis_project_id
@@ -1180,7 +1190,11 @@ export class PgBazisRepository implements BazisRepositoryPort {
              n.quantity, n.cumulative_quantity,
              n.length_mm, n.width_mm, n.thickness_mm, n.main_material_name,
              ${TREE_NODE_EXTRA_SELECT},
-             (SELECT jsonb_agg(DISTINCT jsonb_build_object('orderId', m.order_id, 'orderName', o.order_name))
+             (SELECT jsonb_agg(DISTINCT jsonb_build_object(
+                'orderId', m.order_id,
+                'orderName', o.order_name,
+                'orderDeleted', COALESCE(o.delete_flag, false)
+              ))
               FROM bazis_node_order_detail_map m
               JOIN orders o ON o.order_id = m.order_id
               WHERE m.node_id = n.bazis_node_id
@@ -1216,7 +1230,11 @@ export class PgBazisRepository implements BazisRepositoryPort {
              n.quantity, n.cumulative_quantity,
              n.length_mm, n.width_mm, n.thickness_mm, n.main_material_name,
              ${TREE_NODE_EXTRA_SELECT},
-             (SELECT jsonb_agg(DISTINCT jsonb_build_object('orderId', m.order_id, 'orderName', o.order_name))
+             (SELECT jsonb_agg(DISTINCT jsonb_build_object(
+                'orderId', m.order_id,
+                'orderName', o.order_name,
+                'orderDeleted', COALESCE(o.delete_flag, false)
+              ))
               FROM bazis_node_order_detail_map m
               JOIN orders o ON o.order_id = m.order_id
               WHERE m.node_id = n.bazis_node_id
@@ -1258,8 +1276,9 @@ export class PgBazisRepository implements BazisRepositoryPort {
 
     const links = await this.database.query<NodeOrderLinkRow>(
       `
-      SELECT m.order_id, m.order_detail_id, m.mapping_kind
+      SELECT m.order_id, m.order_detail_id, m.mapping_kind, COALESCE(o.delete_flag, false) AS order_delete_flag
       FROM bazis_node_order_detail_map m
+      LEFT JOIN orders o ON o.order_id = m.order_id
       WHERE m.node_id = $1
       ORDER BY m.order_id DESC
       `,
@@ -1298,6 +1317,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
         orderId: Number(link.order_id),
         orderDetailId: nullableNumber(link.order_detail_id),
         mappingKind: link.mapping_kind,
+        ...(link.order_delete_flag === true ? { orderDeleted: true } : {}),
       })),
     };
   }
@@ -1507,6 +1527,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       `
       SELECT bol.order_id,
              o.order_name,
+             COALESCE(o.delete_flag, false) AS order_delete_flag,
              bol.created_at::text AS created_at,
              COALESCE(m.nodes_mapped, 0)::int AS nodes_mapped,
              COALESCE(m.details_created, 0)::int AS details_created
@@ -1530,6 +1551,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
     return result.rows.map((row) => ({
       orderId: Number(row.order_id),
       orderName: row.order_name ?? null,
+      ...(row.order_delete_flag === true ? { orderDeleted: true } : {}),
       createdAt: row.created_at,
       nodesMapped: Number(row.nodes_mapped),
       detailsCreated: Number(row.details_created),
@@ -2627,7 +2649,11 @@ function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
     notes: row.notes,
     childrenCount: Number(row.children_count),
     orders: (row.linked_orders ?? [])
-      .map((entry) => ({ orderId: Number(entry.orderId), orderName: entry.orderName ?? '' }))
+      .map((entry) => ({
+        orderId: Number(entry.orderId),
+        orderName: entry.orderName ?? '',
+        ...(entry.orderDeleted === true ? { orderDeleted: true } : {}),
+      }))
       .sort((left, right) => left.orderId - right.orderId),
     orderIds: (row.linked_orders ?? [])
       .map((entry) => Number(entry.orderId))
@@ -2639,6 +2665,7 @@ function mapProjectListRow(row: ProjectListRow): BazisProjectListItemDto {
   const linkedOrders = (row.linked_orders ?? []).map((entry) => ({
     orderId: Number(entry.orderId),
     orderName: entry.orderName ?? '',
+    ...(entry.orderDeleted === true ? { orderDeleted: true } : {}),
   }));
   return {
     bazisProjectId: Number(row.bazis_project_id),

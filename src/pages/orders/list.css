@@ -51,11 +51,18 @@
 }
 
 .orders-table td.orders-col--order-name,
-.orders-table td.orders-col--doweling-name,
+.orders-table td.orders-col--basis-project,
 .orders-table td.orders-col--planned-date,
 .orders-table td.orders-col--amount,
 .orders-table td.orders-col--payment-date {
   font-size: 96%;
+}
+
+.orders-table .orders-basis-project-value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .orders-table td.col-order-id {

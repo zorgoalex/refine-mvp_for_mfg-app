@@ -13880,6 +13880,7 @@ components:
         - debtAmount
         - partsCount
         - totalArea
+        - basisProjects
         - primaryGroup
         - groups
         - updatedAt
@@ -13957,6 +13958,11 @@ components:
           type: array
           items:
             type: string
+        basisProjects:
+          type: array
+          items:
+            type: string
+          description: "Unique non-empty detail basis_project values in first-detail order."
         sheetMaterialTypeIds:
           type: array
           items:

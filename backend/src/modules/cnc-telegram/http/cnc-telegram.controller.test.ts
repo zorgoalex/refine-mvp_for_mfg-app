@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
-import { parseDateQuery, parseIdempotencyKey, parseStructuredIngest } from './cnc-telegram.controller';
+import { parseDateQuery, parseIdempotencyKey, parseStructuredIngest, parseTodayQuery } from './cnc-telegram.controller';
 
 describe('CncTelegramController parsing', () => {
   it('accepts structured packet ingest and rejects raw fields', () => {
@@ -64,6 +64,25 @@ describe('CncTelegramController parsing', () => {
     expect(parseDateQuery('2026-07-24')).toBe('2026-07-24');
     expect(() => parseDateQuery('24.07.2026')).toThrow(ApiError);
     expect(() => parseDateQuery('2026-02-30')).toThrow(ApiError);
+  });
+
+  it('validates today board range query values', () => {
+    expect(parseTodayQuery({ dateFrom: '2026-07-18', dateTo: '2026-07-24' })).toEqual({
+      workday: null,
+      workdayFrom: '2026-07-18',
+      workdayTo: '2026-07-24',
+    });
+    expect(() =>
+      parseTodayQuery({
+        date: '2026-07-24',
+        dateFrom: '2026-07-18',
+        dateTo: '2026-07-24',
+      }),
+    ).toThrow(ApiError);
+    expect(() => parseTodayQuery({ dateFrom: '2026-07-24' })).toThrow(ApiError);
+    expect(() =>
+      parseTodayQuery({ dateFrom: '2026-07-24', dateTo: '2026-07-18' }),
+    ).toThrow(ApiError);
   });
 });
 

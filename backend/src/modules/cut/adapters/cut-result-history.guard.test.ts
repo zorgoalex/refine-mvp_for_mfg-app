@@ -56,4 +56,17 @@ describe('cut result history implementation guards', () => {
     expect(pdfRenderer).toContain("case 'cut_sheet_render_v1':");
     expect(pdfRenderer).toContain('return buildSheetsPdfV1(sheets)');
   });
+
+  it('refreshes PDF dynamic fields and CNC relations on every PDF render', () => {
+    expect(repository).toContain('refreshPdfDynamicFieldsForSheets');
+    expect(repository).toContain('refreshPdfDynamicFields: true');
+    expect(repository).toContain('cti.match_detail_id = od.detail_id');
+    expect(repository).toContain("cti.match_status = 'matched'");
+    expect(repository).toContain('buildPdfSheetMeta(sheet.placements, detailById)');
+    expect(repository).toContain('buildPdfDetailRows(sheet.placements, detailById)');
+    expect(controller).toContain('fresh on-demand render');
+    expect(controller).toContain('this.cut.renderGroupPdf({');
+    expect(controller).toContain('this.cut.renderJobPdf({');
+    expect(controller).not.toContain('this.sendPdf(response, result');
+  });
 });

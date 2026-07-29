@@ -180,7 +180,9 @@ export class WorkosAuthService {
     void this.ports.identities.touchLastLogin(link.identityId).catch(() => undefined);
 
     const currentUser = this.toCurrentUser(user, session.sessionId, identity, link);
-    const accessToken = await this.ports.tokens.issueAccessToken(currentUser);
+    const accessToken = await this.ports.tokens.issueAccessToken(currentUser, {
+      notAfter: session.refreshTokenExpiresAt,
+    });
 
     return {
       response: this.toAuthResponse(currentUser, accessToken),

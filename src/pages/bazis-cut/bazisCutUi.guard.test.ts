@@ -31,6 +31,11 @@ describe('Basis-cut UI integration guards', () => {
     expect(list).toContain('ERP-заказы');
     expect(list).toContain('Базис-проекты');
     expect(list).toContain('Базис-заказы');
+    expect(list).toContain('OrderDeletedTag');
+    expect(card).toContain('sourceOrderDeleted');
+    expect(list).toContain('orderDeletedReferenceClassName');
+    expect(card).toContain('rowClassName={(row) => orderDeletedReferenceClassName(row.sourceOrderDeleted)}');
+    expect(styles).toContain('order-deleted-reference-row');
   });
 
   it('supports new/existing searchable set selection', () => {

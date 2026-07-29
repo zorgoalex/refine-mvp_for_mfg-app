@@ -6,7 +6,7 @@ describe('refresh cookie contract', () => {
     expect(
       createRefreshCookie('refresh_secret', {
         nodeEnv: 'development',
-        ttlDays: 7,
+        expiresAt: new Date('2026-05-01T22:00:00.000Z'),
       }),
     ).toEqual({
       name: REFRESH_COOKIE_NAME,
@@ -16,7 +16,7 @@ describe('refresh cookie contract', () => {
         secure: false,
         sameSite: 'lax',
         path: '/api/v1/auth',
-        maxAge: 604800000,
+        expires: new Date('2026-05-01T22:00:00.000Z'),
       },
     });
   });
@@ -25,7 +25,7 @@ describe('refresh cookie contract', () => {
     expect(
       createRefreshCookie('refresh_secret', {
         nodeEnv: 'production',
-        ttlDays: 7,
+        expiresAt: new Date('2026-05-01T22:00:00.000Z'),
       }).options.secure,
     ).toBe(true);
   });
@@ -36,7 +36,7 @@ describe('refresh cookie contract', () => {
         nodeEnv: 'staging',
         secure: true,
         sameSite: 'none',
-        ttlDays: 7,
+        expiresAt: new Date('2026-05-01T22:00:00.000Z'),
       }).options,
     ).toMatchObject({
       secure: true,

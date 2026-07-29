@@ -97,6 +97,13 @@ Backend cutover mode за `VITE_USE_BACKEND_AUTH=true` использует:
 - `/api/v1/auth/logout`;
 - `/api/v1/me`.
 
+Пользовательская сессия имеет абсолютный срок 10 часов
+(`AUTH_SESSION_TTL_SECONDS=36000`). Внутри неё access token действует 15 минут
+(`ACCESS_TOKEN_TTL_SECONDS=900`) и обновляется автоматически. Технический
+refresh-token не может жить дольше 7 дней (`REFRESH_TOKEN_TTL_DAYS=7`), но его
+фактический срок всегда ограничен абсолютным сроком пользовательской сессии.
+Access token, выданный перед концом сессии, также обрезается по этой границе.
+
 Refresh token остаётся в HttpOnly cookie и не хранится в JavaScript.
 
 ## WorkOS AuthKit

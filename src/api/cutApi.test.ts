@@ -109,6 +109,19 @@ describe('cutApi', () => {
     expect(fetchMock.mock.calls[3][0]).toContain('/api/v1/cut-jobs/42/results/3/groups/100/sheets/0.svg');
   });
 
+  it('requests SVG piece metadata only when enabled', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('<svg/>', { status: 200, headers: { 'Content-Type': 'image/svg+xml' } }))
+      .mockResolvedValueOnce(new Response('<svg/>', { status: 200, headers: { 'Content-Type': 'image/svg+xml' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cutApi.fetchSheetSvg(42, 100, 0);
+    await cutApi.fetchSheetSvg(42, 100, 0, false, undefined, undefined, true, 'bottom-left', 3, true);
+
+    expect(fetchMock.mock.calls[0][0] as string).not.toContain('pieceMetadata=on');
+    expect(fetchMock.mock.calls[1][0] as string).toContain('pieceMetadata=on');
+  });
+
   it('emits origin=raw on every render URL when originTopLeft is false (RAW half not dead)', async () => {
     const fetchMock = vi.fn()
       .mockImplementation(() => new Response('PNG', { status: 200, headers: { 'Content-Type': 'image/png' } }));

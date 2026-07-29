@@ -322,6 +322,7 @@ function createPgSessionManager(
   return new PgAuthSessionManager(database, tokenService, createAccessTokenIssuer(config), {
     refreshTokenPepper,
     refreshTokenTtlDays: config.get('REFRESH_TOKEN_TTL_DAYS', { infer: true }),
+    sessionTtlSeconds: config.get('AUTH_SESSION_TTL_SECONDS', { infer: true }),
     // Schema capability, NOT the feature flag: already-issued WorkOS
     // sessions keep their provenance (audit source, sid-less 'unavailable'
     // logout) even while the SSO entrypoints are rolled back.

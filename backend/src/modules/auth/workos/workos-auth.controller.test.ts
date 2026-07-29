@@ -404,7 +404,6 @@ function createHarness(options: {
         nodeEnv: 'test',
         refreshCookieSameSite: 'lax',
         refreshCookieSecure: false,
-        refreshTokenTtlDays: 7,
       };
     },
   };

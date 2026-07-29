@@ -38,6 +38,7 @@ describe('PgAuthSessionManager', () => {
       sessionId: 'session-1',
       userId: '42',
       refreshToken: 'refresh-login',
+      refreshTokenExpiresAt: new Date('2026-05-01T22:00:00.000Z'),
     });
 
     expect(database.queries.map((query) => normalizeSql(query.text))).toEqual([
@@ -66,6 +67,10 @@ describe('PgAuthSessionManager', () => {
     ]);
     expect(JSON.stringify(audit?.params)).not.toContain('refresh-login');
     expect(JSON.stringify(audit?.params)).not.toContain('pepper');
+    const sessionInsert = database.queries.find((query) => query.text.includes('INSERT INTO auth_sessions'));
+    const refreshInsert = database.queries.find((query) => query.text.includes('INSERT INTO refresh_tokens'));
+    expect(sessionInsert?.params[1]).toEqual(new Date('2026-05-01T22:00:00.000Z'));
+    expect(refreshInsert?.params[4]).toEqual(new Date('2026-05-01T22:00:00.000Z'));
     vi.useRealTimers();
   });
 
@@ -168,6 +173,8 @@ describe('PgAuthSessionManager', () => {
         session_id: 'session-1',
         token_family_id: 'family-1',
         expires_at: new Date('2026-05-02T12:00:00.000Z'),
+        session_created_at: new Date('2026-05-01T02:05:00.000Z'),
+        session_expires_at: new Date('2026-05-02T12:00:00.000Z'),
         revoked_at: null,
         session_status: 'active',
         username: 'manager',
@@ -185,13 +192,14 @@ describe('PgAuthSessionManager', () => {
       }),
     ).resolves.toMatchObject({
       response: {
-        accessTokenExpiresAt: '2026-05-01T12:15:00.000Z',
+        accessTokenExpiresAt: '2026-05-01T12:05:00.000Z',
         user: {
           id: '42',
           role: 'manager',
         },
       },
       refreshToken: 'refresh-login',
+      refreshTokenExpiresAt: new Date('2026-05-01T12:05:00.000Z'),
     });
 
     expect(database.queries.some((query) => query.text.includes("revoked_reason = 'rotated'"))).toBe(
@@ -217,6 +225,36 @@ describe('PgAuthSessionManager', () => {
       }),
     ]);
     expect(JSON.stringify(audit?.params)).not.toContain('refresh-login');
+    vi.useRealTimers();
+  });
+
+  it('expires an existing refresh session at the configured absolute 10-hour boundary', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-01T12:00:00.000Z'));
+    const database = createDatabase({
+      refreshRow: {
+        token_id: 'token-old',
+        user_id: '42',
+        session_id: 'session-1',
+        token_family_id: 'family-1',
+        expires_at: new Date('2026-05-02T12:00:00.000Z'),
+        session_created_at: new Date('2026-05-01T00:00:00.000Z'),
+        session_expires_at: new Date('2026-05-02T12:00:00.000Z'),
+        revoked_at: null,
+        session_status: 'active',
+        username: 'manager',
+        role_id: 10,
+        is_active: true,
+      },
+    });
+
+    await expect(
+      createManager(database.service).refresh({ refreshToken: 'refresh-login' }),
+    ).rejects.toMatchObject({
+      code: 'REFRESH_TOKEN_EXPIRED',
+      statusCode: 401,
+    });
+    expect(database.queries.some((query) => query.text.includes("SET status = 'expired'"))).toBe(true);
     vi.useRealTimers();
   });
 
@@ -573,7 +611,11 @@ describe('PgAuthSessionManager', () => {
 
 function createManager(
   database: DatabaseService,
-  extraOptions: { supportsProviderSessions?: boolean; enforceLoginPolicy?: boolean } = {},
+  extraOptions: {
+    supportsProviderSessions?: boolean;
+    enforceLoginPolicy?: boolean;
+    sessionTtlSeconds?: number;
+  } = {},
 ): PgAuthSessionManager {
   return new PgAuthSessionManager(
     database,
@@ -586,6 +628,7 @@ function createManager(
     {
       refreshTokenPepper: 'test-refresh-pepper-with-at-least-32',
       refreshTokenTtlDays: 7,
+      sessionTtlSeconds: 36000,
       ...extraOptions,
     },
   );
@@ -639,7 +682,15 @@ function createDatabase(
       }
 
       if (text.includes('FROM refresh_tokens rt')) {
-        return { rows: options.refreshRow ? [options.refreshRow] : [] };
+        if (!options.refreshRow) return { rows: [] };
+        const tokenExpiresAt = new Date(String(options.refreshRow.expires_at));
+        return {
+          rows: [{
+            session_created_at: new Date(tokenExpiresAt.getTime() - 36_000_000),
+            session_expires_at: tokenExpiresAt,
+            ...options.refreshRow,
+          }],
+        };
       }
 
       if (text.includes('SELECT provider_session_id, auth_source FROM auth_sessions')) {

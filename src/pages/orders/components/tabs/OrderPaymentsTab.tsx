@@ -14,6 +14,7 @@ import dayjs from 'dayjs';
 // Exposed methods via ref
 export interface OrderPaymentsTabRef {
   applyCurrentEdits: () => Promise<boolean>;
+  addInlinePayment: () => Promise<void>;
 }
 
 // Default values for quick add
@@ -32,16 +33,6 @@ export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [highlightedRowKey, setHighlightedRowKey] = useState<React.Key | null>(null);
   const tableRef = useRef<OrderPaymentTableRef>(null);
-
-  // Expose methods via ref for parent (OrderForm) to call
-  useImperativeHandle(ref, () => ({
-    applyCurrentEdits: async () => {
-      if (tableRef.current) {
-        return await tableRef.current.applyCurrentEdits();
-      }
-      return true;
-    },
-  }));
 
   // Handle create new payment via modal
   const handleCreate = () => {
@@ -78,6 +69,17 @@ export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
       tableRef.current.startEditRow(lastPayment);
     }
   };
+
+  // Expose methods via ref for parent (OrderForm) and cross-page intents.
+  useImperativeHandle(ref, () => ({
+    applyCurrentEdits: async () => {
+      if (tableRef.current) {
+        return await tableRef.current.applyCurrentEdits();
+      }
+      return true;
+    },
+    addInlinePayment: handleQuickAdd,
+  }));
 
   // Handle edit existing payment (via modal - legacy support)
   const handleEdit = (payment: Payment) => {

@@ -132,6 +132,14 @@ function makeListItem(overrides: Partial<OrderListItemDto> = {}): OrderListItemD
 }
 
 describe('mapOrderListItemToLegacyRow — header-material fallback (critic R8)', () => {
+  it('maps backend Basis-project aggregates for the orders list fallback', () => {
+    const item = makeListItem({
+      basisProjects: ['1491', '1492'],
+    });
+    const row = mapOrderListItemToLegacyRow(item);
+    expect(row.basis_projects).toEqual(['1491', '1492']);
+  });
+
   it('maps backend detail filmNames for the orders list film column', () => {
     const item = makeListItem({
       filmNames: ['Пленка A', 'Пленка B'],

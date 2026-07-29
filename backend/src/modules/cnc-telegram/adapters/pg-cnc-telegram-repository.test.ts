@@ -19,7 +19,30 @@ describe('PgCncTelegramRepository', () => {
     const result = await repo.listToday({ currentUser: user() });
 
     expect(result.workday).toBe('2026-07-24');
-    expect(queries[1]?.params).toEqual(['2026-07-24']);
+    expect(queries[1]?.params).toEqual(['2026-07-24', '2026-07-24']);
+  });
+
+  it('queries packets and bath readiness for a date range', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const database = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({
+      currentUser: user(),
+      workdayFrom: '2026-07-18',
+      workdayTo: '2026-07-24',
+    });
+
+    expect(result.workday).toBe('2026-07-24');
+    expect(queries[0]?.text).toContain('p.workday BETWEEN $1::date AND $2::date');
+    expect(queries[0]?.params).toEqual(['2026-07-18', '2026-07-24']);
+    expect(queries[1]?.text).toContain('p.workday BETWEEN $1::date AND $2::date');
+    expect(queries[1]?.params).toEqual(['2026-07-18', '2026-07-24']);
   });
 
   it('ingests structured packets with idempotency, audit and outbox writes', async () => {
@@ -193,6 +216,8 @@ describe('PgCncTelegramRepository', () => {
       .flatMap((packet) => packet.items)[0];
 
     expect(sql).toContain('COALESCE(i.match_order_id, item_order.order_id) AS item_order_id');
+    expect(sql).toContain('matched_order.delete_flag');
+    expect(sql).toContain('LEFT JOIN orders matched_order');
     expect(sql).toContain('HAVING COUNT(*) = 1');
     expect(item).toMatchObject({
       orderName: '2706',
@@ -200,6 +225,39 @@ describe('PgCncTelegramRepository', () => {
       matchOrderId: null,
       matchDetailId: null,
       matchStatus: 'unmatched',
+    });
+  });
+
+  it('marks packet items linked to soft-deleted matched orders', async () => {
+    const database = {
+      query: vi.fn(async (text: string) => {
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [
+              packetRow({
+                order_name: '2706',
+                item_order_id: 11450,
+                order_delete_flag: true,
+                match_order_id: 11450,
+                match_detail_id: 7788,
+                match_status: 'matched',
+              }),
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-28' });
+    const item = result.columns.flatMap((column) => column.packets)
+      .flatMap((packet) => packet.items)[0];
+
+    expect(item).toMatchObject({
+      orderId: 11450,
+      matchOrderId: 11450,
+      orderDeleted: true,
     });
   });
 
@@ -283,6 +341,12 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('cut_result_sheet_map');
     expect(sql).toContain('cut_result_label_map_projection');
     expect(sql).toContain('fallback_target_details');
+    expect(sql).toContain('completed_whole_order_keys');
+    expect(sql).toContain('whole_order_target_details');
+    expect(sql).toContain("lower(packet_comment.comment_text) LIKE '%весь%'");
+    expect(sql).toContain("regexp_matches(\n        packet_comment.comment_text,\n        '(^|[^0-9])([0-9]{4,})([^0-9]|$)'");
+    expect(sql).toContain('1000000000::integer AS completed_quantity');
+    expect(sql).toContain('LEAST(SUM(target.completed_quantity), 1000000000::bigint)::integer');
     expect(sql).toContain('lower(trim(i.order_name)) AS order_key');
     expect(sql).toContain('od.detail_number = item.detail_number');
     expect(sql).toContain('jsonb_array_elements_text(p.comments_json)');

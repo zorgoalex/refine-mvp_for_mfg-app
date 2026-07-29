@@ -137,7 +137,11 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       `SELECT s.*,
               COALESCE(SUM(d.quantity), 0)::bigint AS quantity,
               COUNT(d.bazis_cut_set_detail_id)::bigint AS position_count,
-              COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id', d.source_order_id, 'label', d.source_order_full_number))
+              COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
+                'id', d.source_order_id,
+                'label', d.source_order_full_number,
+                'deleted', COALESCE(source_order.delete_flag, false)
+              ))
                 FILTER (WHERE d.source_order_id IS NOT NULL), '[]'::jsonb) AS orders,
               COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id', d.source_project_id, 'label', d.source_project_code))
                 FILTER (WHERE d.source_project_id IS NOT NULL), '[]'::jsonb) AS projects,
@@ -158,6 +162,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
               COUNT(*) OVER() AS total_count
        FROM bazis_cut_sets s
        LEFT JOIN bazis_cut_set_details d ON d.bazis_cut_set_id=s.bazis_cut_set_id
+       LEFT JOIN orders source_order ON source_order.order_id=d.source_order_id
        WHERE ($1='' OR s.name ILIKE '%' || $1 || '%'
          OR EXISTS (
            SELECT 1 FROM bazis_cut_set_details sd
@@ -541,7 +546,11 @@ async function loadSet(client: DatabaseClient, setId: number): Promise<BazisCutS
   const header = headerResult.rows[0];
   if (!header) throw setNotFound(setId);
   const detailsResult = await client.query<DetailRow>(
-    `SELECT * FROM bazis_cut_set_details WHERE bazis_cut_set_id=$1 ORDER BY sort_order, bazis_cut_set_detail_id`,
+    `SELECT d.*, COALESCE(source_order.delete_flag, false) AS source_order_deleted
+     FROM bazis_cut_set_details d
+     LEFT JOIN orders source_order ON source_order.order_id=d.source_order_id
+     WHERE d.bazis_cut_set_id=$1
+     ORDER BY d.sort_order, d.bazis_cut_set_detail_id`,
     [setId],
   );
   const details = detailsResult.rows.map(mapDetail);
@@ -550,7 +559,7 @@ async function loadSet(client: DatabaseClient, setId: number): Promise<BazisCutS
     createdBy: nullableNumber(header.created_by), updatedBy: nullableNumber(header.updated_by),
     createdAt: iso(header.created_at), updatedAt: iso(header.updated_at), details,
     quantity: details.reduce((sum, detail) => sum + detail.quantity, 0), positionCount: details.length,
-    orders: refs(details, 'sourceOrderId', 'sourceOrderFullNumber'),
+    orders: refs(details, 'sourceOrderId', 'sourceOrderFullNumber', 'sourceOrderDeleted'),
     projects: refs(details, 'sourceProjectId', 'sourceProjectCode'),
     bazisProjects: labelRefs(details, 'sourceBazisProjectId', 'sourceBazisProjectName'),
     bazisOrders: labelRefs(details, 'sourceBazisRevisionId', 'sourceBazisOrderNo'),
@@ -571,6 +580,7 @@ function mapDetail(row: DetailRow): BazisCutSetDetailDto {
     bazisCutSetDetailId: toNumber(row.bazis_cut_set_detail_id),
     bazisCutSetId: toNumber(row.bazis_cut_set_id), sortOrder: Number(row.sort_order),
     sourceOrderDetailId: nullableNumber(row.source_order_detail_id), sourceOrderId: nullableNumber(row.source_order_id),
+    sourceOrderDeleted: row.source_order_deleted === true,
     sourceProjectId: nullableNumber(row.source_project_id), sourceBazisProjectId: nullableNumber(row.source_bazis_project_id),
     sourceBazisRevisionId: nullableNumber(row.source_bazis_revision_id), sourceBazisNodeId: nullableNumber(row.source_bazis_node_id),
     sourceOrderName: textValue(row.source_order_name), sourceOrderFullNumber: textValue(row.source_order_full_number),
@@ -726,13 +736,15 @@ function sameFields(detail: BazisCutSetDetailDto, fields: BazisCutDetailFields):
 }
 
 function refs(details: BazisCutSetDetailDto[], idKey: keyof BazisCutSetDetailDto,
-  labelKey: keyof BazisCutSetDetailDto): BazisCutSourceRefDto[] {
-  const map = new Map<number, string>();
+  labelKey: keyof BazisCutSetDetailDto, deletedKey?: keyof BazisCutSetDetailDto): BazisCutSourceRefDto[] {
+  const map = new Map<number, { label: string; deleted: boolean }>();
   for (const detail of details) {
     const id = detail[idKey]; const label = detail[labelKey];
-    if (typeof id === 'number' && typeof label === 'string' && label) map.set(id, label);
+    const deleted = deletedKey ? detail[deletedKey] === true : false;
+    if (typeof id === 'number' && typeof label === 'string' && label) map.set(id, { label, deleted });
   }
-  return [...map].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+  return [...map].map(([id, ref]) => ({ id, label: ref.label, ...(ref.deleted ? { deleted: true } : {}) }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
 }
 
 function labelRefs(details: BazisCutSetDetailDto[], idKey: keyof BazisCutSetDetailDto,
@@ -754,14 +766,14 @@ function labelRefs(details: BazisCutSetDetailDto[], idKey: keyof BazisCutSetDeta
 
 function parseRefs(value: unknown): BazisCutSourceRefDto[] {
   if (!Array.isArray(value)) return [];
-  const map = new Map<string, number>();
+  const map = new Map<string, { id: number; deleted: boolean }>();
   for (const item of value) {
     if (!item || typeof item !== 'object') continue;
-    const ref = item as { id?: unknown; label?: unknown };
+    const ref = item as { id?: unknown; label?: unknown; deleted?: unknown };
     const id = nullableNumber(ref.id); const label = textValue(ref.label);
-    if (id !== null && label && !map.has(label)) map.set(label, id);
+    if (id !== null && label && !map.has(label)) map.set(label, { id, deleted: ref.deleted === true });
   }
-  return [...map].map(([label, id]) => ({ id, label }))
+  return [...map].map(([label, ref]) => ({ id: ref.id, label, ...(ref.deleted ? { deleted: true } : {}) }))
     .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
 }
 

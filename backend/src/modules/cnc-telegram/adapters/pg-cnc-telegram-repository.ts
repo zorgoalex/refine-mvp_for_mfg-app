@@ -65,6 +65,7 @@ interface PacketJoinedRow extends QueryResultRow {
   source_item_key: string | null;
   order_name: string | null;
   item_order_id: string | number | null;
+  order_delete_flag: boolean | null;
   detail_number: string | number | null;
   width_mm: string | number | null;
   height_mm: string | number | null;
@@ -141,15 +142,20 @@ export class PgCncTelegramRepository
   constructor(private readonly database: DatabaseService) {}
 
   async listToday(command: ListCncTelegramTodayCommand): Promise<CncTelegramTodayResponseDto> {
-    const workday = command.workday ?? await currentDatabaseWorkday(this.database);
+    const workday =
+      command.workday ??
+      command.workdayTo ??
+      await currentDatabaseWorkday(this.database);
+    const workdayFrom = command.workdayFrom ?? workday;
+    const workdayTo = command.workdayTo ?? workday;
     const rows = await this.database.query<PacketJoinedRow>(
-      packetSelectSql('p.workday = $1::date'),
-      [workday],
+      packetSelectSql('p.workday BETWEEN $1::date AND $2::date'),
+      [workdayFrom, workdayTo],
     );
     const packets = mapPacketRows(rows.rows);
-    const baths = await loadBathCards(this.database, workday);
+    const baths = await loadBathCards(this.database, workdayFrom, workdayTo);
     return {
-      workday,
+      workday: workdayTo,
       generatedAt: new Date().toISOString(),
       columns: buildTodayColumns(packets, baths),
     };
@@ -307,6 +313,7 @@ function packetSelectSql(whereSql: string): string {
       i.source_item_key,
       i.order_name,
       COALESCE(i.match_order_id, item_order.order_id) AS item_order_id,
+      COALESCE(matched_order.delete_flag, false) AS order_delete_flag,
       i.detail_number,
       i.width_mm,
       i.height_mm,
@@ -330,6 +337,7 @@ function packetSelectSql(whereSql: string): string {
       HAVING COUNT(*) = 1
     ) item_order
       ON item_order.order_key = lower(trim(i.order_name))
+    LEFT JOIN orders matched_order ON matched_order.order_id = i.match_order_id
     WHERE ${whereSql}
     ORDER BY p.updated_at DESC, p.packet_id, i.order_name ASC NULLS LAST, i.detail_number ASC NULLS LAST
   `;
@@ -1029,7 +1037,8 @@ async function enqueueOutbox(
 
 async function loadBathCards(
   database: DatabaseService,
-  workday: string,
+  workdayFrom: string,
+  workdayTo: string,
 ): Promise<CncTelegramBathCardDto[]> {
   const result = await database.query<BathJoinedRow>(
     `
@@ -1054,7 +1063,7 @@ async function loadBathCards(
         i.quantity
       FROM cnc_telegram_packets p
       JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
-      WHERE p.workday = $1::date
+      WHERE p.workday BETWEEN $1::date AND $2::date
     ),
     matched_target_details AS (
       SELECT
@@ -1082,6 +1091,38 @@ async function loadBathCards(
         AND NULLIF(trim(o.order_name), '') IS NOT NULL
       GROUP BY lower(trim(o.order_name))
       HAVING COUNT(*) = 1
+    ),
+    completed_whole_order_keys AS (
+      SELECT DISTINCT lower(trim(order_match.match[2])) AS order_key
+      FROM cnc_telegram_packets p
+      CROSS JOIN LATERAL jsonb_array_elements_text(p.comments_json) AS packet_comment(comment_text)
+      CROSS JOIN LATERAL regexp_matches(
+        packet_comment.comment_text,
+        '(^|[^0-9])([0-9]{4,})([^0-9]|$)',
+        'g'
+      ) AS order_match(match)
+      WHERE p.workday BETWEEN $1::date AND $2::date
+        AND (p.completion_status = 'completed' OR p.thumbs_up = true)
+        AND lower(packet_comment.comment_text) LIKE '%весь%'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(p.comments_json) AS material_comment(comment_text)
+          WHERE lower(material_comment.comment_text) LIKE ANY (
+            ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
+          )
+        )
+    ),
+    whole_order_target_details AS (
+      SELECT
+        order_key.order_id,
+        od.detail_id::bigint AS detail_id,
+        1000000000::integer AS completed_quantity
+      FROM completed_whole_order_keys whole_order
+      JOIN unique_order_keys order_key
+        ON order_key.order_key = whole_order.order_key
+      JOIN order_details od
+        ON od.order_id = order_key.order_id
+       AND od.delete_flag = false
     ),
     fallback_target_details AS (
       SELECT
@@ -1143,11 +1184,13 @@ async function loadBathCards(
       SELECT
         target.order_id,
         target.detail_id,
-        SUM(target.completed_quantity)::integer AS completed_quantity
+        LEAST(SUM(target.completed_quantity), 1000000000::bigint)::integer AS completed_quantity
       FROM (
         SELECT * FROM matched_target_details
         UNION ALL
         SELECT * FROM fallback_target_details
+        UNION ALL
+        SELECT * FROM whole_order_target_details
       ) target
       GROUP BY target.order_id, target.detail_id
     ),
@@ -1235,7 +1278,7 @@ async function loadBathCards(
       placement.order_detail_id ASC,
       placement.instance ASC
     `,
-    [workday],
+    [workdayFrom, workdayTo],
   );
   return mapBathRows(result.rows);
 }
@@ -1457,6 +1500,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         sourceItemKey: row.source_item_key ?? '',
         orderName: row.order_name ?? '',
         orderId: toNullableNumber(row.item_order_id),
+        ...(row.order_delete_flag === true ? { orderDeleted: true } : {}),
         detailNumber: toNullableNumber(row.detail_number),
         widthMm: toNullableNumber(row.width_mm),
         heightMm: toNullableNumber(row.height_mm),

@@ -4,6 +4,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisNodeCard as BazisNodeCardData, BazisNodeOrderLink } from '../../api/types/bazisApi.types';
+import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { PanelDiagram } from './PanelDiagram';
 import { parseNodeRaw, type RawEdgeEntry, type RawFaceEntry, type RawKeyValue } from './parseNodeRaw';
 
@@ -137,8 +138,13 @@ export const NodeCard: React.FC<NodeCardProps> = ({ nodeId, collapsibleSummary =
           <Text strong>Заказы</Text>
           <Space wrap>
             {card.orderLinks.map((link) => (
-              <Space key={`${link.orderId}-${link.orderDetailId ?? 'none'}-${link.mappingKind}`} size="small">
+              <Space
+                key={`${link.orderId}-${link.orderDetailId ?? 'none'}-${link.mappingKind}`}
+                className={link.orderDeleted ? ORDER_DELETED_REFERENCE_LINE_CLASS : undefined}
+                size="small"
+              >
                 <Link to={`/orders/show/${link.orderId}`}>#{link.orderId}</Link>
+                <OrderDeletedTag deleted={link.orderDeleted} />
                 {renderOrderTag(link)}
               </Space>
             ))}

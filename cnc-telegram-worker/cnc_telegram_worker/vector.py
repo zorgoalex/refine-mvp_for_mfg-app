@@ -12,7 +12,7 @@ DETAIL_HEADER_RE = re.compile(r"(?P<order>\d{4,})#(?P<detail>\d{1,5})#")
 DETAIL_SIZE_RE = re.compile(r"@(?P<width>\d+(?:[.,]\d+)?)\*(?P<height>\d+(?:[.,]\d+)?)@")
 NUMBER_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
 MATRIX_RE = re.compile(r"matrix\(([^)]+)\)", re.IGNORECASE)
-GEOMETRY_TAGS = {"rect", "polygon", "polyline"}
+GEOMETRY_TAGS = {"rect", "polygon", "polyline", "path"}
 COREL_UNIT_PER_MM = 100
 
 

@@ -1,8 +1,9 @@
 import { applyAxisOrigin, orientPieceRect, type CutAxisOrigin } from '../../../shared/cut-geometry';
-import type {
-  BackMappedSheet,
-  FreecutPlacement,
-  SheetPlacementsJson,
+import {
+  parseFreecutItemId,
+  type BackMappedSheet,
+  type FreecutPlacement,
+  type SheetPlacementsJson,
 } from '../application/cut-freecut-mapping';
 
 /**
@@ -196,6 +197,23 @@ function num(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
 }
 
+function pieceDataAttributes(piece: FreecutPlacement, cx: number, cy: number): string {
+  const detailId = parseFreecutItemId(piece.item_id);
+  const attrs = [
+    'class="cut-sheet-piece"',
+    `data-item-id="${escapeXml(piece.item_id)}"`,
+    `data-piece-instance="${num(piece.instance)}"`,
+    `data-piece-cx="${num(cx)}"`,
+    `data-piece-cy="${num(cy)}"`,
+  ];
+  if (detailId !== null) attrs.push(`data-detail-id="${detailId}"`);
+  return attrs.join(' ');
+}
+
+function renderPieceGroup(piece: FreecutPlacement, cx: number, cy: number, body: string): string {
+  return `<g ${pieceDataAttributes(piece, cx, cy)}>${body}</g>`;
+}
+
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
   const { sheet, labelFor, fillFor, rotate90 = false, showLabels = true, axisOrigin = 'top-left' } = input;
   const originTopLeft = sheet.coordinate_contract === 'native_portrait_v1' ? false : (input.originTopLeft ?? false);
@@ -223,7 +241,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
         rect.h,
       )}" fill="${escapeXml(fill)}" stroke="#1f2d3d" stroke-width="2"/>`;
       if (!showLabels) {
-        return rectEl;
+        return renderPieceGroup(piece, cx, cy, rectEl);
       }
       const resolved = labelFor(piece);
       const lines = Array.isArray(resolved) ? resolved : [resolved];
@@ -236,12 +254,12 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
           return `<tspan x="${num(cx)}" dy="${dy}">${escapeXml(line)}</tspan>`;
         })
         .join('');
-      return [
+      return renderPieceGroup(piece, cx, cy, [
         rectEl,
         `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
           fontMm,
         )}" fill="#1f2d3d" text-anchor="middle" dominant-baseline="middle">${tspans}</text>`,
-      ].join('');
+      ].join(''));
     })
     .join('');
 
@@ -314,7 +332,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
         compact: !shouldRenderBathCenterLabel(labelBox.w, labelBox.h, detailFontMm),
       });
 
-      return [rectEl, ...sideTexts, centerText].join('');
+      return renderPieceGroup(piece, cx, cy, [rectEl, ...sideTexts, centerText].join(''));
     })
     .join('');
 

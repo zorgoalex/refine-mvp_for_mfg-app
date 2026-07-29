@@ -7,6 +7,7 @@ import type { AccessTokenIssuerPort, IssuedAccessToken } from '../auth.types';
 
 export interface AccessTokenPayload {
   sub: string;
+  iat: number;
   username: string;
   role: UserRole;
   roleId: number;
@@ -27,9 +28,25 @@ export class JwtAccessTokenIssuer implements AccessTokenIssuerPort {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  issueAccessToken(user: CurrentUser): Promise<IssuedAccessToken> {
+  async issueAccessToken(
+    user: CurrentUser,
+    options: { notAfter?: Date } = {},
+  ): Promise<IssuedAccessToken> {
+    const now = this.now();
+    const configuredExpiresAt = new Date(now.getTime() + this.ttlSeconds * 1000);
+    const expiresAt =
+      options.notAfter && options.notAfter.getTime() < configuredExpiresAt.getTime()
+        ? options.notAfter
+        : configuredExpiresAt;
+    const expiresInSeconds = Math.floor((expiresAt.getTime() - now.getTime()) / 1000);
+
+    if (options.notAfter && expiresInSeconds <= 0) {
+      throw new ApiError(401, 'ACCESS_TOKEN_SESSION_EXPIRED', 'Auth session expired');
+    }
+
     const payload: AccessTokenPayload = {
       sub: user.id,
+      iat: Math.floor(now.getTime() / 1000),
       username: user.username,
       role: user.role,
       roleId: user.roleId,
@@ -44,18 +61,20 @@ export class JwtAccessTokenIssuer implements AccessTokenIssuerPort {
     };
     const accessToken = jwt.sign(payload, this.secret, {
       algorithm: 'HS256',
-      expiresIn: this.ttlSeconds,
+      expiresIn: expiresInSeconds,
     });
 
-    return Promise.resolve({
+    return {
       accessToken,
-      expiresAt: new Date(this.now().getTime() + this.ttlSeconds * 1000),
-    });
+      expiresAt: new Date(now.getTime() + expiresInSeconds * 1000),
+    };
   }
 
   verifyAccessToken(accessToken: string): CurrentUser {
     try {
-      const payload = jwt.verify(accessToken, this.secret) as AccessTokenPayload;
+      const payload = jwt.verify(accessToken, this.secret, {
+        clockTimestamp: Math.floor(this.now().getTime() / 1000),
+      }) as AccessTokenPayload;
 
       if (payload.tokenType !== 'access') {
         throw new ApiError(401, 'ACCESS_TOKEN_INVALID', 'Access token is invalid');
