@@ -162,6 +162,7 @@ export const cutApi = {
     originTopLeft = true,
     axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
     resultNo?: number,
+    pieceMetadata = false,
   ): Promise<Blob> {
     const path = resultNo === undefined
       ? apiRoutes.cutJobs.sheetSvg(validateCutJobId(cutJobId), validateCutJobId(groupId), sheetIndex)
