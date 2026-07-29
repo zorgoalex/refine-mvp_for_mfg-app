@@ -2,6 +2,7 @@ import React, { useMemo, useState, useCallback, useEffect } from "react";
 import type { Dayjs } from "dayjs";
 import {
   IResourceComponentsProps,
+  useInvalidate,
   useMany,
   useNavigation,
   useList,
@@ -142,7 +143,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { isActive } = useKeepAlive();
   const { getSetting } = useAppSettings({ enabled: isActive });
 
-  const { tableProps, current, pageSize, setCurrent, setPageSize, sorters, setSorters, filters, setFilters } = useTable({
+  const { tableProps, tableQueryResult, current, pageSize, setCurrent, setPageSize, sorters, setSorters, filters, setFilters } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [
@@ -157,6 +158,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
   });
 
+  const invalidate = useInvalidate();
   const { show } = useNavigation();
   const isMobile = useIsMobile();
   const orderFilterFormSync = useMemo(
@@ -577,6 +579,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         }
       }
       setCurrent(1);
+      await invalidate({ resource: "orders_view", invalidates: ["list"] });
+      await tableQueryResult.refetch();
     } catch (error) {
       const unmappedReferences = extractUnmappedReferencesFromApiError(error, file.name);
       if (unmappedReferences.length > 0) {
