@@ -427,6 +427,8 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
           return result;
         }
 
+        await pruneDeletedOrderImportMaps(tx, snapshot);
+
         const remappedSnapshot = await remapSnapshotReferencesForImport(
           tx,
           snapshot,
@@ -2651,6 +2653,41 @@ async function findExistingOrderForSnapshotImport(
   return row ? { orderId: Number(row.order_id), orderName: row.order_name, status: 'skipped' } : null;
 }
 
+async function pruneDeletedOrderImportMaps(
+  tx: TransactionClient,
+  snapshot: OrderSnapshotDto,
+): Promise<void> {
+  const source = snapshot.source.sourceInstanceId;
+  const sourceId = snapshot.identity.order.sourceId;
+  const deleted = await tx.query<IdRow>(
+    `
+    SELECT o.order_id AS id
+    FROM order_import_entity_map m
+    JOIN orders o ON o.order_id::text = m.local_entity_id
+    WHERE m.source_instance_id = $1
+      AND m.entity_type = $2
+      AND m.source_entity_id = $3
+      AND o.delete_flag = true
+    ORDER BY o.order_id
+    `,
+    [source, SNAPSHOT_ENTITY_TYPES.order, sourceId],
+  );
+  const deletedOrderIds = deleted.rows.map((row) => Number(row.id));
+  if (deletedOrderIds.length === 0) return;
+
+  await tx.query(
+    `
+    DELETE FROM order_import_entity_map
+    WHERE source_instance_id = $1
+      AND (
+        (entity_type = $2 AND source_entity_id = $3)
+        OR local_order_id = ANY($4::bigint[])
+      )
+    `,
+    [source, SNAPSHOT_ENTITY_TYPES.order, sourceId, deletedOrderIds],
+  );
+}
+
 async function getMap(
   tx: TransactionClient,
   source: string,
@@ -3312,5 +3349,6 @@ export {
   snapshotBatchFailure as _testOnlySnapshotBatchFailure,
   snapshotFailureSummary as _testOnlySnapshotFailureSummary,
   findExistingOrderForSnapshotImport as _testOnlyFindExistingOrderForSnapshotImport,
+  pruneDeletedOrderImportMaps as _testOnlyPruneDeletedOrderImportMaps,
   summarizeSnapshotBatchResults as _testOnlySummarizeSnapshotBatchResults,
 };

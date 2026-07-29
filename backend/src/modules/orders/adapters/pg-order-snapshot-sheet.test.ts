@@ -36,6 +36,7 @@ import {
   _testOnlySnapshotBatchFailure as snapshotBatchFailure,
   _testOnlySnapshotFailureSummary as snapshotFailureSummary,
   _testOnlyFindExistingOrderForSnapshotImport as findExistingOrderForSnapshotImport,
+  _testOnlyPruneDeletedOrderImportMaps as pruneDeletedOrderImportMaps,
   _testOnlySummarizeSnapshotBatchResults as summarizeSnapshotBatchResults,
   _testOnlySnapshotToSaveOrderDto as snapshotToSaveOrderDto,
   buildSheetValidationDetails,
@@ -594,6 +595,28 @@ describe('pg-order-snapshot batch import failures', () => {
     expect(tx.query).toHaveBeenCalledTimes(2);
   });
 
+  it('prunes stale import maps that point at a soft-deleted order before reimport', async () => {
+    const tx = fakePruneDeletedOrderImportMapsTx([{ id: 11453 }]);
+
+    await pruneDeletedOrderImportMaps(tx, minimalSnapshotWithSheet(null));
+
+    expect(tx.query).toHaveBeenCalledTimes(2);
+    expect(normalizeSql(String(tx.query.mock.calls[0][0]))).toContain('o.delete_flag = true');
+    expect(tx.query.mock.calls[0][1]).toEqual(['test', 'order', '1']);
+    expect(normalizeSql(String(tx.query.mock.calls[1][0]))).toContain('DELETE FROM order_import_entity_map');
+    expect(normalizeSql(String(tx.query.mock.calls[1][0]))).toContain('local_order_id = ANY($4::bigint[])');
+    expect(tx.query.mock.calls[1][1]).toEqual(['test', 'order', '1', [11453]]);
+  });
+
+  it('leaves import maps untouched when the mapped order is not deleted', async () => {
+    const tx = fakePruneDeletedOrderImportMapsTx([]);
+
+    await pruneDeletedOrderImportMaps(tx, minimalSnapshotWithSheet(null));
+
+    expect(tx.query).toHaveBeenCalledTimes(1);
+    expect(normalizeSql(String(tx.query.mock.calls[0][0]))).toContain('o.delete_flag = true');
+  });
+
   it('keeps ApiError details so the UI can show field-level import causes', () => {
     const error = new ApiError(422, 'VALIDATION_ERROR', 'Order payload validation failed', {
       errors: [
@@ -876,6 +899,7 @@ function minimalSnapshotWithOrderStatusReference(orderStatusId: number): import(
 }
 
 type ExistingOrderLookupRow = { order_id: number; order_name: string; payload_hash: string | null };
+type PruneDeletedOrderImportMapRow = { id: number };
 
 function fakeExistingOrderLookupTx(options: {
   mappedRows: ExistingOrderLookupRow[];
@@ -890,6 +914,19 @@ function fakeExistingOrderLookupTx(options: {
   });
 
   return { query } as unknown as TransactionClient & { query: typeof query };
+}
+
+function fakePruneDeletedOrderImportMapsTx(rows: PruneDeletedOrderImportMapRow[]): TransactionClient & { query: ReturnType<typeof vi.fn> } {
+  const query = vi.fn(async (sql: string) => {
+    if (sql.includes('SELECT o.order_id AS id')) return { rows };
+    return { rows: [] };
+  });
+
+  return { query } as unknown as TransactionClient & { query: typeof query };
+}
+
+function normalizeSql(sql: string): string {
+  return sql.replace(/\s+/g, ' ').trim();
 }
 
 function fakeReferenceTx(options: { overrideExists: boolean; uniqueMatchId: number | null }): DatabaseClient {
