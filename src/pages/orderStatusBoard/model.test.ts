@@ -5,6 +5,7 @@ import type {
   OrderStatusBoardResponse,
 } from '../../api/types/orderStatusBoardApi.types';
 import {
+  buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
   filterBoardColumns,
   filterCncTodayColumnsByOrders,
@@ -83,7 +84,7 @@ describe('order status board model', () => {
   it('keeps CNC today as visual flow without changing status-board API type', () => {
     const disabled = parseOrderStatusBoardViewState(new URLSearchParams('flow=cnc'));
     const state = parseOrderStatusBoardViewState(
-      new URLSearchParams('flow=cnc&date=2026-07-23&order=2706&order=2712'),
+      new URLSearchParams('flow=cnc&date=2026-07-23&period=2w&order=2706&order=2712'),
       {
         cncTelegram: true,
       },
@@ -92,12 +93,37 @@ describe('order status board model', () => {
     expect(disabled.view).toBe('order');
     expect(state.view).toBe('cnc_today');
     expect(state.cncWorkday).toBe('2026-07-23');
+    expect(state.cncOrderSearchPeriod).toBe('2w');
     expect(state.cncOrderFilters).toEqual(['2706', '2712']);
     const serialized = serializeOrderStatusBoardViewState(state);
     expect(serialized.toString()).toContain('flow=cnc');
     expect(serialized.toString()).toContain('date=2026-07-23');
+    expect(serialized.toString()).toContain('period=2w');
     expect(serialized.getAll('order')).toEqual(['2706', '2712']);
     expect(toOrderStatusBoardQuery(state)).toMatchObject({ board: 'order' });
+  });
+
+  it('builds CNC order search ranges from the selected board date', () => {
+    expect(buildCncOrderSearchDateRange('2026-07-23', undefined)).toEqual({
+      dateFrom: '2026-07-21',
+      dateTo: '2026-07-23',
+      days: 3,
+    });
+    expect(buildCncOrderSearchDateRange('2026-07-23', '1w')).toEqual({
+      dateFrom: '2026-07-17',
+      dateTo: '2026-07-23',
+      days: 7,
+    });
+    expect(buildCncOrderSearchDateRange('2026-07-23', '2w')).toEqual({
+      dateFrom: '2026-07-10',
+      dateTo: '2026-07-23',
+      days: 14,
+    });
+    expect(buildCncOrderSearchDateRange('2026-03-01', '1m')).toEqual({
+      dateFrom: '2026-01-30',
+      dateTo: '2026-03-01',
+      days: 31,
+    });
   });
 
   it('filters CNC packet and bath cards by exact order number', () => {

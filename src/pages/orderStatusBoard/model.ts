@@ -9,7 +9,9 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 
 const COMPLETED_ORDER_STATUS_NAMES = new Set(['завершен', 'завершён']);
+const CNC_ORDER_SEARCH_PERIODS = new Set(['1w', '2w', '1m']);
 export type OrderStatusBoardVisualFlow = OrderStatusBoardType | 'cnc_today';
+export type CncOrderSearchPeriod = '1w' | '2w' | '1m';
 
 export interface OrderStatusBoardViewState {
   view: OrderStatusBoardVisualFlow;
@@ -20,6 +22,7 @@ export interface OrderStatusBoardViewState {
   plannedFrom?: string;
   plannedTo?: string;
   cncWorkday?: string;
+  cncOrderSearchPeriod?: CncOrderSearchPeriod;
   cncOrderFilters: string[];
   hideEmpty: boolean;
 }
@@ -54,6 +57,7 @@ export function parseOrderStatusBoardViewState(
   const plannedFrom = dateOnly(params.get('plannedFrom'));
   const plannedTo = dateOnly(params.get('plannedTo'));
   const cncWorkday = dateOnly(params.get('date'));
+  const cncOrderSearchPeriod = parseCncOrderSearchPeriod(params.get('period'));
   return {
     view,
     search: params.get('q')?.trim() ?? '',
@@ -63,6 +67,7 @@ export function parseOrderStatusBoardViewState(
     ...(plannedFrom ? { plannedFrom } : {}),
     ...(plannedTo ? { plannedTo } : {}),
     ...(cncWorkday ? { cncWorkday } : {}),
+    ...(view === 'cnc_today' && cncOrderSearchPeriod ? { cncOrderSearchPeriod } : {}),
     cncOrderFilters: normalizeCncOrderFilterValues(params.getAll('order')),
     hideEmpty: params.get('hideEmpty') === '1',
   };
@@ -84,6 +89,9 @@ export function serializeOrderStatusBoardViewState(
   if (state.plannedFrom) params.set('plannedFrom', state.plannedFrom);
   if (state.plannedTo) params.set('plannedTo', state.plannedTo);
   if (state.view === 'cnc_today' && state.cncWorkday) params.set('date', state.cncWorkday);
+  if (state.view === 'cnc_today' && state.cncOrderSearchPeriod) {
+    params.set('period', state.cncOrderSearchPeriod);
+  }
   if (state.view === 'cnc_today') {
     for (const orderName of normalizeCncOrderFilterValues(state.cncOrderFilters)) {
       params.append('order', orderName);
@@ -154,6 +162,27 @@ export function filterCncTodayColumnsByOrders(
       : packets.length;
     return { ...column, baths, packets, total };
   });
+}
+
+export function buildCncOrderSearchDateRange(
+  workday: string,
+  period: CncOrderSearchPeriod | undefined,
+): { dateFrom: string; dateTo: string; days: number } {
+  const days = cncOrderSearchPeriodDays(period);
+  return {
+    dateFrom: subtractDateOnlyDays(workday, days - 1),
+    dateTo: workday,
+    days,
+  };
+}
+
+export function cncOrderSearchPeriodDays(
+  period: CncOrderSearchPeriod | undefined,
+): number {
+  if (period === '1w') return 7;
+  if (period === '2w') return 14;
+  if (period === '1m') return 31;
+  return 3;
 }
 
 function isDoneProductionStatus(column: OrderStatusBoardColumn): boolean {
@@ -254,6 +283,19 @@ function dateOnly(value: string | null): string | undefined {
     new Date(timestamp).toISOString().slice(0, 10) === value
     ? value
     : undefined;
+}
+
+function parseCncOrderSearchPeriod(value: string | null): CncOrderSearchPeriod | undefined {
+  return value && CNC_ORDER_SEARCH_PERIODS.has(value)
+    ? value as CncOrderSearchPeriod
+    : undefined;
+}
+
+function subtractDateOnlyDays(value: string, days: number): string {
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
 }
 
 function normalizeCncOrderKey(value: string | null | undefined): string {

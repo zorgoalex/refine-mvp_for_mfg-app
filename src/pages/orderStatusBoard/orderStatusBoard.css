@@ -75,6 +75,20 @@
   flex: 0 0 220px;
 }
 
+.status-board-toolbar__cnc-period {
+  min-height: 32px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.status-board-toolbar__cnc-period-chip {
+  min-width: 46px;
+  font-variant-numeric: tabular-nums;
+}
+
 .status-board-toolbar__switch {
   min-height: 32px;
   flex: 0 0 auto;
@@ -711,6 +725,13 @@
   font-weight: 400;
 }
 
+.cnc-packet-card__summary.order-deleted-reference-line,
+.cnc-packet-card__summary.order-deleted-reference-line .cnc-packet-card__summary-order,
+.cnc-packet-card__summary.order-deleted-reference-line .cnc-packet-card__summary-order.ant-btn,
+.cnc-packet-card__summary.order-deleted-reference-line .cnc-packet-card__summary-meta {
+  color: var(--app-deleted-reference-text) !important;
+}
+
 .cnc-packet-card__collapse,
 .cnc-packet-card__sheet {
   margin-top: 8px;
@@ -784,6 +805,13 @@
   font-variant-numeric: tabular-nums;
   text-align: left;
   white-space: normal;
+}
+
+.cnc-packet-card__item.order-deleted-reference-line,
+.cnc-packet-card__item.order-deleted-reference-line .cnc-packet-card__order-link,
+.cnc-packet-card__item.order-deleted-reference-line .cnc-packet-card__size,
+.cnc-packet-card__item.order-deleted-reference-line .cnc-packet-card__qty {
+  color: var(--app-deleted-reference-text) !important;
 }
 
 .cnc-packet-card__size {

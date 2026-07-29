@@ -142,15 +142,20 @@ export class PgCncTelegramRepository
   constructor(private readonly database: DatabaseService) {}
 
   async listToday(command: ListCncTelegramTodayCommand): Promise<CncTelegramTodayResponseDto> {
-    const workday = command.workday ?? await currentDatabaseWorkday(this.database);
+    const workday =
+      command.workday ??
+      command.workdayTo ??
+      await currentDatabaseWorkday(this.database);
+    const workdayFrom = command.workdayFrom ?? workday;
+    const workdayTo = command.workdayTo ?? workday;
     const rows = await this.database.query<PacketJoinedRow>(
-      packetSelectSql('p.workday = $1::date'),
-      [workday],
+      packetSelectSql('p.workday BETWEEN $1::date AND $2::date'),
+      [workdayFrom, workdayTo],
     );
     const packets = mapPacketRows(rows.rows);
-    const baths = await loadBathCards(this.database, workday);
+    const baths = await loadBathCards(this.database, workdayFrom, workdayTo);
     return {
-      workday,
+      workday: workdayTo,
       generatedAt: new Date().toISOString(),
       columns: buildTodayColumns(packets, baths),
     };
@@ -1032,7 +1037,8 @@ async function enqueueOutbox(
 
 async function loadBathCards(
   database: DatabaseService,
-  workday: string,
+  workdayFrom: string,
+  workdayTo: string,
 ): Promise<CncTelegramBathCardDto[]> {
   const result = await database.query<BathJoinedRow>(
     `
@@ -1057,7 +1063,7 @@ async function loadBathCards(
         i.quantity
       FROM cnc_telegram_packets p
       JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
-      WHERE p.workday = $1::date
+      WHERE p.workday BETWEEN $1::date AND $2::date
     ),
     matched_target_details AS (
       SELECT
@@ -1095,7 +1101,7 @@ async function loadBathCards(
         '(^|[^0-9])([0-9]{4,})([^0-9]|$)',
         'g'
       ) AS order_match(match)
-      WHERE p.workday = $1::date
+      WHERE p.workday BETWEEN $1::date AND $2::date
         AND (p.completion_status = 'completed' OR p.thumbs_up = true)
         AND lower(packet_comment.comment_text) LIKE '%весь%'
         AND NOT EXISTS (
@@ -1272,7 +1278,7 @@ async function loadBathCards(
       placement.order_detail_id ASC,
       placement.instance ASC
     `,
-    [workday],
+    [workdayFrom, workdayTo],
   );
   return mapBathRows(result.rows);
 }

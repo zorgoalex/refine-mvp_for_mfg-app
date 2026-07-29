@@ -8,6 +8,8 @@ import type {
 export interface ListCncTelegramTodayCommand {
   currentUser: CurrentUser;
   workday?: string | null;
+  workdayFrom?: string | null;
+  workdayTo?: string | null;
   requestId?: string;
 }
 

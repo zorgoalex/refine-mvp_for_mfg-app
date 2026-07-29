@@ -3,8 +3,14 @@ import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type { CncTelegramTodayResponse } from './types/cncTelegramApi.types';
 
+export interface CncTelegramTodayQuery {
+  date?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
 export const cncTelegramApi = {
-  today(query: { date?: string } = {}): Promise<CncTelegramTodayResponse> {
+  today(query: CncTelegramTodayQuery = {}): Promise<CncTelegramTodayResponse> {
     return httpClient.get<CncTelegramTodayResponse>(
       withQuery(apiRoutes.cncTelegram.today, query),
     );

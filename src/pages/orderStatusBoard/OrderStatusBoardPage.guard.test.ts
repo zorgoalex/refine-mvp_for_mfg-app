@@ -83,6 +83,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('suffixIcon={<SearchOutlined />}');
     expect(page).toContain('options={cncOrderFilterOptions}');
     expect(page).toContain('aria-label="Фильтр МДФ-работ по номеру заказа"');
+    expect(page).toContain('status-board-toolbar__cnc-period');
+    expect(page).toContain('Период');
+    expect(page).toContain("label: '1нед'");
+    expect(page).toContain("label: '2нед'");
+    expect(page).toContain("label: '1м'");
+    expect(page).toContain('aria-pressed={active}');
+    expect(page).toContain('buildCncOrderSearchDateRange');
+    expect(page).toContain('dateFrom: searchRange.dateFrom');
+    expect(page).toContain('dateTo: searchRange.dateTo');
     expect(page).toContain('datasetKey');
     expect(page).toContain('buildCncColumnTotals(column, relationContext)');
     expect(page).toContain("getCncBathRelationState(bath, relationContext) !== 'dimmed'");
@@ -136,6 +145,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('summary.orderDeleted');
     expect(page).toContain('item.orderDeleted');
     expect(page).toContain('OrderDeletedTag');
+    expect(page).toContain('ORDER_DELETED_REFERENCE_LINE_CLASS');
+    expect(css).toContain('.cnc-packet-card__summary.order-deleted-reference-line');
+    expect(css).toContain('.cnc-packet-card__item.order-deleted-reference-line');
     expect(page).toContain('summary.positions');
     expect(page).toContain('summary.details');
     expect(page).toContain('summary.orderId ??= item.orderId ?? item.matchOrderId ?? null');

@@ -19,7 +19,30 @@ describe('PgCncTelegramRepository', () => {
     const result = await repo.listToday({ currentUser: user() });
 
     expect(result.workday).toBe('2026-07-24');
-    expect(queries[1]?.params).toEqual(['2026-07-24']);
+    expect(queries[1]?.params).toEqual(['2026-07-24', '2026-07-24']);
+  });
+
+  it('queries packets and bath readiness for a date range', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const database = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({
+      currentUser: user(),
+      workdayFrom: '2026-07-18',
+      workdayTo: '2026-07-24',
+    });
+
+    expect(result.workday).toBe('2026-07-24');
+    expect(queries[0]?.text).toContain('p.workday BETWEEN $1::date AND $2::date');
+    expect(queries[0]?.params).toEqual(['2026-07-18', '2026-07-24']);
+    expect(queries[1]?.text).toContain('p.workday BETWEEN $1::date AND $2::date');
+    expect(queries[1]?.params).toEqual(['2026-07-18', '2026-07-24']);
   });
 
   it('ingests structured packets with idempotency, audit and outbox writes', async () => {

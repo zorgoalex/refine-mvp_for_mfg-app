@@ -71,7 +71,7 @@ import type {
   CncTelegramTodayResponse,
 } from '../../api/types/cncTelegramApi.types';
 import { featureFlags } from '../../config/featureFlags';
-import { OrderDeletedTag } from '../../components/OrderDeletedTag';
+import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
 import {
   classifyOrderStatusBoardMoveFailure,
@@ -80,6 +80,7 @@ import {
   restoreOrderStatusBoardFocus,
 } from './interaction';
 import {
+  buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
   filterBoardColumns,
   filterCncTodayColumnsByOrders,
@@ -87,6 +88,7 @@ import {
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
   toOrderStatusBoardQuery,
+  type CncOrderSearchPeriod,
   type OrderStatusBoardViewState,
 } from './model';
 
@@ -102,6 +104,14 @@ const CNC_BATH_PDF_TEMPLATE_OPTIONS = [
   { value: 'standard', label: 'Стандартный' },
 ];
 const CNC_PDF_WORKER_SRC = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+const CNC_ORDER_SEARCH_PERIOD_OPTIONS: Array<{
+  label: string;
+  value: CncOrderSearchPeriod;
+}> = [
+  { label: '1нед', value: '1w' },
+  { label: '2нед', value: '2w' },
+  { label: '1м', value: '1m' },
+];
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
 type CncRelationTarget = { kind: 'packet'; id: string } | { kind: 'bath'; id: string };
@@ -143,6 +153,9 @@ export const OrderStatusBoardPage: React.FC = () => {
   const boardRef = useRef<OrderStatusBoardResponse | null>(null);
   const [cncToday, setCncToday] = useState<CncTelegramTodayResponse | null>(null);
   const cncTodayRef = useRef<CncTelegramTodayResponse | null>(null);
+  const [cncOrderSearchToday, setCncOrderSearchToday] =
+    useState<CncTelegramTodayResponse | null>(null);
+  const cncOrderSearchTodayRef = useRef<CncTelegramTodayResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
@@ -174,6 +187,10 @@ export const OrderStatusBoardPage: React.FC = () => {
   useEffect(() => {
     cncTodayRef.current = cncToday;
   }, [cncToday]);
+
+  useEffect(() => {
+    cncOrderSearchTodayRef.current = cncOrderSearchToday;
+  }, [cncOrderSearchToday]);
 
   useEffect(() => {
     setSearchDraft(viewState.search);
@@ -213,9 +230,22 @@ export const OrderStatusBoardPage: React.FC = () => {
           const response = await cncTelegramApi.today(
             workday ? { date: workday } : {},
           );
+          const searchRange = buildCncOrderSearchDateRange(
+            response.workday,
+            viewStateRef.current.cncOrderSearchPeriod,
+          );
+          const searchResponse =
+            searchRange.dateFrom === response.workday && searchRange.dateTo === response.workday
+              ? response
+              : await cncTelegramApi.today({
+                dateFrom: searchRange.dateFrom,
+                dateTo: searchRange.dateTo,
+              });
           if (datasetRevisionRef.current !== revision) return false;
           cncTodayRef.current = response;
+          cncOrderSearchTodayRef.current = searchResponse;
           setCncToday(response);
+          setCncOrderSearchToday(searchResponse);
           boardRef.current = null;
           setBoard(null);
           setStale(false);
@@ -231,7 +261,9 @@ export const OrderStatusBoardPage: React.FC = () => {
         boardRef.current = response;
         setBoard(response);
         cncTodayRef.current = null;
+        cncOrderSearchTodayRef.current = null;
         setCncToday(null);
+        setCncOrderSearchToday(null);
         setStale(false);
         if (!commandInFlightRef.current && pendingRef.current.size > 0) {
           replacePending(new Set());
@@ -276,6 +308,8 @@ export const OrderStatusBoardPage: React.FC = () => {
     boardRef.current = null;
     setCncToday(null);
     cncTodayRef.current = null;
+    setCncOrderSearchToday(null);
+    cncOrderSearchTodayRef.current = null;
     setStale(false);
     loadingColumnTokensRef.current.clear();
     void fetchInitial();
@@ -479,16 +513,21 @@ export const OrderStatusBoardPage: React.FC = () => {
       boardColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
     [boardColumns, viewState.hideEmpty],
   );
-  const cncColumns = cncToday?.columns ?? [];
   const cncOrderFilters = viewState.cncOrderFilters;
   const cncOrderFilterKey = cncOrderFilters.join('\u0000');
+  const cncSingleDayColumns = cncToday?.columns ?? [];
+  const cncSearchColumns = cncOrderSearchToday?.columns ?? cncSingleDayColumns;
+  const cncColumns =
+    cncOrderFilters.length > 0
+      ? cncSearchColumns
+      : cncSingleDayColumns;
   const cncOrderFilterOptions = useMemo(
     () =>
-      buildCncOrderFilterOptions(cncColumns).map((orderName) => ({
+      buildCncOrderFilterOptions(cncSearchColumns).map((orderName) => ({
         label: orderName,
         value: orderName,
       })),
-    [cncColumns],
+    [cncSearchColumns],
   );
   const cncFilteredColumns = useMemo(
     () => filterCncTodayColumnsByOrders(cncColumns, cncOrderFilters),
@@ -509,7 +548,11 @@ export const OrderStatusBoardPage: React.FC = () => {
   const isCncToday = viewState.view === 'cnc_today';
   const activeBoard: OrderStatusBoardType =
     viewState.view === 'production' ? 'production' : 'order';
-  const generatedAt = isCncToday ? cncToday?.generatedAt : board?.generatedAt;
+  const generatedAt = isCncToday
+    ? cncOrderFilters.length > 0
+      ? cncOrderSearchToday?.generatedAt
+      : cncToday?.generatedAt
+    : board?.generatedAt;
 
   useEffect(() => {
     if (!cncRelationsEnabled) setActiveCncRelation(null);
@@ -517,7 +560,7 @@ export const OrderStatusBoardPage: React.FC = () => {
 
   useEffect(() => {
     setActiveCncRelation(null);
-  }, [cncOrderFilterKey, isCncToday, viewState.cncWorkday]);
+  }, [cncOrderFilterKey, isCncToday, viewState.cncOrderSearchPeriod, viewState.cncWorkday]);
 
   useEffect(() => {
     const topScrollbar = topScrollbarRef.current;
@@ -754,6 +797,32 @@ export const OrderStatusBoardPage: React.FC = () => {
               onChange={(values) => updateViewState({ cncOrderFilters: values })}
               aria-label="Фильтр МДФ-работ по номеру заказа"
             />
+            <div
+              className="status-board-toolbar__cnc-period"
+              aria-label="Период поиска по номеру заказа"
+            >
+              <Typography.Text type="secondary">Период</Typography.Text>
+              {CNC_ORDER_SEARCH_PERIOD_OPTIONS.map((option) => {
+                const active = viewState.cncOrderSearchPeriod === option.value;
+                return (
+                  <Button
+                    key={option.value}
+                    size="small"
+                    shape="round"
+                    type={active ? 'primary' : 'default'}
+                    aria-pressed={active}
+                    className="status-board-toolbar__cnc-period-chip"
+                    onClick={() =>
+                      updateViewState({
+                        cncOrderSearchPeriod: active ? undefined : option.value,
+                      })
+                    }
+                  >
+                    {option.label}
+                  </Button>
+                );
+              })}
+            </div>
             <label className="status-board-toolbar__switch">
               <Switch
                 size="small"
@@ -1006,7 +1075,12 @@ const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
   const orderId = summary.orderId;
 
   return (
-    <Typography.Text className="cnc-packet-card__summary">
+    <Typography.Text
+      className={[
+        'cnc-packet-card__summary',
+        summary.orderDeleted ? ORDER_DELETED_REFERENCE_LINE_CLASS : '',
+      ].filter(Boolean).join(' ')}
+    >
       <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
         {orderId !== null ? (
           <Button
@@ -1141,7 +1215,14 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               const orderId = item.orderId ?? item.matchOrderId;
 
               return (
-                <div className="cnc-packet-card__item" role="row" key={item.packetItemId}>
+                <div
+                  className={[
+                    'cnc-packet-card__item',
+                    item.orderDeleted ? ORDER_DELETED_REFERENCE_LINE_CLASS : '',
+                  ].filter(Boolean).join(' ')}
+                  role="row"
+                  key={item.packetItemId}
+                >
                   <span>
                     <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
                       {orderId ? (

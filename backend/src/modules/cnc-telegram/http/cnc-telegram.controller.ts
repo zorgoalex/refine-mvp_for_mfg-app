@@ -130,6 +130,8 @@ export class CncTelegramController {
     summary: 'List current-day structured CNC Telegram parsing results',
   })
   @ApiQuery({ name: 'date', required: false, type: String })
+  @ApiQuery({ name: 'dateFrom', required: false, type: String })
+  @ApiQuery({ name: 'dateTo', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Current-day CNC Telegram packets' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -142,9 +144,12 @@ export class CncTelegramController {
   ): Promise<CncTelegramTodayResponseDto> {
     this.assertEnabled();
     const currentUser = this.requireCurrentUser(request);
+    const parsedQuery = parseTodayQuery(query);
     return this.cncTelegram.listToday({
       currentUser,
-      workday: parseDateQuery(query.date),
+      workday: parsedQuery.workday,
+      workdayFrom: parsedQuery.workdayFrom,
+      workdayTo: parsedQuery.workdayTo,
       requestId: request.requestId,
     });
   }
@@ -264,13 +269,39 @@ export function parseIdempotencyKey(value: string | string[] | undefined): strin
   return key;
 }
 
-export function parseDateQuery(value: unknown): string | null {
+export function parseTodayQuery(query: Record<string, unknown>): {
+  workday: string | null;
+  workdayFrom: string | null;
+  workdayTo: string | null;
+} {
+  const workday = parseDateQuery(query.date, 'date');
+  const workdayFrom = parseDateQuery(query.dateFrom, 'dateFrom');
+  const workdayTo = parseDateQuery(query.dateTo, 'dateTo');
+  if (workday && (workdayFrom || workdayTo)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'date cannot be combined with dateFrom/dateTo', {
+      field: 'date',
+    });
+  }
+  if ((workdayFrom && !workdayTo) || (!workdayFrom && workdayTo)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'dateFrom and dateTo must be provided together', {
+      field: workdayFrom ? 'dateTo' : 'dateFrom',
+    });
+  }
+  if (workdayFrom && workdayTo && workdayFrom > workdayTo) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'dateFrom must be before or equal dateTo', {
+      field: 'dateFrom',
+    });
+  }
+  return { workday, workdayFrom, workdayTo };
+}
+
+export function parseDateQuery(value: unknown, field = 'date'): string | null {
   if (value === undefined || value === '') {
     return null;
   }
   if (typeof value !== 'string' || !DATE_ONLY.test(value) || !isValidDateOnly(value)) {
-    throw new ApiError(422, 'VALIDATION_ERROR', 'date must use YYYY-MM-DD format', {
-      field: 'date',
+    throw new ApiError(422, 'VALIDATION_ERROR', `${field} must use YYYY-MM-DD format`, {
+      field,
     });
   }
   return value;
