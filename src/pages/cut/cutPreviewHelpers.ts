@@ -111,6 +111,7 @@ export interface CutPieceTooltipRow {
 export interface CutPieceOverlay {
   key: string;
   orderId: number | null;
+  orderDeleted?: boolean;
   orderDetailId: number | null;
   detailNumber: number | null;
   leftPct: number;
@@ -131,6 +132,7 @@ export function buildCutPieceTooltipRows(item: CutJobItemDto, piece: SheetPlacem
   const detail = item.detail;
   const rows: CutPieceTooltipRow[] = [
     { label: 'Заказ', value: formatTooltipValue(item.orderId) },
+    ...(item.orderDeleted ? [{ label: 'Статус заказа', value: 'удалён' }] : []),
     { label: 'Позиция', value: formatTooltipValue(detail?.detailNumber) },
     { label: 'Экземпляр', value: formatTooltipValue(piece.instance) },
     { label: 'Кол-во в задании', value: formatTooltipValue(item.qty) },
@@ -210,6 +212,7 @@ export function buildSheetPieceOverlays(
       return {
         key: `${piece.item_id}:${piece.instance}`,
         orderId: item.orderId,
+        orderDeleted: item.orderDeleted === true,
         orderDetailId: item.orderDetailId,
         detailNumber: item.detail?.detailNumber ?? null,
         leftPct: (rect.x / rect.vw) * 100,

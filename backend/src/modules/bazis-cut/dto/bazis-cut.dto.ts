@@ -77,6 +77,7 @@ export type BazisCutDetailFields = z.infer<typeof bazisCutDetailFieldsSchema>;
 export interface BazisCutSourceRefDto {
   id: number;
   label: string;
+  deleted?: boolean;
 }
 
 export interface BazisCutSetSummaryDto {
@@ -99,6 +100,7 @@ export interface BazisCutSetDetailDto extends BazisCutDetailFields {
   sortOrder: number;
   sourceOrderDetailId: number | null;
   sourceOrderId: number | null;
+  sourceOrderDeleted: boolean;
   sourceProjectId: number | null;
   sourceBazisProjectId: number | null;
   sourceBazisRevisionId: number | null;

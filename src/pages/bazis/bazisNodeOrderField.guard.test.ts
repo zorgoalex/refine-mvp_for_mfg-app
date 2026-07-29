@@ -13,6 +13,8 @@ describe('bazis node order-provenance UI guards', () => {
   it('PanelsTab has an order column with ORDER NAMES linking to /orders/show/:id', () => {
     expect(panelsTab).toContain("title: 'Заказ'");
     expect(panelsTab).toContain('order.orderName');
+    expect(panelsTab).toContain('OrderDeletedTag');
+    expect(panelsTab).toContain('order.orderDeleted');
     expect(panelsTab).toContain('/orders/show/');
     // Клик по ссылке не должен триггерить выбор строки (row onClick)
     expect(panelsTab).toMatch(/RouterLink[\s\S]*?stopPropagation/);
@@ -20,5 +22,7 @@ describe('bazis node order-provenance UI guards', () => {
 
   it('ViewerTree marks nodes that are already in an ERP order with the order NAME', () => {
     expect(viewerTree).toContain('order.orderName');
+    expect(viewerTree).toContain('formatTreeOrderRef');
+    expect(viewerTree).toContain('(удалён)');
   });
 });

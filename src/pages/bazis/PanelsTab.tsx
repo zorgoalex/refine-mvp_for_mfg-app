@@ -17,6 +17,7 @@ import { isApiError } from '../../api/apiError';
 import { authSession } from '../../api/authSession';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
+import { OrderDeletedTag } from '../../components/OrderDeletedTag';
 import { AddToOrderModal } from './AddToOrderModal';
 import { NodeCard } from './NodeCard';
 import { PanelNotesCell } from './PanelNotesCell';
@@ -487,13 +488,15 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           row.orders.length > 0 ? (
             <Space wrap size={4}>
               {row.orders.map((order) => (
-                <RouterLink
-                  key={order.orderId}
-                  to={`/orders/show/${order.orderId}`}
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  {order.orderName?.trim() || `#${order.orderId}`}
-                </RouterLink>
+                <Space key={order.orderId} size={4} wrap>
+                  <RouterLink
+                    to={`/orders/show/${order.orderId}`}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {order.orderName?.trim() || `#${order.orderId}`}
+                  </RouterLink>
+                  <OrderDeletedTag deleted={order.orderDeleted} />
+                </Space>
               ))}
             </Space>
           ) : (

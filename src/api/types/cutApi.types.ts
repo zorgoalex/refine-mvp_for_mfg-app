@@ -71,6 +71,8 @@ export interface CutJobItemDto {
   detail: CutDetailInfoDto | null;
   /** Order name from orders.order_name (present only on enriched single-job read). */
   orderName?: string | null;
+  /** True when the referenced order was soft-deleted after this cut item was created. */
+  orderDeleted?: boolean;
 }
 
 export interface SheetPlacementPiece {

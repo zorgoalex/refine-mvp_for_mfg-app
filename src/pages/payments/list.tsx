@@ -11,6 +11,7 @@ import { authStorage } from "../../utils/auth";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import { useIsMobile } from "../../hooks/useDeviceTier";
 import { PaymentCardList } from "./mobile/PaymentCardList";
+import { OrderDeletedTag } from "../../components/OrderDeletedTag";
 import dayjs from "dayjs";
 import "./list.css";
 
@@ -46,8 +47,10 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   const { data: typesData } = useMany({ resource: "payment_types", ids: typeIds, queryOptions: { enabled: typeIds.length > 0 } });
 
   const orderMap = useMemo(() => {
-    const map: Record<string | number, string> = {};
-    (ordersData?.data || []).forEach((o: any) => (map[o.order_id] = o.order_name ?? o.order_id));
+    const map: Record<string | number, { label: string; deleted: boolean }> = {};
+    (ordersData?.data || []).forEach((o: any) => {
+      map[o.order_id] = { label: o.order_name ?? String(o.order_id), deleted: o.delete_flag === true };
+    });
     return map;
   }, [ordersData]);
 
@@ -59,7 +62,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
 
   const paymentCardLookups = useMemo(
     () => ({
-      orderLabelOf: (oid: unknown) => orderMap[oid as any] ?? String(oid ?? "—"),
+      orderLabelOf: (oid: unknown) => orderMap[oid as any]?.label ?? String(oid ?? "—"),
       typeLabelOf: (tid: unknown) => typeMap[tid as any] ?? String(tid ?? "—"),
     }),
     [orderMap, typeMap]
@@ -290,7 +293,15 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
           <Table.Column
             dataIndex="order_id"
             title="Заказ"
-            render={(_, r: any) => orderMap[r?.order_id] ?? r?.order_id}
+            render={(_, r: any) => {
+              const order = orderMap[r?.order_id];
+              return (
+                <Space size={4} wrap>
+                  <span>{order?.label ?? r?.order_id}</span>
+                  <OrderDeletedTag deleted={order?.deleted} />
+                </Space>
+              );
+            }}
           />
           <Table.Column
             dataIndex="type_paid_id"

@@ -76,6 +76,8 @@ export interface CutJobItemDto {
   detail: CutDetailInfoDto | null;
   /** Order name from orders.order_name (present only on enriched single-job read). */
   orderName?: string | null;
+  /** True when the referenced order is soft-deleted; historical links must be marked stale. */
+  orderDeleted?: boolean;
 }
 
 export interface CutManualSheetDto {

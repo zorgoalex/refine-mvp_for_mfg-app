@@ -3,6 +3,7 @@ import { Card, Input, Space, Table, Typography, message } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { Link, useNavigate } from 'react-router-dom';
 import { bazisCutApi, type BazisCutSetListItemDto, type BazisCutSourceRefDto } from '../../api/bazisCutApi';
+import { OrderDeletedTag } from '../../components/OrderDeletedTag';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 
 const { Title, Text } = Typography;
@@ -69,6 +70,10 @@ const Sources: React.FC<{ row: BazisCutSetListItemDto }> = ({ row }) => <Space d
 const SourceLine: React.FC<{ title: string; refs: BazisCutSourceRefDto[]; href?: (id: number) => string }> = ({ title, refs, href }) => {
   if (refs.length === 0) return null;
   return <div><Text type="secondary">{title}: </Text>{refs.map((ref, index) => <React.Fragment key={ref.id}>
-    {index > 0 && ', '}{href ? <Link to={href(ref.id)} onClick={(event) => event.stopPropagation()}>{ref.label}</Link> : ref.label}
+    {index > 0 && ', '}
+    <Space size={4} wrap>
+      {href ? <Link to={href(ref.id)} onClick={(event) => event.stopPropagation()}>{ref.label}</Link> : ref.label}
+      <OrderDeletedTag deleted={ref.deleted} />
+    </Space>
   </React.Fragment>)}</div>;
 };

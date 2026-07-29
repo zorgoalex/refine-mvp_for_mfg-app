@@ -35,6 +35,7 @@ import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfil
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
 import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, loadSheetAxisOrigin, saveSheetAxisOrigin, selectVariantSheets } from './cutPreviewHelpers';
 import { TableTopScroll } from '../../components/TableTopScroll';
+import { OrderDeletedTag } from '../../components/OrderDeletedTag';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
 import { buildPieceMetaByItemId } from './cutPieceMeta';
@@ -354,14 +355,37 @@ function cutJobOrderOptions(job: CutJobDto | null): CutOrderSelectOption[] {
   for (const item of job?.items ?? []) {
     if (byId.has(item.orderId)) continue;
     const label = item.orderName?.trim() || `#${item.orderId}`;
+    const title = item.orderDeleted ? `${label} · удалён` : label;
     byId.set(item.orderId, {
       value: item.orderId,
       label,
-      title: label,
+      title,
       searchText: label.toLowerCase(),
     });
   }
   return [...byId.values()];
+}
+
+function CutOrderReference({
+  orderId,
+  orderName,
+  orderDeleted,
+  onOpen,
+}: {
+  orderId: number;
+  orderName?: string | null;
+  orderDeleted?: boolean | null;
+  onOpen: () => void;
+}): JSX.Element {
+  const label = orderName?.trim() || `#${orderId}`;
+  return (
+    <Space size={4} wrap>
+      <Button type="link" size="small" style={{ padding: 0 }} onClick={onOpen}>
+        {label}
+      </Button>
+      <OrderDeletedTag deleted={orderDeleted} />
+    </Space>
+  );
 }
 
 function cutJobFilmOptions(job: CutJobDto | null): CutFilmSelectOption[] {
@@ -2261,13 +2285,16 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         title: 'Заказ',
         dataIndex: 'orderId',
         key: 'order',
-        width: 140,
+        width: 178,
         // Click the order name to open its card as an in-app workspace tab
         // (push = new keep-alive tab, same as the orders list double-click).
         render: (_: unknown, r: CutJobItemDto) => (
-          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => show('orders_view', r.orderId, 'push')}>
-            {r.orderName?.trim() || `#${r.orderId}`}
-          </Button>
+          <CutOrderReference
+            orderId={r.orderId}
+            orderName={r.orderName}
+            orderDeleted={r.orderDeleted}
+            onOpen={() => show('orders_view', r.orderId, 'push')}
+          />
         ),
       },
       { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: 90 },

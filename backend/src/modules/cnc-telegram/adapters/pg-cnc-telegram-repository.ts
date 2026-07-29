@@ -65,6 +65,7 @@ interface PacketJoinedRow extends QueryResultRow {
   source_item_key: string | null;
   order_name: string | null;
   item_order_id: string | number | null;
+  order_delete_flag: boolean | null;
   detail_number: string | number | null;
   width_mm: string | number | null;
   height_mm: string | number | null;
@@ -307,6 +308,7 @@ function packetSelectSql(whereSql: string): string {
       i.source_item_key,
       i.order_name,
       COALESCE(i.match_order_id, item_order.order_id) AS item_order_id,
+      COALESCE(matched_order.delete_flag, false) AS order_delete_flag,
       i.detail_number,
       i.width_mm,
       i.height_mm,
@@ -330,6 +332,7 @@ function packetSelectSql(whereSql: string): string {
       HAVING COUNT(*) = 1
     ) item_order
       ON item_order.order_key = lower(trim(i.order_name))
+    LEFT JOIN orders matched_order ON matched_order.order_id = i.match_order_id
     WHERE ${whereSql}
     ORDER BY p.updated_at DESC, p.packet_id, i.order_name ASC NULLS LAST, i.detail_number ASC NULLS LAST
   `;
@@ -1491,6 +1494,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         sourceItemKey: row.source_item_key ?? '',
         orderName: row.order_name ?? '',
         orderId: toNullableNumber(row.item_order_id),
+        ...(row.order_delete_flag === true ? { orderDeleted: true } : {}),
         detailNumber: toNullableNumber(row.detail_number),
         widthMm: toNullableNumber(row.width_mm),
         heightMm: toNullableNumber(row.height_mm),

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Empty, Spin, Table } from 'antd';
+import { Alert, Empty, Space, Spin, Table } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisRevisionOrder } from '../../api/types/bazisApi.types';
+import { OrderDeletedTag } from '../../components/OrderDeletedTag';
 
 interface RevisionOrdersTabProps {
   revisionId: number;
@@ -14,8 +15,13 @@ const columns: ColumnsType<BazisRevisionOrder> = [
     title: 'ID заказа',
     dataIndex: 'orderId',
     key: 'orderId',
-    width: 120,
-    render: (value: number) => <Link to={`/orders/show/${value}`}>#{value}</Link>,
+    width: 150,
+    render: (value: number, record) => (
+      <Space size={4} wrap>
+        <Link to={`/orders/show/${value}`}>#{value}</Link>
+        <OrderDeletedTag deleted={record.orderDeleted} />
+      </Space>
+    ),
   },
   {
     title: 'Название',

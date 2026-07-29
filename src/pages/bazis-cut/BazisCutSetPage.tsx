@@ -9,6 +9,7 @@ import { Link, useParams } from 'react-router-dom';
 import {
   bazisCutApi, type BazisCutDetailFields, type BazisCutSetCardDto, type BazisCutSetDetailDto,
 } from '../../api/bazisCutApi';
+import { OrderDeletedTag } from '../../components/OrderDeletedTag';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
 import { buildBazisCutQrCode, summarizeBazisCutDetails } from './bazisCutDetailPresentation';
@@ -62,7 +63,7 @@ const GROUPED_FIELDS = FIELD_GROUPS.flatMap((group) =>
 const LEADING_COLUMN_COUNT = 6;
 const QR_CODE_COLUMN_INDEX = 4;
 const QR_CODE_STICKY_CLASS = 'bazis-cut-sticky-qr';
-const QR_CODE_STICKY_LEFT_PX = 58 + 180 + 150;
+const QR_CODE_STICKY_LEFT_PX = 58 + 210 + 150;
 const TOTAL_LABEL_COLUMN_INDEX = LEADING_COLUMN_COUNT - 1;
 const QUANTITY_COLUMN_INDEX = LEADING_COLUMN_COUNT
   + GROUPED_FIELDS.findIndex((field) => field.key === 'quantity');
@@ -177,7 +178,12 @@ function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) =
   return [
     { title: '№', key: 'rowNumber', fixed: 'left', width: 58, align: 'right',
       render: (_: unknown, _row: BazisCutSetDetailDto, index: number) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{index + 1}</span> },
-    { title: 'Источник', key: 'source', fixed: 'left', width: 180, render: (_, row) => row.sourceOrderId ? <Link to={`/orders/show/${row.sourceOrderId}`}>{row.sourceOrderFullNumber || row.sourceOrderName}</Link> : 'Снимок' },
+    { title: 'Источник', key: 'source', fixed: 'left', width: 210, render: (_, row) => row.sourceOrderId ? (
+      <Space size={4} wrap>
+        <Link to={`/orders/show/${row.sourceOrderId}`}>{row.sourceOrderFullNumber || row.sourceOrderName}</Link>
+        <OrderDeletedTag deleted={row.sourceOrderDeleted} />
+      </Space>
+    ) : 'Снимок' },
     { title: 'Базис заказ', dataIndex: 'sourceBazisOrderNo', key: 'sourceBazisOrderNo', fixed: 'left', width: 150,
       render: (value: string) => value
         ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span>
@@ -235,10 +241,13 @@ function useWorkspaceTabsHeight(): number {
   }, []);
   return height;
 }
-const SourceRefs: React.FC<{ refs: Array<{ id: number; label: string }>; href?: (id: number) => string }> = ({ refs, href }) => {
+const SourceRefs: React.FC<{ refs: Array<{ id: number; label: string; deleted?: boolean }>; href?: (id: number) => string }> = ({ refs, href }) => {
   if (refs.length === 0) return <>—</>;
   return <>{refs.map((ref, index) => <React.Fragment key={`${ref.id}-${ref.label}`}>{index > 0 && ', '}
-    {href && ref.id > 0 ? <Link to={href(ref.id)}>{ref.label}</Link> : ref.label}
+    <Space size={4} wrap>
+      {href && ref.id > 0 ? <Link to={href(ref.id)}>{ref.label}</Link> : ref.label}
+      <OrderDeletedTag deleted={ref.deleted} />
+    </Space>
   </React.Fragment>)}</>;
 };
 function exportFileName(name: string, setId: number): string {

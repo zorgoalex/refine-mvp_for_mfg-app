@@ -193,6 +193,8 @@ describe('PgCncTelegramRepository', () => {
       .flatMap((packet) => packet.items)[0];
 
     expect(sql).toContain('COALESCE(i.match_order_id, item_order.order_id) AS item_order_id');
+    expect(sql).toContain('matched_order.delete_flag');
+    expect(sql).toContain('LEFT JOIN orders matched_order');
     expect(sql).toContain('HAVING COUNT(*) = 1');
     expect(item).toMatchObject({
       orderName: '2706',
@@ -200,6 +202,39 @@ describe('PgCncTelegramRepository', () => {
       matchOrderId: null,
       matchDetailId: null,
       matchStatus: 'unmatched',
+    });
+  });
+
+  it('marks packet items linked to soft-deleted matched orders', async () => {
+    const database = {
+      query: vi.fn(async (text: string) => {
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [
+              packetRow({
+                order_name: '2706',
+                item_order_id: 11450,
+                order_delete_flag: true,
+                match_order_id: 11450,
+                match_detail_id: 7788,
+                match_status: 'matched',
+              }),
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-28' });
+    const item = result.columns.flatMap((column) => column.packets)
+      .flatMap((packet) => packet.items)[0];
+
+    expect(item).toMatchObject({
+      orderId: 11450,
+      matchOrderId: 11450,
+      orderDeleted: true,
     });
   });
 

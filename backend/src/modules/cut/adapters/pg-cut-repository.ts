@@ -152,6 +152,7 @@ const PROFILE_EDITABLE_STATUSES = new Set(['draft', 'ready', 'failed']);
 
 interface RenderDetailInfo {
   orderId: number;
+  orderDeleted: boolean;
   detailNumber: number | null;
   widthMm: number | null;
   heightMm: number | null;
@@ -2121,7 +2122,7 @@ export class PgCutRepository implements CutRepositoryPort {
   async listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto> {
     const readyStatusIds = await this.resolveReadyStatusIds();
 
-    const conditions: string[] = ['od.delete_flag = false'];
+    const conditions: string[] = ['od.delete_flag = false', 'ord.delete_flag = false'];
     const params: unknown[] = [];
     const addArrayFilter = (column: string, values: number[] | undefined) => {
       if (values && values.length > 0) {
@@ -2255,6 +2256,7 @@ export class PgCutRepository implements CutRepositoryPort {
   async listFilmOptionsForCut(query: ListFilmOptionsForCutQuery): Promise<CutFilmOptionDto[]> {
     const conditions: string[] = [
       'od.delete_flag = false',
+      'ord.delete_flag = false',
       'od.film_id IS NOT NULL',
       'f.film_name IS NOT NULL',
       `btrim(f.film_name) <> ''`,
@@ -2851,6 +2853,7 @@ export class PgCutRepository implements CutRepositoryPort {
       completion_date: string | Date | null;
       planned_completion_date: string | Date | null;
       client_name: string | null;
+      order_delete_flag: boolean | null;
     }>(
       // material_name = sheet-material name (COALESCE sheet_material_type, legacy
       // material) for the 4th label line; the id columns give a stable material
@@ -2865,7 +2868,8 @@ export class PgCutRepository implements CutRepositoryPort {
               smt.thickness_mm, f.film_name,
               mt.milling_type_name, et.edge_type_name, ps.production_status_name,
               cnc.machine_files,
-              o.order_name, o.order_date, o.completion_date, o.planned_completion_date,
+              o.order_name, o.delete_flag AS order_delete_flag,
+              o.order_date, o.completion_date, o.planned_completion_date,
               c.client_name
        FROM cut_job_item cji
        LEFT JOIN order_details od ON od.detail_id = cji.order_detail_id AND od.delete_flag = false
@@ -2921,6 +2925,7 @@ export class PgCutRepository implements CutRepositoryPort {
         edgeTypeName: row.edge_type_name ?? null,
         productionStatusName: row.production_status_name ?? null,
         orderName: row.order_name ?? null,
+        orderDeleted: row.order_delete_flag === true,
         orderDate: dateOnly(row.order_date),
         readyDate: dateOnly(row.completion_date) ?? dateOnly(row.planned_completion_date),
         clientName: row.client_name ?? null,
@@ -4459,6 +4464,8 @@ interface ItemRow extends QueryResultRow {
   link_pdf_file?: string | null;
   /** Present only on the enriched path (ENRICHED_ITEMS_QUERY). */
   order_name?: string | null;
+  /** Present only on the enriched path (ENRICHED_ITEMS_QUERY). */
+  order_delete_flag?: boolean | null;
 }
 
 // Enriched item query: joins order_details + dictionaries to resolve the order
@@ -4480,7 +4487,8 @@ const ENRICHED_ITEMS_QUERY = `
          od.priority, od.production_status_id, ps.production_status_name,
          od.joint_order_id, od.note,
          od.link_cutting_file, od.link_cutting_image_file, od.link_cad_file, od.link_pdf_file,
-         o.order_name AS order_name
+         o.order_name AS order_name,
+         o.delete_flag AS order_delete_flag
   FROM cut_job_item i
   -- delete_flag in the JOIN (not WHERE): a reserved detail that was later soft-
   -- deleted must still return its item row, but with detail: null (canonical
@@ -4664,8 +4672,8 @@ async function loadJob(
     qty: toNum(row.qty),
     cutGroupId: row.cut_group_id === null ? null : toNum(row.cut_group_id),
     detail: includeItemDetails ? mapItemDetail(row) : null,
-    // orderName is only present on the enriched (single-job) path; undefined on the light/list path.
-    ...(includeItemDetails ? { orderName: row.order_name ?? null } : {}),
+    // orderName/orderDeleted are only present on the enriched (single-job) path; undefined on the light/list path.
+    ...(includeItemDetails ? { orderName: row.order_name ?? null, orderDeleted: row.order_delete_flag === true } : {}),
   }));
   const resolvedMaterialNames = materialNames ?? uniqueSorted(
     itemDtos.map((item) => item.detail?.materialName ?? null),

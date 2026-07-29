@@ -5,6 +5,7 @@ import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Table, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
+import { OrderDeletedTag } from "../../components/OrderDeletedTag";
 
 export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = () => {
   const { tableProps } = useTable({
@@ -23,8 +24,10 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   );
   const { data: ordersData } = useMany({ resource: "orders", ids: orderIds, queryOptions: { enabled: orderIds.length > 0 } });
   const orderMap = useMemo(() => {
-    const map: Record<string | number, string> = {};
-    (ordersData?.data || []).forEach((o: any) => (map[o.order_id] = o.order_name ?? `#${o.order_id}`));
+    const map: Record<string | number, { label: string; deleted: boolean }> = {};
+    (ordersData?.data || []).forEach((o: any) => {
+      map[o.order_id] = { label: o.order_name ?? `#${o.order_id}`, deleted: o.delete_flag === true };
+    });
     return map;
   }, [ordersData]);
 
@@ -41,7 +44,21 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
         })}
       >
         <Table.Column dataIndex="requirement_id" title="id" sorter />
-        <Table.Column dataIndex="order_id" title="Заказ" sorter render={(value) => (value ? orderMap[value] ?? `#${value}` : "—")} />
+        <Table.Column
+          dataIndex="order_id"
+          title="Заказ"
+          sorter
+          render={(value) => {
+            if (!value) return "—";
+            const order = orderMap[value];
+            return (
+              <Space size={4} wrap>
+                <span>{order?.label ?? `#${value}`}</span>
+                <OrderDeletedTag deleted={order?.deleted} />
+              </Space>
+            );
+          }}
+        />
         <Table.Column dataIndex="resource_type" title="Тип ресурса" sorter />
         <Table.Column dataIndex="material_id" title="Материал" />
         <Table.Column dataIndex="film_id" title="Пленка" />

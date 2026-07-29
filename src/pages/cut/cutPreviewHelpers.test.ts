@@ -294,6 +294,11 @@ describe('cutPreviewHelpers', () => {
       expect(rows.some((row) => row.label.endsWith('ID') || row.label.includes('ID '))).toBe(false);
       expect(rows.some((row) => row.label === 'detail_name' || row.label === 'note' || row.label === 'film_id')).toBe(false);
     });
+
+    it('marks deleted order references in sheet tooltip rows', () => {
+      const rows = buildCutPieceTooltipRows({ ...item, orderDeleted: true }, placements.pieces[0]);
+      expect(rows).toContainEqual({ label: 'Статус заказа', value: 'удалён' });
+    });
   });
 
   describe('selectVariantSheets', () => {

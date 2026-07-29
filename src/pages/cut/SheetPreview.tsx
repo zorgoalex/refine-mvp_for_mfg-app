@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Tooltip } from 'antd';
+import { Space, Tooltip } from 'antd';
+import { OrderDeletedTag } from '../../components/OrderDeletedTag';
 import { displayedSheetExtents, formatSheetSide, type CutPieceOverlay } from './cutPreviewHelpers';
 import { fitLabelScale, LINE1_SCALE, splitDimsLine } from './pieceLabel';
 
@@ -33,9 +34,10 @@ export interface SheetPreviewProps {
 function renderOverlayTooltip(overlay: CutPieceOverlay): React.ReactNode {
   return (
     <div className="app-tabular" style={{ maxWidth: 520, maxHeight: 420, overflow: 'auto' }}>
-      <div style={{ fontWeight: 700, marginBottom: 6 }}>
-        Заказ {overlay.orderId ?? '—'} · позиция {overlay.detailNumber ?? '—'}
-      </div>
+      <Space size={4} wrap style={{ fontWeight: 700, marginBottom: 6 }}>
+        <span>Заказ {overlay.orderId ?? '—'} · позиция {overlay.detailNumber ?? '—'}</span>
+        <OrderDeletedTag deleted={overlay.orderDeleted} />
+      </Space>
       <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(120px, 1fr)', columnGap: 10, rowGap: 3 }}>
         {overlay.tooltipRows.map((row, index) => (
           <React.Fragment key={`${row.label}:${index}`}>

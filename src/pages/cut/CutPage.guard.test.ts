@@ -107,6 +107,8 @@ describe('CutPage source guards', () => {
     // Use Refine navigation push (keep-alive tab) for the order number; not a
     // react-router Link with target="_blank".
     expect(source).toContain("show('orders_view', r.orderId, 'push')");
+    expect(source).toContain('OrderDeletedTag');
+    expect(source).toContain('orderDeleted={r.orderDeleted}');
     expect(source).not.toContain('react-router-dom');
   });
 

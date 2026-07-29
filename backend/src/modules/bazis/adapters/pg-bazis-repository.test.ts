@@ -2729,6 +2729,7 @@ describe('PgBazisRepository.listRevisionOrders', () => {
         {
           order_id: 9001,
           order_name: 'Тест-заказ 1',
+          order_delete_flag: true,
           created_at: '2026-07-08 10:00:00+00',
           nodes_mapped: 12,
           details_created: 10,
@@ -2743,13 +2744,14 @@ describe('PgBazisRepository.listRevisionOrders', () => {
     const sql = normalizeSql(database.queries[1].text);
     expect(sql).toContain('FROM bazis_order_links bol');
     expect(sql).toContain('JOIN orders o ON o.order_id = bol.order_id');
+    expect(sql).toContain('delete_flag');
     // счётчик деталей — по order_detail_id, НЕ по mapping_kind (см. семантику выше)
     expect(sql).toContain('FILTER (WHERE map.order_detail_id IS NOT NULL)');
     // скоуп агрегата границей ревизии — пин против cross-revision утечки счётчиков
     expect(sql).toContain('JOIN bazis_nodes n ON n.bazis_node_id = map.node_id');
     expect(sql).toContain('WHERE n.revision_id = $1');
     expect(orders).toEqual([{
-      orderId: 9001, orderName: 'Тест-заказ 1', createdAt: '2026-07-08 10:00:00+00',
+      orderId: 9001, orderName: 'Тест-заказ 1', orderDeleted: true, createdAt: '2026-07-08 10:00:00+00',
       nodesMapped: 12, detailsCreated: 10,
     }]);
   });
@@ -2851,6 +2853,8 @@ describe('PgBazisRepository.listProjects', () => {
       .map((query) => normalizeSql(query.text))
       .find((sql) => sql.startsWith('SELECT bp.bazis_project_id'));
     expect(listSql).toContain('order_name');
+    expect(listSql).toContain('delete_flag');
+    expect(listSql).toContain('orderDeleted');
     expect(listSql).toContain('JOIN orders');
     expect(listSql).toContain('JOIN projects erp_project');
   });
@@ -3043,6 +3047,8 @@ describe('PgBazisRepository tree order provenance', () => {
     expect(treeSql).toContain('bazis_node_order_detail_map');
     expect(treeSql).toContain('order_detail_id IS NOT NULL');
     expect(treeSql).toContain('order_name');
+    expect(treeSql).toContain('delete_flag');
+    expect(treeSql).toContain('orderDeleted');
   });
 
   it('returns populated orderIds from the full-tree read (behavior, not just SQL shape)', async () => {

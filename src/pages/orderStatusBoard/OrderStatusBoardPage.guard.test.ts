@@ -133,6 +133,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('onOpenOrder(orderId)');
     expect(page).toContain('summary.orderName');
     expect(page).toContain('summary.orderId');
+    expect(page).toContain('summary.orderDeleted');
+    expect(page).toContain('item.orderDeleted');
+    expect(page).toContain('OrderDeletedTag');
     expect(page).toContain('summary.positions');
     expect(page).toContain('summary.details');
     expect(page).toContain('summary.orderId ??= item.orderId ?? item.matchOrderId ?? null');

@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ApiError } from '../../api/apiError';
 import { projectsApi } from '../../api/projectsApi';
 import type { ProjectCard, ProjectDto, ProjectOrderSummary } from '../../api/projectsApi';
+import { OrderDeletedTag } from '../../components/OrderDeletedTag';
 import { formatNumber } from '../../utils/numberFormat';
 import { canMergeInto } from './projectHelpers';
 
@@ -143,7 +144,12 @@ export const ProjectShow: React.FC = () => {
         title: 'Номер',
         dataIndex: 'fullNumber',
         key: 'fullNumber',
-        render: (value: string, record) => <Link to={`/orders/show/${record.orderId}`}>{value}</Link>,
+        render: (value: string, record) => (
+          <Space size={4} wrap>
+            <Link to={`/orders/show/${record.orderId}`}>{value}</Link>
+            <OrderDeletedTag deleted={record.deleteFlag} />
+          </Space>
+        ),
       },
       {
         title: 'Заказ',

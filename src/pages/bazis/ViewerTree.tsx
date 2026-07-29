@@ -137,8 +137,8 @@ export const ViewerTree = forwardRef<ViewerTreeHandle, ViewerTreeProps>(({
             <span>{dataNode.title as React.ReactNode}</span>
             {dataNode.orders.length > 0 ? (
               // Узел уже добавлен в ERP-заказ(ы) созданной деталью — показываем названия
-              <Tag color="green" style={{ marginInlineEnd: 0, lineHeight: '16px' }}>
-                {dataNode.orders.map((order) => order.orderName?.trim() || `#${order.orderId}`).join(', ')}
+              <Tag color={dataNode.orders.some((order) => order.orderDeleted) ? 'red' : 'green'} style={{ marginInlineEnd: 0, lineHeight: '16px' }}>
+                {dataNode.orders.map(formatTreeOrderRef).join(', ')}
               </Tag>
             ) : null}
             {showBadges ? (
@@ -159,6 +159,11 @@ export const ViewerTree = forwardRef<ViewerTreeHandle, ViewerTreeProps>(({
 });
 
 ViewerTree.displayName = 'ViewerTree';
+
+function formatTreeOrderRef(order: { orderId: number; orderName?: string | null; orderDeleted?: boolean }): string {
+  const label = order.orderName?.trim() || `#${order.orderId}`;
+  return order.orderDeleted ? `${label} (удалён)` : label;
+}
 
 interface SummaryBadgeProps {
   label: string;

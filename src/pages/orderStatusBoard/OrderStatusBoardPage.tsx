@@ -71,6 +71,7 @@ import type {
   CncTelegramTodayResponse,
 } from '../../api/types/cncTelegramApi.types';
 import { featureFlags } from '../../config/featureFlags';
+import { OrderDeletedTag } from '../../components/OrderDeletedTag';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
 import {
   classifyOrderStatusBoardMoveFailure,
@@ -1005,23 +1006,26 @@ const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
 
   return (
     <Typography.Text className="cnc-packet-card__summary">
-      {orderId !== null ? (
-        <Button
-          type="link"
-          className="cnc-packet-card__summary-order"
-          aria-label={`Открыть заказ ${summary.orderName}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenOrder(orderId);
-          }}
-        >
-          {summary.orderName}
-        </Button>
-      ) : (
-        <span className="cnc-packet-card__summary-order">
-          {summary.orderName}
-        </span>
-      )}
+      <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+        {orderId !== null ? (
+          <Button
+            type="link"
+            className="cnc-packet-card__summary-order"
+            aria-label={`Открыть заказ ${summary.orderName}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenOrder(orderId);
+            }}
+          >
+            {summary.orderName}
+          </Button>
+        ) : (
+          <span className="cnc-packet-card__summary-order">
+            {summary.orderName}
+          </span>
+        )}
+        <OrderDeletedTag deleted={summary.orderDeleted} />
+      </span>
       <span className="cnc-packet-card__summary-meta">
         : {summary.positions} поз · {summary.details} дет.
       </span>
@@ -1138,20 +1142,23 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               return (
                 <div className="cnc-packet-card__item" role="row" key={item.packetItemId}>
                   <span>
-                    {orderId ? (
-                      <Button
-                        type="link"
-                        className="cnc-packet-card__order-link"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpenOrder(orderId);
-                        }}
-                      >
-                        {item.orderName}
-                      </Button>
-                    ) : (
-                      item.orderName
-                    )}
+                    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {orderId ? (
+                        <Button
+                          type="link"
+                          className="cnc-packet-card__order-link"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenOrder(orderId);
+                          }}
+                        >
+                          {item.orderName}
+                        </Button>
+                      ) : (
+                        item.orderName
+                      )}
+                      <OrderDeletedTag deleted={item.orderDeleted} />
+                    </span>
                   </span>
                   <span>
                     <span>{item.detailNumber ? `#${item.detailNumber}` : '—'}</span>
@@ -2272,12 +2279,14 @@ interface CncSummaryItem {
   orderName: string;
   orderId?: number | null;
   matchOrderId?: number | null;
+  orderDeleted?: boolean;
   quantity: number;
 }
 
 interface CncOrderSummary {
   orderName: string;
   orderId: number | null;
+  orderDeleted?: boolean;
   positions: number;
   details: number;
 }
@@ -2294,15 +2303,17 @@ interface CncRelationContext {
 }
 
 function buildCncOrderSummaries(items: CncSummaryItem[]): CncOrderSummary[] {
-  const summaries = new Map<string, { orderId: number | null; positions: number; details: number }>();
+  const summaries = new Map<string, { orderId: number | null; orderDeleted: boolean; positions: number; details: number }>();
   for (const item of items) {
     const orderName = item.orderName.trim() || 'Без заказа';
     const summary = summaries.get(orderName) ?? {
       orderId: null,
+      orderDeleted: false,
       positions: 0,
       details: 0,
     };
     summary.orderId ??= item.orderId ?? item.matchOrderId ?? null;
+    summary.orderDeleted ||= item.orderDeleted === true;
     summary.positions += 1;
     summary.details += item.quantity;
     summaries.set(orderName, summary);
@@ -2313,6 +2324,7 @@ function buildCncOrderSummaries(items: CncSummaryItem[]): CncOrderSummary[] {
     .map(([orderName, summary]) => ({
       orderName,
       orderId: summary.orderId,
+      ...(summary.orderDeleted ? { orderDeleted: true } : {}),
       positions: summary.positions,
       details: summary.details,
     }));

@@ -8,7 +8,7 @@ export interface BazisTreeDataNode extends DataNode {
   designation: string | null;
   productOrderNo: string | null;
   childrenCount: number;
-  orders: Array<{ orderId: number; orderName: string }>;
+  orders: Array<{ orderId: number; orderName: string; orderDeleted?: boolean }>;
   orderIds: number[];
 }
 
