@@ -26,8 +26,11 @@ const baseForm: StatusAutomationFormValues = {
   actionType: 'change_order_status',
   targetStatusId: 2,
   currentOrderStatusIn: [],
+  currentOrderStatusNotIn: [],
   currentPaymentStatusIn: [],
+  currentPaymentStatusNotIn: [],
   currentProductionStatusIn: [],
+  currentProductionStatusNotIn: [],
   paidShareGte: undefined,
   orderSourceIn: [],
   firstPaymentOnly: undefined,
@@ -40,8 +43,11 @@ const eventDescriptor = (overrides: Partial<StatusAutomationEventTypeDto> = {}):
   title: 'Платёж создан',
   allowedConditions: [
     'currentOrderStatusIn',
+    'currentOrderStatusNotIn',
     'currentPaymentStatusIn',
+    'currentPaymentStatusNotIn',
     'currentProductionStatusIn',
+    'currentProductionStatusNotIn',
     'paidShareGte',
     'orderSourceIn',
     'firstPaymentOnly',
@@ -68,8 +74,11 @@ describe('statusAutomationView', () => {
       describeConditions(
         {
           currentOrderStatusIn: [1, 999],
+          currentOrderStatusNotIn: [2],
           currentPaymentStatusIn: [3],
+          currentPaymentStatusNotIn: [777],
           currentProductionStatusIn: [4, 998],
+          currentProductionStatusNotIn: [4],
           paidShareGte: 50,
           orderSourceIn: ['bazis'],
           firstPaymentOnly: true,
@@ -77,7 +86,7 @@ describe('statusAutomationView', () => {
         catalogs,
       ),
     ).toBe(
-      'Статус заказа: Новый, #999; Статус оплаты: Частично оплачен; Статус производства: В работе, #998; Оплачено ≥ 50%; Источник: Базис; Только первый платёж',
+      'Статус заказа: Новый, #999; Исключить статус заказа: Оплачен; Статус оплаты: Частично оплачен; Исключить статус оплаты: #777; Статус производства: В работе, #998; Исключить статус производства: В работе; Оплачено ≥ 50%; Источник: Базис; Только первый платёж',
     );
   });
 
@@ -86,8 +95,11 @@ describe('statusAutomationView', () => {
       describeConditions(
         {
           currentOrderStatusIn: [],
+          currentOrderStatusNotIn: [],
           currentPaymentStatusIn: [],
+          currentPaymentStatusNotIn: [],
           currentProductionStatusIn: [],
+          currentProductionStatusNotIn: [],
           orderSourceIn: [],
           firstPaymentOnly: false,
         },
@@ -101,8 +113,11 @@ describe('statusAutomationView', () => {
     expect(allowedConditionKeysForEvent(null)).toEqual([]);
     expect(allowedConditionKeysForEvent(eventDescriptor())).toEqual([
       'currentOrderStatusIn',
+      'currentOrderStatusNotIn',
       'currentPaymentStatusIn',
+      'currentPaymentStatusNotIn',
       'currentProductionStatusIn',
+      'currentProductionStatusNotIn',
       'paidShareGte',
       'orderSourceIn',
       'firstPaymentOnly',
@@ -124,6 +139,7 @@ describe('statusAutomationView', () => {
         paidShareGte: 0,
         firstPaymentOnly: false,
         currentOrderStatusIn: [1],
+        currentOrderStatusNotIn: [2],
         orderSourceIn: [],
       }),
     ).toEqual({
@@ -133,6 +149,7 @@ describe('statusAutomationView', () => {
       targetStatusId: 2,
       conditions: {
         currentOrderStatusIn: [1],
+        currentOrderStatusNotIn: [2],
         paidShareGte: 0,
         firstPaymentOnly: false,
       },
@@ -152,6 +169,7 @@ describe('statusAutomationView', () => {
           actionType: 'change_production_status',
           targetStatusId: 4,
           currentProductionStatusIn: [4],
+          currentProductionStatusNotIn: [999],
           priority: 10,
           isEnabled: true,
         },
@@ -161,7 +179,7 @@ describe('statusAutomationView', () => {
       eventType: 'order.created',
       actionType: 'change_production_status',
       targetStatusId: 4,
-      conditions: { currentProductionStatusIn: [4] },
+      conditions: { currentProductionStatusIn: [4], currentProductionStatusNotIn: [999] },
       priority: 10,
       isEnabled: true,
       version: 7,
@@ -173,16 +191,22 @@ describe('statusAutomationView', () => {
       buildCreatePayload({
         ...baseForm,
         currentOrderStatusIn: [1],
+        currentOrderStatusNotIn: [2],
         currentPaymentStatusIn: [3],
+        currentPaymentStatusNotIn: [5],
         currentProductionStatusIn: [4],
+        currentProductionStatusNotIn: [6],
         paidShareGte: 50,
         orderSourceIn: ['manual', 'bazis', 'import'],
         firstPaymentOnly: true,
       }).conditions,
     ).toEqual({
       currentOrderStatusIn: [1],
+      currentOrderStatusNotIn: [2],
       currentPaymentStatusIn: [3],
+      currentPaymentStatusNotIn: [5],
       currentProductionStatusIn: [4],
+      currentProductionStatusNotIn: [6],
       paidShareGte: 50,
       orderSourceIn: ['manual', 'bazis', 'import'],
       firstPaymentOnly: true,

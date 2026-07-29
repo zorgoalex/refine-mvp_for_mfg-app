@@ -23,8 +23,11 @@ const actionTypeSchema = z.enum([
 const conditionSchema = z
   .object({
     currentOrderStatusIn: z.array(z.number().int().positive()).optional(),
+    currentOrderStatusNotIn: z.array(z.number().int().positive()).optional(),
     currentPaymentStatusIn: z.array(z.number().int().positive()).optional(),
+    currentPaymentStatusNotIn: z.array(z.number().int().positive()).optional(),
     currentProductionStatusIn: z.array(z.number().int().positive()).optional(),
+    currentProductionStatusNotIn: z.array(z.number().int().positive()).optional(),
     paidShareGte: z.number().min(0).max(100).optional(),
     orderSourceIn: z.array(z.enum(['manual', 'bazis', 'import'])).optional(),
     firstPaymentOnly: z.boolean().optional(),
@@ -171,11 +174,23 @@ function normalizeConditions(value: z.infer<typeof conditionSchema>): StatusAuto
   if (value.currentOrderStatusIn !== undefined && value.currentOrderStatusIn.length > 0) {
     conditions.currentOrderStatusIn = value.currentOrderStatusIn;
   }
+  if (value.currentOrderStatusNotIn !== undefined && value.currentOrderStatusNotIn.length > 0) {
+    conditions.currentOrderStatusNotIn = value.currentOrderStatusNotIn;
+  }
   if (value.currentPaymentStatusIn !== undefined && value.currentPaymentStatusIn.length > 0) {
     conditions.currentPaymentStatusIn = value.currentPaymentStatusIn;
   }
+  if (value.currentPaymentStatusNotIn !== undefined && value.currentPaymentStatusNotIn.length > 0) {
+    conditions.currentPaymentStatusNotIn = value.currentPaymentStatusNotIn;
+  }
   if (value.currentProductionStatusIn !== undefined && value.currentProductionStatusIn.length > 0) {
     conditions.currentProductionStatusIn = value.currentProductionStatusIn;
+  }
+  if (
+    value.currentProductionStatusNotIn !== undefined &&
+    value.currentProductionStatusNotIn.length > 0
+  ) {
+    conditions.currentProductionStatusNotIn = value.currentProductionStatusNotIn;
   }
   if (value.paidShareGte !== undefined) conditions.paidShareGte = value.paidShareGte;
   if (value.orderSourceIn !== undefined && value.orderSourceIn.length > 0) {

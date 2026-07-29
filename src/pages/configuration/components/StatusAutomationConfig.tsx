@@ -89,8 +89,11 @@ function emptyForm(eventType: StatusAutomationEventType = 'order.created'): Stat
     actionType: 'change_order_status',
     targetStatusId: 0,
     currentOrderStatusIn: [],
+    currentOrderStatusNotIn: [],
     currentPaymentStatusIn: [],
+    currentPaymentStatusNotIn: [],
     currentProductionStatusIn: [],
+    currentProductionStatusNotIn: [],
     paidShareGte: undefined,
     orderSourceIn: [],
     firstPaymentOnly: undefined,
@@ -106,8 +109,13 @@ function formFromRule(rule: StatusAutomationRuleDto): StatusAutomationFormValues
     actionType: rule.actionType,
     targetStatusId: rule.targetStatusId,
     currentOrderStatusIn: [...(rule.conditions.currentOrderStatusIn ?? [])],
+    currentOrderStatusNotIn: [...(rule.conditions.currentOrderStatusNotIn ?? [])],
     currentPaymentStatusIn: [...(rule.conditions.currentPaymentStatusIn ?? [])],
+    currentPaymentStatusNotIn: [...(rule.conditions.currentPaymentStatusNotIn ?? [])],
     currentProductionStatusIn: [...(rule.conditions.currentProductionStatusIn ?? [])],
+    currentProductionStatusNotIn: [
+      ...(rule.conditions.currentProductionStatusNotIn ?? []),
+    ],
     paidShareGte: rule.conditions.paidShareGte,
     orderSourceIn: [...(rule.conditions.orderSourceIn ?? [])],
     firstPaymentOnly: rule.conditions.firstPaymentOnly,
@@ -282,11 +290,20 @@ export function StatusAutomationConfig() {
         ? current.actionType
         : descriptor?.allowedActions[0] ?? current.actionType,
       currentOrderStatusIn: allowed.has('currentOrderStatusIn') ? current.currentOrderStatusIn : [],
+      currentOrderStatusNotIn: allowed.has('currentOrderStatusNotIn')
+        ? current.currentOrderStatusNotIn
+        : [],
       currentPaymentStatusIn: allowed.has('currentPaymentStatusIn')
         ? current.currentPaymentStatusIn
         : [],
+      currentPaymentStatusNotIn: allowed.has('currentPaymentStatusNotIn')
+        ? current.currentPaymentStatusNotIn
+        : [],
       currentProductionStatusIn: allowed.has('currentProductionStatusIn')
         ? current.currentProductionStatusIn
+        : [],
+      currentProductionStatusNotIn: allowed.has('currentProductionStatusNotIn')
+        ? current.currentProductionStatusNotIn
         : [],
       paidShareGte: allowed.has('paidShareGte') ? current.paidShareGte : undefined,
       orderSourceIn: allowed.has('orderSourceIn') ? current.orderSourceIn : [],
@@ -582,6 +599,18 @@ export function StatusAutomationConfig() {
               />
               <Select<number[]>
                 mode="multiple"
+                value={form.currentOrderStatusNotIn ?? []}
+                onChange={(value) => updateForm({ currentOrderStatusNotIn: value })}
+                options={orderStatusOptions}
+                disabled={!allowedConditionSet.has('currentOrderStatusNotIn')}
+                placeholder="Исключить статусы заказа"
+                style={{ width: '100%' }}
+                allowClear
+                showSearch
+                optionFilterProp="label"
+              />
+              <Select<number[]>
+                mode="multiple"
                 value={form.currentPaymentStatusIn ?? []}
                 onChange={(value) => updateForm({ currentPaymentStatusIn: value })}
                 options={paymentStatusOptions}
@@ -594,11 +623,35 @@ export function StatusAutomationConfig() {
               />
               <Select<number[]>
                 mode="multiple"
+                value={form.currentPaymentStatusNotIn ?? []}
+                onChange={(value) => updateForm({ currentPaymentStatusNotIn: value })}
+                options={paymentStatusOptions}
+                disabled={!allowedConditionSet.has('currentPaymentStatusNotIn')}
+                placeholder="Исключить статусы оплаты"
+                style={{ width: '100%' }}
+                allowClear
+                showSearch
+                optionFilterProp="label"
+              />
+              <Select<number[]>
+                mode="multiple"
                 value={form.currentProductionStatusIn ?? []}
                 onChange={(value) => updateForm({ currentProductionStatusIn: value })}
                 options={productionStatusOptions}
                 disabled={!allowedConditionSet.has('currentProductionStatusIn')}
                 placeholder="Статусы производства"
+                style={{ width: '100%' }}
+                allowClear
+                showSearch
+                optionFilterProp="label"
+              />
+              <Select<number[]>
+                mode="multiple"
+                value={form.currentProductionStatusNotIn ?? []}
+                onChange={(value) => updateForm({ currentProductionStatusNotIn: value })}
+                options={productionStatusOptions}
+                disabled={!allowedConditionSet.has('currentProductionStatusNotIn')}
+                placeholder="Исключить статусы производства"
                 style={{ width: '100%' }}
                 allowClear
                 showSearch

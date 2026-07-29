@@ -13,8 +13,11 @@ export interface StatusAutomationEventDescriptor {
 
 const BASE_CONDITIONS: ReadonlyArray<keyof StatusAutomationConditions> = [
   'currentOrderStatusIn',
+  'currentOrderStatusNotIn',
   'currentPaymentStatusIn',
+  'currentPaymentStatusNotIn',
   'currentProductionStatusIn',
+  'currentProductionStatusNotIn',
   'paidShareGte',
   'orderSourceIn',
 ];

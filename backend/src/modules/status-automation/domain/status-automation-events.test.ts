@@ -14,8 +14,11 @@ const expectedEventTypes = [
 
 const baseConditions = [
   'currentOrderStatusIn',
+  'currentOrderStatusNotIn',
   'currentPaymentStatusIn',
+  'currentPaymentStatusNotIn',
   'currentProductionStatusIn',
+  'currentProductionStatusNotIn',
   'paidShareGte',
   'orderSourceIn',
 ] as const;

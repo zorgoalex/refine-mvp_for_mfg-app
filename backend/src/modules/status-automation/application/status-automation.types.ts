@@ -16,8 +16,11 @@ export type StatusAutomationOrigin = 'user' | 'automation';
 
 export interface StatusAutomationConditions {
   currentOrderStatusIn?: number[];
+  currentOrderStatusNotIn?: number[];
   currentPaymentStatusIn?: number[];
+  currentPaymentStatusNotIn?: number[];
   currentProductionStatusIn?: number[];
+  currentProductionStatusNotIn?: number[];
   paidShareGte?: number; // 0..100
   orderSourceIn?: Array<'manual' | 'bazis' | 'import'>;
   firstPaymentOnly?: boolean; // только payment.created

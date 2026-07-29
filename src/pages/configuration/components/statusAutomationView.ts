@@ -21,8 +21,11 @@ export interface StatusAutomationFormValues {
   actionType: StatusAutomationActionType;
   targetStatusId: number;
   currentOrderStatusIn?: number[];
+  currentOrderStatusNotIn?: number[];
   currentPaymentStatusIn?: number[];
+  currentPaymentStatusNotIn?: number[];
   currentProductionStatusIn?: number[];
+  currentProductionStatusNotIn?: number[];
   paidShareGte?: number;
   orderSourceIn?: StatusAutomationOrderSource[];
   firstPaymentOnly?: boolean;
@@ -46,13 +49,37 @@ export function describeConditions(
   if (current.currentOrderStatusIn?.length) {
     parts.push(`Статус заказа: ${formatStatusIds(current.currentOrderStatusIn, catalogs.orderStatusNames)}`);
   }
+  if (current.currentOrderStatusNotIn?.length) {
+    parts.push(
+      `Исключить статус заказа: ${formatStatusIds(
+        current.currentOrderStatusNotIn,
+        catalogs.orderStatusNames,
+      )}`,
+    );
+  }
   if (current.currentPaymentStatusIn?.length) {
     parts.push(`Статус оплаты: ${formatStatusIds(current.currentPaymentStatusIn, catalogs.paymentStatusNames)}`);
+  }
+  if (current.currentPaymentStatusNotIn?.length) {
+    parts.push(
+      `Исключить статус оплаты: ${formatStatusIds(
+        current.currentPaymentStatusNotIn,
+        catalogs.paymentStatusNames,
+      )}`,
+    );
   }
   if (current.currentProductionStatusIn?.length) {
     parts.push(
       `Статус производства: ${formatStatusIds(
         current.currentProductionStatusIn,
+        catalogs.productionStatusNames,
+      )}`,
+    );
+  }
+  if (current.currentProductionStatusNotIn?.length) {
+    parts.push(
+      `Исключить статус производства: ${formatStatusIds(
+        current.currentProductionStatusNotIn,
         catalogs.productionStatusNames,
       )}`,
     );
@@ -90,11 +117,20 @@ function buildConditions(form: StatusAutomationFormValues): StatusAutomationCond
   if (form.currentOrderStatusIn?.length) {
     conditions.currentOrderStatusIn = [...form.currentOrderStatusIn];
   }
+  if (form.currentOrderStatusNotIn?.length) {
+    conditions.currentOrderStatusNotIn = [...form.currentOrderStatusNotIn];
+  }
   if (form.currentPaymentStatusIn?.length) {
     conditions.currentPaymentStatusIn = [...form.currentPaymentStatusIn];
   }
+  if (form.currentPaymentStatusNotIn?.length) {
+    conditions.currentPaymentStatusNotIn = [...form.currentPaymentStatusNotIn];
+  }
   if (form.currentProductionStatusIn?.length) {
     conditions.currentProductionStatusIn = [...form.currentProductionStatusIn];
+  }
+  if (form.currentProductionStatusNotIn?.length) {
+    conditions.currentProductionStatusNotIn = [...form.currentProductionStatusNotIn];
   }
   if (form.paidShareGte !== undefined) {
     conditions.paidShareGte = form.paidShareGte;
@@ -138,4 +174,3 @@ export function buildUpdatePayload(
     version: rule.version,
   };
 }
-
