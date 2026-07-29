@@ -65,7 +65,7 @@ export async function resolveInitialUiVariant(
       return resolveUiVariant(config, confirmed);
     }
     // A successful old/malformed backend response is authoritative absence,
-    // not a transport outage. Never resurrect cached evolution in this case.
+    // not a transport outage. Use the configured default instead of stale cache.
     return resolveUiVariant(config);
   } catch {
     // Same-user confirmed cache is the only non-server bootstrap fallback.

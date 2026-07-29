@@ -109,6 +109,21 @@ const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
 
 const ORDER_LIST_DEFAULT_ORDER = ORDER_LIST_COLUMN_DEFINITIONS.map((definition) => definition.key);
 
+const renderOrderListHeaderTitle = (title: React.ReactNode): React.ReactNode => (
+  <span
+    className="orders-table-header-title"
+    title={typeof title === "string" ? title : undefined}
+  >
+    {title}
+  </span>
+);
+
+const withOrderListHeaderTitles = (columns: ColumnsType<any>): ColumnsType<any> =>
+  columns.map((column) => ({
+    ...column,
+    title: renderOrderListHeaderTitle(column.title as React.ReactNode),
+  }));
+
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [searchOrderId, setSearchOrderId] = useState<string>("");
@@ -1045,7 +1060,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     );
   };
 
-  const orderListColumns: ColumnsType<any> = [
+  const orderListColumns: ColumnsType<any> = withOrderListHeaderTitles([
     {
       dataIndex: "order_id",
       key: "order_id",
@@ -1224,7 +1239,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         </Space>
       ),
     },
-  ];
+  ]);
 
   const visibleOrderListColumns = applyOrderDetailColumnSettings(orderListColumns, orderListColumnSettings);
 

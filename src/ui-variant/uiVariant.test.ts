@@ -8,11 +8,11 @@ describe('ui variant resolver', () => {
     expect(resolveUiVariant({ evolutionEnabled: false })).toBe('legacy');
   });
 
-  it('requires both runtime availability and a confirmed user preference', () => {
-    expect(resolveUiVariant({ evolutionEnabled: true })).toBe('legacy');
+  it('defaults to evolution when runtime allows it and respects confirmed user preference', () => {
+    expect(resolveUiVariant({ evolutionEnabled: true })).toBe('evolution');
     expect(resolveUiVariant({ evolutionEnabled: true }, 'evolution')).toBe('evolution');
     expect(resolveUiVariant({ evolutionEnabled: true }, 'legacy')).toBe('legacy');
-    expect(resolveUiVariant({ evolutionEnabled: true }, 'future')).toBe('legacy');
+    expect(resolveUiVariant({ evolutionEnabled: true }, 'future')).toBe('evolution');
   });
 
   it('gives emergency force-legacy highest priority', () => {
