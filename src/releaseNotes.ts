@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-29",
+    title: "Список заказов: Базис-проект",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Колонка «Присадка» в списке заказов переименована в «Базис-проект».",
+      "Если присадка заказа не указана, колонка показывает уникальные непустые значения «Базис проект» из деталей заказа.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-29",
     title: "Раскрой: PDF всегда пересчитывает динамические поля",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

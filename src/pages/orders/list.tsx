@@ -73,13 +73,14 @@ import {
   useOrderDetailColumnPreferences,
   type OrderDetailColumnDefinition,
 } from "./components/tables/OrderDetailColumnSettings";
+import { resolveOrderListBasisProjectValues } from "./orderListBasisProjects";
 import "./list.css";
 
 const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'order_id', label: 'id', lockVisible: true },
   { key: 'order_name', label: 'Заказ', lockVisible: true },
   ...(featureFlags.projects ? [{ key: 'project_code', label: '№ проекта' }] : []),
-  { key: 'doweling_order_name', label: 'Прис.' },
+  { key: 'doweling_order_name', label: 'Базис-проект' },
   { key: 'groups', label: 'Группа' },
   { key: 'order_date', label: 'Дата заказа' },
   { key: 'client_name', label: 'Клиент' },
@@ -1100,16 +1101,24 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     {
       dataIndex: "doweling_order_name",
       key: "doweling_order_name",
-      title: "Прис.",
-      sorter: true,
-      width: 80,
-      className: "orders-col orders-col--doweling-name",
+      title: "Базис-проект",
+      width: 120,
+      className: "orders-col orders-col--basis-project",
       render: (_, record) => {
         const latestLink = getLatestDoweling(record.order_id, record);
         const dowelingName = latestLink?.doweling_order?.doweling_order_name;
-        return dowelingName ? (
-          <span style={{ color: '#DC2626', letterSpacing: '0.8px' }}>{dowelingName}</span>
-        ) : null;
+        const values = resolveOrderListBasisProjectValues({
+          dowelingOrderName: dowelingName,
+          basisProjects: record.basis_projects,
+          details: detailsByOrderId[record.order_id],
+        });
+        const displayValue = values.join(", ");
+
+        return displayValue ? (
+          <Tooltip title={displayValue} placement="topLeft">
+            <span className="orders-basis-project-value">{displayValue}</span>
+          </Tooltip>
+        ) : "—";
       },
     },
     ...(useBackendOrdersRead && featureFlags.useBackendGroups

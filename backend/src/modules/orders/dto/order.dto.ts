@@ -114,6 +114,7 @@ export interface OrderListItemDto {
   /** @deprecated Variant B: always empty post-034; use sheetMaterialTypeIds. */
   materialIds: number[];
   materialNames: string[];
+  basisProjects: string[];
   filmNames: string[];
   /** Variant B: aggregated sheet material type IDs from order details (authoritative post-034). */
   sheetMaterialTypeIds: number[];

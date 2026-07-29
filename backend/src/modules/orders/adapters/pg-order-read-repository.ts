@@ -103,6 +103,7 @@ interface OrderHeaderRow extends QueryResultRow {
   header_sheet_material_type_id: string | number | null;
   material_ids: unknown[] | null;
   material_names: unknown[] | null;
+  basis_projects: unknown[] | null;
   film_names: unknown[] | null;
   sheet_material_type_ids: unknown[] | null;
   material_id: string | number | null;
@@ -419,6 +420,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         o.*,
         material_projection.material_ids,
         material_projection.material_names,
+        basis_projection.basis_projects,
         film_projection.film_names,
         material_projection.sheet_material_type_ids,
         milling_projection.milling_type_id,
@@ -448,6 +450,20 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           ${listDetailNameGroupBy}
         ) materials
       ) material_projection ON true
+      LEFT JOIN LATERAL (
+        SELECT ARRAY_AGG(projects.basis_project ORDER BY projects.first_detail_number, projects.first_detail_id) AS basis_projects
+        FROM (
+          SELECT DISTINCT ON (LOWER(BTRIM(od.basis_project)))
+            BTRIM(od.basis_project) AS basis_project,
+            od.detail_number AS first_detail_number,
+            od.detail_id AS first_detail_id
+          FROM order_details od
+          WHERE od.order_id = o.order_id
+            AND od.delete_flag = false
+            AND NULLIF(BTRIM(od.basis_project), '') IS NOT NULL
+          ORDER BY LOWER(BTRIM(od.basis_project)), od.detail_number, od.detail_id
+        ) projects
+      ) basis_projection ON true
       LEFT JOIN LATERAL (
         SELECT ARRAY_AGG(films.film_name ORDER BY films.first_detail_number, films.first_detail_id) AS film_names
         FROM (
@@ -1190,6 +1206,7 @@ function mapListItem(row: OrderHeaderRow, includeDeleted: boolean = false): Orde
     // Variant B: materialIds is empty (material_id is NULL post-034); sheetMaterialTypeIds is authoritative.
     materialIds: toNumberArray(row.material_ids),
     materialNames: toStringArray(row.material_names),
+    basisProjects: toStringArray(row.basis_projects),
     filmNames: toStringArray(row.film_names),
     sheetMaterialTypeIds: toNumberArray(row.sheet_material_type_ids),
     headerMaterialName: row.header_material_name ?? null,

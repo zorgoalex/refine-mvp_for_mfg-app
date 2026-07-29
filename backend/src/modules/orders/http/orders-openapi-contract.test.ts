@@ -201,6 +201,18 @@ describe('orders OpenAPI contract', () => {
     expect(materialIdBlock.toLowerCase()).not.toContain('shadow');
     expect(materialIdBlock.toLowerCase()).toMatch(/null|422|deprecated/);
   });
+
+  it('documents Basis-project aggregates in the orders list response', () => {
+    const contract = readOpenApiContract();
+    const orderListItemSection = sectionBetween(
+      contract,
+      '    OrderListItemDto:',
+      '    OrderResponse:',
+    );
+
+    expect(orderListItemSection).toContain('- basisProjects');
+    expect(orderListItemSection).toContain('basisProjects:');
+  });
 });
 
 // Generated Swagger document tests — asserts the CONTROLLER DECORATOR schemas (not only the
