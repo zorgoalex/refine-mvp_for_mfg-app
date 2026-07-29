@@ -78,7 +78,7 @@ describe('AuthController HTTP shell', () => {
           secure: false,
           sameSite: 'lax',
           path: '/api/v1/auth',
-          maxAge: 604800000,
+          expires: new Date('2026-05-07T00:00:00.000Z'),
         },
       },
     ]);
@@ -319,7 +319,6 @@ function createController(options: {
         authEnabled: options.authEnabled,
         apiPrefix: '/api/v1',
         nodeEnv: options.nodeEnv ?? 'development',
-        refreshTokenTtlDays: 7,
         refreshCookieSecure: options.refreshCookieSecure,
         refreshCookieSameSite: options.refreshCookieSameSite ?? 'lax',
       };

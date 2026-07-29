@@ -96,6 +96,8 @@ describe('httpClient', () => {
   });
 
   it('clears session and throws ApiError when refresh fails', async () => {
+    const expiredListener = vi.fn();
+    const unsubscribeExpired = authSession.subscribeExpired(expiredListener);
     const fetchMock = vi.fn(async (url: string) => {
       if (url === '/api/v1/auth/refresh') {
         return jsonResponse(
@@ -122,6 +124,8 @@ describe('httpClient', () => {
     });
     expect(authSession.getAccessToken()).toBeNull();
     expect(authSession.getUser()).toBeNull();
+    expect(expiredListener).toHaveBeenCalledTimes(1);
+    unsubscribeExpired();
   });
 
   it('parses backend error contract into ApiError', async () => {

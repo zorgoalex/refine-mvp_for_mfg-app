@@ -84,7 +84,10 @@ export interface AuthAuditPort {
 }
 
 export interface AccessTokenIssuerPort {
-  issueAccessToken(user: CurrentUser): Promise<IssuedAccessToken>;
+  issueAccessToken(
+    user: CurrentUser,
+    options?: { notAfter?: Date },
+  ): Promise<IssuedAccessToken>;
 }
 
 export interface IssuedAccessToken {

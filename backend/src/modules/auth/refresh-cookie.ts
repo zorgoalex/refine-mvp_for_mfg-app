@@ -7,6 +7,7 @@ export interface RefreshCookieOptions {
   secure: boolean;
   sameSite: 'lax' | 'strict' | 'none';
   path: string;
+  expires?: Date;
   maxAge?: number;
 }
 
@@ -20,7 +21,7 @@ export function createRefreshCookie(
   refreshToken: string,
   options: {
     nodeEnv: string;
-    ttlDays: number;
+    expiresAt: Date;
     apiPrefix?: string;
     secure?: boolean;
     sameSite?: 'lax' | 'strict' | 'none';
@@ -34,7 +35,7 @@ export function createRefreshCookie(
       secure: options.secure ?? options.nodeEnv === 'production',
       sameSite: options.sameSite ?? 'lax',
       path: getAuthCookiePath(options.apiPrefix ?? DEFAULT_API_PREFIX),
-      maxAge: options.ttlDays * 24 * 60 * 60 * 1000,
+      expires: options.expiresAt,
     },
   };
 }

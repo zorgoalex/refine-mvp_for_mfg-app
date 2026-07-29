@@ -113,6 +113,7 @@ export const envSchema = z
     JWT_ACCESS_SECRET: z.string().trim().min(32).optional(),
     REFRESH_TOKEN_PEPPER: z.string().trim().min(32).optional(),
     ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+    AUTH_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(36000),
     REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
     REFRESH_COOKIE_SECURE: optionalBooleanFromEnv,
     REFRESH_COOKIE_SAME_SITE: sameSiteFromEnv,

@@ -153,7 +153,7 @@ export class AuthController {
       ipAddress: request.ip,
       requestId: request.requestId,
     });
-    this.setRefreshCookie(response, result.refreshToken);
+    this.setRefreshCookie(response, result.refreshToken, result.refreshTokenExpiresAt);
 
     return result.response;
   }
@@ -196,7 +196,7 @@ export class AuthController {
       ipAddress: request.ip,
       requestId: request.requestId,
     });
-    this.setRefreshCookie(response, result.refreshToken);
+    this.setRefreshCookie(response, result.refreshToken, result.refreshTokenExpiresAt);
 
     return result.response;
   }
@@ -284,14 +284,18 @@ export class AuthController {
     }
   }
 
-  private setRefreshCookie(response: Response, refreshToken: string): void {
+  private setRefreshCookie(
+    response: Response,
+    refreshToken: string,
+    refreshTokenExpiresAt: Date,
+  ): void {
     const flags = this.runtimeConfig.getFeatureFlags();
     const cookie = createRefreshCookie(refreshToken, {
       apiPrefix: flags.apiPrefix,
       nodeEnv: flags.nodeEnv,
       sameSite: flags.refreshCookieSameSite,
       secure: flags.refreshCookieSecure,
-      ttlDays: flags.refreshTokenTtlDays,
+      expiresAt: refreshTokenExpiresAt,
     });
 
     response.cookie(cookie.name, cookie.value, cookie.options);

@@ -140,8 +140,8 @@ export async function refreshAccessToken(): Promise<string | null> {
       return data.accessToken;
     } catch (error) {
       console.error('Backend token refresh error:', error);
-      authSession.clear();
       authStorage.clear();
+      authSession.expire();
       return null;
     }
   }

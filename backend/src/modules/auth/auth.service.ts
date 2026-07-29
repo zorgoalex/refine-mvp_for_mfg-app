@@ -98,7 +98,9 @@ export class AuthService {
     }
     await this.ports.rateLimits.refund(accountLimit);
     const currentUser = this.toCurrentUser(user, session.sessionId);
-    const accessToken = await this.ports.tokens.issueAccessToken(currentUser);
+    const accessToken = await this.ports.tokens.issueAccessToken(currentUser, {
+      notAfter: session.refreshTokenExpiresAt,
+    });
 
     return {
       response: this.toAuthResponse(currentUser, accessToken),
