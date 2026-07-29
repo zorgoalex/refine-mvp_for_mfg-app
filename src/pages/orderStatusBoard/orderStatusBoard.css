@@ -150,6 +150,7 @@
 }
 
 .status-board-columns--cnc {
+  --cnc-bath-detail-span-extra: 34px;
   align-items: flex-start;
 }
 
@@ -157,9 +158,18 @@
   margin-left: 24px;
 }
 
+.status-board-columns--cnc-detailed {
+  isolation: isolate;
+}
+
 .status-board-columns--cnc-detailed .cnc-today-column--detailed {
-  width: 620px;
-  min-width: 620px;
+  position: relative;
+  overflow: visible;
+  z-index: 12;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--detailed .status-board-column__cards {
+  overflow: visible;
 }
 
 .status-board-column {
@@ -886,10 +896,24 @@
 }
 
 .cnc-bath-card--detailed {
+  width: calc(200% + var(--cnc-bath-detail-span-extra, 34px));
+  max-width: calc(200% + var(--cnc-bath-detail-span-extra, 34px));
+  align-self: flex-start;
+  z-index: 20;
   border-color: #722ed1;
+  background: #ffffff;
   box-shadow:
     0 0 0 2px #722ed1,
+    0 16px 34px rgba(23, 15, 56, 0.22),
     0 4px 14px var(--app-shadow);
+}
+
+.cnc-bath-card--detailed-left {
+  margin-left: calc(-100% - var(--cnc-bath-detail-span-extra, 34px));
+}
+
+.cnc-bath-card--detailed-right {
+  margin-left: 0;
 }
 
 .cnc-bath-card__actions {
@@ -941,6 +965,13 @@
   background: #fff;
 }
 
+.cnc-bath-card--detailed .cnc-bath-card__sheet-svg {
+  max-height: min(72vh, 760px);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 8px 18px rgba(0, 0, 0, 0.08);
+}
+
 .cnc-bath-card__sheet-svg svg {
   display: block;
   width: 100%;
@@ -949,6 +980,10 @@
 
 .cnc-bath-card__sheet-svg [data-detail-id] {
   cursor: pointer;
+}
+
+.cnc-bath-card__sheet-svg [data-cnc-order-fill="true"] {
+  fill-opacity: 0.96;
 }
 
 .cnc-bath-card__sheet-svg [data-cnc-selected-detail="true"] > rect:first-child {
@@ -1094,9 +1129,18 @@
     scroll-snap-align: start;
   }
 
+  .cnc-bath-card--detailed {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+  }
+
   .status-board-columns--cnc-detailed .cnc-today-column--detailed {
-    width: calc(100vw - 48px);
-    min-width: calc(100vw - 48px);
+    overflow: hidden;
+  }
+
+  .status-board-columns--cnc-detailed .cnc-today-column--detailed .status-board-column__cards {
+    overflow-y: auto;
   }
 
   .status-board-card__actions .ant-btn {

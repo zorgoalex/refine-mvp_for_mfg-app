@@ -237,6 +237,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('onSelectDetailedDetail={selectCncDetailedDetail}');
     expect(page).toContain('data-cnc-detailed-state');
     expect(page).toContain('Свернуть подробный вид ванны');
+    expect(page).toContain('detailed ? false : true');
+    expect(page).toContain('buildCncBathDetailOrderFillMap');
+    expect(page).toContain('CNC_BATH_DETAIL_ORDER_FILL_COLORS');
+    expect(page).toContain("rect.setAttribute('fill', fill)");
+    expect(page).toContain("rect.setAttribute('data-cnc-order-fill', 'true')");
+    expect(page).toContain('cncBathDetailCheckPoint');
+    expect(page).toContain('cncClampSvgCoordinate');
     expect(cutApi).toContain('pieceMetadata');
     expect(cutApi).toContain("params.append('pieceMetadata', 'on')");
     expect(page).toContain('decorateCncBathSheetSvg');
@@ -246,10 +253,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cncDetailFingerprintsIntersect');
     expect(page).toContain('cncPacketWholeOrderIntersects');
     expect(css).toContain('.status-board-columns--cnc-detailed .cnc-today-column--detailed');
-    expect(css).toContain('width: 620px');
     expect(css).toContain('.cnc-bath-card--detailed');
+    expect(css).toContain('width: calc(200% + var(--cnc-bath-detail-span-extra, 34px));');
+    expect(css).toContain('margin-left: calc(-100% - var(--cnc-bath-detail-span-extra, 34px));');
+    expect(css).toContain('isolation: isolate');
     expect(css).toContain('.cnc-bath-card__detail-close');
     expect(css).toContain('.cnc-bath-card__sheet-svg [data-detail-id]');
+    expect(css).toContain('.cnc-bath-card__sheet-svg [data-cnc-order-fill="true"]');
     expect(css).toContain('.cnc-bath-card__sheet-svg [data-cnc-selected-detail="true"] > rect:first-child');
   });
 

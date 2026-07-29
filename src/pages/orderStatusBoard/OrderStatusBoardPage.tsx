@@ -114,11 +114,24 @@ const CNC_ORDER_SEARCH_PERIOD_OPTIONS: Array<{
   { label: '1м', value: '1m' },
 ];
 const CNC_SVG_NS = 'http://www.w3.org/2000/svg';
+const CNC_BATH_DETAIL_ORDER_FILL_COLORS = [
+  '#d7e9ff',
+  '#dff3d7',
+  '#ffe6b8',
+  '#f7d5e8',
+  '#d9f0ef',
+  '#eadcff',
+  '#ffe0d2',
+  '#e8edc9',
+  '#d5e5f2',
+  '#f2ddd5',
+] as const;
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
 type CncRelationTarget = { kind: 'packet'; id: string } | { kind: 'bath'; id: string };
 type CncDetailedDetailTarget = { bathId: string; detailId: number };
 type CncRelationCardState = 'normal' | 'active' | 'related' | 'order-mentioned' | 'dimmed';
+type CncDetailedBathPlacement = 'left' | 'right';
 type CncPdfjsModule = typeof import('pdfjs-dist');
 
 const STATUS_BOARD_CARD_DISPLAY_OPTIONS: Array<{
@@ -1123,6 +1136,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 ) : (
                   bathCards.map((bath) => {
                     const detailed = detailedContext?.activeBathId === bath.bathCardId;
+                    const detailedPlacement: CncDetailedBathPlacement =
+                      column.key === 'baths_ready' ? 'left' : 'right';
                     const selectedDetailId =
                       detailedContext?.activeDetail?.bathId === bath.bathCardId
                         ? detailedContext.activeDetail.detailId
@@ -1137,6 +1152,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         highlightEnabled={relationsEnabled}
                         detailed={detailed}
                         detailedEnabled={detailedEnabled}
+                        detailedPlacement={detailedPlacement}
                         selectedDetailId={selectedDetailId}
                         onSelect={() => {
                           if (relationsEnabled) {
@@ -1484,6 +1500,7 @@ interface CncTelegramBathCardViewProps {
   highlightEnabled: boolean;
   detailed: boolean;
   detailedEnabled: boolean;
+  detailedPlacement: CncDetailedBathPlacement;
   selectedDetailId: number | null;
   onSelect: () => void;
   onCloseDetailed: () => void;
@@ -1498,6 +1515,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   highlightEnabled,
   detailed,
   detailedEnabled,
+  detailedPlacement,
   selectedDetailId,
   onSelect,
   onCloseDetailed,
@@ -1513,6 +1531,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
         [
           'status-board-card cnc-bath-card',
           detailed ? 'cnc-bath-card--detailed' : '',
+          detailed ? `cnc-bath-card--detailed-${detailedPlacement}` : '',
           detailedEnabled ? 'cnc-bath-card--detailed-selectable' : '',
         ].filter(Boolean).join(' '),
         relationState,
@@ -1677,12 +1696,19 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
         .join('|'),
     [bath.items],
   );
+  const orderFillKey = useMemo(
+    () =>
+      bath.items
+        .map((item) => `${item.detailId}:${item.orderId}:${item.orderName}`)
+        .join('|'),
+    [bath.items],
+  );
   const previewKey = useMemo(
     () =>
-      `${bath.cutJobId}:${bath.resultNo}:${detailed ? 'd' : 's'}:${selectedDetailId ?? '-'}:${completedKey}:${bath.sheets
+      `${bath.cutJobId}:${bath.resultNo}:${detailed ? 'd' : 's'}:${selectedDetailId ?? '-'}:${completedKey}:${orderFillKey}:${bath.sheets
         .map((sheet) => `${sheet.cutGroupId}:${sheet.variant}:${sheet.sheetIndex}`)
         .join('|')}`,
-    [bath.cutJobId, bath.resultNo, bath.sheets, completedKey, detailed, selectedDetailId],
+    [bath.cutJobId, bath.resultNo, bath.sheets, completedKey, detailed, orderFillKey, selectedDetailId],
   );
   const expanded = detailed || open;
 
@@ -1701,12 +1727,13 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
     setError(null);
     void (async () => {
       const completedDetailCounts = buildCompletedBathDetailCounts(bath);
+      const orderFillByDetailId = buildCncBathDetailOrderFillMap(bath);
       for (const sheet of bath.sheets) {
         if (cancelled) return;
         const rotate90 = cncSheetPreviewRotate90(
           sheet.sheetWidthMm,
           sheet.sheetHeightMm,
-          true,
+          detailed ? false : true,
         );
         const blob = await cutApi.fetchSheetSvg(
           bath.cutJobId,
@@ -1724,6 +1751,7 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
           ? decorateCncBathSheetSvg(
               await blob.text(),
               completedDetailCounts,
+              orderFillByDetailId,
               selectedDetailId,
             )
           : undefined;
@@ -1854,9 +1882,27 @@ function buildCompletedBathDetailCounts(bath: CncTelegramBathCard): Map<number, 
   return counts;
 }
 
+function buildCncBathDetailOrderFillMap(bath: CncTelegramBathCard): Map<number, string> {
+  const fillByOrder = new Map<string, string>();
+  const fillByDetailId = new Map<number, string>();
+  for (const item of bath.items) {
+    const orderKey = `id:${item.orderId}`;
+    let fill = fillByOrder.get(orderKey);
+    if (!fill) {
+      fill = CNC_BATH_DETAIL_ORDER_FILL_COLORS[
+        fillByOrder.size % CNC_BATH_DETAIL_ORDER_FILL_COLORS.length
+      ];
+      fillByOrder.set(orderKey, fill);
+    }
+    fillByDetailId.set(item.detailId, fill);
+  }
+  return fillByDetailId;
+}
+
 function decorateCncBathSheetSvg(
   svgText: string,
   completedDetailCounts: ReadonlyMap<number, number>,
+  orderFillByDetailId: ReadonlyMap<number, string>,
   selectedDetailId: number | null,
 ): string {
   const document = new DOMParser().parseFromString(svgText, 'image/svg+xml');
@@ -1869,6 +1915,13 @@ function decorateCncBathSheetSvg(
     if (!Number.isInteger(detailId) || detailId <= 0) continue;
     if (selectedDetailId === detailId) piece.setAttribute('data-cnc-selected-detail', 'true');
 
+    const fill = orderFillByDetailId.get(detailId);
+    const rect = piece.querySelector('rect');
+    if (fill && rect) {
+      rect.setAttribute('fill', fill);
+      rect.setAttribute('data-cnc-order-fill', 'true');
+    }
+
     const completedQuantity = completedDetailCounts.get(detailId) ?? 0;
     if (completedQuantity <= 0) continue;
     const instance = Number(piece.getAttribute('data-piece-instance') ?? '1');
@@ -1880,20 +1933,22 @@ function decorateCncBathSheetSvg(
 
 function appendCncBathDetailCheck(document: Document, piece: SVGElement): void {
   const rect = piece.querySelector('rect');
-  const cx = cncSvgNumber(
-    piece.getAttribute('data-piece-cx'),
-    rect ? cncSvgRectCenter(rect, 'x', 'width') : null,
-  );
-  const cy = cncSvgNumber(
-    piece.getAttribute('data-piece-cy'),
-    rect ? cncSvgRectCenter(rect, 'y', 'height') : null,
-  );
-  if (cx === null || cy === null) return;
+  const box = rect ? cncSvgRectBox(rect) : null;
   const radius = cncBathDetailCheckRadius(rect);
+  const point = box
+    ? cncBathDetailCheckPoint(box, radius)
+    : {
+        cx: cncSvgNumber(piece.getAttribute('data-piece-cx')),
+        cy: cncSvgNumber(piece.getAttribute('data-piece-cy')),
+      };
+  if (point.cx === null || point.cy === null) return;
   const marker = document.createElementNS(CNC_SVG_NS, 'g');
   marker.setAttribute('class', 'cnc-bath-detail-check');
   marker.setAttribute('pointer-events', 'none');
-  marker.setAttribute('transform', `translate(${formatCncSvgNumber(cx)} ${formatCncSvgNumber(cy)})`);
+  marker.setAttribute(
+    'transform',
+    `translate(${formatCncSvgNumber(point.cx)} ${formatCncSvgNumber(point.cy)})`,
+  );
 
   const title = document.createElementNS(CNC_SVG_NS, 'title');
   title.textContent = 'Распилено';
@@ -1924,14 +1979,31 @@ function appendCncBathDetailCheck(document: Document, piece: SVGElement): void {
   piece.append(marker);
 }
 
-function cncSvgRectCenter(
+function cncSvgRectBox(
   rect: SVGElement,
-  offsetAttribute: 'x' | 'y',
-  sizeAttribute: 'width' | 'height',
-): number | null {
-  const offset = cncSvgNumber(rect.getAttribute(offsetAttribute));
-  const size = cncSvgNumber(rect.getAttribute(sizeAttribute));
-  return offset === null || size === null ? null : offset + size / 2;
+): { x: number; y: number; width: number; height: number } | null {
+  const x = cncSvgNumber(rect.getAttribute('x'));
+  const y = cncSvgNumber(rect.getAttribute('y'));
+  const width = cncSvgNumber(rect.getAttribute('width'));
+  const height = cncSvgNumber(rect.getAttribute('height'));
+  return x === null || y === null || width === null || height === null
+    ? null
+    : { x, y, width: Math.abs(width), height: Math.abs(height) };
+}
+
+function cncBathDetailCheckPoint(
+  box: { x: number; y: number; width: number; height: number },
+  radius: number,
+): { cx: number; cy: number } {
+  return {
+    cx: box.x + cncClampSvgCoordinate(box.width - radius * 1.24, radius, box.width - radius),
+    cy: box.y + cncClampSvgCoordinate(radius * 1.24, radius, box.height - radius),
+  };
+}
+
+function cncClampSvgCoordinate(value: number, min: number, max: number): number {
+  if (max < min) return (min + max) / 2;
+  return Math.min(Math.max(value, min), max);
 }
 
 function cncBathDetailCheckRadius(rect: SVGElement | null): number {
@@ -1941,7 +2013,7 @@ function cncBathDetailCheckRadius(rect: SVGElement | null): number {
     width !== null && height !== null
       ? Math.min(Math.abs(width), Math.abs(height))
       : 180;
-  return Math.max(16, Math.min(54, minSide * 0.22));
+  return Math.max(16, Math.min(44, minSide * 0.16));
 }
 
 function cncSvgNumber(value: string | null, fallback: number | null = null): number | null {
