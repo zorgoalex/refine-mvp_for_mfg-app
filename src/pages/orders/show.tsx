@@ -74,10 +74,13 @@ const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: strin
 ];
 
 const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 120;
+const ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT = 40;
 
 type OrderShowStickyStyle = CSSProperties & {
   '--order-show-sticky-top': string;
-  '--order-show-summary-tabs-height': string;
+  '--order-show-compact-header-height': string;
+  '--order-show-tabs-shell-height': string;
+  '--order-show-details-toolbar-height': string;
   '--order-show-table-header-top': string;
 };
 
@@ -416,20 +419,35 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
-  const [orderShowSummaryTabsRef, orderShowSummaryTabsHeight] = useMeasuredElementHeight<HTMLDivElement>();
-  const orderShowDetailsToolbarRef = useRef<HTMLDivElement>(null);
+  const orderShowSummaryTabsRef = useRef<HTMLDivElement>(null);
+  const [orderShowTabsShellRef, orderShowTabsShellHeight] = useMeasuredElementHeight<HTMLDivElement>();
+  const [orderShowDetailsToolbarRef, orderShowDetailsToolbarHeight] = useMeasuredElementHeight<HTMLDivElement>();
   const [orderShowStickyEnabled, setOrderShowStickyEnabled] = useState(false);
   const [orderShowSummaryStuck, setOrderShowSummaryStuck] = useState(false);
+  const orderShowStickyStackMeasured = orderShowTabsShellHeight > 0 && orderShowDetailsToolbarHeight > 0;
   const orderShowTableHeaderTop = useMemo(() => (
-    orderShowStickyEnabled
-      ? Math.max(0, Math.ceil(workspaceTabsHeight + orderShowSummaryTabsHeight))
+    orderShowStickyEnabled && orderShowStickyStackMeasured
+      ? Math.max(0, Math.ceil(
+          workspaceTabsHeight +
+          ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT +
+          orderShowTabsShellHeight +
+          orderShowDetailsToolbarHeight,
+        ))
       : 0
-  ), [orderShowStickyEnabled, orderShowSummaryTabsHeight, workspaceTabsHeight]);
+  ), [
+    orderShowDetailsToolbarHeight,
+    orderShowStickyEnabled,
+    orderShowStickyStackMeasured,
+    orderShowTabsShellHeight,
+    workspaceTabsHeight,
+  ]);
   const orderShowStickyStyle = useMemo<OrderShowStickyStyle>(() => ({
     '--order-show-sticky-top': `${workspaceTabsHeight}px`,
-    '--order-show-summary-tabs-height': `${orderShowSummaryTabsHeight}px`,
+    '--order-show-compact-header-height': `${ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT}px`,
+    '--order-show-tabs-shell-height': `${orderShowTabsShellHeight}px`,
+    '--order-show-details-toolbar-height': `${orderShowDetailsToolbarHeight}px`,
     '--order-show-table-header-top': `${orderShowTableHeaderTop}px`,
-  }), [orderShowSummaryTabsHeight, orderShowTableHeaderTop, workspaceTabsHeight]);
+  }), [orderShowDetailsToolbarHeight, orderShowTableHeaderTop, orderShowTabsShellHeight, workspaceTabsHeight]);
   const orderShowPageClassName = useMemo(() => [
     'order-show-page',
     orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
@@ -1426,7 +1444,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               headerMaterialName={headerMaterialName}
             />
 
-            <div className="order-show-tabs-shell">
+            <div ref={orderShowTabsShellRef} className="order-show-tabs-shell">
             <div
               role="tablist"
               aria-label="Секции заказа"

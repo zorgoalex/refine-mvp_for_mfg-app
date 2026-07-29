@@ -53,10 +53,16 @@ describe('OrderShow sticky detail header guards', () => {
     expect(showSource).toContain('const orderShowDetailTableSticky = useMemo');
     expect(showSource).toContain('sticky={orderShowDetailTableSticky}');
     expect(showSource).toContain('offsetHeader: orderShowTableHeaderTop');
-    expect(showSource).toContain('Math.ceil(workspaceTabsHeight + orderShowSummaryTabsHeight)');
+    expect(showSource).toContain('ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT');
+    expect(showSource).toContain('orderShowTabsShellHeight');
+    expect(showSource).toContain('orderShowDetailsToolbarHeight');
+    expect(showSource).toContain('orderShowStickyStackMeasured');
+    expect(showSource).not.toContain('Math.ceil(workspaceTabsHeight + orderShowSummaryTabsHeight)');
     expect(showSource).not.toContain('orderShowDetailsToolbarNode.getBoundingClientRect().bottom');
     expect(showSource).not.toContain('updateOrderShowTableHeaderTop');
     expect(showSource).not.toContain('workspaceTabsHeight + orderShowSummaryTabsHeight + orderShowDetailsToolbarHeight');
+    expect(appCss).toContain('--order-show-compact-header-height: 40px;');
+    expect(appCss).toContain('min-height: var(--order-show-compact-header-height);');
     expect(appCss).not.toMatch(/\.order-show-page--sticky-enabled \.order-show-details-toolbar[\s\S]*position:\s*sticky/);
     expect(appCss).not.toMatch(/\.order-show-details-table \.ant-table-thead > tr > th[\s\S]*position:\s*sticky/);
     expect(appCss).not.toContain('order-show-page--table-header-ready');
