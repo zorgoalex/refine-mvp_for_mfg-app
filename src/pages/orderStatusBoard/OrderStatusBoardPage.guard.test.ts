@@ -9,6 +9,10 @@ const css = readFileSync(
   'src/pages/orderStatusBoard/orderStatusBoard.css',
   'utf8',
 );
+const cutApi = readFileSync(
+  'src/api/cutApi.ts',
+  'utf8',
+);
 const interaction = readFileSync(
   'src/pages/orderStatusBoard/interaction.ts',
   'utf8',
@@ -93,9 +97,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('dateFrom: searchRange.dateFrom');
     expect(page).toContain('dateTo: searchRange.dateTo');
     expect(page).toContain('datasetKey');
-    expect(page).toContain('buildCncColumnTotals(column, relationContext)');
+    expect(page).toContain('buildCncColumnTotals(column, relationContext, detailedContext)');
     expect(page).toContain("getCncBathRelationState(bath, relationContext) !== 'dimmed'");
-    expect(page).toContain("getCncPacketRelationState(packet, relationContext) !== 'dimmed'");
+    expect(page).toContain("getCncPacketDisplayState(packet, relationContext, detailedContext) !== 'dimmed'");
     expect(page).toContain('cnc-today-column__header-main');
     expect(page).toContain('cnc-today-column__totals');
     expect(page).toContain("{totals.details} дет. · {formatArea(totals.areaM2)}");
@@ -218,6 +222,35 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('border-color: #722ed1');
     expect(css).toContain('0 0 0 2px #722ed1');
     expect(css).not.toContain('transition: all');
+  });
+
+  it('keeps CNC detailed bath mode explicit and clickable by SVG detail metadata', () => {
+    expect(page).toContain('const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false)');
+    expect(page).toContain('const [activeCncDetailedBathId, setActiveCncDetailedBathId]');
+    expect(page).toContain('const [activeCncDetailedDetail, setActiveCncDetailedDetail]');
+    expect(page).toContain('Подробный');
+    expect(page).toContain('checked={cncDetailedEnabled}');
+    expect(page).toContain('buildCncDetailedContext');
+    expect(page).toContain('detailedContext={cncDetailedContext}');
+    expect(page).toContain('onSelectDetailedBath={selectCncDetailedBath}');
+    expect(page).toContain('onCloseDetailedBath={closeCncDetailedBath}');
+    expect(page).toContain('onSelectDetailedDetail={selectCncDetailedDetail}');
+    expect(page).toContain('data-cnc-detailed-state');
+    expect(page).toContain('Свернуть подробный вид ванны');
+    expect(cutApi).toContain('pieceMetadata');
+    expect(cutApi).toContain("params.append('pieceMetadata', 'on')");
+    expect(page).toContain('decorateCncBathSheetSvg');
+    expect(page).toContain('data-detail-id');
+    expect(page).toContain('cnc-bath-detail-check');
+    expect(page).toContain('getCncPacketDisplayState');
+    expect(page).toContain('cncDetailFingerprintsIntersect');
+    expect(page).toContain('cncPacketWholeOrderIntersects');
+    expect(css).toContain('.status-board-columns--cnc-detailed .cnc-today-column--detailed');
+    expect(css).toContain('width: 620px');
+    expect(css).toContain('.cnc-bath-card--detailed');
+    expect(css).toContain('.cnc-bath-card__detail-close');
+    expect(css).toContain('.cnc-bath-card__sheet-svg [data-detail-id]');
+    expect(css).toContain('.cnc-bath-card__sheet-svg [data-cnc-selected-detail="true"] > rect:first-child');
   });
 
   it('keeps order cards dense, badge-based and project-code-free', () => {

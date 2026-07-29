@@ -324,6 +324,7 @@ export class CutController {
       originTopLeft: canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin),
       axisOrigin,
       variant: parseVariant(query.variant),
+      pieceMetadata: query.pieceMetadata === 'on',
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/svg+xml');
@@ -685,6 +686,7 @@ export class CutController {
       originTopLeft: canonicalOriginTopLeft(parseOriginTopLeft(query.origin), axisOrigin),
       axisOrigin,
       variant: parseVariant(query.variant),
+      pieceMetadata: query.pieceMetadata === 'on',
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/svg+xml');

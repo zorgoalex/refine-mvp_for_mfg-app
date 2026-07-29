@@ -83,6 +83,7 @@ import type {
   CutFilmOptionDto,
   CutEditorParamsDto,
   CutGroupDto,
+  CutJobItemDto,
   CutJobDto,
   CutJobRefDto,
   CutJobTotals,
@@ -441,6 +442,27 @@ function frozenRenderViewKey(view: {
     view.axisOrigin ?? 'top-left',
     view.showLabels === false ? 'labels-off' : 'labels-on',
   ].join(':');
+}
+
+function frozenPieceLabelLines(
+  piece: FreecutPlacement,
+  itemByItemId: ReadonlyMap<string, CutJobItemDto>,
+  quantities: ReadonlyMap<string, number>,
+): string[] {
+  const item = itemByItemId.get(piece.item_id);
+  const label = (piece as { label?: PieceLabelSnapshot }).label;
+  const detailId = parseFreecutItemId(piece.item_id);
+  return composePieceLabelLines({
+    orderId: label?.orderId ?? item?.orderId ?? null,
+    orderName: item?.orderName ?? null,
+    detailId,
+    detailNumber: label?.detailNumber ?? item?.detail?.detailNumber ?? null,
+    widthMm: label?.widthMm ?? item?.detail?.width ?? null,
+    heightMm: label?.heightMm ?? item?.detail?.height ?? null,
+    itemId: piece.item_id,
+    instance: piece.instance,
+    qty: quantities.get(piece.item_id) ?? item?.qty ?? 1,
+  });
 }
 
 const FROZEN_RENDER_VIEW_COUNT = 12;
@@ -1640,6 +1662,7 @@ export class PgCutRepository implements CutRepositoryPort {
     originTopLeft?: boolean;
     axisOrigin?: import('../../../shared/cut-geometry').CutAxisOrigin;
     showLabels?: boolean;
+    pieceMetadata?: boolean;
     refreshPdfDynamicFields?: boolean;
   }): Promise<{
     job: CutJobDto;
@@ -1666,6 +1689,19 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new ApiError(409, 'CUT_MANUAL_LAYOUT_UNAVAILABLE', 'Ручной вариант раскроя недоступен');
     }
     const sourceSheets = useManual ? manual!.sheets : group.sheets;
+    const rebuildSvgWithPieceMetadata = args.pieceMetadata === true;
+    const frozenQuantities = rebuildSvgWithPieceMetadata
+      ? computeGroupItemQuantities(sourceSheets.map((sheet) => ({
+          sheetIndex: sheet.sheetIndex,
+          placements: sheet.placements,
+        })))
+      : new Map<string, number>();
+    const frozenItemByItemId = rebuildSvgWithPieceMetadata
+      ? new Map(frozen.job.items.map((item) => [freecutItemId(item.orderDetailId), item]))
+      : new Map<string, CutJobItemDto>();
+    const frozenFillByOrder = rebuildSvgWithPieceMetadata
+      ? createOrderFillResolver(frozen.job.items.map((item) => item.orderId))
+      : (() => '#eef3f8');
     const sheets = sourceSheets.map((sheet) => {
       const placements = sheet.placements;
       const renderSnapshot = sheet.renderSnapshot;
@@ -1678,10 +1714,25 @@ export class PgCutRepository implements CutRepositoryPort {
       if (!renderSnapshot || renderSnapshot.contractVersion !== 'cut_sheet_render_v1' || !view) {
         throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_CORRUPT', `Нет frozen render листа ${sheet.sheetIndex}`);
       }
+      const svg = rebuildSvgWithPieceMetadata && !view.svg.includes('data-detail-id=')
+        ? buildSheetSvg({
+            sheet: placements,
+            labelFor: (piece) => frozenPieceLabelLines(piece, frozenItemByItemId, frozenQuantities),
+            fillFor: (piece) => {
+              const item = frozenItemByItemId.get(piece.item_id);
+              const orderId = (piece as { label?: PieceLabelSnapshot }).label?.orderId ?? item?.orderId ?? null;
+              return frozenFillByOrder(orderId);
+            },
+            rotate90: args.rotate90,
+            originTopLeft: args.originTopLeft,
+            axisOrigin: args.axisOrigin,
+            showLabels: args.showLabels,
+          })
+        : view.svg;
       return {
         sheetIndex: sheet.sheetIndex,
         placements,
-        svg: view.svg,
+        svg,
         bathSvg: view.bathSvg,
         pdfMeta: renderSnapshot.pdfMeta as PdfSheetMeta,
         pdfDetailRows: renderSnapshot.pdfDetailRows as PdfSheetDetailRow[],
@@ -2495,6 +2546,7 @@ export class PgCutRepository implements CutRepositoryPort {
           rotate90: query.rotate90,
           originTopLeft: query.originTopLeft,
           axisOrigin: query.axisOrigin,
+          pieceMetadata: query.pieceMetadata,
         })
       : await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, query.axisOrigin, variant, query.cutJobId);
     // Rule 8: blank sheets are index-stable and never 404 for SVG.

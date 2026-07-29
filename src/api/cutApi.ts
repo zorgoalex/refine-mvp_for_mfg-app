@@ -131,6 +131,7 @@ export const cutApi = {
     originTopLeft = true,
     axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
     resultNo?: number,
+    pieceMetadata = false,
   ): Promise<Blob> {
     const path = resultNo === undefined
       ? apiRoutes.cutJobs.sheetPng(validateCutJobId(cutJobId), validateCutJobId(groupId), sheetIndex)
@@ -171,6 +172,7 @@ export const cutApi = {
     params.append('axisOrigin', axisOrigin);
     if (variant) params.append('variant', variant);
     if (renderToken) params.append('renderVersion', renderToken);
+    if (pieceMetadata) params.append('pieceMetadata', 'on');
     const qs = params.toString();
     const { blob } = await httpClient.download(qs ? `${path}?${qs}` : path);
     return blob;

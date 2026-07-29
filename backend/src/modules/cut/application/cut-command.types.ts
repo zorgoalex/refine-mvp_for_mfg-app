@@ -152,6 +152,8 @@ export interface RenderSheetSvgQuery {
   originTopLeft?: boolean;
   axisOrigin?: CutAxisOrigin;
   variant?: 'auto' | 'manual' | 'active';
+  /** Re-render old frozen SVG views from stored placements when they lack piece data-* metadata. */
+  pieceMetadata?: boolean;
   requestId?: string;
 }
 

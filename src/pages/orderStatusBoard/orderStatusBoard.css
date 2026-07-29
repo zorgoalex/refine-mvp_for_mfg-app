@@ -157,6 +157,11 @@
   margin-left: 24px;
 }
 
+.status-board-columns--cnc-detailed .cnc-today-column--detailed {
+  width: 620px;
+  min-width: 620px;
+}
+
 .status-board-column {
   --status-color: #8c8c8c;
   width: 304px;
@@ -324,7 +329,6 @@
 }
 
 .cnc-relation-card {
-  cursor: pointer;
   transition:
     background-color 140ms ease,
     border-color 140ms ease,
@@ -332,6 +336,11 @@
     filter 140ms ease,
     opacity 140ms ease,
     transform 140ms ease;
+}
+
+.cnc-relation-card[data-cnc-clickable="true"],
+.cnc-bath-card--detailed-selectable {
+  cursor: pointer;
 }
 
 .cnc-relation-card--active,
@@ -876,6 +885,28 @@
   overflow-wrap: anywhere;
 }
 
+.cnc-bath-card--detailed {
+  border-color: #722ed1;
+  box-shadow:
+    0 0 0 2px #722ed1,
+    0 4px 14px var(--app-shadow);
+}
+
+.cnc-bath-card__actions {
+  min-width: 40px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.cnc-bath-card__detail-close.ant-btn {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+}
+
 .cnc-bath-card__ready-icon {
   min-width: 22px;
   font-size: 22px;
@@ -898,6 +929,35 @@
 .cnc-bath-card__sheet-figure figcaption {
   color: var(--app-text-muted);
   font-size: 11px;
+}
+
+.cnc-bath-card__sheet-svg {
+  min-width: 0;
+  width: 100%;
+  max-height: 720px;
+  overflow: auto;
+  border-radius: 6px;
+  outline: 1px solid rgba(0, 0, 0, 0.1);
+  background: #fff;
+}
+
+.cnc-bath-card__sheet-svg svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.cnc-bath-card__sheet-svg [data-detail-id] {
+  cursor: pointer;
+}
+
+.cnc-bath-card__sheet-svg [data-cnc-selected-detail="true"] > rect:first-child {
+  stroke: #fa541c;
+  stroke-width: 8;
+}
+
+.cnc-bath-card__sheet-svg text {
+  pointer-events: none;
 }
 
 .cnc-bath-card__pdf-body {
@@ -1032,6 +1092,11 @@
     width: calc(100vw - 48px);
     min-width: calc(100vw - 48px);
     scroll-snap-align: start;
+  }
+
+  .status-board-columns--cnc-detailed .cnc-today-column--detailed {
+    width: calc(100vw - 48px);
+    min-width: calc(100vw - 48px);
   }
 
   .status-board-card__actions .ant-btn {
