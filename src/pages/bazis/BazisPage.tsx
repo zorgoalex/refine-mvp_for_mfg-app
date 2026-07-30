@@ -293,8 +293,9 @@ export const BazisPage: React.FC = () => {
 
   return (
     <>
-      <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <Space className="bazis-list-modern" direction="vertical" size="large" style={{ width: '100%' }}>
         <Card
+          className="bazis-list-modern__card"
           title={<Title level={3} style={{ margin: 0 }}>Базис-проекты</Title>}
           extra={(
             <Button

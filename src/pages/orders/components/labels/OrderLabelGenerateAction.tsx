@@ -25,6 +25,7 @@ interface OrderLabelGenerateActionProps {
   orderId: number;
   isOrderDirty?: boolean;
   compact?: boolean;
+  buttonLabel?: React.ReactNode;
   onGenerated?: () => void;
   initialDetailId?: number | null;
   detailOptions?: LabelPreviewDetailOption[];
@@ -36,6 +37,7 @@ export const OrderLabelGeneratePreviewSurface: React.FC<{
 }> = ({ preview }) => (
   <OrderLabelPagesViewer
     svgPages={preview.svgPages}
+    rows={preview.rows}
     title={`Предпросмотр бирок: ${preview.labelCount} шт.`}
     printEnabled={false}
   />
@@ -45,6 +47,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   orderId,
   isOrderDirty = false,
   compact = false,
+  buttonLabel = 'Сформировать бирки',
   onGenerated,
   initialDetailId = null,
   detailOptions = [],
@@ -249,7 +252,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         disabled={!canGenerate || isOrderDirty}
         onClick={() => setOpen(true)}
       >
-        Сформировать бирки
+        {buttonLabel}
       </Button>
       <Modal
         title="Сформировать бирки"
@@ -426,6 +429,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
             {generatedPreview ? (
               <OrderLabelPagesViewer
                 svgPages={generatedPreview.svgPages}
+                rows={generatedPreview.rows}
                 title={`Сформированные бирки${generatedGenerationId ? ` #${generatedGenerationId}` : ''}: ${generatedPreview.labelCount} шт.`}
                 printTitle={`Заказ ${orderId} — бирки${generatedGenerationId ? ` #${generatedGenerationId}` : ''}`}
               />

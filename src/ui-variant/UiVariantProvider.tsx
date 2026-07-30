@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useLayoutEffect, useMemo } from 'react';
-import { setDocumentUiVariant, type UiVariant } from './uiVariant';
+import { isModernUiVariant, setDocumentUiVariant, type UiVariant } from './uiVariant';
 
 interface UiVariantContextValue {
   variant: UiVariant;
   isEvolution: boolean;
+  isModern: boolean;
 }
 
 const UiVariantContext = createContext<UiVariantContextValue | null>(null);
@@ -16,7 +17,11 @@ export const UiVariantProvider: React.FC<
   }, [initialVariant]);
 
   const value = useMemo<UiVariantContextValue>(
-    () => ({ variant: initialVariant, isEvolution: initialVariant === 'evolution' }),
+    () => ({
+      variant: initialVariant,
+      isEvolution: initialVariant === 'evolution',
+      isModern: isModernUiVariant(initialVariant),
+    }),
     [initialVariant],
   );
 
@@ -30,7 +35,11 @@ export const UiVariantProvider: React.FC<
 };
 
 export function useUiVariant(): UiVariantContextValue {
-  const value = useContext(UiVariantContext);
+  const value = useOptionalUiVariant();
   if (!value) throw new Error('useUiVariant must be used inside UiVariantProvider');
   return value;
+}
+
+export function useOptionalUiVariant(): UiVariantContextValue | null {
+  return useContext(UiVariantContext);
 }

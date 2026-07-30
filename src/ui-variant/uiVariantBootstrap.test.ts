@@ -14,7 +14,7 @@ describe('UI variant bootstrap', () => {
       },
       getPreferences: async () => {
         calls.push('preferences');
-        return { preferences: { uiVariant: 'evolution' } };
+        return { preferences: { uiVariant: 'line' } };
       },
       setCached,
     });
@@ -22,9 +22,9 @@ describe('UI variant bootstrap', () => {
     await expect(resolveInitialUiVariant(
       { evolutionEnabled: true, forceLegacy: false },
       dependencies,
-    )).resolves.toBe('evolution');
+    )).resolves.toBe('line');
     expect(calls).toEqual(['restore', 'preferences']);
-    expect(setCached).toHaveBeenCalledWith('7', 'evolution');
+    expect(setCached).toHaveBeenCalledWith('7', 'line');
   });
 
   it('skips auth and preferences when rollout is unavailable or force-disabled', async () => {
@@ -47,13 +47,13 @@ describe('UI variant bootstrap', () => {
       getPreferences: async () => {
         throw new Error('offline');
       },
-      getCached: () => 'evolution',
+      getCached: () => 'air',
     });
 
     await expect(resolveInitialUiVariant(
       { evolutionEnabled: true },
       dependencies,
-    )).resolves.toBe('evolution');
+    )).resolves.toBe('air');
   });
 
   it('uses evolution default when an old backend returns 200 without uiVariant', async () => {

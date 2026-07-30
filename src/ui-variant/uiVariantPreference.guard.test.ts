@@ -20,6 +20,14 @@ describe('per-user UI variant selector', () => {
       { preferences: { uiVariant: 'evolution' } },
       'evolution',
     )).toBe('evolution');
+    expect(requireConfirmedUiVariant(
+      { preferences: { uiVariant: 'line' } },
+      'line',
+    )).toBe('line');
+    expect(requireConfirmedUiVariant(
+      { preferences: { uiVariant: 'air' } },
+      'air',
+    )).toBe('air');
     expect(() => requireConfirmedUiVariant({ preferences: {} }, 'evolution')).toThrow();
     expect(() => requireConfirmedUiVariant(
       { preferences: { uiVariant: 'legacy' } },
@@ -32,7 +40,7 @@ describe('per-user UI variant selector', () => {
       current: 'legacy' as const,
       requested: 'evolution' as const,
       isSaving: false,
-      evolutionAvailable: true,
+      modernUiAvailable: true,
       hasDirtyTabs: false,
       userId: '7',
       hasAccessToken: true,
@@ -41,7 +49,11 @@ describe('per-user UI variant selector', () => {
     expect(getUiVariantSwitchBlockReason(allowed)).toBeNull();
     expect(getUiVariantSwitchBlockReason({ ...allowed, requested: 'legacy' })).toBe('same');
     expect(getUiVariantSwitchBlockReason({ ...allowed, isSaving: true })).toBe('saving');
-    expect(getUiVariantSwitchBlockReason({ ...allowed, evolutionAvailable: false }))
+    expect(getUiVariantSwitchBlockReason({ ...allowed, modernUiAvailable: false }))
+      .toBe('unavailable');
+    expect(getUiVariantSwitchBlockReason({ ...allowed, requested: 'line' }))
+      .toBeNull();
+    expect(getUiVariantSwitchBlockReason({ ...allowed, requested: 'air', modernUiAvailable: false }))
       .toBe('unavailable');
     expect(getUiVariantSwitchBlockReason({ ...allowed, hasDirtyTabs: true })).toBe('dirty');
     expect(getUiVariantSwitchBlockReason({ ...allowed, userId: null })).toBe('unauthenticated');
@@ -59,20 +71,20 @@ describe('per-user UI variant selector', () => {
 
   it('persists exact PATCH confirmation, caches for that user, then hard reloads', async () => {
     const updatePreferences = vi.fn(async () => ({
-      preferences: { uiVariant: 'evolution' },
+      preferences: { uiVariant: 'air' },
     }));
     const setCached = vi.fn();
     const reload = vi.fn();
 
-    await expect(persistUiVariantPreference('evolution', '7', {
+    await expect(persistUiVariantPreference('air', '7', {
       updatePreferences,
       getCurrentUserId: () => '7',
       setCached,
       reload,
     })).resolves.toBe('switched');
 
-    expect(updatePreferences).toHaveBeenCalledWith({ uiVariant: 'evolution' });
-    expect(setCached).toHaveBeenCalledWith('7', 'evolution');
+    expect(updatePreferences).toHaveBeenCalledWith({ uiVariant: 'air' });
+    expect(setCached).toHaveBeenCalledWith('7', 'air');
     expect(reload).toHaveBeenCalledOnce();
   });
 
@@ -105,7 +117,9 @@ describe('per-user UI variant selector', () => {
     expect(profileSource).toContain('value={variant}');
     expect(profileSource).toContain('minHeight: 40');
     expect(profileSource).toContain('Классический');
-    expect(profileSource).toContain('Новый');
+    expect(profileSource).toContain('Новый (Evolutionary)');
+    expect(profileSource).toContain('LINE · Деловой минимализм');
+    expect(profileSource).toContain('AIR · Светлая динамика');
   });
 
   it('reboots every successful login at a safe URL before authenticated paint', () => {

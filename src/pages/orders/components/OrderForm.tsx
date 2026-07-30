@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Card, Tabs, Button, Space, Spin, notification, Modal, Form, Select, Tooltip, Popconfirm, message } from 'antd';
+import { Card, Tabs, Button, Empty, Space, Spin, notification, Modal, Form, Select, Tag, Tooltip, Popconfirm, message } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
 import { toClientKey } from '../../../api/mappers/orderMapper';
@@ -61,6 +61,7 @@ import {
   clearAddPaymentIntent,
   readAddPaymentIntent,
 } from '../orderPaymentIntent';
+import { OperationalPageHeader, useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 
 interface OrderFormProps {
   mode: OrderFormMode;
@@ -98,6 +99,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const isOperational = useOperationalUi();
   const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
   const tabKey = useWorkspaceTabKey(location.pathname);
   const bazisDraft = readBazisDraftFromLocationState(location.state);
@@ -1471,10 +1473,11 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   };
 
   const headerTabItems = useMemo(
-    () => [
+    () => {
+      const items = [
       {
         key: 'basic',
-        label: 'Основная информация',
+        label: isOperational ? 'Обзор' : 'Основная информация',
         children: (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <OrderBasicInfo clientLocked={bazisDraftClientLocked} />
@@ -1484,12 +1487,12 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       },
       {
         key: 'details',
-        label: 'Детали заказа',
+        label: isOperational ? 'Состав' : 'Детали заказа',
         children: <OrderDetailsTab ref={detailsTabRef} isSaving={isSaving} />,
       },
       {
         key: 'dates',
-        label: 'Даты',
+        label: isOperational ? 'Логистика' : 'Даты',
         children: <OrderDatesSection />,
       },
       {
@@ -1514,14 +1517,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         : []),
       {
         key: 'services',
-        label: 'Услуги/работы',
-        children: <div>TODO: Services Tab</div>,
+        label: isOperational ? 'Активность' : 'Услуги/работы',
+        children: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={isOperational ? 'События заказа отсутствуют' : 'Услуги и работы не добавлены'} />,
         disabled: mode === 'create' && !header.order_id,
       },
       {
         key: 'workshops',
-        label: 'Цеха',
-        children: <div>TODO: Workshops Tab</div>,
+        label: isOperational ? 'Производство' : 'Цеха',
+        children: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={isOperational ? 'Производственные операции не добавлены' : 'Цеха не назначены'} />,
         disabled: mode === 'create' && !header.order_id,
       },
       {
@@ -1532,8 +1535,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       },
       {
         key: 'additional',
-        label: 'Дополнительно',
-        children: (
+        label: isOperational ? 'Бирки' : 'Дополнительно',
+        children: isOperational ? (
+          labelsEnabled ? (
+            <OrderLabelDataEditor orderId={header.order_id ?? orderId} isOrderDirty={isDirty} />
+          ) : (
+            <span>Бирки недоступны</span>
+          )
+        ) : (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <OrderLegacySection />
             <OrderFilesSection />
@@ -1543,8 +1552,26 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           </Space>
         ),
       },
-    ],
-    [mode, header.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled, bazisDraftClientLocked]
+      ];
+
+      if (!isOperational) return items;
+
+      const operationalOrder = [
+        'basic',
+        'details',
+        'requirements',
+        'cut',
+        'workshops',
+        'finance',
+        'dates',
+        'additional',
+        'services',
+      ];
+      return operationalOrder
+        .map((key) => items.find((item) => item.key === key))
+        .filter((item): item is (typeof items)[number] => Boolean(item));
+    },
+    [mode, header.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled, bazisDraftClientLocked, isOperational]
   );
 
   const enabledTabKeys = useMemo(
@@ -1687,6 +1714,79 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         {projectLink ? <Link to={projectLink}>{projectCode}</Link> : <span>{projectCode}</span>}
       </Card>
     ) : null;
+
+  if (isOperational) {
+    return (
+      <OrderDraftStoreProvider orderKey={orderKey}>
+        <div className="order-form-operational">
+          <OperationalPageHeader
+            breadcrumbs={(
+              <Space split={<span>›</span>} size={6}>
+                <Link to="/orders">Заказы</Link>
+                <span>{header.order_name || orderId || 'Новый'}</span>
+                <span>Редактирование</span>
+                {activeTab === 'additional' ? <span>Бирки</span> : null}
+              </Space>
+            )}
+            title={`${mode === 'create' ? 'Создание' : 'Редактирование'} заказа ${header.order_name || orderId || ''}${activeTab === 'additional' ? ' · Бирки' : ''}`}
+            description={activeTab === 'additional'
+              ? 'Настройка шаблона и данных бирок с мгновенным предпросмотром результата.'
+              : 'Редактирование состава, параметров и производственных данных заказа.'}
+            actions={(
+              <>
+                <Tag color="orange">Режим редактирования</Tag>
+                {mode === 'edit' && orderId ? (
+                  <Button icon={<EyeOutlined />} onClick={() => show('orders_view', orderId)}>
+                    Просмотр
+                  </Button>
+                ) : null}
+                {featureFlags.useBackendOrdersWrite && canManageOrderTrash && mode === 'edit' && orderId && !header.delete_flag ? (
+                  <Popconfirm
+                    title={`Удалить заказ №${header.order_name}?`}
+                    description="Заказ попадёт в корзину, его можно будет восстановить."
+                    okText="Удалить"
+                    okButtonProps={{ danger: true }}
+                    cancelText="Отмена"
+                    onConfirm={makeOrderDeleteHandler({
+                      deleteFn: () => ordersApi.delete(Number(orderId), {
+                        version: Number(header.version ?? 0),
+                      }),
+                      onSuccess: () => {
+                        message.success('Заказ перемещён в корзину');
+                        navigate('/orders');
+                      },
+                      onVersionConflict: () => window.location.reload(),
+                      onError: (errorMessage) => message.error(errorMessage),
+                    })}
+                  >
+                    <Button danger icon={<DeleteOutlined />}>Удалить</Button>
+                  </Popconfirm>
+                ) : null}
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  onClick={handleSave}
+                  loading={isSaving}
+                  disabled={!isDirty && !isDetailEditing && !isPaymentEditing}
+                >
+                  Сохранить
+                </Button>
+              </>
+            )}
+          />
+          <div className="order-form-operational__workspace">
+            <OrderHeaderSummary />
+            <Tabs
+              activeKey={activeTab}
+              onChange={(key) => setActiveTab(key)}
+              items={headerTabItems}
+              type="card"
+            />
+          </div>
+        </div>
+      </OrderDraftStoreProvider>
+    );
+  }
 
   return (
     <OrderDraftStoreProvider orderKey={orderKey}>

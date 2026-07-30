@@ -20,10 +20,12 @@ import { RowSeparator } from './RowSeparator';
 import { collectOrderBasisProjects } from './orderBasisProjects';
 import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
+import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
 
 const { Text } = Typography;
 
 export const OrderHeaderSummary: React.FC = () => {
+  const isOperational = useOperationalUi();
   const { header, details, payments, isPaymentStatusManual, dowelingLinks } = useOrderFormStore();
   const { getSetting } = useAppSettings();
 
@@ -331,6 +333,58 @@ export const OrderHeaderSummary: React.FC = () => {
       filmName,
     };
   }, [details, millingTypesMap, edgeTypesMap, filmsMap]);
+
+  if (isOperational) {
+    const finalAmount = Number(header.final_amount) || Number(header.total_amount) || totals.total_amount || 0;
+    const paidAmount = Number(header.paid_amount) || totals.total_paid || 0;
+    const paymentPercent = finalAmount > 0 ? Math.min(100, Math.round((paidAmount / finalAmount) * 100)) : 0;
+    const deadlineAt = header.planned_completion_date ? dayjs(header.planned_completion_date) : null;
+    const daysToDeadline = deadlineAt ? deadlineAt.startOf('day').diff(dayjs().startOf('day'), 'day') : null;
+
+    return (
+      <>
+        <div
+          className="order-show-operational-summary"
+          onContextMenu={handleContextMenu}
+          title="ПКМ — изменить статусы"
+        >
+          <div className="order-show-operational-summary__primary">
+            <strong>{header.order_name || 'Новый заказ'}</strong>
+            <Tag color={daysToDeadline != null && daysToDeadline < 0 ? 'orange' : 'green'}>
+              {daysToDeadline != null && daysToDeadline < 0 ? 'Под риском' : 'В работе'}
+            </Tag>
+            <Tag>{`${paymentPercent}%`}</Tag>
+          </div>
+          <div className="order-show-operational-summary__metric">
+            <strong>{clientData?.data?.client_name || '—'}</strong>
+            <small>{primaryPhone ? `Тел.: ${primaryPhone}` : 'Телефон не указан'}</small>
+          </div>
+          <div className="order-show-operational-summary__metric">
+            <strong>
+              {header.order_date ? dayjs(header.order_date).format('DD.MM') : '—'}
+              {' — '}
+              {deadlineAt ? deadlineAt.format('DD.MM.YYYY') : '—'}
+            </strong>
+            <small>{daysToDeadline == null ? 'Срок не указан' : `До срока ${daysToDeadline} дн.`}</small>
+          </div>
+          <div className="order-show-operational-summary__metric">
+            <strong>{materialsSummary}</strong>
+            <small>{`${totals.parts_count} деталей · ${formatNumber(totals.total_area, 2)} м²`}</small>
+          </div>
+          <div className="order-show-operational-summary__money">
+            <strong>{formatNumber(finalAmount, 0)} {CURRENCY_SYMBOL}</strong>
+            <small>{`Оплачено ${formatNumber(paidAmount, 0)} ${CURRENCY_SYMBOL}`}</small>
+          </div>
+        </div>
+        <OrderHeaderContextMenu
+          visible={contextMenu.visible}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={closeContextMenu}
+        />
+      </>
+    );
+  }
 
   return (
     <>

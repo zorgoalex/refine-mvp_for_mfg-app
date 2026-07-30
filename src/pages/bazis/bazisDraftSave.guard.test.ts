@@ -54,7 +54,7 @@ describe('bazis draft order guards', () => {
     expect(orderForm).toContain('readBazisDraftFromLocationState');
     expect(orderForm).toContain('<OrderBasicInfo clientLocked={bazisDraftClientLocked} />');
     // Проп идёт из memoized tab-tree — deps обязаны включать lock-флаг (Critic code-R2)
-    expect(orderForm).toMatch(/\[mode, header\.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled, bazisDraftClientLocked\]/);
+    expect(orderForm).toMatch(/\[mode, header\.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled, bazisDraftClientLocked, isOperational\]/);
     // Настоящий disabled + скрытое создание клиента, не DOM-косметика
     expect(orderBasicInfo).toContain('disabled={clientLocked}');
     expect(orderBasicInfo).toMatch(/if \(clientLocked\) \{\s*return;\s*\}/);

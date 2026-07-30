@@ -31,6 +31,19 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-29",
+    title: "Новые варианты дизайна LINE и AIR",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В личном кабинете доступны варианты LINE и AIR рядом с классическим и текущим новым дизайном.",
+    ],
+    changed: [
+      "По умолчанию для пользователей без сохранённого выбора остаётся текущий новый дизайн Evolutionary.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-29",
     title: "Список заказов: Базис-проект",
     services: ["ERP"],
     repositories: ["repo_erp"],

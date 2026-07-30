@@ -21,9 +21,9 @@ import { i18nProvider } from "./utils/i18nProvider";
 import { featureFlags } from "./config/featureFlags";
 import { AppThemeProvider, useAppTheme } from "./theme/ThemeProvider";
 import { UiVariantProvider, useUiVariant } from "./ui-variant/UiVariantProvider";
-import { resolveUiVariant, type UiVariant } from "./ui-variant/uiVariant";
+import { isModernUiVariant, resolveUiVariant, type UiVariant } from "./ui-variant/uiVariant";
 import { getLoadedRuntimeConfig } from "./config/runtimeConfig";
-import { getEvolutionTheme } from "./ui-evolution/theme/evolutionTheme";
+import { getModernUiTheme } from "./ui-evolution/theme/evolutionTheme";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -212,7 +212,7 @@ const App = ({ initialUiVariant = resolveUiVariant(getLoadedRuntimeConfig()?.ui)
 
 const ThemedApp = () => {
   const { mode, uiSize } = useAppTheme();
-  const { isEvolution } = useUiVariant();
+  const { variant } = useUiVariant();
 
   // Configure notifications globally
   useEffect(() => {
@@ -232,8 +232,8 @@ const ThemedApp = () => {
             componentSize={uiSize === 'small' ? 'small' : undefined}
             theme={{
               algorithm: mode === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-              ...(isEvolution
-                ? getEvolutionTheme(mode)
+              ...(isModernUiVariant(variant)
+                ? getModernUiTheme(mode, variant)
                 : {
                     token: {
                       colorPrimary: "#1677ff",

@@ -21,10 +21,10 @@ describe('profile preferences OpenAPI contract', () => {
 
     expect(userPreferences).toMatch(/required:[\s\S]*- uiVariant/);
     expect(userPreferences).toMatch(
-      /uiVariant:\s*\n\s*type: string\s*\n\s*enum: \[legacy, evolution\]/,
+      /uiVariant:\s*\n\s*type: string\s*\n\s*enum: \[legacy, evolution, line, air\]/,
     );
     expect(updateRequest).toMatch(
-      /uiVariant:\s*\n\s*type: string\s*\n\s*enum: \[legacy, evolution\]/,
+      /uiVariant:\s*\n\s*type: string\s*\n\s*enum: \[legacy, evolution, line, air\]/,
     );
   });
 });

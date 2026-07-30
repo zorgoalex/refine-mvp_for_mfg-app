@@ -6,8 +6,12 @@ import { useAppTheme } from "../../theme/ThemeProvider";
 import { featureFlags } from "../../config/featureFlags";
 import { WorkosLinkCard } from "./WorkosLinkCard";
 import { useUiVariantPreference } from "../../ui-variant/useUiVariantPreference";
-import type { UiVariant } from "../../ui-variant/uiVariant";
+import { isModernUiVariant, type UiVariant } from "../../ui-variant/uiVariant";
 import { TelegramNotificationsCard } from "./TelegramNotificationsCard";
+import {
+  OperationalPageHeader,
+  useOperationalUi,
+} from "../../ui-operational/OperationalPrimitives";
 
 const roleNames: Record<string, string> = {
   admin: "Администратор",
@@ -18,22 +22,44 @@ const roleNames: Record<string, string> = {
   viewer: "Наблюдатель",
 };
 
+const uiVariantOptions: Array<{ label: string; value: UiVariant }> = [
+  { label: "Классический", value: "legacy" },
+  { label: "Новый (Evolutionary)", value: "evolution" },
+  { label: "LINE · Деловой минимализм", value: "line" },
+  { label: "AIR · Светлая динамика", value: "air" },
+];
+
 export const ProfilePage: React.FC = () => {
+  const isOperational = useOperationalUi();
   const { data: identity } = useGetIdentity<UserIdentity>();
   const { mode, setMode, uiSize, setUiSize } = useAppTheme();
   const {
     variant,
-    evolutionAvailable,
+    modernUiAvailable,
     isSaving: isVariantSaving,
     setVariant,
   } = useUiVariantPreference();
   const roleName = identity?.role ? roleNames[identity.role] ?? identity.role : "—";
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: "100%", padding: 24 }}>
-      <Typography.Title level={3} style={{ margin: 0 }}>
-        Личный кабинет
-      </Typography.Title>
+    <Space
+      className={`profile-page${isOperational ? " profile-page--operational" : ""}`}
+      direction="vertical"
+      size="middle"
+      style={{ width: "100%", padding: isOperational ? 0 : 24 }}
+    >
+      {isOperational ? (
+        <OperationalPageHeader
+          compact
+          breadcrumbs="Профиль / Личный кабинет"
+          title="Личный кабинет"
+          description="Учетная запись, уведомления и персональные настройки интерфейса."
+        />
+      ) : (
+        <Typography.Title level={3} style={{ margin: 0 }}>
+          Личный кабинет
+        </Typography.Title>
+      )}
       <Card>
         <Descriptions column={1} size="small" bordered>
           <Descriptions.Item label="Пользователь">
@@ -67,25 +93,22 @@ export const ProfilePage: React.FC = () => {
               onChange={(event) => void setVariant(event.target.value as UiVariant)}
             >
               <Space direction="vertical" size={0}>
-                <Radio
-                  value="legacy"
-                  style={{ minHeight: 40, display: "flex", alignItems: "center" }}
-                >
-                  Классический
-                </Radio>
-                <Radio
-                  value="evolution"
-                  disabled={!evolutionAvailable}
-                  style={{ minHeight: 40, display: "flex", alignItems: "center" }}
-                >
-                  Новый
-                </Radio>
+                {uiVariantOptions.map((option) => (
+                  <Radio
+                    disabled={isModernUiVariant(option.value) && !modernUiAvailable}
+                    key={option.value}
+                    value={option.value}
+                    style={{ minHeight: 40, display: "flex", alignItems: "center" }}
+                  >
+                    {option.label}
+                  </Radio>
+                ))}
               </Space>
             </Radio.Group>
             <Typography.Text type="secondary">
-              {evolutionAvailable
+              {modernUiAvailable
                 ? "После сохранения страница перезагрузится в выбранном дизайне."
-                : "Новый дизайн временно отключён администратором."}
+                : "Новые варианты дизайна временно отключены администратором."}
             </Typography.Text>
           </Space>
         </Space>

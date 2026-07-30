@@ -5,7 +5,8 @@ export type ThemeMode = 'light' | 'dark';
 /** Глобальный размер antd-компонентов: default = стандарт, small = компакт. */
 export type UiSize = 'default' | 'small';
 
-export type UiVariant = 'legacy' | 'evolution';
+export const UI_VARIANTS = ['legacy', 'evolution', 'line', 'air'] as const;
+export type UiVariant = (typeof UI_VARIANTS)[number];
 
 export interface OrderDetailColumnPreferenceDto {
   order: string[];

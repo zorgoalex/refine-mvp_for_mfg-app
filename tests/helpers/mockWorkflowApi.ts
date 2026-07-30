@@ -10,7 +10,7 @@ export interface WorkflowMockApiOptions {
     graphqlErrorForQuery?: (query: string) => string | null | undefined;
     runtimeConfig?: false | Record<string, boolean>;
     themeMode?: 'light' | 'dark';
-    uiVariant?: 'legacy' | 'evolution';
+    uiVariant?: 'legacy' | 'evolution' | 'line' | 'air';
 }
 
 const AUTH_TOKEN =
@@ -550,20 +550,26 @@ export async function setupWorkflowMockApi(
     });
 
     await page.route(/\/api\/v1\/me\/preferences$/, async (route) => {
-        const requestedThemeMode = (() => {
+        const requestBody = (() => {
             if (route.request().method() !== 'PATCH') {
-                return null;
+                return {};
             }
 
             try {
-                return JSON.parse(route.request().postData() || '{}').themeMode;
+                return JSON.parse(route.request().postData() || '{}') as {
+                    themeMode?: unknown;
+                    uiVariant?: unknown;
+                };
             } catch {
-                return null;
+                return {};
             }
         })();
-        const themeMode = requestedThemeMode === 'dark' || requestedThemeMode === 'light'
-            ? requestedThemeMode
+        const themeMode = requestBody.themeMode === 'dark' || requestBody.themeMode === 'light'
+            ? requestBody.themeMode
             : options.themeMode ?? 'light';
+        const uiVariant = isMockUiVariant(requestBody.uiVariant)
+            ? requestBody.uiVariant
+            : options.uiVariant;
 
         await route.fulfill({
             status: 200,
@@ -571,7 +577,7 @@ export async function setupWorkflowMockApi(
             body: JSON.stringify({
                 preferences: {
                     themeMode,
-                    ...(options.uiVariant ? { uiVariant: options.uiVariant } : {}),
+                    ...(uiVariant ? { uiVariant } : {}),
                 },
             }),
         });
@@ -874,6 +880,10 @@ export async function setupWorkflowMockApi(
     });
 
     return db;
+}
+
+function isMockUiVariant(value: unknown): value is NonNullable<WorkflowMockApiOptions['uiVariant']> {
+    return value === 'legacy' || value === 'evolution' || value === 'line' || value === 'air';
 }
 
 function createOrderFormDataResponse(db: WorkflowMockDb) {

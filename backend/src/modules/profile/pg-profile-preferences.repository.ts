@@ -1,7 +1,7 @@
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../common/errors/api-error';
 import type { DatabaseClient } from '../../database/database.types';
-import { RECENT_REFERENCE_RESOURCES } from './profile-preferences.types';
+import { RECENT_REFERENCE_RESOURCES, UI_VARIANTS } from './profile-preferences.types';
 import type {
   OrderDetailColumnPreferencesDto,
   PageSizePreferencesDto,
@@ -15,6 +15,7 @@ import type {
 } from './profile-preferences.types';
 
 const DEFAULT_UI_VARIANT: UiVariant = 'evolution';
+const uiVariantSet = new Set<unknown>(UI_VARIANTS);
 
 interface PreferenceRow extends QueryResultRow {
   theme_mode: string | null;
@@ -219,7 +220,7 @@ function normalizeUiSize(value: unknown): UiSize {
 }
 
 function normalizeUiVariant(value: unknown): UiVariant {
-  return value === 'legacy' || value === 'evolution' ? value : DEFAULT_UI_VARIANT;
+  return uiVariantSet.has(value) ? (value as UiVariant) : DEFAULT_UI_VARIANT;
 }
 
 function normalizeOrderDetailColumns(value: unknown): OrderDetailColumnPreferencesDto {

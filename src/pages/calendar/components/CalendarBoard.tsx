@@ -32,11 +32,13 @@ import {
 } from '../utils/calendarLayout';
 import { formatDateKey } from '../utils/dateUtils';
 import { useResponsive } from '../hooks/useResponsive';
+import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 
 /**
  * Основной компонент доски календаря
  */
 const CalendarBoard: React.FC = () => {
+  const isOperational = useOperationalUi();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(1200);
   // Responsive: classify container width for mobile vs desktop nav/layout
@@ -78,6 +80,8 @@ const CalendarBoard: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
     responsive.isMobile ? ViewMode.BRIEF : ViewMode.STANDARD,
   );
+  const [periodDays, setPeriodDays] = useState<7 | 14 | 30>(7);
+  const [productionOnly, setProductionOnly] = useState(true);
   // Масштабирование карточек: 1.0 = дефолт (100%), диапазон от 0.7 (70%) до 1.5 (150%)
   const [cardScale, setCardScale] = useState<number>(1.0);
   const pendingOrderActionsRef = useRef<Map<number, Promise<void>>>(new Map());
@@ -89,7 +93,21 @@ const CalendarBoard: React.FC = () => {
   // Генерация дней календаря
   // AD-6: stepDays=1 на mobile (по 1 дню), stepDays=7 на desktop (по неделе)
   const { days, startDate, endDate, goToToday, goForward, goBackward } =
-    useCalendarDays({ stepDays: isMobile ? 1 : 7 });
+    useCalendarDays({
+      stepDays: isMobile ? 1 : isOperational ? periodDays : 7,
+      daysAfter: isOperational ? 24 : 10,
+    });
+  const displayedDays = useMemo(
+    () => isOperational ? days.slice(0, periodDays) : days,
+    [days, isOperational, periodDays],
+  );
+  const periodLabel = useMemo(() => {
+    const first = displayedDays[0];
+    const last = displayedDays.at(-1);
+    if (!first || !last) return '';
+    const dayMonth = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' });
+    return `${dayMonth.format(first)} – ${dayMonth.format(last)} ${last.getFullYear()}`;
+  }, [displayedDays]);
 
   // Загрузка данных заказов
   const { ordersByDate, isLoading, error, refetch, productionWorkflowDisplay } = useCalendarData(
@@ -383,8 +401,8 @@ const CalendarBoard: React.FC = () => {
 
   // Группируем дни по рядам
   const dayRows = useMemo(() => {
-    return groupDaysIntoRows(days, columnsPerRow);
-  }, [days, columnsPerRow]);
+    return isOperational ? [displayedDays] : groupDaysIntoRows(displayedDays, columnsPerRow);
+  }, [columnsPerRow, displayedDays, isOperational]);
 
   // Обработка ошибок
   if (error) {
@@ -478,6 +496,76 @@ const CalendarBoard: React.FC = () => {
               />
             </div>
           </>
+        ) : isOperational ? (
+          <div className="calendar-navigation__operational">
+            <Space size="small">
+              <Tooltip title={`Назад на ${periodDays} дней`}>
+                <Button aria-label="Назад" icon={<LeftOutlined />} onClick={goBackward} />
+              </Tooltip>
+              <Button icon={<CalendarOutlined />} onClick={goToToday}>Сегодня</Button>
+              <Tooltip title={`Вперед на ${periodDays} дней`}>
+                <Button aria-label="Вперед" icon={<RightOutlined />} onClick={goForward} />
+              </Tooltip>
+            </Space>
+            <div className="calendar-navigation__period">
+              <span>{periodDays === 7 ? 'Неделя' : periodDays === 14 ? 'Две недели' : 'Месяц'}</span>
+              <strong>{periodLabel}</strong>
+            </div>
+            <Segmented
+              options={[
+                { label: 'Неделя', value: 7 },
+                { label: '2 недели', value: 14 },
+                { label: 'Месяц', value: 30 },
+              ]}
+              value={periodDays}
+              onChange={(value) => setPeriodDays(value as 7 | 14 | 30)}
+            />
+            <Segmented
+              options={[
+                { label: 'Комфортно', value: ViewMode.STANDARD },
+                { label: 'Компактно', value: ViewMode.COMPACT },
+              ]}
+              value={viewMode === ViewMode.BRIEF ? ViewMode.COMPACT : viewMode}
+              onChange={(value) => setViewMode(value as ViewMode)}
+            />
+            <span className="calendar-navigation__grow" />
+            <Button
+              className={productionOnly ? 'calendar-navigation__production-filter is-active' : 'calendar-navigation__production-filter'}
+              aria-pressed={productionOnly}
+              onClick={() => setProductionOnly((active) => !active)}
+            >
+              Только производство
+            </Button>
+            <Tooltip title="Обновить данные">
+              <Button
+                aria-label="Обновить"
+                icon={<ReloadOutlined />}
+                onClick={() => refetch()}
+                loading={isLoading || isMoving}
+              />
+            </Tooltip>
+            {isZoomAvailable ? (
+              <Space size={4}>
+                <Tooltip title="Уменьшить">
+                  <Button
+                    aria-label="Уменьшить масштаб"
+                    icon={<ZoomOutOutlined />}
+                    onClick={handleZoomOut}
+                    disabled={cardScale <= MIN_SCALE}
+                  />
+                </Tooltip>
+                <span className="calendar-navigation__scale">{Math.round(cardScale * 100)}%</span>
+                <Tooltip title="Увеличить">
+                  <Button
+                    aria-label="Увеличить масштаб"
+                    icon={<ZoomInOutlined />}
+                    onClick={handleZoomIn}
+                    disabled={cardScale >= MAX_SCALE}
+                  />
+                </Tooltip>
+              </Space>
+            ) : null}
+          </div>
         ) : (
           <Space size="middle" wrap>
             <Space size="small">
@@ -565,7 +653,12 @@ const CalendarBoard: React.FC = () => {
             <div key={`row-${rowIndex}`} className="calendar-row">
               {row.map((day) => {
                 const dateKey = formatDateKey(day);
-                const dayOrders = ordersByDate[dateKey] || [];
+                const allDayOrders = ordersByDate[dateKey] || [];
+                const dayOrders = productionOnly
+                  ? allDayOrders.filter((order) =>
+                      (order.order_details?.length ?? 0) > 0 ||
+                      (order.passedProductionCodes?.length ?? 0) > 0)
+                  : allDayOrders;
 
                 return (
                   <DayColumn

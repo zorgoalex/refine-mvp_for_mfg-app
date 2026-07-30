@@ -265,7 +265,8 @@ describe('CutPage source guards', () => {
     expect(source).toContain('embeddedJobIds?.has(candidate.cutJobId)');
     expect(source).toContain('candidate.items?.some((item) => item.orderId === embeddedOrderId)');
     expect(source).toContain('<Form.Item name="orderIds" hidden>');
-    expect(source).toContain('{!isEmbeddedOrder && <Title level={3}>Раскрой</Title>}');
+    expect(source).toContain('{!isEmbeddedOrder && !isOperational && <Title level={3}>Раскрой</Title>}');
+    expect(source).toContain('isOperational && !isEmbeddedOrder');
   });
 
   it('refreshes the job list when the kept-alive /cut tab path changes or deep-link opens a job', () => {
@@ -410,8 +411,8 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain('distinctOrderIdsFromItems(row.items).length');
     expect(source).toContain('<span>Заказы: <b>{distinctOrderIdsFromItems(job.items).length}</b></span>');
     expect(source).toContain("title: 'Деталей'");
-    expect(source).toContain("title: 'Площадь, итого'");
-    expect(source).toContain("title: 'Кол-во листов раскроя'");
+    expect(source).toContain("title: isOperational ? 'Площадь, м²' : 'Площадь, итого'");
+    expect(source).toContain("title: isOperational ? 'Листы' : 'Кол-во листов раскроя'");
     expect(source).toContain("className: 'cut-jobs-name-cell'");
     expect(appCss).toContain('td.cut-jobs-name-cell');
     expect(appCss).toContain('text-align: left !important');
@@ -419,7 +420,7 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain('width: 56');
     expect(source).toContain('width: 84');
     expect(source).toContain("title: 'Профиль'");
-    expect(source).toContain("title: 'Материал деталей'");
+    expect(source).toContain("title: isOperational ? 'Материал' : 'Материал деталей'");
     expect(source).toContain('formatJobMaterialNames(row.materialNames)');
     expect(source).toContain("width: '20ch'");
     expect(source).toContain('CUT_JOBS_TABLE_CONTAINER_HEIGHT');

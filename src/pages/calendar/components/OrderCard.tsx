@@ -15,6 +15,7 @@ import {
 } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
 import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
+import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 
 /**
  * Компонент карточки заказа (стандартный вид)
@@ -49,6 +50,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
   isDragging: isDraggingProp = false,
 }) => {
   const navigate = useNavigate();
+  const isOperational = useOperationalUi();
 
   // AD-mobile: double-tap on the card opens the context menu. We use
   // touchstart/touchend (not `click`) so the gesture works even when
@@ -270,9 +272,12 @@ const OrderCard: React.FC<OrderCardProps> = ({
 
   // Формируем строку даты + клиент
   const infoLine = [
-    order.order_date ? formatDateKey(order.order_date) : null,
+    !isOperational && order.order_date ? formatDateKey(order.order_date) : null,
     order.client_name,
   ].filter(Boolean).join(' • ');
+  const dueDate = order.planned_completion_date
+    ? formatDateKey(order.planned_completion_date)
+    : null;
 
   // Статус оплаты
   const paymentStatus = order.payment_status_name || '';
@@ -373,9 +378,10 @@ const OrderCard: React.FC<OrderCardProps> = ({
       {/* Строка 4: Статус оплаты */}
       {paymentText && (
         <div
-          className="order-card__payment"
+          className={`order-card__payment${isOperational ? ` order-card__payment--${isNotPaid ? 'danger' : 'success'}` : ''}`}
           style={{ color: isNotPaid ? '#d32f2f' : '#666666' }}
         >
+          {isOperational ? <i aria-hidden="true" /> : null}
           {paymentText}
         </div>
       )}
@@ -384,19 +390,24 @@ const OrderCard: React.FC<OrderCardProps> = ({
       <div className="order-card__divider" />
 
       {/* Индикаторы производства — плашка с пройденными этапами */}
-      <div
-        className="order-card__production-stages"
-        style={{ background: allProductionReady ? '#ffd9bf' : 'transparent' }}
-      >
-        <ProductionStagesDisplay
-          passedCodes={passedProductionCodes}
-          displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
-          codeToLetter={productionWorkflowDisplay?.codeToLetter}
-          codeToName={productionWorkflowDisplay?.codeToName}
-          fontSize={11}
-          showTooltip={true}
-          passedColor="#fa8c16"
-        />
+      <div className="order-card__footer">
+        {isOperational ? (
+          <span className="order-card__due">Срок {dueDate ?? '—'}</span>
+        ) : null}
+        <div
+          className="order-card__production-stages"
+          style={{ background: allProductionReady && !isOperational ? '#ffd9bf' : 'transparent' }}
+        >
+          <ProductionStagesDisplay
+            passedCodes={passedProductionCodes}
+            displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+            codeToLetter={productionWorkflowDisplay?.codeToLetter}
+            codeToName={productionWorkflowDisplay?.codeToName}
+            fontSize={11}
+            showTooltip={true}
+            passedColor="#fa8c16"
+          />
+        </div>
       </div>
     </div>
   );

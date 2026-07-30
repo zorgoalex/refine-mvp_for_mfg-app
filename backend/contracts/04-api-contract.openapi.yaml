@@ -11682,7 +11682,7 @@ components:
           enum: [default, small]
         uiVariant:
           type: string
-          enum: [legacy, evolution]
+          enum: [legacy, evolution, line, air]
         orderDetailColumns:
           type: object
           additionalProperties:
@@ -11715,7 +11715,7 @@ components:
           enum: [default, small]
         uiVariant:
           type: string
-          enum: [legacy, evolution]
+          enum: [legacy, evolution, line, air]
         orderDetailColumns:
           type: object
           additionalProperties:

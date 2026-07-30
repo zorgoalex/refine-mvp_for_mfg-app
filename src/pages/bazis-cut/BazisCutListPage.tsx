@@ -51,7 +51,7 @@ export const BazisCutListPage: React.FC = () => {
       }
       setPage(next);
     } };
-  return <div style={{ padding: 24 }}><Space direction="vertical" size="middle" style={{ width: '100%' }}>
+  return <div className="bazis-cut-list-modern"><Space direction="vertical" size="middle" style={{ width: '100%' }}>
     <Title level={3} style={{ margin: 0 }}>Базис-раскрой</Title>
     <Card><Input.Search allowClear value={search} onChange={(event) => setSearch(event.target.value)}
       placeholder="Набор, заказ или Базис-проект" style={{ maxWidth: 420 }} /></Card>

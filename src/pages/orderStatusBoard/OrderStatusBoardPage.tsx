@@ -35,11 +35,13 @@ import {
   CloseOutlined,
   DownloadOutlined,
   DragOutlined,
+  FilterOutlined,
   FilePdfOutlined,
   FileTextOutlined,
   LeftOutlined,
   MoreOutlined,
   PictureOutlined,
+  PlusOutlined,
   PrinterOutlined,
   ReloadOutlined,
   RightOutlined,
@@ -92,6 +94,10 @@ import {
   type CncOrderSearchPeriod,
   type OrderStatusBoardViewState,
 } from './model';
+import {
+  OperationalPageHeader,
+  useOperationalUi,
+} from '../../ui-operational/OperationalPrimitives';
 
 const BOARD_DRAG_TYPE = 'ORDER_STATUS_BOARD_CARD';
 const DATE_FORMAT = 'DD.MM.YYYY';
@@ -151,6 +157,7 @@ interface BoardDragItem {
 }
 
 export const OrderStatusBoardPage: React.FC = () => {
+  const isOperational = useOperationalUi();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const viewState = useMemo(
@@ -689,32 +696,82 @@ export const OrderStatusBoardPage: React.FC = () => {
 
   return (
     <DndProvider backend={HTML5Backend}>
-      <main className="status-board-page" aria-labelledby="status-board-title">
-        <div className="status-board-page__header">
-          <div>
-            <Typography.Title id="status-board-title" level={3} tabIndex={-1}>
-              Доски статусов
-            </Typography.Title>
-            <Typography.Text type="secondary">
-              Заказы, производство и CNC-работы на сегодня.
-            </Typography.Text>
-          </div>
-          <div className="status-board-page__updated">
-            {generatedAt && (
-              <Typography.Text type="secondary">
-                Обновлено {formatDateTime(generatedAt)}
-              </Typography.Text>
+      <main
+        className={`status-board-page${isOperational && isCncToday ? ' status-board-page--cnc' : ''}`}
+        aria-labelledby={isOperational ? undefined : 'status-board-title'}
+        aria-label={isOperational ? (isCncToday ? 'Доска МДФ-работ' : 'Доски статусов') : undefined}
+      >
+        {isOperational ? (
+          <OperationalPageHeader
+            compact
+            breadcrumbs={isCncToday ? 'Производство / МДФ-работы' : 'Производство / Доски статусов'}
+            title={isCncToday ? 'МДФ-работы' : 'Доски статусов'}
+            description={isCncToday
+              ? 'Операционная доска файлов, раскроя и карт вакуумного стола.'
+              : 'Заказы и производственные статусы в едином рабочем пространстве.'}
+            actions={(
+              <>
+                {isCncToday ? (
+                  <>
+                    <Button
+                      icon={<FilterOutlined />}
+                      onClick={() => {
+                        document.querySelector<HTMLInputElement>('.status-board-toolbar__cnc-order-search input')?.focus();
+                      }}
+                    >
+                      Фильтры
+                    </Button>
+                    <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/cut')}>
+                      Добавить карту ванны
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    {generatedAt ? (
+                      <Typography.Text type="secondary">
+                        Обновлено {formatDateTime(generatedAt)}
+                      </Typography.Text>
+                    ) : null}
+                    <Tooltip title="Обновить доску">
+                      <Button
+                        aria-label="Обновить доску"
+                        icon={<ReloadOutlined />}
+                        loading={loading}
+                        onClick={() => void fetchInitial()}
+                      />
+                    </Tooltip>
+                  </>
+                )}
+              </>
             )}
-            <Tooltip title="Обновить доску">
-              <Button
-                aria-label="Обновить доску"
-                icon={<ReloadOutlined />}
-                loading={loading}
-                onClick={() => void fetchInitial()}
-              />
-            </Tooltip>
+          />
+        ) : (
+          <div className="status-board-page__header">
+            <div>
+              <Typography.Title id="status-board-title" level={3} tabIndex={-1}>
+                Доски статусов
+              </Typography.Title>
+              <Typography.Text type="secondary">
+                Заказы, производство и CNC-работы на сегодня.
+              </Typography.Text>
+            </div>
+            <div className="status-board-page__updated">
+              {generatedAt && (
+                <Typography.Text type="secondary">
+                  Обновлено {formatDateTime(generatedAt)}
+                </Typography.Text>
+              )}
+              <Tooltip title="Обновить доску">
+                <Button
+                  aria-label="Обновить доску"
+                  icon={<ReloadOutlined />}
+                  loading={loading}
+                  onClick={() => void fetchInitial()}
+                />
+              </Tooltip>
+            </div>
           </div>
-        </div>
+        )}
 
         <Tabs
           className="status-board-tabs"
@@ -1081,6 +1138,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   onSelectDetailedDetail,
   onOpenOrder,
 }) => {
+  const isOperational = useOperationalUi();
   const detailedBathActive = detailedEnabled && Boolean(detailedContext?.activeBathId);
   const displayColumns = useMemo(
     () =>
@@ -1105,6 +1163,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           : [`cnc-today-column--${column.key}`];
         const title = cncColumnDisplayTitle(column);
         const totals = buildCncColumnTotals(column, relationContext, detailedContext);
+        const loadPercent = Math.min(100, Math.round(totals.areaM2));
         const bathSourceCards = column.baths ?? [];
         const packetSourceCards = column.packets ?? [];
         const packetStateFor = (packet: CncTelegramPacket) =>
@@ -1148,12 +1207,26 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
               <Typography.Text className="cnc-today-column__totals" type="secondary">
                 {totals.details} дет. · {formatArea(totals.areaM2)}
               </Typography.Text>
+              <div className="cnc-today-column__load">
+                {isOperational ? (
+                  <div className="cnc-today-column__load-label">
+                    <span>WIP / мощность</span>
+                    <strong>{loadPercent}%</strong>
+                  </div>
+                ) : null}
+                <span><span style={{ width: `${loadPercent}%` }} /></span>
+                {!isOperational ? <Typography.Text type="secondary">{loadPercent}%</Typography.Text> : null}
+              </div>
             </header>
 
             <div className="status-board-column__cards">
               {bathColumn ? (
                 bathCards.length === 0 ? (
-                  <div className="status-board-column__empty">Ванн нет</div>
+                  <div className="status-board-column__empty">
+                    <span className="status-board-column__empty-icon"><PictureOutlined /></span>
+                    <strong>Карт ванн пока нет</strong>
+                    <small>Перетащите подготовленный раскрой или создайте карту вручную.</small>
+                  </div>
                 ) : (
                   bathCards.map((bath) => {
                     const detailed = detailedContext?.activeBathId === bath.bathCardId;
@@ -1191,7 +1264,11 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                   })
                 )
               ) : packetCards.length === 0 ? (
-                <div className="status-board-column__empty">Пакетов нет</div>
+                <div className="status-board-column__empty">
+                  <span className="status-board-column__empty-icon"><FileTextOutlined /></span>
+                  <strong>Пакетов пока нет</strong>
+                  <small>Новые файлы появятся здесь после загрузки.</small>
+                </div>
               ) : (
                 packetCards.map((packet) => (
                   <CncTelegramPacketCard
@@ -1277,6 +1354,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   onSelectRelation,
   onOpenOrder,
 }) => {
+  const isOperational = useOperationalUi();
   const displayComments = packet.comments.filter((comment) =>
     isCncDisplayComment(comment) && comment.trim() !== (packet.programName ?? '').trim(),
   );
@@ -1304,6 +1382,11 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               />
             ))}
           </div>
+          {isOperational ? (
+            <Typography.Text className="cnc-packet-card__material" type="secondary">
+              {packet.materialName}
+            </Typography.Text>
+          ) : null}
           <Typography.Text className="cnc-packet-card__program">
             {packet.programName ?? packet.externalPacketKey}
           </Typography.Text>
@@ -1346,6 +1429,13 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
         </div>
       )}
 
+      {isOperational ? (
+        <div className="cnc-packet-card__metrics">
+          <span>{packet.itemQuantityTotal} деталей</span>
+          <span>{packet.itemCount} позиций</span>
+        </div>
+      ) : null}
+
       <Collapse
         className="cnc-packet-card__collapse compact-collapse"
         size="small"
@@ -1355,7 +1445,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
           key="items"
           header={
             <span className="cnc-packet-card__collapse-label">
-              <FileTextOutlined /> {packet.itemQuantityTotal} дет. · {packet.itemCount} поз
+              <FileTextOutlined /> {isOperational ? 'Детали' : `${packet.itemQuantityTotal} дет. · ${packet.itemCount} поз`}
             </span>
           }
         >
@@ -1543,6 +1633,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   onSelectDetail,
   onOpenOrder,
 }) => {
+  const isOperational = useOperationalUi();
   const orderSummaries = buildCncOrderSummaries(bath.items);
   const interactive = relationsEnabled || detailedEnabled;
 
@@ -1608,6 +1699,13 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
         </div>
       </div>
 
+      {isOperational ? (
+        <div className="cnc-packet-card__metrics">
+          <span>{bath.itemQuantityTotal} деталей</span>
+          <span>{bath.positionCount} позиций</span>
+        </div>
+      ) : null}
+
       <Collapse
         className="cnc-packet-card__collapse compact-collapse"
         size="small"
@@ -1617,7 +1715,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           key="items"
           header={
             <span className="cnc-packet-card__collapse-label">
-              <FileTextOutlined /> {bath.itemQuantityTotal} дет. · {bath.positionCount} поз
+              <FileTextOutlined /> {isOperational ? 'Детали' : `${bath.itemQuantityTotal} дет. · ${bath.positionCount} поз`}
             </span>
           }
         >

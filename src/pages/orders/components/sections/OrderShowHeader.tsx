@@ -20,6 +20,7 @@ import { collectOrderBasisProjects } from './orderBasisProjects';
 import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { resolveCurrentProductionStatusCodes } from '../../currentProductionStatus';
+import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
 
 const { Text } = Typography;
 
@@ -44,6 +45,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   headerMaterialName,
 }) => {
   const navigate = useNavigate();
+  const isOperational = useOperationalUi();
   const { getSetting } = useAppSettings();
 
   // State for client context menu
@@ -240,6 +242,52 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     materialsSummary,
     basisProjects.length > 0 ? `Базис: ${compactBasisProjectsSummary}` : null,
   ].filter(Boolean).join(' · ');
+
+  if (isOperational) {
+    const paymentPercent = finalAmount > 0 ? Math.min(100, Math.round((paidAmount / finalAmount) * 100)) : 0;
+    const deadlineAt = record?.planned_completion_date ? dayjs(record.planned_completion_date) : null;
+    const isAtRisk = deadlineAt?.isBefore(dayjs(), 'day') && record?.order_status_name !== 'Готов к выдаче';
+    const daysToDeadline = deadlineAt ? deadlineAt.startOf('day').diff(dayjs().startOf('day'), 'day') : null;
+
+    return (
+      <div
+        className={`order-show-operational-summary${compactSticky ? ' order-show-operational-summary--compact' : ''}`}
+        aria-label="Сводка заказа"
+      >
+        <div className="order-show-operational-summary__primary">
+          <strong>{record?.order_name || 'Заказ'}</strong>
+          <Tag color={isAtRisk ? 'orange' : 'green'}>{isAtRisk ? 'Под риском' : 'В работе'}</Tag>
+          <Tag>{`${paymentPercent}%`}</Tag>
+        </div>
+        <div className="order-show-operational-summary__metric">
+          <strong>{record?.client_name || '—'}</strong>
+          <small>{primaryPhone ? `Тел.: ${primaryPhone}` : 'Телефон не указан'}</small>
+        </div>
+        <div className="order-show-operational-summary__metric">
+          <strong>
+            {record?.order_date ? dayjs(record.order_date).format('DD.MM') : '—'}
+            {' — '}
+            {record?.planned_completion_date ? dayjs(record.planned_completion_date).format('DD.MM.YYYY') : '—'}
+          </strong>
+          <small>
+            {daysToDeadline == null
+              ? 'Срок не указан'
+              : daysToDeadline >= 0
+                ? `Срок выдачи через ${daysToDeadline} дн.`
+                : `Просрочено на ${Math.abs(daysToDeadline)} дн.`}
+          </small>
+        </div>
+        <div className="order-show-operational-summary__metric">
+          <strong>{materialsSummary}</strong>
+          <small>{`${totals.parts_count} деталей · ${formatNumber(totals.total_area, 2)} м²`}</small>
+        </div>
+        <div className="order-show-operational-summary__money">
+          <strong>{formatNumber(finalAmount, 0)} {CURRENCY_SYMBOL}</strong>
+          <small>{`Оплачено ${formatNumber(paidAmount, 0)} ${CURRENCY_SYMBOL}`}</small>
+        </div>
+      </div>
+    );
+  }
 
   if (compactSticky) {
     return (
