@@ -13,7 +13,13 @@ const raw = {
   ] },
   СписокПазов: { Паз: [{ Название: 'Паз для ЗС', Ширина: '4', Глубина: '8' }] },
   СписокОпераций: { СдельнаяОперация: [{ Наименование: 'Раскрой', Код: 'cut16', Стоимость: '51.52' }] },
-  Свойство: [{ Наименование: 'Артикул', Значение: 'АБ-12' }],
+  ПользовательскиеСвойства: {
+    Свойство: [
+      { Имя: 'Фрезеровка', Значение: 'Модерн' },
+      { Имя: 'Пленка', Значение: 'Белый глянец' },
+      { Имя: 'Маршрут', Значение: 'Фрезеровка; облицовка' },
+    ],
+  },
   ОсновнойМатериал: { Наименование: 'ЛДСП Белый' },
 };
 
@@ -38,13 +44,33 @@ describe('parseNodeRaw', () => {
     expect(sections.grooves).toHaveLength(1);
     expect(sections.operations).toHaveLength(1);
     expect(sections.operations[0]).toEqual(expect.arrayContaining([{ key: 'Код', value: 'cut16' }]));
-    expect(sections.properties).toEqual([{ key: 'Артикул', value: 'АБ-12' }]);
+    expect(sections.properties).toEqual([
+      { key: 'Фрезеровка', value: 'Модерн' },
+      { key: 'Пленка', value: 'Белый глянец' },
+      { key: 'Маршрут', value: 'Фрезеровка; облицовка' },
+    ]);
     expect(sections.scalars).toEqual(expect.arrayContaining([{ key: 'ТипОбъекта', value: 'Панель' }]));
     expect(sections.scalars.map((scalar) => scalar.key)).not.toContain('СписокКромок2');
   });
 
+  it('supports legacy direct properties and single nested property objects', () => {
+    expect(parseNodeRaw({
+      ПользовательскиеСвойства: {
+        Свойство: { Имя: 'Присадка', Значение: 'Присадка:' },
+      },
+      Свойство: [{ Наименование: 'Артикул', Значение: 'АБ-12' }],
+    }).properties).toEqual([
+      { key: 'Присадка', value: 'Присадка:' },
+      { key: 'Артикул', value: 'АБ-12' },
+    ]);
+  });
+
   it('is resilient to missing/odd shapes', () => {
     expect(parseNodeRaw({})).toMatchObject({ edges: [], faces: [], holes: [], properties: [], operations: [] });
-    expect(parseNodeRaw({ СписокКромок1: 'мусор' } as never).edges).toEqual([]);
+    expect(parseNodeRaw({
+      СписокКромок1: 'мусор',
+      ПользовательскиеСвойства: 'мусор',
+      Свойство: [{ Имя: '', Значение: '' }],
+    } as never)).toMatchObject({ edges: [], properties: [] });
   });
 });

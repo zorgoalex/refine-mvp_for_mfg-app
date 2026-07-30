@@ -39,7 +39,18 @@ export interface NodeRawSections {
 
 const EDGE_KEYS = ['СписокКромок1', 'СписокКромок2', 'СписокКромок3', 'СписокКромок4'] as const;
 const FACE_KEYS = ['ОблицовкаПласти1', 'ОблицовкаПласти2'] as const;
-const SECTION_KEYS = new Set<string>([...EDGE_KEYS, ...FACE_KEYS, 'Отверстие', 'Отверстия', 'Свойство', 'СдельнаяОперация', 'СписокОпераций', 'СписокПазов', 'Паз']);
+const SECTION_KEYS = new Set<string>([
+  ...EDGE_KEYS,
+  ...FACE_KEYS,
+  'Отверстие',
+  'Отверстия',
+  'ПользовательскиеСвойства',
+  'Свойство',
+  'СдельнаяОперация',
+  'СписокОпераций',
+  'СписокПазов',
+  'Паз',
+]);
 
 function toKeyValues(entry: unknown): RawKeyValue[] {
   if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -63,7 +74,13 @@ function entryList(container: unknown, itemKey: string): unknown[] {
   }
 
   const items = (container as Record<string, unknown>)[itemKey];
-  return Array.isArray(items) ? items : [];
+  if (Array.isArray(items)) return items;
+  return items != null && typeof items === 'object' ? [items] : [];
+}
+
+function directEntryList(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  return value != null && typeof value === 'object' ? [value] : [];
 }
 
 export function parseNodeRaw(rawJson: Record<string, unknown>): NodeRawSections {
@@ -118,14 +135,23 @@ export function parseNodeRaw(rawJson: Record<string, unknown>): NodeRawSections 
     });
   }
 
-  const properties: RawKeyValue[] = (Array.isArray(rawJson['Свойство']) ? rawJson['Свойство'] : [])
+  // Реальный Bazis-XML хранит пользовательские свойства в контейнере
+  // <ПользовательскиеСвойства><Свойство><Имя>…</Имя><Значение>…</Значение>.
+  // Прямой rawJson.Свойство и поле Наименование оставляем как legacy fallback.
+  const properties: RawKeyValue[] = [
+    ...entryList(rawJson['ПользовательскиеСвойства'], 'Свойство'),
+    ...directEntryList(rawJson['Свойство']),
+  ]
     .map((property) => {
       const fields = toKeyValues(property);
-      const name = fields.find((field) => field.key === 'Наименование')?.value ?? '';
+      const name = fields.find((field) => field.key === 'Имя')?.value
+        ?? fields.find((field) => field.key === 'Наименование')?.value
+        ?? '';
       const value = fields.find((field) => field.key === 'Значение')?.value ?? '';
-      return { key: name, value };
+      if (name === '' && value === '') return null;
+      return { key: name || 'Свойство', value };
     })
-    .filter((property) => property.key !== '');
+    .filter((property): property is RawKeyValue => property !== null);
 
   const scalars = Object.entries(rawJson)
     .filter(([key, value]) => !SECTION_KEYS.has(key)
