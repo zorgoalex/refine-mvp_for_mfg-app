@@ -18,6 +18,17 @@ import {
 
 const repositorySource = readFileSync(new URL('./pg-cut-repository.ts', import.meta.url), 'utf8');
 
+describe('vacuum bath meter-guide render wiring', () => {
+  it('resolves catalog identity + frozen calculation mode and applies guides to current and historical renders', () => {
+    expect(repositorySource).toContain('shouldShowBathMeterGuides({');
+    expect(repositorySource).toContain('smt.name AS sheet_material_name');
+    expect(repositorySource).toContain('smt.height_mm AS sheet_material_height_mm');
+    expect(repositorySource).toContain('showBathMeterGuides,');
+    expect(repositorySource).toContain('addBathMeterGuidesToSvg(baseSvg, placements');
+    expect(repositorySource).toContain('addBathMeterGuidesToSvg(view.bathSvg, placements');
+  });
+});
+
 describe('cut result number allocation', () => {
   const currentManual = {
     cutResultId: 902,
@@ -456,10 +467,20 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('SELECT cut_group_id, sheet_material_type_id, film_id, status, pdf_template_code, summary FROM cut_group')) {
       return { rows: storedGroups, rowCount: storedGroups.length };
     }
-    if (sql.startsWith('SELECT cut_job_id, group_key FROM cut_group WHERE cut_group_id = $1')) {
+    if (sql.startsWith('SELECT cg.cut_job_id, cg.group_key, cg.summary, cj.last_calc_params,')) {
       const group = storedGroups.find((candidate) => Number(candidate.cut_group_id) === Number(params[0]));
       return group
-        ? { rows: [{ cut_job_id: 42, group_key: group.group_key }], rowCount: 1 }
+        ? {
+            rows: [{
+              cut_job_id: 42,
+              group_key: group.group_key,
+              summary: group.summary ?? null,
+              last_calc_params: lastCalcParams,
+              sheet_material_name: null,
+              sheet_material_height_mm: null,
+            }],
+            rowCount: 1,
+          }
         : { rows: [], rowCount: 0 };
     }
     if (sql.startsWith('SELECT cgs.sheet_index, cgs.placements FROM cut_group_sheet')) {

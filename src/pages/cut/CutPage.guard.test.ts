@@ -67,6 +67,14 @@ describe('CutPage source guards', () => {
     expect(source).toMatch(/landscape=\{\(\(\) => \{[\s\S]*sheetPreviewRotate90\(\s*p\.sheet_width_mm/);
   });
 
+  it('enables vacuum-bath meter guides from the shared eligibility contract', () => {
+    expect(source).toMatch(/shouldShowBathMeterGuides\(\{/);
+    expect(source).toMatch(/engineUsed:\s*group\.summary\?\.engine_used/);
+    expect(source).toMatch(/materialName:\s*sheetOption\?\.name/);
+    expect(source).toMatch(/materialHeightMm:\s*sheetOption\?\.heightMm/);
+    expect(source).toMatch(/showBathMeterGuides=\{showBathMeterGuides\}/);
+  });
+
   it('group header is sticky, offset below the workspace tab-bar, opaque in both themes', () => {
     expect(source).toMatch(/headStyle=\{\{[\s\S]*position:\s*'sticky'[\s\S]*top:\s*stickyHeaderTop/);
     // theme-aware background so the sticky header is opaque in light and dark.

@@ -5,18 +5,72 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  BATH_METER_GUIDE_OFFSETS_MM,
+  bathMeterGuideLines,
   usableExtent,
   piecesClear,
   pieceWithinUsable,
   validateSheetPlacements,
   orientPieceRect,
   applyAxisOrigin,
+  shouldShowBathMeterGuides,
   undoAxisOriginY,
   rotatePiece,
   snapDraggedPiece,
   moveAllowed,
   validateSheetGroupInvariant,
 } from './index';
+
+describe('bath meter guides', () => {
+  it('enables guides only for a vacuum-table Ванна material with catalog height 2800 mm', () => {
+    expect(shouldShowBathMeterGuides({
+      engineUsed: 'vacuum_table',
+      materialName: 'Ванна 1400',
+      materialHeightMm: 2800,
+    })).toBe(true);
+    expect(shouldShowBathMeterGuides({
+      layoutMode: 'vacuum_table',
+      materialName: '  ванна 2100',
+      materialHeightMm: 2800,
+    })).toBe(true);
+
+    expect(shouldShowBathMeterGuides({
+      engineUsed: 'ga',
+      materialName: 'Ванна 1400',
+      materialHeightMm: 2800,
+    })).toBe(false);
+    expect(shouldShowBathMeterGuides({
+      engineUsed: 'vacuum_table',
+      materialName: 'МДФ 16 мм',
+      materialHeightMm: 2800,
+    })).toBe(false);
+    expect(shouldShowBathMeterGuides({
+      engineUsed: 'vacuum_table',
+      materialName: 'Ванна 1400',
+      materialHeightMm: 2799,
+    })).toBe(false);
+    expect(shouldShowBathMeterGuides({
+      engineUsed: 'vacuum_table',
+      materialName: 'Ванна 1400',
+      materialHeightMm: Symbol('invalid'),
+    })).toBe(false);
+  });
+
+  it('places portrait guides across the width at 800 and 1800 mm from the top edge', () => {
+    expect(bathMeterGuideLines(1400, 2800, false)).toEqual([
+      { offsetMm: 800, x1: 0, y1: 800, x2: 1400, y2: 800 },
+      { offsetMm: 1800, x1: 0, y1: 1800, x2: 1400, y2: 1800 },
+    ]);
+  });
+
+  it('places landscape guides across the short side at 800 and 1800 mm from the left edge', () => {
+    expect(bathMeterGuideLines(1400, 2800, true)).toEqual([
+      { offsetMm: 800, x1: 800, y1: 0, x2: 800, y2: 1400 },
+      { offsetMm: 1800, x1: 1800, y1: 0, x2: 1800, y2: 1400 },
+    ]);
+    expect(BATH_METER_GUIDE_OFFSETS_MM).toEqual([800, 1800]);
+  });
+});
 
 describe('display axis origin', () => {
   it.each([

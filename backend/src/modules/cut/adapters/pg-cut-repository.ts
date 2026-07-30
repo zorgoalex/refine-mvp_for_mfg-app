@@ -13,6 +13,7 @@ import {
   type ManualViolation,
   manualSetMatchesAuto,
   reconstructManualSheets,
+  shouldShowBathMeterGuides,
   validateSheetPlacements,
   validateSheetGroupInvariant,
 } from '../../../shared/cut-geometry';
@@ -104,7 +105,14 @@ import {
   MATERIAL_NAMES_BY_JOB_SQL,
   type TotalsRow,
 } from './cut-totals';
-import { buildBathProfileSheetSvg, buildSheetSvg, composePieceLabelLines, computeGroupItemQuantities, createOrderFillResolver } from '../render/sheet-svg';
+import {
+  addBathMeterGuidesToSvg,
+  buildBathProfileSheetSvg,
+  buildSheetSvg,
+  composePieceLabelLines,
+  computeGroupItemQuantities,
+  createOrderFillResolver,
+} from '../render/sheet-svg';
 import { renderSheetPng } from '../render/sheet-png';
 import {
   buildFrozenSheetsPdf,
@@ -1703,6 +1711,25 @@ export class PgCutRepository implements CutRepositoryPort {
     const frozenFillByOrder = rebuildSvgWithPieceMetadata
       ? createOrderFillResolver(frozen.job.items.map((item) => item.orderId))
       : (() => '#eef3f8');
+    const bathGuideMeta = await this.database.query<{
+      last_calc_params: FreecutParams | null;
+      sheet_material_name: string | null;
+      sheet_material_height_mm: string | number | null;
+    }>(
+      `SELECT cj.last_calc_params,
+              smt.name AS sheet_material_name,
+              smt.height_mm AS sheet_material_height_mm
+       FROM cut_job cj
+       LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = $2
+       WHERE cj.cut_job_id = $1`,
+      [frozen.job.cutJobId, group.sheetMaterialTypeId],
+    );
+    const showBathMeterGuides = shouldShowBathMeterGuides({
+      engineUsed: group.summary?.engine_used,
+      layoutMode: bathGuideMeta.rows[0]?.last_calc_params?.layout_mode,
+      materialName: bathGuideMeta.rows[0]?.sheet_material_name,
+      materialHeightMm: bathGuideMeta.rows[0]?.sheet_material_height_mm,
+    });
     const sheets = sourceSheets.map((sheet) => {
       const placements = sheet.placements;
       const renderSnapshot = sheet.renderSnapshot;
@@ -1715,7 +1742,7 @@ export class PgCutRepository implements CutRepositoryPort {
       if (!renderSnapshot || renderSnapshot.contractVersion !== 'cut_sheet_render_v1' || !view) {
         throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_CORRUPT', `Нет frozen render листа ${sheet.sheetIndex}`);
       }
-      const svg = rebuildSvgWithPieceMetadata && !view.svg.includes('data-detail-id=')
+      const baseSvg = rebuildSvgWithPieceMetadata && !view.svg.includes('data-detail-id=')
         ? buildSheetSvg({
             sheet: placements,
             labelFor: (piece) => frozenPieceLabelLines(piece, frozenItemByItemId, frozenQuantities),
@@ -1730,11 +1757,17 @@ export class PgCutRepository implements CutRepositoryPort {
             showLabels: args.showLabels,
           })
         : view.svg;
+      const svg = showBathMeterGuides
+        ? addBathMeterGuidesToSvg(baseSvg, placements, args.rotate90 === true)
+        : baseSvg;
+      const bathSvg = showBathMeterGuides
+        ? addBathMeterGuidesToSvg(view.bathSvg, placements, args.rotate90 === true)
+        : view.bathSvg;
       return {
         sheetIndex: sheet.sheetIndex,
         placements,
         svg,
-        bathSvg: view.bathSvg,
+        bathSvg,
         pdfMeta: renderSnapshot.pdfMeta as PdfSheetMeta,
         pdfDetailRows: renderSnapshot.pdfDetailRows as PdfSheetDetailRow[],
       };
@@ -2964,8 +2997,21 @@ export class PgCutRepository implements CutRepositoryPort {
     const groupRes = await client.query<{
       cut_job_id: string | number;
       group_key: string | null;
+      summary: Record<string, unknown> | null;
+      last_calc_params: FreecutParams | null;
+      sheet_material_name: string | null;
+      sheet_material_height_mm: string | number | null;
     }>(
-      `SELECT cut_job_id, group_key FROM cut_group WHERE cut_group_id = $1`,
+      `SELECT cg.cut_job_id,
+              cg.group_key,
+              cg.summary,
+              cj.last_calc_params,
+              smt.name AS sheet_material_name,
+              smt.height_mm AS sheet_material_height_mm
+       FROM cut_group cg
+       JOIN cut_job cj ON cj.cut_job_id = cg.cut_job_id
+       LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = cg.sheet_material_type_id
+       WHERE cg.cut_group_id = $1`,
       [cutGroupId],
     );
     if (groupRes.rows.length === 0) {
@@ -2973,6 +3019,12 @@ export class PgCutRepository implements CutRepositoryPort {
     }
     const resolvedJobId = toNum(groupRes.rows[0].cut_job_id);
     const groupKey = groupRes.rows[0].group_key ?? null;
+    const showBathMeterGuides = shouldShowBathMeterGuides({
+      engineUsed: groupRes.rows[0].summary?.engine_used,
+      layoutMode: groupRes.rows[0].last_calc_params?.layout_mode,
+      materialName: groupRes.rows[0].sheet_material_name,
+      materialHeightMm: groupRes.rows[0].sheet_material_height_mm,
+    });
 
     if (cutJobId !== undefined && resolvedJobId !== cutJobId) {
       throw new ApiError(
@@ -3113,8 +3165,25 @@ export class PgCutRepository implements CutRepositoryPort {
         return {
           sheetIndex: s.sheetIndex,
           placements: s.placements,
-          svg: buildSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90, originTopLeft, axisOrigin, showLabels }),
-          bathSvg: buildBathProfileSheetSvg({ sheet: s.placements, labelFor, fillFor, rotate90, originTopLeft, axisOrigin }),
+          svg: buildSheetSvg({
+            sheet: s.placements,
+            labelFor,
+            fillFor,
+            rotate90,
+            originTopLeft,
+            axisOrigin,
+            showLabels,
+            showBathMeterGuides,
+          }),
+          bathSvg: buildBathProfileSheetSvg({
+            sheet: s.placements,
+            labelFor,
+            fillFor,
+            rotate90,
+            originTopLeft,
+            axisOrigin,
+            showBathMeterGuides,
+          }),
           pdfMeta: buildPdfSheetMeta(s.placements, detailById),
           pdfDetailRows: buildPdfDetailRows(s.placements, detailById),
         };

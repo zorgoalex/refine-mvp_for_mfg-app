@@ -24,10 +24,12 @@ import {
 } from '@ant-design/icons';
 import type { SheetPlacements, SheetPlacementPiece } from '../../api/types/cutApi.types';
 import {
+  BATH_METER_GUIDE_STYLE,
   snapDraggedPiece,
   rotatePiece,
   orientPieceRect,
   applyAxisOrigin,
+  bathMeterGuideLines,
   usableExtent,
   moveAllowed,
 } from './cutLayoutGeometry';
@@ -78,6 +80,8 @@ export interface SheetEditorProps {
   pieceSheetInfoByItemId: Map<string, { materialName: string | null; filmName: string | null }>;
   /** Show per-sheet film name(s) — true when the job splits by film (combineFilms off). */
   showFilm: boolean;
+  /** Overlay the 800/1800 mm film-length references for a resolved vacuum bath. */
+  showBathMeterGuides: boolean;
   /** Group view scale controlled by the sticky group toolbar. */
   viewZoom?: number;
   sheetRotations: Record<number, number>;
@@ -345,6 +349,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     pieceMetaByItemId,
     pieceSheetInfoByItemId,
     showFilm,
+    showBathMeterGuides,
     viewZoom = 1,
     sheetRotations,
     sheetMirrors,
@@ -978,6 +983,9 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         const swapsViewAxes = viewRotation % 180 !== 0;
         const rotatedViewportW = swapsViewAxes ? svgDisplayH : svgDisplayW;
         const rotatedViewportH = swapsViewAxes ? svgDisplayW : svgDisplayH;
+        const displayBathLandscape = landscape !== swapsViewAxes;
+        const bathGuideViewW = displayBathLandscape ? H : W;
+        const bathGuideViewH = displayBathLandscape ? W : H;
 
         return (
           <div key={sheetIndex} data-testid={`sheet-editor-sheet-${sheetIndex}`} style={{ display: 'inline-block', verticalAlign: 'top' }}>
@@ -1402,7 +1410,36 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                   </g>
                 );
               })}
+
             </svg>
+            {/* Screen-edge overlay: view rotation/mirroring affects pieces, but
+                film-length references always count from the displayed top/left. */}
+            {showBathMeterGuides && (
+              <svg
+                aria-hidden="true"
+                className="cut-bath-meter-guide-overlay"
+                viewBox={`0 0 ${bathGuideViewW} ${bathGuideViewH}`}
+                width={rotatedViewportW}
+                height={rotatedViewportH}
+                style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+              >
+                {bathMeterGuideLines(W, H, displayBathLandscape).map((line) => (
+                  <line
+                    key={line.offsetMm}
+                    className="cut-bath-meter-guide"
+                    data-offset-mm={line.offsetMm}
+                    x1={line.x1}
+                    y1={line.y1}
+                    x2={line.x2}
+                    y2={line.y2}
+                    stroke={BATH_METER_GUIDE_STYLE.stroke}
+                    strokeOpacity={BATH_METER_GUIDE_STYLE.strokeOpacity}
+                    strokeWidth={BATH_METER_GUIDE_STYLE.strokeWidthMm}
+                    strokeDasharray={`${BATH_METER_GUIDE_STYLE.dashMm} ${BATH_METER_GUIDE_STYLE.gapMm}`}
+                  />
+                ))}
+              </svg>
+            )}
             </div>
           </div>
         );

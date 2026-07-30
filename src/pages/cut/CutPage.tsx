@@ -69,7 +69,12 @@ import type {
   EligibleDetailDto,
   SheetPlacements,
 } from '../../api/types/cutApi.types';
-import { validateSheetPlacements, validateSheetGroupInvariant, movesFromSheets } from './cutLayoutGeometry';
+import {
+  movesFromSheets,
+  shouldShowBathMeterGuides,
+  validateSheetGroupInvariant,
+  validateSheetPlacements,
+} from './cutLayoutGeometry';
 import type { CutAxisOrigin, ManualViolation } from './cutLayoutGeometry';
 import {
   CUT_JOB_STATUS_FILTER_ALL,
@@ -3464,7 +3469,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
       {job?.groups.map((group) => {
         // Readable group title: «Раскрой: <материал> · N листов» (fallback to id).
-        const matName = sheetOptions.find((o) => o.sheetMaterialTypeId === group.sheetMaterialTypeId)?.name;
+        const sheetOption = sheetOptions.find((o) => o.sheetMaterialTypeId === group.sheetMaterialTypeId);
+        const matName = sheetOption?.name;
+        const showBathMeterGuides = shouldShowBathMeterGuides({
+          engineUsed: group.summary?.engine_used,
+          layoutMode: profiles.find((profile) => profile.cutParamProfileId === job.paramProfileId)?.params?.layout_mode,
+          materialName: sheetOption?.name,
+          materialHeightMm: sheetOption?.heightMm,
+        });
         const filmNames = groupFilmNames(job, group);
         const filmText = filmNames.length > 0 ? filmNames.join(', ') : null;
         const filmLabel = filmNames.length > 1 ? 'Плёнки' : 'Плёнка';
@@ -3745,6 +3757,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   pieceMetaByItemId={pieceMetaByItemId}
                   pieceSheetInfoByItemId={pieceSheetInfoByItemId}
                   showFilm={!job.combineFilms}
+                  showBathMeterGuides={showBathMeterGuides}
                 />
               </div>
             )}

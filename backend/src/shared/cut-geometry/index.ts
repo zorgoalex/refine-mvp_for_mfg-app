@@ -84,6 +84,81 @@ export type ManualViolation = {
 
 const DEFAULT_EPS = 1e-6;
 
+/** Physical film-length reference marks used by 2800 mm vacuum baths. */
+export const BATH_METER_GUIDE_OFFSETS_MM = [800, 1800] as const;
+export const BATH_METER_GUIDE_SHEET_HEIGHT_MM = 2800;
+export const BATH_METER_GUIDE_STYLE = {
+  stroke: '#536273',
+  strokeOpacity: 0.28,
+  strokeWidthMm: 3,
+  dashMm: 18,
+  gapMm: 14,
+} as const;
+
+export interface BathMeterGuideEligibility {
+  /** Effective layout mode from frozen calculation params. */
+  layoutMode?: unknown;
+  /** Effective engine stored in cut_group.summary. */
+  engineUsed?: unknown;
+  materialName?: unknown;
+  materialHeightMm?: unknown;
+}
+
+/**
+ * A catalog row represents a vacuum bath only when all three stable facts
+ * agree: vacuum calculation, a name beginning with «Ванна», and catalog
+ * height 2800 mm. Name/dimensions alone must not decorate ordinary sheets.
+ */
+export function shouldShowBathMeterGuides(input: BathMeterGuideEligibility): boolean {
+  const vacuumLayout = input.layoutMode === 'vacuum_table' || input.engineUsed === 'vacuum_table';
+  const name = typeof input.materialName === 'string'
+    ? input.materialName.normalize('NFKC').trimStart().toLocaleLowerCase('ru-RU')
+    : '';
+  const height = typeof input.materialHeightMm === 'number'
+    ? input.materialHeightMm
+    : typeof input.materialHeightMm === 'string'
+      ? Number(input.materialHeightMm)
+      : Number.NaN;
+  return vacuumLayout
+    && name.startsWith('ванна')
+    && Number.isFinite(height)
+    && height === BATH_METER_GUIDE_SHEET_HEIGHT_MM;
+}
+
+export interface BathMeterGuideLine {
+  offsetMm: (typeof BATH_METER_GUIDE_OFFSETS_MM)[number];
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/**
+ * Lines are screen-edge based by product contract: from the top in portrait,
+ * from the left in landscape. They remain independent from coordinate-origin
+ * and dense-cluster preferences, which only reposition cut pieces.
+ */
+export function bathMeterGuideLines(
+  sheetWidthMm: number,
+  sheetHeightMm: number,
+  landscape: boolean,
+): BathMeterGuideLine[] {
+  if (
+    !Number.isFinite(sheetWidthMm)
+    || !Number.isFinite(sheetHeightMm)
+    || sheetWidthMm <= 0
+    || sheetHeightMm <= 0
+  ) {
+    return [];
+  }
+  const displayedLongSideMm = sheetHeightMm;
+  return BATH_METER_GUIDE_OFFSETS_MM
+    .filter((offsetMm) => offsetMm > 0 && offsetMm < displayedLongSideMm)
+    .map((offsetMm) => landscape
+      ? { offsetMm, x1: offsetMm, y1: 0, x2: offsetMm, y2: sheetWidthMm }
+      : { offsetMm, x1: 0, y1: offsetMm, x2: sheetWidthMm, y2: offsetMm });
+}
+
 // ── Core geometry helpers ─────────────────────────────────────────────────
 
 /**

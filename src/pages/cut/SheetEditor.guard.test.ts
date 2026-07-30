@@ -51,6 +51,15 @@ describe('SheetEditor source contract', () => {
     expect(src).toMatch(/Материал/);
     expect(src).toMatch(/Плёнк/);
   });
+  it('renders shared low-contrast 800/1800 mm vacuum-bath guides above piece fills', () => {
+    expect(src).toMatch(/showBathMeterGuides/);
+    expect(src).toMatch(/displayBathLandscape\s*=\s*landscape\s*!==\s*swapsViewAxes/);
+    expect(src).toMatch(/className="cut-bath-meter-guide-overlay"/);
+    expect(src).toMatch(/bathMeterGuideLines\(W,\s*H,\s*displayBathLandscape\)/);
+    expect(src).toMatch(/className="cut-bath-meter-guide"/);
+    expect(src).toMatch(/BATH_METER_GUIDE_STYLE\.strokeOpacity/);
+    expect(src).toMatch(/pointerEvents:\s*'none'/);
+  });
   it('numbers editor sheets by display position, not the (possibly sparse) sheetIndex', () => {
     // A group's manual layout may omit an emptied sheet, leaving a gap in sheetIndex.
     // The "Лист N" header must use the dense render position so numbering stays 1..N.

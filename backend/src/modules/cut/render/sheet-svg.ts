@@ -1,4 +1,10 @@
-import { applyAxisOrigin, orientPieceRect, type CutAxisOrigin } from '../../../shared/cut-geometry';
+import {
+  BATH_METER_GUIDE_STYLE,
+  applyAxisOrigin,
+  bathMeterGuideLines,
+  orientPieceRect,
+  type CutAxisOrigin,
+} from '../../../shared/cut-geometry';
 import {
   parseFreecutItemId,
   type BackMappedSheet,
@@ -183,6 +189,8 @@ export interface BuildSheetSvgInput {
    * SVG download and PDF print always keep labels (showLabels=true).
    */
   showLabels?: boolean;
+  /** Overlay 800/1800 mm film-length references for a resolved vacuum bath. */
+  showBathMeterGuides?: boolean;
 }
 
 function escapeXml(value: string): string {
@@ -213,6 +221,35 @@ function pieceDataAttributes(piece: FreecutPlacement, cx: number, cy: number): s
 
 function renderPieceGroup(piece: FreecutPlacement, cx: number, cy: number, body: string): string {
   return `<g ${pieceDataAttributes(piece, cx, cy)}>${body}</g>`;
+}
+
+function renderBathMeterGuides(sheet: SheetPlacementsJson, landscape: boolean): string {
+  return bathMeterGuideLines(sheet.sheet_width_mm, sheet.sheet_height_mm, landscape)
+    .map((line) => (
+      `<line class="cut-bath-meter-guide" data-offset-mm="${num(line.offsetMm)}" x1="${num(line.x1)}" y1="${num(
+        line.y1,
+      )}" x2="${num(line.x2)}" y2="${num(line.y2)}" stroke="${BATH_METER_GUIDE_STYLE.stroke}" stroke-opacity="${num(
+        BATH_METER_GUIDE_STYLE.strokeOpacity,
+      )}" stroke-width="${num(BATH_METER_GUIDE_STYLE.strokeWidthMm)}" stroke-dasharray="${num(
+        BATH_METER_GUIDE_STYLE.dashMm,
+      )} ${num(BATH_METER_GUIDE_STYLE.gapMm)}" pointer-events="none"/>`
+    ))
+    .join('');
+}
+
+/** Adds guide overlays to an already rendered/frozen SVG, idempotently. */
+export function addBathMeterGuidesToSvg(
+  svg: string,
+  sheet: SheetPlacementsJson,
+  landscape: boolean,
+): string {
+  if (svg.includes('class="cut-bath-meter-guide"')) return svg;
+  const guides = renderBathMeterGuides(sheet, landscape);
+  if (!guides) return svg;
+  const closingTag = svg.lastIndexOf('</svg>');
+  return closingTag < 0
+    ? svg
+    : `${svg.slice(0, closingTag)}${guides}${svg.slice(closingTag)}`;
 }
 
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
@@ -263,6 +300,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       ].join(''));
     })
     .join('');
+  const bathMeterGuides = input.showBathMeterGuides ? renderBathMeterGuides(sheet, rotate90) : '';
 
   return [
     // viewBox only (no width/height attrs): the px size is chosen at raster time
@@ -270,6 +308,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${num(vbW)} ${num(vbH)}">`,
     `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>`,
     pieces,
+    bathMeterGuides,
     `</svg>`,
   ].join('');
 }
@@ -337,11 +376,13 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
       return renderPieceGroup(piece, cx, cy, [rectEl, ...sideTexts, centerText].join(''));
     })
     .join('');
+  const bathMeterGuides = input.showBathMeterGuides ? renderBathMeterGuides(sheet, rotate90) : '';
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${num(vbW)} ${num(vbH)}">`,
     `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>`,
     pieces,
+    bathMeterGuides,
     `</svg>`,
   ].join('');
 }
