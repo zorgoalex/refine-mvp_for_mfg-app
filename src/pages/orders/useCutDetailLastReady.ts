@@ -2,9 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cutApi } from '../../api/cutApi';
 import type { CutDetailLastReadyRef } from '../../api/types/cutApi.types';
 import {
-  CUT_JOB_READY_EVENT,
   cutJobReadyAffects,
-  readCutJobReadyEvent,
+  subscribeCutJobReady,
 } from '../cut/cutJobEvents';
 import { buildCutJobByDetailId } from './cutColumnHelpers';
 
@@ -51,15 +50,18 @@ export function useCutDetailLastReady({
 
   useEffect(() => {
     if (!enabled || typeof window === 'undefined') return undefined;
-    const handler = (event: Event) => {
-      const payload = readCutJobReadyEvent(event);
-      if (!payload) return;
+    const unsubscribe = subscribeCutJobReady((payload) => {
       if (!cutJobReadyAffects(payload, { detailIds: detailIdsRef.current, orderId: orderIdRef.current })) return;
       void refresh(detailIdsRef.current);
+    });
+    const refreshOnFocus = () => {
+      void refresh(detailIdsRef.current);
     };
-    window.addEventListener(CUT_JOB_READY_EVENT, handler);
+    window.addEventListener('focus', refreshOnFocus);
+
     return () => {
-      window.removeEventListener(CUT_JOB_READY_EVENT, handler);
+      unsubscribe();
+      window.removeEventListener('focus', refreshOnFocus);
     };
   }, [enabled, refresh]);
 

@@ -7,6 +7,7 @@ import { clientPhonesApi } from '../api/clientPhonesApi';
 import { ordersApi } from '../api/ordersApi';
 import { paymentsApi } from '../api/paymentsApi';
 import { usersApi } from '../api/usersApi';
+import { notifyOrderFormReferencesChanged } from '../api/orderFormReferenceEvents';
 import { mapOrderDtoToFormValues, mapOrderListItemToLegacyRow } from '../api/mappers/orderMapper';
 import type { OrderListQuery, OrderSortBy, SortOrder } from '../api/types/orderApi.types';
 import type { ClientPhoneDto } from '../api/types/clientPhoneApi.types';
@@ -1891,6 +1892,7 @@ export const dataProvider = (_apiUrl: string) => {
       `;
       // console.log('[dataProvider.create] GraphQL query:', query);
       const data = await gqlRequest(query, varHeader ? varValues : undefined);
+      notifyOrderFormReferencesChanged(resource);
       return { data: data[`insert_${resource}_one`] };
     },
 
@@ -1938,6 +1940,7 @@ export const dataProvider = (_apiUrl: string) => {
         }
       `;
       const data = await gqlRequest(query, varHeader ? varValues : undefined);
+      notifyOrderFormReferencesChanged(resource);
       return { data: data[`update_${resource}_by_pk`] };
     },
 
@@ -1970,6 +1973,7 @@ export const dataProvider = (_apiUrl: string) => {
         }
       `;
       const data = await gqlRequest(query);
+      notifyOrderFormReferencesChanged(resource);
       return { data: data[`delete_${resource}_by_pk`] };
     },
 
