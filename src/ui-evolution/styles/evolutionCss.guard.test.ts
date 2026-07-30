@@ -10,6 +10,7 @@ describe('evolution CSS isolation', () => {
     ':root[data-ui-variant="line"]',
     ':root[data-ui-variant="air"]',
     ':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"])',
+    ':root:where([data-ui-variant="line"], [data-ui-variant="air"])',
   ];
 
   it('scopes every style rule to the runtime document marker', () => {

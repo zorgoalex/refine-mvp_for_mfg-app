@@ -8,6 +8,10 @@ import { WorkosLinkCard } from "./WorkosLinkCard";
 import { useUiVariantPreference } from "../../ui-variant/useUiVariantPreference";
 import { isModernUiVariant, type UiVariant } from "../../ui-variant/uiVariant";
 import { TelegramNotificationsCard } from "./TelegramNotificationsCard";
+import {
+  OperationalPageHeader,
+  useOperationalUi,
+} from "../../ui-operational/OperationalPrimitives";
 
 const roleNames: Record<string, string> = {
   admin: "Администратор",
@@ -26,6 +30,7 @@ const uiVariantOptions: Array<{ label: string; value: UiVariant }> = [
 ];
 
 export const ProfilePage: React.FC = () => {
+  const isOperational = useOperationalUi();
   const { data: identity } = useGetIdentity<UserIdentity>();
   const { mode, setMode, uiSize, setUiSize } = useAppTheme();
   const {
@@ -37,10 +42,24 @@ export const ProfilePage: React.FC = () => {
   const roleName = identity?.role ? roleNames[identity.role] ?? identity.role : "—";
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: "100%", padding: 24 }}>
-      <Typography.Title level={3} style={{ margin: 0 }}>
-        Личный кабинет
-      </Typography.Title>
+    <Space
+      className={`profile-page${isOperational ? " profile-page--operational" : ""}`}
+      direction="vertical"
+      size="middle"
+      style={{ width: "100%", padding: isOperational ? 0 : 24 }}
+    >
+      {isOperational ? (
+        <OperationalPageHeader
+          compact
+          breadcrumbs="Профиль / Личный кабинет"
+          title="Личный кабинет"
+          description="Учетная запись, уведомления и персональные настройки интерфейса."
+        />
+      ) : (
+        <Typography.Title level={3} style={{ margin: 0 }}>
+          Личный кабинет
+        </Typography.Title>
+      )}
       <Card>
         <Descriptions column={1} size="small" bordered>
           <Descriptions.Item label="Пользователь">

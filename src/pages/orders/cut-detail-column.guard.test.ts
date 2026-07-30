@@ -15,7 +15,7 @@ describe('cut detail column', () => {
     const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
     // Wrapped in the top-scrollbar helper + horizontal scroll enabled so the
     // (now 13-column) details table is reachable without scrolling to the bottom.
-    expect(show).toContain('<TableTopScroll>');
+    expect(show).toContain('<TableTopScroll');
     expect(show).toContain("scroll={{ x: 'max-content' }}");
   });
 

@@ -1,7 +1,7 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select, Popconfirm } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, MoreOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -62,6 +62,7 @@ import {
 import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from "../cut/cutJobEvents";
 import { useCutDetailLastReady } from "./useCutDetailLastReady";
 import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
+import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/OperationalPrimitives";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 
@@ -179,11 +180,13 @@ const modalConfirm = (content: string): Promise<boolean> =>
 
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
+  const isOperational = useOperationalUi();
   const isMobile = useIsMobile();
   const { id: currentOrderId } = useParams();
   const [searchParams] = useSearchParams();
   const highlightDetail = Number(searchParams.get('highlightDetail')) || null;
   const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(null);
+  const [activeOperationalTab, setActiveOperationalTab] = useState('overview');
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [moveCandidates, setMoveCandidates] = useState<ProjectDto[]>([]);
   const [moveCandidatesLoading, setMoveCandidatesLoading] = useState(false);
@@ -450,9 +453,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   }), [orderShowDetailsToolbarHeight, orderShowTableHeaderTop, orderShowTabsShellHeight, workspaceTabsHeight]);
   const orderShowPageClassName = useMemo(() => [
     'order-show-page',
+    isOperational ? 'order-show-page--operational' : '',
+    isOperational && activeInfoPanel === 'cut' ? 'order-show-page--cut-active' : '',
+    isOperational && activeInfoPanel === 'additional' ? 'order-show-page--additional-active' : '',
     orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
     orderShowSummaryStuck ? 'order-show-page--summary-stuck' : '',
-  ].filter(Boolean).join(' '), [orderShowStickyEnabled, orderShowSummaryStuck]);
+  ].filter(Boolean).join(' '), [activeInfoPanel, isOperational, orderShowStickyEnabled, orderShowSummaryStuck]);
   const orderShowDetailTableSticky = useMemo(() => (
     orderShowStickyEnabled && orderShowTableHeaderTop > 0
       ? { offsetHeader: orderShowTableHeaderTop }
@@ -1222,12 +1228,31 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       </Space>
     </div>
   );
+  const visibleOrderInfoTabs: Array<{
+    key: string;
+    panel: OrderInfoPanelKey | null;
+    label: string;
+    color: string;
+  }> = isOperational ? [
+    { key: 'overview', panel: null, label: 'Обзор', color: 'var(--operational-brand)' },
+    { key: 'composition', panel: 'groups', label: 'Состав', color: 'var(--operational-brand)' },
+    { key: 'materials', panel: 'additional', label: 'Материалы', color: 'var(--operational-brand)' },
+    { key: 'cut', panel: 'cut', label: 'Раскрой', color: 'var(--operational-brand)' },
+    { key: 'production', panel: 'additional', label: 'Производство', color: 'var(--operational-brand)' },
+    { key: 'finance', panel: 'finance', label: 'Финансы', color: 'var(--operational-brand)' },
+    { key: 'logistics', panel: 'deadlines', label: 'Логистика', color: 'var(--operational-brand)' },
+    { key: 'labels', panel: 'additional', label: 'Бирки', color: 'var(--operational-brand)' },
+    { key: 'activity', panel: 'deadlines', label: 'Активность', color: 'var(--operational-brand)' },
+  ] : orderInfoTabs.map((tab) => ({ ...tab, panel: tab.key }));
+  const activeOrderInfoLabel = isOperational
+    ? visibleOrderInfoTabs.find((tab) => tab.key === activeOperationalTab)?.label
+    : visibleOrderInfoTabs.find((tab) => tab.panel === activeInfoPanel)?.label;
 
   return (
     <Show
       isLoading={showLoading}
-      title={showTitle}
-      breadcrumb={
+      title={isOperational ? ' ' : showTitle}
+      breadcrumb={isOperational ? false : (
         <Breadcrumb>
           <Breadcrumb.Item>
             <Link to="/">
@@ -1239,8 +1264,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           </Breadcrumb.Item>
           <Breadcrumb.Item>Просмотр</Breadcrumb.Item>
         </Breadcrumb>
-      }
-      headerButtons={() => (
+      )}
+      headerButtons={() => isOperational ? null : (
         deletedOrder ? null : (
           isMobile ? (
             <>
@@ -1434,6 +1459,60 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       ) : record && (
         <div className={orderShowPageClassName} style={orderShowStickyStyle}>
           <div ref={orderShowStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
+          {isOperational ? (
+            <OperationalPageHeader
+              breadcrumbs={(
+                <Space split={<span>›</span>} size={6}>
+                  <Link to="/orders">Заказы</Link>
+                  <span>{record.order_name}</span>
+                  {activeOrderInfoLabel ? <span>{activeOrderInfoLabel}</span> : null}
+                </Space>
+              )}
+              title={`Заказ ${record.order_name}${activeOrderInfoLabel ? ` · ${activeOrderInfoLabel}` : ''}`}
+              description={activeOperationalTab === 'labels'
+                ? 'Предпросмотр, навигация и печать производственных бирок без перехода между разделами.'
+                : activeOperationalTab === 'cut'
+                  ? 'Контроль готовности деталей, заданий и листов раскроя в контексте заказа.'
+                  : 'Контроль состава, производства, финансов и документов заказа в одном рабочем пространстве.'}
+              actions={(
+                activeOperationalTab === 'labels' ? (
+                  <>
+                    <Button icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}?tab=additional`)}>
+                      Изменить
+                    </Button>
+                    <Button icon={<DownloadOutlined />} onClick={handlePrint}>
+                      PDF
+                    </Button>
+                    <Button type="primary" icon={<PrinterOutlined />} onClick={handlePrint}>
+                      Печать
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      icon={<EyeOutlined />}
+                      onClick={() => {
+                        setActiveOperationalTab('overview');
+                        setActiveInfoPanel(null);
+                      }}
+                    >
+                      Просмотр
+                    </Button>
+                    <Button icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}`)}>
+                      Редактировать
+                    </Button>
+                    <Button
+                      type="primary"
+                      icon={<CheckOutlined />}
+                      onClick={() => message.success('Заказ готов к передаче на следующий этап')}
+                    >
+                      Передать на следующий этап
+                    </Button>
+                  </>
+                )
+              )}
+            />
+          ) : null}
           <div ref={orderShowSummaryTabsRef} className="order-show-summary-tabs-sticky">
             <OrderShowHeader
               record={record}
@@ -1456,8 +1535,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 overflow: 'hidden',
               }}
             >
-              {orderInfoTabs.map((tab) => {
-                const isActive = activeInfoPanel === tab.key;
+              {visibleOrderInfoTabs.map((tab) => {
+                const isActive = isOperational
+                  ? activeOperationalTab === tab.key
+                  : activeInfoPanel === tab.panel;
 
                 return (
                   <button
@@ -1466,7 +1547,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     role="tab"
                     aria-selected={isActive}
                     title={tab.label}
-                    onClick={() => setActiveInfoPanel(isActive ? null : tab.key)}
+                    onClick={() => {
+                      if (isOperational) {
+                        setActiveOperationalTab(tab.key);
+                        setActiveInfoPanel(tab.panel);
+                      } else {
+                        setActiveInfoPanel(isActive ? null : tab.panel);
+                      }
+                    }}
                     style={{
                       flex: '1 1 0',
                       minWidth: 0,
@@ -1573,7 +1661,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 )}
 
                 {activeInfoPanel === 'additional' && (
-                  <>
+                  isOperational && activeOperationalTab === 'labels' ? (
+                    <div className="order-label-operational-view">
+                      {labelsEnabled && record?.order_id ? (
+                        <OrderLatestLabelsPreview orderId={record.order_id} />
+                      ) : (
+                        <span style={{ color: 'var(--app-text-muted)' }}>Бирки недоступны</span>
+                      )}
+                    </div>
+                  ) : (
+                    <>
                     {/* Три колонки: Даты | Производство | Присадки + Раскрой */}
                     <div
                       style={{
@@ -1751,7 +1848,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         </div>
                       </details>
                     </div>
-                  </>
+                    </>
+                  )
                 )}
               </div>
             )}

@@ -1,5 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftOutlined, CheckOutlined, CloseOutlined, EditOutlined } from '@ant-design/icons';
+import {
+  ArrowLeftOutlined,
+  CheckOutlined,
+  CloseOutlined,
+  DownloadOutlined,
+  EditOutlined,
+  HistoryOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import { Alert, Button, Card, Col, Descriptions, Empty, Input, Row, Select, Space, Spin, Tabs, Tooltip, Typography, message } from 'antd';
 import type { BazisProjectCard } from '../../api/types/bazisApi.types';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
@@ -16,10 +24,15 @@ import { NodeSearch } from './NodeSearch';
 import { RevisionOrdersTab } from './RevisionOrdersTab';
 import { buildSubtreeSummaries, useRevisionData } from './useRevisionData';
 import { ViewerTree, type ViewerTreeHandle } from './ViewerTree';
+import {
+  OperationalPageHeader,
+  useOperationalUi,
+} from '../../ui-operational/OperationalPrimitives';
 
 const { Title, Text } = Typography;
 
 export const BazisProjectViewPage: React.FC = () => {
+  const isOperational = useOperationalUi();
   const { bazisProjectId: bazisProjectIdParam } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [projectCard, setProjectCard] = useState<BazisProjectCard | null>(null);
@@ -227,6 +240,18 @@ export const BazisProjectViewPage: React.FC = () => {
     }
   };
 
+  const exportProjectSnapshot = () => {
+    if (!projectCard) return;
+
+    const blob = new Blob([JSON.stringify(projectCard, null, 2)], { type: 'application/json' });
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = href;
+    anchor.download = `bazis-project-${projectCard.bazisProjectId}.json`;
+    anchor.click();
+    URL.revokeObjectURL(href);
+  };
+
   if (!can('bazis.view')) {
     return <Alert type="error" message="Недостаточно прав" showIcon />;
   }
@@ -260,204 +285,259 @@ export const BazisProjectViewPage: React.FC = () => {
     label: buildRevisionLabel(revision),
   }));
 
-  return (
-    <Card
-      className="bazis-project-modern-card"
-      title={(
-        <Space direction="vertical" size={4}>
-          <Space align="center" size={12}>
-            <Link to="/bazis">
-              <Button size="small" icon={<ArrowLeftOutlined />}>К списку</Button>
-            </Link>
-            {renaming ? (
-              <Space.Compact>
-                <Input
-                  autoFocus
-                  aria-label="Название Базис-проекта"
-                  value={renameDraft}
-                  maxLength={300}
-                  style={{ width: 'min(420px, 48vw)', height: 40 }}
-                  onChange={(event) => setRenameDraft(event.target.value)}
-                  onPressEnter={() => void saveProjectName()}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape') cancelRename();
-                  }}
+  const projectTitle = (
+    <Space direction="vertical" size={4}>
+      <Space align="center" size={12}>
+        {!isOperational ? (
+          <Link to="/bazis">
+            <Button size="small" icon={<ArrowLeftOutlined />}>К списку</Button>
+          </Link>
+        ) : null}
+        {renaming ? (
+          <Space.Compact>
+            <Input
+              autoFocus
+              aria-label="Название Базис-проекта"
+              value={renameDraft}
+              maxLength={300}
+              style={{ width: 'min(420px, 48vw)', height: 40 }}
+              onChange={(event) => setRenameDraft(event.target.value)}
+              onPressEnter={() => void saveProjectName()}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') cancelRename();
+              }}
+            />
+            <Tooltip title="Сохранить">
+              <Button
+                aria-label="Сохранить название"
+                icon={<CheckOutlined />}
+                type="primary"
+                loading={renameSaving}
+                disabled={!renameDraft.trim()}
+                style={{ minWidth: 40, height: 40 }}
+                onClick={() => void saveProjectName()}
+              />
+            </Tooltip>
+            <Tooltip title="Отмена">
+              <Button
+                aria-label="Отменить редактирование"
+                icon={<CloseOutlined />}
+                disabled={renameSaving}
+                style={{ minWidth: 40, height: 40 }}
+                onClick={cancelRename}
+              />
+            </Tooltip>
+          </Space.Compact>
+        ) : (
+          <Space align="center" size={4}>
+            <Title level={3} style={{ margin: 0 }}>
+              {projectCard.name}
+            </Title>
+            {canManage ? (
+              <Tooltip title="Изменить название">
+                <Button
+                  aria-label="Изменить название Базис-проекта"
+                  type="text"
+                  icon={<EditOutlined />}
+                  style={{ width: 40, height: 40 }}
+                  onClick={startRename}
                 />
-                <Tooltip title="Сохранить">
-                  <Button
-                    aria-label="Сохранить название"
-                    icon={<CheckOutlined />}
-                    type="primary"
-                    loading={renameSaving}
-                    disabled={!renameDraft.trim()}
-                    style={{ minWidth: 40, height: 40 }}
-                    onClick={() => void saveProjectName()}
-                  />
-                </Tooltip>
-                <Tooltip title="Отмена">
-                  <Button
-                    aria-label="Отменить редактирование"
-                    icon={<CloseOutlined />}
-                    disabled={renameSaving}
-                    style={{ minWidth: 40, height: 40 }}
-                    onClick={cancelRename}
-                  />
-                </Tooltip>
-              </Space.Compact>
-            ) : (
-              <Space align="center" size={4}>
-                <Title level={3} style={{ margin: 0 }}>
-                  {projectCard.name}
-                </Title>
-                {canManage ? (
-                  <Tooltip title="Изменить название">
-                    <Button
-                      aria-label="Изменить название Базис-проекта"
-                      type="text"
-                      icon={<EditOutlined />}
-                      style={{ width: 40, height: 40 }}
-                      onClick={startRename}
-                    />
-                  </Tooltip>
-                ) : null}
-              </Space>
-            )}
-          </Space>
-          {renameErrorText ? <Text type="danger">{renameErrorText}</Text> : null}
-          <Space size={12} wrap>
-            <Link to={`/projects/show/${projectCard.projectId}`}>
-              {projectCard.projectName?.trim()
-                ? `ERP-проект: ${projectCard.projectName.trim()} · #${projectCard.projectId}`
-                : `ERP-проект #${projectCard.projectId}`}
-            </Link>
-            {projectCard.bazisOrderNo?.trim() ? (
-              <Text type="secondary">{`Заказ Базис: ${projectCard.bazisOrderNo.trim()}`}</Text>
+              </Tooltip>
             ) : null}
           </Space>
-        </Space>
-      )}
-      extra={selectedRevision ? (
-        <Space align="center" wrap>
-          <Text strong>Ревизия</Text>
-          <Select<number>
-            style={{ minWidth: 320 }}
-            value={selectedRevision.bazisRevisionId}
-            options={revisionOptions}
-            onChange={handleRevisionChange}
-          />
-        </Space>
+        )}
+      </Space>
+      {renameErrorText ? <Text type="danger">{renameErrorText}</Text> : null}
+      <Space size={12} wrap>
+        <Link to={`/projects/show/${projectCard.projectId}`}>
+          {projectCard.projectName?.trim()
+            ? `ERP-проект: ${projectCard.projectName.trim()} · #${projectCard.projectId}`
+            : `ERP-проект #${projectCard.projectId}`}
+        </Link>
+        {projectCard.bazisOrderNo?.trim() ? (
+          <Text type="secondary">{`Заказ Базис: ${projectCard.bazisOrderNo.trim()}`}</Text>
+        ) : null}
+      </Space>
+    </Space>
+  );
+  const tabLabel = (label: string, count?: number | null) => isOperational ? (
+    <span className="bazis-project-tab-label">
+      <span>{label}</span>
+      {count != null ? <small>{count}</small> : null}
+    </span>
+  ) : `${label}${count != null ? ` · ${count}` : ''}`;
+
+  return (
+    <div className="bazis-project-workspace">
+      {isOperational ? (
+        <OperationalPageHeader
+          breadcrumbs={(
+            <Space split={<span>›</span>} size={6}>
+              <Link to="/orders">Заказы</Link>
+              <Link to="/bazis">Базис-проекты</Link>
+              <span>{projectCard.name}</span>
+            </Space>
+          )}
+          title={`Базис-проект ${projectCard.name}`}
+          description="Ревизия, панели и производственная готовность проекта в одном рабочем пространстве."
+          actions={(
+            <>
+              <Button
+                icon={<HistoryOutlined />}
+                onClick={() => document.querySelector('.bazis-project-modern-card')?.scrollIntoView({ behavior: 'smooth' })}
+              >
+                Изменения
+              </Button>
+              <Button icon={<DownloadOutlined />} onClick={exportProjectSnapshot}>
+                Экспорт
+              </Button>
+              <Button type="primary" icon={<PlusOutlined />} disabled>
+                Создать заказ
+              </Button>
+            </>
+          )}
+        />
       ) : null}
-    >
-      {projectCard.revisions.length === 0 || !selectedRevision ? (
-        <Empty description="У проекта пока нет ревизий" />
-      ) : (
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          items={[
-            {
-              key: 'panels',
-              label: 'Панели',
-              children: revisionData.errorText ? (
-                <Alert type="warning" showIcon message={revisionData.errorText} />
-              ) : revisionData.loading ? (
-                <Spin />
-              ) : (
-                <PanelsTab
-                  // remount при смене ревизии: сбрасывает expandedRowKeys —
-                  // групповые ключи (материал+размеры) могут совпасть в другой ревизии
-                  key={selectedRevision.bazisRevisionId}
-                  revisionId={selectedRevision.bazisRevisionId}
-                  data={revisionData}
-                  bazisOrderNo={projectCard.bazisOrderNo}
-                  canManage={canManage}
-                  selectedId={selectedPanelId}
-                  focusToken={panelFocusToken}
-                  onSelect={setSelectedPanelId}
-                  onGoToTree={goToTree}
-                />
-              ),
-            },
-            {
-              key: 'hardware',
-              label: 'Фурнитура',
-              children: revisionData.loading ? <Spin /> : (
-                <HardwareTab data={revisionData} onGoToTree={goToTree} onGoToPanel={goToPanel} />
-              ),
-            },
-            {
-              key: 'operations',
-              label: 'Операции',
-              children: revisionData.loading ? <Spin /> : (
-                <OperationsTab data={revisionData} onGoToTree={goToTree} onGoToPanel={goToPanel} />
-              ),
-            },
-            {
-              key: 'estimate',
-              label: 'Смета',
-              children: revisionData.loading ? <Spin /> : (
-                <EstimateTab data={revisionData} onGoToTree={goToTree} onGoToPanel={goToPanel} />
-              ),
-            },
-            {
-              key: 'tree',
-              label: 'Дерево',
-              children: (
-                <Space direction="vertical" size="large" style={{ width: '100%' }}>
-                  <Descriptions bordered size="small" column={6}>
-                    <Descriptions.Item label="Всего узлов">{selectedRevision.summary.totalNodes ?? '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Панели">{selectedRevision.summary.panels ?? '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Фурнитура">{selectedRevision.summary.hardware ?? '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Сборки">{selectedRevision.summary.assemblies ?? '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Блоки">{selectedRevision.summary.blocks ?? '—'}</Descriptions.Item>
-                    <Descriptions.Item label="Уникальных материалов">{selectedRevision.summary.uniqueMaterials ?? '—'}</Descriptions.Item>
-                  </Descriptions>
-                  <NodeSearch
-                    // key заставляет пересоздать компонент при смене ревизии — гарантированно сбрасывает
-                    // внутреннее состояние поиска, не полагаясь только на internal useEffect
+      <Card
+        className="bazis-project-modern-card"
+        title={isOperational ? (
+          <div className="bazis-project-workspace__revision-title">
+            <Text className="bazis-project-workspace__eyebrow">Активная ревизия</Text>
+            <Title level={2}>
+              {projectCard.bazisOrderNo?.trim()
+                ? `${projectCard.bazisOrderNo.trim()} · ${selectedRevision?.productName?.trim() || projectCard.name}`
+                : selectedRevision?.productName?.trim() || projectCard.name}
+            </Title>
+            <Text type="secondary">
+              {selectedRevision
+                ? `Базис #${selectedRevision.bazisRevisionId} · обновлено ${formatRevisionDate(selectedRevision.importedAt)}`
+                : 'Ревизия не выбрана'}
+            </Text>
+          </div>
+        ) : projectTitle}
+        extra={selectedRevision ? (
+          <Space align="center" className="bazis-project-workspace__revision-select">
+            <Text strong>Ревизия</Text>
+            <Select<number>
+              style={{ width: '100%', minWidth: 0 }}
+              value={selectedRevision.bazisRevisionId}
+              options={revisionOptions}
+              onChange={handleRevisionChange}
+            />
+          </Space>
+        ) : null}
+      >
+        {projectCard.revisions.length === 0 || !selectedRevision ? (
+          <Empty description="У проекта пока нет ревизий" />
+        ) : (
+          <Tabs
+            activeKey={activeTab}
+            onChange={setActiveTab}
+            items={[
+              {
+                key: 'panels',
+                label: tabLabel('Панели', selectedRevision.summary.panels),
+                children: revisionData.errorText ? (
+                  <Alert type="warning" showIcon message={revisionData.errorText} />
+                ) : revisionData.loading ? (
+                  <Spin />
+                ) : (
+                  <PanelsTab
+                    // remount при смене ревизии: сбрасывает expandedRowKeys —
+                    // групповые ключи (материал+размеры) могут совпасть в другой ревизии
                     key={selectedRevision.bazisRevisionId}
                     revisionId={selectedRevision.bazisRevisionId}
-                    onPick={(item) => (
-                      viewerTreeRef.current?.revealNode(item.pathNodeIds, item.bazisNodeId) ?? Promise.resolve()
-                    )}
+                    data={revisionData}
+                    bazisOrderNo={projectCard.bazisOrderNo}
+                    canManage={canManage}
+                    selectedId={selectedPanelId}
+                    focusToken={panelFocusToken}
+                    onSelect={setSelectedPanelId}
+                    onGoToTree={goToTree}
                   />
-                  <Row gutter={[16, 16]}>
-                    <Col span={14} xs={24} lg={14}>
-                      <ViewerTree
-                        ref={viewerTreeRef}
-                        revisionId={selectedRevision.bazisRevisionId}
-                        height={treeHeight}
-                        selectedNodeId={selectedNodeId}
-                        onSelectNode={setSelectedNodeId}
-                        getNodeSummary={getNodeSummary}
-                      />
-                    </Col>
-                    <Col span={10} xs={24} lg={10}>
-                      <NodeCard nodeId={selectedNodeId} />
-                    </Col>
-                  </Row>
-                </Space>
-              ),
-            },
-            {
-              key: 'materials',
-              label: 'Материалы',
-              children: (
-                <MaterialsSummaryTab
-                  revisionId={selectedRevision.bazisRevisionId}
-                  canManage={canManage}
-                />
-              ),
-            },
-            {
-              key: 'orders',
-              label: 'Заказы',
-              children: <RevisionOrdersTab revisionId={selectedRevision.bazisRevisionId} />,
-            },
-          ]}
-        />
-      )}
-    </Card>
+                ),
+              },
+              {
+                key: 'hardware',
+                label: tabLabel('Фурнитура', selectedRevision.summary.hardware),
+                children: revisionData.loading ? <Spin /> : (
+                  <HardwareTab data={revisionData} onGoToTree={goToTree} onGoToPanel={goToPanel} />
+                ),
+              },
+              {
+                key: 'operations',
+                label: tabLabel('Операции'),
+                children: revisionData.loading ? <Spin /> : (
+                  <OperationsTab data={revisionData} onGoToTree={goToTree} onGoToPanel={goToPanel} />
+                ),
+              },
+              {
+                key: 'estimate',
+                label: tabLabel('Смета'),
+                children: revisionData.loading ? <Spin /> : (
+                  <EstimateTab data={revisionData} onGoToTree={goToTree} onGoToPanel={goToPanel} />
+                ),
+              },
+              {
+                key: 'tree',
+                label: tabLabel('Дерево'),
+                children: (
+                  <Space direction="vertical" size="large" style={{ width: '100%' }}>
+                    <Descriptions bordered size="small" column={6}>
+                      <Descriptions.Item label="Всего узлов">{selectedRevision.summary.totalNodes ?? '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Панели">{selectedRevision.summary.panels ?? '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Фурнитура">{selectedRevision.summary.hardware ?? '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Сборки">{selectedRevision.summary.assemblies ?? '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Блоки">{selectedRevision.summary.blocks ?? '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Уникальных материалов">{selectedRevision.summary.uniqueMaterials ?? '—'}</Descriptions.Item>
+                    </Descriptions>
+                    <NodeSearch
+                      // key заставляет пересоздать компонент при смене ревизии — гарантированно сбрасывает
+                      // внутреннее состояние поиска, не полагаясь только на internal useEffect
+                      key={selectedRevision.bazisRevisionId}
+                      revisionId={selectedRevision.bazisRevisionId}
+                      onPick={(item) => (
+                        viewerTreeRef.current?.revealNode(item.pathNodeIds, item.bazisNodeId) ?? Promise.resolve()
+                      )}
+                    />
+                    <Row gutter={[16, 16]}>
+                      <Col span={14} xs={24} lg={14}>
+                        <ViewerTree
+                          ref={viewerTreeRef}
+                          revisionId={selectedRevision.bazisRevisionId}
+                          height={treeHeight}
+                          selectedNodeId={selectedNodeId}
+                          onSelectNode={setSelectedNodeId}
+                          getNodeSummary={getNodeSummary}
+                        />
+                      </Col>
+                      <Col span={10} xs={24} lg={10}>
+                        <NodeCard nodeId={selectedNodeId} />
+                      </Col>
+                    </Row>
+                  </Space>
+                ),
+              },
+              {
+                key: 'materials',
+                label: tabLabel('Материалы', selectedRevision.summary.uniqueMaterials),
+                children: (
+                  <MaterialsSummaryTab
+                    revisionId={selectedRevision.bazisRevisionId}
+                    canManage={canManage}
+                  />
+                ),
+              },
+              {
+                key: 'orders',
+                label: tabLabel('Заказы'),
+                children: <RevisionOrdersTab revisionId={selectedRevision.bazisRevisionId} />,
+              },
+            ]}
+          />
+        )}
+      </Card>
+    </div>
   );
 };
 

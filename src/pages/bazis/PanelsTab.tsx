@@ -9,8 +9,15 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
-import { ApartmentOutlined } from '@ant-design/icons';
-import { Button, Checkbox, Collapse, Empty, Modal, Space, Table, Tooltip, Typography, notification } from 'antd';
+import {
+  ApartmentOutlined,
+  FilterOutlined,
+  InfoCircleOutlined,
+  ScissorOutlined,
+  SearchOutlined,
+  SettingOutlined,
+} from '@ant-design/icons';
+import { Button, Checkbox, Collapse, Empty, Input, Modal, Space, Table, Tooltip, Typography, notification } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { FilterDropdownProps, FilterValue } from 'antd/es/table/interface';
 import { isApiError } from '../../api/apiError';
@@ -48,6 +55,7 @@ import {
 } from './panelSelection';
 import { shouldApplyNotesResponse } from './panelNotesEditor';
 import { NODE_KIND_LABELS_RU, nodePathTitle, type RevisionData } from './useRevisionData';
+import { useOperationalUi } from '../../ui-operational/OperationalPrimitives';
 import './panels.css';
 
 const { Panel } = Collapse;
@@ -176,10 +184,11 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   onGoToTree,
 }) => {
   const navigate = useNavigate();
-  const { nodes, byId, ancestorsOf } = data;
+  const isOperational = useOperationalUi();
+  const { nodes, ancestorsOf } = data;
   const [expandedKeys, setExpandedKeys] = useState<readonly React.Key[]>([]);
   const groupedUserId = authSession.getUser()?.id ?? 'anon';
-  const [grouped, setGroupedState] = useState(() => loadPanelsGrouped(groupedUserId));
+  const [grouped, setGroupedState] = useState(() => isOperational ? false : loadPanelsGrouped(groupedUserId));
   const setGrouped = (value: boolean) => {
     setGroupedState(value);
     savePanelsGrouped(groupedUserId, value);
@@ -193,6 +202,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   const [selectOnlyFree, setSelectOnlyFree] = useState(true);
   const [createDraftLoading, setCreateDraftLoading] = useState(false);
   const [addToOrderOpen, setAddToOrderOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [refreshedOrdersByNodeId, setRefreshedOrdersByNodeId] = useState<Map<number, BazisTreeNode['orders']> | null>(null);
   const [notesByNodeId, setNotesByNodeId] = useState<Map<number, string | null> | null>(null);
   // Эпоха данных: инкремент при каждой смене nodes/ревизии. Поздний PATCH-ответ
@@ -211,7 +221,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   }, [nodes, revisionId]);
   const fallbackBazisOrderNo = normalizeText(bazisOrderNo);
 
-  const panels = useMemo<PanelLike[]>(
+  const allPanels = useMemo<PanelLike[]>(
     () =>
       nodes
         .filter((node) => node.objectType === 'Панель')
@@ -233,6 +243,21 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         }),
     [ancestorsOf, fallbackBazisOrderNo, nodes, notesByNodeId, refreshedOrdersByNodeId],
   );
+
+  const panels = useMemo(() => {
+    const query = searchQuery.trim().toLocaleLowerCase('ru-RU');
+    if (!query) {
+      return allPanels;
+    }
+    return allPanels.filter((panel) => [
+      panel.name,
+      panel.designation,
+      panel.materialName,
+      panel.pathTitle,
+      panel.productName,
+      formatSize(panel),
+    ].some((value) => String(value ?? '').toLocaleLowerCase('ru-RU').includes(query)));
+  }, [allPanels, searchQuery]);
 
   const groupRows = useMemo<PanelGroupTableRow[]>(
     () =>
@@ -260,7 +285,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   );
 
   const filterOptions = useMemo(() => buildPanelFilterOptions(panels), [panels]);
-  const alivePanelIds = useMemo(() => new Set(panels.map((panel) => panel.bazisNodeId)), [panels]);
+  const alivePanelIds = useMemo(() => new Set(allPanels.map((panel) => panel.bazisNodeId)), [allPanels]);
   const selectionStats = useMemo(() => selectionSummary(selection, groupRows), [groupRows, selection]);
   const selectionPossible = useMemo(
     () => groupRows.some((group) => group.children.some((panel) => panel.orders.length === 0)),
@@ -313,6 +338,12 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
     }
   }, [focusToken, grouped, groupRows, selectedId]);
 
+  useEffect(() => {
+    if (isOperational && selectedId == null && flatRows[0]) {
+      onSelect(flatRows[0].bazisNodeId);
+    }
+  }, [flatRows, isOperational, onSelect, selectedId]);
+
   const handleNotesSaved = (nodeId: number, notes: string | null, epoch: number) => {
     if (!shouldApplyNotesResponse(epoch, notesEpochRef.current)) {
       return;
@@ -333,7 +364,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         panelFilterPredicate(field, value, row),
     });
 
-    return [
+    const baseColumns: ColumnsType<PanelsTableRow> = [
       {
         // Header: tri-state «выбрать все видимые свободные» (учитывает фильтры;
         // uncheck снимает только видимые, скрытый выбор не трогает)
@@ -445,8 +476,11 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         sorter: panelComparators.name,
         ...filterProps('name', filterOptions.names),
         render: (_, row) => (
-          <span style={{ whiteSpace: 'normal', overflowWrap: 'break-word' }}>
-            {row.rowType === 'group' ? row.names.join(' / ') || '—' : row.name?.trim() || '—'}
+          <span className="bazis-panel-detail-cell">
+            <strong>{row.rowType === 'group' ? row.names.join(' / ') || '—' : row.name?.trim() || '—'}</strong>
+            {isOperational && row.rowType === 'panel' && row.designation?.trim()
+              ? <small>{row.designation.trim()}</small>
+              : null}
           </span>
         ),
       },
@@ -585,11 +619,45 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         },
       },
     ];
-  }, [canManage, filterOptions, handleNotesSaved, notesEpoch, onGoToTree, selectOnlyFree, selection, visiblePanels]);
+
+    if (!isOperational) {
+      return baseColumns;
+    }
+
+    const operationalColumnOrder = [
+      'selection',
+      'seq',
+      'name',
+      'size',
+      'quantity',
+      'areaM2',
+      'material',
+      'edgeCount',
+      'hasDrilling',
+      'orders',
+      'path',
+      'actions',
+    ];
+    return operationalColumnOrder
+      .map((key) => baseColumns.find((column) => column.key === key))
+      .filter((column): column is ColumnsType<PanelsTableRow>[number] => Boolean(column))
+      .map((column) => {
+        if (column.key === 'name') return { ...column, title: 'Деталь', width: 128 };
+        if (column.key === 'material') return { ...column, width: 145 };
+        if (column.key === 'path') return { ...column, width: 96 };
+        return column;
+      });
+  }, [canManage, filterOptions, handleNotesSaved, isOperational, notesEpoch, onGoToTree, selectOnlyFree, selection, visiblePanels]);
 
   const selectedNodeIds = useMemo(() => Array.from(selection.selected), [selection.selected]);
   const selectedAncestors = selectedId != null ? ancestorsOf(selectedId) : [];
-  const selectedPanel = selectedId != null ? byId.get(selectedId) : null;
+  const selectedPanel = selectedId != null
+    ? allPanels.find((panel) => panel.bazisNodeId === selectedId) ?? null
+    : null;
+  const workspaceTotals = summarizeVisibleRows(grouped ? groupRows : flatRows);
+  const workspaceMaterialCount = new Set(
+    visiblePanels.map((panel) => panel.mainMaterialName?.trim()).filter(Boolean),
+  ).size;
 
   if (groupRows.length === 0) {
     return <Empty description="В ревизии нет панелей" />;
@@ -657,62 +725,58 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   };
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Space size="middle" align="center" wrap style={{ justifyContent: 'space-between', width: '100%' }}>
-        <Space size="middle" wrap>
+    <div className="bazis-panels-workspace">
+      <section className="bazis-panels-workspace__table">
+        <div className="bazis-panels-workspace__toolbar">
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            aria-label="Поиск панелей"
+            placeholder="Деталь, обозначение, материал или расположение"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
           <Checkbox checked={grouped} onChange={(event) => setGrouped(event.target.checked)}>
-            Группировать
+            Группировать по изделию
           </Checkbox>
           <Tooltip title="Влияет на верхний чекбокс «выбрать все»: включено — берутся только панели без заказа; выключено — все видимые, включая уже привязанные">
             <Checkbox
+              aria-label="Выбрать с пустым заказом"
               checked={selectOnlyFree}
               onChange={(event) => setSelectOnlyFree(event.target.checked)}
             >
-              Выбрать с пустым заказом
+              Только без заказа
             </Checkbox>
           </Tooltip>
-        </Space>
-        {selectionPossible ? (
-          <Space size="middle" wrap>
-            <Text>
-              Выбрано: {selectionStats.panels} позиций / {selectionStats.units} шт.
-              {selectionStats.excludedBusy > 0 ? ` (исключено ${selectionStats.excludedBusy} — уже в заказе)` : ''}
-            </Text>
-            <Button
-              disabled={selectionStats.panels === 0 || !canManage}
-              loading={createDraftLoading}
-              onClick={() => void handleCreateDraftOrder()}
-            >
-              В новый заказ
-            </Button>
-            {/* source-guard legacy marker: onClick={noop} */}
-            <Button disabled={selectionStats.panels === 0 || !canManage} onClick={() => setAddToOrderOpen(true)}>
-              В существующий заказ
-            </Button>
-          </Space>
-        ) : null}
-      </Space>
+          <span className="bazis-panels-workspace__grow" />
+          <Tooltip title="Фильтры доступны в заголовках колонок">
+            <Button aria-label="Фильтры таблицы" icon={<FilterOutlined />} />
+          </Tooltip>
+          <Tooltip title="Настроить представление">
+            <Button aria-label="Настроить представление" icon={<SettingOutlined />} />
+          </Tooltip>
+        </div>
 
-      <Table<PanelsTableRow>
-        className="bazis-panels-table"
-        bordered
-        size="small"
-        columns={columns}
-        dataSource={grouped ? groupRows : flatRows}
-        onChange={(_pagination, filters) => setTableFilters(filters)}
-        pagination={false}
-        // ~10 строк по 39px + шапка; содержимое скроллится внутри блока
-        scroll={{ y: 390, x: 'max-content' }}
-        expandable={
-          grouped
-            ? {
-                expandedRowKeys: expandedKeys,
-                onExpandedRowsChange: setExpandedKeys,
-                indentSize: 24,
-              }
-            : undefined
-        }
-        summary={(visibleRows) => {
+        <Table<PanelsTableRow>
+          className="bazis-panels-table"
+          bordered
+          size="small"
+          columns={columns}
+          dataSource={grouped ? groupRows : flatRows}
+          onChange={(_pagination, filters) => setTableFilters(filters)}
+          pagination={false}
+          scroll={{ y: isOperational ? 470 : 390, x: 'max-content' }}
+          expandable={
+            grouped
+              ? {
+                  expandedRowKeys: expandedKeys,
+                  onExpandedRowsChange: setExpandedKeys,
+                  indentSize: 24,
+                }
+              : undefined
+          }
+          summary={(visibleRows) => {
+          if (isOperational) return null;
           // rc-table отдаёт сюда УЖЕ отфильтрованный/отсортированный верхний
           // уровень — итоги совпадают с тем, что видит пользователь (critic R1)
           const totals = summarizeVisibleRows(visibleRows);
@@ -741,8 +805,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
               </Table.Summary.Row>
             </Table.Summary>
           );
-        }}
-        rowClassName={(row) => {
+          }}
+          rowClassName={(row) => {
           const selectedClass =
             row.rowType === 'panel' && row.bazisNodeId === selectedId ? 'ant-table-row-selected' : '';
           // Фон-отличие только у ВЛОЖЕННЫХ строк группировки; в плоском
@@ -752,8 +816,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
             hasDeletedOrderReference(row.orders),
             [childClass, selectedClass].filter(Boolean).join(' '),
           );
-        }}
-        onRow={(row) => ({
+          }}
+          onRow={(row) => ({
           onClick: () => {
             if (row.rowType === 'group') {
               // Клик по строке группы = развернуть/свернуть (как Excel-группировка)
@@ -774,28 +838,167 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
               ? BUSY_SELECTED_ROW_STYLE
               : undefined),
           },
-        })}
-      />
+          })}
+        />
 
-      {selectedId != null && selectedPanel ? (
-        // key: смена панели пересоздаёт Collapse — спойлеры возвращаются в свёрнутое
-        // состояние, раскрыта только карточка самой панели
-        <Collapse key={selectedId} defaultActiveKey={['panel']}>
-          <Panel key="panel" header={`Панель: ${selectedPanel.name?.trim() || '—'}`}>
-            <NodeCard nodeId={selectedId} collapsibleSummary />
-          </Panel>
-          {selectedAncestors.map((ancestor) => (
-            <Panel
-              key={ancestor.bazisNodeId}
-              header={`${NODE_KIND_LABELS_RU[ancestor.nodeKind] ?? ancestor.nodeKind}: ${ancestor.name?.trim() || '—'}`}
-            >
-              <NodeCard nodeId={ancestor.bazisNodeId} />
+        <div className="bazis-panels-workspace__selection">
+          {isOperational ? (
+            <>
+              <Text>Всего панелей <strong>{workspaceTotals.positions}</strong></Text>
+              <Text>Количество <strong>{workspaceTotals.totalQuantity ?? '—'}</strong></Text>
+              <Text>
+                Площадь <strong>{workspaceTotals.totalAreaM2 != null ? `${formatAreaM2(workspaceTotals.totalAreaM2)} м²` : '—'}</strong>
+              </Text>
+              <Text>Материалов <strong>{workspaceMaterialCount}</strong></Text>
+            </>
+          ) : (
+            <Text>
+              Панелей: <strong>{flatRows.length}</strong>
+            </Text>
+          )}
+          <span className="bazis-panels-workspace__grow" />
+          {selectionPossible ? (
+            <>
+              <Text>
+                Выбрано: {selectionStats.panels} позиций / {selectionStats.units} шт.
+                {selectionStats.excludedBusy > 0 ? ` · исключено ${selectionStats.excludedBusy}` : ''}
+              </Text>
+              {/* source-guard legacy marker: onClick={noop} */}
+              <Button disabled={selectionStats.panels === 0 || !canManage} onClick={() => setAddToOrderOpen(true)}>
+                В существующий заказ
+              </Button>
+              <Button
+                type="primary"
+                disabled={selectionStats.panels === 0 || !canManage}
+                loading={createDraftLoading}
+                onClick={() => void handleCreateDraftOrder()}
+              >
+                В новый заказ
+              </Button>
+            </>
+          ) : null}
+        </div>
+      </section>
+
+      <aside className="bazis-panels-workspace__inspector">
+        <div className="bazis-panels-workspace__inspector-head">
+          <div>
+            <Text className="bazis-project-workspace__eyebrow">Выбранная панель</Text>
+            <Typography.Title level={3}>{selectedPanel?.name?.trim() || 'Панель не выбрана'}</Typography.Title>
+            {selectedPanel?.designation ? <Text type="secondary">{selectedPanel.designation}</Text> : null}
+          </div>
+          <Tooltip title="Редактирование панели доступно в дереве проекта">
+            <Button
+              aria-label="Редактировать панель"
+              type="text"
+              icon={<SettingOutlined />}
+              disabled={!selectedPanel}
+              onClick={() => selectedPanel && onGoToTree(selectedPanel.bazisNodeId)}
+            />
+          </Tooltip>
+        </div>
+        <div className="bazis-panels-workspace__inspector-body">
+          {selectedId != null && selectedPanel ? (
+            <>
+              <dl className="bazis-panel-definition-list">
+                <div>
+                  <dt>Размер</dt>
+                  <dd>{formatSize(selectedPanel)}</dd>
+                </div>
+                <div>
+                  <dt>Площадь</dt>
+                  <dd>
+                    {panelAreaM2(selectedPanel) != null
+                      ? `${formatAreaM2(panelAreaM2(selectedPanel) ?? 0)} м²`
+                      : '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Материал</dt>
+                  <dd>{selectedPanel.mainMaterialName?.trim() || '—'}</dd>
+                </div>
+                <div>
+                  <dt>Связанный заказ</dt>
+                  <dd>
+                    {selectedPanel.orders.length > 0
+                      ? selectedPanel.orders.map((order) => order.orderName?.trim() || `#${order.orderId}`).join(', ')
+                      : '—'}
+                  </dd>
+                </div>
+              </dl>
+
+              <div className="bazis-panel-inspector-tabs" role="tablist" aria-label="Данные панели">
+                <button type="button" className="is-active">Схема отверстий</button>
+                <button type="button" onClick={() => onGoToTree(selectedPanel.bazisNodeId)}>Операции</button>
+                <button type="button" onClick={() => onGoToTree(selectedPanel.bazisNodeId)}>Примечания</button>
+              </div>
+
+              <div className="bazis-panel-preview" aria-label="Схема панели">
+                <div className="bazis-panel-preview__sheet">
+                  {selectedPanel.hasDrilling
+                    ? Array.from({ length: 8 }, (_, index) => (
+                        <span key={index} className={`bazis-panel-preview__hole bazis-panel-preview__hole--${index + 1}`} />
+                      ))
+                    : null}
+                  {selectedPanel.edgeCount > 0 ? <i className="bazis-panel-preview__edge" /> : null}
+                </div>
+              </div>
+
+              <Text className="bazis-panel-inspector-section">Технологические операции</Text>
+              <div className="bazis-panel-operation-list">
+                <div>
+                  <span className="bazis-panel-operation-list__icon"><SettingOutlined /></span>
+                  <span>
+                    <strong>Присадка</strong>
+                    <small>{selectedPanel.hasDrilling ? 'Отверстия предусмотрены' : 'Не требуется'}</small>
+                  </span>
+                  <b className={selectedPanel.hasDrilling ? 'is-success' : ''}>
+                    {selectedPanel.hasDrilling ? 'Готово' : 'Нет'}
+                  </b>
+                </div>
+                <div>
+                  <span className="bazis-panel-operation-list__icon"><ScissorOutlined /></span>
+                  <span>
+                    <strong>{`Кромление · ${selectedPanel.edgeCount ?? 0} сторон`}</strong>
+                    <small>{selectedPanel.edgeCount > 0 ? 'Технология назначена' : 'Не требуется'}</small>
+                  </span>
+                  <b className={selectedPanel.edgeCount > 0 ? 'is-info' : ''}>
+                    {selectedPanel.edgeCount > 0 ? 'Назначено' : 'Нет'}
+                  </b>
+                </div>
+              </div>
+
+              <Text className="bazis-panel-inspector-section">Расположение</Text>
+              <div className="bazis-panel-location">
+                <InfoCircleOutlined />
+                <span>{selectedPanel.pathTitle || 'Расположение не указано'}</span>
+              </div>
+            </>
+          ) : (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Выберите панель в таблице" />
+          )}
+        </div>
+      </aside>
+
+      <div className="bazis-panels-workspace__legacy-details">
+        {selectedId != null && selectedPanel ? (
+          <Collapse key={selectedId} defaultActiveKey={['panel']}>
+            <Panel key="panel" header={`Панель: ${selectedPanel.name?.trim() || '—'}`}>
+              <NodeCard nodeId={selectedId} collapsibleSummary />
             </Panel>
-          ))}
-        </Collapse>
-      ) : (
-        <Text type="secondary">Выберите панель в списке, чтобы посмотреть подробности.</Text>
-      )}
+            {selectedAncestors.map((ancestor) => (
+              <Panel
+                key={ancestor.bazisNodeId}
+                header={`${NODE_KIND_LABELS_RU[ancestor.nodeKind] ?? ancestor.nodeKind}: ${ancestor.name?.trim() || '—'}`}
+              >
+                <NodeCard nodeId={ancestor.bazisNodeId} />
+              </Panel>
+            ))}
+          </Collapse>
+        ) : (
+          <Text type="secondary">Выберите панель в списке, чтобы посмотреть подробности.</Text>
+        )}
+      </div>
 
       <AddToOrderModal
         open={addToOrderOpen}
@@ -807,7 +1010,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           void refreshPanelOrders();
         }}
       />
-    </Space>
+    </div>
   );
 };
 

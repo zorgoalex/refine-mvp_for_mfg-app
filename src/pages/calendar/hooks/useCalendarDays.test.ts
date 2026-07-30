@@ -18,10 +18,8 @@ describe('computeStepOffset (AD-6 stepDays helper)', () => {
     expect(computeStepOffset(7, -1)).toBe(-7);
   });
 
-  it('honors type-level constraint: only 1 or 7', () => {
-    // TypeScript enforces this; runtime test verifies the helper is
-    // used as intended in the hook (caller passes 1 or 7).
-    const validSteps: Array<1 | 7> = [1, 7];
+  it('supports day, week, two-week, and month navigation steps', () => {
+    const validSteps: Array<1 | 7 | 14 | 30> = [1, 7, 14, 30];
     validSteps.forEach((step) => {
       expect(Math.abs(computeStepOffset(step, 1))).toBe(step);
       expect(Math.abs(computeStepOffset(step, -1))).toBe(step);

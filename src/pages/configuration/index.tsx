@@ -36,6 +36,10 @@ import {
   type VisibilityRole,
 } from '../../utils/resourceVisibility';
 import { RESOURCE_LABELS } from '../../utils/tabLabels';
+import {
+  OperationalPageHeader,
+  useOperationalUi,
+} from '../../ui-operational/OperationalPrimitives';
 
 const { Text } = Typography;
 
@@ -503,6 +507,7 @@ const TableVisibilityByRoleTab: React.FC = () => {
 // Главная страница конфигурации
 // ============================================================================
 export const ConfigurationPage: React.FC = () => {
+  const isOperational = useOperationalUi();
   const [activeTab, setActiveTab] = useState(() => readStoredConfigurationActiveTab() ?? 'orders');
   const statusAutomationVisible = featureFlags.statusAutomation && (!featureFlags.useBackendPermissions || can('status_automation.view'));
   const deadlineSettingsVisible =
@@ -652,7 +657,30 @@ export const ConfigurationPage: React.FC = () => {
     writeStoredConfigurationActiveTab(key);
   };
 
-  return (
+  const configurationTabs = (
+    <Tabs
+      className="configuration-tabs-wrap"
+      activeKey={resolvedActiveTab}
+      onChange={handleTabChange}
+      items={tabItems}
+      type={isOperational ? 'line' : 'card'}
+      tabBarGutter={isOperational ? 12 : 4}
+    />
+  );
+
+  return isOperational ? (
+    <div className="configuration-operational">
+      <OperationalPageHeader
+        compact
+        breadcrumbs="Администрирование / Конфигурация"
+        title="Конфигурация"
+        description="Рабочие параметры заказов, производства, уведомлений и системных модулей."
+      />
+      <section className="operational-panel configuration-operational__panel">
+        {configurationTabs}
+      </section>
+    </div>
+  ) : (
     <Card
       title={
         <Space>
@@ -661,14 +689,7 @@ export const ConfigurationPage: React.FC = () => {
         </Space>
       }
     >
-      <Tabs
-        className="configuration-tabs-wrap"
-        activeKey={resolvedActiveTab}
-        onChange={handleTabChange}
-        items={tabItems}
-        type="card"
-        tabBarGutter={4}
-      />
+      {configurationTabs}
     </Card>
   );
 };

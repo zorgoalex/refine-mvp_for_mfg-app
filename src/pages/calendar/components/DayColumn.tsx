@@ -7,6 +7,7 @@ import DayColumnBrief from './DayColumnBrief';
 import { DayColumnProps, DragItem, ViewMode } from '../types/calendar';
 import { getDayName, formatDateKey, isToday } from '../utils/dateUtils';
 import { calculateTotalArea, areAllOrdersIssued } from '../utils/groupOrdersByDate';
+import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 
 /**
  * Компонент колонки дня с заказами
@@ -22,12 +23,15 @@ const DayColumn: React.FC<DayColumnProps> = ({
   onContextMenu,
   onCheckboxChange,
 }) => {
+  const isOperational = useOperationalUi();
   const dateKey = formatDateKey(date);
   const dayName = getDayName(date);
   const totalArea = calculateTotalArea(orders);
   const allIssued = areAllOrdersIssued(orders);
   const isTodayDay = isToday(date);
   const isSunday = date.getDay() === 0;
+  const loadPercent = Math.min(100, Math.round(totalArea));
+  const loadTone = loadPercent >= 90 ? 'danger' : loadPercent >= 75 ? 'warning' : 'success';
 
   // Настройка useDrop для приема перетаскиваемых карточек
   const [{ isOver, canDrop }, dropRef] = useDrop<DragItem, unknown, { isOver: boolean; canDrop: boolean }>({
@@ -70,15 +74,30 @@ const DayColumn: React.FC<DayColumnProps> = ({
     >
       {/* Заголовок дня: Пн (17.11.2025) - 55.54 кв.м. */}
       <div className="day-column__header">
-        <div className="day-column__header-left">
-          <span className="day-column__day-name">{dayName}</span>
-          <span className="day-column__date">({formattedDate})</span>
+        <div className="day-column__header-top">
+          <div className="day-column__header-left">
+            <span className="day-column__day-name">{dayName}</span>
+            <span className="day-column__date">
+              {isOperational ? `${day}.${month}` : `(${formattedDate})`}
+            </span>
+          </div>
+          <div className="day-column__header-right">
+            <span className="day-column__total-area">
+              {totalArea > 0 ? `${totalArea.toFixed(2)} м²` : '—'}
+            </span>
+          </div>
         </div>
-        <div className="day-column__header-right">
-          <span className="day-column__total-area">
-            {totalArea > 0 ? `${totalArea.toFixed(2)} кв.м.` : '—'}
-          </span>
-        </div>
+        {isOperational ? (
+          <div className="day-column__load">
+            <div className="day-column__load-label">
+              <span>Загрузка</span>
+              <strong>{loadPercent}%</strong>
+            </div>
+            <div className={`day-column__progress day-column__progress--${loadTone}`}>
+              <span style={{ width: `${loadPercent}%` }} />
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Список заказов */}
@@ -96,11 +115,18 @@ const DayColumn: React.FC<DayColumnProps> = ({
             />
           ))
         ) : (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="Нет заказов"
-            style={{ marginTop: 20 }}
-          />
+          isOperational ? (
+            <div className="day-column__drop-empty">
+              Перетащите заказ сюда
+              <span>или добавьте новый</span>
+            </div>
+          ) : (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="Нет заказов"
+              style={{ marginTop: 20 }}
+            />
+          )
         )}
       </div>
     </div>

@@ -34,6 +34,7 @@ const MATERIAL_ROUTE_KEYS = [
 
 const FINANCE_ROUTE_KEYS = ['payments', 'payments_view', 'payment_types', 'payment_statuses'];
 const ANALYTICS_ROUTE_KEYS = ['clients_analytics_view', 'payments_analytics'];
+const ORDER_DOMAIN_KEYS = ['orders_view', 'bazis'];
 
 export const EvolutionAirNavigation: React.FC = () => {
   const { sider, isCreateModalOpen, setIsCreateModalOpen } = useEvolutionNavigation();
@@ -64,14 +65,15 @@ export const EvolutionAirNavigation: React.FC = () => {
       label: 'Заказы',
       route: sider.ordersRoute,
       icon: <FileTextOutlined />,
-      active: sider.selectedKey === 'orders_view',
+      active: isActive(ORDER_DOMAIN_KEYS),
     },
     {
       key: 'production',
       label: 'Производство',
       route: sider.calendarRoute,
       icon: <CalendarOutlined />,
-      active: activeCategory === 'Производство' || isActive(['calendar', 'order-status-board']),
+      active: (activeCategory === 'Производство' && !isActive(ORDER_DOMAIN_KEYS))
+        || isActive(['calendar', 'order-status-board']),
     },
     {
       key: 'materials',
@@ -158,7 +160,7 @@ export const EvolutionAirNavigation: React.FC = () => {
         </nav>
 
         <div className="evolution-air-utilities">
-          <EvolutionHeaderUtilities searchLabel="Найти" />
+          <EvolutionHeaderUtilities searchLabel="Найти" operational />
         </div>
       </header>
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Input, Select, Space, Table, Typography, message } from 'antd';
-import { SaveOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Checkbox, Empty, Input, Select, Space, Table, Typography, message } from 'antd';
+import { SaveOutlined, SearchOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../../../api/labelsApi';
 import type { LabelTemplate, LatestOrderLabelsPreview, OrderLabelData } from '../../../../api/types/labelsApi.types';
 import { canAny } from '../../../../utils/permissions';
@@ -9,6 +9,7 @@ import { OrderLabelGenerateAction } from './OrderLabelGenerateAction';
 import { LabelSvgPreviewFrame } from './LabelSvgPreviewFrame';
 import { OrderLabelPagesViewer } from './OrderLabelPagesViewer';
 import { firstLabelPageIndexForDetail } from './orderLabelPreviewIndex';
+import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
 
 const { Text } = Typography;
 
@@ -37,6 +38,7 @@ export const OrderLabelInlinePreviewSurface: React.FC<{ svg: string }> = ({ svg 
 );
 
 export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orderId, isOrderDirty }) => {
+  const isOperational = useOperationalUi();
   const canWrite = canAny(['labels.generate', 'labels.manage_templates']);
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
@@ -50,6 +52,7 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
   const [latestPreviewLoading, setLatestPreviewLoading] = useState(false);
   const [latestPreviewRefreshKey, setLatestPreviewRefreshKey] = useState(0);
   const [selectedLatestPageIndex, setSelectedLatestPageIndex] = useState<number | null>(null);
+  const [detailSearch, setDetailSearch] = useState('');
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.labelTemplateId === templateId) ?? null,
     [templateId, templates],
@@ -160,9 +163,30 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
   useEffect(() => {
     setSelectedLatestPageIndex(selectedDetailFirstPageIndex);
   }, [latestPreview?.generationId, selectedDetailId, selectedDetailFirstPageIndex]);
+  const selectedDetail = data?.details.find((detail) => detail.detailId === selectedDetailId) ?? null;
+  const selectedBasis = selectedDetail ? parseBasisDataView(selectedDetail.basisData) : null;
+  const selectedPreviewIndex = selectedLatestPageIndex ?? selectedDetailFirstPageIndex;
+  const selectedPreviewSvg = latestPreview?.svgPages[selectedPreviewIndex] ?? null;
+  const labelCount = (data?.details ?? []).reduce(
+    (total, detail) => total + Math.max(1, Number(detail.quantity) || 1),
+    0,
+  );
+  const visibleDetails = (data?.details ?? []).filter((detail) => {
+    const query = detailSearch.trim().toLocaleLowerCase('ru-RU');
+    if (!query) return true;
+    const parsed = parseBasisDataView(detail.basisData);
+    return [
+      detail.detailNumber,
+      detail.detailName,
+      parsed.position,
+      parsed.name,
+      parsed.designation,
+      detail.materialName,
+    ].some((value) => String(value ?? '').toLocaleLowerCase('ru-RU').includes(query));
+  });
 
   return (
-    <Card size="small" title="Бирки">
+    <Card size="small" title="Бирки" className="order-label-data-editor">
       <style>{`
         .order-label-inline-preview-fit svg {
           display: block;
@@ -171,35 +195,218 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
           width: auto;
           height: auto;
         }
+
+        .order-label-editor-workspace {
+          display: grid;
+          grid-template-columns: minmax(190px, 220px) minmax(360px, 1fr) minmax(230px, 280px);
+          gap: 12px;
+          min-height: 540px;
+        }
+
+        .order-label-editor-panel {
+          min-width: 0;
+          overflow: hidden;
+          border: 1px solid var(--app-border);
+          border-radius: var(--operational-radius);
+          background: var(--app-surface);
+        }
+
+        .order-label-editor-panel__head {
+          padding: 13px;
+          border-bottom: 1px solid var(--app-border);
+        }
+
+        .order-label-editor-panel__head h3.ant-typography {
+          margin: 3px 0 0;
+          font-size: 14px;
+        }
+
+        .order-label-editor-list {
+          display: flex;
+          max-height: 520px;
+          flex-direction: column;
+          gap: 5px;
+          padding: 8px;
+          overflow: auto;
+        }
+
+        .order-label-editor-list__item {
+          display: flex;
+          width: 100%;
+          min-height: 52px;
+          flex-direction: column;
+          justify-content: center;
+          padding: 7px 9px;
+          border: 1px solid var(--app-border);
+          border-radius: calc(var(--operational-radius) - 3px);
+          background: var(--app-surface);
+          color: inherit;
+          font: inherit;
+          text-align: left;
+          cursor: pointer;
+        }
+
+        .order-label-editor-list__item.is-active {
+          border-color: var(--operational-brand);
+          background: var(--operational-brand-soft);
+        }
+
+        .order-label-editor-list__item small {
+          color: var(--app-text-muted);
+        }
+
+        .order-label-editor-preview {
+          display: flex;
+          min-height: 0;
+          flex-direction: column;
+        }
+
+        .order-label-editor-preview__toolbar {
+          display: flex;
+          min-height: 52px;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          padding: 8px 12px;
+          border-bottom: 1px solid var(--app-border);
+        }
+
+        .order-label-editor-preview__toolbar-actions {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .order-label-editor-preview__canvas {
+          display: flex;
+          min-height: 0;
+          flex: 1;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+          overflow: auto;
+          background: var(--app-bg);
+        }
+
+        .order-label-editor-preview__canvas svg {
+          display: block;
+          width: auto;
+          max-width: 100%;
+          max-height: 480px;
+        }
+
+        .order-label-editor-properties {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .order-label-editor-properties__body {
+          display: flex;
+          flex: 1;
+          flex-direction: column;
+          gap: 12px;
+          padding: 13px;
+        }
+
+        .order-label-editor-field {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+        }
+
+        .order-label-editor-field > label {
+          color: var(--app-text-muted);
+          font-size: 10px;
+          font-weight: 700;
+        }
+
+        @media (max-width: 980px) {
+          .order-label-editor-workspace {
+            grid-template-columns: 200px minmax(0, 1fr);
+          }
+
+          .order-label-editor-properties {
+            grid-column: 1 / -1;
+          }
+        }
+
+        @media (max-width: 720px) {
+          .order-label-editor-workspace {
+            grid-template-columns: 1fr;
+          }
+
+          .order-label-editor-properties {
+            grid-column: auto;
+          }
+        }
       `}</style>
       <Space direction="vertical" style={{ width: '100%' }} size={12}>
         {isOrderDirty && <Alert type="warning" showIcon message="Сначала сохраните заказ" />}
         {labelDataDirty && <Alert type="warning" showIcon message="Сначала сохраните данные бирок" />}
-        <Space wrap>
-          <Select
-            style={{ minWidth: 260 }}
-            value={templateId}
-            loading={loading}
-            onChange={(value) => setTemplateId(value)}
-            options={templates.map((template) => ({
-              value: template.labelTemplateId,
-              label: template.isActive ? template.name : `${template.name} (архив)`,
-            }))}
-            placeholder="Шаблон"
-          />
-          <Button icon={<SaveOutlined />} onClick={save} loading={loading} disabled={!canWrite || isOrderDirty || !data || !labelDataDirty}>
-            Сохранить данные бирок
-          </Button>
-          <OrderLabelGenerateAction
-            orderId={orderId}
-            isOrderDirty={isOrderDirty || labelDataDirty}
-            compact
-            initialDetailId={selectedDetailId}
-            detailOptions={detailPreviewOptions}
-            onGenerated={() => setLatestPreviewRefreshKey((current) => current + 1)}
-          />
-        </Space>
-        {(latestPreview || latestPreviewLoading) && (
+        {isOperational ? (
+          <div className="order-label-editor-config">
+            <label className="order-label-editor-config__template">
+              <span>Шаблон бирок</span>
+              <Select
+                value={templateId}
+                loading={loading}
+                onChange={(value) => setTemplateId(value)}
+                options={templates.map((template) => ({
+                  value: template.labelTemplateId,
+                  label: template.isActive ? template.name : `${template.name} (архив)`,
+                }))}
+                placeholder="Шаблон"
+              />
+            </label>
+            <div className="order-label-editor-config__options" aria-label="Поля шаблона">
+              <Checkbox defaultChecked>QR-код</Checkbox>
+              <Checkbox defaultChecked>Схема детали</Checkbox>
+              <Checkbox defaultChecked>Плёнка</Checkbox>
+              <Checkbox>Операции</Checkbox>
+            </div>
+            <div className="order-label-editor-config__actions">
+              <Button
+                onClick={() => document.querySelector('.order-label-editor-list')?.scrollIntoView({ block: 'nearest' })}
+              >
+                Выбрать детали
+              </Button>
+              <OrderLabelGenerateAction
+                orderId={orderId}
+                isOrderDirty={isOrderDirty || labelDataDirty}
+                initialDetailId={selectedDetailId}
+                detailOptions={detailPreviewOptions}
+                buttonLabel={`Сформировать ${labelCount || 0} бирок`}
+                onGenerated={() => setLatestPreviewRefreshKey((current) => current + 1)}
+              />
+            </div>
+          </div>
+        ) : (
+          <Space wrap>
+            <Select
+              style={{ minWidth: 260 }}
+              value={templateId}
+              loading={loading}
+              onChange={(value) => setTemplateId(value)}
+              options={templates.map((template) => ({
+                value: template.labelTemplateId,
+                label: template.isActive ? template.name : `${template.name} (архив)`,
+              }))}
+              placeholder="Шаблон"
+            />
+            <Button icon={<SaveOutlined />} onClick={save} loading={loading} disabled={!canWrite || isOrderDirty || !data || !labelDataDirty}>
+              Сохранить данные бирок
+            </Button>
+            <OrderLabelGenerateAction
+              orderId={orderId}
+              isOrderDirty={isOrderDirty || labelDataDirty}
+              compact
+              initialDetailId={selectedDetailId}
+              detailOptions={detailPreviewOptions}
+              onGenerated={() => setLatestPreviewRefreshKey((current) => current + 1)}
+            />
+          </Space>
+        )}
+        {!isOperational && (latestPreview || latestPreviewLoading) && (
           <Space direction="vertical" size={6} style={{ width: '100%' }}>
             {latestPreviewLoading ? (
               <Text type="secondary">Загрузка превью...</Text>
@@ -207,6 +414,7 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
               latestPreview && (
                 <OrderLabelPagesViewer
                   svgPages={latestPreview.svgPages}
+                  rows={latestPreview.rows}
                   title={`Последняя генерация: ${latestPreview.labelCount} шт.`}
                   printTitle={`Заказ ${orderId} — последняя генерация бирок #${latestPreview.generationId}`}
                   selectedIndex={selectedLatestPageIndex ?? selectedDetailFirstPageIndex}
@@ -216,10 +424,10 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
             )}
           </Space>
         )}
-        {selectedDetailId && (
+        {!isOperational && selectedDetailId && (
           <Text type="secondary">Выбрана для предпросмотра: {detailPreviewOptions.find((detail) => detail.detailId === selectedDetailId)?.label}</Text>
         )}
-        <Table
+        {!isOperational ? <Table
           rowKey="detailId"
           size="small"
           loading={loading}
@@ -264,7 +472,138 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
               ),
             },
           ]}
-        />
+        /> : (
+          <div className="order-label-editor-workspace">
+            <aside className="order-label-editor-panel">
+              <div className="order-label-editor-panel__head">
+                <Text type="secondary">Редактирование</Text>
+                <Typography.Title level={3}>Список бирок</Typography.Title>
+              </div>
+              <div style={{ padding: '8px 8px 0' }}>
+                <Input
+                  allowClear
+                  prefix={<SearchOutlined />}
+                  placeholder="Номер или деталь"
+                  aria-label="Поиск бирки"
+                  value={detailSearch}
+                  onChange={(event) => setDetailSearch(event.target.value)}
+                />
+              </div>
+              <div className="order-label-editor-list">
+                {visibleDetails.map((detail) => {
+                  const parsed = parseBasisDataView(detail.basisData);
+                  const position = parsed.position ?? detail.detailNumber ?? detail.detailId;
+                  const name = detail.detailName ?? parsed.name ?? 'Деталь';
+                  return (
+                    <button
+                      key={detail.detailId}
+                      type="button"
+                      className={`order-label-editor-list__item${detail.detailId === selectedDetailId ? ' is-active' : ''}`}
+                      onClick={() => setSelectedDetailId(detail.detailId)}
+                    >
+                      <strong>{`Бирка ${position}`}</strong>
+                      <small>{`Позиция ${position} · ${name}`}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
+
+            <section className="order-label-editor-panel order-label-editor-preview">
+              <div className="order-label-editor-preview__toolbar">
+                <div className="order-label-editor-preview__toolbar-actions">
+                  <Text strong>{latestPreviewLoading ? 'Обновление...' : 'Предпросмотр 100%'}</Text>
+                  <Button aria-label="Уменьшить масштаб" icon={<ZoomOutOutlined />} />
+                  <Button aria-label="Увеличить масштаб" icon={<ZoomInOutlined />} />
+                </div>
+                <Button
+                  disabled={!labelDataDirty}
+                  onClick={() => {
+                    if (!data) return;
+                    setCommentsByDetailId(Object.fromEntries(
+                      data.details.map((detail) => [
+                        detail.detailId,
+                        String(detail.bazisFields['bazis.comment'] ?? detail.note ?? ''),
+                      ]),
+                    ));
+                    setDirtyDetailIds(new Set());
+                  }}
+                >
+                  Сбросить изменения
+                </Button>
+              </div>
+              <div className="order-label-editor-preview__canvas">
+                {selectedPreviewSvg ? (
+                  <LabelSvgPreviewFrame svg={selectedPreviewSvg} />
+                ) : (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Сформируйте бирки для предпросмотра" />
+                )}
+              </div>
+            </section>
+
+            <aside className="order-label-editor-panel order-label-editor-properties">
+              <div className="order-label-editor-panel__head">
+                <Text type="secondary">Свойства</Text>
+                <Typography.Title level={3}>
+                  {selectedDetail ? `Бирка ${selectedBasis?.position ?? selectedDetail.detailNumber ?? '—'}` : 'Бирка'}
+                </Typography.Title>
+              </div>
+              <div className="order-label-editor-properties__body">
+                <div className="order-label-editor-field">
+                  <label htmlFor="order-label-detail-name">Название детали на бирке</label>
+                  <Input
+                    id="order-label-detail-name"
+                    value={selectedDetail?.detailName ?? selectedBasis?.name ?? ''}
+                    disabled
+                  />
+                </div>
+                <div className="order-label-editor-field">
+                  <label htmlFor="order-label-detail-size">Размер</label>
+                  <Input
+                    id="order-label-detail-size"
+                    value={selectedBasis?.designation ?? selectedBasis?.raw ?? ''}
+                    disabled
+                  />
+                </div>
+                <div className="order-label-editor-field">
+                  <label htmlFor="order-label-detail-comment">Комментарий бирки</label>
+                  <Input.TextArea
+                    id="order-label-detail-comment"
+                    rows={4}
+                    value={selectedDetail ? commentsByDetailId[selectedDetail.detailId] ?? '' : ''}
+                    disabled={!selectedDetail || !canWrite || isOrderDirty}
+                    onChange={(event) => {
+                      if (!selectedDetail) return;
+                      setDirtyDetailIds((current) => new Set([...current, selectedDetail.detailId]));
+                      setCommentsByDetailId((current) => ({
+                        ...current,
+                        [selectedDetail.detailId]: event.target.value,
+                      }));
+                    }}
+                  />
+                </div>
+                <div className="order-label-editor-field">
+                  <label htmlFor="order-label-detail-quantity">Количество копий</label>
+                  <Input
+                    id="order-label-detail-quantity"
+                    value={selectedDetail?.quantity ?? ''}
+                    disabled
+                  />
+                </div>
+                <span style={{ flex: 1 }} />
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  onClick={save}
+                  loading={loading}
+                  disabled={!canWrite || isOrderDirty || !data || !labelDataDirty}
+                >
+                  Сохранить бирку
+                </Button>
+              </div>
+            </aside>
+          </div>
+        )}
       </Space>
     </Card>
   );

@@ -8,6 +8,7 @@ import { saveLabelBlob } from './labelDownloads';
 import { OrderLabelGenerateAction } from './OrderLabelGenerateAction';
 import { LabelSvgPreviewFrame } from './LabelSvgPreviewFrame';
 import { OrderLabelPagesViewer } from './OrderLabelPagesViewer';
+import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
 
 const { Text } = Typography;
 
@@ -36,6 +37,7 @@ export const OrderLatestLabelPreviewSurface: React.FC<{
 );
 
 export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> = ({ orderId }) => {
+  const isOperational = useOperationalUi();
   const canGenerate = can('labels.generate');
   const [latest, setLatest] = useState<LatestOrderLabelsPreview | null>(null);
   const [loading, setLoading] = useState(false);
@@ -62,8 +64,14 @@ export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> =
   };
 
   return (
-    <div style={{ marginBottom: 8, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 3 }}>
+    <div
+      className={isOperational ? 'order-latest-labels-preview--operational' : undefined}
+      style={isOperational ? undefined : { marginBottom: 8, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}
+    >
+      <div
+        className="order-latest-labels-preview__title"
+        style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 3 }}
+      >
         Бирки
       </div>
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -71,10 +79,11 @@ export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> =
           <>
             <OrderLabelPagesViewer
               svgPages={latest.svgPages}
+              rows={latest.rows}
               title={`Последняя генерация: ${latest.labelCount} шт.`}
               printTitle={`Заказ ${orderId} — последняя генерация бирок #${latest.generationId}`}
             />
-            <Space wrap>
+            <Space wrap className="order-latest-labels-preview__actions">
               {canGenerate && (
                 <Button size="small" icon={<DownloadOutlined />} onClick={downloadLatest}>
                   Скачать ZIP

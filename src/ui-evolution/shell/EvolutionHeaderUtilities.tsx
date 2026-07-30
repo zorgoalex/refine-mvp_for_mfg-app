@@ -36,6 +36,7 @@ export interface EvolutionHeaderUtilitiesProps {
   searchLabel?: string;
   leadingClassName?: string;
   actionsClassName?: string;
+  operational?: boolean;
 }
 
 export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> = ({
@@ -43,6 +44,7 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
   searchLabel = 'Быстрый переход',
   leadingClassName = '',
   actionsClassName = '',
+  operational = false,
 }) => {
   const { data: identity } = useGetIdentity<UserIdentity>();
   const { mutate: logout } = useLogout();
@@ -83,7 +85,13 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
       </div>
 
       <Space align="center" className={actionsClass} size={8}>
-        {identity && canScan ? (
+        {identity && operational ? (
+          <span className="evolution-header__sync-state">
+            <i aria-hidden="true" />
+            Все изменения сохранены
+          </span>
+        ) : null}
+        {identity && canScan && !operational ? (
           <Tooltip title="Сканер бирок">
             <Button
               aria-label="Сканер бирок"
@@ -94,7 +102,7 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
           </Tooltip>
         ) : null}
         {identity ? <NotificationBell /> : null}
-        {identity ? (
+        {identity && !operational ? (
           <Tooltip title={mode === 'dark' ? 'Темная тема' : 'Светлая тема'}>
             <Switch
               aria-label="Переключить тему"

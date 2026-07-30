@@ -35,7 +35,11 @@ export const UiVariantProvider: React.FC<
 };
 
 export function useUiVariant(): UiVariantContextValue {
-  const value = useContext(UiVariantContext);
+  const value = useOptionalUiVariant();
   if (!value) throw new Error('useUiVariant must be used inside UiVariantProvider');
   return value;
+}
+
+export function useOptionalUiVariant(): UiVariantContextValue | null {
+  return useContext(UiVariantContext);
 }

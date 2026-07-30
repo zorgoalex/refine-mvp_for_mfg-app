@@ -14,6 +14,7 @@ import { EvolutionMobileNavigation } from './EvolutionMobileNavigation';
 import { EvolutionSider } from './EvolutionSider';
 import { EvolutionWorkspaceTabs } from './EvolutionWorkspaceTabs';
 import '../styles/evolution.css';
+import '../../ui-operational/operational.css';
 
 const SIDEBAR_STORAGE_KEY = 'erp.ui.evolution.sidebar.collapsed';
 
@@ -64,6 +65,25 @@ function resolveModernRouteFamily(pathname: string): string {
   return 'crud';
 }
 
+function resolveOperationalPageKind(pathname: string): 'list' | 'show' | 'form' | 'workspace' {
+  if (
+    pathname.startsWith('/orders/create') ||
+    pathname.startsWith('/orders/edit') ||
+    pathname.startsWith('/configuration') ||
+    pathname.startsWith('/profile') ||
+    pathname.startsWith('/scan') ||
+    pathname.startsWith('/groups')
+  ) return 'workspace';
+  if (/\/(?:show\/|projects\/|bazis-cut\/\d+)/.test(pathname)) return 'show';
+  if (/\/(?:create|edit\/)/.test(pathname)) return 'form';
+  if (
+    pathname.startsWith('/calendar') ||
+    pathname.startsWith('/cut') ||
+    pathname.startsWith('/order-status-board')
+  ) return 'workspace';
+  return 'list';
+}
+
 export const EvolutionWorkspaceLayout: React.FC = () => {
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(getInitialCollapsed);
@@ -71,7 +91,10 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   const { variant } = useUiVariant();
   const location = useLocation();
   const routeFamily = resolveModernRouteFamily(location.pathname);
+  const pageKind = resolveOperationalPageKind(location.pathname);
+  const isOperational = variant === 'line' || variant === 'air';
   const isAirDesktop = variant === 'air' && !isMobile;
+  const effectiveCollapsed = isOperational ? false : collapsed;
 
   useTabSync();
   useGlobalUnloadGuard();
@@ -88,7 +111,8 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   const shellClassName = [
     'evolution-shell',
     `evolution-shell--${variant}`,
-    collapsed && !isAirDesktop ? 'evolution-shell--collapsed' : '',
+    isOperational ? 'evolution-shell--operational' : '',
+    effectiveCollapsed && !isAirDesktop ? 'evolution-shell--collapsed' : '',
     isAirDesktop ? 'evolution-shell--air-desktop' : '',
   ].filter(Boolean).join(' ');
 
@@ -99,17 +123,25 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
         isAirDesktop ? (
           <EvolutionAirNavigation />
         ) : (
-          <EvolutionSider collapsed={collapsed} onCollapse={handleCollapse} />
+          <EvolutionSider
+            collapsed={effectiveCollapsed}
+            onCollapse={handleCollapse}
+            operational={isOperational}
+          />
         )
       ) : null}
       <Layout className="evolution-shell__main">
         {!isAirDesktop ? (
-          <EvolutionHeader onOpenSider={isMobile ? () => setIsMobileNavigationOpen(true) : undefined} />
+          <EvolutionHeader
+            onOpenSider={isMobile ? () => setIsMobileNavigationOpen(true) : undefined}
+            operational={isOperational}
+          />
         ) : null}
-        <EvolutionWorkspaceTabs />
+        {!isOperational ? <EvolutionWorkspaceTabs /> : null}
         <Layout.Content
           className="evolution-shell__content"
           data-modern-route={routeFamily}
+          data-operational-page-kind={pageKind}
           id="evolution-main-content"
           tabIndex={-1}
         >
