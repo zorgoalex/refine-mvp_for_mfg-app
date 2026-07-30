@@ -9,7 +9,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from telethon import TelegramClient
 
@@ -144,7 +144,7 @@ class CncTelegramWorker:
             if image_path is None:
                 print(f"skip message {group.image_message.id}: image download returned no path", flush=True)
                 return
-            thumbs_up = has_thumbs_up(group.image_message)
+            thumbs_up = group_has_thumbs_up(group)
             sheet_image = persist_sheet_image(self.config.media_dir, chat_id, int(group.image_message.id), image_path)
             if group.gcode_message is not None:
                 gcode_path = await download_media(group.gcode_message, run_dir, "program")
@@ -225,10 +225,23 @@ def group_image_messages(messages: list[Any]) -> list[ImageGroup]:
     vector_messages = [message for message in messages if is_vector_message(message)]
     groups: list[ImageGroup] = []
     for index, image_message in enumerate(image_messages):
+        previous_image_id = image_messages[index - 1].id if index > 0 else None
         next_image_id = image_messages[index + 1].id if index + 1 < len(image_messages) else None
         comments = nearby_comments(messages, image_message, next_image_id)
-        gcode_message = select_gcode_message(gcode_messages, image_message, comments)
-        vector_message = select_vector_message(vector_messages, image_message, comments)
+        gcode_message = select_gcode_message(
+            gcode_messages,
+            image_message,
+            comments,
+            previous_image_id,
+            next_image_id,
+        )
+        vector_message = select_vector_message(
+            vector_messages,
+            image_message,
+            comments,
+            previous_image_id,
+            next_image_id,
+        )
         groups.append(ImageGroup(
             image_message=image_message,
             comments=comments,
@@ -262,39 +275,89 @@ def nearby_comments(messages: list[Any], image_message: Any, next_image_id: int 
     return comments
 
 
-def select_gcode_message(gcode_messages: list[Any], image_message: Any, comments: list[str]) -> Any | None:
+def select_gcode_message(
+    gcode_messages: list[Any],
+    image_message: Any,
+    comments: list[str],
+    previous_image_id: int | None = None,
+    next_image_id: int | None = None,
+) -> Any | None:
     if not gcode_messages:
         return None
-    image_orders = set(extract_order_names(" ".join([message_text(image_message), *comments])))
-    candidates: list[tuple[int, Any]] = []
-    for gcode_message in gcode_messages:
-        filename = message_filename(gcode_message) or ""
-        gcode_orders = set(extract_order_names(filename))
-        if image_orders and gcode_orders and image_orders.isdisjoint(gcode_orders):
-            continue
-        distance = abs(int(gcode_message.id) - int(image_message.id))
-        candidates.append((distance, gcode_message))
-    if not candidates:
-        return min(gcode_messages, key=lambda message: abs(int(message.id) - int(image_message.id)))
-    return min(candidates, key=lambda pair: pair[0])[1]
+    return select_attachment_message(
+        gcode_messages,
+        image_message,
+        comments,
+        previous_image_id,
+        next_image_id,
+        key_builder=lambda image_id: lambda message: abs(int(message.id) - image_id),
+    )
 
 
-def select_vector_message(vector_messages: list[Any], image_message: Any, comments: list[str]) -> Any | None:
+def select_vector_message(
+    vector_messages: list[Any],
+    image_message: Any,
+    comments: list[str],
+    previous_image_id: int | None = None,
+    next_image_id: int | None = None,
+) -> Any | None:
     if not vector_messages:
         return None
+    return select_attachment_message(
+        vector_messages,
+        image_message,
+        comments,
+        previous_image_id,
+        next_image_id,
+        key_builder=lambda image_id: lambda message: (
+            0 if Path(message_filename(message) or "").suffix.lower() == ".svg" else 1,
+            abs(int(message.id) - image_id),
+        ),
+    )
+
+
+def select_attachment_message(
+    messages: list[Any],
+    image_message: Any,
+    comments: list[str],
+    previous_image_id: int | None,
+    next_image_id: int | None,
+    *,
+    key_builder: Callable[[int], Any],
+) -> Any | None:
     image_orders = set(extract_order_names(" ".join([message_text(image_message), *comments])))
-    candidates: list[tuple[int, int, Any]] = []
-    for vector_message in vector_messages:
-        filename = message_filename(vector_message) or ""
-        vector_orders = set(extract_order_names(filename))
-        if image_orders and vector_orders and image_orders.isdisjoint(vector_orders):
+    compatible_messages: list[Any] = []
+    for message in messages:
+        filename = message_filename(message) or ""
+        attachment_orders = set(extract_order_names(filename))
+        if image_orders and attachment_orders and image_orders.isdisjoint(attachment_orders):
             continue
-        suffix_priority = 0 if Path(filename).suffix.lower() == ".svg" else 1
-        distance = abs(int(vector_message.id) - int(image_message.id))
-        candidates.append((suffix_priority, distance, vector_message))
-    if not candidates:
-        return min(vector_messages, key=lambda message: abs(int(message.id) - int(image_message.id)))
-    return min(candidates, key=lambda pair: (pair[0], pair[1]))[2]
+        compatible_messages.append(message)
+    candidates = compatible_messages or messages
+    image_id = int(image_message.id)
+    previous_id = int(previous_image_id) if previous_image_id is not None else None
+    next_id = int(next_image_id) if next_image_id is not None else None
+    before_image = [
+        message for message in candidates
+        if (previous_id is None or int(message.id) > previous_id) and int(message.id) < image_id
+    ]
+    after_image = [
+        message for message in candidates
+        if int(message.id) > image_id and (next_id is None or int(message.id) < next_id)
+    ]
+    sort_key = key_builder(image_id)
+    for scoped_candidates in (before_image, after_image, candidates):
+        if scoped_candidates:
+            return min(scoped_candidates, key=sort_key)
+    return None
+
+
+def group_has_thumbs_up(group: ImageGroup) -> bool:
+    return any(
+        has_thumbs_up(message)
+        for message in (group.image_message, group.gcode_message, group.vector_message)
+        if message is not None
+    )
 
 
 def group_source_fingerprint(
@@ -305,15 +368,23 @@ def group_source_fingerprint(
     ocr_engine: str,
 ) -> str:
     payload = {
-        "version": 1,
+        "version": 2,
         "chatId": chat_id,
         "workday": workday.isoformat(),
         "parserVersion": parser_version,
         "ocrEngine": ocr_engine,
         "image": message_identity(group.image_message, include_reactions=True),
         "comments": group.comments,
-        "gcode": message_identity(group.gcode_message, include_reactions=False) if group.gcode_message is not None else None,
-        "vector": message_identity(group.vector_message, include_reactions=False) if group.vector_message is not None else None,
+        "gcode": (
+            message_identity(group.gcode_message, include_reactions=True)
+            if group.gcode_message is not None
+            else None
+        ),
+        "vector": (
+            message_identity(group.vector_message, include_reactions=True)
+            if group.vector_message is not None
+            else None
+        ),
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()

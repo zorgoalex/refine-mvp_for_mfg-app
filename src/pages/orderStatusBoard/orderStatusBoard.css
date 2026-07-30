@@ -98,6 +98,23 @@
   cursor: pointer;
 }
 
+.status-board-toolbar__settings-button.ant-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.status-board-toolbar__settings-panel {
+  min-width: 190px;
+  display: grid;
+  gap: 10px;
+}
+
+.status-board-toolbar__settings-panel .status-board-toolbar__switch {
+  width: 100%;
+  min-height: 28px;
+  justify-content: space-between;
+}
+
 .status-board-toolbar__display-mode {
   min-height: 32px;
   flex: 0 0 auto;
@@ -789,9 +806,15 @@
 .cnc-packet-card__summaries {
   display: grid;
   gap: 2px;
-  font-size: 12px;
+  margin-bottom: 12px;
+  font-size: 15px;
   line-height: 1.25;
   overflow-wrap: anywhere;
+}
+
+.cnc-packet-card__summaries:empty {
+  display: none;
+  margin-bottom: 0;
 }
 
 .cnc-packet-card__summary {
@@ -809,7 +832,7 @@
   height: auto;
   min-height: 0;
   padding: 0;
-  font-size: 12px;
+  font-size: inherit;
   font-weight: 650;
   line-height: 1.25;
   vertical-align: baseline;
@@ -831,8 +854,13 @@
 .status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__summary-order.ant-btn,
 .status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__summary-meta,
 .status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__summary-meta {
-  font-size: 10px;
+  font-size: 12.5px;
   line-height: 1.18;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__summaries,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__summaries {
+  margin-bottom: 9px;
 }
 
 .status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__notes,
@@ -1262,6 +1290,11 @@
 
   .status-board-toolbar__display-mode .ant-segmented {
     width: 100%;
+  }
+
+  .status-board-toolbar__settings-button.ant-btn {
+    width: 100%;
+    margin-left: 0;
   }
 
   .status-board-toolbar__display-mode .ant-segmented-group {

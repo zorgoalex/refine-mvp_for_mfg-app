@@ -17,6 +17,7 @@ import {
   Empty,
   Input,
   Modal,
+  Popover,
   Segmented,
   Select,
   Spin,
@@ -46,6 +47,7 @@ import {
   ReloadOutlined,
   RightOutlined,
   SearchOutlined,
+  SettingOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -85,7 +87,9 @@ import {
 import {
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
+  DEFAULT_CNC_ORDER_SEARCH_PERIOD,
   filterBoardColumns,
+  filterCncBathColumnsByMachineOrderMatches,
   filterCncTodayColumnsByOrders,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
@@ -203,6 +207,8 @@ export const OrderStatusBoardPage: React.FC = () => {
   const [activeCncRelation, setActiveCncRelation] =
     useState<CncRelationTarget | null>(null);
   const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
+  const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =
+    useState(true);
   const [activeCncDetailedBathId, setActiveCncDetailedBathId] =
     useState<string | null>(null);
   const [activeCncDetailedDetail, setActiveCncDetailedDetail] =
@@ -254,26 +260,20 @@ export const OrderStatusBoardPage: React.FC = () => {
       setLoadingColumns(new Set());
       try {
         if (viewStateRef.current.view === 'cnc_today') {
-          const workday = viewStateRef.current.cncWorkday;
-          const response = await cncTelegramApi.today(
-            workday ? { date: workday } : {},
-          );
-          const searchRange = buildCncOrderSearchDateRange(
-            response.workday,
+          const workday = viewStateRef.current.cncWorkday ?? dayjs().format('YYYY-MM-DD');
+          const displayRange = buildCncOrderSearchDateRange(
+            workday,
             viewStateRef.current.cncOrderSearchPeriod,
           );
-          const searchResponse =
-            searchRange.dateFrom === response.workday && searchRange.dateTo === response.workday
-              ? response
-              : await cncTelegramApi.today({
-                dateFrom: searchRange.dateFrom,
-                dateTo: searchRange.dateTo,
-              });
+          const response = await cncTelegramApi.today({
+            dateFrom: displayRange.dateFrom,
+            dateTo: displayRange.dateTo,
+          });
           if (datasetRevisionRef.current !== revision) return false;
           cncTodayRef.current = response;
-          cncOrderSearchTodayRef.current = searchResponse;
+          cncOrderSearchTodayRef.current = response;
           setCncToday(response);
-          setCncOrderSearchToday(searchResponse);
+          setCncOrderSearchToday(response);
           boardRef.current = null;
           setBoard(null);
           setStale(false);
@@ -543,23 +543,26 @@ export const OrderStatusBoardPage: React.FC = () => {
   );
   const cncOrderFilters = viewState.cncOrderFilters;
   const cncOrderFilterKey = cncOrderFilters.join('\u0000');
-  const cncSingleDayColumns = cncToday?.columns ?? [];
-  const cncSearchColumns = cncOrderSearchToday?.columns ?? cncSingleDayColumns;
-  const cncColumns =
-    cncOrderFilters.length > 0
-      ? cncSearchColumns
-      : cncSingleDayColumns;
+  const cncDisplayPeriod = viewState.cncOrderSearchPeriod ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD;
+  const cncPeriodColumns = cncToday?.columns ?? [];
   const cncOrderFilterOptions = useMemo(
     () =>
-      buildCncOrderFilterOptions(cncSearchColumns).map((orderName) => ({
+      buildCncOrderFilterOptions(cncPeriodColumns).map((orderName) => ({
         label: orderName,
         value: orderName,
       })),
-    [cncSearchColumns],
+    [cncPeriodColumns],
+  );
+  const cncOrderFilteredColumns = useMemo(
+    () => filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters),
+    [cncPeriodColumns, cncOrderFilterKey],
   );
   const cncFilteredColumns = useMemo(
-    () => filterCncTodayColumnsByOrders(cncColumns, cncOrderFilters),
-    [cncColumns, cncOrderFilterKey],
+    () =>
+      cncBathsRequireMachineFiles
+        ? filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns)
+        : cncOrderFilteredColumns,
+    [cncBathsRequireMachineFiles, cncOrderFilteredColumns],
   );
   const cncRelationContext = useMemo(
     () =>
@@ -693,6 +696,35 @@ export const OrderStatusBoardPage: React.FC = () => {
   const cncCanStepForward = cncNavigationDate.startOf('day').isBefore(cncMaxDate);
   const updateCncWorkday = (date: Dayjs) =>
     updateViewState({ cncWorkday: date.format('YYYY-MM-DD'), cncOrderFilters: [] });
+  const cncSettingsContent = (
+    <div className="status-board-toolbar__settings-panel" aria-label="Режимы МДФ-доски">
+      <Typography.Text strong>Режимы</Typography.Text>
+      <label className="status-board-toolbar__switch">
+        <Switch
+          size="small"
+          checked={cncBathsRequireMachineFiles}
+          onChange={setCncBathsRequireMachineFiles}
+        />
+        Ванны с файлами
+      </label>
+      <label className="status-board-toolbar__switch">
+        <Switch
+          size="small"
+          checked={cncRelationsEnabled}
+          onChange={setCncRelationsEnabled}
+        />
+        Связи
+      </label>
+      <label className="status-board-toolbar__switch">
+        <Switch
+          size="small"
+          checked={cncDetailedEnabled}
+          onChange={setCncDetailedEnabled}
+        />
+        Подробный
+      </label>
+    </div>
+  );
 
   return (
     <DndProvider backend={HTML5Backend}>
@@ -924,11 +956,11 @@ export const OrderStatusBoardPage: React.FC = () => {
             />
             <div
               className="status-board-toolbar__cnc-period"
-              aria-label="Период поиска по номеру заказа"
+              aria-label="Период отображения МДФ-работ"
             >
               <Typography.Text type="secondary">Период</Typography.Text>
               {CNC_ORDER_SEARCH_PERIOD_OPTIONS.map((option) => {
-                const active = viewState.cncOrderSearchPeriod === option.value;
+                const active = cncDisplayPeriod === option.value;
                 return (
                   <Button
                     key={option.value}
@@ -939,7 +971,7 @@ export const OrderStatusBoardPage: React.FC = () => {
                     className="status-board-toolbar__cnc-period-chip"
                     onClick={() =>
                       updateViewState({
-                        cncOrderSearchPeriod: active ? undefined : option.value,
+                        cncOrderSearchPeriod: option.value,
                       })
                     }
                   >
@@ -956,22 +988,18 @@ export const OrderStatusBoardPage: React.FC = () => {
               />
               Скрыть пустые
             </label>
-            <label className="status-board-toolbar__switch">
-              <Switch
-                size="small"
-                checked={cncRelationsEnabled}
-                onChange={setCncRelationsEnabled}
+            <Popover
+              placement="bottomRight"
+              trigger="click"
+              title="Настройки отображения"
+              content={cncSettingsContent}
+            >
+              <Button
+                className="status-board-toolbar__settings-button"
+                icon={<SettingOutlined />}
+                aria-label="Настройки отображения МДФ-доски"
               />
-              Связи
-            </label>
-            <label className="status-board-toolbar__switch">
-              <Switch
-                size="small"
-                checked={cncDetailedEnabled}
-                onChange={setCncDetailedEnabled}
-              />
-              Подробный
-            </label>
+            </Popover>
           </div>
         )}
 

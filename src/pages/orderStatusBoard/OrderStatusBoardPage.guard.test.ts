@@ -72,7 +72,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
     expect(page).toContain("key: 'cnc_today'");
     expect(page).toContain('cncTelegramApi.today');
-    expect(page).toContain('workday ? { date: workday } : {}');
+    expect(page).not.toContain('workday ? { date: workday } : {}');
     expect(page).toContain('<CncTelegramTodayColumns');
     expect(page).toContain("label: 'МДФ-работы'");
     expect(page).toContain("parsed: 'Файлы на станке'");
@@ -82,6 +82,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('aria-label="Дата CNC-работ"');
     expect(page).toContain('buildCncOrderFilterOptions');
     expect(page).toContain('filterCncTodayColumnsByOrders');
+    expect(page).toContain('filterCncBathColumnsByMachineOrderMatches');
     expect(page).toContain('status-board-toolbar__cnc-order-search');
     expect(page).toContain('mode="multiple"');
     expect(page).toContain('suffixIcon={<SearchOutlined />}');
@@ -89,13 +90,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('aria-label="Фильтр МДФ-работ по номеру заказа"');
     expect(page).toContain('status-board-toolbar__cnc-period');
     expect(page).toContain('Период');
+    expect(page).toContain('DEFAULT_CNC_ORDER_SEARCH_PERIOD');
     expect(page).toContain("label: '1нед'");
     expect(page).toContain("label: '2нед'");
     expect(page).toContain("label: '1м'");
     expect(page).toContain('aria-pressed={active}');
     expect(page).toContain('buildCncOrderSearchDateRange');
-    expect(page).toContain('dateFrom: searchRange.dateFrom');
-    expect(page).toContain('dateTo: searchRange.dateTo');
+    expect(page).toContain('dateFrom: displayRange.dateFrom');
+    expect(page).toContain('dateTo: displayRange.dateTo');
     expect(page).toContain('datasetKey');
     expect(page).toContain('buildCncColumnTotals(column, relationContext, detailedContext)');
     expect(page).toContain('buildCncDetailedDisplayColumns(columns)');
@@ -167,6 +169,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('summary.orderId ??= item.orderId ?? item.matchOrderId ?? null');
     expect(page).toContain('const orderId = item.orderId ?? item.matchOrderId');
     expect(css).toContain('.cnc-packet-card__summaries');
+    expect(css).toContain('font-size: 15px');
+    expect(css).toContain('margin-bottom: 12px');
     expect(css).toContain('.cnc-packet-card__summary');
     expect(css).toContain('.cnc-packet-card__summary-order');
     expect(css).toContain('.cnc-packet-card__summary-order.ant-btn');
@@ -226,6 +230,21 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('border-color: #722ed1');
     expect(css).toContain('0 0 0 2px #722ed1');
     expect(css).not.toContain('transition: all');
+  });
+
+  it('keeps CNC display modes under the settings gear with bath-file filtering on by default', () => {
+    expect(page).toContain('SettingOutlined');
+    expect(page).toContain('Настройки отображения');
+    expect(page).toContain('status-board-toolbar__settings-button');
+    expect(page).toContain('status-board-toolbar__settings-panel');
+    expect(page).toContain('const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =');
+    expect(page).toContain('useState(true)');
+    expect(page).toContain('Ванны с файлами');
+    expect(page).toContain('checked={cncBathsRequireMachineFiles}');
+    expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns)');
+    expect(css).toContain('.status-board-toolbar__settings-button.ant-btn');
+    expect(css).toContain('margin-left: auto');
+    expect(css).toContain('.status-board-toolbar__settings-panel');
   });
 
   it('keeps CNC detailed bath mode explicit and clickable by SVG detail metadata', () => {

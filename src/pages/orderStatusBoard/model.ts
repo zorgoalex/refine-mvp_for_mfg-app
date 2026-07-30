@@ -9,9 +9,10 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 
 const COMPLETED_ORDER_STATUS_NAMES = new Set(['завершен', 'завершён']);
-const CNC_ORDER_SEARCH_PERIODS = new Set(['1w', '2w', '1m']);
 export type OrderStatusBoardVisualFlow = OrderStatusBoardType | 'cnc_today';
 export type CncOrderSearchPeriod = '1w' | '2w' | '1m';
+export const DEFAULT_CNC_ORDER_SEARCH_PERIOD: CncOrderSearchPeriod = '1w';
+const CNC_ORDER_SEARCH_PERIODS = new Set<CncOrderSearchPeriod>(['1w', '2w', '1m']);
 
 export interface OrderStatusBoardViewState {
   view: OrderStatusBoardVisualFlow;
@@ -57,7 +58,9 @@ export function parseOrderStatusBoardViewState(
   const plannedFrom = dateOnly(params.get('plannedFrom'));
   const plannedTo = dateOnly(params.get('plannedTo'));
   const cncWorkday = dateOnly(params.get('date'));
-  const cncOrderSearchPeriod = parseCncOrderSearchPeriod(params.get('period'));
+  const cncOrderSearchPeriod = view === 'cnc_today'
+    ? parseCncOrderSearchPeriod(params.get('period')) ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD
+    : undefined;
   return {
     view,
     search: params.get('q')?.trim() ?? '',
@@ -164,6 +167,29 @@ export function filterCncTodayColumnsByOrders(
   });
 }
 
+export function filterCncBathColumnsByMachineOrderMatches(
+  columns: CncTelegramTodayColumn[],
+): CncTelegramTodayColumn[] {
+  const machineOrderKeys = new Set<string>();
+  for (const column of columns) {
+    if (column.key !== 'parsed' && column.key !== 'completed') continue;
+    for (const packet of column.packets ?? []) {
+      for (const item of packet.items) {
+        const key = normalizeCncOrderKey(item.orderName);
+        if (key) machineOrderKeys.add(key);
+      }
+    }
+  }
+
+  return columns.map((column) => {
+    if (column.key !== 'baths' && column.key !== 'baths_ready') return column;
+    const baths = (column.baths ?? []).filter((bath) =>
+      bath.items.some((item) => machineOrderKeys.has(normalizeCncOrderKey(item.orderName))),
+    );
+    return { ...column, baths, total: baths.length };
+  });
+}
+
 export function buildCncOrderSearchDateRange(
   workday: string,
   period: CncOrderSearchPeriod | undefined,
@@ -182,7 +208,7 @@ export function cncOrderSearchPeriodDays(
   if (period === '1w') return 7;
   if (period === '2w') return 14;
   if (period === '1m') return 31;
-  return 3;
+  return 7;
 }
 
 function isDoneProductionStatus(column: OrderStatusBoardColumn): boolean {
