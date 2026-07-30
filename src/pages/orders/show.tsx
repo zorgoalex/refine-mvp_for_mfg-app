@@ -65,6 +65,7 @@ import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
 import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/OperationalPrimitives";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
+type OrderExcelExportMode = 'full' | 'without-prices';
 
 const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
   { key: 'groups', label: 'Группы заказа', color: '#722ed1' },
@@ -606,7 +607,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const printRef = useRef<HTMLDivElement>(null);
 
   // Состояние для экспорта
-  const [isExporting, setIsExporting] = useState(false);
+  const [activeExcelExport, setActiveExcelExport] = useState<OrderExcelExportMode | null>(null);
+  const isExporting = activeExcelExport === 'full';
+  const isPriceFreeExporting = activeExcelExport === 'without-prices';
+  const isAnyExcelExporting = activeExcelExport !== null;
   const [isSnapshotExporting, setIsSnapshotExporting] = useState(false);
 
   // Состояние для выбора деталей в раскрой
@@ -830,10 +834,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   });
 
   // Функция экспорта в Excel
-  const handleExportExcel = async () => {
-    if (!record) return;
+  const handleExportExcel = async (exportMode: OrderExcelExportMode = 'full') => {
+    if (!record || isAnyExcelExporting) return;
 
-    setIsExporting(true);
+    const withoutPrices = exportMode === 'without-prices';
+    setActiveExcelExport(exportMode);
     try {
       // Формат файла: заказ-Ф<ГГ>-<ID>-<название>-<клиент>.xlsx
       const fileName = generateOrderFileName({
@@ -841,6 +846,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         orderName: record.order_name,
         orderDate: record.order_date,
         clientName: resolvedClientName ?? undefined,
+        variant: withoutPrices ? 'without-prices' : 'standard',
       });
 
       // Получение данных присадки и конструктора для экспорта
@@ -895,17 +901,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           })),
           client: exportClient,
           clientPhone,
+          pricingMode: withoutPrices ? 'omit' : 'full',
         },
         fileName
       );
 
-      message.success('Excel файл успешно сгенерирован');
+      message.success(withoutPrices
+        ? 'Excel без цен успешно сгенерирован'
+        : 'Excel файл успешно сгенерирован');
     } catch (error) {
       const errorMessage = handleExcelError(error);
       message.error(errorMessage);
       console.error('Ошибка экспорта:', error);
     } finally {
-      setIsExporting(false);
+      setActiveExcelExport(null);
     }
   };
 
@@ -1293,7 +1302,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       key: 'excel',
                       icon: <FileExcelOutlined />,
                       label: 'Экспорт в Excel',
-                      disabled: !record || details.length === 0 || isClientResolving,
+                      disabled: !record || details.length === 0 || isClientResolving || isAnyExcelExporting,
+                    },
+                    {
+                      key: 'excel-without-prices',
+                      icon: <FileExcelOutlined />,
+                      label: 'Excel без цен и сумм',
+                      disabled: !record || details.length === 0 || isClientResolving || isAnyExcelExporting,
                     },
                     {
                       key: 'json',
@@ -1311,6 +1326,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     }
                     if (key === 'excel') {
                       void handleExportExcel();
+                    }
+                    if (key === 'excel-without-prices') {
+                      void handleExportExcel('without-prices');
                     }
                     if (key === 'json') {
                       void handleExportSnapshot();
@@ -1376,11 +1394,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 <Button
                   aria-label="Экспорт в Excel"
                   icon={<FileExcelOutlined />}
-                  onClick={handleExportExcel}
+                  onClick={() => void handleExportExcel()}
                   loading={isExporting}
-                  disabled={!record || details.length === 0 || isClientResolving}
+                  disabled={!record || details.length === 0 || isClientResolving || isAnyExcelExporting}
                 />
               </Tooltip>
+              <Button
+                aria-label="Экспорт в Excel без цен и сумм"
+                icon={<FileExcelOutlined />}
+                onClick={() => void handleExportExcel('without-prices')}
+                loading={isPriceFreeExporting}
+                disabled={!record || details.length === 0 || isClientResolving || isAnyExcelExporting}
+              >
+                Excel без цен
+              </Button>
               <Dropdown
                 trigger={['click']}
                 menu={{
@@ -1480,6 +1507,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     <Button icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}?tab=additional`)}>
                       Изменить
                     </Button>
+                    <Button
+                      icon={<FileExcelOutlined />}
+                      onClick={() => void handleExportExcel('without-prices')}
+                      loading={isPriceFreeExporting}
+                      disabled={details.length === 0 || isClientResolving || isAnyExcelExporting}
+                    >
+                      Excel без цен
+                    </Button>
                     <Button icon={<DownloadOutlined />} onClick={handlePrint}>
                       PDF
                     </Button>
@@ -1500,6 +1535,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     </Button>
                     <Button icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}`)}>
                       Редактировать
+                    </Button>
+                    <Button
+                      icon={<FileExcelOutlined />}
+                      onClick={() => void handleExportExcel('without-prices')}
+                      loading={isPriceFreeExporting}
+                      disabled={details.length === 0 || isClientResolving || isAnyExcelExporting}
+                    >
+                      Excel без цен
                     </Button>
                     <Button
                       type="primary"
