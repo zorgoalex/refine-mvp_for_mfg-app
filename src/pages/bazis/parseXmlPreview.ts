@@ -37,6 +37,16 @@ export class XmlPreviewError extends Error {}
 const MAX_PREVIEW_NODES = 20_000;
 const CONTAINER_TAGS = ['Сборка', 'Блок'];
 
+export function swapImportedBazisPanelDimensions(
+  sourceHeightMm: number | null,
+  sourceWidthMm: number | null,
+): { heightMm: number | null; widthMm: number | null } {
+  return {
+    heightMm: sourceWidthMm,
+    widthMm: sourceHeightMm,
+  };
+}
+
 export function parseXmlPreview(xmlText: string): XmlPreviewResult {
   const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
   if (doc.querySelector('parsererror')) {
@@ -161,11 +171,14 @@ function buildTitle(element: Element, fallbackTitle: string): string {
     return name;
   }
 
-  const length = numberOfChild(element, 'Длина_готовой_детали') ?? numberOfChild(element, 'Длина');
-  const width = numberOfChild(element, 'Ширина_готовой_детали') ?? numberOfChild(element, 'Ширина');
+  const sourceHeight =
+    numberOfChild(element, 'Длина_готовой_детали') ?? numberOfChild(element, 'Длина');
+  const sourceWidth =
+    numberOfChild(element, 'Ширина_готовой_детали') ?? numberOfChild(element, 'Ширина');
+  const { heightMm, widthMm } = swapImportedBazisPanelDimensions(sourceHeight, sourceWidth);
   const quantity = textOfChild(element, 'Количество');
   const parts = [
-    length != null && width != null ? `${length}x${width}` : null,
+    heightMm != null && widthMm != null ? `${heightMm}x${widthMm}` : null,
     quantity ? `кол-во ${quantity}` : null,
   ].filter(Boolean);
   return parts.length > 0 ? `${name} — ${parts.join(', ')}` : name;

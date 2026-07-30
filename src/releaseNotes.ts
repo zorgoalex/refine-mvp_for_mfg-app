@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-30",
+    title: "Базис XML: ориентация размеров деталей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "При импорте XML Базис исходная ширина панели становится высотой детали в ERP, а исходная высота — шириной.",
+      "Предпросмотр XML использует тот же порядок размеров, что и сохранённый Базис-проект.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-30",
     title: "Раскрой: PDF ванн на МДФ-доске",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
