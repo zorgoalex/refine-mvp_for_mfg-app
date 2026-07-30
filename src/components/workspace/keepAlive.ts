@@ -2,17 +2,19 @@ const CALENDAR_KEY = '/calendar';
 // /cut holds rich in-page state (the open job + its loaded details) that an
 // operator builds up; keep it mounted so navigating to an order card and back
 // restores that state instead of remounting to a collapsed list.
-// /bazis: минимизируемые модалки (визард импорта / создание заказа) держат
-// state на странице; ремаунт при dirty-переключении закрывал бы их — страница
-// должна быть eligible ВСЕГДА, чтобы not-eligible→eligible ремаунта не было.
+// /bazis и карточки проектов держат локальное состояние страницы: модалки,
+// фильтры, сортировки и выделение. Ремаунт также повторно загружает проект.
 const ALWAYS_KEEP = new Set(['/orders', '/cut', '/bazis', '/configuration']);
 
 const isOrderFormKey = (key: string): boolean =>
   key === '/orders/create' || key.startsWith('/orders/edit/');
 
+const isBazisProjectKey = (key: string): boolean =>
+  key.startsWith('/bazis/projects/');
+
 export const isKeepAliveEligible = (key: string, { dirty }: { dirty: boolean }): boolean => {
   if (key === CALENDAR_KEY) return false;            // B7: global-class hack ⇒ remount only
-  if (ALWAYS_KEEP.has(key) || isOrderFormKey(key)) return true;
+  if (ALWAYS_KEEP.has(key) || isOrderFormKey(key) || isBazisProjectKey(key)) return true;
   return dirty;                                       // dirty non-orders tab kept while dirty
 };
 
