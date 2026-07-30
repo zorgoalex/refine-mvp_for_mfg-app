@@ -42,4 +42,13 @@ describe('bazis node card spoiler guards', () => {
     const between = nodeCard.slice(summaryEnd, diagramIdx);
     expect(between).not.toContain('<Collapse');
   });
+
+  it('пользовательские свойства показываются отдельным раскрытым разделом', () => {
+    expect(nodeCard).toContain(
+      "defaultActiveKey={sections.properties.length > 0 ? ['properties'] : []}",
+    );
+    expect(nodeCard).toContain(
+      'header={`Пользовательские свойства (${sections.properties.length})`}',
+    );
+  });
 });

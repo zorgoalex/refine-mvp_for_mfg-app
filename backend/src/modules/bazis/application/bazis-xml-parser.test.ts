@@ -107,6 +107,26 @@ describe('parseBazisXml', () => {
     expect(withHoles?.raw).not.toHaveProperty('СписокЭлементов');
   });
 
+  it('keeps real Bazis user properties nested in every panel raw payload', () => {
+    const xml = `<Проект Версия="1"><Изделие><Наименование>Тест</Наименование><СписокЭлементов>
+      <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>Фасад</Наименование>
+        <ПользовательскиеСвойства>
+          <Свойство><Имя>Фрезеровка</Имя><Значение>Модерн</Значение></Свойство>
+          <Свойство><Имя>Пленка</Имя><Значение>Белый глянец</Значение></Свойство>
+        </ПользовательскиеСвойства>
+      </Объект>
+    </СписокЭлементов></Изделие></Проект>`;
+
+    const panel = parseBazisXml(xml).nodes.find((node) => node.objectType === 'Панель');
+
+    expect(panel?.raw['ПользовательскиеСвойства']).toEqual({
+      Свойство: [
+        { Имя: 'Фрезеровка', Значение: 'Модерн' },
+        { Имя: 'Пленка', Значение: 'Белый глянец' },
+      ],
+    });
+  });
+
   it('aggregates unique materials with kind guess', () => {
     const parsed = parseBazisXml(fixture);
     expect(parsed.materials.length).toBe(5);

@@ -156,7 +156,7 @@ export const NodeCard: React.FC<NodeCardProps> = ({ nodeId, collapsibleSummary =
         <PanelDiagram lengthMm={card.lengthMm} widthMm={card.widthMm} holes={sections.holesGeometry} />
       ) : null}
 
-      <Collapse>
+      <Collapse defaultActiveKey={sections.properties.length > 0 ? ['properties'] : []}>
         <Collapse.Panel key="edges" header={`Кромки (${sections.edges.length})`}>
           {renderGroupedSideEntries(sections.edges, 'Сторона')}
         </Collapse.Panel>
@@ -169,7 +169,10 @@ export const NodeCard: React.FC<NodeCardProps> = ({ nodeId, collapsibleSummary =
         <Collapse.Panel key="grooves" header={`Пазы (${sections.grooves.length})`}>
           {renderIndexedTables(sections.grooves, 'Паз')}
         </Collapse.Panel>
-        <Collapse.Panel key="properties" header={`Свойства (${sections.properties.length})`}>
+        <Collapse.Panel
+          key="properties"
+          header={`Пользовательские свойства (${sections.properties.length})`}
+        >
           {renderSingleTable(sections.properties)}
         </Collapse.Panel>
         <Collapse.Panel key="operations" header={`Операции (${sections.operations.length})`}>
