@@ -90,7 +90,7 @@ class PacketBuilderTest(unittest.TestCase):
         self.assertEqual(packet["items"][0]["widthMm"], 100)
         self.assertEqual(packet["items"][0]["heightMm"], 50)
 
-    def test_vector_items_are_primary_and_aggregate_geometry_quantity(self) -> None:
+    def test_ocr_items_are_primary_and_svg_corrects_matching_quantity(self) -> None:
         image = ImageMeta(
             chat_id="-100123",
             message_id=561,
@@ -134,13 +134,13 @@ G0 Z10
         )
 
         self.assertEqual(packet["items"], [{
-            "sourceItemKey": "vector:1200:16:2215x493:0",
+            "sourceItemKey": "ocr:1200:16:2215x493:0",
             "orderName": "1200",
             "detailNumber": 16,
             "widthMm": 2215.0,
             "heightMm": 493.0,
             "quantity": 3,
-            "source": "vector",
+            "source": "ocr",
             "confidence": 0.99,
             "matchOrderId": None,
             "matchDetailId": None,
@@ -212,8 +212,52 @@ G0 Z10
             parser_version="test",
         )
 
-        self.assertEqual(packet["items"][0]["source"], "vector")
+        self.assertEqual(packet["items"][0]["source"], "ocr")
         self.assertEqual(packet["items"][0]["quantity"], 3)
+
+    def test_rejects_svg_when_order_majority_does_not_match_ocr(self) -> None:
+        image = ImageMeta(
+            chat_id="-100123",
+            message_id=10503,
+            thread_id=None,
+            message_date=datetime(2026, 7, 27, 4, 4, tzinfo=timezone.utc),
+            edited_at=None,
+            text="",
+            thumbs_up=True,
+        )
+        packet = build_structured_packet(
+            image=image,
+            workday=date(2026, 7, 27),
+            comments=["18мм!!!\nФрезы для 18мм: 1, 6, 8"],
+            ocr=OcrResult(items=[{
+                "orderName": "2665",
+                "detailNumber": 52,
+                "widthMm": 750,
+                "heightMm": 350,
+                "quantity": 3,
+                "confidence": 0.8,
+            }]),
+            gcode=GcodeMeta(
+                "CNC#1_2665-18MM.TXT",
+                "G0 X0 Y0\n",
+                parse_gcode_text("G0 X0 Y0\n", "CNC#1_2665-18MM.TXT"),
+            ),
+            vector_items=[
+                {"orderName": "2665", "detailNumber": 52, "widthMm": 750, "heightMm": 350},
+                {"orderName": "2694", "detailNumber": 1, "widthMm": 1043, "heightMm": 295},
+                {"orderName": "2696", "detailNumber": 1, "widthMm": 2720, "heightMm": 350},
+                {"orderName": "2700", "detailNumber": 9, "widthMm": 187, "heightMm": 497},
+                {"orderName": "2705", "detailNumber": 9, "widthMm": 1280, "heightMm": 100},
+            ],
+            default_machine="",
+            default_material="МДФ 16мм",
+            ocr_engine="glm-ocr",
+            parser_version="test",
+        )
+
+        self.assertEqual([item["orderName"] for item in packet["items"]], ["2665"])
+        self.assertEqual(packet["items"][0]["source"], "ocr")
+        self.assertTrue(any("SVG ignored: order numbers do not match OCR majority" in warning for warning in packet["analysisWarnings"]))
 
     def test_ocr_items_without_gcode_do_not_need_review(self) -> None:
         image = ImageMeta(

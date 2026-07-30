@@ -17,7 +17,7 @@ from .cleanup import cleanup_temp_dir
 from .config import WorkerConfig
 from .erp_client import BackendAuth, ErpClient
 from .gcode import extract_order_names, parse_gcode_text
-from .ocr import OcrResult, run_ocr_command
+from .ocr import run_ocr_command
 from .packet import (
     GcodeMeta,
     ImageMeta,
@@ -156,12 +156,12 @@ class CncTelegramWorker:
                         text=gcode_text,
                         analysis=parse_gcode_text(gcode_text, filename),
                     )
+            ocr = await run_ocr_command(self.config.ocr_command, image_path)
             if group.vector_message is not None:
                 vector_path = await download_media(group.vector_message, run_dir, "vector")
                 if vector_path is not None:
                     vector_items = parse_vector_file(vector_path)
 
-            ocr = OcrResult() if vector_items else await run_ocr_command(self.config.ocr_command, image_path)
             image = ImageMeta(
                 chat_id=chat_id,
                 message_id=int(group.image_message.id),
@@ -372,7 +372,7 @@ def group_source_fingerprint(
     ocr_engine: str,
 ) -> str:
     payload = {
-        "version": 2,
+        "version": 3,
         "chatId": chat_id,
         "workday": workday.isoformat(),
         "parserVersion": parser_version,

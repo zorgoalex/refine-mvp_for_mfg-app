@@ -24,6 +24,8 @@ MATERIAL_RE = re.compile(
 IGNORED_ANALYSIS_WARNINGS = {
     "RapidOCR found text, but no detail rows with order and size",
 }
+VECTOR_ORDER_MAJORITY_RATIO = 0.5
+OCR_VECTOR_SIZE_TOLERANCE_MM = 3
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,12 @@ class GcodeMeta:
     analysis: GcodeAnalysis
 
 
+@dataclass(frozen=True)
+class VectorValidation:
+    items: list[dict[str, Any]]
+    warnings: list[str]
+
+
 def build_structured_packet(
     *,
     image: ImageMeta,
@@ -62,20 +70,24 @@ def build_structured_packet(
     gcode_analysis = gcode.analysis if gcode else None
     vector_items = vector_items or []
     raw_comments = normalize_comments([image.text, *comments, *ocr.comments])
-    structured_order_names = collect_structured_order_names(vector_items, ocr.items, gcode_analysis)
-    order_names = collect_order_names(raw_comments, vector_items, ocr.items, gcode_analysis)
+    ocr_items = normalize_ocr_items(ocr.items)
+    vector_validation = validate_vector_items(vector_items, ocr, ocr_items, gcode_analysis)
+    accepted_vector_items = vector_validation.items
+    structured_order_names = collect_structured_order_names(accepted_vector_items, ocr.items, gcode_analysis)
+    order_names = collect_order_names(raw_comments, accepted_vector_items, ocr.items, gcode_analysis)
     last_order_names = detect_last_order_names(raw_comments)
     material_name = ocr.material_name or infer_material(raw_comments, gcode.filename if gcode else "", default_material)
     tools = [
         {"toolNumber": tool.toolNumber, "spindleRpm": tool.spindleRpm}
         for tool in (gcode_analysis.tools if gcode_analysis else [])
     ]
-    items = normalize_vector_items(vector_items) if vector_items else normalize_ocr_items(ocr.items)
+    items = reconcile_ocr_items_with_vector(ocr_items, accepted_vector_items)
     warnings = [
         warning
         for warning in normalize_comments(
             [
                 *ocr.analysis_warnings,
+                *vector_validation.warnings,
                 *(gcode_analysis.warnings if gcode_analysis else []),
                 *gcode_warnings(gcode_analysis, order_names, has_items=bool(items)),
             ],
@@ -83,7 +95,7 @@ def build_structured_packet(
         )
         if warning not in IGNORED_ANALYSIS_WARNINGS
     ]
-    if not vector_items:
+    if not accepted_vector_items:
         items = reconcile_item_quantities_with_gcode(items, order_names, gcode_analysis)
     if not items:
         items = fallback_items(order_names, gcode_analysis)
@@ -209,6 +221,89 @@ def collect_structured_order_names(
     if gcode_analysis:
         values.extend(gcode_analysis.order_names)
     return dedupe(values)
+
+
+def validate_vector_items(
+    vector_items: list[dict[str, Any]],
+    ocr: OcrResult,
+    ocr_items: list[dict[str, Any]],
+    gcode_analysis: GcodeAnalysis | None,
+) -> VectorValidation:
+    normalized_vector_items = normalize_vector_items(vector_items)
+    if not normalized_vector_items:
+        return VectorValidation(items=[], warnings=[])
+
+    vector_order_names = item_order_names(normalized_vector_items)
+    reference_order_names = collect_ocr_order_names(ocr, ocr_items)
+    reference_source = "OCR"
+    if not reference_order_names and gcode_analysis and gcode_analysis.order_names:
+        reference_order_names = dedupe(gcode_analysis.order_names)
+        reference_source = "G-code filename"
+
+    if not reference_order_names:
+        return VectorValidation(
+            items=[],
+            warnings=["SVG ignored: no OCR or G-code order numbers available for validation"],
+        )
+
+    if not order_majority_matches(reference_order_names, vector_order_names):
+        return VectorValidation(
+            items=[],
+            warnings=[(
+                "SVG ignored: order numbers do not match "
+                f"{reference_source} majority "
+                f"(reference={', '.join(reference_order_names)}; "
+                f"svg={', '.join(vector_order_names)}; "
+                f"overlap={', '.join(order_overlap(reference_order_names, vector_order_names)) or 'none'})"
+            )],
+        )
+
+    reference_orders = set(reference_order_names)
+    accepted_items = [
+        item
+        for item in normalized_vector_items
+        if item.get("orderName") in reference_orders
+    ]
+    dropped_orders = [
+        order_name
+        for order_name in vector_order_names
+        if order_name not in reference_orders
+    ]
+    warnings = [
+        f"SVG rows ignored for orders outside {reference_source}: {', '.join(dropped_orders)}"
+    ] if dropped_orders else []
+    return VectorValidation(items=accepted_items, warnings=warnings)
+
+
+def collect_ocr_order_names(ocr: OcrResult, ocr_items: list[dict[str, Any]]) -> list[str]:
+    values = item_order_names(ocr_items)
+    for comment in ocr.comments:
+        values.extend(extract_order_names_without_doweling_numbers(comment))
+    return dedupe(values)
+
+
+def item_order_names(items: list[dict[str, Any]]) -> list[str]:
+    values: list[str] = []
+    for item in items:
+        order_name = item.get("orderName")
+        if isinstance(order_name, str):
+            values.extend(extract_order_names(order_name))
+    return dedupe(values)
+
+
+def order_majority_matches(reference_order_names: list[str], vector_order_names: list[str]) -> bool:
+    if not reference_order_names or not vector_order_names:
+        return False
+    overlap_count = len(order_overlap(reference_order_names, vector_order_names))
+    return (
+        overlap_count / len(reference_order_names) > VECTOR_ORDER_MAJORITY_RATIO
+        and overlap_count / len(vector_order_names) > VECTOR_ORDER_MAJORITY_RATIO
+    )
+
+
+def order_overlap(left: list[str], right: list[str]) -> list[str]:
+    right_set = set(right)
+    return [order_name for order_name in left if order_name in right_set]
 
 
 def extract_order_names_without_doweling_numbers(comment: str) -> list[str]:
@@ -375,6 +470,88 @@ def normalize_vector_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(normalized_by_key.values())
 
 
+def reconcile_ocr_items_with_vector(
+    ocr_items: list[dict[str, Any]],
+    vector_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not ocr_items:
+        return vector_items
+    if not vector_items:
+        return ocr_items
+
+    result: list[dict[str, Any]] = []
+    used_vector_indexes: set[int] = set()
+    for item in ocr_items:
+        vector_match = unique_vector_match(item, vector_items, used_vector_indexes)
+        if vector_match is None:
+            result.append(item)
+            continue
+        vector_index, vector_item = vector_match
+        used_vector_indexes.add(vector_index)
+        result.append(correct_ocr_item_from_vector(item, vector_item))
+
+    ocr_orders = set(item_order_names(ocr_items))
+    for index, vector_item in enumerate(vector_items):
+        if index in used_vector_indexes or vector_item.get("orderName") not in ocr_orders:
+            continue
+        added_item = dict(vector_item)
+        added_item["reviewNote"] = "Added from SVG after OCR order validation"
+        result.append(added_item)
+    return result
+
+
+def unique_vector_match(
+    ocr_item: dict[str, Any],
+    vector_items: list[dict[str, Any]],
+    used_vector_indexes: set[int],
+) -> tuple[int, dict[str, Any]] | None:
+    matches = [
+        (index, vector_item)
+        for index, vector_item in enumerate(vector_items)
+        if index not in used_vector_indexes and vector_item_matches_ocr(ocr_item, vector_item)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def vector_item_matches_ocr(ocr_item: dict[str, Any], vector_item: dict[str, Any]) -> bool:
+    if ocr_item.get("orderName") != vector_item.get("orderName"):
+        return False
+    ocr_detail = positive_int(ocr_item.get("detailNumber"))
+    vector_detail = positive_int(vector_item.get("detailNumber"))
+    if ocr_detail is not None and vector_detail != ocr_detail:
+        return False
+    if ocr_detail is None and vector_detail is None:
+        return False
+
+    ocr_width = positive_float(ocr_item.get("widthMm"))
+    ocr_height = positive_float(ocr_item.get("heightMm"))
+    vector_width = positive_float(vector_item.get("widthMm"))
+    vector_height = positive_float(vector_item.get("heightMm"))
+    if ocr_width is None or ocr_height is None or vector_width is None or vector_height is None:
+        return ocr_detail is not None and vector_detail == ocr_detail
+    return same_size_with_tolerance(ocr_width, ocr_height, vector_width, vector_height, OCR_VECTOR_SIZE_TOLERANCE_MM)
+
+
+def correct_ocr_item_from_vector(ocr_item: dict[str, Any], vector_item: dict[str, Any]) -> dict[str, Any]:
+    result = dict(ocr_item)
+    vector_detail = positive_int(vector_item.get("detailNumber"))
+    vector_width = positive_float(vector_item.get("widthMm"))
+    vector_height = positive_float(vector_item.get("heightMm"))
+    if positive_int(result.get("detailNumber")) is None and vector_detail is not None:
+        result["detailNumber"] = vector_detail
+    if vector_width is not None:
+        result["widthMm"] = vector_width
+    if vector_height is not None:
+        result["heightMm"] = vector_height
+    result["quantity"] = positive_int(vector_item.get("quantity")) or positive_int(ocr_item.get("quantity")) or 1
+    result["confidence"] = max(
+        confidence(ocr_item.get("confidence"), default=0.5),
+        confidence(vector_item.get("confidence"), default=0.99),
+    )
+    result["reviewNote"] = clean_string(ocr_item.get("reviewNote"), 500)
+    return result
+
+
 def fallback_items(order_names: list[str], gcode_analysis: GcodeAnalysis | None) -> list[dict[str, Any]]:
     if len(order_names) == 1 and gcode_analysis and gcode_analysis.size_candidates:
         return [
@@ -481,7 +658,17 @@ def nearest_known_order_name(value: str, known_orders: list[str]) -> str | None:
 
 
 def same_size(left_width: float, left_height: float, right_width: float, right_height: float) -> bool:
-    return abs(left_width - right_width) <= 3 and abs(left_height - right_height) <= 3
+    return same_size_with_tolerance(left_width, left_height, right_width, right_height, 3)
+
+
+def same_size_with_tolerance(
+    left_width: float,
+    left_height: float,
+    right_width: float,
+    right_height: float,
+    tolerance_mm: float,
+) -> bool:
+    return abs(left_width - right_width) <= tolerance_mm and abs(left_height - right_height) <= tolerance_mm
 
 
 def gcode_item(order_name: str, candidate: SizeCandidate, index: int) -> dict[str, Any]:
