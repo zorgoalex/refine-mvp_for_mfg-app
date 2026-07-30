@@ -99,7 +99,7 @@ export const BATH_METER_GUIDE_STYLE = {
   dashMm: 18,
   gapMm: 14,
   labelFill: '#ff6a00',
-  labelFontRatio: 0.5,
+  labelFontRatio: 1,
   labelFontWeight: 700,
 } as const;
 
@@ -147,7 +147,7 @@ export interface BathMeterGuideLabel {
 }
 
 /**
- * The orange meter label is exactly half the base font used for bath
+ * The orange meter label matches the base font used for bath
  * dimension annotations. Keeping the calculation here makes SVG, raster/PDF
  * and the manual editor use one typography contract.
  */
