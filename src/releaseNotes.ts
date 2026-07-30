@@ -62,6 +62,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-30",
+    title: "Карточка заказа: Excel без цен и сумм",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В карточке заказа появилась отдельная кнопка «Excel без цен» для выгрузки производственного файла с размерами и параметрами деталей.",
+      "В таком файле колонки «Цена за кв.м.» и «Сумма», общая сумма заказа и зависимые финансовые итоги остаются пустыми.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-30",
     title: "Раскрой: предпросмотр PDF и читаемые размеры деталей",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

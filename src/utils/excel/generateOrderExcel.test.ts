@@ -21,7 +21,10 @@ function makeDetails(count: number) {
   }));
 }
 
-async function buildWorkbook(detailCount: number) {
+async function buildWorkbook(
+  detailCount: number,
+  pricingMode: 'full' | 'omit' = 'full',
+) {
   const template = await fs.readFile(templatePath);
   vi.stubGlobal('fetch', vi.fn(async () => ({
     ok: true,
@@ -41,6 +44,7 @@ async function buildWorkbook(detailCount: number) {
     payments: [],
     client: { client_name: 'Тестовый клиент' },
     clientPhone: '+7 777 000 00 00',
+    pricingMode,
   });
 
   const workbook = new ExcelJS.Workbook();
@@ -64,6 +68,7 @@ describe('buildOrderExcelBuffer dynamic detail rows', () => {
     expect(worksheet.getCell(`C${lastDetailRow}`).value).toBe(400 + detailCount - 1);
     expect(worksheet.getCell(`D${lastDetailRow}`).value).toBe(((detailCount - 1) % 3) + 1);
     expect(worksheet.getCell(`H${lastDetailRow}`).value).toBe(`Позиция ${detailCount}`);
+    expect(worksheet.getCell(`I${lastDetailRow}`).value).toBe(1000 + detailCount - 1);
     expect(worksheet.getCell(`K${lastDetailRow}`).value).toBe(`Пленка ${detailCount}`);
 
     expect(worksheet.getCell(`A${lastDetailRow}`).value).toBe(detailCount);
@@ -123,5 +128,30 @@ describe('buildOrderExcelBuffer dynamic detail rows', () => {
 
     expect(worksheet.getCell('A68').isMerged).toBe(false);
     expect(worksheet.getCell('H69').isMerged).toBe(false);
+  });
+
+  it('keeps price columns but leaves all price values and order totals empty in omit mode', async () => {
+    const worksheet = await buildWorkbook(3, 'omit');
+
+    expect(worksheet.getCell('I11').value).toBe('Цена за кв.м.');
+    expect(worksheet.getCell('J11').value).toBe('Сумма');
+    expect(worksheet.getCell('I12').value).toBeNull();
+    expect(worksheet.getCell('J12').value).toBeNull();
+    expect(worksheet.getCell('I14').value).toBeNull();
+    expect(worksheet.getCell('J14').value).toBeNull();
+    expect(worksheet.getCell('I66').value).toBeNull();
+    expect(worksheet.getCell('J66').value).toBeNull();
+
+    expect(worksheet.getCell('J2').value).toBeNull();
+    expect(worksheet.getCell('L2').value).toBeNull();
+    expect(worksheet.getCell('K4').value).toBeNull();
+
+    expect(worksheet.getCell('E12').value).toEqual({
+      formula: 'ROUND((B12/1000)*(C12/1000)*D12,2)',
+    });
+    expect(worksheet.getCell('K8').value).toEqual({
+      formula: 'ROUND(SUMPRODUCT(B12:B66,C12:C66,D12:D66)/1000000,2)',
+    });
+    expect(worksheet.getCell('M8').value).toEqual({ formula: 'SUM(D12:D66)' });
   });
 });
