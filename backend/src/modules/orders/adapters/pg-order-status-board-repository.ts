@@ -267,6 +267,10 @@ function appendUserFilters(
   actorIndex: number | null,
   assignedSql: string,
 ): void {
+  if (query.orderIds && query.orderIds.length > 0) {
+    filters.push(`o.order_id = ANY($${params.push(query.orderIds)}::bigint[])`);
+  }
+
   if (query.search) {
     const search = parseOrderSearchInput(query.search);
     const plainIndex = params.push(`%${search.plain}%`);
@@ -573,6 +577,7 @@ export function createOrderStatusBoardFilterKey(query: OrderStatusBoardQuery): s
     includeDone: query.includeDone === true,
     plannedFrom: query.plannedFrom ?? null,
     plannedTo: query.plannedTo ?? null,
+    orderIds: query.orderIds ? [...query.orderIds].sort((left, right) => left - right) : [],
   });
   return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
 }

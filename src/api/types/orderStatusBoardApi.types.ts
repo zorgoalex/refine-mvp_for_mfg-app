@@ -11,6 +11,7 @@ export interface OrderStatusBoardQuery {
   includeDone?: boolean;
   plannedFrom?: string;
   plannedTo?: string;
+  orderIds?: number[];
 }
 
 export interface OrderStatusBoardStatus {

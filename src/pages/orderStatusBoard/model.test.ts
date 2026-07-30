@@ -7,6 +7,7 @@ import type {
 import {
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
+  collectCncOrderIds,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncTodayColumnsByOrders,
@@ -216,6 +217,29 @@ describe('order status board model', () => {
     expect(filtered[2]?.total).toBe(2);
   });
 
+  it('collects unique ERP order ids from visible CNC cards', () => {
+    const columns = [
+      {
+        key: 'parsed',
+        title: 'Файлы на станке',
+        total: 1,
+        packets: [
+          cncPacket('p-2706', ['2706', '2712'], [2706, null], [null, 2712]),
+        ],
+        baths: [],
+      },
+      {
+        key: 'baths',
+        title: 'Карты ванн',
+        total: 1,
+        packets: [],
+        baths: [cncBath('b-2700', ['2700', '2706'], [2700, 2706])],
+      },
+    ] as CncTelegramTodayColumn[];
+
+    expect(collectCncOrderIds(columns)).toEqual([2700, 2706, 2712]);
+  });
+
   it('drops impossible dates from a hand-edited shared URL', () => {
     const state = parseOrderStatusBoardViewState(
       new URLSearchParams('plannedFrom=2026-02-30&plannedTo=0000-01-01'),
@@ -319,22 +343,34 @@ function card(orderId: number): OrderStatusBoardCard {
   };
 }
 
-function cncPacket(packetId: string, orderNames: string[]) {
+function cncPacket(
+  packetId: string,
+  orderNames: string[],
+  orderIds: Array<number | null> = [],
+  matchOrderIds: Array<number | null> = [],
+) {
   return {
     packetId,
     items: orderNames.map((orderName, index) => ({
       packetItemId: `${packetId}-${index}`,
       orderName,
+      orderId: orderIds[index] ?? null,
+      matchOrderId: matchOrderIds[index] ?? null,
     })),
   };
 }
 
-function cncBath(bathCardId: string, orderNames: string[]) {
+function cncBath(
+  bathCardId: string,
+  orderNames: string[],
+  orderIds: number[] = [],
+) {
   return {
     bathCardId,
     items: orderNames.map((orderName, index) => ({
       bathItemId: `${bathCardId}-${index}`,
       orderName,
+      orderId: orderIds[index] ?? Number(orderName),
     })),
   };
 }
