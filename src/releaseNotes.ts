@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-30",
+    title: "Раскрой: PDF ванн на МДФ-доске",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "PDF карт раскроя из карточки ванны на доске МДФ-работ теперь заново отрисовывает карту ванны текущим рендерером, поэтому размерные подписи деталей используют увеличенный шрифт и в сохранённых раскроях.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-30",
     title: "Раскрой: предпросмотр PDF и читаемые размеры деталей",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

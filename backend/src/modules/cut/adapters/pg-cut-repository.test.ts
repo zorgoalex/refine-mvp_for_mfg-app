@@ -25,7 +25,18 @@ describe('vacuum bath meter-guide render wiring', () => {
     expect(repositorySource).toContain('smt.height_mm AS sheet_material_height_mm');
     expect(repositorySource).toContain('showBathMeterGuides,');
     expect(repositorySource).toContain('addBathMeterGuidesToSvg(baseSvg, placements');
-    expect(repositorySource).toContain('addBathMeterGuidesToSvg(view.bathSvg, placements');
+    expect(repositorySource).toContain('addBathMeterGuidesToSvg(baseBathSvg, placements');
+  });
+});
+
+describe('frozen bath PDF render wiring', () => {
+  it('rebuilds frozen bath SVG with the current renderer when PDF dynamic fields refresh', () => {
+    expect(repositorySource).toContain('rebuildBathSvgWithCurrentRenderer = args.refreshPdfDynamicFields === true');
+    expect(repositorySource).toContain('baseBathSvg = rebuildBathSvgWithCurrentRenderer');
+    expect(repositorySource).toContain('buildBathProfileSheetSvg({');
+    expect(repositorySource).toContain('labelFor: (piece) => frozenPieceLabelLines(piece, frozenItemByItemId, frozenQuantities)');
+    expect(repositorySource).toContain('addBathMeterGuidesToSvg(baseBathSvg, placements');
+    expect(repositorySource).not.toContain('addBathMeterGuidesToSvg(view.bathSvg, placements');
   });
 });
 

@@ -1698,17 +1698,19 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new ApiError(409, 'CUT_MANUAL_LAYOUT_UNAVAILABLE', 'Ручной вариант раскроя недоступен');
     }
     const sourceSheets = useManual ? manual!.sheets : group.sheets;
+    const rebuildFrozenPieceMetadata = args.pieceMetadata === true || args.refreshPdfDynamicFields === true;
     const rebuildSvgWithPieceMetadata = args.pieceMetadata === true;
-    const frozenQuantities = rebuildSvgWithPieceMetadata
+    const rebuildBathSvgWithCurrentRenderer = args.refreshPdfDynamicFields === true;
+    const frozenQuantities = rebuildFrozenPieceMetadata
       ? computeGroupItemQuantities(sourceSheets.map((sheet) => ({
           sheetIndex: sheet.sheetIndex,
           placements: sheet.placements,
         })))
       : new Map<string, number>();
-    const frozenItemByItemId = rebuildSvgWithPieceMetadata
+    const frozenItemByItemId = rebuildFrozenPieceMetadata
       ? new Map(frozen.job.items.map((item) => [freecutItemId(item.orderDetailId), item]))
       : new Map<string, CutJobItemDto>();
-    const frozenFillByOrder = rebuildSvgWithPieceMetadata
+    const frozenFillByOrder = rebuildFrozenPieceMetadata
       ? createOrderFillResolver(frozen.job.items.map((item) => item.orderId))
       : (() => '#eef3f8');
     const bathGuideMeta = await this.database.query<{
@@ -1760,9 +1762,23 @@ export class PgCutRepository implements CutRepositoryPort {
       const svg = showBathMeterGuides
         ? addBathMeterGuidesToSvg(baseSvg, placements, args.rotate90 === true)
         : baseSvg;
-      const bathSvg = showBathMeterGuides
-        ? addBathMeterGuidesToSvg(view.bathSvg, placements, args.rotate90 === true)
+      const baseBathSvg = rebuildBathSvgWithCurrentRenderer
+        ? buildBathProfileSheetSvg({
+            sheet: placements,
+            labelFor: (piece) => frozenPieceLabelLines(piece, frozenItemByItemId, frozenQuantities),
+            fillFor: (piece) => {
+              const item = frozenItemByItemId.get(piece.item_id);
+              const orderId = (piece as { label?: PieceLabelSnapshot }).label?.orderId ?? item?.orderId ?? null;
+              return frozenFillByOrder(orderId);
+            },
+            rotate90: args.rotate90,
+            originTopLeft: args.originTopLeft,
+            axisOrigin: args.axisOrigin,
+          })
         : view.bathSvg;
+      const bathSvg = showBathMeterGuides
+        ? addBathMeterGuidesToSvg(baseBathSvg, placements, args.rotate90 === true)
+        : baseBathSvg;
       return {
         sheetIndex: sheet.sheetIndex,
         placements,
