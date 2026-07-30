@@ -4316,6 +4316,7 @@ function buildPdfSheetMeta(
     materials: string[];
     thicknesses: string[];
     films: string[];
+    edgeTypes: string[];
     machineFiles: string[];
   } = {
     orders: [],
@@ -4325,6 +4326,7 @@ function buildPdfSheetMeta(
     materials: [],
     thicknesses: [],
     films: [],
+    edgeTypes: [],
     machineFiles: [],
   };
   const add = (list: string[], value: string | number | null | undefined) => {
@@ -4343,6 +4345,7 @@ function buildPdfSheetMeta(
     add(meta.materials, detail.materialName);
     add(meta.thicknesses, detail.thicknessMm);
     add(meta.films, detail.filmName);
+    add(meta.edgeTypes, detail.edgeTypeName);
     for (const file of detail.machineFiles) add(meta.machineFiles, file);
   }
   return meta;

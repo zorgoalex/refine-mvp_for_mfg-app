@@ -1,5 +1,7 @@
 import type {
   LabelConditionBranch,
+  LabelCustomExpressionAggregateFunction,
+  LabelCustomExpressionAggregateSource,
   LabelCustomExpressionNode,
   LabelCustomFieldExpressionV1,
   LabelEditorMetadataV1,
@@ -11,6 +13,8 @@ import type {
 
 export type CustomFieldType = LabelFieldCatalogItem['type'];
 export type CustomFieldValueMode = 'constant' | 'source' | 'expression';
+export type CustomExpressionPreviewScalar = string | number | boolean | null | undefined;
+export type CustomExpressionPreviewCollections = Record<string, Array<Record<string, CustomExpressionPreviewScalar>>>;
 
 export interface CustomFieldSchemaRow {
   fieldId: string;
@@ -576,7 +580,8 @@ export function findCustomFieldDependencyCycle(rows: CustomFieldSchemaRow[]): st
 
 export function evaluateCustomFieldPreviewValues(
   rows: CustomFieldSchemaRow[],
-  baseValues: Record<string, string | number | boolean | null | undefined>,
+  baseValues: Record<string, CustomExpressionPreviewScalar>,
+  options: { collections?: CustomExpressionPreviewCollections } = {},
 ): Record<string, string> {
   const byId = new Map(rows.map((row) => [row.fieldId, row]));
   const resolvedValues = new Map<string, string | number | boolean | null | undefined>();
@@ -589,7 +594,11 @@ export function evaluateCustomFieldPreviewValues(
     resolving.add(fieldId);
     let value: string | number | boolean | null | undefined;
     if (row.valueMode === 'expression' && row.expression) {
-      value = evaluateCustomExpressionNode(row.expression.root, (dependency) => resolve(dependency));
+      value = evaluateCustomExpressionNode(
+        row.expression.root,
+        (dependency) => resolve(dependency),
+        options.collections ?? {},
+      );
     } else if (row.valueMode === 'source' && row.sourceField) {
       value = resolve(row.sourceField);
     } else {
@@ -736,6 +745,23 @@ function parseCustomExpressionNode(
     }
     return { type: 'concat', parts };
   }
+  if (value.type === 'aggregate') {
+    const separator = value.separator === undefined ? undefined : value.separator;
+    if (!hasAllowedKeys(value, ['type', 'source', 'field', 'fn'], ['separator'])
+      || !isCustomExpressionAggregateSource(value.source)
+      || !isCustomExpressionFieldId(value.field)
+      || !isCustomExpressionAggregateFunction(value.fn)
+      || (separator !== undefined && (typeof separator !== 'string' || separator.length > 1000))) {
+      return null;
+    }
+    return {
+      type: 'aggregate',
+      source: value.source,
+      field: value.field.trim(),
+      fn: value.fn,
+      ...(separator === undefined ? {} : { separator }),
+    };
+  }
   if (value.type === 'if_else') {
     if (!hasExactKeys(value, ['type', 'when', 'then', 'else']) || !isRecord(value.when)) return null;
     const when = parseCustomExpressionWhen(value.when);
@@ -768,6 +794,10 @@ function visitCustomExpressionNode(node: LabelCustomExpressionNode, visit: (fiel
     visit(node.field);
     return;
   }
+  if (node.type === 'aggregate') {
+    visit(node.field);
+    return;
+  }
   if (node.type === 'concat') {
     node.parts.forEach((part) => visitCustomExpressionNode(part, visit));
     return;
@@ -781,15 +811,17 @@ function visitCustomExpressionNode(node: LabelCustomExpressionNode, visit: (fiel
 
 function evaluateCustomExpressionNode(
   node: LabelCustomExpressionNode,
-  getValue: (fieldId: string) => string | number | boolean | null | undefined,
+  getValue: (fieldId: string) => CustomExpressionPreviewScalar,
+  collections: CustomExpressionPreviewCollections,
 ): string {
   if (node.type === 'empty') return '';
   if (node.type === 'text') return ensureCustomExpressionPreviewLength(node.value);
   if (node.type === 'field') return ensureCustomExpressionPreviewLength(stringifyCustomExpressionValue(getValue(node.field)));
+  if (node.type === 'aggregate') return ensureCustomExpressionPreviewLength(evaluateCustomAggregatePreviewNode(node, collections));
   if (node.type === 'concat') {
     let result = '';
     for (const part of node.parts) {
-      result = ensureCustomExpressionPreviewLength(result + evaluateCustomExpressionNode(part, getValue));
+      result = ensureCustomExpressionPreviewLength(result + evaluateCustomExpressionNode(part, getValue, collections));
     }
     return result;
   }
@@ -801,7 +833,7 @@ function evaluateCustomExpressionNode(
       : node.when.op === 'equals'
         ? String(value ?? '') === String(node.when.value ?? '')
         : String(value ?? '') !== String(node.when.value ?? '');
-  return evaluateCustomExpressionNode(matches ? node.then : node.else, getValue);
+  return evaluateCustomExpressionNode(matches ? node.then : node.else, getValue, collections);
 }
 
 function summarizeCustomExpressionNode(
@@ -812,6 +844,17 @@ function summarizeCustomExpressionNode(
   if (node.type === 'field') return fieldLabels.get(node.field) ?? node.field;
   if (node.type === 'text') return `«${node.value || 'пусто'}»`;
   if (node.type === 'concat') return node.parts.map((part) => summarizeCustomExpressionNode(part, fieldLabels)).join(' + ');
+  if (node.type === 'aggregate') {
+    const fn = {
+      join: 'список',
+      unique_join: 'уникальные',
+      count: 'количество',
+      sum: 'сумма',
+      min: 'минимум',
+      max: 'максимум',
+    }[node.fn];
+    return `${fn} ${fieldLabels.get(node.field) ?? node.field}`;
+  }
   const operator = {
     exists: 'существует',
     not_empty: 'не пусто',
@@ -823,6 +866,23 @@ function summarizeCustomExpressionNode(
 
 function stringifyCustomExpressionValue(value: string | number | boolean | null | undefined): string {
   return value == null ? '' : String(value);
+}
+
+function evaluateCustomAggregatePreviewNode(
+  node: Extract<LabelCustomExpressionNode, { type: 'aggregate' }>,
+  collections: CustomExpressionPreviewCollections,
+): string {
+  const values = (collections[node.source] ?? [])
+    .map((row) => row[node.field] ?? row[node.field.replace(/^detail\./, '')])
+    .filter((value) => value !== null && value !== undefined && String(value).trim() !== '');
+  if (node.fn === 'count') return String(values.length);
+  const strings = values.map((value) => String(value).trim()).filter(Boolean);
+  if (node.fn === 'join') return strings.join(node.separator ?? ', ');
+  if (node.fn === 'unique_join') return [...new Set(strings)].join(node.separator ?? ', ');
+  const numbers = values.map((value) => Number(value)).filter((value) => Number.isFinite(value));
+  if (node.fn === 'sum') return numbers.length > 0 ? String(numbers.reduce((sum, value) => sum + value, 0)) : '';
+  if (node.fn === 'min') return numbers.length > 0 ? String(Math.min(...numbers)) : '';
+  return numbers.length > 0 ? String(Math.max(...numbers)) : '';
 }
 
 function normalizeCustomPreviewScalar(value: unknown): string | number | boolean | null | undefined {
@@ -839,6 +899,19 @@ function ensureCustomExpressionPreviewLength(value: string): string {
 
 function isCustomExpressionFieldId(value: unknown): value is string {
   return typeof value === 'string' && Boolean(value.trim()) && value.length <= 200;
+}
+
+function isCustomExpressionAggregateSource(value: unknown): value is LabelCustomExpressionAggregateSource {
+  return value === 'order.details' || value === 'sheet.details';
+}
+
+function isCustomExpressionAggregateFunction(value: unknown): value is LabelCustomExpressionAggregateFunction {
+  return value === 'join'
+    || value === 'unique_join'
+    || value === 'count'
+    || value === 'sum'
+    || value === 'min'
+    || value === 'max';
 }
 
 function parseLabelConditionBranch(value: unknown): LabelConditionBranch | null {
@@ -866,6 +939,13 @@ function hasExactKeys(value: Record<string, unknown>, required: string[]): boole
   const keys = Object.keys(value);
   return keys.length === required.length
     && required.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function hasAllowedKeys(value: Record<string, unknown>, required: string[], optional: string[]): boolean {
+  const allowed = new Set([...required, ...optional]);
+  const keys = Object.keys(value);
+  return required.every((key) => Object.prototype.hasOwnProperty.call(value, key))
+    && keys.every((key) => allowed.has(key));
 }
 
 function isLabelConditionScalar(value: unknown): value is string | number | boolean | null {

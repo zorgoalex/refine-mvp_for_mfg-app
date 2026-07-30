@@ -3,6 +3,7 @@ import type { LabelTemplateDto, OrderLabelDataDetailDto } from './labels.types';
 import {
   assertRenderableCustomFieldSchema,
   evaluateCustomFieldExpression,
+  type LabelCustomExpressionContext,
   readCustomFieldExpressionV1,
 } from './label-custom-field-expression';
 import { parseBasisData, type ParsedBasisData } from './parse-basis-data';
@@ -45,6 +46,20 @@ export function buildLabelRows(input: {
 }): LabelRow[] {
   assertRenderableCustomFieldSchema(input.template.customFieldSchema);
   const expanded: LabelRow[] = [];
+  const orderDetailCollection = input.details.map((detail) => {
+    const detailOrderFields = detail.orderFields && Object.keys(detail.orderFields).length > 0
+      ? detail.orderFields
+      : input.orderFields ?? {};
+    const detailOrderName = readOrderNameFromFields(detailOrderFields) ?? input.orderName;
+    return buildBaseValues(detailOrderName, detailOrderFields, detail, input.useBasisFields ?? true);
+  });
+  const expressionContext: LabelCustomExpressionContext = {
+    getCollectionValues: (source, fieldId) => (
+      source === 'order.details'
+        ? orderDetailCollection.map((row) => row[fieldId] ?? null)
+        : undefined
+    ),
+  };
   const total = input.details.reduce(
     (sum, detail) => sum + Math.max(0, Math.trunc(detail.quantity || 0)),
     0,
@@ -62,7 +77,7 @@ export function buildLabelRows(input: {
       values['label.counter'] = rowIndex;
       values['label.counter_total'] = total;
       values['label.counter_text'] = `Бир. № ${rowIndex} / ${total}`;
-      applyCustomFieldValues(values, input.template.customFieldSchema, detail.customFields);
+      applyCustomFieldValues(values, input.template.customFieldSchema, detail.customFields, expressionContext);
       expanded.push({
         rowIndex,
         detailId: detail.detailId,
@@ -134,6 +149,7 @@ function applyCustomFieldValues(
   values: Record<string, string | number | boolean | null>,
   customFieldSchema: Record<string, unknown>,
   manualValues: Record<string, unknown>,
+  expressionContext: LabelCustomExpressionContext = {},
 ): void {
   const manualFieldIds = new Set(Object.keys(manualValues));
   for (const [fieldId, value] of Object.entries(manualValues)) {
@@ -155,7 +171,7 @@ function applyCustomFieldValues(
         Object.prototype.hasOwnProperty.call(customFieldSchema, dependency)
           ? resolveCustomField(dependency)
           : values[dependency]
-      ));
+      ), expressionContext);
     } else {
       const defaultValue = readCustomDefaultValue(schema);
       if (defaultValue !== undefined) values[fieldId] = normalizeValue(defaultValue);

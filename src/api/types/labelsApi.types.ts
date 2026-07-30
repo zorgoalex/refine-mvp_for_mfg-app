@@ -1,6 +1,8 @@
 export type LabelExportFormat = 'bmp' | 'png' | 'emf';
 export type LabelElementKind = 'text' | 'line' | 'rect' | 'qr' | 'cut_map';
 export type LabelConditionOperator = 'exists' | 'not_empty' | 'equals' | 'not_equals';
+export type LabelCustomExpressionAggregateFunction = 'join' | 'unique_join' | 'count' | 'sum' | 'min' | 'max';
+export type LabelCustomExpressionAggregateSource = 'order.details' | 'sheet.details';
 export type LabelConditionBranch =
   | { type: 'current' }
   | { type: 'field'; field: string }
@@ -23,6 +25,13 @@ export type LabelCustomExpressionNode =
   | { type: 'field'; field: string }
   | { type: 'text'; value: string }
   | { type: 'concat'; parts: LabelCustomExpressionNode[] }
+  | {
+      type: 'aggregate';
+      source: LabelCustomExpressionAggregateSource;
+      field: string;
+      fn: LabelCustomExpressionAggregateFunction;
+      separator?: string;
+    }
   | {
       type: 'if_else';
       when: {

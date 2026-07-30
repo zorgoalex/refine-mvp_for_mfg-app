@@ -2,11 +2,20 @@ import { ApiError } from '../../../common/errors/api-error';
 
 export type LabelCustomExpressionScalar = string | number | boolean | null;
 export type LabelCustomExpressionOperator = 'exists' | 'not_empty' | 'equals' | 'not_equals';
+export type LabelCustomExpressionAggregateFunction = 'join' | 'unique_join' | 'count' | 'sum' | 'min' | 'max';
+export type LabelCustomExpressionAggregateSource = 'order.details' | 'sheet.details';
 
 export type LabelCustomExpressionNode =
   | { type: 'field'; field: string }
   | { type: 'text'; value: string }
   | { type: 'concat'; parts: LabelCustomExpressionNode[] }
+  | {
+      type: 'aggregate';
+      source: LabelCustomExpressionAggregateSource;
+      field: string;
+      fn: LabelCustomExpressionAggregateFunction;
+      separator?: string;
+    }
   | {
       type: 'if_else';
       when: { field: string; op: LabelCustomExpressionOperator; value?: LabelCustomExpressionScalar };
@@ -19,6 +28,13 @@ export interface LabelCustomFieldExpressionV1 {
   type: 'custom_expression';
   version: 1;
   root: LabelCustomExpressionNode;
+}
+
+export interface LabelCustomExpressionContext {
+  getCollectionValues?: (
+    source: LabelCustomExpressionAggregateSource,
+    fieldId: string,
+  ) => readonly LabelCustomExpressionScalar[] | undefined;
 }
 
 const MAX_EXPRESSION_DEPTH = 8;
@@ -149,8 +165,9 @@ export function assertRenderableCustomFieldSchema(customFieldSchema: Record<stri
 export function evaluateCustomFieldExpression(
   expression: LabelCustomFieldExpressionV1,
   getValue: (fieldId: string) => LabelCustomExpressionScalar | undefined,
+  context: LabelCustomExpressionContext = {},
 ): string {
-  return evaluateNode(expression.root, getValue);
+  return evaluateNode(expression.root, getValue, context);
 }
 
 function parseNode(value: unknown, depth: number, budget: { nodes: number }): LabelCustomExpressionNode | null {
@@ -182,6 +199,23 @@ function parseNode(value: unknown, depth: number, budget: { nodes: number }): La
     }
     return { type: 'concat', parts };
   }
+  if (value.type === 'aggregate') {
+    const separator = value.separator === undefined ? undefined : value.separator;
+    if (!exactKeysOptional(value, ['type', 'source', 'field', 'fn'], ['separator'])
+      || !isAggregateSource(value.source)
+      || !isFieldId(value.field)
+      || !isAggregateFunction(value.fn)
+      || (separator !== undefined && (typeof separator !== 'string' || separator.length > MAX_TEXT_LENGTH))) {
+      return null;
+    }
+    return {
+      type: 'aggregate',
+      source: value.source,
+      field: value.field.trim(),
+      fn: value.fn,
+      ...(separator === undefined ? {} : { separator }),
+    };
+  }
   if (value.type === 'if_else') {
     if (!exactKeys(value, ['type', 'when', 'then', 'else']) || !isRecord(value.when)) return null;
     const when = parseWhen(value.when);
@@ -210,25 +244,28 @@ function parseWhen(value: Record<string, unknown>): Extract<LabelCustomExpressio
 function evaluateNode(
   node: LabelCustomExpressionNode,
   getValue: (fieldId: string) => LabelCustomExpressionScalar | undefined,
+  context: LabelCustomExpressionContext,
 ): string {
   if (node.type === 'empty') return '';
   if (node.type === 'text') return ensureResultLength(node.value);
   if (node.type === 'field') return ensureResultLength(stringify(getValue(node.field)));
+  if (node.type === 'aggregate') return ensureResultLength(evaluateAggregateNode(node, context));
   if (node.type === 'concat') {
     let result = '';
     for (const part of node.parts) {
-      result = ensureResultLength(result + evaluateNode(part, getValue));
+      result = ensureResultLength(result + evaluateNode(part, getValue, context));
     }
     return result;
   }
   return conditionMatches(node.when, getValue(node.when.field))
-    ? evaluateNode(node.then, getValue)
-    : evaluateNode(node.else, getValue);
+    ? evaluateNode(node.then, getValue, context)
+    : evaluateNode(node.else, getValue, context);
 }
 
 function expressionStats(node: LabelCustomExpressionNode): { nodes: number; textLength: number } {
   if (node.type === 'text') return { nodes: 1, textLength: node.value.length };
   if (node.type === 'field' || node.type === 'empty') return { nodes: 1, textLength: 0 };
+  if (node.type === 'aggregate') return { nodes: 1, textLength: node.separator?.length ?? 0 };
   const children = node.type === 'concat' ? node.parts : [node.then, node.else];
   return children.reduce(
     (total, child) => {
@@ -285,6 +322,10 @@ function visitNode(node: LabelCustomExpressionNode, visit: (fieldId: string) => 
     visit(node.field);
     return;
   }
+  if (node.type === 'aggregate') {
+    visit(node.field);
+    return;
+  }
   if (node.type === 'concat') {
     node.parts.forEach((part) => visitNode(part, visit));
     return;
@@ -294,6 +335,22 @@ function visitNode(node: LabelCustomExpressionNode, visit: (fieldId: string) => 
     visitNode(node.then, visit);
     visitNode(node.else, visit);
   }
+}
+
+function evaluateAggregateNode(
+  node: Extract<LabelCustomExpressionNode, { type: 'aggregate' }>,
+  context: LabelCustomExpressionContext,
+): string {
+  const values = (context.getCollectionValues?.(node.source, node.field) ?? [])
+    .filter((value) => value !== null && value !== undefined && String(value).trim() !== '');
+  if (node.fn === 'count') return String(values.length);
+  const strings = values.map((value) => String(value).trim()).filter(Boolean);
+  if (node.fn === 'join') return strings.join(node.separator ?? ', ');
+  if (node.fn === 'unique_join') return [...new Set(strings)].join(node.separator ?? ', ');
+  const numbers = values.map((value) => Number(value)).filter((value) => Number.isFinite(value));
+  if (node.fn === 'sum') return numbers.length > 0 ? String(numbers.reduce((sum, value) => sum + value, 0)) : '';
+  if (node.fn === 'min') return numbers.length > 0 ? String(Math.min(...numbers)) : '';
+  return numbers.length > 0 ? String(Math.max(...numbers)) : '';
 }
 
 function stringify(value: LabelCustomExpressionScalar | undefined): string {
@@ -319,10 +376,30 @@ function isScalar(value: unknown): value is LabelCustomExpressionScalar {
     || (typeof value === 'number' && Number.isFinite(value));
 }
 
+function isAggregateSource(value: unknown): value is LabelCustomExpressionAggregateSource {
+  return value === 'order.details' || value === 'sheet.details';
+}
+
+function isAggregateFunction(value: unknown): value is LabelCustomExpressionAggregateFunction {
+  return value === 'join'
+    || value === 'unique_join'
+    || value === 'count'
+    || value === 'sum'
+    || value === 'min'
+    || value === 'max';
+}
+
 function exactKeys(value: Record<string, unknown>, required: string[]): boolean {
   const keys = Object.keys(value);
   return required.every((key) => Object.prototype.hasOwnProperty.call(value, key))
     && keys.every((key) => required.includes(key));
+}
+
+function exactKeysOptional(value: Record<string, unknown>, required: string[], optional: string[]): boolean {
+  const allowed = new Set([...required, ...optional]);
+  const keys = Object.keys(value);
+  return required.every((key) => Object.prototype.hasOwnProperty.call(value, key))
+    && keys.every((key) => allowed.has(key));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

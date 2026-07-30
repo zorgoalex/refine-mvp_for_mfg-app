@@ -59,6 +59,13 @@ describe('LabelsConfigTab wiring', () => {
     expect(expressionEditorSrc).toMatch(/IF \/ ELSE/);
     expect(expressionEditorSrc).toMatch(/Фиксированный текст/);
     expect(expressionEditorSrc).toMatch(/Пропустить/);
+    expect(expressionEditorSrc).toMatch(/Агрегация списка/);
+    expect(expressionEditorSrc).toMatch(/unique_join/);
+    expect(expressionEditorSrc).toMatch(/AGGREGATE_FUNCTION_OPTIONS/);
+    expect(tabSrc).toMatch(/LABEL_AGGREGATE_SOURCES/);
+    expect(tabSrc).toMatch(/order\.details/);
+    expect(tabSrc).toMatch(/aggregateSources=\{LABEL_AGGREGATE_SOURCES\}/);
+    expect(tabSrc).toMatch(/LABEL_PREVIEW_COLLECTIONS/);
     expect(expressionEditorSrc).toMatch(/ArrowUpOutlined/);
     expect(expressionEditorSrc).toMatch(/ArrowDownOutlined/);
   });

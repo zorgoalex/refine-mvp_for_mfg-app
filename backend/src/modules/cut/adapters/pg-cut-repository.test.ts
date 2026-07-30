@@ -754,6 +754,7 @@ describe('PgCutRepository', () => {
         smt_width_mm: 2800,
         smt_height_mm: 2070,
         doweling: true,
+        edge_type_name: 'ПВХ 2мм',
         machine_files: ['CNC#1_11380.TXT', 'CNC#2_11380.TXT'],
         order_name: '11380',
       }],
@@ -773,7 +774,7 @@ describe('PgCutRepository', () => {
       groups: Array<{
         sheets: Array<{
           renderSnapshot?: {
-            pdfMeta?: { machineFiles?: string[] };
+            pdfMeta?: { machineFiles?: string[]; edgeTypes?: string[] };
             pdfDetailRows?: Array<{
               quantity: number;
               machineFiles?: string[];
@@ -787,6 +788,7 @@ describe('PgCutRepository', () => {
     const row = renderSnapshot?.pdfDetailRows?.[0];
 
     expect(renderSnapshot?.pdfMeta?.machineFiles).toEqual(['CNC#1_11380.TXT', 'CNC#2_11380.TXT']);
+    expect(renderSnapshot?.pdfMeta?.edgeTypes).toEqual(['ПВХ 2мм']);
     expect(row?.quantity).toBe(2);
     expect(row?.machineFiles).toEqual(['CNC#1_11380.TXT', 'CNC#2_11380.TXT']);
     expect(row?.fields).toMatchObject({

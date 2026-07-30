@@ -8,6 +8,8 @@ import {
 import { Button, Input, Select, Space, Tooltip, Typography } from 'antd';
 import type {
   LabelConditionOperator,
+  LabelCustomExpressionAggregateFunction,
+  LabelCustomExpressionAggregateSource,
   LabelCustomExpressionNode,
   LabelFieldCatalogItem,
 } from '../../../api/types/labelsApi.types';
@@ -18,6 +20,7 @@ const NODE_OPTIONS: Array<{ value: LabelCustomExpressionNode['type']; label: str
   { value: 'field', label: 'Поле' },
   { value: 'text', label: 'Фиксированный текст' },
   { value: 'concat', label: 'Склейка значений' },
+  { value: 'aggregate', label: 'Агрегация списка' },
   { value: 'if_else', label: 'IF / ELSE' },
   { value: 'empty', label: 'Пропустить' },
 ];
@@ -29,9 +32,25 @@ const OPERATOR_OPTIONS: Array<{ value: LabelConditionOperator; label: string }> 
   { value: 'not_equals', label: 'не равно' },
 ];
 
+const AGGREGATE_FUNCTION_OPTIONS: Array<{ value: LabelCustomExpressionAggregateFunction; label: string }> = [
+  { value: 'unique_join', label: 'Уникальные значения' },
+  { value: 'join', label: 'Все значения' },
+  { value: 'count', label: 'Количество непустых' },
+  { value: 'sum', label: 'Сумма' },
+  { value: 'min', label: 'Минимум' },
+  { value: 'max', label: 'Максимум' },
+];
+
+export interface CustomFieldAggregateSourceOption {
+  value: LabelCustomExpressionAggregateSource;
+  label: string;
+  fieldSource: LabelFieldCatalogItem['source'];
+}
+
 export interface CustomFieldExpressionEditorProps {
   value: LabelCustomExpressionNode;
   fields: LabelFieldCatalogItem[];
+  aggregateSources?: CustomFieldAggregateSourceOption[];
   disabled?: boolean;
   onChange: (value: LabelCustomExpressionNode) => void;
 }
@@ -39,12 +58,14 @@ export interface CustomFieldExpressionEditorProps {
 export const CustomFieldExpressionEditor: React.FC<CustomFieldExpressionEditorProps> = ({
   value,
   fields,
+  aggregateSources,
   disabled = false,
   onChange,
 }) => (
   <ExpressionNodeEditor
     value={value}
     fields={fields}
+    aggregateSources={aggregateSources}
     disabled={disabled}
     depth={1}
     onChange={onChange}
@@ -58,18 +79,24 @@ interface ExpressionNodeEditorProps extends CustomFieldExpressionEditorProps {
 const ExpressionNodeEditor: React.FC<ExpressionNodeEditorProps> = ({
   value,
   fields,
+  aggregateSources,
   disabled,
   depth,
   onChange,
 }) => {
   const firstField = fields[0]?.id ?? '';
+  const firstAggregateSource = aggregateSources?.[0];
+  const firstAggregateField = firstAggregateSource
+    ? aggregateFieldOptions(fields, firstAggregateSource).at(0)?.value ?? firstField
+    : firstField;
   const fieldOptions = fields.map((field) => ({
     value: field.id,
     label: `${field.category}: ${field.label}`,
   }));
-  const nodeOptions = depth >= 8
+  const nodeOptions = (depth >= 8
     ? NODE_OPTIONS.filter((option) => option.value !== 'concat' && option.value !== 'if_else')
-    : NODE_OPTIONS;
+    : NODE_OPTIONS)
+    .filter((option) => option.value !== 'aggregate' || (aggregateSources?.length ?? 0) > 0);
 
   return (
     <div
@@ -87,7 +114,7 @@ const ExpressionNodeEditor: React.FC<ExpressionNodeEditorProps> = ({
           disabled={disabled}
           options={nodeOptions}
           style={{ width: 210 }}
-          onChange={(type: LabelCustomExpressionNode['type']) => onChange(defaultNode(type, firstField))}
+          onChange={(type: LabelCustomExpressionNode['type']) => onChange(defaultNode(type, firstField, firstAggregateSource?.value, firstAggregateField))}
         />
 
         {value.type === 'field' && (
@@ -123,6 +150,7 @@ const ExpressionNodeEditor: React.FC<ExpressionNodeEditorProps> = ({
                 <ExpressionNodeEditor
                   value={part}
                   fields={fields}
+                  aggregateSources={aggregateSources}
                   disabled={disabled}
                   depth={depth + 1}
                   onChange={(nextPart) => onChange({
@@ -173,11 +201,60 @@ const ExpressionNodeEditor: React.FC<ExpressionNodeEditorProps> = ({
               disabled={disabled || value.parts.length >= 20}
               onClick={() => onChange({
                 type: 'concat',
-                parts: [...value.parts, defaultNode('field', firstField)],
+                parts: [...value.parts, defaultNode('field', firstField, firstAggregateSource?.value, firstAggregateField)],
               })}
             >
               Добавить часть
             </Button>
+          </Space>
+        )}
+
+        {value.type === 'aggregate' && (
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Text type="secondary">Выберите список сущностей и поле, значения которого нужно собрать.</Text>
+            <Space.Compact block>
+              <Select
+                value={value.source}
+                disabled={disabled}
+                options={(aggregateSources ?? []).map((source) => ({ value: source.value, label: source.label }))}
+                style={{ width: '38%' }}
+                onChange={(source: LabelCustomExpressionAggregateSource) => {
+                  const sourceOption = aggregateSources?.find((option) => option.value === source);
+                  const field = sourceOption ? aggregateFieldOptions(fields, sourceOption).at(0)?.value ?? value.field : value.field;
+                  onChange({ ...value, source, field });
+                }}
+              />
+              <Select
+                showSearch
+                optionFilterProp="label"
+                value={value.field || undefined}
+                placeholder="Поле"
+                disabled={disabled}
+                options={aggregateFieldOptions(
+                  fields,
+                  aggregateSources?.find((source) => source.value === value.source) ?? firstAggregateSource,
+                )}
+                style={{ width: '62%' }}
+                onChange={(field) => onChange({ ...value, field })}
+              />
+            </Space.Compact>
+            <Space.Compact block>
+              <Select
+                value={value.fn}
+                disabled={disabled}
+                options={AGGREGATE_FUNCTION_OPTIONS}
+                style={{ width: '45%' }}
+                onChange={(fn: LabelCustomExpressionAggregateFunction) => onChange({ ...value, fn })}
+              />
+              <Input
+                value={value.separator ?? ', '}
+                disabled={disabled || (value.fn !== 'join' && value.fn !== 'unique_join')}
+                maxLength={1000}
+                placeholder="Разделитель"
+                style={{ width: '55%' }}
+                onChange={(event) => onChange({ ...value, separator: event.target.value })}
+              />
+            </Space.Compact>
           </Space>
         )}
 
@@ -227,6 +304,7 @@ const ExpressionNodeEditor: React.FC<ExpressionNodeEditorProps> = ({
               title="Тогда"
               value={value.then}
               fields={fields}
+              aggregateSources={aggregateSources}
               disabled={disabled}
               depth={depth + 1}
               onChange={(thenNode) => onChange({ ...value, then: thenNode })}
@@ -235,6 +313,7 @@ const ExpressionNodeEditor: React.FC<ExpressionNodeEditorProps> = ({
               title="Иначе"
               value={value.else}
               fields={fields}
+              aggregateSources={aggregateSources}
               disabled={disabled}
               depth={depth + 1}
               onChange={(elseNode) => onChange({ ...value, else: elseNode })}
@@ -257,10 +336,24 @@ const BranchEditor: React.FC<ExpressionNodeEditorProps & { title: string }> = ({
   </div>
 );
 
-function defaultNode(type: LabelCustomExpressionNode['type'], firstField: string): LabelCustomExpressionNode {
+function defaultNode(
+  type: LabelCustomExpressionNode['type'],
+  firstField: string,
+  firstAggregateSource?: LabelCustomExpressionAggregateSource,
+  firstAggregateField?: string,
+): LabelCustomExpressionNode {
   if (type === 'field') return { type: 'field', field: firstField };
   if (type === 'text') return { type: 'text', value: '' };
   if (type === 'empty') return { type: 'empty' };
+  if (type === 'aggregate') {
+    return {
+      type: 'aggregate',
+      source: firstAggregateSource ?? 'order.details',
+      field: firstAggregateField ?? firstField,
+      fn: 'unique_join',
+      separator: ', ',
+    };
+  }
   if (type === 'concat') {
     return {
       type: 'concat',
@@ -276,6 +369,19 @@ function defaultNode(type: LabelCustomExpressionNode['type'], firstField: string
     then: { type: 'field', field: firstField },
     else: { type: 'empty' },
   };
+}
+
+function aggregateFieldOptions(
+  fields: LabelFieldCatalogItem[],
+  source?: CustomFieldAggregateSourceOption,
+): Array<{ value: string; label: string }> {
+  const sourceFields = source
+    ? fields.filter((field) => field.source === source.fieldSource)
+    : fields;
+  return sourceFields.map((field) => ({
+    value: field.id,
+    label: `${field.category}: ${field.label}`,
+  }));
 }
 
 function movePart(

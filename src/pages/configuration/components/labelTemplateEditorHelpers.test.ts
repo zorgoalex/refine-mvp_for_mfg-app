@@ -193,6 +193,51 @@ describe('label template editor helpers', () => {
     expect(summarizeCustomFieldExpression(expression, new Map([['custom.material', 'Материал']]))).toContain('Материал');
   });
 
+  it('round-trips and previews aggregate custom formulas over detail collections', () => {
+    const rows = customFieldRowsFromSchema({
+      'custom.edge_types': expressionSchema({
+        type: 'aggregate',
+        source: 'sheet.details',
+        field: 'detail.edge_type_name',
+        fn: 'unique_join',
+        separator: ', ',
+      }),
+      'custom.quantity_total': expressionSchema({
+        type: 'aggregate',
+        source: 'sheet.details',
+        field: 'detail.quantity',
+        fn: 'sum',
+      }),
+    });
+
+    expect(customFieldRowsToSchema(rows)).toMatchObject({
+      'custom.edge_types': {
+        expression: {
+          root: {
+            type: 'aggregate',
+            source: 'sheet.details',
+            field: 'detail.edge_type_name',
+            fn: 'unique_join',
+          },
+        },
+      },
+    });
+    expect(customExpressionFieldIds(rows[0].expression!)).toEqual(['detail.edge_type_name']);
+    expect(evaluateCustomFieldPreviewValues(rows, {}, {
+      collections: {
+        'sheet.details': [
+          { 'detail.edge_type_name': 'ПВХ 2мм', 'detail.quantity': 2 },
+          { 'detail.edge_type_name': 'ABS 1мм', 'detail.quantity': 1 },
+          { 'detail.edge_type_name': 'ПВХ 2мм', 'detail.quantity': 3 },
+        ],
+      },
+    })).toMatchObject({
+      'custom.edge_types': 'ПВХ 2мм, ABS 1мм',
+      'custom.quantity_total': '6',
+    });
+    expect(isCustomFieldExpressionValid(rows[0].expression!, new Set(['detail.edge_type_name']))).toBe(true);
+  });
+
   it('detects custom formula dependency cycles and reports oversized preview output', () => {
     const rows = customFieldRowsFromSchema({
       'custom.a': expressionSchema({ type: 'field', field: 'custom.b' }),

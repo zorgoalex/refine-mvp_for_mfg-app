@@ -182,6 +182,7 @@ const CUT_SPECIFIC_FIELD_CATALOG: CutPdfFieldCatalogItem[] = [
   { id: 'detail.materials', source: 'detail', sourceColumn: null, label: 'Материалы деталей', category: 'Детали листа', type: 'string' },
   { id: 'detail.films', source: 'detail', sourceColumn: null, label: 'Пленки деталей', category: 'Детали листа', type: 'string' },
   { id: 'detail.thicknesses', source: 'detail', sourceColumn: null, label: 'Толщины деталей', category: 'Детали листа', type: 'string' },
+  { id: 'detail.edge_types', source: 'detail', sourceColumn: null, label: 'Обкаты деталей', category: 'Детали листа', type: 'string' },
   { id: 'detail.machine_files', source: 'detail', sourceColumn: null, label: 'Файлы станка деталей', category: 'Детали листа', type: 'string' },
   { id: 'detail.table', source: 'detail', sourceColumn: null, label: 'Таблица деталей листа', category: 'Таблица деталей', type: 'string' },
   { id: 'detail.row_number', source: 'detail', sourceColumn: null, label: 'Номер строки', category: 'Таблица деталей', type: 'number' },
