@@ -7,6 +7,7 @@ interface GenerateFileNameParams {
   orderName: string;
   orderDate: string | Date;
   clientName?: string;
+  variant?: 'standard' | 'without-prices';
 }
 
 /**
@@ -19,6 +20,7 @@ export const generateOrderFileName = ({
   orderName,
   orderDate,
   clientName,
+  variant = 'standard',
 }: GenerateFileNameParams): string => {
   // Получить две последние цифры года
   const date = typeof orderDate === 'string' ? new Date(orderDate) : orderDate;
@@ -30,7 +32,8 @@ export const generateOrderFileName = ({
   const sanitizedClientName = clientName ? sanitizeFileName(clientName) : 'Без_имени';
 
   // Формат: заказ-Ф<ГГ>-<ID>-<название>-<клиент>.xlsx
-  return `заказ-Ф${yearLastTwoDigits}-${orderId}-${sanitizedOrderName}-${sanitizedClientName}.xlsx`;
+  const variantSuffix = variant === 'without-prices' ? '-без-цен' : '';
+  return `заказ-Ф${yearLastTwoDigits}-${orderId}-${sanitizedOrderName}-${sanitizedClientName}${variantSuffix}.xlsx`;
 };
 
 /**
