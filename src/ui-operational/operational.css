@@ -2564,7 +2564,18 @@
 
 :root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational) > div > .ant-page-header,
 :root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-form-operational) > div > .ant-page-header {
+  padding: 0;
+  background: transparent;
+}
+
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational) > div > .ant-page-header > :where(.ant-page-header-breadcrumb, .ant-page-header-heading),
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-form-operational) > div > .ant-page-header > :where(.ant-page-header-breadcrumb, .ant-page-header-heading) {
   display: none;
+}
+
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational) > div > .ant-page-header > .ant-page-header-content,
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-form-operational) > div > .ant-page-header > .ant-page-header-content {
+  padding: 0;
 }
 
 .order-show-operational-summary {

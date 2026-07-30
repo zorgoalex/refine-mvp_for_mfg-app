@@ -85,6 +85,14 @@ describe('LINE/AIR operational layout parity', () => {
     }
     expect(styles).toContain('.evolution-screen-frame:has(.order-show-page--operational) > div > .ant-page-header');
     expect(styles).toContain('.evolution-screen-frame:has(.order-form-operational) > div > .ant-page-header');
+    const pageHeaderRuleStart = styles.indexOf(
+      ':root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational) > div > .ant-page-header,',
+    );
+    const pageHeaderRule = styles.slice(pageHeaderRuleStart, styles.indexOf('}', pageHeaderRuleStart));
+    expect(pageHeaderRule).toContain('padding: 0');
+    expect(pageHeaderRule).not.toContain('display: none');
+    expect(styles).toContain('.ant-page-header > :where(.ant-page-header-breadcrumb, .ant-page-header-heading)');
+    expect(styles).toContain('.ant-page-header > .ant-page-header-content');
   });
 
   it('resets fixed desktop navigation offsets on mobile', () => {
