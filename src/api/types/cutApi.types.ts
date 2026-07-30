@@ -122,6 +122,10 @@ export interface CutManualLayout {
 export interface CutGroupDto {
   cutGroupId: number;
   sheetMaterialTypeId: number | null;
+  /** Resolved sheet material used by this cut group. Present on single-job reads. */
+  sheetMaterialName?: string | null;
+  sheetMaterialWidthMm?: number | null;
+  sheetMaterialHeightMm?: number | null;
   filmId: number | null;
   status: string;
   pdfTemplate: string;

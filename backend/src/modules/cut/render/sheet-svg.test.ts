@@ -288,8 +288,8 @@ describe('vacuum bath meter guides', () => {
       expect(svg).toContain('data-offset-mm="1800" x1="0" y1="1800" x2="1400" y2="1800"');
       expect(svg).toContain('stroke-dasharray="18 14"');
       expect(svg).toContain('stroke-opacity="0.28"');
-      expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="9.8" y="790.2" fill="#ff6a00"');
-      expect(svg).toContain('font-size="14" font-weight="700"');
+      expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="19.6" y="780.4" fill="#ff6a00"');
+      expect(svg).toContain('font-size="28" font-weight="700"');
       expect(svg).toContain('>800мм</text>');
       expect(svg).toContain('>1800мм</text>');
     }
@@ -305,7 +305,7 @@ describe('vacuum bath meter guides', () => {
 
     expect(svg).toContain('data-offset-mm="800" x1="800" y1="0" x2="800" y2="1400"');
     expect(svg).toContain('data-offset-mm="1800" x1="1800" y1="0" x2="1800" y2="1400"');
-    expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="809.8" y="14" fill="#ff6a00"');
+    expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="819.6" y="28" fill="#ff6a00"');
   });
 
   it('keeps ordinary sheet SVG byte-compatible when guides are disabled', () => {

@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-30",
+    title: "Раскрой ванн: крупнее подписи поперечных линий",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Подписи размеров 800 мм и 1800 мм у поперечных линий расхода плёнки на картах ванн увеличены в два раза.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-30",
     title: "Раскрой: действующие и архивные версии расчёта",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

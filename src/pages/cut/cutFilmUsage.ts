@@ -72,13 +72,14 @@ export function computeOrderBathFilmUsage(
         const relevantDetailIds = uniqueSheetDetailIds(sheet.placements).filter((detailId) => orderDetailIds.has(detailId));
         if (relevantDetailIds.length === 0) continue;
 
-        const materialName = groupMaterialName(job, group)
+        const materialName = groupSheetMaterialName(group)
+          ?? groupMaterialName(job, group)
           ?? firstOrderDetailMaterialName(relevantDetailIds, orderDetailById);
         if (!shouldShowBathMeterGuides({
           engineUsed: group.summary?.engine_used,
           materialName,
-          materialWidthMm: sheet.placements.sheet_width_mm,
-          materialHeightMm: sheet.placements.sheet_height_mm,
+          materialWidthMm: group.sheetMaterialWidthMm ?? sheet.placements.sheet_width_mm,
+          materialHeightMm: group.sheetMaterialHeightMm ?? sheet.placements.sheet_height_mm,
         })) {
           continue;
         }
@@ -129,6 +130,10 @@ function uniqueSheetDetailIds(placements: SheetPlacements): number[] {
     out.push(detailId);
   }
   return out;
+}
+
+function groupSheetMaterialName(group: CutGroupDto): string | null {
+  return group.sheetMaterialName?.trim() || null;
 }
 
 function groupMaterialName(job: CutJobDto, group: CutGroupDto): string | null {
