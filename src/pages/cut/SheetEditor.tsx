@@ -30,6 +30,7 @@ import {
   orientPieceRect,
   applyAxisOrigin,
   bathMeterGuideLines,
+  calculateBathSheetFilmUsage,
   usableExtent,
   moveAllowed,
 } from './cutLayoutGeometry';
@@ -38,6 +39,7 @@ import { counterViewMatrix, orientedOrigin, svgToUsable } from './sheetEditorGeo
 import { isNoopDrop } from './editorHistory';
 import { buildPieceLabelLines, fitLabelScale, splitDimsLine, LINE1_SCALE } from './pieceLabel';
 import { sheetMaterialFilmNames } from './cutPageHelpers';
+import { formatFilmLinearMeters } from './cutFilmUsage';
 import {
   clampGroupDelta,
   groupOfPiece,
@@ -998,6 +1000,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 pieceSheetInfoByItemId,
                 showFilm,
               );
+              const bathFilmUsage = showBathMeterGuides ? calculateBathSheetFilmUsage(placements) : null;
               return (
                 <div
                   style={{
@@ -1023,6 +1026,12 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                       <>
                         {' · '}
                         {films.length > 1 ? 'Плёнки' : 'Плёнка'}: <b>{films.join(', ')}</b>
+                      </>
+                    )}
+                    {bathFilmUsage && (
+                      <>
+                        {' · '}
+                        Потребность плёнки: <b>{formatFilmLinearMeters(bathFilmUsage.linearMeters)}</b>
                       </>
                     )}
                   </span>

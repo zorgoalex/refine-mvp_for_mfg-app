@@ -22,6 +22,7 @@ describe('vacuum bath meter-guide render wiring', () => {
   it('resolves catalog identity + frozen calculation mode and applies guides to current and historical renders', () => {
     expect(repositorySource).toContain('shouldShowBathMeterGuides({');
     expect(repositorySource).toContain('smt.name AS sheet_material_name');
+    expect(repositorySource).toContain('smt.width_mm AS sheet_material_width_mm');
     expect(repositorySource).toContain('smt.height_mm AS sheet_material_height_mm');
     expect(repositorySource).toContain('showBathMeterGuides,');
     expect(repositorySource).toContain('addBathMeterGuidesToSvg(baseSvg, placements');
@@ -422,8 +423,8 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('INSERT INTO audit_log_related_entity')) return { rows: [], rowCount: 1 };
 
     // loadJob reads
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material FROM cut_job WHERE cut_job_id = $1')) {
-      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: jobVersion, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, pdf_template_code: 'default', combine_films: false, split_by_material: true }], rowCount: 1 };
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material, last_calc_params FROM cut_job WHERE cut_job_id = $1')) {
+      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: jobVersion, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, pdf_template_code: 'default', combine_films: false, split_by_material: true, last_calc_params: lastCalcParams }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT i.cut_job_id')) {
       return { rows: [{ cut_job_id: 42, positions: 0, details: 0, area: 0 }], rowCount: 1 };
@@ -475,8 +476,15 @@ function createDatabase(options: FakeDbOptions = {}) {
       }));
       return { rows, rowCount: rows.length };
     }
-    if (sql.startsWith('SELECT cut_group_id, sheet_material_type_id, film_id, status, pdf_template_code, summary FROM cut_group')) {
-      return { rows: storedGroups, rowCount: storedGroups.length };
+    if (sql.startsWith('SELECT cg.cut_group_id, cg.sheet_material_type_id, cg.film_id, cg.status, cg.pdf_template_code, cg.summary, cg.group_key,')) {
+      const rows = storedGroups.map((group) => ({
+        ...group,
+        sheet_material_name: group.sheet_material_name ?? null,
+        sheet_material_width_mm: group.sheet_material_width_mm ?? null,
+        sheet_material_height_mm: group.sheet_material_height_mm ?? null,
+        group_film_name: group.group_film_name ?? null,
+      }));
+      return { rows, rowCount: rows.length };
     }
     if (sql.startsWith('SELECT cg.cut_job_id, cg.group_key, cg.summary, cj.last_calc_params,')) {
       const group = storedGroups.find((candidate) => Number(candidate.cut_group_id) === Number(params[0]));
@@ -488,6 +496,7 @@ function createDatabase(options: FakeDbOptions = {}) {
               summary: group.summary ?? null,
               last_calc_params: lastCalcParams,
               sheet_material_name: null,
+              sheet_material_width_mm: null,
               sheet_material_height_mm: null,
             }],
             rowCount: 1,

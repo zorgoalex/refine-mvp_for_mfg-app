@@ -31,7 +31,7 @@ import { AddToCutModal } from "./components/AddToCutModal";
 import { AddToBazisCutModal } from "../bazis-cut/AddToBazisCutModal";
 import { can, canAny } from "../../utils/permissions";
 import { cutApi } from "../../api/cutApi";
-import type { CutJobRef } from "../../api/types/cutApi.types";
+import type { CutJobDto, CutJobRef } from "../../api/types/cutApi.types";
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
 import { cutJobDeepLink, cutJobProfileLabel } from "./cutColumnHelpers";
@@ -61,6 +61,7 @@ import {
 } from "./components/tables/OrderDetailColumnSettings";
 import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from "../cut/cutJobEvents";
 import { useCutDetailLastReady } from "./useCutDetailLastReady";
+import { computeOrderBathFilmUsage, formatFilmLinearMeters } from "../cut/cutFilmUsage";
 import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
 import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/OperationalPrimitives";
 
@@ -570,8 +571,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const edgeTypesMap = new Map(
     (edgeTypesData?.data || []).map((item: any) => [item.edge_type_id, item.edge_type_name])
   );
-  const filmsMap = new Map(
-    (filmsData?.data || []).map((item: any) => [item.film_id, item.film_name])
+  const filmsMap = useMemo(
+    () => new Map<number, string>(
+      (filmsData?.data || []).map((item: any) => [item.film_id, item.film_name]),
+    ),
+    [filmsData],
   );
   const materialsMap = new Map(
     (materialsData?.data || []).map((item: any) => [item.material_id, item.material_name])
@@ -650,6 +654,41 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     detailIds: cutDetailIds,
     orderId: record?.order_id,
   });
+  const latestReadyCutJobIds = useMemo(
+    () => [...new Set([...cutJobByDetailId.values()].map((ref) => ref.cutJobId))].sort((a, b) => a - b),
+    [cutJobByDetailId],
+  );
+  const latestReadyCutJobIdsKey = latestReadyCutJobIds.join(',');
+  const [bathCutJobs, setBathCutJobs] = useState<CutJobDto[]>([]);
+  const [bathCutJobsLoading, setBathCutJobsLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!cutColumnEnabled || latestReadyCutJobIds.length === 0) {
+      setBathCutJobs([]);
+      setBathCutJobsLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setBathCutJobsLoading(true);
+    Promise.all(
+      latestReadyCutJobIds.map(async (cutJobId) => {
+        try {
+          return await cutApi.get(cutJobId);
+        } catch {
+          return null;
+        }
+      }),
+    ).then((jobs) => {
+      if (!cancelled) setBathCutJobs(jobs.filter((job): job is CutJobDto => job !== null));
+    }).finally(() => {
+      if (!cancelled) setBathCutJobsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cutColumnEnabled, latestReadyCutJobIds, latestReadyCutJobIdsKey]);
 
   // All distinct active cut jobs that contain details from THIS order (a detail
   // may be placed in several jobs — list them all). Same cut.view gate as the
@@ -684,6 +723,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       window.removeEventListener(CUT_JOB_READY_EVENT, handler);
     };
   }, [cutColumnEnabled, cutDetailIds, record?.order_id, refreshCutOrderJobs]);
+
+  const bathFilmUsage = useMemo(
+    () => computeOrderBathFilmUsage(
+      details as any,
+      bathCutJobs,
+      filmsMap,
+    ),
+    [bathCutJobs, details, filmsMap],
+  );
 
   // Detail grouping state (persisted per user+order; suppressed during cut selection).
   const groupingUserId = authSession.getUser()?.id ?? 'anon';
@@ -1857,6 +1905,69 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                           </div>
                         )}
                       </div>
+                    </div>
+
+                    <div style={{ marginTop: 12, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 6 }}>
+                        Материалы по раскрою ванны
+                      </div>
+                      <Table
+                        dataSource={bathFilmUsage}
+                        rowKey={(row) => row.filmId ?? row.filmName ?? 'no-film'}
+                        size="small"
+                        pagination={false}
+                        bordered
+                        loading={bathCutJobsLoading}
+                        locale={{
+                          emptyText: cutColumnEnabled ? 'Нет данных по раскрою ванны' : 'Нет доступа к данным раскроя',
+                        }}
+                        columns={[
+                          {
+                            title: 'Пленка',
+                            dataIndex: 'filmName',
+                            key: 'filmName',
+                            render: (value: string | null) => value?.trim() || 'Пленка не указана',
+                          },
+                          {
+                            title: 'Пог. м',
+                            dataIndex: 'linearMeters',
+                            key: 'linearMeters',
+                            align: 'right' as const,
+                            render: (value: number) => formatFilmLinearMeters(value),
+                          },
+                          {
+                            title: 'Листы',
+                            dataIndex: 'sheets',
+                            key: 'sheets',
+                            align: 'center' as const,
+                          },
+                          {
+                            title: 'Раскрои',
+                            dataIndex: 'cutJobIds',
+                            key: 'cutJobIds',
+                            render: (value: number[]) => value.map((id) => `#${id}`).join(', '),
+                          },
+                        ]}
+                        summary={(data) => {
+                          const totalMeters = data.reduce((sum, item) => sum + item.linearMeters, 0);
+                          const totalSheets = data.reduce((sum, item) => sum + item.sheets, 0);
+
+                          return (
+                            <Table.Summary.Row>
+                              <Table.Summary.Cell index={0}>
+                                <strong>Итого:</strong>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={1} align="right">
+                                <strong>{formatFilmLinearMeters(totalMeters)}</strong>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={2} align="center">
+                                <strong>{totalSheets}</strong>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={3} />
+                            </Table.Summary.Row>
+                          );
+                        }}
+                      />
                     </div>
 
                     {/* Ниже — на всю ширину: Файлы, Бирки, Служебная информация */}

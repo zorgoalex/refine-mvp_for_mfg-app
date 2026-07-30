@@ -50,6 +50,8 @@ describe('SheetEditor source contract', () => {
     expect(src).toMatch(/showFilm/);
     expect(src).toMatch(/Материал/);
     expect(src).toMatch(/Плёнк/);
+    expect(src).toMatch(/calculateBathSheetFilmUsage/);
+    expect(src).toMatch(/Потребность плёнки/);
   });
   it('renders shared low-contrast 800/1800 mm vacuum-bath guides above piece fills', () => {
     expect(src).toMatch(/showBathMeterGuides/);

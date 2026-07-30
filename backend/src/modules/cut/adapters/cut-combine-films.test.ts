@@ -40,6 +40,15 @@ describe('groupByCuttableKey', () => {
     expect(groups.every((g) => g.sheetMaterialTypeId === 5)).toBe(true);
   });
 
+  it('OFF + no material split: still splits different films into separate groups', () => {
+    const rows = [row({ film_id: 3 }), row({ order_detail_id: 11, film_id: 7 })];
+    const groupsByKey = groupByCuttableKey(rows as any, false, false);
+    const groups = [...groupsByKey.values()];
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => g.filmId).sort()).toEqual([3, 7]);
+    expect([...groupsByKey.keys()].sort()).toEqual(['all|f:3', 'all|f:7']);
+  });
+
   it('ON: merges same-material/different-film details into one group (filmId null)', () => {
     const rows = [row({ film_id: 3 }), row({ order_detail_id: 11, film_id: 7 })];
     const groups = [...groupByCuttableKey(rows as any, true).values()];
@@ -103,13 +112,13 @@ function makeRepoForSetCombine(opts: {
     }
 
     // loadJob reads (after update)
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material FROM cut_job')) {
-      return { rows: [{ cut_job_id: 9, name: 'J', status: opts.status, source: 'manual', version: opts.version, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, combine_films: opts.current, split_by_material: true }], rowCount: 1 };
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material, last_calc_params FROM cut_job')) {
+      return { rows: [{ cut_job_id: 9, name: 'J', status: opts.status, source: 'manual', version: opts.version, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, pdf_template_code: null, combine_films: opts.current, split_by_material: true, last_calc_params: null }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT i.cut_job_id')) return { rows: [{ cut_job_id: 9, positions: 0, details: 0, area: 0, materials_count: 0, films_count: 0 }], rowCount: 1 };
     if (sql.startsWith('SELECT g.cut_job_id')) return { rows: [{ cut_job_id: 9, sheets: 0 }], rowCount: 1 };
     if (sql.startsWith('SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item')) return { rows: [], rowCount: 0 };
-    if (sql.startsWith('SELECT cut_group_id, sheet_material_type_id, film_id, status, summary FROM cut_group')) return { rows: [], rowCount: 0 };
+    if (sql.startsWith('SELECT cg.cut_group_id')) return { rows: [], rowCount: 0 };
 
     return { rows: [], rowCount: 0 };
   };

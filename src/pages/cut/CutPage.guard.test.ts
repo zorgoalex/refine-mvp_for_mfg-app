@@ -71,6 +71,7 @@ describe('CutPage source guards', () => {
     expect(source).toMatch(/shouldShowBathMeterGuides\(\{/);
     expect(source).toMatch(/engineUsed:\s*group\.summary\?\.engine_used/);
     expect(source).toMatch(/materialName:\s*sheetOption\?\.name/);
+    expect(source).toMatch(/materialWidthMm:\s*sheetOption\?\.widthMm/);
     expect(source).toMatch(/materialHeightMm:\s*sheetOption\?\.heightMm/);
     expect(source).toMatch(/showBathMeterGuides=\{showBathMeterGuides\}/);
   });

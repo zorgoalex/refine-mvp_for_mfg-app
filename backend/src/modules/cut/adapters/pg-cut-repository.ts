@@ -11,6 +11,7 @@ import {
   type GapParams,
   type GeomSheet,
   type ManualViolation,
+  calculateBathSheetFilmUsage,
   manualSetMatchesAuto,
   reconstructManualSheets,
   shouldShowBathMeterGuides,
@@ -82,6 +83,7 @@ import type {
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
   CutFilmOptionDto,
+  CutFilmUsageDto,
   CutEditorParamsDto,
   CutGroupDto,
   CutJobItemDto,
@@ -99,6 +101,7 @@ import type {
 } from '../dto/cut.dto';
 import {
   mapTotalsRow,
+  roundTo2,
   TOTALS_FROZEN_ITEMS_BY_JOB_SQL,
   TOTALS_BY_JOB_SQL,
   SHEETS_BY_JOB_SQL,
@@ -1589,6 +1592,7 @@ export class PgCutRepository implements CutRepositoryPort {
       ...summary,
       job: {
         ...row.snapshot_job,
+        totals: normalizeCutJobTotals(row.snapshot_job.totals),
         currentCutResult: summary,
         cutResults: undefined,
       },
@@ -1716,10 +1720,12 @@ export class PgCutRepository implements CutRepositoryPort {
     const bathGuideMeta = await this.database.query<{
       last_calc_params: FreecutParams | null;
       sheet_material_name: string | null;
+      sheet_material_width_mm: string | number | null;
       sheet_material_height_mm: string | number | null;
     }>(
       `SELECT cj.last_calc_params,
               smt.name AS sheet_material_name,
+              smt.width_mm AS sheet_material_width_mm,
               smt.height_mm AS sheet_material_height_mm
        FROM cut_job cj
        LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = $2
@@ -1730,6 +1736,7 @@ export class PgCutRepository implements CutRepositoryPort {
       engineUsed: group.summary?.engine_used,
       layoutMode: bathGuideMeta.rows[0]?.last_calc_params?.layout_mode,
       materialName: bathGuideMeta.rows[0]?.sheet_material_name,
+      materialWidthMm: bathGuideMeta.rows[0]?.sheet_material_width_mm,
       materialHeightMm: bathGuideMeta.rows[0]?.sheet_material_height_mm,
     });
     const sheets = sourceSheets.map((sheet) => {
@@ -2058,26 +2065,8 @@ export class PgCutRepository implements CutRepositoryPort {
 
   async listManualLayoutsForJob(
     cutJobId: number,
-  ): Promise<Array<{ groupKey: string; sheets: CutManualSheetDto[]; isActive: boolean; isStale: boolean; version: number }>> {
-    const result = await this.database.query<{
-      group_key: string;
-      sheets: unknown;
-      is_active: boolean;
-      is_stale: boolean;
-      version: string | number;
-    }>(
-      `SELECT group_key, sheets, is_active, is_stale, version
-       FROM cut_group_manual_layout
-       WHERE cut_job_id = $1`,
-      [cutJobId],
-    );
-    return result.rows.map((row) => ({
-      groupKey: row.group_key,
-      sheets: row.sheets as CutManualSheetDto[],
-      isActive: row.is_active,
-      isStale: row.is_stale,
-      version: Number(row.version),
-    }));
+  ): Promise<ManualLayoutReadModel[]> {
+    return loadManualLayouts(this.database, cutJobId);
   }
 
   /** Hard-invalidates all active/non-stale manual layouts for a job.
@@ -3016,6 +3005,7 @@ export class PgCutRepository implements CutRepositoryPort {
       summary: Record<string, unknown> | null;
       last_calc_params: FreecutParams | null;
       sheet_material_name: string | null;
+      sheet_material_width_mm: string | number | null;
       sheet_material_height_mm: string | number | null;
     }>(
       `SELECT cg.cut_job_id,
@@ -3023,6 +3013,7 @@ export class PgCutRepository implements CutRepositoryPort {
               cg.summary,
               cj.last_calc_params,
               smt.name AS sheet_material_name,
+              smt.width_mm AS sheet_material_width_mm,
               smt.height_mm AS sheet_material_height_mm
        FROM cut_group cg
        JOIN cut_job cj ON cj.cut_job_id = cg.cut_job_id
@@ -3039,6 +3030,7 @@ export class PgCutRepository implements CutRepositoryPort {
       engineUsed: groupRes.rows[0].summary?.engine_used,
       layoutMode: groupRes.rows[0].last_calc_params?.layout_mode,
       materialName: groupRes.rows[0].sheet_material_name,
+      materialWidthMm: groupRes.rows[0].sheet_material_width_mm,
       materialHeightMm: groupRes.rows[0].sheet_material_height_mm,
     });
 
@@ -4390,6 +4382,7 @@ interface JobRow extends QueryResultRow {
   pdf_template_code: string | null;
   combine_films: boolean | null;
   split_by_material: boolean | null;
+  last_calc_params: FreecutParams | null;
 }
 
 function buildPdfSheetMeta(
@@ -4747,6 +4740,11 @@ interface GroupRow extends QueryResultRow {
   status: string;
   pdf_template_code: string | null;
   summary: Record<string, unknown> | null;
+  group_key: string | null;
+  sheet_material_name: string | null;
+  sheet_material_width_mm: string | number | null;
+  sheet_material_height_mm: string | number | null;
+  group_film_name: string | null;
 }
 
 interface SheetRow extends QueryResultRow {
@@ -4757,13 +4755,170 @@ interface SheetRow extends QueryResultRow {
   placements: SheetPlacementsJson;
 }
 
+interface FilmUsageDetailInfo {
+  filmId: number | null;
+  filmName: string | null;
+}
+
+type ManualLayoutReadModel = {
+  groupKey: string;
+  sheets: CutManualSheetDto[];
+  isActive: boolean;
+  isStale: boolean;
+  version: number;
+};
+
+function emptyCutTotals(): CutJobTotals {
+  return { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0, filmUsage: [] };
+}
+
+function normalizeCutJobTotals(totals: CutJobTotals): CutJobTotals {
+  return {
+    ...totals,
+    filmUsage: Array.isArray(totals.filmUsage) ? totals.filmUsage : [],
+  };
+}
+
+async function loadFilmUsageDetailInfo(
+  client: DatabaseClient,
+  orderDetailIds: number[],
+): Promise<Map<number, FilmUsageDetailInfo>> {
+  const out = new Map<number, FilmUsageDetailInfo>();
+  const ids = [...new Set(orderDetailIds.filter((id) => Number.isInteger(id) && id > 0))];
+  if (ids.length === 0) return out;
+  const rows = await client.query<{
+    detail_id: string | number;
+    film_id: string | number | null;
+    film_name: string | null;
+  }>(
+    `SELECT od.detail_id,
+            od.film_id,
+            f.film_name
+       FROM order_details od
+       LEFT JOIN films f ON f.film_id = od.film_id
+       WHERE od.detail_id = ANY($1::bigint[])`,
+    [ids],
+  );
+  for (const row of rows.rows) {
+    out.set(toNum(row.detail_id), {
+      filmId: row.film_id === null ? null : toNum(row.film_id),
+      filmName: row.film_name ?? null,
+    });
+  }
+  return out;
+}
+
+async function loadManualLayouts(
+  client: DatabaseClient,
+  cutJobId: number,
+): Promise<ManualLayoutReadModel[]> {
+  const result = await client.query<{
+    group_key: string;
+    sheets: unknown;
+    is_active: boolean;
+    is_stale: boolean;
+    version: string | number;
+  }>(
+    `SELECT group_key, sheets, is_active, is_stale, version
+       FROM cut_group_manual_layout
+       WHERE cut_job_id = $1`,
+    [cutJobId],
+  );
+  return result.rows.map((row) => ({
+    groupKey: row.group_key,
+    sheets: row.sheets as CutManualSheetDto[],
+    isActive: row.is_active,
+    isStale: row.is_stale,
+    version: Number(row.version),
+  }));
+}
+
+function computeBathFilmUsageTotals(input: {
+  layoutMode?: unknown;
+  groups: CutGroupDto[];
+  groupRowsById: ReadonlyMap<number, GroupRow>;
+  manualLayoutsByKey: ReadonlyMap<string, ManualLayoutReadModel>;
+  detailInfoById: ReadonlyMap<number, FilmUsageDetailInfo>;
+}): CutFilmUsageDto[] {
+  const totals = new Map<string, CutFilmUsageDto>();
+  for (const group of input.groups) {
+    const meta = input.groupRowsById.get(group.cutGroupId);
+    if (!meta) continue;
+    const showBathMeterGuides = shouldShowBathMeterGuides({
+      engineUsed: group.summary?.engine_used,
+      layoutMode: input.layoutMode,
+      materialName: meta.sheet_material_name,
+      materialWidthMm: meta.sheet_material_width_mm,
+      materialHeightMm: meta.sheet_material_height_mm,
+    });
+    if (!showBathMeterGuides) continue;
+
+    const groupKey = meta.group_key ?? null;
+    const manual = groupKey ? (input.manualLayoutsByKey.get(groupKey) ?? null) : null;
+    const sourceSheets = manual && manual.isActive && !manual.isStale
+      ? manual.sheets.map((sheet) => ({ sheetIndex: sheet.sheetIndex, placements: sheet.placements }))
+      : group.sheets.map((sheet) => ({ sheetIndex: sheet.sheetIndex, placements: sheet.placements }));
+
+    for (const sheet of sourceSheets) {
+      const usage = calculateBathSheetFilmUsage(sheet.placements);
+      if (!usage) continue;
+      const filmRefs = filmRefsForSheet(sheet.placements.pieces, input.detailInfoById, {
+        filmId: group.filmId,
+        filmName: meta.group_film_name,
+      });
+      for (const filmRef of filmRefs) {
+        const key = filmRef.filmId !== null ? `id:${filmRef.filmId}` : `name:${filmRef.filmName ?? ''}`;
+        const current = totals.get(key);
+        if (current) {
+          current.linearMeters = roundTo2(current.linearMeters + usage.linearMeters);
+          current.sheets += 1;
+        } else {
+          totals.set(key, {
+            filmId: filmRef.filmId,
+            filmName: filmRef.filmName,
+            linearMeters: usage.linearMeters,
+            sheets: 1,
+          });
+        }
+      }
+    }
+  }
+  return [...totals.values()]
+    .map((row) => ({ ...row, linearMeters: roundTo2(row.linearMeters) }))
+    .sort((a, b) => (a.filmName ?? '').localeCompare(b.filmName ?? '', 'ru') || (a.filmId ?? 0) - (b.filmId ?? 0));
+}
+
+function filmRefsForSheet(
+  pieces: ReadonlyArray<{ item_id: string }>,
+  detailInfoById: ReadonlyMap<number, FilmUsageDetailInfo>,
+  groupFilm: { filmId: number | null; filmName: string | null },
+): Array<{ filmId: number | null; filmName: string | null }> {
+  const out: Array<{ filmId: number | null; filmName: string | null }> = [];
+  const seen = new Set<string>();
+  const add = (filmId: number | null, filmName: string | null) => {
+    const cleanName = filmName?.trim() || null;
+    if (filmId === null && cleanName === null) return;
+    const key = filmId !== null ? `id:${filmId}` : `name:${cleanName}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ filmId, filmName: cleanName });
+  };
+  for (const piece of pieces) {
+    const detailId = parseFreecutItemId(piece.item_id);
+    const info = detailId === null ? null : detailInfoById.get(detailId) ?? null;
+    add(info?.filmId ?? null, info?.filmName ?? null);
+  }
+  if (out.length === 0) add(groupFilm.filmId, groupFilm.filmName);
+  return out;
+}
+
 async function computeTotals(
   client: DatabaseClient,
   cutJobIds: number[],
   frozenItems = false,
 ): Promise<Map<number, CutJobTotals>> {
   const out = new Map<number, CutJobTotals>();
-  for (const id of cutJobIds) out.set(id, { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 });
+  for (const id of cutJobIds) out.set(id, emptyCutTotals());
   if (cutJobIds.length === 0) return out;
   // SEQUENTIAL, not Promise.all: loadJob/computeTotals run inside command
   // transactions on a single pg client/connection. Two concurrent queries on one
@@ -4779,7 +4934,7 @@ async function computeTotals(
   }
   for (const row of sheets.rows) {
     const id = toNum(row.cut_job_id);
-    const cur = out.get(id) ?? { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 };
+    const cur = out.get(id) ?? emptyCutTotals();
     out.set(id, { ...cur, sheets: toNum(row.sheets) });
   }
   return out;
@@ -4809,7 +4964,8 @@ async function loadJob(
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
     `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason,
-            param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material
+            param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material,
+            last_calc_params
        FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
   );
@@ -4817,7 +4973,7 @@ async function loadJob(
   if (!jobRow) {
     throw new CutJobNotFoundError(cutJobId);
   }
-  const resolvedTotals = totals ?? (await computeTotals(client, [cutJobId], frozenItems)).get(cutJobId)!;
+  const baseTotals = normalizeCutJobTotals(totals ?? (await computeTotals(client, [cutJobId], frozenItems)).get(cutJobId)!);
 
   // The list view only needs item counts, so it opts out of the dictionary joins
   // (it loads up to 200 jobs); single-job reads enrich each item with full detail.
@@ -4828,7 +4984,22 @@ async function loadJob(
     [cutJobId],
   );
   const groupsResult = await client.query<GroupRow>(
-    `SELECT cut_group_id, sheet_material_type_id, film_id, status, pdf_template_code, summary FROM cut_group WHERE cut_job_id = $1 ORDER BY cut_group_id`,
+    `SELECT cg.cut_group_id,
+            cg.sheet_material_type_id,
+            cg.film_id,
+            cg.status,
+            cg.pdf_template_code,
+            cg.summary,
+            cg.group_key,
+            smt.name AS sheet_material_name,
+            smt.width_mm AS sheet_material_width_mm,
+            smt.height_mm AS sheet_material_height_mm,
+            f.film_name AS group_film_name
+       FROM cut_group cg
+       LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = cg.sheet_material_type_id
+       LEFT JOIN films f ON f.film_id = cg.film_id
+       WHERE cg.cut_job_id = $1
+       ORDER BY cg.cut_group_id`,
     [cutJobId],
   );
   const groupIds = groupsResult.rows.map((row) => toNum(row.cut_group_id));
@@ -4851,6 +5022,10 @@ async function loadJob(
   const resolvedMaterialNames = materialNames ?? uniqueSorted(
     itemDtos.map((item) => item.detail?.materialName ?? null),
   );
+  const detailInfoById = await loadFilmUsageDetailInfo(
+    client,
+    itemDtos.map((item) => item.orderDetailId),
+  );
 
   const groups: CutGroupDto[] = groupsResult.rows.map((row) => {
     const cutGroupId = toNum(row.cut_group_id);
@@ -4871,6 +5046,18 @@ async function loadJob(
         })),
     };
   });
+  const groupRowsById = new Map(groupsResult.rows.map((row) => [toNum(row.cut_group_id), row]));
+  const manualLayouts = groups.length > 0 ? await loadManualLayouts(client, cutJobId) : [];
+  const resolvedTotals: CutJobTotals = {
+    ...baseTotals,
+    filmUsage: computeBathFilmUsageTotals({
+      layoutMode: jobRow.last_calc_params?.layout_mode,
+      groups,
+      groupRowsById,
+      manualLayoutsByKey: new Map(manualLayouts.map((layout) => [layout.groupKey, layout])),
+      detailInfoById,
+    }),
+  };
 
   return {
     cutJobId: toNum(jobRow.cut_job_id),
@@ -5102,7 +5289,7 @@ function mapCutResultSummary(row: CutResultRow): CutResultSummaryDto {
     createdBy: numOrNull(row.created_by),
     createdByName: row.created_by_name_snapshot,
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
-    totals: row.totals_snapshot,
+    totals: normalizeCutJobTotals(row.totals_snapshot),
     isCurrent: row.is_current === true,
   };
 }

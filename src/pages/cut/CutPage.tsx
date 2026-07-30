@@ -71,6 +71,7 @@ import type {
 } from '../../api/types/cutApi.types';
 import {
   movesFromSheets,
+  calculateBathSheetFilmUsage,
   shouldShowBathMeterGuides,
   validateSheetGroupInvariant,
   validateSheetPlacements,
@@ -96,6 +97,7 @@ import {
   buildFilmTextureMap,
   pruneEmptySheets,
 } from './cutPageHelpers';
+import { filmUsageTooltip, formatFilmLinearMeters, totalFilmUsageMeters } from './cutFilmUsage';
 import { can } from '../../utils/permissions';
 import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
 import { useTabStore } from '../../stores/tabStore';
@@ -2043,7 +2045,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   }), [jobs]);
   const exportJobs = useCallback(() => {
     const cells = [
-      ['#', 'Название', 'Статус', 'Источник', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Профиль', 'Материал'],
+      ['#', 'Название', 'Статус', 'Источник', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Материал'],
       ...filteredJobs.map((candidate) => [
         candidate.cutJobId,
         candidate.name,
@@ -2054,6 +2056,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         candidate.totals.details,
         candidate.totals.area,
         candidate.status === 'ready' ? candidate.totals.sheets : '',
+        totalFilmUsageMeters(candidate.totals.filmUsage) > 0
+          ? formatFilmLinearMeters(totalFilmUsageMeters(candidate.totals.filmUsage))
+          : '',
         resolveProfileLabel(candidate.paramProfileId, profiles, cutSettings),
         candidate.materialNames.join(', '),
       ]),
@@ -2202,6 +2207,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         key: 'sheets',
         width: 84,
         render: (_: unknown, row: CutJobDto) => (row.status === 'ready' ? row.totals.sheets : '—'),
+      },
+      {
+        title: 'Количество плёнки',
+        key: 'filmUsage',
+        width: 118,
+        render: (_: unknown, row: CutJobDto) => {
+          const total = totalFilmUsageMeters(row.totals.filmUsage);
+          if (row.status !== 'ready' || total <= 0) return '—';
+          const title = filmUsageTooltip(row.totals.filmUsage);
+          const value = <Text strong className="app-tabular">{formatFilmLinearMeters(total)}</Text>;
+          return title ? <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{title}</span>}>{value}</Tooltip> : value;
+        },
       },
       {
         title: 'Профиль',
@@ -3211,6 +3228,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   <span>Плёнок: <b>{job.totals.filmsCount}</b></span>
                   <span>Площадь, итого: <b>{formatArea(job.totals.area)}</b></span>
                   {job.status === 'ready' && <span>Листов раскроя: <b>{job.totals.sheets}</b></span>}
+                  {totalFilmUsageMeters(job.totals.filmUsage) > 0 && (
+                    <span>Количество плёнки: <b>{formatFilmLinearMeters(totalFilmUsageMeters(job.totals.filmUsage))}</b></span>
+                  )}
                 </Space>
                 <div className="cut-job-operational-fields" style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 12 }}>
                   <div>
@@ -3475,6 +3495,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           engineUsed: group.summary?.engine_used,
           layoutMode: profiles.find((profile) => profile.cutParamProfileId === job.paramProfileId)?.params?.layout_mode,
           materialName: sheetOption?.name,
+          materialWidthMm: sheetOption?.widthMm,
           materialHeightMm: sheetOption?.heightMm,
         });
         const filmNames = groupFilmNames(job, group);
@@ -3793,6 +3814,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   const isPortraitPreview = displayHeightMm > displayWidthMm;
                   const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90, originTopLeft, sheetAxisOrigin);
                   const sheetDetailIds = detailIdsForSheet(sheet);
+                  const bathFilmUsage = showBathMeterGuides ? calculateBathSheetFilmUsage(sheet.placements) : null;
                   return (
                     <div
                       key={elemKey}
@@ -3813,6 +3835,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                               <span>{matName ?? 'материал не задан'}</span>
                               {filmText && <span>{filmLabel}: {filmText}</span>}
                               <span>кол-во деталей - {sheet.placements.pieces.length}</span>
+                              {bathFilmUsage && (
+                                <span>Потребность плёнки: <b>{formatFilmLinearMeters(bathFilmUsage.linearMeters)}</b></span>
+                              )}
                             </>
                           ) : (
                             <>
@@ -3822,6 +3847,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                               {filmText ? ` · ${filmLabel}: ${filmText}` : ''}
                               {' · '}
                               кол-во деталей - {sheet.placements.pieces.length}
+                              {bathFilmUsage && (
+                                <>
+                                  {' · '}
+                                  <span>Потребность плёнки: <b>{formatFilmLinearMeters(bathFilmUsage.linearMeters)}</b></span>
+                                </>
+                              )}
                             </>
                           )}
                         </div>
