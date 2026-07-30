@@ -269,6 +269,54 @@ export class CutController {
     });
   }
 
+  @ApiOperation({ operationId: 'setCutResultCurrent', summary: 'Mark a completed cut result as active/current for a cut job' })
+  @Post(':cutJobId/results/:resultNo/current')
+  async setResultCurrent(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Param('resultNo') resultNo: string,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    return this.cut.setCurrentResult({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      resultNo: parseCutJobId(resultNo),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'archiveCutResult', summary: 'Archive a completed cut result for external selections' })
+  @Post(':cutJobId/results/:resultNo/archive')
+  async archiveResult(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Param('resultNo') resultNo: string,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    return this.cut.archiveResult({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      resultNo: parseCutJobId(resultNo),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'unarchiveCutResult', summary: 'Return a completed cut result from archive' })
+  @Delete(':cutJobId/results/:resultNo/archive')
+  async unarchiveResult(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Param('resultNo') resultNo: string,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    return this.cut.unarchiveResult({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      resultNo: parseCutJobId(resultNo),
+      requestId: request.requestId,
+    });
+  }
+
   @ApiOperation({ operationId: 'renderCutResultSheetPng', summary: 'Render a frozen result sheet PNG' })
   @Get(':cutJobId/results/:resultNo/groups/:groupId/sheets/:sheetIndex.png')
   async renderResultPng(

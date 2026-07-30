@@ -180,6 +180,30 @@ describe('cut PDF CNC enrichment contract', () => {
   });
 });
 
+describe('cut result archive/current contract', () => {
+  it('stores result archive state outside append-only cut_result and exposes it in history reads', () => {
+    expect(repositorySource).toContain('LEFT JOIN cut_result_archive_state archive');
+    expect(repositorySource).toContain('archive.archived_at');
+    expect(repositorySource).toContain('archive.archived_by');
+    expect(repositorySource).toContain('isArchived: row.archived_at != null');
+    expect(repositorySource).not.toMatch(/UPDATE\s+cut_result\b/i);
+  });
+
+  it('prevents archived results from becoming acting and prevents acting results from being archived', () => {
+    expect(repositorySource).toContain("throw new ApiError(409, 'CUT_RESULT_ARCHIVED'");
+    expect(repositorySource).toContain("throw new ApiError(409, 'CUT_RESULT_CURRENT'");
+    expect(repositorySource).toContain('current_result.result_no = r.result_no AND archive.archived_at IS NULL');
+    expect(repositorySource).toContain('numOrNull(jobRow.current_result_no) === command.resultNo');
+  });
+
+  it('records auditable state changes for result archive/current commands', () => {
+    expect(repositorySource).toContain('CUT_AUDIT_EVENTS.currentResultChanged');
+    expect(repositorySource).toContain('CUT_AUDIT_EVENTS.resultArchived');
+    expect(repositorySource).toContain('CUT_AUDIT_EVENTS.resultUnarchived');
+    expect(repositorySource).toContain('version = version + 1');
+  });
+});
+
 interface FakeRow {
   [key: string]: unknown;
 }

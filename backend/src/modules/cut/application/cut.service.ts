@@ -8,6 +8,7 @@ import type {
   CalculateCutJobCommand,
   CreateCutJobCommand,
   CutRepositoryPort,
+  CutResultStateCommand,
   CutSheetTypeOption,
   DetailLastReadyQuery,
   DetailPlacementsQuery,
@@ -161,6 +162,21 @@ export class CutService implements OnModuleInit, OnModuleDestroy {
   async renderJobPdf(query: RenderJobPdfQuery) {
     this.require(query.currentUser, 'cut.view', { cutJobId: query.cutJobId, requestId: query.requestId });
     return this.ports.cut.renderJobPdf(query);
+  }
+
+  async setCurrentResult(command: CutResultStateCommand) {
+    this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
+    return this.ports.cut.setCurrentResult(command);
+  }
+
+  async archiveResult(command: CutResultStateCommand) {
+    this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
+    return this.ports.cut.archiveResult(command);
+  }
+
+  async unarchiveResult(command: CutResultStateCommand) {
+    this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
+    return this.ports.cut.unarchiveResult(command);
   }
 
   /** Internal pre-warm bookkeeping (no user-facing permission gate). */

@@ -224,6 +224,9 @@ export interface CutResultSummaryDto {
   createdAt: string;
   totals: CutJobTotals;
   isCurrent: boolean;
+  isArchived: boolean;
+  archivedAt: string | null;
+  archivedBy: number | null;
 }
 
 export interface CutResultDto extends CutResultSummaryDto {

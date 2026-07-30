@@ -44,6 +44,19 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).not.toMatch(/abs\(p\.detail_height_mm - od\.height\)/);
   });
 
+  it('excludes archived cut result placements from selectable label cut maps', () => {
+    expect(source).toContain('LEFT JOIN cut_result_archive_state archive');
+    expect(source).toContain("j.status <> 'archived' AND archive.archived_at IS NULL");
+    expect(source).toContain('WHERE archive.archived_at IS NULL');
+    expect(source).toContain('AND archive.archived_at IS NULL');
+  });
+
+  it('orders label cut-map options by acting public result number, not only cut_result_id', () => {
+    expect(source).toContain('LEFT JOIN cut_result current_result');
+    expect(source).toContain('current_result.result_no = r.result_no');
+    expect(source).not.toContain('j.current_cut_result_id = r.cut_result_id');
+  });
+
   it('renders every order label SVG page for preview and latest, not only the first row', () => {
     const previewStart = source.indexOf('async previewOrderLabels');
     const previewEnd = source.indexOf('async generateOrderLabels', previewStart);

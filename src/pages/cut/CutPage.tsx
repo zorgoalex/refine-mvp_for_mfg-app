@@ -1346,7 +1346,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         useTabStore.getState().openTab({ key: '/cut', path, label: 'Раскрой', resource: 'cut' });
         return;
       }
-      await openJob(job.cutJobId, result.isCurrent ? undefined : result.resultNo);
+      await openJob(job.cutJobId, result.resultNo);
     },
     [isEmbeddedOrder, job, openJob],
   );
@@ -1361,6 +1361,66 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     window.history.pushState(null, '', path);
     useTabStore.getState().openTab({ key: '/cut', path, label: 'Раскрой', resource: 'cut' });
   }, [isEmbeddedOrder, job, openJob]);
+
+  const refreshAfterResultStateChange = useCallback(
+    async (resultNoToKeep?: number) => {
+      if (!job) return;
+      await openJob(job.cutJobId, resultNoToKeep);
+      await loadJobs();
+    },
+    [job, loadJobs, openJob],
+  );
+
+  const setCurrentResult = useCallback(
+    async (result: CutResultSummary) => {
+      if (!job || result.isCurrent || result.isArchived) return;
+      setBusy(true);
+      try {
+        await cutApi.setCurrentResult(job.cutJobId, result.resultNo);
+        message.success(`Раскрой ${result.cutNumber} назначен действующим`);
+        await refreshAfterResultStateChange();
+      } catch (error) {
+        handleError(error, 'Не удалось назначить действующий раскрой');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [handleError, job, refreshAfterResultStateChange],
+  );
+
+  const archiveResult = useCallback(
+    async (result: CutResultSummary) => {
+      if (!job || result.isCurrent || result.isArchived) return;
+      setBusy(true);
+      try {
+        await cutApi.archiveResult(job.cutJobId, result.resultNo);
+        message.success(`Раскрой ${result.cutNumber} отправлен в архив`);
+        await refreshAfterResultStateChange(selectedResult?.resultNo === result.resultNo ? result.resultNo : undefined);
+      } catch (error) {
+        handleError(error, 'Не удалось архивировать раскрой');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [handleError, job, refreshAfterResultStateChange, selectedResult?.resultNo],
+  );
+
+  const unarchiveResult = useCallback(
+    async (result: CutResultSummary) => {
+      if (!job || !result.isArchived) return;
+      setBusy(true);
+      try {
+        await cutApi.unarchiveResult(job.cutJobId, result.resultNo);
+        message.success(`Раскрой ${result.cutNumber} возвращён из архива`);
+        await refreshAfterResultStateChange(selectedResult?.resultNo === result.resultNo ? result.resultNo : undefined);
+      } catch (error) {
+        handleError(error, 'Не удалось вернуть раскрой из архива');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [handleError, job, refreshAfterResultStateChange, selectedResult?.resultNo],
+  );
 
   const cutResultColumns: ColumnsType<CutResultSummary> = useMemo(
     () => [
@@ -1380,19 +1440,45 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       },
       { title: 'Автор', dataIndex: 'createdByName', key: 'createdByName', render: (value: string | null) => value || '—' },
       { title: 'Листы', key: 'sheets', width: 80, render: (_: unknown, row: CutResultSummary) => row.totals.sheets },
-      { title: 'Статус', key: 'current', width: 100, render: (_: unknown, row: CutResultSummary) => row.isCurrent ? <Tag color="green">Текущий</Tag> : null },
+      {
+        title: 'Статус',
+        key: 'current',
+        width: 150,
+        render: (_: unknown, row: CutResultSummary) => (
+          <Space size={4} wrap>
+            {row.isCurrent && <Tag color="green">Действующий</Tag>}
+            {row.isArchived && <Tag>Архив</Tag>}
+          </Space>
+        ),
+      },
       {
         title: 'Действие',
         key: 'action',
-        width: 100,
+        width: 260,
         render: (_: unknown, row: CutResultSummary) => (
-          <Button size="small" type="link" disabled={busy || selectedResult?.cutResultId === row.cutResultId} onClick={() => void openResult(row)}>
-            Открыть
-          </Button>
+          <Space size={4} wrap>
+            <Button size="small" type="link" disabled={busy || (isFrozenResultSelection && selectedResult?.cutResultId === row.cutResultId)} onClick={() => void openResult(row)}>
+              Открыть
+            </Button>
+            {!row.isCurrent && !row.isArchived && (
+              <Button size="small" type="link" disabled={busy} onClick={() => void setCurrentResult(row)}>
+                Сделать действующим
+              </Button>
+            )}
+            {row.isArchived ? (
+              <Button size="small" type="link" disabled={busy} onClick={() => void unarchiveResult(row)}>
+                Вернуть
+              </Button>
+            ) : (
+              <Button size="small" type="link" danger disabled={busy || row.isCurrent} onClick={() => void archiveResult(row)}>
+                В архив
+              </Button>
+            )}
+          </Space>
         ),
       },
     ],
-    [busy, openResult, selectedResult?.cutResultId],
+    [archiveResult, busy, isFrozenResultSelection, openResult, selectedResult?.cutResultId, setCurrentResult, unarchiveResult],
   );
 
   // Deep-link: /cut?job=<id> opens that job (e.g. from the order show page
@@ -2553,7 +2639,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     });
 
   const jobCutResults = job?.cutResults ?? [];
-  const latestCutResult = jobCutResults[0] ?? null;
+  const primaryCutResult = job?.currentCutResult
+    ?? jobCutResults.find((result) => !result.isArchived)
+    ?? jobCutResults[0]
+    ?? null;
   const operationalManualMode = job != null && (
     editingGroupId != null
     || job.groups.some((group) => group.manualLayout?.isActive && !group.manualLayout.isStale)
@@ -3092,20 +3181,46 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   isOperational ? (
                     <div className="cut-results-operational-list">
                       {jobCutResults.map((result) => (
-                        <button
+                        <div
                           key={result.cutResultId}
-                          type="button"
-                          className={result.isCurrent ? 'is-current' : ''}
-                          disabled={busy || selectedResult?.cutResultId === result.cutResultId}
-                          onClick={() => void openResult(result)}
+                          className={[
+                            'cut-results-operational-list__item',
+                            result.isCurrent ? 'is-current' : '',
+                            result.isArchived ? 'is-archived' : '',
+                          ].filter(Boolean).join(' ')}
                         >
-                          <span className="cut-results-operational-list__icon"><DownloadOutlined /></span>
-                          <span>
-                            <strong>{`${result.cutNumber} · ${result.resultKind === 'manual' ? 'Ручной' : 'Авто'}`}</strong>
-                            <small>{new Date(result.createdAt).toLocaleString('ru-RU')}</small>
-                          </span>
-                          {result.isCurrent ? <Tag color="green">Текущий</Tag> : <b>Открыть</b>}
-                        </button>
+                          <button
+                            type="button"
+                            disabled={busy || (isFrozenResultSelection && selectedResult?.cutResultId === result.cutResultId)}
+                            onClick={() => void openResult(result)}
+                          >
+                            <span className="cut-results-operational-list__icon"><DownloadOutlined /></span>
+                            <span>
+                              <strong>{`${result.cutNumber} · ${result.resultKind === 'manual' ? 'Ручной' : 'Авто'}`}</strong>
+                              <small>{new Date(result.createdAt).toLocaleString('ru-RU')}</small>
+                            </span>
+                            <Space size={4} wrap>
+                              {result.isCurrent ? <Tag color="green">Действующий</Tag> : <b>Открыть</b>}
+                              {result.isArchived && <Tag>Архив</Tag>}
+                            </Space>
+                          </button>
+                          <Space size={4} wrap className="cut-results-operational-list__actions">
+                            {!result.isCurrent && !result.isArchived && (
+                              <Button size="small" type="link" disabled={busy} onClick={() => void setCurrentResult(result)}>
+                                Сделать действующим
+                              </Button>
+                            )}
+                            {result.isArchived ? (
+                              <Button size="small" type="link" disabled={busy} onClick={() => void unarchiveResult(result)}>
+                                Вернуть
+                              </Button>
+                            ) : (
+                              <Button size="small" type="link" danger disabled={busy || result.isCurrent} onClick={() => void archiveResult(result)}>
+                                В архив
+                              </Button>
+                            )}
+                          </Space>
+                        </div>
                       ))}
                     </div>
                   ) : (
@@ -3115,7 +3230,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                         size="small"
                         rowKey="cutResultId"
                         pagination={false}
-                        dataSource={latestCutResult ? [latestCutResult] : []}
+                        dataSource={primaryCutResult ? [primaryCutResult] : []}
                         columns={cutResultColumns}
                       />
                       {jobCutResults.length > 1 && (
@@ -3167,16 +3282,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   type="info"
                   showIcon
                   style={{ marginBottom: 12 }}
-                  message={`Историческая версия ${selectedResult.cutNumber}`}
-                  description="Версия доступна только для просмотра. Изменения выполняются в текущем раскрое."
-                  action={
+                  message={`${selectedResult.isCurrent ? 'Действующая версия' : 'Историческая версия'} ${selectedResult.cutNumber}`}
+                  description={selectedResult.isCurrent
+                    ? 'Действующая версия выбрана из сохранённых раскроев и доступна только для просмотра.'
+                    : 'Версия доступна только для просмотра. Изменения выполняются в действующем раскрое.'}
+                  action={(
                     <Button
                       size="small"
                       onClick={returnToCurrentResult}
                     >
-                      Вернуться к текущему
+                      Вернуться к живому заданию
                     </Button>
-                  }
+                  )}
                 />
               )}
               {isOperational && (

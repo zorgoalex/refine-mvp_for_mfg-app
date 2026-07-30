@@ -32,6 +32,18 @@ export class UnavailableCutRepository implements CutRepositoryPort {
     return Promise.reject(unavailable());
   }
 
+  setCurrentResult() {
+    return Promise.reject(unavailable());
+  }
+
+  archiveResult() {
+    return Promise.reject(unavailable());
+  }
+
+  unarchiveResult() {
+    return Promise.reject(unavailable());
+  }
+
   getJob() {
     return Promise.reject(unavailable());
   }

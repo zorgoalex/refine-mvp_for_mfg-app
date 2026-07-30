@@ -1003,8 +1003,8 @@ export class PgLabelsRepository implements LabelsPort {
               maps.cut_job_id, maps.variant, maps.sheet_index, maps.sheet_ordinal,
               r.result_no, r.result_kind, r.created_at,
               COALESCE(r.snapshot_job ->> 'name', 'Раскрой ' || maps.cut_job_id::text) AS cut_job_name,
-              (j.current_cut_result_id = r.cut_result_id) AS is_current,
-              (j.status = 'archived') AS is_archived,
+              (current_result.result_no = r.result_no) AS is_current,
+              (j.status = 'archived' OR archive.archived_at IS NOT NULL) AS is_archived,
               CASE WHEN maps.cut_result_placement_id IS NULL THEN NULL ELSE
                 EXISTS (
                   SELECT 1
@@ -1031,6 +1031,11 @@ export class PgLabelsRepository implements LabelsPort {
          ON r.cut_result_id = maps.cut_result_id
         AND r.snapshot_digest = maps.snapshot_digest
        LEFT JOIN cut_job j ON j.cut_job_id = maps.cut_job_id
+       LEFT JOIN cut_result current_result
+         ON current_result.cut_result_id = j.current_cut_result_id
+       LEFT JOIN cut_result_archive_state archive
+         ON archive.cut_job_id = r.cut_job_id
+        AND archive.result_no = r.result_no
        WHERE od.order_id = $1
          AND NOT EXISTS (
            SELECT 1
@@ -1040,8 +1045,8 @@ export class PgLabelsRepository implements LabelsPort {
              AND newer.revision_no > r.revision_no
          )
        ORDER BY od.detail_id,
-                (j.status <> 'archived') DESC NULLS LAST,
-                (j.current_cut_result_id = r.cut_result_id) DESC NULLS LAST,
+                (j.status <> 'archived' AND archive.archived_at IS NULL) DESC NULLS LAST,
+                (current_result.result_no = r.result_no) DESC NULLS LAST,
                 r.created_at DESC NULLS LAST,
                 r.cut_result_id DESC NULLS LAST,
                 maps.instance`,
@@ -1741,6 +1746,12 @@ export async function resolveLabelCutMaps(
        JOIN cut_result r
          ON r.cut_result_id = p.cut_result_id
         AND r.snapshot_digest = projection.snapshot_digest
+       JOIN cut_job j
+         ON j.cut_job_id = p.cut_job_id
+        AND j.status <> 'archived'
+       LEFT JOIN cut_result_archive_state archive
+         ON archive.cut_job_id = r.cut_job_id
+        AND archive.result_no = r.result_no
        JOIN order_details od
          ON od.detail_id = p.order_detail_id
         AND od.order_id = p.order_id
@@ -1749,7 +1760,8 @@ export async function resolveLabelCutMaps(
          AS requested(order_id, detail_id, instance)
          ON requested.order_id = p.order_id
         AND requested.detail_id = p.order_detail_id
-        AND requested.instance = p.instance`,
+        AND requested.instance = p.instance
+       WHERE archive.archived_at IS NULL`,
       [
         unselectedRows.map((row) => row.orderId),
         unselectedRows.map((row) => row.detailId),
@@ -1807,11 +1819,18 @@ export async function resolveLabelCutMaps(
      JOIN cut_result r
        ON r.cut_result_id = p.cut_result_id
       AND r.snapshot_digest = projection.snapshot_digest
+     JOIN cut_job j
+       ON j.cut_job_id = p.cut_job_id
+      AND j.status <> 'archived'
+     LEFT JOIN cut_result_archive_state archive
+       ON archive.cut_job_id = r.cut_job_id
+      AND archive.result_no = r.result_no
      JOIN order_details od
        ON od.detail_id = p.order_detail_id
       AND od.delete_flag = false
      WHERE p.cut_result_placement_id = ANY($1::bigint[])
-       AND ($2::bigint IS NULL OR p.order_id = $2)`,
+       AND ($2::bigint IS NULL OR p.order_id = $2)
+       AND archive.archived_at IS NULL`,
     [[...placementIds], orderId ?? null],
   );
   const placementById = new Map(result.rows.map((row) => [toNumber(row.cut_result_placement_id), row]));
