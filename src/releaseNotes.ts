@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-30",
+    title: "МДФ-работы: свежие раскладки ванн",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Карточки ванн на доске МДФ-работ выбирают самую свежую раскладку из всех результатов раскроя, которые содержат детали этой карты, вместо выбора версии до фильтрации по деталям.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-30",
     title: "Базис XML: ориентация размеров деталей",
     services: ["ERP"],
     repositories: ["repo_erp"],

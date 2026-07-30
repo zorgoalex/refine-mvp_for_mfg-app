@@ -1194,8 +1194,8 @@ async function loadBathCards(
       ) target
       GROUP BY target.order_id, target.detail_id
     ),
-    latest_vacuum_results AS (
-      SELECT DISTINCT ON (j.cut_job_id)
+    candidate_vacuum_results AS (
+      SELECT
         r.cut_result_id,
         r.cut_job_id,
         r.result_no,
@@ -1211,28 +1211,28 @@ async function loadBathCards(
        AND projection.snapshot_digest = r.snapshot_digest
       WHERE r.snapshot_job IS NOT NULL
         AND COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
-      ORDER BY
-        j.cut_job_id,
-        (j.current_cut_result_id = r.cut_result_id) DESC NULLS LAST,
-        r.created_at DESC,
-        r.result_no DESC,
-        r.revision_no DESC,
-        r.cut_result_id DESC
+        AND EXISTS (
+          SELECT 1
+          FROM cut_result_placement placement
+          JOIN cut_result_sheet_map sheet
+            ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+           AND sheet.is_effective = true
+          JOIN target_details target
+            ON target.order_id = placement.order_id
+           AND target.detail_id = placement.order_detail_id
+          WHERE placement.cut_result_id = r.cut_result_id
+        )
     ),
-    candidate_results AS (
-      SELECT latest.*
-      FROM latest_vacuum_results latest
-      WHERE EXISTS (
-        SELECT 1
-        FROM cut_result_placement placement
-        JOIN cut_result_sheet_map sheet
-          ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
-         AND sheet.is_effective = true
-        JOIN target_details target
-          ON target.order_id = placement.order_id
-         AND target.detail_id = placement.order_detail_id
-        WHERE placement.cut_result_id = latest.cut_result_id
-      )
+    latest_vacuum_results AS (
+      SELECT DISTINCT ON (candidate.cut_job_id)
+        candidate.*
+      FROM candidate_vacuum_results candidate
+      ORDER BY
+        candidate.cut_job_id,
+        candidate.result_created_at DESC,
+        candidate.result_no DESC,
+        candidate.revision_no DESC,
+        candidate.cut_result_id DESC
     )
     SELECT
       result.cut_result_id,
@@ -1254,7 +1254,7 @@ async function loadBathCards(
       sheet.sheet_ordinal,
       sheet.sheet_width_mm,
       sheet.sheet_height_mm
-    FROM candidate_results result
+    FROM latest_vacuum_results result
     JOIN cut_result_placement placement
       ON placement.cut_result_id = result.cut_result_id
     JOIN cut_result_sheet_map sheet
