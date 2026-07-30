@@ -98,6 +98,9 @@ export const BATH_METER_GUIDE_STYLE = {
   strokeWidthMm: 3,
   dashMm: 18,
   gapMm: 14,
+  labelFill: '#ff6a00',
+  labelFontRatio: 0.5,
+  labelFontWeight: 700,
 } as const;
 
 export interface BathMeterGuideEligibility {
@@ -135,6 +138,46 @@ export interface BathMeterGuideLine {
   y1: number;
   x2: number;
   y2: number;
+}
+
+export interface BathMeterGuideLabel {
+  x: number;
+  y: number;
+  text: string;
+}
+
+/**
+ * The orange meter label is exactly half the base font used for bath
+ * dimension annotations. Keeping the calculation here makes SVG, raster/PDF
+ * and the manual editor use one typography contract.
+ */
+export function bathMeterGuideLabelFontMm(
+  sheetWidthMm: number,
+  sheetHeightMm: number,
+  labelFontMm?: number,
+): number {
+  const fallbackLabelFontMm = Math.max(24, Math.round(Math.min(sheetWidthMm, sheetHeightMm) / 42));
+  const bathDimensionFontMm = Math.max(18, Math.round((labelFontMm ?? fallbackLabelFontMm) * 0.85));
+  return bathDimensionFontMm * BATH_METER_GUIDE_STYLE.labelFontRatio;
+}
+
+/** Position a horizontal label by the left edge and a vertical label by the top edge. */
+export function bathMeterGuideLabel(
+  line: BathMeterGuideLine,
+  fontSizeMm: number,
+): BathMeterGuideLabel {
+  const vertical = line.x1 === line.x2;
+  return vertical
+    ? {
+        x: line.x1 + fontSizeMm * 0.7,
+        y: fontSizeMm,
+        text: `${line.offsetMm}мм`,
+      }
+    : {
+        x: fontSizeMm * 0.7,
+        y: line.y1 - fontSizeMm * 0.7,
+        text: `${line.offsetMm}мм`,
+      };
 }
 
 /**

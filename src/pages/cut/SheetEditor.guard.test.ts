@@ -60,6 +60,11 @@ describe('SheetEditor source contract', () => {
     expect(src).toMatch(/bathMeterGuideLines\(W,\s*H,\s*displayBathLandscape\)/);
     expect(src).toMatch(/className="cut-bath-meter-guide"/);
     expect(src).toMatch(/BATH_METER_GUIDE_STYLE\.strokeOpacity/);
+    expect(src).toMatch(/bathMeterGuideLabelFontMm\(W,\s*H\)/);
+    expect(src).toMatch(/className="cut-bath-meter-guide-label"/);
+    expect(src).toMatch(/BATH_METER_GUIDE_STYLE\.labelFill/);
+    expect(src).toMatch(/fontSize=\{bathGuideLabelFontMm\}/);
+    expect(src).toMatch(/\{label\.text\}/);
     expect(src).toMatch(/pointerEvents:\s*'none'/);
   });
   it('numbers editor sheets by display position, not the (possibly sparse) sheetIndex', () => {

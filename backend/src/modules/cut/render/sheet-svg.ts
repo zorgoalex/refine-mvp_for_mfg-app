@@ -1,6 +1,8 @@
 import {
   BATH_METER_GUIDE_STYLE,
   applyAxisOrigin,
+  bathMeterGuideLabel,
+  bathMeterGuideLabelFontMm,
   bathMeterGuideLines,
   orientPieceRect,
   type CutAxisOrigin,
@@ -223,8 +225,31 @@ function renderPieceGroup(piece: FreecutPlacement, cx: number, cy: number, body:
   return `<g ${pieceDataAttributes(piece, cx, cy)}>${body}</g>`;
 }
 
-function renderBathMeterGuides(sheet: SheetPlacementsJson, landscape: boolean): string {
+function renderBathMeterGuideLabels(
+  sheet: SheetPlacementsJson,
+  landscape: boolean,
+  labelFontMm = bathMeterGuideLabelFontMm(sheet.sheet_width_mm, sheet.sheet_height_mm),
+): string {
   return bathMeterGuideLines(sheet.sheet_width_mm, sheet.sheet_height_mm, landscape)
+    .map((line) => {
+      const label = bathMeterGuideLabel(line, labelFontMm);
+      return `<text class="cut-bath-meter-guide-label" data-offset-mm="${num(line.offsetMm)}" x="${num(
+        label.x,
+      )}" y="${num(label.y)}" fill="${BATH_METER_GUIDE_STYLE.labelFill}" font-family="Liberation Sans, sans-serif" font-size="${num(
+        labelFontMm,
+      )}" font-weight="${num(BATH_METER_GUIDE_STYLE.labelFontWeight)}" text-anchor="start" dominant-baseline="middle" stroke="#ffffff" stroke-width="${num(
+        labelFontMm * 0.16,
+      )}" paint-order="stroke" pointer-events="none" style="font-variant-numeric:tabular-nums">${label.text}</text>`;
+    })
+    .join('');
+}
+
+function renderBathMeterGuides(
+  sheet: SheetPlacementsJson,
+  landscape: boolean,
+  labelFontMm = bathMeterGuideLabelFontMm(sheet.sheet_width_mm, sheet.sheet_height_mm),
+): string {
+  const lines = bathMeterGuideLines(sheet.sheet_width_mm, sheet.sheet_height_mm, landscape)
     .map((line) => (
       `<line class="cut-bath-meter-guide" data-offset-mm="${num(line.offsetMm)}" x1="${num(line.x1)}" y1="${num(
         line.y1,
@@ -235,6 +260,7 @@ function renderBathMeterGuides(sheet: SheetPlacementsJson, landscape: boolean): 
       )} ${num(BATH_METER_GUIDE_STYLE.gapMm)}" pointer-events="none"/>`
     ))
     .join('');
+  return `${lines}${renderBathMeterGuideLabels(sheet, landscape, labelFontMm)}`;
 }
 
 /** Adds guide overlays to an already rendered/frozen SVG, idempotently. */
@@ -243,13 +269,17 @@ export function addBathMeterGuidesToSvg(
   sheet: SheetPlacementsJson,
   landscape: boolean,
 ): string {
-  if (svg.includes('class="cut-bath-meter-guide"')) return svg;
-  const guides = renderBathMeterGuides(sheet, landscape);
-  if (!guides) return svg;
+  const hasLines = svg.includes('class="cut-bath-meter-guide"');
+  const hasLabels = svg.includes('class="cut-bath-meter-guide-label"');
+  if (hasLines && hasLabels) return svg;
+  const overlay = hasLines
+    ? renderBathMeterGuideLabels(sheet, landscape)
+    : renderBathMeterGuides(sheet, landscape);
+  if (!overlay) return svg;
   const closingTag = svg.lastIndexOf('</svg>');
   return closingTag < 0
     ? svg
-    : `${svg.slice(0, closingTag)}${guides}${svg.slice(closingTag)}`;
+    : `${svg.slice(0, closingTag)}${overlay}${svg.slice(closingTag)}`;
 }
 
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
@@ -300,7 +330,9 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       ].join(''));
     })
     .join('');
-  const bathMeterGuides = input.showBathMeterGuides ? renderBathMeterGuides(sheet, rotate90) : '';
+  const bathMeterGuides = input.showBathMeterGuides
+    ? renderBathMeterGuides(sheet, rotate90, bathMeterGuideLabelFontMm(w, h, input.labelFontMm))
+    : '';
 
   return [
     // viewBox only (no width/height attrs): the px size is chosen at raster time
@@ -376,7 +408,9 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
       return renderPieceGroup(piece, cx, cy, [rectEl, ...sideTexts, centerText].join(''));
     })
     .join('');
-  const bathMeterGuides = input.showBathMeterGuides ? renderBathMeterGuides(sheet, rotate90) : '';
+  const bathMeterGuides = input.showBathMeterGuides
+    ? renderBathMeterGuides(sheet, rotate90, bathMeterGuideLabelFontMm(w, h, input.labelFontMm))
+    : '';
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${num(vbW)} ${num(vbH)}">`,

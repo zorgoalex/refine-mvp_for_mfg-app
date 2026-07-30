@@ -283,10 +283,15 @@ describe('vacuum bath meter guides', () => {
 
     for (const svg of [normal, bath]) {
       expect(svg.match(/class="cut-bath-meter-guide"/g)).toHaveLength(2);
+      expect(svg.match(/class="cut-bath-meter-guide-label"/g)).toHaveLength(2);
       expect(svg).toContain('data-offset-mm="800" x1="0" y1="800" x2="1400" y2="800"');
       expect(svg).toContain('data-offset-mm="1800" x1="0" y1="1800" x2="1400" y2="1800"');
       expect(svg).toContain('stroke-dasharray="18 14"');
       expect(svg).toContain('stroke-opacity="0.28"');
+      expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="9.8" y="790.2" fill="#ff6a00"');
+      expect(svg).toContain('font-size="14" font-weight="700"');
+      expect(svg).toContain('>800мм</text>');
+      expect(svg).toContain('>1800мм</text>');
     }
   });
 
@@ -300,6 +305,7 @@ describe('vacuum bath meter guides', () => {
 
     expect(svg).toContain('data-offset-mm="800" x1="800" y1="0" x2="800" y2="1400"');
     expect(svg).toContain('data-offset-mm="1800" x1="1800" y1="0" x2="1800" y2="1400"');
+    expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="809.8" y="14" fill="#ff6a00"');
   });
 
   it('keeps ordinary sheet SVG byte-compatible when guides are disabled', () => {
@@ -313,7 +319,23 @@ describe('vacuum bath meter guides', () => {
     const twice = addBathMeterGuidesToSvg(once, bathSheet, false);
 
     expect(once.match(/class="cut-bath-meter-guide"/g)).toHaveLength(2);
+    expect(once.match(/class="cut-bath-meter-guide-label"/g)).toHaveLength(2);
     expect(twice).toBe(once);
+  });
+
+  it('backfills labels without duplicating lines in SVGs rendered by the previous guide version', () => {
+    const current = buildSheetSvg({
+      sheet: bathSheet,
+      labelFor: () => 'X',
+      showBathMeterGuides: true,
+    });
+    const previousVersion = current.replace(/<text class="cut-bath-meter-guide-label"[^>]*>.*?<\/text>/g, '');
+    const upgraded = addBathMeterGuidesToSvg(previousVersion, bathSheet, false);
+
+    expect(previousVersion.match(/class="cut-bath-meter-guide"/g)).toHaveLength(2);
+    expect(previousVersion).not.toContain('class="cut-bath-meter-guide-label"');
+    expect(upgraded.match(/class="cut-bath-meter-guide"/g)).toHaveLength(2);
+    expect(upgraded.match(/class="cut-bath-meter-guide-label"/g)).toHaveLength(2);
   });
 });
 

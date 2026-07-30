@@ -17,6 +17,8 @@ export {
   BATH_METER_GUIDE_SHEET_HEIGHT_MM,
   BATH_FILM_USAGE_ZONES,
   BATH_METER_GUIDE_STYLE,
+  bathMeterGuideLabel,
+  bathMeterGuideLabelFontMm,
   bathMeterGuideLines,
   calculateBathSheetFilmUsage,
   shouldShowBathMeterGuides,
@@ -36,6 +38,7 @@ export {
 
 export type {
   BathMeterGuideEligibility,
+  BathMeterGuideLabel,
   BathMeterGuideLine,
   BathSheetFilmUsage,
   BathFilmLongSideAxis,
