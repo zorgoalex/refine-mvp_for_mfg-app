@@ -337,6 +337,10 @@ def select_attachment_message(
     image_id = int(image_message.id)
     previous_id = int(previous_image_id) if previous_image_id is not None else None
     next_id = int(next_image_id) if next_image_id is not None else None
+    replies = [
+        message for message in candidates
+        if message_reply_to_id(message) == image_id
+    ]
     before_image = [
         message for message in candidates
         if (previous_id is None or int(message.id) > previous_id) and int(message.id) < image_id
@@ -346,7 +350,7 @@ def select_attachment_message(
         if int(message.id) > image_id and (next_id is None or int(message.id) < next_id)
     ]
     sort_key = key_builder(image_id)
-    for scoped_candidates in (before_image, after_image, candidates):
+    for scoped_candidates in (replies, before_image, after_image):
         if scoped_candidates:
             return min(scoped_candidates, key=sort_key)
     return None
