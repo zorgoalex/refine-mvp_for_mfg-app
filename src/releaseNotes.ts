@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-30",
+    title: "Меню: отдельная иконка Базис-раскроя",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Пункт меню «Базис-раскрой» теперь использует отдельную табличную иконку и больше не совпадает с иконкой пункта «Раскрой».",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-29",
     title: "Новые варианты дизайна LINE и AIR",
     services: ["ERP"],

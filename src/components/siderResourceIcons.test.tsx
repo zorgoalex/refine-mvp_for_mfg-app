@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { describe, expect, it } from 'vitest';
 import { SIDER_RESOURCE_ICONS } from './siderResourceIcons';
 
@@ -8,6 +9,7 @@ const NAVIGATION_RESOURCES = [
   'groups',
   'projects',
   'cut-jobs',
+  'bazis-cut-sets',
   'bazis',
   'clients',
   'clients_analytics_view',
@@ -46,5 +48,12 @@ const NAVIGATION_RESOURCES = [
 describe('SIDER_RESOURCE_ICONS', () => {
   it.each(NAVIGATION_RESOURCES)('provides a semantic icon for %s', (resource) => {
     expect(SIDER_RESOURCE_ICONS[resource]).toBeTruthy();
+  });
+
+  it('uses different icons for regular cut and Bazis cut', () => {
+    const cutIcon = SIDER_RESOURCE_ICONS['cut-jobs'] as ReactElement;
+    const bazisCutIcon = SIDER_RESOURCE_ICONS['bazis-cut-sets'] as ReactElement;
+
+    expect(cutIcon.type).not.toBe(bazisCutIcon.type);
   });
 });
