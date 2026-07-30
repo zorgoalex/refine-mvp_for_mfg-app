@@ -5,18 +5,139 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  BATH_FILM_USAGE_ZONES,
+  BATH_METER_GUIDE_OFFSETS_MM,
+  bathMeterGuideLines,
+  calculateBathSheetFilmUsage,
   usableExtent,
   piecesClear,
   pieceWithinUsable,
   validateSheetPlacements,
   orientPieceRect,
   applyAxisOrigin,
+  shouldShowBathMeterGuides,
   undoAxisOriginY,
   rotatePiece,
   snapDraggedPiece,
   moveAllowed,
   validateSheetGroupInvariant,
 } from './index';
+
+describe('bath meter guides', () => {
+  it('enables guides only for a vacuum-table Ванна material with catalog long side 2800 mm', () => {
+    expect(shouldShowBathMeterGuides({
+      engineUsed: 'vacuum_table',
+      materialName: 'Ванна 1400',
+      materialHeightMm: 2800,
+    })).toBe(true);
+    expect(shouldShowBathMeterGuides({
+      layoutMode: 'vacuum_table',
+      materialName: '  ванна 2100',
+      materialHeightMm: 2800,
+    })).toBe(true);
+    expect(shouldShowBathMeterGuides({
+      engineUsed: 'vacuum_table',
+      materialName: 'Ванна 2080x1050',
+      materialWidthMm: 2800,
+      materialHeightMm: 1050,
+    })).toBe(true);
+
+    expect(shouldShowBathMeterGuides({
+      engineUsed: 'ga',
+      materialName: 'Ванна 1400',
+      materialHeightMm: 2800,
+    })).toBe(false);
+    expect(shouldShowBathMeterGuides({
+      engineUsed: 'vacuum_table',
+      materialName: 'МДФ 16 мм',
+      materialHeightMm: 2800,
+    })).toBe(false);
+    expect(shouldShowBathMeterGuides({
+      engineUsed: 'vacuum_table',
+      materialName: 'Ванна 1400',
+      materialHeightMm: 2799,
+    })).toBe(false);
+    expect(shouldShowBathMeterGuides({
+      engineUsed: 'vacuum_table',
+      materialName: 'Ванна 1400',
+      materialHeightMm: Symbol('invalid'),
+    })).toBe(false);
+  });
+
+  it('places portrait guides across the width at 800 and 1800 mm from the top edge', () => {
+    expect(bathMeterGuideLines(1400, 2800, false)).toEqual([
+      { offsetMm: 800, x1: 0, y1: 800, x2: 1400, y2: 800 },
+      { offsetMm: 1800, x1: 0, y1: 1800, x2: 1400, y2: 1800 },
+    ]);
+  });
+
+  it('places landscape guides across the short side at 800 and 1800 mm from the left edge', () => {
+    expect(bathMeterGuideLines(1400, 2800, true)).toEqual([
+      { offsetMm: 800, x1: 800, y1: 0, x2: 800, y2: 1400 },
+      { offsetMm: 1800, x1: 1800, y1: 0, x2: 1800, y2: 1400 },
+    ]);
+    expect(BATH_METER_GUIDE_OFFSETS_MM).toEqual([800, 1800]);
+  });
+
+  it('keeps guides on the displayed long side when the native long side is width', () => {
+    expect(bathMeterGuideLines(2800, 1050, false)).toEqual([
+      { offsetMm: 800, x1: 800, y1: 0, x2: 800, y2: 1050 },
+      { offsetMm: 1800, x1: 1800, y1: 0, x2: 1800, y2: 1050 },
+    ]);
+    expect(bathMeterGuideLines(2800, 1050, true)).toEqual([
+      { offsetMm: 800, x1: 0, y1: 800, x2: 1050, y2: 800 },
+      { offsetMm: 1800, x1: 0, y1: 1800, x2: 1050, y2: 1800 },
+    ]);
+  });
+});
+
+describe('bath film usage', () => {
+  const base = {
+    sheet_width_mm: 1050,
+    sheet_height_mm: 2800,
+    trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
+  };
+
+  it('uses the zone that contains the farthest occupied point on the long side', () => {
+    expect(calculateBathSheetFilmUsage({
+      ...base,
+      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 100, height_mm: 800, rotated: false }],
+    })?.linearMeters).toBe(1.1);
+    expect(calculateBathSheetFilmUsage({
+      ...base,
+      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 750, width_mm: 100, height_mm: 51, rotated: false }],
+    })?.linearMeters).toBe(2.1);
+    expect(calculateBathSheetFilmUsage({
+      ...base,
+      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 1799, width_mm: 100, height_mm: 2, rotated: false }],
+    })?.linearMeters).toBe(3.1);
+  });
+
+  it('measures along width when the bath long side is native X', () => {
+    expect(calculateBathSheetFilmUsage({
+      sheet_width_mm: 2800,
+      sheet_height_mm: 1050,
+      trim_mm: { left: 10, right: 0, top: 0, bottom: 0 },
+      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 1700, y_mm: 0, width_mm: 80, height_mm: 100, rotated: false }],
+    })).toEqual({
+      linearMeters: 2.1,
+      occupiedToMm: 1790,
+      zoneToMm: 1800,
+      longSideAxis: 'x',
+    });
+  });
+
+  it('returns null for empty or non-2800 sheets', () => {
+    expect(calculateBathSheetFilmUsage({ ...base, pieces: [] })).toBeNull();
+    expect(calculateBathSheetFilmUsage({
+      sheet_width_mm: 1050,
+      sheet_height_mm: 2600,
+      trim_mm: base.trim_mm,
+      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 100, height_mm: 100, rotated: false }],
+    })).toBeNull();
+    expect(BATH_FILM_USAGE_ZONES.map((zone) => zone.linearMeters)).toEqual([1.1, 2.1, 3.1]);
+  });
+});
 
 describe('display axis origin', () => {
   it.each([

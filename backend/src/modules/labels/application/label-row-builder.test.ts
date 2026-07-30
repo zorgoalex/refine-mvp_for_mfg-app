@@ -227,6 +227,36 @@ describe('label row builder', () => {
     expect(row.values['custom.result']).toBe('МДФ 16 / Client A');
   });
 
+  it('evaluates aggregate custom fields over all details in the label order batch', () => {
+    const rows = buildLabelRows({
+      orderName: 'ERP-548',
+      orderFields: {},
+      today: '2026-07-21',
+      template: {
+        customFieldSchema: {
+          'custom.edge_types': expressionSchema({
+            type: 'aggregate',
+            source: 'order.details',
+            field: 'detail.edge_type_name',
+            fn: 'unique_join',
+            separator: ', ',
+          }),
+        },
+      },
+      details: [
+        detail({ detailId: 101, detailFields: { edge_type_name: 'ПВХ 2мм' } }),
+        detail({ detailId: 102, detailFields: { edge_type_name: 'ABS 1мм' } }),
+        detail({ detailId: 103, detailFields: { edge_type_name: 'ПВХ 2мм' } }),
+      ],
+    });
+
+    expect(rows.map((row) => row.values['custom.edge_types'])).toEqual([
+      'ПВХ 2мм, ABS 1мм',
+      'ПВХ 2мм, ABS 1мм',
+      'ПВХ 2мм, ABS 1мм',
+    ]);
+  });
+
   it('uses manual custom overrides, including null, inside dependent formulas', () => {
     const [row] = buildLabelRows({
       orderName: 'ERP-548',

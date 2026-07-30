@@ -3,6 +3,7 @@ import QRCode, { type QRCodeErrorCorrectionLevel } from 'qrcode';
 import SVGtoPDF from 'svg-to-pdfkit';
 import {
   evaluateCustomFieldExpression,
+  type LabelCustomExpressionContext,
   readCustomFieldExpressionV1,
   type LabelCustomExpressionScalar,
 } from '../../labels/application/label-custom-field-expression';
@@ -39,6 +40,7 @@ export interface PdfSheetMeta {
   materials?: readonly string[];
   thicknesses?: readonly string[];
   films?: readonly string[];
+  edgeTypes?: readonly string[];
   machineFiles?: readonly string[];
 }
 
@@ -176,7 +178,7 @@ function drawTemplateLayoutPage(
   const pageW = mmToPt(readNumber(page.width, 297, 20, 2000));
   const pageH = mmToPt(readNumber(page.height, 210, 20, 2000));
   const customFieldSchema = isRecord(layout.customFieldSchema) ? layout.customFieldSchema : {};
-  const values = resolveCustomFieldValues(customFieldSchema, buildSheetFieldValues(sheet));
+  const values = resolveCustomFieldValues(customFieldSchema, buildSheetFieldValues(sheet), sheet);
   const elements = upgradeTemplateLayoutElements((layout.elements ?? [])
     .map((raw, index) => toLayoutElement(raw, index))
     .filter((element): element is PdfLayoutElement => element !== null))
@@ -674,6 +676,7 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
     'detail.materials': joinBlank(meta.materials),
     'detail.films': joinBlank(meta.films),
     'detail.thicknesses': joinBlank(meta.thicknesses),
+    'detail.edge_types': joinBlank(meta.edgeTypes),
     'detail.machine_files': joinBlank(machineFiles),
     'computed.today': new Date().toISOString().slice(0, 10),
     'computed.page_number': sheet.sheetNumber ?? null,
@@ -684,11 +687,19 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
 function resolveCustomFieldValues(
   customFieldSchema: Record<string, unknown>,
   baseValues: Record<string, LabelCustomExpressionScalar>,
+  sheet: PdfSheetInput,
 ): Record<string, LabelCustomExpressionScalar> {
   const values: Record<string, LabelCustomExpressionScalar> = { ...baseValues };
   const resolving = new Set<string>();
   const resolved = new Set<string>();
   const schemaKeys = new Set(Object.keys(customFieldSchema));
+  const expressionContext: LabelCustomExpressionContext = {
+    getCollectionValues: (source, fieldId) => (
+      source === 'sheet.details'
+        ? sheetDetailCollectionValues(sheet.detailRows ?? [], fieldId)
+        : undefined
+    ),
+  };
 
   const resolveCustom = (rawFieldId: string): LabelCustomExpressionScalar => {
     const fieldId = rawFieldId.replace(/^custom\./, '');
@@ -704,7 +715,7 @@ function resolveCustomFieldValues(
         const dep = dependency.replace(/^custom\./, '');
         if (schemaKeys.has(dependency) || schemaKeys.has(dep)) return resolveCustom(dep);
         return scalar(values[dependency] ?? values[dep] ?? values[`custom.${dep}`]);
-      });
+      }, expressionContext);
     } else if (typeof schema.sourceField === 'string') {
       value = scalar(values[schema.sourceField] ?? values[schema.sourceField.replace(/^custom\./, '')]);
     } else if (Object.prototype.hasOwnProperty.call(schema, 'defaultValue')) {
@@ -721,6 +732,13 @@ function resolveCustomFieldValues(
 
   for (const fieldId of schemaKeys) resolveCustom(fieldId);
   return values;
+}
+
+function sheetDetailCollectionValues(
+  rows: readonly PdfSheetDetailRow[],
+  fieldId: string,
+): LabelCustomExpressionScalar[] {
+  return rows.map((row, index) => scalar(detailRowValue(row, fieldId, index)));
 }
 
 function resolveElementText(element: PdfLayoutElement, values: Record<string, LabelCustomExpressionScalar>): string {

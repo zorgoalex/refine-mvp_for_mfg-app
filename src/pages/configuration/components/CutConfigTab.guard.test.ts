@@ -159,6 +159,11 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/bath-field-utilization/);
     expect(tabSrc).toMatch(/detail\.machine_file/);
     expect(tabSrc).toMatch(/detail\.doweling/);
+    expect(tabSrc).toMatch(/detail\.edge_types/);
+    expect(tabSrc).toMatch(/PDF_AGGREGATE_SOURCES/);
+    expect(tabSrc).toMatch(/sheet\.details/);
+    expect(tabSrc).toMatch(/aggregateSources=\{PDF_AGGREGATE_SOURCES\}/);
+    expect(tabSrc).toMatch(/PDF_PREVIEW_COLLECTIONS/);
     expect(tabSrc).toMatch(/Линия/);
     expect(tabSrc).toMatch(/Прямоугольник/);
     expect(tabSrc).toMatch(/PdfTemplateCanvas/);

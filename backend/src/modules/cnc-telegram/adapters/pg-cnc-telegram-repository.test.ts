@@ -347,6 +347,12 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain("regexp_matches(\n        packet_comment.comment_text,\n        '(^|[^0-9])([0-9]{4,})([^0-9]|$)'");
     expect(sql).toContain('1000000000::integer AS completed_quantity');
     expect(sql).toContain('LEAST(SUM(target.completed_quantity), 1000000000::bigint)::integer');
+    expect(sql).toContain('candidate_vacuum_results AS (');
+    expect(sql).toContain('latest_vacuum_results AS (');
+    expect(sql).toContain('SELECT DISTINCT ON (candidate.cut_job_id)');
+    expect(sql).toContain('FROM candidate_vacuum_results candidate');
+    expect(sql).toContain('candidate.result_created_at DESC');
+    expect(sql).not.toContain('(j.current_cut_result_id = r.cut_result_id) DESC');
     expect(sql).toContain('lower(trim(i.order_name)) AS order_key');
     expect(sql).toContain('od.detail_number = item.detail_number');
     expect(sql).toContain('jsonb_array_elements_text(p.comments_json)');

@@ -56,6 +56,7 @@ import { TableTopScroll } from '../../components/TableTopScroll';
 import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
+import { CutPdfPreview } from './CutPdfPreview';
 import { buildPieceMetaByItemId } from './cutPieceMeta';
 import { pushHistory } from './editorHistory';
 import { CutSheetLabelGenerateAction } from './CutSheetLabelGenerateAction';
@@ -68,7 +69,13 @@ import type {
   EligibleDetailDto,
   SheetPlacements,
 } from '../../api/types/cutApi.types';
-import { validateSheetPlacements, validateSheetGroupInvariant, movesFromSheets } from './cutLayoutGeometry';
+import {
+  movesFromSheets,
+  calculateBathSheetFilmUsage,
+  shouldShowBathMeterGuides,
+  validateSheetGroupInvariant,
+  validateSheetPlacements,
+} from './cutLayoutGeometry';
 import type { CutAxisOrigin, ManualViolation } from './cutLayoutGeometry';
 import {
   CUT_JOB_STATUS_FILTER_ALL,
@@ -90,6 +97,7 @@ import {
   buildFilmTextureMap,
   pruneEmptySheets,
 } from './cutPageHelpers';
+import { filmUsageTooltip, formatFilmLinearMeters, totalFilmUsageMeters } from './cutFilmUsage';
 import { can } from '../../utils/permissions';
 import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
 import { useTabStore } from '../../stores/tabStore';
@@ -2037,7 +2045,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   }), [jobs]);
   const exportJobs = useCallback(() => {
     const cells = [
-      ['#', 'Название', 'Статус', 'Источник', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Профиль', 'Материал'],
+      ['#', 'Название', 'Статус', 'Источник', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Материал'],
       ...filteredJobs.map((candidate) => [
         candidate.cutJobId,
         candidate.name,
@@ -2048,6 +2056,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         candidate.totals.details,
         candidate.totals.area,
         candidate.status === 'ready' ? candidate.totals.sheets : '',
+        totalFilmUsageMeters(candidate.totals.filmUsage) > 0
+          ? formatFilmLinearMeters(totalFilmUsageMeters(candidate.totals.filmUsage))
+          : '',
         resolveProfileLabel(candidate.paramProfileId, profiles, cutSettings),
         candidate.materialNames.join(', '),
       ]),
@@ -2196,6 +2207,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         key: 'sheets',
         width: 84,
         render: (_: unknown, row: CutJobDto) => (row.status === 'ready' ? row.totals.sheets : '—'),
+      },
+      {
+        title: 'Количество плёнки',
+        key: 'filmUsage',
+        width: 118,
+        render: (_: unknown, row: CutJobDto) => {
+          const total = totalFilmUsageMeters(row.totals.filmUsage);
+          if (row.status !== 'ready' || total <= 0) return '—';
+          const title = filmUsageTooltip(row.totals.filmUsage);
+          const value = <Text strong className="app-tabular">{formatFilmLinearMeters(total)}</Text>;
+          return title ? <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{title}</span>}>{value}</Tooltip> : value;
+        },
       },
       {
         title: 'Профиль',
@@ -3205,6 +3228,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   <span>Плёнок: <b>{job.totals.filmsCount}</b></span>
                   <span>Площадь, итого: <b>{formatArea(job.totals.area)}</b></span>
                   {job.status === 'ready' && <span>Листов раскроя: <b>{job.totals.sheets}</b></span>}
+                  {totalFilmUsageMeters(job.totals.filmUsage) > 0 && (
+                    <span>Количество плёнки: <b>{formatFilmLinearMeters(totalFilmUsageMeters(job.totals.filmUsage))}</b></span>
+                  )}
                 </Space>
                 <div className="cut-job-operational-fields" style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 12 }}>
                   <div>
@@ -3463,7 +3489,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
       {job?.groups.map((group) => {
         // Readable group title: «Раскрой: <материал> · N листов» (fallback to id).
-        const matName = sheetOptions.find((o) => o.sheetMaterialTypeId === group.sheetMaterialTypeId)?.name;
+        const sheetOption = sheetOptions.find((o) => o.sheetMaterialTypeId === group.sheetMaterialTypeId);
+        const matName = sheetOption?.name;
+        const showBathMeterGuides = shouldShowBathMeterGuides({
+          engineUsed: group.summary?.engine_used,
+          layoutMode: profiles.find((profile) => profile.cutParamProfileId === job.paramProfileId)?.params?.layout_mode,
+          materialName: sheetOption?.name,
+          materialWidthMm: sheetOption?.widthMm,
+          materialHeightMm: sheetOption?.heightMm,
+        });
         const filmNames = groupFilmNames(job, group);
         const filmText = filmNames.length > 0 ? filmNames.join(', ') : null;
         const filmLabel = filmNames.length > 1 ? 'Плёнки' : 'Плёнка';
@@ -3744,6 +3778,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   pieceMetaByItemId={pieceMetaByItemId}
                   pieceSheetInfoByItemId={pieceSheetInfoByItemId}
                   showFilm={!job.combineFilms}
+                  showBathMeterGuides={showBathMeterGuides}
                 />
               </div>
             )}
@@ -3779,6 +3814,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   const isPortraitPreview = displayHeightMm > displayWidthMm;
                   const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90, originTopLeft, sheetAxisOrigin);
                   const sheetDetailIds = detailIdsForSheet(sheet);
+                  const bathFilmUsage = showBathMeterGuides ? calculateBathSheetFilmUsage(sheet.placements) : null;
                   return (
                     <div
                       key={elemKey}
@@ -3799,6 +3835,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                               <span>{matName ?? 'материал не задан'}</span>
                               {filmText && <span>{filmLabel}: {filmText}</span>}
                               <span>кол-во деталей - {sheet.placements.pieces.length}</span>
+                              {bathFilmUsage && (
+                                <span>Потребность плёнки: <b>{formatFilmLinearMeters(bathFilmUsage.linearMeters)}</b></span>
+                              )}
                             </>
                           ) : (
                             <>
@@ -3808,6 +3847,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                               {filmText ? ` · ${filmLabel}: ${filmText}` : ''}
                               {' · '}
                               кол-во деталей - {sheet.placements.pieces.length}
+                              {bathFilmUsage && (
+                                <>
+                                  {' · '}
+                                  <span>Потребность плёнки: <b>{formatFilmLinearMeters(bathFilmUsage.linearMeters)}</b></span>
+                                </>
+                              )}
                             </>
                           )}
                         </div>
@@ -3894,25 +3939,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         ]}
       >
         <div style={{ minHeight: 420 }}>
-          {pdfPreview.loading ? (
-            <div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Spin tip="Готовим PDF" />
-            </div>
-          ) : pdfPreview.url ? (
-            <iframe
-              title="Предпросмотр PDF"
-              src={pdfPreview.url}
-              style={{
-                width: '100%',
-                height: 'min(72vh, 760px)',
-                minHeight: 420,
-                border: '1px solid rgba(0, 0, 0, 0.1)',
-                borderRadius: 6,
-              }}
-            />
-          ) : (
-            <Alert type="warning" showIcon message="PDF не загружен" />
-          )}
+          <CutPdfPreview blob={pdfPreview.blob} loading={pdfPreview.loading} />
         </div>
       </Modal>
     </>

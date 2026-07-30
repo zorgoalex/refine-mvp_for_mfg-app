@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addBathMeterGuidesToSvg,
   buildBathProfileSheetSvg,
   buildSheetSvg,
   composePieceLabelLines,
@@ -168,7 +169,7 @@ describe('buildSheetSvg multi-line labels', () => {
 });
 
 describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
-  it('puts dimensions along sides and keeps only order/position in the centre', () => {
+  it('puts enlarged dimensions along sides and keeps only order/position in the centre', () => {
     const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['11300', 'поз. 5', '600X400'] });
 
     expect(svg).toContain('data-detail-id="999"');
@@ -177,8 +178,8 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).toMatch(/font-size="[^"]+"[^>]*fill="#14532d"[^>]*> 5<\/text>/);
     expect(svg).not.toContain('>поз. 5</text>');
     expect(svg).not.toContain('600X400');
-    expect(svg).toMatch(/<text x="310" y="[^"]*"[^>]*font-size="42"[^>]*>600<\/text>/);
-    expect(svg).toMatch(/transform="rotate\(-90 [^"]+\)"[^>]*font-size="42"[^>]*>400<\/text>/);
+    expect(svg).toMatch(/<text x="310" y="[^"]*"[^>]*font-size="84"[^>]*>600<\/text>/);
+    expect(svg).toMatch(/transform="rotate\(-90 [^"]+\)"[^>]*font-size="84"[^>]*>400<\/text>/);
   });
 
   it('does not change the standard SVG renderer output', () => {
@@ -214,6 +215,17 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).toMatch(/font-size="28"[^>]*>1000<\/text>/);
   });
 
+  it('keeps the old small dimension font when either side is 150 mm or less', () => {
+    const thresholdSheet: SheetPlacementsJson = {
+      ...sheet,
+      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 1000, height_mm: 150, rotated: false }],
+    };
+    const svg = buildBathProfileSheetSvg({ sheet: thresholdSheet, labelFor: () => ['11300', 'поз. 5', '1000X150'] });
+
+    expect(svg).toMatch(/font-size="42"[^>]*>1000<\/text>/);
+    expect(svg).toMatch(/font-size="42"[^>]*>150<\/text>/);
+  });
+
   it('styles bath PDF center detail labels by semantic part', () => {
     const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['11300', 'поз. 5', '600X400'] });
 
@@ -245,8 +257,63 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
   it('moves bath center labels into the safe area below and right of side dimensions', () => {
     const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['11300', 'поз. 5', '600X400'] });
 
-    expect(svg).toMatch(/<text x="340.45" y="193.65"[^>]*>11300<\/text>/);
+    expect(svg).toMatch(/<text x="370.9" y="226.2"[^>]*>11300<\/text>/);
     expect(svg).not.toMatch(/<text x="310" y="215"[^>]*>11300<\/text>/);
+  });
+});
+
+describe('vacuum bath meter guides', () => {
+  const bathSheet: SheetPlacementsJson = {
+    ...sheet,
+    sheet_width_mm: 1400,
+    sheet_height_mm: 2800,
+  };
+
+  it('renders two subtle dashed guides at portrait y=800/1800 in normal and bath-profile SVGs', () => {
+    const normal = buildSheetSvg({
+      sheet: bathSheet,
+      labelFor: () => 'X',
+      showBathMeterGuides: true,
+    });
+    const bath = buildBathProfileSheetSvg({
+      sheet: bathSheet,
+      labelFor: () => 'X',
+      showBathMeterGuides: true,
+    });
+
+    for (const svg of [normal, bath]) {
+      expect(svg.match(/class="cut-bath-meter-guide"/g)).toHaveLength(2);
+      expect(svg).toContain('data-offset-mm="800" x1="0" y1="800" x2="1400" y2="800"');
+      expect(svg).toContain('data-offset-mm="1800" x1="0" y1="1800" x2="1400" y2="1800"');
+      expect(svg).toContain('stroke-dasharray="18 14"');
+      expect(svg).toContain('stroke-opacity="0.28"');
+    }
+  });
+
+  it('renders landscape guides at x=800/1800 from the displayed left edge', () => {
+    const svg = buildSheetSvg({
+      sheet: bathSheet,
+      labelFor: () => 'X',
+      rotate90: true,
+      showBathMeterGuides: true,
+    });
+
+    expect(svg).toContain('data-offset-mm="800" x1="800" y1="0" x2="800" y2="1400"');
+    expect(svg).toContain('data-offset-mm="1800" x1="1800" y1="0" x2="1800" y2="1400"');
+  });
+
+  it('keeps ordinary sheet SVG byte-compatible when guides are disabled', () => {
+    expect(buildSheetSvg({ sheet: bathSheet, labelFor: () => 'X', showBathMeterGuides: false }))
+      .toBe(buildSheetSvg({ sheet: bathSheet, labelFor: () => 'X' }));
+  });
+
+  it('adds guides idempotently to frozen SVG views used by history and MDF bath cards', () => {
+    const frozen = buildSheetSvg({ sheet: bathSheet, labelFor: () => 'X' });
+    const once = addBathMeterGuidesToSvg(frozen, bathSheet, false);
+    const twice = addBathMeterGuidesToSvg(once, bathSheet, false);
+
+    expect(once.match(/class="cut-bath-meter-guide"/g)).toHaveLength(2);
+    expect(twice).toBe(once);
   });
 });
 

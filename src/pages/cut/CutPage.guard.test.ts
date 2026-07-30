@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 // backend-owned, no-Hasura-write surface (CLAUDE.md principle 2/3) and keeps the
 // no_sheet_spec onboarding signal (plan §5).
 const source = readFileSync(fileURLToPath(new URL('./CutPage.tsx', import.meta.url)), 'utf8');
+const pdfPreviewSource = readFileSync(fileURLToPath(new URL('./CutPdfPreview.tsx', import.meta.url)), 'utf8');
 const sheetLabelSource = readFileSync(fileURLToPath(new URL('./CutSheetLabelGenerateAction.tsx', import.meta.url)), 'utf8');
 const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import.meta.url)), 'utf8');
 const pdfTemplateEventsSource = readFileSync(fileURLToPath(new URL('../../api/cutPdfTemplateEvents.ts', import.meta.url)), 'utf8');
@@ -22,6 +23,18 @@ describe('CutPage source guards', () => {
     expect(source).not.toMatch(/hasura/i);
     expect(source).not.toMatch(/graphql/i);
     expect(source).not.toMatch(/\bfetch\(/);
+  });
+
+  it('renders PDF preview through PDF.js instead of Chrome PDF Viewer iframe', () => {
+    expect(source).toContain("import { CutPdfPreview } from './CutPdfPreview'");
+    expect(source).toContain('<CutPdfPreview blob={pdfPreview.blob} loading={pdfPreview.loading} />');
+    expect(source).not.toContain('<iframe');
+    expect(pdfPreviewSource).toContain("import('pdfjs-dist')");
+    expect(pdfPreviewSource).toContain('pdf.worker.min.mjs');
+    expect(pdfPreviewSource).toContain('cut-pdf-preview-pages');
+    expect(pdfPreviewSource).not.toContain('<iframe');
+    expect(pdfPreviewSource).not.toContain('<object');
+    expect(pdfPreviewSource).not.toContain('<embed');
   });
 
   it('surfaces the no_sheet_spec count to the operator', () => {
@@ -52,6 +65,15 @@ describe('CutPage source guards', () => {
     // The SheetEditor landscape prop derives from the working sheet dims via the
     // same helper the preview uses, so a landscape sheet opens landscape in the editor.
     expect(source).toMatch(/landscape=\{\(\(\) => \{[\s\S]*sheetPreviewRotate90\(\s*p\.sheet_width_mm/);
+  });
+
+  it('enables vacuum-bath meter guides from the shared eligibility contract', () => {
+    expect(source).toMatch(/shouldShowBathMeterGuides\(\{/);
+    expect(source).toMatch(/engineUsed:\s*group\.summary\?\.engine_used/);
+    expect(source).toMatch(/materialName:\s*sheetOption\?\.name/);
+    expect(source).toMatch(/materialWidthMm:\s*sheetOption\?\.widthMm/);
+    expect(source).toMatch(/materialHeightMm:\s*sheetOption\?\.heightMm/);
+    expect(source).toMatch(/showBathMeterGuides=\{showBathMeterGuides\}/);
   });
 
   it('group header is sticky, offset below the workspace tab-bar, opaque in both themes', () => {

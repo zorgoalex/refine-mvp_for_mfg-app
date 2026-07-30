@@ -37,6 +37,59 @@ describe('label custom field expressions', () => {
     expect(evaluateCustomFieldExpression(expression!, () => '')).toBe('Материал: не указан');
   });
 
+  it('parses and evaluates aggregate nodes over a supplied detail collection', () => {
+    const expression = readCustomFieldExpressionV1({
+      expression: {
+        type: 'custom_expression',
+        version: 1,
+        root: {
+          type: 'aggregate',
+          source: 'sheet.details',
+          field: 'detail.edge_type_name',
+          fn: 'unique_join',
+          separator: ', ',
+        },
+      },
+    });
+
+    expect(expression).not.toBeNull();
+    expect(customExpressionFieldIds(expression!)).toEqual(['detail.edge_type_name']);
+    expect(evaluateCustomFieldExpression(expression!, () => undefined, {
+      getCollectionValues: (source, fieldId) => (
+        source === 'sheet.details' && fieldId === 'detail.edge_type_name'
+          ? ['ПВХ 2мм', 'ABS 1мм', 'ПВХ 2мм', '']
+          : undefined
+      ),
+    })).toBe('ПВХ 2мм, ABS 1мм');
+  });
+
+  it('supports aggregate numeric functions and count over supplied collections', () => {
+    const sumExpression = readCustomFieldExpressionV1({
+      expression: {
+        type: 'custom_expression',
+        version: 1,
+        root: { type: 'aggregate', source: 'order.details', field: 'detail.quantity', fn: 'sum' },
+      },
+    });
+    const countExpression = readCustomFieldExpressionV1({
+      expression: {
+        type: 'custom_expression',
+        version: 1,
+        root: { type: 'aggregate', source: 'order.details', field: 'detail.quantity', fn: 'count' },
+      },
+    });
+    const context = {
+      getCollectionValues: (source: 'order.details' | 'sheet.details', fieldId: string) => (
+        source === 'order.details' && fieldId === 'detail.quantity'
+          ? [2, 3, '', 'bad']
+          : undefined
+      ),
+    };
+
+    expect(evaluateCustomFieldExpression(sumExpression!, () => undefined, context)).toBe('5');
+    expect(evaluateCustomFieldExpression(countExpression!, () => undefined, context)).toBe('3');
+  });
+
   it('rejects unknown versions, extra keys, excessive depth, and excessive concat parts', () => {
     expect(readCustomFieldExpressionV1({
       expression: { type: 'custom_expression', version: 2, root: { type: 'empty' } },
@@ -56,6 +109,13 @@ describe('label custom field expressions', () => {
     for (let index = 0; index < 8; index += 1) root = { type: 'concat', parts: [root] };
     expect(readCustomFieldExpressionV1({
       expression: { type: 'custom_expression', version: 1, root },
+    })).toBeNull();
+    expect(readCustomFieldExpressionV1({
+      expression: {
+        type: 'custom_expression',
+        version: 1,
+        root: { type: 'aggregate', source: 'bad.details', field: 'detail.edge_type_name', fn: 'unique_join' },
+      },
     })).toBeNull();
   });
 

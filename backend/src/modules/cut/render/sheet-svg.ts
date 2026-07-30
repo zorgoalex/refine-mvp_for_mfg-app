@@ -1,4 +1,10 @@
-import { applyAxisOrigin, orientPieceRect, type CutAxisOrigin } from '../../../shared/cut-geometry';
+import {
+  BATH_METER_GUIDE_STYLE,
+  applyAxisOrigin,
+  bathMeterGuideLines,
+  orientPieceRect,
+  type CutAxisOrigin,
+} from '../../../shared/cut-geometry';
 import {
   parseFreecutItemId,
   type BackMappedSheet,
@@ -115,6 +121,7 @@ const ORDER_FILL_PALETTE = [
 ] as const;
 const BATH_ORDER_LABEL_COLOR = '#7f1d1d';
 const BATH_POSITION_LABEL_COLOR = '#14532d';
+const BATH_DIMENSION_FONT_ENLARGE_MIN_SIDE_MM = 150;
 
 /** Deterministic, light fill color for a source order. Unknown order keeps the
  * legacy neutral fill so old/partial data remains readable. */
@@ -182,6 +189,8 @@ export interface BuildSheetSvgInput {
    * SVG download and PDF print always keep labels (showLabels=true).
    */
   showLabels?: boolean;
+  /** Overlay 800/1800 mm film-length references for a resolved vacuum bath. */
+  showBathMeterGuides?: boolean;
 }
 
 function escapeXml(value: string): string {
@@ -212,6 +221,35 @@ function pieceDataAttributes(piece: FreecutPlacement, cx: number, cy: number): s
 
 function renderPieceGroup(piece: FreecutPlacement, cx: number, cy: number, body: string): string {
   return `<g ${pieceDataAttributes(piece, cx, cy)}>${body}</g>`;
+}
+
+function renderBathMeterGuides(sheet: SheetPlacementsJson, landscape: boolean): string {
+  return bathMeterGuideLines(sheet.sheet_width_mm, sheet.sheet_height_mm, landscape)
+    .map((line) => (
+      `<line class="cut-bath-meter-guide" data-offset-mm="${num(line.offsetMm)}" x1="${num(line.x1)}" y1="${num(
+        line.y1,
+      )}" x2="${num(line.x2)}" y2="${num(line.y2)}" stroke="${BATH_METER_GUIDE_STYLE.stroke}" stroke-opacity="${num(
+        BATH_METER_GUIDE_STYLE.strokeOpacity,
+      )}" stroke-width="${num(BATH_METER_GUIDE_STYLE.strokeWidthMm)}" stroke-dasharray="${num(
+        BATH_METER_GUIDE_STYLE.dashMm,
+      )} ${num(BATH_METER_GUIDE_STYLE.gapMm)}" pointer-events="none"/>`
+    ))
+    .join('');
+}
+
+/** Adds guide overlays to an already rendered/frozen SVG, idempotently. */
+export function addBathMeterGuidesToSvg(
+  svg: string,
+  sheet: SheetPlacementsJson,
+  landscape: boolean,
+): string {
+  if (svg.includes('class="cut-bath-meter-guide"')) return svg;
+  const guides = renderBathMeterGuides(sheet, landscape);
+  if (!guides) return svg;
+  const closingTag = svg.lastIndexOf('</svg>');
+  return closingTag < 0
+    ? svg
+    : `${svg.slice(0, closingTag)}${guides}${svg.slice(closingTag)}`;
 }
 
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
@@ -262,6 +300,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       ].join(''));
     })
     .join('');
+  const bathMeterGuides = input.showBathMeterGuides ? renderBathMeterGuides(sheet, rotate90) : '';
 
   return [
     // viewBox only (no width/height attrs): the px size is chosen at raster time
@@ -269,6 +308,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${num(vbW)} ${num(vbH)}">`,
     `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>`,
     pieces,
+    bathMeterGuides,
     `</svg>`,
   ].join('');
 }
@@ -280,7 +320,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 42));
   const detailFontMm = fontMm * 2;
-  const sideFontMm = Math.max(18, Math.round(fontMm * 0.85));
+  const baseSideFontMm = Math.max(18, Math.round(fontMm * 0.85));
   const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90, originTopLeft);
 
   const pieces = sheet.pieces
@@ -298,6 +338,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
       const sideTexts: string[] = [];
       let reservedTop = 0;
       let reservedLeft = 0;
+      const sideFontMm = bathDimensionBaseFont(rect.w, rect.h, baseSideFontMm);
       const widthLabel = formatDimension(rect.w);
       const widthFont = fitBathSideFont(widthLabel, rect.w, rect.h, sideFontMm, 'horizontal');
       if (widthFont !== null) {
@@ -335,13 +376,21 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
       return renderPieceGroup(piece, cx, cy, [rectEl, ...sideTexts, centerText].join(''));
     })
     .join('');
+  const bathMeterGuides = input.showBathMeterGuides ? renderBathMeterGuides(sheet, rotate90) : '';
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${num(vbW)} ${num(vbH)}">`,
     `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>`,
     pieces,
+    bathMeterGuides,
     `</svg>`,
   ].join('');
+}
+
+function bathDimensionBaseFont(rectW: number, rectH: number, baseFontMm: number): number {
+  return Math.min(rectW, rectH) <= BATH_DIMENSION_FONT_ENLARGE_MIN_SIDE_MM
+    ? baseFontMm
+    : baseFontMm * 2;
 }
 
 function bathCenterLabelBox(rect: { x: number; y: number; w: number; h: number }, reservedTop: number, reservedLeft: number) {

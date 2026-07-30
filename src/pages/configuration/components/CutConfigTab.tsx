@@ -74,13 +74,15 @@ import {
   summarizeParams,
 } from './cutConfigHelpers';
 import { CutDefaultSettingsCard } from './CutDefaultSettingsCard';
-import { CustomFieldExpressionEditor } from './CustomFieldExpressionEditor';
+import { CustomFieldExpressionEditor, type CustomFieldAggregateSourceOption } from './CustomFieldExpressionEditor';
 import {
   customFieldRowsFromSchema,
   customFieldRowsToSchema,
   evaluateCustomFieldPreviewValues,
   isCustomFieldExpressionValid,
+  readCustomFieldExpressionV1,
   summarizeCustomFieldExpression,
+  type CustomExpressionPreviewCollections,
   type CustomFieldSchemaRow,
 } from './labelTemplateEditorHelpers';
 import './CutConfigTab.css';
@@ -509,6 +511,7 @@ const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
   { id: 'detail.materials', source: 'detail', label: 'Материалы деталей', category: 'Детали', type: 'string' },
   { id: 'detail.films', source: 'detail', label: 'Пленки деталей', category: 'Детали', type: 'string' },
   { id: 'detail.thicknesses', source: 'detail', label: 'Толщины деталей', category: 'Детали', type: 'string' },
+  { id: 'detail.edge_types', source: 'detail', label: 'Обкаты деталей', category: 'Детали', type: 'string' },
   { id: 'detail.machine_files', source: 'detail', label: 'Файлы станка деталей', category: 'Детали', type: 'string' },
   { id: 'detail.table', source: 'detail', label: 'Таблица деталей', category: 'Детали', type: 'string' },
   { id: 'detail.row_number', source: 'detail', label: 'Номер строки', category: 'Таблица деталей', type: 'number' },
@@ -528,6 +531,9 @@ const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
   { id: 'computed.today', source: 'computed', label: 'Текущая дата', category: 'Вычисляемые', type: 'date' },
   { id: 'computed.page_number', source: 'computed', label: 'Номер страницы', category: 'Вычисляемые', type: 'number' },
   { id: 'computed.page_count', source: 'computed', label: 'Всего страниц', category: 'Вычисляемые', type: 'number' },
+];
+const PDF_AGGREGATE_SOURCES: CustomFieldAggregateSourceOption[] = [
+  { value: 'sheet.details', label: 'Детали листа', fieldSource: 'detail' },
 ];
 const PDF_PREVIEW_VALUES: Record<string, string> = {
   'job.name': 'Раскрой заказ 11380',
@@ -551,6 +557,7 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'detail.materials': 'Ванна 2080x1050',
   'detail.films': 'Крем брюле -Декор+',
   'detail.thicknesses': '16',
+  'detail.edge_types': 'ПВХ 2мм, ABS 1мм',
   'detail.machine_files': 'CNC#1_11380.TXT',
   'detail.table': '#  Длина  Ширина  Кол-во',
   'detail.row_number': '1',
@@ -570,6 +577,49 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'computed.today': '03.07.2026',
   'computed.page_number': '1',
   'computed.page_count': '3',
+};
+const PDF_PREVIEW_COLLECTIONS: CustomExpressionPreviewCollections = {
+  'sheet.details': [
+    {
+      'detail.order': '11380',
+      'detail.position': '12',
+      'detail.lengthMm': 800,
+      'detail.widthMm': 240,
+      'detail.quantity': 2,
+      'detail.doweling': true,
+      'detail.machine_file': 'CNC#1_11380.TXT',
+      'detail.material': 'Ванна 2080x1050',
+      'detail.film': 'Крем брюле -Декор+',
+      'detail.thickness': 16,
+      'detail.edge_type_name': 'ПВХ 2мм',
+    },
+    {
+      'detail.order': '11380',
+      'detail.position': '13',
+      'detail.lengthMm': 780,
+      'detail.widthMm': 255,
+      'detail.quantity': 1,
+      'detail.doweling': false,
+      'detail.machine_file': 'CNC#2_11380.TXT',
+      'detail.material': 'Ванна 2080x1050',
+      'detail.film': 'Крем брюле -Декор+',
+      'detail.thickness': 16,
+      'detail.edge_type_name': 'ABS 1мм',
+    },
+    {
+      'detail.order': '11381',
+      'detail.position': '14',
+      'detail.lengthMm': 760,
+      'detail.widthMm': 270,
+      'detail.quantity': 1,
+      'detail.doweling': true,
+      'detail.machine_file': 'CNC#1_11380.TXT',
+      'detail.material': 'Ванна 2080x1050',
+      'detail.film': 'Крем брюле -Декор+',
+      'detail.thickness': 16,
+      'detail.edge_type_name': 'ПВХ 2мм',
+    },
+  ],
 };
 const DEFAULT_PDF_DETAIL_TABLE_COLUMNS: PdfDetailTableColumn[] = [
   { field: 'detail.row_number', label: '#', width: 0.55, visible: true },
@@ -667,7 +717,9 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   ]), [customFields, fields]);
   const usedFieldIds = useMemo(() => new Set((selected?.elements ?? []).map((element) => element.source).filter(Boolean) as string[]), [selected]);
   const previewValues = useMemo(() => {
-    const evaluated = evaluateCustomFieldPreviewValues(customFields, PDF_PREVIEW_VALUES);
+    const evaluated = evaluateCustomFieldPreviewValues(customFields, PDF_PREVIEW_VALUES, {
+      collections: PDF_PREVIEW_COLLECTIONS,
+    });
     return {
       ...PDF_PREVIEW_VALUES,
       ...evaluated,
@@ -1410,6 +1462,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
           <CustomFieldExpressionEditor
             value={editingCustomField.expression?.root ?? defaultCustomExpressionNode(fieldCatalog[0]?.id ?? '')}
             fields={expressionFields}
+            aggregateSources={PDF_AGGREGATE_SOURCES}
             disabled={!canManage}
             onChange={(root) => patchCustomField(editingCustomField.fieldId, {
               valueMode: 'expression',
@@ -2408,15 +2461,21 @@ function defaultPdfElementsForTemplateCode(templateCode: string): PdfTemplateEle
 function normalizeCustomField(raw: unknown): CustomFieldSchemaRow {
   const r = isRecord(raw) ? raw : {};
   const type = r.type === 'number' || r.type === 'date' || r.type === 'boolean' ? r.type : 'string';
+  const sourceField = typeof r.sourceField === 'string' ? r.sourceField : null;
+  const expression = readCustomFieldExpressionV1(r);
+  const hasDefaultValue = Object.prototype.hasOwnProperty.call(r, 'defaultValue');
+  const valueMode = expression ? 'expression' : sourceField ? 'source' : 'constant';
   return {
     fieldId: customFieldSourceId(String(r.fieldId ?? r.id ?? 'field').trim()),
     label: String(r.label ?? r.fieldId ?? r.id ?? 'Поле').trim(),
     type,
-    valueMode: typeof r.sourceField === 'string' ? 'source' : 'constant',
-    sourceField: typeof r.sourceField === 'string' ? r.sourceField : null,
-    defaultValue: isRecord(r) && Object.prototype.hasOwnProperty.call(r, 'defaultValue') ? r.defaultValue : '',
-    expression: null,
-    extra: {},
+    valueMode,
+    sourceField,
+    defaultValue: hasDefaultValue ? r.defaultValue : '',
+    expression,
+    extra: Object.fromEntries(
+      Object.entries(r).filter(([key]) => !['fieldId', 'id', 'label', 'type', 'sourceField', 'defaultValue', 'expression'].includes(key)),
+    ),
   };
 }
 

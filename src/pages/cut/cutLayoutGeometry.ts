@@ -13,6 +13,13 @@
 // ── Re-exports from the shared module (no geometry literals here) ─────────────
 
 export {
+  BATH_METER_GUIDE_OFFSETS_MM,
+  BATH_METER_GUIDE_SHEET_HEIGHT_MM,
+  BATH_FILM_USAGE_ZONES,
+  BATH_METER_GUIDE_STYLE,
+  bathMeterGuideLines,
+  calculateBathSheetFilmUsage,
+  shouldShowBathMeterGuides,
   usableExtent,
   piecesClear,
   pieceWithinUsable,
@@ -28,6 +35,10 @@ export {
 } from '@shared/cut-geometry';
 
 export type {
+  BathMeterGuideEligibility,
+  BathMeterGuideLine,
+  BathSheetFilmUsage,
+  BathFilmLongSideAxis,
   GeomPiece,
   GeomSheet,
   PieceRect,

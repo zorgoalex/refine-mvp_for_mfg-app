@@ -63,6 +63,41 @@ describe('parseBazisXml', () => {
     expect(panel?.isRectangular).toBe(true);
   });
 
+  it('swaps imported panel height and width while preserving non-panel dimensions', () => {
+    const xml = `<Проект Версия="1"><Изделие><Наименование>Тест</Наименование><СписокЭлементов>
+      <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>Готовая</Наименование>
+        <Длина_готовой_детали>580</Длина_готовой_детали>
+        <Ширина_готовой_детали>452</Ширина_готовой_детали>
+      </Объект>
+      <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>Fallback</Наименование>
+        <Длина>700</Длина><Ширина>300</Ширина>
+      </Объект>
+      <Объект><ТипОбъекта>Фурнитура</ТипОбъекта><Наименование>Ручка</Наименование>
+        <Длина>30</Длина><Ширина>10</Ширина>
+      </Объект>
+    </СписокЭлементов></Изделие></Проект>`;
+
+    const parsed = parseBazisXml(xml);
+    const finished = parsed.nodes.find((node) => node.name === 'Готовая');
+    const fallback = parsed.nodes.find((node) => node.name === 'Fallback');
+    const hardware = parsed.nodes.find((node) => node.name === 'Ручка');
+
+    // В ERP height создаётся из lengthMm: XML height становится ERP width,
+    // а XML width становится ERP height.
+    expect({ lengthMm: finished?.lengthMm, widthMm: finished?.widthMm }).toEqual({
+      lengthMm: 452,
+      widthMm: 580,
+    });
+    expect({ lengthMm: fallback?.lengthMm, widthMm: fallback?.widthMm }).toEqual({
+      lengthMm: 300,
+      widthMm: 700,
+    });
+    expect({ lengthMm: hardware?.lengthMm, widthMm: hardware?.widthMm }).toEqual({
+      lengthMm: 30,
+      widthMm: 10,
+    });
+  });
+
   it('keeps holes/edges/facings inside raw', () => {
     const parsed = parseBazisXml(fixture);
     const withHoles = parsed.nodes.find(

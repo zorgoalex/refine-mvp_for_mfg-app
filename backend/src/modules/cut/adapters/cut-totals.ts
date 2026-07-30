@@ -26,6 +26,7 @@ export function mapTotalsRow(row: TotalsRow): CutJobTotals {
     sheets: num(row.sheets),
     materialsCount: num(row.materials_count),
     filmsCount: num(row.films_count),
+    filmUsage: [],
   };
 }
 

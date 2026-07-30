@@ -84,6 +84,148 @@ export type ManualViolation = {
 
 const DEFAULT_EPS = 1e-6;
 
+/** Physical film-length reference marks used by 2800 mm vacuum baths. */
+export const BATH_METER_GUIDE_OFFSETS_MM = [800, 1800] as const;
+export const BATH_METER_GUIDE_SHEET_HEIGHT_MM = 2800;
+export const BATH_FILM_USAGE_ZONES = [
+  { maxOccupiedMm: 800, linearMeters: 1.1 },
+  { maxOccupiedMm: 1800, linearMeters: 2.1 },
+  { maxOccupiedMm: 2800, linearMeters: 3.1 },
+] as const;
+export const BATH_METER_GUIDE_STYLE = {
+  stroke: '#536273',
+  strokeOpacity: 0.28,
+  strokeWidthMm: 3,
+  dashMm: 18,
+  gapMm: 14,
+} as const;
+
+export interface BathMeterGuideEligibility {
+  /** Effective layout mode from frozen calculation params. */
+  layoutMode?: unknown;
+  /** Effective engine stored in cut_group.summary. */
+  engineUsed?: unknown;
+  materialName?: unknown;
+  materialWidthMm?: unknown;
+  materialHeightMm?: unknown;
+}
+
+/**
+ * A catalog row represents a vacuum bath only when all three stable facts
+ * agree: vacuum calculation, a name beginning with «Ванна», and catalog
+ * long side 2800 mm. Name/dimensions alone must not decorate ordinary sheets.
+ */
+export function shouldShowBathMeterGuides(input: BathMeterGuideEligibility): boolean {
+  const vacuumLayout = input.layoutMode === 'vacuum_table' || input.engineUsed === 'vacuum_table';
+  const name = typeof input.materialName === 'string'
+    ? input.materialName.normalize('NFKC').trimStart().toLocaleLowerCase('ru-RU')
+    : '';
+  const width = mmOrNaN(input.materialWidthMm);
+  const height = mmOrNaN(input.materialHeightMm);
+  const dimensions = [width, height].filter(Number.isFinite);
+  const longSide = dimensions.length > 0 ? Math.max(...dimensions) : Number.NaN;
+  return vacuumLayout
+    && name.startsWith('ванна')
+    && longSide === BATH_METER_GUIDE_SHEET_HEIGHT_MM;
+}
+
+export interface BathMeterGuideLine {
+  offsetMm: (typeof BATH_METER_GUIDE_OFFSETS_MM)[number];
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/**
+ * Lines are screen-edge based by product contract: from the top in portrait,
+ * from the left in landscape. They remain independent from coordinate-origin
+ * and dense-cluster preferences, which only reposition cut pieces.
+ */
+export function bathMeterGuideLines(
+  sheetWidthMm: number,
+  sheetHeightMm: number,
+  landscape: boolean,
+): BathMeterGuideLine[] {
+  if (
+    !Number.isFinite(sheetWidthMm)
+    || !Number.isFinite(sheetHeightMm)
+    || sheetWidthMm <= 0
+    || sheetHeightMm <= 0
+  ) {
+    return [];
+  }
+  const nativeLongAxis: 'x' | 'y' = sheetWidthMm > sheetHeightMm ? 'x' : 'y';
+  const displayedLongAxis: 'x' | 'y' = landscape
+    ? (nativeLongAxis === 'x' ? 'y' : 'x')
+    : nativeLongAxis;
+  const displayedLongSideMm = displayedLongAxis === 'x'
+    ? (landscape ? sheetHeightMm : sheetWidthMm)
+    : (landscape ? sheetWidthMm : sheetHeightMm);
+  const displayedShortSideMm = displayedLongAxis === 'x'
+    ? (landscape ? sheetWidthMm : sheetHeightMm)
+    : (landscape ? sheetHeightMm : sheetWidthMm);
+  return BATH_METER_GUIDE_OFFSETS_MM
+    .filter((offsetMm) => offsetMm > 0 && offsetMm < displayedLongSideMm)
+    .map((offsetMm) => displayedLongAxis === 'x'
+      ? { offsetMm, x1: offsetMm, y1: 0, x2: offsetMm, y2: displayedShortSideMm }
+      : { offsetMm, x1: 0, y1: offsetMm, x2: displayedShortSideMm, y2: offsetMm });
+}
+
+export type BathFilmLongSideAxis = 'x' | 'y';
+
+export interface BathSheetFilmUsage {
+  linearMeters: number;
+  occupiedToMm: number;
+  zoneToMm: (typeof BATH_FILM_USAGE_ZONES)[number]['maxOccupiedMm'];
+  longSideAxis: BathFilmLongSideAxis;
+}
+
+export function calculateBathSheetFilmUsage(
+  placements: Pick<GeomSheet, 'sheet_width_mm' | 'sheet_height_mm' | 'trim_mm' | 'pieces'>,
+): BathSheetFilmUsage | null {
+  const width = mmOrNaN(placements.sheet_width_mm);
+  const height = mmOrNaN(placements.sheet_height_mm);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  if (Math.max(width, height) !== BATH_METER_GUIDE_SHEET_HEIGHT_MM) return null;
+  if (!Array.isArray(placements.pieces) || placements.pieces.length === 0) return null;
+
+  const longSideAxis: BathFilmLongSideAxis = width > height ? 'x' : 'y';
+  const originTrim = longSideAxis === 'x'
+    ? mmOrZero(placements.trim_mm?.left)
+    : mmOrZero(placements.trim_mm?.top);
+  let occupiedToMm = 0;
+  for (const piece of placements.pieces) {
+    const start = originTrim + (longSideAxis === 'x' ? mmOrZero(piece.x_mm) : mmOrZero(piece.y_mm));
+    const length = longSideAxis === 'x' ? mmOrZero(piece.width_mm) : mmOrZero(piece.height_mm);
+    occupiedToMm = Math.max(occupiedToMm, start + length);
+  }
+  if (occupiedToMm <= 0) return null;
+
+  const zone = BATH_FILM_USAGE_ZONES.find((candidate) => occupiedToMm <= candidate.maxOccupiedMm + DEFAULT_EPS)
+    ?? BATH_FILM_USAGE_ZONES[BATH_FILM_USAGE_ZONES.length - 1];
+  return {
+    linearMeters: zone.linearMeters,
+    occupiedToMm,
+    zoneToMm: zone.maxOccupiedMm,
+    longSideAxis,
+  };
+}
+
+function mmOrNaN(value: unknown): number {
+  const n = typeof value === 'number'
+    ? value
+    : typeof value === 'string'
+      ? Number(value)
+      : Number.NaN;
+  return Number.isFinite(n) ? n : Number.NaN;
+}
+
+function mmOrZero(value: unknown): number {
+  const n = mmOrNaN(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 // ── Core geometry helpers ─────────────────────────────────────────────────
 
 /**

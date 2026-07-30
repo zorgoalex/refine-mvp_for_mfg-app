@@ -64,6 +64,7 @@ export interface GenerateOrderExcelParams {
   payments?: OrderPayment[];
   client?: { client_name: string } | null;
   clientPhone?: string | null;
+  pricingMode?: 'full' | 'omit';
 }
 
 const cloneStyle = (style: any) => JSON.parse(JSON.stringify(style ?? {}));
@@ -144,7 +145,11 @@ function restoreFooterTemplate(worksheet: any, footerTemplate: ReturnType<typeof
   });
 }
 
-function applyDetailRowLayout(worksheet: any, rowNumber: number) {
+function applyDetailRowLayout(
+  worksheet: any,
+  rowNumber: number,
+  pricingMode: GenerateOrderExcelParams['pricingMode'],
+) {
   const templateRow = worksheet.getRow(DETAIL_TEMPLATE_LAST_ROW);
   const targetRow = worksheet.getRow(rowNumber);
   targetRow.height = templateRow.height;
@@ -159,10 +164,16 @@ function applyDetailRowLayout(worksheet: any, rowNumber: number) {
   targetRow.getCell(5).value = {
     formula: `ROUND((B${rowNumber}/1000)*(C${rowNumber}/1000)*D${rowNumber},2)`,
   };
-  targetRow.getCell(10).value = { formula: `E${rowNumber}*I${rowNumber}` };
+  targetRow.getCell(10).value = pricingMode === 'omit'
+    ? null
+    : { formula: `E${rowNumber}*I${rowNumber}` };
 }
 
-function prepareDetailRows(worksheet: any, detailCount: number) {
+function prepareDetailRows(
+  worksheet: any,
+  detailCount: number,
+  pricingMode: GenerateOrderExcelParams['pricingMode'],
+) {
   const extraRows = Math.max(0, detailCount - DETAIL_TEMPLATE_CAPACITY);
   const footerTemplate = captureFooterTemplate(worksheet);
 
@@ -177,10 +188,12 @@ function prepareDetailRows(worksheet: any, detailCount: number) {
 
   const lastDetailRow = DETAIL_START_ROW + Math.max(detailCount, DETAIL_TEMPLATE_CAPACITY) - 1;
   for (let rowNumber = DETAIL_START_ROW; rowNumber <= lastDetailRow; rowNumber += 1) {
-    applyDetailRowLayout(worksheet, rowNumber);
+    applyDetailRowLayout(worksheet, rowNumber, pricingMode);
   }
 
-  worksheet.getCell('J2').value = { formula: `SUM(J${DETAIL_START_ROW}:J${lastDetailRow})` };
+  worksheet.getCell('J2').value = pricingMode === 'omit'
+    ? null
+    : { formula: `SUM(J${DETAIL_START_ROW}:J${lastDetailRow})` };
   worksheet.getCell('K8').value = {
     formula: `ROUND(SUMPRODUCT(B${DETAIL_START_ROW}:B${lastDetailRow},C${DETAIL_START_ROW}:C${lastDetailRow},D${DETAIL_START_ROW}:D${lastDetailRow})/1000000,2)`,
   };
@@ -197,9 +210,10 @@ function prepareDetailRows(worksheet: any, detailCount: number) {
  * Базовая функция, которая возвращает ArrayBuffer для дальнейшей обработки
  * (создание Blob, конвертация в base64, и т.д.)
  *
- * ⚠️ ВАЖНО: Ячейки с формулами НЕ заполняются программно!
+ * ⚠️ ВАЖНО: Ячейки с формулами НЕ заполняются готовыми значениями.
  * Формулы: A/E/J в строках деталей, K8 (общая площадь),
- *          M8 (кол-во деталей), J2 (общая сумма), K4 (остаток)
+ *          M8 (кол-во деталей), J2 (общая сумма), K4 (остаток).
+ * В режиме pricingMode='omit' финансовые I/J/J2/L2/K4 остаются пустыми.
  * Диапазон деталей расширяется динамически, если позиций больше 55.
  */
 export const buildOrderExcelBuffer = async ({
@@ -208,6 +222,7 @@ export const buildOrderExcelBuffer = async ({
   payments = [],
   client,
   clientPhone,
+  pricingMode = 'full',
 }: GenerateOrderExcelParams): Promise<ArrayBuffer> => {
   try {
     // Lazy-load ExcelJS to keep the initial bundle smaller.
@@ -274,14 +289,22 @@ export const buildOrderExcelBuffer = async ({
     worksheet.getCell('F5').value = getCommonValue(d => d.film?.film_name); // Пленка
     worksheet.getCell('H5').value = getCommonValue(d => d.material?.material_name); // Материал
 
-    // ⚠️ НЕ заполняем ячейки с формулами:
+    // ⚠️ Не подменяем формулы готовыми значениями:
     // - J2 (общая сумма) - рассчитывается формулой
     // - K8 (общая площадь) - рассчитывается формулой
     // - M8 (кол-во деталей) - рассчитывается формулой
     // - K4 (остаток оплаты) - рассчитывается формулой
 
     // 5. Заполнить детали (начиная со строки 12)
-    const lastDetailRow = prepareDetailRows(worksheet, details.length);
+    const lastDetailRow = prepareDetailRows(worksheet, details.length, pricingMode);
+
+    if (pricingMode === 'omit') {
+      // L2 and K4 derive discounted total and outstanding balance from J2.
+      // Clear them with the total so the price-free export cannot show
+      // misleading zero or negative financial values.
+      worksheet.getCell('L2').value = null;
+      worksheet.getCell('K4').value = null;
+    }
 
     details.forEach((detail, index) => {
       const rowNumber = DETAIL_START_ROW + index;
@@ -294,7 +317,9 @@ export const buildOrderExcelBuffer = async ({
       row.getCell(6).value = detail.milling_type?.milling_type_name || ''; // F: Тип фрезеровки ⚠️
       row.getCell(7).value = detail.edge_type?.edge_type_name || ''; // G: Обкат/кромка
       row.getCell(8).value = detail.notes || ''; // H: Примечание
-      row.getCell(9).value = detail.milling_cost_per_sqm || null; // I: Цена за кв.м.
+      row.getCell(9).value = pricingMode === 'omit'
+        ? null
+        : detail.milling_cost_per_sqm || null; // I: Цена за кв.м.
       row.getCell(11).value = detail.film?.film_name || ''; // K: Пленка
 
       // Применить стиль строки (копировать из шаблона)

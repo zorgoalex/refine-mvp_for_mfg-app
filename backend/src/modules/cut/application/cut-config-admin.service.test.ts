@@ -83,6 +83,7 @@ describe('CutConfigAdminService RBAC', () => {
       'detail.machine_file',
       'detail.machine_files',
       'detail.materials',
+      'detail.edge_types',
       'detail.order',
       'detail.detail_name',
       'computed.today',
@@ -92,6 +93,10 @@ describe('CutConfigAdminService RBAC', () => {
     expect(fields.find((field) => field.id === 'computed.today')).toMatchObject({ source: 'computed' });
     expect(fields.find((field) => field.id === 'detail.order')).toMatchObject({ source: 'detail' });
     expect(fields.find((field) => field.id === 'detail.materials')).toMatchObject({ source: 'detail' });
+    expect(fields.find((field) => field.id === 'detail.edge_types')).toMatchObject({
+      source: 'detail',
+      label: 'Обкаты деталей',
+    });
     expect(fields.some((field) => field.source === 'bazis')).toBe(true);
   });
 

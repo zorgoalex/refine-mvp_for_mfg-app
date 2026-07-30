@@ -348,6 +348,70 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('К раскрою');
   });
 
+  it('renders v3 custom aggregate fields over current sheet detail rows', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('v3-aggregate-field'),
+        sheetWidthMm: 2800,
+        sheetHeightMm: 2070,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          customFieldSchema: {
+            'custom.edge_types': {
+              type: 'string',
+              label: 'Обкаты',
+              expression: {
+                type: 'custom_expression',
+                version: 1,
+                root: {
+                  type: 'aggregate',
+                  source: 'sheet.details',
+                  field: 'detail.edge_type_name',
+                  fn: 'unique_join',
+                  separator: ', ',
+                },
+              },
+            },
+          },
+          elements: [
+            { id: 'edge-types', type: 'field', source: 'custom.edge_types', x: 10, y: 10, w: 90, h: 10 },
+          ],
+        },
+        detailRows: [
+          {
+            order: '1001',
+            position: 1,
+            lengthMm: 500,
+            widthMm: 200,
+            quantity: 1,
+            fields: { edge_type_name: 'ПВХ 2мм' },
+          },
+          {
+            order: '1001',
+            position: 2,
+            lengthMm: 300,
+            widthMm: 100,
+            quantity: 1,
+            fields: { edge_type_name: 'ABS 1мм' },
+          },
+          {
+            order: '1001',
+            position: 3,
+            lengthMm: 200,
+            widthMm: 100,
+            quantity: 1,
+            fields: { edge_type_name: 'ПВХ 2мм' },
+          },
+        ],
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('ПВХ 2мм, ABS 1мм');
+  });
+
   it('renders empty seeded template layouts with default detail and machine-file tables', async () => {
     const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
     const pdf = await buildSheetsPdf([

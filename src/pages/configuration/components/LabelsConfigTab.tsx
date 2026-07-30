@@ -61,10 +61,11 @@ import {
   withLabelTypography,
   type AlignmentGuide,
   type CustomFieldSchemaRow,
+  type CustomExpressionPreviewCollections,
   type CustomFieldType,
   type CustomFieldValueMode,
 } from './labelTemplateEditorHelpers';
-import { CustomFieldExpressionEditor } from './CustomFieldExpressionEditor';
+import { CustomFieldExpressionEditor, type CustomFieldAggregateSourceOption } from './CustomFieldExpressionEditor';
 import { OcrTemplatesConfig } from './OcrTemplatesConfig';
 import {
   labelEditorLayoutGeometry,
@@ -95,6 +96,40 @@ const PREVIEW_FIELD_VALUES: Record<string, string> = {
   'bazis.comment': '',
   'date.today': '24.06.2026',
   'label.counter_text': 'Бир.№    1 / 0',
+};
+const LABEL_AGGREGATE_SOURCES: CustomFieldAggregateSourceOption[] = [
+  { value: 'order.details', label: 'Детали заказа', fieldSource: 'detail' },
+];
+const LABEL_PREVIEW_COLLECTIONS: CustomExpressionPreviewCollections = {
+  'order.details': [
+    {
+      'detail.detail_number': '27',
+      'detail.detail_name': 'Фасад левый',
+      'detail.edge_type_name': 'ПВХ 2мм',
+      'detail.material_name': 'МДФ 16 мм',
+      'detail.quantity': 1,
+      'detail.width': 596,
+      'detail.height': 902,
+    },
+    {
+      'detail.detail_number': '28',
+      'detail.detail_name': 'Фасад правый',
+      'detail.edge_type_name': 'ABS 1мм',
+      'detail.material_name': 'МДФ 16 мм',
+      'detail.quantity': 2,
+      'detail.width': 596,
+      'detail.height': 902,
+    },
+    {
+      'detail.detail_number': '29',
+      'detail.detail_name': 'Перемычка',
+      'detail.edge_type_name': 'ПВХ 2мм',
+      'detail.material_name': 'МДФ 16 мм',
+      'detail.quantity': 1,
+      'detail.width': 120,
+      'detail.height': 596,
+    },
+  ],
 };
 const QR_NAME_DUP_ERROR_PREFIX = 'QR_NAME_DUP:';
 const QR_NAME_EMPTY_ERROR_PREFIX = 'QR_NAME_EMPTY:';
@@ -337,7 +372,9 @@ export const LabelsConfigTab: React.FC = () => {
     const generated = Object.fromEntries(fields.map((field, index) => [field.id, sampleLabelFieldValue(field, index)]));
     try {
       return {
-        values: evaluateCustomFieldPreviewValues(customFields, { ...generated, ...PREVIEW_FIELD_VALUES }),
+        values: evaluateCustomFieldPreviewValues(customFields, { ...generated, ...PREVIEW_FIELD_VALUES }, {
+          collections: LABEL_PREVIEW_COLLECTIONS,
+        }),
         error: null,
       };
     } catch (error) {
@@ -2333,7 +2370,7 @@ export const LabelsConfigTab: React.FC = () => {
             name="valueMode"
             label="Откуда брать значение"
             rules={[{ required: true }]}
-            extra="Формула позволяет склеивать поля и текст, строить цепочки IF/ELSE и возвращать пустое значение."
+            extra="Формула позволяет склеивать поля и текст, собирать значения из списка деталей, строить IF/ELSE и возвращать пустое значение."
           >
             <Select
               options={[
@@ -2399,11 +2436,12 @@ export const LabelsConfigTab: React.FC = () => {
           {customFieldValueMode === 'expression' && (
             <Form.Item
               label="Формула значения"
-              extra="В склейке пробелы и разделители добавляются отдельными фиксированными текстами. IF/ELSE можно вкладывать в любую ветвь."
+              extra="В склейке пробелы и разделители добавляются отдельными фиксированными текстами. Агрегация собирает значения выбранного поля из списка деталей."
             >
               <CustomFieldExpressionEditor
                 value={customFieldExpression.root}
                 fields={customExpressionFields}
+                aggregateSources={LABEL_AGGREGATE_SOURCES}
                 disabled={!canManage || saving || !customExpressionRendererReady}
                 onChange={(root) => setCustomFieldExpression({
                   type: 'custom_expression',

@@ -133,6 +133,15 @@ export interface CutGroupDto {
   renderToken?: string;
 }
 
+export interface CutFilmUsage {
+  filmId: number | null;
+  filmName: string | null;
+  /** Linear film meters needed by vacuum-bath sheets for this film. */
+  linearMeters: number;
+  /** Number of layout sheets contributing to this film usage. */
+  sheets: number;
+}
+
 export interface CutJobTotals {
   positions: number;
   details: number;
@@ -143,6 +152,8 @@ export interface CutJobTotals {
   materialsCount: number;
   /** distinct non-null films among the job's details */
   filmsCount: number;
+  /** Vacuum-table 2800 mm bath film usage, grouped by film. Absent in old snapshots. */
+  filmUsage?: CutFilmUsage[];
 }
 
 /** Per-job editor geometry params (trim is read from placements.trim_mm). */

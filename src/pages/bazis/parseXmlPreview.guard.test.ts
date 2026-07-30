@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { swapImportedBazisPanelDimensions } from './parseXmlPreview';
 
 /**
  * DOMParser недоступен в node-тест-окружении (без jsdom), поэтому
@@ -31,5 +32,20 @@ describe('parseXmlPreview multi-product guards', () => {
     expect(source).toContain("project.getAttribute('Наименование')");
     expect(source).toContain("textOfChild(product, 'Заказ')");
     expect(source).toContain('bazisOrderNo: projectOrderName ?? firstProductOrderNo');
+  });
+});
+
+describe('parseXmlPreview panel dimensions', () => {
+  it('shows imported panel width as ERP height and imported height as ERP width', () => {
+    expect(swapImportedBazisPanelDimensions(580, 452)).toEqual({
+      heightMm: 452,
+      widthMm: 580,
+    });
+  });
+
+  it('uses the swapped dimensions in panel preview titles', () => {
+    expect(source).toContain(
+      'swapImportedBazisPanelDimensions(sourceHeight, sourceWidth)',
+    );
   });
 });

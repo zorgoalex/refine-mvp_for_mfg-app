@@ -1436,7 +1436,8 @@ describeIntegration('PgCutRepository (integration)', () => {
     });
 
     it('logicalGroupKey encodes the grouping mode (pure unit test)', () => {
-      expect(logicalGroupKey({ splitByMaterial: false, combineFilms: false, sheetMaterialTypeId: 7, filmId: 3 })).toBe('all');
+      expect(logicalGroupKey({ splitByMaterial: false, combineFilms: false, sheetMaterialTypeId: 7, filmId: 3 })).toBe('all|f:3');
+      expect(logicalGroupKey({ splitByMaterial: false, combineFilms: true, sheetMaterialTypeId: 7, filmId: 3 })).toBe('all');
       expect(logicalGroupKey({ splitByMaterial: true, combineFilms: true, sheetMaterialTypeId: 7, filmId: 3 })).toBe('m:7|f:all');
       expect(logicalGroupKey({ splitByMaterial: true, combineFilms: false, sheetMaterialTypeId: 7, filmId: null })).toBe('m:7|f:null');
       expect(logicalGroupKey({ splitByMaterial: true, combineFilms: false, sheetMaterialTypeId: null, filmId: null })).toBe('m:null|f:null');

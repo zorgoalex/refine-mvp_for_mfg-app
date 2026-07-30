@@ -8,6 +8,7 @@ import {
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
   filterBoardColumns,
+  filterCncBathColumnsByMachineOrderMatches,
   filterCncTodayColumnsByOrders,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
@@ -101,13 +102,19 @@ describe('order status board model', () => {
     expect(serialized.toString()).toContain('period=2w');
     expect(serialized.getAll('order')).toEqual(['2706', '2712']);
     expect(toOrderStatusBoardQuery(state)).toMatchObject({ board: 'order' });
+
+    const defaultPeriodState = parseOrderStatusBoardViewState(
+      new URLSearchParams('flow=cnc&date=2026-07-23'),
+      { cncTelegram: true },
+    );
+    expect(defaultPeriodState.cncOrderSearchPeriod).toBe('1w');
   });
 
   it('builds CNC order search ranges from the selected board date', () => {
     expect(buildCncOrderSearchDateRange('2026-07-23', undefined)).toEqual({
-      dateFrom: '2026-07-21',
+      dateFrom: '2026-07-17',
       dateTo: '2026-07-23',
-      days: 3,
+      days: 7,
     });
     expect(buildCncOrderSearchDateRange('2026-07-23', '1w')).toEqual({
       dateFrom: '2026-07-17',
@@ -169,6 +176,44 @@ describe('order status board model', () => {
     expect(partial[0]?.total).toBe(0);
     expect(partial[1]?.baths).toEqual([]);
     expect(partial[1]?.total).toBe(0);
+  });
+
+  it('keeps only bath cards with order numbers present in machine file cards', () => {
+    const columns = [
+      {
+        key: 'parsed',
+        title: 'Файлы на станке',
+        total: 1,
+        packets: [cncPacket('p-2706', ['2706'])],
+        baths: [],
+      },
+      {
+        key: 'completed',
+        title: 'Распилено',
+        total: 1,
+        packets: [cncPacket('p-2712', ['2712'])],
+        baths: [],
+      },
+      {
+        key: 'baths',
+        title: 'Карты ванн',
+        total: 3,
+        packets: [],
+        baths: [
+          cncBath('b-2706', ['2706']),
+          cncBath('b-2712', ['2712']),
+          cncBath('b-3000', ['3000']),
+        ],
+      },
+    ] as CncTelegramTodayColumn[];
+
+    const filtered = filterCncBathColumnsByMachineOrderMatches(columns);
+
+    expect(filtered[2]?.baths.map((bath) => bath.bathCardId)).toEqual([
+      'b-2706',
+      'b-2712',
+    ]);
+    expect(filtered[2]?.total).toBe(2);
   });
 
   it('drops impossible dates from a hand-edited shared URL', () => {

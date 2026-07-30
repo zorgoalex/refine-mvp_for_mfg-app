@@ -31,7 +31,7 @@ import { AddToCutModal } from "./components/AddToCutModal";
 import { AddToBazisCutModal } from "../bazis-cut/AddToBazisCutModal";
 import { can, canAny } from "../../utils/permissions";
 import { cutApi } from "../../api/cutApi";
-import type { CutJobRef } from "../../api/types/cutApi.types";
+import type { CutJobDto, CutJobRef } from "../../api/types/cutApi.types";
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
 import { cutJobDeepLink, cutJobProfileLabel } from "./cutColumnHelpers";
@@ -61,10 +61,12 @@ import {
 } from "./components/tables/OrderDetailColumnSettings";
 import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from "../cut/cutJobEvents";
 import { useCutDetailLastReady } from "./useCutDetailLastReady";
+import { computeOrderBathFilmUsage, formatFilmLinearMeters } from "../cut/cutFilmUsage";
 import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
 import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/OperationalPrimitives";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
+type OrderExcelExportMode = 'full' | 'without-prices';
 
 const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
   { key: 'groups', label: 'Группы заказа', color: '#722ed1' },
@@ -569,8 +571,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const edgeTypesMap = new Map(
     (edgeTypesData?.data || []).map((item: any) => [item.edge_type_id, item.edge_type_name])
   );
-  const filmsMap = new Map(
-    (filmsData?.data || []).map((item: any) => [item.film_id, item.film_name])
+  const filmsMap = useMemo(
+    () => new Map<number, string>(
+      (filmsData?.data || []).map((item: any) => [item.film_id, item.film_name]),
+    ),
+    [filmsData],
   );
   const materialsMap = new Map(
     (materialsData?.data || []).map((item: any) => [item.material_id, item.material_name])
@@ -606,7 +611,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const printRef = useRef<HTMLDivElement>(null);
 
   // Состояние для экспорта
-  const [isExporting, setIsExporting] = useState(false);
+  const [activeExcelExport, setActiveExcelExport] = useState<OrderExcelExportMode | null>(null);
+  const isExporting = activeExcelExport === 'full';
+  const isPriceFreeExporting = activeExcelExport === 'without-prices';
+  const isAnyExcelExporting = activeExcelExport !== null;
   const [isSnapshotExporting, setIsSnapshotExporting] = useState(false);
 
   // Состояние для выбора деталей в раскрой
@@ -646,6 +654,41 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     detailIds: cutDetailIds,
     orderId: record?.order_id,
   });
+  const latestReadyCutJobIds = useMemo(
+    () => [...new Set([...cutJobByDetailId.values()].map((ref) => ref.cutJobId))].sort((a, b) => a - b),
+    [cutJobByDetailId],
+  );
+  const latestReadyCutJobIdsKey = latestReadyCutJobIds.join(',');
+  const [bathCutJobs, setBathCutJobs] = useState<CutJobDto[]>([]);
+  const [bathCutJobsLoading, setBathCutJobsLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!cutColumnEnabled || latestReadyCutJobIds.length === 0) {
+      setBathCutJobs([]);
+      setBathCutJobsLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setBathCutJobsLoading(true);
+    Promise.all(
+      latestReadyCutJobIds.map(async (cutJobId) => {
+        try {
+          return await cutApi.get(cutJobId);
+        } catch {
+          return null;
+        }
+      }),
+    ).then((jobs) => {
+      if (!cancelled) setBathCutJobs(jobs.filter((job): job is CutJobDto => job !== null));
+    }).finally(() => {
+      if (!cancelled) setBathCutJobsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cutColumnEnabled, latestReadyCutJobIds, latestReadyCutJobIdsKey]);
 
   // All distinct active cut jobs that contain details from THIS order (a detail
   // may be placed in several jobs — list them all). Same cut.view gate as the
@@ -680,6 +723,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       window.removeEventListener(CUT_JOB_READY_EVENT, handler);
     };
   }, [cutColumnEnabled, cutDetailIds, record?.order_id, refreshCutOrderJobs]);
+
+  const bathFilmUsage = useMemo(
+    () => computeOrderBathFilmUsage(
+      details as any,
+      bathCutJobs,
+      filmsMap,
+    ),
+    [bathCutJobs, details, filmsMap],
+  );
 
   // Detail grouping state (persisted per user+order; suppressed during cut selection).
   const groupingUserId = authSession.getUser()?.id ?? 'anon';
@@ -830,10 +882,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   });
 
   // Функция экспорта в Excel
-  const handleExportExcel = async () => {
-    if (!record) return;
+  const handleExportExcel = async (exportMode: OrderExcelExportMode = 'full') => {
+    if (!record || isAnyExcelExporting) return;
 
-    setIsExporting(true);
+    const withoutPrices = exportMode === 'without-prices';
+    setActiveExcelExport(exportMode);
     try {
       // Формат файла: заказ-Ф<ГГ>-<ID>-<название>-<клиент>.xlsx
       const fileName = generateOrderFileName({
@@ -841,6 +894,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         orderName: record.order_name,
         orderDate: record.order_date,
         clientName: resolvedClientName ?? undefined,
+        variant: withoutPrices ? 'without-prices' : 'standard',
       });
 
       // Получение данных присадки и конструктора для экспорта
@@ -895,17 +949,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           })),
           client: exportClient,
           clientPhone,
+          pricingMode: withoutPrices ? 'omit' : 'full',
         },
         fileName
       );
 
-      message.success('Excel файл успешно сгенерирован');
+      message.success(withoutPrices
+        ? 'Excel без цен успешно сгенерирован'
+        : 'Excel файл успешно сгенерирован');
     } catch (error) {
       const errorMessage = handleExcelError(error);
       message.error(errorMessage);
       console.error('Ошибка экспорта:', error);
     } finally {
-      setIsExporting(false);
+      setActiveExcelExport(null);
     }
   };
 
@@ -1293,7 +1350,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       key: 'excel',
                       icon: <FileExcelOutlined />,
                       label: 'Экспорт в Excel',
-                      disabled: !record || details.length === 0 || isClientResolving,
+                      disabled: !record || details.length === 0 || isClientResolving || isAnyExcelExporting,
+                    },
+                    {
+                      key: 'excel-without-prices',
+                      icon: <FileExcelOutlined />,
+                      label: 'Excel без цен и сумм',
+                      disabled: !record || details.length === 0 || isClientResolving || isAnyExcelExporting,
                     },
                     {
                       key: 'json',
@@ -1311,6 +1374,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     }
                     if (key === 'excel') {
                       void handleExportExcel();
+                    }
+                    if (key === 'excel-without-prices') {
+                      void handleExportExcel('without-prices');
                     }
                     if (key === 'json') {
                       void handleExportSnapshot();
@@ -1376,11 +1442,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 <Button
                   aria-label="Экспорт в Excel"
                   icon={<FileExcelOutlined />}
-                  onClick={handleExportExcel}
+                  onClick={() => void handleExportExcel()}
                   loading={isExporting}
-                  disabled={!record || details.length === 0 || isClientResolving}
+                  disabled={!record || details.length === 0 || isClientResolving || isAnyExcelExporting}
                 />
               </Tooltip>
+              <Button
+                aria-label="Экспорт в Excel без цен и сумм"
+                icon={<FileExcelOutlined />}
+                onClick={() => void handleExportExcel('without-prices')}
+                loading={isPriceFreeExporting}
+                disabled={!record || details.length === 0 || isClientResolving || isAnyExcelExporting}
+              >
+                Excel без цен
+              </Button>
               <Dropdown
                 trigger={['click']}
                 menu={{
@@ -1480,6 +1555,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     <Button icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}?tab=additional`)}>
                       Изменить
                     </Button>
+                    <Button
+                      icon={<FileExcelOutlined />}
+                      onClick={() => void handleExportExcel('without-prices')}
+                      loading={isPriceFreeExporting}
+                      disabled={details.length === 0 || isClientResolving || isAnyExcelExporting}
+                    >
+                      Excel без цен
+                    </Button>
                     <Button icon={<DownloadOutlined />} onClick={handlePrint}>
                       PDF
                     </Button>
@@ -1500,6 +1583,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     </Button>
                     <Button icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}`)}>
                       Редактировать
+                    </Button>
+                    <Button
+                      icon={<FileExcelOutlined />}
+                      onClick={() => void handleExportExcel('without-prices')}
+                      loading={isPriceFreeExporting}
+                      disabled={details.length === 0 || isClientResolving || isAnyExcelExporting}
+                    >
+                      Excel без цен
                     </Button>
                     <Button
                       type="primary"
@@ -1814,6 +1905,69 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                           </div>
                         )}
                       </div>
+                    </div>
+
+                    <div style={{ marginTop: 12, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 6 }}>
+                        Материалы по раскрою ванны
+                      </div>
+                      <Table
+                        dataSource={bathFilmUsage}
+                        rowKey={(row) => row.filmId ?? row.filmName ?? 'no-film'}
+                        size="small"
+                        pagination={false}
+                        bordered
+                        loading={bathCutJobsLoading}
+                        locale={{
+                          emptyText: cutColumnEnabled ? 'Нет данных по раскрою ванны' : 'Нет доступа к данным раскроя',
+                        }}
+                        columns={[
+                          {
+                            title: 'Пленка',
+                            dataIndex: 'filmName',
+                            key: 'filmName',
+                            render: (value: string | null) => value?.trim() || 'Пленка не указана',
+                          },
+                          {
+                            title: 'Пог. м',
+                            dataIndex: 'linearMeters',
+                            key: 'linearMeters',
+                            align: 'right' as const,
+                            render: (value: number) => formatFilmLinearMeters(value),
+                          },
+                          {
+                            title: 'Листы',
+                            dataIndex: 'sheets',
+                            key: 'sheets',
+                            align: 'center' as const,
+                          },
+                          {
+                            title: 'Раскрои',
+                            dataIndex: 'cutJobIds',
+                            key: 'cutJobIds',
+                            render: (value: number[]) => value.map((id) => `#${id}`).join(', '),
+                          },
+                        ]}
+                        summary={(data) => {
+                          const totalMeters = data.reduce((sum, item) => sum + item.linearMeters, 0);
+                          const totalSheets = data.reduce((sum, item) => sum + item.sheets, 0);
+
+                          return (
+                            <Table.Summary.Row>
+                              <Table.Summary.Cell index={0}>
+                                <strong>Итого:</strong>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={1} align="right">
+                                <strong>{formatFilmLinearMeters(totalMeters)}</strong>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={2} align="center">
+                                <strong>{totalSheets}</strong>
+                              </Table.Summary.Cell>
+                              <Table.Summary.Cell index={3} />
+                            </Table.Summary.Row>
+                          );
+                        }}
+                      />
                     </div>
 
                     {/* Ниже — на всю ширину: Файлы, Бирки, Служебная информация */}

@@ -35,4 +35,11 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(source).toContain('<CutPage embeddedOrderId={record.order_id} />');
     expect(source).toContain("activeInfoPanel === 'cut'");
   });
+
+  it('renders vacuum-bath film material usage in the read-only order card', () => {
+    expect(source).toContain('computeOrderBathFilmUsage');
+    expect(source).toContain('Материалы по раскрою ванны');
+    expect(source).toContain('formatFilmLinearMeters');
+    expect(source).toContain('bathCutJobs');
+  });
 });

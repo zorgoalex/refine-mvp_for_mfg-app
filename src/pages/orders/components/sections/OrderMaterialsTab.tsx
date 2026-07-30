@@ -1,7 +1,7 @@
 // Order Materials Tab
 // Displays aggregated data for materials and films
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Row, Col, Table, Typography } from 'antd';
 import { useList } from '@refinedev/core';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
@@ -9,6 +9,11 @@ import { formatNumber } from '../../../../utils/numberFormat';
 import { resolveDetailMaterialName } from '../../../../utils/materialDisplayName';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import type { OrderDetail } from '../../../../types/orders';
+import { can } from '../../../../utils/permissions';
+import { cutApi } from '../../../../api/cutApi';
+import type { CutJobDto } from '../../../../api/types/cutApi.types';
+import { useCutDetailLastReady } from '../../useCutDetailLastReady';
+import { computeOrderBathFilmUsage, formatFilmLinearMeters } from '../../../cut/cutFilmUsage';
 
 const { Text } = Typography;
 
@@ -29,7 +34,24 @@ interface FilmAggregation {
 }
 
 export const OrderMaterialsTab: React.FC = () => {
-  const { details } = useOrderFormStore();
+  const { details, header } = useOrderFormStore();
+  const detailIds = useMemo(
+    () => details.map((detail) => detail.detail_id).filter((id): id is number => Number.isInteger(id) && id > 0),
+    [details],
+  );
+  const cutViewAllowed = can('cut.view');
+  const cutJobByDetailId = useCutDetailLastReady({
+    enabled: cutViewAllowed,
+    detailIds,
+    orderId: header.order_id ?? null,
+  });
+  const latestCutJobIds = useMemo(
+    () => [...new Set([...cutJobByDetailId.values()].map((ref) => ref.cutJobId))].sort((a, b) => a - b),
+    [cutJobByDetailId],
+  );
+  const latestCutJobIdsKey = latestCutJobIds.join(',');
+  const [cutJobs, setCutJobs] = useState<CutJobDto[]>([]);
+  const [cutJobsLoading, setCutJobsLoading] = useState(false);
 
   // Загружаем справочники — gate: skip when no detail carries a legacy material_id (Variant B normal case)
   const hasLegacyMaterialIds = details.some((d) => d.material_id != null);
@@ -60,6 +82,42 @@ export const OrderMaterialsTab: React.FC = () => {
     });
     return map;
   }, [filmsData]);
+
+  const filmNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const [id, name] of Object.entries(filmsMap)) {
+      map.set(Number(id), name);
+    }
+    return map;
+  }, [filmsMap]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!cutViewAllowed || latestCutJobIds.length === 0) {
+      setCutJobs([]);
+      setCutJobsLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setCutJobsLoading(true);
+    Promise.all(
+      latestCutJobIds.map(async (cutJobId) => {
+        try {
+          return await cutApi.get(cutJobId);
+        } catch {
+          return null;
+        }
+      }),
+    ).then((jobs) => {
+      if (!cancelled) setCutJobs(jobs.filter((job): job is CutJobDto => job !== null));
+    }).finally(() => {
+      if (!cancelled) setCutJobsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cutViewAllowed, latestCutJobIds, latestCutJobIdsKey]);
 
   // Агрегация по материалам
   const materialsAggregation = useMemo(() => {
@@ -117,6 +175,11 @@ export const OrderMaterialsTab: React.FC = () => {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [details, filmsMap]);
 
+  const bathFilmUsage = useMemo(
+    () => computeOrderBathFilmUsage(details, cutJobs, filmNameById),
+    [cutJobs, details, filmNameById],
+  );
+
   const materialsColumns = [
     {
       title: 'Материал',
@@ -156,6 +219,34 @@ export const OrderMaterialsTab: React.FC = () => {
       dataIndex: 'detailsCount',
       key: 'detailsCount',
       align: 'center' as const,
+    },
+  ];
+
+  const bathFilmUsageColumns = [
+    {
+      title: 'Пленка',
+      dataIndex: 'filmName',
+      key: 'filmName',
+      render: (value: string | null) => value?.trim() || 'Пленка не указана',
+    },
+    {
+      title: 'Пог. м',
+      dataIndex: 'linearMeters',
+      key: 'linearMeters',
+      align: 'right' as const,
+      render: (value: number) => formatFilmLinearMeters(value),
+    },
+    {
+      title: 'Листы',
+      dataIndex: 'sheets',
+      key: 'sheets',
+      align: 'center' as const,
+    },
+    {
+      title: 'Раскрои',
+      dataIndex: 'cutJobIds',
+      key: 'cutJobIds',
+      render: (value: number[]) => value.map((id) => `#${id}`).join(', '),
     },
   ];
 
@@ -238,6 +329,44 @@ export const OrderMaterialsTab: React.FC = () => {
           />
         </Col>
       </Row>
+      <div style={{ marginTop: 24 }}>
+        <div style={{ marginBottom: 16 }}>
+          <Text strong style={{ fontSize: 14 }}>
+            Материалы по раскрою ванны
+          </Text>
+        </div>
+        <Table
+          dataSource={bathFilmUsage}
+          columns={bathFilmUsageColumns}
+          rowKey={(row) => row.filmId ?? row.filmName ?? 'no-film'}
+          size="small"
+          pagination={false}
+          bordered
+          loading={cutJobsLoading}
+          locale={{
+            emptyText: cutViewAllowed ? 'Нет данных по раскрою ванны' : 'Нет доступа к данным раскроя',
+          }}
+          summary={(data) => {
+            const totalMeters = data.reduce((sum, item) => sum + item.linearMeters, 0);
+            const totalSheets = data.reduce((sum, item) => sum + item.sheets, 0);
+
+            return (
+              <Table.Summary.Row>
+                <Table.Summary.Cell index={0}>
+                  <Text strong style={{ fontSize: '1.1em' }}>Итого:</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={1} align="right">
+                  <Text strong style={{ fontSize: '1.1em' }}>{formatFilmLinearMeters(totalMeters)}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={2} align="center">
+                  <Text strong style={{ fontSize: '1.1em' }}>{totalSheets}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={3} />
+              </Table.Summary.Row>
+            );
+          }}
+        />
+      </div>
     </div>
   );
 };

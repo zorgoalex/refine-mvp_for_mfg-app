@@ -221,6 +221,11 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
     const objectType = toText(element['ТипОбъекта']);
     const quantity = toNumber(element['Количество']);
     const cumulative = (quantity ?? 1) * parentQty;
+    const sourceHeightMm =
+      toNumber(element['Длина_готовой_детали']) ?? toNumber(element['Длина']);
+    const sourceWidthMm =
+      toNumber(element['Ширина_готовой_детали']) ?? toNumber(element['Ширина']);
+    const swapPanelDimensions = objectType === 'Панель';
     const index = pushNode({
       parentIndex,
       seq,
@@ -233,8 +238,11 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
       designation: toText(element['Обозначение']),
       quantity,
       cumulativeQuantity: cumulative,
-      lengthMm: toNumber(element['Длина_готовой_детали']) ?? toNumber(element['Длина']),
-      widthMm: toNumber(element['Ширина_готовой_детали']) ?? toNumber(element['Ширина']),
+      // В ERP высота детали хранится в lengthMm. Для импортируемых панелей
+      // оси Базиса разворачиваем: исходная ширина становится высотой ERP,
+      // исходная высота — шириной ERP. Размеры контейнеров/фурнитуры не меняем.
+      lengthMm: swapPanelDimensions ? sourceWidthMm : sourceHeightMm,
+      widthMm: swapPanelDimensions ? sourceHeightMm : sourceWidthMm,
       heightMm: toNumber(element['Высота']),
       thicknessMm: toNumber(element['ОбщаяТолщина']) ?? toNumber(element['Толщина']),
       price: toNumber(element['Цена']),
