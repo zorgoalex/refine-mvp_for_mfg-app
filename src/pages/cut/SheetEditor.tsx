@@ -29,6 +29,8 @@ import {
   rotatePiece,
   orientPieceRect,
   applyAxisOrigin,
+  bathMeterGuideLabel,
+  bathMeterGuideLabelFontMm,
   bathMeterGuideLines,
   calculateBathSheetFilmUsage,
   usableExtent,
@@ -988,6 +990,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
         const displayBathLandscape = landscape !== swapsViewAxes;
         const bathGuideViewW = displayBathLandscape ? H : W;
         const bathGuideViewH = displayBathLandscape ? W : H;
+        const bathGuideLabelFontMm = bathMeterGuideLabelFontMm(W, H);
 
         return (
           <div key={sheetIndex} data-testid={`sheet-editor-sheet-${sheetIndex}`} style={{ display: 'inline-block', verticalAlign: 'top' }}>
@@ -1432,21 +1435,43 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 height={rotatedViewportH}
                 style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
               >
-                {bathMeterGuideLines(W, H, displayBathLandscape).map((line) => (
-                  <line
-                    key={line.offsetMm}
-                    className="cut-bath-meter-guide"
-                    data-offset-mm={line.offsetMm}
-                    x1={line.x1}
-                    y1={line.y1}
-                    x2={line.x2}
-                    y2={line.y2}
-                    stroke={BATH_METER_GUIDE_STYLE.stroke}
-                    strokeOpacity={BATH_METER_GUIDE_STYLE.strokeOpacity}
-                    strokeWidth={BATH_METER_GUIDE_STYLE.strokeWidthMm}
-                    strokeDasharray={`${BATH_METER_GUIDE_STYLE.dashMm} ${BATH_METER_GUIDE_STYLE.gapMm}`}
-                  />
-                ))}
+                {bathMeterGuideLines(W, H, displayBathLandscape).map((line) => {
+                  const label = bathMeterGuideLabel(line, bathGuideLabelFontMm);
+                  return (
+                    <React.Fragment key={line.offsetMm}>
+                      <line
+                        className="cut-bath-meter-guide"
+                        data-offset-mm={line.offsetMm}
+                        x1={line.x1}
+                        y1={line.y1}
+                        x2={line.x2}
+                        y2={line.y2}
+                        stroke={BATH_METER_GUIDE_STYLE.stroke}
+                        strokeOpacity={BATH_METER_GUIDE_STYLE.strokeOpacity}
+                        strokeWidth={BATH_METER_GUIDE_STYLE.strokeWidthMm}
+                        strokeDasharray={`${BATH_METER_GUIDE_STYLE.dashMm} ${BATH_METER_GUIDE_STYLE.gapMm}`}
+                      />
+                      <text
+                        className="cut-bath-meter-guide-label"
+                        data-offset-mm={line.offsetMm}
+                        x={label.x}
+                        y={label.y}
+                        fill={BATH_METER_GUIDE_STYLE.labelFill}
+                        fontFamily="Liberation Sans, sans-serif"
+                        fontSize={bathGuideLabelFontMm}
+                        fontWeight={BATH_METER_GUIDE_STYLE.labelFontWeight}
+                        textAnchor="start"
+                        dominantBaseline="middle"
+                        stroke="#fff"
+                        strokeWidth={bathGuideLabelFontMm * 0.16}
+                        paintOrder="stroke"
+                        style={{ fontVariantNumeric: 'tabular-nums', userSelect: 'none' }}
+                      >
+                        {label.text}
+                      </text>
+                    </React.Fragment>
+                  );
+                })}
               </svg>
             )}
             </div>

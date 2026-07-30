@@ -7,6 +7,9 @@ import { describe, it, expect } from 'vitest';
 import {
   BATH_FILM_USAGE_ZONES,
   BATH_METER_GUIDE_OFFSETS_MM,
+  BATH_METER_GUIDE_STYLE,
+  bathMeterGuideLabel,
+  bathMeterGuideLabelFontMm,
   bathMeterGuideLines,
   calculateBathSheetFilmUsage,
   usableExtent,
@@ -88,6 +91,24 @@ describe('bath meter guides', () => {
       { offsetMm: 800, x1: 0, y1: 800, x2: 1050, y2: 800 },
       { offsetMm: 1800, x1: 0, y1: 1800, x2: 1050, y2: 1800 },
     ]);
+  });
+
+  it('labels each guide in bright orange at half the bath dimension font size', () => {
+    const fontSizeMm = bathMeterGuideLabelFontMm(1400, 2800);
+    const [portraitLine] = bathMeterGuideLines(1400, 2800, false);
+    const [landscapeLine] = bathMeterGuideLines(1400, 2800, true);
+
+    expect(fontSizeMm).toBe(14);
+    expect(BATH_METER_GUIDE_STYLE.labelFill).toBe('#ff6a00');
+    expect(BATH_METER_GUIDE_STYLE.labelFontRatio).toBe(0.5);
+    const portraitLabel = bathMeterGuideLabel(portraitLine, fontSizeMm);
+    const landscapeLabel = bathMeterGuideLabel(landscapeLine, fontSizeMm);
+    expect(portraitLabel.text).toBe('800мм');
+    expect(portraitLabel.x).toBeCloseTo(9.8);
+    expect(portraitLabel.y).toBeCloseTo(790.2);
+    expect(landscapeLabel.text).toBe('800мм');
+    expect(landscapeLabel.x).toBeCloseTo(809.8);
+    expect(landscapeLabel.y).toBe(14);
   });
 });
 
