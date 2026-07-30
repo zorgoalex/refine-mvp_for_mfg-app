@@ -5224,6 +5224,9 @@ async function loadJob(
     return {
       cutGroupId,
       sheetMaterialTypeId: row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id),
+      sheetMaterialName: row.sheet_material_name ?? null,
+      sheetMaterialWidthMm: row.sheet_material_width_mm === null ? null : toNum(row.sheet_material_width_mm),
+      sheetMaterialHeightMm: row.sheet_material_height_mm === null ? null : toNum(row.sheet_material_height_mm),
       filmId: row.film_id === null ? null : toNum(row.film_id),
       status: row.status,
       pdfTemplate: row.pdf_template_code ?? 'standard',

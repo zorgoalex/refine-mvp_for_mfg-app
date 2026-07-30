@@ -89,6 +89,9 @@ const cutJob = (placements: SheetPlacements, overrides: Partial<CutJobDto> = {})
   groups: [{
     cutGroupId: 77,
     sheetMaterialTypeId: 7,
+    sheetMaterialName: 'Ванна 2080x1050',
+    sheetMaterialWidthMm: 1050,
+    sheetMaterialHeightMm: 2800,
     filmId: 5,
     status: 'ready',
     pdfTemplate: 'standard',
@@ -128,6 +131,14 @@ describe('cut film usage helpers', () => {
       sheets: [{ sheetIndex: 0, placements: bathSheet(1900) }],
     };
     expect(computeOrderBathFilmUsage([orderDetail()], [job])[0].linearMeters).toBe(3.1);
+  });
+
+  it('uses the cut group sheet material when order detail material is MDF', () => {
+    const detail = { ...orderDetail(), material_name_resolved: 'МДФ 16мм' };
+    const job = cutJob(bathSheet(900));
+    if (job.items[0].detail) job.items[0].detail.materialName = 'МДФ 16мм';
+
+    expect(computeOrderBathFilmUsage([detail], [job])[0].linearMeters).toBe(2.1);
   });
 
   it('ignores non-vacuum jobs and sheets without this order details', () => {
