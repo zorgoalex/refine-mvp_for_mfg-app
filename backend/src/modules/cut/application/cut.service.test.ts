@@ -24,6 +24,9 @@ function repo(overrides: Partial<CutRepositoryPort> = {}): CutRepositoryPort {
     removeItem: reject,
     calculate: reject,
     archive: reject,
+    setCurrentResult: reject,
+    archiveResult: reject,
+    unarchiveResult: reject,
     getJob: reject,
     listJobs: reject,
     listEligibleDetails: reject,
@@ -93,7 +96,7 @@ describe('CutService RBAC (§8 principle 8)', () => {
     expect(listFilmOptionsForCut).toHaveBeenCalledOnce();
   });
 
-  it('requires cut.manage for calculate/addItems/removeItem/archive', async () => {
+  it('requires cut.manage for calculate/addItems/removeItem/archive/result-state commands', async () => {
     const service = new CutService({ cut: repo() });
     const viewer = user(['cut.view']);
     await expect(
@@ -108,6 +111,31 @@ describe('CutService RBAC (§8 principle 8)', () => {
     await expect(
       service.archive({ currentUser: viewer, cutJobId: 1, version: 0 }),
     ).rejects.toMatchObject({ statusCode: 403 });
+    await expect(
+      service.setCurrentResult({ currentUser: viewer, cutJobId: 1, resultNo: 2 }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    await expect(
+      service.archiveResult({ currentUser: viewer, cutJobId: 1, resultNo: 2 }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    await expect(
+      service.unarchiveResult({ currentUser: viewer, cutJobId: 1, resultNo: 2 }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('delegates result-state commands with cut.manage', async () => {
+    const setCurrentResult = vi.fn(async () => ({ cutJobId: 42 }) as never);
+    const archiveResult = vi.fn(async () => ({ cutJobId: 42 }) as never);
+    const unarchiveResult = vi.fn(async () => ({ cutJobId: 42 }) as never);
+    const service = new CutService({ cut: repo({ setCurrentResult, archiveResult, unarchiveResult }) });
+    const currentUser = user(['cut.manage']);
+
+    await service.setCurrentResult({ currentUser, cutJobId: 42, resultNo: 2, requestId: 'rq-current' });
+    await service.archiveResult({ currentUser, cutJobId: 42, resultNo: 3, requestId: 'rq-archive' });
+    await service.unarchiveResult({ currentUser, cutJobId: 42, resultNo: 4, requestId: 'rq-unarchive' });
+
+    expect(setCurrentResult).toHaveBeenCalledWith(expect.objectContaining({ cutJobId: 42, resultNo: 2 }));
+    expect(archiveResult).toHaveBeenCalledWith(expect.objectContaining({ cutJobId: 42, resultNo: 3 }));
+    expect(unarchiveResult).toHaveBeenCalledWith(expect.objectContaining({ cutJobId: 42, resultNo: 4 }));
   });
 
   it('throws a 403 ApiError carrying the required permission', async () => {

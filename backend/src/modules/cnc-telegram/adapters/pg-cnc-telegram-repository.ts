@@ -1201,16 +1201,24 @@ async function loadBathCards(
         r.result_no,
         r.revision_no,
         r.created_at AS result_created_at,
-        COALESCE(r.snapshot_job ->> 'name', j.name, 'Раскрой ' || j.cut_job_id::text) AS cut_job_name
+        COALESCE(r.snapshot_job ->> 'name', j.name, 'Раскрой ' || j.cut_job_id::text) AS cut_job_name,
+        (current_result.result_no = r.result_no) AS is_current_result
       FROM cut_job j
       JOIN cut_result r ON r.cut_job_id = j.cut_job_id
+      LEFT JOIN cut_result current_result
+        ON current_result.cut_result_id = j.current_cut_result_id
       LEFT JOIN cut_param_profiles profile
         ON profile.cut_param_profile_id = j.param_profile_id
+      LEFT JOIN cut_result_archive_state archive
+        ON archive.cut_job_id = r.cut_job_id
+       AND archive.result_no = r.result_no
       JOIN cut_result_label_map_projection projection
         ON projection.cut_result_id = r.cut_result_id
        AND projection.snapshot_digest = r.snapshot_digest
       WHERE r.snapshot_job IS NOT NULL
+        AND j.status <> 'archived'
         AND COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+        AND archive.archived_at IS NULL
         AND EXISTS (
           SELECT 1
           FROM cut_result_placement placement
@@ -1229,6 +1237,7 @@ async function loadBathCards(
       FROM candidate_vacuum_results candidate
       ORDER BY
         candidate.cut_job_id,
+        candidate.is_current_result DESC,
         candidate.result_created_at DESC,
         candidate.result_no DESC,
         candidate.revision_no DESC,

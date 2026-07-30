@@ -26,6 +26,9 @@ describe('cutApi', () => {
       { ...job, items: [{ cutJobItemId: 1, orderDetailId: 1, orderId: 9, qty: 1, cutGroupId: null }] }, // addItems
       { ...job, status: 'ready' }, // calculate
       { ...job, status: 'archived' }, // archive
+      { ...job, currentCutResult: { cutResultId: 2, cutJobId: 42, resultNo: 2, cutNumber: '42-2', resultKind: 'auto', sourceJobVersion: 1, basedOnResultId: null, createdBy: 7, createdByName: 'u', createdAt: '2026-07-21T00:00:00.000Z', totals: job.totals, isCurrent: true, isArchived: false, archivedAt: null, archivedBy: null } }, // setCurrentResult
+      job, // archiveResult
+      job, // unarchiveResult
       { details: [], noSheetSpecCount: 2 }, // eligible
     );
 
@@ -33,6 +36,9 @@ describe('cutApi', () => {
     await cutApi.addItems(42, { detailIds: [1], version: 0 });
     await cutApi.calculate(42, 1, '11111111-1111-4111-8111-111111111111');
     await cutApi.archive(42, 2);
+    await cutApi.setCurrentResult(42, 2);
+    await cutApi.archiveResult(42, 3);
+    await cutApi.unarchiveResult(42, 3);
     await expect(cutApi.listEligibleDetails(42, { orderIds: [9] })).resolves.toMatchObject({ noSheetSpecCount: 2 });
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs');
@@ -41,7 +47,13 @@ describe('cutApi', () => {
     expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/cut-jobs/42/calculate');
     expect(fetchMock.mock.calls[3][0]).toBe('/api/v1/cut-jobs/42');
     expect(fetchMock.mock.calls[3][1]?.method).toBe('DELETE');
-    expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/cut-jobs/42/eligible-details?orderIds=9');
+    expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/cut-jobs/42/results/2/current');
+    expect(fetchMock.mock.calls[4][1]?.method).toBe('POST');
+    expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/cut-jobs/42/results/3/archive');
+    expect(fetchMock.mock.calls[5][1]?.method).toBe('POST');
+    expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/cut-jobs/42/results/3/archive');
+    expect(fetchMock.mock.calls[6][1]?.method).toBe('DELETE');
+    expect(fetchMock.mock.calls[7][0]).toBe('/api/v1/cut-jobs/42/eligible-details?orderIds=9');
   });
 
   it('fetches date-filtered cut film options from the backend', async () => {

@@ -761,6 +761,9 @@ probe_file() {
                            AND pg_get_constraintdef(oid) LIKE '%line%'
                            AND pg_get_constraintdef(oid) LIKE '%air%'
                       );" ;;
+    092_cut_result_archive_state*) probe_all "$(q_tbl cut_result_archive_state)" \
+                     "$(q_con fk_cut_result_archive_state_job)" \
+                     "$(q_con chk_cut_result_archive_state_result_no)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

@@ -8,12 +8,29 @@ describe('CutPage result history guard', () => {
     expect(source).toContain('Выполненные раскрои');
     expect(source).toContain('Историческая версия');
     expect(source).toContain('job?.status === \'archived\' || isHistoricalResult');
-    expect(source).toContain('Вернуться к текущему');
+    expect(source).toContain('Вернуться к живому заданию');
   });
 
   it('routes historical PNG/SVG/PDF through immutable result number', () => {
     expect(source).toContain('isHistoricalResult ? selectedResult?.resultNo : undefined');
     expect(source).toContain('cutApi.getResult');
+  });
+
+  it('keeps ordinary job opening live; frozen read-only mode is only explicit result opening', () => {
+    expect(source).toContain('if (resultNo !== undefined) {');
+    expect(source).toContain('const frozen = await cutApi.getResult(cutJobId, resultNo)');
+    expect(source).toContain('setIsFrozenResultSelection(resultNo !== undefined)');
+    expect(source).toContain('await openJob(job.cutJobId, result.resultNo)');
+    expect(source).not.toContain('currentIsLatest');
+    expect(source).not.toContain('effectiveResultNo');
+  });
+
+  it('wires archive and acting-result commands for completed result rows', () => {
+    expect(source).toContain('cutApi.setCurrentResult(job.cutJobId, result.resultNo)');
+    expect(source).toContain('cutApi.archiveResult(job.cutJobId, result.resultNo)');
+    expect(source).toContain('cutApi.unarchiveResult(job.cutJobId, result.resultNo)');
+    expect(source).toContain('отправлен в архив');
+    expect(source).toContain('Сделать действующим');
   });
 
   it('allows request-only PDF template selection for every frozen or archived version', () => {

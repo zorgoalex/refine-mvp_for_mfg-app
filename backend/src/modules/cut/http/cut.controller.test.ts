@@ -120,20 +120,33 @@ describe('CutController', () => {
     ).rejects.toMatchObject({ statusCode: 503, code: 'SERVICE_READ_ONLY' } satisfies Partial<ApiError>);
   });
 
-  it('delegates create / calculate / archive to the service', async () => {
+  it('delegates create / calculate / archive and result-state commands to the service', async () => {
     const calls: string[] = [];
     const controller = createController({
       service: {
         createJob: vi.fn(async (c) => { calls.push(`create:${c.dto.name}`); return jobDto(); }),
         calculate: vi.fn(async (c) => { calls.push(`calc:${c.cutJobId}:${c.version}`); return jobDto(); }),
         archive: vi.fn(async (c) => { calls.push(`archive:${c.cutJobId}:${c.version}`); return jobDto(); }),
+        setCurrentResult: vi.fn(async (c) => { calls.push(`current:${c.cutJobId}:${c.resultNo}`); return jobDto(); }),
+        archiveResult: vi.fn(async (c) => { calls.push(`archiveResult:${c.cutJobId}:${c.resultNo}`); return jobDto(); }),
+        unarchiveResult: vi.fn(async (c) => { calls.push(`unarchiveResult:${c.cutJobId}:${c.resultNo}`); return jobDto(); }),
       },
     });
 
     await expect(controller.create({ user: currentUser() } as never, { name: 'Тест' })).resolves.toMatchObject({ cutJobId: 42 });
     await controller.calculate({ user: currentUser() } as never, '42', { version: 3, commandId: TEST_COMMAND_ID });
     await controller.archive({ user: currentUser() } as never, '42', { version: 5 });
-    expect(calls).toEqual(['create:Тест', 'calc:42:3', 'archive:42:5']);
+    await controller.setResultCurrent({ user: currentUser() } as never, '42', '2');
+    await controller.archiveResult({ user: currentUser() } as never, '42', '3');
+    await controller.unarchiveResult({ user: currentUser() } as never, '42', '4');
+    expect(calls).toEqual([
+      'create:Тест',
+      'calc:42:3',
+      'archive:42:5',
+      'current:42:2',
+      'archiveResult:42:3',
+      'unarchiveResult:42:4',
+    ]);
   });
 
   it('serves eligible-details as a backend read (no Hasura)', async () => {

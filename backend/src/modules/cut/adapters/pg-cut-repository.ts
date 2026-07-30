@@ -54,6 +54,7 @@ import type {
   CalculateCutJobCommand,
   CreateCutJobCommand,
   CutRepositoryPort,
+  CutResultStateCommand,
   DetailLastReadyQuery,
   DetailPlacementsQuery,
   EligibleDetailsQuery,
@@ -236,6 +237,8 @@ interface CutResultRow extends QueryResultRow {
   created_by_name_snapshot: string | null;
   created_at: Date | string;
   is_current: boolean;
+  archived_at: Date | string | null;
+  archived_by: string | number | null;
 }
 
 const CUT_RESULT_LEASE_MS = 15 * 60 * 1000;
@@ -1554,10 +1557,17 @@ export class PgCutRepository implements CutRepositoryPort {
               r.cut_result_id, r.cut_job_id, r.result_no, r.revision_no, r.result_kind,
               r.source_job_version, r.based_on_result_id, r.totals_snapshot,
               r.created_by, r.created_by_name_snapshot, r.created_at,
-              (j.current_cut_result_id = r.cut_result_id) AS is_current,
+              (current_result.result_no = r.result_no AND archive.archived_at IS NULL) AS is_current,
+              archive.archived_at,
+              archive.archived_by,
               r.snapshot_job
        FROM cut_result r
        JOIN cut_job j ON j.cut_job_id = r.cut_job_id
+       LEFT JOIN cut_result current_result
+         ON current_result.cut_result_id = j.current_cut_result_id
+       LEFT JOIN cut_result_archive_state archive
+         ON archive.cut_job_id = r.cut_job_id
+        AND archive.result_no = r.result_no
        WHERE r.cut_job_id = $1
        ORDER BY r.result_no DESC, r.revision_no DESC`,
       [query.cutJobId],
@@ -1572,9 +1582,16 @@ export class PgCutRepository implements CutRepositoryPort {
               r.created_by, r.created_by_name_snapshot, r.created_at,
               r.snapshot_job, r.snapshot_digest,
               cut_result_snapshot_digest(r.snapshot_job) AS computed_digest,
-              (j.current_cut_result_id = r.cut_result_id) AS is_current
+              (current_result.result_no = r.result_no AND archive.archived_at IS NULL) AS is_current,
+              archive.archived_at,
+              archive.archived_by
        FROM cut_result r
        JOIN cut_job j ON j.cut_job_id = r.cut_job_id
+       LEFT JOIN cut_result current_result
+         ON current_result.cut_result_id = j.current_cut_result_id
+       LEFT JOIN cut_result_archive_state archive
+         ON archive.cut_job_id = r.cut_job_id
+        AND archive.result_no = r.result_no
        WHERE r.cut_job_id = $1 AND r.result_no = $2
        ORDER BY r.revision_no DESC
        LIMIT 1`,
@@ -1598,6 +1615,181 @@ export class PgCutRepository implements CutRepositoryPort {
       },
       renderToken: `r${summary.cutResultId}:${row.snapshot_digest.slice(0, 16)}`,
     };
+  }
+
+  async setCurrentResult(command: CutResultStateCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const job = await tx.query<{
+        current_cut_result_id: string | number | null;
+        current_result_no: string | number | null;
+        status: string;
+      }>(
+        `SELECT j.current_cut_result_id, current_result.result_no AS current_result_no, j.status
+         FROM cut_job j
+         LEFT JOIN cut_result current_result
+           ON current_result.cut_result_id = j.current_cut_result_id
+         WHERE j.cut_job_id = $1
+         FOR UPDATE OF j`,
+        [command.cutJobId],
+      );
+      const jobRow = job.rows[0];
+      if (!jobRow) throw new CutJobNotFoundError(command.cutJobId);
+      if (jobRow.status === 'archived') {
+        throw new CutJobNotMutableError(command.cutJobId, jobRow.status);
+      }
+      const result = await tx.query<{
+        cut_result_id: string | number;
+        archived_at: Date | string | null;
+      }>(
+        `SELECT r.cut_result_id, archive.archived_at
+         FROM cut_result r
+         LEFT JOIN cut_result_archive_state archive
+           ON archive.cut_job_id = r.cut_job_id
+          AND archive.result_no = r.result_no
+         WHERE r.cut_job_id = $1 AND r.result_no = $2
+         ORDER BY r.revision_no DESC
+         LIMIT 1`,
+        [command.cutJobId, command.resultNo],
+      );
+      const resultRow = result.rows[0];
+      if (!resultRow) {
+        throw new ApiError(404, 'CUT_RESULT_NOT_FOUND', `Раскрой ${command.cutJobId}-${command.resultNo} не найден`);
+      }
+      if (resultRow.archived_at !== null) {
+        throw new ApiError(409, 'CUT_RESULT_ARCHIVED', 'Архивный раскрой нельзя сделать действующим');
+      }
+      const nextCurrentResultId = toNum(resultRow.cut_result_id);
+      const previousCurrentResultId = numOrNull(jobRow.current_cut_result_id);
+      if (previousCurrentResultId === nextCurrentResultId) return;
+      await tx.query(
+        `UPDATE cut_job
+            SET current_cut_result_id = $2, version = version + 1, updated_at = now()
+          WHERE cut_job_id = $1`,
+        [command.cutJobId, nextCurrentResultId],
+      );
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.currentResultChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        related: { cutResultIds: [previousCurrentResultId, nextCurrentResultId].filter((id): id is number => id !== null) },
+        before: { currentCutResultId: previousCurrentResultId },
+        after: { currentCutResultId: nextCurrentResultId, resultNo: command.resultNo },
+        metadata: { resultNo: command.resultNo },
+      });
+    });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
+  }
+
+  async archiveResult(command: CutResultStateCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const job = await tx.query<{
+        current_cut_result_id: string | number | null;
+        current_result_no: string | number | null;
+        status: string;
+      }>(
+        `SELECT j.current_cut_result_id, current_result.result_no AS current_result_no, j.status
+         FROM cut_job j
+         LEFT JOIN cut_result current_result
+           ON current_result.cut_result_id = j.current_cut_result_id
+         WHERE j.cut_job_id = $1
+         FOR UPDATE OF j`,
+        [command.cutJobId],
+      );
+      const jobRow = job.rows[0];
+      if (!jobRow) throw new CutJobNotFoundError(command.cutJobId);
+      if (jobRow.status === 'archived') {
+        throw new CutJobNotMutableError(command.cutJobId, jobRow.status);
+      }
+      const result = await tx.query<{ cut_result_id: string | number }>(
+        `SELECT cut_result_id
+         FROM cut_result
+         WHERE cut_job_id = $1 AND result_no = $2
+         ORDER BY revision_no DESC
+         LIMIT 1`,
+        [command.cutJobId, command.resultNo],
+      );
+      const resultRow = result.rows[0];
+      if (!resultRow) {
+        throw new ApiError(404, 'CUT_RESULT_NOT_FOUND', `Раскрой ${command.cutJobId}-${command.resultNo} не найден`);
+      }
+      const cutResultId = toNum(resultRow.cut_result_id);
+      if (
+        numOrNull(jobRow.current_result_no) === command.resultNo
+        || numOrNull(jobRow.current_cut_result_id) === cutResultId
+      ) {
+        throw new ApiError(409, 'CUT_RESULT_CURRENT', 'Действующий раскрой нельзя архивировать. Сначала назначьте действующим другой раскрой.');
+      }
+      const inserted = await tx.query(
+        `INSERT INTO cut_result_archive_state (cut_job_id, result_no, archived_by)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (cut_job_id, result_no) DO NOTHING
+         RETURNING cut_job_id`,
+        [command.cutJobId, command.resultNo, numOrNull(command.currentUser.id)],
+      );
+      if ((inserted.rowCount ?? 0) === 0) return;
+      await tx.query(
+        `UPDATE cut_job SET version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId],
+      );
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.resultArchived,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        related: { cutResultIds: [cutResultId] },
+        after: { resultNo: command.resultNo, archived: true },
+        metadata: { resultNo: command.resultNo },
+      });
+    });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
+  }
+
+  async unarchiveResult(command: CutResultStateCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const job = await tx.query<{ status: string }>(
+        `SELECT status FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const jobRow = job.rows[0];
+      if (!jobRow) throw new CutJobNotFoundError(command.cutJobId);
+      if (jobRow.status === 'archived') {
+        throw new CutJobNotMutableError(command.cutJobId, jobRow.status);
+      }
+      const result = await tx.query<{ cut_result_id: string | number }>(
+        `SELECT cut_result_id
+         FROM cut_result
+         WHERE cut_job_id = $1 AND result_no = $2
+         ORDER BY revision_no DESC
+         LIMIT 1`,
+        [command.cutJobId, command.resultNo],
+      );
+      const resultRow = result.rows[0];
+      if (!resultRow) {
+        throw new ApiError(404, 'CUT_RESULT_NOT_FOUND', `Раскрой ${command.cutJobId}-${command.resultNo} не найден`);
+      }
+      const deleted = await tx.query(
+        `DELETE FROM cut_result_archive_state
+         WHERE cut_job_id = $1 AND result_no = $2
+         RETURNING cut_job_id`,
+        [command.cutJobId, command.resultNo],
+      );
+      if ((deleted.rowCount ?? 0) === 0) return;
+      await tx.query(
+        `UPDATE cut_job SET version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId],
+      );
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.resultUnarchived,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        related: { cutResultIds: [toNum(resultRow.cut_result_id)] },
+        after: { resultNo: command.resultNo, archived: false },
+        metadata: { resultNo: command.resultNo },
+      });
+    });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
   async backfillLegacyResults(batchSize = 50): Promise<number> {
@@ -5291,6 +5483,9 @@ function mapCutResultSummary(row: CutResultRow): CutResultSummaryDto {
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
     totals: normalizeCutJobTotals(row.totals_snapshot),
     isCurrent: row.is_current === true,
+    isArchived: row.archived_at != null,
+    archivedAt: row.archived_at instanceof Date ? row.archived_at.toISOString() : row.archived_at == null ? null : String(row.archived_at),
+    archivedBy: numOrNull(row.archived_by),
   };
 }
 

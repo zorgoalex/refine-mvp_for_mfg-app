@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-30",
+    title: "Раскрой: действующие и архивные версии расчёта",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В карточке задания на раскрой любую сохранённую версию расчёта можно назначить действующей.",
+      "Сохранённые версии расчёта можно архивировать и возвращать из архива; архивные версии скрываются из рабочих выборов и карточек ванн.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-30",
     title: "МДФ-работы: свежие раскладки ванн",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

@@ -39,6 +39,26 @@ export const cutApi = {
     );
   },
 
+  async setCurrentResult(cutJobId: number, resultNo: number): Promise<CutJobDto> {
+    return httpClient.post<CutJobDto>(
+      apiRoutes.cutJobs.resultCurrent(validateCutJobId(cutJobId), validateCutJobId(resultNo)),
+      {},
+    );
+  },
+
+  async archiveResult(cutJobId: number, resultNo: number): Promise<CutJobDto> {
+    return httpClient.post<CutJobDto>(
+      apiRoutes.cutJobs.resultArchive(validateCutJobId(cutJobId), validateCutJobId(resultNo)),
+      {},
+    );
+  },
+
+  async unarchiveResult(cutJobId: number, resultNo: number): Promise<CutJobDto> {
+    return httpClient.delete<CutJobDto>(
+      apiRoutes.cutJobs.resultArchive(validateCutJobId(cutJobId), validateCutJobId(resultNo)),
+    );
+  },
+
   create(request: CreateCutJobRequest): Promise<CutJobDto> {
     return httpClient.post<CutJobDto>(apiRoutes.cutJobs.list, request);
   },

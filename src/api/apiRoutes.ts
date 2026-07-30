@@ -96,6 +96,8 @@ export const apiRoutes = {
     byId: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}`),
     results: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/results`),
     result: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}`),
+    resultCurrent: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}/current`),
+    resultArchive: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}/archive`),
     items: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/items`),
     item: (cutJobId: number, itemId: number) =>
       backendApiPath(`/cut-jobs/${cutJobId}/items/${itemId}`),

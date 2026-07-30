@@ -9351,6 +9351,44 @@ paths:
         '503':
           $ref: '#/components/responses/FeatureDisabled'
 
+  /api/v1/cnc-telegram/media/{storageKey}:
+    get:
+      tags:
+        - CncTelegram
+      operationId: getCncTelegramMedia
+      summary: Serve a stored CNC Telegram media preview
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - name: storageKey
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Media file
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+
   /api/v1/cnc-telegram/ingest:
     post:
       tags:
@@ -9488,6 +9526,58 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/film-options:
+    get:
+      tags:
+        - CutJobs
+      operationId: listCutFilmOptions
+      summary: List film options for cut creation criteria
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/eligible-details:
+    get:
+      tags:
+        - CutJobs
+      operationId: previewEligibleDetailsForCutJob
+      summary: Preview eligible details before creating a cut job
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/cut-jobs/sheet-types:
     get:
       tags:
@@ -9562,6 +9652,36 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/{cutJobId}/name:
+    patch:
+      tags:
+        - CutJobs
+      operationId: renameCutJob
+      summary: Rename a cut job
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/cut-jobs/{cutJobId}/eligible-details:
     get:
       tags:
@@ -9613,6 +9733,61 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/current:
+    post:
+      tags: [CutJobs]
+      operationId: setCutResultCurrent
+      summary: Mark a completed cut result as acting for a cut job
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/archive:
+    post:
+      tags: [CutJobs]
+      operationId: archiveCutResult
+      summary: Archive a completed cut result for external selections
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [CutJobs]
+      operationId: unarchiveCutResult
+      summary: Return a completed cut result from archive
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
   /api/v1/cut-jobs/{cutJobId}/results/{resultNo}/groups/{groupId}/sheets/{sheetIndex}.png:
     get:
@@ -10544,6 +10719,19 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cut-config/pdf-template-fields:
+    get:
+      tags: [CutConfig]
+      operationId: listCutPdfTemplateFields
+      summary: List available PDF template fields
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/FeatureDisabled' }
 
   /api/v1/cut-config/pdf-templates/{id}:

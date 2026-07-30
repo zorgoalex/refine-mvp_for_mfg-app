@@ -252,12 +252,17 @@ describe('CutPage source guards', () => {
     expect(source).toContain('detail-group-tint-${jobItemOrderTintByOrderId.get(row.orderId) ?? 0}');
   });
 
-  it('shows only the latest completed cut result and hides full history under a spoiler', () => {
-    expect(source).toContain('const latestCutResult = jobCutResults[0] ?? null');
+  it('shows the acting non-archived cut result first and hides full history under a spoiler', () => {
+    expect(source).toContain('const primaryCutResult = job?.currentCutResult');
+    expect(source).toContain('?? jobCutResults.find((result) => !result.isArchived)');
     expect(source).toContain('className="cut-results-latest-table"');
-    expect(source).toContain('dataSource={latestCutResult ? [latestCutResult] : []}');
+    expect(source).toContain('dataSource={primaryCutResult ? [primaryCutResult] : []}');
     expect(source).toContain('className="cut-results-history-collapse"');
     expect(source).toContain('Все сохранённые раскрои (${jobCutResults.length})');
+    expect(source).toContain('Сделать действующим');
+    expect(source).toContain('В архив');
+    expect(source).toContain('Вернуть');
+    expect(source).toContain('Действующий');
     expect(source).not.toContain('<Card size="small" title="Выполненные раскрои"');
   });
 

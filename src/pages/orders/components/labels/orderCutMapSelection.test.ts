@@ -55,6 +55,23 @@ describe('order cut-map selection', () => {
     });
     expect(buildDefaultOrderCutMapSelection(rows)).toEqual({});
   });
+
+  it('filters archived cut result placements out of label choices', () => {
+    const rows = buildOrderCutMapLabelRows({
+      ...data,
+      details: [{
+        ...data.details[0],
+        quantity: 1,
+        options: [
+          { ...option(401, 1, 8, '50-8', true), isArchived: true },
+          option(402, 1, 9, '50-9', true),
+        ],
+      }],
+    });
+
+    expect(rows[0]?.options.map((item) => item.cutNumber)).toEqual(['50-9']);
+    expect(buildDefaultOrderCutMapSelection(rows)).toEqual({ '11:1': 402 });
+  });
 });
 
 function option(

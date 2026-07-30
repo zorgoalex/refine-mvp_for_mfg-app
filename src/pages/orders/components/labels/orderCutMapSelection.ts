@@ -23,7 +23,7 @@ export function buildOrderCutMapLabelRows(data: OrderLabelCutMapOptions | null):
       detailId: detail.detailId,
       copyIndex,
       label: `${detail.detailNumber ?? detail.detailId}: ${detail.detailName ?? 'Деталь'} · экз. ${copyIndex}`,
-      options: detail.options.filter((option) => option.instance === copyIndex && option.dimensionsMatch),
+      options: detail.options.filter((option) => option.instance === copyIndex && option.dimensionsMatch && !option.isArchived),
     };
   }));
 }

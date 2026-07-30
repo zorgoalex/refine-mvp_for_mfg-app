@@ -351,8 +351,13 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('latest_vacuum_results AS (');
     expect(sql).toContain('SELECT DISTINCT ON (candidate.cut_job_id)');
     expect(sql).toContain('FROM candidate_vacuum_results candidate');
+    expect(sql).toContain('(current_result.result_no = r.result_no) AS is_current_result');
+    expect(sql).toContain('LEFT JOIN cut_result current_result');
+    expect(sql).toContain('LEFT JOIN cut_result_archive_state archive');
+    expect(sql).toContain("j.status <> 'archived'");
+    expect(sql).toContain('archive.archived_at IS NULL');
+    expect(sql).toContain('candidate.is_current_result DESC');
     expect(sql).toContain('candidate.result_created_at DESC');
-    expect(sql).not.toContain('(j.current_cut_result_id = r.cut_result_id) DESC');
     expect(sql).toContain('lower(trim(i.order_name)) AS order_key');
     expect(sql).toContain('od.detail_number = item.detail_number');
     expect(sql).toContain('jsonb_array_elements_text(p.comments_json)');

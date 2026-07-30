@@ -96,6 +96,13 @@ export interface GetCutResultQuery extends ListCutResultsQuery {
   resultNo: number;
 }
 
+export interface CutResultStateCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  resultNo: number;
+  requestId?: string;
+}
+
 export interface ListCutJobsQuery {
   currentUser: CurrentUser;
   filters?: { status?: string; createdBy?: number };
@@ -338,6 +345,9 @@ export interface CutRepositoryPort {
   getJob(query: GetCutJobQuery): Promise<CutJobDto>;
   listResults(query: ListCutResultsQuery): Promise<CutResultSummaryDto[]>;
   getResult(query: GetCutResultQuery): Promise<CutResultDto>;
+  setCurrentResult(command: CutResultStateCommand): Promise<CutJobDto>;
+  archiveResult(command: CutResultStateCommand): Promise<CutJobDto>;
+  unarchiveResult(command: CutResultStateCommand): Promise<CutJobDto>;
   listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]>;
   listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto>;
   listFilmOptionsForCut(query: ListFilmOptionsForCutQuery): Promise<CutFilmOptionDto[]>;
