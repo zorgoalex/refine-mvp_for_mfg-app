@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { setupWorkflowMockApi } from './helpers/mockWorkflowApi';
+import { makeMinimalPdfBytes } from './helpers/pdfBytes';
 
 /**
  * Mocked-local Playwright coverage for the manual-layout editor on /cut.
@@ -37,6 +38,7 @@ const PNG_BYTES = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
 );
+const PDF_BYTES = makeMinimalPdfBytes();
 
 // ── Fixture builder ──────────────────────────────────────────────────────────
 
@@ -336,12 +338,22 @@ async function setupMocks(
   );
   await page.route(
     /\/api\/v1\/cut-jobs\/42\/groups\/100\/export\.pdf(\?.*)?$/,
-    (route) => route.fulfill({ status: 200, contentType: 'application/pdf', body: PNG_BYTES }),
+    (route) => route.fulfill({ status: 200, contentType: 'application/pdf', body: PDF_BYTES }),
   );
   await page.route(
     /\/api\/v1\/cut-jobs\/42\/export\.pdf(\?.*)?$/,
-    (route) => route.fulfill({ status: 200, contentType: 'application/pdf', body: PNG_BYTES }),
+    (route) => route.fulfill({ status: 200, contentType: 'application/pdf', body: PDF_BYTES }),
   );
+  await page.route(/\/api\/v1\/cut-jobs\/42\/groups\/100\/pdf-template$/, async (route) => {
+    const body = route.request().postDataJSON() as { pdfTemplate?: string };
+    const nextJob = {
+      ...job,
+      groups: job.groups.map((group) => (
+        group.cutGroupId === GROUP_ID ? { ...group, pdfTemplate: body.pdfTemplate ?? group.pdfTemplate } : group
+      )),
+    };
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(nextJob) });
+  });
 
   return { job, identity };
 }
@@ -636,7 +648,7 @@ test.describe('Cut manual layout editor (mocked-local)', () => {
     let pdfRequestUrl = '';
     await page.route(/\/api\/v1\/cut-jobs\/42\/groups\/100\/export\.pdf(\?.*)?$/, (route) => {
       pdfRequestUrl = route.request().url();
-      return route.fulfill({ status: 200, contentType: 'application/pdf', body: PNG_BYTES });
+      return route.fulfill({ status: 200, contentType: 'application/pdf', body: PDF_BYTES });
     });
 
     await page.getByTestId(`pdf-template-select-${GROUP_ID}`).click();
@@ -646,7 +658,8 @@ test.describe('Cut manual layout editor (mocked-local)', () => {
 
     const modal = page.getByRole('dialog', { name: /Предпросмотр PDF/ });
     await expect(modal).toBeVisible({ timeout: 10000 });
-    await expect(modal.locator('iframe[title="Предпросмотр PDF"]')).toBeVisible();
+    await expect(modal.getByTestId('cut-pdf-preview-pages')).toBeVisible();
+    await expect(modal.getByAltText('Страница PDF 1')).toBeVisible();
     await expect(modal.getByRole('button', { name: 'Скачать' })).toBeEnabled();
     expect(pdfRequestUrl).toContain('template=bath_vacuum');
   });

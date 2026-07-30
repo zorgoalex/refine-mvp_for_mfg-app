@@ -168,7 +168,7 @@ describe('buildSheetSvg multi-line labels', () => {
 });
 
 describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
-  it('puts dimensions along sides and keeps only order/position in the centre', () => {
+  it('puts enlarged dimensions along sides and keeps only order/position in the centre', () => {
     const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['11300', 'поз. 5', '600X400'] });
 
     expect(svg).toContain('data-detail-id="999"');
@@ -177,8 +177,8 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).toMatch(/font-size="[^"]+"[^>]*fill="#14532d"[^>]*> 5<\/text>/);
     expect(svg).not.toContain('>поз. 5</text>');
     expect(svg).not.toContain('600X400');
-    expect(svg).toMatch(/<text x="310" y="[^"]*"[^>]*font-size="42"[^>]*>600<\/text>/);
-    expect(svg).toMatch(/transform="rotate\(-90 [^"]+\)"[^>]*font-size="42"[^>]*>400<\/text>/);
+    expect(svg).toMatch(/<text x="310" y="[^"]*"[^>]*font-size="84"[^>]*>600<\/text>/);
+    expect(svg).toMatch(/transform="rotate\(-90 [^"]+\)"[^>]*font-size="84"[^>]*>400<\/text>/);
   });
 
   it('does not change the standard SVG renderer output', () => {
@@ -214,6 +214,17 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).toMatch(/font-size="28"[^>]*>1000<\/text>/);
   });
 
+  it('keeps the old small dimension font when either side is 150 mm or less', () => {
+    const thresholdSheet: SheetPlacementsJson = {
+      ...sheet,
+      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 1000, height_mm: 150, rotated: false }],
+    };
+    const svg = buildBathProfileSheetSvg({ sheet: thresholdSheet, labelFor: () => ['11300', 'поз. 5', '1000X150'] });
+
+    expect(svg).toMatch(/font-size="42"[^>]*>1000<\/text>/);
+    expect(svg).toMatch(/font-size="42"[^>]*>150<\/text>/);
+  });
+
   it('styles bath PDF center detail labels by semantic part', () => {
     const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['11300', 'поз. 5', '600X400'] });
 
@@ -245,7 +256,7 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
   it('moves bath center labels into the safe area below and right of side dimensions', () => {
     const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['11300', 'поз. 5', '600X400'] });
 
-    expect(svg).toMatch(/<text x="340.45" y="193.65"[^>]*>11300<\/text>/);
+    expect(svg).toMatch(/<text x="370.9" y="226.2"[^>]*>11300<\/text>/);
     expect(svg).not.toMatch(/<text x="310" y="215"[^>]*>11300<\/text>/);
   });
 });

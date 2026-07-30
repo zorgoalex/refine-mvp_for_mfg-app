@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-30",
+    title: "Раскрой: предпросмотр PDF и читаемые размеры деталей",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Предпросмотр PDF раскроя больше не встраивает Chrome PDF Viewer и показывает страницы через PDF.js.",
+      "В PDF профиля ванн размерные подписи на деталях увеличены в два раза; для деталей со стороной 150 мм или меньше сохранён компактный размер.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-30",
     title: "Раскрой: разделение групп по плёнкам",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

@@ -115,6 +115,7 @@ const ORDER_FILL_PALETTE = [
 ] as const;
 const BATH_ORDER_LABEL_COLOR = '#7f1d1d';
 const BATH_POSITION_LABEL_COLOR = '#14532d';
+const BATH_DIMENSION_FONT_ENLARGE_MIN_SIDE_MM = 150;
 
 /** Deterministic, light fill color for a source order. Unknown order keeps the
  * legacy neutral fill so old/partial data remains readable. */
@@ -280,7 +281,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 42));
   const detailFontMm = fontMm * 2;
-  const sideFontMm = Math.max(18, Math.round(fontMm * 0.85));
+  const baseSideFontMm = Math.max(18, Math.round(fontMm * 0.85));
   const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90, originTopLeft);
 
   const pieces = sheet.pieces
@@ -298,6 +299,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
       const sideTexts: string[] = [];
       let reservedTop = 0;
       let reservedLeft = 0;
+      const sideFontMm = bathDimensionBaseFont(rect.w, rect.h, baseSideFontMm);
       const widthLabel = formatDimension(rect.w);
       const widthFont = fitBathSideFont(widthLabel, rect.w, rect.h, sideFontMm, 'horizontal');
       if (widthFont !== null) {
@@ -342,6 +344,12 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
     pieces,
     `</svg>`,
   ].join('');
+}
+
+function bathDimensionBaseFont(rectW: number, rectH: number, baseFontMm: number): number {
+  return Math.min(rectW, rectH) <= BATH_DIMENSION_FONT_ENLARGE_MIN_SIDE_MM
+    ? baseFontMm
+    : baseFontMm * 2;
 }
 
 function bathCenterLabelBox(rect: { x: number; y: number; w: number; h: number }, reservedTop: number, reservedLeft: number) {

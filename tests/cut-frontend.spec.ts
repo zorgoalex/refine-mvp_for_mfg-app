@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { setupWorkflowMockApi } from './helpers/mockWorkflowApi';
+import { makeMinimalPdfBytes } from './helpers/pdfBytes';
 
 // Mocked-local /cut page smoke (no live backend): proves the backend-owned cut
 // flow renders behind VITE_USE_BACKEND_CUT and that the operator path
@@ -19,6 +20,7 @@ const PNG_BYTES = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
 );
+const PDF_BYTES = makeMinimalPdfBytes();
 
 function jobBase() {
   return {
@@ -160,7 +162,7 @@ test.describe('Cut page (mocked-local)', () => {
     let jobPdfRequestUrl = '';
     await page.route(/\/api\/v1\/cut-jobs\/42\/export\.pdf(\?.*)?$/, (route) => {
       jobPdfRequestUrl = route.request().url();
-      return route.fulfill({ status: 200, contentType: 'application/pdf', body: PNG_BYTES });
+      return route.fulfill({ status: 200, contentType: 'application/pdf', body: PDF_BYTES });
     });
 
     await page.goto('/cut');
@@ -186,7 +188,8 @@ test.describe('Cut page (mocked-local)', () => {
     await page.getByTestId('preview-job-pdf-btn').click();
     const pdfModal = page.getByRole('dialog', { name: /Предпросмотр PDF/ });
     await expect(pdfModal).toBeVisible({ timeout: 10000 });
-    await expect(pdfModal.locator('iframe[title="Предпросмотр PDF"]')).toBeVisible();
+    await expect(pdfModal.getByTestId('cut-pdf-preview-pages')).toBeVisible();
+    await expect(pdfModal.getByAltText('Страница PDF 1')).toBeVisible();
     expect(jobPdfRequestUrl).toContain('template=bath_profiles');
     await pdfModal.getByRole('button', { name: 'Закрыть' }).click();
   });

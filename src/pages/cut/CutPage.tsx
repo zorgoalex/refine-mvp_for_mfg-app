@@ -56,6 +56,7 @@ import { TableTopScroll } from '../../components/TableTopScroll';
 import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { SheetPreview } from './SheetPreview';
 import { SheetEditor } from './SheetEditor';
+import { CutPdfPreview } from './CutPdfPreview';
 import { buildPieceMetaByItemId } from './cutPieceMeta';
 import { pushHistory } from './editorHistory';
 import { CutSheetLabelGenerateAction } from './CutSheetLabelGenerateAction';
@@ -3894,25 +3895,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         ]}
       >
         <div style={{ minHeight: 420 }}>
-          {pdfPreview.loading ? (
-            <div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Spin tip="Готовим PDF" />
-            </div>
-          ) : pdfPreview.url ? (
-            <iframe
-              title="Предпросмотр PDF"
-              src={pdfPreview.url}
-              style={{
-                width: '100%',
-                height: 'min(72vh, 760px)',
-                minHeight: 420,
-                border: '1px solid rgba(0, 0, 0, 0.1)',
-                borderRadius: 6,
-              }}
-            />
-          ) : (
-            <Alert type="warning" showIcon message="PDF не загружен" />
-          )}
+          <CutPdfPreview blob={pdfPreview.blob} loading={pdfPreview.loading} />
         </div>
       </Modal>
     </>
