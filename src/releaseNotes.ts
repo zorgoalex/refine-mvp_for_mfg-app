@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-30",
+    title: "Раскрой: разделение групп по плёнкам",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Если флажок «Объединить разные плёнки» выключен, задание на раскрой больше не объединяет детали с разными плёнками в одну группу даже при выключенном «Разделять по материалу».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-30",
     title: "Меню: отдельная иконка Базис-раскроя",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

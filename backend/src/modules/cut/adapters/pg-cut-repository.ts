@@ -253,7 +253,8 @@ interface CalcItemRow extends QueryResultRow {
  * across recalculations.
  *
  * Encoding:
- *   !splitByMaterial           → 'all'
+ *   !splitByMaterial+combineFilms → 'all'
+ *   !splitByMaterial+!combineFilms → 'all|f:<filmId|null>'
  *   splitByMaterial+combineFilms → 'm:<smtId|null>|f:all'
  *   else                       → 'm:<smtId|null>|f:<filmId|null>'
  */
@@ -263,7 +264,7 @@ export function logicalGroupKey(g: {
   sheetMaterialTypeId: number | null;
   filmId: number | null;
 }): string {
-  if (!g.splitByMaterial) return 'all';
+  if (!g.splitByMaterial) return g.combineFilms ? 'all' : `all|f:${g.filmId ?? 'null'}`;
   if (g.combineFilms) return `m:${g.sheetMaterialTypeId ?? 'null'}|f:all`;
   return `m:${g.sheetMaterialTypeId ?? 'null'}|f:${g.filmId ?? 'null'}`;
 }
@@ -4164,20 +4165,22 @@ export function applySheetOverride(
  *    when combineFilms is true the key drops film_id so films of the SAME material
  *    nest on shared sheets (merged group filmId null). Different materials NEVER
  *    merge.
- *  - splitByMaterial=false: ALL details land in ONE group (key constant), cut
- *    together; the group's sheet/dims come from the first item (typically the
- *    per-job override sheet). filmId is null (mixed).
+ *  - splitByMaterial=false: materials may share the selected sheet; combineFilms
+ *    still controls film grouping. ON uses one all-details group with filmId
+ *    null; OFF groups by film across all materials.
  *  Each item always keeps its own filmTexture so freecut applies grain per detail. */
 export function groupByCuttableKey(rows: CalcItemRow[], combineFilms = false, splitByMaterial = true): Map<string, CuttableGroup> {
   const groups = new Map<string, CuttableGroup>();
   for (const row of rows) {
     const sheetMaterialTypeId = row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id);
     const rowFilmId = row.film_id === null ? null : toNum(row.film_id);
-    // The group's film: null when films are mixed into one group (combine, or the
-    // single all-materials group); otherwise the row's own film.
-    const filmId = !splitByMaterial || combineFilms ? null : rowFilmId;
+    // The group's film is null only when different films are intentionally mixed.
+    // If material splitting is off but film combining is off, keep one group per film.
+    const filmId = combineFilms ? null : rowFilmId;
     const key = !splitByMaterial
-      ? 'all'
+      ? combineFilms
+        ? 'all'
+        : `all|f:${rowFilmId ?? 'null'}`
       : combineFilms
         ? `${sheetMaterialTypeId ?? 'null'}:all`
         : `${sheetMaterialTypeId ?? 'null'}:${rowFilmId ?? 'null'}`;
@@ -4194,7 +4197,7 @@ export function groupByCuttableKey(rows: CalcItemRow[], combineFilms = false, sp
       };
       groups.set(key, group);
     } else if (!splitByMaterial && group.sheetMaterialTypeId === null && sheetMaterialTypeId !== null) {
-      // The single "all" group cuts every detail together: if its sheet is still
+      // A non-material-split group cuts details together: if its sheet is still
       // unknown (the first row was no_sheet_spec), adopt the first materialed row's
       // sheet/dims instead of failing the whole group with CUT_NO_SHEET_SPEC.
       group.sheetMaterialTypeId = sheetMaterialTypeId;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { applySheetOverride, groupByCuttableKey, splitByMaterialChangedOutboxKey, PgCutRepository } from './pg-cut-repository';
+import { applySheetOverride, groupByCuttableKey, logicalGroupKey, splitByMaterialChangedOutboxKey, PgCutRepository } from './pg-cut-repository';
 import type { SetCutJobSplitByMaterialCommand } from '../application/cut-command.types';
 
 const anyUser: CurrentUser = {
@@ -37,13 +37,25 @@ describe('groupByCuttableKey splitByMaterial', () => {
     expect(groups.map((g) => g.sheetMaterialTypeId).sort()).toEqual([2, 3, 5]);
   });
 
-  it('split=false: 3 different materials → ONE group (all together, filmId null)', () => {
+  it('split=false + combineFilms=false: groups by film even when materials are not split', () => {
+    const rows = [
+      row({ sheet_material_type_id: 2, film_id: 3 }),
+      row({ order_detail_id: 11, sheet_material_type_id: 3, film_id: 7 }),
+      row({ order_detail_id: 12, sheet_material_type_id: 5, film_id: 7 }),
+    ];
+    const groups = [...groupByCuttableKey(rows as any, false, false).values()];
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => g.filmId).sort()).toEqual([3, 7]);
+    expect(groups.find((g) => g.filmId === 7)?.items.map((item) => item.orderDetailId).sort()).toEqual([11, 12]);
+  });
+
+  it('split=false + combineFilms=true: combines every film into one all-details group', () => {
     const rows = [
       row({ sheet_material_type_id: 2, film_id: 3 }),
       row({ order_detail_id: 11, sheet_material_type_id: 3, film_id: 7 }),
       row({ order_detail_id: 12, sheet_material_type_id: 5, film_id: 9 }),
     ];
-    const groups = [...groupByCuttableKey(rows as any, false, false).values()];
+    const groups = [...groupByCuttableKey(rows as any, true, false).values()];
     expect(groups).toHaveLength(1);
     expect(groups[0].filmId).toBeNull();
     expect(groups[0].items).toHaveLength(3);
@@ -72,6 +84,11 @@ describe('groupByCuttableKey splitByMaterial', () => {
     expect(groups).toHaveLength(2); // material 2 (films merged) + material 3
     expect(groups.map((g) => g.sheetMaterialTypeId).sort()).toEqual([2, 3]);
     expect(groups.every((g) => g.filmId === null)).toBe(true);
+  });
+
+  it('logical group key preserves film identity when only material split is off', () => {
+    expect(logicalGroupKey({ splitByMaterial: false, combineFilms: false, sheetMaterialTypeId: 7, filmId: 3 })).toBe('all|f:3');
+    expect(logicalGroupKey({ splitByMaterial: false, combineFilms: true, sheetMaterialTypeId: 7, filmId: 3 })).toBe('all');
   });
 });
 
