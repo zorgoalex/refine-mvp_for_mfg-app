@@ -11,13 +11,28 @@ import {
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncTodayColumnsByOrders,
+  isCncCardSummaryOnly,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
+  toggleCncCardStandardOverride,
   toOrderStatusBoardQuery,
 } from './model';
 
 describe('order status board model', () => {
+  it('toggles a temporary standard-view override for only one compact MDF card', () => {
+    const first = toggleCncCardStandardOverride(new Set(), 'packet:p-1');
+
+    expect(first).toEqual(new Set(['packet:p-1']));
+    expect(isCncCardSummaryOnly('compact', first, 'packet:p-1')).toBe(false);
+    expect(isCncCardSummaryOnly('compact', first, 'bath:b-1')).toBe(true);
+    expect(isCncCardSummaryOnly('standard', first, 'bath:b-1')).toBe(false);
+
+    const second = toggleCncCardStandardOverride(first, 'packet:p-1');
+    expect(second).toEqual(new Set());
+    expect(first).toEqual(new Set(['packet:p-1']));
+  });
+
   it('hides the completed column only on the order board', () => {
     const completed = column('completed', [], 0, null);
     const columns = [

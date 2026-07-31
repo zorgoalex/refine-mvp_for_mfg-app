@@ -184,6 +184,33 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(cncFileNameRules.every((rule) => rule.includes('color: var(--app-text-muted);'))).toBe(true);
   });
 
+  it('offers compact MDF cards with per-card temporary standard view', () => {
+    expect(page).toContain('type CncCardDisplayMode,');
+    expect(page).toContain('const [cncCardDisplayMode, setCncCardDisplayMode]');
+    expect(page).toContain('aria-label="Формат карточек МДФ-доски"');
+    expect(page).toContain("label: 'Стандартные'");
+    expect(page).toContain("label: 'Компактные'");
+    expect(page).toContain('cardDisplayMode={cncCardDisplayMode}');
+    expect(page).toContain("const cardKey = `packet:${packet.packetId}`");
+    expect(page).toContain("const cardKey = `bath:${bath.bathCardId}`");
+    expect(page).toMatch(
+      /isCncCardSummaryOnly\(\s*cardDisplayMode,\s*standardCardOverrides,\s*cardKey,\s*\)/,
+    );
+    expect(page).toContain('<CncCardDisplayToggle');
+    expect(page).toContain('Показать стандартный вид карточки');
+    expect(page).toContain('Вернуть компактный вид карточки');
+    expect(page).toContain("data-cnc-card-view={summaryOnly ? 'compact' : 'standard'}");
+    expect(page).toContain('event.stopPropagation()');
+    expect(css).toContain('.cnc-card-display-toggle.ant-btn');
+    expect(css).toContain('min-width: 40px');
+    expect(css).toContain('min-height: 40px');
+    expect(css).toContain('.cnc-card-display-toggle__icon');
+    expect(css).toContain('scale(0.25)');
+    expect(css).toContain('blur(4px)');
+    expect(css).toContain('cubic-bezier(0.2, 0, 0, 1)');
+    expect(css).not.toContain('transition: all');
+  });
+
   it('keeps CNC relation highlighting defaulted on and controlled by the Links switch', () => {
     expect(page).toContain('const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true)');
     expect(page).toContain('const [activeCncRelation, setActiveCncRelation]');

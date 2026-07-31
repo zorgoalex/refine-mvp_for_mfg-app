@@ -762,6 +762,68 @@
   font-size: 16px;
 }
 
+.cnc-card--summary-only {
+  padding: 8px 9px;
+}
+
+.cnc-card--summary-only .status-board-card__top {
+  min-height: 40px;
+}
+
+.cnc-card--summary-only .cnc-packet-card__summaries {
+  margin-bottom: 0;
+  padding-block: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cnc-card-display-toggle.ant-btn {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  flex: 0 0 40px;
+  padding: 10px;
+  transition-property: transform;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.cnc-card-display-toggle.ant-btn:active {
+  transform: scale(0.96);
+}
+
+.cnc-card-display-toggle__icons {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cnc-card-display-toggle__icon {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition-property: opacity, filter, transform;
+  transition-duration: 300ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.cnc-card-display-toggle__icon--visible {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+}
+
+.cnc-card-display-toggle__icon--hidden {
+  opacity: 0;
+  filter: blur(4px);
+  transform: scale(0.25);
+}
+
 .cnc-packet-card__status-icon {
   width: 24px;
   height: 24px;
@@ -1349,7 +1411,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .status-board-column,
-  .status-board-card {
+  .status-board-card,
+  .cnc-card-display-toggle.ant-btn,
+  .cnc-card-display-toggle__icon {
     transition: none;
   }
 }

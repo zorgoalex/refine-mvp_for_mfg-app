@@ -34,8 +34,10 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseOutlined,
+  CompressOutlined,
   DownloadOutlined,
   DragOutlined,
+  ExpandOutlined,
   FilterOutlined,
   FilePdfOutlined,
   FileTextOutlined,
@@ -93,10 +95,13 @@ import {
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncTodayColumnsByOrders,
+  isCncCardSummaryOnly,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
+  toggleCncCardStandardOverride,
   toOrderStatusBoardQuery,
+  type CncCardDisplayMode,
   type CncOrderSearchPeriod,
   type OrderStatusBoardViewState,
 } from './model';
@@ -130,6 +135,13 @@ const CNC_ORDER_SEARCH_PERIOD_OPTIONS: Array<{
   { label: '1нед', value: '1w' },
   { label: '2нед', value: '2w' },
   { label: '1м', value: '1m' },
+];
+const CNC_CARD_DISPLAY_OPTIONS: Array<{
+  label: string;
+  value: CncCardDisplayMode;
+}> = [
+  { label: 'Стандартные', value: 'standard' },
+  { label: 'Компактные', value: 'compact' },
 ];
 const CNC_SVG_NS = 'http://www.w3.org/2000/svg';
 const CNC_BATH_DETAIL_ORDER_FILL_COLORS = [
@@ -217,6 +229,8 @@ export const OrderStatusBoardPage: React.FC = () => {
   viewStateRef.current = viewState;
   const [cardDisplayMode, setCardDisplayMode] =
     useState<StatusBoardCardDisplayMode>('standard');
+  const [cncCardDisplayMode, setCncCardDisplayMode] =
+    useState<CncCardDisplayMode>('standard');
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true);
   const [activeCncRelation, setActiveCncRelation] =
     useState<CncRelationTarget | null>(null);
@@ -1081,6 +1095,20 @@ export const OrderStatusBoardPage: React.FC = () => {
                 );
               })}
             </div>
+            <div
+              className="status-board-toolbar__display-mode status-board-toolbar__cnc-card-mode"
+              aria-label="Формат карточек МДФ-доски"
+            >
+              <Typography.Text type="secondary">Карточки</Typography.Text>
+              <Segmented
+                size="small"
+                value={cncCardDisplayMode}
+                options={CNC_CARD_DISPLAY_OPTIONS}
+                onChange={(value) =>
+                  setCncCardDisplayMode(value as CncCardDisplayMode)
+                }
+              />
+            </div>
             <label className="status-board-toolbar__switch">
               <Switch
                 size="small"
@@ -1194,6 +1222,7 @@ export const OrderStatusBoardPage: React.FC = () => {
                 relationsEnabled={cncRelationsEnabled}
                 detailedContext={cncDetailedContext}
                 detailedEnabled={cncDetailedEnabled}
+                cardDisplayMode={cncCardDisplayMode}
                 onSelectRelation={toggleCncRelation}
                 onSelectDetailedBath={selectCncDetailedBath}
                 onCloseDetailedBath={closeCncDetailedBath}
@@ -1242,6 +1271,7 @@ interface CncTelegramTodayColumnsProps {
   relationsEnabled: boolean;
   detailedContext: CncDetailedContext | null;
   detailedEnabled: boolean;
+  cardDisplayMode: CncCardDisplayMode;
   onSelectRelation: (target: CncRelationTarget) => void;
   onSelectDetailedBath: (bathId: string) => void;
   onCloseDetailedBath: (bathId: string) => void;
@@ -1272,6 +1302,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   relationsEnabled,
   detailedContext,
   detailedEnabled,
+  cardDisplayMode,
   onSelectRelation,
   onSelectDetailedBath,
   onCloseDetailedBath,
@@ -1279,6 +1310,21 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   onOpenOrder,
 }) => {
   const isOperational = useOperationalUi();
+  const [standardCardOverrides, setStandardCardOverrides] =
+    useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    if (cardDisplayMode !== 'standard') return;
+    setStandardCardOverrides((current) =>
+      current.size === 0 ? current : new Set(),
+    );
+  }, [cardDisplayMode]);
+
+  const toggleCardDisplay = useCallback((cardKey: string) => {
+    setStandardCardOverrides((current) =>
+      toggleCncCardStandardOverride(current, cardKey),
+    );
+  }, []);
   const detailedBathActive = detailedEnabled && Boolean(detailedContext?.activeBathId);
   const displayColumns = useMemo(
     () => {
@@ -1432,6 +1478,12 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                   </div>
                 ) : (
                   bathCards.map((bath) => {
+                    const cardKey = `bath:${bath.bathCardId}`;
+                    const summaryOnly = isCncCardSummaryOnly(
+                      cardDisplayMode,
+                      standardCardOverrides,
+                      cardKey,
+                    );
                     const detailed = detailedContext?.activeBathId === bath.bathCardId;
                     const detailedPlacement: CncDetailedBathPlacement =
                       column.key === 'baths_ready' ? 'left' : 'right';
@@ -1450,7 +1502,10 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         detailed={detailed}
                         detailedEnabled={detailedEnabled}
                         detailedPlacement={detailedPlacement}
+                        summaryOnly={summaryOnly}
+                        displayToggleVisible={cardDisplayMode === 'compact'}
                         selectedDetailId={selectedDetailId}
+                        onToggleDisplay={() => toggleCardDisplay(cardKey)}
                         onSelect={() => {
                           if (relationsEnabled) {
                             onSelectRelation({ kind: 'bath', id: bath.bathCardId });
@@ -1473,19 +1528,30 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                   <small>Новые файлы появятся здесь после загрузки.</small>
                 </div>
               ) : (
-                packetCards.map((packet) => (
-                  <CncTelegramPacketCard
-                    key={packet.packetId}
-                    packet={packet}
-                    relationState={packetStateFor(packet)}
-                    relationsEnabled={relationsEnabled}
-                    highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
-                    onSelectRelation={() =>
-                      onSelectRelation({ kind: 'packet', id: packet.packetId })
-                    }
-                    onOpenOrder={onOpenOrder}
-                  />
-                ))
+                packetCards.map((packet) => {
+                  const cardKey = `packet:${packet.packetId}`;
+                  const summaryOnly = isCncCardSummaryOnly(
+                    cardDisplayMode,
+                    standardCardOverrides,
+                    cardKey,
+                  );
+                  return (
+                    <CncTelegramPacketCard
+                      key={packet.packetId}
+                      packet={packet}
+                      relationState={packetStateFor(packet)}
+                      relationsEnabled={relationsEnabled}
+                      highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
+                      summaryOnly={summaryOnly}
+                      displayToggleVisible={cardDisplayMode === 'compact'}
+                      onToggleDisplay={() => toggleCardDisplay(cardKey)}
+                      onSelectRelation={() =>
+                        onSelectRelation({ kind: 'packet', id: packet.packetId })
+                      }
+                      onOpenOrder={onOpenOrder}
+                    />
+                  );
+                })
               )}
             </div>
           </article>
@@ -1540,11 +1606,63 @@ const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
   );
 };
 
+interface CncCardDisplayToggleProps {
+  visible: boolean;
+  standardView: boolean;
+  onToggle: () => void;
+}
+
+const CncCardDisplayToggle: React.FC<CncCardDisplayToggleProps> = ({
+  visible,
+  standardView,
+  onToggle,
+}) => {
+  if (!visible) return null;
+  const label = standardView
+    ? 'Вернуть компактный вид карточки'
+    : 'Показать стандартный вид карточки';
+
+  return (
+    <Tooltip title={label}>
+      <Button
+        type="text"
+        className="cnc-card-display-toggle"
+        aria-label={label}
+        aria-pressed={standardView}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle();
+        }}
+      >
+        <span className="cnc-card-display-toggle__icons" aria-hidden="true">
+          <ExpandOutlined
+            className={`cnc-card-display-toggle__icon ${
+              standardView
+                ? 'cnc-card-display-toggle__icon--hidden'
+                : 'cnc-card-display-toggle__icon--visible'
+            }`}
+          />
+          <CompressOutlined
+            className={`cnc-card-display-toggle__icon ${
+              standardView
+                ? 'cnc-card-display-toggle__icon--visible'
+                : 'cnc-card-display-toggle__icon--hidden'
+            }`}
+          />
+        </span>
+      </Button>
+    </Tooltip>
+  );
+};
+
 interface CncTelegramPacketCardProps {
   packet: CncTelegramPacket;
   relationState: CncRelationCardState;
   relationsEnabled: boolean;
   highlightEnabled: boolean;
+  summaryOnly: boolean;
+  displayToggleVisible: boolean;
+  onToggleDisplay: () => void;
   onSelectRelation: () => void;
   onOpenOrder: (orderId: number) => void;
 }
@@ -1554,6 +1672,9 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   relationState,
   relationsEnabled,
   highlightEnabled,
+  summaryOnly,
+  displayToggleVisible,
+  onToggleDisplay,
   onSelectRelation,
   onOpenOrder,
 }) => {
@@ -1566,10 +1687,14 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   return (
     <div
       className={cncRelationCardClassName(
-        'status-board-card cnc-packet-card',
+        [
+          'status-board-card cnc-packet-card',
+          summaryOnly ? 'cnc-card--summary-only' : '',
+        ].filter(Boolean).join(' '),
         relationState,
         highlightEnabled,
       )}
+      data-cnc-card-view={summaryOnly ? 'compact' : 'standard'}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
       data-cnc-clickable={relationsEnabled ? 'true' : undefined}
       onClick={relationsEnabled ? onSelectRelation : undefined}
@@ -1585,74 +1710,90 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               />
             ))}
           </div>
-          {isOperational ? (
-            <Typography.Text className="cnc-packet-card__material" type="secondary">
-              {packet.materialName}
-            </Typography.Text>
-          ) : null}
-          <Typography.Text className="cnc-packet-card__program">
-            {packet.programName ?? packet.externalPacketKey}
-          </Typography.Text>
+          {!summaryOnly && (
+            <>
+              {isOperational ? (
+                <Typography.Text className="cnc-packet-card__material" type="secondary">
+                  {packet.materialName}
+                </Typography.Text>
+              ) : null}
+              <Typography.Text className="cnc-packet-card__program">
+                {packet.programName ?? packet.externalPacketKey}
+              </Typography.Text>
+            </>
+          )}
         </div>
-        {packet.completionStatus === 'completed' && (
-          <div className="cnc-packet-card__status-icons" aria-label="Статусы листа">
-            <Tooltip title="Распилено на станке">
-              <span
-                className="cnc-packet-card__status-icon cnc-packet-card__status-icon--completed"
-                role="img"
-                aria-label="Распилено на станке"
-                tabIndex={0}
-              >
-                <CheckCircleOutlined />
-              </span>
-            </Tooltip>
+        {(displayToggleVisible || (!summaryOnly && packet.completionStatus === 'completed')) && (
+          <div
+            className="cnc-packet-card__status-icons"
+            aria-label={summaryOnly ? 'Вид карточки' : 'Статусы листа'}
+          >
+            <CncCardDisplayToggle
+              visible={displayToggleVisible}
+              standardView={!summaryOnly}
+              onToggle={onToggleDisplay}
+            />
+            {!summaryOnly && packet.completionStatus === 'completed' && (
+              <Tooltip title="Распилено на станке">
+                <span
+                  className="cnc-packet-card__status-icon cnc-packet-card__status-icon--completed"
+                  role="img"
+                  aria-label="Распилено на станке"
+                  tabIndex={0}
+                >
+                  <CheckCircleOutlined />
+                </span>
+              </Tooltip>
+            )}
           </div>
         )}
       </div>
-      {(displayComments.length > 0 || packet.dowelingLinks.length > 0) && (
-        <div className="cnc-packet-card__notes">
-          {displayComments.map((comment, index) => (
-            isCncProgramFilename(comment) ? (
-              <Typography.Text
-                key={`${packet.packetId}:comment:${index}`}
-                strong
-                className="cnc-packet-card__note-file"
-              >
-                {comment}
-              </Typography.Text>
-            ) : (
-              <span key={`${packet.packetId}:comment:${index}`}>{comment}</span>
-            )
-          ))}
-          {packet.dowelingLinks.map((link, index) => (
-            <span key={`${packet.packetId}:dowel:${index}`}>
-              {link.orderName}: присадка №{link.dowelingNumber}
-            </span>
-          ))}
-        </div>
-      )}
+      {!summaryOnly && (
+        <>
+          {(displayComments.length > 0 || packet.dowelingLinks.length > 0) && (
+            <div className="cnc-packet-card__notes">
+              {displayComments.map((comment, index) => (
+                isCncProgramFilename(comment) ? (
+                  <Typography.Text
+                    key={`${packet.packetId}:comment:${index}`}
+                    strong
+                    className="cnc-packet-card__note-file"
+                  >
+                    {comment}
+                  </Typography.Text>
+                ) : (
+                  <span key={`${packet.packetId}:comment:${index}`}>{comment}</span>
+                )
+              ))}
+              {packet.dowelingLinks.map((link, index) => (
+                <span key={`${packet.packetId}:dowel:${index}`}>
+                  {link.orderName}: присадка №{link.dowelingNumber}
+                </span>
+              ))}
+            </div>
+          )}
 
-      {isOperational ? (
-        <div className="cnc-packet-card__metrics">
-          <span>{packet.itemQuantityTotal} деталей</span>
-          <span>{packet.itemCount} позиций</span>
-        </div>
-      ) : null}
+          {isOperational ? (
+            <div className="cnc-packet-card__metrics">
+              <span>{packet.itemQuantityTotal} деталей</span>
+              <span>{packet.itemCount} позиций</span>
+            </div>
+          ) : null}
 
-      <Collapse
-        className="cnc-packet-card__collapse compact-collapse"
-        size="small"
-        ghost
-      >
-        <Collapse.Panel
-          key="items"
-          header={
-            <span className="cnc-packet-card__collapse-label">
-              <FileTextOutlined /> {isOperational ? 'Детали' : `${packet.itemQuantityTotal} дет. · ${packet.itemCount} поз`}
-            </span>
-          }
-        >
-          <div className="cnc-packet-card__items" role="table" aria-label="Результаты распознавания">
+          <Collapse
+            className="cnc-packet-card__collapse compact-collapse"
+            size="small"
+            ghost
+          >
+            <Collapse.Panel
+              key="items"
+              header={
+                <span className="cnc-packet-card__collapse-label">
+                  <FileTextOutlined /> {isOperational ? 'Детали' : `${packet.itemQuantityTotal} дет. · ${packet.itemCount} поз`}
+                </span>
+              }
+            >
+              <div className="cnc-packet-card__items" role="table" aria-label="Результаты распознавания">
             <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
               <span>Заказ</span>
               <span>Деталь / размер</span>
@@ -1710,20 +1851,22 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
                 </div>
               );
             })}
+              </div>
+            </Collapse.Panel>
+          </Collapse>
+
+          {packet.sheetImageUrl && (
+            <CncTelegramSheetImagePreview
+              imageUrl={packet.sheetImageUrl}
+              title={packet.programName ?? packet.externalPacketKey}
+            />
+          )}
+
+          <div className="status-board-card__footer">
+            <span>В чате {formatDateTime(packet.sourceCreatedAt ?? packet.sourceUpdatedAt ?? packet.updatedAt)}</span>
           </div>
-        </Collapse.Panel>
-      </Collapse>
-
-      {packet.sheetImageUrl && (
-        <CncTelegramSheetImagePreview
-          imageUrl={packet.sheetImageUrl}
-          title={packet.programName ?? packet.externalPacketKey}
-        />
+        </>
       )}
-
-      <div className="status-board-card__footer">
-        <span>В чате {formatDateTime(packet.sourceCreatedAt ?? packet.sourceUpdatedAt ?? packet.updatedAt)}</span>
-      </div>
     </div>
   );
 });
@@ -1815,7 +1958,10 @@ interface CncTelegramBathCardViewProps {
   detailed: boolean;
   detailedEnabled: boolean;
   detailedPlacement: CncDetailedBathPlacement;
+  summaryOnly: boolean;
+  displayToggleVisible: boolean;
   selectedDetailId: number | null;
+  onToggleDisplay: () => void;
   onSelect: () => void;
   onCloseDetailed: () => void;
   onSelectDetail: (detailId: number) => void;
@@ -1830,7 +1976,10 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   detailed,
   detailedEnabled,
   detailedPlacement,
+  summaryOnly,
+  displayToggleVisible,
   selectedDetailId,
+  onToggleDisplay,
   onSelect,
   onCloseDetailed,
   onSelectDetail,
@@ -1848,12 +1997,14 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           detailed ? 'cnc-bath-card--detailed' : '',
           detailed ? `cnc-bath-card--detailed-${detailedPlacement}` : '',
           detailedEnabled ? 'cnc-bath-card--detailed-selectable' : '',
+          summaryOnly ? 'cnc-card--summary-only' : '',
         ].filter(Boolean).join(' '),
         relationState,
         highlightEnabled,
       )}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
       data-cnc-detailed-state={detailed ? 'active' : detailedEnabled ? 'selectable' : undefined}
+      data-cnc-card-view={summaryOnly ? 'compact' : 'standard'}
       data-cnc-clickable={interactive ? 'true' : undefined}
       onClick={interactive ? onSelect : undefined}
     >
@@ -1868,12 +2019,19 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               />
             ))}
           </div>
-          <Typography.Text className="cnc-bath-card__job">
-            {bath.cutJobName} · раскрой №{bath.cutNumber}
-          </Typography.Text>
+          {!summaryOnly && (
+            <Typography.Text className="cnc-bath-card__job">
+              {bath.cutJobName} · раскрой №{bath.cutNumber}
+            </Typography.Text>
+          )}
         </div>
         <div className="cnc-bath-card__actions">
-          {detailed && (
+          <CncCardDisplayToggle
+            visible={displayToggleVisible}
+            standardView={!summaryOnly}
+            onToggle={onToggleDisplay}
+          />
+          {!summaryOnly && detailed && (
             <Tooltip title="Свернуть раскладку">
               <Button
                 type="text"
@@ -1888,41 +2046,45 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               />
             </Tooltip>
           )}
-          <Tooltip
-            title={bath.ready ? 'Все детали ванны уже в колонке «Распилено»' : 'Не все детали ванны распилены'}
-          >
-            <CheckCircleFilled
-              className={[
-                'cnc-bath-card__ready-icon',
-                bath.ready ? 'cnc-bath-card__ready-icon--ready' : 'cnc-bath-card__ready-icon--pending',
-              ].join(' ')}
-              aria-label={bath.ready ? 'Ванна готова к закатке' : 'Ванна не готова к закатке'}
-            />
-          </Tooltip>
+          {!summaryOnly && (
+            <Tooltip
+              title={bath.ready ? 'Все детали ванны уже в колонке «Распилено»' : 'Не все детали ванны распилены'}
+            >
+              <CheckCircleFilled
+                className={[
+                  'cnc-bath-card__ready-icon',
+                  bath.ready ? 'cnc-bath-card__ready-icon--ready' : 'cnc-bath-card__ready-icon--pending',
+                ].join(' ')}
+                aria-label={bath.ready ? 'Ванна готова к закатке' : 'Ванна не готова к закатке'}
+              />
+            </Tooltip>
+          )}
         </div>
       </div>
 
-      {isOperational ? (
-        <div className="cnc-packet-card__metrics">
-          <span>{bath.itemQuantityTotal} деталей</span>
-          <span>{bath.positionCount} позиций</span>
-        </div>
-      ) : null}
+      {!summaryOnly && (
+        <>
+          {isOperational ? (
+            <div className="cnc-packet-card__metrics">
+              <span>{bath.itemQuantityTotal} деталей</span>
+              <span>{bath.positionCount} позиций</span>
+            </div>
+          ) : null}
 
-      <Collapse
-        className="cnc-packet-card__collapse compact-collapse"
-        size="small"
-        ghost
-      >
-        <Collapse.Panel
-          key="items"
-          header={
-            <span className="cnc-packet-card__collapse-label">
-              <FileTextOutlined /> {isOperational ? 'Детали' : `${bath.itemQuantityTotal} дет. · ${bath.positionCount} поз`}
-            </span>
-          }
-        >
-          <div className="cnc-packet-card__items" role="table" aria-label="Детали ванны">
+          <Collapse
+            className="cnc-packet-card__collapse compact-collapse"
+            size="small"
+            ghost
+          >
+            <Collapse.Panel
+              key="items"
+              header={
+                <span className="cnc-packet-card__collapse-label">
+                  <FileTextOutlined /> {isOperational ? 'Детали' : `${bath.itemQuantityTotal} дет. · ${bath.positionCount} поз`}
+                </span>
+              }
+            >
+              <div className="cnc-packet-card__items" role="table" aria-label="Детали ванны">
             <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
               <span>Заказ</span>
               <span>Деталь / размер</span>
@@ -1963,23 +2125,25 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
                 </span>
               </div>
             ))}
+              </div>
+            </Collapse.Panel>
+          </Collapse>
+
+          <CncBathPdfPreview bath={bath} />
+          {bath.sheets.length > 0 && (
+            <CncBathSheetPreview
+              bath={bath}
+              detailed={detailed}
+              selectedDetailId={selectedDetailId}
+              onSelectDetail={onSelectDetail}
+            />
+          )}
+
+          <div className="status-board-card__footer">
+            <span>Раскрой {formatDateTime(bath.createdAt)}</span>
           </div>
-        </Collapse.Panel>
-      </Collapse>
-
-      <CncBathPdfPreview bath={bath} />
-      {bath.sheets.length > 0 && (
-        <CncBathSheetPreview
-          bath={bath}
-          detailed={detailed}
-          selectedDetailId={selectedDetailId}
-          onSelectDetail={onSelectDetail}
-        />
+        </>
       )}
-
-      <div className="status-board-card__footer">
-        <span>Раскрой {formatDateTime(bath.createdAt)}</span>
-      </div>
     </div>
   );
 });

@@ -11,6 +11,7 @@ import type {
 const COMPLETED_ORDER_STATUS_NAMES = new Set(['завершен', 'завершён']);
 export type OrderStatusBoardVisualFlow = OrderStatusBoardType | 'cnc_today';
 export type CncOrderSearchPeriod = '1w' | '2w' | '1m';
+export type CncCardDisplayMode = 'standard' | 'compact';
 export const DEFAULT_CNC_ORDER_SEARCH_PERIOD: CncOrderSearchPeriod = '1w';
 const CNC_ORDER_SEARCH_PERIODS = new Set<CncOrderSearchPeriod>(['1w', '2w', '1m']);
 
@@ -30,6 +31,27 @@ export interface OrderStatusBoardViewState {
 
 export interface OrderStatusBoardViewStateOptions {
   cncTelegram?: boolean;
+}
+
+export function toggleCncCardStandardOverride(
+  current: ReadonlySet<string>,
+  cardKey: string,
+): Set<string> {
+  const next = new Set(current);
+  if (next.has(cardKey)) {
+    next.delete(cardKey);
+  } else {
+    next.add(cardKey);
+  }
+  return next;
+}
+
+export function isCncCardSummaryOnly(
+  displayMode: CncCardDisplayMode,
+  standardOverrides: ReadonlySet<string>,
+  cardKey: string,
+): boolean {
+  return displayMode === 'compact' && !standardOverrides.has(cardKey);
 }
 
 export function filterBoardColumns(
