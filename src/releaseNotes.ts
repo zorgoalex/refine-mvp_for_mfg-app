@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-31",
+    title: "Раскрой: печать и масштабирование PDF",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "В окне предпросмотра PDF раскроя снова доступны печать, увеличение и уменьшение масштаба без возврата к встроенному Chrome PDF Viewer.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-31",
     title: "МДФ-работы: компактные карточки",
     services: ["ERP"],
     repositories: ["repo_erp"],

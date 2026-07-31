@@ -1,7 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Spin, Typography } from 'antd';
+import { Alert, Button, Space, Spin, Typography } from 'antd';
+import { ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
 
 const CUT_PDF_WORKER_SRC = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+const CUT_PDF_PREVIEW_MIN_ZOOM = 50;
+const CUT_PDF_PREVIEW_MAX_ZOOM = 250;
+const CUT_PDF_PREVIEW_DEFAULT_ZOOM = 100;
+const CUT_PDF_PREVIEW_ZOOM_STEP = 25;
 
 type CutPdfjsModule = typeof import('pdfjs-dist');
 
@@ -29,15 +34,23 @@ const previewFrameStyle: React.CSSProperties = {
   padding: 12,
 };
 
-const previewPageStyle: React.CSSProperties = {
-  display: 'block',
-  width: '100%',
-  maxWidth: 920,
-  height: 'auto',
-  margin: '0 auto 16px',
-  boxShadow: '0 1px 6px rgba(0, 0, 0, 0.16)',
-  background: '#fff',
+const previewToolbarStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'flex-end',
+  marginBottom: 8,
 };
+
+function previewPageStyle(zoomPercent: number): React.CSSProperties {
+  return {
+    display: 'block',
+    width: `${zoomPercent}%`,
+    maxWidth: Math.round(920 * zoomPercent / 100),
+    height: 'auto',
+    margin: '0 auto 16px',
+    boxShadow: '0 1px 6px rgba(0, 0, 0, 0.16)',
+    background: '#fff',
+  };
+}
 
 async function loadCutPdfjs(): Promise<CutPdfjsModule> {
   if (!cutPdfjsPromise) {
@@ -109,6 +122,7 @@ export const CutPdfPreview: React.FC<CutPdfPreviewProps> = ({ blob, loading }) =
   const [pages, setPages] = useState<CutPdfPagePreview[]>([]);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [zoomPercent, setZoomPercent] = useState(CUT_PDF_PREVIEW_DEFAULT_ZOOM);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +130,7 @@ export const CutPdfPreview: React.FC<CutPdfPreviewProps> = ({ blob, loading }) =
 
     setPages([]);
     setError(null);
+    setZoomPercent(CUT_PDF_PREVIEW_DEFAULT_ZOOM);
 
     if (!blob || loading) {
       setRendering(false);
@@ -171,18 +186,46 @@ export const CutPdfPreview: React.FC<CutPdfPreviewProps> = ({ blob, loading }) =
   }
 
   return (
-    <div data-testid="cut-pdf-preview-pages" style={previewFrameStyle}>
-      {pages.map((page) => (
-        <div key={page.pageNumber}>
-          <Typography.Text type="secondary">Страница {page.pageNumber}</Typography.Text>
-          <img
-            data-testid={`cut-pdf-preview-page-${page.pageNumber}`}
-            alt={`Страница PDF ${page.pageNumber}`}
-            src={page.url}
-            style={previewPageStyle}
+    <div>
+      <div style={previewToolbarStyle} data-testid="cut-pdf-preview-zoom-controls">
+        <Space size={4}>
+          <Button
+            aria-label="Уменьшить масштаб PDF"
+            icon={<ZoomOutOutlined />}
+            disabled={zoomPercent <= CUT_PDF_PREVIEW_MIN_ZOOM}
+            onClick={() => setZoomPercent((current) => Math.max(CUT_PDF_PREVIEW_MIN_ZOOM, current - CUT_PDF_PREVIEW_ZOOM_STEP))}
+            data-testid="cut-pdf-preview-zoom-out"
           />
-        </div>
-      ))}
+          <Button
+            title="Сбросить масштаб до 100%"
+            disabled={zoomPercent === CUT_PDF_PREVIEW_DEFAULT_ZOOM}
+            onClick={() => setZoomPercent(CUT_PDF_PREVIEW_DEFAULT_ZOOM)}
+            data-testid="cut-pdf-preview-zoom-reset"
+          >
+            {zoomPercent}%
+          </Button>
+          <Button
+            aria-label="Увеличить масштаб PDF"
+            icon={<ZoomInOutlined />}
+            disabled={zoomPercent >= CUT_PDF_PREVIEW_MAX_ZOOM}
+            onClick={() => setZoomPercent((current) => Math.min(CUT_PDF_PREVIEW_MAX_ZOOM, current + CUT_PDF_PREVIEW_ZOOM_STEP))}
+            data-testid="cut-pdf-preview-zoom-in"
+          />
+        </Space>
+      </div>
+      <div data-testid="cut-pdf-preview-pages" style={previewFrameStyle}>
+        {pages.map((page) => (
+          <div key={page.pageNumber}>
+            <Typography.Text type="secondary">Страница {page.pageNumber}</Typography.Text>
+            <img
+              data-testid={`cut-pdf-preview-page-${page.pageNumber}`}
+              alt={`Страница PDF ${page.pageNumber}`}
+              src={page.url}
+              style={previewPageStyle(zoomPercent)}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
