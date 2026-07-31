@@ -2,6 +2,7 @@
 // Implements: getList, getOne, create, update, deleteOne
 
 import { authStorage, isTokenExpired, refreshAccessToken } from './auth';
+import { authSession } from '../api/authSession';
 import { logGraphQLError } from './notificationLogger';
 import { clientPhonesApi } from '../api/clientPhonesApi';
 import { ordersApi } from '../api/ordersApi';
@@ -15,6 +16,7 @@ import type { PaymentDto } from '../api/types/paymentApi.types';
 import type { UserDto, UserListQuery } from '../api/types/userApi.types';
 import type { UserRole } from '../api/types/authApi.types';
 import { featureFlags } from '../config/featureFlags';
+import { canMutateHasuraResource, canQueryHasuraResource } from './resourcePermissions';
 
 type AnyObject = Record<string, any>;
 
@@ -1504,6 +1506,26 @@ function assertNotBackendOnlyWrite(resource: string): void {
   }
 }
 
+function hasHasuraReadAccess(resource: string): boolean {
+  return canQueryHasuraResource(resource, authSession.getUser());
+}
+
+function assertHasuraReadAccess(resource: string): void {
+  if (hasHasuraReadAccess(resource)) return;
+  throw {
+    message: `Нет прав для чтения ресурса ${resource}`,
+    statusCode: 403,
+  };
+}
+
+function assertHasuraWriteAccess(resource: string): void {
+  if (canMutateHasuraResource(resource, authSession.getUser())) return;
+  throw {
+    message: `Нет прав для изменения ресурса ${resource}`,
+    statusCode: 403,
+  };
+}
+
 function requireOrderDeleteVersion(meta?: AnyObject): number {
   const version = meta?.version ?? meta?.orderVersion;
 
@@ -1727,6 +1749,10 @@ export const dataProvider = (_apiUrl: string) => {
         return backendUsersList;
       }
 
+      if (!hasHasuraReadAccess(resource)) {
+        return { data: [], total: 0 };
+      }
+
       // Handle pagination: mode 'off' means no limit/offset
       const paginationMode = pagination?.mode;
       const limit = paginationMode === 'off' ? null : (pagination?.pageSize ?? 10);
@@ -1798,6 +1824,8 @@ export const dataProvider = (_apiUrl: string) => {
         return backendUser;
       }
 
+      assertHasuraReadAccess(resource);
+
       const idCol = ID_COLUMNS[resource] ?? "id";
       const selection = fieldsFor(resource);
       const query = `
@@ -1828,6 +1856,7 @@ export const dataProvider = (_apiUrl: string) => {
       if (resource === "orders_view") {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
+      assertHasuraWriteAccess(resource);
       const selection = fieldsFor(resource);
       const idCol = ID_COLUMNS[resource] ?? "id";
 
@@ -1913,6 +1942,7 @@ export const dataProvider = (_apiUrl: string) => {
       if (resource === "orders_view") {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
+      assertHasuraWriteAccess(resource);
       const idCol = ID_COLUMNS[resource] ?? "id";
       // Do not send id, audit fields, or timestamps in _set
       // Audit fields (created_by, edited_by) are auto-managed by Hasura permissions via column presets
@@ -1966,6 +1996,7 @@ export const dataProvider = (_apiUrl: string) => {
       if (resource === "orders_view") {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
+      assertHasuraWriteAccess(resource);
       const idCol = ID_COLUMNS[resource] ?? "id";
       const query = `
         mutation {
@@ -1984,6 +2015,10 @@ export const dataProvider = (_apiUrl: string) => {
       const backendUsers = await getBackendUsersManyIfEnabled(resource, ids);
       if (backendUsers) {
         return backendUsers;
+      }
+
+      if (!hasHasuraReadAccess(resource)) {
+        return { data: [] };
       }
 
       const idCol = ID_COLUMNS[resource] ?? "id";

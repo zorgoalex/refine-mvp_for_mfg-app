@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { applyFeatureFlags, featureFlags } from '../config/featureFlags';
-import { canQueryAppSettingsResource, canQueryUsersResource } from './resourcePermissions';
+import {
+  canMutateHasuraResource,
+  canQueryAppSettingsResource,
+  canQueryHasuraResource,
+  canQueryUsersResource,
+} from './resourcePermissions';
 
 describe('resourcePermissions', () => {
   const originalFlags = { ...featureFlags };
@@ -45,5 +50,31 @@ describe('resourcePermissions', () => {
     applyFeatureFlags({ ...featureFlags, useBackendAuth: false, useBackendPermissions: false });
 
     expect(canQueryAppSettingsResource(null)).toBe(true);
+  });
+
+  it('limits packer Hasura reads to resources granted in metadata', () => {
+    applyFeatureFlags({ ...featureFlags, useBackendAuth: true, useBackendPermissions: true });
+    const packer = { role: 'packer', permissions: ['orders.view'] };
+
+    expect(canQueryHasuraResource('order_statuses', packer)).toBe(true);
+    for (const resource of [
+      'materials',
+      'films',
+      'milling_types',
+      'edge_types',
+      'production_statuses',
+      'production_status_events',
+      'payment_types',
+      'app_settings',
+      'orders_view',
+    ]) {
+      expect(canQueryHasuraResource(resource, packer), resource).toBe(false);
+    }
+  });
+
+  it('blocks direct packer Hasura mutations even on readable resources', () => {
+    applyFeatureFlags({ ...featureFlags, useBackendAuth: true, useBackendPermissions: true });
+
+    expect(canMutateHasuraResource('order_statuses', { roleId: 30, permissions: ['orders.view'] })).toBe(false);
   });
 });
