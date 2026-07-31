@@ -251,6 +251,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const backendOrder = useBackendOrdersRead ? record?.__backendOrder : null;
   const labelsEnabled = featureFlags.labels && canAny(['labels.view', 'labels.generate']);
   const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
+  const canUpdateOrders = !featureFlags.useBackendPermissions || can('orders.update');
+  const canExportOrders = !featureFlags.useBackendPermissions || can('orders.export');
   const canCreatePayment = !featureFlags.useBackendPermissions || can('payments.create');
   const deletedOrderModel = deletedOrder ? buildDeletedOrderCardModel(deletedOrder) : null;
   const canRestore = canManageOrderTrash && featureFlags.useBackendOrdersWrite;
@@ -1326,8 +1328,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         deletedOrder ? null : (
           isMobile ? (
             <>
-              <EditButton>Изменить</EditButton>
-              {featureFlags.projects && record?.order_id && record?.client_id ? (
+              {canUpdateOrders && <EditButton>Изменить</EditButton>}
+              {canUpdateOrders && featureFlags.projects && record?.order_id && record?.client_id ? (
                 <Button onClick={() => setMoveModalOpen(true)}>Перенести в другой проект</Button>
               ) : null}
               <Dropdown
@@ -1340,30 +1342,32 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       label: 'Обновить',
                       disabled: isUpdating,
                     },
-                    {
-                      key: 'print',
-                      icon: <PrinterOutlined />,
-                      label: 'Печать',
-                      disabled: !record || details.length === 0,
-                    },
-                    {
-                      key: 'excel',
-                      icon: <FileExcelOutlined />,
-                      label: 'Экспорт в Excel',
-                      disabled: !record || details.length === 0 || isClientResolving || isAnyExcelExporting,
-                    },
-                    {
-                      key: 'excel-without-prices',
-                      icon: <FileExcelOutlined />,
-                      label: 'Excel без цен и сумм',
-                      disabled: !record || details.length === 0 || isClientResolving || isAnyExcelExporting,
-                    },
-                    {
-                      key: 'json',
-                      icon: <FileTextOutlined />,
-                      label: 'JSON snapshot',
-                      disabled: !record || isSnapshotExporting,
-                    },
+                    ...(canExportOrders ? [
+                      {
+                        key: 'print',
+                        icon: <PrinterOutlined />,
+                        label: 'Печать',
+                        disabled: !record || details.length === 0,
+                      },
+                      {
+                        key: 'excel',
+                        icon: <FileExcelOutlined />,
+                        label: 'Экспорт в Excel',
+                        disabled: !record || details.length === 0 || isClientResolving || isAnyExcelExporting,
+                      },
+                      {
+                        key: 'excel-without-prices',
+                        icon: <FileExcelOutlined />,
+                        label: 'Excel без цен и сумм',
+                        disabled: !record || details.length === 0 || isClientResolving || isAnyExcelExporting,
+                      },
+                      {
+                        key: 'json',
+                        icon: <FileTextOutlined />,
+                        label: 'JSON snapshot',
+                        disabled: !record || isSnapshotExporting,
+                      },
+                    ] : []),
                   ],
                   onClick: ({ key }) => {
                     if (key === 'refresh') {
@@ -1417,8 +1421,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             </>
           ) : (
             <>
-              <EditButton>Изменить</EditButton>
-              {featureFlags.projects && record?.order_id && record?.client_id ? (
+              {canUpdateOrders && <EditButton>Изменить</EditButton>}
+              {canUpdateOrders && featureFlags.projects && record?.order_id && record?.client_id ? (
                 <Button onClick={() => setMoveModalOpen(true)}>
                   Перенести в другой проект
                 </Button>
@@ -1430,68 +1434,72 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               >
                 Обновить
               </Button>
-              <Button
-                type="primary"
-                icon={<PrinterOutlined />}
-                onClick={handlePrint}
-                disabled={!record || details.length === 0}
-              >
-                Печать
-              </Button>
-              <Tooltip title="Экспорт в Excel">
-                <Button
-                  aria-label="Экспорт в Excel"
-                  icon={<FileExcelOutlined />}
-                  onClick={() => void handleExportExcel()}
-                  loading={isExporting}
-                  disabled={!record || details.length === 0 || isClientResolving || isAnyExcelExporting}
-                />
-              </Tooltip>
-              <Button
-                aria-label="Экспорт в Excel без цен и сумм"
-                icon={<FileExcelOutlined />}
-                onClick={() => void handleExportExcel('without-prices')}
-                loading={isPriceFreeExporting}
-                disabled={!record || details.length === 0 || isClientResolving || isAnyExcelExporting}
-              >
-                Excel без цен
-              </Button>
-              <Dropdown
-                trigger={['click']}
-                menu={{
-                  items: [
-                    {
-                      key: 'pdf',
-                      icon: <FilePdfOutlined />,
-                      label: 'Экспорт в PDF',
-                      disabled: !record || details.length === 0,
-                    },
-                    {
-                      key: 'json',
-                      icon: <FileTextOutlined />,
-                      label: 'JSON snapshot',
-                      disabled: !record || isSnapshotExporting,
-                    },
-                  ],
-                  onClick: ({ key }) => {
-                    if (key === 'pdf') {
-                      handlePrint();
-                    }
-                    if (key === 'json') {
-                      void handleExportSnapshot();
-                    }
-                  },
-                }}
-              >
-                <Tooltip title="Другие экспорты">
+              {canExportOrders ? (
+                <>
                   <Button
-                    aria-label="Другие экспорты"
-                    icon={isSnapshotExporting ? <DownloadOutlined /> : <MoreOutlined />}
-                    loading={isSnapshotExporting}
-                    disabled={!record}
-                  />
-                </Tooltip>
-              </Dropdown>
+                    type="primary"
+                    icon={<PrinterOutlined />}
+                    onClick={handlePrint}
+                    disabled={!record || details.length === 0}
+                  >
+                    Печать
+                  </Button>
+                  <Tooltip title="Экспорт в Excel">
+                    <Button
+                      aria-label="Экспорт в Excel"
+                      icon={<FileExcelOutlined />}
+                      onClick={() => void handleExportExcel()}
+                      loading={isExporting}
+                      disabled={!record || details.length === 0 || isClientResolving || isAnyExcelExporting}
+                    />
+                  </Tooltip>
+                  <Button
+                    aria-label="Экспорт в Excel без цен и сумм"
+                    icon={<FileExcelOutlined />}
+                    onClick={() => void handleExportExcel('without-prices')}
+                    loading={isPriceFreeExporting}
+                    disabled={!record || details.length === 0 || isClientResolving || isAnyExcelExporting}
+                  >
+                    Excel без цен
+                  </Button>
+                  <Dropdown
+                    trigger={['click']}
+                    menu={{
+                      items: [
+                        {
+                          key: 'pdf',
+                          icon: <FilePdfOutlined />,
+                          label: 'Экспорт в PDF',
+                          disabled: !record || details.length === 0,
+                        },
+                        {
+                          key: 'json',
+                          icon: <FileTextOutlined />,
+                          label: 'JSON snapshot',
+                          disabled: !record || isSnapshotExporting,
+                        },
+                      ],
+                      onClick: ({ key }) => {
+                        if (key === 'pdf') {
+                          handlePrint();
+                        }
+                        if (key === 'json') {
+                          void handleExportSnapshot();
+                        }
+                      },
+                    }}
+                  >
+                    <Tooltip title="Другие экспорты">
+                      <Button
+                        aria-label="Другие экспорты"
+                        icon={isSnapshotExporting ? <DownloadOutlined /> : <MoreOutlined />}
+                        loading={isSnapshotExporting}
+                        disabled={!record}
+                      />
+                    </Tooltip>
+                  </Dropdown>
+                </>
+              ) : null}
               {featureFlags.useBackendOrdersWrite && canManageOrderTrash && record?.order_id && !record?.delete_flag ? (
                 <Popconfirm
                   title={`Удалить заказ №${record.order_name}?`}
@@ -1552,23 +1560,29 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               actions={(
                 activeOperationalTab === 'labels' ? (
                   <>
-                    <Button icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}?tab=additional`)}>
-                      Изменить
-                    </Button>
-                    <Button
-                      icon={<FileExcelOutlined />}
-                      onClick={() => void handleExportExcel('without-prices')}
-                      loading={isPriceFreeExporting}
-                      disabled={details.length === 0 || isClientResolving || isAnyExcelExporting}
-                    >
-                      Excel без цен
-                    </Button>
-                    <Button icon={<DownloadOutlined />} onClick={handlePrint}>
-                      PDF
-                    </Button>
-                    <Button type="primary" icon={<PrinterOutlined />} onClick={handlePrint}>
-                      Печать
-                    </Button>
+                    {canUpdateOrders ? (
+                      <Button icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}?tab=additional`)}>
+                        Изменить
+                      </Button>
+                    ) : null}
+                    {canExportOrders ? (
+                      <>
+                        <Button
+                          icon={<FileExcelOutlined />}
+                          onClick={() => void handleExportExcel('without-prices')}
+                          loading={isPriceFreeExporting}
+                          disabled={details.length === 0 || isClientResolving || isAnyExcelExporting}
+                        >
+                          Excel без цен
+                        </Button>
+                        <Button icon={<DownloadOutlined />} onClick={handlePrint}>
+                          PDF
+                        </Button>
+                        <Button type="primary" icon={<PrinterOutlined />} onClick={handlePrint}>
+                          Печать
+                        </Button>
+                      </>
+                    ) : null}
                   </>
                 ) : (
                   <>
@@ -1581,24 +1595,30 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     >
                       Просмотр
                     </Button>
-                    <Button icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}`)}>
-                      Редактировать
-                    </Button>
-                    <Button
-                      icon={<FileExcelOutlined />}
-                      onClick={() => void handleExportExcel('without-prices')}
-                      loading={isPriceFreeExporting}
-                      disabled={details.length === 0 || isClientResolving || isAnyExcelExporting}
-                    >
-                      Excel без цен
-                    </Button>
-                    <Button
-                      type="primary"
-                      icon={<CheckOutlined />}
-                      onClick={() => message.success('Заказ готов к передаче на следующий этап')}
-                    >
-                      Передать на следующий этап
-                    </Button>
+                    {canUpdateOrders ? (
+                      <Button icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}`)}>
+                        Редактировать
+                      </Button>
+                    ) : null}
+                    {canExportOrders ? (
+                      <Button
+                        icon={<FileExcelOutlined />}
+                        onClick={() => void handleExportExcel('without-prices')}
+                        loading={isPriceFreeExporting}
+                        disabled={details.length === 0 || isClientResolving || isAnyExcelExporting}
+                      >
+                        Excel без цен
+                      </Button>
+                    ) : null}
+                    {canUpdateOrders ? (
+                      <Button
+                        type="primary"
+                        icon={<CheckOutlined />}
+                        onClick={() => message.success('Заказ готов к передаче на следующий этап')}
+                      >
+                        Передать на следующий этап
+                      </Button>
+                    ) : null}
                   </>
                 )
               )}

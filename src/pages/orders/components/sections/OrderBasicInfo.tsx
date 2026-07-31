@@ -22,6 +22,8 @@ import {
   productionActionsApi,
 } from '../../../../api/productionActionsApi';
 import { featureFlags } from '../../../../config/featureFlags';
+import { authSession } from '../../../../api/authSession';
+import { isPackerUser } from '../../../../utils/packerStatusAccess';
 import { ordersApi } from '../../../../api/ordersApi';
 import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
 
@@ -57,6 +59,8 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({ clientLocked = f
   const invalidate = useInvalidate();
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
+  const currentUser = authSession.getUser();
+  const packerMode = isPackerUser(currentUser);
 
   // Load clients
   const { selectProps: clientSelectProps } = useSelect({
@@ -65,7 +69,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({ clientLocked = f
     optionValue: 'client_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     ...(header.client_id ? { defaultValue: header.client_id } : {}),
-    queryOptions: { enabled: !useBackendReferences },
+    queryOptions: { enabled: !useBackendReferences && !packerMode },
   });
   const resolvedClientSelectProps = useBackendReferences
     ? createBackendSelectProps(orderFormData.references.clients, orderFormData.isLoading)
@@ -78,7 +82,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({ clientLocked = f
     optionValue: 'employee_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     ...(header.manager_id ? { defaultValue: header.manager_id } : {}),
-    queryOptions: { enabled: !useBackendReferences },
+    queryOptions: { enabled: !useBackendReferences && !packerMode },
   });
   const resolvedEmployeeSelectProps = useBackendReferences
     ? createBackendSelectProps(orderFormData.references.employees, orderFormData.isLoading)
@@ -104,7 +108,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({ clientLocked = f
     optionValue: 'payment_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'payment_status_id', order: 'asc' }],
-    queryOptions: { enabled: !useBackendReferences },
+    queryOptions: { enabled: !useBackendReferences && !packerMode },
   });
   const resolvedPaymentStatusProps = useBackendReferences
     ? createBackendSelectProps(orderFormData.references.paymentStatuses, orderFormData.isLoading)
@@ -117,7 +121,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({ clientLocked = f
     optionValue: 'production_status_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
-    queryOptions: { enabled: !useBackendReferences },
+    queryOptions: { enabled: !useBackendReferences && !packerMode },
   });
   const resolvedProductionStatusProps = useBackendReferences
     ? createBackendSelectProps(orderFormData.references.productionStatuses, orderFormData.isLoading)
@@ -346,6 +350,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({ clientLocked = f
     optionValue: 'doweling_order_id',
     sorters: [{ field: 'doweling_order_id', order: 'desc' }],
     pagination: { pageSize: 50 },
+    queryOptions: { enabled: !packerMode },
   });
 
   // Get full doweling order data for linking

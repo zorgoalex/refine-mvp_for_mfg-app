@@ -20,6 +20,7 @@ const ROLE_ID_TO_KEY: Record<number, string> = {
   11: 'operator',
   15: 'top_manager',
   20: 'worker',
+  30: 'packer',
   100: 'viewer',
 };
 

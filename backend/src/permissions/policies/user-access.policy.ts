@@ -3,6 +3,7 @@ import type { UserRole } from '../permissions';
 
 const ROLE_RANK = {
   viewer: 10,
+  packer: 15,
   worker: 20,
   operator: 30,
   manager: 40,

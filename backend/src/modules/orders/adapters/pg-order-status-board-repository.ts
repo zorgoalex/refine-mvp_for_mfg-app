@@ -84,6 +84,11 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
         ? 'o.order_status_id::text'
         : `COALESCE(o.production_status_id::text, '${UNASSIGNED_COLUMN}')`;
     const policy = ROLE_POLICIES[command.currentUser.role];
+    if (command.query.board === 'production' && policy.productionTasks.view === 'none') {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра доски производства', {
+        requiredPermissions: ['productionTasks.view'],
+      });
+    }
     const needsAssignment =
       command.query.onlyMyOrders ||
       policy.orders.view === 'assigned' ||
@@ -527,7 +532,8 @@ function mapBoardCard(row: BoardRow, currentUser: CurrentUser): OrderStatusBoard
     currentUser.permissions.includes('orders.update') &&
     allowsScope(currentUser, policy.orders.update, scopedEntity);
   const canChangeOrderStatus =
-    canUpdateOrder && currentUser.permissions.includes('orders.change_status');
+    currentUser.permissions.includes('orders.change_status') &&
+    (canUpdateOrder || currentUser.role === 'packer');
   const canChangeProductionStatus =
     currentUser.permissions.includes('orders.change_production_status') &&
     (

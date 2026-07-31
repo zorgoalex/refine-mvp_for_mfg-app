@@ -16,7 +16,12 @@ import {
   isProductionActionVersionConflict,
   productionActionsApi,
 } from '../../../api/productionActionsApi';
+import { authSession } from '../../../api/authSession';
 import { featureFlags } from '../../../config/featureFlags';
+import {
+  filterOrderStatusesForPacker,
+  isPackerUser,
+} from '../../../utils/packerStatusAccess';
 
 export interface OrderHeaderContextMenuProps {
   visible: boolean;
@@ -37,7 +42,12 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
 }) => {
   const { header, updateHeaderField } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
-  const { toggleOrderEvent, events, refetch } = useProductionStatusEvent({ orderId: header.order_id });
+  const currentUser = authSession.getUser();
+  const packerMode = isPackerUser(currentUser);
+  const { toggleOrderEvent, events, refetch } = useProductionStatusEvent({
+    orderId: header.order_id,
+    enabled: !packerMode,
+  });
   const { mutate: updateOrder } = useUpdate();
   const invalidate = useInvalidate();
   const dataProvider = useDataProvider();
@@ -77,6 +87,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
     pagination: { pageSize: 100 },
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'payment_status_id', order: 'asc' }],
+    queryOptions: { enabled: !packerMode },
   });
 
   // Load production statuses
@@ -85,12 +96,13 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
     pagination: { pageSize: 100 },
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
+    queryOptions: { enabled: !packerMode },
   });
 
-  const orderStatuses = (orderStatusesData?.data || []).map((s: any) => ({
+  const orderStatuses = filterOrderStatusesForPacker((orderStatusesData?.data || []).map((s: any) => ({
     id: s.order_status_id,
     name: s.order_status_name,
-  }));
+  })), currentUser);
 
   const paymentStatuses = (paymentStatusesData?.data || []).map((s: any) => ({
     id: s.payment_status_id,
@@ -418,16 +430,20 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
       label: 'Статус заказа',
       children: orderStatusItems,
     },
-    {
-      key: 'payment_status',
-      label: 'Статус оплаты',
-      children: paymentStatusItems,
-    },
-    {
-      key: 'production_status',
-      label: 'Статус производства',
-      children: productionStatusItems,
-    },
+    ...(!packerMode
+      ? [
+          {
+            key: 'payment_status',
+            label: 'Статус оплаты',
+            children: paymentStatusItems,
+          },
+          {
+            key: 'production_status',
+            label: 'Статус производства',
+            children: productionStatusItems,
+          },
+        ]
+      : []),
   ];
 
   return (

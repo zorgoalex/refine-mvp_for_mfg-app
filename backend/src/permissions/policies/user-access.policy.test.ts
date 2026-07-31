@@ -18,6 +18,7 @@ describe('UserAccessPolicy', () => {
 
   it('allows admin to create lower roles but not superadmin/admin peers', () => {
     expect(policy.canCreateUser(user('admin'), 'manager')).toBeNull();
+    expect(policy.canCreateUser(user('admin'), 'packer')).toBeNull();
     expect(policy.canCreateUser(user('admin'), 'admin')).toBe('role_assignment_denied');
     expect(policy.canCreateUser(user('admin'), 'superadmin')).toBe('role_assignment_denied');
   });
@@ -29,6 +30,7 @@ describe('UserAccessPolicy', () => {
 
   it('blocks lower roles from user administration', () => {
     expect(policy.canCreateUser(user('manager'), 'viewer')).toBe('missing_permission');
+    expect(policy.canCreateUser(user('packer'), 'viewer')).toBe('missing_permission');
     expect(policy.canUpdateUser(user('top_manager'), { id: '2', role: 'viewer' })).toBe('missing_permission');
   });
 

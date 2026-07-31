@@ -1188,6 +1188,7 @@ const USER_ROLE_ID_MAP: Record<number, UserRole> = {
   11: 'operator',
   15: 'top_manager',
   20: 'worker',
+  30: 'packer',
   100: 'viewer',
 };
 
@@ -1198,6 +1199,7 @@ const USER_ROLE_LABELS: Record<UserRole, string> = {
   manager: 'Менеджер',
   operator: 'Оператор',
   worker: 'Работник',
+  packer: 'Упаковщик',
   viewer: 'Наблюдатель',
 };
 

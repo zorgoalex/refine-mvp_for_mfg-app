@@ -23,6 +23,41 @@ describe('ProductionActionService', () => {
   });
 
   describe('production command coarse gate', () => {
+    it('lets a packer reach the repo for changeOrderStatus without orders.update', async () => {
+      let called = false;
+      const service = new ProductionActionService({
+        productionActions: createRepository({
+          async changeOrderStatus() {
+            called = true;
+            return response();
+          },
+        }),
+      });
+
+      await service.changeOrderStatus({
+        currentUser: currentUser('packer'),
+        orderId: 15,
+        dto: { orderStatusId: 6, version: 3, idempotencyKey: 'packer-status-1' },
+      });
+
+      expect(called).toBe(true);
+    });
+
+    it('denies a packer for production-stage commands', async () => {
+      const service = new ProductionActionService({ productionActions: createRepository() });
+
+      await expect(
+        service.changeProductionStatus({
+          currentUser: currentUser('packer'),
+          orderId: 15,
+          dto: { productionStatusId: 7, version: 3, idempotencyKey: 'packer-prod-deny-1' },
+        }),
+      ).rejects.toMatchObject({
+        statusCode: 403,
+        code: 'PERMISSION_DENIED',
+      } satisfies Partial<ApiError>);
+    });
+
     it('lets a worker (only orders.change_production_status) reach the repo for changeProductionStatus', async () => {
       let called = false;
       const service = new ProductionActionService({

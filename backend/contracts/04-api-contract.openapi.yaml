@@ -11680,6 +11680,7 @@ components:
         - top_manager
         - operator
         - worker
+        - packer
         - viewer
 
     PermissionName:

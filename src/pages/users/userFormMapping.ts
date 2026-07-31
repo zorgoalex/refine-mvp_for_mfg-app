@@ -20,6 +20,7 @@ const ROLE_ID_TO_NAME: Record<number, UserRole> = {
   11: 'operator',
   15: 'top_manager',
   20: 'worker',
+  30: 'packer',
   100: 'viewer',
 };
 
@@ -30,6 +31,7 @@ const ROLE_NAME_TO_ID: Record<string, number> = {
   operator: 11,
   top_manager: 15,
   worker: 20,
+  packer: 30,
   viewer: 100,
 };
 

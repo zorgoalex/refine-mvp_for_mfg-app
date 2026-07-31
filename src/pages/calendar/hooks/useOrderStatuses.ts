@@ -19,7 +19,10 @@ export interface OrderStatusesResult {
  *
  * @returns Объект со статусами и состоянием загрузки
  */
-export const useOrderStatuses = (): OrderStatusesResult => {
+export const useOrderStatuses = (
+  options: { loadPaymentAndProduction?: boolean } = {},
+): OrderStatusesResult => {
+  const loadPaymentAndProduction = options.loadPaymentAndProduction ?? true;
   // Загружаем статусы заказов
   const {
     data: orderStatusesData,
@@ -42,6 +45,7 @@ export const useOrderStatuses = (): OrderStatusesResult => {
     resource: 'payment_statuses',
     pagination: { pageSize: 100 },
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    queryOptions: { enabled: loadPaymentAndProduction },
   });
 
   // Загружаем статусы производства
@@ -54,20 +58,21 @@ export const useOrderStatuses = (): OrderStatusesResult => {
     resource: 'production_statuses',
     pagination: { pageSize: 100 },
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    queryOptions: { enabled: loadPaymentAndProduction },
   });
 
   // Объединяем состояния загрузки
   const isLoading =
     isLoadingOrderStatuses ||
-    isLoadingPaymentStatuses ||
-    isLoadingProductionStatuses;
+    (loadPaymentAndProduction && isLoadingPaymentStatuses) ||
+    (loadPaymentAndProduction && isLoadingProductionStatuses);
 
   // Объединяем ошибки
   const error = isErrorOrderStatuses
     ? (errorOrderStatuses as Error)
-    : isErrorPaymentStatuses
+    : loadPaymentAndProduction && isErrorPaymentStatuses
     ? (errorPaymentStatuses as Error)
-    : isErrorProductionStatuses
+    : loadPaymentAndProduction && isErrorProductionStatuses
     ? (errorProductionStatuses as Error)
     : undefined;
 

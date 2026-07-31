@@ -174,6 +174,27 @@ describe('PgOrderStatusBoardRepository', () => {
     );
   });
 
+  it('rejects the production board for packer before querying PostgreSQL', async () => {
+    const database = fakeDatabase([]);
+
+    await expect(
+      new PgOrderStatusBoardRepository(database.client).getBoard({
+        currentUser: user('packer'),
+        query: {
+          board: 'production',
+          limit: 24,
+          onlyMyOrders: false,
+          overdueOnly: false,
+        },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['productionTasks.view'] },
+    });
+    expect(database.queries).toHaveLength(0);
+  });
+
   it('does not evaluate assignment joins for an unrestricted unfiltered reader', async () => {
     const database = fakeDatabase([]);
     const repository = new PgOrderStatusBoardRepository(database.client);
@@ -454,6 +475,33 @@ describe('PgOrderStatusBoardRepository', () => {
       canChangeProductionStatus: false,
     });
   });
+
+  it('marks packer cards as order-status mutable without production status access', async () => {
+    const database = fakeDatabase([
+      boardRow(null, null),
+      {
+        ...boardRow(101, null),
+        created_by: 1,
+        manager_id: null,
+        current_user_assigned: false,
+      },
+    ]);
+
+    const board = await new PgOrderStatusBoardRepository(database.client).getBoard({
+      currentUser: user('packer'),
+      query: {
+        board: 'order',
+        limit: 24,
+        onlyMyOrders: false,
+        overdueOnly: false,
+      },
+    });
+
+    expect(board.columns[0]?.cards[0]).toMatchObject({
+      canChangeOrderStatus: true,
+      canChangeProductionStatus: false,
+    });
+  });
 });
 
 function fakeDatabase(rows: Record<string, unknown>[]) {
@@ -515,7 +563,7 @@ function user(role: CurrentUser['role']): CurrentUser {
     id: '42',
     username: role,
     role,
-    roleId: 20,
+    roleId: role === 'packer' ? 30 : 20,
     permissions: getPermissionsForRole(role),
   };
 }

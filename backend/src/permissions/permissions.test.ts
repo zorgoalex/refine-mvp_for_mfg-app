@@ -17,6 +17,8 @@ describe('permissions foundation', () => {
     expect(mapRoleIdToRole(2)).toBe('superadmin');
     expect(mapRoleToRoleId('superadmin')).toBe(2);
     expect(mapRoleToRoleId('admin')).toBe(1);
+    expect(mapRoleIdToRole(30)).toBe('packer');
+    expect(mapRoleToRoleId('packer')).toBe(30);
     expect(USER_ROLES).toContain('superadmin');
   });
 
@@ -171,6 +173,24 @@ describe('permissions foundation', () => {
     expect(can('viewer', 'orders.view_financials')).toBe(false);
   });
 
+  it('keeps packer limited to viewing orders and setting issue-ready order statuses', () => {
+    expect(getPermissionsForRole('packer')).toEqual([
+      'profile.view',
+      'profile.update_own',
+      'sessions.logout_own',
+      'orders.view',
+      'orders.change_status',
+    ]);
+    expect(can('packer', 'orders.view')).toBe(true);
+    expect(can('packer', 'orders.change_status')).toBe(true);
+    expect(can('packer', 'orders.update')).toBe(false);
+    expect(can('packer', 'orders.change_production_status')).toBe(false);
+    expect(can('packer', 'payments.view')).toBe(false);
+    expect(can('packer', 'orders.view_financials')).toBe(false);
+    expect(can('packer', 'production.tasks.update')).toBe(false);
+    expect(can('packer', 'cut.view')).toBe(false);
+  });
+
   it('preserves existing manager and top manager finance permissions', () => {
     expect(can('manager', 'payments.view')).toBe(true);
     expect(can('manager', 'payments.create')).toBe(true);
@@ -212,6 +232,7 @@ describe('permissions foundation', () => {
       'manager',
       'operator',
       'worker',
+      'packer',
       'viewer',
     ]);
     expect(HASURA_ALLOWED_ROLES.admin).not.toContain('superadmin');

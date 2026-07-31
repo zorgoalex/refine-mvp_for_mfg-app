@@ -41,6 +41,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
     top_manager: "Топ-менеджер",
     operator: "Оператор",
     worker: "Работник",
+    packer: "Упаковщик",
     viewer: "Наблюдатель",
   };
 

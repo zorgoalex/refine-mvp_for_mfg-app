@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-30",
+    title: "Заказы: роль упаковщика",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "Добавлена роль «Упаковщик»: просмотр заказов и установка только статусов заказа «Готов к выдаче» и «Выдан».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-30",
     title: "Карточка заказа: данные обновляются без перезагрузки",
     services: ["ERP"],
     repositories: ["repo_erp"],

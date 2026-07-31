@@ -2,9 +2,9 @@ import { Refine, Authenticated } from "@refinedev/core";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 import { VariantWorkspaceLayout } from "./ui-variant/shellRegistry";
 import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev/react-router-v6";
-import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, Outlet } from "react-router-dom";
 import { ConfigProvider, notification, theme as antdTheme } from "antd";
-import { useEffect, lazy } from "react";
+import { useEffect, lazy, type ReactNode } from "react";
 import ruRU from 'antd/locale/ru_RU';
 import "@refinedev/antd/dist/reset.css";
 import "./styles/app.css";
@@ -24,6 +24,8 @@ import { UiVariantProvider, useUiVariant } from "./ui-variant/UiVariantProvider"
 import { isModernUiVariant, resolveUiVariant, type UiVariant } from "./ui-variant/uiVariant";
 import { getLoadedRuntimeConfig } from "./config/runtimeConfig";
 import { getModernUiTheme } from "./ui-evolution/theme/evolutionTheme";
+import { can } from "./utils/permissions";
+import type { PermissionName } from "./api/types/authApi.types";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -201,6 +203,19 @@ const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 export interface AppProps {
   initialUiVariant?: UiVariant;
 }
+
+const PermissionRoute = ({
+  permission,
+  children,
+}: {
+  permission: PermissionName;
+  children: ReactNode;
+}) => {
+  if (!featureFlags.useBackendPermissions || can(permission)) {
+    return <>{children}</>;
+  }
+  return <Navigate to="/orders" replace />;
+};
 
 const App = ({ initialUiVariant = resolveUiVariant(getLoadedRuntimeConfig()?.ui) }: AppProps) => (
   <UiVariantProvider initialVariant={initialUiVariant}>
@@ -662,9 +677,30 @@ const ThemedApp = () => {
                   />
                   <Route path="/orders" >
                     <Route index element={<OrderList />} />
-                    <Route path="create" element={<OrderCreate />} />
-                    <Route path="edit/:id" element={<OrderEdit />} />
-                    <Route path="trash" element={<OrderTrash />} />
+                    <Route
+                      path="create"
+                      element={(
+                        <PermissionRoute permission="orders.create">
+                          <OrderCreate />
+                        </PermissionRoute>
+                      )}
+                    />
+                    <Route
+                      path="edit/:id"
+                      element={(
+                        <PermissionRoute permission="orders.update">
+                          <OrderEdit />
+                        </PermissionRoute>
+                      )}
+                    />
+                    <Route
+                      path="trash"
+                      element={(
+                        <PermissionRoute permission="orders.delete">
+                          <OrderTrash />
+                        </PermissionRoute>
+                      )}
+                    />
                     <Route path="show/:id" element={<OrderShow />} />
                   </Route>
                   <Route path="/calendar" >

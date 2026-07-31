@@ -62,6 +62,7 @@ import { buildOrderListFilterFormSync } from "./orderListFilterFormSync";
 import { findOrderByName, countOrdersAfter } from "../../api/reports/ordersSearchReportApi";
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
+import { can } from "../../utils/permissions";
 import { GroupFilter } from "./components/groups/GroupFilter";
 import { AddToCutModal } from "./components/AddToCutModal";
 import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
@@ -154,6 +155,12 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [selectedCutOrderIds, setSelectedCutOrderIds] = useState<number[]>([]);
   const [addToCutOpen, setAddToCutOpen] = useState(false);
   const canViewUsers = canQueryUsersResource(currentUser);
+  const canViewReferences = !featureFlags.useBackendPermissions || can('references.view');
+  const canViewFinancials = !featureFlags.useBackendPermissions || can('orders.view_financials');
+  const canViewDoweling = !featureFlags.useBackendPermissions || can('doweling.view');
+  const canViewEmployees = !featureFlags.useBackendPermissions || can('employees.view');
+  const canCreateOrders = !featureFlags.useBackendPermissions || can('orders.create');
+  const canUpdateOrders = !featureFlags.useBackendPermissions || can('orders.update');
   // Keep-alive: when this /orders tab is hidden (another tab active) every data
   // hook is disabled so the cached list stops reacting to invalidateQueries.
   const { isActive } = useKeepAlive();
@@ -321,7 +328,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     resource: "clients",
     optionLabel: "client_name",
     optionValue: "client_id",
-    queryOptions: { enabled: isActive },
+    queryOptions: { enabled: isActive && canViewReferences },
   });
 
   const { selectProps: userSelectProps } = useSelect({
@@ -344,14 +351,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     resource: "payment_statuses",
     optionLabel: "payment_status_name",
     optionValue: useBackendOrdersRead ? "payment_status_id" : "payment_status_name",
-    queryOptions: { enabled: isActive },
+    queryOptions: { enabled: isActive && canViewFinancials },
   });
 
   const { selectProps: dowelingSelectProps } = useSelect({
     resource: "doweling_orders",
     optionLabel: "doweling_order_name",
     optionValue: "doweling_order_name",
-    queryOptions: { enabled: isActive },
+    queryOptions: { enabled: isActive && canViewDoweling },
   });
 
   // Применение фильтров
@@ -793,7 +800,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     ],
     pagination: { pageSize: 10000 },
     queryOptions: {
-      enabled: isActive && orderIds.length > 0 && !useBackendOrdersRead,
+      enabled: isActive && orderIds.length > 0 && !useBackendOrdersRead && canViewDoweling,
     },
   });
 
@@ -826,7 +833,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { data: employeesData } = useList({
     resource: "employees",
     pagination: { pageSize: 1000 },
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    queryOptions: { enabled: isActive && canViewEmployees, refetchOnWindowFocus: false },
   });
 
   // Map сотрудников для lookup по employee_id
@@ -1248,7 +1255,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       render: (_, record) => (
         <Space size={4}>
           <ShowButton hideText size="small" icon={<EyeOutlined style={{ fontSize: 12 }} />} recordItemId={record.order_id} meta={{ syncWithLocation: true }} />
-          <EditButton hideText size="small" icon={<EditOutlined style={{ fontSize: 12 }} />} recordItemId={record.order_id} meta={{ syncWithLocation: true }} />
+          {canUpdateOrders && (
+            <EditButton hideText size="small" icon={<EditOutlined style={{ fontSize: 12 }} />} recordItemId={record.order_id} meta={{ syncWithLocation: true }} />
+          )}
         </Space>
       ),
     },
@@ -1262,7 +1271,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         title="Заказы"
         headerButtons={({ createButtonProps }) => (
           <>
-            {createButtonProps && (
+            {createButtonProps && canCreateOrders && (
               <CreateButton {...createButtonProps}>Создать</CreateButton>
             )}
             <Space.Compact style={{ marginRight: 8 }}>

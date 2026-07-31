@@ -63,6 +63,7 @@ import {
   createProductionActionIdempotencyKey,
   productionActionsApi,
 } from '../../api/productionActionsApi';
+import { authSession } from '../../api/authSession';
 import type {
   OrderStatusBoardCard,
   OrderStatusBoardColumn,
@@ -103,6 +104,10 @@ import {
   OperationalPageHeader,
   useOperationalUi,
 } from '../../ui-operational/OperationalPrimitives';
+import {
+  isPackerAllowedOrderStatusName,
+  isPackerUser,
+} from '../../utils/packerStatusAccess';
 
 const BOARD_DRAG_TYPE = 'ORDER_STATUS_BOARD_CARD';
 const DATE_FORMAT = 'DD.MM.YYYY';
@@ -222,6 +227,8 @@ export const OrderStatusBoardPage: React.FC = () => {
     useState<string | null>(null);
   const [activeCncDetailedDetail, setActiveCncDetailedDetail] =
     useState<CncDetailedDetailTarget | null>(null);
+  const currentUser = authSession.getUser();
+  const isPacker = isPackerUser(currentUser);
 
   useEffect(() => {
     boardRef.current = board;
@@ -248,6 +255,12 @@ export const OrderStatusBoardPage: React.FC = () => {
   );
 
   useEffect(() => {
+    if (isPacker && viewState.view !== 'order') {
+      updateViewState({ view: 'order' });
+    }
+  }, [isPacker, updateViewState, viewState.view]);
+
+  useEffect(() => {
     if (searchDraft.trim() === viewState.search) return;
     const timer = window.setTimeout(() => {
       updateViewState({ search: searchDraft.trim() });
@@ -268,6 +281,13 @@ export const OrderStatusBoardPage: React.FC = () => {
       loadingColumnTokensRef.current.clear();
       setLoadingColumns(new Set());
       try {
+        if (
+          isPackerUser(authSession.getUser()) &&
+          viewStateRef.current.view !== 'order'
+        ) {
+          setLoading(false);
+          return false;
+        }
         if (viewStateRef.current.view === 'cnc_today') {
           const workday = viewStateRef.current.cncWorkday ?? dayjs().format('YYYY-MM-DD');
           const displayRange = buildCncOrderSearchDateRange(
@@ -448,6 +468,13 @@ export const OrderStatusBoardPage: React.FC = () => {
           ? card.canChangeOrderStatus
           : card.canChangeProductionStatus;
       if (!canMove) return;
+      if (
+        viewState.view === 'order' &&
+        isPackerUser(authSession.getUser()) &&
+        !isPackerAllowedOrderStatusName(targetName)
+      ) {
+        return;
+      }
 
       const boardType = viewState.view === 'production' ? 'production' : 'order';
       const nextPending = reserveOrderStatusBoardMutation(
@@ -540,6 +567,16 @@ export const OrderStatusBoardPage: React.FC = () => {
   );
 
   const isCncToday = viewState.view === 'cnc_today';
+  const statusBoardTabItems = useMemo(
+    () => [
+      { key: 'order', label: 'Статусы заказов' },
+      ...(isPacker ? [] : [{ key: 'production', label: 'Производство' }]),
+      ...(!isPacker && featureFlags.cncTelegram
+        ? [{ key: 'cnc_today', label: 'МДФ-работы' }]
+        : []),
+    ],
+    [isPacker],
+  );
   const activeBoard: OrderStatusBoardType =
     viewState.view === 'production' ? 'production' : 'order';
   const boardColumns = useMemo(
@@ -877,19 +914,13 @@ export const OrderStatusBoardPage: React.FC = () => {
 
         <Tabs
           className="status-board-tabs"
-          activeKey={viewState.view}
+          activeKey={isPacker && viewState.view !== 'order' ? 'order' : viewState.view}
           onChange={(key) =>
             updateViewState({
               view: key as typeof viewState.view,
             })
           }
-          items={[
-            { key: 'order', label: 'Статусы заказов' },
-            { key: 'production', label: 'Производство' },
-            ...(featureFlags.cncTelegram
-              ? [{ key: 'cnc_today', label: 'МДФ-работы' }]
-              : []),
-          ]}
+          items={statusBoardTabItems}
         />
 
         {!isCncToday && (
@@ -2612,6 +2643,11 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
   onOpenOrder,
 }) => {
   const destination = column.status.id !== null && column.status.isActive;
+  const currentUser = authSession.getUser();
+  const packerDestinationAllowed =
+    board !== 'order' ||
+    !isPackerUser(currentUser) ||
+    isPackerAllowedOrderStatusName(column.status.name);
   const [{ isOver, canDrop }, dropRef] = useDrop<
     BoardDragItem,
     void,
@@ -2621,6 +2657,7 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
     canDrop: (item) =>
       mutationsEnabled &&
       destination &&
+      packerDestinationAllowed &&
       item.board === board &&
       item.sourceColumn !== column.key &&
       (board === 'order'
@@ -2748,7 +2785,12 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
     (column) =>
       column.key !== sourceColumn &&
       column.status.id !== null &&
-      column.status.isActive,
+      column.status.isActive &&
+      (
+        board !== 'order' ||
+        !isPackerUser(authSession.getUser()) ||
+        isPackerAllowedOrderStatusName(column.status.name)
+      ),
   );
   const readonlyReasonId = `status-board-readonly-${card.orderId}`;
   const moveAvailable = canMove && destinations.length > 0;
