@@ -241,7 +241,10 @@ describe('OrderStatusBoardPage UX guards', () => {
       actions.indexOf('cnc-bath-card__ready-icon'),
     );
     expect(css).toMatch(
-      /\.cnc-bath-card__cut-result-badge\.ant-tag\s*\{[^}]*padding-inline: 3px;[^}]*font-size: 0\.6em;[^}]*font-variant-numeric: tabular-nums;/s,
+      /\.cnc-bath-card__actions\s*\{[^}]*align-items: center;/s,
+    );
+    expect(css).toMatch(
+      /\.cnc-bath-card__cut-result-badge\.ant-tag\s*\{[^}]*padding-inline: 6px;[^}]*border-radius: 4px;[^}]*font-size: 1\.2em;[^}]*font-variant-numeric: tabular-nums;/s,
     );
     expect(page).toContain('filterCncBathColumnsByOrderStatuses(');
     expect(page).toContain('!isCncOrderHiddenFromMdfBoard(card)');
