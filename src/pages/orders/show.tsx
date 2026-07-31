@@ -254,6 +254,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const canUpdateOrders = !featureFlags.useBackendPermissions || can('orders.update');
   const canExportOrders = !featureFlags.useBackendPermissions || can('orders.export');
   const canCreatePayment = !featureFlags.useBackendPermissions || can('payments.create');
+  const canViewReferences = !featureFlags.useBackendPermissions || can('references.view');
+  const canViewFinancials = !featureFlags.useBackendPermissions || can('orders.view_financials');
+  const canViewDoweling = !featureFlags.useBackendPermissions || can('doweling.view');
+  const canViewEmployees = !featureFlags.useBackendPermissions || can('employees.view');
   const deletedOrderModel = deletedOrder ? buildDeletedOrderCardModel(deletedOrder) : null;
   const canRestore = canManageOrderTrash && featureFlags.useBackendOrdersWrite;
   const showTitle = deletedOrder
@@ -514,27 +518,32 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const { data: millingTypesData } = useList({
     resource: "milling_types",
     pagination: { pageSize: 10000 },
+    queryOptions: { enabled: canViewReferences },
   });
 
   const { data: edgeTypesData } = useList({
     resource: "edge_types",
     pagination: { pageSize: 10000 },
+    queryOptions: { enabled: canViewReferences },
   });
 
   const { data: filmsData } = useList({
     resource: "films",
     pagination: { pageSize: 10000 },
     filters: [],  // Убираем любые фильтры чтобы загрузить все записи
+    queryOptions: { enabled: canViewReferences },
   });
 
   const { data: materialsData } = useList({
     resource: "materials",
     pagination: { pageSize: 10000 },
+    queryOptions: { enabled: canViewReferences },
   });
 
   const { data: paymentTypesData } = useList({
     resource: "payment_types",
     pagination: { pageSize: 1000 },
+    queryOptions: { enabled: canViewFinancials },
   });
 
   // Загрузка телефонов клиента для экспорта
@@ -545,7 +554,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     ],
     pagination: { pageSize: 100 },
     queryOptions: {
-      enabled: !!record?.client_id,
+      enabled: !!record?.client_id && canExportOrders,
     },
   });
 
@@ -795,7 +804,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     sorters: [{ field: 'payment_date', order: 'asc' }],
     pagination: { pageSize: 1000 },
     queryOptions: {
-      enabled: !!record?.order_id && !useBackendOrdersRead,
+      enabled: !!record?.order_id && !useBackendOrdersRead && canViewFinancials,
     },
   });
 
@@ -809,7 +818,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     ],
     pagination: { pageSize: 100 },
     queryOptions: {
-      enabled: !!record?.order_id && !useBackendOrdersRead,
+      enabled: !!record?.order_id && !useBackendOrdersRead && canViewDoweling,
     },
   });
 
@@ -819,6 +828,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const { data: employeesData } = useList({
     resource: 'employees',
     pagination: { pageSize: 1000 },
+    queryOptions: { enabled: canViewEmployees },
   });
 
   const employeesMap = new Map(

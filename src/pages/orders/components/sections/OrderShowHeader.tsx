@@ -21,6 +21,8 @@ import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { resolveCurrentProductionStatusCodes } from '../../currentProductionStatus';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
+import { can } from '../../../../utils/permissions';
+import { featureFlags } from '../../../../config/featureFlags';
 
 const { Text } = Typography;
 
@@ -47,6 +49,10 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
   const { getSetting } = useAppSettings();
+  const canViewEmployees = !featureFlags.useBackendPermissions || can('employees.view');
+  const canViewReferences = !featureFlags.useBackendPermissions || can('references.view');
+  const canViewProductionReferences = !featureFlags.useBackendPermissions || can('production.view');
+  const canViewClients = !featureFlags.useBackendPermissions || can('clients.view');
 
   // State for client context menu
   const [clientMenuOpen, setClientMenuOpen] = useState(false);
@@ -59,7 +65,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
 
   // Client context menu items
   const clientMenuItems: MenuProps['items'] = useMemo(() => {
-    if (!record?.client_id) return [];
+    if (!record?.client_id || !canViewClients) return [];
     return [
       {
         key: 'view-client',
@@ -71,12 +77,13 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
         },
       },
     ];
-  }, [record?.client_id, navigate]);
+  }, [canViewClients, record?.client_id, navigate]);
 
   // Load employees for design_engineer lookup
   const { data: employeesData } = useList({
     resource: 'employees',
     pagination: { pageSize: 1000 },
+    queryOptions: { enabled: canViewEmployees },
   });
 
   const employeesMap = useMemo(() => new Map(
@@ -112,7 +119,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     ] : [],
     pagination: { pageSize: 100 },
     queryOptions: {
-      enabled: uniqueMaterialIds.length > 0,
+      enabled: uniqueMaterialIds.length > 0 && canViewReferences,
     },
   });
 
@@ -124,7 +131,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     ],
     pagination: { pageSize: 100 },
     queryOptions: {
-      enabled: !!record?.client_id,
+      enabled: !!record?.client_id && canViewClients,
     },
   });
 
@@ -178,6 +185,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     // IMPORTANT: explicit is_active filter disables dataProvider auto-filter, so we can map inactive statuses too
     filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
     sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
+    queryOptions: { enabled: canViewProductionReferences },
   });
 
   // Create map for production status ID to code

@@ -159,6 +159,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const canViewFinancials = !featureFlags.useBackendPermissions || can('orders.view_financials');
   const canViewDoweling = !featureFlags.useBackendPermissions || can('doweling.view');
   const canViewEmployees = !featureFlags.useBackendPermissions || can('employees.view');
+  const canViewProductionReferences = !featureFlags.useBackendPermissions || can('production.view');
   const canCreateOrders = !featureFlags.useBackendPermissions || can('orders.create');
   const canUpdateOrders = !featureFlags.useBackendPermissions || can('orders.update');
   // Keep-alive: when this /orders tab is hidden (another tab active) every data
@@ -767,25 +768,25 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { data: materialsData } = useList({
     resource: "materials",
     pagination: { pageSize: 10000 },
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    queryOptions: { enabled: isActive && canViewReferences, refetchOnWindowFocus: false },
   });
 
   const { data: millingTypesData } = useList({
     resource: "milling_types",
     pagination: { pageSize: 10000 },
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    queryOptions: { enabled: isActive && canViewReferences, refetchOnWindowFocus: false },
   });
 
   const { data: edgeTypesData } = useList({
     resource: "edge_types",
     pagination: { pageSize: 10000 },
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    queryOptions: { enabled: isActive && canViewReferences, refetchOnWindowFocus: false },
   });
 
   const { data: filmsData } = useList({
     resource: "films",
     pagination: { pageSize: 10000 },
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    queryOptions: { enabled: isActive && canViewReferences, refetchOnWindowFocus: false },
   });
 
   // Загружаем связи с присадками для заказов на текущей странице
@@ -816,7 +817,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     ],
     pagination: { pageSize: 10000 },
     queryOptions: {
-      enabled: isActive && orderIds.length > 0 && !useBackendOrdersRead,
+      enabled: isActive && orderIds.length > 0 && !useBackendOrdersRead && canViewProductionReferences,
     },
   });
 
@@ -826,7 +827,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     pagination: { pageSize: 100 },
     // IMPORTANT: explicit is_active filter disables dataProvider auto-filter, so we can map inactive statuses too
     filters: [{ field: "is_active", operator: "in", value: [true, false] }],
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    queryOptions: { enabled: isActive && canViewProductionReferences, refetchOnWindowFocus: false },
   });
 
   // Загружаем сотрудников для lookup конструктора
