@@ -33,4 +33,17 @@ describe('resourcePermissions', () => {
     expect(canQueryAppSettingsResource({ roleId: 30, permissions: ['orders.view'] })).toBe(false);
     expect(canQueryAppSettingsResource(null)).toBe(false);
   });
+
+  it('blocks app_settings for packer and anonymous backend sessions before runtime permission flags are applied', () => {
+    applyFeatureFlags({ ...featureFlags, useBackendAuth: true, useBackendPermissions: false });
+
+    expect(canQueryAppSettingsResource({ role: 'packer', permissions: ['orders.view'] })).toBe(false);
+    expect(canQueryAppSettingsResource(null)).toBe(false);
+  });
+
+  it('keeps legacy app_settings behavior before backend auth is enabled', () => {
+    applyFeatureFlags({ ...featureFlags, useBackendAuth: false, useBackendPermissions: false });
+
+    expect(canQueryAppSettingsResource(null)).toBe(true);
+  });
 });
