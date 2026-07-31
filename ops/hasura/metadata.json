@@ -12,6 +12,17 @@
                     },
                     "insert_permissions": [
                         {
+                            "role": "admin",
+                            "permission": {
+                                "check": {},
+                                "set": {
+                                    "created_by": "x-hasura-User-Id"
+                                },
+                                "columns": "*"
+                            },
+                            "comment": ""
+                        },
+                        {
                             "role": "manager",
                             "permission": {
                                 "check": {},
@@ -47,6 +58,15 @@
                     ],
                     "select_permissions": [
                         {
+                            "role": "admin",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
                             "role": "manager",
                             "permission": {
                                 "columns": "*",
@@ -75,6 +95,18 @@
                         }
                     ],
                     "update_permissions": [
+                        {
+                            "role": "admin",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "check": {},
+                                "set": {
+                                    "edited_by": "x-hasura-User-Id"
+                                }
+                            },
+                            "comment": ""
+                        },
                         {
                             "role": "manager",
                             "permission": {
@@ -110,6 +142,13 @@
                         }
                     ],
                     "delete_permissions": [
+                        {
+                            "role": "admin",
+                            "permission": {
+                                "filter": {}
+                            },
+                            "comment": ""
+                        },
                         {
                             "role": "manager",
                             "permission": {

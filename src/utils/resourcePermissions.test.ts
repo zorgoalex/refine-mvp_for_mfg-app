@@ -32,6 +32,10 @@ describe('resourcePermissions', () => {
     applyFeatureFlags({ ...featureFlags, useBackendPermissions: true });
 
     expect(canQueryAppSettingsResource({ role: 'superadmin', permissions: [] })).toBe(true);
+    expect(canQueryAppSettingsResource({
+      role: 'admin',
+      permissions: ['settings.view', 'settings.manage'],
+    })).toBe(true);
     expect(canQueryAppSettingsResource({ role: 'top_manager', permissions: [] })).toBe(true);
     expect(canQueryAppSettingsResource({ role: 'manager', permissions: [] })).toBe(true);
     expect(canQueryAppSettingsResource({ role: 'packer', permissions: ['orders.view'] })).toBe(false);
