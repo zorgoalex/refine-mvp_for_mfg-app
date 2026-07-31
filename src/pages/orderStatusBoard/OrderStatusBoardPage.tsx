@@ -1894,6 +1894,14 @@ const CncTelegramPrintCard: React.FC<{
   );
   return (
     <div className={`cnc-print-card${card.kind === 'bath' ? ' cnc-print-card--bath' : ''}`}>
+      {card.kind === 'packet' && card.packet.cuttingSequenceNo != null && (
+        <div className="cnc-print-card__sequence-row">
+          <strong className="cnc-print-card__sequence">
+            <span className="cnc-print-card__sequence-sign">№</span>
+            {card.packet.cuttingSequenceNo}
+          </strong>
+        </div>
+      )}
       <div className="cnc-print-card__summaries">
         {summaries.length > 0 ? summaries.map((summary) => (
           <div className="cnc-print-card__summary" key={summary.orderName}>
@@ -2047,7 +2055,8 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
             {packet.cuttingSequenceNo != null && (
               <Tooltip title="Номер раскроя файла станка">
                 <span className="cnc-packet-card__sequence">
-                  №{packet.cuttingSequenceNo}
+                  <span className="cnc-packet-card__sequence-sign">№</span>
+                  {packet.cuttingSequenceNo}
                 </span>
               </Tooltip>
             )}
