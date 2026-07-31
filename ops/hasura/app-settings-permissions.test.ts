@@ -9,7 +9,7 @@ const appSettings = metadata.sources
   .find((entry: any) => entry.table.name === 'app_settings');
 
 describe('app_settings Hasura permissions', () => {
-  it('keeps the admin settings UI aligned with app_settings metadata', () => {
+  it('does not define permissions for Hasura reserved admin role', () => {
     for (const permissionType of [
       'select_permissions',
       'insert_permissions',
@@ -18,8 +18,8 @@ describe('app_settings Hasura permissions', () => {
     ]) {
       expect(
         (appSettings[permissionType] ?? []).some((entry: any) => entry.role === 'admin'),
-        `${permissionType} must include admin`,
-      ).toBe(true);
+        `${permissionType} cannot include reserved admin role`,
+      ).toBe(false);
     }
   });
 });
