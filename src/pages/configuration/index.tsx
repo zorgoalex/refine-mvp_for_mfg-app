@@ -26,6 +26,7 @@ import { NotificationRulesConfig } from './components/NotificationRulesConfig';
 import { OrgStructureConfig } from './components/OrgStructureConfig';
 import { CutConfigTab } from './components/CutConfigTab';
 import { LabelsConfigTab } from './components/LabelsConfigTab';
+import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMatrix';
 import { can } from '../../utils/permissions';
 import {
   buildInitialResourceVisibility,
@@ -405,6 +406,7 @@ const FinanceConfigTab: React.FC = () => {
           </Tooltip>
         )}
       </div>
+      <FinancialLayerAccessMatrix />
     </div>
   );
 };

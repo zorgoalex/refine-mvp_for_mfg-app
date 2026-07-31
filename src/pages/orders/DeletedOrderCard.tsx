@@ -9,12 +9,14 @@ interface DeletedOrderCardProps {
   model: DeletedOrderCardModel;
   onRestore: (version: number) => void | Promise<void>;
   canRestore: boolean;
+  showFinancials?: boolean;
 }
 
 export const DeletedOrderCard: React.FC<DeletedOrderCardProps> = ({
   model,
   onRestore,
   canRestore,
+  showFinancials = true,
 }) => (
   <Space direction="vertical" size="middle" style={{ width: '100%' }}>
     <Alert
@@ -34,9 +36,11 @@ export const DeletedOrderCard: React.FC<DeletedOrderCardProps> = ({
       <Descriptions column={1} bordered size="small">
         <Descriptions.Item label="Номер">{model.orderName}</Descriptions.Item>
         <Descriptions.Item label="Клиент">{model.clientName ?? '—'}</Descriptions.Item>
-        <Descriptions.Item label="Сумма">
-          {model.finalAmount === null ? '—' : formatNumber(model.finalAmount, 0)}
-        </Descriptions.Item>
+        {showFinancials && (
+          <Descriptions.Item label="Сумма">
+            {model.finalAmount === null ? '—' : formatNumber(model.finalAmount, 0)}
+          </Descriptions.Item>
+        )}
         <Descriptions.Item label="Дата заказа">{formatDate(model.orderDate)}</Descriptions.Item>
         <Descriptions.Item label="Кол-во деталей">{model.detailsCount}</Descriptions.Item>
       </Descriptions>

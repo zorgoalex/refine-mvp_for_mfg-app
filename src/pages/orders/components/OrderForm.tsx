@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Card, Tabs, Button, Empty, Space, Spin, notification, Modal, Form, Select, Tag, Tooltip, Popconfirm, message } from 'antd';
+import { Alert, Card, Tabs, Button, Empty, Space, Spin, notification, Modal, Form, Select, Tag, Tooltip, Popconfirm, message } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
 import { toClientKey } from '../../../api/mappers/orderMapper';
@@ -28,6 +28,7 @@ import { OrderFormMode } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
 import { featureFlags } from '../../../config/featureFlags';
 import { can } from '../../../utils/permissions';
+import { useOrderFinancialVisibility } from '../../../hooks/useOrderFinancialVisibility';
 import { resolveOrderTabLabel } from '../../../utils/tabLabels';
 import {
   buildNextOrderNameFromList, collectProvenanceNodes, draftToFormSeed } from '../../bazis/bazisOrderDraft';
@@ -91,7 +92,24 @@ function computeOrderSaveSignature(values: unknown): string {
   return JSON.stringify(values);
 }
 
-export const OrderForm: React.FC<OrderFormProps> = ({
+export const OrderForm: React.FC<OrderFormProps> = (props) => {
+  const { canViewFinancials, isLoading } = useOrderFinancialVisibility();
+  if (isLoading) return <Spin />;
+  if (!canViewFinancials) {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        message="Финансовый слой заказа недоступен"
+        description="Создание и полное редактирование заказа отключены. Статусы заказа и деталей можно менять в карточке заказа и на рабочих досках."
+      />
+    );
+  }
+
+  return <OrderFormContent {...props} />;
+};
+
+const OrderFormContent: React.FC<OrderFormProps> = ({
   mode,
   orderId,
   onSaveSuccess,

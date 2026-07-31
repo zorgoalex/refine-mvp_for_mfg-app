@@ -41,4 +41,16 @@ describe('buildOrderCardModel', () => {
     expect(m.amountLine).toBe('0 ₸ · оплачено 0 ₸');
     expect(m.priority).toBe(false);
   });
+
+  it('omits payment status and amounts without the financial layer', () => {
+    const model = buildOrderCardModel({
+      order_id: 7,
+      payment_status_name: 'Оплачен',
+      final_amount: 1200,
+      paid_amount: 800,
+    }, { showFinancials: false });
+
+    expect(model.paymentTag).toBe('');
+    expect(model.amountLine).toBe('');
+  });
 });

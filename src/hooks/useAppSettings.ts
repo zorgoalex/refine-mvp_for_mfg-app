@@ -174,6 +174,7 @@ export const SETTING_KEYS = {
   // Production workflow (production_status_events)
   PRODUCTION_WORKFLOW_DEFAULT: 'production.workflow.default',
   RESOURCE_VISIBILITY_BY_ROLE: 'navigation.resource_visibility_by_role',
+  ORDER_FINANCIAL_VISIBILITY: 'orders.financial_visibility',
 } as const;
 
 // Types for specific settings

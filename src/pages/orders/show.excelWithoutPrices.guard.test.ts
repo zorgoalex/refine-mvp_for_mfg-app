@@ -6,8 +6,9 @@ const source = readFileSync(resolve(__dirname, 'show.tsx'), 'utf8');
 
 describe('order show price-free Excel export', () => {
   it('exposes a separate action and sends the omit-pricing mode to the workbook builder', () => {
-    expect(source).toContain('Экспорт в Excel без цен и сумм');
-    expect(source).toContain('Excel без цен и сумм');
+    expect(source).toContain('<Tooltip title="Excel для производства">');
+    expect(source).toContain('aria-label="Excel для производства"');
+    expect(source).toContain('productionExcelIcon');
     expect(source).toContain("handleExportExcel('without-prices')");
     expect(source).toContain("pricingMode: withoutPrices ? 'omit' : 'full'");
     expect(source).toContain("variant: withoutPrices ? 'without-prices' : 'standard'");
