@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { applyFeatureFlags, featureFlags } from '../config/featureFlags';
-import { canQueryUsersResource } from './resourcePermissions';
+import { canQueryAppSettingsResource, canQueryUsersResource } from './resourcePermissions';
 
 describe('resourcePermissions', () => {
   const originalFlags = { ...featureFlags };
@@ -21,5 +21,16 @@ describe('resourcePermissions', () => {
 
     expect(canQueryUsersResource({ permissions: ['orders.view'] })).toBe(false);
     expect(canQueryUsersResource({ permissions: ['users.view'] })).toBe(true);
+  });
+
+  it('allows app_settings Hasura queries only for roles with metadata select permission', () => {
+    applyFeatureFlags({ ...featureFlags, useBackendPermissions: true });
+
+    expect(canQueryAppSettingsResource({ role: 'superadmin', permissions: [] })).toBe(true);
+    expect(canQueryAppSettingsResource({ role: 'top_manager', permissions: [] })).toBe(true);
+    expect(canQueryAppSettingsResource({ role: 'manager', permissions: [] })).toBe(true);
+    expect(canQueryAppSettingsResource({ role: 'packer', permissions: ['orders.view'] })).toBe(false);
+    expect(canQueryAppSettingsResource({ roleId: 30, permissions: ['orders.view'] })).toBe(false);
+    expect(canQueryAppSettingsResource(null)).toBe(false);
   });
 });

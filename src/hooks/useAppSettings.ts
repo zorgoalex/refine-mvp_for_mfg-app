@@ -5,6 +5,8 @@
 
 import { useList, useCreate, useUpdate } from '@refinedev/core';
 import { useCallback, useMemo } from 'react';
+import { authSession } from '../api/authSession';
+import { canQueryAppSettingsResource } from '../utils/resourcePermissions';
 
 interface AppSetting {
   setting_id: number;
@@ -40,7 +42,7 @@ interface UseAppSettingsResult {
 }
 
 export const useAppSettings = (options?: { enabled?: boolean }): UseAppSettingsResult => {
-  const enabled = options?.enabled ?? true;
+  const enabled = (options?.enabled ?? true) && canQueryAppSettingsResource(authSession.getUser());
   const { data, isLoading, refetch } = useList<AppSetting>({
     resource: 'app_settings',
     pagination: { mode: 'off' },
