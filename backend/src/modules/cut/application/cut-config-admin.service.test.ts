@@ -73,6 +73,7 @@ describe('CutConfigAdminService RBAC', () => {
     expect(fields.map((field) => field.id)).toEqual(expect.arrayContaining([
       'job.number',
       'cut.number',
+      'cut.current_version',
       'sheet.thumbnail',
       'sheet.film_requirement',
       'sheet.machine_files',
@@ -99,6 +100,10 @@ describe('CutConfigAdminService RBAC', () => {
     expect(fields.find((field) => field.id === 'cut.number')).toMatchObject({
       source: 'cut',
       label: 'Номер раскроя',
+    });
+    expect(fields.find((field) => field.id === 'cut.current_version')).toMatchObject({
+      source: 'cut',
+      label: 'Текущая/актуальная версия Карты раскроя',
     });
     expect(fields.find((field) => field.id === 'sheet.film_requirement')).toMatchObject({
       source: 'sheet',

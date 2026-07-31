@@ -46,6 +46,8 @@ describe('cut PDF sheet context fields', () => {
     expect(repositorySource).toContain('loadPdfRenderIdentity');
     expect(repositorySource).toContain('cutJobId: pdfIdentity.cutJobId');
     expect(repositorySource).toContain('cutNumber: pdfIdentity.cutNumber');
+    expect(repositorySource).toContain('currentCutNumber: pdfIdentity.currentCutNumber');
+    expect(repositorySource).toContain('currentCutNumber: currentResultNo === null ? null : `${cutJobId}-${currentResultNo}`');
     expect(repositorySource).toContain('filmRequirementLinearMeters: showBathMeterGuides');
     expect(repositorySource).toContain('calculateBathSheetFilmUsage(s.placements)?.linearMeters');
     expect(repositorySource).toContain('bathDetailInfoFor:');

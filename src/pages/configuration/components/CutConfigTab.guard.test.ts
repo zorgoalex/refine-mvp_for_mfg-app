@@ -154,6 +154,8 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/Номер задания на раскрой/);
     expect(tabSrc).toMatch(/cut\.number/);
     expect(tabSrc).toMatch(/Номер раскроя/);
+    expect(tabSrc).toMatch(/cut\.current_version/);
+    expect(tabSrc).toMatch(/Текущая\/актуальная версия Карты раскроя/);
     expect(tabSrc).toMatch(/sheet\.film_requirement/);
     expect(tabSrc).toMatch(/Потребность в плёнке/);
     expect(tabSrc).toMatch(/BATH_PROFILE_PDF_ELEMENTS/);
@@ -175,7 +177,9 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).not.toContain('Обкат: ${piece.edge}');
     expect(tabSrc).not.toContain('Фрезеровка: ${piece.milling}');
     expect(tabSrc).toContain('text={`${piece.edge}\\n${piece.milling}`}');
-    expect(tabSrc).toMatch(/const detailMetaFontSize = detailFontSize \/ 2/);
+    expect(tabSrc).toMatch(/const orderFontSize = detailFontSize \* 1\.25/);
+    expect(tabSrc).toMatch(/const detailMetaFontSize = orderFontSize \/ 2/);
+    expect(tabSrc).toMatch(/fontSize=\{orderFontSize\}/);
     expect(tabSrc).toMatch(/fontSize=\{detailMetaFontSize\}/);
     expect(tabSrc).toMatch(/fontSize=\{detailFontSize\}/);
     expect(tabSrc).toMatch(/fontStyle="bold"/);

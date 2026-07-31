@@ -198,6 +198,7 @@ interface RenderedSheetContext {
 interface PdfRenderIdentity {
   cutJobId: number | null;
   cutNumber: string | null;
+  currentCutNumber: string | null;
 }
 
 /** Related audit dimensions when a Phase 1 failure has not yet resolved groups. */
@@ -2863,6 +2864,7 @@ export class PgCutRepository implements CutRepositoryPort {
         detailRows: s.pdfDetailRows,
         cutJobId: pdfIdentity.cutJobId ?? undefined,
         cutNumber: pdfIdentity.cutNumber ?? undefined,
+        currentCutNumber: pdfIdentity.currentCutNumber ?? undefined,
         filmRequirementLinearMeters: s.filmRequirementLinearMeters,
       }));
     return frozenContext
@@ -2964,6 +2966,7 @@ export class PgCutRepository implements CutRepositoryPort {
           detailRows: sheet.pdfDetailRows,
           cutJobId: pdfIdentity.cutJobId ?? undefined,
           cutNumber: pdfIdentity.cutNumber ?? undefined,
+          currentCutNumber: pdfIdentity.currentCutNumber ?? undefined,
           filmRequirementLinearMeters: sheet.filmRequirementLinearMeters,
         });
         sheetNumber += 1;
@@ -2982,21 +2985,20 @@ export class PgCutRepository implements CutRepositoryPort {
     cutJobId: number | undefined,
     requestedResultNo: number | undefined,
   ): Promise<PdfRenderIdentity> {
-    if (cutJobId === undefined) return { cutJobId: null, cutNumber: null };
-    let resultNo = requestedResultNo ?? null;
-    if (resultNo === null) {
-      const result = await this.database.query<{ result_no: string | number | null }>(
-        `SELECT current_result.result_no
-         FROM cut_job j
-         LEFT JOIN cut_result current_result ON current_result.cut_result_id = j.current_cut_result_id
-         WHERE j.cut_job_id = $1`,
-        [cutJobId],
-      );
-      resultNo = numOrNull(result.rows[0]?.result_no);
-    }
+    if (cutJobId === undefined) return { cutJobId: null, cutNumber: null, currentCutNumber: null };
+    const result = await this.database.query<{ result_no: string | number | null }>(
+      `SELECT current_result.result_no
+       FROM cut_job j
+       LEFT JOIN cut_result current_result ON current_result.cut_result_id = j.current_cut_result_id
+       WHERE j.cut_job_id = $1`,
+      [cutJobId],
+    );
+    const currentResultNo = numOrNull(result.rows[0]?.result_no);
+    const resultNo = requestedResultNo ?? currentResultNo;
     return {
       cutJobId,
       cutNumber: resultNo === null ? null : `${cutJobId}-${resultNo}`,
+      currentCutNumber: currentResultNo === null ? null : `${cutJobId}-${currentResultNo}`,
     };
   }
 

@@ -404,7 +404,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
         );
       }
       const labelBox = bathCenterLabelBox(rect, reservedTop, reservedLeft);
-      const centerText = renderBathDetailCenterLabel({
+      const centerLabel = renderBathDetailCenterLabel({
         lines: labelFor(piece),
         cx: labelBox.cx,
         cy: labelBox.cy,
@@ -414,17 +414,16 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
         compact: !shouldRenderBathCenterLabel(labelBox.w, labelBox.h, detailFontMm),
       });
       const bathDetailInfo = input.bathDetailInfoFor?.(piece);
-      const dimensionFontMm = Math.min(widthFont ?? sideFontMm, heightFont ?? sideFontMm);
       const detailMeta = bathDetailInfo
         ? renderBathDetailMeta({
             info: bathDetailInfo,
             rect,
-            fontMm: dimensionFontMm / 2,
+            fontMm: (centerLabel.orderFontMm ?? detailFontMm) / 2,
             clipId: `cut-bath-detail-meta-${pieceIndex}`,
           })
         : '';
 
-      return renderPieceGroup(piece, cx, cy, [rectEl, ...sideTexts, centerText, detailMeta].join(''));
+      return renderPieceGroup(piece, cx, cy, [rectEl, ...sideTexts, centerLabel.svg, detailMeta].join(''));
     })
     .join('');
   const bathMeterGuides = input.showBathMeterGuides
@@ -494,6 +493,11 @@ function shouldRenderBathCenterLabel(rectW: number, rectH: number, baseFontMm: n
   return rectW >= minSide && rectH >= minSide;
 }
 
+interface BathDetailCenterLabelRender {
+  svg: string;
+  orderFontMm: number | null;
+}
+
 function renderBathDetailCenterLabel(input: {
   lines: string | string[];
   cx: number;
@@ -502,28 +506,34 @@ function renderBathDetailCenterLabel(input: {
   rectH: number;
   baseFontMm: number;
   compact?: boolean;
-}): string {
+}): BathDetailCenterLabelRender {
   const lines = (Array.isArray(input.lines) ? input.lines : [input.lines]).slice(0, 2).map((line) => line.trim()).filter(Boolean);
-  if (lines.length === 0) return '';
+  if (lines.length === 0) return { svg: '', orderFontMm: null };
   if (lines.length === 1) {
     const font = fitBathLabelFont([lines[0]], input.rectW, input.rectH, input.baseFontMm, 1);
-    return `<text x="${num(input.cx)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
-      font,
-    )}" ${bathOrderLabelStyle(font)} text-anchor="middle" dominant-baseline="middle">${escapeXml(lines[0])}</text>`;
+    return {
+      svg: `<text x="${num(input.cx)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+        font,
+      )}" ${bathOrderLabelStyle(font)} text-anchor="middle" dominant-baseline="middle">${escapeXml(lines[0])}</text>`,
+      orderFontMm: font,
+    };
   }
 
   const [orderLine, rawPositionLine] = lines;
   const positionLine = formatBathPositionLabel(rawPositionLine);
   if (input.compact) {
-    return renderBathPositionLabel({
-      label: positionLine,
-      cx: input.cx,
-      cy: input.cy,
-      maxW: input.rectW,
-      maxH: input.rectH,
-      baseFontMm: input.baseFontMm * 0.8,
-      rotate: input.rectW < input.rectH,
-    });
+    return {
+      svg: renderBathPositionLabel({
+        label: positionLine,
+        cx: input.cx,
+        cy: input.cy,
+        maxW: input.rectW,
+        maxH: input.rectH,
+        baseFontMm: input.baseFontMm * 0.8,
+        rotate: input.rectW < input.rectH,
+      }),
+      orderFontMm: null,
+    };
   }
   const oneLineText = `${orderLine} ${positionLine}`;
   const shouldUseOneLine = input.rectH < input.baseFontMm * 1.65;
@@ -535,40 +545,46 @@ function renderBathDetailCenterLabel(input: {
     const positionW = estimateBathPositionWidth(positionLine, positionFont);
     const totalW = orderW + gapW + positionW;
     const left = input.cx - totalW / 2;
-    return [
-      `<text x="${num(left + orderW / 2)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+    return {
+      svg: [
+        `<text x="${num(left + orderW / 2)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+          font,
+        )}" ${bathOrderLabelStyle(font)} text-anchor="middle" dominant-baseline="middle">${escapeXml(
+          orderLine,
+        )}</text>`,
+        renderBathPositionLabel({
+          label: positionLine,
+          cx: left + orderW + gapW + positionW / 2,
+          cy: input.cy,
+          maxW: positionW,
+          maxH: input.rectH,
+          baseFontMm: positionFont,
+        }),
+      ].join(''),
+      orderFontMm: font,
+    };
+  }
+
+  const font = fitBathLabelFont([orderLine, positionLine], input.rectW, input.rectH, input.baseFontMm, 2);
+  const positionFont = font * 0.8;
+  return {
+    svg: [
+      `<text x="${num(input.cx)}" y="${num(input.cy - font * 0.55)}" font-family="Liberation Sans, sans-serif" font-size="${num(
         font,
       )}" ${bathOrderLabelStyle(font)} text-anchor="middle" dominant-baseline="middle">${escapeXml(
         orderLine,
       )}</text>`,
       renderBathPositionLabel({
         label: positionLine,
-        cx: left + orderW + gapW + positionW / 2,
-        cy: input.cy,
-        maxW: positionW,
-        maxH: input.rectH,
+        cx: input.cx,
+        cy: input.cy + font * 0.55,
+        maxW: input.rectW,
+        maxH: input.rectH / 2,
         baseFontMm: positionFont,
       }),
-    ].join('');
-  }
-
-  const font = fitBathLabelFont([orderLine, positionLine], input.rectW, input.rectH, input.baseFontMm, 2);
-  const positionFont = font * 0.8;
-  return [
-    `<text x="${num(input.cx)}" y="${num(input.cy - font * 0.55)}" font-family="Liberation Sans, sans-serif" font-size="${num(
-      font,
-    )}" ${bathOrderLabelStyle(font)} text-anchor="middle" dominant-baseline="middle">${escapeXml(
-      orderLine,
-    )}</text>`,
-    renderBathPositionLabel({
-      label: positionLine,
-      cx: input.cx,
-      cy: input.cy + font * 0.55,
-      maxW: input.rectW,
-      maxH: input.rectH / 2,
-      baseFontMm: positionFont,
-    }),
-  ].join('');
+    ].join(''),
+    orderFontMm: font,
+  };
 }
 
 function formatBathPositionLabel(value: string): string {

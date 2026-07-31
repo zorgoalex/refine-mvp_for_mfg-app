@@ -32,6 +32,7 @@ export interface PdfSheetInput {
   detailRows?: PdfSheetDetailRow[];
   cutJobId?: number;
   cutNumber?: string;
+  currentCutNumber?: string;
   filmRequirementLinearMeters?: number | null;
 }
 
@@ -713,6 +714,7 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
     'job.number': sheet.cutJobId ?? null,
     'job.pdf_template': sheet.template ?? '',
     'cut.number': sheet.cutNumber ?? '',
+    'cut.current_version': sheet.currentCutNumber ?? '',
     'group.number': '',
     'group.material': joinBlank(meta.materials),
     'group.film': joinBlank(meta.films),
