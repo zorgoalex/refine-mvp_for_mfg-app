@@ -235,12 +235,11 @@ export class PgCncTelegramRepository
       await setSessionUser(tx, command.currentUser.id);
       const requestId = command.requestId || 'cnc-telegram-ingest';
       const payloadHash = hashPayload(command.dto);
-      const idempotency = await reconcileIdempotency(tx, {
+      await reconcileIdempotency(tx, {
         dto: command.dto,
         currentUserId: command.currentUser.id,
         payloadHash,
       });
-      if (idempotency.completedResponse) return idempotency.completedResponse;
 
       const replay = await tx.query<PacketReplayRow>(
         `
@@ -1102,7 +1101,7 @@ async function reconcileIdempotency(
     currentUserId: string;
     payloadHash: string;
   },
-): Promise<{ completedResponse?: CncTelegramIngestResponseDto }> {
+): Promise<void> {
   const requestHash = hashRequest({
     actorUserId: input.currentUserId,
     commandName: COMMAND_NAME,
@@ -1127,7 +1126,7 @@ async function reconcileIdempotency(
       requestHash,
     ],
   );
-  if (inserted.rows[0]) return {};
+  if (inserted.rows[0]) return;
 
   const existing = await tx.query<IdempotencyRow>(
     `
@@ -1144,8 +1143,7 @@ async function reconcileIdempotency(
     throw idempotencyError('IDEMPOTENCY_KEY_REUSED', input.dto.idempotencyKey);
   }
   if (row.status === 'completed' && row.response_json) {
-    if (input.dto.cuttingSequenceNo != null) return {};
-    return { completedResponse: parseStoredResponse(row.response_json) };
+    return;
   }
   if (row.status === 'failed') {
     throw idempotencyError('IDEMPOTENCY_FAILED', input.dto.idempotencyKey);
@@ -1766,12 +1764,6 @@ function stableStringify(value: unknown): string {
   return `{${Object.keys(record).sort().map((key) =>
     `${JSON.stringify(key)}:${stableStringify(record[key])}`,
   ).join(',')}}`;
-}
-
-function parseStoredResponse(value: CncTelegramIngestResponseDto | string): CncTelegramIngestResponseDto {
-  return typeof value === 'string'
-    ? JSON.parse(value) as CncTelegramIngestResponseDto
-    : value;
 }
 
 function idempotencyError(code: string, idempotencyKey: string): ApiError {

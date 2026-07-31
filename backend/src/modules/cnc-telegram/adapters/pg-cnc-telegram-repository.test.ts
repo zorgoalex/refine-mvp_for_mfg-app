@@ -665,6 +665,75 @@ describe('PgCncTelegramRepository', () => {
     expect(result.packet.cuttingSequenceNo).toBe(17);
   });
 
+  it('can assign a missing cutting sequence when replaying completed idempotency for a pending packet', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const dto = {
+      ...ingestDto(),
+      idempotencyKey: 'cnc:test:repo:completed-auto-sequence',
+      thumbsUp: false,
+      completionStatus: 'pending' as const,
+    };
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/FROM command_idempotency_keys/i.test(text)) {
+          const inserted = queries.find((query) =>
+            /INSERT INTO command_idempotency_keys/i.test(query.text),
+          );
+          return {
+            rows: [{
+              request_hash: inserted?.params[4],
+              response_json: {
+                packet: { cuttingSequenceNo: null },
+                requestId: 'request-cnc-1',
+                applied: true,
+                ignoredStaleSourceVersion: false,
+              },
+              status: 'completed',
+            }],
+          };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return {
+            rows: [{
+              packet_id: '00000000-0000-0000-0000-000000000001',
+              source_version: 1,
+              payload_hash: payloadHashForTest(dto),
+            }],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              cutting_sequence_no: 21,
+              completion_status: 'pending',
+              thumbs_up: false,
+            })],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto,
+      requestId: 'request-cnc-1',
+    });
+
+    const sql = queries.map((query) => query.text).join('\n');
+    expect(sql).toContain('MAX(cutting_sequence_no)');
+    expect(result.applied).toBe(false);
+    expect(result.packet.cuttingSequenceNo).toBe(21);
+  });
+
   it('can assign a missing cutting sequence on stale source-version replays', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const tx = {
