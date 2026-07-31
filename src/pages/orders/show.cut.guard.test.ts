@@ -36,9 +36,12 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(source).toContain("activeInfoPanel === 'cut'");
   });
 
-  it('renders vacuum-bath film material usage in the read-only order card', () => {
+  it('renders two-column order materials with linked bath cut jobs in the read-only order card', () => {
     expect(source).toContain('computeOrderBathFilmUsage');
-    expect(source).toContain('Материалы по раскрою ванны');
+    expect(source).toContain('Материалы заказа');
+    expect(source).toContain('buildOrderFilmMaterialRows');
+    expect(source).toContain('buildOrderSheetMaterialRows');
+    expect(source).toContain('<CutJobLinks cutJobIds={value} cutJobNameById={cutJobNameById} />');
     expect(source).toContain('formatFilmLinearMeters');
     expect(source).toContain('bathCutJobs');
   });

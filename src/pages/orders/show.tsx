@@ -9,6 +9,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from "reac
 import { useTabStore } from "../../stores/tabStore";
 import { resolveOrderTabLabel } from "../../utils/tabLabels";
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from "../../utils/materialDisplayName";
+import { formatNumber } from "../../utils/numberFormat";
 import { downloadOrderExcel } from "../../utils/excel/generateOrderExcel";
 import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
 import { handleExcelError } from "../../utils/excel/excelErrorHandler";
@@ -64,6 +65,8 @@ import { useCutDetailLastReady } from "./useCutDetailLastReady";
 import { computeOrderBathFilmUsage, formatFilmLinearMeters } from "../cut/cutFilmUsage";
 import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
 import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/OperationalPrimitives";
+import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
+import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./orderMaterialsSummary";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
@@ -742,6 +745,18 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       filmsMap,
     ),
     [bathCutJobs, details, filmsMap],
+  );
+  const cutJobNameById = useMemo(() => buildCutJobNameById(bathCutJobs), [bathCutJobs]);
+  const orderFilmMaterialRows = useMemo(
+    () => buildOrderFilmMaterialRows(details as any, bathFilmUsage, filmsMap),
+    [bathFilmUsage, details, filmsMap],
+  );
+  const orderSheetMaterialRows = useMemo(
+    () => buildOrderSheetMaterialRows(
+      details as any,
+      (detail) => resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap),
+    ),
+    [details, resolvedNameByDetailId, materialsData],
   );
 
   // Detail grouping state (persisted per user+order; suppressed during cut selection).
@@ -1939,65 +1954,143 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
                     <div style={{ marginTop: 12, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 6 }}>
-                        Материалы по раскрою ванны
+                        Материалы заказа
                       </div>
-                      <Table
-                        dataSource={bathFilmUsage}
-                        rowKey={(row) => row.filmId ?? row.filmName ?? 'no-film'}
-                        size="small"
-                        pagination={false}
-                        bordered
-                        loading={bathCutJobsLoading}
-                        locale={{
-                          emptyText: cutColumnEnabled ? 'Нет данных по раскрою ванны' : 'Нет доступа к данным раскроя',
-                        }}
-                        columns={[
-                          {
-                            title: 'Пленка',
-                            dataIndex: 'filmName',
-                            key: 'filmName',
-                            render: (value: string | null) => value?.trim() || 'Пленка не указана',
-                          },
-                          {
-                            title: 'Пог. м',
-                            dataIndex: 'linearMeters',
-                            key: 'linearMeters',
-                            align: 'right' as const,
-                            render: (value: number) => formatFilmLinearMeters(value),
-                          },
-                          {
-                            title: 'Листы',
-                            dataIndex: 'sheets',
-                            key: 'sheets',
-                            align: 'center' as const,
-                          },
-                          {
-                            title: 'Раскрои',
-                            dataIndex: 'cutJobIds',
-                            key: 'cutJobIds',
-                            render: (value: number[]) => value.map((id) => `#${id}`).join(', '),
-                          },
-                        ]}
-                        summary={(data) => {
-                          const totalMeters = data.reduce((sum, item) => sum + item.linearMeters, 0);
-                          const totalSheets = data.reduce((sum, item) => sum + item.sheets, 0);
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 12 }}>
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Пленка</div>
+                          <Table
+                            dataSource={orderFilmMaterialRows}
+                            rowKey="key"
+                            size="small"
+                            pagination={false}
+                            bordered
+                            loading={bathCutJobsLoading}
+                            scroll={{ x: 680 }}
+                            locale={{
+                              emptyText: cutColumnEnabled ? 'Нет данных по пленке' : 'Нет доступа к данным раскроя',
+                            }}
+                            columns={[
+                              {
+                                title: 'Пленка',
+                                dataIndex: 'name',
+                                key: 'name',
+                              },
+                              {
+                                title: 'м²',
+                                dataIndex: 'totalArea',
+                                key: 'totalArea',
+                                align: 'right' as const,
+                                render: (value: number) => formatNumber(value, 2),
+                              },
+                              {
+                                title: 'Детали',
+                                dataIndex: 'detailsCount',
+                                key: 'detailsCount',
+                                align: 'center' as const,
+                              },
+                              {
+                                title: 'Пог. м',
+                                dataIndex: 'bathLinearMeters',
+                                key: 'bathLinearMeters',
+                                align: 'right' as const,
+                                render: (value: number) => value > 0 ? formatFilmLinearMeters(value) : '—',
+                              },
+                              {
+                                title: 'Листы',
+                                dataIndex: 'bathSheets',
+                                key: 'bathSheets',
+                                align: 'center' as const,
+                                render: (value: number) => value > 0 ? value : '—',
+                              },
+                              {
+                                title: 'Раскрои',
+                                dataIndex: 'cutJobIds',
+                                key: 'cutJobIds',
+                                render: (value: number[]) => (
+                                  <CutJobLinks cutJobIds={value} cutJobNameById={cutJobNameById} />
+                                ),
+                              },
+                            ]}
+                            summary={(data) => {
+                              const totalArea = data.reduce((sum, item) => sum + item.totalArea, 0);
+                              const totalDetails = data.reduce((sum, item) => sum + item.detailsCount, 0);
+                              const totalMeters = data.reduce((sum, item) => sum + item.bathLinearMeters, 0);
+                              const totalSheets = data.reduce((sum, item) => sum + item.bathSheets, 0);
 
-                          return (
-                            <Table.Summary.Row>
-                              <Table.Summary.Cell index={0}>
-                                <strong>Итого:</strong>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={1} align="right">
-                                <strong>{formatFilmLinearMeters(totalMeters)}</strong>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={2} align="center">
-                                <strong>{totalSheets}</strong>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={3} />
-                            </Table.Summary.Row>
-                          );
-                        }}
-                      />
+                              return (
+                                <Table.Summary.Row>
+                                  <Table.Summary.Cell index={0}>
+                                    <strong>Итого:</strong>
+                                  </Table.Summary.Cell>
+                                  <Table.Summary.Cell index={1} align="right">
+                                    <strong>{formatNumber(totalArea, 2)}</strong>
+                                  </Table.Summary.Cell>
+                                  <Table.Summary.Cell index={2} align="center">
+                                    <strong>{totalDetails}</strong>
+                                  </Table.Summary.Cell>
+                                  <Table.Summary.Cell index={3} align="right">
+                                    <strong>{totalMeters > 0 ? formatFilmLinearMeters(totalMeters) : '—'}</strong>
+                                  </Table.Summary.Cell>
+                                  <Table.Summary.Cell index={4} align="center">
+                                    <strong>{totalSheets > 0 ? totalSheets : '—'}</strong>
+                                  </Table.Summary.Cell>
+                                  <Table.Summary.Cell index={5} />
+                                </Table.Summary.Row>
+                              );
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Листовые материалы</div>
+                          <Table
+                            dataSource={orderSheetMaterialRows}
+                            rowKey="key"
+                            size="small"
+                            pagination={false}
+                            bordered
+                            locale={{ emptyText: 'Нет данных по листовым материалам' }}
+                            columns={[
+                              {
+                                title: 'Материал',
+                                dataIndex: 'name',
+                                key: 'name',
+                              },
+                              {
+                                title: 'м²',
+                                dataIndex: 'totalArea',
+                                key: 'totalArea',
+                                align: 'right' as const,
+                                render: (value: number) => formatNumber(value, 2),
+                              },
+                              {
+                                title: 'Детали',
+                                dataIndex: 'detailsCount',
+                                key: 'detailsCount',
+                                align: 'center' as const,
+                              },
+                            ]}
+                            summary={(data) => {
+                              const totalArea = data.reduce((sum, item) => sum + item.totalArea, 0);
+                              const totalDetails = data.reduce((sum, item) => sum + item.detailsCount, 0);
+
+                              return (
+                                <Table.Summary.Row>
+                                  <Table.Summary.Cell index={0}>
+                                    <strong>Итого:</strong>
+                                  </Table.Summary.Cell>
+                                  <Table.Summary.Cell index={1} align="right">
+                                    <strong>{formatNumber(totalArea, 2)}</strong>
+                                  </Table.Summary.Cell>
+                                  <Table.Summary.Cell index={2} align="center">
+                                    <strong>{totalDetails}</strong>
+                                  </Table.Summary.Cell>
+                                </Table.Summary.Row>
+                              );
+                            }}
+                          />
+                        </div>
+                      </div>
                     </div>
 
                     {/* Ниже — на всю ширину: Файлы, Бирки, Служебная информация */}
