@@ -62,7 +62,7 @@ import {
 } from "./components/tables/OrderDetailColumnSettings";
 import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from "../cut/cutJobEvents";
 import { useCutDetailLastReady } from "./useCutDetailLastReady";
-import { computeOrderBathFilmUsage, formatFilmLinearMeters } from "../cut/cutFilmUsage";
+import { computeOrderBathFilmUsage } from "../cut/cutFilmUsage";
 import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
 import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/OperationalPrimitives";
 import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
@@ -1994,7 +1994,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                 dataIndex: 'bathLinearMeters',
                                 key: 'bathLinearMeters',
                                 align: 'right' as const,
-                                render: (value: number) => value > 0 ? formatFilmLinearMeters(value) : '—',
+                                render: (value: number) => value > 0 ? formatNumber(value, 1) : '—',
                               },
                               {
                                 title: 'Листы',
@@ -2030,7 +2030,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                     <strong>{totalDetails}</strong>
                                   </Table.Summary.Cell>
                                   <Table.Summary.Cell index={3} align="right">
-                                    <strong>{totalMeters > 0 ? formatFilmLinearMeters(totalMeters) : '—'}</strong>
+                                    <strong>{totalMeters > 0 ? formatNumber(totalMeters, 1) : '—'}</strong>
                                   </Table.Summary.Cell>
                                   <Table.Summary.Cell index={4} align="center">
                                     <strong>{totalSheets > 0 ? totalSheets : '—'}</strong>

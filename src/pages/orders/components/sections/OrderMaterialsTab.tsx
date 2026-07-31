@@ -11,7 +11,7 @@ import { can } from '../../../../utils/permissions';
 import { cutApi } from '../../../../api/cutApi';
 import type { CutJobDto } from '../../../../api/types/cutApi.types';
 import { useCutDetailLastReady } from '../../useCutDetailLastReady';
-import { computeOrderBathFilmUsage, formatFilmLinearMeters } from '../../../cut/cutFilmUsage';
+import { computeOrderBathFilmUsage } from '../../../cut/cutFilmUsage';
 import { buildCutJobNameById, CutJobLinks } from '../../CutJobLinks';
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from '../../orderMaterialsSummary';
 
@@ -165,7 +165,7 @@ export const OrderMaterialsTab: React.FC = () => {
       dataIndex: 'bathLinearMeters',
       key: 'bathLinearMeters',
       align: 'right' as const,
-      render: (value: number) => value > 0 ? formatFilmLinearMeters(value) : '—',
+      render: (value: number) => value > 0 ? formatNumber(value, 1) : '—',
     },
     {
       title: 'Листы',
@@ -228,7 +228,7 @@ export const OrderMaterialsTab: React.FC = () => {
                     <Text strong style={{ fontSize: '1.1em' }}>{totalDetails}</Text>
                   </Table.Summary.Cell>
                   <Table.Summary.Cell index={3} align="right">
-                    <Text strong style={{ fontSize: '1.1em' }}>{totalMeters > 0 ? formatFilmLinearMeters(totalMeters) : '—'}</Text>
+                    <Text strong style={{ fontSize: '1.1em' }}>{totalMeters > 0 ? formatNumber(totalMeters, 1) : '—'}</Text>
                   </Table.Summary.Cell>
                   <Table.Summary.Cell index={4} align="center">
                     <Text strong style={{ fontSize: '1.1em' }}>{totalSheets > 0 ? totalSheets : '—'}</Text>

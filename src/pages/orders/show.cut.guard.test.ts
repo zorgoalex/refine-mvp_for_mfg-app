@@ -42,7 +42,7 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(source).toContain('buildOrderFilmMaterialRows');
     expect(source).toContain('buildOrderSheetMaterialRows');
     expect(source).toContain('<CutJobLinks cutJobIds={value} cutJobNameById={cutJobNameById} />');
-    expect(source).toContain('formatFilmLinearMeters');
+    expect(source).toContain('formatNumber(value, 1)');
     expect(source).toContain('bathCutJobs');
   });
 });
