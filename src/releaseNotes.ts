@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-07-31",
+    title: "Базис XML: фрезеровка и плёнка в заказе",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "При создании заказа из Базис-проекта фрезеровка и плёнка детали берутся из одноимённых пользовательских свойств XML с приоритетом над облицовкой пласти.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-30",
     title: "Заказы: роль упаковщика",
     services: ["ERP"],

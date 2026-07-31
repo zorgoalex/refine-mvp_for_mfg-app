@@ -110,6 +110,7 @@ describe('parseBazisXml', () => {
   it('keeps real Bazis user properties nested in every panel raw payload', () => {
     const xml = `<Проект Версия="1"><Изделие><Наименование>Тест</Наименование><СписокЭлементов>
       <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>Фасад</Наименование>
+        <ОблицовкаПласти1><Пласть><Наименование>Старая плёнка</Наименование></Пласть></ОблицовкаПласти1>
         <ПользовательскиеСвойства>
           <Свойство><Имя>Фрезеровка</Имя><Значение>Модерн</Значение></Свойство>
           <Свойство><Имя>Пленка</Имя><Значение>Белый глянец</Значение></Свойство>
@@ -117,7 +118,8 @@ describe('parseBazisXml', () => {
       </Объект>
     </СписокЭлементов></Изделие></Проект>`;
 
-    const panel = parseBazisXml(xml).nodes.find((node) => node.objectType === 'Панель');
+    const parsed = parseBazisXml(xml);
+    const panel = parsed.nodes.find((node) => node.objectType === 'Панель');
 
     expect(panel?.raw['ПользовательскиеСвойства']).toEqual({
       Свойство: [
@@ -125,6 +127,9 @@ describe('parseBazisXml', () => {
         { Имя: 'Пленка', Значение: 'Белый глянец' },
       ],
     });
+    expect(parsed.materials.filter((material) => material.kindGuess === 'film')).toEqual([
+      { name: 'Белый глянец', kindGuess: 'film', usageCount: 1 },
+    ]);
   });
 
   it('aggregates unique materials with kind guess', () => {
