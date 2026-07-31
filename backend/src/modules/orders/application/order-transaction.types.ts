@@ -141,6 +141,26 @@ export interface DetailSheetAuditRef {
   sheetMaterialTypeId: number | null;
 }
 
+export interface OrderStatusAuditInfo {
+  statusId: number;
+  statusName: string;
+  statusCode: string | null;
+}
+
+export interface ProductionStatusAuditInfo {
+  statusId: number;
+  statusName: string;
+  statusCode: string | null;
+}
+
+export interface OrderDetailStatusAuditRow {
+  detailId: number;
+  detailNumber: number | null;
+  productionStatusId: number | null;
+  productionStatusName: string | null;
+  productionStatusCode: string | null;
+}
+
 export interface OrderSaveAuditMetadata {
   commandName: string;
   requestId?: string;
@@ -170,6 +190,39 @@ export interface OrderSaveAuditEvent {
   after?: Record<string, unknown> | null;
   metadata?: OrderSaveAuditMetadata;
   relatedSheetMaterialTypeIds?: number[];
+}
+
+export interface OrderStatusAuditEvent {
+  action:
+    | 'orders.status_change'
+    | 'orders.production_status_change'
+    | 'orders.detail_production_status_change';
+  orderId: number;
+  detailId?: number;
+  actorUserId: string;
+  actorUsername?: string | null;
+  actorRole?: string | null;
+  clientId?: number | null;
+  requestId?: string;
+  statusField: 'orderStatus' | 'productionCurrentStatus' | 'productionDetailStage';
+  statusId: number | null;
+  statusName?: string | null;
+  statusCode?: string | null;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  diff?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface OrderStatusOutboxEvent {
+  eventType: 'order.status_changed' | 'order.production_status_changed';
+  orderId: number;
+  clientId: number | null;
+  actorUserId: string;
+  requestId: string;
+  idempotencyKey: string;
+  sourceIdempotencyKey?: string;
+  payload: Record<string, unknown>;
 }
 
 /** Transaction-scoped context threaded into shadow-material audit writes. */
@@ -262,6 +315,9 @@ export interface OrderWriteUnitOfWork {
     response: RestoreOrderResponseDto,
   ): Promise<void>;
   loadOrderHeaderSnapshot(orderId: number): Promise<Record<string, unknown> | null>;
+  loadOrderStatusAuditInfo(statusId: number | null): Promise<OrderStatusAuditInfo | null>;
+  loadProductionStatusAuditInfo(statusId: number | null): Promise<ProductionStatusAuditInfo | null>;
+  loadOrderDetailStatusAuditRows(orderId: number): Promise<OrderDetailStatusAuditRow[]>;
   peekOrderName(orderId: number): Promise<string | null>;
   loadOrderForUpdate(orderId: number): Promise<LockedOrderRow | null>;
   /**
@@ -346,6 +402,8 @@ export interface OrderWriteUnitOfWork {
     actorUserId: string;
   }): Promise<number>;
   writeAuditEvent(event: OrderSaveAuditEvent): Promise<void>;
+  writeStatusAuditEvent(event: OrderStatusAuditEvent): Promise<void>;
+  enqueueStatusOutboxEvent(event: OrderStatusOutboxEvent): Promise<void>;
   evaluateStatusAutomation(event: StatusAutomationEvent): Promise<void>;
   writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string>;
   enqueueOrderDeleteOutbox(input: OrderDeleteOutboxInput): Promise<void>;

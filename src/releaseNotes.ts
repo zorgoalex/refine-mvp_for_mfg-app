@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-31",
+    title: "Аудит: смена статусов заказа и деталей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В журнале аудита отдельными событиями фиксируются смена статуса заказа, текущего производственного статуса и производственного статуса существующих деталей, включая аккаунт исполнителя и старое/новое значение.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-31",
     title: "Потребности заказов: живая сводка материалов",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

@@ -6,13 +6,17 @@ import type {
   CreateOrderCommand,
   DeleteOrderCommand,
   DetailSheetAuditRef,
+  OrderDetailStatusAuditRow,
   OrderDeadlineSyncPort,
   OrderDefaultSchedulePort,
   OrderChildReference,
   RestoreOrderCommand,
   OrderSaveAuditMetadata,
+  OrderStatusAuditInfo,
+  OrderStatusOutboxEvent,
   LockedOrderRow,
   OrderPermissionCheckerPort,
+  ProductionStatusAuditInfo,
   OrderTransactionManagerPort,
   OrderWriteUnitOfWork,
   UpdateOrderCommand,
@@ -51,6 +55,8 @@ interface StoredSheetSummary {
   detailSheetIds: ReadonlyArray<{ detailId: number; sheetMaterialTypeId: number | null }>;
 }
 
+const ORDER_SAVE_SOURCE = 'backend-orders-command';
+
 function actorUserIdOf(currentUser: CurrentUser): number | null {
   const parsed = Number(currentUser.id);
   return Number.isFinite(parsed) ? parsed : null;
@@ -60,6 +66,64 @@ function numOrNull(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function boolOrNull(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
+function changedDiff(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): Record<string, unknown> {
+  const diff: Record<string, unknown> = {};
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const key of keys) {
+    if (before[key] !== after[key]) {
+      diff[key] = { before: before[key] ?? null, after: after[key] ?? null };
+    }
+  }
+  return diff;
+}
+
+function orderStatusAuditJson(
+  statusId: number | null,
+  status: OrderStatusAuditInfo | null,
+  version: number,
+): Record<string, unknown> {
+  return {
+    orderStatusId: statusId,
+    orderStatusName: status?.statusName ?? null,
+    orderStatusCode: status?.statusCode ?? null,
+    version,
+  };
+}
+
+function productionStatusAuditJson(
+  statusId: number | null,
+  status: ProductionStatusAuditInfo | null,
+  version: number,
+  productionStatusFromDetailsEnabled: boolean | null,
+): Record<string, unknown> {
+  return {
+    productionStatusId: statusId,
+    productionStatusName: status?.statusName ?? null,
+    productionStatusCode: status?.statusCode ?? null,
+    productionStatusFromDetailsEnabled,
+    version,
+  };
+}
+
+function detailProductionStatusAuditJson(
+  detail: OrderDetailStatusAuditRow,
+): Record<string, unknown> {
+  return {
+    detailId: detail.detailId,
+    detailNumber: detail.detailNumber,
+    productionStatusId: detail.productionStatusId,
+    productionStatusName: detail.productionStatusName,
+    productionStatusCode: detail.productionStatusCode,
+  };
 }
 
 function normalizeProjectIdInput(value: unknown): number | null {
@@ -412,6 +476,7 @@ export class OrderTransactionService {
         });
       }
       const beforeSnapshot = await unitOfWork.loadOrderHeaderSnapshot(command.orderId);
+      const beforeDetailStatusRows = await unitOfWork.loadOrderDetailStatusAuditRows(command.orderId);
 
       // SP3 stored sheet state. Only sheet-eligible orders can carry sheet details, so
       // read stored details ONLY when eligible — legacy updates take no extra query and
@@ -490,6 +555,7 @@ export class OrderTransactionService {
         currentUser: command.currentUser,
       });
       const afterSnapshot = await unitOfWork.loadOrderHeaderSnapshot(command.orderId);
+      const afterDetailStatusRows = await unitOfWork.loadOrderDetailStatusAuditRows(command.orderId);
       const beforeDetailRefs = touchesSheet ? toBeforeDetailRefs(storedDetailSheetIds) : undefined;
       const afterDetailRefs2 = touchesSheet ? toAfterDetailRefs(prepared.details) : undefined;
       await unitOfWork.writeAuditEvent({
@@ -521,13 +587,27 @@ export class OrderTransactionService {
           storedDetailSheetIds,
         ),
       });
+      const automationRequestId =
+        command.requestId ??
+        (command.dto.idempotencyKey ? 'orders-update' : `orders-update-${command.orderId}-v${version}`);
+      await this.emitStatusChangeAuditAndEvents(unitOfWork, {
+        orderId: command.orderId,
+        previousVersion: lockedOrder.version,
+        nextVersion: version,
+        currentUser: command.currentUser,
+        clientId: prepared.order.header.clientId ?? null,
+        requestId: automationRequestId,
+        sourceIdempotencyKey: command.dto.idempotencyKey ?? undefined,
+        beforeSnapshot,
+        afterSnapshot,
+        beforeDetailStatusRows,
+        afterDetailStatusRows,
+      });
       await this.emitPaymentCreatedAutomationEvents(unitOfWork, {
         orderId: command.orderId,
         order: prepared.order,
         currentUser: command.currentUser,
-        requestId:
-          command.requestId ??
-          (command.dto.idempotencyKey ? 'orders-update' : `orders-update-${command.orderId}-v${version}`),
+        requestId: automationRequestId,
         sourceIdempotencyKey: command.dto.idempotencyKey ?? undefined,
       });
       if (command.postPersistHook) {
@@ -768,6 +848,230 @@ export class OrderTransactionService {
       ...order,
       payments: [],
     };
+  }
+
+  private async emitStatusChangeAuditAndEvents(
+    unitOfWork: OrderWriteUnitOfWork,
+    input: {
+      orderId: number;
+      previousVersion: number;
+      nextVersion: number;
+      currentUser: CurrentUser;
+      clientId: number | null;
+      requestId: string;
+      sourceIdempotencyKey?: string;
+      beforeSnapshot: Record<string, unknown> | null;
+      afterSnapshot: Record<string, unknown> | null;
+      beforeDetailStatusRows: OrderDetailStatusAuditRow[];
+      afterDetailStatusRows: OrderDetailStatusAuditRow[];
+    },
+  ): Promise<void> {
+    const outboxEvents: OrderStatusOutboxEvent[] = [];
+    const outboxSeed = input.sourceIdempotencyKey ?? input.requestId;
+    const beforeOrderStatusId = numOrNull(input.beforeSnapshot?.orderStatusId);
+    const afterOrderStatusId = numOrNull(input.afterSnapshot?.orderStatusId);
+
+    if (beforeOrderStatusId !== afterOrderStatusId) {
+      const beforeStatus = await unitOfWork.loadOrderStatusAuditInfo(beforeOrderStatusId);
+      const afterStatus = await unitOfWork.loadOrderStatusAuditInfo(afterOrderStatusId);
+      const before = orderStatusAuditJson(beforeOrderStatusId, beforeStatus, input.previousVersion);
+      const after = orderStatusAuditJson(afterOrderStatusId, afterStatus, input.nextVersion);
+
+      await unitOfWork.writeStatusAuditEvent({
+        action: 'orders.status_change',
+        orderId: input.orderId,
+        actorUserId: input.currentUser.id,
+        actorUsername: input.currentUser.username,
+        actorRole: input.currentUser.role,
+        clientId: input.clientId,
+        requestId: input.requestId,
+        statusField: 'orderStatus',
+        statusId: afterOrderStatusId,
+        statusName: afterStatus?.statusName ?? null,
+        statusCode: afterStatus?.statusCode ?? null,
+        before,
+        after,
+        diff: changedDiff(before, after),
+        metadata: {
+          source: ORDER_SAVE_SOURCE,
+          orderId: input.orderId,
+          clientId: input.clientId,
+          orderStatusId: afterOrderStatusId,
+          orderStatusName: afterStatus?.statusName ?? null,
+          previousOrderStatusId: beforeOrderStatusId,
+          previousOrderStatusName: beforeStatus?.statusName ?? null,
+          action: 'order_status_change',
+          statusField: 'orderStatus',
+          requestId: input.requestId,
+        },
+      });
+
+      outboxEvents.push({
+        eventType: 'order.status_changed',
+        orderId: input.orderId,
+        clientId: input.clientId,
+        actorUserId: input.currentUser.id,
+        requestId: input.requestId,
+        idempotencyKey: `${outboxSeed}:order.status_changed`,
+        sourceIdempotencyKey: input.sourceIdempotencyKey,
+        payload: {
+          eventType: 'order.status_changed',
+          actorUserId: input.currentUser.id,
+          requestId: input.requestId,
+          entityType: 'order',
+          entityId: String(input.orderId),
+          orderId: input.orderId,
+          clientId: input.clientId,
+          orderStatusId: afterOrderStatusId,
+          previousOrderStatusId: beforeOrderStatusId,
+          action: 'order_status_change',
+          scope: { source: 'order-save' },
+          idempotencyKey: input.sourceIdempotencyKey ?? input.requestId,
+          outboxIdempotencyKey: `${outboxSeed}:order.status_changed`,
+        },
+      });
+    }
+
+    const beforeProductionStatusId = numOrNull(input.beforeSnapshot?.productionStatusId);
+    const afterProductionStatusId = numOrNull(input.afterSnapshot?.productionStatusId);
+    if (beforeProductionStatusId !== afterProductionStatusId) {
+      const beforeStatus = await unitOfWork.loadProductionStatusAuditInfo(beforeProductionStatusId);
+      const afterStatus = await unitOfWork.loadProductionStatusAuditInfo(afterProductionStatusId);
+      const before = productionStatusAuditJson(
+        beforeProductionStatusId,
+        beforeStatus,
+        input.previousVersion,
+        boolOrNull(input.beforeSnapshot?.productionStatusFromDetailsEnabled),
+      );
+      const after = productionStatusAuditJson(
+        afterProductionStatusId,
+        afterStatus,
+        input.nextVersion,
+        boolOrNull(input.afterSnapshot?.productionStatusFromDetailsEnabled),
+      );
+
+      await unitOfWork.writeStatusAuditEvent({
+        action: 'orders.production_status_change',
+        orderId: input.orderId,
+        actorUserId: input.currentUser.id,
+        actorUsername: input.currentUser.username,
+        actorRole: input.currentUser.role,
+        clientId: input.clientId,
+        requestId: input.requestId,
+        statusField: 'productionCurrentStatus',
+        statusId: afterProductionStatusId,
+        statusName: afterStatus?.statusName ?? null,
+        statusCode: afterStatus?.statusCode ?? null,
+        before,
+        after,
+        diff: changedDiff(before, after),
+        metadata: {
+          source: ORDER_SAVE_SOURCE,
+          orderId: input.orderId,
+          clientId: input.clientId,
+          productionStatusId: afterProductionStatusId,
+          productionStatusCode: afterStatus?.statusCode ?? null,
+          productionStatusName: afterStatus?.statusName ?? null,
+          previousProductionStatusId: beforeProductionStatusId,
+          previousProductionStatusCode: beforeStatus?.statusCode ?? null,
+          previousProductionStatusName: beforeStatus?.statusName ?? null,
+          action: 'production_status_change',
+          statusField: 'productionCurrentStatus',
+          requestId: input.requestId,
+        },
+      });
+
+      outboxEvents.push({
+        eventType: 'order.production_status_changed',
+        orderId: input.orderId,
+        clientId: input.clientId,
+        actorUserId: input.currentUser.id,
+        requestId: input.requestId,
+        idempotencyKey: `${outboxSeed}:order.production_status_changed`,
+        sourceIdempotencyKey: input.sourceIdempotencyKey,
+        payload: {
+          eventType: 'order.production_status_changed',
+          actorUserId: input.currentUser.id,
+          requestId: input.requestId,
+          entityType: 'order',
+          entityId: String(input.orderId),
+          orderId: input.orderId,
+          clientId: input.clientId,
+          productionStatusId: afterProductionStatusId,
+          productionStatusCode: afterStatus?.statusCode ?? null,
+          previousProductionStatusId: beforeProductionStatusId,
+          previousProductionStatusCode: beforeStatus?.statusCode ?? null,
+          action: 'production_status_change',
+          scope: { source: 'order-save' },
+          idempotencyKey: input.sourceIdempotencyKey ?? input.requestId,
+          outboxIdempotencyKey: `${outboxSeed}:order.production_status_changed`,
+        },
+      });
+    }
+
+    const beforeDetailsById = new Map(
+      input.beforeDetailStatusRows.map((detail) => [detail.detailId, detail]),
+    );
+    for (const afterDetail of input.afterDetailStatusRows) {
+      const beforeDetail = beforeDetailsById.get(afterDetail.detailId);
+      if (!beforeDetail) {
+        continue;
+      }
+      if (beforeDetail.productionStatusId === afterDetail.productionStatusId) {
+        continue;
+      }
+
+      const before = detailProductionStatusAuditJson(beforeDetail);
+      const after = detailProductionStatusAuditJson(afterDetail);
+      await unitOfWork.writeStatusAuditEvent({
+        action: 'orders.detail_production_status_change',
+        orderId: input.orderId,
+        detailId: afterDetail.detailId,
+        actorUserId: input.currentUser.id,
+        actorUsername: input.currentUser.username,
+        actorRole: input.currentUser.role,
+        clientId: input.clientId,
+        requestId: input.requestId,
+        statusField: 'productionDetailStage',
+        statusId: afterDetail.productionStatusId,
+        statusName: afterDetail.productionStatusName,
+        statusCode: afterDetail.productionStatusCode,
+        before,
+        after,
+        diff: changedDiff(before, after),
+        metadata: {
+          source: ORDER_SAVE_SOURCE,
+          orderId: input.orderId,
+          clientId: input.clientId,
+          detailId: afterDetail.detailId,
+          detailNumber: afterDetail.detailNumber,
+          productionStatusId: afterDetail.productionStatusId,
+          productionStatusCode: afterDetail.productionStatusCode,
+          productionStatusName: afterDetail.productionStatusName,
+          previousProductionStatusId: beforeDetail.productionStatusId,
+          previousProductionStatusCode: beforeDetail.productionStatusCode,
+          previousProductionStatusName: beforeDetail.productionStatusName,
+          action: 'detail_production_status_change',
+          statusField: 'productionDetailStage',
+          requestId: input.requestId,
+        },
+      });
+    }
+
+    for (const event of outboxEvents) {
+      await unitOfWork.enqueueStatusOutboxEvent(event);
+    }
+
+    for (const event of outboxEvents) {
+      await unitOfWork.evaluateStatusAutomation({
+        eventType: event.eventType,
+        origin: 'user',
+        orderId: event.orderId,
+        actor: input.currentUser,
+        requestId: event.requestId,
+        sourceIdempotencyKey: event.sourceIdempotencyKey,
+      });
+    }
   }
 
   private async emitPaymentCreatedAutomationEvents(

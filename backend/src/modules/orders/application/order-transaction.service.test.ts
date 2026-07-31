@@ -28,6 +28,7 @@ import type {
   LockedOrderDeleteRow,
   LockedOrderRestoreRow,
   OrderChildReference,
+  OrderDetailStatusAuditRow,
   OrderDeleteAuditInput,
   OrderDeleteIdempotencyResult,
   OrderDeleteOutboxInput,
@@ -35,8 +36,12 @@ import type {
   OrderRestoreIdempotencyResult,
   OrderRestoreOutboxInput,
   OrderSaveAuditEvent,
+  OrderStatusAuditEvent,
+  OrderStatusAuditInfo,
+  OrderStatusOutboxEvent,
   OrderTransactionManagerPort,
   OrderWriteUnitOfWork,
+  ProductionStatusAuditInfo,
   RestoreOrderCommand,
   SaveContext,
   SheetReferenceValidationInput,
@@ -87,6 +92,7 @@ interface FakeState {
   projects: Map<number, FakeProjectRecord>;
   auditEvents: Array<
     | OrderSaveAuditEvent
+    | OrderStatusAuditEvent
     | { action: 'orders.delete'; orderId: number; actorUserId: string; requestId: string; nextVersion: number }
     | {
         action: 'orders.restore';
@@ -97,7 +103,14 @@ interface FakeState {
         targetOrderName: string;
       }
   >;
-  outboxEvents: Array<{ eventType: string; orderId: number; requestId: string; targetOrderName?: string }>;
+  outboxEvents: Array<{
+    eventType: string;
+    orderId: number;
+    requestId: string;
+    targetOrderName?: string;
+    idempotencyKey?: string;
+    payload?: Record<string, unknown>;
+  }>;
   deniedRestoreAudits: Array<{ orderId: number; requestId: string; actorUserId: string }>;
 }
 
@@ -659,6 +672,22 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     this.state.auditEvents.push(event);
   }
 
+  async writeStatusAuditEvent(event: OrderStatusAuditEvent): Promise<void> {
+    this.call('writeStatusAuditEvent');
+    this.state.auditEvents.push(event);
+  }
+
+  async enqueueStatusOutboxEvent(event: OrderStatusOutboxEvent): Promise<void> {
+    this.call('enqueueStatusOutboxEvent');
+    this.state.outboxEvents.push({
+      eventType: event.eventType,
+      orderId: event.orderId,
+      requestId: event.requestId,
+      idempotencyKey: event.idempotencyKey,
+      payload: event.payload,
+    });
+  }
+
   async evaluateStatusAutomation(event: StatusAutomationEvent): Promise<void> {
     this.call('evaluateStatusAutomation');
     this.owner.statusAutomationEvents.push(event);
@@ -738,6 +767,7 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       managerId: order.header.managerId ?? null,
       orderStatusId: order.header.orderStatusId,
       productionStatusId: order.header.productionStatusId ?? null,
+      productionStatusFromDetailsEnabled: order.header.productionStatusFromDetailsEnabled ?? null,
       plannedCompletionDate: order.header.plannedCompletionDate ?? null,
       completionDate: order.header.completionDate ?? null,
       issueDate: order.header.issueDate ?? null,
@@ -761,6 +791,46 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       // path selection in OrderTransactionService (storedEligible check at line ~190).
       sheetEligible: true,
     };
+  }
+
+  async loadOrderStatusAuditInfo(statusId: number | null): Promise<OrderStatusAuditInfo | null> {
+    this.call('loadOrderStatusAuditInfo');
+    return statusId === null
+      ? null
+      : {
+          statusId,
+          statusName: `Статус заказа ${statusId}`,
+          statusCode: null,
+        };
+  }
+
+  async loadProductionStatusAuditInfo(
+    statusId: number | null,
+  ): Promise<ProductionStatusAuditInfo | null> {
+    this.call('loadProductionStatusAuditInfo');
+    return statusId === null
+      ? null
+      : {
+          statusId,
+          statusName: `Производственный статус ${statusId}`,
+          statusCode: `production_${statusId}`,
+        };
+  }
+
+  async loadOrderDetailStatusAuditRows(orderId: number): Promise<OrderDetailStatusAuditRow[]> {
+    this.call('loadOrderDetailStatusAuditRows');
+    const order = this.getOrder(orderId);
+    return order.details.map((detail) => {
+      const productionStatusId = detail.productionStatusId ?? null;
+      return {
+        detailId: detail.id as number,
+        detailNumber: detail.detailNumber ?? null,
+        productionStatusId,
+        productionStatusName:
+          productionStatusId === null ? null : `Производственный статус ${productionStatusId}`,
+        productionStatusCode: productionStatusId === null ? null : `production_${productionStatusId}`,
+      };
+    });
   }
 
   async readOrder(orderId: number): Promise<OrderDto> {
@@ -1722,7 +1792,7 @@ describe('OrderTransactionService', () => {
     expect(updateAuditEvent1.after).toBeTruthy();
     // after reflects the updated orderName
     expect((updateAuditEvent1.after as Record<string, unknown>)?.orderName).toBe('Updated order');
-    expect(transactions.calls.slice(0, 11)).toEqual([
+    expect(transactions.calls.slice(0, 12)).toEqual([
       'begin',
       'setSessionUser',
       'lockOrderName',
@@ -1730,12 +1800,228 @@ describe('OrderTransactionService', () => {
       'loadOrderForUpdate',
       'assertOrderNameAvailable',
       'loadOrderHeaderSnapshot',
+      'loadOrderDetailStatusAuditRows',
       // VARIANT B: storedEligible=true (sheetEligible in snapshot) → loadStoredOrderSheetState runs
       'loadStoredOrderSheetState',
       'validateSheetReferences',
       'assertChildOwnership',
       'updateOrderHeader',
     ]);
+  });
+
+  it('audits order, production, and existing detail status changes made through order save', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      header: createHeader({
+        orderName: 'Seed order',
+        clientId: 1001,
+        orderStatusId: 1001,
+        productionStatusId: 2001,
+      }),
+      details: [
+        calculatedDetail({ id: 11, detailNumber: 1, detailCost: 3000, productionStatusId: 3001 }),
+        calculatedDetail({ id: 12, detailNumber: 2, detailCost: 3000, productionStatusId: 3001 }),
+        calculatedDetail({ id: 13, detailNumber: 3, detailCost: 4000, productionStatusId: 3004 }),
+      ],
+      payments: [],
+    });
+
+    await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      requestId: 'req-status-save',
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Seed order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1002,
+          productionStatusId: 2002,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [
+          calculatedDetail({ id: 11, detailNumber: 1, detailCost: 3000, productionStatusId: 3002 }),
+          calculatedDetail({ id: 12, detailNumber: 2, detailCost: 3000, productionStatusId: 3001 }),
+          {
+            clientKey: 'new-detail',
+            detailNumber: 4,
+            height: 1000,
+            width: 500,
+            quantity: 1,
+            materialId: null,
+            sheetMaterialTypeId: 1001,
+            millingTypeId: 1001,
+            edgeTypeId: 1001,
+            detailCost: 3000,
+            productionStatusId: 3003,
+          },
+        ],
+        payments: [],
+        deleted: { detailIds: [13] },
+        version: 3,
+        idempotencyKey: 'save-status-key',
+      }),
+    });
+
+    expect(transactions.state.auditEvents.map((event) => event.action)).toEqual([
+      'orders.update',
+      'orders.status_change',
+      'orders.production_status_change',
+      'orders.detail_production_status_change',
+    ]);
+    const orderStatusEvent = transactions.state.auditEvents.find(
+      (event): event is OrderStatusAuditEvent => event.action === 'orders.status_change',
+    );
+    expect(orderStatusEvent).toMatchObject({
+      orderId: 42,
+      actorUserId: 'user_manager',
+      actorUsername: 'manager',
+      actorRole: 'manager',
+      clientId: 1001,
+      requestId: 'req-status-save',
+      statusField: 'orderStatus',
+      statusId: 1002,
+      statusName: 'Статус заказа 1002',
+      statusCode: null,
+    });
+    expect(orderStatusEvent?.before).toMatchObject({
+      orderStatusId: 1001,
+      orderStatusName: 'Статус заказа 1001',
+    });
+    expect(orderStatusEvent?.after).toMatchObject({
+      orderStatusId: 1002,
+      orderStatusName: 'Статус заказа 1002',
+    });
+
+    const productionStatusEvent = transactions.state.auditEvents.find(
+      (event): event is OrderStatusAuditEvent =>
+        event.action === 'orders.production_status_change',
+    );
+    expect(productionStatusEvent).toMatchObject({
+      orderId: 42,
+      statusField: 'productionCurrentStatus',
+      statusId: 2002,
+      statusName: 'Производственный статус 2002',
+      statusCode: 'production_2002',
+    });
+    expect(productionStatusEvent?.before).toMatchObject({
+      productionStatusId: 2001,
+      productionStatusName: 'Производственный статус 2001',
+      productionStatusCode: 'production_2001',
+    });
+    expect(productionStatusEvent?.after).toMatchObject({
+      productionStatusId: 2002,
+      productionStatusName: 'Производственный статус 2002',
+      productionStatusCode: 'production_2002',
+    });
+
+    const detailStatusEvents = transactions.state.auditEvents.filter(
+      (event): event is OrderStatusAuditEvent =>
+        event.action === 'orders.detail_production_status_change',
+    );
+    expect(detailStatusEvents.map((event) => event.detailId)).toEqual([11]);
+    expect(detailStatusEvents[0]).toMatchObject({
+      orderId: 42,
+      detailId: 11,
+      statusField: 'productionDetailStage',
+      statusId: 3002,
+      statusName: 'Производственный статус 3002',
+      statusCode: 'production_3002',
+    });
+    expect(detailStatusEvents[0].before).toMatchObject({
+      detailId: 11,
+      detailNumber: 1,
+      productionStatusId: 3001,
+      productionStatusName: 'Производственный статус 3001',
+      productionStatusCode: 'production_3001',
+    });
+    expect(detailStatusEvents[0].after).toMatchObject({
+      detailId: 11,
+      detailNumber: 1,
+      productionStatusId: 3002,
+      productionStatusName: 'Производственный статус 3002',
+      productionStatusCode: 'production_3002',
+    });
+
+    expect(transactions.state.outboxEvents).toMatchObject([
+      {
+        eventType: 'order.status_changed',
+        orderId: 42,
+        requestId: 'req-status-save',
+        idempotencyKey: 'save-status-key:order.status_changed',
+      },
+      {
+        eventType: 'order.production_status_changed',
+        orderId: 42,
+        requestId: 'req-status-save',
+        idempotencyKey: 'save-status-key:order.production_status_changed',
+      },
+    ]);
+    expect(transactions.state.outboxEvents[0].payload).toMatchObject({
+      orderStatusId: 1002,
+      previousOrderStatusId: 1001,
+      scope: { source: 'order-save' },
+    });
+    expect(transactions.statusAutomationEvents).toEqual([
+      expect.objectContaining({
+        eventType: 'order.status_changed',
+        orderId: 42,
+        requestId: 'req-status-save',
+        sourceIdempotencyKey: 'save-status-key',
+      }),
+      expect.objectContaining({
+        eventType: 'order.production_status_changed',
+        orderId: 42,
+        requestId: 'req-status-save',
+        sourceIdempotencyKey: 'save-status-key',
+      }),
+    ]);
+    expect(transactions.calls.indexOf('writeStatusAuditEvent')).toBeGreaterThan(
+      transactions.calls.indexOf('writeAuditEvent'),
+    );
+    expect(transactions.calls.indexOf('enqueueStatusOutboxEvent')).toBeGreaterThan(
+      transactions.calls.indexOf('writeStatusAuditEvent'),
+    );
+  });
+
+  it('does not emit dedicated status audit when order save leaves statuses unchanged', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      header: createHeader({ orderStatusId: 1001, productionStatusId: 2001 }),
+      details: [calculatedDetail({ id: 11, detailCost: 10000, productionStatusId: 3001 })],
+      payments: [],
+    });
+
+    await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      requestId: 'req-no-status-change',
+      dto: createSaveDto({
+        header: {
+          orderId: 42,
+          orderName: 'Seed order',
+          clientId: 1001,
+          orderDate: '2026-04-30',
+          orderStatusId: 1001,
+          productionStatusId: 2001,
+          discount: 0,
+          surcharge: 0,
+        },
+        details: [calculatedDetail({ id: 11, detailCost: 10000, productionStatusId: 3001 })],
+        payments: [],
+        version: 3,
+      }),
+    });
+
+    expect(transactions.state.auditEvents.map((event) => event.action)).toEqual(['orders.update']);
+    expect(transactions.state.outboxEvents).toEqual([]);
+    expect(transactions.statusAutomationEvents).toEqual([]);
   });
 
   it('emits payment.created automation when order update adds a nested payment', async () => {
