@@ -12,7 +12,7 @@ describe('configuration tabs layout', () => {
     const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
 
     expect(source).toContain('configuration-tabs-wrap');
-    expect(source).toContain("tabBarGutter={4}");
+    expect(source).toContain("tabBarGutter={isOperational ? 12 : 4}");
   });
 
   it('registers the table visibility tab in the configuration screen', () => {
@@ -21,6 +21,19 @@ describe('configuration tabs layout', () => {
     expect(source).toContain("key: 'table-visibility'");
     expect(source).toContain('Видимость таблиц для юзеров');
     expect(source).toContain('<TableVisibilityByRoleTab />');
+  });
+
+  it('embeds the financial layer matrix in finance settings', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
+    const matrixSource = fs.readFileSync(
+      path.resolve(__dirname, 'components/FinancialLayerAccessMatrix.tsx'),
+      'utf8',
+    );
+
+    expect(source).toContain('<FinancialLayerAccessMatrix />');
+    expect(matrixSource).toContain('Порядок применения: аккаунт → роль → базовые права');
+    expect(matrixSource).toContain("SETTING_KEYS.ORDER_FINANCIAL_VISIBILITY");
+    expect(matrixSource).toContain("scope: MatrixScope");
   });
 
   it('embeds default schedules into production stages', () => {

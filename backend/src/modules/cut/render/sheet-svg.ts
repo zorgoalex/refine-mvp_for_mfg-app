@@ -58,6 +58,11 @@ export interface PieceLabelInput {
   materialName?: string | null;
 }
 
+export interface BathPieceDetailInfo {
+  edgeTypeName?: string | null;
+  millingTypeName?: string | null;
+}
+
 /**
  * Piece label lines shown inside every placed detail:
  * 1) order name (orders.order_name), falling back to the numeric order id when
@@ -124,6 +129,8 @@ const ORDER_FILL_PALETTE = [
 const BATH_ORDER_LABEL_COLOR = '#7f1d1d';
 const BATH_POSITION_LABEL_COLOR = '#14532d';
 const BATH_DIMENSION_FONT_ENLARGE_MIN_SIDE_MM = 150;
+const BATH_ORDER_LABEL_WEIGHT = 900;
+const BATH_ORDER_LABEL_STROKE_RATIO = 0.04;
 
 /** Deterministic, light fill color for a source order. Unknown order keeps the
  * legacy neutral fill so old/partial data remains readable. */
@@ -161,6 +168,8 @@ export interface BuildSheetSvgInput {
    * detail on line 2).
    */
   labelFor: (piece: FreecutPlacement) => string | string[];
+  /** Extra labels printed only in the bath PDF miniature, at each piece's bottom-right. */
+  bathDetailInfoFor?: (piece: FreecutPlacement) => BathPieceDetailInfo;
   /** Optional per-piece fill, used to group details by source order. */
   fillFor?: (piece: FreecutPlacement) => string | null | undefined;
   /** font-size in mm for piece labels (scaled with the mm viewBox). */
@@ -356,7 +365,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
   const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90, originTopLeft);
 
   const pieces = sheet.pieces
-    .map((piece) => {
+    .map((piece, pieceIndex) => {
       const x = sheet.trim_mm.left + piece.x_mm;
       const y = sheet.trim_mm.top + piece.y_mm;
       const rect = applyAxisOrigin(orientPieceRect({ x, y, w: piece.width_mm, h: piece.height_mm }, w, h, rotate90, originTopLeft), axisOrigin, rotate90);
@@ -404,8 +413,18 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
         baseFontMm: detailFontMm,
         compact: !shouldRenderBathCenterLabel(labelBox.w, labelBox.h, detailFontMm),
       });
+      const bathDetailInfo = input.bathDetailInfoFor?.(piece);
+      const dimensionFontMm = Math.min(widthFont ?? sideFontMm, heightFont ?? sideFontMm);
+      const detailMeta = bathDetailInfo
+        ? renderBathDetailMeta({
+            info: bathDetailInfo,
+            rect,
+            fontMm: dimensionFontMm,
+            clipId: `cut-bath-detail-meta-${pieceIndex}`,
+          })
+        : '';
 
-      return renderPieceGroup(piece, cx, cy, [rectEl, ...sideTexts, centerText].join(''));
+      return renderPieceGroup(piece, cx, cy, [rectEl, ...sideTexts, centerText, detailMeta].join(''));
     })
     .join('');
   const bathMeterGuides = input.showBathMeterGuides
@@ -419,6 +438,33 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
     bathMeterGuides,
     `</svg>`,
   ].join('');
+}
+
+function renderBathDetailMeta(input: {
+  info: BathPieceDetailInfo;
+  rect: { x: number; y: number; w: number; h: number };
+  fontMm: number;
+  clipId: string;
+}): string {
+  const fontMm = Math.max(1, input.fontMm);
+  const padding = Math.max(3, fontMm * 0.16);
+  const x = input.rect.x + input.rect.w - padding;
+  const bottom = input.rect.y + input.rect.h - padding;
+  const edge = input.info.edgeTypeName?.trim() || '—';
+  const milling = input.info.millingTypeName?.trim() || '—';
+  return [
+    `<clipPath id="${input.clipId}"><rect x="${num(input.rect.x)}" y="${num(input.rect.y)}" width="${num(input.rect.w)}" height="${num(input.rect.h)}"/></clipPath>`,
+    `<text class="cut-bath-detail-meta" font-family="Liberation Sans, sans-serif" font-size="${num(fontMm)}" fill="#111111" text-anchor="end" data-corner="bottom-right" clip-path="url(#${input.clipId})">`,
+    `<tspan x="${num(x)}" y="${num(bottom - fontMm * 1.05)}">${escapeXml(`Обкат: ${edge}`)}</tspan>`,
+    `<tspan x="${num(x)}" y="${num(bottom)}">${escapeXml(`Фрезеровка: ${milling}`)}</tspan>`,
+    '</text>',
+  ].join('');
+}
+
+function bathOrderLabelStyle(fontMm: number): string {
+  return `fill="${BATH_ORDER_LABEL_COLOR}" font-weight="${BATH_ORDER_LABEL_WEIGHT}" stroke="${BATH_ORDER_LABEL_COLOR}" stroke-width="${num(
+    fontMm * BATH_ORDER_LABEL_STROKE_RATIO,
+  )}" paint-order="stroke"`;
 }
 
 function bathDimensionBaseFont(rectW: number, rectH: number, baseFontMm: number): number {
@@ -463,7 +509,7 @@ function renderBathDetailCenterLabel(input: {
     const font = fitBathLabelFont([lines[0]], input.rectW, input.rectH, input.baseFontMm, 1);
     return `<text x="${num(input.cx)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
       font,
-    )}" fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700" text-anchor="middle" dominant-baseline="middle">${escapeXml(lines[0])}</text>`;
+    )}" ${bathOrderLabelStyle(font)} text-anchor="middle" dominant-baseline="middle">${escapeXml(lines[0])}</text>`;
   }
 
   const [orderLine, rawPositionLine] = lines;
@@ -492,7 +538,7 @@ function renderBathDetailCenterLabel(input: {
     return [
       `<text x="${num(left + orderW / 2)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
         font,
-      )}" fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700" text-anchor="middle" dominant-baseline="middle">${escapeXml(
+      )}" ${bathOrderLabelStyle(font)} text-anchor="middle" dominant-baseline="middle">${escapeXml(
         orderLine,
       )}</text>`,
       renderBathPositionLabel({
@@ -511,7 +557,7 @@ function renderBathDetailCenterLabel(input: {
   return [
     `<text x="${num(input.cx)}" y="${num(input.cy - font * 0.55)}" font-family="Liberation Sans, sans-serif" font-size="${num(
       font,
-    )}" fill="${BATH_ORDER_LABEL_COLOR}" font-weight="700" text-anchor="middle" dominant-baseline="middle">${escapeXml(
+    )}" ${bathOrderLabelStyle(font)} text-anchor="middle" dominant-baseline="middle">${escapeXml(
       orderLine,
     )}</text>`,
     renderBathPositionLabel({

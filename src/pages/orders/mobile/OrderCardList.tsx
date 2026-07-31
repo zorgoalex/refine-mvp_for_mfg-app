@@ -10,6 +10,7 @@ export interface OrderCardListProps {
   pagination: TablePaginationConfig | false;
   onPaginationChange: (page: number, pageSize: number) => void;
   onOpen: (id: number) => void;
+  showFinancials?: boolean;
 }
 
 export const buildOrderCardPagination = (
@@ -31,14 +32,14 @@ export const buildOrderCardPagination = (
   };
 };
 
-export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pagination, onPaginationChange, onOpen }) => (
+export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pagination, onPaginationChange, onOpen, showFinancials = true }) => (
   <List
     dataSource={rows as Record<string, unknown>[]}
     loading={loading}
     pagination={buildOrderCardPagination(pagination, onPaginationChange)}
     rowKey={(r) => String(r.order_id)}
     renderItem={(row) => {
-      const m = buildOrderCardModel(row);
+      const m = buildOrderCardModel(row, { showFinancials });
       return (
         <Card
           size="small"
@@ -62,7 +63,9 @@ export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pag
             {m.paymentTag && <Tag>{m.paymentTag}</Tag>}
             {m.productionTag && <Tag>{m.productionTag}</Tag>}
           </div>
-          <Typography.Text strong style={{ display: 'block', marginTop: 6 }}>{m.amountLine}</Typography.Text>
+          {m.amountLine && (
+            <Typography.Text strong style={{ display: 'block', marginTop: 6 }}>{m.amountLine}</Typography.Text>
+          )}
         </Card>
       );
     }}

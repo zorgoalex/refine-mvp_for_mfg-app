@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import PDFDocument from 'pdfkit';
-import { buildSheetsPdf } from './sheet-pdf';
+import { buildSheetsPdf, stretchSvgToBounds } from './sheet-pdf';
 import { FONT_FAMILY } from './sheet-png';
 
 const SVG = (label: string) =>
@@ -548,6 +548,34 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('CNC#3_11380.TXT');
   });
 
+  it('renders cut identity and per-sheet bath film requirement fields', async () => {
+    const textSpy = vi.spyOn(PDFDocument.prototype, 'text');
+    await buildSheetsPdf([
+      {
+        svg: SVG('cut-fields'),
+        sheetWidthMm: 1400,
+        sheetHeightMm: 2800,
+        cutJobId: 42,
+        cutNumber: '42-3',
+        filmRequirementLinearMeters: 2.1,
+        templateLayout: {
+          version: 3,
+          page: { width: 297, height: 210 },
+          elements: [
+            { id: 'job', type: 'field', source: 'job.number', x: 10, y: 10, w: 40, h: 8 },
+            { id: 'cut', type: 'field', source: 'cut.number', x: 10, y: 20, w: 40, h: 8 },
+            { id: 'film', type: 'field', source: 'sheet.film_requirement', x: 10, y: 30, w: 60, h: 8 },
+          ],
+        },
+      },
+    ]);
+
+    const rendered = textSpy.mock.calls.map((call) => String(call[0]));
+    expect(rendered).toContain('42');
+    expect(rendered).toContain('42-3');
+    expect(rendered).toContain('2,1 пог. м');
+  });
+
   it('renders v3 sheet thumbnail layouts on the configured PDF page size', async () => {
     const pdf = await buildSheetsPdf([
       {
@@ -571,7 +599,11 @@ describe('buildSheetsPdf', () => {
   });
 
   it('forces sheet thumbnails to stretch over the full template element bounds', () => {
-    expect(SHEET_PDF_SOURCE).toContain('SVGtoPDF(doc, sheet.bathSvg ?? sheet.svg, 0, 0');
+    expect(stretchSvgToBounds('<svg viewBox="0 0 2800 2070"><rect/></svg>'))
+      .toContain('<svg preserveAspectRatio="none" viewBox="0 0 2800 2070">');
+    expect(stretchSvgToBounds('<svg preserveAspectRatio="xMidYMid meet" viewBox="0 0 1 1"/>'))
+      .toContain('preserveAspectRatio="none"');
+    expect(SHEET_PDF_SOURCE).toContain('SVGtoPDF(doc, stretchSvgToBounds(sheet.bathSvg ?? sheet.svg), 0, 0');
     expect(SHEET_PDF_SOURCE).toContain('width: w');
     expect(SHEET_PDF_SOURCE).toContain('height: h');
     expect(SHEET_PDF_SOURCE).not.toContain("style.fit ?? 'contain'");

@@ -227,6 +227,22 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
   });
 
+  it('shows the bath cut-result version before readiness and removes terminal work', () => {
+    const actionsStart = page.indexOf('<div className="cnc-bath-card__actions">');
+    const actionsEnd = page.indexOf('</div>', actionsStart);
+    const actions = page.slice(actionsStart, actionsEnd);
+    expect(actions).toContain('className="cnc-bath-card__cut-result-badge"');
+    expect(actions).toContain('№{bath.cutNumber}');
+    expect(actions.indexOf('cnc-bath-card__cut-result-badge')).toBeLessThan(
+      actions.indexOf('cnc-bath-card__ready-icon'),
+    );
+    expect(css).toMatch(
+      /\.cnc-bath-card__cut-result-badge\.ant-tag\s*\{[^}]*padding-inline: 3px;[^}]*font-size: 0\.6em;[^}]*font-variant-numeric: tabular-nums;/s,
+    );
+    expect(page).toContain('filterCncBathColumnsByOrderStatuses(');
+    expect(page).toContain('!isCncOrderHiddenFromMdfBoard(card)');
+  });
+
   it('keeps all five MDF columns fluid and switches narrow boards to order numbers only', () => {
     expect(page).not.toContain('? buildCncDetailedDisplayColumns(columns)');
     expect(css).toMatch(
@@ -265,7 +281,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('if (!cncRelationsEnabled) setActiveCncRelation(null)');
     expect(page).toContain('cncRelationTargetEquals(current, target) ? null : target');
     expect(page).toContain('cncRelationsEnabled');
-    expect(page).toContain('? buildCncRelationContext(cncFilteredColumns, cncOrderCards, activeCncRelation)');
+    expect(page).toContain('? buildCncRelationContext(cncActiveColumns, cncOrderCards, activeCncRelation)');
     expect(page).toContain("key: 'orders' as const");
     expect(page).toContain("orders: 'Заказы'");
     expect(page).toContain('orderStatusBoardApi.get({');

@@ -3,7 +3,7 @@ import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 import { VariantWorkspaceLayout } from "./ui-variant/shellRegistry";
 import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev/react-router-v6";
 import { BrowserRouter, Navigate, Route, Routes, Outlet } from "react-router-dom";
-import { ConfigProvider, notification, theme as antdTheme } from "antd";
+import { ConfigProvider, Spin, notification, theme as antdTheme } from "antd";
 import { useEffect, lazy, type ReactNode } from "react";
 import ruRU from 'antd/locale/ru_RU';
 import "@refinedev/antd/dist/reset.css";
@@ -26,6 +26,7 @@ import { getLoadedRuntimeConfig } from "./config/runtimeConfig";
 import { getModernUiTheme } from "./ui-evolution/theme/evolutionTheme";
 import { can } from "./utils/permissions";
 import type { PermissionName } from "./api/types/authApi.types";
+import { useOrderFinancialVisibility } from "./hooks/useOrderFinancialVisibility";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -211,6 +212,13 @@ const PermissionRoute = ({
   if (!featureFlags.useBackendPermissions || can(permission)) {
     return <>{children}</>;
   }
+  return <Navigate to="/orders" replace />;
+};
+
+const FinancialRoute = ({ children }: { children: ReactNode }) => {
+  const { canViewFinancials, isLoading } = useOrderFinancialVisibility();
+  if (isLoading) return <div style={{ display: 'grid', minHeight: 160, placeItems: 'center' }}><Spin /></div>;
+  if (canViewFinancials) return <>{children}</>;
   return <Navigate to="/orders" replace />;
 };
 
@@ -831,13 +839,13 @@ const ThemedApp = () => {
                     <Route path="edit/:id" element={<UnitEdit />} />
                     <Route path="show/:id" element={<UnitShow />} />
                   </Route>
-                  <Route path="/payments" >
+                  <Route path="/payments" element={<FinancialRoute><Outlet /></FinancialRoute>}>
                     <Route index element={<PaymentList />} />
                     <Route path="create" element={<PaymentCreate />} />
                     <Route path="edit/:id" element={<PaymentEdit />} />
                     <Route path="show/:id" element={<PaymentShow />} />
                   </Route>
-                  <Route path="/payments-analytics" >
+                  <Route path="/payments-analytics" element={<FinancialRoute><Outlet /></FinancialRoute>}>
                     <Route index element={<PaymentsAnalyticsList />} />
                     <Route path="show/:id" element={<PaymentsAnalyticsShow />} />
                   </Route>

@@ -7,11 +7,14 @@ import { projectsApi } from '../../api/projectsApi';
 import type { ProjectDto } from '../../api/projectsApi';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 import { formatProjectRow, type ProjectRow } from './projectHelpers';
+import { filterOrderFinancialItems } from '../../utils/orderFinancialVisibility';
+import { useOrderFinancialVisibility } from '../../hooks/useOrderFinancialVisibility';
 
 const { Title } = Typography;
 
 export const ProjectsList: React.FC = () => {
   const navigate = useNavigate();
+  const { canViewFinancials } = useOrderFinancialVisibility();
   const { pageSize, setPageSize } = usePageSizePreference('projects:list', 10);
   const [currentPage, setCurrentPage] = useState(1);
   const [rows, setRows] = useState<ProjectRow[]>([]);
@@ -80,7 +83,7 @@ export const ProjectsList: React.FC = () => {
   }, [createForm, navigate]);
 
   const columns = useMemo<ColumnsType<ProjectRow>>(
-    () => [
+    () => filterOrderFinancialItems([
       {
         title: 'Код',
         dataIndex: 'code',
@@ -115,8 +118,8 @@ export const ProjectsList: React.FC = () => {
         key: 'totalPaidAmountLabel',
         width: 150,
       },
-    ],
-    [],
+    ], canViewFinancials),
+    [canViewFinancials],
   );
 
   return (

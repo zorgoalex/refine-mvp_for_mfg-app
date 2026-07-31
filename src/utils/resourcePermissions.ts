@@ -22,7 +22,10 @@ export function canQueryAppSettingsResource(
   if (roleKey === 'packer') return false;
   if (!featureFlags.useBackendPermissions) return true;
 
-  return roleKey === 'superadmin' || roleKey === 'top_manager' || roleKey === 'manager';
+  return roleKey === 'superadmin'
+    || roleKey === 'admin'
+    || roleKey === 'top_manager'
+    || roleKey === 'manager';
 }
 
 export function canQueryHasuraResource(

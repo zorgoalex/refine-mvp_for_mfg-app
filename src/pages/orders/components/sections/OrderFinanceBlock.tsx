@@ -6,8 +6,7 @@ import { Typography, Table } from 'antd';
 import { useList } from '@refinedev/core';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
-import { can } from '../../../../utils/permissions';
-import { featureFlags } from '../../../../config/featureFlags';
+import { useOrderFinancialVisibility } from '../../../../hooks/useOrderFinancialVisibility';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -18,7 +17,7 @@ interface OrderFinanceBlockProps {
 }
 
 export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, payments: providedPayments }) => {
-  const canViewFinancials = !featureFlags.useBackendPermissions || can('orders.view_financials');
+  const { canViewFinancials } = useOrderFinancialVisibility();
 
   // Загружаем платежи для текущего заказа
   const { data: paymentsData } = useList({
@@ -147,6 +146,8 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
     fontSize: 13,
     fontWeight: 600,
   };
+
+  if (!canViewFinancials) return null;
 
   return (
     <div

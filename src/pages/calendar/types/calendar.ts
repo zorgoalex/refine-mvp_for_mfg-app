@@ -166,6 +166,7 @@ export interface DayColumnProps {
   onPrintDay?: (date: Date, orders: CalendarOrder[]) => void;
   onContextMenu?: (e: React.MouseEvent, order: CalendarOrder) => void;
   onCheckboxChange?: (order: CalendarOrder, isChecked: boolean) => void;
+  showFinancials?: boolean;
 }
 
 /**
@@ -179,6 +180,7 @@ export interface OrderCardProps {
   onContextMenu?: (e: React.MouseEvent, order: CalendarOrder) => void;
   onCheckboxChange?: (order: CalendarOrder, isChecked: boolean) => void;
   isDragging?: boolean;
+  showFinancials?: boolean;
 }
 
 /**

@@ -10,8 +10,10 @@ import {
   collectCncOrderIds,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
+  filterCncBathColumnsByOrderStatuses,
   filterCncTodayColumnsByOrders,
   isCncCardSummaryOnly,
+  isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
@@ -253,6 +255,56 @@ describe('order status board model', () => {
     ] as CncTelegramTodayColumn[];
 
     expect(collectCncOrderIds(columns)).toEqual([2700, 2706, 2712]);
+  });
+
+  it('hides MDF orders for configured production and order statuses', () => {
+    for (const productionStatusName of [' Закатан ', 'УПАКОВАН', 'выдан']) {
+      expect(isCncOrderHiddenFromMdfBoard({
+        ...card(2700),
+        productionStatusName,
+      })).toBe(true);
+    }
+    for (const orderStatusName of ['Готов к выдаче', 'Выдан', 'Завершен', 'Завершён']) {
+      expect(isCncOrderHiddenFromMdfBoard({
+        ...card(2700),
+        orderStatusName,
+      })).toBe(true);
+    }
+    expect(isCncOrderHiddenFromMdfBoard({
+      ...card(2700),
+      productionStatusName: 'Закатка',
+      orderStatusName: 'В работе',
+    })).toBe(false);
+  });
+
+  it('removes a bath only when every linked order has left the MDF board', () => {
+    const columns = [
+      {
+        key: 'baths',
+        title: 'Карты ванн',
+        total: 4,
+        packets: [],
+        baths: [
+          cncBath('terminal', ['2700'], [2700]),
+          cncBath('mixed', ['2700', '2706'], [2700, 2706]),
+          cncBath('order-terminal', ['2712'], [2712]),
+          cncBath('status-missing', ['3000'], [3000]),
+        ],
+      },
+    ] as CncTelegramTodayColumn[];
+    const cards = [
+      { ...card(2700), productionStatusName: 'Закатан' },
+      { ...card(2706), productionStatusName: 'К закатке' },
+      { ...card(2712), orderStatusName: 'Готов к выдаче' },
+    ];
+
+    const filtered = filterCncBathColumnsByOrderStatuses(columns, cards);
+
+    expect(filtered[0]?.baths.map((bath) => bath.bathCardId)).toEqual([
+      'mixed',
+      'status-missing',
+    ]);
+    expect(filtered[0]?.total).toBe(2);
   });
 
   it('drops impossible dates from a hand-edited shared URL', () => {

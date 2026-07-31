@@ -151,6 +151,11 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/Файлы станка/);
     expect(tabSrc).toMatch(/sheet\.machine_files/);
     expect(tabSrc).toMatch(/sheet\.utilization/);
+    expect(tabSrc).toMatch(/Номер задания на раскрой/);
+    expect(tabSrc).toMatch(/cut\.number/);
+    expect(tabSrc).toMatch(/Номер раскроя/);
+    expect(tabSrc).toMatch(/sheet\.film_requirement/);
+    expect(tabSrc).toMatch(/Потребность в плёнке/);
     expect(tabSrc).toMatch(/BATH_PROFILE_PDF_ELEMENTS/);
     expect(tabSrc).toMatch(/defaultPdfElementsForTemplateCode/);
     expect(tabSrc).toMatch(/bath-label-ready-date/);
@@ -167,6 +172,10 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/Линия/);
     expect(tabSrc).toMatch(/Прямоугольник/);
     expect(tabSrc).toMatch(/PdfTemplateCanvas/);
+    expect(tabSrc).toMatch(/Обкат:/);
+    expect(tabSrc).toMatch(/Фрезеровка:/);
+    expect(tabSrc).toMatch(/fontSize=\{detailFontSize\}/);
+    expect(tabSrc).toMatch(/fontStyle="bold"/);
     expect(tabSrc).toMatch(/wrap="word"/);
     expect(tabSrc).toMatch(/customFieldRowsToSchema/);
     expect(tabSrc).toMatch(/CustomFieldExpressionEditor/);

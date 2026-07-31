@@ -80,6 +80,7 @@ import type {
   CncTelegramTodayResponse,
 } from '../../api/types/cncTelegramApi.types';
 import { featureFlags } from '../../config/featureFlags';
+import { useOrderFinancialVisibility } from '../../hooks/useOrderFinancialVisibility';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
 import {
@@ -95,8 +96,10 @@ import {
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
+  filterCncBathColumnsByOrderStatuses,
   filterCncTodayColumnsByOrders,
   isCncCardSummaryOnly,
+  isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
@@ -186,6 +189,7 @@ interface BoardDragItem {
 
 export const OrderStatusBoardPage: React.FC = () => {
   const isOperational = useOperationalUi();
+  const { canViewFinancials } = useOrderFinancialVisibility();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const viewState = useMemo(
@@ -638,22 +642,30 @@ export const OrderStatusBoardPage: React.FC = () => {
     () => filterBoardColumns('production', cncOrderBoard?.columns ?? [], true),
     [cncOrderBoard?.columns],
   );
-  const cncOrderCards = useMemo(
+  const cncOrderStatusCards = useMemo(
     () => buildCncOrderStatusCards(cncOrderBoardColumns, cncOrderIds),
     [cncOrderBoardColumns, cncOrderIds],
+  );
+  const cncActiveColumns = useMemo(
+    () => filterCncBathColumnsByOrderStatuses(cncFilteredColumns, cncOrderStatusCards),
+    [cncFilteredColumns, cncOrderStatusCards],
+  );
+  const cncOrderCards = useMemo(
+    () => cncOrderStatusCards.filter((card) => !isCncOrderHiddenFromMdfBoard(card)),
+    [cncOrderStatusCards],
   );
   const cncRelationContext = useMemo(
     () =>
       cncRelationsEnabled
-        ? buildCncRelationContext(cncFilteredColumns, cncOrderCards, activeCncRelation)
+        ? buildCncRelationContext(cncActiveColumns, cncOrderCards, activeCncRelation)
         : null,
-    [activeCncRelation, cncFilteredColumns, cncOrderCards, cncRelationsEnabled],
+    [activeCncRelation, cncActiveColumns, cncOrderCards, cncRelationsEnabled],
   );
   const cncDetailedContext = useMemo(
     () =>
       cncDetailedEnabled
         ? buildCncDetailedContext(
-            cncFilteredColumns,
+            cncActiveColumns,
             activeCncDetailedBathId,
             activeCncDetailedDetail,
           )
@@ -662,13 +674,13 @@ export const OrderStatusBoardPage: React.FC = () => {
       activeCncDetailedBathId,
       activeCncDetailedDetail,
       cncDetailedEnabled,
-      cncFilteredColumns,
+      cncActiveColumns,
     ],
   );
   const cncVisibleColumns = useMemo(
     () =>
-      cncFilteredColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
-    [cncFilteredColumns, viewState.hideEmpty],
+      cncActiveColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
+    [cncActiveColumns, viewState.hideEmpty],
   );
   const generatedAt = isCncToday
     ? cncOrderFilters.length > 0
@@ -1242,6 +1254,7 @@ export const OrderStatusBoardPage: React.FC = () => {
                 onCloseDetailedBath={closeCncDetailedBath}
                 onSelectDetailedDetail={selectCncDetailedDetail}
                 onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}
+                showFinancials={canViewFinancials}
               />
             )
           ) : columns.length === 0 ? (
@@ -1266,6 +1279,7 @@ export const OrderStatusBoardPage: React.FC = () => {
                   onLoadMore={loadMore}
                   onMove={moveCard}
                   onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}
+                  showFinancials={canViewFinancials}
                 />
               ))}
             </div>
@@ -1292,6 +1306,7 @@ interface CncTelegramTodayColumnsProps {
   onCloseDetailedBath: (bathId: string) => void;
   onSelectDetailedDetail: (target: CncDetailedDetailTarget) => void;
   onOpenOrder: (orderId: number) => void;
+  showFinancials: boolean;
 }
 
 type CncTelegramTodayDisplayColumnKey =
@@ -1323,6 +1338,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   onCloseDetailedBath,
   onSelectDetailedDetail,
   onOpenOrder,
+  showFinancials,
 }) => {
   const isOperational = useOperationalUi();
   const [standardCardOverrides, setStandardCardOverrides] =
@@ -1486,6 +1502,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         openOrderOnNumber={!relationsEnabled}
                         onMove={() => undefined}
                         onOpenOrder={onOpenOrder}
+                        showFinancials={showFinancials}
                       />
                     );
                   })
@@ -2207,6 +2224,12 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               />
             </Tooltip>
           )}
+          <Tag
+            className="cnc-bath-card__cut-result-badge"
+            aria-label={`Номер карты раскроя ${bath.cutNumber}`}
+          >
+            №{bath.cutNumber}
+          </Tag>
           {!summaryOnly && (
             <Tooltip
               title={bath.ready ? 'Все детали ванны уже в колонке «Распилено»' : 'Не все детали ванны распилены'}
@@ -2953,6 +2976,7 @@ interface StatusBoardColumnViewProps {
     trigger: HTMLElement | null,
   ) => void;
   onOpenOrder: (orderId: number) => void;
+  showFinancials: boolean;
 }
 
 const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
@@ -2967,6 +2991,7 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
   onLoadMore,
   onMove,
   onOpenOrder,
+  showFinancials,
 }) => {
   const destination = column.status.id !== null && column.status.isActive;
   const currentUser = authSession.getUser();
@@ -3044,6 +3069,7 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
               displayMode={cardDisplayMode}
               onMove={onMove}
               onOpenOrder={onOpenOrder}
+              showFinancials={showFinancials}
             />
           ))
         )}
@@ -3083,6 +3109,7 @@ interface StatusBoardCardViewProps {
   openOrderOnNumber?: boolean;
   onMove: StatusBoardColumnViewProps['onMove'];
   onOpenOrder: (orderId: number) => void;
+  showFinancials: boolean;
 }
 
 const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
@@ -3106,6 +3133,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   openOrderOnNumber = true,
   onMove,
   onOpenOrder,
+  showFinancials,
 }) => {
   const actionButtonRef = useRef<HTMLButtonElement | null>(null);
   const dragButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -3159,7 +3187,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
     resolveStatusBoardStatusColor(board, card, allColumns) ?? '#8c8c8c';
   const showCompactDetails = displayMode !== 'minimal';
   const showStandardDetails = displayMode === 'standard';
-  const paymentSummary = formatPaymentSummary(card);
+  const paymentSummary = showFinancials ? formatPaymentSummary(card) : null;
   const showUrgentFlag = card.priority <= 50;
   const showAutoFlag =
     board === 'production' && card.productionStatusFromDetailsEnabled;

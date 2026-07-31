@@ -19,6 +19,7 @@ export interface DetailGroupingControlsProps {
   onFieldChange: (field: GroupField | null) => void;
   onToggleSeparation: (value: boolean) => void;
   size?: 'small' | 'middle';
+  hiddenFields?: GroupField[];
 }
 
 export const DetailGroupingControls: React.FC<DetailGroupingControlsProps> = ({
@@ -26,6 +27,7 @@ export const DetailGroupingControls: React.FC<DetailGroupingControlsProps> = ({
   onFieldChange,
   onToggleSeparation,
   size = 'small',
+  hiddenFields = [],
 }) => {
   const menu: MenuProps = useMemo(
     () => ({
@@ -34,11 +36,13 @@ export const DetailGroupingControls: React.FC<DetailGroupingControlsProps> = ({
       items: [
         { key: 'none', label: 'Без группировки' },
         { type: 'divider' as const },
-        ...GROUP_FIELDS.map(f => ({ key: f.field, label: f.label })),
+        ...GROUP_FIELDS
+          .filter((field) => !hiddenFields.includes(field.field))
+          .map(f => ({ key: f.field, label: f.label })),
       ],
       onClick: ({ key }) => onFieldChange(key === 'none' ? null : (key as GroupField)),
     }),
-    [state.field, onFieldChange],
+    [hiddenFields, state.field, onFieldChange],
   );
 
   return (
