@@ -494,6 +494,7 @@ const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
   { id: 'job.number', source: 'job', label: 'Номер задания на раскрой', category: 'Задание', type: 'number' },
   { id: 'job.pdf_template', source: 'job', label: 'Шаблон PDF', category: 'Задание', type: 'string' },
   { id: 'cut.number', source: 'cut', label: 'Номер раскроя', category: 'Раскрой', type: 'string' },
+  { id: 'cut.current_version', source: 'cut', label: 'Текущая/актуальная версия Карты раскроя', category: 'Раскрой', type: 'string' },
   { id: 'group.number', source: 'group', label: 'Номер группы', category: 'Группа', type: 'number' },
   { id: 'group.material', source: 'group', label: 'Материал группы', category: 'Группа', type: 'string' },
   { id: 'group.film', source: 'group', label: 'Пленка группы', category: 'Группа', type: 'string' },
@@ -542,6 +543,7 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'job.number': '19',
   'job.pdf_template': 'Профили ванны',
   'cut.number': '19-3',
+  'cut.current_version': '19-4',
   'group.number': '1',
   'group.material': 'Ванна 2080x1050',
   'group.film': 'Крем брюле -Декор+',
@@ -2004,7 +2006,8 @@ const PdfKonvaElement: React.FC<{
           <KonvaRect x={0} y={0} width={w} height={h} fill="#ffffff" stroke={String(element.style.color ?? '#111111')} strokeWidth={Number(element.style.strokeWidth ?? 0.25)} />
           {pieces.map((piece, index) => {
             const detailFontSize = Math.max(1.8, Math.min(3.8, Math.min(piece.w, piece.h) * 0.12));
-            const detailMetaFontSize = detailFontSize / 2;
+            const orderFontSize = detailFontSize * 1.25;
+            const detailMetaFontSize = orderFontSize / 2;
             return (
               <KonvaGroup
                 key={index}
@@ -2048,7 +2051,7 @@ const PdfKonvaElement: React.FC<{
                   width={Math.max(1, piece.w - detailFontSize * 1.5)}
                   text={piece.order}
                   fontFamily="Arial"
-                  fontSize={detailFontSize * 1.25}
+                  fontSize={orderFontSize}
                   fontStyle="bold"
                   fill="#7f1d1d"
                   stroke="#7f1d1d"

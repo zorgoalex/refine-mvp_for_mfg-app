@@ -557,6 +557,7 @@ describe('buildSheetsPdf', () => {
         sheetHeightMm: 2800,
         cutJobId: 42,
         cutNumber: '42-3',
+        currentCutNumber: '42-4',
         filmRequirementLinearMeters: 2.1,
         templateLayout: {
           version: 3,
@@ -564,7 +565,8 @@ describe('buildSheetsPdf', () => {
           elements: [
             { id: 'job', type: 'field', source: 'job.number', x: 10, y: 10, w: 40, h: 8 },
             { id: 'cut', type: 'field', source: 'cut.number', x: 10, y: 20, w: 40, h: 8 },
-            { id: 'film', type: 'field', source: 'sheet.film_requirement', x: 10, y: 30, w: 60, h: 8 },
+            { id: 'current-cut', type: 'field', source: 'cut.current_version', x: 10, y: 30, w: 40, h: 8 },
+            { id: 'film', type: 'field', source: 'sheet.film_requirement', x: 10, y: 40, w: 60, h: 8 },
           ],
         },
       },
@@ -573,6 +575,7 @@ describe('buildSheetsPdf', () => {
     const rendered = textSpy.mock.calls.map((call) => String(call[0]));
     expect(rendered).toContain('42');
     expect(rendered).toContain('42-3');
+    expect(rendered).toContain('42-4');
     expect(rendered).toContain('2,1 пог. м');
   });
 
