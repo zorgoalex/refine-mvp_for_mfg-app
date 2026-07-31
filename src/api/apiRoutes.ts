@@ -46,6 +46,7 @@ export const apiRoutes = {
   orders: {
     list: backendApiPath('/orders'),
     formData: backendApiPath('/orders/form-data'),
+    resourceDemands: backendApiPath('/orders/resource-demands'),
     statusBoard: backendApiPath('/orders/status-board'),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
     restore: (orderId: number) => backendApiPath(`/orders/${orderId}/restore`),

@@ -182,9 +182,6 @@ const OrderWorkshopEdit = lazy(async () => ({ default: (await import("./pages/or
 const OrderWorkshopShow = lazy(async () => ({ default: (await import("./pages/order_workshops/show")).OrderWorkshopShow }));
 
 const OrderResourceRequirementList = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/list")).OrderResourceRequirementList }));
-const OrderResourceRequirementCreate = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/create")).OrderResourceRequirementCreate }));
-const OrderResourceRequirementEdit = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/edit")).OrderResourceRequirementEdit }));
-const OrderResourceRequirementShow = lazy(async () => ({ default: (await import("./pages/order_resource_requirements/show")).OrderResourceRequirementShow }));
 
 // clients_analytics and payments_analytics each export two named components from one module.
 const ClientsAnalyticsList = lazy(async () => ({ default: (await import("./pages/clients_analytics")).ClientsAnalyticsList }));
@@ -629,10 +626,7 @@ const ThemedApp = () => {
                 {
                   name: "order_resource_requirements",
                   list: "/order-resource-requirements",
-                  create: "/order-resource-requirements/create",
-                  edit: "/order-resource-requirements/edit/:id",
-                  show: "/order-resource-requirements/show/:id",
-                  meta: { idColumnName: "requirement_id", label: "Order Resource Requirements" },
+                  meta: { label: "Потребности заказов в ресурсах" },
                 },
                 {
                   name: "order_doweling_links",
@@ -928,9 +922,6 @@ const ThemedApp = () => {
                   </Route>
                   <Route path="/order-resource-requirements" >
                     <Route index element={<OrderResourceRequirementList />} />
-                    <Route path="create" element={<OrderResourceRequirementCreate />} />
-                    <Route path="edit/:id" element={<OrderResourceRequirementEdit />} />
-                    <Route path="show/:id" element={<OrderResourceRequirementShow />} />
                   </Route>
                 </Route>
                 <Route
