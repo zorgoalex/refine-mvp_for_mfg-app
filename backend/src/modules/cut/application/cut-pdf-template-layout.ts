@@ -162,8 +162,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const CUT_SPECIFIC_FIELD_CATALOG: CutPdfFieldCatalogItem[] = [
   { id: 'job.name', source: 'job', sourceColumn: null, label: 'Название задания', category: 'Задание раскроя', type: 'string' },
-  { id: 'job.number', source: 'job', sourceColumn: null, label: 'Номер задания', category: 'Задание раскроя', type: 'number' },
+  { id: 'job.number', source: 'job', sourceColumn: null, label: 'Номер задания на раскрой', category: 'Задание раскроя', type: 'number' },
   { id: 'job.pdf_template', source: 'job', sourceColumn: null, label: 'Шаблон PDF', category: 'Задание раскроя', type: 'string' },
+  { id: 'cut.number', source: 'cut', sourceColumn: null, label: 'Номер раскроя', category: 'Раскрой', type: 'string' },
   { id: 'group.number', source: 'group', sourceColumn: null, label: 'Номер группы', category: 'Группа раскроя', type: 'number' },
   { id: 'group.material', source: 'group', sourceColumn: null, label: 'Материал группы', category: 'Группа раскроя', type: 'string' },
   { id: 'group.film', source: 'group', sourceColumn: null, label: 'Пленка группы', category: 'Группа раскроя', type: 'string' },
@@ -173,6 +174,7 @@ const CUT_SPECIFIC_FIELD_CATALOG: CutPdfFieldCatalogItem[] = [
   { id: 'sheet.details_count', source: 'sheet', sourceColumn: null, label: 'Количество деталей на листе', category: 'Лист раскроя', type: 'number' },
   { id: 'sheet.area', source: 'sheet', sourceColumn: null, label: 'Площадь деталей', category: 'Лист раскроя', type: 'number' },
   { id: 'sheet.utilization', source: 'sheet', sourceColumn: null, label: 'Утилизация листа, %', category: 'Лист раскроя', type: 'number' },
+  { id: 'sheet.film_requirement', source: 'sheet', sourceColumn: null, label: 'Потребность в плёнке', category: 'Лист раскроя', type: 'string' },
   { id: 'sheet.thumbnail', source: 'sheet', sourceColumn: null, label: 'Миниатюра листа раскроя', category: 'Лист раскроя', type: 'string' },
   { id: 'sheet.machine_files', source: 'sheet', sourceColumn: null, label: 'Файлы станка на листе', category: 'Лист раскроя', type: 'string' },
   { id: 'order.unique_names', source: 'order', sourceColumn: null, label: 'Заказы на листе', category: 'Заказ', type: 'string' },

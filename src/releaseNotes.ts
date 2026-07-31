@@ -31,6 +31,20 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-07-31",
+    title: "PDF раскроя ванн: новые данные и читаемая карта",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В шаблон PDF добавлены номер задания на раскрой, номер конкретного раскроя и потребность листа ванны в плёнке.",
+      "На каждой детали карты ванны показаны обкат и фрезеровка.",
+    ],
+    changed: [
+      "Номер заказа на детали выделен более жирным шрифтом, а миниатюра листа растягивается на всю область шаблона.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-07-31",
     title: "Раскрой: печать и масштабирование PDF",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

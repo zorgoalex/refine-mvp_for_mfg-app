@@ -30,6 +30,9 @@ export interface PdfSheetInput {
   templateLayout?: Record<string, unknown> | null;
   meta?: PdfSheetMeta;
   detailRows?: PdfSheetDetailRow[];
+  cutJobId?: number;
+  cutNumber?: string;
+  filmRequirementLinearMeters?: number | null;
 }
 
 export interface PdfSheetMeta {
@@ -313,7 +316,7 @@ function drawSheetThumbnail(
   if (w <= 0 || h <= 0) return;
   doc.save();
   doc.rect(0, 0, w, h).clip();
-  SVGtoPDF(doc, sheet.bathSvg ?? sheet.svg, 0, 0, {
+  SVGtoPDF(doc, stretchSvgToBounds(sheet.bathSvg ?? sheet.svg), 0, 0, {
     width: w,
     height: h,
     assumePt: false,
@@ -326,6 +329,13 @@ function drawSheetThumbnail(
     .rect(0, 0, w, h)
     .stroke()
     .restore();
+}
+
+export function stretchSvgToBounds(svg: string): string {
+  return svg.replace(/<svg\b([^>]*)>/i, (_tag, rawAttributes: string) => {
+    const attributes = rawAttributes.replace(/\s+preserveAspectRatio=(?:"[^"]*"|'[^']*')/i, '');
+    return `<svg preserveAspectRatio="none"${attributes}>`;
+  });
 }
 
 function drawTemplateQr(
@@ -655,8 +665,9 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
   const utilization = sheetArea > 0 ? (detailsArea / sheetArea) * 100 : null;
   return {
     'job.name': '',
-    'job.number': '',
+    'job.number': sheet.cutJobId ?? null,
     'job.pdf_template': sheet.template ?? '',
+    'cut.number': sheet.cutNumber ?? '',
     'group.number': '',
     'group.material': joinBlank(meta.materials),
     'group.film': joinBlank(meta.films),
@@ -666,6 +677,7 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
     'sheet.details_count': totalQuantity,
     'sheet.area': detailsArea > 0 ? Number(detailsArea.toFixed(3)) : null,
     'sheet.utilization': utilization === null ? null : Number(utilization.toFixed(2)),
+    'sheet.film_requirement': formatFilmRequirement(sheet.filmRequirementLinearMeters),
     'sheet.thumbnail': '',
     'sheet.machine_files': joinBlank(machineFiles),
     'detail.table': '',
@@ -682,6 +694,11 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
     'computed.page_number': sheet.sheetNumber ?? null,
     'computed.page_count': sheet.pageCount ?? null,
   };
+}
+
+function formatFilmRequirement(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '';
+  return `${Number(value.toFixed(1)).toLocaleString('ru-RU')} пог. м`;
 }
 
 function resolveCustomFieldValues(
