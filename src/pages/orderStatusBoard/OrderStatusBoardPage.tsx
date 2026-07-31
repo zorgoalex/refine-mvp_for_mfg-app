@@ -17,7 +17,6 @@ import {
   Empty,
   Input,
   Modal,
-  Popover,
   Segmented,
   Select,
   Spin,
@@ -49,7 +48,6 @@ import {
   ReloadOutlined,
   RightOutlined,
   SearchOutlined,
-  SettingOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -109,6 +107,17 @@ import {
   type CncOrderSearchPeriod,
   type OrderStatusBoardViewState,
 } from './model';
+import {
+  useOrderDetailColumnPreferences,
+  type OrderDetailColumnDefinition,
+} from '../orders/components/tables/OrderDetailColumnSettings';
+import { StatusBoardColumnSettingsButton } from './StatusBoardColumnSettings';
+import {
+  CNC_STATUS_BOARD_COLUMN_DEFINITIONS,
+  STATUS_BOARD_COLUMN_PREFERENCE_KEYS,
+  STATUS_BOARD_LABELS,
+  filterVisibleStatusBoardColumns,
+} from './statusBoardColumnVisibility';
 import {
   OperationalPageHeader,
   useOperationalUi,
@@ -598,6 +607,73 @@ export const OrderStatusBoardPage: React.FC = () => {
   );
   const activeBoard: OrderStatusBoardType =
     viewState.view === 'production' ? 'production' : 'order';
+  const orderPreferenceColumns = useMemo(
+    () =>
+      viewState.view === 'order'
+        ? filterBoardColumns('order', board?.columns ?? [], true)
+        : [],
+    [board?.columns, viewState.view],
+  );
+  const productionPreferenceColumns = useMemo(
+    () =>
+      viewState.view === 'production'
+        ? filterBoardColumns('production', board?.columns ?? [], true)
+        : [],
+    [board?.columns, viewState.view],
+  );
+  const orderColumnDefinitions = useMemo<OrderDetailColumnDefinition[]>(
+    () =>
+      orderPreferenceColumns.map((column) => ({
+        key: column.key,
+        label: column.status.name,
+      })),
+    [orderPreferenceColumns],
+  );
+  const productionColumnDefinitions = useMemo<OrderDetailColumnDefinition[]>(
+    () =>
+      productionPreferenceColumns.map((column) => ({
+        key: column.key,
+        label: column.status.name,
+      })),
+    [productionPreferenceColumns],
+  );
+  const orderColumnDefaultOrder = useMemo(
+    () => orderColumnDefinitions.map((definition) => definition.key),
+    [orderColumnDefinitions],
+  );
+  const productionColumnDefaultOrder = useMemo(
+    () => productionColumnDefinitions.map((definition) => definition.key),
+    [productionColumnDefinitions],
+  );
+  const cncColumnDefaultOrder = useMemo(
+    () => CNC_STATUS_BOARD_COLUMN_DEFINITIONS.map((definition) => definition.key),
+    [],
+  );
+  const orderColumnPreferences = useOrderDetailColumnPreferences(
+    STATUS_BOARD_COLUMN_PREFERENCE_KEYS.order,
+    orderColumnDefaultOrder,
+    orderColumnDefinitions,
+  );
+  const productionColumnPreferences = useOrderDetailColumnPreferences(
+    STATUS_BOARD_COLUMN_PREFERENCE_KEYS.production,
+    productionColumnDefaultOrder,
+    productionColumnDefinitions,
+  );
+  const cncColumnPreferences = useOrderDetailColumnPreferences(
+    STATUS_BOARD_COLUMN_PREFERENCE_KEYS.cnc_today,
+    cncColumnDefaultOrder,
+    CNC_STATUS_BOARD_COLUMN_DEFINITIONS,
+  );
+  const activeColumnDefinitions = isCncToday
+    ? CNC_STATUS_BOARD_COLUMN_DEFINITIONS
+    : viewState.view === 'production'
+      ? productionColumnDefinitions
+      : orderColumnDefinitions;
+  const activeColumnPreferences = isCncToday
+    ? cncColumnPreferences
+    : viewState.view === 'production'
+      ? productionColumnPreferences
+      : orderColumnPreferences;
   const boardColumns = useMemo(
     () => filterBoardColumns(
       viewState.view === 'production' ? 'production' : 'order',
@@ -606,10 +682,20 @@ export const OrderStatusBoardPage: React.FC = () => {
     ),
     [board?.columns, viewState.view, viewState.showDone],
   );
+  const userVisibleBoardColumns = useMemo(
+    () =>
+      filterVisibleStatusBoardColumns(
+        boardColumns,
+        activeColumnPreferences.settings.hidden,
+      ),
+    [activeColumnPreferences.settings.hidden, boardColumns],
+  );
   const columns = useMemo(
     () =>
-      boardColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
-    [boardColumns, viewState.hideEmpty],
+      userVisibleBoardColumns.filter(
+        (column) => !viewState.hideEmpty || column.total > 0,
+      ),
+    [userVisibleBoardColumns, viewState.hideEmpty],
   );
   const cncOrderFilters = viewState.cncOrderFilters;
   const cncOrderFilterKey = cncOrderFilters.join('\u0000');
@@ -679,8 +765,17 @@ export const OrderStatusBoardPage: React.FC = () => {
   );
   const cncVisibleColumns = useMemo(
     () =>
-      cncActiveColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
-    [cncActiveColumns, viewState.hideEmpty],
+      filterVisibleStatusBoardColumns(
+        cncActiveColumns,
+        cncColumnPreferences.settings.hidden,
+      ).filter((column) => !viewState.hideEmpty || column.total > 0),
+    [cncActiveColumns, cncColumnPreferences.settings.hidden, viewState.hideEmpty],
+  );
+  const cncOrdersColumnVisible =
+    !cncColumnPreferences.settings.hidden.includes('orders');
+  const cncHasVisibleColumns = cncVisibleColumns.length > 0 || cncOrdersColumnVisible;
+  const allCncColumnsHidden = CNC_STATUS_BOARD_COLUMN_DEFINITIONS.every(
+    (definition) => cncColumnPreferences.settings.hidden.includes(definition.key),
   );
   const generatedAt = isCncToday
     ? cncOrderFilters.length > 0
@@ -792,7 +887,13 @@ export const OrderStatusBoardPage: React.FC = () => {
       resizeObserver.observe(viewport.firstElementChild);
     }
     return () => resizeObserver.disconnect();
-  }, [cncVisibleColumns.length, columns.length, datasetKey, loading]);
+  }, [
+    cncHasVisibleColumns,
+    cncVisibleColumns.length,
+    columns.length,
+    datasetKey,
+    loading,
+  ]);
 
   const scrollBoardFromTop = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
@@ -831,8 +932,8 @@ export const OrderStatusBoardPage: React.FC = () => {
   const updateCncWorkday = (date: Dayjs) =>
     updateViewState({ cncWorkday: date.format('YYYY-MM-DD'), cncOrderFilters: [] });
   const cncSettingsContent = (
-    <div className="status-board-toolbar__settings-panel" aria-label="Режимы МДФ-доски">
-      <Typography.Text strong>Режимы</Typography.Text>
+    <section className="status-board-settings__modes" aria-label="Режимы МДФ-доски">
+      <strong>Режимы</strong>
       <label className="status-board-toolbar__switch">
         <Switch
           size="small"
@@ -857,7 +958,7 @@ export const OrderStatusBoardPage: React.FC = () => {
         />
         Подробный
       </label>
-    </div>
+    </section>
   );
 
   return (
@@ -1024,6 +1125,13 @@ export const OrderStatusBoardPage: React.FC = () => {
                 }
               />
             </div>
+            <StatusBoardColumnSettingsButton
+              key={STATUS_BOARD_COLUMN_PREFERENCE_KEYS[viewState.view]}
+              boardLabel={STATUS_BOARD_LABELS[viewState.view]}
+              definitions={activeColumnDefinitions}
+              settings={activeColumnPreferences.settings}
+              onChange={activeColumnPreferences.saveSettings}
+            />
           </div>
         )}
         {isCncToday && (
@@ -1142,18 +1250,14 @@ export const OrderStatusBoardPage: React.FC = () => {
               />
               Скрыть пустые
             </label>
-            <Popover
-              placement="bottomRight"
-              trigger="click"
-              title="Настройки отображения"
-              content={cncSettingsContent}
-            >
-              <Button
-                className="status-board-toolbar__settings-button"
-                icon={<SettingOutlined />}
-                aria-label="Настройки отображения МДФ-доски"
-              />
-            </Popover>
+            <StatusBoardColumnSettingsButton
+              key={STATUS_BOARD_COLUMN_PREFERENCE_KEYS.cnc_today}
+              boardLabel={STATUS_BOARD_LABELS.cnc_today}
+              definitions={CNC_STATUS_BOARD_COLUMN_DEFINITIONS}
+              settings={cncColumnPreferences.settings}
+              onChange={cncColumnPreferences.saveSettings}
+              extraContent={cncSettingsContent}
+            />
           </div>
         )}
 
@@ -1192,7 +1296,7 @@ export const OrderStatusBoardPage: React.FC = () => {
           {announcement}
         </div>
 
-        {(isCncToday ? cncVisibleColumns.length > 0 : columns.length > 0) && (
+        {(isCncToday ? cncHasVisibleColumns : columns.length > 0) && (
           <div
             ref={topScrollbarRef}
             className="status-board-scrollbar"
@@ -1229,10 +1333,12 @@ export const OrderStatusBoardPage: React.FC = () => {
               <Spin size="large" tip="Загрузка доски…" />
             </div>
           ) : isCncToday ? (
-            cncVisibleColumns.length === 0 ? (
+            !cncHasVisibleColumns ? (
               <Empty
                 description={
-                  cncOrderFilters.length > 0
+                  allCncColumnsHidden
+                    ? 'Все колонки скрыты в настройках'
+                    : cncOrderFilters.length > 0
                     ? 'По выбранному заказу МДФ-работ нет'
                     : 'CNC-работ на сегодня нет'
                 }
@@ -1248,6 +1354,7 @@ export const OrderStatusBoardPage: React.FC = () => {
                 detailedContext={cncDetailedContext}
                 detailedEnabled={cncDetailedEnabled}
                 cardDisplayMode={cncCardDisplayMode}
+                showOrdersColumn={cncOrdersColumnVisible}
                 printDate={cncNavigationDate.format(DATE_FORMAT)}
                 onSelectRelation={toggleCncRelation}
                 onSelectDetailedBath={selectCncDetailedBath}
@@ -1258,7 +1365,13 @@ export const OrderStatusBoardPage: React.FC = () => {
               />
             )
           ) : columns.length === 0 ? (
-            <Empty description="По выбранным фильтрам заказов нет" />
+            <Empty
+              description={
+                boardColumns.length > 0 && userVisibleBoardColumns.length === 0
+                  ? 'Все колонки скрыты в настройках'
+                  : 'По выбранным фильтрам заказов нет'
+              }
+            />
           ) : (
             <div className="status-board-columns">
               {columns.map((column) => (
@@ -1266,7 +1379,7 @@ export const OrderStatusBoardPage: React.FC = () => {
                   key={column.key}
                   board={activeBoard}
                   column={column}
-                  allColumns={boardColumns}
+                  allColumns={userVisibleBoardColumns}
                   finePointer={finePointer}
                   mutationsEnabled={
                     featureFlags.useBackendProductionActions &&
@@ -1300,6 +1413,7 @@ interface CncTelegramTodayColumnsProps {
   detailedContext: CncDetailedContext | null;
   detailedEnabled: boolean;
   cardDisplayMode: CncCardDisplayMode;
+  showOrdersColumn: boolean;
   printDate: string;
   onSelectRelation: (target: CncRelationTarget) => void;
   onSelectDetailedBath: (bathId: string) => void;
@@ -1332,6 +1446,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   detailedContext,
   detailedEnabled,
   cardDisplayMode,
+  showOrdersColumn,
   printDate,
   onSelectRelation,
   onSelectDetailedBath,
@@ -1360,16 +1475,20 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   const displayColumns = useMemo(
     () => [
       ...columns,
-      {
-        key: 'orders' as const,
-        title: 'Заказы',
-        total: orderCards.length,
-        packets: [],
-        baths: [],
-        orderCards,
-      },
+      ...(showOrdersColumn
+        ? [
+            {
+              key: 'orders' as const,
+              title: 'Заказы',
+              total: orderCards.length,
+              packets: [],
+              baths: [],
+              orderCards,
+            },
+          ]
+        : []),
     ],
-    [columns, orderCards],
+    [columns, orderCards, showOrdersColumn],
   );
   const detailedPacketHighlightEnabled = cncDetailedContextHasActiveDetail(detailedContext);
 
@@ -1380,6 +1499,11 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           'status-board-columns status-board-columns--cnc',
           detailedBathActive ? 'status-board-columns--cnc-detailed' : '',
         ].filter(Boolean).join(' ')}
+        style={
+          {
+            '--status-board-cnc-column-count': displayColumns.length,
+          } as React.CSSProperties
+        }
       >
       {displayColumns.map((column) => {
         const bathColumn = column.key === 'baths' || column.key === 'baths_ready';

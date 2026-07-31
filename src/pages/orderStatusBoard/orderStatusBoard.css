@@ -99,20 +99,78 @@
 }
 
 .status-board-toolbar__settings-button.ant-btn {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  padding: 0;
   margin-left: auto;
   flex: 0 0 auto;
 }
 
-.status-board-toolbar__settings-panel {
-  min-width: 190px;
+.status-board-settings {
   display: grid;
-  gap: 10px;
+  gap: 18px;
 }
 
-.status-board-toolbar__settings-panel .status-board-toolbar__switch {
+.status-board-settings__modes,
+.status-board-settings__columns {
+  display: grid;
+  gap: 8px;
+}
+
+.status-board-settings__modes {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--app-border-soft);
+}
+
+.status-board-settings__modes .status-board-toolbar__switch {
   width: 100%;
-  min-height: 28px;
+  min-height: 40px;
   justify-content: space-between;
+}
+
+.status-board-settings__hint,
+.status-board-settings__footer-end > span {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.status-board-settings__column-list {
+  display: grid;
+  gap: 2px;
+}
+
+.status-board-settings__column-list .ant-checkbox-wrapper {
+  width: 100%;
+  min-height: 40px;
+  padding-inline: 4px;
+  margin-inline-start: 0;
+  display: flex;
+  align-items: center;
+}
+
+.status-board-settings__footer,
+.status-board-settings__footer-end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-board-settings__footer {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.status-board-settings__footer-end {
+  margin-left: auto;
+}
+
+.status-board-settings__footer .ant-btn {
+  min-height: 40px;
+}
+
+.status-board-settings__footer-end > .status-board-settings__save-status--error {
+  color: #ff4d4f;
 }
 
 .status-board-toolbar__display-mode {
@@ -172,7 +230,7 @@
   width: 100%;
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--status-board-cnc-column-count, 5), minmax(0, 1fr));
   align-items: stretch;
   gap: clamp(4px, 0.8vw, 12px);
 }
@@ -1549,8 +1607,8 @@
   }
 
   .status-board-toolbar__settings-button.ant-btn {
-    width: 100%;
-    margin-left: 0;
+    width: 40px;
+    margin-left: auto;
   }
 
   .status-board-toolbar__display-mode .ant-segmented-group {
