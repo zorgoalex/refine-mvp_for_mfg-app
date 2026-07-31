@@ -600,6 +600,112 @@ describe('PgOrderTransactionManager', () => {
     expect(audit!.params).toContain(555);
   });
 
+  it('writes query-ready status audit rows and status outbox events', async () => {
+    const { queries, service } = createDatabase();
+    const manager = new PgOrderTransactionManager(service);
+
+    await manager.runInTransaction(async (uow) => {
+      await uow.writeStatusAuditEvent({
+        action: 'orders.detail_production_status_change',
+        orderId: 77,
+        detailId: 200,
+        actorUserId: '9',
+        actorUsername: 'manager1',
+        actorRole: 'manager',
+        clientId: 555,
+        requestId: 'req_status',
+        statusField: 'productionDetailStage',
+        statusId: 3,
+        statusName: 'Крой',
+        statusCode: 'cut',
+        before: { detailId: 200, productionStatusId: 2 },
+        after: { detailId: 200, productionStatusId: 3 },
+        diff: { productionStatusId: { before: 2, after: 3 } },
+        metadata: { action: 'detail_production_status_change' },
+      });
+      await uow.enqueueStatusOutboxEvent({
+        eventType: 'order.production_status_changed',
+        orderId: 77,
+        clientId: 555,
+        actorUserId: '9',
+        requestId: 'req_status',
+        idempotencyKey: 'status-key:order.production_status_changed',
+        sourceIdempotencyKey: 'status-key',
+        payload: {
+          eventType: 'order.production_status_changed',
+          orderId: 77,
+          productionStatusId: 3,
+        },
+      });
+    });
+
+    const audit = queries.find((q) => /INSERT INTO audit_log/i.test(q.text));
+    expect(audit).toBeDefined();
+    expect(audit!.params[0]).toBe('orders.detail_production_status_change');
+    expect(audit!.params[1]).toBe('order_detail');
+    expect(audit!.params[2]).toBe('200');
+    expect(audit!.params[3]).toBe('9');
+    expect(audit!.params[4]).toBe('manager1');
+    expect(audit!.params[5]).toBe('manager');
+    expect(audit!.params[6]).toBe('req_status');
+    expect(audit!.params[7]).toBe('backend-orders-command');
+    expect(audit!.params[8]).toBe(77);
+    expect(audit!.params[9]).toBe(555);
+    expect(audit!.params[14]).toBe('productionDetailStage');
+    expect(audit!.params[15]).toBe(3);
+    expect(audit!.params[16]).toBe('Крой');
+    expect(audit!.params[17]).toBe('cut');
+    expect(JSON.parse(audit!.params[19] as string)).toMatchObject({ productionStatusId: 2 });
+    expect(JSON.parse(audit!.params[20] as string)).toMatchObject({ productionStatusId: 3 });
+    expect(JSON.parse(audit!.params[21] as string)).toEqual({
+      productionStatusId: { before: 2, after: 3 },
+    });
+
+    const related = queries.find((q) => /INSERT INTO audit_log_related_entity/i.test(q.text));
+    expect(related?.params).toEqual(['audit-delete-1', 'order_detail', 200]);
+
+    const outbox = queries.find((q) => q.params[0] === 'order.production_status_changed');
+    expect(outbox?.params[1]).toBe('77');
+    expect(outbox?.params[3]).toBe('status-key:order.production_status_changed');
+    expect(JSON.parse(outbox?.params[2] as string)).toMatchObject({
+      source: 'backend-orders-command',
+      eventType: 'order.production_status_changed',
+      orderId: 77,
+      productionStatusId: 3,
+    });
+  });
+
+  it('loads status audit reference rows for header and details', async () => {
+    const { queries, service } = createDatabase();
+    const manager = new PgOrderTransactionManager(service);
+
+    await manager.runInTransaction(async (uow) => {
+      await expect(uow.loadOrderStatusAuditInfo(5)).resolves.toEqual({
+        statusId: 5,
+        statusName: 'Статус 5',
+        statusCode: null,
+      });
+      await expect(uow.loadProductionStatusAuditInfo(6)).resolves.toEqual({
+        statusId: 6,
+        statusName: 'Производство 6',
+        statusCode: 'prod_6',
+      });
+      await expect(uow.loadOrderDetailStatusAuditRows(77)).resolves.toEqual([
+        {
+          detailId: 200,
+          detailNumber: 1,
+          productionStatusId: 3,
+          productionStatusName: 'Крой',
+          productionStatusCode: 'cut',
+        },
+      ]);
+    });
+
+    expect(normalizedSql(queries)).toContain('FROM order_statuses');
+    expect(normalizedSql(queries)).toContain('FROM production_statuses');
+    expect(normalizedSql(queries)).toContain('FROM order_details od');
+  });
+
   it('writes a non-null diff_json for orders.create audit when before/after snapshots are provided', async () => {
     const { queries, service } = createDatabase();
     const manager = new PgOrderTransactionManager(service);
@@ -1301,6 +1407,7 @@ function createDatabase(
             managerId: 42,
             orderStatusId: 1,
             productionStatusId: null,
+            productionStatusFromDetailsEnabled: true,
             plannedCompletionDate: '2026-05-10',
             completionDate: null,
             issueDate: null,
@@ -1319,6 +1426,45 @@ function createDatabase(
             filmId: null,
             refKey1c: null,
           }],
+          rowCount: 1,
+        };
+      }
+
+      if (normalized.startsWith('SELECT order_status_id, order_status_name FROM order_statuses')) {
+        return {
+          rows: [{ order_status_id: params[0], order_status_name: `Статус ${params[0]}` }],
+          rowCount: 1,
+        };
+      }
+
+      if (
+        normalized.startsWith(
+          'SELECT production_status_id, production_status_name, production_status_code FROM production_statuses',
+        )
+      ) {
+        return {
+          rows: [
+            {
+              production_status_id: params[0],
+              production_status_name: `Производство ${params[0]}`,
+              production_status_code: `prod_${params[0]}`,
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+
+      if (normalized.startsWith('SELECT od.detail_id')) {
+        return {
+          rows: [
+            {
+              detail_id: 200,
+              detail_number: 1,
+              production_status_id: 3,
+              production_status_name: 'Крой',
+              production_status_code: 'cut',
+            },
+          ],
           rowCount: 1,
         };
       }

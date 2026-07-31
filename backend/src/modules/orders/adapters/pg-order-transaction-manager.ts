@@ -14,6 +14,7 @@ import type {
   LockedOrderRestoreRow,
   OrderCreateIdempotencyResult,
   OrderChildReference,
+  OrderDetailStatusAuditRow,
   OrderDeleteAuditInput,
   OrderDeleteOutboxInput,
   OrderDeleteIdempotencyResult,
@@ -21,8 +22,12 @@ import type {
   OrderRestoreIdempotencyResult,
   OrderRestoreOutboxInput,
   OrderSaveAuditEvent,
+  OrderStatusAuditEvent,
+  OrderStatusAuditInfo,
+  OrderStatusOutboxEvent,
   OrderTransactionManagerPort,
   RestoreOrderCommand,
+  ProductionStatusAuditInfo,
   OrderWriteUnitOfWork,
   SaveContext,
   SheetReferenceValidationInput,
@@ -98,6 +103,25 @@ interface LockedOrderRestoreDbRow extends LockedOrderDeleteDbRow {
 
 interface AuditRow {
   audit_id: string;
+}
+
+interface OrderStatusAuditInfoRow {
+  order_status_id: string | number;
+  order_status_name: string;
+}
+
+interface ProductionStatusAuditInfoRow {
+  production_status_id: string | number;
+  production_status_name: string;
+  production_status_code: string | null;
+}
+
+interface OrderDetailStatusAuditDbRow {
+  detail_id: string | number;
+  detail_number: string | number | null;
+  production_status_id: string | number | null;
+  production_status_name: string | null;
+  production_status_code: string | null;
 }
 
 export class PgOrderTransactionManager implements OrderTransactionManagerPort {
@@ -599,6 +623,80 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       [orderId],
     );
     return result.rows[0] ?? null;
+  }
+
+  async loadOrderStatusAuditInfo(statusId: number | null): Promise<OrderStatusAuditInfo | null> {
+    if (statusId === null) {
+      return null;
+    }
+
+    const result = await this.tx.query<OrderStatusAuditInfoRow>(
+      `
+      SELECT order_status_id, order_status_name
+      FROM order_statuses
+      WHERE order_status_id = $1
+      `,
+      [statusId],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          statusId: Number(row.order_status_id),
+          statusName: row.order_status_name,
+          statusCode: null,
+        }
+      : null;
+  }
+
+  async loadProductionStatusAuditInfo(
+    statusId: number | null,
+  ): Promise<ProductionStatusAuditInfo | null> {
+    if (statusId === null) {
+      return null;
+    }
+
+    const result = await this.tx.query<ProductionStatusAuditInfoRow>(
+      `
+      SELECT production_status_id, production_status_name, production_status_code
+      FROM production_statuses
+      WHERE production_status_id = $1
+      `,
+      [statusId],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          statusId: Number(row.production_status_id),
+          statusName: row.production_status_name,
+          statusCode: row.production_status_code,
+        }
+      : null;
+  }
+
+  async loadOrderDetailStatusAuditRows(orderId: number): Promise<OrderDetailStatusAuditRow[]> {
+    const result = await this.tx.query<OrderDetailStatusAuditDbRow>(
+      `
+      SELECT od.detail_id,
+             od.detail_number,
+             od.production_status_id,
+             ps.production_status_name,
+             ps.production_status_code
+      FROM order_details od
+      LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
+      WHERE od.order_id = $1
+      ORDER BY od.detail_id
+      `,
+      [orderId],
+    );
+
+    return result.rows.map((row) => ({
+      detailId: Number(row.detail_id),
+      detailNumber: row.detail_number === null ? null : Number(row.detail_number),
+      productionStatusId:
+        row.production_status_id === null ? null : Number(row.production_status_id),
+      productionStatusName: row.production_status_name,
+      productionStatusCode: row.production_status_code,
+    }));
   }
 
   async assertChildOwnership(
@@ -1184,6 +1282,54 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       >,
       relatedEntities: sheetIds.map((entityId) => ({ entityType: 'sheet_material_type', entityId })),
     });
+  }
+
+  async writeStatusAuditEvent(event: OrderStatusAuditEvent): Promise<void> {
+    await auditService.record(this.tx, {
+      event: event.action,
+      entityType: event.detailId === undefined ? 'order' : 'order_detail',
+      entityId: event.detailId ?? event.orderId,
+      actorUserId: event.actorUserId,
+      actorUsername: event.actorUsername ?? null,
+      actorRole: event.actorRole ?? null,
+      requestId: event.requestId ?? 'order-status-audit',
+      source: SOURCE,
+      relatedOrderId: event.orderId,
+      relatedClientId: event.clientId ?? null,
+      statusField: event.statusField,
+      statusId: event.statusId,
+      statusName: event.statusName ?? null,
+      statusCode: event.statusCode ?? null,
+      before: event.before ?? null,
+      after: event.after ?? null,
+      diff: event.diff ?? computeDiff(event.before ?? null, event.after ?? null),
+      metadata: event.metadata ?? { commandName: event.action },
+      relatedEntities:
+        event.detailId === undefined
+          ? []
+          : [{ entityType: 'order_detail', entityId: event.detailId }],
+    });
+  }
+
+  async enqueueStatusOutboxEvent(event: OrderStatusOutboxEvent): Promise<void> {
+    await this.tx.query(
+      `
+      INSERT INTO outbox_events (
+        event_type, aggregate_type, aggregate_id, payload_json, idempotency_key
+      )
+      VALUES ($1, 'order', $2, $3::jsonb, $4)
+      ON CONFLICT (idempotency_key) DO NOTHING
+      `,
+      [
+        event.eventType,
+        String(event.orderId),
+        JSON.stringify({
+          source: SOURCE,
+          ...event.payload,
+        }),
+        event.idempotencyKey,
+      ],
+    );
   }
 
   async evaluateStatusAutomation(event: StatusAutomationEvent): Promise<void> {

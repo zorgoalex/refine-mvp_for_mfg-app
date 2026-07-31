@@ -22,6 +22,7 @@ const DayColumn: React.FC<DayColumnProps> = ({
   onDrop,
   onContextMenu,
   onCheckboxChange,
+  showFinancials = true,
 }) => {
   const isOperational = useOperationalUi();
   const dateKey = formatDateKey(date);
@@ -112,6 +113,7 @@ const DayColumn: React.FC<DayColumnProps> = ({
               onCheckboxChange={onCheckboxChange}
               cardScale={cardScale}
               productionWorkflowDisplay={productionWorkflowDisplay}
+              showFinancials={showFinancials}
             />
           ))
         ) : (

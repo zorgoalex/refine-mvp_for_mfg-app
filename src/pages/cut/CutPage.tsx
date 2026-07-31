@@ -1882,6 +1882,23 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     triggerBlobDownload(pdfPreview.blob, pdfPreview.fileName);
   }, [pdfPreview.blob, pdfPreview.fileName]);
 
+  const printPreviewPdf = useCallback(() => {
+    if (!pdfPreview.blob) {
+      message.warning('PDF ещё не готов для печати');
+      return;
+    }
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      message.warning('Браузер заблокировал окно PDF. Разрешите всплывающие окна.');
+      return;
+    }
+    printWindow.opener = null;
+    const printUrl = URL.createObjectURL(pdfPreview.blob);
+    printWindow.location.href = printUrl;
+    printWindow.focus();
+    window.setTimeout(() => URL.revokeObjectURL(printUrl), 60_000);
+  }, [pdfPreview.blob]);
+
   const openJobPdfPreview = useCallback(async () => {
     if (!job) return;
     const requestSeq = pdfPreviewRequestSeqRef.current + 1;
@@ -4050,8 +4067,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           <Button key="close" onClick={closeGroupPdfPreview}>
             Закрыть
           </Button>,
-          <Button key="download" type="primary" disabled={!pdfPreview.blob || pdfPreview.loading} onClick={downloadPreviewPdf}>
+          <Button key="download" disabled={!pdfPreview.blob || pdfPreview.loading} onClick={downloadPreviewPdf}>
             Скачать
+          </Button>,
+          <Button
+            key="print"
+            type="primary"
+            icon={<PrinterOutlined />}
+            disabled={!pdfPreview.blob || pdfPreview.loading}
+            onClick={printPreviewPdf}
+            data-testid="print-preview-pdf-btn"
+          >
+            Печать
           </Button>,
         ]}
       >

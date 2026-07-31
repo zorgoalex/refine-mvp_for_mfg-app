@@ -41,6 +41,21 @@ describe('frozen bath PDF render wiring', () => {
   });
 });
 
+describe('cut PDF sheet context fields', () => {
+  it('passes cut identity, per-sheet film requirement, edge and milling into PDF renders', () => {
+    expect(repositorySource).toContain('loadPdfRenderIdentity');
+    expect(repositorySource).toContain('cutJobId: pdfIdentity.cutJobId');
+    expect(repositorySource).toContain('cutNumber: pdfIdentity.cutNumber');
+    expect(repositorySource).toContain('currentCutNumber: pdfIdentity.currentCutNumber');
+    expect(repositorySource).toContain('currentCutNumber: currentResultNo === null ? null : `${cutJobId}-${currentResultNo}`');
+    expect(repositorySource).toContain('filmRequirementLinearMeters: showBathMeterGuides');
+    expect(repositorySource).toContain('calculateBathSheetFilmUsage(s.placements)?.linearMeters');
+    expect(repositorySource).toContain('bathDetailInfoFor:');
+    expect(repositorySource).toContain('edgeTypeName: detail?.edgeTypeName ?? null');
+    expect(repositorySource).toContain('millingTypeName: detail?.millingTypeName ?? null');
+  });
+});
+
 describe('cut result number allocation', () => {
   const currentManual = {
     cutResultId: 902,

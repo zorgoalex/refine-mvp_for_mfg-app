@@ -48,6 +48,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
   onCheckboxChange,
   onContextMenu,
   isDragging: isDraggingProp = false,
+  showFinancials = true,
 }) => {
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
@@ -280,7 +281,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
     : null;
 
   // Статус оплаты
-  const paymentStatus = order.payment_status_name || '';
+  const paymentStatus = showFinancials ? order.payment_status_name || '' : '';
   const isNotPaid = paymentStatus.toLowerCase().includes('не оплачен');
   const paymentText = paymentStatus;
 

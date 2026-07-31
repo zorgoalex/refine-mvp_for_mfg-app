@@ -180,9 +180,11 @@ describe('permissions foundation', () => {
       'sessions.logout_own',
       'orders.view',
       'orders.change_status',
+      'calendar.view',
     ]);
     expect(can('packer', 'orders.view')).toBe(true);
     expect(can('packer', 'orders.change_status')).toBe(true);
+    expect(can('packer', 'calendar.view')).toBe(true);
     expect(can('packer', 'orders.update')).toBe(false);
     expect(can('packer', 'orders.change_production_status')).toBe(false);
     expect(can('packer', 'payments.view')).toBe(false);

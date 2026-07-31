@@ -21,6 +21,8 @@ import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { resolveCurrentProductionStatusCodes } from '../../currentProductionStatus';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
+import { can } from '../../../../utils/permissions';
+import { featureFlags } from '../../../../config/featureFlags';
 
 const { Text } = Typography;
 
@@ -34,6 +36,7 @@ interface OrderShowHeaderProps {
   // internal materials fetch so sheet orders never show the (hidden) shadow name.
   detailMaterialNames?: string[];
   headerMaterialName?: string | null;
+  showFinancials?: boolean;
 }
 
 export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
@@ -43,10 +46,15 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   compactSticky = false,
   detailMaterialNames,
   headerMaterialName,
+  showFinancials = true,
 }) => {
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
   const { getSetting } = useAppSettings();
+  const canViewEmployees = !featureFlags.useBackendPermissions || can('employees.view');
+  const canViewReferences = !featureFlags.useBackendPermissions || can('references.view');
+  const canViewProductionReferences = !featureFlags.useBackendPermissions || can('production.view');
+  const canViewClients = !featureFlags.useBackendPermissions || can('clients.view');
 
   // State for client context menu
   const [clientMenuOpen, setClientMenuOpen] = useState(false);
@@ -59,7 +67,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
 
   // Client context menu items
   const clientMenuItems: MenuProps['items'] = useMemo(() => {
-    if (!record?.client_id) return [];
+    if (!record?.client_id || !canViewClients) return [];
     return [
       {
         key: 'view-client',
@@ -71,12 +79,13 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
         },
       },
     ];
-  }, [record?.client_id, navigate]);
+  }, [canViewClients, record?.client_id, navigate]);
 
   // Load employees for design_engineer lookup
   const { data: employeesData } = useList({
     resource: 'employees',
     pagination: { pageSize: 1000 },
+    queryOptions: { enabled: canViewEmployees },
   });
 
   const employeesMap = useMemo(() => new Map(
@@ -112,7 +121,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     ] : [],
     pagination: { pageSize: 100 },
     queryOptions: {
-      enabled: uniqueMaterialIds.length > 0,
+      enabled: uniqueMaterialIds.length > 0 && canViewReferences,
     },
   });
 
@@ -124,7 +133,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     ],
     pagination: { pageSize: 100 },
     queryOptions: {
-      enabled: !!record?.client_id,
+      enabled: !!record?.client_id && canViewClients,
     },
   });
 
@@ -178,6 +187,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     // IMPORTANT: explicit is_active filter disables dataProvider auto-filter, so we can map inactive statuses too
     filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
     sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
+    queryOptions: { enabled: canViewProductionReferences },
   });
 
   // Create map for production status ID to code
@@ -257,7 +267,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
         <div className="order-show-operational-summary__primary">
           <strong>{record?.order_name || 'Заказ'}</strong>
           <Tag color={isAtRisk ? 'orange' : 'green'}>{isAtRisk ? 'Под риском' : 'В работе'}</Tag>
-          <Tag>{`${paymentPercent}%`}</Tag>
+          {showFinancials && <Tag>{`${paymentPercent}%`}</Tag>}
         </div>
         <div className="order-show-operational-summary__metric">
           <strong>{record?.client_name || '—'}</strong>
@@ -281,10 +291,12 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
           <strong>{materialsSummary}</strong>
           <small>{`${totals.parts_count} деталей · ${formatNumber(totals.total_area, 2)} м²`}</small>
         </div>
-        <div className="order-show-operational-summary__money">
-          <strong>{formatNumber(finalAmount, 0)} {CURRENCY_SYMBOL}</strong>
-          <small>{`Оплачено ${formatNumber(paidAmount, 0)} ${CURRENCY_SYMBOL}`}</small>
-        </div>
+        {showFinancials && (
+          <div className="order-show-operational-summary__money">
+            <strong>{formatNumber(finalAmount, 0)} {CURRENCY_SYMBOL}</strong>
+            <small>{`Оплачено ${formatNumber(paidAmount, 0)} ${CURRENCY_SYMBOL}`}</small>
+          </div>
+        )}
       </div>
     );
   }
@@ -311,12 +323,14 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             <Text strong className="order-show-header__compact-text">{record?.client_name || '—'}</Text>
             {primaryPhone ? <a href={`tel:${primaryPhone.replace(/[^+\d]/g, '')}`}>{primaryPhone}</a> : null}
           </span>
-          <span className="order-show-header__compact-item order-show-header__compact-money">
-            <span className="order-show-header__compact-text">{compactFinanceItems.join(' / ')}</span>
-            <Tag color={record?.payment_status_name === 'Оплачен' ? '#059669' : '#D97706'}>
-              {record?.payment_status_name || 'Не назначен'}
-            </Tag>
-          </span>
+          {showFinancials && (
+            <span className="order-show-header__compact-item order-show-header__compact-money">
+              <span className="order-show-header__compact-text">{compactFinanceItems.join(' / ')}</span>
+              <Tag color={record?.payment_status_name === 'Оплачен' ? '#059669' : '#D97706'}>
+                {record?.payment_status_name || 'Не назначен'}
+              </Tag>
+            </span>
+          )}
           <span className="order-show-header__compact-item order-show-header__compact-dates">
             {record?.order_date ? dayjs(record.order_date).format('DD.MM.YYYY') : '—'}
             {' → '}
@@ -446,7 +460,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
         </div>
 
         {/* Column 3: Final amount + Payment status */}
-        <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+        {showFinancials && <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
           <Text strong style={{ fontSize: 15, color: '#4F46E5' }}>
             {formatNumber(record?.final_amount || record?.total_amount || 0, 2)} {CURRENCY_SYMBOL}
           </Text>
@@ -460,7 +474,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
           >
             {record?.payment_status_name?.toUpperCase() || 'НЕ НАЗНАЧЕН'}
           </Tag>
-        </div>
+        </div>}
       </div>
 
       <RowSeparator />
@@ -518,7 +532,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
         </div>
 
         {/* Column 3: Discount/Surcharge | Paid | Remaining - двухстрочный стиль */}
-        <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
+        {showFinancials && <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
           {(() => {
             const discount = Number(record?.discount) || 0;
             const surcharge = Number(record?.surcharge) || 0;
@@ -602,7 +616,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
               </React.Fragment>
             ));
           })()}
-        </div>
+        </div>}
       </div>
 
       <RowSeparator />

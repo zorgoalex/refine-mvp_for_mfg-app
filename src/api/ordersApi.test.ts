@@ -73,6 +73,27 @@ describe('ordersApi', () => {
     );
   });
 
+  it('loads the live resource demand projection with report filters', async () => {
+    const response = {
+      data: [],
+      pagination: { page: 2, pageSize: 50, total: 0, totalPages: 1 },
+      refreshedAt: '2026-07-31T10:00:00.000Z',
+    };
+    const fetchMock = mockFetch(response);
+
+    await expect(ordersApi.listResourceDemands({
+      page: 2,
+      pageSize: 50,
+      dateFrom: '2026-07-01',
+      supplierId: 7,
+    })).resolves.toEqual(response);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/orders/resource-demands?page=2&pageSize=50&dateFrom=2026-07-01&supplierId=7',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('creates an order with one POST /api/v1/orders request', async () => {
     const dto = createSaveOrderDto();
     const order = createOrderDto();

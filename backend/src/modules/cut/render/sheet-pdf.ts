@@ -30,6 +30,10 @@ export interface PdfSheetInput {
   templateLayout?: Record<string, unknown> | null;
   meta?: PdfSheetMeta;
   detailRows?: PdfSheetDetailRow[];
+  cutJobId?: number;
+  cutNumber?: string;
+  currentCutNumber?: string;
+  filmRequirementLinearMeters?: number | null;
 }
 
 export interface PdfSheetMeta {
@@ -313,7 +317,7 @@ function drawSheetThumbnail(
   if (w <= 0 || h <= 0) return;
   doc.save();
   doc.rect(0, 0, w, h).clip();
-  SVGtoPDF(doc, sheet.bathSvg ?? sheet.svg, 0, 0, {
+  SVGtoPDF(doc, stretchSvgToBounds(sheet.bathSvg ?? sheet.svg, w, h), 0, 0, {
     width: w,
     height: h,
     assumePt: false,
@@ -326,6 +330,58 @@ function drawSheetThumbnail(
     .rect(0, 0, w, h)
     .stroke()
     .restore();
+}
+
+export function stretchSvgToBounds(svg: string, targetWidth?: number, targetHeight?: number): string {
+  const stretched = svg.replace(/<svg\b([^>]*)>/i, (_tag, rawAttributes: string) => {
+    const attributes = rawAttributes.replace(/\s+preserveAspectRatio=(?:"[^"]*"|'[^']*')/i, '');
+    return `<svg preserveAspectRatio="none"${attributes}>`;
+  });
+  if (!targetWidth || !targetHeight || targetWidth <= 0 || targetHeight <= 0) return stretched;
+
+  const viewBox = /<svg\b[^>]*\bviewBox=(?:"([^"]+)"|'([^']+)')[^>]*>/i.exec(stretched)?.slice(1).find(Boolean);
+  if (!viewBox) return stretched;
+  const values = viewBox.trim().split(/[\s,]+/).map(Number);
+  if (values.length !== 4 || values.some((value) => !Number.isFinite(value))) return stretched;
+  const [, , viewBoxWidth, viewBoxHeight] = values;
+  if (viewBoxWidth <= 0 || viewBoxHeight <= 0) return stretched;
+
+  const scaleX = targetWidth / viewBoxWidth;
+  const scaleY = targetHeight / viewBoxHeight;
+  const uniformScale = Math.min(scaleX, scaleY);
+  const compensateX = uniformScale / scaleX;
+  const compensateY = uniformScale / scaleY;
+  if (Math.abs(compensateX - 1) < 1e-9 && Math.abs(compensateY - 1) < 1e-9) return stretched;
+
+  return stretched.replace(/<text\b([^>]*)>([\s\S]*?)<\/text>/g, (textTag, rawAttributes: string, content: string) => {
+    const tspanAttributes = /<tspan\b([^>]*)>/i.exec(content)?.[1] || '';
+    const anchorX = readSvgNumberAttribute(rawAttributes, 'x') ?? readSvgNumberAttribute(tspanAttributes, 'x');
+    const anchorY = readSvgNumberAttribute(rawAttributes, 'y') ?? readSvgNumberAttribute(tspanAttributes, 'y');
+    if (anchorX === null || anchorY === null) return textTag;
+
+    const clipPath = /\s+clip-path=(?:"[^"]*"|'[^']*')/i.exec(rawAttributes)?.[0].trim();
+    const textAttributes = rawAttributes.replace(/\s+clip-path=(?:"[^"]*"|'[^']*')/i, '');
+    const transform = [
+      `translate(${formatSvgNumber(anchorX)} ${formatSvgNumber(anchorY)})`,
+      `scale(${formatSvgNumber(compensateX)} ${formatSvgNumber(compensateY)})`,
+      `translate(${formatSvgNumber(-anchorX)} ${formatSvgNumber(-anchorY)})`,
+    ].join(' ');
+    const lockedText = `<g class="cut-pdf-text-aspect-lock" transform="${transform}"><text${textAttributes}>${content}</text></g>`;
+    return clipPath ? `<g ${clipPath}>${lockedText}</g>` : lockedText;
+  });
+}
+
+function readSvgNumberAttribute(attributes: string, name: 'x' | 'y'): number | null {
+  const numeric = '[-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][-+]?\\d+)?';
+  const match = new RegExp(`(?:^|\\s)${name}=(?:"(${numeric})"|'(${numeric})')`, 'i').exec(attributes);
+  if (!match) return null;
+  const value = Number(match[1] ?? match[2]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function formatSvgNumber(value: number): string {
+  const rounded = Number(value.toFixed(6));
+  return Object.is(rounded, -0) ? '0' : String(rounded);
 }
 
 function drawTemplateQr(
@@ -655,8 +711,10 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
   const utilization = sheetArea > 0 ? (detailsArea / sheetArea) * 100 : null;
   return {
     'job.name': '',
-    'job.number': '',
+    'job.number': sheet.cutJobId ?? null,
     'job.pdf_template': sheet.template ?? '',
+    'cut.number': sheet.cutNumber ?? '',
+    'cut.current_version': sheet.currentCutNumber ?? '',
     'group.number': '',
     'group.material': joinBlank(meta.materials),
     'group.film': joinBlank(meta.films),
@@ -666,6 +724,7 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
     'sheet.details_count': totalQuantity,
     'sheet.area': detailsArea > 0 ? Number(detailsArea.toFixed(3)) : null,
     'sheet.utilization': utilization === null ? null : Number(utilization.toFixed(2)),
+    'sheet.film_requirement': formatFilmRequirement(sheet.filmRequirementLinearMeters),
     'sheet.thumbnail': '',
     'sheet.machine_files': joinBlank(machineFiles),
     'detail.table': '',
@@ -682,6 +741,11 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
     'computed.page_number': sheet.sheetNumber ?? null,
     'computed.page_count': sheet.pageCount ?? null,
   };
+}
+
+function formatFilmRequirement(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '';
+  return `${Number(value.toFixed(1)).toLocaleString('ru-RU')} пог. м`;
 }
 
 function resolveCustomFieldValues(

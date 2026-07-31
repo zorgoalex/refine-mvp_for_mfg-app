@@ -71,7 +71,11 @@ describe('CutConfigAdminService RBAC', () => {
     const fields = await service.listPdfTemplateFields({ currentUser: user(['cut.view']) });
 
     expect(fields.map((field) => field.id)).toEqual(expect.arrayContaining([
+      'job.number',
+      'cut.number',
+      'cut.current_version',
       'sheet.thumbnail',
+      'sheet.film_requirement',
       'sheet.machine_files',
       'sheet.utilization',
       'order.unique_names',
@@ -89,6 +93,22 @@ describe('CutConfigAdminService RBAC', () => {
       'computed.today',
     ]));
     expect(fields.find((field) => field.id === 'order.unique_names')).toMatchObject({ source: 'order' });
+    expect(fields.find((field) => field.id === 'job.number')).toMatchObject({
+      source: 'job',
+      label: 'Номер задания на раскрой',
+    });
+    expect(fields.find((field) => field.id === 'cut.number')).toMatchObject({
+      source: 'cut',
+      label: 'Номер раскроя',
+    });
+    expect(fields.find((field) => field.id === 'cut.current_version')).toMatchObject({
+      source: 'cut',
+      label: 'Текущая/актуальная версия Карты раскроя',
+    });
+    expect(fields.find((field) => field.id === 'sheet.film_requirement')).toMatchObject({
+      source: 'sheet',
+      label: 'Потребность в плёнке',
+    });
     expect(fields.find((field) => field.id === 'client.unique_names')).toMatchObject({ source: 'client' });
     expect(fields.find((field) => field.id === 'computed.today')).toMatchObject({ source: 'computed' });
     expect(fields.find((field) => field.id === 'detail.order')).toMatchObject({ source: 'detail' });

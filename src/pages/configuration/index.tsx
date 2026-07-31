@@ -18,6 +18,7 @@ import {
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { featureFlags } from '../../config/featureFlags';
+import { bitrix24MenuConfig } from '../../config/bitrix24';
 import { VlmConfigTab } from './VlmConfigTab';
 import { ProductionWorkflowTab } from './components/ProductionWorkflowTab';
 import { DeadlineTransitionRulesConfig } from './components/DeadlineTransitionRulesConfig';
@@ -26,6 +27,7 @@ import { NotificationRulesConfig } from './components/NotificationRulesConfig';
 import { OrgStructureConfig } from './components/OrgStructureConfig';
 import { CutConfigTab } from './components/CutConfigTab';
 import { LabelsConfigTab } from './components/LabelsConfigTab';
+import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMatrix';
 import { can } from '../../utils/permissions';
 import {
   buildInitialResourceVisibility,
@@ -405,6 +407,7 @@ const FinanceConfigTab: React.FC = () => {
           </Tooltip>
         )}
       </div>
+      <FinancialLayerAccessMatrix />
     </div>
   );
 };
@@ -427,7 +430,13 @@ const TableVisibilityByRoleTab: React.FC = () => {
     [rolesData],
   );
   const menuResources = useMemo(
-    () => getMenuResources(resources, RESOURCE_LABELS),
+    () => getMenuResources(
+      resources,
+      RESOURCE_LABELS,
+      bitrix24MenuConfig
+        ? [{ name: 'crm', label: bitrix24MenuConfig.label, route: bitrix24MenuConfig.url }]
+        : [],
+    ),
     [resources],
   );
   const savedMatrix = normalizeRoleVisibilityMatrix(

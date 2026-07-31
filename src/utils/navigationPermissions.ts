@@ -1,5 +1,7 @@
 import type { PermissionName } from '../api/types/authApi.types';
-import { canAny, type PermissionCarrier } from './permissions';
+import { can, canAny, type PermissionCarrier } from './permissions';
+
+const FINANCIAL_NAVIGATION_RESOURCES = new Set(['payments', 'payments_view']);
 
 export const SETTINGS_CATEGORY_PERMISSIONS: PermissionName[] = [
   'settings.view',
@@ -17,6 +19,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   doweling_orders_view: ['orders.view'],
   order_workshops: ['orders.view'],
   order_resource_requirements: ['orders.view'],
+  crm: ['orders.view'],
   clients: ['references.view'],
   materials: ['references.view'],
   milling_types: ['references.view'],
@@ -85,8 +88,19 @@ export function canViewNavigationResource(
   resourceName: string,
   user: PermissionCarrier | null | undefined,
   backendPermissionsEnabled: boolean,
+  financialLayerVisible?: boolean,
 ): boolean {
+  if (FINANCIAL_NAVIGATION_RESOURCES.has(resourceName) && financialLayerVisible === false) {
+    return false;
+  }
   if (!backendPermissionsEnabled) return true;
+
+  if (
+    FINANCIAL_NAVIGATION_RESOURCES.has(resourceName)
+    && !(financialLayerVisible ?? can('orders.view_financials', user))
+  ) {
+    return false;
+  }
 
   const permissions = RESOURCE_PERMISSION_MAP[resourceName];
   if (!permissions) return false;

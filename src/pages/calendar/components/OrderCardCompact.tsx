@@ -22,6 +22,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
   cardScale = 1.0,
   onContextMenu,
   isDragging: isDraggingProp = false,
+  showFinancials = true,
 }) => {
   const navigate = useNavigate();
 
@@ -162,7 +163,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
 
   // Вычисляем фрезеровку из деталей заказа
   const millingDisplay = getMillingDisplayValue(order.order_details);
-  const paymentStatus = order.payment_status_name || '';
+  const paymentStatus = showFinancials ? order.payment_status_name || '' : '';
 
   // Проверка статусов для контуров
   const isIssued = order.order_status_name?.toLowerCase() === 'выдан';
@@ -173,7 +174,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
     ? '#8B4513'
     : isReadyToIssue
     ? '#52c41a'
-    : getCardBorderColor(order);
+    : getCardBorderColor(showFinancials ? order : { ...order, payment_status: undefined });
 
   // Обработчик клика на номер заказа
   const handleOrderClick = () => {

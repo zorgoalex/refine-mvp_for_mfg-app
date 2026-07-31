@@ -7,31 +7,15 @@ import { useList } from '@refinedev/core';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { resolveDetailMaterialName } from '../../../../utils/materialDisplayName';
-import { calculateOrderTotalArea } from '../../../../utils/orderArea';
-import type { OrderDetail } from '../../../../types/orders';
 import { can } from '../../../../utils/permissions';
 import { cutApi } from '../../../../api/cutApi';
 import type { CutJobDto } from '../../../../api/types/cutApi.types';
 import { useCutDetailLastReady } from '../../useCutDetailLastReady';
-import { computeOrderBathFilmUsage, formatFilmLinearMeters } from '../../../cut/cutFilmUsage';
+import { computeOrderBathFilmUsage } from '../../../cut/cutFilmUsage';
+import { buildCutJobNameById, CutJobLinks } from '../../CutJobLinks';
+import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from '../../orderMaterialsSummary';
 
 const { Text } = Typography;
-
-interface MaterialAggregation {
-  id: number;
-  name: string;
-  totalArea: number;
-  detailsCount: number;
-  areaDetails: OrderDetail[];
-}
-
-interface FilmAggregation {
-  id: number;
-  name: string;
-  totalArea: number;
-  detailsCount: number;
-  areaDetails: OrderDetail[];
-}
 
 export const OrderMaterialsTab: React.FC = () => {
   const { details, header } = useOrderFormStore();
@@ -119,68 +103,24 @@ export const OrderMaterialsTab: React.FC = () => {
     };
   }, [cutViewAllowed, latestCutJobIds, latestCutJobIdsKey]);
 
-  // Агрегация по материалам
-  const materialsAggregation = useMemo(() => {
-    const aggregation: Record<number, MaterialAggregation> = {};
-
-    details.forEach((detail) => {
-      const sheetTypeId = detail.sheet_material_type_id;
-      if (!sheetTypeId) return;
-
-      if (!aggregation[sheetTypeId]) {
-        aggregation[sheetTypeId] = {
-          id: sheetTypeId,
-          name:
-            resolveDetailMaterialName(detail, undefined, materialsMap) ||
-            `ID: ${sheetTypeId}`,
-          totalArea: 0,
-          detailsCount: 0,
-          areaDetails: [],
-        };
-      }
-
-      aggregation[sheetTypeId].areaDetails.push(detail);
-      aggregation[sheetTypeId].detailsCount += 1;
-    });
-
-    return Object.values(aggregation)
-      .map((item) => ({ ...item, totalArea: calculateOrderTotalArea(item.areaDetails) }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [details, materialsMap]);
-
-  // Агрегация по пленкам
-  const filmsAggregation = useMemo(() => {
-    const aggregation: Record<number, FilmAggregation> = {};
-
-    details.forEach((detail) => {
-      const filmId = detail.film_id;
-      if (!filmId) return;
-
-      if (!aggregation[filmId]) {
-        aggregation[filmId] = {
-          id: filmId,
-          name: filmsMap[filmId] || `ID: ${filmId}`,
-          totalArea: 0,
-          detailsCount: 0,
-          areaDetails: [],
-        };
-      }
-
-      aggregation[filmId].areaDetails.push(detail);
-      aggregation[filmId].detailsCount += 1;
-    });
-
-    return Object.values(aggregation)
-      .map((item) => ({ ...item, totalArea: calculateOrderTotalArea(item.areaDetails) }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [details, filmsMap]);
-
   const bathFilmUsage = useMemo(
     () => computeOrderBathFilmUsage(details, cutJobs, filmNameById),
     [cutJobs, details, filmNameById],
   );
+  const cutJobNameById = useMemo(() => buildCutJobNameById(cutJobs), [cutJobs]);
+  const filmMaterialRows = useMemo(
+    () => buildOrderFilmMaterialRows(details, bathFilmUsage, filmNameById),
+    [bathFilmUsage, details, filmNameById],
+  );
+  const sheetMaterialRows = useMemo(
+    () => buildOrderSheetMaterialRows(
+      details,
+      (detail) => resolveDetailMaterialName(detail, undefined, materialsMap),
+    ),
+    [details, materialsMap],
+  );
 
-  const materialsColumns = [
+  const sheetMaterialColumns = [
     {
       title: 'Материал',
       dataIndex: 'name',
@@ -201,7 +141,7 @@ export const OrderMaterialsTab: React.FC = () => {
     },
   ];
 
-  const filmsColumns = [
+  const filmMaterialColumns = [
     {
       title: 'Пленка',
       dataIndex: 'name',
@@ -220,59 +160,61 @@ export const OrderMaterialsTab: React.FC = () => {
       key: 'detailsCount',
       align: 'center' as const,
     },
-  ];
-
-  const bathFilmUsageColumns = [
-    {
-      title: 'Пленка',
-      dataIndex: 'filmName',
-      key: 'filmName',
-      render: (value: string | null) => value?.trim() || 'Пленка не указана',
-    },
     {
       title: 'Пог. м',
-      dataIndex: 'linearMeters',
-      key: 'linearMeters',
+      dataIndex: 'bathLinearMeters',
+      key: 'bathLinearMeters',
       align: 'right' as const,
-      render: (value: number) => formatFilmLinearMeters(value),
+      render: (value: number) => value > 0 ? formatNumber(value, 1) : '—',
     },
     {
       title: 'Листы',
-      dataIndex: 'sheets',
-      key: 'sheets',
+      dataIndex: 'bathSheets',
+      key: 'bathSheets',
       align: 'center' as const,
+      render: (value: number) => value > 0 ? value : '—',
     },
     {
       title: 'Раскрои',
       dataIndex: 'cutJobIds',
       key: 'cutJobIds',
-      render: (value: number[]) => value.map((id) => `#${id}`).join(', '),
+      render: (value: number[]) => (
+        <CutJobLinks cutJobIds={value} cutJobNameById={cutJobNameById} />
+      ),
     },
   ];
 
   return (
     <div style={{ padding: '16px 0' }}>
+      <div style={{ marginBottom: 16 }}>
+        <Text strong style={{ fontSize: 14 }}>
+          Материалы заказа
+        </Text>
+      </div>
       <Row gutter={24}>
-        {/* Таблица материалов */}
-        <Col span={12}>
+        <Col xs={24} lg={12}>
           <div style={{ marginBottom: 16 }}>
             <Text strong style={{ fontSize: 14 }}>
-              Расчет материалов
+              Пленка
             </Text>
           </div>
           <Table
-            dataSource={materialsAggregation}
-            columns={materialsColumns}
-            rowKey="id"
+            dataSource={filmMaterialRows}
+            columns={filmMaterialColumns}
+            rowKey="key"
             size="small"
             pagination={false}
             bordered
+            loading={cutJobsLoading}
+            scroll={{ x: 680 }}
             locale={{
-              emptyText: 'Нет данных по материалам',
+              emptyText: cutViewAllowed ? 'Нет данных по пленке' : 'Нет доступа к данным раскроя',
             }}
             summary={(data) => {
-              const totalArea = calculateOrderTotalArea(details.filter((detail) => detail.sheet_material_type_id != null));
+              const totalArea = data.reduce((sum, item) => sum + item.totalArea, 0);
               const totalDetails = data.reduce((sum, item) => sum + item.detailsCount, 0);
+              const totalMeters = data.reduce((sum, item) => sum + item.bathLinearMeters, 0);
+              const totalSheets = data.reduce((sum, item) => sum + item.bathSheets, 0);
 
               return (
                 <Table.Summary.Row>
@@ -285,31 +227,37 @@ export const OrderMaterialsTab: React.FC = () => {
                   <Table.Summary.Cell index={2} align="center">
                     <Text strong style={{ fontSize: '1.1em' }}>{totalDetails}</Text>
                   </Table.Summary.Cell>
+                  <Table.Summary.Cell index={3} align="right">
+                    <Text strong style={{ fontSize: '1.1em' }}>{totalMeters > 0 ? formatNumber(totalMeters, 1) : '—'}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={4} align="center">
+                    <Text strong style={{ fontSize: '1.1em' }}>{totalSheets > 0 ? totalSheets : '—'}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={5} />
                 </Table.Summary.Row>
               );
             }}
           />
         </Col>
 
-        {/* Таблица пленок */}
-        <Col span={12}>
+        <Col xs={24} lg={12}>
           <div style={{ marginBottom: 16 }}>
             <Text strong style={{ fontSize: 14 }}>
-              Расчет пленок
+              Листовые материалы
             </Text>
           </div>
           <Table
-            dataSource={filmsAggregation}
-            columns={filmsColumns}
-            rowKey="id"
+            dataSource={sheetMaterialRows}
+            columns={sheetMaterialColumns}
+            rowKey="key"
             size="small"
             pagination={false}
             bordered
             locale={{
-              emptyText: 'Нет данных по пленкам',
+              emptyText: 'Нет данных по листовым материалам',
             }}
             summary={(data) => {
-              const totalArea = calculateOrderTotalArea(details.filter((detail) => detail.film_id != null));
+              const totalArea = data.reduce((sum, item) => sum + item.totalArea, 0);
               const totalDetails = data.reduce((sum, item) => sum + item.detailsCount, 0);
 
               return (
@@ -329,44 +277,6 @@ export const OrderMaterialsTab: React.FC = () => {
           />
         </Col>
       </Row>
-      <div style={{ marginTop: 24 }}>
-        <div style={{ marginBottom: 16 }}>
-          <Text strong style={{ fontSize: 14 }}>
-            Материалы по раскрою ванны
-          </Text>
-        </div>
-        <Table
-          dataSource={bathFilmUsage}
-          columns={bathFilmUsageColumns}
-          rowKey={(row) => row.filmId ?? row.filmName ?? 'no-film'}
-          size="small"
-          pagination={false}
-          bordered
-          loading={cutJobsLoading}
-          locale={{
-            emptyText: cutViewAllowed ? 'Нет данных по раскрою ванны' : 'Нет доступа к данным раскроя',
-          }}
-          summary={(data) => {
-            const totalMeters = data.reduce((sum, item) => sum + item.linearMeters, 0);
-            const totalSheets = data.reduce((sum, item) => sum + item.sheets, 0);
-
-            return (
-              <Table.Summary.Row>
-                <Table.Summary.Cell index={0}>
-                  <Text strong style={{ fontSize: '1.1em' }}>Итого:</Text>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={1} align="right">
-                  <Text strong style={{ fontSize: '1.1em' }}>{formatFilmLinearMeters(totalMeters)}</Text>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={2} align="center">
-                  <Text strong style={{ fontSize: '1.1em' }}>{totalSheets}</Text>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={3} />
-              </Table.Summary.Row>
-            );
-          }}
-        />
-      </div>
     </div>
   );
 };

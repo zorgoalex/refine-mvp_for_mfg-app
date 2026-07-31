@@ -491,8 +491,10 @@ const PDF_CUSTOM_FIELD_TYPE_OPTIONS: Array<{ value: CustomFieldSchemaRow['type']
 ];
 const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
   { id: 'job.name', source: 'job', label: 'Название задания', category: 'Задание', type: 'string' },
-  { id: 'job.number', source: 'job', label: 'Номер задания', category: 'Задание', type: 'number' },
+  { id: 'job.number', source: 'job', label: 'Номер задания на раскрой', category: 'Задание', type: 'number' },
   { id: 'job.pdf_template', source: 'job', label: 'Шаблон PDF', category: 'Задание', type: 'string' },
+  { id: 'cut.number', source: 'cut', label: 'Номер раскроя', category: 'Раскрой', type: 'string' },
+  { id: 'cut.current_version', source: 'cut', label: 'Текущая/актуальная версия Карты раскроя', category: 'Раскрой', type: 'string' },
   { id: 'group.number', source: 'group', label: 'Номер группы', category: 'Группа', type: 'number' },
   { id: 'group.material', source: 'group', label: 'Материал группы', category: 'Группа', type: 'string' },
   { id: 'group.film', source: 'group', label: 'Пленка группы', category: 'Группа', type: 'string' },
@@ -502,6 +504,7 @@ const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
   { id: 'sheet.details_count', source: 'sheet', label: 'Количество деталей на листе', category: 'Лист', type: 'number' },
   { id: 'sheet.area', source: 'sheet', label: 'Площадь деталей', category: 'Лист', type: 'number' },
   { id: 'sheet.utilization', source: 'sheet', label: 'Утилизация листа, %', category: 'Лист', type: 'number' },
+  { id: 'sheet.film_requirement', source: 'sheet', label: 'Потребность в плёнке', category: 'Лист', type: 'string' },
   { id: 'sheet.thumbnail', source: 'sheet', label: 'Миниатюра листа раскроя', category: 'Лист', type: 'string' },
   { id: 'sheet.machine_files', source: 'sheet', label: 'Файлы станка на листе', category: 'Лист', type: 'string' },
   { id: 'order.unique_names', source: 'order', label: 'Заказы на листе', category: 'Заказ', type: 'string' },
@@ -539,6 +542,8 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'job.name': 'Раскрой заказ 11380',
   'job.number': '19',
   'job.pdf_template': 'Профили ванны',
+  'cut.number': '19-3',
+  'cut.current_version': '19-4',
   'group.number': '1',
   'group.material': 'Ванна 2080x1050',
   'group.film': 'Крем брюле -Декор+',
@@ -548,6 +553,7 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'sheet.details_count': '32',
   'sheet.area': '5.378',
   'sheet.utilization': '48.76',
+  'sheet.film_requirement': '2,1 пог. м',
   'sheet.thumbnail': '',
   'sheet.machine_files': 'CNC#1_11380.TXT',
   'order.unique_names': '11380',
@@ -1989,18 +1995,87 @@ const PdfKonvaElement: React.FC<{
     const h = Math.max(element.h, 1);
     const pieceColor = ['#e6f4ff', '#fff1f0', '#f6ffed', '#fffbe6'];
     const pieces = [
-      { x: w * 0.07, y: h * 0.08, w: w * 0.34, h: h * 0.24 },
-      { x: w * 0.45, y: h * 0.08, w: w * 0.46, h: h * 0.18 },
-      { x: w * 0.08, y: h * 0.38, w: w * 0.26, h: h * 0.48 },
-      { x: w * 0.39, y: h * 0.35, w: w * 0.52, h: h * 0.38 },
+      { x: w * 0.07, y: h * 0.08, w: w * 0.34, h: h * 0.24, order: '11380', widthLabel: '800', heightLabel: '240', edge: 'ПВХ 2мм', milling: 'Модерн' },
+      { x: w * 0.45, y: h * 0.08, w: w * 0.46, h: h * 0.18, order: '11380', widthLabel: '780', heightLabel: '180', edge: 'ABS 1мм', milling: 'Паз' },
+      { x: w * 0.08, y: h * 0.38, w: w * 0.26, h: h * 0.48, order: '11381', widthLabel: '1100', heightLabel: '320', edge: '—', milling: 'Модерн' },
+      { x: w * 0.39, y: h * 0.35, w: w * 0.52, h: h * 0.38, order: '11382', widthLabel: '950', heightLabel: '420', edge: 'ПВХ 2мм', milling: 'Классика' },
     ];
     return (
       <React.Fragment>
         <KonvaGroup {...common} width={w} height={h}>
           <KonvaRect x={0} y={0} width={w} height={h} fill="#ffffff" stroke={String(element.style.color ?? '#111111')} strokeWidth={Number(element.style.strokeWidth ?? 0.25)} />
-          {pieces.map((piece, index) => (
-            <KonvaRect key={index} x={piece.x} y={piece.y} width={piece.w} height={piece.h} fill={pieceColor[index % pieceColor.length]} stroke="#334155" strokeWidth={0.18} listening={false} />
-          ))}
+          {pieces.map((piece, index) => {
+            const detailFontSize = Math.max(1.8, Math.min(3.8, Math.min(piece.w, piece.h) * 0.12));
+            const orderFontSize = detailFontSize * 1.25;
+            const detailMetaFontSize = orderFontSize / 2;
+            return (
+              <KonvaGroup
+                key={index}
+                x={piece.x}
+                y={piece.y}
+                width={piece.w}
+                height={piece.h}
+                clipX={0}
+                clipY={0}
+                clipWidth={piece.w}
+                clipHeight={piece.h}
+                listening={false}
+              >
+                <KonvaRect x={0} y={0} width={piece.w} height={piece.h} fill={pieceColor[index % pieceColor.length]} stroke="#334155" strokeWidth={0.18} listening={false} />
+                <KonvaText
+                  x={1}
+                  y={0.5}
+                  width={Math.max(1, piece.w - 2)}
+                  text={piece.widthLabel}
+                  fontFamily="Arial"
+                  fontSize={detailFontSize}
+                  align="center"
+                  fill="#111111"
+                  listening={false}
+                />
+                <KonvaText
+                  x={detailFontSize * 0.9}
+                  y={piece.h - 1}
+                  width={Math.max(1, piece.h - 2)}
+                  text={piece.heightLabel}
+                  fontFamily="Arial"
+                  fontSize={detailFontSize}
+                  align="center"
+                  fill="#111111"
+                  rotation={-90}
+                  listening={false}
+                />
+                <KonvaText
+                  x={detailFontSize * 1.25}
+                  y={Math.max(detailFontSize * 1.4, piece.h * 0.4)}
+                  width={Math.max(1, piece.w - detailFontSize * 1.5)}
+                  text={piece.order}
+                  fontFamily="Arial"
+                  fontSize={orderFontSize}
+                  fontStyle="bold"
+                  fill="#7f1d1d"
+                  stroke="#7f1d1d"
+                  strokeWidth={detailFontSize * 0.04}
+                  align="center"
+                  listening={false}
+                />
+                <KonvaText
+                  x={1}
+                  y={Math.max(1, piece.h - detailMetaFontSize * 2.15)}
+                  width={Math.max(1, piece.w - 2)}
+                  height={detailMetaFontSize * 2.1}
+                  text={`${piece.edge}\n${piece.milling}`}
+                  fontFamily="Arial"
+                  fontSize={detailMetaFontSize}
+                  lineHeight={1}
+                  align="right"
+                  verticalAlign="bottom"
+                  fill="#111111"
+                  listening={false}
+                />
+              </KonvaGroup>
+            );
+          })}
         </KonvaGroup>
         {selectedBox}
         {boundsBox}

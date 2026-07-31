@@ -39,6 +39,16 @@ class StateStoreTest(unittest.TestCase):
             self.assertTrue(restored.source_unchanged("telegram:-100:1", "source-a"))
             self.assertFalse(restored.source_unchanged("telegram:-100:1", "source-b"))
 
+    def test_existing_telegram_cutting_sequence_reply_replaces_local_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "state.json"
+            state = StateStore(path)
+
+            state.assign_cutting_sequence_number("telegram:-100:1", existing_number=7)
+            state.assign_cutting_sequence_number("telegram:-100:1", existing_number=8)
+
+            self.assertEqual(StateStore(path).cutting_sequence_number("telegram:-100:1"), 8)
+
     def test_cleanup_refuses_root(self) -> None:
         with self.assertRaises(ValueError):
             cleanup_temp_dir(Path("/"), 24)

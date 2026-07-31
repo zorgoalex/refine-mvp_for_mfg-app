@@ -10,4 +10,9 @@ describe('audit list related-entity UI', () => {
   it('renders relatedEntities from the row', () => {
     expect(src).toContain('relatedEntities');
   });
+  it('keeps readable and technical audit views available', () => {
+    expect(src).toContain("'readable' | 'technical'");
+    expect(src).toContain('Понятный');
+    expect(src).toContain('Технический');
+  });
 });

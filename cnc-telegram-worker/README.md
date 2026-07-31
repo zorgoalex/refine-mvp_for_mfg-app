@@ -16,6 +16,9 @@ python -m cnc_telegram_worker cleanup
 ```
 
 `login` creates the Telethon `.session` file. Run it once before daemon mode.
+`once --days 10` scans oldest to newest, checks existing Telegram replies like
+`Раскрой №7` before storing a number, and only writes a new reply after ERP
+accepts the packet and returns a cutting sequence number.
 
 ## Required Environment
 

@@ -59,6 +59,7 @@ def build_structured_packet(
     comments: list[str],
     ocr: OcrResult,
     gcode: GcodeMeta | None,
+    cutting_sequence_no: int | None = None,
     vector_items: list[dict[str, Any]] | None = None,
     sheet_image: dict[str, Any] | None = None,
     default_machine: str,
@@ -139,6 +140,7 @@ def build_structured_packet(
             "updatedAt": isoformat_utc(source_updated_at),
         },
         "workday": workday.isoformat(),
+        "cuttingSequenceNo": cutting_sequence_no if cutting_sequence_no is not None and cutting_sequence_no > 0 else None,
         "machine": machine,
         "programName": gcode.filename if gcode else None,
         "materialName": material_name,
@@ -166,6 +168,7 @@ def external_packet_key(chat_id: str, message_id: int) -> str:
 def canonical_payload_hash(packet: dict[str, Any]) -> str:
     payload = json.loads(json.dumps(packet, ensure_ascii=False))
     payload.pop("idempotencyKey", None)
+    payload.pop("cuttingSequenceNo", None)
     payload.get("source", {}).pop("version", None)
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()

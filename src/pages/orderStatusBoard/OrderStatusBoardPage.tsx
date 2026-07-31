@@ -17,7 +17,6 @@ import {
   Empty,
   Input,
   Modal,
-  Popover,
   Segmented,
   Select,
   Spin,
@@ -34,8 +33,10 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseOutlined,
+  CompressOutlined,
   DownloadOutlined,
   DragOutlined,
+  ExpandOutlined,
   FilterOutlined,
   FilePdfOutlined,
   FileTextOutlined,
@@ -47,10 +48,10 @@ import {
   ReloadOutlined,
   RightOutlined,
   SearchOutlined,
-  SettingOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
+import { createPortal } from 'react-dom';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -77,6 +78,7 @@ import type {
   CncTelegramTodayResponse,
 } from '../../api/types/cncTelegramApi.types';
 import { featureFlags } from '../../config/featureFlags';
+import { useOrderFinancialVisibility } from '../../hooks/useOrderFinancialVisibility';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
 import {
@@ -92,14 +94,30 @@ import {
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
+  filterCncBathColumnsByOrderStatuses,
   filterCncTodayColumnsByOrders,
+  isCncCardSummaryOnly,
+  isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
+  toggleCncCardStandardOverride,
   toOrderStatusBoardQuery,
+  type CncCardDisplayMode,
   type CncOrderSearchPeriod,
   type OrderStatusBoardViewState,
 } from './model';
+import {
+  useOrderDetailColumnPreferences,
+  type OrderDetailColumnDefinition,
+} from '../orders/components/tables/OrderDetailColumnSettings';
+import { StatusBoardColumnSettingsButton } from './StatusBoardColumnSettings';
+import {
+  CNC_STATUS_BOARD_COLUMN_DEFINITIONS,
+  STATUS_BOARD_COLUMN_PREFERENCE_KEYS,
+  STATUS_BOARD_LABELS,
+  filterVisibleStatusBoardColumns,
+} from './statusBoardColumnVisibility';
 import {
   OperationalPageHeader,
   useOperationalUi,
@@ -130,6 +148,13 @@ const CNC_ORDER_SEARCH_PERIOD_OPTIONS: Array<{
   { label: '1нед', value: '1w' },
   { label: '2нед', value: '2w' },
   { label: '1м', value: '1m' },
+];
+const CNC_CARD_DISPLAY_OPTIONS: Array<{
+  label: string;
+  value: CncCardDisplayMode;
+}> = [
+  { label: 'Стандартные', value: 'standard' },
+  { label: 'Компактные', value: 'compact' },
 ];
 const CNC_SVG_NS = 'http://www.w3.org/2000/svg';
 const CNC_BATH_DETAIL_ORDER_FILL_COLORS = [
@@ -173,6 +198,7 @@ interface BoardDragItem {
 
 export const OrderStatusBoardPage: React.FC = () => {
   const isOperational = useOperationalUi();
+  const { canViewFinancials } = useOrderFinancialVisibility();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const viewState = useMemo(
@@ -217,6 +243,8 @@ export const OrderStatusBoardPage: React.FC = () => {
   viewStateRef.current = viewState;
   const [cardDisplayMode, setCardDisplayMode] =
     useState<StatusBoardCardDisplayMode>('standard');
+  const [cncCardDisplayMode, setCncCardDisplayMode] =
+    useState<CncCardDisplayMode>('standard');
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true);
   const [activeCncRelation, setActiveCncRelation] =
     useState<CncRelationTarget | null>(null);
@@ -579,6 +607,73 @@ export const OrderStatusBoardPage: React.FC = () => {
   );
   const activeBoard: OrderStatusBoardType =
     viewState.view === 'production' ? 'production' : 'order';
+  const orderPreferenceColumns = useMemo(
+    () =>
+      viewState.view === 'order'
+        ? filterBoardColumns('order', board?.columns ?? [], true)
+        : [],
+    [board?.columns, viewState.view],
+  );
+  const productionPreferenceColumns = useMemo(
+    () =>
+      viewState.view === 'production'
+        ? filterBoardColumns('production', board?.columns ?? [], true)
+        : [],
+    [board?.columns, viewState.view],
+  );
+  const orderColumnDefinitions = useMemo<OrderDetailColumnDefinition[]>(
+    () =>
+      orderPreferenceColumns.map((column) => ({
+        key: column.key,
+        label: column.status.name,
+      })),
+    [orderPreferenceColumns],
+  );
+  const productionColumnDefinitions = useMemo<OrderDetailColumnDefinition[]>(
+    () =>
+      productionPreferenceColumns.map((column) => ({
+        key: column.key,
+        label: column.status.name,
+      })),
+    [productionPreferenceColumns],
+  );
+  const orderColumnDefaultOrder = useMemo(
+    () => orderColumnDefinitions.map((definition) => definition.key),
+    [orderColumnDefinitions],
+  );
+  const productionColumnDefaultOrder = useMemo(
+    () => productionColumnDefinitions.map((definition) => definition.key),
+    [productionColumnDefinitions],
+  );
+  const cncColumnDefaultOrder = useMemo(
+    () => CNC_STATUS_BOARD_COLUMN_DEFINITIONS.map((definition) => definition.key),
+    [],
+  );
+  const orderColumnPreferences = useOrderDetailColumnPreferences(
+    STATUS_BOARD_COLUMN_PREFERENCE_KEYS.order,
+    orderColumnDefaultOrder,
+    orderColumnDefinitions,
+  );
+  const productionColumnPreferences = useOrderDetailColumnPreferences(
+    STATUS_BOARD_COLUMN_PREFERENCE_KEYS.production,
+    productionColumnDefaultOrder,
+    productionColumnDefinitions,
+  );
+  const cncColumnPreferences = useOrderDetailColumnPreferences(
+    STATUS_BOARD_COLUMN_PREFERENCE_KEYS.cnc_today,
+    cncColumnDefaultOrder,
+    CNC_STATUS_BOARD_COLUMN_DEFINITIONS,
+  );
+  const activeColumnDefinitions = isCncToday
+    ? CNC_STATUS_BOARD_COLUMN_DEFINITIONS
+    : viewState.view === 'production'
+      ? productionColumnDefinitions
+      : orderColumnDefinitions;
+  const activeColumnPreferences = isCncToday
+    ? cncColumnPreferences
+    : viewState.view === 'production'
+      ? productionColumnPreferences
+      : orderColumnPreferences;
   const boardColumns = useMemo(
     () => filterBoardColumns(
       viewState.view === 'production' ? 'production' : 'order',
@@ -587,10 +682,20 @@ export const OrderStatusBoardPage: React.FC = () => {
     ),
     [board?.columns, viewState.view, viewState.showDone],
   );
+  const userVisibleBoardColumns = useMemo(
+    () =>
+      filterVisibleStatusBoardColumns(
+        boardColumns,
+        activeColumnPreferences.settings.hidden,
+      ),
+    [activeColumnPreferences.settings.hidden, boardColumns],
+  );
   const columns = useMemo(
     () =>
-      boardColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
-    [boardColumns, viewState.hideEmpty],
+      userVisibleBoardColumns.filter(
+        (column) => !viewState.hideEmpty || column.total > 0,
+      ),
+    [userVisibleBoardColumns, viewState.hideEmpty],
   );
   const cncOrderFilters = viewState.cncOrderFilters;
   const cncOrderFilterKey = cncOrderFilters.join('\u0000');
@@ -623,22 +728,30 @@ export const OrderStatusBoardPage: React.FC = () => {
     () => filterBoardColumns('production', cncOrderBoard?.columns ?? [], true),
     [cncOrderBoard?.columns],
   );
-  const cncOrderCards = useMemo(
+  const cncOrderStatusCards = useMemo(
     () => buildCncOrderStatusCards(cncOrderBoardColumns, cncOrderIds),
     [cncOrderBoardColumns, cncOrderIds],
+  );
+  const cncActiveColumns = useMemo(
+    () => filterCncBathColumnsByOrderStatuses(cncFilteredColumns, cncOrderStatusCards),
+    [cncFilteredColumns, cncOrderStatusCards],
+  );
+  const cncOrderCards = useMemo(
+    () => cncOrderStatusCards.filter((card) => !isCncOrderHiddenFromMdfBoard(card)),
+    [cncOrderStatusCards],
   );
   const cncRelationContext = useMemo(
     () =>
       cncRelationsEnabled
-        ? buildCncRelationContext(cncFilteredColumns, cncOrderCards, activeCncRelation)
+        ? buildCncRelationContext(cncActiveColumns, cncOrderCards, activeCncRelation)
         : null,
-    [activeCncRelation, cncFilteredColumns, cncOrderCards, cncRelationsEnabled],
+    [activeCncRelation, cncActiveColumns, cncOrderCards, cncRelationsEnabled],
   );
   const cncDetailedContext = useMemo(
     () =>
       cncDetailedEnabled
         ? buildCncDetailedContext(
-            cncFilteredColumns,
+            cncActiveColumns,
             activeCncDetailedBathId,
             activeCncDetailedDetail,
           )
@@ -647,13 +760,22 @@ export const OrderStatusBoardPage: React.FC = () => {
       activeCncDetailedBathId,
       activeCncDetailedDetail,
       cncDetailedEnabled,
-      cncFilteredColumns,
+      cncActiveColumns,
     ],
   );
   const cncVisibleColumns = useMemo(
     () =>
-      cncFilteredColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
-    [cncFilteredColumns, viewState.hideEmpty],
+      filterVisibleStatusBoardColumns(
+        cncActiveColumns,
+        cncColumnPreferences.settings.hidden,
+      ).filter((column) => !viewState.hideEmpty || column.total > 0),
+    [cncActiveColumns, cncColumnPreferences.settings.hidden, viewState.hideEmpty],
+  );
+  const cncOrdersColumnVisible =
+    !cncColumnPreferences.settings.hidden.includes('orders');
+  const cncHasVisibleColumns = cncVisibleColumns.length > 0 || cncOrdersColumnVisible;
+  const allCncColumnsHidden = CNC_STATUS_BOARD_COLUMN_DEFINITIONS.every(
+    (definition) => cncColumnPreferences.settings.hidden.includes(definition.key),
   );
   const generatedAt = isCncToday
     ? cncOrderFilters.length > 0
@@ -765,7 +887,13 @@ export const OrderStatusBoardPage: React.FC = () => {
       resizeObserver.observe(viewport.firstElementChild);
     }
     return () => resizeObserver.disconnect();
-  }, [cncVisibleColumns.length, columns.length, datasetKey, loading]);
+  }, [
+    cncHasVisibleColumns,
+    cncVisibleColumns.length,
+    columns.length,
+    datasetKey,
+    loading,
+  ]);
 
   const scrollBoardFromTop = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
@@ -804,8 +932,8 @@ export const OrderStatusBoardPage: React.FC = () => {
   const updateCncWorkday = (date: Dayjs) =>
     updateViewState({ cncWorkday: date.format('YYYY-MM-DD'), cncOrderFilters: [] });
   const cncSettingsContent = (
-    <div className="status-board-toolbar__settings-panel" aria-label="Режимы МДФ-доски">
-      <Typography.Text strong>Режимы</Typography.Text>
+    <section className="status-board-settings__modes" aria-label="Режимы МДФ-доски">
+      <strong>Режимы</strong>
       <label className="status-board-toolbar__switch">
         <Switch
           size="small"
@@ -830,7 +958,7 @@ export const OrderStatusBoardPage: React.FC = () => {
         />
         Подробный
       </label>
-    </div>
+    </section>
   );
 
   return (
@@ -997,6 +1125,13 @@ export const OrderStatusBoardPage: React.FC = () => {
                 }
               />
             </div>
+            <StatusBoardColumnSettingsButton
+              key={STATUS_BOARD_COLUMN_PREFERENCE_KEYS[viewState.view]}
+              boardLabel={STATUS_BOARD_LABELS[viewState.view]}
+              definitions={activeColumnDefinitions}
+              settings={activeColumnPreferences.settings}
+              onChange={activeColumnPreferences.saveSettings}
+            />
           </div>
         )}
         {isCncToday && (
@@ -1081,6 +1216,32 @@ export const OrderStatusBoardPage: React.FC = () => {
                 );
               })}
             </div>
+            <div
+              className="status-board-toolbar__display-mode status-board-toolbar__cnc-card-mode"
+              aria-label="Формат карточек МДФ-доски"
+            >
+              <Typography.Text type="secondary">Карточки</Typography.Text>
+              <Segmented
+                size="small"
+                value={cncCardDisplayMode}
+                options={CNC_CARD_DISPLAY_OPTIONS}
+                onChange={(value) =>
+                  setCncCardDisplayMode(value as CncCardDisplayMode)
+                }
+              />
+            </div>
+            {cncCardDisplayMode === 'compact' && (
+              <Tooltip title="Печать всех колонок и карточек в альбомном формате">
+                <Button
+                  className="status-board-toolbar__cnc-print"
+                  icon={<PrinterOutlined />}
+                  aria-label="Распечатать компактную МДФ-доску"
+                  onClick={() => window.print()}
+                >
+                  Печать
+                </Button>
+              </Tooltip>
+            )}
             <label className="status-board-toolbar__switch">
               <Switch
                 size="small"
@@ -1089,18 +1250,14 @@ export const OrderStatusBoardPage: React.FC = () => {
               />
               Скрыть пустые
             </label>
-            <Popover
-              placement="bottomRight"
-              trigger="click"
-              title="Настройки отображения"
-              content={cncSettingsContent}
-            >
-              <Button
-                className="status-board-toolbar__settings-button"
-                icon={<SettingOutlined />}
-                aria-label="Настройки отображения МДФ-доски"
-              />
-            </Popover>
+            <StatusBoardColumnSettingsButton
+              key={STATUS_BOARD_COLUMN_PREFERENCE_KEYS.cnc_today}
+              boardLabel={STATUS_BOARD_LABELS.cnc_today}
+              definitions={CNC_STATUS_BOARD_COLUMN_DEFINITIONS}
+              settings={cncColumnPreferences.settings}
+              onChange={cncColumnPreferences.saveSettings}
+              extraContent={cncSettingsContent}
+            />
           </div>
         )}
 
@@ -1139,7 +1296,7 @@ export const OrderStatusBoardPage: React.FC = () => {
           {announcement}
         </div>
 
-        {(isCncToday ? cncVisibleColumns.length > 0 : columns.length > 0) && (
+        {(isCncToday ? cncHasVisibleColumns : columns.length > 0) && (
           <div
             ref={topScrollbarRef}
             className="status-board-scrollbar"
@@ -1176,10 +1333,12 @@ export const OrderStatusBoardPage: React.FC = () => {
               <Spin size="large" tip="Загрузка доски…" />
             </div>
           ) : isCncToday ? (
-            cncVisibleColumns.length === 0 ? (
+            !cncHasVisibleColumns ? (
               <Empty
                 description={
-                  cncOrderFilters.length > 0
+                  allCncColumnsHidden
+                    ? 'Все колонки скрыты в настройках'
+                    : cncOrderFilters.length > 0
                     ? 'По выбранному заказу МДФ-работ нет'
                     : 'CNC-работ на сегодня нет'
                 }
@@ -1194,15 +1353,25 @@ export const OrderStatusBoardPage: React.FC = () => {
                 relationsEnabled={cncRelationsEnabled}
                 detailedContext={cncDetailedContext}
                 detailedEnabled={cncDetailedEnabled}
+                cardDisplayMode={cncCardDisplayMode}
+                showOrdersColumn={cncOrdersColumnVisible}
+                printDate={cncNavigationDate.format(DATE_FORMAT)}
                 onSelectRelation={toggleCncRelation}
                 onSelectDetailedBath={selectCncDetailedBath}
                 onCloseDetailedBath={closeCncDetailedBath}
                 onSelectDetailedDetail={selectCncDetailedDetail}
                 onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}
+                showFinancials={canViewFinancials}
               />
             )
           ) : columns.length === 0 ? (
-            <Empty description="По выбранным фильтрам заказов нет" />
+            <Empty
+              description={
+                boardColumns.length > 0 && userVisibleBoardColumns.length === 0
+                  ? 'Все колонки скрыты в настройках'
+                  : 'По выбранным фильтрам заказов нет'
+              }
+            />
           ) : (
             <div className="status-board-columns">
               {columns.map((column) => (
@@ -1210,7 +1379,7 @@ export const OrderStatusBoardPage: React.FC = () => {
                   key={column.key}
                   board={activeBoard}
                   column={column}
-                  allColumns={boardColumns}
+                  allColumns={userVisibleBoardColumns}
                   finePointer={finePointer}
                   mutationsEnabled={
                     featureFlags.useBackendProductionActions &&
@@ -1223,6 +1392,7 @@ export const OrderStatusBoardPage: React.FC = () => {
                   onLoadMore={loadMore}
                   onMove={moveCard}
                   onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}
+                  showFinancials={canViewFinancials}
                 />
               ))}
             </div>
@@ -1242,16 +1412,19 @@ interface CncTelegramTodayColumnsProps {
   relationsEnabled: boolean;
   detailedContext: CncDetailedContext | null;
   detailedEnabled: boolean;
+  cardDisplayMode: CncCardDisplayMode;
+  showOrdersColumn: boolean;
+  printDate: string;
   onSelectRelation: (target: CncRelationTarget) => void;
   onSelectDetailedBath: (bathId: string) => void;
   onCloseDetailedBath: (bathId: string) => void;
   onSelectDetailedDetail: (target: CncDetailedDetailTarget) => void;
   onOpenOrder: (orderId: number) => void;
+  showFinancials: boolean;
 }
 
 type CncTelegramTodayDisplayColumnKey =
   | CncTelegramTodayColumn['key']
-  | 'machine_files'
   | 'orders';
 
 interface CncTelegramTodayDisplayColumn {
@@ -1272,48 +1445,70 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   relationsEnabled,
   detailedContext,
   detailedEnabled,
+  cardDisplayMode,
+  showOrdersColumn,
+  printDate,
   onSelectRelation,
   onSelectDetailedBath,
   onCloseDetailedBath,
   onSelectDetailedDetail,
   onOpenOrder,
+  showFinancials,
 }) => {
   const isOperational = useOperationalUi();
+  const [standardCardOverrides, setStandardCardOverrides] =
+    useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    if (cardDisplayMode !== 'standard') return;
+    setStandardCardOverrides((current) =>
+      current.size === 0 ? current : new Set(),
+    );
+  }, [cardDisplayMode]);
+
+  const toggleCardDisplay = useCallback((cardKey: string) => {
+    setStandardCardOverrides((current) =>
+      toggleCncCardStandardOverride(current, cardKey),
+    );
+  }, []);
   const detailedBathActive = detailedEnabled && Boolean(detailedContext?.activeBathId);
   const displayColumns = useMemo(
-    () => {
-      const baseColumns = detailedBathActive
-        ? buildCncDetailedDisplayColumns(columns)
-        : columns;
-      return [
-        ...baseColumns,
-        {
-          key: 'orders' as const,
-          title: 'Заказы',
-          total: orderCards.length,
-          packets: [],
-          baths: [],
-          orderCards,
-        },
-      ];
-    },
-    [columns, detailedBathActive, orderCards],
+    () => [
+      ...columns,
+      ...(showOrdersColumn
+        ? [
+            {
+              key: 'orders' as const,
+              title: 'Заказы',
+              total: orderCards.length,
+              packets: [],
+              baths: [],
+              orderCards,
+            },
+          ]
+        : []),
+    ],
+    [columns, orderCards, showOrdersColumn],
   );
   const detailedPacketHighlightEnabled = cncDetailedContextHasActiveDetail(detailedContext);
 
   return (
-    <div
-      className={[
-        'status-board-columns status-board-columns--cnc',
-        detailedBathActive ? 'status-board-columns--cnc-detailed' : '',
-      ].filter(Boolean).join(' ')}
-    >
+    <>
+      <div
+        className={[
+          'status-board-columns status-board-columns--cnc',
+          detailedBathActive ? 'status-board-columns--cnc-detailed' : '',
+        ].filter(Boolean).join(' ')}
+        style={
+          {
+            '--status-board-cnc-column-count': displayColumns.length,
+          } as React.CSSProperties
+        }
+      >
       {displayColumns.map((column) => {
         const bathColumn = column.key === 'baths' || column.key === 'baths_ready';
         const orderColumn = column.key === 'orders';
-        const columnClassNames = column.key === 'machine_files'
-          ? ['cnc-today-column--machine_files', 'cnc-today-column--parsed']
-          : [`cnc-today-column--${column.key}`];
+        const columnClassNames = [`cnc-today-column--${column.key}`];
         const title = cncColumnDisplayTitle(column);
         const totals = buildCncColumnTotals(column, relationContext, detailedContext);
         const loadPercent = Math.min(100, Math.round(totals.areaM2));
@@ -1399,29 +1594,42 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                     <small>В текущих карточках нет связанных заказов ERP.</small>
                   </div>
                 ) : (
-                  sortedOrderCards.map((card) => (
-                    <StatusBoardCardView
-                      key={card.orderId}
-                      board="production"
-                      card={card}
-                      sourceColumn={String(card.productionStatusId ?? 'unassigned')}
-                      allColumns={orderStatusColumns}
-                      finePointer={false}
-                      mutationsEnabled={false}
-                      pending={false}
-                      displayMode="standard"
-                      actionsVisible={false}
-                      relationState={orderStateFor(card)}
-                      relationsEnabled={relationsEnabled}
-                      highlightEnabled={relationsEnabled}
-                      onSelectRelation={() =>
-                        onSelectRelation({ kind: 'order', id: card.orderId })
-                      }
-                      openOrderOnNumber={!relationsEnabled}
-                      onMove={() => undefined}
-                      onOpenOrder={onOpenOrder}
-                    />
-                  ))
+                  sortedOrderCards.map((card) => {
+                    const cardKey = `order:${card.orderId}`;
+                    const summaryOnly = isCncCardSummaryOnly(
+                      cardDisplayMode,
+                      standardCardOverrides,
+                      cardKey,
+                    );
+                    return (
+                      <StatusBoardCardView
+                        key={card.orderId}
+                        board="production"
+                        card={card}
+                        sourceColumn={String(card.productionStatusId ?? 'unassigned')}
+                        allColumns={orderStatusColumns}
+                        finePointer={false}
+                        mutationsEnabled={false}
+                        pending={false}
+                        displayMode="standard"
+                        actionsVisible={false}
+                        cncOrderCard
+                        cncSummaryOnly={summaryOnly}
+                        displayToggleVisible={cardDisplayMode === 'compact'}
+                        onToggleDisplay={() => toggleCardDisplay(cardKey)}
+                        relationState={orderStateFor(card)}
+                        relationsEnabled={relationsEnabled}
+                        highlightEnabled={relationsEnabled}
+                        onSelectRelation={() =>
+                          onSelectRelation({ kind: 'order', id: card.orderId })
+                        }
+                        openOrderOnNumber={!relationsEnabled}
+                        onMove={() => undefined}
+                        onOpenOrder={onOpenOrder}
+                        showFinancials={showFinancials}
+                      />
+                    );
+                  })
                 )
               ) : bathColumn ? (
                 bathCards.length === 0 ? (
@@ -1432,6 +1640,12 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                   </div>
                 ) : (
                   bathCards.map((bath) => {
+                    const cardKey = `bath:${bath.bathCardId}`;
+                    const summaryOnly = isCncCardSummaryOnly(
+                      cardDisplayMode,
+                      standardCardOverrides,
+                      cardKey,
+                    );
                     const detailed = detailedContext?.activeBathId === bath.bathCardId;
                     const detailedPlacement: CncDetailedBathPlacement =
                       column.key === 'baths_ready' ? 'left' : 'right';
@@ -1450,7 +1664,10 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         detailed={detailed}
                         detailedEnabled={detailedEnabled}
                         detailedPlacement={detailedPlacement}
+                        summaryOnly={summaryOnly}
+                        displayToggleVisible={cardDisplayMode === 'compact'}
                         selectedDetailId={selectedDetailId}
+                        onToggleDisplay={() => toggleCardDisplay(cardKey)}
                         onSelect={() => {
                           if (relationsEnabled) {
                             onSelectRelation({ kind: 'bath', id: bath.bathCardId });
@@ -1473,35 +1690,57 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                   <small>Новые файлы появятся здесь после загрузки.</small>
                 </div>
               ) : (
-                packetCards.map((packet) => (
-                  <CncTelegramPacketCard
-                    key={packet.packetId}
-                    packet={packet}
-                    relationState={packetStateFor(packet)}
-                    relationsEnabled={relationsEnabled}
-                    highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
-                    onSelectRelation={() =>
-                      onSelectRelation({ kind: 'packet', id: packet.packetId })
-                    }
-                    onOpenOrder={onOpenOrder}
-                  />
-                ))
+                packetCards.map((packet) => {
+                  const cardKey = `packet:${packet.packetId}`;
+                  const summaryOnly = isCncCardSummaryOnly(
+                    cardDisplayMode,
+                    standardCardOverrides,
+                    cardKey,
+                  );
+                  return (
+                    <CncTelegramPacketCard
+                      key={packet.packetId}
+                      packet={packet}
+                      relationState={packetStateFor(packet)}
+                      relationsEnabled={relationsEnabled}
+                      highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
+                      summaryOnly={summaryOnly}
+                      displayToggleVisible={cardDisplayMode === 'compact'}
+                      onToggleDisplay={() => toggleCardDisplay(cardKey)}
+                      onSelectRelation={() =>
+                        onSelectRelation({ kind: 'packet', id: packet.packetId })
+                      }
+                      onOpenOrder={onOpenOrder}
+                    />
+                  );
+                })
               )}
             </div>
           </article>
         );
-      })}
-    </div>
+        })}
+      </div>
+      {cardDisplayMode === 'compact' && createPortal(
+        <CncTelegramPrintBoard
+          columns={displayColumns}
+          orderStatusColumns={orderStatusColumns}
+          printDate={printDate}
+        />,
+        document.body,
+      )}
+    </>
   );
 };
 
 interface CncOrderSummaryLineProps {
   summary: CncOrderSummary;
+  compact: boolean;
   onOpenOrder: (orderId: number) => void;
 }
 
 const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
   summary,
+  compact,
   onOpenOrder,
 }) => {
   const orderId = summary.orderId;
@@ -1513,7 +1752,7 @@ const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
         summary.orderDeleted ? ORDER_DELETED_REFERENCE_LINE_CLASS : '',
       ].filter(Boolean).join(' ')}
     >
-      <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+      <span className="cnc-packet-card__summary-order-wrap">
         {orderId !== null ? (
           <Button
             type="link"
@@ -1534,9 +1773,203 @@ const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
         <OrderDeletedTag deleted={summary.orderDeleted} />
       </span>
       <span className="cnc-packet-card__summary-meta">
-        : {summary.positions} поз · {summary.details} дет.
+        {compact
+          ? `${summary.details} дет.`
+          : `: ${summary.positions} поз · ${summary.details} дет.`}
       </span>
     </Typography.Text>
+  );
+};
+
+interface CncTelegramPrintBoardProps {
+  columns: CncTelegramTodayDisplayColumn[];
+  orderStatusColumns: OrderStatusBoardColumn[];
+  printDate: string;
+}
+
+type CncPrintCard =
+  | { kind: 'packet'; packet: CncTelegramPacket }
+  | { kind: 'bath'; bath: CncTelegramBathCard }
+  | { kind: 'order'; order: OrderStatusBoardCard };
+
+interface CncPrintColumn {
+  key: CncTelegramTodayDisplayColumnKey;
+  title: string;
+  total: number;
+  totals: CncColumnTotals;
+  cards: CncPrintCard[];
+}
+
+const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
+  columns,
+  orderStatusColumns,
+  printDate,
+}) => {
+  const printColumns: CncPrintColumn[] = columns.map((column) => {
+    const cards: CncPrintCard[] = column.key === 'orders'
+      ? (column.orderCards ?? []).map((order) => ({ kind: 'order', order }))
+      : column.key === 'baths' || column.key === 'baths_ready'
+        ? column.baths.map((bath) => ({ kind: 'bath', bath }))
+        : column.packets.map((packet) => ({ kind: 'packet', packet }));
+    return {
+      key: column.key,
+      title: cncColumnDisplayTitle(column),
+      total: column.total,
+      totals: buildCncColumnTotals(column, null, null),
+      cards,
+    };
+  });
+  const rowCount = Math.max(
+    0,
+    ...printColumns.map((column) => column.cards.length),
+  );
+
+  return (
+    <section className="cnc-print-board" aria-label="Печатная версия МДФ-доски">
+      <header className="cnc-print-board__title">
+        <strong>МДФ-работы</strong>
+        <span>{printDate}</span>
+      </header>
+      <table>
+        <thead>
+          <tr>
+            {printColumns.map((column) => (
+              <th key={column.key} scope="col">
+                <div className="cnc-print-board__column-title">
+                  <span>{column.title}</span>
+                  <b>{column.total}</b>
+                </div>
+                <small>
+                  {column.totals.details} дет. · {formatArea(column.totals.areaM2)}
+                </small>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: rowCount }, (_, rowIndex) => (
+            <tr key={rowIndex}>
+              {printColumns.map((column) => (
+                <td key={column.key}>
+                  {column.cards[rowIndex] ? (
+                    <CncTelegramPrintCard
+                      card={column.cards[rowIndex]}
+                      orderStatusColumns={orderStatusColumns}
+                    />
+                  ) : null}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+};
+
+const CncTelegramPrintCard: React.FC<{
+  card: CncPrintCard;
+  orderStatusColumns: OrderStatusBoardColumn[];
+}> = ({ card, orderStatusColumns }) => {
+  if (card.kind === 'order') {
+    const status = card.order.productionStatusName || 'Без статуса';
+    const statusColor =
+      resolveStatusBoardStatusColor('production', card.order, orderStatusColumns) ??
+      '#8c8c8c';
+    return (
+      <div className="cnc-print-card cnc-print-card--order">
+        <strong className="cnc-print-card__order-number">
+          {formatStatusBoardOrderNumber(card.order)}
+        </strong>
+        <Tag color={statusColor}>{status}</Tag>
+        <span className="cnc-print-card__client">
+          {card.order.clientName || 'Клиент не указан'}
+        </span>
+      </div>
+    );
+  }
+
+  const summaries = buildCncOrderSummaries(
+    card.kind === 'bath' ? card.bath.items : card.packet.items,
+  );
+  return (
+    <div className={`cnc-print-card${card.kind === 'bath' ? ' cnc-print-card--bath' : ''}`}>
+      {card.kind === 'packet' && card.packet.cuttingSequenceNo != null && (
+        <div className="cnc-print-card__sequence-row">
+          <strong className="cnc-print-card__sequence">
+            <span className="cnc-print-card__sequence-sign">№</span>
+            {card.packet.cuttingSequenceNo}
+          </strong>
+        </div>
+      )}
+      <div className="cnc-print-card__summaries">
+        {summaries.length > 0 ? summaries.map((summary) => (
+          <div className="cnc-print-card__summary" key={summary.orderName}>
+            <strong>{summary.orderName}</strong>
+            <span>{summary.details} дет.</span>
+          </div>
+        )) : (
+          <strong className="cnc-print-card__order-number">Без заказа</strong>
+        )}
+      </div>
+      {card.kind === 'bath' && (
+        <span
+          className="cnc-print-card__bath-cut-number"
+          aria-label={`Номер карты раскроя ${card.bath.cutNumber}`}
+        >
+          {card.bath.cutNumber}
+        </span>
+      )}
+    </div>
+  );
+};
+
+interface CncCardDisplayToggleProps {
+  visible: boolean;
+  standardView: boolean;
+  onToggle: () => void;
+}
+
+const CncCardDisplayToggle: React.FC<CncCardDisplayToggleProps> = ({
+  visible,
+  standardView,
+  onToggle,
+}) => {
+  if (!visible) return null;
+  const label = standardView
+    ? 'Вернуть компактный вид карточки'
+    : 'Показать стандартный вид карточки';
+
+  return (
+    <Tooltip title={label}>
+      <Button
+        type="text"
+        className="cnc-card-display-toggle"
+        aria-label={label}
+        aria-pressed={standardView}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle();
+        }}
+      >
+        <span className="cnc-card-display-toggle__icons" aria-hidden="true">
+          <ExpandOutlined
+            className={`cnc-card-display-toggle__icon ${
+              standardView
+                ? 'cnc-card-display-toggle__icon--hidden'
+                : 'cnc-card-display-toggle__icon--visible'
+            }`}
+          />
+          <CompressOutlined
+            className={`cnc-card-display-toggle__icon ${
+              standardView
+                ? 'cnc-card-display-toggle__icon--visible'
+                : 'cnc-card-display-toggle__icon--hidden'
+            }`}
+          />
+        </span>
+      </Button>
+    </Tooltip>
   );
 };
 
@@ -1545,6 +1978,9 @@ interface CncTelegramPacketCardProps {
   relationState: CncRelationCardState;
   relationsEnabled: boolean;
   highlightEnabled: boolean;
+  summaryOnly: boolean;
+  displayToggleVisible: boolean;
+  onToggleDisplay: () => void;
   onSelectRelation: () => void;
   onOpenOrder: (orderId: number) => void;
 }
@@ -1554,6 +1990,9 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   relationState,
   relationsEnabled,
   highlightEnabled,
+  summaryOnly,
+  displayToggleVisible,
+  onToggleDisplay,
   onSelectRelation,
   onOpenOrder,
 }) => {
@@ -1566,10 +2005,14 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   return (
     <div
       className={cncRelationCardClassName(
-        'status-board-card cnc-packet-card',
+        [
+          'status-board-card cnc-packet-card',
+          summaryOnly ? 'cnc-card--summary-only' : '',
+        ].filter(Boolean).join(' '),
         relationState,
         highlightEnabled,
       )}
+      data-cnc-card-view={summaryOnly ? 'compact' : 'standard'}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
       data-cnc-clickable={relationsEnabled ? 'true' : undefined}
       onClick={relationsEnabled ? onSelectRelation : undefined}
@@ -1581,78 +2024,103 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               <CncOrderSummaryLine
                 key={summary.orderName}
                 summary={summary}
+                compact={summaryOnly}
                 onOpenOrder={onOpenOrder}
               />
             ))}
           </div>
-          {isOperational ? (
-            <Typography.Text className="cnc-packet-card__material" type="secondary">
-              {packet.materialName}
-            </Typography.Text>
-          ) : null}
-          <Typography.Text className="cnc-packet-card__program">
-            {packet.programName ?? packet.externalPacketKey}
-          </Typography.Text>
+          {!summaryOnly && (
+            <>
+              {isOperational ? (
+                <Typography.Text className="cnc-packet-card__material" type="secondary">
+                  {packet.materialName}
+                </Typography.Text>
+              ) : null}
+              <Typography.Text className="cnc-packet-card__program">
+                {packet.programName ?? packet.externalPacketKey}
+              </Typography.Text>
+            </>
+          )}
         </div>
-        {packet.completionStatus === 'completed' && (
-          <div className="cnc-packet-card__status-icons" aria-label="Статусы листа">
-            <Tooltip title="Распилено на станке">
-              <span
-                className="cnc-packet-card__status-icon cnc-packet-card__status-icon--completed"
-                role="img"
-                aria-label="Распилено на станке"
-                tabIndex={0}
-              >
-                <CheckCircleOutlined />
-              </span>
-            </Tooltip>
+        {(displayToggleVisible || packet.cuttingSequenceNo != null || (!summaryOnly && packet.completionStatus === 'completed')) && (
+          <div
+            className="cnc-packet-card__status-icons"
+            aria-label={summaryOnly ? 'Вид карточки и номер раскроя' : 'Статусы листа'}
+          >
+            <CncCardDisplayToggle
+              visible={displayToggleVisible}
+              standardView={!summaryOnly}
+              onToggle={onToggleDisplay}
+            />
+            {packet.cuttingSequenceNo != null && (
+              <Tooltip title="Номер раскроя файла станка">
+                <span className="cnc-packet-card__sequence">
+                  <span className="cnc-packet-card__sequence-sign">№</span>
+                  {packet.cuttingSequenceNo}
+                </span>
+              </Tooltip>
+            )}
+            {!summaryOnly && packet.completionStatus === 'completed' && (
+              <Tooltip title="Распилено на станке">
+                <span
+                  className="cnc-packet-card__status-icon cnc-packet-card__status-icon--completed"
+                  role="img"
+                  aria-label="Распилено на станке"
+                  tabIndex={0}
+                >
+                  <CheckCircleOutlined />
+                </span>
+              </Tooltip>
+            )}
           </div>
         )}
       </div>
-      {(displayComments.length > 0 || packet.dowelingLinks.length > 0) && (
-        <div className="cnc-packet-card__notes">
-          {displayComments.map((comment, index) => (
-            isCncProgramFilename(comment) ? (
-              <Typography.Text
-                key={`${packet.packetId}:comment:${index}`}
-                strong
-                className="cnc-packet-card__note-file"
-              >
-                {comment}
-              </Typography.Text>
-            ) : (
-              <span key={`${packet.packetId}:comment:${index}`}>{comment}</span>
-            )
-          ))}
-          {packet.dowelingLinks.map((link, index) => (
-            <span key={`${packet.packetId}:dowel:${index}`}>
-              {link.orderName}: присадка №{link.dowelingNumber}
-            </span>
-          ))}
-        </div>
-      )}
+      {!summaryOnly && (
+        <>
+          {(displayComments.length > 0 || packet.dowelingLinks.length > 0) && (
+            <div className="cnc-packet-card__notes">
+              {displayComments.map((comment, index) => (
+                isCncProgramFilename(comment) ? (
+                  <Typography.Text
+                    key={`${packet.packetId}:comment:${index}`}
+                    strong
+                    className="cnc-packet-card__note-file"
+                  >
+                    {comment}
+                  </Typography.Text>
+                ) : (
+                  <span key={`${packet.packetId}:comment:${index}`}>{comment}</span>
+                )
+              ))}
+              {packet.dowelingLinks.map((link, index) => (
+                <span key={`${packet.packetId}:dowel:${index}`}>
+                  {link.orderName}: присадка №{link.dowelingNumber}
+                </span>
+              ))}
+            </div>
+          )}
 
-      {isOperational ? (
-        <div className="cnc-packet-card__metrics">
-          <span>{packet.itemQuantityTotal} деталей</span>
-          <span>{packet.itemCount} позиций</span>
-        </div>
-      ) : null}
+          {isOperational ? (
+            <div className="cnc-packet-card__metrics">
+              <span>{packet.itemQuantityTotal} деталей</span>
+              <span>{packet.itemCount} позиций</span>
+            </div>
+          ) : null}
 
-      <Collapse
-        className="cnc-packet-card__collapse compact-collapse"
-        size="small"
-        ghost
-      >
-        <Collapse.Panel
-          key="items"
-          header={
-            <span className="cnc-packet-card__collapse-label">
-              <FileTextOutlined /> {isOperational ? 'Детали' : `${packet.itemQuantityTotal} дет. · ${packet.itemCount} поз`}
-            </span>
-          }
-        >
-          <div className="cnc-packet-card__items" role="table" aria-label="Результаты распознавания">
+          <Collapse
+            className="cnc-packet-card__collapse compact-collapse"
+            size="small"
+            ghost
+          >
+            <Collapse.Panel
+              key="items"
+              header={
+                <span className="cnc-packet-card__collapse-label">
+                  <FileTextOutlined /> {isOperational ? 'Детали' : `${packet.itemQuantityTotal} дет. · ${packet.itemCount} поз`}
+                </span>
+              }
+            >
+              <div className="cnc-packet-card__items" role="table" aria-label="Результаты распознавания">
             <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
               <span>Заказ</span>
               <span>Деталь / размер</span>
@@ -1710,20 +2178,22 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
                 </div>
               );
             })}
+              </div>
+            </Collapse.Panel>
+          </Collapse>
+
+          {packet.sheetImageUrl && (
+            <CncTelegramSheetImagePreview
+              imageUrl={packet.sheetImageUrl}
+              title={packet.programName ?? packet.externalPacketKey}
+            />
+          )}
+
+          <div className="status-board-card__footer">
+            <span>В чате {formatDateTime(packet.sourceCreatedAt ?? packet.sourceUpdatedAt ?? packet.updatedAt)}</span>
           </div>
-        </Collapse.Panel>
-      </Collapse>
-
-      {packet.sheetImageUrl && (
-        <CncTelegramSheetImagePreview
-          imageUrl={packet.sheetImageUrl}
-          title={packet.programName ?? packet.externalPacketKey}
-        />
+        </>
       )}
-
-      <div className="status-board-card__footer">
-        <span>В чате {formatDateTime(packet.sourceCreatedAt ?? packet.sourceUpdatedAt ?? packet.updatedAt)}</span>
-      </div>
     </div>
   );
 });
@@ -1815,7 +2285,10 @@ interface CncTelegramBathCardViewProps {
   detailed: boolean;
   detailedEnabled: boolean;
   detailedPlacement: CncDetailedBathPlacement;
+  summaryOnly: boolean;
+  displayToggleVisible: boolean;
   selectedDetailId: number | null;
+  onToggleDisplay: () => void;
   onSelect: () => void;
   onCloseDetailed: () => void;
   onSelectDetail: (detailId: number) => void;
@@ -1830,7 +2303,10 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   detailed,
   detailedEnabled,
   detailedPlacement,
+  summaryOnly,
+  displayToggleVisible,
   selectedDetailId,
+  onToggleDisplay,
   onSelect,
   onCloseDetailed,
   onSelectDetail,
@@ -1848,12 +2324,14 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           detailed ? 'cnc-bath-card--detailed' : '',
           detailed ? `cnc-bath-card--detailed-${detailedPlacement}` : '',
           detailedEnabled ? 'cnc-bath-card--detailed-selectable' : '',
+          summaryOnly ? 'cnc-card--summary-only' : '',
         ].filter(Boolean).join(' '),
         relationState,
         highlightEnabled,
       )}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
       data-cnc-detailed-state={detailed ? 'active' : detailedEnabled ? 'selectable' : undefined}
+      data-cnc-card-view={summaryOnly ? 'compact' : 'standard'}
       data-cnc-clickable={interactive ? 'true' : undefined}
       onClick={interactive ? onSelect : undefined}
     >
@@ -1864,16 +2342,24 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               <CncOrderSummaryLine
                 key={summary.orderName}
                 summary={summary}
+                compact={summaryOnly}
                 onOpenOrder={onOpenOrder}
               />
             ))}
           </div>
-          <Typography.Text className="cnc-bath-card__job">
-            {bath.cutJobName} · раскрой №{bath.cutNumber}
-          </Typography.Text>
+          {!summaryOnly && (
+            <Typography.Text className="cnc-bath-card__job">
+              {bath.cutJobName} · раскрой №{bath.cutNumber}
+            </Typography.Text>
+          )}
         </div>
         <div className="cnc-bath-card__actions">
-          {detailed && (
+          <CncCardDisplayToggle
+            visible={displayToggleVisible}
+            standardView={!summaryOnly}
+            onToggle={onToggleDisplay}
+          />
+          {!summaryOnly && detailed && (
             <Tooltip title="Свернуть раскладку">
               <Button
                 type="text"
@@ -1888,41 +2374,51 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               />
             </Tooltip>
           )}
-          <Tooltip
-            title={bath.ready ? 'Все детали ванны уже в колонке «Распилено»' : 'Не все детали ванны распилены'}
+          <Tag
+            className="cnc-bath-card__cut-result-badge"
+            aria-label={`Номер карты раскроя ${bath.cutNumber}`}
           >
-            <CheckCircleFilled
-              className={[
-                'cnc-bath-card__ready-icon',
-                bath.ready ? 'cnc-bath-card__ready-icon--ready' : 'cnc-bath-card__ready-icon--pending',
-              ].join(' ')}
-              aria-label={bath.ready ? 'Ванна готова к закатке' : 'Ванна не готова к закатке'}
-            />
-          </Tooltip>
+            {bath.cutNumber}
+          </Tag>
+          {!summaryOnly && (
+            <Tooltip
+              title={bath.ready ? 'Все детали ванны уже в колонке «Распилено»' : 'Не все детали ванны распилены'}
+            >
+              <CheckCircleFilled
+                className={[
+                  'cnc-bath-card__ready-icon',
+                  bath.ready ? 'cnc-bath-card__ready-icon--ready' : 'cnc-bath-card__ready-icon--pending',
+                ].join(' ')}
+                aria-label={bath.ready ? 'Ванна готова к закатке' : 'Ванна не готова к закатке'}
+              />
+            </Tooltip>
+          )}
         </div>
       </div>
 
-      {isOperational ? (
-        <div className="cnc-packet-card__metrics">
-          <span>{bath.itemQuantityTotal} деталей</span>
-          <span>{bath.positionCount} позиций</span>
-        </div>
-      ) : null}
+      {!summaryOnly && (
+        <>
+          {isOperational ? (
+            <div className="cnc-packet-card__metrics">
+              <span>{bath.itemQuantityTotal} деталей</span>
+              <span>{bath.positionCount} позиций</span>
+            </div>
+          ) : null}
 
-      <Collapse
-        className="cnc-packet-card__collapse compact-collapse"
-        size="small"
-        ghost
-      >
-        <Collapse.Panel
-          key="items"
-          header={
-            <span className="cnc-packet-card__collapse-label">
-              <FileTextOutlined /> {isOperational ? 'Детали' : `${bath.itemQuantityTotal} дет. · ${bath.positionCount} поз`}
-            </span>
-          }
-        >
-          <div className="cnc-packet-card__items" role="table" aria-label="Детали ванны">
+          <Collapse
+            className="cnc-packet-card__collapse compact-collapse"
+            size="small"
+            ghost
+          >
+            <Collapse.Panel
+              key="items"
+              header={
+                <span className="cnc-packet-card__collapse-label">
+                  <FileTextOutlined /> {isOperational ? 'Детали' : `${bath.itemQuantityTotal} дет. · ${bath.positionCount} поз`}
+                </span>
+              }
+            >
+              <div className="cnc-packet-card__items" role="table" aria-label="Детали ванны">
             <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
               <span>Заказ</span>
               <span>Деталь / размер</span>
@@ -1963,23 +2459,25 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
                 </span>
               </div>
             ))}
+              </div>
+            </Collapse.Panel>
+          </Collapse>
+
+          <CncBathPdfPreview bath={bath} />
+          {bath.sheets.length > 0 && (
+            <CncBathSheetPreview
+              bath={bath}
+              detailed={detailed}
+              selectedDetailId={selectedDetailId}
+              onSelectDetail={onSelectDetail}
+            />
+          )}
+
+          <div className="status-board-card__footer">
+            <span>Раскрой {formatDateTime(bath.createdAt)}</span>
           </div>
-        </Collapse.Panel>
-      </Collapse>
-
-      <CncBathPdfPreview bath={bath} />
-      {bath.sheets.length > 0 && (
-        <CncBathSheetPreview
-          bath={bath}
-          detailed={detailed}
-          selectedDetailId={selectedDetailId}
-          onSelectDetail={onSelectDetail}
-        />
+        </>
       )}
-
-      <div className="status-board-card__footer">
-        <span>Раскрой {formatDateTime(bath.createdAt)}</span>
-      </div>
     </div>
   );
 });
@@ -2628,6 +3126,7 @@ interface StatusBoardColumnViewProps {
     trigger: HTMLElement | null,
   ) => void;
   onOpenOrder: (orderId: number) => void;
+  showFinancials: boolean;
 }
 
 const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
@@ -2642,6 +3141,7 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
   onLoadMore,
   onMove,
   onOpenOrder,
+  showFinancials,
 }) => {
   const destination = column.status.id !== null && column.status.isActive;
   const currentUser = authSession.getUser();
@@ -2719,6 +3219,7 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
               displayMode={cardDisplayMode}
               onMove={onMove}
               onOpenOrder={onOpenOrder}
+              showFinancials={showFinancials}
             />
           ))
         )}
@@ -2747,6 +3248,10 @@ interface StatusBoardCardViewProps {
   pending: boolean;
   displayMode: StatusBoardCardDisplayMode;
   actionsVisible?: boolean;
+  cncOrderCard?: boolean;
+  cncSummaryOnly?: boolean;
+  displayToggleVisible?: boolean;
+  onToggleDisplay?: () => void;
   relationState?: CncRelationCardState;
   relationsEnabled?: boolean;
   highlightEnabled?: boolean;
@@ -2754,6 +3259,7 @@ interface StatusBoardCardViewProps {
   openOrderOnNumber?: boolean;
   onMove: StatusBoardColumnViewProps['onMove'];
   onOpenOrder: (orderId: number) => void;
+  showFinancials: boolean;
 }
 
 const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
@@ -2766,6 +3272,10 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   pending,
   displayMode,
   actionsVisible = true,
+  cncOrderCard = false,
+  cncSummaryOnly = false,
+  displayToggleVisible = false,
+  onToggleDisplay,
   relationState = 'normal',
   relationsEnabled = false,
   highlightEnabled = false,
@@ -2773,6 +3283,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   openOrderOnNumber = true,
   onMove,
   onOpenOrder,
+  showFinancials,
 }) => {
   const actionButtonRef = useRef<HTMLButtonElement | null>(null);
   const dragButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -2826,7 +3337,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
     resolveStatusBoardStatusColor(board, card, allColumns) ?? '#8c8c8c';
   const showCompactDetails = displayMode !== 'minimal';
   const showStandardDetails = displayMode === 'standard';
-  const paymentSummary = formatPaymentSummary(card);
+  const paymentSummary = showFinancials ? formatPaymentSummary(card) : null;
   const showUrgentFlag = card.priority <= 50;
   const showAutoFlag =
     board === 'production' && card.productionStatusFromDetailsEnabled;
@@ -2865,6 +3376,8 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         [
           'status-board-card',
           `status-board-card--${displayMode}`,
+          cncOrderCard ? 'cnc-order-card' : '',
+          cncSummaryOnly ? 'cnc-order-card--summary-only' : '',
           isDragging ? 'status-board-card--dragging' : '',
           pending ? 'status-board-card--pending' : '',
         ].filter(Boolean).join(' '),
@@ -2873,6 +3386,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
       )}
       data-status-board-order-id={card.orderId}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
+      data-cnc-card-view={cncOrderCard ? (cncSummaryOnly ? 'compact' : 'standard') : undefined}
       data-cnc-clickable={relationClickEnabled ? 'true' : undefined}
       role={relationClickEnabled ? 'button' : undefined}
       tabIndex={relationClickEnabled ? 0 : -1}
@@ -2904,9 +3418,14 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         >
           {orderNumber}
         </Button>
-        {actionsVisible && (
+        {(actionsVisible || displayToggleVisible) && (
           <div className="status-board-card__actions">
-            {finePointer && (
+            <CncCardDisplayToggle
+              visible={displayToggleVisible}
+              standardView={!cncSummaryOnly}
+              onToggle={onToggleDisplay ?? (() => undefined)}
+            />
+            {actionsVisible && finePointer && (
               <Tooltip title={moveAvailable ? 'Перетащить заказ' : unavailableReason}>
                 <Button
                   ref={(node) => {
@@ -2921,42 +3440,44 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
                 />
               </Tooltip>
             )}
-            <Dropdown
-              trigger={['click']}
-              disabled={!moveAvailable}
-              menu={{
-                items: destinations.map((column) => ({
-                  key: String(column.status.id),
-                  label: column.status.name,
-                })),
-                onClick: ({ key }) => {
-                  const target = destinations.find(
-                    (column) => String(column.status.id) === key,
-                  );
-                  if (target?.status.id !== null && target?.status.id !== undefined) {
-                    onMove(
-                      card,
-                      target.status.id,
-                      target.status.name,
-                      actionButtonRef.current,
+            {actionsVisible && (
+              <Dropdown
+                trigger={['click']}
+                disabled={!moveAvailable}
+                menu={{
+                  items: destinations.map((column) => ({
+                    key: String(column.status.id),
+                    label: column.status.name,
+                  })),
+                  onClick: ({ key }) => {
+                    const target = destinations.find(
+                      (column) => String(column.status.id) === key,
                     );
-                  }
-                },
-              }}
-            >
-              <Tooltip
-                title={moveAvailable ? 'Переместить в другой статус' : unavailableReason}
+                    if (target?.status.id !== null && target?.status.id !== undefined) {
+                      onMove(
+                        card,
+                        target.status.id,
+                        target.status.name,
+                        actionButtonRef.current,
+                      );
+                    }
+                  },
+                }}
               >
-                <Button
-                  ref={actionButtonRef}
-                  type="text"
-                  aria-label={`Переместить заказ ${orderNumber}`}
-                  aria-describedby={!moveAvailable ? readonlyReasonId : undefined}
-                  aria-disabled={!moveAvailable}
-                  icon={<MoreOutlined />}
-                />
-              </Tooltip>
-            </Dropdown>
+                <Tooltip
+                  title={moveAvailable ? 'Переместить в другой статус' : unavailableReason}
+                >
+                  <Button
+                    ref={actionButtonRef}
+                    type="text"
+                    aria-label={`Переместить заказ ${orderNumber}`}
+                    aria-describedby={!moveAvailable ? readonlyReasonId : undefined}
+                    aria-disabled={!moveAvailable}
+                    icon={<MoreOutlined />}
+                  />
+                </Tooltip>
+              </Dropdown>
+            )}
           </div>
         )}
       </div>
@@ -2976,7 +3497,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </Tag>
       </div>
 
-      {showCompactDetails && showStandardDetails && (
+      {showCompactDetails && showStandardDetails && !cncSummaryOnly && (
         <div className="status-board-card__standard-grid">
           <Typography.Text
             className="status-board-card__client status-board-card__standard-client"
@@ -3012,7 +3533,16 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </div>
       )}
 
-      {showCompactDetails && !showStandardDetails && (
+      {cncSummaryOnly && (
+        <Typography.Text
+          className="cnc-order-card__compact-client"
+          ellipsis={{ tooltip: card.clientName }}
+        >
+          {card.clientName || 'Клиент не указан'}
+        </Typography.Text>
+      )}
+
+      {showCompactDetails && !showStandardDetails && !cncSummaryOnly && (
         <div
           className="status-board-card__compact-text"
           title={compactDetailText}
@@ -3202,38 +3732,6 @@ function formatCncSize(width: number | null, height: number | null): string {
   return `${formatter.format(width)}×${formatter.format(height)}`;
 }
 
-function buildCncDetailedDisplayColumns(
-  columns: CncTelegramTodayColumn[],
-): CncTelegramTodayDisplayColumn[] {
-  const machineColumns = columns.filter(
-    (column) => column.key === 'parsed' || column.key === 'completed',
-  );
-  if (machineColumns.length === 0) return columns;
-
-  const machineColumn: CncTelegramTodayDisplayColumn = {
-    key: 'machine_files',
-    title: 'Файлы станка',
-    total: machineColumns.reduce((sum, column) => sum + column.total, 0),
-    packets: machineColumns.flatMap((column) => column.packets),
-    baths: [],
-  };
-  const displayColumns: CncTelegramTodayDisplayColumn[] = [];
-  let machineColumnInserted = false;
-
-  for (const column of columns) {
-    if (column.key === 'parsed' || column.key === 'completed') {
-      if (!machineColumnInserted) {
-        displayColumns.push(machineColumn);
-        machineColumnInserted = true;
-      }
-      continue;
-    }
-    displayColumns.push(column);
-  }
-
-  return displayColumns;
-}
-
 function cncColumnBadgeColor(columnKey: CncTelegramTodayDisplayColumnKey): string {
   if (columnKey === 'orders') return '#722ed1';
   if (columnKey === 'completed' || columnKey === 'baths_ready') return '#389e0d';
@@ -3245,7 +3743,6 @@ function cncColumnDisplayTitle(column: CncTelegramTodayDisplayColumn): string {
   const titles: Record<CncTelegramTodayDisplayColumnKey, string> = {
     parsed: 'Файлы на станке',
     completed: 'Распилено',
-    machine_files: 'Файлы станка',
     baths: 'Карты ванн',
     baths_ready: 'Готовы к закатке',
     orders: 'Заказы',

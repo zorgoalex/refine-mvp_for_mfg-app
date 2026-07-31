@@ -21,7 +21,8 @@ import {
   canViewSettingsCategory,
   isLegacyAdminUser,
 } from "../utils/navigationPermissions";
-import { can } from "../utils/permissions";
+import { canManageOrderContent } from "../utils/orderFinancialVisibility";
+import { useOrderFinancialVisibility } from "../hooks/useOrderFinancialVisibility";
 import { useSiderMenuItems } from "../utils/siderMenuItems";
 import {
   bitrix24MenuConfig,
@@ -106,6 +107,7 @@ export const CustomSider: React.FC = () => {
   }, []);
 
   const currentUser = featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser();
+  const { canViewFinancials } = useOrderFinancialVisibility(currentUser);
   const currentRoleKey = getCurrentUserRoleKey(currentUser);
   const roleVisibilityMatrix = normalizeRoleVisibilityMatrix(
     getSetting(SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE),
@@ -124,14 +126,14 @@ export const CustomSider: React.FC = () => {
     [currentUser, legacyIsAdmin, featureFlags.useBackendPermissions],
   );
   const canCreateOrders = useMemo(
-    () => !featureFlags.useBackendPermissions || can("orders.create", currentUser),
-    [currentUser, featureFlags.useBackendPermissions],
+    () => canManageOrderContent("orders.create", currentUser, canViewFinancials),
+    [canViewFinancials, currentUser, featureFlags.useBackendPermissions],
   );
   const canViewNavigation = useCallback(
     (name: string) =>
-      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions) &&
+      canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions, canViewFinancials) &&
       canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
-    [currentRoleKey, currentUser, roleVisibilityMatrix],
+    [canViewFinancials, currentRoleKey, currentUser, roleVisibilityMatrix],
   );
 
   const sider = useSiderMenuItems({

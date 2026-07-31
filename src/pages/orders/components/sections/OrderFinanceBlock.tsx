@@ -6,6 +6,7 @@ import { Typography, Table } from 'antd';
 import { useList } from '@refinedev/core';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
+import { useOrderFinancialVisibility } from '../../../../hooks/useOrderFinancialVisibility';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -16,6 +17,8 @@ interface OrderFinanceBlockProps {
 }
 
 export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, payments: providedPayments }) => {
+  const { canViewFinancials } = useOrderFinancialVisibility();
+
   // Загружаем платежи для текущего заказа
   const { data: paymentsData } = useList({
     resource: 'payments',
@@ -30,7 +33,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
       pageSize: 1000,
     },
     queryOptions: {
-      enabled: !!record?.order_id && !providedPayments,
+      enabled: !!record?.order_id && !providedPayments && canViewFinancials,
     },
   });
 
@@ -38,6 +41,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
   const { data: paymentTypesData } = useList({
     resource: 'payment_types',
     pagination: { pageSize: 1000 },
+    queryOptions: { enabled: canViewFinancials },
   });
 
   // Создаем lookup map для типов оплаты
@@ -142,6 +146,8 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
     fontSize: 13,
     fontWeight: 600,
   };
+
+  if (!canViewFinancials) return null;
 
   return (
     <div

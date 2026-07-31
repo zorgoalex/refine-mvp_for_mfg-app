@@ -56,6 +56,32 @@
                             "comment": ""
                         },
                         {
+                            "role": "operator",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {
+                                    "setting_key": {
+                                        "_eq": "navigation.resource_visibility_by_role"
+                                    }
+                                },
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "packer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {
+                                    "setting_key": {
+                                        "_eq": "navigation.resource_visibility_by_role"
+                                    }
+                                },
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
                             "role": "superadmin",
                             "permission": {
                                 "columns": "*",
@@ -69,6 +95,32 @@
                             "permission": {
                                 "columns": "*",
                                 "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "viewer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {
+                                    "setting_key": {
+                                        "_eq": "navigation.resource_visibility_by_role"
+                                    }
+                                },
+                                "allow_aggregations": true
+                            },
+                            "comment": ""
+                        },
+                        {
+                            "role": "worker",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {
+                                    "setting_key": {
+                                        "_eq": "navigation.resource_visibility_by_role"
+                                    }
+                                },
                                 "allow_aggregations": true
                             },
                             "comment": ""

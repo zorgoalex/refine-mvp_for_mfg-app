@@ -8,6 +8,8 @@ import type { ProjectCard, ProjectDto, ProjectOrderSummary } from '../../api/pro
 import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { formatNumber } from '../../utils/numberFormat';
 import { canMergeInto } from './projectHelpers';
+import { filterOrderFinancialItems } from '../../utils/orderFinancialVisibility';
+import { useOrderFinancialVisibility } from '../../hooks/useOrderFinancialVisibility';
 
 const { Title } = Typography;
 
@@ -18,6 +20,7 @@ interface ProjectFormValues {
 }
 
 export const ProjectShow: React.FC = () => {
+  const { canViewFinancials } = useOrderFinancialVisibility();
   const { id } = useParams();
   const projectId = Number(id);
   const isValidProjectId = Number.isInteger(projectId) && projectId > 0;
@@ -139,7 +142,7 @@ export const ProjectShow: React.FC = () => {
   }, [loadProject, project, selectedSourceProjectId]);
 
   const orderColumns = useMemo<ColumnsType<ProjectOrderSummary>>(
-    () => [
+    () => filterOrderFinancialItems([
       {
         title: 'Номер',
         dataIndex: 'fullNumber',
@@ -176,8 +179,8 @@ export const ProjectShow: React.FC = () => {
         key: 'orderStatusName',
         render: (value: string | null) => value || '—',
       },
-    ],
-    [],
+    ], canViewFinancials),
+    [canViewFinancials],
   );
 
   const mergeOptions = useMemo(

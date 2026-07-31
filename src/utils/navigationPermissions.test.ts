@@ -66,6 +66,19 @@ describe('navigation permissions', () => {
     });
   });
 
+  it('requires the financial layer for payment navigation', () => {
+    expect(canViewNavigationResource('payments', { permissions: ['payments.view'] }, true)).toBe(false);
+    expect(canViewNavigationResource('payments', {
+      permissions: ['payments.view', 'orders.view_financials'],
+    }, true)).toBe(true);
+    expect(canViewNavigationResource('payments_view', {
+      permissions: ['finance.analytics.view', 'orders.view_financials'],
+    }, true)).toBe(true);
+    expect(canViewNavigationResource('payments', {
+      permissions: ['payments.view', 'orders.view_financials'],
+    }, true, false)).toBe(false);
+  });
+
   it('requires orders.view for production-adjacent order resources in backend mode', () => {
     [
       'order-status-board',
@@ -88,6 +101,11 @@ describe('navigation permissions', () => {
     );
   });
 
+  it('uses orders.view as the base permission for the Bitrix menu link', () => {
+    expect(canViewNavigationResource('crm', { permissions: ['orders.view'] }, true)).toBe(true);
+    expect(canViewNavigationResource('crm', { permissions: ['references.view'] }, true)).toBe(false);
+  });
+
   it('uses backend analytics permissions for analytics menu resources', () => {
     expect(
       canViewNavigationResource(
@@ -106,7 +124,7 @@ describe('navigation permissions', () => {
     expect(
       canViewNavigationResource(
         'payments_view',
-        { permissions: ['finance.analytics.view'] },
+        { permissions: ['finance.analytics.view', 'orders.view_financials'] },
         true,
       ),
     ).toBe(true);

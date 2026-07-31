@@ -441,6 +441,7 @@ export const ROLE_PERMISSIONS = {
 
     'orders.view',
     'orders.change_status',
+    'calendar.view',
   ],
 
   viewer: [

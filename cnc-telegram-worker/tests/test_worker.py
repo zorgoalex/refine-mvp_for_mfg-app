@@ -13,9 +13,12 @@ sys.modules.setdefault("telethon", telethon_stub)
 from cnc_telegram_worker.telegram_source import is_image_message, is_vector_message
 from cnc_telegram_worker.worker import (
     ImageGroup,
+    cutting_sequence_reply_number,
     group_has_thumbs_up,
     group_image_messages,
     group_source_fingerprint,
+    is_cutting_sequence_reply_text,
+    parse_cutting_sequence_reply,
 )
 
 
@@ -45,12 +48,14 @@ class FakeMessage:
         filename: str | None = None,
         mime_type: str | None = None,
         thumbs_up: bool = False,
+        reply_to: int | None = None,
     ) -> None:
         self.id = message_id
         self.date = datetime(2026, 7, 24, 5, 0, tzinfo=timezone.utc)
         self.edit_date = None
         self.raw_text = text
         self.file = FakeFile(filename, mime_type) if filename or mime_type else None
+        self.reply_to = types.SimpleNamespace(reply_to_msg_id=reply_to) if reply_to else None
         self.reactions = (
             types.SimpleNamespace(results=[FakeReactionResult("\U0001F44D")])
             if thumbs_up
@@ -63,6 +68,7 @@ class WorkerFingerprintTest(unittest.TestCase):
         group = ImageGroup(
             image_message=FakeMessage(10, text="2689"),
             comments=["2689 весь"],
+            cutting_sequence_no=None,
             gcode_message=FakeMessage(11, filename="CNC#1_2689.TXT"),
             vector_message=FakeMessage(12, filename="2689.svg"),
         )
@@ -79,6 +85,7 @@ class WorkerFingerprintTest(unittest.TestCase):
         changed_comment = ImageGroup(
             image_message=group.image_message,
             comments=["2689 весь", "ХДФ"],
+            cutting_sequence_no=None,
             gcode_message=group.gcode_message,
             vector_message=group.vector_message,
         )
@@ -147,12 +154,14 @@ class WorkerFingerprintTest(unittest.TestCase):
         group = ImageGroup(
             image_message=image,
             comments=[],
+            cutting_sequence_no=None,
             gcode_message=gcode,
             vector_message=None,
         )
         without_reaction = ImageGroup(
             image_message=image,
             comments=[],
+            cutting_sequence_no=None,
             gcode_message=FakeMessage(41, filename="CNC#2_2718.TXT"),
             vector_message=None,
         )
@@ -162,6 +171,19 @@ class WorkerFingerprintTest(unittest.TestCase):
             group_source_fingerprint(group, "-100123", date(2026, 7, 24), "parser-v1", "ocr-a"),
             group_source_fingerprint(without_reaction, "-100123", date(2026, 7, 24), "parser-v1", "ocr-a"),
         )
+
+    def test_cutting_sequence_reply_is_bound_to_image_and_not_a_comment(self) -> None:
+        image = FakeMessage(50, text="2700", mime_type="image/jpeg")
+        reply = FakeMessage(51, text="Раскрой №7", reply_to=50)
+        comment = FakeMessage(52, text="2700 весь")
+
+        groups = group_image_messages([image, reply, comment])
+
+        self.assertEqual(parse_cutting_sequence_reply("Раскрой №7"), 7)
+        self.assertTrue(is_cutting_sequence_reply_text("Раскрой №7"))
+        self.assertEqual(cutting_sequence_reply_number([image, reply], image), 7)
+        self.assertEqual(groups[0].cutting_sequence_no, 7)
+        self.assertEqual(groups[0].comments, ["2700 весь"])
 
 
 if __name__ == "__main__":

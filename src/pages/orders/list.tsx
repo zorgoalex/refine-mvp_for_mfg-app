@@ -63,6 +63,12 @@ import { findOrderByName, countOrdersAfter } from "../../api/reports/ordersSearc
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import { can } from "../../utils/permissions";
+import {
+  canManageOrderContent,
+  filterOrderFinancialItems,
+  ORDER_FINANCIAL_FIELD_KEYS,
+} from "../../utils/orderFinancialVisibility";
+import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 import { GroupFilter } from "./components/groups/GroupFilter";
 import { AddToCutModal } from "./components/AddToCutModal";
 import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
@@ -110,8 +116,6 @@ const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'actions', label: 'Действия', lockVisible: true, lockPosition: 'end' },
 ];
 
-const ORDER_LIST_DEFAULT_ORDER = ORDER_LIST_COLUMN_DEFINITIONS.map((definition) => definition.key);
-
 const renderOrderListHeaderTitle = (title: React.ReactNode): React.ReactNode => (
   <span
     className="orders-table-header-title"
@@ -156,11 +160,20 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [addToCutOpen, setAddToCutOpen] = useState(false);
   const canViewUsers = canQueryUsersResource(currentUser);
   const canViewReferences = !featureFlags.useBackendPermissions || can('references.view');
-  const canViewFinancials = !featureFlags.useBackendPermissions || can('orders.view_financials');
+  const { canViewFinancials } = useOrderFinancialVisibility(currentUser);
   const canViewDoweling = !featureFlags.useBackendPermissions || can('doweling.view');
   const canViewEmployees = !featureFlags.useBackendPermissions || can('employees.view');
-  const canCreateOrders = !featureFlags.useBackendPermissions || can('orders.create');
-  const canUpdateOrders = !featureFlags.useBackendPermissions || can('orders.update');
+  const canViewProductionReferences = !featureFlags.useBackendPermissions || can('production.view');
+  const canCreateOrders = canManageOrderContent('orders.create', currentUser, canViewFinancials);
+  const canUpdateOrders = canManageOrderContent('orders.update', currentUser, canViewFinancials);
+  const orderListColumnDefinitions = useMemo(
+    () => filterOrderFinancialItems(ORDER_LIST_COLUMN_DEFINITIONS, canViewFinancials),
+    [canViewFinancials],
+  );
+  const orderListDefaultOrder = useMemo(
+    () => orderListColumnDefinitions.map((definition) => definition.key),
+    [orderListColumnDefinitions],
+  );
   // Keep-alive: when this /orders tab is hidden (another tab active) every data
   // hook is disabled so the cached list stops reacting to invalidateQueries.
   const { isActive } = useKeepAlive();
@@ -189,6 +202,21 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     [filters, useBackendOrdersRead, canViewUsers],
   );
   const hasActiveOrderFilters = orderFilterFormSync.hasActiveFilters;
+
+  useEffect(() => {
+    if (canViewFinancials) return;
+    const safeFilters = filters.filter((filter) => (
+      !('field' in filter) || !ORDER_FINANCIAL_FIELD_KEYS.has(String(filter.field))
+    ));
+    if (safeFilters.length !== filters.length) setFilters(safeFilters, 'replace');
+    form.setFieldsValue({
+      payment_status_name: undefined,
+      final_amount_min: undefined,
+      final_amount_max: undefined,
+      paid_amount_min: undefined,
+      paid_amount_max: undefined,
+    });
+  }, [canViewFinancials, filters, form, setFilters]);
 
   // URL/useTable filters are source of truth after hard reload.
   useEffect(() => {
@@ -400,7 +428,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       });
     }
 
-    if (hasValue(values.payment_status_name)) {
+    if (canViewFinancials && hasValue(values.payment_status_name)) {
       newFilters.push({
         field: useBackendOrdersRead ? "payment_status_id" : "payment_status_name",
         operator: "eq",
@@ -408,19 +436,19 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       });
     }
 
-    if (hasValue(values.final_amount_min)) {
+    if (canViewFinancials && hasValue(values.final_amount_min)) {
       newFilters.push({ field: "final_amount", operator: "gte", value: values.final_amount_min });
     }
 
-    if (hasValue(values.final_amount_max)) {
+    if (canViewFinancials && hasValue(values.final_amount_max)) {
       newFilters.push({ field: "final_amount", operator: "lte", value: values.final_amount_max });
     }
 
-    if (hasValue(values.paid_amount_min)) {
+    if (canViewFinancials && hasValue(values.paid_amount_min)) {
       newFilters.push({ field: "paid_amount", operator: "gte", value: values.paid_amount_min });
     }
 
-    if (hasValue(values.paid_amount_max)) {
+    if (canViewFinancials && hasValue(values.paid_amount_max)) {
       newFilters.push({ field: "paid_amount", operator: "lte", value: values.paid_amount_max });
     }
 
@@ -644,7 +672,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   };
 
   const { settings: orderListColumnSettings, saveSettings: saveOrderListColumnSettings } =
-    useOrderDetailColumnPreferences('orderList', ORDER_LIST_DEFAULT_ORDER, ORDER_LIST_COLUMN_DEFINITIONS);
+    useOrderDetailColumnPreferences('orderList', orderListDefaultOrder, orderListColumnDefinitions);
   const snapshotImportBusy = snapshotImporting || snapshotReferenceMappingSubmitting;
   const snapshotImportBusyFileName = snapshotImportFileName ?? snapshotReferenceMapping?.file.name ?? null;
 
@@ -668,14 +696,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         )}
         <OrderDetailColumnSettingsButton
           tableKey="orderList"
-          definitions={ORDER_LIST_COLUMN_DEFINITIONS}
-          defaultOrder={ORDER_LIST_DEFAULT_ORDER}
+          definitions={orderListColumnDefinitions}
+          defaultOrder={orderListDefaultOrder}
           settings={orderListColumnSettings}
           onChange={saveOrderListColumnSettings}
         />
       </Space>
     ),
-  }), [orderListColumnSettings, saveOrderListColumnSettings, tableProps?.pagination, useBackendCut, selectedCutOrderIds]);
+  }), [orderListColumnDefinitions, orderListColumnSettings, orderListDefaultOrder, saveOrderListColumnSettings, tableProps?.pagination, useBackendCut, selectedCutOrderIds]);
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
@@ -767,25 +795,25 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const { data: materialsData } = useList({
     resource: "materials",
     pagination: { pageSize: 10000 },
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    queryOptions: { enabled: isActive && canViewReferences, refetchOnWindowFocus: false },
   });
 
   const { data: millingTypesData } = useList({
     resource: "milling_types",
     pagination: { pageSize: 10000 },
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    queryOptions: { enabled: isActive && canViewReferences, refetchOnWindowFocus: false },
   });
 
   const { data: edgeTypesData } = useList({
     resource: "edge_types",
     pagination: { pageSize: 10000 },
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    queryOptions: { enabled: isActive && canViewReferences, refetchOnWindowFocus: false },
   });
 
   const { data: filmsData } = useList({
     resource: "films",
     pagination: { pageSize: 10000 },
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    queryOptions: { enabled: isActive && canViewReferences, refetchOnWindowFocus: false },
   });
 
   // Загружаем связи с присадками для заказов на текущей странице
@@ -816,7 +844,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     ],
     pagination: { pageSize: 10000 },
     queryOptions: {
-      enabled: isActive && orderIds.length > 0 && !useBackendOrdersRead,
+      enabled: isActive && orderIds.length > 0 && !useBackendOrdersRead && canViewProductionReferences,
     },
   });
 
@@ -826,7 +854,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     pagination: { pageSize: 100 },
     // IMPORTANT: explicit is_active filter disables dataProvider auto-filter, so we can map inactive statuses too
     filters: [{ field: "is_active", operator: "in", value: [true, false] }],
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    queryOptions: { enabled: isActive && canViewProductionReferences, refetchOnWindowFocus: false },
   });
 
   // Загружаем сотрудников для lookup конструктора
@@ -1263,7 +1291,10 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     },
   ]);
 
-  const visibleOrderListColumns = applyOrderDetailColumnSettings(orderListColumns, orderListColumnSettings);
+  const visibleOrderListColumns = applyOrderDetailColumnSettings(
+    filterOrderFinancialItems(orderListColumns, canViewFinancials),
+    orderListColumnSettings,
+  );
 
   return (
     <>
@@ -1308,14 +1339,16 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 {filtersVisible ? "Скрыть фильтры" : hasActiveOrderFilters ? "Фильтры активны" : "Фильтры"}
               </Button>
             </Badge>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => setCreateModalOpen(true)}
-            >
-              Создать заказ
-            </Button>
-            <Dropdown
+            {canCreateOrders && (
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setCreateModalOpen(true)}
+              >
+                Создать заказ
+              </Button>
+            )}
+            {canViewFinancials && <Dropdown
               trigger={["click"]}
               menu={{
                 items: [
@@ -1353,7 +1386,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 title="JSON: выгрузка / загрузка"
                 loading={snapshotImporting}
               />
-            </Dropdown>
+            </Dropdown>}
           </>
         )}
       >
@@ -1462,61 +1495,39 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                     <Select {...orderStatusSelectProps} allowClear placeholder="Статус" />
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12} md={6} lg={4}>
-                  <Form.Item name="payment_status_name" label="Статус оплаты">
-                    <Select {...paymentStatusSelectProps} allowClear placeholder="Статус" />
-                  </Form.Item>
-                </Col>
+                {canViewFinancials && (
+                  <Col xs={24} sm={12} md={6} lg={4}>
+                    <Form.Item name="payment_status_name" label="Статус оплаты">
+                      <Select {...paymentStatusSelectProps} allowClear placeholder="Статус" />
+                    </Form.Item>
+                  </Col>
+                )}
               </Row>
               <Row gutter={16}>
-                <Col xs={12} sm={6} md={4} lg={3}>
-                  <Form.Item name="final_amount_min" label="Сумма от">
-                    <InputNumber
-                      style={{ width: "100%" }}
-                      placeholder="Мин"
-                      min={0}
-                      precision={0}
-                      formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
-                      parser={(value) => value?.replace(/\s/g, '') as unknown as number}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col xs={12} sm={6} md={4} lg={3}>
-                  <Form.Item name="final_amount_max" label="Сумма до">
-                    <InputNumber
-                      style={{ width: "100%" }}
-                      placeholder="Макс"
-                      min={0}
-                      precision={0}
-                      formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
-                      parser={(value) => value?.replace(/\s/g, '') as unknown as number}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col xs={12} sm={6} md={4} lg={3}>
-                  <Form.Item name="paid_amount_min" label="Оплата от">
-                    <InputNumber
-                      style={{ width: "100%" }}
-                      placeholder="Мин"
-                      min={0}
-                      precision={0}
-                      formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
-                      parser={(value) => value?.replace(/\s/g, '') as unknown as number}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col xs={12} sm={6} md={4} lg={3}>
-                  <Form.Item name="paid_amount_max" label="Оплата до">
-                    <InputNumber
-                      style={{ width: "100%" }}
-                      placeholder="Макс"
-                      min={0}
-                      precision={0}
-                      formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
-                      parser={(value) => value?.replace(/\s/g, '') as unknown as number}
-                    />
-                  </Form.Item>
-                </Col>
+                {canViewFinancials && (
+                  <>
+                    <Col xs={12} sm={6} md={4} lg={3}>
+                      <Form.Item name="final_amount_min" label="Сумма от">
+                        <InputNumber style={{ width: "100%" }} placeholder="Мин" min={0} precision={0} formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} parser={(value) => value?.replace(/\s/g, '') as unknown as number} />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} sm={6} md={4} lg={3}>
+                      <Form.Item name="final_amount_max" label="Сумма до">
+                        <InputNumber style={{ width: "100%" }} placeholder="Макс" min={0} precision={0} formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} parser={(value) => value?.replace(/\s/g, '') as unknown as number} />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} sm={6} md={4} lg={3}>
+                      <Form.Item name="paid_amount_min" label="Оплата от">
+                        <InputNumber style={{ width: "100%" }} placeholder="Мин" min={0} precision={0} formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} parser={(value) => value?.replace(/\s/g, '') as unknown as number} />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} sm={6} md={4} lg={3}>
+                      <Form.Item name="paid_amount_max" label="Оплата до">
+                        <InputNumber style={{ width: "100%" }} placeholder="Макс" min={0} precision={0} formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} parser={(value) => value?.replace(/\s/g, '') as unknown as number} />
+                      </Form.Item>
+                    </Col>
+                  </>
+                )}
                 <Col xs={24} sm={12} md={6} lg={4}>
                   <Form.Item name="doweling_order_name" label="Присадка">
                     <Select
@@ -1578,6 +1589,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
               setCurrent(nextPage);
             }}
             onOpen={(id) => show("orders_view", id, "push")}
+            showFinancials={canViewFinancials}
           />
         ) : (
           <Table

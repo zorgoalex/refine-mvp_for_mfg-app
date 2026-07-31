@@ -37,6 +37,26 @@ describe('CutPage source guards', () => {
     expect(pdfPreviewSource).not.toContain('<embed');
   });
 
+  it('keeps a direct print action in the PDF preview modal', () => {
+    expect(source).toContain('const printPreviewPdf = useCallback');
+    expect(source).toContain("window.open('', '_blank')");
+    expect(source).toContain('URL.createObjectURL(pdfPreview.blob)');
+    expect(source).toContain('data-testid="print-preview-pdf-btn"');
+    expect(source).toContain('onClick={printPreviewPdf}');
+    expect(source).toContain('<PrinterOutlined />');
+  });
+
+  it('keeps zoom controls in the PDF.js preview', () => {
+    expect(pdfPreviewSource).toContain('CUT_PDF_PREVIEW_MIN_ZOOM = 50');
+    expect(pdfPreviewSource).toContain('CUT_PDF_PREVIEW_MAX_ZOOM = 250');
+    expect(pdfPreviewSource).toContain('CUT_PDF_PREVIEW_ZOOM_STEP = 25');
+    expect(pdfPreviewSource).toContain('const [zoomPercent, setZoomPercent] = useState(CUT_PDF_PREVIEW_DEFAULT_ZOOM)');
+    expect(pdfPreviewSource).toContain('data-testid="cut-pdf-preview-zoom-out"');
+    expect(pdfPreviewSource).toContain('data-testid="cut-pdf-preview-zoom-reset"');
+    expect(pdfPreviewSource).toContain('data-testid="cut-pdf-preview-zoom-in"');
+    expect(pdfPreviewSource).toContain('width: `${zoomPercent}%`');
+  });
+
   it('surfaces the no_sheet_spec count to the operator', () => {
     expect(source).toContain('noSheetSpecMessage');
     expect(source).toContain('noSheetSpecCount');

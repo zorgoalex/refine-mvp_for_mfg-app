@@ -24,9 +24,14 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(source).toContain('cutApi.listPlacements');
     expect(source).toContain('orderIds: [orderId]');
     expect(source).toContain('cutOrderJobs');
+    expect(source).toContain('cncTelegramApi.orderCuttingSequences');
+    expect(source).toContain('cncOrderCuttingSequences');
     // Each job is a deep-link into /cut?job=<id>.
     expect(source).toContain('cutJobDeepLink(j.cutJobId)');
     expect(source).toContain('Профиль: {cutJobProfileLabel(j)}');
+    expect(source).toContain('Файлы станка');
+    expect(source).toContain('№{sequence.cuttingSequenceNo}');
+    expect(source).toContain('fontVariantNumeric: \'tabular-nums\'');
   });
 
   it('renders embedded cut screen as a top order info tab', () => {
@@ -36,10 +41,13 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(source).toContain("activeInfoPanel === 'cut'");
   });
 
-  it('renders vacuum-bath film material usage in the read-only order card', () => {
+  it('renders two-column order materials with linked bath cut jobs in the read-only order card', () => {
     expect(source).toContain('computeOrderBathFilmUsage');
-    expect(source).toContain('Материалы по раскрою ванны');
-    expect(source).toContain('formatFilmLinearMeters');
+    expect(source).toContain('Материалы заказа');
+    expect(source).toContain('buildOrderFilmMaterialRows');
+    expect(source).toContain('buildOrderSheetMaterialRows');
+    expect(source).toContain('<CutJobLinks cutJobIds={value} cutJobNameById={cutJobNameById} />');
+    expect(source).toContain('formatNumber(value, 1)');
     expect(source).toContain('bathCutJobs');
   });
 });

@@ -10,14 +10,31 @@ import {
   collectCncOrderIds,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
+  filterCncBathColumnsByOrderStatuses,
   filterCncTodayColumnsByOrders,
+  isCncCardSummaryOnly,
+  isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
+  toggleCncCardStandardOverride,
   toOrderStatusBoardQuery,
 } from './model';
 
 describe('order status board model', () => {
+  it('toggles a temporary standard-view override for only one compact MDF card', () => {
+    const first = toggleCncCardStandardOverride(new Set(), 'packet:p-1');
+
+    expect(first).toEqual(new Set(['packet:p-1']));
+    expect(isCncCardSummaryOnly('compact', first, 'packet:p-1')).toBe(false);
+    expect(isCncCardSummaryOnly('compact', first, 'bath:b-1')).toBe(true);
+    expect(isCncCardSummaryOnly('standard', first, 'bath:b-1')).toBe(false);
+
+    const second = toggleCncCardStandardOverride(first, 'packet:p-1');
+    expect(second).toEqual(new Set());
+    expect(first).toEqual(new Set(['packet:p-1']));
+  });
+
   it('hides the completed column only on the order board', () => {
     const completed = column('completed', [], 0, null);
     const columns = [
@@ -238,6 +255,56 @@ describe('order status board model', () => {
     ] as CncTelegramTodayColumn[];
 
     expect(collectCncOrderIds(columns)).toEqual([2700, 2706, 2712]);
+  });
+
+  it('hides MDF orders for configured production and order statuses', () => {
+    for (const productionStatusName of [' Закатан ', 'УПАКОВАН', 'выдан']) {
+      expect(isCncOrderHiddenFromMdfBoard({
+        ...card(2700),
+        productionStatusName,
+      })).toBe(true);
+    }
+    for (const orderStatusName of ['Готов к выдаче', 'Выдан', 'Завершен', 'Завершён']) {
+      expect(isCncOrderHiddenFromMdfBoard({
+        ...card(2700),
+        orderStatusName,
+      })).toBe(true);
+    }
+    expect(isCncOrderHiddenFromMdfBoard({
+      ...card(2700),
+      productionStatusName: 'Закатка',
+      orderStatusName: 'В работе',
+    })).toBe(false);
+  });
+
+  it('removes a bath only when every linked order has left the MDF board', () => {
+    const columns = [
+      {
+        key: 'baths',
+        title: 'Карты ванн',
+        total: 4,
+        packets: [],
+        baths: [
+          cncBath('terminal', ['2700'], [2700]),
+          cncBath('mixed', ['2700', '2706'], [2700, 2706]),
+          cncBath('order-terminal', ['2712'], [2712]),
+          cncBath('status-missing', ['3000'], [3000]),
+        ],
+      },
+    ] as CncTelegramTodayColumn[];
+    const cards = [
+      { ...card(2700), productionStatusName: 'Закатан' },
+      { ...card(2706), productionStatusName: 'К закатке' },
+      { ...card(2712), orderStatusName: 'Готов к выдаче' },
+    ];
+
+    const filtered = filterCncBathColumnsByOrderStatuses(columns, cards);
+
+    expect(filtered[0]?.baths.map((bath) => bath.bathCardId)).toEqual([
+      'mixed',
+      'status-missing',
+    ]);
+    expect(filtered[0]?.total).toBe(2);
   });
 
   it('drops impossible dates from a hand-edited shared URL', () => {

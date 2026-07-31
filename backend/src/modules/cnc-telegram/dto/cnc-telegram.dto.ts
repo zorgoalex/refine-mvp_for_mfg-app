@@ -34,6 +34,7 @@ export interface CncTelegramPacketItemDto {
 export interface CncTelegramPacketDto {
   packetId: string;
   externalPacketKey: string;
+  cuttingSequenceNo: number | null;
   sourceChatId: string;
   sourceMessageId: number | null;
   sourceThreadId: number | null;
@@ -117,6 +118,24 @@ export interface CncTelegramTodayResponseDto {
   columns: CncTelegramTodayColumnDto[];
 }
 
+export interface CncTelegramOrderCuttingSequenceDto {
+  packetId: string;
+  externalPacketKey: string;
+  cuttingSequenceNo: number;
+  sourceMessageId: number | null;
+  workday: string;
+  programName: string | null;
+  materialName: string;
+  completionStatus: CncTelegramCompletionStatus;
+  sourceCreatedAt: string | null;
+  itemQuantityTotal: number;
+}
+
+export interface CncTelegramOrderCuttingSequencesResponseDto {
+  orderId: number;
+  sequences: CncTelegramOrderCuttingSequenceDto[];
+}
+
 export interface CncTelegramIngestResponseDto {
   packet: CncTelegramPacketDto;
   requestId: string;
@@ -137,6 +156,7 @@ export interface CncTelegramStructuredIngestDto {
     updatedAt?: string | null;
   };
   workday?: string;
+  cuttingSequenceNo?: number | null;
   machine?: string | null;
   programName?: string | null;
   materialName?: string | null;

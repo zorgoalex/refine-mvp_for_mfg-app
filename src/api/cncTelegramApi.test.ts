@@ -56,4 +56,20 @@ describe('cncTelegramApi', () => {
       '/api/v1/cnc-telegram/today?dateFrom=2026-07-18&dateTo=2026-07-24',
     );
   });
+
+  it('loads machine-file cutting sequence numbers for an order card', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ orderId: 2700, sequences: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cncTelegramApi.orderCuttingSequences(2700);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/v1/cnc-telegram/orders/2700/cutting-sequences',
+    );
+  });
 });

@@ -38,6 +38,7 @@ import {
   filterOrderStatusesForPacker,
   isPackerUser,
 } from '../../../utils/packerStatusAccess';
+import { useOrderFinancialVisibility } from '../../../hooks/useOrderFinancialVisibility';
 
 /**
  * Основной компонент доски календаря
@@ -126,8 +127,10 @@ const CalendarBoard: React.FC = () => {
   // Hooks для статусов и их обновления
   const currentUser = authSession.getUser();
   const packerMode = isPackerUser(currentUser);
+  const { canViewFinancials } = useOrderFinancialVisibility(currentUser);
   const { orderStatuses, paymentStatuses, productionStatuses, isLoading: isLoadingStatuses } = useOrderStatuses({
     loadPaymentAndProduction: !packerMode,
+    loadPayment: canViewFinancials,
   });
   const menuOrderStatuses = filterOrderStatusesForPacker(orderStatuses, currentUser);
   const { updateStatus, isUpdating } = useOrderStatusUpdate();
@@ -682,6 +685,7 @@ const CalendarBoard: React.FC = () => {
                     viewMode={viewMode}
                     cardScale={cardScale}
                     productionWorkflowDisplay={productionWorkflowDisplay}
+                    showFinancials={canViewFinancials}
                   />
                 );
               })}
@@ -713,7 +717,7 @@ const CalendarBoard: React.FC = () => {
           backendProductionActionsEnabled={featureFlags.useBackendProductionActions}
           statuses={{
             orderStatuses: menuOrderStatuses,
-            paymentStatuses: packerMode ? [] : paymentStatuses,
+            paymentStatuses: packerMode || !canViewFinancials ? [] : paymentStatuses,
             productionStatuses: packerMode ? [] : productionStatuses,
           }}
         />

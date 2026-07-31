@@ -348,6 +348,20 @@ describe('buildTopMenuItems', () => {
     });
     expect(items.map((i) => (i as { key: string }).key)).toEqual(['orders_view', 'crm']);
   });
+
+  it('omits CRM when role visibility denies its virtual resource key', () => {
+    const items = buildTopMenuItems({
+      ...baseArgs,
+      canViewNavigation: (name) => name !== 'crm',
+      crm: { url: 'https://crm-test.mebelkz.app', label: 'CRM' },
+      openExternal: () => {},
+    });
+
+    expect(items.map((i) => (i as { key: string }).key)).toEqual([
+      'orders_view',
+      'calendar',
+    ]);
+  });
 });
 
 describe('makeCrmOpener', () => {

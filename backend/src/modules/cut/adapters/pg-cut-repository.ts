@@ -192,6 +192,13 @@ interface RenderedSheetContext {
   bathSvg: string;
   pdfMeta: PdfSheetMeta;
   pdfDetailRows: PdfSheetDetailRow[];
+  filmRequirementLinearMeters: number | null;
+}
+
+interface PdfRenderIdentity {
+  cutJobId: number | null;
+  cutNumber: string | null;
+  currentCutNumber: string | null;
 }
 
 /** Related audit dimensions when a Phase 1 failure has not yet resolved groups. */
@@ -1965,6 +1972,13 @@ export class PgCutRepository implements CutRepositoryPort {
         ? buildBathProfileSheetSvg({
             sheet: placements,
             labelFor: (piece) => frozenPieceLabelLines(piece, frozenItemByItemId, frozenQuantities),
+            bathDetailInfoFor: (piece) => {
+              const detail = frozenItemByItemId.get(piece.item_id)?.detail;
+              return {
+                edgeTypeName: detail?.edgeTypeName ?? null,
+                millingTypeName: detail?.millingTypeName ?? null,
+              };
+            },
             fillFor: (piece) => {
               const item = frozenItemByItemId.get(piece.item_id);
               const orderId = (piece as { label?: PieceLabelSnapshot }).label?.orderId ?? item?.orderId ?? null;
@@ -1985,6 +1999,9 @@ export class PgCutRepository implements CutRepositoryPort {
         bathSvg,
         pdfMeta: renderSnapshot.pdfMeta as PdfSheetMeta,
         pdfDetailRows: renderSnapshot.pdfDetailRows as PdfSheetDetailRow[],
+        filmRequirementLinearMeters: showBathMeterGuides
+          ? calculateBathSheetFilmUsage(placements)?.linearMeters ?? null
+          : null,
       };
     });
     const resolvedSheets = args.refreshPdfDynamicFields
@@ -2833,6 +2850,7 @@ export class PgCutRepository implements CutRepositoryPort {
     if (printableSheets.length === 0) {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, 0);
     }
+    const pdfIdentity = await this.loadPdfRenderIdentity(query.cutJobId, query.resultNo);
     const pdfSheets = printableSheets.map((s, index) => ({
         svg: s.svg,
         bathSvg: s.bathSvg,
@@ -2844,6 +2862,10 @@ export class PgCutRepository implements CutRepositoryPort {
         templateLayout,
         meta: s.pdfMeta,
         detailRows: s.pdfDetailRows,
+        cutJobId: pdfIdentity.cutJobId ?? undefined,
+        cutNumber: pdfIdentity.cutNumber ?? undefined,
+        currentCutNumber: pdfIdentity.currentCutNumber ?? undefined,
+        filmRequirementLinearMeters: s.filmRequirementLinearMeters,
       }));
     return frozenContext
       ? buildFrozenSheetsPdf(frozenContext.renderContractVersion, pdfSheets)
@@ -2882,6 +2904,7 @@ export class PgCutRepository implements CutRepositoryPort {
     const pdfTemplate = templateSelection.code;
     if (templateSelection.requiresActiveCheck) await this.assertPdfTemplateActive(pdfTemplate);
     const templateLayout = frozen ? null : await this.loadPdfTemplateLayout(pdfTemplate);
+    const pdfIdentity = await this.loadPdfRenderIdentity(query.cutJobId, query.resultNo);
     const groupIds = frozen
       ? frozen.job.groups.map((group) => group.cutGroupId)
       : (await this.database.query<{ cut_group_id: string | number }>(
@@ -2941,6 +2964,10 @@ export class PgCutRepository implements CutRepositoryPort {
           templateLayout,
           meta: sheet.pdfMeta,
           detailRows: sheet.pdfDetailRows,
+          cutJobId: pdfIdentity.cutJobId ?? undefined,
+          cutNumber: pdfIdentity.cutNumber ?? undefined,
+          currentCutNumber: pdfIdentity.currentCutNumber ?? undefined,
+          filmRequirementLinearMeters: sheet.filmRequirementLinearMeters,
         });
         sheetNumber += 1;
       }
@@ -2952,6 +2979,27 @@ export class PgCutRepository implements CutRepositoryPort {
     return frozen
       ? buildFrozenSheetsPdf('cut_sheet_render_v1', pdfSheets)
       : buildSheetsPdf(pdfSheets);
+  }
+
+  private async loadPdfRenderIdentity(
+    cutJobId: number | undefined,
+    requestedResultNo: number | undefined,
+  ): Promise<PdfRenderIdentity> {
+    if (cutJobId === undefined) return { cutJobId: null, cutNumber: null, currentCutNumber: null };
+    const result = await this.database.query<{ result_no: string | number | null }>(
+      `SELECT current_result.result_no
+       FROM cut_job j
+       LEFT JOIN cut_result current_result ON current_result.cut_result_id = j.current_cut_result_id
+       WHERE j.cut_job_id = $1`,
+      [cutJobId],
+    );
+    const currentResultNo = numOrNull(result.rows[0]?.result_no);
+    const resultNo = requestedResultNo ?? currentResultNo;
+    return {
+      cutJobId,
+      cutNumber: resultNo === null ? null : `${cutJobId}-${resultNo}`,
+      currentCutNumber: currentResultNo === null ? null : `${cutJobId}-${currentResultNo}`,
+    };
   }
 
   private async loadGroupPdfLandscapeRenderContext(
@@ -3357,6 +3405,14 @@ export class PgCutRepository implements CutRepositoryPort {
           : detailById.get(parseFreecutItemId(piece.item_id)!)?.orderId ?? null);
       return fillByOrder(orderId);
     };
+    const bathDetailInfoFor = (piece: FreecutPlacement) => {
+      const detailId = parseFreecutItemId(piece.item_id);
+      const detail = detailId === null ? null : detailById.get(detailId) ?? null;
+      return {
+        edgeTypeName: detail?.edgeTypeName ?? null,
+        millingTypeName: detail?.millingTypeName ?? null,
+      };
+    };
 
     return {
       sheets: rawSheets.map((s) => {
@@ -3378,6 +3434,7 @@ export class PgCutRepository implements CutRepositoryPort {
           bathSvg: buildBathProfileSheetSvg({
             sheet: s.placements,
             labelFor,
+            bathDetailInfoFor,
             fillFor,
             rotate90,
             originTopLeft,
@@ -3386,6 +3443,9 @@ export class PgCutRepository implements CutRepositoryPort {
           }),
           pdfMeta: buildPdfSheetMeta(s.placements, detailById),
           pdfDetailRows: buildPdfDetailRows(s.placements, detailById),
+          filmRequirementLinearMeters: showBathMeterGuides
+            ? calculateBathSheetFilmUsage(s.placements)?.linearMeters ?? null
+            : null,
         };
       }),
     };

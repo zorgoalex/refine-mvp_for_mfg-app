@@ -5,6 +5,8 @@
 
 import { useList, useCreate, useUpdate } from '@refinedev/core';
 import { useCallback, useMemo } from 'react';
+import { authSession } from '../api/authSession';
+import { canQueryAppSettingsResource } from '../utils/resourcePermissions';
 
 interface AppSetting {
   setting_id: number;
@@ -40,7 +42,7 @@ interface UseAppSettingsResult {
 }
 
 export const useAppSettings = (options?: { enabled?: boolean }): UseAppSettingsResult => {
-  const enabled = options?.enabled ?? true;
+  const enabled = (options?.enabled ?? true) && canQueryAppSettingsResource(authSession.getUser());
   const { data, isLoading, refetch } = useList<AppSetting>({
     resource: 'app_settings',
     pagination: { mode: 'off' },
@@ -172,6 +174,7 @@ export const SETTING_KEYS = {
   // Production workflow (production_status_events)
   PRODUCTION_WORKFLOW_DEFAULT: 'production.workflow.default',
   RESOURCE_VISIBILITY_BY_ROLE: 'navigation.resource_visibility_by_role',
+  ORDER_FINANCIAL_VISIBILITY: 'orders.financial_visibility',
 } as const;
 
 // Types for specific settings

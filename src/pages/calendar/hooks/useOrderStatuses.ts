@@ -20,9 +20,10 @@ export interface OrderStatusesResult {
  * @returns Объект со статусами и состоянием загрузки
  */
 export const useOrderStatuses = (
-  options: { loadPaymentAndProduction?: boolean } = {},
+  options: { loadPaymentAndProduction?: boolean; loadPayment?: boolean } = {},
 ): OrderStatusesResult => {
   const loadPaymentAndProduction = options.loadPaymentAndProduction ?? true;
+  const loadPayment = loadPaymentAndProduction && (options.loadPayment ?? true);
   // Загружаем статусы заказов
   const {
     data: orderStatusesData,
@@ -45,7 +46,7 @@ export const useOrderStatuses = (
     resource: 'payment_statuses',
     pagination: { pageSize: 100 },
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    queryOptions: { enabled: loadPaymentAndProduction },
+    queryOptions: { enabled: loadPayment },
   });
 
   // Загружаем статусы производства
@@ -64,13 +65,13 @@ export const useOrderStatuses = (
   // Объединяем состояния загрузки
   const isLoading =
     isLoadingOrderStatuses ||
-    (loadPaymentAndProduction && isLoadingPaymentStatuses) ||
+    (loadPayment && isLoadingPaymentStatuses) ||
     (loadPaymentAndProduction && isLoadingProductionStatuses);
 
   // Объединяем ошибки
   const error = isErrorOrderStatuses
     ? (errorOrderStatuses as Error)
-    : loadPaymentAndProduction && isErrorPaymentStatuses
+    : loadPayment && isErrorPaymentStatuses
     ? (errorPaymentStatuses as Error)
     : loadPaymentAndProduction && isErrorProductionStatuses
     ? (errorProductionStatuses as Error)
@@ -82,10 +83,10 @@ export const useOrderStatuses = (
     name: item.order_status_name,
   }));
 
-  const paymentStatuses: StatusItem[] = (paymentStatusesData?.data || []).map((item: any) => ({
+  const paymentStatuses: StatusItem[] = loadPayment ? (paymentStatusesData?.data || []).map((item: any) => ({
     id: item.payment_status_id,
     name: item.payment_status_name,
-  }));
+  })) : [];
 
   const productionStatuses: StatusItem[] = (productionStatusesData?.data || []).map((item: any) => ({
     id: item.production_status_id,
