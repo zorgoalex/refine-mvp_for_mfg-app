@@ -138,7 +138,7 @@ export function buildTopMenuItems(args: {
           onClick: () => args.push(args.statusBoard!.route),
         }
       : null,
-    args.crm
+    args.crm && args.canViewNavigation('crm')
       ? {
           key: 'crm',
           icon: args.crm.icon,

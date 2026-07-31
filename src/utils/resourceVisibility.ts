@@ -67,8 +67,9 @@ export function normalizeRoleVisibilityMatrix(value: unknown): RoleVisibilityMat
 export function getMenuResources(
   resources: IResourceItem[],
   labels: Record<string, string>,
+  virtualResources: VisibilityResource[] = [],
 ): VisibilityResource[] {
-  return resources
+  const registeredResources = resources
     .map((resource) => {
       const route = typeof resource.list === 'string' ? resource.list : resource.meta?.route ?? '';
       if (!route) return null;
@@ -78,8 +79,13 @@ export function getMenuResources(
         route,
       };
     })
-    .filter((resource): resource is VisibilityResource => Boolean(resource))
-    .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+    .filter((resource): resource is VisibilityResource => Boolean(resource));
+  const registeredNames = new Set(registeredResources.map((resource) => resource.name));
+
+  return [
+    ...registeredResources,
+    ...virtualResources.filter((resource) => !registeredNames.has(resource.name)),
+  ].sort((a, b) => a.label.localeCompare(b.label, 'ru'));
 }
 
 export function buildInitialResourceVisibility(

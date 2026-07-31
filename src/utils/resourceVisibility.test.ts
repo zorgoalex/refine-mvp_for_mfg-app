@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildInitialResourceVisibility,
   canViewResourceByRoleVisibility,
+  getMenuResources,
   normalizeRoleKey,
   type RoleVisibilityMatrix,
 } from './resourceVisibility';
@@ -54,5 +55,18 @@ describe('resource visibility matrix', () => {
       orders_view: { manager: false, operator: true },
       calendar: { manager: true, operator: true },
     });
+  });
+
+  it('includes configured virtual links such as Bitrix in the editable matrix', () => {
+    expect(
+      getMenuResources(
+        [{ name: 'orders_view', list: '/orders' } as any],
+        { orders_view: 'Заказы' },
+        [{ name: 'crm', label: 'Битрикс24', route: 'https://example.bitrix24.kz/' }],
+      ),
+    ).toEqual([
+      { name: 'crm', label: 'Битрикс24', route: 'https://example.bitrix24.kz/' },
+      { name: 'orders_view', label: 'Заказы', route: '/orders' },
+    ]);
   });
 });

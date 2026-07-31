@@ -101,6 +101,11 @@ describe('navigation permissions', () => {
     );
   });
 
+  it('uses orders.view as the base permission for the Bitrix menu link', () => {
+    expect(canViewNavigationResource('crm', { permissions: ['orders.view'] }, true)).toBe(true);
+    expect(canViewNavigationResource('crm', { permissions: ['references.view'] }, true)).toBe(false);
+  });
+
   it('uses backend analytics permissions for analytics menu resources', () => {
     expect(
       canViewNavigationResource(

@@ -28,7 +28,7 @@ describe('resourcePermissions', () => {
     expect(canQueryUsersResource({ permissions: ['users.view'] })).toBe(true);
   });
 
-  it('allows app_settings queries for authorized settings roles', () => {
+  it('allows authenticated roles to read their navigation visibility setting', () => {
     applyFeatureFlags({ ...featureFlags, useBackendPermissions: true });
 
     expect(canQueryAppSettingsResource({ role: 'superadmin', permissions: [] })).toBe(true);
@@ -38,15 +38,18 @@ describe('resourcePermissions', () => {
     })).toBe(true);
     expect(canQueryAppSettingsResource({ role: 'top_manager', permissions: [] })).toBe(true);
     expect(canQueryAppSettingsResource({ role: 'manager', permissions: [] })).toBe(true);
-    expect(canQueryAppSettingsResource({ role: 'packer', permissions: ['orders.view'] })).toBe(false);
-    expect(canQueryAppSettingsResource({ roleId: 30, permissions: ['orders.view'] })).toBe(false);
+    expect(canQueryAppSettingsResource({ role: 'operator', permissions: ['orders.view'] })).toBe(true);
+    expect(canQueryAppSettingsResource({ role: 'worker', permissions: ['orders.view'] })).toBe(true);
+    expect(canQueryAppSettingsResource({ role: 'packer', permissions: ['orders.view'] })).toBe(true);
+    expect(canQueryAppSettingsResource({ roleId: 30, permissions: ['orders.view'] })).toBe(true);
+    expect(canQueryAppSettingsResource({ role: 'viewer', permissions: ['orders.view'] })).toBe(true);
     expect(canQueryAppSettingsResource(null)).toBe(false);
   });
 
-  it('blocks app_settings for packer and anonymous backend sessions before runtime permission flags are applied', () => {
+  it('allows packer visibility reads but blocks anonymous backend sessions before runtime flags apply', () => {
     applyFeatureFlags({ ...featureFlags, useBackendAuth: true, useBackendPermissions: false });
 
-    expect(canQueryAppSettingsResource({ role: 'packer', permissions: ['orders.view'] })).toBe(false);
+    expect(canQueryAppSettingsResource({ role: 'packer', permissions: ['orders.view'] })).toBe(true);
     expect(canQueryAppSettingsResource(null)).toBe(false);
   });
 
@@ -61,6 +64,7 @@ describe('resourcePermissions', () => {
     const packer = { role: 'packer', permissions: ['orders.view'] };
 
     expect(canQueryHasuraResource('order_statuses', packer)).toBe(true);
+    expect(canQueryHasuraResource('app_settings', packer)).toBe(true);
     for (const resource of [
       'materials',
       'films',
@@ -69,7 +73,6 @@ describe('resourcePermissions', () => {
       'production_statuses',
       'production_status_events',
       'payment_types',
-      'app_settings',
       'orders_view',
     ]) {
       expect(canQueryHasuraResource(resource, packer), resource).toBe(false);

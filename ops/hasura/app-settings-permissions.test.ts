@@ -22,4 +22,30 @@ describe('app_settings Hasura permissions', () => {
       ).toBe(false);
     }
   });
+
+  it('lets restricted roles read only the navigation visibility row', () => {
+    for (const role of ['operator', 'worker', 'packer', 'viewer']) {
+      const selectPermission = appSettings.select_permissions.find(
+        (entry: any) => entry.role === role,
+      );
+
+      expect(selectPermission?.permission).toMatchObject({
+        columns: '*',
+        filter: {
+          setting_key: { _eq: 'navigation.resource_visibility_by_role' },
+        },
+      });
+
+      for (const permissionType of [
+        'insert_permissions',
+        'update_permissions',
+        'delete_permissions',
+      ]) {
+        expect(
+          (appSettings[permissionType] ?? []).some((entry: any) => entry.role === role),
+          `${permissionType} must not grant ${role} writes`,
+        ).toBe(false);
+      }
+    }
+  });
 });

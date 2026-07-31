@@ -19,6 +19,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   doweling_orders_view: ['orders.view'],
   order_workshops: ['orders.view'],
   order_resource_requirements: ['orders.view'],
+  crm: ['orders.view'],
   clients: ['references.view'],
   materials: ['references.view'],
   milling_types: ['references.view'],
