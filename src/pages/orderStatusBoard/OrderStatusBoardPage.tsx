@@ -1417,6 +1417,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       onSelectRelation={() =>
                         onSelectRelation({ kind: 'order', id: card.orderId })
                       }
+                      openOrderOnNumber={!relationsEnabled}
                       onMove={() => undefined}
                       onOpenOrder={onOpenOrder}
                     />
@@ -2750,6 +2751,7 @@ interface StatusBoardCardViewProps {
   relationsEnabled?: boolean;
   highlightEnabled?: boolean;
   onSelectRelation?: () => void;
+  openOrderOnNumber?: boolean;
   onMove: StatusBoardColumnViewProps['onMove'];
   onOpenOrder: (orderId: number) => void;
 }
@@ -2768,6 +2770,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   relationsEnabled = false,
   highlightEnabled = false,
   onSelectRelation,
+  openOrderOnNumber = true,
   onMove,
   onOpenOrder,
 }) => {
@@ -2890,7 +2893,12 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           type="link"
           className="status-board-card__number"
           onClick={(event) => {
-            if (relationClickEnabled) event.stopPropagation();
+            if (relationClickEnabled) {
+              event.stopPropagation();
+              onSelectRelation?.();
+              return;
+            }
+            if (!openOrderOnNumber) return;
             onOpenOrder(card.orderId);
           }}
         >

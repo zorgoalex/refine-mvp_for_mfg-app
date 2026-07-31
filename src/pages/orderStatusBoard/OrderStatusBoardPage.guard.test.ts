@@ -201,6 +201,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('CNC_ORDER_STATUS_REFRESH_MS');
     expect(page).toContain('getCncOrderRelationState');
     expect(page).toContain("onSelectRelation({ kind: 'order', id: card.orderId })");
+    expect(page).toContain('openOrderOnNumber={!relationsEnabled}');
+    expect(page).toContain('if (!openOrderOnNumber) return;');
     expect(page).toContain('const bathCards = relationContext');
     expect(page).toContain('const packetCards = relationContext');
     expect(page).toContain('sortCncRelationCards');
