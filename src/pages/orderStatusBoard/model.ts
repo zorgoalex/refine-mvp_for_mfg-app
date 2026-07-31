@@ -190,6 +190,23 @@ export function filterCncBathColumnsByMachineOrderMatches(
   });
 }
 
+export function collectCncOrderIds(columns: CncTelegramTodayColumn[]): number[] {
+  const orderIds = new Set<number>();
+  for (const column of columns) {
+    for (const packet of column.packets ?? []) {
+      for (const item of packet.items) {
+        addCncOrderId(orderIds, item.orderId ?? item.matchOrderId);
+      }
+    }
+    for (const bath of column.baths ?? []) {
+      for (const item of bath.items) {
+        addCncOrderId(orderIds, item.orderId);
+      }
+    }
+  }
+  return Array.from(orderIds).sort((left, right) => left - right);
+}
+
 export function buildCncOrderSearchDateRange(
   workday: string,
   period: CncOrderSearchPeriod | undefined,
@@ -209,6 +226,12 @@ export function cncOrderSearchPeriodDays(
   if (period === '2w') return 14;
   if (period === '1m') return 31;
   return 7;
+}
+
+function addCncOrderId(target: Set<number>, value: number | null | undefined): void {
+  if (Number.isInteger(value) && Number(value) > 0) {
+    target.add(Number(value));
+  }
 }
 
 function isDoneProductionStatus(column: OrderStatusBoardColumn): boolean {

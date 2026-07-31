@@ -134,6 +134,7 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
             <Select.Option value="operator">Оператор (operator)</Select.Option>
             <Select.Option value="top_manager">Топ-менеджер (top_manager)</Select.Option>
             <Select.Option value="worker">Работник (worker)</Select.Option>
+            <Select.Option value="packer">Упаковщик (packer)</Select.Option>
             <Select.Option value="viewer">Наблюдатель (viewer)</Select.Option>
           </Select>
         </Form.Item>

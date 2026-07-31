@@ -42,6 +42,7 @@ import {
 
 const SOURCE = 'backend-production-command';
 const AUTOMATION_SOURCE = 'backend-status-automation';
+const PACKER_ALLOWED_ORDER_STATUS_NAMES = new Set(['готов к выдаче', 'выдан']);
 
 export interface AutomationActionContext {
   actor: CurrentUser;
@@ -321,11 +322,21 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const order = await loadOrderForUpdate(tx, command.orderId);
-      await this.assertOrderScope(command.currentUser, order, [
-        'orders.update',
-        'orders.change_status',
-      ], requestId);
+      if (command.currentUser.role !== 'packer') {
+        await this.assertOrderScope(command.currentUser, order, [
+          'orders.update',
+          'orders.change_status',
+        ], requestId);
+      }
       const status = await loadOrderStatus(tx, command.dto.orderStatusId);
+      if (command.currentUser.role === 'packer') {
+        await this.assertPackerOrderStatusTarget(
+          command.currentUser,
+          order,
+          status,
+          requestId,
+        );
+      }
       assertVersion(order, command.dto.version);
 
       if (order.orderStatusId === command.dto.orderStatusId) {
@@ -1621,6 +1632,44 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       requiredPermissions,
     });
   }
+
+  private async assertPackerOrderStatusTarget(
+    currentUser: CurrentUser,
+    order: LockedOrder,
+    status: { orderStatusId: number; orderStatusName: string },
+    requestId: string,
+  ): Promise<void> {
+    if (
+      currentUser.permissions.includes('orders.view') &&
+      currentUser.permissions.includes('orders.change_status') &&
+      PACKER_ALLOWED_ORDER_STATUS_NAMES.has(normalizeStatusName(status.orderStatusName))
+    ) {
+      return;
+    }
+
+    await writeDeniedActionAudit(this.database, {
+      currentUser,
+      requestId,
+      order,
+      requiredPermissions: ['orders.view', 'orders.change_status'],
+      reason: 'order_status_target_denied',
+      metadata: {
+        orderStatusId: status.orderStatusId,
+        orderStatusName: status.orderStatusName,
+        allowedOrderStatusNames: [...PACKER_ALLOWED_ORDER_STATUS_NAMES],
+      },
+    });
+    throw new ApiError(
+      403,
+      'ORDER_STATUS_TARGET_DENIED',
+      'Упаковщик может ставить только статусы заказа "Готов к выдаче" и "Выдан"',
+      {
+        orderStatusId: status.orderStatusId,
+        orderStatusName: status.orderStatusName,
+        allowedOrderStatusNames: [...PACKER_ALLOWED_ORDER_STATUS_NAMES],
+      },
+    );
+  }
 }
 
 async function writeDeniedActionAudit(
@@ -1630,6 +1679,8 @@ async function writeDeniedActionAudit(
     requestId: string;
     order: LockedOrder;
     requiredPermissions: readonly string[];
+    reason?: string;
+    metadata?: Record<string, unknown>;
   },
 ): Promise<void> {
   await auditService.recordDenied(database, {
@@ -1643,9 +1694,14 @@ async function writeDeniedActionAudit(
     source: SOURCE,
     relatedOrderId: input.order.orderId,
     relatedClientId: input.order.clientId,
-    reason: 'order_scope_denied',
+    reason: input.reason ?? 'order_scope_denied',
     requiredPermissions: input.requiredPermissions,
+    metadata: input.metadata,
   });
+}
+
+function normalizeStatusName(value: string): string {
+  return value.trim().toLocaleLowerCase('ru-RU').replace(/\s+/g, ' ');
 }
 
 export async function changeOrderStatusFromDeadlineInTransaction(

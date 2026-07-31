@@ -36,6 +36,7 @@ export class OrderStatusBoardController {
   @ApiQuery({ name: 'includeDone', required: false, type: Boolean })
   @ApiQuery({ name: 'plannedFrom', required: false, type: String })
   @ApiQuery({ name: 'plannedTo', required: false, type: String })
+  @ApiQuery({ name: 'orderIds', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Order status board projection' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -155,6 +156,7 @@ export function parseOrderStatusBoardQuery(
   if (includeDone && board !== 'production') {
     throw validationError('includeDone', 'includeDone is only valid for production board');
   }
+  const orderIds = parseOrderIds(query.orderIds);
 
   return {
     board,
@@ -167,6 +169,7 @@ export function parseOrderStatusBoardQuery(
     includeDone,
     ...(plannedFrom ? { plannedFrom } : {}),
     ...(plannedTo ? { plannedTo } : {}),
+    ...(orderIds.length > 0 ? { orderIds } : {}),
   };
 }
 
@@ -216,6 +219,30 @@ function parseDateOnly(
     throw validationError(field, `${field} must be a valid calendar date`);
   }
   return raw;
+}
+
+function parseOrderIds(value: unknown): number[] {
+  if (value === undefined || value === '') return [];
+  const rawValues = Array.isArray(value) ? value : [value];
+  const ids = new Set<number>();
+  for (const raw of rawValues) {
+    if (typeof raw !== 'string') {
+      throw validationError('orderIds', 'orderIds must contain positive integers');
+    }
+    for (const part of raw.split(',')) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      const parsed = Number(trimmed);
+      if (!/^\d+$/.test(trimmed) || !Number.isSafeInteger(parsed) || parsed <= 0) {
+        throw validationError('orderIds', 'orderIds must contain positive integers');
+      }
+      ids.add(parsed);
+      if (ids.size > 200) {
+        throw validationError('orderIds', 'orderIds must contain 200 values or fewer');
+      }
+    }
+  }
+  return Array.from(ids);
 }
 
 function single(value: unknown, field: string): string | undefined {

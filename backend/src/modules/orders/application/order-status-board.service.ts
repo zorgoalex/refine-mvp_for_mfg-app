@@ -1,5 +1,6 @@
 import { ApiError } from '../../../common/errors/api-error';
 import { PermissionsService } from '../../../permissions/permissions.service';
+import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import type { OrderStatusBoardResponseDto } from '../dto/order-status-board.dto';
 import type {
   GetOrderStatusBoardCommand,
@@ -22,6 +23,14 @@ export class OrderStatusBoardService {
     if (!this.permissions.canUser(command.currentUser, 'orders.view')) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра доски', {
         requiredPermissions: ['orders.view'],
+      });
+    }
+    if (
+      command.query.board === 'production' &&
+      ROLE_POLICIES[command.currentUser.role].productionTasks.view === 'none'
+    ) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра доски производства', {
+        requiredPermissions: ['productionTasks.view'],
       });
     }
 
@@ -47,4 +56,3 @@ export class OrderStatusBoardService {
     };
   }
 }
-

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ordersApi } from '../api/ordersApi';
+import { subscribeOrderFormReferencesChanged } from '../api/orderFormReferenceEvents';
 import type { OrderFormDataResponse } from '../api/types/orderApi.types';
 import { featureFlags } from '../config/featureFlags';
 
@@ -57,6 +58,7 @@ interface UseOrderFormDataResult {
 
 let cachedFormData: OrderFormDataResponse | null = null;
 let pendingFormDataRequest: Promise<OrderFormDataResponse> | null = null;
+let formDataCacheGeneration = 0;
 
 export function useOrderFormData(enabled = featureFlags.useBackendReferences): UseOrderFormDataResult {
   const [data, setData] = useState<OrderFormDataResponse | null>(() =>
@@ -64,6 +66,30 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
   );
   const [isLoading, setIsLoading] = useState(() => enabled && !cachedFormData);
   const [error, setError] = useState<Error | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const refresh = () => {
+      invalidateOrderFormDataCache();
+      setRefreshVersion((version) => version + 1);
+    };
+    const unsubscribe = subscribeOrderFormReferencesChanged(refresh);
+
+    // Covers reference changes made in another browser/session: returning to
+    // the order tab refreshes the aggregate without reloading the order page.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', refresh);
+    }
+
+    return () => {
+      unsubscribe();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', refresh);
+      }
+    };
+  }, [enabled]);
 
   useEffect(() => {
     if (!enabled) {
@@ -101,7 +127,7 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [enabled, refreshVersion]);
 
   const references = useMemo(() => mapOrderFormDataToReferences(data), [data]);
 
@@ -177,20 +203,32 @@ export function createBackendSelectProps(options: ReferenceOption[], isLoading =
 }
 
 export function resetOrderFormDataCacheForTests(): void {
+  formDataCacheGeneration += 1;
+  cachedFormData = null;
+  pendingFormDataRequest = null;
+}
+
+export function invalidateOrderFormDataCache(): void {
+  formDataCacheGeneration += 1;
   cachedFormData = null;
   pendingFormDataRequest = null;
 }
 
 async function loadOrderFormData(): Promise<OrderFormDataResponse> {
   if (!pendingFormDataRequest) {
+    const requestGeneration = formDataCacheGeneration;
     pendingFormDataRequest = ordersApi
       .getFormData()
       .then((response) => {
-        cachedFormData = response;
+        if (requestGeneration === formDataCacheGeneration) {
+          cachedFormData = response;
+        }
         return response;
       })
       .catch((error) => {
-        pendingFormDataRequest = null;
+        if (requestGeneration === formDataCacheGeneration) {
+          pendingFormDataRequest = null;
+        }
         throw error;
       });
   }

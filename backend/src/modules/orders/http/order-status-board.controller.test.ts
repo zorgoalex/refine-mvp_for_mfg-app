@@ -18,6 +18,7 @@ describe('parseOrderStatusBoardQuery', () => {
         includeDone: 'true',
         plannedFrom: '2026-07-01',
         plannedTo: '2026-07-31',
+        orderIds: '11453, 11454',
       }),
     ).toEqual({
       board: 'production',
@@ -29,6 +30,18 @@ describe('parseOrderStatusBoardQuery', () => {
       includeDone: true,
       plannedFrom: '2026-07-01',
       plannedTo: '2026-07-31',
+      orderIds: [11453, 11454],
+    });
+  });
+
+  it('deduplicates repeated order id filters', () => {
+    expect(
+      parseOrderStatusBoardQuery({
+        board: 'production',
+        orderIds: ['2706,2712', '2706'],
+      }),
+    ).toMatchObject({
+      orderIds: [2706, 2712],
     });
   });
 
@@ -56,6 +69,8 @@ describe('parseOrderStatusBoardQuery', () => {
     [{ board: 'order', plannedFrom: '19.07.2026' }, 'plannedFrom'],
     [{ board: 'order', plannedFrom: '2026-02-30' }, 'plannedFrom'],
     [{ board: 'order', plannedFrom: '0000-01-01' }, 'plannedFrom'],
+    [{ board: 'order', orderIds: '2706,nope' }, 'orderIds'],
+    [{ board: 'order', orderIds: '0' }, 'orderIds'],
     [{ board: ['order'] }, 'board'],
     [{ board: 'order', search: { nested: 'value' } }, 'search'],
     [

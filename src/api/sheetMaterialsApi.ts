@@ -1,5 +1,6 @@
 import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
+import { notifyOrderFormReferencesChanged } from './orderFormReferenceEvents';
 
 export interface SheetMaterialTypeInput {
   name: string;
@@ -38,18 +39,33 @@ export interface SheetMaterialTypeDto {
 }
 
 export const sheetMaterialsApi = {
-  create(input: SheetMaterialTypeInput): Promise<SheetMaterialTypeDto> {
-    return httpClient.post<SheetMaterialTypeDto>(apiRoutes.sheetMaterials.list, input);
+  async create(input: SheetMaterialTypeInput): Promise<SheetMaterialTypeDto> {
+    const response = await httpClient.post<SheetMaterialTypeDto>(
+      apiRoutes.sheetMaterials.list,
+      input,
+    );
+    notifyOrderFormReferencesChanged('sheet_material_types');
+    return response;
   },
 
-  update(id: number, input: SheetMaterialTypeInput, version: number): Promise<SheetMaterialTypeDto> {
-    return httpClient.put<SheetMaterialTypeDto>(apiRoutes.sheetMaterials.byId(id), { ...input, version });
+  async update(
+    id: number,
+    input: SheetMaterialTypeInput,
+    version: number,
+  ): Promise<SheetMaterialTypeDto> {
+    const response = await httpClient.put<SheetMaterialTypeDto>(
+      apiRoutes.sheetMaterials.byId(id),
+      { ...input, version },
+    );
+    notifyOrderFormReferencesChanged('sheet_material_types');
+    return response;
   },
 
-  deactivate(id: number, version: number): Promise<void> {
-    return httpClient.delete<void>(apiRoutes.sheetMaterials.byId(id), {
+  async deactivate(id: number, version: number): Promise<void> {
+    await httpClient.delete<void>(apiRoutes.sheetMaterials.byId(id), {
       body: JSON.stringify({ version }),
       headers: { 'Content-Type': 'application/json' },
     });
+    notifyOrderFormReferencesChanged('sheet_material_types');
   },
 };

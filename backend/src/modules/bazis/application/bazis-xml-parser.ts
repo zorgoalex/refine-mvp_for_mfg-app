@@ -165,6 +165,36 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
     return copy;
   };
 
+  const userPropertyValue = (
+    element: BazisElement,
+    acceptedNames: ReadonlySet<string>,
+  ): string | null => {
+    const propertyCandidates: unknown[] = [];
+    const nested = element['ПользовательскиеСвойства'];
+    if (typeof nested === 'object' && nested !== null && !Array.isArray(nested)) {
+      propertyCandidates.push((nested as BazisElement)['Свойство']);
+    }
+    propertyCandidates.push(element['Свойство']);
+
+    for (const candidate of propertyCandidates) {
+      const properties = Array.isArray(candidate) ? candidate : candidate ? [candidate] : [];
+      for (const property of properties) {
+        if (typeof property !== 'object' || property === null || Array.isArray(property)) {
+          continue;
+        }
+        const row = property as BazisElement;
+        const name = toText(row['Имя'] ?? row['Наименование']);
+        if (
+          name &&
+          acceptedNames.has(name.toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/\s+/g, ' '))
+        ) {
+          return toText(row['Значение']);
+        }
+      }
+    }
+    return null;
+  };
+
   const recordMaterial = (
     name: string | null,
     kind: ParsedBazisMaterialUsage['kindGuess'],
@@ -194,11 +224,17 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
       recordMaterial(mainName, 'hardware');
     }
 
-    for (const faceKey of ['ОблицовкаПласти1', 'ОблицовкаПласти2']) {
-      const face = element[faceKey] as BazisElement | undefined;
-      const plasti = (face?.['Пласть'] ?? []) as BazisElement[];
-      for (const plast of plasti) {
-        recordMaterial(toText(plast['Наименование']), 'film');
+    const customFilmName =
+      objectType === 'Панель' ? userPropertyValue(element, new Set(['пленка'])) : null;
+    if (customFilmName) {
+      recordMaterial(customFilmName, 'film');
+    } else {
+      for (const faceKey of ['ОблицовкаПласти1', 'ОблицовкаПласти2']) {
+        const face = element[faceKey] as BazisElement | undefined;
+        const plasti = (face?.['Пласть'] ?? []) as BazisElement[];
+        for (const plast of plasti) {
+          recordMaterial(toText(plast['Наименование']), 'film');
+        }
       }
     }
 

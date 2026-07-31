@@ -32,6 +32,7 @@ describe('resource visibility matrix', () => {
 
   it('normalizes known role ids to canonical backend role names', () => {
     expect(normalizeRoleKey({ role_id: 10, role_name: 'Менеджер' })).toBe('manager');
+    expect(normalizeRoleKey({ role_id: 30, role_name: 'Упаковщик' })).toBe('packer');
     expect(normalizeRoleKey({ role_id: 100, role_name: 'Наблюдатель' })).toBe('viewer');
     expect(normalizeRoleKey({ role_id: 999, role_name: 'Custom' })).toBe('999');
   });

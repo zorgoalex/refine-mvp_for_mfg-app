@@ -52,6 +52,11 @@ export const ROLE_POLICIES = {
     payments: { view: 'none', create: 'none', update: 'none', delete: 'none' },
     productionTasks: { view: 'assigned', update: 'assigned' },
   },
+  packer: {
+    orders: { view: 'all', update: 'none', export: 'none', delete: 'none' },
+    payments: { view: 'none', create: 'none', update: 'none', delete: 'none' },
+    productionTasks: { view: 'none', update: 'none' },
+  },
   viewer: {
     orders: { view: 'all', update: 'none', export: 'none', delete: 'none' },
     payments: { view: 'none', create: 'none', update: 'none', delete: 'none' },

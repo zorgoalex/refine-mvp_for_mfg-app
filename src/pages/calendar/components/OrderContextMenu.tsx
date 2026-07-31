@@ -190,24 +190,31 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
       label: 'Статус заказа',
       children: orderStatusItems,
     },
-    {
-      key: 'payment_status',
-      label: 'Статус оплаты',
-      children: paymentStatusItems,
-    },
-    {
-      key: 'production_status',
-      label: 'Статус производства',
-      children: productionStatusItems,
-    },
-    { type: 'divider' },
-    {
-      key: 'move_to_date',
-      label: 'Перенести на дату',
-      icon: <CalendarOutlined />,
-      disabled: !onMoveToDate,
-      onClick: openMoveModal,
-    },
+    ...(paymentStatusItems.length > 0
+      ? [{
+          key: 'payment_status',
+          label: 'Статус оплаты',
+          children: paymentStatusItems,
+        }]
+      : []),
+    ...(productionStatusItems.length > 0
+      ? [{
+          key: 'production_status',
+          label: 'Статус производства',
+          children: productionStatusItems,
+        }]
+      : []),
+    ...(onMoveToDate
+      ? [
+          { type: 'divider' as const },
+          {
+            key: 'move_to_date',
+            label: 'Перенести на дату',
+            icon: <CalendarOutlined />,
+            onClick: openMoveModal,
+          },
+        ]
+      : []),
   ];
 
   return (

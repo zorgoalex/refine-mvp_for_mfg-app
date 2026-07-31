@@ -35,7 +35,12 @@ export class ProductionActionService {
   }
 
   async changeOrderStatus(command: ChangeOrderStatusCommand) {
-    this.requirePermissions(command.currentUser, ['orders.change_status', 'orders.update']);
+    this.requirePermissions(
+      command.currentUser,
+      command.currentUser.role === 'packer'
+        ? ['orders.view', 'orders.change_status']
+        : ['orders.change_status', 'orders.update'],
+    );
     return this.ports.productionActions.changeOrderStatus(command);
   }
 

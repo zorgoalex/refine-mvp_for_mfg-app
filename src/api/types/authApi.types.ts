@@ -5,6 +5,7 @@ export type UserRole =
   | 'operator'
   | 'top_manager'
   | 'worker'
+  | 'packer'
   | 'viewer'
   | string;
 

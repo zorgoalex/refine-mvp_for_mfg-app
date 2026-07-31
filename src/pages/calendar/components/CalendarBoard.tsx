@@ -18,6 +18,7 @@ import {
   formatProductionActionPermissionDeniedMessage,
   isProductionActionPermissionDenied,
 } from '../../../api/productionActionsApi';
+import { authSession } from '../../../api/authSession';
 import { DragItem, CalendarOrder, ViewMode } from '../types/calendar';
 import {
   applyKnownCalendarOrderVersion,
@@ -33,6 +34,10 @@ import {
 import { formatDateKey } from '../utils/dateUtils';
 import { useResponsive } from '../hooks/useResponsive';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
+import {
+  filterOrderStatusesForPacker,
+  isPackerUser,
+} from '../../../utils/packerStatusAccess';
 
 /**
  * Основной компонент доски календаря
@@ -119,7 +124,12 @@ const CalendarBoard: React.FC = () => {
   const { moveOrder, isMoving } = useOrderMove();
   
   // Hooks для статусов и их обновления
-  const { orderStatuses, paymentStatuses, productionStatuses, isLoading: isLoadingStatuses } = useOrderStatuses();
+  const currentUser = authSession.getUser();
+  const packerMode = isPackerUser(currentUser);
+  const { orderStatuses, paymentStatuses, productionStatuses, isLoading: isLoadingStatuses } = useOrderStatuses({
+    loadPaymentAndProduction: !packerMode,
+  });
+  const menuOrderStatuses = filterOrderStatusesForPacker(orderStatuses, currentUser);
   const { updateStatus, isUpdating } = useOrderStatusUpdate();
   const invalidate = useInvalidate();
 
@@ -139,7 +149,7 @@ const CalendarBoard: React.FC = () => {
   // Hook для событий производственных статусов выбранного заказа
   const { events: productionEvents, toggleOrderEvent, refetch: refetchEvents } = useProductionStatusEvent({
     orderId: contextMenu.order?.order_id,
-    enabled: contextMenu.visible && !!contextMenu.order?.order_id,
+    enabled: !packerMode && contextMenu.visible && !!contextMenu.order?.order_id,
   });
 
   const queueOrderAction = useCallback((orderId: number, action: () => Promise<void>) => {
@@ -698,13 +708,13 @@ const CalendarBoard: React.FC = () => {
           onClose={handleCloseContextMenu}
           onStatusChange={handleStatusChange}
           onProductionStatusToggle={handleProductionStatusToggle}
-          onMoveToDate={handleMoveToDate}
+          onMoveToDate={packerMode ? undefined : handleMoveToDate}
           activeProductionStatusIds={activeProductionStatusIds}
           backendProductionActionsEnabled={featureFlags.useBackendProductionActions}
           statuses={{
-            orderStatuses,
-            paymentStatuses,
-            productionStatuses,
+            orderStatuses: menuOrderStatuses,
+            paymentStatuses: packerMode ? [] : paymentStatuses,
+            productionStatuses: packerMode ? [] : productionStatuses,
           }}
         />
       )}

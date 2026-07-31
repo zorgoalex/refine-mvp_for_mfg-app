@@ -262,6 +262,11 @@
   background: #fff7e6;
 }
 
+.cnc-today-column--orders {
+  --status-color: #722ed1;
+  background: #f9f0ff;
+}
+
 .cnc-today-column--parsed .status-board-column__header,
 .cnc-today-column--completed .status-board-column__header {
   background: #f7fbff;
@@ -270,6 +275,10 @@
 .cnc-today-column--baths .status-board-column__header,
 .cnc-today-column--baths_ready .status-board-column__header {
   background: #fffaf0;
+}
+
+.cnc-today-column--orders .status-board-column__header {
+  background: #fcf7ff;
 }
 
 .cnc-today-column .status-board-column__header {
@@ -428,6 +437,8 @@
 .cnc-relation-card--dimmed .cnc-packet-card__notes,
 .cnc-relation-card--dimmed .cnc-packet-card__note-file,
 .cnc-relation-card--dimmed .cnc-bath-card__job,
+.cnc-relation-card--dimmed .status-board-card__number,
+.cnc-relation-card--dimmed .status-board-card__standard-cell,
 .cnc-relation-card--dimmed .status-board-card__footer,
 .cnc-relation-card--dimmed .cnc-packet-card__order-link {
   color: var(--app-text-muted) !important;

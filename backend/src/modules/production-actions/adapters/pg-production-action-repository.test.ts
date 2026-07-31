@@ -234,6 +234,52 @@ describe('PgProductionActionRepository', () => {
     expect(normalizedSql(database.queries)).toContain('UPDATE orders SET order_status_id');
   });
 
+  it('allows packer to set order status to ready for issue without orders.update', async () => {
+    const database = createDatabase({
+      orderCreatedByUserId: 1,
+      orderManagerUserId: null,
+      orderStatusName: 'Готов к выдаче',
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.changeOrderStatus({
+        currentUser: currentUser('packer', '30'),
+        orderId: 15,
+        dto: { orderStatusId: 6, version: 3, idempotencyKey: 'status-key-packer-ready' },
+        requestId: 'request-packer-ready',
+      }),
+    ).resolves.toMatchObject({
+      order: { orderId: 15, orderStatusId: 6, version: 4 },
+    });
+
+    expect(normalizedSql(database.queries)).toContain('UPDATE orders SET order_status_id');
+  });
+
+  it('denies packer when target order status is not ready for issue or issued', async () => {
+    const database = createDatabase({
+      orderCreatedByUserId: 1,
+      orderManagerUserId: null,
+      orderStatusName: 'В производстве',
+    });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.changeOrderStatus({
+        currentUser: currentUser('packer', '30'),
+        orderId: 15,
+        dto: { orderStatusId: 4, version: 3, idempotencyKey: 'status-key-packer-deny' },
+        requestId: 'request-packer-deny',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'ORDER_STATUS_TARGET_DENIED',
+    });
+
+    expect(normalizedSql(database.queries)).not.toContain('UPDATE orders SET order_status_id');
+    expect(normalizedParams(database.queries)).toContain('order_status_target_denied');
+  });
+
   it('emits order.status_changed after the manual status outbox with the source idempotency key', async () => {
     const database = createDatabase();
     const repository = new PgProductionActionRepository(database.service);
@@ -1710,6 +1756,7 @@ function createDatabase(options: {
   updatedDetailIds?: number[];
   /** Suffix appended to the fake order status name — used to inject a token for redaction tests */
   orderStatusNameOverride?: string;
+  orderStatusName?: string;
 } = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   let lastRequestHash: unknown = 'hash';
@@ -1778,9 +1825,10 @@ function createDatabase(options: {
       }
 
       if (normalized.startsWith('SELECT order_status_id, order_status_name')) {
-        const statusName = options.orderStatusNameOverride
-          ? `Выдан ${options.orderStatusNameOverride}`
-          : 'Выдан';
+        const statusName = options.orderStatusName
+          ?? (options.orderStatusNameOverride
+            ? `Выдан ${options.orderStatusNameOverride}`
+            : 'Выдан');
         return { rows: [{ order_status_id: params[0], order_status_name: statusName }], rowCount: 1 };
       }
 

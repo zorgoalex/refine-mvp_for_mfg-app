@@ -19,6 +19,7 @@ const roleNames: Record<string, string> = {
   top_manager: "Топ-менеджер",
   operator: "Оператор",
   worker: "Работник",
+  packer: "Упаковщик",
   viewer: "Наблюдатель",
 };
 

@@ -166,6 +166,33 @@ describe('PgOrderStatusBoardRepository', () => {
     expect(createOrderStatusBoardFilterKey(base)).not.toBe(
       createOrderStatusBoardFilterKey({ ...base, search: 'B' }),
     );
+    expect(createOrderStatusBoardFilterKey({ ...base, orderIds: [2, 1] })).toBe(
+      createOrderStatusBoardFilterKey({ ...base, orderIds: [1, 2] }),
+    );
+    expect(createOrderStatusBoardFilterKey({ ...base, orderIds: [1, 3] })).not.toBe(
+      createOrderStatusBoardFilterKey({ ...base, orderIds: [1, 2] }),
+    );
+  });
+
+  it('rejects the production board for packer before querying PostgreSQL', async () => {
+    const database = fakeDatabase([]);
+
+    await expect(
+      new PgOrderStatusBoardRepository(database.client).getBoard({
+        currentUser: user('packer'),
+        query: {
+          board: 'production',
+          limit: 24,
+          onlyMyOrders: false,
+          overdueOnly: false,
+        },
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['productionTasks.view'] },
+    });
+    expect(database.queries).toHaveLength(0);
   });
 
   it('does not evaluate assignment joins for an unrestricted unfiltered reader', async () => {
@@ -187,6 +214,27 @@ describe('PgOrderStatusBoardRepository', () => {
     expect(database.queries[0]?.text).toContain('ranked.row_number <= $1');
     expect(database.queries[0]?.text).not.toContain('$2');
     expect(database.queries[0]?.params).toEqual([25]);
+  });
+
+  it('filters the board by explicit order ids before ranking cards', async () => {
+    const database = fakeDatabase([]);
+
+    await new PgOrderStatusBoardRepository(database.client).getBoard({
+      currentUser: user('admin'),
+      query: {
+        board: 'production',
+        limit: 24,
+        onlyMyOrders: false,
+        overdueOnly: false,
+        includeDone: true,
+        orderIds: [2700, 2706],
+      },
+    });
+
+    const sql = database.queries[0]?.text ?? '';
+    expect(sql).toContain('o.order_id = ANY($1::bigint[])');
+    expect(sql).toContain('ranked.row_number <= $2');
+    expect(database.queries[0]?.params).toEqual([[2700, 2706], 25]);
   });
 
   it('excludes the completed status from the order catalog and order scan', async () => {
@@ -427,6 +475,33 @@ describe('PgOrderStatusBoardRepository', () => {
       canChangeProductionStatus: false,
     });
   });
+
+  it('marks packer cards as order-status mutable without production status access', async () => {
+    const database = fakeDatabase([
+      boardRow(null, null),
+      {
+        ...boardRow(101, null),
+        created_by: 1,
+        manager_id: null,
+        current_user_assigned: false,
+      },
+    ]);
+
+    const board = await new PgOrderStatusBoardRepository(database.client).getBoard({
+      currentUser: user('packer'),
+      query: {
+        board: 'order',
+        limit: 24,
+        onlyMyOrders: false,
+        overdueOnly: false,
+      },
+    });
+
+    expect(board.columns[0]?.cards[0]).toMatchObject({
+      canChangeOrderStatus: true,
+      canChangeProductionStatus: false,
+    });
+  });
 });
 
 function fakeDatabase(rows: Record<string, unknown>[]) {
@@ -488,7 +563,7 @@ function user(role: CurrentUser['role']): CurrentUser {
     id: '42',
     username: role,
     role,
-    roleId: 20,
+    roleId: role === 'packer' ? 30 : 20,
     permissions: getPermissionsForRole(role),
   };
 }

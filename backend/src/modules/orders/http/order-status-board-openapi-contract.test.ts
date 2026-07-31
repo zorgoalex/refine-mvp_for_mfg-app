@@ -23,6 +23,8 @@ describe('order status board OpenAPI contract', () => {
     expect(route).toContain("pattern: '^(unassigned|[1-9][0-9]*)$'");
     expect(route).toContain('maximum: 60');
     expect(route).toContain('- name: includeDone');
+    expect(route).toContain('- name: orderIds');
+    expect(route).toContain('CSV-список ID заказов');
     expect(route).toContain('только для production');
     expect(route).toContain("$ref: '#/components/schemas/OrderStatusBoardResponse'");
     expect(route).toContain("'422':");

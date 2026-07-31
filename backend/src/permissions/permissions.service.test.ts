@@ -6,6 +6,7 @@ describe('PermissionsService', () => {
 
   it('maps role_id to canonical role', () => {
     expect(service.mapRoleIdToRole(2)).toBe('superadmin');
+    expect(service.mapRoleIdToRole(30)).toBe('packer');
     expect(service.mapRoleIdToRole(999)).toBeNull();
   });
 

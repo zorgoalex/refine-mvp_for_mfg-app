@@ -59,32 +59,32 @@ describe('user form mapping', () => {
   it('uses role_id only for legacy Hasura update payloads', () => {
     expect(
       mapLegacyUserFormToHasuraPayload({
-        username: 'operator_user',
-        email: 'operator@example.test',
-        role: 'operator',
-        full_name: 'Operator User',
+        username: 'packer_user',
+        email: 'packer@example.test',
+        role: 'packer',
+        full_name: 'Packer User',
         is_active: true,
       }),
     ).toEqual({
-      username: 'operator_user',
-      email: 'operator@example.test',
-      full_name: 'Operator User',
+      username: 'packer_user',
+      email: 'packer@example.test',
+      full_name: 'Packer User',
       is_active: true,
-      role_id: 11,
+      role_id: 30,
     });
   });
 
   it('maps existing legacy role_id records to form role names while canonical role strings stay canonical', () => {
     expect(
       mapUserRecordToFormData({
-        user_id: 11,
-        username: 'operator_user',
-        role_id: 11,
+        user_id: 30,
+        username: 'packer_user',
+        role_id: 30,
       }),
     ).toMatchObject({
-      user_id: 11,
-      username: 'operator_user',
-      role: 'operator',
+      user_id: 30,
+      username: 'packer_user',
+      role: 'packer',
     });
 
     expect(

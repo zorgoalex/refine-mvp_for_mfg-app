@@ -471,6 +471,49 @@ describe('OrderQueryService', () => {
     });
   });
 
+  it('returns only allowed order statuses in form data for packer', async () => {
+    const response = createOrderFormDataResponse();
+    response.orderStatuses = [
+      { id: 1, name: 'Новый', color: '#ffffff' },
+      { id: 6, name: 'Готов к выдаче', color: '#00ff00' },
+      { id: 7, name: 'Выдан', color: '#0000ff' },
+    ];
+    const service = new OrderQueryService({
+      reader: {
+        async listOrders() {
+          throw new Error('list should not be called');
+        },
+        async getOrderById() {
+          throw new Error('get should not be called');
+        },
+        async getOrderAudit() {
+          throw new Error('audit should not be called');
+        },
+        async getOrderFormData() {
+          return response;
+        },
+      },
+    });
+
+    await expect(service.getFormData({ currentUser: currentUser('packer') })).resolves.toEqual({
+      clients: [],
+      materials: [],
+      millingTypes: [],
+      edgeTypes: [],
+      films: [],
+      orderStatuses: [
+        { id: 6, name: 'Готов к выдаче', color: '#00ff00' },
+        { id: 7, name: 'Выдан', color: '#0000ff' },
+      ],
+      paymentStatuses: [],
+      paymentTypes: [],
+      productionStatuses: [],
+      workshops: [],
+      employees: [],
+      units: [],
+    });
+  });
+
   it('omits sheetMaterialTypes for a caller without sheet_materials.view', async () => {
     const response = createOrderFormDataResponse();
     const service = new OrderQueryService({

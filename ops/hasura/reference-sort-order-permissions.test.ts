@@ -15,6 +15,23 @@ describe('reference sort-order Hasura permissions', () => {
     expect(table.update_permissions ?? []).toHaveLength(0);
   });
 
+  it('grants packer read-only Hasura access only to order_statuses', () => {
+    const table = tables.find((entry: any) => entry.table.name === 'order_statuses');
+    expect(table.select_permissions.some((entry: any) => entry.role === 'packer')).toBe(true);
+    expect((table.insert_permissions ?? []).some((entry: any) => entry.role === 'packer')).toBe(false);
+    expect((table.update_permissions ?? []).some((entry: any) => entry.role === 'packer')).toBe(false);
+  });
+
+  it.each(['production_statuses', 'production_status_events'])(
+    'does not grant packer Hasura access to %s',
+    (tableName) => {
+      const table = tables.find((entry: any) => entry.table.name === tableName);
+      expect((table.select_permissions ?? []).some((entry: any) => entry.role === 'packer')).toBe(false);
+      expect((table.insert_permissions ?? []).some((entry: any) => entry.role === 'packer')).toBe(false);
+      expect((table.update_permissions ?? []).some((entry: any) => entry.role === 'packer')).toBe(false);
+    },
+  );
+
   it.each(['film_types', 'materials', 'transaction_direction', 'units'])(
     'allows sort_order in every explicit write permission for %s',
     (tableName) => {

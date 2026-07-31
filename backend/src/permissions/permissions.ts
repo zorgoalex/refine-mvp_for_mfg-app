@@ -5,6 +5,7 @@ export const USER_ROLES = [
   'manager',
   'operator',
   'worker',
+  'packer',
   'viewer',
 ] as const;
 
@@ -17,6 +18,7 @@ export const ROLE_ID_TO_ROLE = {
   11: 'operator',
   15: 'top_manager',
   20: 'worker',
+  30: 'packer',
   100: 'viewer',
 } as const satisfies Record<number, UserRole>;
 
@@ -29,6 +31,7 @@ export const ROLE_TO_ROLE_ID = {
   manager: 10,
   operator: 11,
   worker: 20,
+  packer: 30,
   viewer: 100,
 } as const satisfies Record<UserRole, KnownRoleId>;
 
@@ -431,6 +434,15 @@ export const ROLE_PERMISSIONS = {
     'deadlines.view',
   ],
 
+  packer: [
+    'profile.view',
+    'profile.update_own',
+    'sessions.logout_own',
+
+    'orders.view',
+    'orders.change_status',
+  ],
+
   viewer: [
     'profile.view',
     'profile.update_own',
@@ -466,12 +478,13 @@ export const ROLE_PERMISSIONS = {
 } as const satisfies Record<UserRole, readonly PermissionName[]>;
 
 export const HASURA_ALLOWED_ROLES = {
-  superadmin: ['superadmin', 'admin', 'top_manager', 'manager', 'operator', 'worker', 'viewer'],
-  admin: ['admin', 'top_manager', 'manager', 'operator', 'worker', 'viewer'],
-  top_manager: ['top_manager', 'manager', 'operator', 'viewer'],
-  manager: ['manager', 'operator', 'viewer'],
-  operator: ['operator', 'viewer'],
+  superadmin: ['superadmin', 'admin', 'top_manager', 'manager', 'operator', 'worker', 'packer', 'viewer'],
+  admin: ['admin', 'top_manager', 'manager', 'operator', 'worker', 'packer', 'viewer'],
+  top_manager: ['top_manager', 'manager', 'operator', 'packer', 'viewer'],
+  manager: ['manager', 'operator', 'packer', 'viewer'],
+  operator: ['operator', 'packer', 'viewer'],
   worker: ['worker', 'viewer'],
+  packer: ['packer', 'viewer'],
   viewer: ['viewer'],
 } as const satisfies Record<UserRole, readonly UserRole[]>;
 

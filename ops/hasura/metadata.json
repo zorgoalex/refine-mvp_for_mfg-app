@@ -4801,6 +4801,15 @@
                             "comment": ""
                         },
                         {
+                            "role": "packer",
+                            "permission": {
+                                "columns": "*",
+                                "filter": {},
+                                "allow_aggregations": true
+                            },
+                            "comment": "Packer read-only status lookup for order status changes"
+                        },
+                        {
                             "role": "superadmin",
                             "permission": {
                                 "columns": "*",

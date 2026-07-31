@@ -917,6 +917,13 @@ paths:
           schema:
             type: string
             format: date
+        - name: orderIds
+          in: query
+          required: false
+          description: CSV-список ID заказов для точечной проекции доски.
+          schema:
+            type: string
+            pattern: '^[1-9][0-9]*(,[1-9][0-9]*)*$'
       responses:
         '200':
           description: Доска статусов
@@ -11673,6 +11680,7 @@ components:
         - top_manager
         - operator
         - worker
+        - packer
         - viewer
 
     PermissionName:

@@ -46,6 +46,27 @@ describe('OrderStatusBoardService', () => {
     });
   });
 
+  it('rejects the production board for packer before calling the repository', async () => {
+    const service = new OrderStatusBoardService({
+      boards: {
+        async getBoard() {
+          throw new Error('repository must not be called');
+        },
+      },
+    });
+
+    await expect(
+      service.get({
+        currentUser: user('packer', getPermissionsForRole('packer')),
+        query: { ...defaultQuery(), board: 'production' },
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      details: { requiredPermissions: ['productionTasks.view'] },
+    });
+  });
+
   it('keeps financials for an authorized role', async () => {
     const expected = response();
     const service = new OrderStatusBoardService({
@@ -136,4 +157,3 @@ function response(): OrderStatusBoardResponseDto {
     ],
   };
 }
-

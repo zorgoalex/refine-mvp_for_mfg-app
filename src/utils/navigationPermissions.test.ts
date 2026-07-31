@@ -44,6 +44,12 @@ describe('navigation permissions', () => {
       canViewNavigationResource('groups', { permissions: ['orders.view'] }, true),
     ).toBe(false);
     expect(
+      canViewNavigationResource('calendar', { permissions: ['calendar.view'] }, true),
+    ).toBe(true);
+    expect(
+      canViewNavigationResource('calendar', { permissions: ['orders.view'] }, true),
+    ).toBe(false);
+    expect(
       canViewNavigationResource(
         'configuration',
         { permissions: ['deadlines.view'] },

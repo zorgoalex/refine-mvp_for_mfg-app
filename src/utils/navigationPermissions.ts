@@ -11,7 +11,7 @@ export const SETTINGS_CATEGORY_PERMISSIONS: PermissionName[] = [
 export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   orders_view: ['orders.view'],
   'orders-trash': ['orders.delete'],
-  calendar: ['orders.view'],
+  calendar: ['calendar.view'],
   'order-status-board': ['orders.view'],
   scan: ['labels.view'],
   doweling_orders_view: ['orders.view'],

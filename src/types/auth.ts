@@ -26,7 +26,7 @@ export interface UserIdentity {
   username: string;
   role: string;
   roleId?: number;
-  role_id?: number; // Legacy DB role id: 2=superadmin, 1=admin, 10=manager, 11=operator, 15=top_manager, 20=worker, 100=viewer
+  role_id?: number; // Legacy DB role id: 2=superadmin, 1=admin, 10=manager, 11=operator, 15=top_manager, 20=worker, 30=packer, 100=viewer
   permissions?: string[];
 }
 

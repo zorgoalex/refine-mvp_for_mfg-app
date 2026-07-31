@@ -23,6 +23,7 @@ const FINANCIAL_ORDER_SORT_FIELDS = new Set<OrderListSortBy>([
   'paidAmount',
   'debtAmount',
 ]);
+const PACKER_ALLOWED_ORDER_STATUS_NAMES = new Set(['готов к выдаче', 'выдан']);
 
 export interface OrderQueryServicePorts {
   reader: OrderReadRepositoryPort;
@@ -87,6 +88,10 @@ export class OrderQueryService {
   async getFormData(command: GetOrderFormDataCommand): Promise<OrderFormDataResponseDto> {
     this.requireViewPermission(command);
     const response = await this.ports.reader.getOrderFormData(command);
+
+    if (command.currentUser.role === 'packer') {
+      return maskOrderFormDataForPacker(response);
+    }
 
     // SP3: the picker reference is gated on sheet_materials.view. The repo always
     // returns the rows (dumb); the service omits them for callers without the perm
@@ -167,6 +172,29 @@ function maskOrderListItemFinancials(item: OrderListResponseDto['data'][number])
     paidAmount: 0,
     debtAmount: 0,
   };
+}
+
+function maskOrderFormDataForPacker(response: OrderFormDataResponseDto): OrderFormDataResponseDto {
+  return {
+    clients: [],
+    materials: [],
+    millingTypes: [],
+    edgeTypes: [],
+    films: [],
+    orderStatuses: response.orderStatuses.filter((status) =>
+      PACKER_ALLOWED_ORDER_STATUS_NAMES.has(normalizeStatusName(status.name)),
+    ),
+    paymentStatuses: [],
+    paymentTypes: [],
+    productionStatuses: [],
+    workshops: [],
+    employees: [],
+    units: [],
+  };
+}
+
+function normalizeStatusName(value: string): string {
+  return value.trim().toLowerCase();
 }
 
 function maskOrderFinancials(

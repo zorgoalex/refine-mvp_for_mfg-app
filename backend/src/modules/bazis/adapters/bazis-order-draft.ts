@@ -35,6 +35,9 @@ export interface BazisDraftMaterialMapping {
   film_id: number | string | null;
 }
 
+export type BazisDraftReferenceKind = 'film' | 'milling';
+export type BazisDraftReferenceLookup = ReadonlyMap<string, number>;
+
 export interface BazisDraftDetail {
   bazisNodeId: number;
   clientKey: string;
@@ -93,7 +96,7 @@ export function collectUnmappedSheetNames(
       names.add('(панель без материала)');
       continue;
     }
-    const mapping = mappings.get(`sheet:${panel.mainMaterialName.toLowerCase()}`);
+    const mapping = mappings.get(`sheet:${normalizeBazisReferenceName(panel.mainMaterialName)}`);
     if (mapping?.target_kind !== 'sheet' || toNullableNumber(mapping.sheet_material_type_id) == null) {
       names.add(panel.mainMaterialName);
     }
@@ -105,15 +108,28 @@ export function buildDraftDetails(
   panels: ReadonlyArray<BazisDraftPanel>,
   mappings: Map<string, BazisDraftMaterialMapping>,
   revision: BazisDraftRevision,
+  referenceLookup: BazisDraftReferenceLookup = new Map(),
 ): BazisDraftDetail[] {
   return panels.map((panel) => {
-    const filmNames = extractFilmNames(panel.rawJson);
-    const uniqueFilmNames = [...new Set(filmNames.map((name) => name.toLowerCase()))];
-    const filmMapping =
-      uniqueFilmNames.length === 1 ? mappings.get(`film:${uniqueFilmNames[0]}`) : undefined;
-    const sheetMapping = panel.mainMaterialName
-      ? mappings.get(`sheet:${panel.mainMaterialName.toLowerCase()}`)
+    const filmName = panelPreferredFilmName(panel.rawJson);
+    const filmMapping = filmName
+      ? mappings.get(`film:${normalizeBazisReferenceName(filmName)}`)
       : undefined;
+    const sheetMapping = panel.mainMaterialName
+      ? mappings.get(`sheet:${normalizeBazisReferenceName(panel.mainMaterialName)}`)
+      : undefined;
+    const millingName = panelCustomMillingName(panel.rawJson);
+    const millingTypeId = millingName
+      ? referenceLookup.get(bazisReferenceLookupKey('milling', millingName)) ?? 1
+      : 1;
+    const filmId =
+      filmMapping == null
+        ? filmName
+          ? referenceLookup.get(bazisReferenceLookupKey('film', filmName)) ?? null
+          : null
+        : filmMapping.target_kind === 'film'
+          ? toNullableNumber(filmMapping.film_id)
+          : null;
 
     return {
       bazisNodeId: panel.bazisNodeId,
@@ -126,10 +142,9 @@ export function buildDraftDetails(
         sheetMapping?.target_kind === 'sheet'
           ? toNullableNumber(sheetMapping.sheet_material_type_id)
           : null,
-      millingTypeId: 1,
+      millingTypeId,
       edgeTypeId: 1,
-      filmId:
-        filmMapping?.target_kind === 'film' ? toNullableNumber(filmMapping.film_id) : null,
+      filmId,
       priority: 100,
       basisProject:
         panel.productOrderNo ?? revision.revisionBazisOrderNo ?? revision.bazisProjectName,
@@ -139,6 +154,48 @@ export function buildDraftDetails(
       doweling: panelHasDrilling(panel.rawJson),
     };
   });
+}
+
+export function normalizeBazisReferenceName(value: string): string {
+  return value
+    .trim()
+    .toLocaleLowerCase('ru-RU')
+    .replace(/ё/g, 'е')
+    .replace(/\s+/g, ' ');
+}
+
+export function bazisReferenceLookupKey(
+  kind: BazisDraftReferenceKind,
+  value: string,
+): string {
+  return `${kind}:${normalizeBazisReferenceName(value)}`;
+}
+
+export function panelCustomFilmName(
+  rawJson: Record<string, unknown> | null,
+): string | null {
+  return panelUserPropertyValue(rawJson, new Set(['пленка']));
+}
+
+export function panelCustomMillingName(
+  rawJson: Record<string, unknown> | null,
+): string | null {
+  return panelUserPropertyValue(rawJson, new Set(['фрезировка', 'фрезеровка']));
+}
+
+export function panelPreferredFilmName(
+  rawJson: Record<string, unknown> | null,
+): string | null {
+  const customFilmName = panelCustomFilmName(rawJson);
+  if (customFilmName) {
+    return customFilmName;
+  }
+
+  const uniqueFilmNames = new Map<string, string>();
+  for (const filmName of extractFilmNames(rawJson)) {
+    uniqueFilmNames.set(normalizeBazisReferenceName(filmName), filmName);
+  }
+  return uniqueFilmNames.size === 1 ? [...uniqueFilmNames.values()][0] ?? null : null;
 }
 
 export async function computeTargetOrderDuplicates(
@@ -238,6 +295,50 @@ function extractFilmNames(rawJson: Record<string, unknown> | null): string[] {
     }
   }
   return result;
+}
+
+function panelUserPropertyValue(
+  rawJson: Record<string, unknown> | null,
+  acceptedNames: ReadonlySet<string>,
+): string | null {
+  if (!rawJson) {
+    return null;
+  }
+
+  const propertyCandidates: unknown[] = [];
+  const nested = rawJson['ПользовательскиеСвойства'];
+  if (typeof nested === 'object' && nested !== null && !Array.isArray(nested)) {
+    propertyCandidates.push((nested as Record<string, unknown>)['Свойство']);
+  }
+  propertyCandidates.push(rawJson['Свойство']);
+
+  for (const candidate of propertyCandidates) {
+    const properties = Array.isArray(candidate) ? candidate : candidate ? [candidate] : [];
+    for (const property of properties) {
+      if (typeof property !== 'object' || property === null || Array.isArray(property)) {
+        continue;
+      }
+      const row = property as Record<string, unknown>;
+      const propertyName = textValue(row['Имя'] ?? row['Наименование']);
+      if (!propertyName || !acceptedNames.has(normalizeBazisReferenceName(propertyName))) {
+        continue;
+      }
+      const propertyValue = textValue(row['Значение']);
+      if (propertyValue) {
+        return propertyValue;
+      }
+    }
+  }
+
+  return null;
+}
+
+function textValue(value: unknown): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return null;
+  }
+  const text = String(value).trim();
+  return text.length > 0 ? text : null;
 }
 
 function toNullableNumber(value: number | string | null | undefined): number | null {

@@ -21,12 +21,18 @@ import type {
   SetNodeNotesInput,
 } from '../application/bazis.types';
 import {
+  bazisReferenceLookupKey,
   buildDraftDetails,
   clientKeyForNode,
   collectUnmappedSheetNames,
   computeTargetOrderDuplicates,
+  normalizeBazisReferenceName,
   orderDtoToSaveDto,
+  panelCustomFilmName,
+  panelCustomMillingName,
+  panelPreferredFilmName,
 } from './bazis-order-draft';
+import type { BazisDraftReferenceLookup } from './bazis-order-draft';
 import type {
   BazisAddToOrderResponseDto,
   BazisRevisionEstimateDto,
@@ -263,6 +269,12 @@ interface MaterialLookupRow {
   sheet_material_type_id: number | string | null;
   film_id: number | string | null;
   edge_type_id: number | string | null;
+}
+
+interface PanelReferenceLookupRow {
+  reference_kind: 'film' | 'milling';
+  reference_id: number | string;
+  name: string;
 }
 
 interface PanelsSummaryRow {
@@ -1786,12 +1798,13 @@ export class PgBazisRepository implements BazisRepositoryPort {
       }
 
       const mappings = await this.loadMaterialMappingsForPanels(panels);
+      const referenceLookup = await this.loadPanelReferenceLookup(panels);
       const unmappedSheetNames = collectUnmappedSheetNames(panels, mappings);
       if (unmappedSheetNames.length > 0) {
         await this.failCreateOrderIdempotency(command);
         throw new BazisUnmappedMaterialsError(unmappedSheetNames);
       }
-      const dto = buildOrderCreateDto(command, revision, panels, mappings);
+      const dto = buildOrderCreateDto(command, revision, panels, mappings, referenceLookup);
       let response: CreateOrderFromRevisionResponseDto | null = null;
 
       await this.orderTransactions.create({
@@ -1962,6 +1975,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       const panelsByNodeId = new Map(panels.map((panel) => [panel.bazisNodeId, panel] as const));
 
       const mappings = await this.loadMaterialMappingsForPanels(panels);
+      const referenceLookup = await this.loadPanelReferenceLookup(panels);
       const unmappedSheetNames = collectUnmappedSheetNames(panels, mappings);
       if (unmappedSheetNames.length > 0) {
         await this.failBazisIdempotency(command.currentUser, command.idempotencyKey);
@@ -1974,6 +1988,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
         command,
         panelsByNodeId,
         mappings,
+        referenceLookup,
       });
       let response: BazisAddToOrderResponseDto | null = null;
 
@@ -2123,6 +2138,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
     }
 
     const mappings = await this.loadMaterialMappingsForPanels(panels);
+    const referenceLookup = await this.loadPanelReferenceLookup(panels);
     const unmappedSheetNames = collectUnmappedSheetNames(panels, mappings);
     if (unmappedSheetNames.length > 0) {
       throw new BazisUnmappedMaterialsError(unmappedSheetNames);
@@ -2149,7 +2165,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       }
     }
 
-    const details = buildDraftDetails(panels, mappings, revision);
+    const details = buildDraftDetails(panels, mappings, revision, referenceLookup);
     const duplicates =
       command.targetOrderId == null
         ? []
@@ -2381,11 +2397,18 @@ export class PgBazisRepository implements BazisRepositoryPort {
     for (const panel of panels) {
       if (panel.mainMaterialName) {
         const lowered = panel.mainMaterialName.toLowerCase();
-        pairs.set(`sheet:${lowered}`, { sourceKind: 'sheet', name: lowered });
+        pairs.set(`sheet:${normalizeBazisReferenceName(panel.mainMaterialName)}`, {
+          sourceKind: 'sheet',
+          name: lowered,
+        });
       }
-      for (const filmName of extractFilmNames(panel.rawJson)) {
+      const filmName = panelPreferredFilmName(panel.rawJson);
+      if (filmName) {
         const lowered = filmName.toLowerCase();
-        pairs.set(`film:${lowered}`, { sourceKind: 'film', name: lowered });
+        pairs.set(`film:${normalizeBazisReferenceName(filmName)}`, {
+          sourceKind: 'film',
+          name: lowered,
+        });
       }
     }
 
@@ -2411,7 +2434,81 @@ export class PgBazisRepository implements BazisRepositoryPort {
       ],
     );
 
-    return new Map(rows.rows.map((row) => [`${row.source_kind}:${row.name}`, row]));
+    return new Map(
+      rows.rows.map((row) => [
+        `${row.source_kind}:${normalizeBazisReferenceName(row.name)}`,
+        row,
+      ]),
+    );
+  }
+
+  private async loadPanelReferenceLookup(
+    panels: ReadonlyArray<{ rawJson: Record<string, unknown> | null }>,
+  ): Promise<BazisDraftReferenceLookup> {
+    const millingNames = new Set<string>();
+    const filmNames = new Set<string>();
+
+    for (const panel of panels) {
+      const millingName = panelCustomMillingName(panel.rawJson);
+      if (millingName) {
+        millingNames.add(normalizeBazisReferenceName(millingName));
+      }
+      const filmName = panelCustomFilmName(panel.rawJson);
+      if (filmName) {
+        filmNames.add(normalizeBazisReferenceName(filmName));
+      }
+    }
+
+    if (millingNames.size === 0 && filmNames.size === 0) {
+      return new Map();
+    }
+
+    const rows = await this.database.query<PanelReferenceLookupRow>(
+      `
+      SELECT 'milling'::text AS reference_kind,
+             milling_type_id AS reference_id,
+             regexp_replace(
+               replace(lower(btrim(milling_type_name)), 'ё', 'е'),
+               '[[:space:]]+',
+               ' ',
+               'g'
+             ) AS name
+      FROM milling_types
+      WHERE regexp_replace(
+              replace(lower(btrim(milling_type_name)), 'ё', 'е'),
+              '[[:space:]]+',
+              ' ',
+              'g'
+            ) = ANY($1::text[])
+      UNION ALL
+      SELECT 'film'::text AS reference_kind,
+             film_id AS reference_id,
+             regexp_replace(
+               replace(lower(btrim(film_name)), 'ё', 'е'),
+               '[[:space:]]+',
+               ' ',
+               'g'
+             ) AS name
+      FROM films
+      WHERE regexp_replace(
+              replace(lower(btrim(film_name)), 'ё', 'е'),
+              '[[:space:]]+',
+              ' ',
+              'g'
+            ) = ANY($2::text[])
+      ORDER BY reference_kind, reference_id
+      `,
+      [[...millingNames], [...filmNames]],
+    );
+
+    const lookup = new Map<string, number>();
+    for (const row of rows.rows) {
+      const key = bazisReferenceLookupKey(row.reference_kind, row.name);
+      if (!lookup.has(key)) {
+        lookup.set(key, Number(row.reference_id));
+      }
+    }
+    return lookup;
   }
 
   private async runCreateOrderHook(input: {
@@ -2718,6 +2815,7 @@ function buildAddToOrderSaveDto(input: {
     }
   >;
   mappings: Map<string, MaterialLookupRow>;
+  referenceLookup: BazisDraftReferenceLookup;
 }): {
   dto: SaveOrderDto;
   replacedBefore: Array<{
@@ -2744,6 +2842,7 @@ function buildAddToOrderSaveDto(input: {
       ]).map((nodeId) => requirePanel(input.panelsByNodeId, nodeId)),
       input.mappings,
       input.revision,
+      input.referenceLookup,
     ).map((detail) => [detail.bazisNodeId, detail] as const),
   );
 
@@ -2831,9 +2930,15 @@ function buildOrderCreateDto(
     rawJson: Record<string, unknown> | null;
   }>,
   mappings: Map<string, MaterialLookupRow>,
+  referenceLookup: BazisDraftReferenceLookup,
 ): SaveOrderDto {
   const orderDate = new Date().toISOString().slice(0, 10);
-  const details: SaveOrderDetailDto[] = buildDraftDetails(panels, mappings, revision).map(
+  const details: SaveOrderDetailDto[] = buildDraftDetails(
+    panels,
+    mappings,
+    revision,
+    referenceLookup,
+  ).map(
     ({ bazisNodeId: _bazisNodeId, ...detail }) => ({
       ...detail,
       materialId: null,
@@ -3104,33 +3209,6 @@ function uniqueNumbers(values: readonly number[]): number[] {
 
 function pairKey(pair: { bazisNodeId: number; orderDetailId: number }): string {
   return `${pair.bazisNodeId}:${pair.orderDetailId}`;
-}
-
-function extractFilmNames(rawJson: Record<string, unknown> | null): string[] {
-  if (!rawJson) {
-    return [];
-  }
-
-  const result: string[] = [];
-  for (const faceKey of ['ОблицовкаПласти1', 'ОблицовкаПласти2']) {
-    const face = rawJson[faceKey];
-    if (typeof face !== 'object' || face === null) {
-      continue;
-    }
-    const plasti = (face as Record<string, unknown>)['Пласть'];
-    const list = Array.isArray(plasti) ? plasti : plasti ? [plasti] : [];
-    for (const plast of list) {
-      if (typeof plast !== 'object' || plast === null) {
-        continue;
-      }
-      const value = (plast as Record<string, unknown>)['Наименование'];
-      if (typeof value === 'string' && value.trim().length > 0) {
-        result.push(value.trim());
-      }
-    }
-  }
-
-  return result;
 }
 
 async function reconcileBazisIdempotency<TResponse>(

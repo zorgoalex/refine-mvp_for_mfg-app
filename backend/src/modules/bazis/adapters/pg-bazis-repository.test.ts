@@ -2313,6 +2313,91 @@ describe('PgBazisRepository.buildOrderDraft', () => {
     ]);
   });
 
+  it('prioritizes user properties for film and milling reference ids', async () => {
+    const database = createDatabase({
+      orderDraftState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          revision_bazis_order_no: '1457',
+          project_client_id: 5,
+          client_name: 'ООО Клиент',
+        },
+        panelRows: [
+          {
+            bazis_node_id: 101,
+            object_type: 'Панель',
+            name: 'Фасад',
+            position: '7',
+            designation: 'D-01',
+            cumulative_quantity: 2,
+            length_mm: 1200,
+            width_mm: 450,
+            main_material_name: 'Laminate White',
+            product_name: 'Шкаф',
+            product_order_no: '1443',
+            raw_json: {
+              ОблицовкаПласти1: { Пласть: [{ Наименование: 'Snow Film' }] },
+              ПользовательскиеСвойства: {
+                Свойство: [
+                  { Имя: 'Фрезеровка', Значение: 'Модерн' },
+                  { Имя: 'Плёнка', Значение: 'Белый глянец' },
+                ],
+              },
+            },
+          },
+        ],
+        mappingRows: [
+          {
+            source_kind: 'sheet',
+            name: 'laminate white',
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+            film_id: null,
+            edge_type_id: null,
+          },
+          {
+            source_kind: 'film',
+            name: 'белый глянец',
+            target_kind: 'film',
+            sheet_material_type_id: null,
+            film_id: 777,
+            edge_type_id: null,
+          },
+        ],
+        referenceRows: [
+          { reference_kind: 'milling', reference_id: 42, name: 'модерн' },
+          { reference_kind: 'film', reference_id: 778, name: 'белый глянец' },
+        ],
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const result = await repository.buildOrderDraft({
+      currentUser: currentUser(),
+      revisionId: 82,
+      selectedNodeIds: [101],
+    });
+
+    expect(result.details[0]).toMatchObject({
+      filmId: 777,
+      millingTypeId: 42,
+    });
+    const mappingQuery = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('SELECT source_kind, lower(bazis_name) AS name'),
+    );
+    expect(mappingQuery?.params).toEqual([
+      ['sheet', 'film'],
+      ['laminate white', 'белый глянец'],
+    ]);
+    const referenceQuery = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith("SELECT 'milling'::text AS reference_kind"),
+    );
+    expect(referenceQuery?.params).toEqual([['модерн'], ['белый глянец']]);
+  });
+
   it('throws BazisRevisionNotFoundError when the revision is missing', async () => {
     const repository = new PgBazisRepository(createDatabase().service);
 
@@ -3174,6 +3259,7 @@ function createDatabase(
       panelRows?: Array<Record<string, unknown>>;
       draftNodeRows?: Array<Record<string, unknown>>;
       mappingRows?: Array<Record<string, unknown>>;
+      referenceRows?: Array<Record<string, unknown>>;
       nowIso?: string;
     };
     addToOrderState?: {
@@ -3189,6 +3275,7 @@ function createDatabase(
       nodeLookupRows?: Array<Record<string, unknown>>;
       panelRows?: Array<Record<string, unknown>>;
       mappingRows?: Array<Record<string, unknown>>;
+      referenceRows?: Array<Record<string, unknown>>;
       duplicateRows?: Array<Record<string, unknown>>;
       nowIso?: string;
     };
@@ -3196,6 +3283,7 @@ function createDatabase(
       revisionRow?: Record<string, unknown>;
       panelRows?: Array<Record<string, unknown>>;
       mappingRows?: Array<Record<string, unknown>>;
+      referenceRows?: Array<Record<string, unknown>>;
       targetOrderRow?: Record<string, unknown> | null;
       duplicateRows?: Array<Record<string, unknown>>;
     };
@@ -3316,6 +3404,18 @@ function createDatabase(
           options.addToOrderState?.mappingRows ??
           options.orderDraftState?.mappingRows ??
           options.createOrderState?.mappingRows ??
+          [];
+        return {
+          rows,
+          rowCount: rows.length,
+        };
+      }
+
+      if (normalized.startsWith("SELECT 'milling'::text AS reference_kind")) {
+        const rows =
+          options.addToOrderState?.referenceRows ??
+          options.orderDraftState?.referenceRows ??
+          options.createOrderState?.referenceRows ??
           [];
         return {
           rows,

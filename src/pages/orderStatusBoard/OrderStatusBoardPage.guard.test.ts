@@ -184,14 +184,25 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(cncFileNameRules.every((rule) => rule.includes('color: var(--app-text-muted);'))).toBe(true);
   });
 
-  it('keeps CNC relation highlighting behind the Links switch', () => {
-    expect(page).toContain('const [cncRelationsEnabled, setCncRelationsEnabled] = useState(false)');
+  it('keeps CNC relation highlighting defaulted on and controlled by the Links switch', () => {
+    expect(page).toContain('const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true)');
     expect(page).toContain('const [activeCncRelation, setActiveCncRelation]');
+    expect(page).toContain("| { kind: 'order'; id: number }");
     expect(page).toContain('Связи');
     expect(page).toContain('checked={cncRelationsEnabled}');
     expect(page).toContain('if (!cncRelationsEnabled) setActiveCncRelation(null)');
+    expect(page).toContain('cncRelationTargetEquals(current, target) ? null : target');
     expect(page).toContain('cncRelationsEnabled');
-    expect(page).toContain('? buildCncRelationContext(cncFilteredColumns, activeCncRelation)');
+    expect(page).toContain('? buildCncRelationContext(cncFilteredColumns, cncOrderCards, activeCncRelation)');
+    expect(page).toContain("key: 'orders' as const");
+    expect(page).toContain("orders: 'Заказы'");
+    expect(page).toContain('orderStatusBoardApi.get({');
+    expect(page).toContain('orderIds: chunk');
+    expect(page).toContain('CNC_ORDER_STATUS_REFRESH_MS');
+    expect(page).toContain('getCncOrderRelationState');
+    expect(page).toContain("onSelectRelation({ kind: 'order', id: card.orderId })");
+    expect(page).toContain('openOrderOnNumber={!relationsEnabled}');
+    expect(page).toContain('if (!openOrderOnNumber) return;');
     expect(page).toContain('const bathCards = relationContext');
     expect(page).toContain('const packetCards = relationContext');
     expect(page).toContain('sortCncRelationCards');
