@@ -40,8 +40,8 @@ describe('dataProvider packer Hasura guards', () => {
     await expect(provider.getMany({ resource: 'films', ids: [1, 2] })).resolves.toEqual({
       data: [],
     });
-    await expect(provider.getOne({ resource: 'milling_types', id: 1 })).rejects.toMatchObject({
-      statusCode: 403,
+    await expect(provider.getOne({ resource: 'milling_types', id: 1 })).resolves.toEqual({
+      data: null,
     });
 
     expect(globalThis.fetch).not.toHaveBeenCalled();

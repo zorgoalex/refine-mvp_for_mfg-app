@@ -1510,14 +1510,6 @@ function hasHasuraReadAccess(resource: string): boolean {
   return canQueryHasuraResource(resource, authSession.getUser());
 }
 
-function assertHasuraReadAccess(resource: string): void {
-  if (hasHasuraReadAccess(resource)) return;
-  throw {
-    message: `Нет прав для чтения ресурса ${resource}`,
-    statusCode: 403,
-  };
-}
-
 function assertHasuraWriteAccess(resource: string): void {
   if (canMutateHasuraResource(resource, authSession.getUser())) return;
   throw {
@@ -1824,7 +1816,9 @@ export const dataProvider = (_apiUrl: string) => {
         return backendUser;
       }
 
-      assertHasuraReadAccess(resource);
+      if (!hasHasuraReadAccess(resource)) {
+        return { data: null };
+      }
 
       const idCol = ID_COLUMNS[resource] ?? "id";
       const selection = fieldsFor(resource);
