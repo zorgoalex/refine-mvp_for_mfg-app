@@ -1993,10 +1993,10 @@ const PdfKonvaElement: React.FC<{
     const h = Math.max(element.h, 1);
     const pieceColor = ['#e6f4ff', '#fff1f0', '#f6ffed', '#fffbe6'];
     const pieces = [
-      { x: w * 0.07, y: h * 0.08, w: w * 0.34, h: h * 0.24, order: '11380', size: '800×240', edge: 'ПВХ 2мм', milling: 'Модерн' },
-      { x: w * 0.45, y: h * 0.08, w: w * 0.46, h: h * 0.18, order: '11380', size: '780×180', edge: 'ABS 1мм', milling: 'Паз' },
-      { x: w * 0.08, y: h * 0.38, w: w * 0.26, h: h * 0.48, order: '11381', size: '1100×320', edge: '—', milling: 'Модерн' },
-      { x: w * 0.39, y: h * 0.35, w: w * 0.52, h: h * 0.38, order: '11382', size: '950×420', edge: 'ПВХ 2мм', milling: 'Классика' },
+      { x: w * 0.07, y: h * 0.08, w: w * 0.34, h: h * 0.24, order: '11380', widthLabel: '800', heightLabel: '240', edge: 'ПВХ 2мм', milling: 'Модерн' },
+      { x: w * 0.45, y: h * 0.08, w: w * 0.46, h: h * 0.18, order: '11380', widthLabel: '780', heightLabel: '180', edge: 'ABS 1мм', milling: 'Паз' },
+      { x: w * 0.08, y: h * 0.38, w: w * 0.26, h: h * 0.48, order: '11381', widthLabel: '1100', heightLabel: '320', edge: '—', milling: 'Модерн' },
+      { x: w * 0.39, y: h * 0.35, w: w * 0.52, h: h * 0.38, order: '11382', widthLabel: '950', heightLabel: '420', edge: 'ПВХ 2мм', milling: 'Классика' },
     ];
     return (
       <React.Fragment>
@@ -2004,6 +2004,7 @@ const PdfKonvaElement: React.FC<{
           <KonvaRect x={0} y={0} width={w} height={h} fill="#ffffff" stroke={String(element.style.color ?? '#111111')} strokeWidth={Number(element.style.strokeWidth ?? 0.25)} />
           {pieces.map((piece, index) => {
             const detailFontSize = Math.max(1.8, Math.min(3.8, Math.min(piece.w, piece.h) * 0.12));
+            const detailMetaFontSize = detailFontSize / 2;
             return (
               <KonvaGroup
                 key={index}
@@ -2018,11 +2019,33 @@ const PdfKonvaElement: React.FC<{
                 listening={false}
               >
                 <KonvaRect x={0} y={0} width={piece.w} height={piece.h} fill={pieceColor[index % pieceColor.length]} stroke="#334155" strokeWidth={0.18} listening={false} />
-                <KonvaText x={1} y={1} width={Math.max(1, piece.w - 2)} text={piece.size} fontFamily="Arial" fontSize={detailFontSize} align="center" fill="#111111" listening={false} />
                 <KonvaText
                   x={1}
-                  y={Math.max(detailFontSize * 1.4, piece.h * 0.4)}
+                  y={0.5}
                   width={Math.max(1, piece.w - 2)}
+                  text={piece.widthLabel}
+                  fontFamily="Arial"
+                  fontSize={detailFontSize}
+                  align="center"
+                  fill="#111111"
+                  listening={false}
+                />
+                <KonvaText
+                  x={detailFontSize * 0.9}
+                  y={piece.h - 1}
+                  width={Math.max(1, piece.h - 2)}
+                  text={piece.heightLabel}
+                  fontFamily="Arial"
+                  fontSize={detailFontSize}
+                  align="center"
+                  fill="#111111"
+                  rotation={-90}
+                  listening={false}
+                />
+                <KonvaText
+                  x={detailFontSize * 1.25}
+                  y={Math.max(detailFontSize * 1.4, piece.h * 0.4)}
+                  width={Math.max(1, piece.w - detailFontSize * 1.5)}
                   text={piece.order}
                   fontFamily="Arial"
                   fontSize={detailFontSize * 1.25}
@@ -2035,12 +2058,12 @@ const PdfKonvaElement: React.FC<{
                 />
                 <KonvaText
                   x={1}
-                  y={Math.max(1, piece.h - detailFontSize * 2.15)}
+                  y={Math.max(1, piece.h - detailMetaFontSize * 2.15)}
                   width={Math.max(1, piece.w - 2)}
-                  height={detailFontSize * 2.1}
-                  text={`Обкат: ${piece.edge}\nФрезеровка: ${piece.milling}`}
+                  height={detailMetaFontSize * 2.1}
+                  text={`${piece.edge}\n${piece.milling}`}
                   fontFamily="Arial"
-                  fontSize={detailFontSize}
+                  fontSize={detailMetaFontSize}
                   lineHeight={1}
                   align="right"
                   verticalAlign="bottom"

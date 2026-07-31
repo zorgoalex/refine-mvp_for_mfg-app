@@ -419,7 +419,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
         ? renderBathDetailMeta({
             info: bathDetailInfo,
             rect,
-            fontMm: dimensionFontMm,
+            fontMm: dimensionFontMm / 2,
             clipId: `cut-bath-detail-meta-${pieceIndex}`,
           })
         : '';
@@ -455,8 +455,8 @@ function renderBathDetailMeta(input: {
   return [
     `<clipPath id="${input.clipId}"><rect x="${num(input.rect.x)}" y="${num(input.rect.y)}" width="${num(input.rect.w)}" height="${num(input.rect.h)}"/></clipPath>`,
     `<text class="cut-bath-detail-meta" font-family="Liberation Sans, sans-serif" font-size="${num(fontMm)}" fill="#111111" text-anchor="end" data-corner="bottom-right" clip-path="url(#${input.clipId})">`,
-    `<tspan x="${num(x)}" y="${num(bottom - fontMm * 1.05)}">${escapeXml(`Обкат: ${edge}`)}</tspan>`,
-    `<tspan x="${num(x)}" y="${num(bottom)}">${escapeXml(`Фрезеровка: ${milling}`)}</tspan>`,
+    `<tspan x="${num(x)}" y="${num(bottom - fontMm * 1.05)}">${escapeXml(edge)}</tspan>`,
+    `<tspan x="${num(x)}" y="${num(bottom)}">${escapeXml(milling)}</tspan>`,
     '</text>',
   ].join('');
 }

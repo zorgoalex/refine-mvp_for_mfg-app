@@ -603,10 +603,33 @@ describe('buildSheetsPdf', () => {
       .toContain('<svg preserveAspectRatio="none" viewBox="0 0 2800 2070">');
     expect(stretchSvgToBounds('<svg preserveAspectRatio="xMidYMid meet" viewBox="0 0 1 1"/>'))
       .toContain('preserveAspectRatio="none"');
-    expect(SHEET_PDF_SOURCE).toContain('SVGtoPDF(doc, stretchSvgToBounds(sheet.bathSvg ?? sheet.svg), 0, 0');
+    expect(SHEET_PDF_SOURCE).toContain('SVGtoPDF(doc, stretchSvgToBounds(sheet.bathSvg ?? sheet.svg, w, h), 0, 0');
     expect(SHEET_PDF_SOURCE).toContain('width: w');
     expect(SHEET_PDF_SOURCE).toContain('height: h');
     expect(SHEET_PDF_SOURCE).not.toContain("style.fit ?? 'contain'");
+  });
+
+  it('keeps text glyph proportions while stretching the sheet geometry', () => {
+    const stretched = stretchSvgToBounds(
+      '<svg viewBox="0 0 100 50"><rect width="100" height="50"/><text x="50" y="10">800</text></svg>',
+      300,
+      300,
+    );
+
+    expect(stretched).toContain('preserveAspectRatio="none"');
+    expect(stretched).toContain('class="cut-pdf-text-aspect-lock"');
+    expect(stretched).toContain('transform="translate(50 10) scale(1 0.5) translate(-50 -10)"');
+  });
+
+  it('keeps piece clipping aligned when compensating metadata text proportions', () => {
+    const stretched = stretchSvgToBounds(
+      '<svg viewBox="0 0 100 50"><clipPath id="piece"><rect width="100" height="50"/></clipPath><text clip-path="url(#piece)"><tspan x="90" y="40">ПВХ 2мм</tspan></text></svg>',
+      300,
+      300,
+    );
+
+    expect(stretched).toContain('<g clip-path="url(#piece)"><g class="cut-pdf-text-aspect-lock"');
+    expect(stretched).toMatch(/<text><tspan x="90" y="40">ПВХ 2мм<\/tspan><\/text>/);
   });
 
   it('renders PDF template text style controls from the editor context menu', () => {

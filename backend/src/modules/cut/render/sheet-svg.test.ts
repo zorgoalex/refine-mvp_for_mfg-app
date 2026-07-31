@@ -169,7 +169,7 @@ describe('buildSheetSvg multi-line labels', () => {
 });
 
 describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
-  it('prints edge and milling in every piece bottom-right using the dimension font', () => {
+  it('prints only edge and milling values bottom-right at half the dimension font size', () => {
     const svg = buildBathProfileSheetSvg({
       sheet,
       labelFor: () => ['11300', 'поз. 5', '600X400'],
@@ -177,11 +177,15 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     });
 
     const dimensionFont = /<text x="310" y="[^"]*"[^>]*font-size="([^"]+)"[^>]*>600<\/text>/.exec(svg)?.[1];
+    const metadataFont = /class="cut-bath-detail-meta"[^>]*font-size="([^"]+)"/.exec(svg)?.[1];
     expect(dimensionFont).toBeTruthy();
+    expect(metadataFont).toBeTruthy();
     expect(svg).toContain('class="cut-bath-detail-meta"');
-    expect(svg).toContain('>Обкат: ПВХ 2мм</tspan>');
-    expect(svg).toContain('>Фрезеровка: Модерн</tspan>');
-    expect(svg).toContain(`class="cut-bath-detail-meta" font-family="Liberation Sans, sans-serif" font-size="${dimensionFont}"`);
+    expect(svg).toContain('>ПВХ 2мм</tspan>');
+    expect(svg).toContain('>Модерн</tspan>');
+    expect(svg).not.toContain('Обкат:');
+    expect(svg).not.toContain('Фрезеровка:');
+    expect(Number(metadataFont)).toBeCloseTo(Number(dimensionFont) / 2, 5);
     expect(svg).toMatch(/text-anchor="end"[^>]*data-corner="bottom-right"/);
   });
 
@@ -192,8 +196,9 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
       bathDetailInfoFor: () => ({ edgeTypeName: null, millingTypeName: null }),
     });
 
-    expect(svg).toContain('>Обкат: —</tspan>');
-    expect(svg).toContain('>Фрезеровка: —</tspan>');
+    expect(svg.match(/>—<\/tspan>/g)).toHaveLength(4);
+    expect(svg).not.toContain('Обкат:');
+    expect(svg).not.toContain('Фрезеровка:');
   });
 
   it('puts enlarged dimensions along sides and keeps only order/position in the centre', () => {
