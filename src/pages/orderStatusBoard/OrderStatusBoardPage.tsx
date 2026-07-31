@@ -96,8 +96,10 @@ import {
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
+  filterCncBathColumnsByOrderStatuses,
   filterCncTodayColumnsByOrders,
   isCncCardSummaryOnly,
+  isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
   serializeOrderStatusBoardViewState,
@@ -640,22 +642,30 @@ export const OrderStatusBoardPage: React.FC = () => {
     () => filterBoardColumns('production', cncOrderBoard?.columns ?? [], true),
     [cncOrderBoard?.columns],
   );
-  const cncOrderCards = useMemo(
+  const cncOrderStatusCards = useMemo(
     () => buildCncOrderStatusCards(cncOrderBoardColumns, cncOrderIds),
     [cncOrderBoardColumns, cncOrderIds],
+  );
+  const cncActiveColumns = useMemo(
+    () => filterCncBathColumnsByOrderStatuses(cncFilteredColumns, cncOrderStatusCards),
+    [cncFilteredColumns, cncOrderStatusCards],
+  );
+  const cncOrderCards = useMemo(
+    () => cncOrderStatusCards.filter((card) => !isCncOrderHiddenFromMdfBoard(card)),
+    [cncOrderStatusCards],
   );
   const cncRelationContext = useMemo(
     () =>
       cncRelationsEnabled
-        ? buildCncRelationContext(cncFilteredColumns, cncOrderCards, activeCncRelation)
+        ? buildCncRelationContext(cncActiveColumns, cncOrderCards, activeCncRelation)
         : null,
-    [activeCncRelation, cncFilteredColumns, cncOrderCards, cncRelationsEnabled],
+    [activeCncRelation, cncActiveColumns, cncOrderCards, cncRelationsEnabled],
   );
   const cncDetailedContext = useMemo(
     () =>
       cncDetailedEnabled
         ? buildCncDetailedContext(
-            cncFilteredColumns,
+            cncActiveColumns,
             activeCncDetailedBathId,
             activeCncDetailedDetail,
           )
@@ -664,13 +674,13 @@ export const OrderStatusBoardPage: React.FC = () => {
       activeCncDetailedBathId,
       activeCncDetailedDetail,
       cncDetailedEnabled,
-      cncFilteredColumns,
+      cncActiveColumns,
     ],
   );
   const cncVisibleColumns = useMemo(
     () =>
-      cncFilteredColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
-    [cncFilteredColumns, viewState.hideEmpty],
+      cncActiveColumns.filter((column) => !viewState.hideEmpty || column.total > 0),
+    [cncActiveColumns, viewState.hideEmpty],
   );
   const generatedAt = isCncToday
     ? cncOrderFilters.length > 0
@@ -2214,6 +2224,12 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               />
             </Tooltip>
           )}
+          <Tag
+            className="cnc-bath-card__cut-result-badge"
+            aria-label={`Версия карты раскроя ${bath.resultNo}`}
+          >
+            №{bath.resultNo}
+          </Tag>
           {!summaryOnly && (
             <Tooltip
               title={bath.ready ? 'Все детали ванны уже в колонке «Распилено»' : 'Не все детали ванны распилены'}

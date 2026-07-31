@@ -1234,6 +1234,18 @@
   font-size: 22px;
 }
 
+.cnc-bath-card__cut-result-badge.ant-tag {
+  margin: 0;
+  padding-inline: 6px;
+  align-self: center;
+  border-radius: 999px;
+  color: var(--app-text);
+  font-size: 1.2em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+
 .cnc-bath-card__ready-icon--ready {
   color: #389e0d;
 }

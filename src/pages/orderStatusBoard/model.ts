@@ -2,6 +2,7 @@ import type {
   CncTelegramTodayColumn,
 } from '../../api/types/cncTelegramApi.types';
 import type {
+  OrderStatusBoardCard,
   OrderStatusBoardColumn,
   OrderStatusBoardQuery,
   OrderStatusBoardResponse,
@@ -9,6 +10,17 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 
 const COMPLETED_ORDER_STATUS_NAMES = new Set(['завершен', 'завершён']);
+const MDF_HIDDEN_PRODUCTION_STATUS_NAMES = new Set([
+  'закатан',
+  'упакован',
+  'выдан',
+]);
+const MDF_HIDDEN_ORDER_STATUS_NAMES = new Set([
+  'готов к выдаче',
+  'выдан',
+  'завершен',
+  'завершён',
+]);
 export type OrderStatusBoardVisualFlow = OrderStatusBoardType | 'cnc_today';
 export type CncOrderSearchPeriod = '1w' | '2w' | '1m';
 export type CncCardDisplayMode = 'standard' | 'compact';
@@ -212,6 +224,43 @@ export function filterCncBathColumnsByMachineOrderMatches(
   });
 }
 
+export function isCncOrderHiddenFromMdfBoard(
+  card: OrderStatusBoardCard,
+): boolean {
+  const productionStatusName = normalizeStatusName(card.productionStatusName);
+  const orderStatusName = normalizeStatusName(card.orderStatusName);
+  return (
+    MDF_HIDDEN_PRODUCTION_STATUS_NAMES.has(productionStatusName)
+    || MDF_HIDDEN_ORDER_STATUS_NAMES.has(orderStatusName)
+  );
+}
+
+export function filterCncBathColumnsByOrderStatuses(
+  columns: CncTelegramTodayColumn[],
+  orderCards: readonly OrderStatusBoardCard[],
+): CncTelegramTodayColumn[] {
+  const hiddenOrderIds = new Set(
+    orderCards
+      .filter(isCncOrderHiddenFromMdfBoard)
+      .map((card) => card.orderId),
+  );
+  if (hiddenOrderIds.size === 0) return columns;
+
+  return columns.map((column) => {
+    if (column.key !== 'baths' && column.key !== 'baths_ready') return column;
+    const baths = (column.baths ?? []).filter((bath) => {
+      const orderIds = new Set(
+        bath.items
+          .map((item) => item.orderId)
+          .filter((orderId) => Number.isInteger(orderId) && orderId > 0),
+      );
+      return orderIds.size === 0
+        || Array.from(orderIds).some((orderId) => !hiddenOrderIds.has(orderId));
+    });
+    return { ...column, baths, total: baths.length };
+  });
+}
+
 export function collectCncOrderIds(columns: CncTelegramTodayColumn[]): number[] {
   const orderIds = new Set<number>();
   for (const column of columns) {
@@ -370,6 +419,10 @@ function subtractDateOnlyDays(value: string, days: number): string {
 }
 
 function normalizeCncOrderKey(value: string | null | undefined): string {
+  return (value ?? '').trim().toLocaleLowerCase('ru-RU');
+}
+
+function normalizeStatusName(value: string | null | undefined): string {
   return (value ?? '').trim().toLocaleLowerCase('ru-RU');
 }
 
