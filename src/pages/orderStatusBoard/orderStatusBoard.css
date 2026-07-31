@@ -741,6 +741,13 @@
   height: 19px;
 }
 
+.status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__sequence,
+.status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__sequence {
+  min-height: 18px;
+  padding: 2px 5px;
+  font-size: 10px;
+}
+
 .cnc-packet-card__program {
   color: var(--app-text-muted);
   font-size: 13px;
@@ -759,6 +766,22 @@
   gap: 8px;
   color: var(--status-color);
   font-size: 16px;
+}
+
+.cnc-packet-card__sequence {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #1677ff;
+  background: color-mix(in srgb, #1677ff 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #1677ff 28%, transparent);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .cnc-card--summary-only {

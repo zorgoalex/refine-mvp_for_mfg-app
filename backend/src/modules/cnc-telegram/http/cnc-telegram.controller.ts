@@ -19,6 +19,7 @@ import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { CncTelegramService } from '../application/cnc-telegram.service';
 import type {
   CncTelegramIngestResponseDto,
+  CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramStructuredIngestDto,
   CncTelegramTodayResponseDto,
 } from '../dto/cnc-telegram.dto';
@@ -90,6 +91,7 @@ const ingestSchema = z.object({
     updatedAt: z.string().datetime({ offset: true }).nullable().optional(),
   }).strict(),
   workday: z.string().regex(DATE_ONLY).refine(isValidDateOnly).optional(),
+  cuttingSequenceNo: z.number().int().positive().max(999999).nullable().optional(),
   machine: z.string().trim().min(1).max(64).nullable().optional(),
   programName: z.string().trim().min(1).max(200).nullable().optional(),
   materialName: z.string().trim().min(1).max(120).nullable().optional(),
@@ -150,6 +152,29 @@ export class CncTelegramController {
       workday: parsedQuery.workday,
       workdayFrom: parsedQuery.workdayFrom,
       workdayTo: parsedQuery.workdayTo,
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({
+    operationId: 'listCncTelegramOrderCuttingSequences',
+    summary: 'List machine-file cutting sequence numbers linked to an order',
+  })
+  @ApiResponse({ status: 200, description: 'Order machine-file cutting sequence numbers' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid order id' })
+  @ApiResponse({ status: 503, description: 'CNC Telegram API is disabled' })
+  @Get('orders/:orderId/cutting-sequences')
+  listOrderCuttingSequences(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderId: string,
+  ): Promise<CncTelegramOrderCuttingSequencesResponseDto> {
+    this.assertEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.cncTelegram.listOrderCuttingSequences({
+      currentUser,
+      orderId: parsePositiveIntegerParam(orderId, 'orderId'),
       requestId: request.requestId,
     });
   }
@@ -267,6 +292,16 @@ export function parseIdempotencyKey(value: string | string[] | undefined): strin
     });
   }
   return key;
+}
+
+function parsePositiveIntegerParam(value: string, field: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid numeric route parameter', {
+      field,
+    });
+  }
+  return parsed;
 }
 
 export function parseTodayQuery(query: Record<string, unknown>): {

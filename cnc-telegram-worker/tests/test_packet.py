@@ -48,6 +48,7 @@ class PacketBuilderTest(unittest.TestCase):
 
         self.assertEqual(packet["externalPacketKey"], "telegram:-100123:55")
         self.assertEqual(packet["source"]["createdAt"], "2026-07-24T05:00:00Z")
+        self.assertIsNone(packet["cuttingSequenceNo"])
         self.assertEqual(packet["completionStatus"], "completed")
         self.assertTrue(packet["thumbsUp"])
         self.assertTrue(packet["rework"])
@@ -77,6 +78,7 @@ class PacketBuilderTest(unittest.TestCase):
             comments=[],
             ocr=OcrResult(),
             gcode=GcodeMeta("CNC#2_2689.TXT", gcode_text, parse_gcode_text(gcode_text, "CNC#2_2689.TXT")),
+            cutting_sequence_no=7,
             default_machine="",
             default_material="МДФ 16мм",
             ocr_engine="glm-ocr",
@@ -84,6 +86,7 @@ class PacketBuilderTest(unittest.TestCase):
         )
 
         self.assertEqual(packet["parseStatus"], "parsed")
+        self.assertEqual(packet["cuttingSequenceNo"], 7)
         self.assertEqual(packet["items"][0]["source"], "gcode")
         self.assertEqual(packet["items"][0]["matchStatus"], "unmatched")
         self.assertIsNone(packet["items"][0]["reviewNote"])
@@ -648,6 +651,7 @@ G0 Z10
         }
         first = canonical_payload_hash(packet)
         packet["idempotencyKey"] = "ignore-me"
+        packet["cuttingSequenceNo"] = 12
         packet["source"]["version"] = 9
         self.assertEqual(canonical_payload_hash(packet), first)
         self.assertEqual(apply_source_version(packet, 3)["source"]["version"], 3)

@@ -764,17 +764,20 @@ probe_file() {
     092_cut_result_archive_state*) probe_all "$(q_tbl cut_result_archive_state)" \
                      "$(q_con fk_cut_result_archive_state_job)" \
                      "$(q_con chk_cut_result_archive_state_result_no)" ;;
+    094_cnc_telegram_cutting_sequence*) probe_all "$(q_col cnc_telegram_packets cutting_sequence_no)" \
+                     "$(q_idx uq_cnc_telegram_packets_cutting_sequence_no)" \
+                     "$(q_con chk_cnc_telegram_packets_cutting_sequence_positive)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
 
-# 073/074/087/088/089/091 contain conditional or multi-step DDL. A partial object can therefore
+# 073/074/087/088/089/091/094 contain conditional or multi-step DDL. A partial object can therefore
 # let PostgreSQL finish the file without reaching the required end state. Never
 # record those migrations in the ledger until the complete effect probe passes.
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

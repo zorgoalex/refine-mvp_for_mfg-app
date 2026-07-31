@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PgCncTelegramRepository } from './pg-cnc-telegram-repository';
@@ -85,6 +86,7 @@ describe('PgCncTelegramRepository', () => {
       ignoredStaleSourceVersion: false,
       auditId: 'audit-1',
       packet: {
+        cuttingSequenceNo: 12,
         itemCount: 1,
         itemQuantityTotal: 4,
         sourceCreatedAt: '2026-07-24T07:59:00.000Z',
@@ -185,6 +187,54 @@ describe('PgCncTelegramRepository', () => {
       ['baths', 'Ванны', 0],
       ['baths_ready', 'Готовы к закатке', 0],
     ]);
+  });
+
+  it('lists stored machine-file cutting sequence numbers for an order card', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const database = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        return {
+          rows: [{
+            packet_id: '00000000-0000-0000-0000-000000000021',
+            external_packet_key: 'telegram:-100:10',
+            cutting_sequence_no: 7,
+            source_message_id: 10,
+            workday: '2026-07-24',
+            program_name: 'CNC#1_2700.TXT',
+            material_name: 'МДФ 16мм',
+            completion_status: 'pending',
+            source_created_at: '2026-07-24T08:00:00.000Z',
+            item_quantity_total: 5,
+          }],
+        };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listOrderCuttingSequences({
+      currentUser: user(),
+      orderId: 2700,
+    });
+
+    expect(queries[0]?.text).toContain('p.cutting_sequence_no IS NOT NULL');
+    expect(queries[0]?.text).toContain('COALESCE(i.match_order_id, order_key.order_id) = $1::bigint');
+    expect(queries[0]?.params).toEqual([2700]);
+    expect(result).toEqual({
+      orderId: 2700,
+      sequences: [{
+        packetId: '00000000-0000-0000-0000-000000000021',
+        externalPacketKey: 'telegram:-100:10',
+        cuttingSequenceNo: 7,
+        sourceMessageId: 10,
+        workday: '2026-07-24',
+        programName: 'CNC#1_2700.TXT',
+        materialName: 'МДФ 16мм',
+        completionStatus: 'pending',
+        sourceCreatedAt: '2026-07-24T08:00:00.000Z',
+        itemQuantityTotal: 5,
+      }],
+    });
   });
 
   it('exposes unique ERP order ids for unmatched CNC packet item order names', async () => {
@@ -449,6 +499,216 @@ describe('PgCncTelegramRepository', () => {
     expect(update?.params[12]).toBe('tg_100_10.jpg');
     expect(update?.params[13]).toBe('image/jpeg');
     expect(update?.params[14]).toBe(12345);
+  });
+
+  it('assigns a cutting sequence number for pending machine packets after item replacement', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [packetRow({ cutting_sequence_no: 13, completion_status: 'pending', thumbs_up: false })] };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:pending-sequence',
+        thumbsUp: false,
+        completionStatus: 'pending',
+      },
+      requestId: 'request-cnc-1',
+    });
+
+    const sql = queries.map((query) => query.text).join('\n');
+    expect(sql).toContain("pg_advisory_xact_lock(hashtext($1))");
+    expect(sql).toContain('MAX(cutting_sequence_no)');
+    expect(sql).toContain('packet.cutting_sequence_no IS NULL');
+    expect(result.packet.cuttingSequenceNo).toBe(13);
+  });
+
+  it('stores explicit Telegram cutting sequence numbers under the same sequence lock', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [packetRow({ cutting_sequence_no: 7 })] };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:explicit-sequence',
+        cuttingSequenceNo: 7,
+      },
+      requestId: 'request-cnc-1',
+    });
+
+    const sequenceUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets[\s\S]*cutting_sequence_no = \$2::integer/i.test(query.text),
+    );
+    expect(queries.map((query) => query.text).join('\n')).toContain("pg_advisory_xact_lock(hashtext($1))");
+    expect(sequenceUpdate?.params).toEqual([
+      '00000000-0000-0000-0000-000000000001',
+      7,
+      42,
+    ]);
+    expect(result.packet.cuttingSequenceNo).toBe(7);
+  });
+
+  it('replays completed idempotency when Telegram later adds an explicit cutting sequence number', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const dto = {
+      ...ingestDto(),
+      idempotencyKey: 'cnc:test:repo:completed-explicit-sequence',
+      cuttingSequenceNo: 17,
+    };
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/FROM command_idempotency_keys/i.test(text)) {
+          const inserted = queries.find((query) =>
+            /INSERT INTO command_idempotency_keys/i.test(query.text),
+          );
+          return {
+            rows: [{
+              request_hash: inserted?.params[4],
+              response_json: {
+                packet: { ...packetRow(), cuttingSequenceNo: null },
+                requestId: 'request-cnc-1',
+                applied: false,
+                ignoredStaleSourceVersion: false,
+              },
+              status: 'completed',
+            }],
+          };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return {
+            rows: [{
+              packet_id: '00000000-0000-0000-0000-000000000001',
+              source_version: 1,
+              payload_hash: payloadHashForTest(dto),
+            }],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [packetRow({ cutting_sequence_no: 17 })] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto,
+      requestId: 'request-cnc-1',
+    });
+
+    const sequenceUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets[\s\S]*cutting_sequence_no = \$2::integer/i.test(query.text),
+    );
+    expect(sequenceUpdate?.params).toEqual([
+      '00000000-0000-0000-0000-000000000001',
+      17,
+      42,
+    ]);
+    expect(result.applied).toBe(false);
+    expect(result.packet.cuttingSequenceNo).toBe(17);
+  });
+
+  it('can assign a missing cutting sequence on stale source-version replays', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return {
+            rows: [{
+              packet_id: '00000000-0000-0000-0000-000000000001',
+              source_version: 5,
+              payload_hash: 'sha256:old',
+            }],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [packetRow({ cutting_sequence_no: 14, source_version: 5 })] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:stale-sequence',
+        source: { ...ingestDto().source, version: 4 },
+        thumbsUp: false,
+        completionStatus: 'pending',
+      },
+      requestId: 'request-cnc-1',
+    });
+
+    const sql = queries.map((query) => query.text).join('\n');
+    expect(result.ignoredStaleSourceVersion).toBe(true);
+    expect(sql).toContain('MAX(cutting_sequence_no)');
+    expect(result.packet.cuttingSequenceNo).toBe(14);
   });
 
   it('fills missing item matches from unique ERP detail size', async () => {
@@ -924,6 +1184,21 @@ function ingestDto() {
   };
 }
 
+function payloadHashForTest(dto: ReturnType<typeof ingestDto> & { cuttingSequenceNo?: number }) {
+  const { idempotencyKey: _idempotencyKey, cuttingSequenceNo: _cuttingSequenceNo, ...payload } = dto;
+  return `sha256:${createHash('sha256').update(stableStringifyForTest(payload)).digest('hex')}`;
+}
+
+function stableStringifyForTest(value: unknown): string {
+  if (value === undefined) return '"__undefined__"';
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringifyForTest).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) =>
+    `${JSON.stringify(key)}:${stableStringifyForTest(record[key])}`,
+  ).join(',')}}`;
+}
+
 function packetRow(overrides: Partial<ReturnType<typeof packetRowBase>> = {}) {
   return { ...packetRowBase(), ...overrides };
 }
@@ -932,6 +1207,7 @@ function packetRowBase() {
   return {
     packet_id: '00000000-0000-0000-0000-000000000001',
     external_packet_key: 'chat:-100:message:10',
+    cutting_sequence_no: 12,
     source_chat_id: '-100',
     source_message_id: 10,
     source_thread_id: null,

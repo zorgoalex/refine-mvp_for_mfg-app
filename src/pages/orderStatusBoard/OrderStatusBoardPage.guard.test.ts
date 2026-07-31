@@ -177,6 +177,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('font-weight: 400');
     expect(css).toContain('.cnc-packet-card__program');
     expect(css).toMatch(/\.cnc-packet-card__program\s*\{[^}]*color: var\(--app-text-muted\);/);
+    expect(page).toContain('packet.cuttingSequenceNo');
+    expect(page).toContain('Номер раскроя файла станка');
+    expect(css).toContain('.cnc-packet-card__sequence');
+    expect(css).toContain('font-variant-numeric: tabular-nums');
     const cncFileNameRules = css.match(/\.cnc-packet-card__note-file\s*\{[^}]*\}/g) ?? [];
     expect(cncFileNameRules.length).toBeGreaterThan(0);
     expect(cncFileNameRules.every((rule) => rule.includes('color: var(--app-text-muted);'))).toBe(true);

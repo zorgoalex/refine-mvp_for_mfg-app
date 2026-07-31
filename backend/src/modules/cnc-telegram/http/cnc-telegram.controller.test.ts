@@ -10,6 +10,7 @@ describe('CncTelegramController parsing', () => {
       idempotencyKey: 'cnc:test:1',
       externalPacketKey: 'chat:-100:message:10',
       source: { version: 2 },
+      cuttingSequenceNo: 7,
       items: [{ orderName: '2689', detailNumber: 31 }],
     });
 
@@ -96,6 +97,7 @@ function structuredPayload() {
       updatedAt: '2026-07-24T08:00:00.000Z',
     },
     workday: '2026-07-24',
+    cuttingSequenceNo: 7,
     machine: 'CNC#1',
     programName: 'CNC#1_2689-HDF.TXT',
     materialName: 'ХДФ',

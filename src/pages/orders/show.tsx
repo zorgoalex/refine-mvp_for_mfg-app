@@ -37,6 +37,8 @@ import {
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 import { cutApi } from "../../api/cutApi";
 import type { CutJobDto, CutJobRef } from "../../api/types/cutApi.types";
+import { cncTelegramApi } from "../../api/cncTelegramApi";
+import type { CncTelegramOrderCuttingSequence } from "../../api/types/cncTelegramApi.types";
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
 import { cutJobDeepLink, cutJobProfileLabel } from "./cutColumnHelpers";
@@ -98,6 +100,10 @@ const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: strin
 
 const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 120;
 const ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT = 40;
+
+function cncOrderCuttingSequenceStatusLabel(status: CncTelegramOrderCuttingSequence['completionStatus']): string {
+  return status === 'completed' ? 'распилено' : 'не распилено';
+}
 
 type OrderShowStickyStyle = CSSProperties & {
   '--order-show-sticky-top': string;
@@ -738,6 +744,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // may be placed in several jobs — list them all). Same cut.view gate as the
   // column; powers the «Раскрой» sub-block in the additional-info panel.
   const [cutOrderJobs, setCutOrderJobs] = useState<CutJobRef[]>([]);
+  const [cncOrderCuttingSequences, setCncOrderCuttingSequences] = useState<CncTelegramOrderCuttingSequence[]>([]);
   const refreshCutOrderJobs = useCallback(async (orderId?: number | null) => {
     if (!cutColumnEnabled || !orderId) {
       setCutOrderJobs([]);
@@ -751,9 +758,26 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     }
   }, [cutColumnEnabled]);
 
+  const refreshCncOrderCuttingSequences = useCallback(async (orderId?: number | null) => {
+    if (!cutColumnEnabled || !orderId) {
+      setCncOrderCuttingSequences([]);
+      return;
+    }
+    try {
+      const res = await cncTelegramApi.orderCuttingSequences(orderId);
+      setCncOrderCuttingSequences(res.sequences);
+    } catch {
+      setCncOrderCuttingSequences([]);
+    }
+  }, [cutColumnEnabled]);
+
   useEffect(() => {
     void refreshCutOrderJobs(record?.order_id);
   }, [record?.order_id, refreshCutOrderJobs]);
+
+  useEffect(() => {
+    void refreshCncOrderCuttingSequences(record?.order_id);
+  }, [record?.order_id, refreshCncOrderCuttingSequences]);
 
   useEffect(() => {
     if (!cutColumnEnabled || typeof window === 'undefined') return undefined;
@@ -761,12 +785,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       const payload = readCutJobReadyEvent(event);
       if (!payload || !cutJobReadyAffects(payload, { detailIds: cutDetailIds, orderId: record?.order_id })) return;
       void refreshCutOrderJobs(record?.order_id);
+      void refreshCncOrderCuttingSequences(record?.order_id);
     };
     window.addEventListener(CUT_JOB_READY_EVENT, handler);
     return () => {
       window.removeEventListener(CUT_JOB_READY_EVENT, handler);
     };
-  }, [cutColumnEnabled, cutDetailIds, record?.order_id, refreshCutOrderJobs]);
+  }, [cutColumnEnabled, cutDetailIds, record?.order_id, refreshCutOrderJobs, refreshCncOrderCuttingSequences]);
 
   const bathFilmUsage = useMemo(
     () => computeOrderBathFilmUsage(
@@ -1987,7 +2012,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                             <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 3 }}>
                               Раскрой
                             </div>
-                            {cutOrderJobs.length === 0 ? (
+                            {cutOrderJobs.length === 0 && cncOrderCuttingSequences.length === 0 ? (
                               <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>—</span>
                             ) : (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -2002,6 +2027,29 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                       {' '}· Профиль: {cutJobProfileLabel(j)}
                                     </span>
                                   </Link>
+                                ))}
+                              </div>
+                            )}
+                            {cncOrderCuttingSequences.length > 0 && (
+                              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--app-text-muted)' }}>
+                                  Файлы станка
+                                </span>
+                                {cncOrderCuttingSequences.map((sequence) => (
+                                  <span
+                                    key={sequence.packetId}
+                                    style={{ fontSize: 12, lineHeight: 1.35, color: 'var(--app-text)' }}
+                                  >
+                                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                                      №{sequence.cuttingSequenceNo}
+                                    </span>
+                                    <span style={{ color: 'var(--app-text-muted)' }}>
+                                      {' '}· {sequence.programName ?? sequence.externalPacketKey}
+                                      {' '}· {sequence.materialName}
+                                      {' '}· {cncOrderCuttingSequenceStatusLabel(sequence.completionStatus)}
+                                      {' '}· {sequence.itemQuantityTotal} дет.
+                                    </span>
+                                  </span>
                                 ))}
                               </div>
                             )}

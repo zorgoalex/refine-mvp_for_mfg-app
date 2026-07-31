@@ -4,10 +4,12 @@ import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
   IngestCncTelegramPacketCommand,
+  ListCncTelegramOrderCuttingSequencesCommand,
   ListCncTelegramTodayCommand,
 } from './cnc-telegram.types';
 import type {
   CncTelegramIngestResponseDto,
+  CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramTodayResponseDto,
 } from '../dto/cnc-telegram.dto';
 
@@ -31,6 +33,17 @@ export class CncTelegramService {
       });
     }
     return this.ports.packets.listToday(command);
+  }
+
+  async listOrderCuttingSequences(
+    command: ListCncTelegramOrderCuttingSequencesCommand,
+  ): Promise<CncTelegramOrderCuttingSequencesResponseDto> {
+    if (!this.permissions.canUser(command.currentUser, 'orders.view')) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра CNC-раскроев заказа', {
+        requiredPermissions: ['orders.view'],
+      });
+    }
+    return this.ports.packets.listOrderCuttingSequences(command);
   }
 
   async ingest(command: IngestCncTelegramPacketCommand): Promise<CncTelegramIngestResponseDto> {

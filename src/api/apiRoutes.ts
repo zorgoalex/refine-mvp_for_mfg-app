@@ -144,6 +144,7 @@ export const apiRoutes = {
   cncTelegram: {
     today: backendApiPath('/cnc-telegram/today'),
     ingest: backendApiPath('/cnc-telegram/ingest'),
+    orderCuttingSequences: (orderId: number) => backendApiPath(`/cnc-telegram/orders/${orderId}/cutting-sequences`),
   },
   sheetMaterials: {
     list: backendApiPath('/sheet-material-types'),

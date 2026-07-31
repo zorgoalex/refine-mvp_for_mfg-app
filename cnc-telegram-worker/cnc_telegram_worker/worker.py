@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from telethon import TelegramClient
+try:
+    from telethon.tl.functions.messages import GetRepliesRequest
+except Exception:  # pragma: no cover - tests use a lightweight Telethon stub.
+    GetRepliesRequest = None  # type: ignore[assignment]
 
 from .cleanup import cleanup_temp_dir
 from .config import WorkerConfig
@@ -46,12 +50,18 @@ from .vector import parse_vector_file
 
 
 IMAGE_STORAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+CUTTING_SEQUENCE_REPLY_RE = re.compile(
+    r"(?<!\w)раскро[ий]\s*(?:файла\s*станка\s*)?[№#]?\s*(\d{1,6})(?!\d)",
+    re.IGNORECASE,
+)
+CUTTING_SEQUENCE_REPLY_TEXT = "Раскрой №{number}"
 
 
 @dataclass(frozen=True)
 class ImageGroup:
     image_message: Any
     comments: list[str]
+    cutting_sequence_no: int | None
     gcode_message: Any | None
     vector_message: Any | None
 
@@ -74,7 +84,7 @@ class CncTelegramWorker:
         self.config.require_backend_auth()
         days_to_scan = days or self.config.history_days
         anchor = workday or datetime.now(self.config.business_timezone).date()
-        workdays = [anchor - timedelta(days=offset) for offset in range(days_to_scan)]
+        workdays = [anchor - timedelta(days=offset) for offset in reversed(range(days_to_scan))]
 
         client = TelegramClient(
             str(self.config.telegram_session_path),
@@ -119,18 +129,35 @@ class CncTelegramWorker:
         )
         groups = group_image_messages(messages)
         for group in groups:
-            await self.process_group(group, chat_id, workday)
+            await self.process_group(client, entity, group, chat_id, workday)
 
-    async def process_group(self, group: ImageGroup, chat_id: str, workday: date) -> None:
+    async def process_group(self, client: Any, entity: Any, group: ImageGroup, chat_id: str, workday: date) -> None:
         external_key = external_packet_key(chat_id, int(group.image_message.id))
+        cutting_sequence_no = group.cutting_sequence_no
+        if cutting_sequence_no is None:
+            cutting_sequence_no = await find_cutting_sequence_reply_number(client, entity, group.image_message)
+        sequence_from_telegram = cutting_sequence_no is not None
+        if cutting_sequence_no is not None:
+            self.state.assign_cutting_sequence_number(external_key, existing_number=cutting_sequence_no)
+            self.state.mark_cutting_sequence_replied(external_key)
+        pending_sequence_reply = (
+            self.state.cutting_sequence_number(external_key) is not None
+            and not self.state.cutting_sequence_replied(external_key)
+        )
+
         source_fingerprint = group_source_fingerprint(
             group,
             chat_id,
             workday,
             self.config.parser_version,
             self.config.ocr_engine,
+            cutting_sequence_no=cutting_sequence_no,
         )
-        if not self.config.resend_unchanged and self.state.source_unchanged(external_key, source_fingerprint):
+        if (
+            not self.config.resend_unchanged
+            and not pending_sequence_reply
+            and self.state.source_unchanged(external_key, source_fingerprint)
+        ):
             print(f"skip source unchanged {external_key}", flush=True)
             return
 
@@ -177,6 +204,7 @@ class CncTelegramWorker:
                 comments=group.comments,
                 ocr=ocr,
                 gcode=gcode_meta,
+                cutting_sequence_no=cutting_sequence_no,
                 vector_items=vector_items,
                 sheet_image=sheet_image,
                 default_machine=self.config.default_machine,
@@ -186,7 +214,12 @@ class CncTelegramWorker:
             )
             payload_hash = canonical_payload_hash(packet)
             version = self.state.next_version(packet["externalPacketKey"], payload_hash)
-            if not version.changed and not self.config.resend_unchanged:
+            if (
+                not version.changed
+                and not self.config.resend_unchanged
+                and not sequence_from_telegram
+                and not pending_sequence_reply
+            ):
                 self.state.mark_posted(
                     packet["externalPacketKey"],
                     payload_hash,
@@ -198,6 +231,17 @@ class CncTelegramWorker:
             packet = apply_source_version(packet, version.source_version)
             idem = idempotency_key(packet["externalPacketKey"], version.source_version)
             response = await self.erp.ingest_packet(packet, idem)
+            response_packet = response.get("packet") if isinstance(response, dict) else None
+            response_sequence_no = (
+                response_packet.get("cuttingSequenceNo")
+                if isinstance(response_packet, dict)
+                else None
+            )
+            if isinstance(response_sequence_no, int) and not isinstance(response_sequence_no, bool) and response_sequence_no > 0:
+                self.state.assign_cutting_sequence_number(external_key, existing_number=response_sequence_no)
+                if cutting_sequence_no is None and not self.state.cutting_sequence_replied(external_key):
+                    await send_cutting_sequence_reply(client, entity, group.image_message, response_sequence_no)
+                    self.state.mark_cutting_sequence_replied(external_key)
             self.state.mark_posted(
                 packet["externalPacketKey"],
                 payload_hash,
@@ -228,6 +272,7 @@ def group_image_messages(messages: list[Any]) -> list[ImageGroup]:
         previous_image_id = image_messages[index - 1].id if index > 0 else None
         next_image_id = image_messages[index + 1].id if index + 1 < len(image_messages) else None
         comments = nearby_comments(messages, image_message, next_image_id)
+        cutting_sequence_no = cutting_sequence_reply_number(messages, image_message)
         gcode_message = select_gcode_message(
             gcode_messages,
             image_message,
@@ -245,6 +290,7 @@ def group_image_messages(messages: list[Any]) -> list[ImageGroup]:
         groups.append(ImageGroup(
             image_message=image_message,
             comments=comments,
+            cutting_sequence_no=cutting_sequence_no,
             gcode_message=gcode_message,
             vector_message=vector_message,
         ))
@@ -260,6 +306,8 @@ def nearby_comments(messages: list[Any], image_message: Any, next_image_id: int 
             continue
         text = message_text(message)
         if not text:
+            continue
+        if is_cutting_sequence_reply_text(text):
             continue
         reply_to = message_reply_to_id(message)
         if reply_to == image_id:
@@ -370,13 +418,15 @@ def group_source_fingerprint(
     workday: date,
     parser_version: str,
     ocr_engine: str,
+    cutting_sequence_no: int | None = None,
 ) -> str:
     payload = {
-        "version": 3,
+        "version": 4,
         "chatId": chat_id,
         "workday": workday.isoformat(),
         "parserVersion": parser_version,
         "ocrEngine": ocr_engine,
+        "cuttingSequenceNo": cutting_sequence_no if cutting_sequence_no is not None and cutting_sequence_no > 0 else None,
         "image": message_identity(group.image_message, include_reactions=True),
         "comments": group.comments,
         "gcode": (
@@ -392,6 +442,93 @@ def group_source_fingerprint(
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def is_cutting_sequence_reply_text(text: str) -> bool:
+    return CUTTING_SEQUENCE_REPLY_RE.search(text.strip()) is not None
+
+
+def parse_cutting_sequence_reply(text: str) -> int | None:
+    match = CUTTING_SEQUENCE_REPLY_RE.search(text.strip())
+    if not match:
+        return None
+    try:
+        value = int(match.group(1))
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def cutting_sequence_reply_number(messages: list[Any], image_message: Any) -> int | None:
+    image_id = int(image_message.id)
+    candidates: list[tuple[datetime, int, int]] = []
+    for message in messages:
+        if message is image_message or message_reply_to_id(message) != image_id:
+            continue
+        number = parse_cutting_sequence_reply(message_text(message))
+        if number is not None:
+            candidates.append((message_datetime(message), int(message.id), number))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (item[0], item[1]))[2]
+
+
+async def find_cutting_sequence_reply_number(client: Any, entity: Any, image_message: Any) -> int | None:
+    image_id = int(image_message.id)
+    direct_number = await find_cutting_sequence_reply_number_from_replies(client, entity, image_id)
+    if direct_number is not None:
+        return direct_number
+    candidates: list[tuple[datetime, int, int]] = []
+    async for message in client.iter_messages(entity, search="Раскрой", limit=1000):
+        if message_reply_to_id(message) != image_id:
+            continue
+        number = parse_cutting_sequence_reply(message_text(message))
+        if number is not None:
+            candidates.append((message_datetime(message), int(message.id), number))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (item[0], item[1]))[2]
+
+
+async def find_cutting_sequence_reply_number_from_replies(client: Any, entity: Any, image_id: int) -> int | None:
+    if GetRepliesRequest is None:
+        return None
+    candidates: list[tuple[datetime, int, int]] = []
+    offset_id = 0
+    while True:
+        response = await client(GetRepliesRequest(
+            peer=entity,
+            msg_id=image_id,
+            offset_id=offset_id,
+            offset_date=None,
+            add_offset=0,
+            limit=100,
+            max_id=0,
+            min_id=0,
+            hash=0,
+        ))
+        messages = list(getattr(response, "messages", []) or [])
+        if not messages:
+            break
+        for message in messages:
+            number = parse_cutting_sequence_reply(message_text(message))
+            if number is not None:
+                candidates.append((message_datetime(message), int(message.id), number))
+        next_offset = min(int(message.id) for message in messages if getattr(message, "id", None) is not None)
+        if next_offset <= 0 or next_offset == offset_id:
+            break
+        offset_id = next_offset
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (item[0], item[1]))[2]
+
+
+async def send_cutting_sequence_reply(client: Any, entity: Any, image_message: Any, number: int) -> None:
+    await client.send_message(
+        entity,
+        CUTTING_SEQUENCE_REPLY_TEXT.format(number=number),
+        reply_to=int(image_message.id),
+    )
 
 
 def message_identity(message: Any, *, include_reactions: bool) -> dict[str, Any]:

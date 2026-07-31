@@ -1900,16 +1900,23 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
             </>
           )}
         </div>
-        {(displayToggleVisible || (!summaryOnly && packet.completionStatus === 'completed')) && (
+        {(displayToggleVisible || packet.cuttingSequenceNo != null || (!summaryOnly && packet.completionStatus === 'completed')) && (
           <div
             className="cnc-packet-card__status-icons"
-            aria-label={summaryOnly ? 'Вид карточки' : 'Статусы листа'}
+            aria-label={summaryOnly ? 'Вид карточки и номер раскроя' : 'Статусы листа'}
           >
             <CncCardDisplayToggle
               visible={displayToggleVisible}
               standardView={!summaryOnly}
               onToggle={onToggleDisplay}
             />
+            {packet.cuttingSequenceNo != null && (
+              <Tooltip title="Номер раскроя файла станка">
+                <span className="cnc-packet-card__sequence">
+                  №{packet.cuttingSequenceNo}
+                </span>
+              </Tooltip>
+            )}
             {!summaryOnly && packet.completionStatus === 'completed' && (
               <Tooltip title="Распилено на станке">
                 <span

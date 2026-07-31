@@ -1,6 +1,7 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type {
   CncTelegramIngestResponseDto,
+  CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramStructuredIngestDto,
   CncTelegramTodayResponseDto,
 } from '../dto/cnc-telegram.dto';
@@ -13,6 +14,12 @@ export interface ListCncTelegramTodayCommand {
   requestId?: string;
 }
 
+export interface ListCncTelegramOrderCuttingSequencesCommand {
+  currentUser: CurrentUser;
+  orderId: number;
+  requestId?: string;
+}
+
 export interface IngestCncTelegramPacketCommand {
   currentUser: CurrentUser;
   dto: CncTelegramStructuredIngestDto;
@@ -21,6 +28,9 @@ export interface IngestCncTelegramPacketCommand {
 
 export interface CncTelegramRepositoryPort {
   listToday(command: ListCncTelegramTodayCommand): Promise<CncTelegramTodayResponseDto>;
+  listOrderCuttingSequences(
+    command: ListCncTelegramOrderCuttingSequencesCommand,
+  ): Promise<CncTelegramOrderCuttingSequencesResponseDto>;
   ingest(command: IngestCncTelegramPacketCommand): Promise<CncTelegramIngestResponseDto>;
 }
 

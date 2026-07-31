@@ -3,11 +3,12 @@ import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
-import type { TransactionClient } from '../../../database/database.types';
+import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
   IngestCncTelegramPacketCommand,
+  ListCncTelegramOrderCuttingSequencesCommand,
   ListCncTelegramTodayCommand,
   RecordCncTelegramDeniedAuditCommand,
 } from '../application/cnc-telegram.types';
@@ -19,6 +20,8 @@ import type {
   CncTelegramIngestResponseDto,
   CncTelegramItemSource,
   CncTelegramMatchStatus,
+  CncTelegramOrderCuttingSequenceDto,
+  CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramPacketDto,
   CncTelegramPacketItemDto,
   CncTelegramStructuredIngestDto,
@@ -36,6 +39,7 @@ const IGNORED_ANALYSIS_WARNINGS = new Set([
 interface PacketJoinedRow extends QueryResultRow {
   packet_id: string;
   external_packet_key: string;
+  cutting_sequence_no: string | number | null;
   source_chat_id: string;
   source_message_id: string | number | null;
   source_thread_id: string | number | null;
@@ -116,6 +120,19 @@ interface BathJoinedRow extends QueryResultRow {
   sheet_height_mm: string | number | null;
 }
 
+interface OrderCuttingSequenceRow extends QueryResultRow {
+  packet_id: string;
+  external_packet_key: string;
+  cutting_sequence_no: string | number;
+  source_message_id: string | number | null;
+  workday: string | Date;
+  program_name: string | null;
+  material_name: string;
+  completion_status: CncTelegramPacketDto['completionStatus'];
+  source_created_at: string | Date | null;
+  item_quantity_total: string | number | null;
+}
+
 interface DetailMatchRow extends QueryResultRow {
   order_key: string;
   order_id: string | number;
@@ -161,6 +178,58 @@ export class PgCncTelegramRepository
     };
   }
 
+  async listOrderCuttingSequences(
+    command: ListCncTelegramOrderCuttingSequencesCommand,
+  ): Promise<CncTelegramOrderCuttingSequencesResponseDto> {
+    const result = await this.database.query<OrderCuttingSequenceRow>(
+      `
+      WITH unique_order_keys AS (
+        SELECT
+          lower(trim(o.order_name)) AS order_key,
+          MIN(o.order_id)::bigint AS order_id
+        FROM orders o
+        WHERE o.delete_flag = false
+          AND NULLIF(trim(o.order_name), '') IS NOT NULL
+        GROUP BY lower(trim(o.order_name))
+        HAVING COUNT(*) = 1
+      )
+      SELECT
+        p.packet_id,
+        p.external_packet_key,
+        p.cutting_sequence_no,
+        p.source_message_id,
+        p.workday,
+        p.program_name,
+        p.material_name,
+        p.completion_status,
+        p.source_created_at,
+        SUM(GREATEST(i.quantity, 0))::integer AS item_quantity_total
+      FROM cnc_telegram_packets p
+      JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
+      LEFT JOIN unique_order_keys order_key
+        ON order_key.order_key = lower(trim(i.order_name))
+      WHERE p.cutting_sequence_no IS NOT NULL
+        AND COALESCE(i.match_order_id, order_key.order_id) = $1::bigint
+      GROUP BY
+        p.packet_id,
+        p.external_packet_key,
+        p.cutting_sequence_no,
+        p.source_message_id,
+        p.workday,
+        p.program_name,
+        p.material_name,
+        p.completion_status,
+        p.source_created_at
+      ORDER BY p.cutting_sequence_no DESC, p.source_created_at DESC NULLS LAST, p.packet_id
+      `,
+      [command.orderId],
+    );
+    return {
+      orderId: command.orderId,
+      sequences: result.rows.map(mapOrderCuttingSequenceRow),
+    };
+  }
+
   async ingest(command: IngestCncTelegramPacketCommand): Promise<CncTelegramIngestResponseDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
@@ -185,6 +254,7 @@ export class PgCncTelegramRepository
       const existing = replay.rows[0] ?? null;
 
       if (existing && command.dto.source.version < Number(existing.source_version)) {
+        await ensureCuttingSequenceNo(tx, existing.packet_id, command.dto, Number(command.currentUser.id));
         const packet = await loadPacket(tx, existing.packet_id);
         const response: CncTelegramIngestResponseDto = {
           packet,
@@ -218,6 +288,7 @@ export class PgCncTelegramRepository
         command.dto.source.version === Number(existing.source_version) &&
         existing.payload_hash === payloadHash
       ) {
+        await ensureCuttingSequenceNo(tx, existing.packet_id, command.dto, Number(command.currentUser.id));
         const packet = await loadPacket(tx, existing.packet_id);
         const response: CncTelegramIngestResponseDto = {
           packet,
@@ -238,6 +309,7 @@ export class PgCncTelegramRepository
         await updatePacket(tx, packetId, resolvedCommand, payloadHash);
       }
       await replaceItems(tx, packetId, resolvedDto);
+      await ensureCuttingSequenceNo(tx, packetId, resolvedDto, Number(command.currentUser.id));
 
       const packet = await loadPacket(tx, packetId);
       const auditId = await writeIngestAudit(tx, {
@@ -284,6 +356,7 @@ function packetSelectSql(whereSql: string): string {
     SELECT
       p.packet_id,
       p.external_packet_key,
+      p.cutting_sequence_no,
       p.source_chat_id,
       p.source_message_id,
       p.source_thread_id,
@@ -542,6 +615,105 @@ async function replaceItems(
       ],
     );
   }
+}
+
+async function ensureCuttingSequenceNo(
+  tx: TransactionClient,
+  packetId: string,
+  dto: CncTelegramStructuredIngestDto,
+  actorUserId: number,
+): Promise<void> {
+  if (dto.cuttingSequenceNo != null) {
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['cnc_telegram_cutting_sequence_no']);
+    await tx.query(
+      `
+      UPDATE cnc_telegram_packets
+      SET
+        cutting_sequence_no = $2::integer,
+        updated_by = $3,
+        updated_at = CASE
+          WHEN cutting_sequence_no IS DISTINCT FROM $2::integer THEN now()
+          ELSE updated_at
+        END
+      WHERE packet_id = $1::uuid
+        AND cutting_sequence_no IS DISTINCT FROM $2::integer
+      `,
+      [packetId, dto.cuttingSequenceNo, actorUserId],
+    );
+    return;
+  }
+  if (!packetNeedsCuttingSequence(dto) && !await packetIntersectsPendingBaths(tx, packetId, dto)) {
+    return;
+  }
+  await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['cnc_telegram_cutting_sequence_no']);
+  await tx.query(
+    `
+    WITH next_sequence AS (
+      SELECT COALESCE(MAX(cutting_sequence_no), 0) + 1 AS cutting_sequence_no
+      FROM cnc_telegram_packets
+    )
+    UPDATE cnc_telegram_packets packet
+    SET
+      cutting_sequence_no = next_sequence.cutting_sequence_no,
+      updated_by = $2,
+      updated_at = now()
+    FROM next_sequence
+    WHERE packet.packet_id = $1::uuid
+      AND packet.cutting_sequence_no IS NULL
+    `,
+    [packetId, actorUserId],
+  );
+}
+
+function packetNeedsCuttingSequence(dto: CncTelegramStructuredIngestDto): boolean {
+  return (dto.completionStatus ?? (dto.thumbsUp ? 'completed' : 'pending')) === 'pending';
+}
+
+async function packetIntersectsPendingBaths(
+  tx: TransactionClient,
+  packetId: string,
+  dto: CncTelegramStructuredIngestDto,
+): Promise<boolean> {
+  const workdayTo = dto.workday ?? await currentDatabaseWorkday(tx);
+  const workdayFrom = dateOnlyDaysBefore(workdayTo, 6);
+  const baths = await loadBathCards(tx, workdayFrom, workdayTo);
+  const pendingBathOrderIds = new Set<number>();
+  for (const bath of baths) {
+    if (bath.ready) continue;
+    for (const item of bath.items) {
+      pendingBathOrderIds.add(item.orderId);
+    }
+  }
+  if (pendingBathOrderIds.size === 0) return false;
+  const packetOrderIds = await loadPacketOrderIds(tx, packetId);
+  return packetOrderIds.some((orderId) => pendingBathOrderIds.has(orderId));
+}
+
+async function loadPacketOrderIds(tx: TransactionClient, packetId: string): Promise<number[]> {
+  const result = await tx.query<{ order_id: string | number | null }>(
+    `
+    WITH unique_order_keys AS (
+      SELECT
+        lower(trim(o.order_name)) AS order_key,
+        MIN(o.order_id)::bigint AS order_id
+      FROM orders o
+      WHERE o.delete_flag = false
+        AND NULLIF(trim(o.order_name), '') IS NOT NULL
+      GROUP BY lower(trim(o.order_name))
+      HAVING COUNT(*) = 1
+    )
+    SELECT DISTINCT COALESCE(i.match_order_id, order_key.order_id) AS order_id
+    FROM cnc_telegram_packet_items i
+    LEFT JOIN unique_order_keys order_key
+      ON order_key.order_key = lower(trim(i.order_name))
+    WHERE i.packet_id = $1::uuid
+      AND COALESCE(i.match_order_id, order_key.order_id) IS NOT NULL
+    `,
+    [packetId],
+  );
+  return result.rows
+    .map((row) => toPositiveInteger(row.order_id))
+    .filter((value): value is number => value !== null);
 }
 
 async function resolveItemMatches(
@@ -840,6 +1012,7 @@ async function writeIngestAudit(
       source: SOURCE,
       action: 'structured_ingest',
       externalPacketKey: input.packet.externalPacketKey,
+      cuttingSequenceNo: input.packet.cuttingSequenceNo,
       machine: input.packet.machine,
       programName: input.packet.programName,
       materialName: input.packet.materialName,
@@ -902,6 +1075,7 @@ function packetOutboxPayload(
     auditId,
     packetId: packet.packetId,
     externalPacketKey: packet.externalPacketKey,
+    cuttingSequenceNo: packet.cuttingSequenceNo,
     sourceChatId: packet.sourceChatId,
     sourceMessageId: packet.sourceMessageId,
     sourceVersion: packet.sourceVersion,
@@ -970,6 +1144,7 @@ async function reconcileIdempotency(
     throw idempotencyError('IDEMPOTENCY_KEY_REUSED', input.dto.idempotencyKey);
   }
   if (row.status === 'completed' && row.response_json) {
+    if (input.dto.cuttingSequenceNo != null) return {};
     return { completedResponse: parseStoredResponse(row.response_json) };
   }
   if (row.status === 'failed') {
@@ -1036,7 +1211,7 @@ async function enqueueOutbox(
 }
 
 async function loadBathCards(
-  database: DatabaseService,
+  database: DatabaseClient,
   workdayFrom: string,
   workdayTo: string,
 ): Promise<CncTelegramBathCardDto[]> {
@@ -1461,6 +1636,21 @@ function packetColumnKey(packet: CncTelegramPacketDto): 'parsed' | 'completed' {
   return 'parsed';
 }
 
+function mapOrderCuttingSequenceRow(row: OrderCuttingSequenceRow): CncTelegramOrderCuttingSequenceDto {
+  return {
+    packetId: row.packet_id,
+    externalPacketKey: row.external_packet_key,
+    cuttingSequenceNo: toNumber(row.cutting_sequence_no),
+    sourceMessageId: toNullableNumber(row.source_message_id),
+    workday: toDateOnly(row.workday),
+    programName: row.program_name,
+    materialName: row.material_name,
+    completionStatus: row.completion_status,
+    sourceCreatedAt: toNullableIso(row.source_created_at),
+    itemQuantityTotal: toNumber(row.item_quantity_total),
+  };
+}
+
 function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
   const packets = new Map<string, CncTelegramPacketDto>();
   for (const row of rows) {
@@ -1469,6 +1659,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
       packet = {
         packetId: row.packet_id,
         externalPacketKey: row.external_packet_key,
+        cuttingSequenceNo: toNullableNumber(row.cutting_sequence_no),
         sourceChatId: row.source_chat_id,
         sourceMessageId: toNullableNumber(row.source_message_id),
         sourceThreadId: toNullableNumber(row.source_thread_id),
@@ -1533,6 +1724,7 @@ function packetAuditSnapshot(packet: CncTelegramPacketDto): Record<string, unkno
   return {
     packetId: packet.packetId,
     externalPacketKey: packet.externalPacketKey,
+    cuttingSequenceNo: packet.cuttingSequenceNo,
     sourceVersion: packet.sourceVersion,
     workday: packet.workday,
     machine: packet.machine,
@@ -1558,7 +1750,7 @@ function deriveParseStatus(dto: CncTelegramStructuredIngestDto): CncTelegramPack
 }
 
 function hashPayload(dto: CncTelegramStructuredIngestDto): string {
-  const { idempotencyKey: _idempotencyKey, ...payload } = dto;
+  const { idempotencyKey: _idempotencyKey, cuttingSequenceNo: _cuttingSequenceNo, ...payload } = dto;
   return `sha256:${createHash('sha256').update(stableStringify(payload)).digest('hex')}`;
 }
 
@@ -1592,7 +1784,7 @@ async function setSessionUser(tx: TransactionClient, userId: string): Promise<vo
   await tx.query('SELECT set_session_user($1)', [userId]);
 }
 
-async function currentDatabaseWorkday(database: DatabaseService): Promise<string> {
+async function currentDatabaseWorkday(database: DatabaseClient): Promise<string> {
   const result = await database.query<CurrentDateRow>(
     'SELECT CURRENT_DATE::text AS workday',
   );
@@ -1601,6 +1793,16 @@ async function currentDatabaseWorkday(database: DatabaseService): Promise<string
     throw new ApiError(500, 'CNC_TELEGRAM_WORKDAY_UNAVAILABLE', 'Database workday is unavailable');
   }
   return toDateOnly(workday);
+}
+
+function dateOnlyDaysBefore(value: string, days: number): string {
+  const [year, month, day] = value.split('-').map((part) => Number(part));
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return value;
+  }
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
 }
 
 function normalizeOptional(value: string | null | undefined): string | null {

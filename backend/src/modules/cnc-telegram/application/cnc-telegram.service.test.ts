@@ -9,6 +9,9 @@ describe('CncTelegramService', () => {
         async listToday() {
           throw new Error('repository must not be called');
         },
+        async listOrderCuttingSequences() {
+          throw new Error('unused');
+        },
         async ingest() {
           throw new Error('unused');
         },
@@ -31,6 +34,9 @@ describe('CncTelegramService', () => {
     const service = new CncTelegramService({
       packets: {
         async listToday() {
+          throw new Error('unused');
+        },
+        async listOrderCuttingSequences() {
           throw new Error('unused');
         },
         async ingest() {
@@ -57,6 +63,32 @@ describe('CncTelegramService', () => {
         requiredPermissions: ['cut.manage'],
       }),
     );
+  });
+
+  it('requires orders.view for order cutting sequence numbers', async () => {
+    const service = new CncTelegramService({
+      packets: {
+        async listToday() {
+          throw new Error('unused');
+        },
+        async listOrderCuttingSequences() {
+          throw new Error('repository must not be called');
+        },
+        async ingest() {
+          throw new Error('unused');
+        },
+      },
+    });
+
+    await expect(
+      service.listOrderCuttingSequences({
+        currentUser: user([]),
+        orderId: 2700,
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+    });
   });
 });
 

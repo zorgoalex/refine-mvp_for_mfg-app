@@ -3,11 +3,13 @@ import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
   IngestCncTelegramPacketCommand,
+  ListCncTelegramOrderCuttingSequencesCommand,
   ListCncTelegramTodayCommand,
   RecordCncTelegramDeniedAuditCommand,
 } from '../application/cnc-telegram.types';
 import type {
   CncTelegramIngestResponseDto,
+  CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramTodayResponseDto,
 } from '../dto/cnc-telegram.dto';
 
@@ -15,6 +17,12 @@ export class UnavailableCncTelegramRepository
   implements CncTelegramRepositoryPort, CncTelegramDeniedAuditPort
 {
   async listToday(_command: ListCncTelegramTodayCommand): Promise<CncTelegramTodayResponseDto> {
+    throw unavailable();
+  }
+
+  async listOrderCuttingSequences(
+    _command: ListCncTelegramOrderCuttingSequencesCommand,
+  ): Promise<CncTelegramOrderCuttingSequencesResponseDto> {
     throw unavailable();
   }
 

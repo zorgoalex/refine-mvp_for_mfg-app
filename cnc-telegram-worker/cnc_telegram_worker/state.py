@@ -26,6 +26,53 @@ class StateStore:
         previous = int(packet.get("sourceVersion", 0)) if isinstance(packet, dict) else 0
         return VersionDecision(source_version=previous + 1, changed=True)
 
+    def cutting_sequence_number(self, external_packet_key: str) -> int | None:
+        packet = self._state.setdefault("packets", {}).get(external_packet_key)
+        if not isinstance(packet, dict):
+            return None
+        value = packet.get("cuttingSequenceNumber")
+        return int(value) if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+    def cutting_sequence_replied(self, external_packet_key: str) -> bool:
+        packet = self._state.setdefault("packets", {}).get(external_packet_key)
+        return isinstance(packet, dict) and packet.get("cuttingSequenceReplied") is True
+
+    def assign_cutting_sequence_number(
+        self,
+        external_packet_key: str,
+        existing_number: int | None = None,
+    ) -> tuple[int, bool]:
+        packet = self._state.setdefault("packets", {}).setdefault(external_packet_key, {})
+        if not isinstance(packet, dict):
+            packet = {}
+            self._state["packets"][external_packet_key] = packet
+        current = packet.get("cuttingSequenceNumber")
+        if isinstance(current, int) and not isinstance(current, bool) and current > 0:
+            if existing_number is not None and existing_number > 0 and current != existing_number:
+                packet["cuttingSequenceNumber"] = existing_number
+                self._advance_cutting_sequence(existing_number + 1)
+                self._write()
+                return existing_number, False
+            return current, False
+        if existing_number is not None and existing_number > 0:
+            number = existing_number
+            new_assignment = False
+        else:
+            number = self._next_cutting_sequence_number()
+            new_assignment = True
+        packet["cuttingSequenceNumber"] = number
+        self._advance_cutting_sequence(number + 1)
+        self._write()
+        return number, new_assignment
+
+    def mark_cutting_sequence_replied(self, external_packet_key: str) -> None:
+        packet = self._state.setdefault("packets", {}).setdefault(external_packet_key, {})
+        if not isinstance(packet, dict):
+            packet = {}
+            self._state["packets"][external_packet_key] = packet
+        packet["cuttingSequenceReplied"] = True
+        self._write()
+
     def source_unchanged(self, external_packet_key: str, source_fingerprint: str) -> bool:
         packet = self._state.setdefault("packets", {}).get(external_packet_key)
         return (
@@ -41,13 +88,32 @@ class StateStore:
         source_version: int,
         source_fingerprint: str | None = None,
     ) -> None:
-        self._state.setdefault("packets", {})[external_packet_key] = {
+        existing = self._state.setdefault("packets", {}).get(external_packet_key)
+        packet = dict(existing) if isinstance(existing, dict) else {}
+        packet.update({
             "payloadHash": payload_hash,
             "sourceFingerprint": source_fingerprint,
             "sourceVersion": source_version,
             "postedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        }
+        })
+        self._state["packets"][external_packet_key] = packet
         self._write()
+
+    def _next_cutting_sequence_number(self) -> int:
+        sequence = self._state.setdefault("cuttingSequence", {})
+        if not isinstance(sequence, dict):
+            sequence = {}
+            self._state["cuttingSequence"] = sequence
+        value = sequence.get("nextNumber", 1)
+        return int(value) if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 1
+
+    def _advance_cutting_sequence(self, next_number: int) -> None:
+        sequence = self._state.setdefault("cuttingSequence", {})
+        if not isinstance(sequence, dict):
+            sequence = {}
+            self._state["cuttingSequence"] = sequence
+        current = self._next_cutting_sequence_number()
+        sequence["nextNumber"] = max(current, next_number)
 
     def _load(self) -> dict[str, Any]:
         try:

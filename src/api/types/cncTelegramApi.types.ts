@@ -34,6 +34,7 @@ export interface CncTelegramPacketItem {
 export interface CncTelegramPacket {
   packetId: string;
   externalPacketKey: string;
+  cuttingSequenceNo: number | null;
   sourceChatId: string;
   sourceMessageId: number | null;
   sourceThreadId: number | null;
@@ -115,4 +116,22 @@ export interface CncTelegramTodayResponse {
   workday: string;
   generatedAt: string;
   columns: CncTelegramTodayColumn[];
+}
+
+export interface CncTelegramOrderCuttingSequence {
+  packetId: string;
+  externalPacketKey: string;
+  cuttingSequenceNo: number;
+  sourceMessageId: number | null;
+  workday: string;
+  programName: string | null;
+  materialName: string;
+  completionStatus: CncTelegramCompletionStatus;
+  sourceCreatedAt: string | null;
+  itemQuantityTotal: number;
+}
+
+export interface CncTelegramOrderCuttingSequencesResponse {
+  orderId: number;
+  sequences: CncTelegramOrderCuttingSequence[];
 }
