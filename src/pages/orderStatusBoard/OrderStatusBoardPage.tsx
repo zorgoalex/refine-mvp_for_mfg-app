@@ -2235,7 +2235,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
             className="cnc-bath-card__cut-result-badge"
             aria-label={`Номер карты раскроя ${bath.cutNumber}`}
           >
-            №{bath.cutNumber}
+            {bath.cutNumber}
           </Tag>
           {!summaryOnly && (
             <Tooltip

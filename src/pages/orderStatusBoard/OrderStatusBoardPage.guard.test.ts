@@ -236,7 +236,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     const actionsEnd = page.indexOf('</div>', actionsStart);
     const actions = page.slice(actionsStart, actionsEnd);
     expect(actions).toContain('className="cnc-bath-card__cut-result-badge"');
-    expect(actions).toContain('№{bath.cutNumber}');
+    expect(actions).toMatch(/>\s*\{bath\.cutNumber\}\s*<\/Tag>/);
+    expect(actions).not.toContain('№{bath.cutNumber}');
     expect(actions.indexOf('cnc-bath-card__cut-result-badge')).toBeLessThan(
       actions.indexOf('cnc-bath-card__ready-icon'),
     );
