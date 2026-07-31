@@ -3,7 +3,7 @@ import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import dayjs from 'dayjs';
 import type { AuditLogEventDto } from '../../api/types/auditApi.types';
-import { buildAuditQuery, RelatedIds, ContextBlock, isRowExpandable } from './list';
+import { buildAuditQuery, RelatedIds, ContextBlock, ReadableAuditEvent, isRowExpandable } from './list';
 
 function event(overrides: Partial<AuditLogEventDto> = {}): AuditLogEventDto {
   return {
@@ -115,5 +115,33 @@ describe('ContextBlock', () => {
   it('renders nothing when no context dimensions are present', () => {
     const html = renderToString(<ContextBlock record={event()} />);
     expect(html).toBe('');
+  });
+});
+
+describe('ReadableAuditEvent', () => {
+  it('renders a non-technical status-change description with actor and before/after values', () => {
+    const html = renderToString(
+      <ReadableAuditEvent
+        record={event({
+          event: 'orders.status_change',
+          relatedOrderId: 42,
+          statusField: 'orderStatus',
+          statusId: 2,
+          statusName: 'Готов к выдаче',
+          before: { orderStatusId: 1 },
+          after: { orderStatusId: 2, orderStatusName: 'Готов к выдаче' },
+          diff: { orderStatusId: { before: 1, after: 2 } },
+        })}
+      />,
+    );
+
+    expect(html).toContain('Изменён статус заказа');
+    expect(html).toContain('Кем:');
+    expect(html).toContain('admin (admin)');
+    expect(html).toContain('Статус заказа');
+    expect(html).toContain('#1');
+    expect(html).toContain('Готов к выдаче');
+    expect(html).not.toContain('Request ID');
+    expect(html).not.toContain('req1');
   });
 });

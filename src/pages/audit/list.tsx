@@ -13,6 +13,7 @@ import {
   Empty,
   Alert,
   DatePicker,
+  Segmented,
 } from 'antd';
 import {
   FilterOutlined,
@@ -27,10 +28,13 @@ import { featureFlags } from '../../config/featureFlags';
 import { authSession } from '../../api/authSession';
 import { can } from '../../utils/permissions';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
+import { buildAuditReadableSummary } from './readableSummary';
 
 const { Text } = Typography;
 
 const PAGE_SIZE_DEFAULT = 50;
+
+type AuditViewMode = 'readable' | 'technical';
 
 export interface FilterValues {
   event?: string;
@@ -178,9 +182,50 @@ export function ContextBlock({ record }: { record: AuditLogEventDto }) {
   );
 }
 
+export function ReadableAuditEvent({ record }: { record: AuditLogEventDto }) {
+  const summary = buildAuditReadableSummary(record);
+
+  return (
+    <div style={{ maxWidth: 820 }}>
+      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        <Text strong>{summary.title}</Text>
+        <div>
+          <Text type="secondary">Кем: </Text>
+          <Text>{summary.actor}</Text>
+          <Text type="secondary"> · Объект: </Text>
+          <Text>{summary.object}</Text>
+        </div>
+        {summary.changes.map((change) => (
+          <div key={`${change.label}-${change.before}-${change.after}`}>
+            <Text>{change.label}: </Text>
+            <Text>{change.before}</Text>
+            <Text type="secondary"> → </Text>
+            <Text>{change.after}</Text>
+          </div>
+        ))}
+        {(summary.related.length > 0 || summary.notes.length > 0) && (
+          <Space size={[4, 4]} wrap>
+            {summary.related.map((item) => (
+              <Tag key={`related-${item}`} color="blue">
+                {item}
+              </Tag>
+            ))}
+            {summary.notes.map((note) => (
+              <Tag key={`note-${note}`} color="default">
+                {note}
+              </Tag>
+            ))}
+          </Space>
+        )}
+      </Space>
+    </div>
+  );
+}
+
 export const AuditList: React.FC = () => {
   const [form] = Form.useForm<FilterValues>();
   const [filtersVisible, setFiltersVisible] = useState(false);
+  const [viewMode, setViewMode] = useState<AuditViewMode>('readable');
   const { pageSize: preferredPageSize, setPageSize: rememberPageSize } = usePageSizePreference(
     'audit:list',
     PAGE_SIZE_DEFAULT,
@@ -312,14 +357,25 @@ export const AuditList: React.FC = () => {
             Журнал аудита
           </Text>
         </Space>
-        <Button
-          type={filtersVisible ? 'primary' : 'default'}
-          icon={<FilterOutlined />}
-          onClick={() => setFiltersVisible((v) => !v)}
-          size="small"
-        >
-          {filtersVisible ? 'Скрыть фильтры' : 'Фильтры'}
-        </Button>
+        <Space size="small" wrap>
+          <Segmented
+            size="small"
+            value={viewMode}
+            options={[
+              { label: 'Понятный', value: 'readable' },
+              { label: 'Технический', value: 'technical' },
+            ]}
+            onChange={(value) => setViewMode(value as AuditViewMode)}
+          />
+          <Button
+            type={filtersVisible ? 'primary' : 'default'}
+            icon={<FilterOutlined />}
+            onClick={() => setFiltersVisible((v) => !v)}
+            size="small"
+          >
+            {filtersVisible ? 'Скрыть фильтры' : 'Фильтры'}
+          </Button>
+        </Space>
       </div>
 
       {permissionError && (
@@ -464,101 +520,134 @@ export const AuditList: React.FC = () => {
         </Card>
       )}
 
-      <Table<AuditLogEventDto>
-        rowKey="auditId"
-        loading={loading}
-        dataSource={data}
-        size="small"
-        sticky
-        scroll={{ x: 'max-content', y: 600 }}
-        pagination={{
-          current: pagination.page,
-          pageSize: pagination.pageSize,
-          total: pagination.total,
-          pageSizeOptions: PAGE_SIZE_OPTIONS,
-          showSizeChanger: true,
-          showTotal: (total) => `Всего: ${total}`,
-        }}
-        onChange={(pag) => handleTableChange(pag)}
-        expandable={{
-          expandedRowRender,
-          rowExpandable: isRowExpandable,
-        }}
-        locale={{ emptyText: <Empty description="Нет записей аудита" /> }}
-      >
-        <Table.Column<AuditLogEventDto>
-          dataIndex="createdAt"
-          title="Дата/время"
-          width={150}
-          render={(value) => formatDateTime(value)}
-        />
-        <Table.Column<AuditLogEventDto>
-          dataIndex="event"
-          title="Событие"
-          width={180}
-          ellipsis
-          render={(value: string) => <Tag color="blue">{value}</Tag>}
-        />
-        <Table.Column<AuditLogEventDto>
-          title="Актор"
-          width={140}
-          render={(_, record) => {
-            if (!record.username) return <span style={{ color: '#bfbfbf' }}>—</span>;
-            return (
+      {viewMode === 'readable' ? (
+        <Table<AuditLogEventDto>
+          rowKey="auditId"
+          loading={loading}
+          dataSource={data}
+          size="small"
+          sticky
+          scroll={{ x: 'max-content', y: 600 }}
+          pagination={{
+            current: pagination.page,
+            pageSize: pagination.pageSize,
+            total: pagination.total,
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
+            showSizeChanger: true,
+            showTotal: (total) => `Всего: ${total}`,
+          }}
+          onChange={(pag) => handleTableChange(pag)}
+          locale={{ emptyText: <Empty description="Нет записей аудита" /> }}
+        >
+          <Table.Column<AuditLogEventDto>
+            dataIndex="createdAt"
+            title="Когда"
+            width={150}
+            render={(value) => formatDateTime(value)}
+          />
+          <Table.Column<AuditLogEventDto>
+            title="Описание"
+            width={760}
+            render={(_, record) => <ReadableAuditEvent record={record} />}
+          />
+        </Table>
+      ) : (
+        <Table<AuditLogEventDto>
+          rowKey="auditId"
+          loading={loading}
+          dataSource={data}
+          size="small"
+          sticky
+          scroll={{ x: 'max-content', y: 600 }}
+          pagination={{
+            current: pagination.page,
+            pageSize: pagination.pageSize,
+            total: pagination.total,
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
+            showSizeChanger: true,
+            showTotal: (total) => `Всего: ${total}`,
+          }}
+          onChange={(pag) => handleTableChange(pag)}
+          expandable={{
+            expandedRowRender,
+            rowExpandable: isRowExpandable,
+          }}
+          locale={{ emptyText: <Empty description="Нет записей аудита" /> }}
+        >
+          <Table.Column<AuditLogEventDto>
+            dataIndex="createdAt"
+            title="Дата/время"
+            width={150}
+            render={(value) => formatDateTime(value)}
+          />
+          <Table.Column<AuditLogEventDto>
+            dataIndex="event"
+            title="Событие"
+            width={180}
+            ellipsis
+            render={(value: string) => <Tag color="blue">{value}</Tag>}
+          />
+          <Table.Column<AuditLogEventDto>
+            title="Актор"
+            width={140}
+            render={(_, record) => {
+              if (!record.username) return <span style={{ color: '#bfbfbf' }}>—</span>;
+              return (
+                <div>
+                  <div>{record.username}</div>
+                  {record.role && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      {record.role}
+                    </Text>
+                  )}
+                </div>
+              );
+            }}
+          />
+          <Table.Column<AuditLogEventDto>
+            title="Сущность"
+            width={130}
+            render={(_, record) => (
               <div>
-                <div>{record.username}</div>
-                {record.role && (
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    {record.role}
+                <Text style={{ fontSize: 12 }}>{record.entityType ?? <span style={{ color: '#bfbfbf' }}>—</span>}</Text>
+                {record.entityId && (
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
+                    #{record.entityId}
                   </Text>
                 )}
               </div>
-            );
-          }}
-        />
-        <Table.Column<AuditLogEventDto>
-          title="Сущность"
-          width={130}
-          render={(_, record) => (
-            <div>
-              <Text style={{ fontSize: 12 }}>{record.entityType ?? <span style={{ color: '#bfbfbf' }}>—</span>}</Text>
-              {record.entityId && (
-                <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
-                  #{record.entityId}
-                </Text>
-              )}
-            </div>
-          )}
-        />
-        <Table.Column<AuditLogEventDto>
-          title="Связанные объекты"
-          width={220}
-          render={(_, record) => <RelatedIds record={record} />}
-        />
-        <Table.Column<AuditLogEventDto>
-          dataIndex="source"
-          title="Источник"
-          width={90}
-          render={(value: string | null) => value ?? <span style={{ color: '#bfbfbf' }}>—</span>}
-        />
-        <Table.Column<AuditLogEventDto>
-          dataIndex="requestId"
-          title="Request ID"
-          width={130}
-          ellipsis
-          render={(value: string) =>
-            value ? (
-              <Tooltip title={value}>
-                <Text code style={{ fontSize: 11 }}>
-                  {value.slice(0, 8)}…
-                </Text>
-              </Tooltip>
-            ) : (
-              <span style={{ color: '#bfbfbf' }}>—</span>
-            )
-          }
-        />
-      </Table>
+            )}
+          />
+          <Table.Column<AuditLogEventDto>
+            title="Связанные объекты"
+            width={220}
+            render={(_, record) => <RelatedIds record={record} />}
+          />
+          <Table.Column<AuditLogEventDto>
+            dataIndex="source"
+            title="Источник"
+            width={90}
+            render={(value: string | null) => value ?? <span style={{ color: '#bfbfbf' }}>—</span>}
+          />
+          <Table.Column<AuditLogEventDto>
+            dataIndex="requestId"
+            title="Request ID"
+            width={130}
+            ellipsis
+            render={(value: string) =>
+              value ? (
+                <Tooltip title={value}>
+                  <Text code style={{ fontSize: 11 }}>
+                    {value.slice(0, 8)}…
+                  </Text>
+                </Tooltip>
+              ) : (
+                <span style={{ color: '#bfbfbf' }}>—</span>
+              )
+            }
+          />
+        </Table>
+      )}
     </div>
   );
 };
