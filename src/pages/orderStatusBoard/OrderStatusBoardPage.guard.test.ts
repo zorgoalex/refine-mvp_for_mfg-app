@@ -265,6 +265,10 @@ describe('OrderStatusBoardPage UX guards', () => {
   });
 
   it('prints the compact MDF board in landscape with repeated column headers', () => {
+    const printCardStart = page.indexOf('const CncTelegramPrintCard');
+    const printCardEnd = page.indexOf('interface CncCardDisplayToggleProps', printCardStart);
+    const printCard = page.slice(printCardStart, printCardEnd);
+
     expect(page).toContain("import { createPortal } from 'react-dom';");
     expect(page).toContain("cncCardDisplayMode === 'compact'");
     expect(page).toContain('aria-label="Распечатать компактную МДФ-доску"');
@@ -278,6 +282,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-print-board thead');
     expect(css).toContain('display: table-header-group');
     expect(css).toContain('break-inside: avoid');
+    expect(printCard).toContain('className="cnc-print-card__bath-cut-number"');
+    expect(printCard).toContain('{card.bath.cutNumber}');
+    expect(printCard).not.toContain('№{card.bath.cutNumber}');
+    expect(css).toMatch(
+      /\.cnc-print-card__bath-cut-number\s*\{[^}]*border-radius: 1mm;[^}]*font-variant-numeric: tabular-nums;/s,
+    );
   });
 
   it('keeps CNC relation highlighting defaulted on and controlled by the Links switch', () => {

@@ -1769,14 +1769,24 @@ const CncTelegramPrintCard: React.FC<{
     card.kind === 'bath' ? card.bath.items : card.packet.items,
   );
   return (
-    <div className="cnc-print-card">
-      {summaries.length > 0 ? summaries.map((summary) => (
-        <div className="cnc-print-card__summary" key={summary.orderName}>
-          <strong>{summary.orderName}</strong>
-          <span>{summary.details} дет.</span>
-        </div>
-      )) : (
-        <strong className="cnc-print-card__order-number">Без заказа</strong>
+    <div className={`cnc-print-card${card.kind === 'bath' ? ' cnc-print-card--bath' : ''}`}>
+      <div className="cnc-print-card__summaries">
+        {summaries.length > 0 ? summaries.map((summary) => (
+          <div className="cnc-print-card__summary" key={summary.orderName}>
+            <strong>{summary.orderName}</strong>
+            <span>{summary.details} дет.</span>
+          </div>
+        )) : (
+          <strong className="cnc-print-card__order-number">Без заказа</strong>
+        )}
+      </div>
+      {card.kind === 'bath' && (
+        <span
+          className="cnc-print-card__bath-cut-number"
+          aria-label={`Номер карты раскроя ${card.bath.cutNumber}`}
+        >
+          {card.bath.cutNumber}
+        </span>
       )}
     </div>
   );
