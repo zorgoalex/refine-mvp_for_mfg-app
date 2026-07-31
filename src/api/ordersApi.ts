@@ -11,6 +11,8 @@ import type {
   OrderFormDataResponse,
   OrderListQuery,
   OrderListResponse,
+  OrderResourceDemandQuery,
+  OrderResourceDemandResponse,
   OrderResponse,
   RestoreOrderRequest,
   RestoreOrderResponse,
@@ -27,6 +29,10 @@ export const ordersApi = {
     return httpClient.get<OrderFormDataResponse>(apiRoutes.orders.formData);
   },
 
+  listResourceDemands(params: OrderResourceDemandQuery = {}): Promise<OrderResourceDemandResponse> {
+    return httpClient.get<OrderResourceDemandResponse>(withQuery(apiRoutes.orders.resourceDemands, params));
+  },
+
   async getById(orderId: number, opts?: { includeDeleted?: boolean }): Promise<OrderDto> {
     const basePath = apiRoutes.orders.byId(validateOrderId(orderId));
     const path = opts?.includeDeleted ? withQuery(basePath, { includeDeleted: 'true' }) : basePath;
@@ -34,15 +40,19 @@ export const ordersApi = {
     return response.order;
   },
 
-  create(dto: SaveOrderDto): Promise<SaveOrderResponse> {
-    return httpClient.post<SaveOrderResponse>(apiRoutes.orders.list, dto);
+  async create(dto: SaveOrderDto): Promise<SaveOrderResponse> {
+    const response = await httpClient.post<SaveOrderResponse>(apiRoutes.orders.list, dto);
+    emitOrderDataChanged(response.order.header.orderId);
+    return response;
   },
 
-  update(orderId: number, dto: SaveOrderDto): Promise<SaveOrderResponse> {
-    return httpClient.put<SaveOrderResponse>(
+  async update(orderId: number, dto: SaveOrderDto): Promise<SaveOrderResponse> {
+    const response = await httpClient.put<SaveOrderResponse>(
       apiRoutes.orders.byId(validateOrderId(orderId)),
       dto,
     );
+    emitOrderDataChanged(response.order.header.orderId);
+    return response;
   },
 
   changeStatus(
@@ -122,6 +132,58 @@ export const ordersApi = {
     );
   },
 };
+
+export const ORDER_DATA_CHANGED_EVENT = 'erp:order-data-changed';
+const ORDER_DATA_CHANGED_STORAGE_KEY = 'erp.orderData.changed';
+
+export interface OrderDataChangedPayload {
+  orderId: number;
+  changedAt: string;
+}
+
+export function subscribeOrderDataChanged(listener: (payload: OrderDataChangedPayload) => void): () => void {
+  if (typeof window === 'undefined') return () => undefined;
+  const onWindowEvent = (event: Event) => {
+    const payload = readOrderDataChangedPayload((event as CustomEvent<unknown>).detail);
+    if (payload) listener(payload);
+  };
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== ORDER_DATA_CHANGED_STORAGE_KEY || !event.newValue) return;
+    try {
+      const payload = readOrderDataChangedPayload(JSON.parse(event.newValue));
+      if (payload) listener(payload);
+    } catch {
+      // Same-window event and polling still work when storage contains invalid data.
+    }
+  };
+  window.addEventListener(ORDER_DATA_CHANGED_EVENT, onWindowEvent);
+  window.addEventListener('storage', onStorage);
+  return () => {
+    window.removeEventListener(ORDER_DATA_CHANGED_EVENT, onWindowEvent);
+    window.removeEventListener('storage', onStorage);
+  };
+}
+
+function emitOrderDataChanged(orderId: number): void {
+  if (typeof window === 'undefined') return;
+  const payload: OrderDataChangedPayload = { orderId, changedAt: new Date().toISOString() };
+  window.dispatchEvent(new CustomEvent(ORDER_DATA_CHANGED_EVENT, { detail: payload }));
+  try {
+    window.localStorage.setItem(ORDER_DATA_CHANGED_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Same-window event and polling remain available.
+  }
+}
+
+function readOrderDataChangedPayload(value: unknown): OrderDataChangedPayload | null {
+  if (!value || typeof value !== 'object') return null;
+  const payload = value as Partial<OrderDataChangedPayload>;
+  return Number.isInteger(payload.orderId)
+    && (payload.orderId ?? 0) > 0
+    && typeof payload.changedAt === 'string'
+    ? payload as OrderDataChangedPayload
+    : null;
+}
 
 export function withQuery(path: string, params: object): string {
   const searchParams = new URLSearchParams();

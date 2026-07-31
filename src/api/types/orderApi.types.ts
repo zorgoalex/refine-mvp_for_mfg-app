@@ -28,6 +28,57 @@ export interface OrderListResponse {
   pagination: Pagination;
 }
 
+export interface OrderResourceDemandQuery {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  dateFrom?: DateOnlyString;
+  dateTo?: DateOnlyString;
+  sheetMaterialTypeId?: number;
+  filmId?: number;
+  supplierId?: number;
+  vendorId?: number;
+}
+
+export interface OrderSheetMaterialDemandDto {
+  sheetMaterialTypeId: number;
+  name: string;
+  totalArea: number;
+  detailsCount: number;
+  supplierId: number | null;
+  supplierName: string | null;
+}
+
+export interface OrderFilmDemandDto {
+  filmId: number;
+  name: string;
+  totalArea: number;
+  detailsCount: number;
+  linearMeters: number;
+  sheets: number;
+  hasCutData: boolean;
+  vendorId: number | null;
+  vendorName: string | null;
+}
+
+export interface OrderResourceDemandDto {
+  orderId: number;
+  orderName: string;
+  fullNumber: string;
+  orderDate: DateOnlyString | null;
+  projectCode: string;
+  clientName: string | null;
+  updatedAt: IsoDateTimeString;
+  sheetMaterials: OrderSheetMaterialDemandDto[];
+  films: OrderFilmDemandDto[];
+}
+
+export interface OrderResourceDemandResponse {
+  data: OrderResourceDemandDto[];
+  pagination: Pagination;
+  refreshedAt: IsoDateTimeString;
+}
+
 export interface Pagination {
   page: number;
   pageSize: number;
