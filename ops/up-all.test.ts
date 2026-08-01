@@ -7,6 +7,8 @@ const script = resolve(__dirname, 'up-all.sh');
 const source = readFileSync(script, 'utf8');
 const deploySource = readFileSync(resolve(__dirname, 'deploy-stack.sh'), 'utf8');
 const setupSource = readFileSync(resolve(__dirname, 'setup-vps.sh'), 'utf8');
+const checkEnvSource = readFileSync(resolve(__dirname, 'check-env.sh'), 'utf8');
+const cncWorkerSource = readFileSync(resolve(__dirname, 'cnc-telegram-worker.sh'), 'utf8');
 const composeSource = readFileSync(resolve(__dirname, 'templates/docker-compose.vps.yml'), 'utf8');
 function run(args: string[]) {
   return execFileSync('bash', [script, ...args], { encoding: 'utf8' });
@@ -66,10 +68,27 @@ describe('up-all.sh provision', () => {
     expect(source).toMatch(/config\)[\s\S]*preflight[\s\S]*compose config/);
   });
 
+  it('loads the test Compose overlay for the local test stack', () => {
+    expect(source).toContain('docker-compose.test.yml');
+    expect(source).toMatch(/-f "\$VPS_FILE"[\s\S]*-f "\$TEST_OVERLAY"/);
+    expect(source).toMatch(/test compose overlay not found/);
+  });
+
   it('deploy-stack overlays CNC Telegram worker for existing live compose files', () => {
     expect(deploySource).toContain('docker-compose.cnc-telegram-worker.yml');
+    expect(deploySource).toContain('docker-compose.${stack_env}.yml');
+    expect(deploySource).toMatch(/COMPOSE_FILE_ARGS\+=\(-f "\$CNC_TELEGRAM_OVERLAY"\)[\s\S]*COMPOSE_FILE_ARGS\+=\(-f "\$STACK_ENV_OVERLAY"\)/);
     expect(deploySource).toMatch(/compose_profile_enabled cnc-telegram[\s\S]*cnc-telegram-worker/);
     expect(deploySource).toMatch(/COMPOSE_FILE_ARGS=\(-f "\$COMPOSE_FILE"\)/);
     expect(deploySource).toMatch(/docker compose --env-file "\$ENV_FILE" "\$\{COMPOSE_FILE_ARGS\[@\]\}"/);
+  });
+
+  it('requires an explicit stack env and blocks non-prod Telegram writers', () => {
+    expect(checkEnvSource).toContain('require_var ERP_STACK_ENV');
+    expect(checkEnvSource).toMatch(/ERP_STACK_ENV must be one of: test, prod, dev/);
+    expect(checkEnvSource).toMatch(/CNC_TELEGRAM_WORKER_ROLE must be one of: disabled, writer/);
+    expect(checkEnvSource).toMatch(/CNC_TELEGRAM_WORKER_ROLE=writer requires ERP_STACK_ENV=prod/);
+    expect(cncWorkerSource).toMatch(/stack_env" == "prod"[\s\S]*role="writer"/);
+    expect(cncWorkerSource).toMatch(/refusing Telegram writer on ERP_STACK_ENV=\$stack_env/);
   });
 });

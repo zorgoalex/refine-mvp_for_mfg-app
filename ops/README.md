@@ -74,6 +74,10 @@ Rules:
 - Commit new env keys with safe defaults/placeholders to
   `ops/templates/env.vps.example`.
 - Keep real values only in the VPS `.env`.
+- Set `ERP_STACK_ENV=test|prod` explicitly. Test deploys load
+  `docker-compose.test.yml` and keep `CNC_TELEGRAM_WORKER_ROLE=disabled`;
+  prod deploys load `docker-compose.prod.yml` and may run
+  `CNC_TELEGRAM_WORKER_ROLE=writer`.
 - If the live VPS Compose file needs a machine-local path or bind override, keep
   that override out of secrets and mirror any general service/env change back
   into the tracked template.
@@ -183,11 +187,18 @@ Logs:
 repo_erp/ops/cnc-telegram-worker.sh logs
 ```
 
-`deploy-stack.sh` also handles old live `docker-compose.yml` files: when
-`COMPOSE_PROFILES=cnc-telegram` is enabled but the live file has no
-`cnc-telegram-worker`, it adds
+`deploy-stack.sh` loads a target overlay from `ERP_STACK_ENV`:
+`ops/templates/docker-compose.test.yml` or
+`ops/templates/docker-compose.prod.yml`. It also handles old live
+`docker-compose.yml` files: when `COMPOSE_PROFILES=cnc-telegram` is enabled
+but the live file has no `cnc-telegram-worker`, it adds
 `ops/templates/docker-compose.cnc-telegram-worker.yml` as an overlay for that
 deploy run.
+
+For one shared CNC Telegram chat, keep exactly one writer. Prod `.env`:
+`ERP_STACK_ENV=prod`, `COMPOSE_PROFILES=cnc-telegram`,
+`BACKEND_ENABLE_CNC_TELEGRAM=true`, `CNC_TELEGRAM_WORKER_ROLE=writer`.
+Test `.env`: `ERP_STACK_ENV=test`, `CNC_TELEGRAM_WORKER_ROLE=disabled`.
 
 ## gen-secrets.sh, ensure-build-repos.sh, up-all.sh provision
 

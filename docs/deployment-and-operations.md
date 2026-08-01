@@ -82,11 +82,17 @@ docker compose \
 ## CNC Telegram worker
 
 Prod worker для рабочего Telegram-чата включается profile `cnc-telegram`.
-Обычный deploy/up поднимет его автоматически, если в VPS `.env` есть:
+Для общего Telegram-чата допускается только один writer. Test stack должен
+оставаться `CNC_TELEGRAM_WORKER_ROLE=disabled`; prod stack должен явно иметь
+`ERP_STACK_ENV=prod` и `CNC_TELEGRAM_WORKER_ROLE=writer`.
+
+Обычный deploy/up поднимет prod writer автоматически, если в VPS `.env` есть:
 
 ```env
+ERP_STACK_ENV=prod
 BACKEND_ENABLE_CNC_TELEGRAM=true
 COMPOSE_PROFILES=cnc-telegram
+CNC_TELEGRAM_WORKER_ROLE=writer
 TELEGRAM_API_ID=<api-id>
 TELEGRAM_API_HASH=<api-hash>
 TELEGRAM_CHAT=<chat-id-or-username>

@@ -31,6 +31,7 @@ ROOT="$(cd "$SCRIPT_PATH/../.." && pwd)"
 
 ENV_FILE="$ROOT/.env"
 VPS_FILE="$ROOT/repo_erp/ops/templates/docker-compose.vps.yml"
+TEST_OVERLAY="$ROOT/repo_erp/ops/templates/docker-compose.test.yml"
 
 # Project name is fixed; the running stack already lives under erp_test.
 PROJECT="${COMPOSE_PROJECT_NAME_OVERRIDE:-erp_test}"
@@ -64,6 +65,7 @@ compose() {
       -p "$PROJECT" \
       --env-file "$ENV_FILE" \
       -f "$VPS_FILE" \
+      -f "$TEST_OVERLAY" \
       "$@" )
 }
 
@@ -71,6 +73,7 @@ compose() {
 preflight() {
   [ -f "$ENV_FILE" ]    || die ".env not found at $ENV_FILE"
   [ -f "$VPS_FILE" ]    || die "base compose file not found at $VPS_FILE"
+  [ -f "$TEST_OVERLAY" ] || die "test compose overlay not found at $TEST_OVERLAY"
   load_compose_profiles
   # Unfilled placeholders in .env render internet-facing services with empty
   # secrets / empty traefik hosts. Warn, do not block (test contour).

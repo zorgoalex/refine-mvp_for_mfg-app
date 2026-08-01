@@ -80,6 +80,14 @@ class CncTelegramWorker:
         )
 
     async def run_once(self, workday: date | None = None, days: int | None = None) -> None:
+        if not self.config.enabled:
+            print(
+                f"CNC Telegram worker disabled: ERP_STACK_ENV={self.config.stack_env} "
+                f"CNC_TELEGRAM_WORKER_ROLE={self.config.worker_role}",
+                flush=True,
+            )
+            return
+        self.config.require_worker_enabled()
         self.config.require_telegram()
         self.config.require_backend_auth()
         days_to_scan = days or self.config.history_days
@@ -109,6 +117,14 @@ class CncTelegramWorker:
             cleanup_temp_dir(self.config.media_dir, self.config.attachment_ttl_hours)
 
     async def run_daemon(self, days: int | None = None) -> None:
+        if not self.config.enabled:
+            print(
+                f"CNC Telegram worker disabled: ERP_STACK_ENV={self.config.stack_env} "
+                f"CNC_TELEGRAM_WORKER_ROLE={self.config.worker_role}",
+                flush=True,
+            )
+            return
+        self.config.require_worker_enabled()
         first = True
         while True:
             scan_days = days or (self.config.history_days if first and self.config.backfill_on_start else 1)

@@ -85,9 +85,12 @@ describe('VPS compose backend runtime flags', () => {
     expect(compose).toContain('cnc-telegram-worker:');
     expect(compose).toContain('profiles: ["cnc-telegram"]');
     expect(compose).toContain('context: ${CNC_TELEGRAM_WORKER_BUILD_CONTEXT:-./repo_erp/cnc-telegram-worker}');
+    expect(compose).toContain('ERP_STACK_ENV: ${ERP_STACK_ENV:-test}');
+    expect(compose).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-disabled}');
+    expect(compose).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: ${CNC_TELEGRAM_ALLOW_NON_PROD_WRITER:-false}');
     expect(compose).toContain('TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}');
     expect(compose).toContain('ERP_API_URL: ${CNC_TELEGRAM_ERP_API_URL:-http://backend:3000/api/v1}');
-    expect(compose).toContain('CNC_OCR_COMMAND: ${CNC_OCR_COMMAND:-python -m cnc_telegram_worker.glm_ocr_client --image {image}}');
+    expect(compose).toContain('CNC_OCR_COMMAND: ${CNC_OCR_COMMAND:-python -m cnc_telegram_worker.rapid_ocr_client --image {image}}');
     expect(compose).toContain('GLM_OCR_RUNNER_URL: ${GLM_OCR_RUNNER_URL:-http://glm-ocr-runner:8001/ocr}');
     expect(compose).toContain('CNC_TEMP_TTL_HOURS: ${CNC_TEMP_TTL_HOURS:-24}');
     expect(compose).toContain('cnc-telegram-worker-data:/data');
@@ -101,14 +104,31 @@ describe('VPS compose backend runtime flags', () => {
     expect(overlay).toContain('glm-ocr-runner:');
     expect(overlay).toContain('cnc-telegram-worker:');
     expect(overlay).toContain('profiles: ["cnc-telegram"]');
+    expect(overlay).toContain('ERP_STACK_ENV: ${ERP_STACK_ENV:-test}');
+    expect(overlay).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-disabled}');
     expect(overlay).toContain('cnc-telegram-worker-data:/data');
+    expect(envExample).toContain('ERP_STACK_ENV=test');
     expect(envExample).toContain('COMPOSE_PROFILES=');
     expect(envExample).toContain('# COMPOSE_PROFILES=cnc-telegram');
     expect(envExample).toContain('CNC_TELEGRAM_WORKER_BUILD_CONTEXT=./repo_erp/cnc-telegram-worker');
-    expect(envExample).toContain('CNC_OCR_ENGINE=glm-ocr-0.9b-q8-llama.cpp');
+    expect(envExample).toContain('CNC_TELEGRAM_WORKER_ROLE=disabled');
+    expect(envExample).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=false');
+    expect(envExample).toContain('CNC_OCR_ENGINE=rapidocr-ppocrv5-eslav');
     expect(envExample).toContain('GLM_OCR_RUNNER_BUILD_CONTEXT=./repo_erp/glm-ocr-runner');
     expect(envExample).toContain('GLM_OCR_MODEL_FILE=GLM-OCR-Q8_0.gguf');
     expect(envExample).toContain('GLM_OCR_MMPROJ_FILE=mmproj-GLM-OCR-Q8_0.gguf');
+  });
+
+  it('defines target-specific Docker Compose overlays for test and prod', () => {
+    const testOverlay = readTemplate('ops/templates/docker-compose.test.yml');
+    const prodOverlay = readTemplate('ops/templates/docker-compose.prod.yml');
+
+    expect(testOverlay).toContain('ERP_STACK_ENV: test');
+    expect(testOverlay).toContain('CNC_TELEGRAM_WORKER_ROLE: disabled');
+    expect(testOverlay).toContain('CNC_BACKFILL_ON_START: "false"');
+    expect(prodOverlay).toContain('ERP_STACK_ENV: prod');
+    expect(prodOverlay).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-writer}');
+    expect(prodOverlay).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: "false"');
   });
 
   it('publishes the CAD service on a public traefik subdomain with internal access', () => {
