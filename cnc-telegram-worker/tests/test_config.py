@@ -14,6 +14,7 @@ class WorkerConfigTest(unittest.TestCase):
 
         self.assertEqual(config.stack_env, "test")
         self.assertEqual(config.worker_role, "disabled")
+        self.assertEqual(config.poll_interval_seconds, 60)
         self.assertFalse(config.enabled)
 
     def test_writer_requires_prod_stack_by_default(self) -> None:

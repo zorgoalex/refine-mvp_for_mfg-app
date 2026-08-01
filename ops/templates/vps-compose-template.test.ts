@@ -93,6 +93,7 @@ describe('VPS compose backend runtime flags', () => {
     expect(compose).toContain('CNC_OCR_COMMAND: ${CNC_OCR_COMMAND:-python -m cnc_telegram_worker.rapid_ocr_client --image {image}}');
     expect(compose).toContain('GLM_OCR_RUNNER_URL: ${GLM_OCR_RUNNER_URL:-http://glm-ocr-runner:8001/ocr}');
     expect(compose).toContain('CNC_TEMP_TTL_HOURS: ${CNC_TEMP_TTL_HOURS:-24}');
+    expect(compose).toContain('CNC_POLL_INTERVAL_SECONDS: ${CNC_POLL_INTERVAL_SECONDS:-60}');
     expect(compose).toContain('cnc-telegram-worker-data:/data');
     expect(compose).toContain('cnc-telegram-worker-data:');
     expect(compose).toContain('glm-ocr-model-cache:');
@@ -113,6 +114,7 @@ describe('VPS compose backend runtime flags', () => {
     expect(envExample).toContain('CNC_TELEGRAM_WORKER_BUILD_CONTEXT=./repo_erp/cnc-telegram-worker');
     expect(envExample).toContain('CNC_TELEGRAM_WORKER_ROLE=disabled');
     expect(envExample).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=false');
+    expect(envExample).toContain('CNC_POLL_INTERVAL_SECONDS=60');
     expect(envExample).toContain('CNC_OCR_ENGINE=rapidocr-ppocrv5-eslav');
     expect(envExample).toContain('GLM_OCR_RUNNER_BUILD_CONTEXT=./repo_erp/glm-ocr-runner');
     expect(envExample).toContain('GLM_OCR_MODEL_FILE=GLM-OCR-Q8_0.gguf');

@@ -6,16 +6,12 @@ import json
 import mimetypes
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
 from telethon import TelegramClient
-try:
-    from telethon.tl.functions.messages import GetRepliesRequest
-except Exception:  # pragma: no cover - tests use a lightweight Telethon stub.
-    GetRepliesRequest = None  # type: ignore[assignment]
 
 from .cleanup import cleanup_temp_dir
 from .config import WorkerConfig
@@ -144,14 +140,25 @@ class CncTelegramWorker:
             self.config.max_messages_per_scan,
         )
         groups = group_image_messages(messages)
+        groups = apply_known_cutting_sequence_state(groups, chat_id, self.state)
+        missing_sequence_ids = {
+            int(group.image_message.id)
+            for group in groups
+            if group.cutting_sequence_no is None
+        }
+        if missing_sequence_ids:
+            sequence_index = await collect_cutting_sequence_reply_search_index(
+                client,
+                entity,
+                missing_sequence_ids,
+            )
+            groups = apply_cutting_sequence_reply_index(groups, sequence_index)
         for group in groups:
             await self.process_group(client, entity, group, chat_id, workday)
 
     async def process_group(self, client: Any, entity: Any, group: ImageGroup, chat_id: str, workday: date) -> None:
         external_key = external_packet_key(chat_id, int(group.image_message.id))
         cutting_sequence_no = group.cutting_sequence_no
-        if cutting_sequence_no is None:
-            cutting_sequence_no = await find_cutting_sequence_reply_number(client, entity, group.image_message)
         sequence_from_telegram = cutting_sequence_no is not None
         if cutting_sequence_no is not None:
             self.state.assign_cutting_sequence_number(external_key, existing_number=cutting_sequence_no)
@@ -489,54 +496,62 @@ def cutting_sequence_reply_number(messages: list[Any], image_message: Any) -> in
     return min(candidates, key=lambda item: (item[0], item[1]))[2]
 
 
-async def find_cutting_sequence_reply_number(client: Any, entity: Any, image_message: Any) -> int | None:
-    image_id = int(image_message.id)
-    direct_number = await find_cutting_sequence_reply_number_from_replies(client, entity, image_id)
-    if direct_number is not None:
-        return direct_number
-    candidates: list[tuple[datetime, int, int]] = []
+async def collect_cutting_sequence_reply_search_index(
+    client: Any,
+    entity: Any,
+    image_message_ids: set[int],
+) -> dict[int, int]:
+    if not image_message_ids:
+        return {}
+    candidates_by_image: dict[int, list[tuple[datetime, int, int]]] = {}
     async for message in client.iter_messages(entity, search="Раскрой", limit=1000):
-        if message_reply_to_id(message) != image_id:
+        reply_to = message_reply_to_id(message)
+        if reply_to not in image_message_ids:
             continue
         number = parse_cutting_sequence_reply(message_text(message))
         if number is not None:
-            candidates.append((message_datetime(message), int(message.id), number))
-    if not candidates:
-        return None
-    return min(candidates, key=lambda item: (item[0], item[1]))[2]
+            candidates_by_image.setdefault(reply_to, []).append((
+                message_datetime(message),
+                int(message.id),
+                number,
+            ))
+    return {
+        image_id: min(candidates, key=lambda item: (item[0], item[1]))[2]
+        for image_id, candidates in candidates_by_image.items()
+    }
 
 
-async def find_cutting_sequence_reply_number_from_replies(client: Any, entity: Any, image_id: int) -> int | None:
-    if GetRepliesRequest is None:
-        return None
-    candidates: list[tuple[datetime, int, int]] = []
-    offset_id = 0
-    while True:
-        response = await client(GetRepliesRequest(
-            peer=entity,
-            msg_id=image_id,
-            offset_id=offset_id,
-            offset_date=None,
-            add_offset=0,
-            limit=100,
-            max_id=0,
-            min_id=0,
-            hash=0,
-        ))
-        messages = list(getattr(response, "messages", []) or [])
-        if not messages:
-            break
-        for message in messages:
-            number = parse_cutting_sequence_reply(message_text(message))
-            if number is not None:
-                candidates.append((message_datetime(message), int(message.id), number))
-        next_offset = min(int(message.id) for message in messages if getattr(message, "id", None) is not None)
-        if next_offset <= 0 or next_offset == offset_id:
-            break
-        offset_id = next_offset
-    if not candidates:
-        return None
-    return min(candidates, key=lambda item: (item[0], item[1]))[2]
+def apply_cutting_sequence_reply_index(
+    groups: list[ImageGroup],
+    sequence_index: dict[int, int],
+) -> list[ImageGroup]:
+    if not sequence_index:
+        return groups
+    return [
+        replace(group, cutting_sequence_no=sequence_index.get(int(group.image_message.id), group.cutting_sequence_no))
+        if group.cutting_sequence_no is None
+        else group
+        for group in groups
+    ]
+
+
+def apply_known_cutting_sequence_state(
+    groups: list[ImageGroup],
+    chat_id: str,
+    state: StateStore,
+) -> list[ImageGroup]:
+    updated: list[ImageGroup] = []
+    for group in groups:
+        if group.cutting_sequence_no is not None:
+            updated.append(group)
+            continue
+        external_key = external_packet_key(chat_id, int(group.image_message.id))
+        if not state.cutting_sequence_replied(external_key):
+            updated.append(group)
+            continue
+        number = state.cutting_sequence_number(external_key)
+        updated.append(replace(group, cutting_sequence_no=number) if number is not None else group)
+    return updated
 
 
 async def send_cutting_sequence_reply(client: Any, entity: Any, image_message: Any, number: int) -> None:

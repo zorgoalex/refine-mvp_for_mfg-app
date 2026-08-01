@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import unittest
 import sys
+import tempfile
 import types
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 telethon_stub = types.ModuleType("telethon")
 telethon_stub.TelegramClient = object
@@ -11,8 +13,13 @@ telethon_stub.utils = types.SimpleNamespace(get_peer_id=lambda entity: entity)
 sys.modules.setdefault("telethon", telethon_stub)
 
 from cnc_telegram_worker.telegram_source import is_image_message, is_vector_message
+from cnc_telegram_worker.packet import external_packet_key
+from cnc_telegram_worker.state import StateStore
 from cnc_telegram_worker.worker import (
     ImageGroup,
+    apply_cutting_sequence_reply_index,
+    apply_known_cutting_sequence_state,
+    collect_cutting_sequence_reply_search_index,
     cutting_sequence_reply_number,
     group_has_thumbs_up,
     group_image_messages,
@@ -61,6 +68,20 @@ class FakeMessage:
             if thumbs_up
             else None
         )
+
+
+class FakeTelegramClient:
+    def __init__(self, messages: list[FakeMessage]) -> None:
+        self.messages = messages
+        self.iter_messages_calls: list[dict[str, object]] = []
+
+    def iter_messages(self, entity: object, **kwargs: object):
+        self.iter_messages_calls.append(kwargs)
+        return self._iter_messages()
+
+    async def _iter_messages(self):
+        for message in self.messages:
+            yield message
 
 
 class WorkerFingerprintTest(unittest.TestCase):
@@ -184,6 +205,48 @@ class WorkerFingerprintTest(unittest.TestCase):
         self.assertEqual(cutting_sequence_reply_number([image, reply], image), 7)
         self.assertEqual(groups[0].cutting_sequence_no, 7)
         self.assertEqual(groups[0].comments, ["2700 весь"])
+
+
+class WorkerCuttingSequenceIndexTest(unittest.IsolatedAsyncioTestCase):
+    async def test_collects_cutting_sequence_reply_numbers_with_one_search(self) -> None:
+        image_a = FakeMessage(100, text="2700", mime_type="image/jpeg")
+        image_b = FakeMessage(200, text="2718", mime_type="image/jpeg")
+        client = FakeTelegramClient([
+            FakeMessage(901, text="Раскрой №8", reply_to=200),
+            FakeMessage(902, text="не номер", reply_to=100),
+            FakeMessage(903, text="Раскрой №7", reply_to=100),
+            FakeMessage(904, text="Раскрой №99", reply_to=999),
+        ])
+
+        index = await collect_cutting_sequence_reply_search_index(client, object(), {100, 200})
+        groups = apply_cutting_sequence_reply_index(group_image_messages([image_a, image_b]), index)
+
+        self.assertEqual(index, {100: 7, 200: 8})
+        self.assertEqual(groups[0].cutting_sequence_no, 7)
+        self.assertEqual(groups[1].cutting_sequence_no, 8)
+        self.assertEqual(len(client.iter_messages_calls), 1)
+        self.assertEqual(client.iter_messages_calls[0], {"search": "Раскрой", "limit": 1000})
+
+
+class WorkerCuttingSequenceStateTest(unittest.TestCase):
+    def test_applies_known_replied_cutting_sequence_before_telegram_search(self) -> None:
+        image_a = FakeMessage(100, text="2700", mime_type="image/jpeg")
+        image_b = FakeMessage(200, text="2718", mime_type="image/jpeg")
+        groups = group_image_messages([image_a, image_b])
+        chat_id = "-100123"
+
+        with tempfile.TemporaryDirectory() as temp:
+            state = StateStore(Path(temp) / "state.json")
+            key_a = external_packet_key(chat_id, 100)
+            key_b = external_packet_key(chat_id, 200)
+            state.assign_cutting_sequence_number(key_a, existing_number=7)
+            state.mark_cutting_sequence_replied(key_a)
+            state.assign_cutting_sequence_number(key_b, existing_number=8)
+
+            updated = apply_known_cutting_sequence_state(groups, chat_id, state)
+
+        self.assertEqual(updated[0].cutting_sequence_no, 7)
+        self.assertIsNone(updated[1].cutting_sequence_no)
 
 
 if __name__ == "__main__":

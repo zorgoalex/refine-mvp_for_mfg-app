@@ -72,7 +72,7 @@ class WorkerConfig:
             default_material=env("CNC_DEFAULT_MATERIAL", "МДФ 16мм"),
             business_timezone_name=env("CNC_BUSINESS_TIMEZONE", "Asia/Almaty"),
             history_days=positive_int_env("CNC_HISTORY_DAYS", 7),
-            poll_interval_seconds=positive_int_env("CNC_POLL_INTERVAL_SECONDS", 120),
+            poll_interval_seconds=positive_int_env("CNC_POLL_INTERVAL_SECONDS", 60),
             temp_ttl_hours=positive_int_env("CNC_TEMP_TTL_HOURS", 24),
             attachment_ttl_hours=positive_int_env("CNC_ATTACHMENT_TTL_HOURS", 24 * 30),
             max_messages_per_scan=positive_int_env("CNC_MAX_MESSAGES_PER_SCAN", 1000),
