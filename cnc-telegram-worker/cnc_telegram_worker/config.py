@@ -6,8 +6,14 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 
+WORKER_ROLES = {"disabled", "writer"}
+
+
 @dataclass(frozen=True)
 class WorkerConfig:
+    stack_env: str
+    worker_role: str
+    allow_non_prod_writer: bool
     telegram_api_id: int | None
     telegram_api_hash: str
     telegram_session_path: Path
@@ -41,7 +47,15 @@ class WorkerConfig:
     @classmethod
     def from_env(cls) -> "WorkerConfig":
         api_id_raw = env("TELEGRAM_API_ID")
+        worker_role = normalized_env("CNC_TELEGRAM_WORKER_ROLE", "disabled")
+        if worker_role not in WORKER_ROLES:
+            raise RuntimeError(
+                f"CNC_TELEGRAM_WORKER_ROLE must be one of: {', '.join(sorted(WORKER_ROLES))}",
+            )
         return cls(
+            stack_env=normalized_env("ERP_STACK_ENV", "test"),
+            worker_role=worker_role,
+            allow_non_prod_writer=bool_env("CNC_TELEGRAM_ALLOW_NON_PROD_WRITER", False),
             telegram_api_id=int(api_id_raw) if api_id_raw else None,
             telegram_api_hash=env("TELEGRAM_API_HASH"),
             telegram_session_path=Path(env("TELEGRAM_SESSION_PATH", "/data/session/cnc_telegram")),
@@ -69,6 +83,22 @@ class WorkerConfig:
             backfill_on_start=bool_env("CNC_BACKFILL_ON_START", True),
         )
 
+    @property
+    def enabled(self) -> bool:
+        return self.worker_role == "writer"
+
+    def require_worker_enabled(self) -> None:
+        if not self.enabled:
+            raise RuntimeError(
+                f"CNC Telegram worker is disabled (ERP_STACK_ENV={self.stack_env}, "
+                f"CNC_TELEGRAM_WORKER_ROLE={self.worker_role})",
+            )
+        if self.stack_env != "prod" and not self.allow_non_prod_writer:
+            raise RuntimeError(
+                "CNC Telegram writer is allowed only with ERP_STACK_ENV=prod; "
+                "set CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=true only for a deliberate one-off run",
+            )
+
     def require_telegram(self) -> None:
         missing = []
         if self.telegram_api_id is None:
@@ -90,6 +120,10 @@ class WorkerConfig:
 
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
+
+
+def normalized_env(name: str, default: str = "") -> str:
+    return env(name, default).lower()
 
 
 def csv_env(name: str) -> tuple[str, ...]:

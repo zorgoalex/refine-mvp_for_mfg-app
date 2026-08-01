@@ -133,6 +133,7 @@ services:
       - "3000"
     environment:
       NODE_ENV: ${BACKEND_NODE_ENV:-production}
+      ERP_STACK_ENV: ${ERP_STACK_ENV:-test}
       APP_NAME: ${BACKEND_APP_NAME:-erp-backend}
       API_PREFIX: /api/v1
       PORT: 3000
@@ -469,6 +470,9 @@ services:
       ocr-service:
         condition: service_healthy
     environment:
+      ERP_STACK_ENV: ${ERP_STACK_ENV:-test}
+      CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-disabled}
+      CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: ${CNC_TELEGRAM_ALLOW_NON_PROD_WRITER:-false}
       TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
       TELEGRAM_SESSION_PATH: ${TELEGRAM_SESSION_PATH:-/data/session/cnc_telegram}

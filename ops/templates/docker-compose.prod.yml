@@ -1,0 +1,10 @@
+services:
+  backend:
+    environment:
+      ERP_STACK_ENV: prod
+
+  cnc-telegram-worker:
+    environment:
+      ERP_STACK_ENV: prod
+      CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-writer}
+      CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: "false"

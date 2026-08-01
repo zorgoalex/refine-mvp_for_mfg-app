@@ -94,6 +94,7 @@ csv_contains() {
 }
 
 require_var COMPOSE_PROJECT_NAME
+require_var ERP_STACK_ENV
 require_var EDGE_NETWORK_NAME
 require_fqdn HASURA_FQDN
 require_fqdn BACKEND_FQDN
@@ -140,6 +141,12 @@ if [[ "${BACKEND_ENABLE_VLM:-true}" == "true" && "${BACKEND_VLM_DISABLED:-true}"
   require_var AUTH0_M2M_AUDIENCE
 fi
 
+case "${ERP_STACK_ENV:-}" in
+  test|prod|dev) ;;
+  "") ;;
+  *) mark_error "ERP_STACK_ENV must be one of: test, prod, dev" ;;
+esac
+
 if csv_contains "${COMPOSE_PROFILES:-}" "cnc-telegram"; then
   [[ "${BACKEND_ENABLE_CNC_TELEGRAM:-false}" == "true" ]] || mark_error "COMPOSE_PROFILES=cnc-telegram requires BACKEND_ENABLE_CNC_TELEGRAM=true"
   require_var TELEGRAM_API_ID
@@ -149,6 +156,15 @@ if csv_contains "${COMPOSE_PROFILES:-}" "cnc-telegram"; then
   if [[ -z "${ERP_BEARER_TOKEN:-}" ]]; then
     require_var ERP_WORKER_LOGIN
     require_var ERP_WORKER_PASSWORD
+  fi
+  case "${CNC_TELEGRAM_WORKER_ROLE:-disabled}" in
+    disabled|writer) ;;
+    *) mark_error "CNC_TELEGRAM_WORKER_ROLE must be one of: disabled, writer" ;;
+  esac
+  if [[ "${CNC_TELEGRAM_WORKER_ROLE:-disabled}" == "writer" \
+      && "${ERP_STACK_ENV:-test}" != "prod" \
+      && "${CNC_TELEGRAM_ALLOW_NON_PROD_WRITER:-false}" != "true" ]]; then
+    mark_error "CNC_TELEGRAM_WORKER_ROLE=writer requires ERP_STACK_ENV=prod (or explicit CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=true)"
   fi
   if [[ ! "${CNC_TEMP_TTL_HOURS:-24}" =~ ^[0-9]+$ ]]; then
     mark_error "CNC_TEMP_TTL_HOURS must be an integer <= 24"
