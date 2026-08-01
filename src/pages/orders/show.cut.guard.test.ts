@@ -22,6 +22,7 @@ describe('OrderShow cut detail-picker guards', () => {
   it('renders split current-result cut links for the order', () => {
     expect(source).toContain('const { cutJobByDetailId, bathCutJobByDetailId } = cutJobMaps');
     expect(source).toContain('cutOrderJobs');
+    expect(source).toContain("import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from \"../cut/cutJobEvents\";");
     expect(source).toContain('cncTelegramApi.orderCuttingSequences');
     expect(source).toContain('cncOrderCuttingSequences');
     expect(source).toContain("title: 'Расчет ванны'");

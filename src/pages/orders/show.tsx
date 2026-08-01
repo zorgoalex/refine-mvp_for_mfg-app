@@ -68,6 +68,7 @@ import {
 } from "./components/tables/OrderDetailColumnSettings";
 import { useCutDetailLastReady } from "./useCutDetailLastReady";
 import { computeOrderBathFilmUsage } from "../cut/cutFilmUsage";
+import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from "../cut/cutJobEvents";
 import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
 import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/OperationalPrimitives";
 import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
