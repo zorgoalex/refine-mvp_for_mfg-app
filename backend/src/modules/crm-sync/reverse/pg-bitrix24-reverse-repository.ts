@@ -2511,8 +2511,10 @@ export class PgBitrix24ReverseRepository {
 
     return this.db.transaction(async (tx) => {
       await tx.query(
-        `SELECT pg_advisory_xact_lock(hashtextextended('order_name:' || $1, 0))`,
-        [normalizedName.trim().toLowerCase()],
+        `SELECT pg_advisory_xact_lock(
+           hashtextextended('order_name:' || normalize_order_name($1), 0)
+         )`,
+        [normalizedName],
       );
       await lockAggregate(tx, `deal:${discovered.bitrix_deal_id}`);
 
@@ -2621,10 +2623,15 @@ export class PgBitrix24ReverseRepository {
         throw new ApiError(503, 'ORDER_INITIAL_STATUS_INVALID', 'Configured initial order statuses are invalid');
       }
       const duplicate = await tx.query(
-        `SELECT 1 FROM orders
+        `SELECT 1
+           FROM orders
           WHERE delete_flag=false AND order_kind='production_order'
-            AND lower(btrim(order_name))=lower(btrim($1))
+            AND normalize_order_name(order_name)=normalize_order_name($1)
             AND order_id<>$2
+         UNION ALL
+         SELECT 1
+           FROM order_legacy_duplicate_name_registry registry
+          WHERE registry.normalized_name=normalize_order_name($1)
           LIMIT 1`,
         [normalizedName, input.orderId],
       );

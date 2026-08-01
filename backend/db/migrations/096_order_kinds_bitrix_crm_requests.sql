@@ -3,20 +3,94 @@
 
 BEGIN;
 
+-- Technical backfills must not enqueue thousands of unchanged ERP orders for
+-- outbound Bitrix delivery. This transaction-local flag is consumed by the
+-- CRM enqueue triggers installed by 095 and resets automatically on commit.
+SELECT set_config('app.crm_sync_origin', 'bitrix24', true);
+
+CREATE TEMP TABLE migration_096_state (
+  first_apply BOOLEAN NOT NULL
+) ON COMMIT DROP;
+
+INSERT INTO migration_096_state(first_apply)
+SELECT to_regclass('public.order_legacy_duplicate_name_registry') IS NULL;
+
+CREATE OR REPLACE FUNCTION normalize_order_name(p_name TEXT) RETURNS TEXT AS $$
+  SELECT lower(btrim(p_name));
+$$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
+
 ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS order_kind TEXT NOT NULL DEFAULT 'production_order',
   ADD COLUMN IF NOT EXISTS source_system TEXT NOT NULL DEFAULT 'erp',
-  ADD COLUMN IF NOT EXISTS legacy_zero_detail_exempt BOOLEAN NOT NULL DEFAULT false;
+  ADD COLUMN IF NOT EXISTS legacy_zero_detail_exempt BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS legacy_duplicate_name_exempt BOOLEAN NOT NULL DEFAULT false;
+
+-- Makes a direct replay safe: any prior version is restored automatically if
+-- this transaction aborts, and the current definition is recreated below.
+DROP TRIGGER IF EXISTS trg_orders_identity_transition ON orders;
+DROP TRIGGER IF EXISTS ctrg_orders_kind_aggregate ON orders;
+
+CREATE TABLE IF NOT EXISTS order_legacy_duplicate_name_registry (
+  normalized_name TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_order_legacy_name_registry_normalized
+    CHECK (normalized_name = normalize_order_name(normalized_name))
+);
+
+CREATE TABLE IF NOT EXISTS order_legacy_duplicate_name_ledger (
+  order_id BIGINT PRIMARY KEY,
+  normalized_name TEXT NOT NULL
+    REFERENCES order_legacy_duplicate_name_registry(normalized_name) ON DELETE RESTRICT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE order_legacy_duplicate_name_ledger
+  DROP CONSTRAINT IF EXISTS order_legacy_duplicate_name_ledger_order_id_fkey;
+
+WITH duplicate_names AS (
+  SELECT normalize_order_name(order_name) AS normalized_name
+  FROM orders
+  WHERE delete_flag = false
+    AND order_kind = 'production_order'
+    AND (SELECT first_apply FROM migration_096_state)
+  GROUP BY normalize_order_name(order_name)
+  HAVING count(*) > 1
+)
+INSERT INTO order_legacy_duplicate_name_registry(normalized_name)
+SELECT normalized_name
+FROM duplicate_names
+ON CONFLICT (normalized_name) DO NOTHING;
+
+INSERT INTO order_legacy_duplicate_name_ledger(order_id, normalized_name)
+SELECT o.order_id, registry.normalized_name
+FROM orders o
+JOIN order_legacy_duplicate_name_registry registry
+  ON registry.normalized_name = normalize_order_name(o.order_name)
+WHERE o.delete_flag = false
+  AND o.order_kind = 'production_order'
+  AND (SELECT first_apply FROM migration_096_state)
+ON CONFLICT (order_id) DO NOTHING;
 
 UPDATE orders o
 SET legacy_zero_detail_exempt = true
 WHERE o.order_kind = 'production_order'
+  AND (SELECT first_apply FROM migration_096_state)
   AND NOT EXISTS (
     SELECT 1
     FROM order_details od
     WHERE od.order_id = o.order_id
       AND od.delete_flag = false
   );
+
+-- Historical ERP data allowed the same order_name for different clients.
+-- Preserve every member of those groups. Registry keys stay reserved, so a
+-- concurrent new order can never claim a legacy name while an exempt row is
+-- deleted/restored. Ledger proves which rows received the one-time exemption.
+UPDATE orders o
+SET legacy_duplicate_name_exempt = true
+FROM order_legacy_duplicate_name_ledger ledger
+WHERE o.order_id = ledger.order_id
+  AND (SELECT first_apply FROM migration_096_state);
 
 -- On a replay, constraint triggers from a prior successful 096 already exist.
 -- Flush their events before ALTER TABLE statements touch the same relations.
@@ -57,72 +131,133 @@ ALTER TABLE orders
 ALTER TABLE orders ALTER COLUMN project_id DROP NOT NULL;
 
 CREATE OR REPLACE FUNCTION enforce_order_identity_transition() RETURNS trigger AS $$
+DECLARE
+  v_old_normalized TEXT;
+  v_new_normalized TEXT := normalize_order_name(NEW.order_name);
+  v_ledger_normalized TEXT;
+  v_requires_name_claim BOOLEAN := TG_OP = 'INSERT';
 BEGIN
   IF TG_OP = 'INSERT' THEN
     IF NEW.legacy_zero_detail_exempt = true THEN
       RAISE EXCEPTION 'legacy zero-detail exemption cannot be granted to new orders'
         USING ERRCODE = '23514', CONSTRAINT = 'chk_orders_legacy_exemption_immutable';
     END IF;
-    RETURN NEW;
+    IF NEW.legacy_duplicate_name_exempt = true THEN
+      RAISE EXCEPTION 'legacy duplicate-name exemption cannot be granted to new orders'
+        USING ERRCODE = '23514', CONSTRAINT = 'chk_orders_legacy_name_exemption_immutable';
+    END IF;
+  ELSE
+    v_old_normalized := normalize_order_name(OLD.order_name);
+
+    IF OLD.source_system IS DISTINCT FROM NEW.source_system THEN
+      RAISE EXCEPTION 'orders.source_system is immutable'
+        USING ERRCODE = '23514', CONSTRAINT = 'chk_orders_source_system_immutable';
+    END IF;
+
+    IF OLD.order_kind IS DISTINCT FROM NEW.order_kind
+       AND NOT (
+         OLD.order_kind IN ('draft', 'crm_request')
+         AND NEW.order_kind = 'production_order'
+       ) THEN
+      RAISE EXCEPTION 'invalid order_kind transition: % -> %', OLD.order_kind, NEW.order_kind
+        USING ERRCODE = '23514', CONSTRAINT = 'chk_orders_order_kind_transition';
+    END IF;
+
+    IF OLD.legacy_zero_detail_exempt = false
+       AND NEW.legacy_zero_detail_exempt = true THEN
+      RAISE EXCEPTION 'legacy zero-detail exemption cannot be granted at runtime'
+        USING ERRCODE = '23514', CONSTRAINT = 'chk_orders_legacy_exemption_immutable';
+    END IF;
+
+    IF OLD.legacy_duplicate_name_exempt = false
+       AND NEW.legacy_duplicate_name_exempt = true THEN
+      RAISE EXCEPTION 'legacy duplicate-name exemption cannot be granted at runtime'
+        USING ERRCODE = '23514', CONSTRAINT = 'chk_orders_legacy_name_exemption_immutable';
+    END IF;
+
+    IF OLD.legacy_duplicate_name_exempt = true
+       AND v_old_normalized IS DISTINCT FROM v_new_normalized THEN
+      NEW.legacy_duplicate_name_exempt := false;
+    END IF;
+
+    v_requires_name_claim :=
+      (OLD.delete_flag = true AND NEW.delete_flag = false)
+      OR (OLD.order_kind <> 'production_order' AND NEW.order_kind = 'production_order')
+      OR v_old_normalized IS DISTINCT FROM v_new_normalized
+      OR (OLD.legacy_duplicate_name_exempt = true
+          AND NEW.legacy_duplicate_name_exempt = false);
   END IF;
 
-  IF OLD.source_system IS DISTINCT FROM NEW.source_system THEN
-    RAISE EXCEPTION 'orders.source_system is immutable'
-      USING ERRCODE = '23514', CONSTRAINT = 'chk_orders_source_system_immutable';
+  IF NEW.legacy_duplicate_name_exempt = true THEN
+    SELECT ledger.normalized_name
+      INTO v_ledger_normalized
+      FROM order_legacy_duplicate_name_ledger ledger
+     WHERE ledger.order_id = NEW.order_id;
+
+    IF v_ledger_normalized IS NULL OR v_ledger_normalized <> v_new_normalized THEN
+      RAISE EXCEPTION 'legacy duplicate-name exemption provenance mismatch for order %', NEW.order_id
+        USING ERRCODE = '23514', CONSTRAINT = 'chk_orders_legacy_name_exemption_provenance';
+    END IF;
   END IF;
 
-  IF OLD.order_kind IS DISTINCT FROM NEW.order_kind
-     AND NOT (
-       OLD.order_kind IN ('draft', 'crm_request')
-       AND NEW.order_kind = 'production_order'
+  IF v_requires_name_claim
+     AND NEW.delete_flag = false
+     AND NEW.order_kind = 'production_order'
+     AND NEW.legacy_duplicate_name_exempt = false
+     AND (
+       EXISTS (
+         SELECT 1
+         FROM order_legacy_duplicate_name_registry registry
+         WHERE registry.normalized_name = v_new_normalized
+       )
+       OR EXISTS (
+         SELECT 1
+         FROM orders existing
+         WHERE existing.order_id IS DISTINCT FROM NEW.order_id
+           AND existing.delete_flag = false
+           AND existing.order_kind = 'production_order'
+           AND normalize_order_name(existing.order_name) = v_new_normalized
+       )
      ) THEN
-    RAISE EXCEPTION 'invalid order_kind transition: % -> %', OLD.order_kind, NEW.order_kind
-      USING ERRCODE = '23514', CONSTRAINT = 'chk_orders_order_kind_transition';
-  END IF;
-
-  IF OLD.legacy_zero_detail_exempt = false
-     AND NEW.legacy_zero_detail_exempt = true THEN
-    RAISE EXCEPTION 'legacy zero-detail exemption cannot be granted at runtime'
-      USING ERRCODE = '23514', CONSTRAINT = 'chk_orders_legacy_exemption_immutable';
+    RAISE EXCEPTION 'active production order name already exists: %', NEW.order_name
+      USING ERRCODE = '23505', CONSTRAINT = 'uq_orders_name_production_active';
   END IF;
 
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS trg_orders_identity_transition ON orders;
 CREATE TRIGGER trg_orders_identity_transition
-BEFORE INSERT OR UPDATE OF order_kind, source_system, legacy_zero_detail_exempt ON orders
+BEFORE INSERT OR UPDATE OF order_name, order_kind, source_system, delete_flag,
+  legacy_zero_detail_exempt, legacy_duplicate_name_exempt ON orders
 FOR EACH ROW EXECUTE FUNCTION enforce_order_identity_transition();
 
-DO $$
-DECLARE
-  duplicates TEXT;
+CREATE OR REPLACE FUNCTION prevent_order_legacy_name_history_mutation() RETURNS trigger AS $$
 BEGIN
-  SELECT string_agg(normalized_name || '=[' || ids || ']', '; ' ORDER BY normalized_name)
-  INTO duplicates
-  FROM (
-    SELECT
-      lower(btrim(order_name)) AS normalized_name,
-      string_agg(order_id::text, ',' ORDER BY order_id) AS ids
-    FROM orders
-    WHERE delete_flag = false
-      AND order_kind = 'production_order'
-    GROUP BY lower(btrim(order_name))
-    HAVING count(*) > 1
-  ) d;
+  RAISE EXCEPTION 'legacy order-name history is immutable'
+    USING ERRCODE = '23514', CONSTRAINT = 'chk_order_legacy_name_history_immutable';
+END;
+$$ LANGUAGE plpgsql;
 
-  IF duplicates IS NOT NULL THEN
-    RAISE EXCEPTION 'global active production order-name duplicates: %', duplicates
-      USING ERRCODE = '23505';
-  END IF;
-END $$;
+DROP TRIGGER IF EXISTS trg_order_legacy_name_registry_immutable
+  ON order_legacy_duplicate_name_registry;
+CREATE TRIGGER trg_order_legacy_name_registry_immutable
+BEFORE INSERT OR UPDATE OR DELETE ON order_legacy_duplicate_name_registry
+FOR EACH ROW EXECUTE FUNCTION prevent_order_legacy_name_history_mutation();
+
+DROP TRIGGER IF EXISTS trg_order_legacy_name_ledger_immutable
+  ON order_legacy_duplicate_name_ledger;
+CREATE TRIGGER trg_order_legacy_name_ledger_immutable
+BEFORE INSERT OR UPDATE OR DELETE ON order_legacy_duplicate_name_ledger
+FOR EACH ROW EXECUTE FUNCTION prevent_order_legacy_name_history_mutation();
 
 DROP INDEX IF EXISTS uq_orders_name_client_active;
 DROP INDEX IF EXISTS uq_orders_name_production_active;
 CREATE UNIQUE INDEX uq_orders_name_production_active
-  ON orders (LOWER(BTRIM(order_name)))
-  WHERE delete_flag = false AND order_kind = 'production_order';
+  ON orders (normalize_order_name(order_name))
+  WHERE delete_flag = false
+    AND order_kind = 'production_order'
+    AND legacy_duplicate_name_exempt = false;
 
 CREATE INDEX IF NOT EXISTS idx_orders_kind_active
   ON orders (order_kind, order_date DESC, order_id DESC)
