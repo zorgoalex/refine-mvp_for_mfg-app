@@ -30,7 +30,8 @@ describe('PgOrderTransactionManager', () => {
 
     const lockQuery = database.queries.find((query) => query.text.includes('pg_advisory_xact_lock'));
     expect(lockQuery).toBeDefined();
-    expect(lockQuery?.params?.[0]).toBe('2558');
+    expect(lockQuery?.params?.[0]).toBe('  2558 ');
+    expect(lockQuery?.text).toContain('normalize_order_name($1)');
   });
 
   it('assertOrderNameAvailable passes when no live duplicate exists', async () => {
@@ -41,9 +42,10 @@ describe('PgOrderTransactionManager', () => {
       await expect(uow.assertOrderNameAvailable({ orderName: '2558' })).resolves.toBeUndefined();
     });
 
-    const dupQuery = database.queries.find((query) => normalizeSql(query.text).includes('lower(trim(order_name))'));
+    const dupQuery = database.queries.find((query) => normalizeSql(query.text).includes('ORDER BY order_id'));
     expect(normalizeSql(dupQuery?.text ?? '')).toContain('delete_flag = false');
     expect(normalizeSql(dupQuery?.text ?? '')).toContain("order_kind = 'production_order'");
+    expect(dupQuery?.text).toContain('normalize_order_name(order_name) = normalize_order_name($1)');
     expect(dupQuery?.params).toEqual(['2558', null]);
   });
 
@@ -64,14 +66,50 @@ describe('PgOrderTransactionManager', () => {
       details: { existingOrderId: 77, orderName: '2558', suggestedOrderName: '2600' },
     });
 
-    const dupQuery = database.queries.find((query) => normalizeSql(query.text).includes('lower(trim(order_name))'));
-    expect(dupQuery?.params).toEqual(['2558', 42]);
+    const dupQuery = database.queries.find((query) => normalizeSql(query.text).includes('ORDER BY order_id'));
+    expect(dupQuery?.params).toEqual([' 2558 ', 42]);
     // Предложение считается по ЧИСЛОВЫМ именам с защитой от bigint-переполнения
     // и ТОЛЬКО по продакшн-эпохе (order_date >= 2025-12-01): легаси-имена вида
     // 230725 (даты до go-live) не должны задирать следующий номер серии.
     const suggestQuery = database.queries.find((query) => normalizeSql(query.text).includes('AS next'));
     expect(suggestQuery?.text).toContain("^\\d{1,15}$");
     expect(suggestQuery?.text).toContain("2025-12-01");
+  });
+
+  it('allows an unchanged normalized name for a migrated legacy duplicate', async () => {
+    const database = createDatabase({
+      currentLegacyDuplicateNameRow: {
+        legacy_duplicate_name_exempt: true,
+        same_normalized_name: true,
+      },
+      duplicateNameRow: { order_id: 77, order_name: '2558' },
+    });
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await manager.runInTransaction(async (uow) => {
+      await expect(
+        uow.assertOrderNameAvailable({ orderName: ' 2558 ', excludeOrderId: 42 }),
+      ).resolves.toBeUndefined();
+    });
+
+    expect(database.queries.some((query) => normalizeSql(query.text).includes('ORDER BY order_id'))).toBe(false);
+  });
+
+  it('rejects a permanently reserved legacy name when no active duplicate remains', async () => {
+    const database = createDatabase({
+      duplicateNameRow: null,
+      reservedNameRow: { order_id: 77 },
+      suggestedNextName: '2600',
+    });
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await expect(
+      manager.runInTransaction((uow) => uow.assertOrderNameAvailable({ orderName: ' 2558 ' })),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'ORDER_NAME_DUPLICATE',
+      details: { existingOrderId: 77, orderName: '2558', suggestedOrderName: '2600' },
+    });
   });
 
   it('runs order writes through the Postgres unit of work', async () => {
@@ -1393,6 +1431,11 @@ function createDatabase(
     restoredRowCount?: number;
     restoreOrderErrorCode?: string;
     duplicateNameRow?: { order_id: number; order_name: string } | null;
+    reservedNameRow?: { order_id: number } | null;
+    currentLegacyDuplicateNameRow?: {
+      legacy_duplicate_name_exempt: boolean;
+      same_normalized_name: boolean;
+    } | null;
     suggestedNextName?: string | null;
     throwOnJsonbMax?: boolean;
     hdfSourceRows?: Array<Record<string, unknown>>;
@@ -1417,8 +1460,18 @@ function createDatabase(
         return { rows: [], rowCount: 1 };
       }
 
-      if (normalized.includes('lower(trim(order_name))')) {
+      if (normalized.includes('SELECT legacy_duplicate_name_exempt')) {
+        const row = options.currentLegacyDuplicateNameRow;
+        return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+
+      if (normalized.includes('normalize_order_name(order_name) = normalize_order_name($1)')) {
         const row = options.duplicateNameRow;
+        return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+
+      if (normalized.includes('FROM order_legacy_duplicate_name_registry')) {
+        const row = options.reservedNameRow;
         return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
       }
 

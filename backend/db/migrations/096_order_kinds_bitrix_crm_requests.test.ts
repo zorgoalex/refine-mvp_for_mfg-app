@@ -17,8 +17,23 @@ describe('096 order kinds and Bitrix CRM requests migration', () => {
   it('makes project optional only for precursors and names globally unique only for production', () => {
     expect(sql).toMatch(/ALTER TABLE orders[\s\S]*ALTER COLUMN project_id DROP NOT NULL/);
     expect(sql).toContain("order_kind <> 'production_order' OR project_id IS NOT NULL");
-    expect(sql).toMatch(/CREATE UNIQUE INDEX uq_orders_name_production_active[\s\S]*LOWER\(BTRIM\(order_name\)\)/i);
+    expect(sql).toMatch(/CREATE UNIQUE INDEX uq_orders_name_production_active[\s\S]*normalize_order_name\(order_name\)/i);
     expect(sql).toContain("order_kind = 'production_order'");
+    expect(sql).toContain('legacy_duplicate_name_exempt BOOLEAN NOT NULL DEFAULT false');
+    expect(sql).toMatch(/WITH duplicate_names AS[\s\S]*HAVING count\(\*\) > 1/i);
+    expect(sql).toContain('order_legacy_duplicate_name_registry');
+    expect(sql).toContain('order_legacy_duplicate_name_ledger');
+    expect(sql).toContain('prevent_order_legacy_name_history_mutation');
+    expect(sql).toContain('trg_order_legacy_name_registry_immutable');
+    expect(sql).toMatch(/trg_order_legacy_name_registry_immutable[\s\S]*BEFORE INSERT OR UPDATE OR DELETE/i);
+    expect(sql).toMatch(/trg_order_legacy_name_ledger_immutable[\s\S]*BEFORE INSERT OR UPDATE OR DELETE/i);
+    expect(sql).toContain("set_config('app.crm_sync_origin', 'bitrix24', true)");
+    expect(sql).toContain("to_regclass('public.order_legacy_duplicate_name_registry') IS NULL");
+    expect(sql).toContain('legacy_duplicate_name_exempt = false');
+    expect(sql).toContain('legacy duplicate-name exemption cannot be granted to new orders');
+    expect(sql).toContain('OLD.legacy_duplicate_name_exempt = false');
+    expect(sql).toContain('NEW.legacy_duplicate_name_exempt := false');
+    expect(sql).toContain("CONSTRAINT = 'uq_orders_name_production_active'");
   });
 
   it('adds stable statuses, non-login service identity, owner mapping and command idempotency', () => {
@@ -92,6 +107,9 @@ describe('096 order kinds and Bitrix CRM requests migration', () => {
   it('has a strict migration-runner end-state probe', () => {
     expect(runner).toContain('096_order_kinds_bitrix_crm_requests*) probe_all');
     expect(runner).toContain('q_col orders order_kind');
+    expect(runner).toContain('q_col orders legacy_duplicate_name_exempt');
+    expect(runner).toContain('q_tbl order_legacy_duplicate_name_registry');
+    expect(runner).toContain("to_regprocedure('normalize_order_name(text)')");
     expect(runner).toContain('q_idx uq_orders_name_production_active');
     expect(runner).toContain('q_trg trg_bitrix24_user_mapping_reconcile');
     expect(runner).toContain("validate_order_kind_aggregate_id(bigint)");

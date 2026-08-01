@@ -814,6 +814,9 @@ probe_file() {
                      "$(q_col orders order_kind)" \
                      "$(q_col orders source_system)" \
                      "$(q_col orders legacy_zero_detail_exempt)" \
+                     "$(q_col orders legacy_duplicate_name_exempt)" \
+                     "$(q_tbl order_legacy_duplicate_name_registry)" \
+                     "$(q_tbl order_legacy_duplicate_name_ledger)" \
                      "$(q_col order_statuses order_status_code)" \
                      "$(q_col users is_service_account)" \
                      "$(q_tbl bitrix24_user_mapping)" \
@@ -830,6 +833,7 @@ probe_file() {
                      "$(q_idx uq_orders_name_production_active)" \
                      "$(q_idx uq_bitrix24_incoming_request_linked_order)" \
                      "$(q_trg trg_bitrix24_user_mapping_reconcile)" \
+                     "SELECT to_regprocedure('normalize_order_name(text)') IS NOT NULL;" \
                      "$(q_trg trg_bitrix24_mapped_user_reconcile)" \
                      "$(q_trg ctrg_bitrix24_request_client_mapping)" \
                      "SELECT to_regprocedure('validate_order_kind_aggregate_id(bigint)') IS NOT NULL;" \
