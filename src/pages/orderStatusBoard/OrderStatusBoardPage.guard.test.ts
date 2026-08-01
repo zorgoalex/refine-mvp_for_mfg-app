@@ -237,7 +237,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     const bathCardStart = packetCardEnd;
     const bathCardEnd = page.indexOf('interface CncBathPdfPreviewProps', bathCardStart);
     const bathCard = page.slice(bathCardStart, bathCardEnd);
+    const compactMetaRule = css.match(
+      /\.cnc-card--summary-only \.cnc-packet-card__summary-meta\s*\{[^}]*\}/s,
+    )?.[0] ?? '';
 
+    expect(page).toContain("const CNC_ORDER_DETAILS_SEPARATOR = '\\u00A0\\u00A0-\\u00A0\\u00A0'");
+    expect(summaryLine).toContain('className="cnc-order-details-separator"');
+    expect(summaryLine).toContain('{CNC_ORDER_DETAILS_SEPARATOR}');
     expect(summaryLine).toContain('{summary.details} дет.');
     expect(summaryLine).not.toContain('summary.positions');
     expect(packetCard).toContain('{packet.itemQuantityTotal} деталей');
@@ -250,9 +256,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(
       /\.cnc-card--summary-only \.cnc-packet-card__summary-order[^}]*\{[^}]*font-size: 1\.2em;[^}]*color: var\(--app-text\);/s,
     );
-    expect(css).toMatch(
-      /\.cnc-card--summary-only \.cnc-packet-card__summary-meta\s*\{[^}]*margin-inline-start: 12px;[^}]*color: var\(--app-text-muted\);/s,
-    );
+    expect(compactMetaRule).toContain('color: var(--app-text-muted);');
+    expect(compactMetaRule).not.toContain('margin-inline-start');
     expect(css).toMatch(
       /\.cnc-order-card--summary-only \.status-board-card__number[^}]*\{[^}]*font-size: 1\.2em;[^}]*color: var\(--app-text\);/s,
     );
@@ -318,10 +323,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('display: table-header-group');
     expect(css).toContain('break-inside: avoid');
     expect(printCard).toContain('className="cnc-print-card__bath-cut-number"');
+    expect(printCard).toContain('className="cnc-order-details-separator"');
+    expect(printCard).toContain('{CNC_ORDER_DETAILS_SEPARATOR}');
     expect(printCard).toContain('{card.bath.cutNumber}');
     expect(printCard).not.toContain('№{card.bath.cutNumber}');
     expect(css).toMatch(
       /\.cnc-print-card__bath-cut-number\s*\{[^}]*border-radius: 1mm;[^}]*font-variant-numeric: tabular-nums;/s,
+    );
+    expect(css).toMatch(
+      /\.cnc-print-card__summary\s*\{[^}]*justify-content: flex-start;[^}]*gap: 0;/s,
     );
   });
 

@@ -888,7 +888,6 @@
 }
 
 .cnc-card--summary-only .cnc-packet-card__summary-meta {
-  margin-inline-start: 12px;
   color: var(--app-text-muted);
   font-weight: 400;
 }
@@ -1807,8 +1806,8 @@
   .cnc-print-card__summary {
     display: flex;
     align-items: baseline;
-    justify-content: space-between;
-    gap: 3mm;
+    justify-content: flex-start;
+    gap: 0;
   }
 
   .cnc-print-card--bath {

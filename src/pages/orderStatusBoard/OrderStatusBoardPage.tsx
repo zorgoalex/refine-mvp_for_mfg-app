@@ -132,6 +132,7 @@ const DATE_FORMAT = 'DD.MM.YYYY';
 const CNC_HISTORY_DAYS = 7;
 const CNC_ORDER_STATUS_BOARD_BATCH_SIZE = 60;
 const CNC_ORDER_STATUS_REFRESH_MS = 15_000;
+const CNC_ORDER_DETAILS_SEPARATOR = '\u00A0\u00A0-\u00A0\u00A0';
 const CNC_DETAIL_CONFIDENCE_WARNING_THRESHOLD = 0.8;
 const CNC_TOOL_COMMENT_PATTERN = /^(?:T\d+\s*S\d+\s*,?\s*)+$/i;
 const CNC_OTHER_MATERIAL_MARKER_PATTERN = /(?:hdf|хдф|лдсп|ldsp|fanera|фанера)/i;
@@ -1774,6 +1775,9 @@ const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
         <OrderDeletedTag deleted={summary.orderDeleted} />
       </span>
       <span className="cnc-packet-card__summary-meta">
+        <span className="cnc-order-details-separator" aria-hidden="true">
+          {CNC_ORDER_DETAILS_SEPARATOR}
+        </span>
         {summary.details} дет.
       </span>
     </Typography.Text>
@@ -1905,6 +1909,9 @@ const CncTelegramPrintCard: React.FC<{
         {summaries.length > 0 ? summaries.map((summary) => (
           <div className="cnc-print-card__summary" key={summary.orderName}>
             <strong>{summary.orderName}</strong>
+            <span className="cnc-order-details-separator" aria-hidden="true">
+              {CNC_ORDER_DETAILS_SEPARATOR}
+            </span>
             <span>{summary.details} дет.</span>
           </div>
         )) : (
