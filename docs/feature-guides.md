@@ -143,11 +143,11 @@ VITE_USE_BACKEND_CNC_TELEGRAM=true
 ## Переход в Битрикс24
 
 Пункт «Битрикс24» открывает портал
-`https://mebelkz.bitrix24.kz/` в переиспользуемой вкладке браузера. При наличии
+`https://bitrix24.example.com/` в переиспользуемой вкладке браузера. При наличии
 Bitrix24 cookie портал открывается сразу, иначе показывает собственный login.
 
 ```env
-VITE_BITRIX24_URL=https://mebelkz.bitrix24.kz/
+VITE_BITRIX24_URL=https://bitrix24.example.com/
 VITE_BITRIX24_LABEL=Битрикс24
 ```
 
@@ -173,7 +173,7 @@ Backend поддерживает одностороннюю проекцию ERP
 
 ```env
 BACKEND_ENABLE_BITRIX24_SYNC=true
-BITRIX24_WEBHOOK_URL=https://mebelkz.bitrix24.kz/rest/...
+BITRIX24_WEBHOOK_URL=https://bitrix24.example.com/rest/...
 BITRIX24_PAY_SYSTEM_ID=<numeric-id>
 BITRIX24_CURRENCY_ID=KZT
 BITRIX24_ASSIGNED_BY_ID=<optional-user-id>
@@ -218,7 +218,7 @@ Contact/Company/Deal в корзину Bitrix24; администратор до
 Read-only canary:
 
 ```bash
-BITRIX24_WEBHOOK_URL='https://mebelkz.bitrix24.kz/rest/…/…' \
+BITRIX24_WEBHOOK_URL='https://bitrix24.example.com/rest/…/…' \
 BITRIX24_PAY_SYSTEM_ID='<id>' \
 npm run test:e2e:bitrix24-sync-stage-canary
 ```

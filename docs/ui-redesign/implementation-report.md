@@ -4,8 +4,8 @@
 Ветка: `feat/ui-redesign-foundation`
 Worktree: `/home/ovhtest/projects/erp_dev/.worktrees/ui-redesign-foundation`
 Migration 084: применена в `erp_test`; stage frontend
-`https://app-test.mebelkz.app` и backend
-`https://backend-test.mebelkz.app` задеплоены; production merge/deploy ещё не
+`https://app-test.example.com` и backend
+`https://backend-test.example.com` задеплоены; production merge/deploy ещё не
 выполнялись
 
 ## Результат
@@ -98,7 +98,7 @@ Auth/network hardening после code review:
 | Clone-script security guards | separate secrets/path, fixed source identity, session purge, bind/network invariants passed |
 | Isolated stack runtime before stop | six services healthy; backend readiness and Hasura GraphQL passed |
 | Browser authenticated smoke before final hardening/stop | ten routes 10/10, evolution marker/main shell, 0 console errors |
-| Live stage variant canary on `https://app-test.mebelkz.app` | login, profile, legacy → evolution → legacy, exact URL reload, clean console |
+| Live stage variant canary on `https://app-test.example.com` | login, profile, legacy → evolution → legacy, exact URL reload, clean console |
 | Responsive smoke before final hardening/stop | 1440×900, 1280×720, 1024×768 and 720×450: no document overflow |
 | New-order modal before final hardening/stop | 684px within 720px viewport; vertical modal wrapper scroll enabled |
 | Representative token contrast (calculated WCAG ratios) | sidebar 7.12:1; primary 5.17:1; body 14.71:1; selected nav 8.85:1; secondary text 4.90:1; group label 4.58:1 |

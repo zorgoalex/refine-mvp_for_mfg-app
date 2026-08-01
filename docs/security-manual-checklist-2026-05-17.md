@@ -5,8 +5,8 @@
 - Branch: `feat/backend-erp-stage1`
 - Goal: close PRD v1 backend acceptance debt item `security/manual checklist`.
 - Source handoff: `session-handoffs/2026-05-17-security-manual-checklist-handoff.md`
-- Stage backend: `https://backend-test.mebelkz.app/api/v1`
-- Stage frontend: `https://app-test.mebelkz.app`
+- Stage backend: `https://backend-test.example.com/api/v1`
+- Stage frontend: `https://app-test.example.com`
 
 ## Status Legend
 
@@ -47,7 +47,7 @@
 | CORS does not allow wildcard credentials in production/staging-like env. | Pass | `backend/src/config/env.validation.ts` rejects `CORS_ALLOWED_ORIGINS` containing `*` when `CORS_ALLOW_CREDENTIALS=true`; covered by `backend/src/config/cors.test.ts`. Verified with `npm test -- backend/src/config/cors.test.ts backend/src/config/env.validation.test.ts backend/src/modules/health/health.service.test.ts backend/src/modules/auth/refresh-cookie.test.ts`. |
 | Refresh cookie flags are appropriate for production/staging. | Pass | `backend/src/config/env.validation.ts` requires `REFRESH_COOKIE_SECURE=true` when `REFRESH_COOKIE_SAME_SITE=none` and auth is enabled; `backend/src/modules/auth/refresh-cookie.test.ts` verifies production Secure cookies and staging cross-site canary attributes. Verified with focused command above. |
 | Required backend env validation covers auth, CORS, DB, Redis/rate-limit, feature flags. | Pass | `backend/src/config/env.validation.ts` validates auth DB/secrets, CORS credentials, DB readiness requirements, Redis/rate-limit settings, staging/production Redis rate-limit store, and deadline feature flags. Covered by `backend/src/config/env.validation.test.ts`; focused command above exited 0. |
-| `/health/ready` checks required dependencies in stage-like runtime. | Pass | Code readiness in `backend/src/modules/health/health.service.ts` verifies DB when `READINESS_REQUIRE_DATABASE=true` and Redis when `READINESS_REQUIRE_REDIS=true`; `backend/src/modules/health/health.service.test.ts` covers required DB ping, DB failure, and required Redis ping. Live stage command passed on 2026-05-17: `curl -fsS https://backend-test.mebelkz.app/health/ready | jq` returned `status: ready` with `database.status=ok`, `redis.status=ok`, and `config.status=ok`. |
+| `/health/ready` checks required dependencies in stage-like runtime. | Pass | Code readiness in `backend/src/modules/health/health.service.ts` verifies DB when `READINESS_REQUIRE_DATABASE=true` and Redis when `READINESS_REQUIRE_REDIS=true`; `backend/src/modules/health/health.service.test.ts` covers required DB ping, DB failure, and required Redis ping. Live stage command passed on 2026-05-17: `curl -fsS https://backend-test.example.com/health/ready | jq` returned `status: ready` with `database.status=ok`, `redis.status=ok`, and `config.status=ok`. |
 | Runtime flags are fail-closed where needed and dependencies are explicit. | Pass | `backend/src/config/env.validation.ts` defaults deadline write/export controls to read-only/disabled and requires explicit dependencies for auth, readiness DB, Redis readiness, and Redis-backed rate limits; verified by `backend/src/config/env.validation.test.ts` with the focused command above. |
 
 ## Legacy Vercel Functions And Rollback Gates
@@ -79,8 +79,8 @@
 | --- | --- | --- |
 | Redis/Valkey-backed rate limit is enabled for stage/prod-like runtime. | Pass | `backend/src/rate-limit/rate-limit.module.ts` selects `RedisRateLimitStore` when `BACKEND_RATE_LIMIT_STORE=redis` using `RATE_LIMIT_REDIS_URL` or `REDIS_URL`; `backend/src/config/env.validation.test.ts` confirms staging requires `BACKEND_RATE_LIMIT_STORE=redis` plus a Redis URL. Focused test command passed 2026-05-17. |
 | Memory fallback is only local/test-safe. | Pass | `backend/src/rate-limit/rate-limit.module.ts` falls back to `MemoryRateLimitStore` only when the store is not `redis`; `backend/src/config/env.validation.test.ts` rejects staging without Redis-backed settings while focused memory-store tests cover local/test behavior. Focused test command passed 2026-05-17. |
-| Stage readiness includes Redis. | Pass | Live stage command passed on 2026-05-17: `curl -fsS https://backend-test.mebelkz.app/health/ready | jq` returned `status: ready` with `redis.status=ok`. Code/test coverage also verifies `READINESS_REQUIRE_REDIS=true` pings Redis through the rate-limit service and staging Redis settings are required. |
-| Login rate-limit smoke evidence is documented or rerun. | Pass | Stage smoke rerun on 2026-05-17 against `https://backend-test.mebelkz.app/api/v1/auth/login` with a unique nonexistent username and dummy password. Attempts 1-10 returned `401 INVALID_CREDENTIALS`; attempt 11 returned `429 RATE_LIMIT_EXCEEDED`. No secrets were printed. |
+| Stage readiness includes Redis. | Pass | Live stage command passed on 2026-05-17: `curl -fsS https://backend-test.example.com/health/ready | jq` returned `status: ready` with `redis.status=ok`. Code/test coverage also verifies `READINESS_REQUIRE_REDIS=true` pings Redis through the rate-limit service and staging Redis settings are required. |
+| Login rate-limit smoke evidence is documented or rerun. | Pass | Stage smoke rerun on 2026-05-17 against `https://backend-test.example.com/api/v1/auth/login` with a unique nonexistent username and dummy password. Attempts 1-10 returned `401 INVALID_CREDENTIALS`; attempt 11 returned `429 RATE_LIMIT_EXCEEDED`. No secrets were printed. |
 
 ## Secrets And Logging
 
@@ -111,9 +111,9 @@
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Stage backend readiness was checked. | Pass | Command passed on 2026-05-17 without secrets: `curl -fsS https://backend-test.mebelkz.app/health/ready | jq` returned JSON `status: ready`; checks included `database.status=ok`, `redis.status=ok`, and `config.status=ok`. |
-| Stage frontend runtime flags were checked without printing secrets. | Pass | After loading `/home/ovhtest/projects/erp_dev/.env` without printing secrets, `https://app-test.mebelkz.app/runtime-config.json` was checked through the Vercel bypass header. Runtime features included `backendAuth=true`, `backendPermissions=true`, `backendOrdersRead=true`, `backendOrdersWrite=true`, `backendPayments=false`, `backendClientPhones=false`, `backendProductionActions=false`, `backendDeadlines=true`, `backendOrderExport=true`, `backendUsers=true`, `backendVlm=true`, `backendReferences=true`, and `enableLegacyHasura=true`. |
-| Stage deadline/frontend canaries were rerun. | Pass | `npm run test:e2e:deadline-engine-stage-canary` passed on 2026-05-17 (1 passed). `npm run test:e2e:frontend-pages-stage-canary` passed on 2026-05-17 (1 passed) with explicit overrides: `FRONTEND_PAGES_STAGE_FRONTEND_URL=https://app-test.mebelkz.app`, `FRONTEND_PAGES_STAGE_BACKEND_API_URL=https://backend-test.mebelkz.app/api/v1`, `FRONTEND_PAGES_STAGE_POSTGRES_CONTAINER=erp_test-postgresdb-1`, and `FRONTEND_PAGES_STAGE_CREATE_USER=true`. |
+| Stage backend readiness was checked. | Pass | Command passed on 2026-05-17 without secrets: `curl -fsS https://backend-test.example.com/health/ready | jq` returned JSON `status: ready`; checks included `database.status=ok`, `redis.status=ok`, and `config.status=ok`. |
+| Stage frontend runtime flags were checked without printing secrets. | Pass | After loading `/home/ovhtest/projects/erp_dev/.env` without printing secrets, `https://app-test.example.com/runtime-config.json` was checked through the Vercel bypass header. Runtime features included `backendAuth=true`, `backendPermissions=true`, `backendOrdersRead=true`, `backendOrdersWrite=true`, `backendPayments=false`, `backendClientPhones=false`, `backendProductionActions=false`, `backendDeadlines=true`, `backendOrderExport=true`, `backendUsers=true`, `backendVlm=true`, `backendReferences=true`, and `enableLegacyHasura=true`. |
+| Stage deadline/frontend canaries were rerun. | Pass | `npm run test:e2e:deadline-engine-stage-canary` passed on 2026-05-17 (1 passed). `npm run test:e2e:frontend-pages-stage-canary` passed on 2026-05-17 (1 passed) with explicit overrides: `FRONTEND_PAGES_STAGE_FRONTEND_URL=https://app-test.example.com`, `FRONTEND_PAGES_STAGE_BACKEND_API_URL=https://backend-test.example.com/api/v1`, `FRONTEND_PAGES_STAGE_POSTGRES_CONTAINER=erp_test-postgresdb-1`, and `FRONTEND_PAGES_STAGE_CREATE_USER=true`. |
 
 ## Follow-Up Items
 

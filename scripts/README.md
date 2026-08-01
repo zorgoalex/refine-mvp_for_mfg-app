@@ -69,7 +69,7 @@ WHERE username = 'admin';
 
 -- Create admin user (if not exists)
 INSERT INTO users (username, email, password_hash, role_id, full_name, is_active)
-VALUES ('admin', 'admin@mebelkz.local', '$2a$10$...', 1, 'Admin User', true)
+VALUES ('admin', 'admin@example.local', '$2a$10$...', 1, 'Admin User', true)
 ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash;
 ```
 

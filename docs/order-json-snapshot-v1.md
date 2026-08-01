@@ -107,7 +107,7 @@ docker exec -i erp_dev-postgresdb-1 \
 
 Stage verification on 2026-05-12:
 
-- `https://backend.dev.mebelkz.app/health/ready` returned ready;
+- `https://backend-dev.example.com/health/ready` returned ready;
 - unauthenticated snapshot routes returned `401 AUTH_REQUIRED`, not `404`;
 - authenticated export of order `11157` returned snapshot v1 with client,
   client phone, 18 details, and 1 payment;

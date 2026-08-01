@@ -23,7 +23,7 @@ The tracked Compose source-of-truth is
 `ops/templates/env.vps.example`.
 
 Bitrix24 sync remains disabled until an administrator-created incoming webhook
-for `mebelkz.bitrix24.kz` and a numeric payment-system ID are configured. The
+for `bitrix24.example.com` and a numeric payment-system ID are configured. The
 webhook needs CRM plus sale/payment access; keep its complete URL only in `.env`.
 Keep `BITRIX24_REQUEST_TIMEOUT_MS` below
 `BACKEND_BITRIX24_SYNC_LEASE_MS`; startup validation rejects an unsafe pair.
@@ -426,7 +426,7 @@ freecut service can build in the same pass. Override the source with
 `FREECUT_REPO_URL` if needed. To pre-place or pin it manually:
 
 ```bash
-git clone https://github.com/zorgoalex/freecut_api.git \
+git clone <freecut-repo-url> \
   ~/projects/erp_dev/repo_freecut
 ```
 
