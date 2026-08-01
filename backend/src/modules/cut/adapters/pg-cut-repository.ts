@@ -527,19 +527,22 @@ export function resolveEffectiveVariant(
 export function resolvePdfTemplateSelection(
   requestedTemplate: string | undefined,
   frozenTemplate: string | undefined,
-): { code: string; requiresActiveCheck: boolean } {
+): { code: string; requiresActiveCheck: boolean; usesCurrentLayout: boolean } {
   if (requestedTemplate !== undefined) {
     return {
       code: requestedTemplate,
       // Preserve an archived snapshot's original template even if it was later
       // deactivated. Any actual override must resolve to an active template.
       requiresActiveCheck: frozenTemplate === undefined || requestedTemplate !== frozenTemplate,
+      // An explicit preview selection always means “render with the current
+      // saved layout”, including historical results whose geometry stays frozen.
+      usesCurrentLayout: true,
     };
   }
   if (frozenTemplate !== undefined) {
-    return { code: frozenTemplate, requiresActiveCheck: false };
+    return { code: frozenTemplate, requiresActiveCheck: false, usesCurrentLayout: false };
   }
-  return { code: 'standard', requiresActiveCheck: true };
+  return { code: 'standard', requiresActiveCheck: true, usesCurrentLayout: true };
 }
 
 export class PgCutRepository implements CutRepositoryPort {
@@ -2836,7 +2839,9 @@ export class PgCutRepository implements CutRepositoryPort {
     );
     const pdfTemplate = templateSelection.code;
     if (templateSelection.requiresActiveCheck) await this.assertPdfTemplateActive(pdfTemplate);
-    const templateLayout = frozenContext ? null : await this.loadPdfTemplateLayout(pdfTemplate);
+    const templateLayout = templateSelection.usesCurrentLayout
+      ? await this.loadPdfTemplateLayout(pdfTemplate)
+      : null;
     const sheets = frozenContext?.sheets ?? currentContext!.sheets;
     const rotate90 = frozenContext ? (query.rotate90 ?? false) : currentContext!.rotate90;
     // Rule 5: group PDF is blocked while the job requires recalculation.
@@ -2868,7 +2873,7 @@ export class PgCutRepository implements CutRepositoryPort {
         currentCutNumber: pdfIdentity.currentCutNumber ?? undefined,
         filmRequirementLinearMeters: s.filmRequirementLinearMeters,
       }));
-    return frozenContext
+    return frozenContext && !templateSelection.usesCurrentLayout
       ? buildFrozenSheetsPdf(frozenContext.renderContractVersion, pdfSheets)
       : buildSheetsPdf(pdfSheets);
   }
@@ -2904,7 +2909,9 @@ export class PgCutRepository implements CutRepositoryPort {
     );
     const pdfTemplate = templateSelection.code;
     if (templateSelection.requiresActiveCheck) await this.assertPdfTemplateActive(pdfTemplate);
-    const templateLayout = frozen ? null : await this.loadPdfTemplateLayout(pdfTemplate);
+    const templateLayout = templateSelection.usesCurrentLayout
+      ? await this.loadPdfTemplateLayout(pdfTemplate)
+      : null;
     const pdfIdentity = await this.loadPdfRenderIdentity(query.cutJobId, query.resultNo);
     const groupIds = frozen
       ? frozen.job.groups.map((group) => group.cutGroupId)
@@ -2977,7 +2984,7 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new CutJobNotFoundError(query.cutJobId);
     }
     for (const sheet of pdfSheets) sheet.pageCount = pdfSheets.length;
-    return frozen
+    return frozen && !templateSelection.usesCurrentLayout
       ? buildFrozenSheetsPdf('cut_sheet_render_v1', pdfSheets)
       : buildSheetsPdf(pdfSheets);
   }

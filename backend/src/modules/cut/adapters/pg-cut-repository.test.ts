@@ -168,6 +168,7 @@ describe('resolvePdfTemplateSelection', () => {
     expect(resolvePdfTemplateSelection('bath_profiles', 'standard')).toEqual({
       code: 'bath_profiles',
       requiresActiveCheck: true,
+      usesCurrentLayout: true,
     });
   });
 
@@ -175,10 +176,12 @@ describe('resolvePdfTemplateSelection', () => {
     expect(resolvePdfTemplateSelection(undefined, 'legacy_template')).toEqual({
       code: 'legacy_template',
       requiresActiveCheck: false,
+      usesCurrentLayout: false,
     });
     expect(resolvePdfTemplateSelection('legacy_template', 'legacy_template')).toEqual({
       code: 'legacy_template',
       requiresActiveCheck: false,
+      usesCurrentLayout: true,
     });
   });
 
@@ -186,7 +189,13 @@ describe('resolvePdfTemplateSelection', () => {
     expect(resolvePdfTemplateSelection(undefined, undefined)).toEqual({
       code: 'standard',
       requiresActiveCheck: true,
+      usesCurrentLayout: true,
     });
+  });
+
+  it('loads the current layout for explicit template requests in both frozen PDF paths', () => {
+    expect(repositorySource.match(/templateSelection\.usesCurrentLayout\s*\? await this\.loadPdfTemplateLayout\(pdfTemplate\)/g)).toHaveLength(2);
+    expect(repositorySource.match(/frozen(?:Context)? && !templateSelection\.usesCurrentLayout\s*\? buildFrozenSheetsPdf/g)).toHaveLength(2);
   });
 });
 

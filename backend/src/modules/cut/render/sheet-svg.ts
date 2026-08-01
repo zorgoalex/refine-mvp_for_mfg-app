@@ -136,9 +136,13 @@ const BATH_DETAIL_META_FONT_SCALE = 2;
 const BATH_DIMENSION_EDGE_INSET_RATIO = 0.55;
 const BATH_DIMENSION_RESERVED_RATIO = 1.05;
 const BATH_PDF_SHEET_FILL = '#f7f7f7';
+const BATH_PDF_PIECE_FILL = '#ffffff';
 const BATH_PDF_GUIDE_LABEL_FILL = '#374151';
 const BATH_PDF_GUIDE_TOP_GUTTER_RATIO = 1.6;
 const BATH_PDF_GUIDE_LEFT_GUTTER_RATIO = 4.2;
+const BATH_DETAIL_META_LINE_SPACING = 0.9;
+const BATH_DETAIL_META_GLYPH_HEIGHT_RATIO = 0.75;
+const BATH_CENTER_PREVIOUS_BASELINE_DISTANCE_RATIO = 1.1;
 const BATH_ORDER_LABEL_WEIGHT = 900;
 const BATH_ORDER_LABEL_STROKE_RATIO = 0.04;
 
@@ -394,7 +398,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
       const cy = rect.y + rect.h / 2;
       const rectEl = `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
         rect.h,
-      )}" fill="none" stroke="#1f2d3d" stroke-width="2"/>`;
+      )}" fill="${BATH_PDF_PIECE_FILL}" stroke="#1f2d3d" stroke-width="2"/>`;
 
       const sideTexts: string[] = [];
       let reservedTop = 0;
@@ -439,6 +443,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
             info: bathDetailInfo,
             rect,
             fontMm: detailMetaFontMm,
+            parallelToSheetShortSideMm: vbW <= vbH ? rect.w : rect.h,
             clipId: `cut-bath-detail-meta-${pieceIndex}`,
           })
         : '';
@@ -474,12 +479,19 @@ function renderBathDetailMeta(input: {
   info: BathPieceDetailInfo;
   rect: { x: number; y: number; w: number; h: number };
   fontMm: number;
+  parallelToSheetShortSideMm: number;
   clipId: string;
 }): string {
   const edge = input.info.edgeTypeName?.trim() || '—';
   const milling = input.info.millingTypeName?.trim() || '—';
   const lines = [edge, milling, ...(input.info.doweling === true ? ['присадка'] : [])];
-  const fontMm = fitBathDetailMetaFont(lines, input.rect.w, input.rect.h, input.fontMm);
+  const fontMm = fitBathDetailMetaFont(
+    lines,
+    input.rect.w,
+    input.rect.h,
+    input.parallelToSheetShortSideMm,
+    input.fontMm,
+  );
   const padding = Math.max(3, fontMm * 0.16);
   const x = input.rect.x + input.rect.w - padding;
   const bottom = input.rect.y + input.rect.h - padding;
@@ -488,18 +500,30 @@ function renderBathDetailMeta(input: {
     `<text class="cut-bath-detail-meta" font-family="Liberation Sans, sans-serif" font-size="${num(fontMm)}" fill="#111111" text-anchor="end" data-corner="bottom-right" clip-path="url(#${input.clipId})">`,
     ...lines.map((line, index) => {
       const linesBelow = lines.length - index - 1;
-      return `<tspan x="${num(x)}" y="${num(bottom - fontMm * 0.9 * linesBelow)}">${escapeXml(line)}</tspan>`;
+      return `<tspan x="${num(x)}" y="${num(bottom - fontMm * BATH_DETAIL_META_LINE_SPACING * linesBelow)}">${escapeXml(line)}</tspan>`;
     }),
     '</text>',
   ].join('');
 }
 
-function fitBathDetailMetaFont(lines: readonly string[], rectW: number, rectH: number, requestedFontMm: number): number {
+function fitBathDetailMetaFont(
+  lines: readonly string[],
+  rectW: number,
+  rectH: number,
+  parallelToSheetShortSideMm: number,
+  requestedFontMm: number,
+): number {
   const widestAtUnit = Math.max(...lines.map((line) => estimateTextWidthMm(line, 1)), 1);
   const widthFit = (rectW * 0.92) / widestAtUnit;
-  const lineBlockUnits = Math.max(0.75, (lines.length - 1) * 0.9 + 0.75);
+  const lineBlockUnits = Math.max(
+    BATH_DETAIL_META_GLYPH_HEIGHT_RATIO,
+    (lines.length - 1) * BATH_DETAIL_META_LINE_SPACING + BATH_DETAIL_META_GLYPH_HEIGHT_RATIO,
+  );
   const heightFit = (rectH * 0.92) / lineBlockUnits;
-  return Math.max(1, Math.min(requestedFontMm, widthFit, heightFit));
+  const occupiesHalfCrosswiseSide = requestedFontMm * lineBlockUnits
+    >= parallelToSheetShortSideMm / 2 - 1e-6;
+  const adaptiveStandard = occupiesHalfCrosswiseSide ? requestedFontMm / 2 : requestedFontMm;
+  return Math.max(1, Math.min(adaptiveStandard, widthFit, heightFit));
 }
 
 function bathOrderLabelStyle(fontMm: number): string {
@@ -578,9 +602,21 @@ function renderBathDetailCenterLabel(input: {
   }
   const font = fitBathLabelFont([orderLine, positionLine], input.rectW, input.rectH, input.baseFontMm, 2);
   const positionFont = font * 0.8;
+  const fittedPositionFont = resolveBathPositionFont({
+    label: positionLine,
+    maxW: input.rectW,
+    maxH: input.rectH / 2,
+    baseFontMm: positionFont,
+  }) ?? positionFont;
+  const occupiedHalfHeights = (font + fittedPositionFont) / 2;
+  const previousVisualGap = Math.max(
+    0,
+    font * BATH_CENTER_PREVIOUS_BASELINE_DISTANCE_RATIO - occupiedHalfHeights,
+  );
+  const lineOffset = (occupiedHalfHeights + previousVisualGap / 2) / 2;
   return {
     svg: [
-      `<text x="${num(input.cx)}" y="${num(input.cy - font * 0.55)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+      `<text x="${num(input.cx)}" y="${num(input.cy - lineOffset)}" font-family="Liberation Sans, sans-serif" font-size="${num(
         font,
       )}" ${bathOrderLabelStyle(font)} text-anchor="middle" dominant-baseline="middle">${escapeXml(
         orderLine,
@@ -588,7 +624,7 @@ function renderBathDetailCenterLabel(input: {
       renderBathPositionLabel({
         label: positionLine,
         cx: input.cx,
-        cy: input.cy + font * 0.55,
+        cy: input.cy + lineOffset,
         maxW: input.rectW,
         maxH: input.rectH / 2,
         baseFontMm: positionFont,
@@ -611,12 +647,8 @@ function renderBathPositionLabel(input: {
   baseFontMm: number;
   rotate?: boolean;
 }): string {
-  const match = /^#\s*(.+)$/.exec(input.label);
-  const marker = match ? '#' : '';
-  const value = match ? ` ${match[1]}` : input.label;
-  const availableW = input.rotate ? input.maxH : input.maxW;
-  const availableH = input.rotate ? input.maxW : input.maxH;
-  const font = fitBathPositionFont(marker, value, availableW, availableH, input.baseFontMm);
+  const { marker, value } = bathPositionParts(input.label);
+  const font = resolveBathPositionFont(input);
   if (font === null) return '';
   const hashFont = font * 0.5;
   const markerW = marker ? estimateTextWidthMm(marker, hashFont) : 0;
@@ -633,6 +665,24 @@ function renderBathPositionLabel(input: {
     )}" fill="${BATH_POSITION_LABEL_COLOR}" text-anchor="middle" dominant-baseline="middle">${escapeXml(value)}</text>`,
   ].join('');
   return input.rotate ? `<g transform="rotate(-90 ${num(input.cx)} ${num(input.cy)})">${body}</g>` : body;
+}
+
+function bathPositionParts(label: string): { marker: string; value: string } {
+  const match = /^#\s*(.+)$/.exec(label);
+  return match ? { marker: '#', value: ` ${match[1]}` } : { marker: '', value: label };
+}
+
+function resolveBathPositionFont(input: {
+  label: string;
+  maxW: number;
+  maxH: number;
+  baseFontMm: number;
+  rotate?: boolean;
+}): number | null {
+  const { marker, value } = bathPositionParts(input.label);
+  const availableW = input.rotate ? input.maxH : input.maxW;
+  const availableH = input.rotate ? input.maxW : input.maxH;
+  return fitBathPositionFont(marker, value, availableW, availableH, input.baseFontMm);
 }
 
 function fitBathPositionFont(

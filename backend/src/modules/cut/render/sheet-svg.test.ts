@@ -169,11 +169,12 @@ describe('buildSheetSvg multi-line labels', () => {
 });
 
 describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
-  it('prints edge, milling and doweling with the doubled standard metadata font', () => {
+  it('prints edge, milling and doweling with the doubled standard metadata font when the crosswise side is roomy', () => {
     const svg = buildBathProfileSheetSvg({
       sheet,
       labelFor: () => ['11300', 'поз. 5', '600X400'],
       bathDetailInfoFor: () => ({ edgeTypeName: 'ПВХ 2мм', millingTypeName: 'Модерн', doweling: true }),
+      labelFontMm: 25,
     });
 
     const orderFont = /<text[^>]*font-size="([^"]+)"[^>]*fill="#7f1d1d"[^>]*>11300<\/text>/.exec(svg)?.[1];
@@ -186,24 +187,30 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).toContain('>присадка</tspan>');
     expect(svg).not.toContain('Обкат:');
     expect(svg).not.toContain('Фрезеровка:');
-    expect(Number(metadataFont)).toBe(98);
+    expect(Number(metadataFont)).toBe(50);
     expect(svg).toMatch(/text-anchor="end"[^>]*data-corner="bottom-right"/);
   });
 
-  it('adapts the doubled metadata font to a medium-height detail without losing any line', () => {
+  it('halves metadata font when its line block reaches half the detail side parallel to the sheet short side', () => {
     const shortSheet: SheetPlacementsJson = {
       ...sheet,
-      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 500, height_mm: 189, rotated: false }],
+      sheet_width_mm: 2800,
+      sheet_height_mm: 1050,
+      pieces: [
+        { item_id: 'det-roomy', instance: 1, x_mm: 0, y_mm: 0, width_mm: 500, height_mm: 350, rotated: false },
+        { item_id: 'det-short', instance: 1, x_mm: 510, y_mm: 0, width_mm: 500, height_mm: 189, rotated: false },
+        { item_id: 'det-equal', instance: 1, x_mm: 1020, y_mm: 0, width_mm: 500, height_mm: 255, rotated: false },
+      ],
     };
     const svg = buildBathProfileSheetSvg({
       sheet: shortSheet,
       labelFor: () => ['2708', 'поз. 9'],
       bathDetailInfoFor: () => ({ edgeTypeName: 'р-1', millingTypeName: 'модерн', doweling: true }),
+      labelFontMm: 25,
     });
-    const metadataFont = Number(/class="cut-bath-detail-meta"[^>]*font-size="([^"]+)"/.exec(svg)?.[1]);
+    const metadataFonts = Array.from(svg.matchAll(/class="cut-bath-detail-meta"[^>]*font-size="([^"]+)"/g), (match) => Number(match[1]));
 
-    expect(metadataFont).toBeGreaterThan(49);
-    expect(metadataFont).toBeLessThan(98);
+    expect(metadataFonts).toEqual([50, 25, 25]);
     expect(svg).toContain('>р-1</tspan>');
     expect(svg).toContain('>модерн</tspan>');
     expect(svg).toContain('>присадка</tspan>');
@@ -301,6 +308,24 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).not.toContain('<tspan fill="#7f1d1d"');
   });
 
+  it('keeps half the previous visual gap between the order and position rows', () => {
+    const roomySheet: SheetPlacementsJson = {
+      ...sheet,
+      pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 1000, height_mm: 600, rotated: false }],
+    };
+    const svg = buildBathProfileSheetSvg({ sheet: roomySheet, labelFor: () => ['11300', 'поз. 5'] });
+    const order = /<text x="[^"]+" y="([^"]+)" font-family="[^"]+" font-size="([^"]+)"[^>]*fill="#7f1d1d"[^>]*>11300<\/text>/.exec(svg);
+    const position = /<text x="[^"]+" y="([^"]+)" font-family="[^"]+" font-size="([^"]+)"[^>]*fill="#14532d"[^>]*> 5<\/text>/.exec(svg);
+
+    expect(order).not.toBeNull();
+    expect(position).not.toBeNull();
+    const visualGap = Number(position?.[1]) - Number(order?.[1])
+      - Number(order?.[2]) / 2 - Number(position?.[2]) / 2;
+    const previousVisualGap = Number(order?.[2]) * 1.1
+      - Number(order?.[2]) / 2 - Number(position?.[2]) / 2;
+    expect(visualGap).toBeCloseTo(previousVisualGap / 2, 3);
+  });
+
   it('shrinks side dimensions and keeps compact position labels for narrow strip details', () => {
     const lowSheet: SheetPlacementsJson = {
       ...sheet,
@@ -320,7 +345,7 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
   it('moves bath center labels into the safe area below and right of side dimensions', () => {
     const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['11300', 'поз. 5', '600X400'] });
 
-    expect(svg).toMatch(/<text x="365\.125" y="192\.798"[^>]*>11300<\/text>/);
+    expect(svg).toMatch(/<text x="365\.125" y="203\.899"[^>]*>11300<\/text>/);
     expect(svg).not.toMatch(/<text x="310" y="215"[^>]*>11300<\/text>/);
   });
 
@@ -331,7 +356,7 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).toMatch(/<text x="67\.75" y="215" transform="rotate\(-90 67\.75 215\)"[^>]*>400<\/text>/);
   });
 
-  it('uses a light sheet surface and transparent detail interiors in bath PDF SVGs', () => {
+  it('uses a light sheet surface and opaque white detail interiors in bath PDF SVGs', () => {
     const bath = buildBathProfileSheetSvg({
       sheet,
       labelFor: () => ['11300', 'поз. 5'],
@@ -340,7 +365,7 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     const normal = buildSheetSvg({ sheet, labelFor: () => 'X', fillFor: () => '#123456' });
 
     expect(bath).toContain('width="2800" height="2070" fill="#f7f7f7"');
-    expect(bath).toMatch(/data-detail-id="999"><rect[^>]*fill="none"/);
+    expect(bath).toMatch(/data-detail-id="999"><rect[^>]*fill="#ffffff"/);
     expect(bath).not.toContain('fill="#123456"');
     expect(normal).toContain('fill="#123456"');
   });

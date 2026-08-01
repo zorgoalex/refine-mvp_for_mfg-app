@@ -41,7 +41,7 @@ describe('cut result history implementation guards', () => {
     expect(repository).toContain('candidate.cutGroupId === args.cutGroupId');
   });
 
-  it('serves historical sheets from frozen render artifacts, never current geometry', () => {
+  it('keeps frozen placements and uses current geometry rendering only for explicit metadata refreshes', () => {
     expect(repository).toContain("contractVersion: 'cut_sheet_render_v1'");
     expect(repository).toContain('renderSnapshot.pdfMeta as PdfSheetMeta');
     expect(repository).toContain('renderSnapshot.pdfDetailRows as PdfSheetDetailRow[]');
@@ -50,7 +50,11 @@ describe('cut result history implementation guards', () => {
       repository.indexOf('private async attachFrozenRenderSnapshots'),
     );
     expect(frozenLoader).toContain('renderSnapshot?.views');
-    expect(frozenLoader).not.toContain('buildSheetSvg(');
+    expect(frozenLoader).toContain("const baseSvg = rebuildSvgWithPieceMetadata && !view.svg.includes('data-detail-id=')");
+    expect(frozenLoader).toContain('? buildSheetSvg({');
+    expect(frozenLoader).toContain(': view.svg;');
+    expect(frozenLoader).toContain('const baseBathSvg = rebuildBathSvgWithCurrentRenderer');
+    expect(frozenLoader).toContain(': view.bathSvg;');
     expect(repository).toContain('buildFrozenSheetsPdf(frozenContext.renderContractVersion, pdfSheets)');
     expect(repository).toContain("buildFrozenSheetsPdf('cut_sheet_render_v1', pdfSheets)");
     expect(pdfRenderer).toContain("case 'cut_sheet_render_v1':");
