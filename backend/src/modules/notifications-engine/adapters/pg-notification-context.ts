@@ -59,6 +59,7 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
         `SELECT order_status_id, client_id, completion_date
            FROM public.orders
           WHERE order_id = $1::bigint AND delete_flag = false
+            AND order_kind = 'production_order'
           LIMIT 1`,
         [orderId],
       );

@@ -286,7 +286,7 @@ export class PgUserIdentityRepository {
     }
 
     const user = await tx.query<{ login_policy: string | null } & QueryResultRow>(
-      'SELECT login_policy FROM users WHERE user_id = $1 AND is_active FOR UPDATE',
+      'SELECT login_policy FROM users WHERE user_id = $1 AND is_active AND is_service_account = false FOR UPDATE',
       [userId],
     );
     const row = user.rows[0];
@@ -417,7 +417,7 @@ export class PgUserIdentityRepository {
       }
 
       const user = await tx.query<{ login_policy: string | null; is_active: boolean } & QueryResultRow>(
-        `SELECT login_policy, is_active FROM users WHERE user_id = $1 FOR UPDATE`,
+        `SELECT login_policy, is_active FROM users WHERE user_id = $1 AND is_service_account = false FOR UPDATE`,
         [input.targetUserId],
       );
       const urow = user.rows[0];

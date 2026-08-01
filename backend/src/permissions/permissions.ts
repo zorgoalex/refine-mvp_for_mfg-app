@@ -65,6 +65,12 @@ export const PERMISSIONS = [
   'clients.delete',
   'clients.analytics.view',
 
+  'bitrix24.requests.view',
+  'bitrix24.requests.update',
+  'bitrix24.requests.convert',
+  'bitrix24.payments.materialize',
+  'bitrix24.integration.manage',
+
   'suppliers.view',
   'suppliers.manage',
   'vendors.view',
@@ -220,6 +226,11 @@ export const ROLE_PERMISSIONS = {
     'clients.update',
     'clients.analytics.view',
 
+    'bitrix24.requests.view',
+    'bitrix24.requests.update',
+    'bitrix24.requests.convert',
+    'bitrix24.payments.materialize',
+
     'suppliers.view',
     'suppliers.manage',
     'vendors.view',
@@ -305,6 +316,11 @@ export const ROLE_PERMISSIONS = {
     'clients.update',
     'clients.analytics.view',
 
+    'bitrix24.requests.view',
+    'bitrix24.requests.update',
+    'bitrix24.requests.convert',
+    'bitrix24.payments.materialize',
+
     'suppliers.view',
     'vendors.view',
 
@@ -365,6 +381,9 @@ export const ROLE_PERMISSIONS = {
     'clients.view',
     'clients.create',
     'clients.update',
+
+    'bitrix24.requests.view',
+    'bitrix24.requests.update',
 
     'suppliers.view',
     'vendors.view',

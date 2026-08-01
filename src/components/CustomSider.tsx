@@ -67,6 +67,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
 
 const CATEGORY_MAP: Record<string, string> = {
   clients: "Контрагенты",
+  bitrix24_incoming_requests: "Контрагенты",
   clients_analytics_view: "Контрагенты",
   suppliers: "Контрагенты",
   vendors: "Контрагенты",

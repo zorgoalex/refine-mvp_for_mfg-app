@@ -22,9 +22,11 @@ export class FailingBitrix24ApiClient implements Bitrix24ApiPort {
   updateCrmItem(): Promise<void> { return this.fail(); }
   findCrmItemByOrigin(): Promise<string | null> { return this.fail(); }
   deleteCrmItem(): Promise<void> { return this.fail(); }
+  getCrmItem(): Promise<Record<string, unknown>> { return this.fail(); }
   setDealProductRows(): Promise<void> { return this.fail(); }
   findPaymentByXmlId(): Promise<string | null> { return this.fail(); }
   listDealPaymentIds(): Promise<string[]> { return this.fail(); }
+  getPayment(): Promise<Record<string, unknown>> { return this.fail(); }
   createDealPayment(): Promise<string> { return this.fail(); }
   updatePayment(): Promise<void> { return this.fail(); }
   deletePayment(): Promise<void> { return this.fail(); }

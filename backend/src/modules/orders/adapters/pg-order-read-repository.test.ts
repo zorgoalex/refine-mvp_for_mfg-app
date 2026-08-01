@@ -57,9 +57,10 @@ describe('PgOrderReadRepository', () => {
 
     const listQuery = database.queries.find((query) => query.text.includes('LIMIT'))?.text ?? '';
     expect(listQuery).toContain('o.delete_flag = false');
-    expect(listQuery).toContain('JOIN projects mp ON mp.project_id = o.project_id');
+    expect(listQuery).toContain("o.order_kind = 'production_order'");
+    expect(listQuery).toContain('LEFT JOIN projects mp ON mp.project_id = o.project_id');
     expect(listQuery).toContain('mp.code AS project_code');
-    expect(listQuery).toContain("(mp.code || '-' || o.order_name) AS full_number");
+    expect(listQuery).toContain("CASE WHEN mp.code IS NULL THEN NULL ELSE mp.code || '-' || o.order_name END AS full_number");
     expect(listQuery).toContain('LEFT JOIN LATERAL');
     expect(listQuery).toContain('FROM order_details od');
     expect(listQuery).toContain('AS basis_projects');
@@ -196,7 +197,7 @@ describe('PgOrderReadRepository', () => {
     expect(listQuery?.text).toContain('(mp.code = $3 AND o.order_name ILIKE $4)');
     expect(listQuery?.text).toContain('o.project_id = $5');
     expect(listQuery?.text).toContain('ORDER BY mp.code DESC');
-    expect(listQuery?.text).toContain("(mp.code || '-' || o.order_name) AS full_number");
+    expect(listQuery?.text).toContain("CASE WHEN mp.code IS NULL THEN NULL ELSE mp.code || '-' || o.order_name END AS full_number");
     expect(listQuery?.params).toEqual(['%МП-1024-77%', 'МП-1024-77%', 'МП-1024', '77%', 77, 10, 0]);
   });
 
@@ -831,6 +832,8 @@ function orderRow() {
   return {
     order_id: 100,
     order_name: 'A-100',
+    order_kind: 'production_order',
+    source_system: 'erp',
     project_id: 77,
     project_code: 'МП-1024',
     full_number: 'МП-1024-A-100',
@@ -900,8 +903,9 @@ function mergeBaseDefaultListSql(): string {
     '',
     '      WITH page_orders AS (',
     '        SELECT',
-    '          o.order_id, o.order_name, o.project_id, mp.code AS project_code,',
-    "          (mp.code || '-' || o.order_name) AS full_number,",
+    '          o.order_id, o.order_name, o.order_kind, o.source_system,',
+    '          o.project_id, mp.code AS project_code,',
+    "          CASE WHEN mp.code IS NULL THEN NULL ELSE mp.code || '-' || o.order_name END AS full_number,",
     '          o.client_id, c.client_name,',
     '          o.order_date, o.priority,',
     '          o.order_status_id, os.order_status_name,',
@@ -916,14 +920,14 @@ function mergeBaseDefaultListSql(): string {
     '          o.sheet_material_type_id AS header_sheet_material_type_id,',
     '          hsmt.name AS header_material_name',
     '        FROM orders o',
-    '        JOIN projects mp ON mp.project_id = o.project_id',
+    '        LEFT JOIN projects mp ON mp.project_id = o.project_id',
     '        LEFT JOIN clients c ON c.client_id = o.client_id',
     '        LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id',
     '        LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id',
     '        LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id',
     '        ',
     '        LEFT JOIN sheet_material_types hsmt ON hsmt.sheet_material_type_id = o.sheet_material_type_id',
-    '        WHERE o.delete_flag = false',
+    "        WHERE o.delete_flag = false AND o.order_kind = 'production_order'",
     '        ORDER BY o.updated_at DESC, o.order_id DESC',
     '        LIMIT $1 OFFSET $2',
     '      )',
@@ -1048,7 +1052,10 @@ function mergeBaseDefaultGetByIdSql(): string {
   return [
     '',
     '      SELECT',
-    '        o.order_id, o.order_name, o.client_id, c.client_name,',
+    '        o.order_id, o.order_name, o.order_kind, o.source_system,',
+    '        o.project_id, mp.code AS project_code,',
+    "        CASE WHEN mp.code IS NULL THEN NULL ELSE mp.code || '-' || o.order_name END AS full_number,",
+    '        o.client_id, c.client_name,',
     '        o.order_date, o.priority,',
     '        o.order_status_id, os.order_status_name,',
     '        o.payment_status_id, pay_s.payment_status_name,',
@@ -1064,13 +1071,14 @@ function mergeBaseDefaultGetByIdSql(): string {
     '        NULL::bigint AS material_id,',
     '        o.milling_type_id, o.edge_type_id, o.film_id',
     '      FROM orders o',
+    '      LEFT JOIN projects mp ON mp.project_id = o.project_id',
     '      LEFT JOIN clients c ON c.client_id = o.client_id',
     '      LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id',
     '      LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id',
     '      LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id',
     '      ',
     '      LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = o.sheet_material_type_id',
-    '      WHERE o.order_id = $1 AND o.delete_flag = false',
+    "      WHERE o.order_id = $1 AND o.delete_flag = false AND o.order_kind = 'production_order'",
     '      ',
   ].join('\n');
 }

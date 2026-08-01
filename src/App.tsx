@@ -47,6 +47,9 @@ const DowelOrderEdit = lazy(async () => ({ default: (await import("./pages/dowel
 const DowelOrderShow = lazy(async () => ({ default: (await import("./pages/doweling_orders/show")).DowelOrderShow }));
 const ConfigurationPage = lazy(async () => ({ default: (await import("./pages/configuration")).ConfigurationPage }));
 const ProfilePage = lazy(async () => ({ default: (await import("./pages/profile")).ProfilePage }));
+const Bitrix24IncomingRequestsPage = lazy(async () => ({
+  default: (await import("./pages/bitrix24/IncomingRequestsPage")).Bitrix24IncomingRequestsPage,
+}));
 
 // Route-level code splitting: every page component is lazy-loaded so the root
 // bundle ships only shell/providers/login. WorkspaceLayout owns the Suspense
@@ -420,6 +423,11 @@ const ThemedApp = () => {
                   meta: { idColumnName: "client_id", label: "Клиенты" },
                 },
                 {
+                  name: "bitrix24_incoming_requests",
+                  list: "/bitrix24/incoming-requests",
+                  meta: { idColumnName: "request_id", label: "Входящие заявки Bitrix" },
+                },
+                {
                   name: "clients_analytics_view",
                   list: "/clients-analytics",
                   show: "/clients-analytics/show/:id",
@@ -781,6 +789,7 @@ const ThemedApp = () => {
                     <Route path="edit/:id" element={<ClientEdit />} />
                     <Route path="show/:id" element={<ClientShow />} />
                   </Route>
+                  <Route path="/bitrix24/incoming-requests" element={<Bitrix24IncomingRequestsPage />} />
                   <Route path="/clients-analytics" >
                     <Route index element={<ClientsAnalyticsList />} />
                     <Route path="show/:id" element={<ClientsAnalyticsShow />} />

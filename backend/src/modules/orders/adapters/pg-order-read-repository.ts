@@ -9,6 +9,7 @@ import type {
   OrderListResponseDto,
 } from '../dto/order.dto';
 import type { OrderGroupRelationType, OrderGroupSummaryDto } from '../dto/order-group-link.dto';
+import type { OrderKind, OrderSourceSystem } from '../domain/order-identity';
 import type {
   GetOrderFormDataCommand,
   GetOrderAuditCommand,
@@ -59,9 +60,11 @@ const PAGE_SORT_COLUMNS: Record<OrderListSortBy, string> = {
 interface OrderHeaderRow extends QueryResultRow {
   order_id: string | number;
   order_name: string;
-  project_id: string | number;
-  project_code: string;
-  full_number: string;
+  order_kind: OrderKind;
+  source_system: OrderSourceSystem;
+  project_id: string | number | null;
+  project_code: string | null;
+  full_number: string | null;
   client_id: string | number;
   client_name: string | null;
   order_date: string | Date;
@@ -390,8 +393,9 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       `
       WITH page_orders AS (
         SELECT
-          o.order_id, o.order_name, o.project_id, mp.code AS project_code,
-          (mp.code || '-' || o.order_name) AS full_number,
+          o.order_id, o.order_name, o.order_kind, o.source_system,
+          o.project_id, mp.code AS project_code,
+          CASE WHEN mp.code IS NULL THEN NULL ELSE mp.code || '-' || o.order_name END AS full_number,
           o.client_id, c.client_name,
           o.order_date, o.priority,
           o.order_status_id, os.order_status_name,
@@ -405,7 +409,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
           ${headerSheetSelect}${deletedSelect}
         FROM orders o
-        JOIN projects mp ON mp.project_id = o.project_id
+        LEFT JOIN projects mp ON mp.project_id = o.project_id
         LEFT JOIN clients c ON c.client_id = o.client_id
         LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
         LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
@@ -589,12 +593,15 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       ? [headerMaterialJoin, deletedHeaderJoin].filter((fragment) => fragment.length > 0).join('\n      ')
       : headerMaterialJoin;
     const headerWhere = includeDeleted
-      ? 'WHERE o.order_id = $1'
-      : 'WHERE o.order_id = $1 AND o.delete_flag = false';
+      ? `WHERE o.order_id = $1 AND o.order_kind = 'production_order'`
+      : `WHERE o.order_id = $1 AND o.delete_flag = false AND o.order_kind = 'production_order'`;
     const headerResult = await this.database.query<OrderHeaderRow>(
       `
       SELECT
-        o.order_id, o.order_name, o.client_id, c.client_name,
+        o.order_id, o.order_name, o.order_kind, o.source_system,
+        o.project_id, mp.code AS project_code,
+        CASE WHEN mp.code IS NULL THEN NULL ELSE mp.code || '-' || o.order_name END AS full_number,
+        o.client_id, c.client_name,
         o.order_date, o.priority,
         o.order_status_id, os.order_status_name,
         o.payment_status_id, pay_s.payment_status_name,
@@ -607,6 +614,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
         ${headerSheetCols}${deletedHeaderSelect}
       FROM orders o
+      LEFT JOIN projects mp ON mp.project_id = o.project_id
       LEFT JOIN clients c ON c.client_id = o.client_id
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
       LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
@@ -889,7 +897,10 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
   }
 
   private buildListWhere(command: ListOrdersCommand, params: unknown[]): string {
-    const clauses = [command.query.deleted === true ? 'o.delete_flag = true' : 'o.delete_flag = false'];
+    const clauses = [
+      command.query.deleted === true ? 'o.delete_flag = true' : 'o.delete_flag = false',
+      `o.order_kind = 'production_order'`,
+    ];
 
     if (command.query.deleted === true && command.query.deletedScopeUserId) {
       const deletedScopeUserIdIndex = params.push(Number(command.query.deletedScopeUserId));
@@ -1101,6 +1112,11 @@ function mapOrderDto(
     header: {
       orderId: toNumber(row.order_id),
       orderName: row.order_name,
+      orderKind: row.order_kind,
+      sourceSystem: row.source_system,
+      projectId: toNullableNumber(row.project_id),
+      projectCode: row.project_code,
+      fullNumber: row.full_number,
       clientId: toNumber(row.client_id),
       clientName: row.client_name,
       orderDate: toDateOnly(row.order_date) ?? '',
@@ -1176,7 +1192,9 @@ function mapListItem(row: OrderHeaderRow, includeDeleted: boolean = false): Orde
   return {
     orderId: toNumber(row.order_id),
     orderName: row.order_name,
-    projectId: toNumber(row.project_id),
+    orderKind: row.order_kind,
+    sourceSystem: row.source_system,
+    projectId: toNullableNumber(row.project_id),
     projectCode: row.project_code,
     fullNumber: row.full_number,
     clientId: toNumber(row.client_id),

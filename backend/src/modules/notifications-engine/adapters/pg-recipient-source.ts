@@ -10,7 +10,9 @@ export class PgRecipientSourceAdapter implements RecipientSourcePort {
     switch (kind) {
       case 'order_manager': {
         const res = await client.query<{ manager_id: string | number }>(
-          `SELECT manager_id FROM public.orders WHERE order_id = $1::bigint AND delete_flag = false AND manager_id IS NOT NULL`,
+          `SELECT manager_id FROM public.orders
+            WHERE order_id = $1::bigint AND delete_flag = false
+              AND order_kind = 'production_order' AND manager_id IS NOT NULL`,
           [ctx.orderId],
         );
         return res.rows.map((r) => Number(r.manager_id)).filter(Number.isFinite);

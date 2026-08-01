@@ -33,6 +33,7 @@ const CATEGORY_ORDER = [
 
 const CATEGORY_MAP: Record<string, string> = {
   clients: "Контрагенты",
+  bitrix24_incoming_requests: "Контрагенты",
   clients_analytics_view: "Контрагенты",
   suppliers: "Контрагенты",
   vendors: "Контрагенты",
@@ -65,6 +66,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   groups: "Группы",
   projects: "Проекты",
   clients: "Клиенты",
+  bitrix24_incoming_requests: "Входящие заявки Bitrix",
   payments: "Платежи",
   materials: "Материалы",
   configuration: "Конфигурация",

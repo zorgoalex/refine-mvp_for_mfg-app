@@ -381,7 +381,10 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
   private async assertOrderReadable(tx: DatabaseClient, user: CurrentUser, orderId: number,
     requestId?: string, setId?: number): Promise<void> {
     const result = await tx.query<OrderScopeRow>(
-      `SELECT order_id, created_by, manager_id FROM orders WHERE order_id=$1 AND delete_flag=false`,
+      `SELECT order_id, created_by, manager_id
+         FROM orders
+        WHERE order_id=$1 AND delete_flag=false
+          AND order_kind = 'production_order'`,
       [orderId],
     );
     const row = result.rows[0];

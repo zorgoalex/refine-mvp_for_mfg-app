@@ -138,6 +138,10 @@ function harness(input?: {
     deletePaymentCreateGuard: vi.fn(async (_db, paymentId: string) => {
       guards.delete(paymentId);
     }),
+    prepareOutboundOperation: vi.fn().mockResolvedValue(
+      '00000000-0000-4000-8000-000000000001',
+    ),
+    completeOutboundOperation: vi.fn().mockResolvedValue(undefined),
   } as unknown as PgCrmSyncMappingRepository;
   const db = {
     transaction: vi.fn(async (handler) => handler({})),
@@ -186,6 +190,29 @@ describe('Bitrix24SyncConsumer', () => {
     expect(intents[0]?.mapping.bitrixId).toBe('100');
   });
 
+  it('updates a Bitrix-owned client without claiming ERP provenance', async () => {
+    const h = harness({
+      mappings: [{
+        entityType: 'client', erpId: '1', bitrixObject: 'contact', bitrixId: '10',
+        parentErpId: null, status: 'active', lastHash: 'old', sourceSystem: 'bitrix24',
+      }],
+    });
+
+    await h.consumer.sync(event('client', '1', 'upsert'));
+
+    expect(h.bitrix.updateCrmItem).toHaveBeenCalledWith(
+      3,
+      '10',
+      expect.not.objectContaining({
+        originatorId: expect.anything(),
+        originId: expect.anything(),
+        assignedById: expect.anything(),
+      }),
+    );
+    expect(h.bitrix.findCrmItemByOrigin).not.toHaveBeenCalled();
+    expect(h.bitrix.createCrmItem).not.toHaveBeenCalled();
+  });
+
   it('creates counterparty, deal, one product row, and native payment', async () => {
     const h = harness({ payments: [makePayment()] });
     const intents = await h.consumer.sync(event('order', '2', 'upsert'));
@@ -221,6 +248,88 @@ describe('Bitrix24SyncConsumer', () => {
       '102',
       expect.objectContaining({ sum: 50, psSum: 50 }),
     );
+  });
+
+  it('acknowledges a CRM request without deleting its Bitrix Deal', async () => {
+    const h = harness({
+      order: makeOrder({ orderKind: 'crm_request', sourceSystem: 'bitrix24' }),
+      mappings: [{
+        entityType: 'order', erpId: '2', bitrixObject: 'deal', bitrixId: '20',
+        parentErpId: '1', status: 'active', lastHash: 'old', sourceSystem: 'bitrix24',
+      }],
+    });
+
+    await expect(h.consumer.sync(event('order', '2', 'upsert'))).resolves.toEqual([]);
+    expect(h.bitrix.deleteCrmItem).not.toHaveBeenCalled();
+    expect(h.bitrix.updateCrmItem).not.toHaveBeenCalled();
+    expect(h.bitrix.createCrmItem).not.toHaveBeenCalled();
+  });
+
+  it('updates only production-owned fields after converting a Bitrix Deal', async () => {
+    const h = harness({
+      order: makeOrder({ orderKind: 'production_order', sourceSystem: 'bitrix24' }),
+      mappings: [
+        {
+          entityType: 'client', erpId: '1', bitrixObject: 'contact', bitrixId: '10',
+          parentErpId: null, status: 'active', lastHash: 'client-old', sourceSystem: 'erp',
+        },
+        {
+          entityType: 'order', erpId: '2', bitrixObject: 'deal', bitrixId: '20',
+          parentErpId: '1', status: 'active', lastHash: 'order-old', sourceSystem: 'bitrix24',
+        },
+      ],
+    });
+
+    await h.consumer.sync(event('order', '2', 'upsert'));
+
+    expect(h.bitrix.updateCrmItem).toHaveBeenCalledWith(
+      2,
+      '20',
+      expect.objectContaining({
+        title: 'Заказ 24001',
+        additionalInfo: 'https://erp.example/orders/show/2',
+        begindate: '2026-07-20',
+        contactId: 10,
+      }),
+    );
+    const dealFields = vi.mocked(h.bitrix.updateCrmItem).mock.calls
+      .find(([entityTypeId]) => entityTypeId === 2)?.[2];
+    expect(dealFields).not.toHaveProperty('originatorId');
+    expect(dealFields).not.toHaveProperty('originId');
+    expect(dealFields).not.toHaveProperty('opportunity');
+    expect(dealFields).not.toHaveProperty('currencyId');
+    expect(dealFields).not.toHaveProperty('comments');
+    expect(dealFields).not.toHaveProperty('assignedById');
+    expect(h.bitrix.setDealProductRows).toHaveBeenCalledWith(
+      '20',
+      [expect.objectContaining({ price: 90, quantity: 1 })],
+    );
+    expect(h.bitrix.findCrmItemByOrigin).not.toHaveBeenCalled();
+    expect(h.bitrix.createCrmItem).not.toHaveBeenCalled();
+  });
+
+  it('does not recreate a remotely deleted Bitrix-owned Deal', async () => {
+    const h = harness({
+      order: makeOrder({ orderKind: 'production_order', sourceSystem: 'bitrix24' }),
+      mappings: [{
+        entityType: 'order', erpId: '2', bitrixObject: 'deal', bitrixId: '20',
+        parentErpId: '1', status: 'remote_deleted', lastHash: 'old', sourceSystem: 'bitrix24',
+      }],
+    });
+
+    const intents = await h.consumer.sync(event('order', '2', 'upsert'));
+
+    expect(intents).toHaveLength(1);
+    expect(intents[0]).toMatchObject({
+      mapping: { status: 'remote_deleted', bitrixId: '20' },
+      audit: {
+        event: 'crm_sync.remote_deleted_skipped',
+        metadata: { conflictCode: 'BITRIX24_DEAL_REMOTE_DELETED' },
+      },
+    });
+    expect(h.bitrix.updateCrmItem).not.toHaveBeenCalled();
+    expect(h.bitrix.createCrmItem).not.toHaveBeenCalled();
+    expect(h.bitrix.deleteCrmItem).not.toHaveBeenCalled();
   });
 
   it('deletes mapped payments before deleted deal', async () => {

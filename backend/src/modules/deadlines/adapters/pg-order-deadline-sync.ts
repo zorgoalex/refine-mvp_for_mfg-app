@@ -49,6 +49,21 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
     requestId?: string;
   }): Promise<void> {
     await this.database.transaction(async (tx) => {
+      await this.syncOrderDeadlinesInTransaction(tx, input, true);
+    });
+  }
+
+  async syncOrderDeadlinesInTransaction(
+    tx: TransactionClient,
+    input: {
+      orderId: number;
+      currentUser: CurrentUser;
+      eventType: 'ORDER_CREATED' | 'ORDER_UPDATED';
+      requestId?: string;
+    },
+    emitOrderEvent: boolean,
+  ): Promise<void> {
+    if (emitOrderEvent) {
       const outbox = new PgOutboxPort(tx);
       await outbox.enqueue({
         eventType: input.eventType,
@@ -61,10 +76,10 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
           source: 'orders.transaction',
         },
       });
+    }
 
-      await this.syncFinalOrderDeadline(tx, input.orderId, input.currentUser, input.requestId);
-      await this.syncStageDeadlines(tx, input.orderId, input.currentUser, input.requestId);
-    });
+    await this.syncFinalOrderDeadline(tx, input.orderId, input.currentUser, input.requestId);
+    await this.syncStageDeadlines(tx, input.orderId, input.currentUser, input.requestId);
   }
 
   private async syncFinalOrderDeadline(
@@ -77,7 +92,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
       `
       SELECT order_id, client_id, manager_id, planned_completion_date, completion_date, delete_flag
       FROM orders
-      WHERE order_id = $1
+      WHERE order_id = $1 AND order_kind = 'production_order'
       LIMIT 1
       `,
       [orderId],
@@ -119,7 +134,7 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
       JOIN orders o ON o.order_id = ow.order_id
       LEFT JOIN workshops w ON w.workshop_id = ow.workshop_id
       LEFT JOIN users u ON u.employee_id = ow.responsible_employee_id AND u.is_active = true
-      WHERE ow.order_id = $1
+      WHERE ow.order_id = $1 AND o.order_kind = 'production_order'
       ORDER BY ow.order_workshop_id ASC
       `,
       [orderId],

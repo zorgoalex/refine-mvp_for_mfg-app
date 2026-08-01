@@ -40,6 +40,7 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
     expect(database.queries[0].text).toContain('expires_at > now()');
     expect(database.queries[0].text).toContain('FOR UPDATE');
     expect(database.queries[1].text).toContain('is_active');
+    expect(database.queries[1].text).toContain('is_service_account = false');
     expect(database.queries[1].text).toContain('FOR UPDATE');
     expect(database.queries[2].text).toContain('ON CONFLICT (provider, provider_user_id) DO NOTHING');
     expect(database.queries[3].text).toContain('auth.identity.linked');
@@ -125,6 +126,7 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
     ).resolves.toMatchObject({ status: 'linked' });
     expect(database.queries[0].text).not.toContain('auth_sessions');
     expect(database.queries[0].text).toContain('is_active');
+    expect(database.queries[0].text).toContain('is_service_account = false');
   });
 });
 
@@ -324,7 +326,7 @@ describe('PgUserIdentityRepository.deleteOneLinkWithAudit', () => {
     ]);
     const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
     await expect(repository.deleteOneLinkWithAudit(base)).resolves.toBe('not_found');
-    expect(database.queries.some((q) => q.text.includes('count'))).toBe(false);
+    expect(database.queries.some((q) => q.text.includes('SELECT count(*)'))).toBe(false);
   });
 
   it('allows admin to unlink from a DEACTIVATED target (is_active ignored on admin path)', async () => {

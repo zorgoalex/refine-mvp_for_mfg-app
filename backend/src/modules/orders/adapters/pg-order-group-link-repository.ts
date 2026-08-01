@@ -201,6 +201,7 @@ async function loadOrder(orderId: number, database: DatabaseClient): Promise<Loc
     SELECT order_id, version, client_id, created_by, manager_id
     FROM orders
     WHERE order_id = $1 AND delete_flag = false
+      AND order_kind = 'production_order'
     `,
     [orderId],
   );
@@ -214,7 +215,10 @@ async function loadOrderForUpdate(tx: DatabaseClient, orderId: number): Promise<
   const result = await tx.query<LockedOrderRow>(
     `
     SELECT order_id, version, client_id, created_by, manager_id
-    FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE
+    FROM orders
+    WHERE order_id = $1 AND delete_flag = false
+      AND order_kind = 'production_order'
+    FOR UPDATE
     `,
     [orderId],
   );

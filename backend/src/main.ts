@@ -6,7 +6,7 @@ import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { ApiErrorFilter } from './common/errors/api-error.filter';
 import { createRequestIdMiddleware } from './common/request-id/request-id.middleware';
-import { toNestGlobalPrefix } from './config/api-prefix';
+import { normalizeApiPrefix, toNestGlobalPrefix } from './config/api-prefix';
 import { createCorsRuntimeOptions, isOriginAllowed } from './config/cors';
 import type { BackendEnv } from './config/env.validation';
 import { setupSwagger } from './config/swagger';
@@ -27,11 +27,19 @@ async function bootstrap(): Promise<void> {
     CORS_ALLOW_CREDENTIALS: config.get('CORS_ALLOW_CREDENTIALS', { infer: true }),
   });
 
+  const apiPrefix = config.get('API_PREFIX', { infer: true });
+  const bitrixCallbackPath =
+    `${normalizeApiPrefix(apiPrefix)}/integrations/bitrix24`;
+  app.use(
+    bitrixCallbackPath,
+    json({ limit: '256kb' }),
+    urlencoded({ limit: '256kb', extended: true, parameterLimit: 200 }),
+  );
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ limit: '50mb', extended: true }));
   app.use(createRequestIdMiddleware(config.get('REQUEST_ID_HEADER', { infer: true })));
   app.useGlobalFilters(new ApiErrorFilter());
-  app.setGlobalPrefix(toNestGlobalPrefix(config.get('API_PREFIX', { infer: true })), {
+  app.setGlobalPrefix(toNestGlobalPrefix(apiPrefix), {
     exclude: [
       { path: 'health/live', method: RequestMethod.GET },
       { path: 'health/ready', method: RequestMethod.GET },

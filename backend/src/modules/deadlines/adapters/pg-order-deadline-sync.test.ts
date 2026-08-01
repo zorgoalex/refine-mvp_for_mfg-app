@@ -44,6 +44,27 @@ describe('PgOrderDeadlineSync', () => {
       ]),
     );
   });
+
+  it('initializes conversion deadlines inside the durable outbox transaction', async () => {
+    const database = createDatabase();
+    const sync = new PgOrderDeadlineSync(database.service);
+
+    await sync.syncOrderDeadlinesInTransaction(
+      database.transactionClient as never,
+      {
+        orderId: 100,
+        currentUser: currentUser(),
+        eventType: 'ORDER_CREATED',
+        requestId: 'conversion-command-1',
+      },
+      false,
+    );
+
+    const outbox = database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'));
+    expect(outbox).toHaveLength(2);
+    expect(outbox.some((query) => query.params[0] === 'ORDER_CREATED')).toBe(false);
+  });
 });
 
 function createDatabase() {
@@ -139,6 +160,7 @@ function createDatabase() {
 
   return {
     queries,
+    transactionClient: tx,
     service: {
       async transaction<T>(handler: (client: typeof tx) => Promise<T>) {
         return handler(tx);

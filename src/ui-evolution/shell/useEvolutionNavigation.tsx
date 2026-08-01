@@ -37,6 +37,7 @@ export const EVOLUTION_CATEGORY_LABELS: Record<(typeof EVOLUTION_CATEGORY_ORDER)
 
 export const EVOLUTION_CATEGORY_MAP: Record<string, (typeof EVOLUTION_CATEGORY_ORDER)[number]> = {
   clients: 'CRM',
+  bitrix24_incoming_requests: 'CRM',
   clients_analytics_view: 'CRM',
   suppliers: 'CRM',
   vendors: 'CRM',

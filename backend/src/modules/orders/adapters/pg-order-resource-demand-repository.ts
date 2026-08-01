@@ -424,7 +424,11 @@ function buildOrderWhere(command: ListOrderResourceDemandsCommand): { whereSql: 
   const actorIndex = scopeNeedsActor(scope)
     ? params.push(normalizeActorUserId(command.currentUser.id))
     : null;
-  const clauses = ['o.delete_flag = false', buildScopePredicate(scope, actorIndex)];
+  const clauses = [
+    'o.delete_flag = false',
+    "o.order_kind = 'production_order'",
+    buildScopePredicate(scope, actorIndex),
+  ];
 
   if (command.query.search) {
     const searchIndex = params.push(`%${command.query.search}%`);

@@ -278,6 +278,7 @@ async function readHeader(
       WHERE cp.client_id = o.client_id
     ) phone ON true
     WHERE o.order_id = $1 AND o.delete_flag = false
+      AND o.order_kind = 'production_order'
     `,
     [orderId],
   );

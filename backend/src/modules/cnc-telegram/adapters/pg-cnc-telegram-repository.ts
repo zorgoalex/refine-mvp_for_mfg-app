@@ -189,6 +189,7 @@ export class PgCncTelegramRepository
           MIN(o.order_id)::bigint AS order_id
         FROM orders o
         WHERE o.delete_flag = false
+          AND o.order_kind = 'production_order'
           AND NULLIF(trim(o.order_name), '') IS NOT NULL
         GROUP BY lower(trim(o.order_name))
         HAVING COUNT(*) = 1
@@ -404,6 +405,7 @@ function packetSelectSql(whereSql: string): string {
         MIN(o.order_id)::bigint AS order_id
       FROM orders o
       WHERE o.delete_flag = false
+        AND o.order_kind = 'production_order'
         AND NULLIF(trim(o.order_name), '') IS NOT NULL
       GROUP BY lower(trim(o.order_name))
       HAVING COUNT(*) = 1
@@ -697,6 +699,7 @@ async function loadPacketOrderIds(tx: TransactionClient, packetId: string): Prom
         MIN(o.order_id)::bigint AS order_id
       FROM orders o
       WHERE o.delete_flag = false
+        AND o.order_kind = 'production_order'
         AND NULLIF(trim(o.order_name), '') IS NOT NULL
       GROUP BY lower(trim(o.order_name))
       HAVING COUNT(*) = 1
@@ -742,6 +745,7 @@ async function resolveItemMatches(
     JOIN order_details od ON od.order_id = o.order_id
     WHERE lower(trim(o.order_name)) = ANY($1::text[])
       AND o.delete_flag = false
+      AND o.order_kind = 'production_order'
       AND od.delete_flag = false
     ORDER BY o.order_id, od.detail_number NULLS LAST, od.detail_id
     `,
@@ -1261,6 +1265,7 @@ async function loadBathCards(
         MIN(o.order_id)::bigint AS order_id
       FROM orders o
       WHERE o.delete_flag = false
+        AND o.order_kind = 'production_order'
         AND NULLIF(trim(o.order_name), '') IS NOT NULL
       GROUP BY lower(trim(o.order_name))
       HAVING COUNT(*) = 1
@@ -1445,6 +1450,7 @@ async function loadBathCards(
     LEFT JOIN orders o
       ON o.order_id = placement.order_id
      AND o.delete_flag = false
+     AND o.order_kind = 'production_order'
     LEFT JOIN order_details od
       ON od.detail_id = placement.order_detail_id
      AND od.delete_flag = false

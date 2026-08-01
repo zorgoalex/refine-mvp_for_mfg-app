@@ -43,6 +43,7 @@ describe('PgOrderTransactionManager', () => {
 
     const dupQuery = database.queries.find((query) => normalizeSql(query.text).includes('lower(trim(order_name))'));
     expect(normalizeSql(dupQuery?.text ?? '')).toContain('delete_flag = false');
+    expect(normalizeSql(dupQuery?.text ?? '')).toContain("order_kind = 'production_order'");
     expect(dupQuery?.params).toEqual(['2558', null]);
   });
 

@@ -52,8 +52,406 @@ tags:
     description: Bazis-compatible label templates and order label generation
   - name: Health
     description: Liveness/readiness проверки backend-сервиса
+  - name: Bitrix24
+    description: Bitrix24 reverse synchronization, incoming requests and callbacks
 
 paths:
+  /api/v1/integrations/bitrix24/install:
+    post:
+      tags:
+        - Bitrix24
+      operationId: installBitrix24LocalApplication
+      summary: Accept Bitrix24 local-application installation callback
+      description: Verifies app.info, encrypts OAuth tokens and binds required CRM events.
+      responses:
+        '201':
+          description: Installation accepted
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+
+  /api/v1/integrations/bitrix24/events:
+    post:
+      tags:
+        - Bitrix24
+      operationId: receiveBitrix24Event
+      summary: Accept authenticated Bitrix24 CRM event
+      description: Validates portal, member and application token before durable enqueue.
+      responses:
+        '201':
+          description: Event accepted
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+
+  /api/v1/bitrix24/incoming-requests:
+    get:
+      tags:
+        - Bitrix24
+      operationId: listBitrix24IncomingRequests
+      summary: List incoming Bitrix24 Deals
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.requests.view
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [unresolved, active, converted, archived]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: stageId
+          in: query
+          schema:
+            type: string
+        - name: assignedById
+          in: query
+          schema:
+            type: string
+        - name: clientId
+          in: query
+          schema:
+            type: integer
+        - name: updatedFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: updatedTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Paginated incoming requests
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/bitrix24/incoming-requests/{requestId}:
+    get:
+      tags:
+        - Bitrix24
+      operationId: getBitrix24IncomingRequest
+      summary: Get one incoming Bitrix24 request with payment snapshots
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.requests.view
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Incoming request
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/bitrix24/incoming-requests/{requestId}/details:
+    put:
+      tags:
+        - Bitrix24
+      operationId: replaceBitrix24IncomingRequestDetails
+      summary: Replace ERP details of an active Bitrix24 CRM request
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.requests.update
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Updated CRM request details and ERP calculation
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/bitrix24/incoming-requests/{requestId}/archive:
+    post:
+      tags:
+        - Bitrix24
+      operationId: archiveBitrix24IncomingRequest
+      summary: Archive an active Bitrix24 CRM request in ERP without deleting the Deal
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.requests.update
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Archived CRM request identity and order version
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/orders/{orderId}/convert-to-production:
+    post:
+      tags:
+        - Bitrix24
+      operationId: convertBitrix24CrmRequestToProduction
+      summary: Convert one CRM request row into a production order
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.requests.convert
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Converted production order identity
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/bitrix24/incoming-requests/{requestId}/materialize-payments:
+    post:
+      tags:
+        - Bitrix24
+      operationId: materializeBitrix24IncomingPayments
+      summary: Explicitly materialize mapped Bitrix24 payment snapshots in ERP
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - bitrix24.payments.materialize
+        - orders.view_financials
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Incoming request with materialized payment state
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/bitrix24/mapped-orders/{orderId}/materialize-payments:
+    post:
+      tags:
+        - Bitrix24
+      operationId: materializeMappedOrderBitrix24Payments
+      summary: Explicitly materialize Bitrix24 payment snapshots for a mapped ERP order
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - bitrix24.payments.materialize
+        - orders.view_financials
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Counts of changed and deleted ERP payments
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/bitrix24/payment-type-mappings:
+    get:
+      tags:
+        - Bitrix24
+      operationId: listBitrix24PaymentTypeMappings
+      summary: List discovered Bitrix24 payment systems and ERP mappings
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.integration.manage
+      responses:
+        '200':
+          description: Payment system mappings
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/bitrix24/user-mappings:
+    get:
+      tags:
+        - Bitrix24
+      operationId: listBitrix24UserMappings
+      summary: List Bitrix24 responsible-user to ERP-user mappings
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.integration.manage
+      responses:
+        '200':
+          description: Responsible-user mappings
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/bitrix24/user-mappings/{bitrixUserId}:
+    put:
+      tags:
+        - Bitrix24
+      operationId: updateBitrix24UserMapping
+      summary: Create, change, or deactivate one responsible-user mapping
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - name: bitrixUserId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[1-9][0-9]*$'
+      responses:
+        '200':
+          description: Updated responsible-user mapping
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/bitrix24/user-mapping-targets:
+    get:
+      tags:
+        - Bitrix24
+      operationId: listBitrix24UserMappingTargets
+      summary: List active non-service ERP users eligible for mapping
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.integration.manage
+      responses:
+        '200':
+          description: Eligible ERP users
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/bitrix24/payment-type-mappings/{paySystemId}:
+    put:
+      tags:
+        - Bitrix24
+      operationId: updateBitrix24PaymentTypeMapping
+      summary: Update one Bitrix24 payment-system mapping
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.integration.manage
+      parameters:
+        - name: paySystemId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Updated payment-system mapping
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/bitrix24/sync-health:
+    get:
+      tags:
+        - Bitrix24
+      operationId: getBitrix24ReverseSyncHealth
+      summary: Get reverse synchronization installation and queue health
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.integration.manage
+      responses:
+        '200':
+          description: Reverse synchronization health
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/bitrix24/sync-health/retry-failed:
+    post:
+      tags:
+        - Bitrix24
+      operationId: retryFailedBitrix24Events
+      summary: Return failed and dead Bitrix24 events to pending queue
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.integration.manage
+      responses:
+        '200':
+          description: Number of events returned to queue
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/audit:
     get:
       tags:
@@ -1341,6 +1739,58 @@ paths:
           $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/resource-demands:
+    get:
+      tags:
+        - Orders
+      operationId: listOrderResourceDemands
+      summary: List live resource demands by production order
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+        - name: sheetMaterialTypeId
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: filmId
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: supplierId
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: vendorId
+          in: query
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Live production-order resource demand projection
+          content:
+            application/json:
+              schema: { type: object }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
 
   /api/v1/orders/{orderId}/project:
     parameters:
@@ -9349,6 +9799,32 @@ paths:
             application/json:
               schema:
                 type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+
+  /api/v1/cnc-telegram/orders/{orderId}/cutting-sequences:
+    get:
+      tags:
+        - CncTelegram
+      operationId: listCncTelegramOrderCuttingSequences
+      summary: List machine-file cutting sequence numbers linked to a production order
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order machine-file cutting sequence numbers
+          content:
+            application/json:
+              schema: { type: object }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

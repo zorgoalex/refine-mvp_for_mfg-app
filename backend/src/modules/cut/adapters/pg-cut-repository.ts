@@ -2426,7 +2426,11 @@ export class PgCutRepository implements CutRepositoryPort {
   async listEligibleDetails(query: EligibleDetailsQuery): Promise<EligibleDetailsResponseDto> {
     const readyStatusIds = await this.resolveReadyStatusIds();
 
-    const conditions: string[] = ['od.delete_flag = false', 'ord.delete_flag = false'];
+    const conditions: string[] = [
+      'od.delete_flag = false',
+      'ord.delete_flag = false',
+      "ord.order_kind = 'production_order'",
+    ];
     const params: unknown[] = [];
     const addArrayFilter = (column: string, values: number[] | undefined) => {
       if (values && values.length > 0) {
@@ -2561,6 +2565,7 @@ export class PgCutRepository implements CutRepositoryPort {
     const conditions: string[] = [
       'od.delete_flag = false',
       'ord.delete_flag = false',
+      "ord.order_kind = 'production_order'",
       'od.film_id IS NOT NULL',
       'f.film_name IS NOT NULL',
       `btrim(f.film_name) <> ''`,

@@ -59,6 +59,9 @@ describe('CrmSyncModule Bitrix24 wiring', () => {
       './adapters/pg-crm-sync-outbox-repository'
     );
     const { AuditService } = await import('../../common/audit/audit.service');
+    const { FailingBitrix24ApiClient } = await import(
+      './adapters/failing-bitrix24-api-client'
+    );
     const db = {
       isConfigured: false,
       query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
@@ -91,6 +94,7 @@ describe('CrmSyncModule Bitrix24 wiring', () => {
       new PgCrmSyncMappingRepository(),
       new PgCrmSyncOutboxRepository(),
       new AuditService(),
+      new FailingBitrix24ApiClient(),
     ) as InstanceType<typeof CrmSyncRelayService>;
     const consumer = (relay as unknown as { consumer: InstanceType<typeof Bitrix24SyncConsumer> })
       .consumer;

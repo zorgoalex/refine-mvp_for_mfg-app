@@ -253,7 +253,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     ],
     [workshops],
   );
-  const bazisDraftClientLocked = mode === 'create' && (bazisDraft?.clientId ?? null) != null;
+  const bazisDraftClientLocked =
+    mode === 'create' && (bazisDraft?.clientId ?? null) != null;
   const bazisDraftProjectLocked = mode === 'create' && bazisDraft != null;
 
   // Bridge dirty state into the workspace tab registry (single dirty contract).
@@ -409,7 +410,6 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     navigate,
     orderId,
   ]);
-
 
   // Load existing order data in edit mode
   // Use relationship to load doweling links via order_doweling_links (many-to-many)

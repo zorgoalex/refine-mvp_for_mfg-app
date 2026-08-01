@@ -153,7 +153,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
       FROM orders o
       JOIN projects p ON p.project_id = o.project_id
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
-      WHERE o.project_id = $1
+      WHERE o.project_id = $1 AND o.order_kind = 'production_order'
       ORDER BY o.order_id ASC
       `,
       [projectId],
@@ -380,6 +380,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         SELECT project_id
         FROM orders
         WHERE order_id = $1 AND delete_flag = false
+          AND order_kind = 'production_order'
         `,
         [command.orderId],
       );
@@ -407,6 +408,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         SELECT o.order_id, o.order_name, o.client_id, o.project_id, o.created_by, o.manager_id
         FROM orders o
         WHERE o.order_id = $1 AND o.delete_flag = false
+          AND o.order_kind = 'production_order'
         FOR UPDATE
         `,
         [command.orderId],
@@ -471,7 +473,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         `
         SELECT COUNT(*) AS c
         FROM orders
-        WHERE project_id = $1
+        WHERE project_id = $1 AND order_kind = 'production_order'
         `,
         [fromProjectId],
       );
@@ -597,6 +599,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         SELECT order_id, order_name, client_id, project_id, created_by, manager_id
         FROM orders
         WHERE project_id = $1 AND delete_flag = false
+          AND order_kind = 'production_order'
         ORDER BY order_id
         FOR UPDATE
         `,
@@ -609,6 +612,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         UPDATE orders
         SET project_id = $1, version = version + 1, edited_by = $3, updated_at = now()
         WHERE project_id = $2 AND delete_flag = false
+          AND order_kind = 'production_order'
         `,
         [command.targetProjectId, command.sourceProjectId, command.currentUser.id],
       );
@@ -628,6 +632,7 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         SELECT COUNT(*) AS c
         FROM orders
         WHERE project_id = $1 AND delete_flag = true
+          AND order_kind = 'production_order'
         `,
         [command.sourceProjectId],
       );

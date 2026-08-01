@@ -1616,7 +1616,8 @@ export class PgLabelsRepository implements LabelsPort {
           this.database.query<ScanCandidateQueryRow>(
             `SELECT ${selectList(bazisParam != null, detailNumberParam)}
                FROM order_details_view od
-               JOIN orders o ON o.order_id = od.order_id AND o.delete_flag = false
+               JOIN orders o ON o.order_id = od.order_id
+                AND o.delete_flag = false AND o.order_kind = 'production_order'
                LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
                ${bazisParam ? `LEFT JOIN LATERAL (
                  SELECT ld.detail_id FROM order_label_detail_data ld
@@ -1642,7 +1643,8 @@ export class PgLabelsRepository implements LabelsPort {
           `SELECT DISTINCT ON (od.detail_id) ${selectList(false, detailNumberParam)}
              FROM order_label_detail_data ld
              JOIN order_details_view od ON od.detail_id = ld.detail_id
-             JOIN orders o ON o.order_id = od.order_id AND o.delete_flag = false
+             JOIN orders o ON o.order_id = od.order_id
+              AND o.delete_flag = false AND o.order_kind = 'production_order'
              LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
             WHERE ld.bazis_fields @> $1::jsonb
             ORDER BY od.detail_id
@@ -2160,7 +2162,11 @@ async function readDetailGeneration(
 }
 
 async function assertOrderExists(client: DatabaseClient, orderId: number): Promise<void> {
-  const result = await client.query('SELECT order_id FROM orders WHERE order_id=$1 AND delete_flag=false', [orderId]);
+  const result = await client.query(
+    `SELECT order_id FROM orders
+      WHERE order_id=$1 AND delete_flag=false AND order_kind='production_order'`,
+    [orderId],
+  );
   if (result.rowCount === 0) {
     throw new OrderLabelDataNotFoundError(orderId);
   }

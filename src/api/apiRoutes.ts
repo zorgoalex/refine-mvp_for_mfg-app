@@ -49,6 +49,8 @@ export const apiRoutes = {
     resourceDemands: backendApiPath('/orders/resource-demands'),
     statusBoard: backendApiPath('/orders/status-board'),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
+    convertToProduction: (orderId: number) =>
+      backendApiPath(`/orders/${orderId}/convert-to-production`),
     restore: (orderId: number) => backendApiPath(`/orders/${orderId}/restore`),
     status: (orderId: number) => backendApiPath(`/orders/${orderId}/status`),
     paymentStatus: (orderId: number) => backendApiPath(`/orders/${orderId}/payment-status`),
@@ -85,6 +87,28 @@ export const apiRoutes = {
   payments: {
     list: backendApiPath('/payments'),
     byId: (paymentId: number) => backendApiPath(`/payments/${paymentId}`),
+  },
+  bitrix24: {
+    incomingRequests: backendApiPath('/bitrix24/incoming-requests'),
+    incomingRequest: (requestId: number) =>
+      backendApiPath(`/bitrix24/incoming-requests/${requestId}`),
+    incomingRequestDetails: (requestId: number) =>
+      backendApiPath(`/bitrix24/incoming-requests/${requestId}/details`),
+    archiveIncomingRequest: (requestId: number) =>
+      backendApiPath(`/bitrix24/incoming-requests/${requestId}/archive`),
+    materializePayments: (requestId: number) =>
+      backendApiPath(`/bitrix24/incoming-requests/${requestId}/materialize-payments`),
+    materializeMappedOrderPayments: (orderId: number) =>
+      backendApiPath(`/bitrix24/mapped-orders/${orderId}/materialize-payments`),
+    userMappings: backendApiPath('/bitrix24/user-mappings'),
+    userMappingTargets: backendApiPath('/bitrix24/user-mapping-targets'),
+    userMapping: (bitrixUserId: string) =>
+      backendApiPath(`/bitrix24/user-mappings/${encodeURIComponent(bitrixUserId)}`),
+    paymentTypeMappings: backendApiPath('/bitrix24/payment-type-mappings'),
+    paymentTypeMapping: (paySystemId: number) =>
+      backendApiPath(`/bitrix24/payment-type-mappings/${paySystemId}`),
+    syncHealth: backendApiPath('/bitrix24/sync-health'),
+    retryFailed: backendApiPath('/bitrix24/sync-health/retry-failed'),
   },
   cutJobs: {
     list: backendApiPath('/cut-jobs'),

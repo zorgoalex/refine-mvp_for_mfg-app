@@ -42,7 +42,7 @@ describe('PgAuthSessionManager', () => {
     });
 
     expect(database.queries.map((query) => normalizeSql(query.text))).toEqual([
-      'SELECT is_active FROM users WHERE user_id = $1 FOR UPDATE',
+      'SELECT is_active, is_service_account FROM users WHERE user_id = $1 FOR UPDATE',
       'INSERT INTO auth_sessions (user_id, expires_at, ip_address, user_agent) VALUES ($1, $2, $3, $4) RETURNING session_id::text, token_family_id::text',
       'INSERT INTO refresh_tokens ( user_id, session_id, token_hash, token_family_id, expires_at, user_agent, ip_address ) VALUES ($1, $2, $3, $4, $5, $6, $7)',
       'UPDATE users SET last_login_at = now() WHERE user_id = $1',
@@ -105,6 +105,12 @@ describe('PgAuthSessionManager', () => {
     await expect(
       createManager(deactivated.service).createLoginSession(user, {}),
     ).rejects.toMatchObject({ code: 'USER_INACTIVE' });
+
+    const serviceAccount = createDatabase({ guardIsServiceAccount: true });
+    await expect(
+      createManager(serviceAccount.service).createLoginSession(user, {}),
+    ).rejects.toMatchObject({ code: 'USER_INACTIVE' });
+    expect(serviceAccount.queries.some((query) => query.text.includes('INSERT INTO auth_sessions'))).toBe(false);
   });
 
   it('re-proves the identity link inside the session transaction (unlink/relink race denies)', async () => {
@@ -640,6 +646,7 @@ function createDatabase(
     providerSessionId?: string | null;
     authSource?: string | null;
     guardIsActive?: boolean;
+    guardIsServiceAccount?: boolean;
     guardLoginPolicy?: string | null;
     guardLinked?: boolean;
     deadSessions?: string[];
@@ -667,6 +674,7 @@ function createDatabase(
           rows: [
             {
               is_active: options.guardIsActive ?? true,
+              is_service_account: options.guardIsServiceAccount ?? false,
               login_policy: options.guardLoginPolicy ?? 'both',
             },
           ],

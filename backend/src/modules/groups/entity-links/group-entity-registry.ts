@@ -18,6 +18,7 @@ export const GROUP_ENTITY_REGISTRY = {
         SELECT order_id::text AS entity_id, COALESCE(order_name, order_id::text) AS display_label
         FROM public.orders
         WHERE order_id = $1::bigint
+          AND order_kind = 'production_order'
         FOR KEY SHARE
       `,
       values: [entityId],
