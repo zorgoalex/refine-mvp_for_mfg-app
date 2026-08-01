@@ -31,8 +31,12 @@ describe('CutPage manual-layout guard', () => {
     expect(src).toMatch(/устарел/);
   });
 
-  it('«устарел» badge requires recalc OR an ACTIVE stale manual — an inactive stale manual must not flag the group (so «Рассчитать» clears it)', () => {
-    expect(src).toMatch(/\(job\.requiresRecalc \?\? false\) \|\| \(isStale && persistedActive\)/);
+  it('«устарел» badge applies only to the live job, never to a frozen result', () => {
+    expect(src).toContain('const showStaleBadge = shouldShowCutStaleBadge({');
+    expect(src).toContain('isFrozenResult: isHistoricalResult');
+    expect(src).toContain('manualLayoutIsStale: isStale');
+    expect(src).toContain('manualLayoutIsActive: persistedActive');
+    expect(src).toContain('{showStaleBadge && (');
   });
 
   it('busts the sheet-blob cache via resetSheetViews on every render-changing op; renderVersion stays in the FETCH (server bust), not the client key', () => {

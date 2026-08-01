@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCutPieceTooltipRows,
   buildSheetPieceOverlays,
+  cutPdfPreviewBlockReason,
   displayedSheetExtents,
   formatSheetSide,
   parseCutPieceDetailId,
@@ -9,6 +10,7 @@ import {
   parseStoredOriginTopLeft,
   parseStoredAxisOrigin,
   selectVariantSheets,
+  shouldShowCutStaleBadge,
   sheetOrientationKey,
   sheetOriginKey,
   sheetAxisOriginKey,
@@ -55,6 +57,44 @@ const baseGroup: CutGroupDto = {
 };
 
 describe('cutPreviewHelpers', () => {
+  describe('frozen result PDF policy', () => {
+    it('never blocks a saved version because the live job is stale or dirty', () => {
+      expect(cutPdfPreviewBlockReason({
+        isFrozenResult: true,
+        hasUnsavedChanges: true,
+        requiresRecalc: true,
+      })).toBeNull();
+    });
+
+    it('keeps live-job PDF safety guards', () => {
+      expect(cutPdfPreviewBlockReason({
+        isFrozenResult: false,
+        hasUnsavedChanges: true,
+        requiresRecalc: false,
+      })).toBe('несохранённые изменения');
+      expect(cutPdfPreviewBlockReason({
+        isFrozenResult: false,
+        hasUnsavedChanges: false,
+        requiresRecalc: true,
+      })).toBe('требуется пересчёт');
+    });
+
+    it('never labels a frozen version as stale', () => {
+      expect(shouldShowCutStaleBadge({
+        isFrozenResult: true,
+        requiresRecalc: true,
+        manualLayoutIsStale: true,
+        manualLayoutIsActive: true,
+      })).toBe(false);
+      expect(shouldShowCutStaleBadge({
+        isFrozenResult: false,
+        requiresRecalc: true,
+        manualLayoutIsStale: false,
+        manualLayoutIsActive: false,
+      })).toBe(true);
+    });
+  });
+
   describe('formatSheetSide', () => {
     it('rounds and suffixes мм', () => {
       expect(formatSheetSide(2799.6)).toBe('2800 мм');

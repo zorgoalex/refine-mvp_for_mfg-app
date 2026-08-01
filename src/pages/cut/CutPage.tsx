@@ -51,7 +51,7 @@ import { ApiError } from '../../api/httpClient';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
-import { buildSheetPieceOverlays, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, loadSheetAxisOrigin, saveSheetAxisOrigin, selectVariantSheets } from './cutPreviewHelpers';
+import { buildSheetPieceOverlays, cutPdfPreviewBlockReason, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, loadSheetAxisOrigin, saveSheetAxisOrigin, selectVariantSheets, shouldShowCutStaleBadge } from './cutPreviewHelpers';
 import { TableTopScroll } from '../../components/TableTopScroll';
 import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { SheetPreview } from './SheetPreview';
@@ -2684,6 +2684,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       if (!g.manualLayout) return false;
       return (showAlternativeByGroup[g.cutGroupId] ?? false) !== g.manualLayout.isActive;
     });
+  const jobPdfPreviewBlockReason = cutPdfPreviewBlockReason({
+    isFrozenResult: isHistoricalResult,
+    hasUnsavedChanges: anyGroupDirty,
+    requiresRecalc: job?.requiresRecalc ?? false,
+  });
 
   const jobCutResults = job?.cutResults ?? [];
   const primaryCutResult = job?.currentCutResult
@@ -2810,7 +2815,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   <Button
                     icon={<PrinterOutlined />}
                     onClick={() => void openJobPdfPreview()}
-                    disabled={job.groups.length === 0 || anyGroupDirty || (job.requiresRecalc ?? false)}
+                    disabled={job.groups.length === 0 || jobPdfPreviewBlockReason !== null}
                     loading={busy}
                   >
                     Печать
@@ -3541,18 +3546,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   />
                 </div>
                 <Tooltip
-                  title={
-                    anyGroupDirty
-                      ? 'несохранённые изменения'
-                      : (job.requiresRecalc ?? false)
-                      ? 'требуется пересчёт'
-                      : undefined
-                  }
+                  title={jobPdfPreviewBlockReason ?? undefined}
                 >
                   <Button
                     onClick={() => void openJobPdfPreview()}
                     loading={busy}
-                    disabled={anyGroupDirty || (job.requiresRecalc ?? false)}
+                    disabled={jobPdfPreviewBlockReason !== null}
                     data-testid="preview-job-pdf-btn"
                   >
                     Предпросмотр PDF (весь раскрой)
@@ -3693,6 +3692,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         const isDirtyGroup =
           isEditingGroup ||
           (group.manualLayout != null && showAlt !== persistedActive);
+        const groupPdfPreviewBlockReason = cutPdfPreviewBlockReason({
+          isFrozenResult: isHistoricalResult,
+          hasUnsavedChanges: isDirtyGroup,
+          requiresRecalc: job.requiresRecalc ?? false,
+        });
+        const showStaleBadge = shouldShowCutStaleBadge({
+          isFrozenResult: isHistoricalResult,
+          requiresRecalc: job.requiresRecalc ?? false,
+          manualLayoutIsStale: isStale,
+          manualLayoutIsActive: persistedActive,
+        });
         // Edit is blocked when editorParams are absent or a recalc is required.
         const legacyAutoLayoutInvalid = job.autoLayoutValidation?.valid === false;
         // Preview sheets: honour displayVariant so count/overlays follow the
@@ -3727,7 +3737,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                     manual layout has drifted stale. An INACTIVE stale manual (not
                     shown/printed) must NOT flag the group — otherwise «Рассчитать»
                     can never clear the badge while a dangling old manual exists. */}
-                {((job.requiresRecalc ?? false) || (isStale && persistedActive)) && (
+                {showStaleBadge && (
                   <Tag color="warning">устарел</Tag>
                 )}
                 {effectiveManual && !isStale && (
@@ -3841,20 +3851,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   />
                 </div>
                 <Tooltip
-                  title={
-                    isDirtyGroup
-                      ? 'несохранённые изменения'
-                      : (job.requiresRecalc ?? false)
-                      ? 'требуется пересчёт'
-                      : undefined
-                  }
+                  title={groupPdfPreviewBlockReason ?? undefined}
                 >
                   <Button
                     className="app-hit-area-sm"
                     size="small"
                     onClick={() => void openGroupPdfPreview(group)}
                     loading={busy}
-                    disabled={isDirtyGroup || (job.requiresRecalc ?? false)}
+                    disabled={groupPdfPreviewBlockReason !== null}
                     data-testid={`preview-group-pdf-btn-${group.cutGroupId}`}
                   >
                     Предпросмотр PDF

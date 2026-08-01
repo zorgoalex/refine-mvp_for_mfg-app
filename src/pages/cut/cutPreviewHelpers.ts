@@ -3,6 +3,28 @@ import { orientPieceRect } from './cutLayoutGeometry';
 import { applyAxisOrigin, type CutAxisOrigin } from './cutLayoutGeometry';
 import { buildPieceLabelLines } from './pieceLabel';
 
+export type CutPdfPreviewBlockReason = 'несохранённые изменения' | 'требуется пересчёт' | null;
+
+export function cutPdfPreviewBlockReason(input: {
+  isFrozenResult: boolean;
+  hasUnsavedChanges: boolean;
+  requiresRecalc: boolean;
+}): CutPdfPreviewBlockReason {
+  if (input.isFrozenResult) return null;
+  if (input.hasUnsavedChanges) return 'несохранённые изменения';
+  return input.requiresRecalc ? 'требуется пересчёт' : null;
+}
+
+export function shouldShowCutStaleBadge(input: {
+  isFrozenResult: boolean;
+  requiresRecalc: boolean;
+  manualLayoutIsStale: boolean;
+  manualLayoutIsActive: boolean;
+}): boolean {
+  if (input.isFrozenResult) return false;
+  return input.requiresRecalc || (input.manualLayoutIsStale && input.manualLayoutIsActive);
+}
+
 /** Rounded mm side label, e.g. "2800 мм". */
 export function formatSheetSide(mm: number): string {
   return `${Math.round(mm)} мм`;

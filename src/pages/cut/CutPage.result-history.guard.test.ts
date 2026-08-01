@@ -16,6 +16,14 @@ describe('CutPage result history guard', () => {
     expect(source).toContain('cutApi.getResult');
   });
 
+  it('keeps saved versions printable even when the live job requires recalculation', () => {
+    expect(source).toContain('const jobPdfPreviewBlockReason = cutPdfPreviewBlockReason({');
+    expect(source).toContain('const groupPdfPreviewBlockReason = cutPdfPreviewBlockReason({');
+    expect(source.match(/isFrozenResult: isHistoricalResult/g)).toHaveLength(3);
+    expect(source).toContain('disabled={jobPdfPreviewBlockReason !== null}');
+    expect(source).toContain('disabled={groupPdfPreviewBlockReason !== null}');
+  });
+
   it('keeps ordinary job opening live; frozen read-only mode is only explicit result opening', () => {
     expect(source).toContain('if (resultNo !== undefined) {');
     expect(source).toContain('const frozen = await cutApi.getResult(cutJobId, resultNo)');
