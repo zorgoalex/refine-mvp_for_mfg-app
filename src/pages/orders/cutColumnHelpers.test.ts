@@ -1,19 +1,41 @@
 import { describe, it, expect } from 'vitest';
-import { buildCutJobByDetailId, cutJobDeepLink, cutJobProfileLabel } from './cutColumnHelpers';
+import { buildCutJobByDetailId, buildCutJobLinkMaps, cutJobDeepLink, cutJobProfileLabel } from './cutColumnHelpers';
 
 describe('cutColumnHelpers', () => {
   it('buildCutJobByDetailId maps each detail to its ref', () => {
     const map = buildCutJobByDetailId([
-      { orderDetailId: 1, cutJobId: 9, name: 'A' },
-      { orderDetailId: 2, cutJobId: 9, name: 'A' },
+      {
+        orderDetailId: 1,
+        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'A', paramProfileId: null, profileName: null, profileIsActive: null },
+        bathCutJob: null,
+      },
+      {
+        orderDetailId: 2,
+        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'A', paramProfileId: null, profileName: null, profileIsActive: null },
+        bathCutJob: null,
+      },
     ]);
     expect(map.get(1)?.cutJobId).toBe(9);
     expect(map.get(2)?.name).toBe('A');
     expect(map.has(3)).toBe(false);
   });
 
+  it('buildCutJobLinkMaps splits regular and vacuum refs', () => {
+    const maps = buildCutJobLinkMaps([
+      {
+        orderDetailId: 1,
+        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
+        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: '10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
+      },
+    ]);
+    expect(maps.cutJobByDetailId.get(1)?.name).toBe('Regular');
+    expect(maps.bathCutJobByDetailId.get(1)?.name).toBe('Bath');
+  });
+
   it('cutJobDeepLink builds the /cut?job= path', () => {
     expect(cutJobDeepLink(45)).toBe('/cut?job=45');
+    expect(cutJobDeepLink(45, 3)).toBe('/cut?job=45&result=3');
+    expect(cutJobDeepLink({ cutJobId: 45, resultNo: 3 })).toBe('/cut?job=45&result=3');
   });
 
   it('cutJobProfileLabel resolves profile display names', () => {

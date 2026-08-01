@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from tempfile import TemporaryDirectory
 from pathlib import Path
 
-from cnc_telegram_worker.vector import parse_svg_parts
+from cnc_telegram_worker.vector import layout_to_dict, parse_svg_cut_layout, parse_svg_parts, parse_vector_file
 
 
 FIXTURES = Path("/home/ovhtest/projects/erp_dev/spec_erp/artifacts_test/cutting_from_tg/dxf")
@@ -46,6 +47,97 @@ class VectorParserTest(unittest.TestCase):
         self.assertEqual(len(items), 17)
         self.assertEqual(counts[("2712", 6, 286.0, 764.0)], 1)
         self.assertEqual(counts[("2712", 2, 300.0, 1500.0)], 2)
+
+    def test_valid_layout_uses_viewbox_scale_and_parent_transform(self) -> None:
+        path = write_svg(
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000mm" height="500mm" viewBox="0 0 10000 5000">
+              <g transform="matrix(1 0 0 1 100 200)">
+                <rect id="_1234_PartContour" width="2000" height="1000">
+                  <metadata><odm name="Comments" value="1234#7#X@200*100@"/></metadata>
+                </rect>
+              </g>
+            </svg>
+            """
+        )
+
+        layout = parse_svg_cut_layout(path)
+
+        self.assertEqual(layout.status, "valid")
+        self.assertEqual(layout.sheet_width_mm, 1000.0)
+        self.assertEqual(layout.sheet_height_mm, 500.0)
+        self.assertEqual(len(layout.items), 1)
+        self.assertEqual(layout.items[0].x_mm, 10.0)
+        self.assertEqual(layout.items[0].y_mm, 20.0)
+        self.assertEqual(layout.items[0].placed_width_mm, 200.0)
+        self.assertEqual(layout.items[0].placed_height_mm, 100.0)
+
+    def test_rejects_operation_only_svg_without_part_contours(self) -> None:
+        path = write_svg(
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000mm" height="500mm" viewBox="0 0 10000 5000">
+              <rect id="__x007e__x007e_vyborka_1234" x="0" y="0" width="2000" height="1000">
+                <metadata><odm name="Comments" value="1234#7#X@200*100@"/></metadata>
+              </rect>
+            </svg>
+            """
+        )
+
+        layout = parse_svg_cut_layout(path)
+
+        self.assertEqual(layout.status, "invalid")
+        self.assertIn("no PartContour detail outlines", layout.reasons)
+        self.assertEqual(parse_vector_file(path), [])
+
+    def test_rejects_part_contours_outside_sheet(self) -> None:
+        path = write_svg(
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000mm" height="500mm" viewBox="0 0 10000 5000">
+              <rect id="_1234_PartContour" x="-1000" y="0" width="2000" height="1000">
+                <metadata><odm name="Comments" value="1234#7#X@200*100@"/></metadata>
+              </rect>
+            </svg>
+            """
+        )
+
+        layout = parse_svg_cut_layout(path)
+
+        self.assertEqual(layout.status, "invalid")
+        self.assertIn("PartContour detail outlines outside sheet", layout.reasons)
+        self.assertEqual(parse_svg_parts(path), [])
+
+    def test_rejects_whole_layout_when_any_detail_contour_is_outside_sheet(self) -> None:
+        path = write_svg(
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000mm" height="500mm" viewBox="0 0 10000 5000">
+              <rect id="_1234_PartContour" x="0" y="0" width="2000" height="1000">
+                <metadata><odm name="Comments" value="1234#7#X@200*100@"/></metadata>
+              </rect>
+              <rect id="_1234_PartContour_1" x="11000" y="0" width="2000" height="1000">
+                <metadata><odm name="Comments" value="1234#8#X@200*100@"/></metadata>
+              </rect>
+            </svg>
+            """
+        )
+
+        layout = parse_svg_cut_layout(path)
+
+        self.assertEqual(layout.status, "invalid")
+        self.assertIn("PartContour detail outlines outside sheet", layout.reasons)
+        self.assertEqual(parse_svg_parts(path), [])
+        self.assertEqual(layout_to_dict(layout)["items"], [])
+
+
+def write_svg(content: str) -> Path:
+    temp_dir = TemporaryDirectory()
+    path = Path(temp_dir.name) / "layout.svg"
+    path.write_text(content.strip(), encoding="utf-8")
+    # Keep directory alive for the duration of the test process.
+    _TEMP_DIRS.append(temp_dir)
+    return path
+
+
+_TEMP_DIRS: list[TemporaryDirectory[str]] = []
 
 
 if __name__ == "__main__":

@@ -60,6 +60,7 @@ def build_structured_packet(
     ocr: OcrResult,
     gcode: GcodeMeta | None,
     vector_items: list[dict[str, Any]] | None = None,
+    cut_layout: dict[str, Any] | None = None,
     sheet_image: dict[str, Any] | None = None,
     default_machine: str,
     default_material: str,
@@ -88,6 +89,7 @@ def build_structured_packet(
             [
                 *ocr.analysis_warnings,
                 *vector_validation.warnings,
+                *cut_layout_warnings(cut_layout),
                 *(gcode_analysis.warnings if gcode_analysis else []),
                 *gcode_warnings(gcode_analysis, order_names, has_items=bool(items)),
             ],
@@ -156,6 +158,8 @@ def build_structured_packet(
         "sheetImage": sheet_image,
         "items": items[:2000],
     }
+    if cut_layout is not None:
+        packet["cutLayout"] = cut_layout
     return packet
 
 
@@ -242,8 +246,8 @@ def validate_vector_items(
 
     if not reference_order_names:
         return VectorValidation(
-            items=[],
-            warnings=["SVG ignored: no OCR or G-code order numbers available for validation"],
+            items=normalized_vector_items,
+            warnings=["SVG accepted without OCR or G-code order-number validation"],
         )
 
     if not order_majority_matches(reference_order_names, vector_order_names):
@@ -273,6 +277,26 @@ def validate_vector_items(
         f"SVG rows ignored for orders outside {reference_source}: {', '.join(dropped_orders)}"
     ] if dropped_orders else []
     return VectorValidation(items=accepted_items, warnings=warnings)
+
+
+def cut_layout_warnings(cut_layout: dict[str, Any] | None) -> list[str]:
+    if not cut_layout:
+        return []
+    status = clean_string(cut_layout.get("status"), 32)
+    if status == "valid":
+        return []
+    raw_reasons = cut_layout.get("reasons")
+    reasons = raw_reasons if isinstance(raw_reasons, list) else []
+    clean_reasons = [
+        reason
+        for reason in (clean_string(item, 200) for item in reasons)
+        if reason
+    ]
+    if clean_reasons:
+        return [f"SVG layout ignored: {'; '.join(clean_reasons[:3])}"]
+    if status:
+        return [f"SVG layout ignored: {status}"]
+    return ["SVG layout ignored"]
 
 
 def collect_ocr_order_names(ocr: OcrResult, ocr_items: list[dict[str, Any]]) -> list[str]:

@@ -59,6 +59,35 @@ describe('CncTelegramController parsing', () => {
     ).toThrow(ApiError);
   });
 
+  it('accepts parsed SVG cut layout geometry', () => {
+    const parsed = parseStructuredIngest({
+      ...structuredPayload(),
+      cutLayout: {
+        status: 'valid',
+        sheet: { widthMm: 2070, heightMm: 2800 },
+        acceptedItemCount: 1,
+        items: [{
+          orderName: '2689',
+          detailNumber: 31,
+          widthMm: 497,
+          heightMm: 477,
+          xMm: 10,
+          yMm: 20,
+          placedWidthMm: 477,
+          placedHeightMm: 497,
+          rotated: true,
+        }],
+      },
+    }, 'cnc:test:1');
+
+    expect(parsed.cutLayout).toMatchObject({
+      status: 'valid',
+      reasons: [],
+      sheet: { widthMm: 2070, heightMm: 2800 },
+      items: [{ quantity: 1, rotated: true }],
+    });
+  });
+
   it('validates date-only query values', () => {
     expect(parseDateQuery(undefined)).toBeNull();
     expect(parseDateQuery('2026-07-24')).toBe('2026-07-24');

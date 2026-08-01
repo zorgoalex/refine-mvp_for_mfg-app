@@ -53,7 +53,7 @@ class WorkerConfig:
             erp_worker_password=env("ERP_WORKER_PASSWORD"),
             ocr_command=env("CNC_OCR_COMMAND"),
             ocr_engine=env("CNC_OCR_ENGINE", "rapidocr-ppocrv5-eslav"),
-            parser_version=env("CNC_PARSER_VERSION", "cnc-telegram-worker-v11"),
+            parser_version=env("CNC_PARSER_VERSION", "cnc-telegram-worker-v14"),
             default_machine=env("CNC_MACHINE_DEFAULT"),
             default_material=env("CNC_DEFAULT_MATERIAL", "МДФ 16мм"),
             business_timezone_name=env("CNC_BUSINESS_TIMEZONE", "Asia/Almaty"),

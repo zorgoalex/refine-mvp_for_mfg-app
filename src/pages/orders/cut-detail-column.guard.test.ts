@@ -8,7 +8,8 @@ describe('cut detail column', () => {
     expect(show).toContain('cutJobDeepLink');
     expect(show).toContain("can('cut.view')");
     expect(show).toContain('useCutDetailLastReady');
-    expect(show).toContain('CUT_JOB_READY_EVENT');
+    expect(show).toContain("title: 'Расчет ванны'");
+    expect(show).toContain('bathCutJobByDetailId');
   });
 
   it('details table is horizontally scrollable with a synced top scrollbar', () => {
@@ -53,7 +54,7 @@ describe('cut detail column', () => {
     }
     // jobItemColumns useMemo must depend on isArchivedJob so the remove button
     // re-renders disabled when the open job is archived.
-    expect(src).toMatch(/\[busy, canManage, isArchivedJob, removeJobItem, show\]/);
+    expect(src).toMatch(/\[busy, canManage, isArchivedJob, jobBathCutJobByDetailId, openJob, removeJobItem, show\]/);
 
     // Deep-link must read the /cut tab path REACTIVELY from the tab store (not
     // window.location once), so a deep-link clicked while /cut is already mounted

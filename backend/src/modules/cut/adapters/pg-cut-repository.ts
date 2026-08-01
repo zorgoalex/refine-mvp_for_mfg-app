@@ -192,6 +192,12 @@ interface RenderedSheetContext {
   bathSvg: string;
   pdfMeta: PdfSheetMeta;
   pdfDetailRows: PdfSheetDetailRow[];
+  filmRequirementLinearMeters: number | null;
+}
+
+interface PdfRenderIdentity {
+  cutJobId: number | null;
+  cutNumber: string | null;
 }
 
 /** Related audit dimensions when a Phase 1 failure has not yet resolved groups. */
@@ -1965,6 +1971,13 @@ export class PgCutRepository implements CutRepositoryPort {
         ? buildBathProfileSheetSvg({
             sheet: placements,
             labelFor: (piece) => frozenPieceLabelLines(piece, frozenItemByItemId, frozenQuantities),
+            bathDetailInfoFor: (piece) => {
+              const detail = frozenItemByItemId.get(piece.item_id)?.detail;
+              return {
+                edgeTypeName: detail?.edgeTypeName ?? null,
+                millingTypeName: detail?.millingTypeName ?? null,
+              };
+            },
             fillFor: (piece) => {
               const item = frozenItemByItemId.get(piece.item_id);
               const orderId = (piece as { label?: PieceLabelSnapshot }).label?.orderId ?? item?.orderId ?? null;
@@ -1985,6 +1998,9 @@ export class PgCutRepository implements CutRepositoryPort {
         bathSvg,
         pdfMeta: renderSnapshot.pdfMeta as PdfSheetMeta,
         pdfDetailRows: renderSnapshot.pdfDetailRows as PdfSheetDetailRow[],
+        filmRequirementLinearMeters: showBathMeterGuides
+          ? calculateBathSheetFilmUsage(placements)?.linearMeters ?? null
+          : null,
       };
     });
     const resolvedSheets = args.refreshPdfDynamicFields
@@ -2700,35 +2716,88 @@ export class PgCutRepository implements CutRepositoryPort {
   async listDetailLastReady(query: DetailLastReadyQuery): Promise<CutDetailLastReadyResponseDto> {
     const detailIds = query.detailIds ?? [];
     if (detailIds.length === 0) return { details: [] };
-    // One row per detail: the latest READY (calculated) job (by creation order,
-    // cut_job_id DESC) that still actively contains it. Archiving overwrites
-    // status off 'ready', so archived jobs are naturally excluded. We order by
-    // cut_job_id (monotonic, immutable) NOT updated_at, which is bumped by
-    // prewarm/profile/ready events and would yield "last touched" not the
-    // latest-created ready job. Uses idx_cut_job_item_order_detail (migr 031).
     const rows = await this.database.query<{
       order_detail_id: string | number;
       cut_job_id: string | number;
+      result_no: string | number;
       name: string;
+      param_profile_id: string | number | null;
+      profile_name: string | null;
+      profile_is_active: boolean | null;
+      is_vacuum: boolean;
     }>(
       `
-      SELECT DISTINCT ON (cji.order_detail_id)
-             cji.order_detail_id, cj.cut_job_id, cj.name
-      FROM cut_job_item cji
-      JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
-      WHERE cji.order_detail_id = ANY($1::bigint[])
-        AND cji.is_active = true
-        AND cj.status = 'ready'
-      ORDER BY cji.order_detail_id, cj.cut_job_id DESC
+      WITH candidates AS (
+        SELECT cji.order_detail_id,
+               cj.cut_job_id,
+               cj.name,
+               cr.result_no,
+               cj.param_profile_id,
+               cpp.name AS profile_name,
+               cpp.is_active AS profile_is_active,
+               COALESCE(
+                 cj.last_calc_params->>'layout_mode',
+                 cpp.params->>'layout_mode',
+                 cj.params->>'layout_mode'
+               ) = 'vacuum_table' AS is_vacuum
+        FROM cut_job_item cji
+        JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
+        JOIN cut_result cr
+          ON cr.cut_result_id = cj.current_cut_result_id
+         AND cr.cut_job_id = cj.cut_job_id
+        LEFT JOIN cut_result_archive_state archived
+          ON archived.cut_job_id = cr.cut_job_id
+         AND archived.result_no = cr.result_no
+        LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = cj.param_profile_id
+        WHERE cji.order_detail_id = ANY($1::bigint[])
+          AND cji.is_active = true
+          AND cj.status = 'ready'
+          AND archived.cut_job_id IS NULL
+      ),
+      ranked AS (
+        SELECT *,
+               row_number() OVER (
+                 PARTITION BY order_detail_id, is_vacuum
+                 ORDER BY cut_job_id DESC
+               ) AS rn
+        FROM candidates
+      )
+      SELECT order_detail_id, cut_job_id, result_no, name,
+             param_profile_id, profile_name, profile_is_active, is_vacuum
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY order_detail_id, is_vacuum
       `,
       [[...detailIds]],
     );
-    return {
-      details: rows.rows.map((row) => ({
-        orderDetailId: toNum(row.order_detail_id),
-        cutJobId: toNum(row.cut_job_id),
+    const byDetail = new Map<number, CutDetailLastReadyResponseDto['details'][number]>();
+    for (const row of rows.rows) {
+      const orderDetailId = toNum(row.order_detail_id);
+      const entry = byDetail.get(orderDetailId) ?? {
+        orderDetailId,
+        cutJob: null,
+        bathCutJob: null,
+      };
+      const cutJobId = toNum(row.cut_job_id);
+      const resultNo = toNum(row.result_no);
+      const ref = {
+        cutJobId,
+        resultNo,
+        cutNumber: `${cutJobId}-${resultNo}`,
         name: row.name,
-      })),
+        paramProfileId: row.param_profile_id === null ? null : toNum(row.param_profile_id),
+        profileName: row.profile_name,
+        profileIsActive: row.profile_is_active,
+      };
+      if (row.is_vacuum) {
+        entry.bathCutJob = ref;
+      } else {
+        entry.cutJob = ref;
+      }
+      byDetail.set(orderDetailId, entry);
+    }
+    return {
+      details: [...byDetail.values()].sort((a, b) => a.orderDetailId - b.orderDetailId),
     };
   }
 
@@ -2833,6 +2902,7 @@ export class PgCutRepository implements CutRepositoryPort {
     if (printableSheets.length === 0) {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, 0);
     }
+    const pdfIdentity = await this.loadPdfRenderIdentity(query.cutJobId, query.resultNo);
     const pdfSheets = printableSheets.map((s, index) => ({
         svg: s.svg,
         bathSvg: s.bathSvg,
@@ -2844,6 +2914,9 @@ export class PgCutRepository implements CutRepositoryPort {
         templateLayout,
         meta: s.pdfMeta,
         detailRows: s.pdfDetailRows,
+        cutJobId: pdfIdentity.cutJobId ?? undefined,
+        cutNumber: pdfIdentity.cutNumber ?? undefined,
+        filmRequirementLinearMeters: s.filmRequirementLinearMeters,
       }));
     return frozenContext
       ? buildFrozenSheetsPdf(frozenContext.renderContractVersion, pdfSheets)
@@ -2882,6 +2955,7 @@ export class PgCutRepository implements CutRepositoryPort {
     const pdfTemplate = templateSelection.code;
     if (templateSelection.requiresActiveCheck) await this.assertPdfTemplateActive(pdfTemplate);
     const templateLayout = frozen ? null : await this.loadPdfTemplateLayout(pdfTemplate);
+    const pdfIdentity = await this.loadPdfRenderIdentity(query.cutJobId, query.resultNo);
     const groupIds = frozen
       ? frozen.job.groups.map((group) => group.cutGroupId)
       : (await this.database.query<{ cut_group_id: string | number }>(
@@ -2941,6 +3015,9 @@ export class PgCutRepository implements CutRepositoryPort {
           templateLayout,
           meta: sheet.pdfMeta,
           detailRows: sheet.pdfDetailRows,
+          cutJobId: pdfIdentity.cutJobId ?? undefined,
+          cutNumber: pdfIdentity.cutNumber ?? undefined,
+          filmRequirementLinearMeters: sheet.filmRequirementLinearMeters,
         });
         sheetNumber += 1;
       }
@@ -2952,6 +3029,28 @@ export class PgCutRepository implements CutRepositoryPort {
     return frozen
       ? buildFrozenSheetsPdf('cut_sheet_render_v1', pdfSheets)
       : buildSheetsPdf(pdfSheets);
+  }
+
+  private async loadPdfRenderIdentity(
+    cutJobId: number | undefined,
+    requestedResultNo: number | undefined,
+  ): Promise<PdfRenderIdentity> {
+    if (cutJobId === undefined) return { cutJobId: null, cutNumber: null };
+    let resultNo = requestedResultNo ?? null;
+    if (resultNo === null) {
+      const result = await this.database.query<{ result_no: string | number | null }>(
+        `SELECT current_result.result_no
+         FROM cut_job j
+         LEFT JOIN cut_result current_result ON current_result.cut_result_id = j.current_cut_result_id
+         WHERE j.cut_job_id = $1`,
+        [cutJobId],
+      );
+      resultNo = numOrNull(result.rows[0]?.result_no);
+    }
+    return {
+      cutJobId,
+      cutNumber: resultNo === null ? null : `${cutJobId}-${resultNo}`,
+    };
   }
 
   private async loadGroupPdfLandscapeRenderContext(
@@ -3357,6 +3456,14 @@ export class PgCutRepository implements CutRepositoryPort {
           : detailById.get(parseFreecutItemId(piece.item_id)!)?.orderId ?? null);
       return fillByOrder(orderId);
     };
+    const bathDetailInfoFor = (piece: FreecutPlacement) => {
+      const detailId = parseFreecutItemId(piece.item_id);
+      const detail = detailId === null ? null : detailById.get(detailId) ?? null;
+      return {
+        edgeTypeName: detail?.edgeTypeName ?? null,
+        millingTypeName: detail?.millingTypeName ?? null,
+      };
+    };
 
     return {
       sheets: rawSheets.map((s) => {
@@ -3378,6 +3485,7 @@ export class PgCutRepository implements CutRepositoryPort {
           bathSvg: buildBathProfileSheetSvg({
             sheet: s.placements,
             labelFor,
+            bathDetailInfoFor,
             fillFor,
             rotate90,
             originTopLeft,
@@ -3386,6 +3494,9 @@ export class PgCutRepository implements CutRepositoryPort {
           }),
           pdfMeta: buildPdfSheetMeta(s.placements, detailById),
           pdfDetailRows: buildPdfDetailRows(s.placements, detailById),
+          filmRequirementLinearMeters: showBathMeterGuides
+            ? calculateBathSheetFilmUsage(s.placements)?.linearMeters ?? null
+            : null,
         };
       }),
     };

@@ -298,10 +298,21 @@ export interface CutDetailPlacementsResponseDto {
 }
 
 /** One detail's latest-created ready (calculated) cut job. */
+export interface CutDetailLastReadyJobRefDto {
+  cutJobId: number;
+  resultNo: number;
+  cutNumber: string;
+  name: string;
+  paramProfileId: number | null;
+  profileName: string | null;
+  profileIsActive: boolean | null;
+}
+
+/** One detail's current ready cut refs, split by regular/vacuum-table profile. */
 export interface CutDetailLastReadyRefDto {
   orderDetailId: number;
-  cutJobId: number;
-  name: string;
+  cutJob: CutDetailLastReadyJobRefDto | null;
+  bathCutJob: CutDetailLastReadyJobRefDto | null;
 }
 
 /** Per-detail latest-created ready cut job (only details that have one appear). */

@@ -19,13 +19,12 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(source).toContain('orderNames={[record.order_name]}');
   });
 
-  it('renders a «Раскрой» sub-block listing all cut jobs for the order', () => {
-    // cut.view-gated placements fetch for this order's details (multi-job).
-    expect(source).toContain('cutApi.listPlacements');
-    expect(source).toContain('orderIds: [orderId]');
+  it('renders split current-result cut links for the order', () => {
+    expect(source).toContain('const { cutJobByDetailId, bathCutJobByDetailId } = cutJobMaps');
     expect(source).toContain('cutOrderJobs');
-    // Each job is a deep-link into /cut?job=<id>.
-    expect(source).toContain('cutJobDeepLink(j.cutJobId)');
+    expect(source).toContain("title: 'Расчет ванны'");
+    expect(source).toContain("key: 'bath_cut_job'");
+    expect(source).toContain('cutJobDeepLink(j)');
     expect(source).toContain('Профиль: {cutJobProfileLabel(j)}');
   });
 

@@ -33,6 +33,8 @@ describe('TOTALS_BY_JOB_SQL materials_count resolution', () => {
   it('mirrors the effective grouping: 1 when not split; else distinct COALESCE(detail sheet, override)', () => {
     const sql = TOTALS_BY_JOB_SQL.replace(/\s+/g, ' ');
     expect(sql).toContain('JOIN cut_job cj ON cj.cut_job_id = i.cut_job_id');
+    expect(sql).toContain('COALESCE(SUM(i.qty), 0) AS details');
+    expect(sql).toContain('COALESCE(SUM(od.area * i.qty), 0) AS area');
     expect(sql).toContain('CASE WHEN NOT cj.split_by_material THEN 1 ELSE COUNT(DISTINCT COALESCE(od.sheet_material_type_id, cj.sheet_material_type_id)) END AS materials_count');
     expect(sql).toContain('GROUP BY i.cut_job_id, cj.sheet_material_type_id, cj.split_by_material');
   });

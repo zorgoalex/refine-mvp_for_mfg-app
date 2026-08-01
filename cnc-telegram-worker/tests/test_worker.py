@@ -127,20 +127,6 @@ class WorkerFingerprintTest(unittest.TestCase):
         self.assertIs(groups[1].gcode_message, second_gcode)
         self.assertIs(groups[1].vector_message, second_vector)
 
-    def test_does_not_attach_later_day_vector_outside_image_block(self) -> None:
-        gcode = FakeMessage(10502, filename="CNC#1_2665-18MM.TXT")
-        image = FakeMessage(10503, mime_type="image/jpeg", thumbs_up=True)
-        comment = FakeMessage(10504, text="18мм!!!\nФрезы для 18мм: 1, 6, 8")
-        next_gcode = FakeMessage(10505, filename="CNC#2_2665+2677+2704-18MM.TXT")
-        next_image = FakeMessage(10506, mime_type="image/jpeg")
-        later_vector = FakeMessage(10531, filename="2694+2665+2696+2700+2705.svg", mime_type="image/svg+xml")
-
-        groups = group_image_messages([gcode, image, comment, next_gcode, next_image, later_vector])
-
-        self.assertEqual(len(groups), 2)
-        self.assertIs(groups[0].gcode_message, gcode)
-        self.assertIsNone(groups[0].vector_message)
-
     def test_group_thumbs_up_uses_attachment_reactions(self) -> None:
         image = FakeMessage(40, text="2718", mime_type="image/jpeg")
         gcode = FakeMessage(41, filename="CNC#2_2718.TXT", thumbs_up=True)

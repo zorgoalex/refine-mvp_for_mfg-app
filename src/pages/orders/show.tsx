@@ -31,7 +31,7 @@ import { AddToCutModal } from "./components/AddToCutModal";
 import { AddToBazisCutModal } from "../bazis-cut/AddToBazisCutModal";
 import { can, canAny } from "../../utils/permissions";
 import { cutApi } from "../../api/cutApi";
-import type { CutJobDto, CutJobRef } from "../../api/types/cutApi.types";
+import type { CutJobDto } from "../../api/types/cutApi.types";
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
 import { cutJobDeepLink, cutJobProfileLabel } from "./cutColumnHelpers";
@@ -59,7 +59,6 @@ import {
   useOrderDetailColumnPreferences,
   type OrderDetailColumnDefinition,
 } from "./components/tables/OrderDetailColumnSettings";
-import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from "../cut/cutJobEvents";
 import { useCutDetailLastReady } from "./useCutDetailLastReady";
 import { computeOrderBathFilmUsage, formatFilmLinearMeters } from "../cut/cutFilmUsage";
 import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
@@ -649,14 +648,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         .filter((id: unknown): id is number => Number.isInteger(id) && (id as number) > 0),
     [details],
   );
-  const cutJobByDetailId = useCutDetailLastReady({
+  const cutJobMaps = useCutDetailLastReady({
     enabled: cutColumnEnabled,
     detailIds: cutDetailIds,
     orderId: record?.order_id,
   });
+  const { cutJobByDetailId, bathCutJobByDetailId } = cutJobMaps;
   const latestReadyCutJobIds = useMemo(
-    () => [...new Set([...cutJobByDetailId.values()].map((ref) => ref.cutJobId))].sort((a, b) => a - b),
-    [cutJobByDetailId],
+    () => [...new Set([...bathCutJobByDetailId.values()].map((ref) => ref.cutJobId))].sort((a, b) => a - b),
+    [bathCutJobByDetailId],
   );
   const latestReadyCutJobIdsKey = latestReadyCutJobIds.join(',');
   const [bathCutJobs, setBathCutJobs] = useState<CutJobDto[]>([]);
@@ -690,39 +690,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     };
   }, [cutColumnEnabled, latestReadyCutJobIds, latestReadyCutJobIdsKey]);
 
-  // All distinct active cut jobs that contain details from THIS order (a detail
-  // may be placed in several jobs — list them all). Same cut.view gate as the
-  // column; powers the «Раскрой» sub-block in the additional-info panel.
-  const [cutOrderJobs, setCutOrderJobs] = useState<CutJobRef[]>([]);
-  const refreshCutOrderJobs = useCallback(async (orderId?: number | null) => {
-    if (!cutColumnEnabled || !orderId) {
-      setCutOrderJobs([]);
-      return;
-    }
-    try {
-      const res = await cutApi.listPlacements({ orderIds: [orderId] });
-      setCutOrderJobs(res.jobs);
-    } catch {
-      setCutOrderJobs([]);
-    }
-  }, [cutColumnEnabled]);
-
-  useEffect(() => {
-    void refreshCutOrderJobs(record?.order_id);
-  }, [record?.order_id, refreshCutOrderJobs]);
-
-  useEffect(() => {
-    if (!cutColumnEnabled || typeof window === 'undefined') return undefined;
-    const handler = (event: Event) => {
-      const payload = readCutJobReadyEvent(event);
-      if (!payload || !cutJobReadyAffects(payload, { detailIds: cutDetailIds, orderId: record?.order_id })) return;
-      void refreshCutOrderJobs(record?.order_id);
-    };
-    window.addEventListener(CUT_JOB_READY_EVENT, handler);
-    return () => {
-      window.removeEventListener(CUT_JOB_READY_EVENT, handler);
-    };
-  }, [cutColumnEnabled, cutDetailIds, record?.order_id, refreshCutOrderJobs]);
+  const cutOrderJobs = useMemo(
+    () => [...new Map([...cutJobByDetailId.values()].map((ref) => [ref.cutJobId, ref])).values()]
+      .sort((a, b) => a.cutJobId - b.cutJobId),
+    [cutJobByDetailId],
+  );
 
   const bathFilmUsage = useMemo(
     () => computeOrderBathFilmUsage(
@@ -1139,7 +1111,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             render: (_: unknown, detail: any) => {
               const ref = cutJobByDetailId.get(detail.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref.cutJobId)}>{ref.name}</Link>;
+              return <Link to={cutJobDeepLink(ref)}>{ref.name || ref.cutNumber}</Link>;
+            },
+          },
+          {
+            title: 'Расчет ванны',
+            key: 'bath_cut_job',
+            width: 150,
+            render: (_: unknown, detail: any) => {
+              const ref = bathCutJobByDetailId.get(detail.detail_id);
+              if (!ref) return '—';
+              return <Link to={cutJobDeepLink(ref)}>{ref.name || ref.cutNumber}</Link>;
             },
           },
         ]
@@ -1891,10 +1873,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                 {cutOrderJobs.map((j) => (
                                   <Link
                                     key={j.cutJobId}
-                                    to={cutJobDeepLink(j.cutJobId)}
+                                    to={cutJobDeepLink(j)}
                                     style={{ fontSize: 12, lineHeight: 1.35 }}
                                   >
-                                    {j.name}
+                                    {j.name || j.cutNumber}
                                     <span style={{ color: 'var(--app-text-muted)' }}>
                                       {' '}· Профиль: {cutJobProfileLabel(j)}
                                     </span>

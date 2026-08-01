@@ -31,7 +31,7 @@ export function mapTotalsRow(row: TotalsRow): CutJobTotals {
 }
 
 /** positions counts only live-detail rows (COUNT(od.detail_id)); details/area
- *  use od.quantity/od.area (NULL od -> 0 via SUM). films_count counts the
+ *  use reserved cut_job_item.qty and detail area (NULL od -> 0 via SUM). films_count counts the
  *  DISTINCT non-null films among the job's details (film-less rows are NULL →
  *  excluded by COUNT(DISTINCT)). materials_count reflects the RESOLVED cut
  *  material, matching the EFFECTIVE grouping calculate produces:
@@ -45,8 +45,8 @@ export function mapTotalsRow(row: TotalsRow): CutJobTotals {
 export const TOTALS_BY_JOB_SQL = `
   SELECT i.cut_job_id,
          COUNT(od.detail_id)                          AS positions,
-         COALESCE(SUM(od.quantity), 0)                AS details,
-         COALESCE(SUM(od.area * od.quantity), 0)      AS area,
+         COALESCE(SUM(i.qty), 0)                      AS details,
+         COALESCE(SUM(od.area * i.qty), 0)            AS area,
          CASE WHEN NOT cj.split_by_material
               THEN 1
               ELSE COUNT(DISTINCT COALESCE(od.sheet_material_type_id, cj.sheet_material_type_id)) END AS materials_count,
