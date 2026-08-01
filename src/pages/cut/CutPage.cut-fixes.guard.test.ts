@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 /**
  * Source-text guards for the 2026-07-14 cut fixes in CutPage.tsx:
  * 1) manual-editor move guard mirrors the sheet-override semantics,
- * 2) «Разделять по материалу» stays editable for vacuum_table profiles,
+ * 2) vacuum_table locks incompatible grouping flags,
  * 3) sticky back-to-top button inside each group card.
  * Runs under vitest env=node (no jsdom) — assert on the source text.
  */
@@ -23,10 +23,9 @@ describe('CutPage cut-fixes guard', () => {
     expect(helper).toMatch(/jobSheetMaterialTypeId\s*\?\?\s*it\.detail\?\.sheetMaterialTypeId/);
   });
 
-  it('split-by-material checkbox stays enabled for vacuum_table profiles with a sheet override', () => {
-    expect(src).toMatch(/isVacuumProfileId/);
-    expect(src).toMatch(/layout_mode.*===\s*'vacuum_table'/);
-    expect(src).toMatch(/job\.sheetMaterialTypeId != null && !isVacuumProfileId\(job\.paramProfileId\)/);
+  it('vacuum_table profile disables both grouping checkboxes', () => {
+    expect(src).toMatch(/isVacuumTableProfile/);
+    expect(src.match(/isVacuumTableProfile\(job\.paramProfileId, profiles\)/g)).toHaveLength(2);
   });
 
   it('renders a fixed back-to-top button once the page has been scrolled', () => {

@@ -613,7 +613,7 @@ function renderBathDetailCenterLabel(input: {
     0,
     font * BATH_CENTER_PREVIOUS_BASELINE_DISTANCE_RATIO - occupiedHalfHeights,
   );
-  const lineOffset = (occupiedHalfHeights + previousVisualGap / 2) / 2;
+  const lineOffset = (occupiedHalfHeights + previousVisualGap / 4) / 2;
   return {
     svg: [
       `<text x="${num(input.cx)}" y="${num(input.cy - lineOffset)}" font-family="Liberation Sans, sans-serif" font-size="${num(

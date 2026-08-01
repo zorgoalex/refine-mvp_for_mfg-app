@@ -51,6 +51,7 @@ import { ApiError } from '../../api/httpClient';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
+import { applyCutProfileSelection, isVacuumTableProfile } from './cutVacuumProfile';
 import { buildSheetPieceOverlays, cutPdfPreviewBlockReason, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, loadSheetAxisOrigin, saveSheetAxisOrigin, selectVariantSheets, shouldShowCutStaleBadge } from './cutPreviewHelpers';
 import { TableTopScroll } from '../../components/TableTopScroll';
 import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
@@ -1119,17 +1120,33 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       if (!job) return;
       setBusy(true);
       try {
-        const updated = await cutApi.setProfile(job.cutJobId, paramProfileId, job.version);
-        setJob(updated);
-        applyPdfTemplateState(updated);
+        const { bathSheetMissing } = await applyCutProfileSelection({
+          currentJob: job,
+          paramProfileId,
+          profiles,
+          sheetOptions,
+          mutations: {
+            setProfile: cutApi.setProfile,
+            setSplitByMaterial: cutApi.setSplitByMaterial,
+            setCombineFilms: cutApi.setCombineFilms,
+            setSheetMaterial: cutApi.setSheetMaterial,
+          },
+          onUpdated: (updated) => {
+            setJob(updated);
+            applyPdfTemplateState(updated);
+          },
+        });
+        if (bathSheetMissing) {
+          message.warning('Не найден материал листа, название которого начинается с «Ванна»');
+        }
         void loadJobs();
       } catch (error) {
-        handleError(error, 'Не удалось изменить профиль раскроя');
+        handleError(error, 'Не удалось применить профиль раскроя');
       } finally {
         setBusy(false);
       }
     },
-    [applyPdfTemplateState, job, loadJobs, handleError],
+    [applyPdfTemplateState, job, loadJobs, handleError, profiles, sheetOptions],
   );
 
   const setJobSheetMaterial = useCallback(
@@ -2196,16 +2213,6 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const pieceMetaByItemId = useMemo(
     () => buildPieceMetaByItemId(job?.items ?? [], job?.sheetMaterialTypeId ?? null),
     [job?.items, job?.sheetMaterialTypeId],
-  );
-
-  // A vacuum_table profile keeps «Разделять по материалу» editable even with a
-  // chosen «Лист раскроя»: operators pre-set the flag before clearing the
-  // override, and the frozen checkbox read as a bug. For other profiles the
-  // freeze stays — the flag is override-irrelevant at calculate time.
-  const isVacuumProfileId = useCallback(
-    (profileId: number | null) =>
-      profiles.find((p) => p.cutParamProfileId === profileId)?.params?.layout_mode === 'vacuum_table',
-    [profiles],
   );
 
   // Per-piece sheet-material and film NAMES for the editor's per-sheet header.
@@ -3465,7 +3472,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                           busy ||
                           job.status === 'calculating' ||
                           isArchivedJob ||
-                          (job.sheetMaterialTypeId != null && !isVacuumProfileId(job.paramProfileId))
+                          isVacuumTableProfile(job.paramProfileId, profiles) ||
+                          job.sheetMaterialTypeId != null
                         }
                       >
                         Разделять по материалу
@@ -3482,7 +3490,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                       <Checkbox
                         checked={job.combineFilms}
                         onChange={(e) => void setJobCombineFilms(e.target.checked)}
-                        disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
+                        disabled={
+                          !canManage ||
+                          busy ||
+                          job.status === 'calculating' ||
+                          isArchivedJob ||
+                          isVacuumTableProfile(job.paramProfileId, profiles)
+                        }
                       >
                         Объединить разные плёнки
                       </Checkbox>
