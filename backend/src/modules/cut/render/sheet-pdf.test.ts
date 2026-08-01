@@ -448,7 +448,8 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('Присадка');
     expect(rendered).toContain('Файл станка');
     expect(rendered).toContain('Файлы станка');
-    expect(rendered).toContain('✓');
+    expect(rendered).toContain('Да');
+    expect(rendered).not.toContain('✓');
     expect(rendered).toContain('CNC#1_11380.TXT');
   });
 
@@ -500,7 +501,8 @@ describe('buildSheetsPdf', () => {
     const rendered = textSpy.mock.calls.map((call) => String(call[0]));
     expect(rendered).toContain('Присадка');
     expect(rendered).toContain('Файл станка');
-    expect(rendered).toContain('✓');
+    expect(rendered).toContain('Да');
+    expect(rendered).not.toContain('✓');
     expect(rendered).toContain('CNC#1_11380.TXT');
   });
 

@@ -1141,8 +1141,8 @@ function splitMachineFileValue(value: unknown): string[] {
 }
 
 function checkboxMark(value: unknown): string {
-  if (value === true || value === 1) return '✓';
-  if (typeof value === 'string' && ['true', 'yes', 'да', '1', '✓'].includes(value.trim().toLowerCase())) return '✓';
+  if (value === true || value === 1) return 'Да';
+  if (typeof value === 'string' && ['true', 'yes', 'да', '1', '✓'].includes(value.trim().toLowerCase())) return 'Да';
   return '';
 }
 
