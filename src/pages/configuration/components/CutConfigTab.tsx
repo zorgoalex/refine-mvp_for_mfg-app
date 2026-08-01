@@ -90,6 +90,22 @@ import './CutConfigTab.css';
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
 
+const PDF_DETAIL_DIMENSION_FONT_SCALE = 1.25;
+
+function fitPdfDetailDimensionFont(
+  label: string,
+  length: number,
+  thickness: number,
+  standardFontSize: number,
+  orientation: 'horizontal' | 'vertical',
+): number {
+  const estimatedTextWidth = Math.max(label.length * 0.56 * standardFontSize, 1);
+  const widthScale = (length * 0.82) / estimatedTextWidth;
+  const thicknessLimit = orientation === 'horizontal' ? 0.35 : 0.42;
+  const thicknessScale = (thickness * thicknessLimit) / standardFontSize;
+  return Math.max(1, Math.min(standardFontSize, standardFontSize * widthScale, standardFontSize * thicknessScale));
+}
+
 const ENGINE_OPTIONS: Array<{ value: FreecutEngineChoice; label: string }> = [
   { value: 'auto', label: 'Авто' },
   { value: 'heuristic', label: 'Быстрый' },
@@ -1995,10 +2011,10 @@ const PdfKonvaElement: React.FC<{
     const h = Math.max(element.h, 1);
     const pieceColor = ['#e6f4ff', '#fff1f0', '#f6ffed', '#fffbe6'];
     const pieces = [
-      { x: w * 0.07, y: h * 0.08, w: w * 0.34, h: h * 0.24, order: '11380', widthLabel: '800', heightLabel: '240', edge: 'ПВХ 2мм', milling: 'Модерн' },
-      { x: w * 0.45, y: h * 0.08, w: w * 0.46, h: h * 0.18, order: '11380', widthLabel: '780', heightLabel: '180', edge: 'ABS 1мм', milling: 'Паз' },
-      { x: w * 0.08, y: h * 0.38, w: w * 0.26, h: h * 0.48, order: '11381', widthLabel: '1100', heightLabel: '320', edge: '—', milling: 'Модерн' },
-      { x: w * 0.39, y: h * 0.35, w: w * 0.52, h: h * 0.38, order: '11382', widthLabel: '950', heightLabel: '420', edge: 'ПВХ 2мм', milling: 'Классика' },
+      { x: w * 0.07, y: h * 0.08, w: w * 0.34, h: h * 0.24, order: '11380', widthLabel: '800', heightLabel: '240', edge: 'ПВХ 2мм', milling: 'Модерн', doweling: true },
+      { x: w * 0.45, y: h * 0.08, w: w * 0.46, h: h * 0.18, order: '11380', widthLabel: '780', heightLabel: '180', edge: 'ABS 1мм', milling: 'Паз', doweling: false },
+      { x: w * 0.08, y: h * 0.38, w: w * 0.26, h: h * 0.48, order: '11381', widthLabel: '1100', heightLabel: '320', edge: '—', milling: 'Модерн', doweling: true },
+      { x: w * 0.39, y: h * 0.35, w: w * 0.52, h: h * 0.38, order: '11382', widthLabel: '950', heightLabel: '420', edge: 'ПВХ 2мм', milling: 'Классика', doweling: false },
     ];
     return (
       <React.Fragment>
@@ -2008,6 +2024,23 @@ const PdfKonvaElement: React.FC<{
             const detailFontSize = Math.max(1.8, Math.min(3.8, Math.min(piece.w, piece.h) * 0.12));
             const orderFontSize = detailFontSize * 1.25;
             const detailMetaFontSize = orderFontSize / 2;
+            const detailMetaLines = [piece.edge, piece.milling, ...(piece.doweling ? ['присадка'] : [])];
+            const detailMetaHeight = detailMetaFontSize * detailMetaLines.length;
+            const standardDimensionFontSize = 3.8 * PDF_DETAIL_DIMENSION_FONT_SCALE;
+            const widthDimensionFontSize = fitPdfDetailDimensionFont(
+              piece.widthLabel,
+              piece.w,
+              piece.h,
+              standardDimensionFontSize,
+              'horizontal',
+            );
+            const heightDimensionFontSize = fitPdfDetailDimensionFont(
+              piece.heightLabel,
+              piece.h,
+              piece.w,
+              standardDimensionFontSize,
+              'vertical',
+            );
             return (
               <KonvaGroup
                 key={index}
@@ -2028,27 +2061,27 @@ const PdfKonvaElement: React.FC<{
                   width={Math.max(1, piece.w - 2)}
                   text={piece.widthLabel}
                   fontFamily="Arial"
-                  fontSize={detailFontSize}
+                  fontSize={widthDimensionFontSize}
                   align="center"
                   fill="#111111"
                   listening={false}
                 />
                 <KonvaText
-                  x={detailFontSize * 0.9}
+                  x={heightDimensionFontSize * 0.9}
                   y={piece.h - 1}
                   width={Math.max(1, piece.h - 2)}
                   text={piece.heightLabel}
                   fontFamily="Arial"
-                  fontSize={detailFontSize}
+                  fontSize={heightDimensionFontSize}
                   align="center"
                   fill="#111111"
                   rotation={-90}
                   listening={false}
                 />
                 <KonvaText
-                  x={detailFontSize * 1.25}
-                  y={Math.max(detailFontSize * 1.4, piece.h * 0.4)}
-                  width={Math.max(1, piece.w - detailFontSize * 1.5)}
+                  x={heightDimensionFontSize * 1.25}
+                  y={Math.max(widthDimensionFontSize * 1.4, piece.h * 0.4)}
+                  width={Math.max(1, piece.w - heightDimensionFontSize * 1.5)}
                   text={piece.order}
                   fontFamily="Arial"
                   fontSize={orderFontSize}
@@ -2061,10 +2094,10 @@ const PdfKonvaElement: React.FC<{
                 />
                 <KonvaText
                   x={1}
-                  y={Math.max(1, piece.h - detailMetaFontSize * 2.15)}
+                  y={Math.max(1, piece.h - detailMetaHeight - detailMetaFontSize * 0.05)}
                   width={Math.max(1, piece.w - 2)}
-                  height={detailMetaFontSize * 2.1}
-                  text={`${piece.edge}\n${piece.milling}`}
+                  height={detailMetaHeight}
+                  text={detailMetaLines.join('\n')}
                   fontFamily="Arial"
                   fontSize={detailMetaFontSize}
                   lineHeight={1}

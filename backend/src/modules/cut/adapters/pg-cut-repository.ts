@@ -1977,6 +1977,7 @@ export class PgCutRepository implements CutRepositoryPort {
               return {
                 edgeTypeName: detail?.edgeTypeName ?? null,
                 millingTypeName: detail?.millingTypeName ?? null,
+                doweling: detail?.doweling ?? false,
               };
             },
             fillFor: (piece) => {
@@ -3411,6 +3412,7 @@ export class PgCutRepository implements CutRepositoryPort {
       return {
         edgeTypeName: detail?.edgeTypeName ?? null,
         millingTypeName: detail?.millingTypeName ?? null,
+        doweling: detail?.doweling ?? false,
       };
     };
 

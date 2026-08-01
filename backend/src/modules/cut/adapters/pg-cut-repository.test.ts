@@ -42,7 +42,7 @@ describe('frozen bath PDF render wiring', () => {
 });
 
 describe('cut PDF sheet context fields', () => {
-  it('passes cut identity, per-sheet film requirement, edge and milling into PDF renders', () => {
+  it('passes cut identity, per-sheet film requirement and detail annotations into PDF renders', () => {
     expect(repositorySource).toContain('loadPdfRenderIdentity');
     expect(repositorySource).toContain('cutJobId: pdfIdentity.cutJobId');
     expect(repositorySource).toContain('cutNumber: pdfIdentity.cutNumber');
@@ -53,6 +53,9 @@ describe('cut PDF sheet context fields', () => {
     expect(repositorySource).toContain('bathDetailInfoFor:');
     expect(repositorySource).toContain('edgeTypeName: detail?.edgeTypeName ?? null');
     expect(repositorySource).toContain('millingTypeName: detail?.millingTypeName ?? null');
+    expect(repositorySource.match(
+      /edgeTypeName: detail\?\.edgeTypeName \?\? null,[\s\S]{0,120}millingTypeName: detail\?\.millingTypeName \?\? null,[\s\S]{0,120}doweling: detail\?\.doweling \?\? false/g,
+    )).toHaveLength(2);
   });
 });
 

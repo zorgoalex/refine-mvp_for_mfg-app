@@ -61,6 +61,7 @@ export interface PieceLabelInput {
 export interface BathPieceDetailInfo {
   edgeTypeName?: string | null;
   millingTypeName?: string | null;
+  doweling?: boolean | null;
 }
 
 /**
@@ -129,6 +130,7 @@ const ORDER_FILL_PALETTE = [
 const BATH_ORDER_LABEL_COLOR = '#7f1d1d';
 const BATH_POSITION_LABEL_COLOR = '#14532d';
 const BATH_DIMENSION_FONT_ENLARGE_MIN_SIDE_MM = 150;
+const BATH_DIMENSION_FONT_SCALE = 1.25;
 const BATH_ORDER_LABEL_WEIGHT = 900;
 const BATH_ORDER_LABEL_STROKE_RATIO = 0.04;
 
@@ -379,7 +381,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
       const sideTexts: string[] = [];
       let reservedTop = 0;
       let reservedLeft = 0;
-      const sideFontMm = bathDimensionBaseFont(rect.w, rect.h, baseSideFontMm);
+      const sideFontMm = bathDimensionBaseFont(rect.w, rect.h, baseSideFontMm) * BATH_DIMENSION_FONT_SCALE;
       const widthLabel = formatDimension(rect.w);
       const widthFont = fitBathSideFont(widthLabel, rect.w, rect.h, sideFontMm, 'horizontal');
       if (widthFont !== null) {
@@ -451,11 +453,14 @@ function renderBathDetailMeta(input: {
   const bottom = input.rect.y + input.rect.h - padding;
   const edge = input.info.edgeTypeName?.trim() || '—';
   const milling = input.info.millingTypeName?.trim() || '—';
+  const lines = [edge, milling, ...(input.info.doweling === true ? ['присадка'] : [])];
   return [
     `<clipPath id="${input.clipId}"><rect x="${num(input.rect.x)}" y="${num(input.rect.y)}" width="${num(input.rect.w)}" height="${num(input.rect.h)}"/></clipPath>`,
     `<text class="cut-bath-detail-meta" font-family="Liberation Sans, sans-serif" font-size="${num(fontMm)}" fill="#111111" text-anchor="end" data-corner="bottom-right" clip-path="url(#${input.clipId})">`,
-    `<tspan x="${num(x)}" y="${num(bottom - fontMm * 1.05)}">${escapeXml(edge)}</tspan>`,
-    `<tspan x="${num(x)}" y="${num(bottom)}">${escapeXml(milling)}</tspan>`,
+    ...lines.map((line, index) => {
+      const linesBelow = lines.length - index - 1;
+      return `<tspan x="${num(x)}" y="${num(bottom - fontMm * 1.05 * linesBelow)}">${escapeXml(line)}</tspan>`;
+    }),
     '</text>',
   ].join('');
 }
