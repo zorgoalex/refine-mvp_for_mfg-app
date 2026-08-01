@@ -54,8 +54,10 @@ describe('edit-form detail grouping', () => {
   it('edit detail table exposes a cut.view-gated Раскрой column refreshed by cut ready events', () => {
     expect(tab).toContain("const cutColumnEnabled = featureFlags.useBackendCut && can('cut.view')");
     expect(tab).toContain('useCutDetailLastReady');
-    expect(tab).toContain('cutJobByDetailId={cutColumnEnabled ? cutJobByDetailId : undefined}');
+    expect(tab).toContain('cutJobByDetailId={cutColumnEnabled ? cutJobMaps.cutJobByDetailId : undefined}');
+    expect(tab).toContain('bathCutJobByDetailId={cutColumnEnabled ? cutJobMaps.bathCutJobByDetailId : undefined}');
     expect(table).toContain("key: 'cut_job'");
-    expect(table).toContain('cutJobDeepLink(ref.cutJobId)');
+    expect(table).toContain("key: 'bath_cut_job'");
+    expect(table).toContain('cutJobDeepLink(ref)');
   });
 });

@@ -1,9 +1,23 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import { freecutItemId, type FreecutPlacement, type SheetPlacementsJson } from '../../cut/application/cut-freecut-mapping';
+import type {
+  CutGroupDto,
+  CutJobDto,
+  CutJobItemDto,
+  CutJobTotals,
+  CutSheetRenderSnapshotDto,
+} from '../../cut/dto/cut.dto';
+import {
+  buildBathProfileSheetSvg,
+  buildSheetSvg,
+  composePieceLabelLines,
+  createOrderFillResolver,
+} from '../../cut/render/sheet-svg';
 import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
@@ -16,6 +30,8 @@ import type {
   CncTelegramBathCardDto,
   CncTelegramBathItemDto,
   CncTelegramBathSheetDto,
+  CncTelegramCutLayoutDto,
+  CncTelegramCutLayoutItemDto,
   CncTelegramDowelingLinkDto,
   CncTelegramIngestResponseDto,
   CncTelegramItemSource,
@@ -64,6 +80,11 @@ interface PacketJoinedRow extends QueryResultRow {
   analysis_warnings_json: unknown;
   ocr_engine: string | null;
   parser_version: string;
+  cut_layout_json: unknown;
+  svg_cut_job_id: string | number | null;
+  svg_cut_result_id: string | number | null;
+  svg_cut_import_status: 'none' | 'skipped' | 'needs_review' | 'imported' | null;
+  svg_cut_import_note: string | null;
   updated_at: string | Date;
   packet_item_id: string | null;
   source_item_key: string | null;
@@ -287,7 +308,11 @@ export class PgCncTelegramRepository
         command.dto.source.version === Number(existing.source_version) &&
         existing.payload_hash === payloadHash
       ) {
-        await ensureCuttingSequenceNo(tx, existing.packet_id, command.dto, Number(command.currentUser.id));
+        const matchedDto = await resolveItemMatches(tx, command.dto);
+        const resolvedDto = aggregateMatchedItems(matchedDto);
+        await ensureCuttingSequenceNo(tx, existing.packet_id, resolvedDto, Number(command.currentUser.id));
+        await ensureStoredCutLayout(tx, existing.packet_id, command.dto.cutLayout ?? null);
+        await syncSvgCutImport(tx, existing.packet_id, resolvedDto, matchedDto, command.currentUser.id);
         const packet = await loadPacket(tx, existing.packet_id);
         const response: CncTelegramIngestResponseDto = {
           packet,
@@ -299,7 +324,8 @@ export class PgCncTelegramRepository
         return response;
       }
 
-      const resolvedDto = aggregateMatchedItems(await resolveItemMatches(tx, command.dto));
+      const matchedDto = await resolveItemMatches(tx, command.dto);
+      const resolvedDto = aggregateMatchedItems(matchedDto);
       const resolvedCommand = resolvedDto === command.dto ? command : { ...command, dto: resolvedDto };
       await assertMatchedDetailsBelongToOrders(tx, resolvedDto);
 
@@ -309,6 +335,7 @@ export class PgCncTelegramRepository
       }
       await replaceItems(tx, packetId, resolvedDto);
       await ensureCuttingSequenceNo(tx, packetId, resolvedDto, Number(command.currentUser.id));
+      await syncSvgCutImport(tx, packetId, resolvedDto, matchedDto, command.currentUser.id);
 
       const packet = await loadPacket(tx, packetId);
       const auditId = await writeIngestAudit(tx, {
@@ -380,6 +407,11 @@ function packetSelectSql(whereSql: string): string {
       p.analysis_warnings_json,
       p.ocr_engine,
       p.parser_version,
+      p.cut_layout_json,
+      p.svg_cut_job_id,
+      p.svg_cut_result_id,
+      p.svg_cut_import_status,
+      p.svg_cut_import_note,
       p.updated_at,
       i.packet_item_id,
       i.source_item_key,
@@ -464,6 +496,7 @@ async function insertPacket(
       analysis_warnings_json,
       ocr_engine,
       parser_version,
+      cut_layout_json,
       created_by,
       updated_by
     )
@@ -476,7 +509,8 @@ async function insertPacket(
       $16, $17, $18, $19::timestamptz, $20,
       $21::jsonb, $22::jsonb, $23::jsonb, $24::jsonb,
       $25, COALESCE($26, 'cnc-telegram-structured-v1'),
-      $27, $27
+      $27::jsonb,
+      $28, $28
     )
     RETURNING packet_id
     `,
@@ -525,7 +559,8 @@ async function updatePacket(
       analysis_warnings_json = $24::jsonb,
       ocr_engine = $25,
       parser_version = COALESCE($26, 'cnc-telegram-structured-v1'),
-      updated_by = $27,
+      cut_layout_json = $27::jsonb,
+      updated_by = $28,
       updated_at = now()
     WHERE packet_id = $1::uuid
     `,
@@ -565,6 +600,7 @@ function packetParams(
     JSON.stringify(analysisWarningsArray(dto.analysisWarnings ?? [])),
     normalizeOptional(dto.ocrEngine),
     normalizeOptional(dto.parserVersion),
+    dto.cutLayout ? JSON.stringify(dto.cutLayout) : null,
     Number(actorUserId),
   ];
 }
@@ -713,6 +749,837 @@ async function loadPacketOrderIds(tx: TransactionClient, packetId: string): Prom
   return result.rows
     .map((row) => toPositiveInteger(row.order_id))
     .filter((value): value is number => value !== null);
+}
+
+async function ensureStoredCutLayout(
+  tx: TransactionClient,
+  packetId: string,
+  layout: CncTelegramCutLayoutDto | null,
+): Promise<void> {
+  if (!layout) return;
+  await tx.query(
+    `UPDATE cnc_telegram_packets
+     SET cut_layout_json = COALESCE(cut_layout_json, $2::jsonb)
+     WHERE packet_id = $1::uuid`,
+    [packetId, JSON.stringify(layout)],
+  );
+}
+
+async function syncSvgCutImport(
+  tx: TransactionClient,
+  packetId: string,
+  dto: CncTelegramStructuredIngestDto,
+  matchSourceDto: CncTelegramStructuredIngestDto,
+  actorUserId: string,
+): Promise<void> {
+  const state = await tx.query<{
+    svg_cut_job_id: string | number | null;
+    svg_cut_result_id: string | number | null;
+    svg_cut_import_status: 'none' | 'skipped' | 'needs_review' | 'imported' | null;
+  }>(
+    `SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status
+     FROM cnc_telegram_packets
+     WHERE packet_id = $1::uuid
+     FOR UPDATE`,
+    [packetId],
+  );
+  const row = state.rows[0];
+  if (!row) return;
+  if (row.svg_cut_import_status === 'imported' && row.svg_cut_job_id !== null && row.svg_cut_result_id !== null) {
+    return;
+  }
+
+  const layout = dto.cutLayout ?? matchSourceDto.cutLayout ?? null;
+  if (!layout) {
+    await setSvgCutImportState(tx, packetId, 'none', null, null, null);
+    return;
+  }
+  if (layout.status !== 'valid') {
+    await setSvgCutImportState(tx, packetId, 'skipped', cutLayoutReason(layout, 'SVG layout invalid'), null, null);
+    return;
+  }
+
+  const plan = await buildSvgCutImportPlan(tx, dto, matchSourceDto, layout);
+  if (!plan.ok) {
+    await setSvgCutImportState(tx, packetId, 'needs_review', plan.reason, null, null);
+    return;
+  }
+
+  const imported = await createSvgCutJob(tx, packetId, dto, layout, plan, actorUserId);
+  await setSvgCutImportState(tx, packetId, 'imported', 'SVG layout imported into cut job', imported.cutJobId, imported.cutResultId);
+}
+
+async function setSvgCutImportState(
+  tx: TransactionClient,
+  packetId: string,
+  status: 'none' | 'skipped' | 'needs_review' | 'imported',
+  note: string | null,
+  cutJobId: number | null,
+  cutResultId: number | null,
+): Promise<void> {
+  await tx.query(
+    `UPDATE cnc_telegram_packets
+     SET svg_cut_import_status = $2,
+         svg_cut_import_note = $3,
+         svg_cut_job_id = $4,
+         svg_cut_result_id = $5,
+         updated_at = now()
+     WHERE packet_id = $1::uuid`,
+    [packetId, status, note, cutJobId, cutResultId],
+  );
+}
+
+type SvgCutImportPlan =
+  | { ok: false; reason: string }
+  | {
+      ok: true;
+      sheetWidthMm: number;
+      sheetHeightMm: number;
+      sheetMaterialTypeId: number;
+      filmId: number | null;
+      details: SvgCutDetail[];
+      placements: Array<CncTelegramCutLayoutItemDto & { orderId: number; orderDetailId: number }>;
+    };
+
+interface SvgCutDetail {
+  detailId: number;
+  orderId: number;
+  orderName: string | null;
+  orderDeleted: boolean;
+  detailNumber: number | null;
+  detailName: string | null;
+  height: number | null;
+  width: number | null;
+  orderQuantity: number | null;
+  cutQuantity: number;
+  area: number | null;
+  materialId: number | null;
+  sheetMaterialTypeId: number | null;
+  sheetMaterialWidthMm: number | null;
+  sheetMaterialHeightMm: number | null;
+  materialName: string | null;
+  doweling: boolean | null;
+  millingTypeId: number | null;
+  millingTypeName: string | null;
+  edgeTypeId: number | null;
+  edgeTypeName: string | null;
+  filmId: number | null;
+  filmName: string | null;
+  priority: number | null;
+  productionStatusId: number | null;
+  productionStatusName: string | null;
+  jointOrderId: number | null;
+  note: string | null;
+  linkCuttingFile: string | null;
+  linkCuttingImageFile: string | null;
+  linkCadFile: string | null;
+  linkPdfFile: string | null;
+}
+
+interface SvgCutDetailRow extends QueryResultRow {
+  detail_id: string | number;
+  order_id: string | number;
+  order_name: string | null;
+  order_delete_flag: boolean | null;
+  detail_number: string | number | null;
+  detail_name: string | null;
+  height: string | number | null;
+  width: string | number | null;
+  order_quantity: string | number | null;
+  area: string | number | null;
+  material_id: string | number | null;
+  sheet_material_type_id: string | number | null;
+  sheet_material_width_mm: string | number | null;
+  sheet_material_height_mm: string | number | null;
+  material_name: string | null;
+  doweling: boolean | null;
+  milling_type_id: string | number | null;
+  milling_type_name: string | null;
+  edge_type_id: string | number | null;
+  edge_type_name: string | null;
+  film_id: string | number | null;
+  film_name: string | null;
+  priority: string | number | null;
+  production_status_id: string | number | null;
+  production_status_name: string | null;
+  joint_order_id: string | number | null;
+  note: string | null;
+  link_cutting_file: string | null;
+  link_cutting_image_file: string | null;
+  link_cad_file: string | null;
+  link_pdf_file: string | null;
+}
+
+async function buildSvgCutImportPlan(
+  tx: TransactionClient,
+  dto: CncTelegramStructuredIngestDto,
+  matchSourceDto: CncTelegramStructuredIngestDto,
+  layout: CncTelegramCutLayoutDto,
+): Promise<SvgCutImportPlan> {
+  const sheet = layout.sheet;
+  const items = layout.items ?? [];
+  if (!sheet || !isPositiveFinite(sheet.widthMm) || !isPositiveFinite(sheet.heightMm)) {
+    return { ok: false, reason: 'SVG layout has no valid sheet size' };
+  }
+  if (items.length === 0) {
+    return { ok: false, reason: cutLayoutReason(layout, 'SVG layout has no placed details') };
+  }
+
+  const matchedItems = new Map<string, IngestItemInput>();
+  for (const item of matchSourceDto.items) {
+    const key = svgLayoutMatchKey(item.orderName, item.detailNumber ?? null, item.widthMm ?? null, item.heightMm ?? null);
+    if (!key) continue;
+    matchedItems.set(key, item);
+  }
+
+  const placements: Array<CncTelegramCutLayoutItemDto & { orderId: number; orderDetailId: number }> = [];
+  const countByDetail = new Map<number, number>();
+  const countByLayoutKey = new Map<string, number>();
+  for (const item of items) {
+    const key = svgLayoutMatchKey(item.orderName, item.detailNumber, item.widthMm, item.heightMm);
+    if (!key) return { ok: false, reason: 'SVG layout item has incomplete order/detail/size identity' };
+    const match = matchedItems.get(key);
+    if (!match || match.matchStatus !== 'matched' || match.matchOrderId == null || match.matchDetailId == null) {
+      return { ok: false, reason: `SVG detail ${item.orderName}#${item.detailNumber} ${item.widthMm}x${item.heightMm} is not uniquely matched to an order detail` };
+    }
+    if (!layoutGeometryInsideSheet(item, sheet.widthMm, sheet.heightMm)) {
+      return { ok: false, reason: `SVG detail ${item.orderName}#${item.detailNumber} is outside sheet bounds` };
+    }
+    placements.push({ ...item, orderId: match.matchOrderId, orderDetailId: match.matchDetailId });
+    countByDetail.set(match.matchDetailId, (countByDetail.get(match.matchDetailId) ?? 0) + 1);
+    countByLayoutKey.set(key, (countByLayoutKey.get(key) ?? 0) + 1);
+  }
+
+  for (const [key, count] of countByLayoutKey.entries()) {
+    const match = matchedItems.get(key);
+    if (match && match.quantity !== count) {
+      return { ok: false, reason: `SVG placement count ${count} differs from parsed item quantity ${match.quantity} for ${match.orderName}#${match.detailNumber}` };
+    }
+  }
+
+  const detailRows = await loadSvgCutDetails(tx, [...countByDetail.keys()]);
+  if (detailRows.size !== countByDetail.size) {
+    return { ok: false, reason: 'Not all SVG matched details still exist in active orders' };
+  }
+  const details = [...countByDetail.entries()].map(([detailId, cutQuantity]) => {
+    const detail = detailRows.get(detailId);
+    if (!detail) throw new Error(`missing detail ${detailId}`);
+    return { ...detail, cutQuantity };
+  });
+
+  const sheetMaterialIds = uniqueValues(details.map((detail) => detail.sheetMaterialTypeId));
+  if (sheetMaterialIds.length !== 1 || sheetMaterialIds[0] === null) {
+    return { ok: false, reason: 'SVG layout spans multiple or missing sheet material specs' };
+  }
+  const filmIds = uniqueValues(details.map((detail) => detail.filmId));
+  const groupFilmId = filmIds.length === 1 ? filmIds[0] : null;
+  const materialDetail = details.find((detail) => detail.sheetMaterialTypeId === sheetMaterialIds[0]);
+  if (
+    materialDetail?.sheetMaterialWidthMm != null &&
+    materialDetail.sheetMaterialHeightMm != null &&
+    !sheetDimsMatch(sheet.widthMm, sheet.heightMm, materialDetail.sheetMaterialWidthMm, materialDetail.sheetMaterialHeightMm)
+  ) {
+    return { ok: false, reason: `SVG sheet ${sheet.widthMm}x${sheet.heightMm} does not match material sheet ${materialDetail.sheetMaterialWidthMm}x${materialDetail.sheetMaterialHeightMm}` };
+  }
+
+  return {
+    ok: true,
+    sheetWidthMm: round3(sheet.widthMm),
+    sheetHeightMm: round3(sheet.heightMm),
+    sheetMaterialTypeId: sheetMaterialIds[0],
+    filmId: groupFilmId,
+    details,
+    placements,
+  };
+}
+
+async function loadSvgCutDetails(tx: TransactionClient, detailIds: number[]): Promise<Map<number, Omit<SvgCutDetail, 'cutQuantity'>>> {
+  if (detailIds.length === 0) return new Map();
+  const rows = await tx.query<SvgCutDetailRow>(
+    `
+    SELECT od.detail_id, od.order_id, ord.order_name, ord.delete_flag AS order_delete_flag,
+           od.detail_number, od.detail_name, od.height, od.width, od.quantity AS order_quantity,
+           od.area, od.material_id, od.sheet_material_type_id,
+           smt.width_mm AS sheet_material_width_mm,
+           smt.height_mm AS sheet_material_height_mm,
+           COALESCE(smt.name, materials.material_name) AS material_name,
+           od.doweling,
+           od.milling_type_id, mt.milling_type_name,
+           od.edge_type_id, et.edge_type_name,
+           od.film_id, films.film_name,
+           od.priority, od.production_status_id, ps.production_status_name,
+           od.joint_order_id, od.note,
+           od.link_cutting_file, od.link_cutting_image_file, od.link_cad_file, od.link_pdf_file
+    FROM order_details od
+    JOIN orders ord ON ord.order_id = od.order_id
+    LEFT JOIN materials ON materials.material_id = od.material_id
+    LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+    LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
+    LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
+    LEFT JOIN films ON films.film_id = od.film_id
+    LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
+    WHERE od.detail_id = ANY($1::bigint[])
+      AND od.delete_flag = false
+      AND ord.delete_flag = false
+    `,
+    [detailIds],
+  );
+  const out = new Map<number, Omit<SvgCutDetail, 'cutQuantity'>>();
+  for (const row of rows.rows) {
+    const detailId = toNumber(row.detail_id);
+    out.set(detailId, {
+      detailId,
+      orderId: toNumber(row.order_id),
+      orderName: row.order_name,
+      orderDeleted: row.order_delete_flag === true,
+      detailNumber: toNullableNumber(row.detail_number),
+      detailName: row.detail_name,
+      height: toNullableNumber(row.height),
+      width: toNullableNumber(row.width),
+      orderQuantity: toNullableNumber(row.order_quantity),
+      area: toNullableNumber(row.area),
+      materialId: toNullableNumber(row.material_id),
+      sheetMaterialTypeId: toNullableNumber(row.sheet_material_type_id),
+      sheetMaterialWidthMm: toNullableNumber(row.sheet_material_width_mm),
+      sheetMaterialHeightMm: toNullableNumber(row.sheet_material_height_mm),
+      materialName: row.material_name,
+      doweling: row.doweling === null || row.doweling === undefined ? null : row.doweling === true,
+      millingTypeId: toNullableNumber(row.milling_type_id),
+      millingTypeName: row.milling_type_name,
+      edgeTypeId: toNullableNumber(row.edge_type_id),
+      edgeTypeName: row.edge_type_name,
+      filmId: toNullableNumber(row.film_id),
+      filmName: row.film_name,
+      priority: toNullableNumber(row.priority),
+      productionStatusId: toNullableNumber(row.production_status_id),
+      productionStatusName: row.production_status_name,
+      jointOrderId: toNullableNumber(row.joint_order_id),
+      note: row.note,
+      linkCuttingFile: row.link_cutting_file,
+      linkCuttingImageFile: row.link_cutting_image_file,
+      linkCadFile: row.link_cad_file,
+      linkPdfFile: row.link_pdf_file,
+    });
+  }
+  return out;
+}
+
+async function createSvgCutJob(
+  tx: TransactionClient,
+  packetId: string,
+  dto: CncTelegramStructuredIngestDto,
+  layout: CncTelegramCutLayoutDto,
+  plan: Extract<SvgCutImportPlan, { ok: true }>,
+  actorUserId: string,
+): Promise<{ cutJobId: number; cutResultId: number }> {
+  const params = SVG_REVERSE_IMPORT_PARAMS;
+  const selectionCriteria = {
+    source: 'cnc_telegram_svg',
+    externalPacketKey: dto.externalPacketKey,
+    packetId,
+    sourceVersion: dto.source.version,
+    programName: dto.programName ?? null,
+    machine: dto.machine ?? null,
+    cutLayout: {
+      sheet: layout.sheet,
+      acceptedItemCount: layout.acceptedItemCount ?? layout.items.length,
+      partContourCount: layout.partContourCount ?? null,
+    },
+  };
+  const jobName = truncateText(dto.programName ?? `SVG ${dto.externalPacketKey}`, 200);
+  const requestHash = sha256Json({ selectionCriteria, placements: plan.placements });
+  const commandId = randomUUID();
+  const commandPayloadHash = sha256Json({
+    type: 'manual_save',
+    source: 'cnc_telegram_svg_reverse_import',
+    packetId,
+    externalPacketKey: dto.externalPacketKey,
+    sourceVersion: dto.source.version,
+    requestHash,
+  });
+  const job = await tx.query<{ cut_job_id: string | number }>(
+    `
+    INSERT INTO cut_job (
+      name, status, source, selection_criteria, params, request_hash,
+      pdf_prewarm_state, created_by, version, last_calc_params, last_calc_basis,
+      sheet_material_type_id, combine_films, split_by_material
+    )
+    VALUES (
+      $1, 'ready', 'api', $2::jsonb, $3::jsonb, $4,
+      'pending', $5, 1, $3::jsonb, $6,
+      $7, false, true
+    )
+    RETURNING cut_job_id
+    `,
+    [
+      jobName,
+      JSON.stringify(selectionCriteria),
+      JSON.stringify(params),
+      requestHash,
+      toNullableNumber(actorUserId),
+      requestHash,
+      plan.sheetMaterialTypeId,
+    ],
+  );
+  const cutJobId = toNumber(job.rows[0].cut_job_id);
+  await tx.query(
+    `INSERT INTO cut_result_command
+       (cut_job_id, command_id, command_type, payload_hash, status, created_by)
+     VALUES ($1, $2::uuid, 'manual_save', $3, 'in_progress', $4)`,
+    [cutJobId, commandId, commandPayloadHash, toNullableNumber(actorUserId)],
+  );
+  const groupKey = `svg:m:${plan.sheetMaterialTypeId}:f:${plan.filmId ?? 'none'}`;
+  const summary = buildSvgCutSummary(plan);
+  const group = await tx.query<{ cut_group_id: string | number }>(
+    `
+    INSERT INTO cut_group (
+      cut_job_id, sheet_material_type_id, film_id, status, pdf_template_code,
+      summary, group_key
+    )
+    VALUES ($1, $2, $3, 'ready', 'standard', $4::jsonb, $5)
+    RETURNING cut_group_id
+    `,
+    [cutJobId, plan.sheetMaterialTypeId, plan.filmId, JSON.stringify(summary), groupKey],
+  );
+  const cutGroupId = toNumber(group.rows[0].cut_group_id);
+
+  const items: CutJobItemDto[] = [];
+  for (const detail of plan.details) {
+    const inserted = await tx.query<{ cut_job_item_id: string | number }>(
+      `
+      INSERT INTO cut_job_item (
+        cut_job_id, cut_group_id, order_detail_id, order_id, qty, is_active, freecut_item_id
+      )
+      VALUES ($1, $2, $3, $4, $5, true, $6)
+      RETURNING cut_job_item_id
+      `,
+      [cutJobId, cutGroupId, detail.detailId, detail.orderId, detail.cutQuantity, freecutItemId(detail.detailId)],
+    );
+    items.push(buildCutJobItemDto(inserted.rows[0].cut_job_item_id, cutGroupId, detail));
+  }
+
+  const itemByDetailId = new Map(items.map((item) => [item.orderDetailId, item]));
+  const placements = buildSvgSheetPlacements(plan, itemByDetailId);
+  const renderSnapshot = buildSvgRenderSnapshot(placements, itemByDetailId, dto.programName ?? dto.externalPacketKey);
+  const sheet = await tx.query<{ cut_group_sheet_id: string | number }>(
+    `
+    INSERT INTO cut_group_sheet (
+      cut_group_id, sheet_index, sheet_material_type_id, placements
+    )
+    VALUES ($1, 0, $2, $3::jsonb)
+    RETURNING cut_group_sheet_id
+    `,
+    [cutGroupId, plan.sheetMaterialTypeId, JSON.stringify(placements)],
+  );
+  const cutGroupSheetId = toNumber(sheet.rows[0].cut_group_sheet_id);
+  const totals = buildSvgCutTotals(plan);
+  const snapshot: CutJobDto = {
+    cutJobId,
+    name: jobName,
+    status: 'ready',
+    source: 'api',
+    version: 1,
+    pdfPrewarmState: 'pending',
+    failureCode: null,
+    failureReason: null,
+    paramProfileId: null,
+    sheetMaterialTypeId: plan.sheetMaterialTypeId,
+    pdfTemplate: 'standard',
+    combineFilms: false,
+    splitByMaterial: true,
+    materialNames: uniqueValues(plan.details.map((detail) => detail.materialName).filter((value): value is string => Boolean(value))),
+    totals,
+    items,
+    groups: [{
+      cutGroupId,
+      sheetMaterialTypeId: plan.sheetMaterialTypeId,
+      filmId: plan.filmId,
+      status: 'ready',
+      pdfTemplate: 'standard',
+      summary,
+      groupKey,
+      renderToken: `snapshot:g${cutGroupId}:m0:a0`,
+      sheets: [{
+        cutGroupSheetId,
+        sheetIndex: 0,
+        pngCacheKey: null,
+        placements,
+        renderSnapshot,
+      }],
+      manualLayout: null,
+    }],
+    editorParams: { kerfMm: 0, spacingMm: 0 },
+    unplaced: [],
+    requiresRecalc: false,
+    autoLayoutValidation: { valid: true },
+    renderToken: 'snapshot:j1',
+  };
+  const manifest = buildSvgCutResultManifest(snapshot);
+  const result = await tx.query<{ cut_result_id: string | number }>(
+    `
+    INSERT INTO cut_result (
+      cut_job_id, result_no, revision_no, result_kind, source_job_version,
+      command_id, command_payload_hash, request_hash, snapshot_job, snapshot_manifest, snapshot_digest,
+      totals_snapshot, created_by
+    )
+    VALUES (
+      $1, 1, 1, 'manual', 1,
+      $2::uuid, $3, $4, $5::jsonb, $6::jsonb, cut_result_snapshot_digest($5::jsonb),
+      $7::jsonb, $8
+    )
+    RETURNING cut_result_id
+    `,
+    [
+      cutJobId,
+      commandId,
+      commandPayloadHash,
+      requestHash,
+      JSON.stringify(snapshot),
+      JSON.stringify(manifest),
+      JSON.stringify(totals),
+      toNullableNumber(actorUserId),
+    ],
+  );
+  const cutResultId = toNumber(result.rows[0].cut_result_id);
+  await tx.query(
+    `UPDATE cut_job
+     SET current_cut_result_id = $2, next_cut_result_no = 2
+     WHERE cut_job_id = $1`,
+    [cutJobId, cutResultId],
+  );
+  await tx.query(
+    `UPDATE cut_result_command
+     SET status = 'completed', cut_result_id = $3, completed_at = now(),
+         owner_token = NULL, heartbeat_at = now(), lease_expires_at = NULL
+     WHERE cut_job_id = $1 AND command_id = $2::uuid AND status = 'in_progress'`,
+    [cutJobId, commandId, cutResultId],
+  );
+  return { cutJobId, cutResultId };
+}
+
+const SVG_REVERSE_IMPORT_PARAMS = {
+  kerf_mm: 0,
+  spacing_mm: 0,
+  trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
+  objective: 'as_imported',
+  time_limit_ms: 0,
+  restarts: 0,
+  layout_mode: 'guillotine',
+  retry_strategy: 'disabled',
+} as const;
+
+function buildSvgCutSummary(plan: Extract<SvgCutImportPlan, { ok: true }>): Record<string, unknown> {
+  const sheetArea = plan.sheetWidthMm * plan.sheetHeightMm;
+  const placedArea = plan.placements.reduce((sum, item) => sum + item.placedWidthMm * item.placedHeightMm, 0);
+  const wastePercent = sheetArea > 0 ? Math.max(0, ((sheetArea - placedArea) / sheetArea) * 100) : 0;
+  return {
+    used_stock_count: 1,
+    waste_percent: round2(wastePercent),
+    engine_used: 'svg_reverse_import',
+    source: 'cnc_telegram_svg',
+  };
+}
+
+function buildCutJobItemDto(
+  cutJobItemId: string | number,
+  cutGroupId: number,
+  detail: SvgCutDetail,
+): CutJobItemDto {
+  return {
+    cutJobItemId: toNumber(cutJobItemId),
+    orderDetailId: detail.detailId,
+    orderId: detail.orderId,
+    qty: detail.cutQuantity,
+    cutGroupId,
+    orderName: detail.orderName,
+    orderDeleted: detail.orderDeleted,
+    detail: {
+      detailFields: null,
+      detailNumber: detail.detailNumber,
+      detailName: detail.detailName,
+      height: detail.height,
+      width: detail.width,
+      quantity: detail.orderQuantity,
+      area: detail.area,
+      materialId: detail.materialId,
+      sheetMaterialTypeId: detail.sheetMaterialTypeId,
+      materialName: detail.materialName,
+      doweling: detail.doweling,
+      millingTypeId: detail.millingTypeId,
+      millingTypeName: detail.millingTypeName,
+      edgeTypeId: detail.edgeTypeId,
+      edgeTypeName: detail.edgeTypeName,
+      filmId: detail.filmId,
+      filmName: detail.filmName,
+      priority: detail.priority,
+      productionStatusId: detail.productionStatusId,
+      productionStatusName: detail.productionStatusName,
+      jointOrderId: detail.jointOrderId,
+      note: detail.note,
+      linkCuttingFile: detail.linkCuttingFile,
+      linkCuttingImageFile: detail.linkCuttingImageFile,
+      linkCadFile: detail.linkCadFile,
+      linkPdfFile: detail.linkPdfFile,
+    },
+  };
+}
+
+function buildSvgSheetPlacements(
+  plan: Extract<SvgCutImportPlan, { ok: true }>,
+  itemByDetailId: ReadonlyMap<number, CutJobItemDto>,
+): SheetPlacementsJson {
+  const nextInstance = new Map<number, number>();
+  const pieces = plan.placements.map((item) => {
+    const instance = (nextInstance.get(item.orderDetailId) ?? 0) + 1;
+    nextInstance.set(item.orderDetailId, instance);
+    const jobItem = itemByDetailId.get(item.orderDetailId);
+    return {
+      item_id: freecutItemId(item.orderDetailId),
+      instance,
+      x_mm: round3(item.xMm),
+      y_mm: round3(item.yMm),
+      width_mm: round3(item.placedWidthMm),
+      height_mm: round3(item.placedHeightMm),
+      rotated: item.rotated === true,
+      label: {
+        orderId: item.orderId,
+        detailNumber: jobItem?.detail?.detailNumber ?? item.detailNumber,
+        widthMm: jobItem?.detail?.width ?? item.widthMm,
+        heightMm: jobItem?.detail?.height ?? item.heightMm,
+      },
+    };
+  });
+  return {
+    trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
+    sheet_width_mm: plan.sheetWidthMm,
+    sheet_height_mm: plan.sheetHeightMm,
+    pieces,
+  };
+}
+
+function buildSvgRenderSnapshot(
+  placements: SheetPlacementsJson,
+  itemByDetailId: ReadonlyMap<number, CutJobItemDto>,
+  machineFile: string,
+): CutSheetRenderSnapshotDto {
+  const itemByItemId = new Map<string, CutJobItemDto>();
+  for (const item of itemByDetailId.values()) itemByItemId.set(freecutItemId(item.orderDetailId), item);
+  const quantities = new Map<string, number>();
+  for (const piece of placements.pieces) quantities.set(piece.item_id, (quantities.get(piece.item_id) ?? 0) + 1);
+  const fillForOrder = createOrderFillResolver([...itemByDetailId.values()].map((item) => item.orderId));
+  const labelFor = (piece: FreecutPlacement) => {
+    const item = itemByItemId.get(piece.item_id);
+    const label = (piece as { label?: { orderId: number | null; detailNumber: number | null; widthMm: number | null; heightMm: number | null } }).label;
+    return composePieceLabelLines({
+      orderId: label?.orderId ?? item?.orderId ?? null,
+      orderName: item?.orderName ?? null,
+      detailId: item?.orderDetailId ?? null,
+      detailNumber: label?.detailNumber ?? item?.detail?.detailNumber ?? null,
+      widthMm: label?.widthMm ?? item?.detail?.width ?? null,
+      heightMm: label?.heightMm ?? item?.detail?.height ?? null,
+      itemId: piece.item_id,
+      instance: piece.instance,
+      qty: quantities.get(piece.item_id) ?? item?.qty ?? 1,
+    });
+  };
+  const bathDetailInfoFor = (piece: FreecutPlacement) => {
+    const detail = itemByItemId.get(piece.item_id)?.detail;
+    return {
+      edgeTypeName: detail?.edgeTypeName ?? null,
+      millingTypeName: detail?.millingTypeName ?? null,
+      doweling: detail?.doweling ?? false,
+    };
+  };
+  const fillFor = (piece: FreecutPlacement) => {
+    const orderId = itemByItemId.get(piece.item_id)?.orderId ?? null;
+    return fillForOrder(orderId);
+  };
+  const views: CutSheetRenderSnapshotDto['views'] = {};
+  for (const rotate90 of [false, true]) {
+    for (const originTopLeft of rotate90 ? [false, true] : [false]) {
+      for (const axisOrigin of ['top-left', 'bottom-left'] as const) {
+        for (const showLabels of [false, true]) {
+          const key = svgFrozenRenderViewKey({ rotate90, originTopLeft, axisOrigin, showLabels });
+          views[key] = {
+            svg: buildSheetSvg({ sheet: placements, labelFor, fillFor, rotate90, originTopLeft, axisOrigin, showLabels }),
+            bathSvg: buildBathProfileSheetSvg({ sheet: placements, labelFor, fillFor, bathDetailInfoFor, rotate90, originTopLeft, axisOrigin, showLabels: true }),
+          };
+        }
+      }
+    }
+  }
+  return {
+    contractVersion: 'cut_sheet_render_v1',
+    views,
+    pdfMeta: buildSvgPdfMeta(itemByDetailId, machineFile),
+    pdfDetailRows: buildSvgPdfDetailRows(itemByDetailId, machineFile),
+  };
+}
+
+function buildSvgPdfMeta(itemByDetailId: ReadonlyMap<number, CutJobItemDto>, machineFile: string): Record<string, unknown> {
+  return {
+    orders: uniqueValues([...itemByDetailId.values()].map((item) => item.orderName ?? String(item.orderId))),
+    clients: [],
+    dates: [],
+    readyDates: [],
+    materials: uniqueValues([...itemByDetailId.values()].map((item) => item.detail?.materialName).filter((value): value is string => Boolean(value))),
+    thicknesses: [],
+    films: uniqueValues([...itemByDetailId.values()].map((item) => item.detail?.filmName).filter((value): value is string => Boolean(value))),
+    edgeTypes: uniqueValues([...itemByDetailId.values()].map((item) => item.detail?.edgeTypeName).filter((value): value is string => Boolean(value))),
+    machineFiles: [machineFile],
+  };
+}
+
+function buildSvgPdfDetailRows(itemByDetailId: ReadonlyMap<number, CutJobItemDto>, machineFile: string): Record<string, unknown>[] {
+  return [...itemByDetailId.values()]
+    .sort((a, b) => a.orderId - b.orderId || (a.detail?.detailNumber ?? a.orderDetailId) - (b.detail?.detailNumber ?? b.orderDetailId))
+    .map((item) => ({
+      order: item.orderName ?? String(item.orderId),
+      position: item.detail?.detailNumber ?? item.orderDetailId,
+      lengthMm: Math.max(item.detail?.width ?? 0, item.detail?.height ?? 0) || null,
+      widthMm: Math.min(item.detail?.width ?? 0, item.detail?.height ?? 0) || null,
+      quantity: item.qty,
+      machineFiles: [machineFile],
+      fields: {
+        detail_id: item.orderDetailId,
+        order_id: item.orderId,
+        detail_number: item.detail?.detailNumber ?? null,
+        height: item.detail?.height ?? null,
+        width: item.detail?.width ?? null,
+        quantity: item.qty,
+        sheet_quantity: item.qty,
+        machine_file: machineFile,
+        machine_files: machineFile,
+        material_name: item.detail?.materialName ?? null,
+        materials: item.detail?.materialName ?? null,
+        film_name: item.detail?.filmName ?? null,
+        films: item.detail?.filmName ?? null,
+        milling_type_name: item.detail?.millingTypeName ?? null,
+        edge_type_name: item.detail?.edgeTypeName ?? null,
+        production_status_name: item.detail?.productionStatusName ?? null,
+      },
+      material: item.detail?.materialName ?? null,
+      film: item.detail?.filmName ?? null,
+    }));
+}
+
+function buildSvgCutTotals(plan: Extract<SvgCutImportPlan, { ok: true }>): CutJobTotals {
+  const details = plan.details.reduce((sum, detail) => sum + detail.cutQuantity, 0);
+  const area = plan.details.reduce((sum, detail) => sum + (detail.area ?? 0) * detail.cutQuantity, 0);
+  const filmsCount = uniqueValues(plan.details.map((detail) => detail.filmId).filter((filmId): filmId is number => filmId !== null)).length;
+  return {
+    positions: plan.details.length,
+    details,
+    area: round2(area),
+    sheets: 1,
+    materialsCount: 1,
+    filmsCount,
+    filmUsage: [],
+  };
+}
+
+function buildSvgCutResultManifest(snapshot: CutJobDto): Record<string, unknown> {
+  return {
+    groups: snapshot.groups.length,
+    items: snapshot.items.length,
+    instances: snapshot.items.reduce((sum, item) => sum + item.qty, 0),
+    unplaced: snapshot.unplaced?.length ?? 0,
+    variants: snapshot.groups.map((group) => ({
+      groupKey: group.groupKey ?? `group:${group.cutGroupId}`,
+      autoSheets: group.sheets.map((sheet) => sheet.sheetIndex),
+      manualSheets: [],
+      renderContract: 'cut_sheet_render_v1',
+      autoRenderViews: group.sheets.map((sheet) => Object.keys(sheet.renderSnapshot?.views ?? {}).length),
+      manualRenderViews: [],
+      manualState: 'none',
+    })),
+  };
+}
+
+function svgFrozenRenderViewKey(view: {
+  rotate90?: boolean;
+  originTopLeft?: boolean;
+  axisOrigin?: 'top-left' | 'bottom-left';
+  showLabels?: boolean;
+}): string {
+  const rotate90 = view.rotate90 === true;
+  return [
+    rotate90 ? 'r90' : 'r0',
+    rotate90 && view.originTopLeft === true ? 'tl' : 'raw',
+    view.axisOrigin ?? 'top-left',
+    view.showLabels === false ? 'labels-off' : 'labels-on',
+  ].join(':');
+}
+
+function svgLayoutMatchKey(
+  orderName: string | null | undefined,
+  detailNumber: number | null | undefined,
+  widthMm: number | null | undefined,
+  heightMm: number | null | undefined,
+): string | null {
+  const orderKey = normalizeOrderKey(orderName);
+  if (!orderKey || detailNumber == null || widthMm == null || heightMm == null) return null;
+  return `${orderKey}|${detailNumber}|${dimensionKey(widthMm)}x${dimensionKey(heightMm)}`;
+}
+
+function layoutGeometryInsideSheet(item: CncTelegramCutLayoutItemDto, sheetWidthMm: number, sheetHeightMm: number): boolean {
+  const toleranceMm = 2;
+  return (
+    item.xMm >= -toleranceMm &&
+    item.yMm >= -toleranceMm &&
+    item.xMm + item.placedWidthMm <= sheetWidthMm + toleranceMm &&
+    item.yMm + item.placedHeightMm <= sheetHeightMm + toleranceMm
+  );
+}
+
+function sheetDimsMatch(svgWidth: number, svgHeight: number, materialWidth: number, materialHeight: number): boolean {
+  const toleranceMm = 10;
+  const direct = Math.abs(svgWidth - materialWidth) <= toleranceMm && Math.abs(svgHeight - materialHeight) <= toleranceMm;
+  const rotated = Math.abs(svgWidth - materialHeight) <= toleranceMm && Math.abs(svgHeight - materialWidth) <= toleranceMm;
+  return direct || rotated;
+}
+
+function cutLayoutReason(layout: CncTelegramCutLayoutDto, fallback: string): string {
+  return layout.reasons.length > 0 ? layout.reasons.join('; ') : fallback;
+}
+
+function dimensionKey(value: number): string {
+  return String(round3(value));
+}
+
+function isPositiveFinite(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function round3(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function uniqueValues<T>(values: readonly T[]): T[] {
+  return [...new Set(values)];
+}
+
+function truncateText(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : value.slice(0, maxLength);
+}
+
+function sha256Json(value: unknown): string {
+  return createHash('sha256').update(stableJson(value)).digest('hex');
+}
+
+function stableJson(v: unknown): string {
+  return JSON.stringify(v, (_key, x: unknown) => {
+    if (x !== null && typeof x === 'object' && !Array.isArray(x)) {
+      return Object.fromEntries(
+        Object.entries(x as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)),
+      );
+    }
+    return x;
+  });
 }
 
 async function resolveItemMatches(
@@ -887,7 +1754,28 @@ function uniqueOrderId(details: DetailMatch[]): number | null {
 function uniqueDetail(details: DetailMatch[]): DetailMatch | null {
   const byId = new Map<number, DetailMatch>();
   for (const detail of details) byId.set(detail.detailId, detail);
-  return byId.size === 1 ? Array.from(byId.values())[0] ?? null : null;
+  if (byId.size === 1) return Array.from(byId.values())[0] ?? null;
+
+  const logicalKey = detailLogicalDuplicateKey(details[0]);
+  if (!logicalKey) return null;
+  for (const detail of details) {
+    if (detailLogicalDuplicateKey(detail) !== logicalKey) return null;
+  }
+  return [...details].sort((a, b) => b.detailId - a.detailId)[0] ?? null;
+}
+
+function detailLogicalDuplicateKey(detail: DetailMatch | undefined): string | null {
+  if (!detail || detail.detailNumber === null || detail.width === null || detail.height === null) return null;
+  return [
+    detail.orderId,
+    detail.detailNumber,
+    roundDimensionForKey(detail.width),
+    roundDimensionForKey(detail.height),
+  ].join(':');
+}
+
+function roundDimensionForKey(value: number): string {
+  return String(Math.round(value * 1000) / 1000);
 }
 
 function sameItemSize(item: IngestItemInput, detail: DetailMatch): boolean {
@@ -1684,6 +2572,11 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         analysisWarnings: analysisWarningsArray(row.analysis_warnings_json),
         ocrEngine: row.ocr_engine,
         parserVersion: row.parser_version,
+        cutLayout: cutLayoutOrNull(row.cut_layout_json),
+        svgCutJobId: toNullableNumber(row.svg_cut_job_id),
+        svgCutResultId: toNullableNumber(row.svg_cut_result_id),
+        svgCutImportStatus: row.svg_cut_import_status ?? 'none',
+        svgCutImportNote: row.svg_cut_import_note,
         itemCount: 0,
         itemQuantityTotal: 0,
         updatedAt: toIso(row.updated_at),
@@ -1736,6 +2629,10 @@ function packetAuditSnapshot(packet: CncTelegramPacketDto): Record<string, unkno
     itemQuantityTotal: packet.itemQuantityTotal,
     warningsCount: packet.analysisWarnings.length,
     commentsCount: packet.comments.length,
+    cutLayoutStatus: packet.cutLayout?.status ?? null,
+    svgCutImportStatus: packet.svgCutImportStatus ?? 'none',
+    svgCutJobId: packet.svgCutJobId ?? null,
+    svgCutResultId: packet.svgCutResultId ?? null,
   };
 }
 
@@ -1827,6 +2724,61 @@ function dowelingArray(value: unknown): CncTelegramDowelingLinkDto[] {
     typeof (item as CncTelegramDowelingLinkDto).orderName === 'string' &&
     typeof (item as CncTelegramDowelingLinkDto).dowelingNumber === 'string',
   );
+}
+
+function cutLayoutOrNull(value: unknown): CncTelegramCutLayoutDto | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  if (raw.status !== 'valid' && raw.status !== 'invalid') return null;
+  const rawSheet = raw.sheet;
+  const sheet = rawSheet && typeof rawSheet === 'object'
+    ? {
+        widthMm: toNumber((rawSheet as Record<string, unknown>).widthMm as string | number | null | undefined),
+        heightMm: toNumber((rawSheet as Record<string, unknown>).heightMm as string | number | null | undefined),
+      }
+    : null;
+  const items = Array.isArray(raw.items)
+    ? raw.items.map(cutLayoutItemOrNull).filter((item): item is CncTelegramCutLayoutItemDto => item !== null)
+    : [];
+  return {
+    status: raw.status,
+    reasons: stringArray(raw.reasons),
+    sheet: sheet && sheet.widthMm > 0 && sheet.heightMm > 0 ? sheet : null,
+    rawCommentCount: toNullableNumber(raw.rawCommentCount as string | number | null | undefined),
+    partContourCount: toNullableNumber(raw.partContourCount as string | number | null | undefined),
+    acceptedItemCount: toNullableNumber(raw.acceptedItemCount as string | number | null | undefined),
+    items,
+  };
+}
+
+function cutLayoutItemOrNull(value: unknown): CncTelegramCutLayoutItemDto | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const orderName = typeof raw.orderName === 'string' ? raw.orderName : '';
+  const detailNumber = toNumber(raw.detailNumber as string | number | null | undefined);
+  const widthMm = toNumber(raw.widthMm as string | number | null | undefined);
+  const heightMm = toNumber(raw.heightMm as string | number | null | undefined);
+  const xMm = toNumber(raw.xMm as string | number | null | undefined);
+  const yMm = toNumber(raw.yMm as string | number | null | undefined);
+  const placedWidthMm = toNumber(raw.placedWidthMm as string | number | null | undefined);
+  const placedHeightMm = toNumber(raw.placedHeightMm as string | number | null | undefined);
+  if (!orderName || detailNumber <= 0 || widthMm <= 0 || heightMm <= 0 || placedWidthMm <= 0 || placedHeightMm <= 0) {
+    return null;
+  }
+  return {
+    orderName,
+    detailNumber,
+    widthMm,
+    heightMm,
+    quantity: Math.max(1, toNumber(raw.quantity as string | number | null | undefined) || 1),
+    confidence: toNullableNumber(raw.confidence as string | number | null | undefined),
+    sourceElementId: typeof raw.sourceElementId === 'string' ? raw.sourceElementId : null,
+    xMm,
+    yMm,
+    placedWidthMm,
+    placedHeightMm,
+    rotated: raw.rotated === true,
+  };
 }
 
 function toNumber(value: string | number | null | undefined): number {

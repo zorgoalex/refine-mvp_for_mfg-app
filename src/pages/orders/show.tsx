@@ -66,7 +66,6 @@ import {
   useOrderDetailColumnPreferences,
   type OrderDetailColumnDefinition,
 } from "./components/tables/OrderDetailColumnSettings";
-import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from "../cut/cutJobEvents";
 import { useCutDetailLastReady } from "./useCutDetailLastReady";
 import { computeOrderBathFilmUsage } from "../cut/cutFilmUsage";
 import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
@@ -699,14 +698,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         .filter((id: unknown): id is number => Number.isInteger(id) && (id as number) > 0),
     [details],
   );
-  const cutJobByDetailId = useCutDetailLastReady({
+  const cutJobMaps = useCutDetailLastReady({
     enabled: cutColumnEnabled,
     detailIds: cutDetailIds,
     orderId: record?.order_id,
   });
+  const { cutJobByDetailId, bathCutJobByDetailId } = cutJobMaps;
   const latestReadyCutJobIds = useMemo(
-    () => [...new Set([...cutJobByDetailId.values()].map((ref) => ref.cutJobId))].sort((a, b) => a - b),
-    [cutJobByDetailId],
+    () => [...new Set([...bathCutJobByDetailId.values()].map((ref) => ref.cutJobId))].sort((a, b) => a - b),
+    [bathCutJobByDetailId],
   );
   const latestReadyCutJobIdsKey = latestReadyCutJobIds.join(',');
   const [bathCutJobs, setBathCutJobs] = useState<CutJobDto[]>([]);
@@ -1225,7 +1225,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             render: (_: unknown, detail: any) => {
               const ref = cutJobByDetailId.get(detail.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref.cutJobId)}>{ref.name}</Link>;
+              return <Link to={cutJobDeepLink(ref)}>{ref.name || ref.cutNumber}</Link>;
+            },
+          },
+          {
+            title: 'Расчет ванны',
+            key: 'bath_cut_job',
+            width: 150,
+            render: (_: unknown, detail: any) => {
+              const ref = bathCutJobByDetailId.get(detail.detail_id);
+              if (!ref) return '—';
+              return <Link to={cutJobDeepLink(ref)}>{ref.name || ref.cutNumber}</Link>;
             },
           },
         ]
@@ -2019,10 +2029,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                 {cutOrderJobs.map((j) => (
                                   <Link
                                     key={j.cutJobId}
-                                    to={cutJobDeepLink(j.cutJobId)}
+                                    to={cutJobDeepLink(j)}
                                     style={{ fontSize: 12, lineHeight: 1.35 }}
                                   >
-                                    {j.name}
+                                    {j.name || j.cutNumber}
                                     <span style={{ color: 'var(--app-text-muted)' }}>
                                       {' '}· Профиль: {cutJobProfileLabel(j)}
                                     </span>

@@ -80,6 +80,34 @@ const itemSchema = z.object({
   }
 });
 
+const cutLayoutItemSchema = z.object({
+  orderName: z.string().trim().min(1).max(64),
+  detailNumber: z.number().int().positive().max(100000),
+  widthMm: z.number().positive().max(10000),
+  heightMm: z.number().positive().max(10000),
+  quantity: z.number().int().positive().max(1000).default(1),
+  confidence: z.number().min(0).max(1).nullable().optional(),
+  sourceElementId: z.string().trim().min(1).max(240).nullable().optional(),
+  xMm: z.number().min(0).max(10000),
+  yMm: z.number().min(0).max(10000),
+  placedWidthMm: z.number().positive().max(10000),
+  placedHeightMm: z.number().positive().max(10000),
+  rotated: z.boolean(),
+}).strict();
+
+const cutLayoutSchema = z.object({
+  status: z.enum(['valid', 'invalid']),
+  reasons: z.array(z.string().trim().min(1).max(500)).max(100).default([]),
+  sheet: z.object({
+    widthMm: z.number().positive().max(10000),
+    heightMm: z.number().positive().max(10000),
+  }).strict().nullable().default(null),
+  rawCommentCount: z.number().int().min(0).max(100000).nullable().optional(),
+  partContourCount: z.number().int().min(0).max(100000).nullable().optional(),
+  acceptedItemCount: z.number().int().min(0).max(100000).nullable().optional(),
+  items: z.array(cutLayoutItemSchema).max(5000).default([]),
+}).strict();
+
 const ingestSchema = z.object({
   externalPacketKey: z.string().trim().min(1).max(200),
   source: z.object({
@@ -111,6 +139,7 @@ const ingestSchema = z.object({
   analysisWarnings: z.array(z.string().trim().min(1).max(500)).max(100).optional(),
   ocrEngine: z.string().trim().min(1).max(120).nullable().optional(),
   parserVersion: z.string().trim().min(1).max(120).nullable().optional(),
+  cutLayout: cutLayoutSchema.nullable().optional(),
   items: z.array(itemSchema).min(1).max(2000),
 }).strict();
 

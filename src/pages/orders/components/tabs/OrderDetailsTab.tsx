@@ -134,7 +134,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         .filter((detailId): detailId is number => Number.isInteger(detailId) && detailId > 0),
     [details],
   );
-  const cutJobByDetailId = useCutDetailLastReady({
+  const cutJobMaps = useCutDetailLastReady({
     enabled: cutColumnEnabled,
     detailIds: persistedDetailIds,
     orderId: header?.order_id,
@@ -597,7 +597,8 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
           groupField={grouping.state.field}
           showSeparation={grouping.state.showSeparation}
           cutSelectable={cutEnabled}
-          cutJobByDetailId={cutColumnEnabled ? cutJobByDetailId : undefined}
+          cutJobByDetailId={cutColumnEnabled ? cutJobMaps.cutJobByDetailId : undefined}
+          bathCutJobByDetailId={cutColumnEnabled ? cutJobMaps.bathCutJobByDetailId : undefined}
           toolbarActions={
             <>
               <AccessibleToolbarTooltip title="Быстрое добавление">

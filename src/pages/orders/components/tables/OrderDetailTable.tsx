@@ -38,7 +38,7 @@ import {
 } from './OrderDetailColumnSettings';
 import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
-import type { CutDetailLastReadyRef } from '../../../../api/types/cutApi.types';
+import type { CutDetailLastReadyJobRef } from '../../../../api/types/cutApi.types';
 import { cutJobDeepLink } from '../../cutColumnHelpers';
 
 interface OrderDetailTableProps {
@@ -55,7 +55,8 @@ interface OrderDetailTableProps {
   groupField?: GroupField | null;
   showSeparation?: boolean;
   cutSelectable?: boolean;
-  cutJobByDetailId?: ReadonlyMap<number, CutDetailLastReadyRef>;
+  cutJobByDetailId?: ReadonlyMap<number, CutDetailLastReadyJobRef>;
+  bathCutJobByDetailId?: ReadonlyMap<number, CutDetailLastReadyJobRef>;
   /** Grouping controls rendered inline on the same right-aligned row as the column-settings gear. */
   groupingControls?: React.ReactNode;
   /** All order-detail actions rendered in the same adaptive row as table controls. */
@@ -134,6 +135,7 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'detail_cost', label: 'Сумма' },
   { key: 'film_id', label: 'Пленка' },
   { key: 'cut_job', label: 'Раскрой' },
+  { key: 'bath_cut_job', label: 'Расчет ванны' },
   { key: 'priority', label: 'Пр-т' },
   { key: 'production_status_id', label: 'Статус' },
   { key: 'basis_project', label: 'Базис проект' },
@@ -249,6 +251,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   showSeparation = true,
   cutSelectable = false,
   cutJobByDetailId,
+  bathCutJobByDetailId,
   groupingControls,
   toolbarActions,
 }, ref) => {
@@ -1204,7 +1207,24 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               if (!d?.detail_id) return null;
               const ref = cutJobByDetailId.get(d.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref.cutJobId)}>{ref.name}</Link>;
+              return <Link to={cutJobDeepLink(ref)}>{ref.name || ref.cutNumber}</Link>;
+            },
+          },
+        ]
+      : []),
+    ...(bathCutJobByDetailId
+      ? [
+          {
+            title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Расчет ванны</div>,
+            key: 'bath_cut_job',
+            width: 150,
+            onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+            render: (_: any, row: any) => {
+              const d = asDetail(row);
+              if (!d?.detail_id) return null;
+              const ref = bathCutJobByDetailId.get(d.detail_id);
+              if (!ref) return '—';
+              return <Link to={cutJobDeepLink(ref)}>{ref.name || ref.cutNumber}</Link>;
             },
           },
         ]

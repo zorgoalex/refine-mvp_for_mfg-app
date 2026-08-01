@@ -24,14 +24,15 @@ export const OrderMaterialsTab: React.FC = () => {
     [details],
   );
   const cutViewAllowed = can('cut.view');
-  const cutJobByDetailId = useCutDetailLastReady({
+  const cutJobMaps = useCutDetailLastReady({
     enabled: cutViewAllowed,
     detailIds,
     orderId: header.order_id ?? null,
   });
+  const { bathCutJobByDetailId } = cutJobMaps;
   const latestCutJobIds = useMemo(
-    () => [...new Set([...cutJobByDetailId.values()].map((ref) => ref.cutJobId))].sort((a, b) => a - b),
-    [cutJobByDetailId],
+    () => [...new Set([...bathCutJobByDetailId.values()].map((ref) => ref.cutJobId))].sort((a, b) => a - b),
+    [bathCutJobByDetailId],
   );
   const latestCutJobIdsKey = latestCutJobIds.join(',');
   const [cutJobs, setCutJobs] = useState<CutJobDto[]>([]);

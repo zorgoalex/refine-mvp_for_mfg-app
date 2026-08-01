@@ -17,7 +17,7 @@ from .cleanup import cleanup_temp_dir
 from .config import WorkerConfig
 from .erp_client import BackendAuth, ErpClient
 from .gcode import extract_order_names, parse_gcode_text
-from .ocr import run_ocr_command
+from .ocr import OcrResult, run_ocr_command
 from .packet import (
     GcodeMeta,
     ImageMeta,
@@ -42,7 +42,7 @@ from .telegram_source import (
     message_thread_id,
     peer_id,
 )
-from .vector import parse_vector_file
+from .vector import layout_to_dict, parse_svg_cut_layout
 
 
 IMAGE_STORAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -189,6 +189,7 @@ class CncTelegramWorker:
         image_path: Path | None = None
         gcode_meta: GcodeMeta | None = None
         vector_items: list[dict[str, Any]] = []
+        cut_layout: dict[str, Any] | None = None
         try:
             image_path = await download_media(group.image_message, run_dir, "sheet")
             if image_path is None:
@@ -206,12 +207,14 @@ class CncTelegramWorker:
                         text=gcode_text,
                         analysis=parse_gcode_text(gcode_text, filename),
                     )
-            ocr = await run_ocr_command(self.config.ocr_command, image_path)
             if group.vector_message is not None:
                 vector_path = await download_media(group.vector_message, run_dir, "vector")
                 if vector_path is not None:
-                    vector_items = parse_vector_file(vector_path)
+                    parsed_layout = parse_svg_cut_layout(vector_path)
+                    cut_layout = layout_to_dict(parsed_layout)
+                    vector_items = cut_layout["items"] if cut_layout["status"] == "valid" else []
 
+            ocr = OcrResult() if vector_items else await run_ocr_command(self.config.ocr_command, image_path)
             image = ImageMeta(
                 chat_id=chat_id,
                 message_id=int(group.image_message.id),
@@ -229,6 +232,7 @@ class CncTelegramWorker:
                 gcode=gcode_meta,
                 cutting_sequence_no=cutting_sequence_no,
                 vector_items=vector_items,
+                cut_layout=cut_layout,
                 sheet_image=sheet_image,
                 default_machine=self.config.default_machine,
                 default_material=self.config.default_material,
@@ -408,10 +412,6 @@ def select_attachment_message(
     image_id = int(image_message.id)
     previous_id = int(previous_image_id) if previous_image_id is not None else None
     next_id = int(next_image_id) if next_image_id is not None else None
-    replies = [
-        message for message in candidates
-        if message_reply_to_id(message) == image_id
-    ]
     before_image = [
         message for message in candidates
         if (previous_id is None or int(message.id) > previous_id) and int(message.id) < image_id
@@ -421,7 +421,7 @@ def select_attachment_message(
         if int(message.id) > image_id and (next_id is None or int(message.id) < next_id)
     ]
     sort_key = key_builder(image_id)
-    for scoped_candidates in (replies, before_image, after_image):
+    for scoped_candidates in (before_image, after_image, candidates):
         if scoped_candidates:
             return min(scoped_candidates, key=sort_key)
     return None

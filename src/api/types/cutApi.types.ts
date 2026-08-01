@@ -324,10 +324,20 @@ export interface CutDetailPlacements {
   hasArchived: boolean;
 }
 
+export interface CutDetailLastReadyJobRef {
+  cutJobId: number;
+  resultNo: number;
+  cutNumber: string;
+  name: string;
+  paramProfileId: number | null;
+  profileName: string | null;
+  profileIsActive: boolean | null;
+}
+
 export interface CutDetailLastReadyRef {
   orderDetailId: number;
-  cutJobId: number;
-  name: string;
+  cutJob: CutDetailLastReadyJobRef | null;
+  bathCutJob: CutDetailLastReadyJobRef | null;
 }
 
 export interface CutDetailLastReadyResponse {

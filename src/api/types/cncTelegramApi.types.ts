@@ -31,6 +31,31 @@ export interface CncTelegramPacketItem {
   reviewNote: string | null;
 }
 
+export interface CncTelegramCutLayoutItem {
+  orderName: string;
+  detailNumber: number;
+  widthMm: number;
+  heightMm: number;
+  quantity: number;
+  confidence?: number | null;
+  sourceElementId?: string | null;
+  xMm: number;
+  yMm: number;
+  placedWidthMm: number;
+  placedHeightMm: number;
+  rotated: boolean;
+}
+
+export interface CncTelegramCutLayout {
+  status: 'valid' | 'invalid';
+  reasons: string[];
+  sheet: { widthMm: number; heightMm: number } | null;
+  rawCommentCount?: number | null;
+  partContourCount?: number | null;
+  acceptedItemCount?: number | null;
+  items: CncTelegramCutLayoutItem[];
+}
+
 export interface CncTelegramPacket {
   packetId: string;
   externalPacketKey: string;
@@ -59,6 +84,11 @@ export interface CncTelegramPacket {
   analysisWarnings: string[];
   ocrEngine: string | null;
   parserVersion: string;
+  cutLayout: CncTelegramCutLayout | null;
+  svgCutJobId?: number | null;
+  svgCutResultId?: number | null;
+  svgCutImportStatus?: 'none' | 'skipped' | 'needs_review' | 'imported';
+  svgCutImportNote?: string | null;
   itemCount: number;
   itemQuantityTotal: number;
   updatedAt: string;

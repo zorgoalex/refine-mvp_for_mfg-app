@@ -2721,35 +2721,88 @@ export class PgCutRepository implements CutRepositoryPort {
   async listDetailLastReady(query: DetailLastReadyQuery): Promise<CutDetailLastReadyResponseDto> {
     const detailIds = query.detailIds ?? [];
     if (detailIds.length === 0) return { details: [] };
-    // One row per detail: the latest READY (calculated) job (by creation order,
-    // cut_job_id DESC) that still actively contains it. Archiving overwrites
-    // status off 'ready', so archived jobs are naturally excluded. We order by
-    // cut_job_id (monotonic, immutable) NOT updated_at, which is bumped by
-    // prewarm/profile/ready events and would yield "last touched" not the
-    // latest-created ready job. Uses idx_cut_job_item_order_detail (migr 031).
     const rows = await this.database.query<{
       order_detail_id: string | number;
       cut_job_id: string | number;
+      result_no: string | number;
       name: string;
+      param_profile_id: string | number | null;
+      profile_name: string | null;
+      profile_is_active: boolean | null;
+      is_vacuum: boolean;
     }>(
       `
-      SELECT DISTINCT ON (cji.order_detail_id)
-             cji.order_detail_id, cj.cut_job_id, cj.name
-      FROM cut_job_item cji
-      JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
-      WHERE cji.order_detail_id = ANY($1::bigint[])
-        AND cji.is_active = true
-        AND cj.status = 'ready'
-      ORDER BY cji.order_detail_id, cj.cut_job_id DESC
+      WITH candidates AS (
+        SELECT cji.order_detail_id,
+               cj.cut_job_id,
+               cj.name,
+               cr.result_no,
+               cj.param_profile_id,
+               cpp.name AS profile_name,
+               cpp.is_active AS profile_is_active,
+               COALESCE(
+                 cj.last_calc_params->>'layout_mode',
+                 cpp.params->>'layout_mode',
+                 cj.params->>'layout_mode'
+               ) = 'vacuum_table' AS is_vacuum
+        FROM cut_job_item cji
+        JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
+        JOIN cut_result cr
+          ON cr.cut_result_id = cj.current_cut_result_id
+         AND cr.cut_job_id = cj.cut_job_id
+        LEFT JOIN cut_result_archive_state archived
+          ON archived.cut_job_id = cr.cut_job_id
+         AND archived.result_no = cr.result_no
+        LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = cj.param_profile_id
+        WHERE cji.order_detail_id = ANY($1::bigint[])
+          AND cji.is_active = true
+          AND cj.status = 'ready'
+          AND archived.cut_job_id IS NULL
+      ),
+      ranked AS (
+        SELECT *,
+               row_number() OVER (
+                 PARTITION BY order_detail_id, is_vacuum
+                 ORDER BY cut_job_id DESC
+               ) AS rn
+        FROM candidates
+      )
+      SELECT order_detail_id, cut_job_id, result_no, name,
+             param_profile_id, profile_name, profile_is_active, is_vacuum
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY order_detail_id, is_vacuum
       `,
       [[...detailIds]],
     );
-    return {
-      details: rows.rows.map((row) => ({
-        orderDetailId: toNum(row.order_detail_id),
-        cutJobId: toNum(row.cut_job_id),
+    const byDetail = new Map<number, CutDetailLastReadyResponseDto['details'][number]>();
+    for (const row of rows.rows) {
+      const orderDetailId = toNum(row.order_detail_id);
+      const entry = byDetail.get(orderDetailId) ?? {
+        orderDetailId,
+        cutJob: null,
+        bathCutJob: null,
+      };
+      const cutJobId = toNum(row.cut_job_id);
+      const resultNo = toNum(row.result_no);
+      const ref = {
+        cutJobId,
+        resultNo,
+        cutNumber: `${cutJobId}-${resultNo}`,
         name: row.name,
-      })),
+        paramProfileId: row.param_profile_id === null ? null : toNum(row.param_profile_id),
+        profileName: row.profile_name,
+        profileIsActive: row.profile_is_active,
+      };
+      if (row.is_vacuum) {
+        entry.bathCutJob = ref;
+      } else {
+        entry.cutJob = ref;
+      }
+      byDetail.set(orderDetailId, entry);
+    }
+    return {
+      details: [...byDetail.values()].sort((a, b) => a.orderDetailId - b.orderDetailId),
     };
   }
 

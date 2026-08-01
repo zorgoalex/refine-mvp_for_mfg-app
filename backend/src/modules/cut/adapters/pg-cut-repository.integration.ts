@@ -1197,8 +1197,57 @@ describeIntegration('PgCutRepository (integration)', () => {
 
     const res = await repo.listDetailLastReady({ currentUser: currentUser(), detailIds: [dA, dB] });
     const byDetail = new Map(res.details.map((d) => [d.orderDetailId, d]));
-    expect(byDetail.get(dA)?.cutJobId).toBe(readyJobId);
+    expect(byDetail.get(dA)?.cutJob?.cutJobId).toBe(readyJobId);
+    expect(byDetail.get(dA)?.cutJob?.resultNo).toBe(readyJob.currentCutResult?.resultNo);
+    expect(byDetail.get(dA)?.bathCutJob).toBeNull();
     expect(byDetail.has(dB)).toBe(false);
+  });
+
+  it('listDetailLastReady splits regular and vacuum-table current results per detail', async () => {
+    const dA = 1;
+    const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
+
+    const regular = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Regular ready', detailIds: [dA] }, requestId: 'ldr-split-regular-c' });
+    const readyRegular = await repo.calculate({
+      currentUser: currentUser(),
+      cutJobId: regular.cutJobId,
+      version: regular.version,
+      requestId: 'ldr-split-regular-calc',
+    });
+
+    const vacuumProfileId = await insertProfile(pool, 'P-ldr-vacuum', { layout_mode: 'vacuum_table', vacuum: { direction: 'optimal' } });
+    const vacuum = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Bath ready', detailIds: [dA] }, requestId: 'ldr-split-vacuum-c' });
+    const vacuumProfiled = await repo.setProfile({
+      currentUser: currentUser(),
+      cutJobId: vacuum.cutJobId,
+      paramProfileId: vacuumProfileId,
+      version: vacuum.version,
+      requestId: 'ldr-split-vacuum-profile',
+    });
+    const readyVacuum = await repo.calculate({
+      currentUser: currentUser(),
+      cutJobId: vacuum.cutJobId,
+      version: vacuumProfiled.version,
+      requestId: 'ldr-split-vacuum-calc',
+    });
+
+    const res = await repo.listDetailLastReady({ currentUser: currentUser(), detailIds: [dA] });
+    expect(res.details).toHaveLength(1);
+    expect(res.details[0]).toMatchObject({
+      orderDetailId: dA,
+      cutJob: {
+        cutJobId: regular.cutJobId,
+        resultNo: readyRegular.currentCutResult?.resultNo,
+        name: 'Regular ready',
+      },
+      bathCutJob: {
+        cutJobId: vacuum.cutJobId,
+        resultNo: readyVacuum.currentCutResult?.resultNo,
+        name: 'Bath ready',
+        paramProfileId: vacuumProfileId,
+        profileName: 'P-ldr-vacuum',
+      },
+    });
   });
 
   it('listDetailLastReady excludes items where is_active=false', async () => {
@@ -1584,7 +1633,7 @@ describeIntegration('PgCutRepository (integration)', () => {
 
     // Despite jobOld having the newest updated_at, the HIGHER-id job must win.
     const res = await repo.listDetailLastReady({ currentUser: currentUser(), detailIds: [dA] });
-    expect(res.details.find((d) => d.orderDetailId === dA)?.cutJobId).toBe(jobNewId);
+    expect(res.details.find((d) => d.orderDetailId === dA)?.cutJob?.cutJobId).toBe(jobNewId);
   });
 
   // ── Task 5: saveManualLayout integration tests ────────────────────────────

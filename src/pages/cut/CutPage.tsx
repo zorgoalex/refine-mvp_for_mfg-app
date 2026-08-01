@@ -61,6 +61,7 @@ import { buildPieceMetaByItemId } from './cutPieceMeta';
 import { pushHistory } from './editorHistory';
 import { CutSheetLabelGenerateAction } from './CutSheetLabelGenerateAction';
 import { authSession } from '../../api/authSession';
+import { useCutDetailLastReady } from '../orders/useCutDetailLastReady';
 import type {
   CutGroupDto,
   CutJobDto,
@@ -640,6 +641,7 @@ interface CutPageProps {
 
 export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const isOperational = useOperationalUi();
+  const canViewCut = can('cut.view');
   const canManage = can('cut.manage');
   const canViewOrders = can('orders.view');
   const isEmbeddedOrder = Number.isInteger(embeddedOrderId) && (embeddedOrderId ?? 0) > 0;
@@ -1267,8 +1269,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // job created earlier — including jobs staged from the Orders "Добавить в
   // раскрой" action, which previously had no surface to be reopened on.
   useEffect(() => {
-    if (can('cut.view')) void loadJobs();
-  }, [loadJobs]);
+    if (canViewCut) void loadJobs();
+  }, [canViewCut, loadJobs]);
 
   // Last-write-wins guard for openJob: a stale in-flight cutApi.get (e.g. rapid
   // deep-link /cut?job=45 -> 46, or fast successive row opens) must not overwrite
@@ -2522,6 +2524,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // an operator deep-linked to an archived job (e.g. from the order show Раскрой
   // column via a stale/hand-edited URL) cannot accidentally mutate it.
   const isArchivedJob = job?.status === 'archived' || isHistoricalResult;
+  const jobItemDetailIds = useMemo(
+    () => job?.items.map((item) => item.orderDetailId).filter((id) => Number.isInteger(id) && id > 0) ?? [],
+    [job?.items],
+  );
+  const { bathCutJobByDetailId: jobBathCutJobByDetailId } = useCutDetailLastReady({
+    enabled: canViewCut && jobItemDetailIds.length > 0,
+    detailIds: jobItemDetailIds,
+  });
 
   // The details an operator actually reserved into this job (cut_job_item rows),
   // including those staged from the Orders "Добавить в раскрой" action. Showing
@@ -2616,6 +2626,26 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         },
       },
       {
+        title: 'Расчет ванны',
+        key: 'bathCutJob',
+        width: 150,
+        render: (_: unknown, r: CutJobItemDto) => {
+          const ref = jobBathCutJobByDetailId.get(r.orderDetailId);
+          if (!ref) return '—';
+          return (
+            <Button
+              size="small"
+              type="link"
+              onClick={() => void openJob(ref.cutJobId, ref.resultNo)}
+              disabled={busy}
+              style={{ padding: 0 }}
+            >
+              {ref.name || ref.cutNumber}
+            </Button>
+          );
+        },
+      },
+      {
         title: 'Действия',
         key: 'actions',
         width: 110,
@@ -2628,7 +2658,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           ) : null,
       },
     ];
-  }, [busy, canManage, isArchivedJob, removeJobItem, show]);
+  }, [busy, canManage, isArchivedJob, jobBathCutJobByDetailId, openJob, removeJobItem, show]);
 
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
   const isCreationPreview = job === null && eligible !== null;
