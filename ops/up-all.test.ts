@@ -77,7 +77,7 @@ describe('up-all.sh provision', () => {
   it('deploy-stack overlays CNC Telegram worker for existing live compose files', () => {
     expect(deploySource).toContain('docker-compose.cnc-telegram-worker.yml');
     expect(deploySource).toContain('docker-compose.${stack_env}.yml');
-    expect(deploySource).toMatch(/env_file_value ERP_STACK_ENV[\s\S]*COMPOSE_FILE_ARGS\+=\(-f "\$STACK_ENV_OVERLAY"\)/);
+    expect(deploySource).toMatch(/COMPOSE_FILE_ARGS\+=\(-f "\$CNC_TELEGRAM_OVERLAY"\)[\s\S]*COMPOSE_FILE_ARGS\+=\(-f "\$STACK_ENV_OVERLAY"\)/);
     expect(deploySource).toMatch(/compose_profile_enabled cnc-telegram[\s\S]*cnc-telegram-worker/);
     expect(deploySource).toMatch(/COMPOSE_FILE_ARGS=\(-f "\$COMPOSE_FILE"\)/);
     expect(deploySource).toMatch(/docker compose --env-file "\$ENV_FILE" "\$\{COMPOSE_FILE_ARGS\[@\]\}"/);

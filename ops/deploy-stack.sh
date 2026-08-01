@@ -71,17 +71,17 @@ compose_profile_enabled() {
 prepare_compose_file_args() {
   local stack_env
   COMPOSE_FILE_ARGS=(-f "$COMPOSE_FILE")
+  if compose_profile_enabled cnc-telegram && ! grep -qE '^[[:space:]]+cnc-telegram-worker:' "$COMPOSE_FILE"; then
+    [[ -f "$CNC_TELEGRAM_OVERLAY" ]] || fail "CNC Telegram overlay not found: $CNC_TELEGRAM_OVERLAY"
+    COMPOSE_FILE_ARGS+=(-f "$CNC_TELEGRAM_OVERLAY")
+    log "Using CNC Telegram worker overlay for existing Compose file"
+  fi
   stack_env="$(env_file_value ERP_STACK_ENV)"
   stack_env="${stack_env:-test}"
   STACK_ENV_OVERLAY="$REPO_DIR/ops/templates/docker-compose.${stack_env}.yml"
   if [[ -f "$STACK_ENV_OVERLAY" ]]; then
     COMPOSE_FILE_ARGS+=(-f "$STACK_ENV_OVERLAY")
     log "Using $stack_env Compose overlay"
-  fi
-  if compose_profile_enabled cnc-telegram && ! grep -qE '^[[:space:]]+cnc-telegram-worker:' "$COMPOSE_FILE"; then
-    [[ -f "$CNC_TELEGRAM_OVERLAY" ]] || fail "CNC Telegram overlay not found: $CNC_TELEGRAM_OVERLAY"
-    COMPOSE_FILE_ARGS+=(-f "$CNC_TELEGRAM_OVERLAY")
-    log "Using CNC Telegram worker overlay for existing Compose file"
   fi
 }
 
