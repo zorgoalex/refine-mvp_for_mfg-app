@@ -119,8 +119,9 @@ export class PgGroupNotificationRecipientRepository {
       FROM public.users u
       CROSS JOIN public.deadline_instances di
       INNER JOIN public.orders o
-        ON o.order_id = di.order_id
+       ON o.order_id = di.order_id
        AND o.delete_flag = false
+       AND o.order_kind = 'production_order'
       WHERE u.user_id = ANY($1::bigint[])
         AND di.deadline_id = $2::uuid
       `,

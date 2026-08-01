@@ -32,7 +32,8 @@ export class PgAuthUserRepository implements AuthUserRepositoryPort {
       `
       SELECT user_id, username, role_id, password_hash, is_active${loginPolicySelect}
       FROM users
-      WHERE username = $1 OR email = $1
+      WHERE (username = $1 OR email = $1)
+        AND is_service_account = false
       LIMIT 1
       `,
       [username],

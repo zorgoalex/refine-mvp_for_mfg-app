@@ -45,7 +45,7 @@ describe('PgProductionActionRepository', () => {
     const sql = normalizedSql(database.queries);
     expect(sql).toContain('SELECT set_session_user($1)');
     expect(sql).toContain('INSERT INTO command_idempotency_keys');
-    expect(sql).toContain('FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE');
+    expect(sql).toContain("FROM orders WHERE order_id = $1 AND delete_flag = false AND order_kind = 'production_order' FOR UPDATE");
     expect(sql).toContain('UPDATE orders SET planned_completion_date = $2, version = version + 1');
     expect(sql).toContain('INSERT INTO audit_log');
     expect(sql).toContain('INSERT INTO outbox_events');
@@ -439,7 +439,7 @@ describe('PgProductionActionRepository', () => {
     const sql = normalizedSql(database.queries);
     expect(sql).not.toContain('SELECT set_session_user($1)');
     expect(sql).not.toContain('VERSION_CONFLICT');
-    expect(sql).toContain('FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE');
+    expect(sql).toContain("FROM orders WHERE order_id = $1 AND delete_flag = false AND order_kind = 'production_order' FOR UPDATE");
     expect(sql).toContain('SELECT order_status_id, order_status_name');
     expect(sql).toContain('UPDATE orders SET order_status_id');
     expect(sql).toContain('INSERT INTO audit_log');
@@ -534,7 +534,7 @@ describe('PgProductionActionRepository', () => {
     });
 
     const sql = normalizedSql(database.queries);
-    expect(sql).toContain('FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE');
+    expect(sql).toContain("FROM orders WHERE order_id = $1 AND delete_flag = false AND order_kind = 'production_order' FOR UPDATE");
     expect(sql).not.toContain('UPDATE orders SET order_status_id');
     expect(sql).not.toContain('INSERT INTO audit_log');
     expect(sql).not.toContain('INSERT INTO outbox_events');
@@ -951,7 +951,7 @@ describe('PgProductionActionRepository', () => {
     const sql = normalizedSql(database.queries);
     expect(sql).toContain('SELECT set_session_user($1)');
     expect(sql).toContain('INSERT INTO command_idempotency_keys');
-    expect(sql).toContain('FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE');
+    expect(sql).toContain("FROM orders WHERE order_id = $1 AND delete_flag = false AND order_kind = 'production_order' FOR UPDATE");
     expect(sql).toContain('UPDATE orders SET production_status_from_details_enabled = true, version = version + 1');
     expect(sql).toContain('SELECT recalc_order_production_status($1)');
     expect(sql).toContain('SELECT production_status_id FROM orders WHERE order_id = $1');
@@ -1593,7 +1593,7 @@ describe('assigned-worker audit metadata across production commands', () => {
       expect(detailLockIdx).toBeGreaterThanOrEqual(0);
       expect(orderLockIdx).toBeLessThan(detailLockIdx);
       expect(normalizedSql(database.queries)).toContain(
-        'FROM orders WHERE order_id = $1 AND delete_flag = false FOR UPDATE',
+        "FROM orders WHERE order_id = $1 AND delete_flag = false AND order_kind = 'production_order' FOR UPDATE",
       );
     });
 

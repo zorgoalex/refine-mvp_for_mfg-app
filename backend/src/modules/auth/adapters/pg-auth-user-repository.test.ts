@@ -4,6 +4,7 @@ import { PgAuthUserRepository } from './pg-auth-user-repository';
 
 describe('PgAuthUserRepository', () => {
   it('maps DB user row into AuthUserRecord', async () => {
+    const queries: string[] = [];
     const repository = new PgAuthUserRepository(
       createDatabase([
         {
@@ -13,7 +14,7 @@ describe('PgAuthUserRepository', () => {
           password_hash: 'bcrypt-hash',
           is_active: true,
         },
-      ]),
+      ], queries),
     );
 
     await expect(repository.findByUsername('manager')).resolves.toEqual({
@@ -24,6 +25,7 @@ describe('PgAuthUserRepository', () => {
       isActive: true,
       loginPolicy: 'both',
     });
+    expect(queries[0]).toContain('is_service_account = false');
   });
 
   it('enforces stored login_policy when the column is selected (flag-off keeps external-only closed)', async () => {
@@ -53,9 +55,10 @@ describe('PgAuthUserRepository', () => {
   });
 });
 
-function createDatabase(rows: unknown[]): DatabaseService {
+function createDatabase(rows: unknown[], queries: string[] = []): DatabaseService {
   return {
-    async query() {
+    async query(text: string) {
+      queries.push(text);
       return { rows };
     },
   } as unknown as DatabaseService;

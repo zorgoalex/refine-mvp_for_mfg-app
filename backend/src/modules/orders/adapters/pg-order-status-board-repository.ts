@@ -125,6 +125,7 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
               ON board_production_status.production_status_id = o.production_status_id`;
     const filters = [
       'o.delete_flag = false',
+      "o.order_kind = 'production_order'",
       buildReadScopePredicate(
         readScope,
         actorIndex,
@@ -417,6 +418,7 @@ function buildStatusCatalogSql(query: OrderStatusBoardQuery, params: unknown[]):
           OR EXISTS (
             SELECT 1 FROM orders catalog_order
             WHERE catalog_order.delete_flag = false
+              AND catalog_order.order_kind = 'production_order'
               AND catalog_order.order_status_id = os.order_status_id
           )
         )`;
@@ -443,6 +445,7 @@ function buildStatusCatalogSql(query: OrderStatusBoardQuery, params: unknown[]):
           OR EXISTS (
             SELECT 1 FROM orders catalog_order
             WHERE catalog_order.delete_flag = false
+              AND catalog_order.order_kind = 'production_order'
               AND catalog_order.production_status_id = ps.production_status_id
           )
         )`

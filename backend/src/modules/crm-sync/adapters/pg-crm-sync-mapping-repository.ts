@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { DatabaseClient } from '../../../database/database.types';
 import type {
   MappingRow,
@@ -18,8 +19,10 @@ export class PgCrmSyncMappingRepository {
       parent_erp_id: string | null;
       status: string;
       last_hash: string | null;
+      source_system: 'erp' | 'bitrix24';
     }>(
-      `SELECT entity_type, erp_id, bitrix_object, bitrix_id, parent_erp_id, status, last_hash
+      `SELECT entity_type, erp_id, bitrix_object, bitrix_id, parent_erp_id,
+              status, last_hash, source_system
          FROM crm_sync_mapping
         WHERE entity_type=$1 AND erp_id=$2`,
       [entityType, erpId],
@@ -34,6 +37,7 @@ export class PgCrmSyncMappingRepository {
       parentErpId: row.parent_erp_id ?? null,
       status: row.status,
       lastHash: row.last_hash ?? null,
+      sourceSystem: row.source_system,
     };
   }
 
@@ -50,8 +54,10 @@ export class PgCrmSyncMappingRepository {
       parent_erp_id: string | null;
       status: string;
       last_hash: string | null;
+      source_system: 'erp' | 'bitrix24';
     }>(
-      `SELECT entity_type, erp_id, bitrix_object, bitrix_id, parent_erp_id, status, last_hash
+      `SELECT entity_type, erp_id, bitrix_object, bitrix_id, parent_erp_id,
+              status, last_hash, source_system
          FROM crm_sync_mapping
         WHERE entity_type=$1 AND parent_erp_id=$2
         ORDER BY erp_id`,
@@ -65,6 +71,7 @@ export class PgCrmSyncMappingRepository {
       parentErpId: row.parent_erp_id ?? null,
       status: row.status,
       lastHash: row.last_hash ?? null,
+      sourceSystem: row.source_system,
     }));
   }
 
@@ -194,6 +201,46 @@ export class PgCrmSyncMappingRepository {
     await client.query(
       'DELETE FROM crm_sync_payment_create_guard WHERE erp_payment_id=$1',
       [erpPaymentId],
+    );
+  }
+
+  async prepareOutboundOperation(
+    client: DatabaseClient,
+    input: {
+      objectType: 'contact' | 'company' | 'deal' | 'payment';
+      bitrixId: string;
+      operation: 'update' | 'delete';
+      expiresInMs?: number;
+    },
+  ): Promise<string> {
+    const operationId = randomUUID();
+    await client.query(
+      `INSERT INTO bitrix24_outbound_operation (
+         operation_id, object_type, bitrix_id, operation, status, expires_at
+       )
+       VALUES ($1,$2,$3,$4,'prepared',
+               now() + ($5::int * interval '1 millisecond'))`,
+      [
+        operationId,
+        input.objectType,
+        input.bitrixId,
+        input.operation,
+        input.expiresInMs ?? 10 * 60_000,
+      ],
+    );
+    return operationId;
+  }
+
+  async completeOutboundOperation(
+    client: DatabaseClient,
+    operationId: string,
+  ): Promise<void> {
+    await client.query(
+      `UPDATE bitrix24_outbound_operation
+          SET status=CASE WHEN status='observed' THEN status ELSE 'completed' END,
+              completed_at=now()
+        WHERE operation_id=$1 AND status IN ('prepared','observed')`,
+      [operationId],
     );
   }
 }

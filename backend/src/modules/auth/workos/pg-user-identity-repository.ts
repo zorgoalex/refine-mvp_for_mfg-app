@@ -800,7 +800,7 @@ export class PgUserIdentityRepository {
       `
       SELECT login_policy, workos_self_link_enabled, workos_self_unlink_enabled
       FROM users
-      WHERE user_id = $1 AND is_active
+      WHERE user_id = $1 AND is_active AND is_service_account = false
       FOR UPDATE
       `,
       [userId],
@@ -943,7 +943,7 @@ export class PgUserIdentityRepository {
         `
         SELECT login_policy, is_active, workos_self_unlink_enabled
         FROM users
-        WHERE user_id = $1
+        WHERE user_id = $1 AND is_service_account = false
         FOR UPDATE
         `,
         [input.targetUserId],

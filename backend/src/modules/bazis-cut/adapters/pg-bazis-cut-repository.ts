@@ -550,7 +550,10 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
     const scope = appendOrderReadScopeSql(params, user, 'o');
     const result = await tx.query<OrderScopeRow>(
       `SELECT o.order_id FROM orders o
-       WHERE o.order_id=$1 AND o.delete_flag=false AND ${scope.predicate}`,
+       WHERE o.order_id=$1
+         AND o.delete_flag=false
+         AND o.order_kind='production_order'
+         AND ${scope.predicate}`,
       params,
     );
     const row = result.rows[0];

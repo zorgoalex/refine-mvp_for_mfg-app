@@ -10,7 +10,7 @@ import {
   createRequestContextMiddleware,
   RequestContextService,
 } from './common/request-context/request-context.service';
-import { toNestGlobalPrefix } from './config/api-prefix';
+import { normalizeApiPrefix, toNestGlobalPrefix } from './config/api-prefix';
 import { createCorsRuntimeOptions, isOriginAllowed } from './config/cors';
 import type { BackendEnv } from './config/env.validation';
 import { setupSwagger } from './config/swagger';
@@ -43,6 +43,13 @@ async function bootstrap(): Promise<void> {
     performanceRumBodyPath(apiPrefix),
     createPerformanceRumBodyParser(),
     createPerformanceRumFormBodyParser(),
+  );
+  const bitrixCallbackPath =
+    `${normalizeApiPrefix(apiPrefix)}/integrations/bitrix24`;
+  app.use(
+    bitrixCallbackPath,
+    json({ limit: '256kb' }),
+    urlencoded({ limit: '256kb', extended: true, parameterLimit: 200 }),
   );
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ limit: '50mb', extended: true }));

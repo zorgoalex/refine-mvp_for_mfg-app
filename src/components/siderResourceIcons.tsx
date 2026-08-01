@@ -53,6 +53,7 @@ export const SIDER_RESOURCE_ICONS: Record<string, React.ReactNode> = {
   'bazis-cut-sets': <TableOutlined />,
   bazis: <FileSearchOutlined />,
   clients: <UserOutlined />,
+  bitrix24_incoming_requests: <InboxOutlined />,
   clients_analytics_view: <BarChartOutlined />,
   suppliers: <ShopOutlined />,
   vendors: <ShopOutlined />,

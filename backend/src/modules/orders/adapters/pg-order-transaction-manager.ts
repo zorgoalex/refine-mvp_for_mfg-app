@@ -232,7 +232,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       sheet_material_type_id: number | string | null;
       sheet_eligible: boolean | null;
     }>(
-      `SELECT sheet_material_type_id, sheet_eligible FROM orders WHERE order_id = $1`,
+      `SELECT sheet_material_type_id, sheet_eligible FROM orders
+        WHERE order_id = $1 AND order_kind = 'production_order'`,
       [orderId],
     );
     const details = await this.tx.query<{
@@ -354,7 +355,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       `
       SELECT order_name
       FROM orders
-      WHERE order_id = $1
+      WHERE order_id = $1 AND order_kind = 'production_order'
       `,
       [orderId],
     );
@@ -380,6 +381,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       FROM orders
       WHERE lower(trim(order_name)) = $1
         AND delete_flag = false
+        AND order_kind = 'production_order'
         AND ($2::bigint IS NULL OR order_id <> $2)
       ORDER BY order_id
       LIMIT 1
@@ -401,6 +403,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       FROM orders
       WHERE order_name ~ '^\\d{1,15}$'
         AND delete_flag = false
+        AND order_kind = 'production_order'
         AND order_date >= DATE '2025-12-01'
       `,
     );
@@ -417,7 +420,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       SELECT order_id, order_name, client_id, version, created_by, manager_id,
              delete_flag, deleted_at, deleted_by
       FROM orders
-      WHERE order_id = $1
+      WHERE order_id = $1 AND order_kind = 'production_order'
       FOR UPDATE
       `,
       [orderId],
@@ -471,6 +474,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       SELECT order_id, order_name, version, created_by, manager_id
       FROM orders
       WHERE order_id = $1 AND delete_flag = false
+        AND order_kind = 'production_order'
       FOR UPDATE
       `,
       [orderId],
@@ -494,6 +498,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       SELECT order_id, order_name, client_id, version, created_by, manager_id
       FROM orders
       WHERE order_id = $1 AND delete_flag = false
+        AND order_kind = 'production_order'
       FOR UPDATE
       `,
       [orderId],
@@ -523,6 +528,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       SELECT client_id, project_id
       FROM orders
       WHERE order_id = $1 AND delete_flag = false
+        AND order_kind = 'production_order'
       `,
       [orderId],
     );
@@ -557,7 +563,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       SELECT p.project_id, p.client_id, p.code
       FROM projects p
       JOIN orders o USING (project_id)
-      WHERE o.order_id = $1
+      WHERE o.order_id = $1 AND o.order_kind = 'production_order'
       FOR UPDATE
       `,
       [orderId],
@@ -581,7 +587,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       -- перезаписал бы client_id и архивным заказам — deleted удерживают клиента корня.
       SELECT COUNT(*)::int AS count
       FROM orders
-      WHERE project_id = $1
+      WHERE project_id = $1 AND order_kind = 'production_order'
       `,
       [projectId],
     );
@@ -670,7 +676,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
              sheet_material_type_id AS "sheetMaterialTypeId", sheet_eligible AS "sheetEligible",
              hdf_min_threshold_mm AS "hdfMinThresholdMm"
       FROM orders
-      WHERE order_id = $1
+      WHERE order_id = $1 AND order_kind = 'production_order'
       `,
       [orderId],
     );

@@ -45,5 +45,8 @@ describe('NotificationsEngineModule wiring', () => {
     expect(notificationsEngineModule).toContain('PgNotificationContextBuilder');
     expect(notificationsEngineModule).toContain('PgOutboxRepository');
     expect(notificationsEngineModule).toContain('isEngineOwnedEvent');
+    expect(notificationsEngineModule).toContain("eventType === 'orders.production_initialized'");
+    expect(notificationsEngineModule).toContain('syncOrderDeadlinesInTransaction');
+    expect(notificationsEngineModule).toContain('Production deadline initialization is unavailable');
   });
 });

@@ -771,6 +771,69 @@ probe_file() {
     092_cut_result_archive_state*) probe_all "$(q_tbl cut_result_archive_state)" \
                      "$(q_con fk_cut_result_archive_state_job)" \
                      "$(q_con chk_cut_result_archive_state_result_no)" ;;
+    093_packer_role*) probe_all \
+                     "SELECT EXISTS (
+                        SELECT 1 FROM public.roles
+                         WHERE role_id = 30
+                           AND role_code = 'packer'
+                           AND is_active = true
+                      );" ;;
+    095_bitrix24_reverse_sync*) probe_all \
+                     "$(q_col crm_sync_mapping source_system)" \
+                     "$(q_col crm_sync_mapping last_bitrix_hash)" \
+                     "$(q_col crm_sync_mapping last_bitrix_updated_at)" \
+                     "$(q_tbl bitrix24_app_installation)" \
+                     "$(q_col bitrix24_app_installation access_token_ciphertext)" \
+                     "$(q_col bitrix24_app_installation refresh_lock_token)" \
+                     "$(q_tbl bitrix24_inbound_event)" \
+                     "$(q_col bitrix24_inbound_event lock_token)" \
+                     "$(q_tbl bitrix24_reconcile_cursor)" \
+                     "$(q_col bitrix24_reconcile_cursor last_bitrix_id)" \
+                     "$(q_col bitrix24_reconcile_cursor cycle_id)" \
+                     "$(q_col bitrix24_reconcile_cursor next_cycle_at)" \
+                     "$(q_tbl bitrix24_remote_state)" \
+                     "$(q_col bitrix24_remote_state normalized_hash)" \
+                     "$(q_tbl bitrix24_incoming_request)" \
+                     "$(q_col bitrix24_incoming_request crm_amount)" \
+                     "$(q_col bitrix24_incoming_request linked_order_id)" \
+                     "$(q_tbl bitrix24_incoming_request_payment)" \
+                     "$(q_col bitrix24_incoming_request_payment erp_order_id)" \
+                     "$(q_tbl bitrix24_payment_type_mapping)" \
+                     "$(q_tbl bitrix24_outbound_operation)" \
+                     "$(q_col bitrix24_outbound_operation expires_at)" \
+                     "$(q_con_on crm_sync_mapping chk_crm_sync_mapping_source_system)" \
+                     "$(q_con_on bitrix24_inbound_event uq_bitrix24_inbound_event_fingerprint)" \
+                     "$(q_con_on bitrix24_inbound_event chk_bitrix24_inbound_event_payload_size)" \
+                     "$(q_con_on bitrix24_reconcile_cursor bitrix24_reconcile_cursor_scope_check)" \
+                     "$(q_con_on bitrix24_incoming_request_payment chk_bitrix24_request_payment_owner)" \
+                     "$(q_idx idx_bitrix24_inbound_event_pending)" \
+                     "$(q_idx uq_bitrix24_inbound_event_open_object)" \
+                     "$(q_idx idx_bitrix24_incoming_request_state)" \
+                     "SELECT to_regprocedure('crm_sync_is_bitrix_inbound()') IS NOT NULL;" ;;
+    096_order_kinds_bitrix_crm_requests*) probe_all \
+                     "$(q_col orders order_kind)" \
+                     "$(q_col orders source_system)" \
+                     "$(q_col orders legacy_zero_detail_exempt)" \
+                     "$(q_col order_statuses order_status_code)" \
+                     "$(q_col users is_service_account)" \
+                     "$(q_tbl bitrix24_user_mapping)" \
+                     "$(q_tbl order_kind_conversion_command)" \
+                     "$(q_col bitrix24_incoming_request counterparty_object_type)" \
+                     "$(q_col bitrix24_incoming_request remote_revision)" \
+                     "$(q_col bitrix24_incoming_request sync_version)" \
+                     "$(q_col bitrix24_incoming_request archived_by_source)" \
+                     "$(q_col bitrix24_incoming_request_payment sync_version)" \
+                     "$(q_col bitrix24_remote_state is_deleted)" \
+                     "$(q_con_on orders chk_orders_kind_source)" \
+                     "$(q_con_on orders chk_orders_kind_project)" \
+                     "$(q_con_on bitrix24_incoming_request chk_bitrix24_request_state_link)" \
+                     "$(q_idx uq_orders_name_production_active)" \
+                     "$(q_idx uq_bitrix24_incoming_request_linked_order)" \
+                     "$(q_trg trg_bitrix24_user_mapping_reconcile)" \
+                     "$(q_trg trg_bitrix24_mapped_user_reconcile)" \
+                     "$(q_trg ctrg_bitrix24_request_client_mapping)" \
+                     "SELECT to_regprocedure('validate_order_kind_aggregate_id(bigint)') IS NOT NULL;" \
+                     "SELECT to_regprocedure('validate_bitrix24_incoming_request_link()') IS NOT NULL;" ;;
     094_cnc_telegram_cutting_sequence*) probe_all "$(q_col cnc_telegram_packets cutting_sequence_no)" \
                      "$(q_idx uq_cnc_telegram_packets_cutting_sequence_no)" \
                      "$(q_con chk_cnc_telegram_packets_cutting_sequence_positive)" ;;

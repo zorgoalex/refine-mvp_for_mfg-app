@@ -16,9 +16,11 @@ export interface Bitrix24ApiPort {
   ): Promise<void>;
   findCrmItemByOrigin(entityTypeId: number, originId: string): Promise<string | null>;
   deleteCrmItem(entityTypeId: number, id: string): Promise<void>;
+  getCrmItem(entityTypeId: number, id: string): Promise<Record<string, unknown>>;
   setDealProductRows(dealId: string, productRows: Array<Record<string, unknown>>): Promise<void>;
   findPaymentByXmlId(xmlId: string): Promise<string | null>;
   listDealPaymentIds(dealId: string): Promise<string[]>;
+  getPayment(id: string): Promise<Record<string, unknown>>;
   createDealPayment(dealId: string): Promise<string>;
   updatePayment(id: string, fields: Record<string, unknown>): Promise<void>;
   deletePayment(id: string): Promise<void>;
@@ -54,6 +56,8 @@ export interface Bitrix24ApiClientOptions {
   sleep?: Bitrix24SleepFn;
   onLimitRetry?: (event: Bitrix24LimitRetryEvent) => void;
   onNetworkRetry?: (event: Bitrix24NetworkRetryEvent) => void;
+  getAccessToken?: () => Promise<string>;
+  refreshAccessToken?: () => Promise<void>;
 }
 
 interface BitrixTime {
@@ -76,6 +80,7 @@ const NETWORK_RETRY_SAFE_METHODS = new Set([
   'crm.item.delete',
   'crm.item.productrow.set',
   'sale.payment.list',
+  'sale.payment.get',
   'sale.payment.update',
   'crm.item.payment.list',
   'crm.item.payment.delete',
@@ -121,6 +126,8 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   private readonly sleep: Bitrix24SleepFn;
   private readonly onLimitRetry?: (event: Bitrix24LimitRetryEvent) => void;
   private readonly onNetworkRetry?: (event: Bitrix24NetworkRetryEvent) => void;
+  private readonly getAccessToken?: () => Promise<string>;
+  private readonly refreshAccessToken?: () => Promise<void>;
   private readonly operatingResetAtByMethod = new Map<string, number>();
   private readonly operationBlockedUntilByMethod = new Map<string, number>();
   private admissionTail: Promise<void> = Promise.resolve();
@@ -166,6 +173,8 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
       new Promise((resolve) => setTimeout(resolve, delayMs)));
     this.onLimitRetry = options.onLimitRetry;
     this.onNetworkRetry = options.onNetworkRetry;
+    this.getAccessToken = options.getAccessToken;
+    this.refreshAccessToken = options.refreshAccessToken;
   }
 
   withRequestGuard<T>(
@@ -259,6 +268,20 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
     }
   }
 
+  async getCrmItem(
+    entityTypeId: number,
+    id: string,
+  ): Promise<Record<string, unknown>> {
+    const result = await this.call<{ item?: Record<string, unknown> }>('crm.item.get', {
+      entityTypeId,
+      id: Number(id),
+    });
+    if (!result?.item || typeof result.item !== 'object') {
+      throw this.unexpected('crm.item.get', result);
+    }
+    return result.item;
+  }
+
   async setDealProductRows(
     dealId: string,
     productRows: Array<Record<string, unknown>>,
@@ -298,6 +321,16 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
     await this.call('sale.payment.update', { id: Number(id), fields });
   }
 
+  async getPayment(id: string): Promise<Record<string, unknown>> {
+    const result = await this.call<{ payment?: Record<string, unknown> }>('sale.payment.get', {
+      id: Number(id),
+    });
+    if (!result?.payment || typeof result.payment !== 'object') {
+      throw this.unexpected('sale.payment.get', result);
+    }
+    return result.payment;
+  }
+
   async deletePayment(id: string): Promise<void> {
     try {
       await this.call('crm.item.payment.delete', { id: Number(id) });
@@ -308,12 +341,23 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   }
 
   private async call<T = unknown>(method: string, params: Record<string, unknown>): Promise<T> {
+    let authRefreshAttempted = false;
     let limitAttempt = 0;
     let networkAttempt = 0;
     for (;;) {
       try {
         return await this.callOnce<T>(method, params);
       } catch (error) {
+        if (
+          error instanceof Bitrix24ApiError &&
+          this.refreshAccessToken &&
+          !authRefreshAttempted &&
+          isOAuthCredentialError(error.code)
+        ) {
+          authRefreshAttempted = true;
+          await this.refreshAccessToken();
+          continue;
+        }
         if (!(error instanceof Bitrix24ApiError)) {
           throw error;
         }
@@ -382,6 +426,9 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
     // Keep the ownership proof adjacent to every actual external REST attempt,
     // including attempts made after a limiter or retry wait.
     await this.requestGuard.getStore()?.();
+    const requestParams = this.getAccessToken
+      ? { ...params, auth: await this.getAccessToken() }
+      : params;
 
     let response: Response;
     try {
@@ -391,7 +438,7 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
           Accept: 'application/json',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(params),
+        body: JSON.stringify(requestParams),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (error) {
@@ -559,6 +606,17 @@ function isRetryableNetworkCode(code: string): boolean {
   return normalized === 'NETWORK_ERROR' || normalized === 'RESPONSE_READ_ERROR';
 }
 
+function isOAuthCredentialError(code: string): boolean {
+  const normalized = code.toUpperCase();
+  return (
+    normalized === 'EXPIRED_TOKEN' ||
+    normalized === 'INVALID_TOKEN' ||
+    normalized === 'INVALID_CREDENTIALS' ||
+    normalized === 'NO_AUTH_FOUND' ||
+    normalized === 'WRONG_AUTH_TYPE'
+  );
+}
+
 function positiveInteger(value: number, field: string): number {
   if (!Number.isInteger(value) || value <= 0) {
     throw new RangeError(`${field} must be a positive integer`);
@@ -614,6 +672,10 @@ export class NoopBitrix24ApiClient implements Bitrix24ApiPort {
     this.log(`[dry-run] crm.item.delete type=${entityTypeId} id=${id}`);
   }
 
+  async getCrmItem(_entityTypeId: number, _id: string): Promise<Record<string, unknown>> {
+    return {};
+  }
+
   async setDealProductRows(
     dealId: string,
     productRows: Array<Record<string, unknown>>,
@@ -627,6 +689,10 @@ export class NoopBitrix24ApiClient implements Bitrix24ApiPort {
 
   async listDealPaymentIds(_dealId: string): Promise<string[]> {
     return [];
+  }
+
+  async getPayment(_id: string): Promise<Record<string, unknown>> {
+    return {};
   }
 
   async createDealPayment(dealId: string): Promise<string> {

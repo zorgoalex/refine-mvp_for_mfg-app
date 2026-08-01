@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
+import type { TransactionClient } from '../../database/database.types';
 import { PgNotificationRuleRepository } from './adapters/pg-notification-rule-repository';
 import { PgRecipientSourceAdapter } from './adapters/pg-recipient-source';
 import { PgVisibilityAdapter } from './adapters/pg-visibility';
@@ -24,6 +27,8 @@ import { TelegramNotificationDeliveryService } from './telegram/telegram-notific
 import { TelegramNotificationsController } from './telegram/telegram-notifications.controller';
 import { TelegramNotificationsRuntimeConfigService } from './telegram/telegram-notifications-runtime-config.service';
 import { TelegramNotificationsService } from './telegram/telegram-notifications.service';
+import { PgOrderDeadlineSync } from '../deadlines/adapters/pg-order-deadline-sync';
+import { ROLE_TO_ROLE_ID, type UserRole } from '../../permissions/permissions';
 
 @Module({
   imports: [DatabaseModule],
@@ -66,6 +71,7 @@ import { TelegramNotificationsService } from './telegram/telegram-notifications.
         database: DatabaseService,
         runtimeConfig: NotificationsRuntimeConfigService,
         engine: NotificationRuleEngineService,
+        config: ConfigService<BackendEnv, true>,
       ) => {
         const flags = runtimeConfig.getFeatureFlags();
         const engineConsumer: OutboxConsumer = {
@@ -83,10 +89,50 @@ import { TelegramNotificationsService } from './telegram/telegram-notifications.
             await engine.processEvent(client, event);
           },
         };
+        const productionInitializationConsumer: OutboxConsumer = {
+          supports: (eventType) => eventType === 'orders.production_initialized',
+          process: async (client, event) => {
+            const enabled =
+              config.get('BACKEND_ENABLE_DEADLINES', { infer: true }) &&
+              !config.get('BACKEND_DEADLINES_READ_ONLY', { infer: true }) &&
+              config.get('BACKEND_ENABLE_DEADLINE_ORDER_SYNC', { infer: true });
+            if (!enabled) {
+              throw new Error(
+                `Production deadline initialization is unavailable for event ${event.outboxEventId}`,
+              );
+            }
+            const orderId = Number(event.payload.orderId);
+            const actorUserId = Number(event.payload.actorUserId);
+            const actorRole = String(event.payload.actorRole) as UserRole;
+            if (
+              !Number.isSafeInteger(orderId) || orderId <= 0 ||
+              !Number.isSafeInteger(actorUserId) || actorUserId <= 0 ||
+              !(actorRole in ROLE_TO_ROLE_ID)
+            ) {
+              throw new Error(`Invalid production initialization event ${event.outboxEventId}`);
+            }
+            await new PgOrderDeadlineSync(database).syncOrderDeadlinesInTransaction(
+              client as TransactionClient,
+              {
+                orderId,
+                currentUser: {
+                  id: String(actorUserId),
+                  username: String(event.payload.actorUsername ?? 'system'),
+                  role: actorRole,
+                  roleId: ROLE_TO_ROLE_ID[actorRole],
+                  permissions: [],
+                },
+                eventType: 'ORDER_CREATED',
+                requestId: String(event.payload.requestId ?? event.outboxEventId),
+              },
+              false,
+            );
+          },
+        };
         return new OutboxRelayService({
           database,
           outboxRepo: new PgOutboxRepository(),
-          consumers: [engineConsumer],
+          consumers: [engineConsumer, productionInitializationConsumer],
           config: {
             workerId: flags.relayWorkerId,
             batchSize: flags.relayBatchSize,
@@ -94,7 +140,12 @@ import { TelegramNotificationsService } from './telegram/telegram-notifications.
           },
         });
       },
-      inject: [DatabaseService, NotificationsRuntimeConfigService, NotificationRuleEngineService],
+      inject: [
+        DatabaseService,
+        NotificationsRuntimeConfigService,
+        NotificationRuleEngineService,
+        ConfigService,
+      ],
     },
     {
       provide: OutboxRelaySchedulerService,

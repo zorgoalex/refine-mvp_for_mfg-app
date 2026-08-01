@@ -157,6 +157,7 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
               }
               FROM users
               WHERE user_id = $1
+                AND is_service_account = false
               LIMIT 1
               `,
               [userId],

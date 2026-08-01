@@ -77,7 +77,7 @@ export class PgDeadlineTargetResolver implements DeadlineTargetResolverPort {
       `
       SELECT order_id, client_id, manager_id, completion_date, delete_flag
       FROM orders
-      WHERE order_id = $1
+      WHERE order_id = $1 AND order_kind = 'production_order'
       LIMIT 1
       `,
       [orderId],
@@ -118,7 +118,7 @@ export class PgDeadlineTargetResolver implements DeadlineTargetResolverPort {
       JOIN orders o ON o.order_id = ow.order_id
       LEFT JOIN workshops w ON w.workshop_id = ow.workshop_id
       LEFT JOIN users u ON u.employee_id = ow.responsible_employee_id AND u.is_active = true
-      WHERE ow.order_workshop_id = $1
+      WHERE ow.order_workshop_id = $1 AND o.order_kind = 'production_order'
       LIMIT 1
       `,
       [workshopId],
