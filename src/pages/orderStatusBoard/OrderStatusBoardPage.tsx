@@ -932,8 +932,16 @@ export const OrderStatusBoardPage: React.FC = () => {
   const updateCncWorkday = (date: Dayjs) =>
     updateViewState({ cncWorkday: date.format('YYYY-MM-DD'), cncOrderFilters: [] });
   const cncSettingsContent = (
-    <section className="status-board-settings__modes" aria-label="Режимы МДФ-доски">
-      <strong>Режимы</strong>
+    <section className="status-board-settings__modes" aria-label="Настройки отображения МДФ-доски">
+      <strong>Отображение</strong>
+      <label className="status-board-toolbar__switch">
+        <Switch
+          size="small"
+          checked={viewState.hideEmpty}
+          onChange={(checked) => updateViewState({ hideEmpty: checked })}
+        />
+        Скрыть пустые
+      </label>
       <label className="status-board-toolbar__switch">
         <Switch
           size="small"
@@ -1138,6 +1146,7 @@ export const OrderStatusBoardPage: React.FC = () => {
           <div className="status-board-toolbar status-board-toolbar--cnc" aria-label="Фильтры CNC-работ">
             <Tooltip title="Предыдущий день">
               <Button
+                size="small"
                 aria-label="Предыдущий день"
                 icon={<LeftOutlined />}
                 disabled={!cncCanStepBack}
@@ -1145,6 +1154,7 @@ export const OrderStatusBoardPage: React.FC = () => {
               />
             </Tooltip>
             <DatePicker
+              size="small"
               value={cncSelectedDate}
               format={DATE_FORMAT}
               allowClear={false}
@@ -1161,6 +1171,7 @@ export const OrderStatusBoardPage: React.FC = () => {
             />
             <Tooltip title="Следующий день">
               <Button
+                size="small"
                 aria-label="Следующий день"
                 icon={<RightOutlined />}
                 disabled={!cncCanStepForward}
@@ -1168,15 +1179,14 @@ export const OrderStatusBoardPage: React.FC = () => {
               />
             </Tooltip>
             <Button
+              size="small"
               icon={<CalendarOutlined />}
               onClick={() => updateCncWorkday(dayjs())}
             >
               Сегодня
             </Button>
-            <Button onClick={() => updateCncWorkday(dayjs().subtract(1, 'day'))}>
-              Вчера
-            </Button>
             <Select
+              size="small"
               allowClear
               mode="multiple"
               showSearch
@@ -1233,6 +1243,7 @@ export const OrderStatusBoardPage: React.FC = () => {
             {cncCardDisplayMode === 'compact' && (
               <Tooltip title="Печать всех колонок и карточек в альбомном формате">
                 <Button
+                  size="small"
                   className="status-board-toolbar__cnc-print"
                   icon={<PrinterOutlined />}
                   aria-label="Распечатать компактную МДФ-доску"
@@ -1242,14 +1253,6 @@ export const OrderStatusBoardPage: React.FC = () => {
                 </Button>
               </Tooltip>
             )}
-            <label className="status-board-toolbar__switch">
-              <Switch
-                size="small"
-                checked={viewState.hideEmpty}
-                onChange={(checked) => updateViewState({ hideEmpty: checked })}
-              />
-              Скрыть пустые
-            </label>
             <StatusBoardColumnSettingsButton
               key={STATUS_BOARD_COLUMN_PREFERENCE_KEYS.cnc_today}
               boardLabel={STATUS_BOARD_LABELS.cnc_today}

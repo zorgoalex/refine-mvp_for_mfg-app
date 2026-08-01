@@ -389,7 +389,17 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
   });
 
-  it('keeps CNC display modes in its single gear with bath-file filtering on by default', () => {
+  it('keeps CNC display modes and empty-column filtering in its compact toolbar gear', () => {
+    const settingsStart = page.indexOf('const cncSettingsContent = (');
+    const settingsEnd = page.indexOf('\n\n  return (', settingsStart);
+    const settings = page.slice(settingsStart, settingsEnd);
+    const cncToolbarStart = page.indexOf('{isCncToday && (');
+    const cncToolbarEnd = page.indexOf(
+      '\n\n        {!isCncToday && !featureFlags.useBackendProductionActions',
+      cncToolbarStart,
+    );
+    const cncToolbar = page.slice(cncToolbarStart, cncToolbarEnd);
+
     expect(page).toContain('extraContent={cncSettingsContent}');
     expect(page).toContain('status-board-settings__modes');
     expect(page).toContain('const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =');
@@ -397,9 +407,18 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('Ванны с файлами');
     expect(page).toContain('checked={cncBathsRequireMachineFiles}');
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns)');
+    expect(settings).toContain('checked={viewState.hideEmpty}');
+    expect(settings).toContain('Скрыть пустые');
+    expect(cncToolbar).not.toContain('Вчера');
+    expect(cncToolbar).not.toContain('checked={viewState.hideEmpty}');
+    expect(cncToolbar.match(/size="small"/g)?.length).toBeGreaterThanOrEqual(7);
     expect(css).toContain('.status-board-toolbar__settings-button.ant-btn');
     expect(css).toContain('margin-left: auto');
     expect(css).toContain('.status-board-settings__modes');
+    expect(css).toMatch(/\.status-board-toolbar--cnc\s*\{[^}]*padding: 2px 6px;/);
+    expect(css).toMatch(
+      /\.status-board-toolbar--cnc \.status-board-toolbar__settings-button\.ant-btn\s*\{[^}]*width: 24px;[^}]*height: 24px;/s,
+    );
   });
 
   it('keeps CNC detailed bath mode explicit and clickable by SVG detail metadata', () => {
