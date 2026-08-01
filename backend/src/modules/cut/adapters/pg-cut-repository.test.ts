@@ -51,6 +51,8 @@ describe('cut PDF sheet context fields', () => {
     expect(repositorySource).toContain('filmRequirementLinearMeters: showBathMeterGuides');
     expect(repositorySource).toContain('calculateBathSheetFilmUsage(s.placements)?.linearMeters');
     expect(repositorySource).toContain('bathDetailInfoFor:');
+    expect(repositorySource).toContain('od.doweling,');
+    expect(repositorySource).toContain('doweling: row.doweling === null || row.doweling === undefined ? null : row.doweling === true');
     expect(repositorySource).toContain('edgeTypeName: detail?.edgeTypeName ?? null');
     expect(repositorySource).toContain('millingTypeName: detail?.millingTypeName ?? null');
     expect(repositorySource.match(

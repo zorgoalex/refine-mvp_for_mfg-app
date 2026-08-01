@@ -4867,6 +4867,7 @@ interface ItemRow extends QueryResultRow {
   material_id?: string | number | null;
   sheet_material_type_id?: string | number | null;
   material_name?: string | null;
+  doweling?: boolean | null;
   milling_type_id?: string | number | null;
   milling_type_name?: string | null;
   edge_type_id?: string | number | null;
@@ -4901,6 +4902,7 @@ const ENRICHED_ITEMS_QUERY = `
          od.quantity AS detail_quantity, od.area,
          od.material_id, od.sheet_material_type_id,
          COALESCE(smt.name, m.material_name) AS material_name,
+         od.doweling,
          od.milling_type_id, mt.milling_type_name,
          od.edge_type_id, et.edge_type_name,
          od.film_id, f.film_name,
@@ -4969,6 +4971,7 @@ function mapItemDetail(row: ItemRow): CutDetailInfoDto | null {
     materialId: numOrNull(row.material_id),
     sheetMaterialTypeId: numOrNull(row.sheet_material_type_id),
     materialName: row.material_name ?? null,
+    doweling: row.doweling === null || row.doweling === undefined ? null : row.doweling === true,
     millingTypeId: numOrNull(row.milling_type_id),
     millingTypeName: row.milling_type_name ?? null,
     edgeTypeId: numOrNull(row.edge_type_id),

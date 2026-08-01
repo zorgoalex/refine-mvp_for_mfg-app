@@ -49,6 +49,7 @@ export interface CutDetailInfoDto {
   materialId: number | null;
   sheetMaterialTypeId: number | null;
   materialName: string | null;
+  doweling: boolean | null;
   millingTypeId: number | null;
   millingTypeName: string | null;
   edgeTypeId: number | null;
