@@ -4,8 +4,11 @@ import type { OrderStatusBoardCard } from '../../api/types/orderStatusBoardApi.t
 import {
   classifyOrderStatusBoardMoveFailure,
   executeOrderStatusBoardMove,
+  isCncPreviewRequestCurrent,
+  releaseCncPreviewLoadKey,
   reserveOrderStatusBoardMutation,
   restoreOrderStatusBoardFocus,
+  syncCncBathSelectedDetail,
 } from './interaction';
 
 describe('order status board interactions', () => {
@@ -123,7 +126,54 @@ describe('order status board interactions', () => {
     ).toBe('title');
     expect(titleFocus).toHaveBeenCalledOnce();
   });
+
+  it('updates the selected bath detail marker in the rendered SVG without rebuilding it', () => {
+    const first = detailMarker(11, true);
+    const second = detailMarker(12, false);
+    const querySelectorAll = vi.fn().mockReturnValue([first.element, second.element]);
+    const root = { querySelectorAll } as unknown as HTMLElement;
+
+    syncCncBathSelectedDetail(root, 12);
+
+    expect(first.removeAttribute).toHaveBeenCalledWith('data-cnc-selected-detail');
+    expect(second.setAttribute).toHaveBeenCalledWith('data-cnc-selected-detail', 'true');
+
+    syncCncBathSelectedDetail(root, null);
+
+    expect(second.removeAttribute).toHaveBeenCalledWith('data-cnc-selected-detail');
+    expect(querySelectorAll).toHaveBeenCalledTimes(2);
+  });
+
+  it('releases only an unfinished matching preview load so collapse reopen can retry', () => {
+    expect(releaseCncPreviewLoadKey('bath:1', 'bath:1', false)).toBeNull();
+    expect(releaseCncPreviewLoadKey('bath:1', 'bath:1', true)).toBe('bath:1');
+    expect(releaseCncPreviewLoadKey('bath:2', 'bath:1', false)).toBe('bath:2');
+  });
+
+  it('prevents a cancelled or stale PDF request from settling a newer same-key request', () => {
+    expect(isCncPreviewRequestCurrent(false, 2, 2)).toBe(true);
+    expect(isCncPreviewRequestCurrent(true, 2, 2)).toBe(false);
+    expect(isCncPreviewRequestCurrent(false, 3, 2)).toBe(false);
+  });
 });
+
+function detailMarker(detailId: number, selected: boolean) {
+  const attributes = new Map<string, string>([
+    ['data-detail-id', String(detailId)],
+    ...(selected ? [['data-cnc-selected-detail', 'true'] as [string, string]] : []),
+  ]);
+  const setAttribute = vi.fn((name: string, value: string) => attributes.set(name, value));
+  const removeAttribute = vi.fn((name: string) => attributes.delete(name));
+  return {
+    element: {
+      getAttribute: (name: string) => attributes.get(name) ?? null,
+      setAttribute,
+      removeAttribute,
+    } as unknown as SVGElement,
+    setAttribute,
+    removeAttribute,
+  };
+}
 
 function card(
   overrides: Partial<OrderStatusBoardCard> = {},

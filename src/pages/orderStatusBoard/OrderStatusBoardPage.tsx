@@ -84,8 +84,11 @@ import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
 import {
   classifyOrderStatusBoardMoveFailure,
   executeOrderStatusBoardMove,
+  isCncPreviewRequestCurrent,
+  releaseCncPreviewLoadKey,
   reserveOrderStatusBoardMutation,
   restoreOrderStatusBoardFocus,
+  syncCncBathSelectedDetail,
 } from './interaction';
 import {
   buildCncOrderSearchDateRange,
@@ -2414,6 +2417,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
             className="cnc-packet-card__collapse compact-collapse"
             size="small"
             ghost
+            onClick={stopCncCardClickPropagation}
           >
             <Collapse.Panel
               key="items"
@@ -2512,6 +2516,7 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
   const [previews, setPreviews] = useState<CncBathSheetPreviewItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sheetBodyRef = useRef<HTMLDivElement | null>(null);
   const previewUrlsRef = useRef<string[]>([]);
   const loadedPreviewKeyRef = useRef<string | null>(null);
   const completedKey = useMemo(
@@ -2530,12 +2535,12 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
   );
   const previewKey = useMemo(
     () =>
-      `${bath.cutJobId}:${bath.resultNo}:${detailed ? 'd' : 's'}:${selectedDetailId ?? '-'}:${completedKey}:${orderFillKey}:${bath.sheets
+      `${bath.cutJobId}:${bath.resultNo}:${detailed ? 'd' : 's'}:${completedKey}:${orderFillKey}:${bath.sheets
         .map((sheet) => `${sheet.cutGroupId}:${sheet.variant}:${sheet.sheetIndex}`)
         .join('|')}`,
-    [bath.cutJobId, bath.resultNo, bath.sheets, completedKey, detailed, orderFillKey, selectedDetailId],
+    [bath.cutJobId, bath.resultNo, bath.sheets, completedKey, detailed, orderFillKey],
   );
-  const expanded = detailed || open;
+  const expanded = open;
 
   const revokePreviewUrls = useCallback(() => {
     previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
@@ -2543,8 +2548,13 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!expanded || loadedPreviewKeyRef.current === previewKey) return;
+    if (!expanded) {
+      setLoading(false);
+      return;
+    }
+    if (loadedPreviewKeyRef.current === previewKey) return;
     let cancelled = false;
+    let loaded = false;
     loadedPreviewKeyRef.current = previewKey;
     revokePreviewUrls();
     setPreviews([]);
@@ -2577,7 +2587,6 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
               await blob.text(),
               completedDetailCounts,
               orderFillByDetailId,
-              selectedDetailId,
             )
           : undefined;
         const url = detailed ? undefined : URL.createObjectURL(blob);
@@ -2596,6 +2605,7 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
           },
         ]);
       }
+      loaded = true;
     })()
       .catch((previewError: unknown) => {
         if (cancelled) return;
@@ -2607,6 +2617,11 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
       });
     return () => {
       cancelled = true;
+      loadedPreviewKeyRef.current = releaseCncPreviewLoadKey(
+        loadedPreviewKeyRef.current,
+        previewKey,
+        loaded,
+      );
     };
   }, [
     bath,
@@ -2614,20 +2629,19 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
     expanded,
     previewKey,
     revokePreviewUrls,
-    selectedDetailId,
   ]);
+
+  useEffect(() => {
+    syncCncBathSelectedDetail(sheetBodyRef.current, selectedDetailId);
+  }, [previews, selectedDetailId]);
 
   useEffect(() => () => {
     revokePreviewUrls();
   }, [revokePreviewUrls]);
 
-  const handleCollapseChange = useCallback(
-    (keys: string | string[]) => {
-      if (detailed) return;
-      setOpen(Array.isArray(keys) ? keys.includes('bath-sheet') : keys === 'bath-sheet');
-    },
-    [detailed],
-  );
+  const handleCollapseChange = useCallback((keys: string | string[]) => {
+    setOpen(Array.isArray(keys) ? keys.includes('bath-sheet') : keys === 'bath-sheet');
+  }, []);
 
   const handleSheetClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -2649,6 +2663,7 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
       ghost
       activeKey={expanded ? ['bath-sheet'] : []}
       onChange={handleCollapseChange}
+      onClick={stopCncCardClickPropagation}
     >
       <Collapse.Panel
         key="bath-sheet"
@@ -2658,7 +2673,7 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
           </span>
         }
       >
-        <div className="cnc-packet-card__sheet-body">
+        <div ref={sheetBodyRef} className="cnc-packet-card__sheet-body">
           {loading && (
             <div className="cnc-packet-card__sheet-loading">
               <Spin size="small" />
@@ -2728,7 +2743,6 @@ function decorateCncBathSheetSvg(
   svgText: string,
   completedDetailCounts: ReadonlyMap<number, number>,
   orderFillByDetailId: ReadonlyMap<number, string>,
-  selectedDetailId: number | null,
 ): string {
   const document = new DOMParser().parseFromString(svgText, 'image/svg+xml');
   if (document.getElementsByTagName('parsererror').length > 0) return svgText;
@@ -2738,7 +2752,6 @@ function decorateCncBathSheetSvg(
   for (const piece of pieces) {
     const detailId = Number(piece.getAttribute('data-detail-id'));
     if (!Number.isInteger(detailId) || detailId <= 0) continue;
-    if (selectedDetailId === detailId) piece.setAttribute('data-cnc-selected-detail', 'true');
     enlargeCncBathDetailText(piece, 2);
 
     const fill = orderFillByDetailId.get(detailId);
@@ -2755,6 +2768,10 @@ function decorateCncBathSheetSvg(
     appendCncBathDetailCheck(document, piece);
   }
   return new XMLSerializer().serializeToString(svg);
+}
+
+function stopCncCardClickPropagation(event: React.MouseEvent<HTMLElement>): void {
+  event.stopPropagation();
 }
 
 function enlargeCncBathDetailText(piece: SVGElement, scale: number): void {
@@ -2872,6 +2889,7 @@ interface CncBathPdfPagePreview {
 
 const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
   const requestSeqRef = useRef(0);
+  const loadedPdfKeyRef = useRef<string | null>(null);
   const pagePreviewUrlsRef = useRef<string[]>([]);
   const [open, setOpen] = useState(false);
   const [template, setTemplate] = useState(CNC_BATH_DEFAULT_PDF_TEMPLATE);
@@ -2885,6 +2903,8 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
   const [printLoading, setPrintLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const pdfPreviewKey =
+    `${bath.cutJobId}:${bath.resultNo}:${bath.cutNumber}:${template}`;
 
   const revokePreviewUrl = useCallback(() => {
     setUrl((current) => {
@@ -2933,10 +2953,14 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
   );
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || loadedPdfKeyRef.current === pdfPreviewKey) return;
     let cancelled = false;
+    let loaded = false;
     const requestSeq = requestSeqRef.current + 1;
     requestSeqRef.current = requestSeq;
+    const isCurrentRequest = () =>
+      isCncPreviewRequestCurrent(cancelled, requestSeqRef.current, requestSeq);
+    loadedPdfKeyRef.current = pdfPreviewKey;
     setLoading(true);
     setError(null);
     setPreviewError(null);
@@ -2947,7 +2971,7 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
 
     fetchFreshPdf()
       .then(async (result) => {
-        if (cancelled || requestSeqRef.current !== requestSeq) return;
+        if (!isCurrentRequest()) return;
         const nextUrl = URL.createObjectURL(result.blob);
         setUrl(nextUrl);
         setBlob(result.blob);
@@ -2955,31 +2979,38 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
 
         try {
           const nextPagePreviews = await renderCncPdfPagePreviews(result.blob);
-          if (cancelled || requestSeqRef.current !== requestSeq) {
+          if (!isCurrentRequest()) {
             revokeCncPdfPagePreviewUrls(nextPagePreviews);
             return;
           }
           pagePreviewUrlsRef.current = nextPagePreviews.map((preview) => preview.url);
           setPagePreviews(nextPagePreviews);
         } catch (renderError) {
-          if (!cancelled && requestSeqRef.current === requestSeq) {
+          if (isCurrentRequest()) {
             setPreviewError(errorMessage(renderError, 'Не удалось показать предпросмотр PDF'));
           }
         }
+        loaded = true;
       })
       .catch((previewError: unknown) => {
-        if (!cancelled && requestSeqRef.current === requestSeq) {
+        if (isCurrentRequest()) {
+          if (loadedPdfKeyRef.current === pdfPreviewKey) {
+            loadedPdfKeyRef.current = null;
+          }
           setError(errorMessage(previewError, 'Не удалось загрузить PDF'));
         }
       })
       .finally(() => {
-        if (!cancelled && requestSeqRef.current === requestSeq) {
+        if (isCurrentRequest()) {
           setLoading(false);
         }
       });
     return () => {
       cancelled = true;
       requestSeqRef.current += 1;
+      if (!loaded && loadedPdfKeyRef.current === pdfPreviewKey) {
+        loadedPdfKeyRef.current = null;
+      }
     };
   }, [
     bath.cutJobId,
@@ -2987,6 +3018,7 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
     bath.resultNo,
     fetchFreshPdf,
     open,
+    pdfPreviewKey,
     revokePagePreviews,
     revokePreviewUrl,
   ]);
@@ -3042,6 +3074,7 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
       size="small"
       ghost
       onChange={(keys) => setOpen(Array.isArray(keys) ? keys.includes('bath-pdf') : keys === 'bath-pdf')}
+      onClick={stopCncCardClickPropagation}
     >
       <Collapse.Panel
         key="bath-pdf"

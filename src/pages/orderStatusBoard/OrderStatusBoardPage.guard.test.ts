@@ -476,6 +476,21 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('decorateCncBathSheetSvg');
     expect(page).toContain('data-detail-id');
     expect(page).toContain('cnc-bath-detail-check');
+    expect(page).toContain('const expanded = open;');
+    expect(page).not.toContain('const expanded = detailed || open;');
+    expect(page.match(/onClick=\{stopCncCardClickPropagation\}/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(page).toContain('syncCncBathSelectedDetail(sheetBodyRef.current, selectedDetailId)');
+    expect(page).toContain('loadedPreviewKeyRef.current = releaseCncPreviewLoadKey(');
+    expect(page).toContain('const loadedPdfKeyRef = useRef<string | null>(null)');
+    expect(page).toContain('loadedPdfKeyRef.current === pdfPreviewKey');
+    expect(page).toContain('loadedPdfKeyRef.current = pdfPreviewKey');
+    expect(page).toContain('isCncPreviewRequestCurrent(cancelled, requestSeqRef.current, requestSeq)');
+    expect(page).toMatch(
+      /const previewKey = useMemo\([\s\S]*?\[bath\.cutJobId, bath\.resultNo, bath\.sheets, completedKey, detailed, orderFillKey\],/,
+    );
+    expect(page).not.toMatch(
+      /const previewKey = useMemo\([\s\S]*?\[[^\]]*selectedDetailId[^\]]*\],/,
+    );
     expect(page).toContain('getCncPacketDisplayState');
     expect(page).toContain('cncDetailFingerprintsIntersect');
     expect(page).toContain('cncPacketWholeOrderIntersects');

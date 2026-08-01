@@ -128,3 +128,34 @@ export function restoreOrderStatusBoardFocus(
   }
   return 'none';
 }
+
+export function syncCncBathSelectedDetail(
+  root: HTMLElement | null,
+  selectedDetailId: number | null,
+): void {
+  if (!root) return;
+  for (const piece of root.querySelectorAll<SVGElement>('[data-detail-id]')) {
+    const selected = Number(piece.getAttribute('data-detail-id')) === selectedDetailId;
+    if (selected) {
+      piece.setAttribute('data-cnc-selected-detail', 'true');
+    } else {
+      piece.removeAttribute('data-cnc-selected-detail');
+    }
+  }
+}
+
+export function releaseCncPreviewLoadKey(
+  currentKey: string | null,
+  requestKey: string,
+  loaded: boolean,
+): string | null {
+  return !loaded && currentKey === requestKey ? null : currentKey;
+}
+
+export function isCncPreviewRequestCurrent(
+  cancelled: boolean,
+  currentRequestSeq: number,
+  requestSeq: number,
+): boolean {
+  return !cancelled && currentRequestSeq === requestSeq;
+}
