@@ -1737,13 +1737,11 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
 
 interface CncOrderSummaryLineProps {
   summary: CncOrderSummary;
-  compact: boolean;
   onOpenOrder: (orderId: number) => void;
 }
 
 const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
   summary,
-  compact,
   onOpenOrder,
 }) => {
   const orderId = summary.orderId;
@@ -1776,9 +1774,7 @@ const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
         <OrderDeletedTag deleted={summary.orderDeleted} />
       </span>
       <span className="cnc-packet-card__summary-meta">
-        {compact
-          ? `${summary.details} дет.`
-          : `: ${summary.positions} поз · ${summary.details} дет.`}
+        {summary.details} дет.
       </span>
     </Typography.Text>
   );
@@ -2027,7 +2023,6 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               <CncOrderSummaryLine
                 key={summary.orderName}
                 summary={summary}
-                compact={summaryOnly}
                 onOpenOrder={onOpenOrder}
               />
             ))}
@@ -2106,7 +2101,6 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
           {isOperational ? (
             <div className="cnc-packet-card__metrics">
               <span>{packet.itemQuantityTotal} деталей</span>
-              <span>{packet.itemCount} позиций</span>
             </div>
           ) : null}
 
@@ -2119,7 +2113,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               key="items"
               header={
                 <span className="cnc-packet-card__collapse-label">
-                  <FileTextOutlined /> {isOperational ? 'Детали' : `${packet.itemQuantityTotal} дет. · ${packet.itemCount} поз`}
+                  <FileTextOutlined /> {packet.itemQuantityTotal} дет.
                 </span>
               }
             >
@@ -2345,7 +2339,6 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               <CncOrderSummaryLine
                 key={summary.orderName}
                 summary={summary}
-                compact={summaryOnly}
                 onOpenOrder={onOpenOrder}
               />
             ))}
@@ -2404,7 +2397,6 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           {isOperational ? (
             <div className="cnc-packet-card__metrics">
               <span>{bath.itemQuantityTotal} деталей</span>
-              <span>{bath.positionCount} позиций</span>
             </div>
           ) : null}
 
@@ -2417,7 +2409,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               key="items"
               header={
                 <span className="cnc-packet-card__collapse-label">
-                  <FileTextOutlined /> {isOperational ? 'Детали' : `${bath.itemQuantityTotal} дет. · ${bath.positionCount} поз`}
+                  <FileTextOutlined /> {bath.itemQuantityTotal} дет.
                 </span>
               }
             >
@@ -3836,7 +3828,6 @@ interface CncOrderSummary {
   orderName: string;
   orderId: number | null;
   orderDeleted?: boolean;
-  positions: number;
   details: number;
 }
 
@@ -3859,18 +3850,19 @@ interface CncDetailedContext {
 }
 
 function buildCncOrderSummaries(items: CncSummaryItem[]): CncOrderSummary[] {
-  const summaries = new Map<string, { orderId: number | null; orderDeleted: boolean; positions: number; details: number }>();
+  const summaries = new Map<
+    string,
+    { orderId: number | null; orderDeleted: boolean; details: number }
+  >();
   for (const item of items) {
     const orderName = item.orderName.trim() || 'Без заказа';
     const summary = summaries.get(orderName) ?? {
       orderId: null,
       orderDeleted: false,
-      positions: 0,
       details: 0,
     };
     summary.orderId ??= item.orderId ?? item.matchOrderId ?? null;
     summary.orderDeleted ||= item.orderDeleted === true;
-    summary.positions += 1;
     summary.details += item.quantity;
     summaries.set(orderName, summary);
   }
@@ -3881,7 +3873,6 @@ function buildCncOrderSummaries(items: CncSummaryItem[]): CncOrderSummary[] {
       orderName,
       orderId: summary.orderId,
       ...(summary.orderDeleted ? { orderDeleted: true } : {}),
-      positions: summary.positions,
       details: summary.details,
     }));
 }

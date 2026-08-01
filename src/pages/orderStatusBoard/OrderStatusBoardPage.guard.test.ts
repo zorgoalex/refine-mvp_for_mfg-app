@@ -170,7 +170,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('ORDER_DELETED_REFERENCE_LINE_CLASS');
     expect(css).toContain('.cnc-packet-card__summary.order-deleted-reference-line');
     expect(css).toContain('.cnc-packet-card__item.order-deleted-reference-line');
-    expect(page).toContain('summary.positions');
+    expect(page).not.toContain('summary.positions');
     expect(page).toContain('summary.details');
     expect(page).toContain('summary.orderId ??= item.orderId ?? item.matchOrderId ?? null');
     expect(page).toContain('const orderId = item.orderId ?? item.matchOrderId');
@@ -227,10 +227,25 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).not.toContain('transition: all');
   });
 
-  it('tunes compact MDF hierarchy and omits position counts', () => {
-    expect(page).toContain('compact: boolean;');
-    expect(page).toContain('compact={summaryOnly}');
-    expect(page).toContain('`${summary.details} дет.`');
+  it('shows detail totals without position counts on every MDF card', () => {
+    const summaryLineStart = page.indexOf('const CncOrderSummaryLine:');
+    const summaryLineEnd = page.indexOf('interface CncTelegramPrintBoardProps', summaryLineStart);
+    const summaryLine = page.slice(summaryLineStart, summaryLineEnd);
+    const packetCardStart = page.indexOf('const CncTelegramPacketCard =');
+    const packetCardEnd = page.indexOf('const CncTelegramBathCardView =', packetCardStart);
+    const packetCard = page.slice(packetCardStart, packetCardEnd);
+    const bathCardStart = packetCardEnd;
+    const bathCardEnd = page.indexOf('interface CncBathPdfPreviewProps', bathCardStart);
+    const bathCard = page.slice(bathCardStart, bathCardEnd);
+
+    expect(summaryLine).toContain('{summary.details} дет.');
+    expect(summaryLine).not.toContain('summary.positions');
+    expect(packetCard).toContain('{packet.itemQuantityTotal} деталей');
+    expect(packetCard).not.toContain('packet.itemCount');
+    expect(bathCard).toContain('{bath.itemQuantityTotal} деталей');
+    expect(bathCard).not.toContain('bath.positionCount');
+    expect(page).not.toContain('positions: number;');
+    expect(page).toContain('{summary.details} дет.');
     expect(page).toContain('className="cnc-order-card__compact-client"');
     expect(css).toMatch(
       /\.cnc-card--summary-only \.cnc-packet-card__summary-order[^}]*\{[^}]*font-size: 1\.2em;[^}]*color: var\(--app-text\);/s,
