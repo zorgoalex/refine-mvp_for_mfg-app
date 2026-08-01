@@ -1697,16 +1697,18 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
               ) : (
                 packetCards.map((packet) => {
                   const cardKey = `packet:${packet.packetId}`;
+                  const packetState = packetStateFor(packet);
                   const summaryOnly = isCncCardSummaryOnly(
                     cardDisplayMode,
                     standardCardOverrides,
                     cardKey,
+                    detailedPacketHighlightEnabled && packetState === 'related',
                   );
                   return (
                     <CncTelegramPacketCard
                       key={packet.packetId}
                       packet={packet}
-                      relationState={packetStateFor(packet)}
+                      relationState={packetState}
                       relationsEnabled={relationsEnabled}
                       highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
                       summaryOnly={summaryOnly}

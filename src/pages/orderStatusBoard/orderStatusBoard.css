@@ -239,12 +239,13 @@
 }
 
 .status-board-columns--cnc {
+  --status-board-cnc-column-gap: clamp(4px, 0.8vw, 12px);
   width: 100%;
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(var(--status-board-cnc-column-count, 5), minmax(0, 1fr));
   align-items: stretch;
-  gap: clamp(4px, 0.8vw, 12px);
+  gap: var(--status-board-cnc-column-gap);
 }
 
 .status-board-columns--cnc > .status-board-column {
@@ -1292,8 +1293,8 @@
 }
 
 .cnc-bath-card--detailed {
-  width: 100%;
-  max-width: 100%;
+  width: calc(200% + var(--status-board-cnc-column-gap));
+  max-width: calc(200% + var(--status-board-cnc-column-gap));
   align-self: flex-start;
   z-index: 20;
   border-color: #722ed1;
@@ -1305,7 +1306,7 @@
 }
 
 .cnc-bath-card--detailed-left {
-  margin-left: 0;
+  margin-left: calc(-100% - var(--status-board-cnc-column-gap));
 }
 
 .cnc-bath-card--detailed-right {
@@ -1533,6 +1534,29 @@
     display: none;
   }
 
+  .status-board-columns--cnc-detailed .cnc-bath-card--detailed .cnc-bath-card__job,
+  .status-board-columns--cnc-detailed .cnc-bath-card--detailed .cnc-packet-card__collapse,
+  .status-board-columns--cnc-detailed .cnc-bath-card--detailed .cnc-packet-card__sheet {
+    display: block;
+  }
+
+  .status-board-columns--cnc-detailed .cnc-bath-card--detailed .cnc-bath-card__actions {
+    display: inline-flex;
+  }
+
+  .status-board-columns--cnc-detailed .cnc-bath-card--detailed .cnc-packet-card__metrics,
+  .status-board-columns--cnc-detailed .cnc-bath-card--detailed .status-board-card__footer {
+    display: flex;
+  }
+
+  .status-board-columns--cnc-detailed .cnc-packet-card[data-cnc-relation-state="related"] .cnc-packet-card__program {
+    display: block;
+  }
+
+  .status-board-columns--cnc-detailed .cnc-packet-card[data-cnc-relation-state="related"] .cnc-packet-card__status-icons {
+    display: inline-flex;
+  }
+
   .status-board-columns--cnc .cnc-today-column .status-board-column__header {
     min-height: 42px;
     padding: 4px;
@@ -1645,20 +1669,6 @@
     width: calc(100vw - 48px);
     min-width: calc(100vw - 48px);
     scroll-snap-align: start;
-  }
-
-  .cnc-bath-card--detailed {
-    width: 100%;
-    max-width: 100%;
-    margin-left: 0;
-  }
-
-  .status-board-columns--cnc-detailed .cnc-today-column--detailed {
-    overflow: hidden;
-  }
-
-  .status-board-columns--cnc-detailed .cnc-today-column--detailed .status-board-column__cards {
-    overflow-y: auto;
   }
 
   .status-board-card__actions .ant-btn {

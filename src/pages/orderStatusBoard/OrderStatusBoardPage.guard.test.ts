@@ -484,9 +484,27 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain(
       'grid-template-columns: repeat(var(--status-board-cnc-column-count, 5), minmax(0, 1fr));',
     );
+    expect(page).toMatch(
+      /const packetState = packetStateFor\(packet\);\s+const summaryOnly = isCncCardSummaryOnly\([\s\S]*?cardKey,\s+detailedPacketHighlightEnabled && packetState === 'related',\s+\);/,
+    );
+    expect(page).toContain('relationState={packetState}');
     expect(css).toContain('.cnc-bath-card--detailed');
-    expect(css).toContain('width: 100%;');
-    expect(css).toContain('margin-left: 0;');
+    expect(css).toContain('--status-board-cnc-column-gap: clamp(4px, 0.8vw, 12px);');
+    expect(css).toMatch(
+      /\.cnc-bath-card--detailed\s*\{[^}]*width: calc\(200% \+ var\(--status-board-cnc-column-gap\)\);[^}]*max-width: calc\(200% \+ var\(--status-board-cnc-column-gap\)\);/s,
+    );
+    expect(css).toMatch(
+      /\.cnc-bath-card--detailed-left\s*\{[^}]*margin-left: calc\(-100% - var\(--status-board-cnc-column-gap\)\);/s,
+    );
+    expect(css).not.toMatch(
+      /@media \(max-width: 768px\)[\s\S]*?\.cnc-bath-card--detailed\s*\{[^}]*width: 100%;/,
+    );
+    expect(css).toMatch(
+      /@container status-board-viewport \(max-width: 960px\)[\s\S]*?\.status-board-columns--cnc-detailed \.cnc-bath-card--detailed \.cnc-packet-card__sheet[^}]*\{[^}]*display: block;/,
+    );
+    expect(css).toMatch(
+      /\.status-board-columns--cnc-detailed \.cnc-packet-card\[data-cnc-relation-state="related"\] \.cnc-packet-card__program[^}]*\{[^}]*display: block;/,
+    );
     expect(css).toContain('isolation: isolate');
     expect(css).toContain('font-size: 10px');
     expect(css).toContain('.cnc-bath-card__detail-close');
