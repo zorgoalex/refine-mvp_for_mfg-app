@@ -308,7 +308,7 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).not.toContain('<tspan fill="#7f1d1d"');
   });
 
-  it('keeps one quarter of the previous visual gap between the order and position rows', () => {
+  it('halves the visible gap between the order and position rows without overlapping them', () => {
     const roomySheet: SheetPlacementsJson = {
       ...sheet,
       pieces: [{ item_id: 'det-1', instance: 1, x_mm: 0, y_mm: 0, width_mm: 1000, height_mm: 600, rotated: false }],
@@ -319,11 +319,14 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
 
     expect(order).not.toBeNull();
     expect(position).not.toBeNull();
-    const visualGap = Number(position?.[1]) - Number(order?.[1])
-      - Number(order?.[2]) / 2 - Number(position?.[2]) / 2;
-    const previousVisualGap = Number(order?.[2]) * 1.1
-      - Number(order?.[2]) / 2 - Number(position?.[2]) / 2;
-    expect(visualGap).toBeCloseTo(previousVisualGap / 4, 2);
+    const occupiedHalfHeights = Number(order?.[2]) / 2 + Number(position?.[2]) / 2;
+    const previousVisualGap = Math.max(
+      0,
+      Number(order?.[2]) * 1.1 - occupiedHalfHeights,
+    );
+    const currentlyDeployedBaselineDistance = occupiedHalfHeights + previousVisualGap / 4;
+    const baselineDistance = Number(position?.[1]) - Number(order?.[1]);
+    expect(baselineDistance).toBeCloseTo(currentlyDeployedBaselineDistance * 0.8, 2);
   });
 
   it('shrinks side dimensions and keeps compact position labels for narrow strip details', () => {
@@ -345,7 +348,7 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
   it('moves bath center labels into the safe area below and right of side dimensions', () => {
     const svg = buildBathProfileSheetSvg({ sheet, labelFor: () => ['11300', 'поз. 5', '600X400'] });
 
-    expect(svg).toMatch(/<text x="365\.125" y="209\.45"[^>]*>11300<\/text>/);
+    expect(svg).toMatch(/<text x="365\.125" y="221\.585"[^>]*>11300<\/text>/);
     expect(svg).not.toMatch(/<text x="310" y="215"[^>]*>11300<\/text>/);
   });
 

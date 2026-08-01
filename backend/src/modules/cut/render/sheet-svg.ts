@@ -143,6 +143,7 @@ const BATH_PDF_GUIDE_LEFT_GUTTER_RATIO = 4.2;
 const BATH_DETAIL_META_LINE_SPACING = 0.9;
 const BATH_DETAIL_META_GLYPH_HEIGHT_RATIO = 0.75;
 const BATH_CENTER_PREVIOUS_BASELINE_DISTANCE_RATIO = 1.1;
+const BATH_CENTER_BASELINE_DISTANCE_SCALE = 0.8;
 const BATH_ORDER_LABEL_WEIGHT = 900;
 const BATH_ORDER_LABEL_STROKE_RATIO = 0.04;
 
@@ -613,7 +614,12 @@ function renderBathDetailCenterLabel(input: {
     0,
     font * BATH_CENTER_PREVIOUS_BASELINE_DISTANCE_RATIO - occupiedHalfHeights,
   );
-  const lineOffset = (occupiedHalfHeights + previousVisualGap / 4) / 2;
+  // Liberation Sans glyphs occupy less than the CSS font box. A 20% baseline
+  // reduction halves the visible whitespace without overlapping both rows.
+  const lineOffset = (
+    (occupiedHalfHeights + previousVisualGap / 4)
+    * BATH_CENTER_BASELINE_DISTANCE_SCALE
+  ) / 2;
   return {
     svg: [
       `<text x="${num(input.cx)}" y="${num(input.cy - lineOffset)}" font-family="Liberation Sans, sans-serif" font-size="${num(
