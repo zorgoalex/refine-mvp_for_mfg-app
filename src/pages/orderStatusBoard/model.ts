@@ -62,8 +62,9 @@ export function isCncCardSummaryOnly(
   displayMode: CncCardDisplayMode,
   standardOverrides: ReadonlySet<string>,
   cardKey: string,
+  forceStandard = false,
 ): boolean {
-  return displayMode === 'compact' && !standardOverrides.has(cardKey);
+  return !forceStandard && displayMode === 'compact' && !standardOverrides.has(cardKey);
 }
 
 export function filterBoardColumns(

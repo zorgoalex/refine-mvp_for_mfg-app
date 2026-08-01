@@ -1645,12 +1645,13 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 ) : (
                   bathCards.map((bath) => {
                     const cardKey = `bath:${bath.bathCardId}`;
+                    const detailed = detailedContext?.activeBathId === bath.bathCardId;
                     const summaryOnly = isCncCardSummaryOnly(
                       cardDisplayMode,
                       standardCardOverrides,
                       cardKey,
+                      detailed,
                     );
-                    const detailed = detailedContext?.activeBathId === bath.bathCardId;
                     const detailedPlacement: CncDetailedBathPlacement =
                       column.key === 'baths_ready' ? 'left' : 'right';
                     const selectedDetailId =

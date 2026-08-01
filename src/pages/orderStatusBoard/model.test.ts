@@ -35,6 +35,15 @@ describe('order status board model', () => {
     expect(first).toEqual(new Set(['packet:p-1']));
   });
 
+  it('forces the active detailed bath out of compact summary view', () => {
+    expect(
+      isCncCardSummaryOnly('compact', new Set(), 'bath:b-1', true),
+    ).toBe(false);
+    expect(
+      isCncCardSummaryOnly('compact', new Set(), 'bath:b-2', false),
+    ).toBe(true);
+  });
+
   it('hides the completed column only on the order board', () => {
     const completed = column('completed', [], 0, null);
     const columns = [

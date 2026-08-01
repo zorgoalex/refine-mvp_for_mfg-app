@@ -457,6 +457,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('onSelectDetailedBath={selectCncDetailedBath}');
     expect(page).toContain('onCloseDetailedBath={closeCncDetailedBath}');
     expect(page).toContain('onSelectDetailedDetail={selectCncDetailedDetail}');
+    expect(page).toMatch(
+      /const detailed = detailedContext\?\.activeBathId === bath\.bathCardId;\s+const summaryOnly = isCncCardSummaryOnly\([\s\S]*?cardKey,\s+detailed,\s+\);/,
+    );
     expect(page).toContain('data-cnc-detailed-state');
     expect(page).toContain('Свернуть подробный вид ванны');
     expect(page).toContain('detailed ? false : true');
