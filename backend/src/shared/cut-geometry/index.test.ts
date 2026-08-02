@@ -93,7 +93,7 @@ describe('bath meter guides', () => {
     ]);
   });
 
-  it('labels each guide in bright orange at the bath dimension font size', () => {
+  it('places each label outside the sheet at the bath dimension font size', () => {
     const fontSizeMm = bathMeterGuideLabelFontMm(1400, 2800);
     const [portraitLine] = bathMeterGuideLines(1400, 2800, false);
     const [landscapeLine] = bathMeterGuideLines(1400, 2800, true);
@@ -104,11 +104,13 @@ describe('bath meter guides', () => {
     const portraitLabel = bathMeterGuideLabel(portraitLine, fontSizeMm);
     const landscapeLabel = bathMeterGuideLabel(landscapeLine, fontSizeMm);
     expect(portraitLabel.text).toBe('800мм');
-    expect(portraitLabel.x).toBeCloseTo(19.6);
-    expect(portraitLabel.y).toBeCloseTo(780.4);
+    expect(portraitLabel.x).toBeCloseTo(-9.8);
+    expect(portraitLabel.y).toBe(800);
+    expect(portraitLabel.textAnchor).toBe('end');
     expect(landscapeLabel.text).toBe('800мм');
-    expect(landscapeLabel.x).toBeCloseTo(819.6);
-    expect(landscapeLabel.y).toBe(28);
+    expect(landscapeLabel.x).toBe(800);
+    expect(landscapeLabel.y).toBeCloseTo(-22.4);
+    expect(landscapeLabel.textAnchor).toBe('middle');
   });
 });
 

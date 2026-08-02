@@ -381,7 +381,7 @@ describe('vacuum bath meter guides', () => {
     sheet_height_mm: 2800,
   };
 
-  it('renders two subtle dashed guides at portrait y=800/1800 in normal and bath-profile SVGs', () => {
+  it('renders portrait guide labels outside the sheet in normal and bath-profile SVGs', () => {
     const normal = buildSheetSvg({
       sheet: bathSheet,
       labelFor: () => 'X',
@@ -404,13 +404,14 @@ describe('vacuum bath meter guides', () => {
       expect(svg).toContain('>800мм</text>');
       expect(svg).toContain('>1800мм</text>');
     }
-    expect(normal).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="19.6" y="780.4" fill="#ff6a00"');
-    expect(bath).toContain('viewBox="-117.6 0 1517.6 2800"');
-    expect(bath).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="-9.8" y="800" fill="#374151"');
-    expect(bath).toContain('text-anchor="end"');
+    for (const svg of [normal, bath]) {
+      expect(svg).toContain('viewBox="-117.6 0 1517.6 2800"');
+      expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="-9.8" y="800" fill="#374151"');
+      expect(svg).toContain('text-anchor="end"');
+    }
   });
 
-  it('renders landscape guides at x=800/1800 from the displayed left edge', () => {
+  it('renders landscape guides at x=800/1800 with labels above the sheet', () => {
     const svg = buildSheetSvg({
       sheet: bathSheet,
       labelFor: () => 'X',
@@ -420,7 +421,9 @@ describe('vacuum bath meter guides', () => {
 
     expect(svg).toContain('data-offset-mm="800" x1="800" y1="0" x2="800" y2="1400"');
     expect(svg).toContain('data-offset-mm="1800" x1="1800" y1="0" x2="1800" y2="1400"');
-    expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="819.6" y="28" fill="#ff6a00"');
+    expect(svg).toContain('viewBox="0 -44.8 2800 1444.8"');
+    expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="800" y="-22.4" fill="#374151"');
+    expect(svg).toContain('text-anchor="middle"');
   });
 
   it('moves landscape bath PDF guide labels above the sheet', () => {
@@ -465,7 +468,27 @@ describe('vacuum bath meter guides', () => {
 
     expect(once.match(/class="cut-bath-meter-guide"/g)).toHaveLength(2);
     expect(once.match(/class="cut-bath-meter-guide-label"/g)).toHaveLength(2);
+    expect(once).toContain('viewBox="-117.6 0 1517.6 2800"');
+    expect(once).toContain('data-offset-mm="800" x="-9.8" y="800" fill="#374151"');
     expect(twice).toBe(once);
+  });
+
+  it('moves labels outside in frozen SVGs that already contain the legacy in-sheet guides', () => {
+    const frozen = buildSheetSvg({ sheet: bathSheet, labelFor: () => 'X' });
+    const legacyGuides = [
+      '<line class="cut-bath-meter-guide" data-offset-mm="800" x1="0" y1="800" x2="1400" y2="800"/>',
+      '<line class="cut-bath-meter-guide" data-offset-mm="1800" x1="0" y1="1800" x2="1400" y2="1800"/>',
+      '<text class="cut-bath-meter-guide-label" data-offset-mm="800" x="19.6" y="780.4">800мм</text>',
+      '<text class="cut-bath-meter-guide-label" data-offset-mm="1800" x="19.6" y="1780.4">1800мм</text>',
+    ].join('');
+    const legacy = frozen.replace('</svg>', `${legacyGuides}</svg>`);
+    const upgraded = addBathMeterGuidesToSvg(legacy, bathSheet, false);
+
+    expect(upgraded).toContain('viewBox="-117.6 0 1517.6 2800"');
+    expect(upgraded).toContain('data-offset-mm="800" x="-9.8" y="800" fill="#374151"');
+    expect(upgraded).not.toContain('x="19.6" y="780.4"');
+    expect(upgraded.match(/class="cut-bath-meter-guide"/g)).toHaveLength(2);
+    expect(upgraded.match(/class="cut-bath-meter-guide-label"/g)).toHaveLength(2);
   });
 
   it('backfills labels without duplicating lines in SVGs rendered by the previous guide version', () => {

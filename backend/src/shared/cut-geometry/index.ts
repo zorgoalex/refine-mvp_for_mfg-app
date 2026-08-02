@@ -102,6 +102,8 @@ export const BATH_METER_GUIDE_STYLE = {
   labelFontRatio: 1,
   labelFontWeight: 700,
 } as const;
+export const BATH_METER_GUIDE_OUTSIDE_TOP_GUTTER_RATIO = 1.6;
+export const BATH_METER_GUIDE_OUTSIDE_LEFT_GUTTER_RATIO = 4.2;
 
 export interface BathMeterGuideEligibility {
   /** Effective layout mode from frozen calculation params. */
@@ -144,6 +146,7 @@ export interface BathMeterGuideLabel {
   x: number;
   y: number;
   text: string;
+  textAnchor: 'middle' | 'end';
 }
 
 /**
@@ -161,7 +164,8 @@ export function bathMeterGuideLabelFontMm(
   return bathDimensionFontMm * BATH_METER_GUIDE_STYLE.labelFontRatio;
 }
 
-/** Position a horizontal label by the left edge and a vertical label by the top edge. */
+/** Position every label outside the sheet: vertical guides above it and
+ * horizontal guides to its left. */
 export function bathMeterGuideLabel(
   line: BathMeterGuideLine,
   fontSizeMm: number,
@@ -169,14 +173,16 @@ export function bathMeterGuideLabel(
   const vertical = line.x1 === line.x2;
   return vertical
     ? {
-        x: line.x1 + fontSizeMm * 0.7,
-        y: fontSizeMm,
+        x: line.x1,
+        y: -fontSizeMm * BATH_METER_GUIDE_OUTSIDE_TOP_GUTTER_RATIO / 2,
         text: `${line.offsetMm}мм`,
+        textAnchor: 'middle',
       }
     : {
-        x: fontSizeMm * 0.7,
-        y: line.y1 - fontSizeMm * 0.7,
+        x: -fontSizeMm * 0.35,
+        y: line.y1,
         text: `${line.offsetMm}мм`,
+        textAnchor: 'end',
       };
 }
 

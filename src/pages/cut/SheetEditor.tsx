@@ -1433,7 +1433,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                 viewBox={`0 0 ${bathGuideViewW} ${bathGuideViewH}`}
                 width={rotatedViewportW}
                 height={rotatedViewportH}
-                style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+                style={{ position: 'absolute', inset: 0, overflow: 'visible', pointerEvents: 'none' }}
               >
                 {bathMeterGuideLines(W, H, displayBathLandscape).map((line) => {
                   const label = bathMeterGuideLabel(line, bathGuideLabelFontMm);
@@ -1460,11 +1460,8 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                         fontFamily="Liberation Sans, sans-serif"
                         fontSize={bathGuideLabelFontMm}
                         fontWeight={BATH_METER_GUIDE_STYLE.labelFontWeight}
-                        textAnchor="start"
+                        textAnchor={label.textAnchor}
                         dominantBaseline="middle"
-                        stroke="#fff"
-                        strokeWidth={bathGuideLabelFontMm * 0.16}
-                        paintOrder="stroke"
                         style={{ fontVariantNumeric: 'tabular-nums', userSelect: 'none' }}
                       >
                         {label.text}

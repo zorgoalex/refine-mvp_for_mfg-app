@@ -1,4 +1,6 @@
 import {
+  BATH_METER_GUIDE_OUTSIDE_LEFT_GUTTER_RATIO,
+  BATH_METER_GUIDE_OUTSIDE_TOP_GUTTER_RATIO,
   BATH_METER_GUIDE_STYLE,
   applyAxisOrigin,
   bathMeterGuideLabel,
@@ -138,8 +140,6 @@ const BATH_DIMENSION_RESERVED_RATIO = 1.05;
 const BATH_PDF_SHEET_FILL = '#f7f7f7';
 const BATH_PDF_PIECE_FILL = '#ffffff';
 const BATH_PDF_GUIDE_LABEL_FILL = '#374151';
-const BATH_PDF_GUIDE_TOP_GUTTER_RATIO = 1.6;
-const BATH_PDF_GUIDE_LEFT_GUTTER_RATIO = 4.2;
 const BATH_DETAIL_META_LINE_SPACING = 0.9;
 const BATH_DETAIL_META_GLYPH_HEIGHT_RATIO = 0.75;
 const BATH_CENTER_PREVIOUS_BASELINE_DISTANCE_RATIO = 1.1;
@@ -253,26 +253,15 @@ function renderBathMeterGuideLabels(
   sheet: SheetPlacementsJson,
   landscape: boolean,
   labelFontMm = bathMeterGuideLabelFontMm(sheet.sheet_width_mm, sheet.sheet_height_mm),
-  outsideSheet = false,
 ): string {
   return bathMeterGuideLines(sheet.sheet_width_mm, sheet.sheet_height_mm, landscape)
     .map((line) => {
-      const vertical = line.x1 === line.x2;
-      const label = outsideSheet
-        ? vertical
-          ? { x: line.x1, y: -labelFontMm * BATH_PDF_GUIDE_TOP_GUTTER_RATIO / 2, text: `${line.offsetMm}мм` }
-          : { x: -labelFontMm * 0.35, y: line.y1, text: `${line.offsetMm}мм` }
-        : bathMeterGuideLabel(line, labelFontMm);
-      const fill = outsideSheet ? BATH_PDF_GUIDE_LABEL_FILL : BATH_METER_GUIDE_STYLE.labelFill;
-      const anchor = outsideSheet ? (vertical ? 'middle' : 'end') : 'start';
-      const outline = outsideSheet
-        ? ''
-        : ` stroke="#ffffff" stroke-width="${num(labelFontMm * 0.16)}" paint-order="stroke"`;
+      const label = bathMeterGuideLabel(line, labelFontMm);
       return `<text class="cut-bath-meter-guide-label" data-offset-mm="${num(line.offsetMm)}" x="${num(
         label.x,
-      )}" y="${num(label.y)}" fill="${fill}" font-family="Liberation Sans, sans-serif" font-size="${num(
+      )}" y="${num(label.y)}" fill="${BATH_PDF_GUIDE_LABEL_FILL}" font-family="Liberation Sans, sans-serif" font-size="${num(
         labelFontMm,
-      )}" font-weight="${num(BATH_METER_GUIDE_STYLE.labelFontWeight)}" text-anchor="${anchor}" dominant-baseline="middle"${outline} pointer-events="none" style="font-variant-numeric:tabular-nums">${label.text}</text>`;
+      )}" font-weight="${num(BATH_METER_GUIDE_STYLE.labelFontWeight)}" text-anchor="${label.textAnchor}" dominant-baseline="middle" pointer-events="none" style="font-variant-numeric:tabular-nums">${label.text}</text>`;
     })
     .join('');
 }
@@ -281,7 +270,6 @@ function renderBathMeterGuides(
   sheet: SheetPlacementsJson,
   landscape: boolean,
   labelFontMm = bathMeterGuideLabelFontMm(sheet.sheet_width_mm, sheet.sheet_height_mm),
-  labelsOutsideSheet = false,
 ): string {
   const lines = bathMeterGuideLines(sheet.sheet_width_mm, sheet.sheet_height_mm, landscape)
     .map((line) => (
@@ -294,7 +282,45 @@ function renderBathMeterGuides(
       )} ${num(BATH_METER_GUIDE_STYLE.gapMm)}" pointer-events="none"/>`
     ))
     .join('');
-  return `${lines}${renderBathMeterGuideLabels(sheet, landscape, labelFontMm, labelsOutsideSheet)}`;
+  return `${lines}${renderBathMeterGuideLabels(sheet, landscape, labelFontMm)}`;
+}
+
+function bathMeterGuideViewBox(
+  sheet: SheetPlacementsJson,
+  landscape: boolean,
+  labelFontMm: number,
+): string {
+  const { vw, vh } = orientPieceRect(
+    { x: 0, y: 0, w: sheet.sheet_width_mm, h: sheet.sheet_height_mm },
+    sheet.sheet_width_mm,
+    sheet.sheet_height_mm,
+    landscape,
+  );
+  const firstGuide = bathMeterGuideLines(
+    sheet.sheet_width_mm,
+    sheet.sheet_height_mm,
+    landscape,
+  )[0];
+  if (!firstGuide) return `0 0 ${num(vw)} ${num(vh)}`;
+  const labelsAbove = firstGuide.x1 === firstGuide.x2;
+  const gutterMm = labelFontMm * (
+    labelsAbove
+      ? BATH_METER_GUIDE_OUTSIDE_TOP_GUTTER_RATIO
+      : BATH_METER_GUIDE_OUTSIDE_LEFT_GUTTER_RATIO
+  );
+  return labelsAbove
+    ? `0 ${num(-gutterMm)} ${num(vw)} ${num(vh + gutterMm)}`
+    : `${num(-gutterMm)} 0 ${num(vw + gutterMm)} ${num(vh)}`;
+}
+
+function removeBathMeterGuideElements(svg: string): string {
+  return svg
+    .replace(/<text\b[^>]*class="cut-bath-meter-guide-label"[^>]*>[\s\S]*?<\/text>/g, '')
+    .replace(/<line\b[^>]*class="cut-bath-meter-guide"[^>]*\/?\s*>/g, '');
+}
+
+function replaceSvgViewBox(svg: string, viewBox: string): string {
+  return svg.replace(/(<svg\b[^>]*\bviewBox=")[^"]*(")/, `$1${viewBox}$2`);
 }
 
 /** Adds guide overlays to an already rendered/frozen SVG, idempotently. */
@@ -303,17 +329,17 @@ export function addBathMeterGuidesToSvg(
   sheet: SheetPlacementsJson,
   landscape: boolean,
 ): string {
-  const hasLines = svg.includes('class="cut-bath-meter-guide"');
-  const hasLabels = svg.includes('class="cut-bath-meter-guide-label"');
-  if (hasLines && hasLabels) return svg;
-  const overlay = hasLines
-    ? renderBathMeterGuideLabels(sheet, landscape)
-    : renderBathMeterGuides(sheet, landscape);
+  const labelFontMm = bathMeterGuideLabelFontMm(sheet.sheet_width_mm, sheet.sheet_height_mm);
+  const overlay = renderBathMeterGuides(sheet, landscape, labelFontMm);
   if (!overlay) return svg;
-  const closingTag = svg.lastIndexOf('</svg>');
+  const upgraded = replaceSvgViewBox(
+    removeBathMeterGuideElements(svg),
+    bathMeterGuideViewBox(sheet, landscape, labelFontMm),
+  );
+  const closingTag = upgraded.lastIndexOf('</svg>');
   return closingTag < 0
-    ? svg
-    : `${svg.slice(0, closingTag)}${overlay}${svg.slice(closingTag)}`;
+    ? upgraded
+    : `${upgraded.slice(0, closingTag)}${overlay}${upgraded.slice(closingTag)}`;
 }
 
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
@@ -364,14 +390,18 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       ].join(''));
     })
     .join('');
+  const guideLabelFontMm = bathMeterGuideLabelFontMm(w, h, input.labelFontMm);
   const bathMeterGuides = input.showBathMeterGuides
-    ? renderBathMeterGuides(sheet, rotate90, bathMeterGuideLabelFontMm(w, h, input.labelFontMm))
+    ? renderBathMeterGuides(sheet, rotate90, guideLabelFontMm)
     : '';
+  const viewBox = input.showBathMeterGuides
+    ? bathMeterGuideViewBox(sheet, rotate90, guideLabelFontMm)
+    : `0 0 ${num(vbW)} ${num(vbH)}`;
 
   return [
     // viewBox only (no width/height attrs): the px size is chosen at raster time
     // via resvg fitTo; explicit width/height would make resvg ignore fitTo.
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${num(vbW)} ${num(vbH)}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">`,
     `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>`,
     pieces,
     bathMeterGuides,
@@ -454,18 +484,11 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
     .join('');
   const guideLabelFontMm = bathMeterGuideLabelFontMm(w, h, input.labelFontMm);
   const bathMeterGuides = input.showBathMeterGuides
-    ? renderBathMeterGuides(sheet, rotate90, guideLabelFontMm, true)
+    ? renderBathMeterGuides(sheet, rotate90, guideLabelFontMm)
     : '';
-  const firstGuide = input.showBathMeterGuides
-    ? bathMeterGuideLines(w, h, rotate90)[0]
-    : undefined;
-  const guideLabelsAbove = firstGuide !== undefined && firstGuide.x1 === firstGuide.x2;
-  const guideGutterMm = input.showBathMeterGuides
-    ? guideLabelFontMm * (guideLabelsAbove ? BATH_PDF_GUIDE_TOP_GUTTER_RATIO : BATH_PDF_GUIDE_LEFT_GUTTER_RATIO)
-    : 0;
-  const viewBox = guideLabelsAbove
-    ? `0 ${num(-guideGutterMm)} ${num(vbW)} ${num(vbH + guideGutterMm)}`
-    : `${num(-guideGutterMm)} 0 ${num(vbW + guideGutterMm)} ${num(vbH)}`;
+  const viewBox = input.showBathMeterGuides
+    ? bathMeterGuideViewBox(sheet, rotate90, guideLabelFontMm)
+    : `0 0 ${num(vbW)} ${num(vbH)}`;
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">`,
