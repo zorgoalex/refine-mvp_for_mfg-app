@@ -39,7 +39,8 @@ import {
 import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
 import type { CutDetailLastReadyJobRef } from '../../../../api/types/cutApi.types';
-import { cutJobDeepLink, cutJobVersionLabel } from '../../cutColumnHelpers';
+import { CutJobVersionLines } from '../../CutJobVersionLines';
+import { cutJobDeepLink } from '../../cutColumnHelpers';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -1207,7 +1208,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               if (!d?.detail_id) return null;
               const ref = cutJobByDetailId.get(d.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ fontVariantNumeric: 'tabular-nums' }}>{cutJobVersionLabel(ref)}</Link>;
+              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ display: 'inline-block', maxWidth: '100%' }}><CutJobVersionLines job={ref} /></Link>;
             },
           },
         ]
@@ -1224,7 +1225,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               if (!d?.detail_id) return null;
               const ref = bathCutJobByDetailId.get(d.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ fontVariantNumeric: 'tabular-nums' }}>{cutJobVersionLabel(ref)}</Link>;
+              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ display: 'inline-block', maxWidth: '100%' }}><CutJobVersionLines job={ref} /></Link>;
             },
           },
         ]

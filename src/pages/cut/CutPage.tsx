@@ -63,7 +63,7 @@ import { pushHistory } from './editorHistory';
 import { CutSheetLabelGenerateAction } from './CutSheetLabelGenerateAction';
 import { authSession } from '../../api/authSession';
 import { useCutDetailLastReady } from '../orders/useCutDetailLastReady';
-import { cutJobVersionLabel } from '../orders/cutColumnHelpers';
+import { CutJobVersionLines } from '../orders/CutJobVersionLines';
 import type {
   CutGroupDto,
   CutJobDto,
@@ -2667,9 +2667,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               onClick={() => void openJob(ref.cutJobId, ref.resultNo)}
               disabled={busy}
               title={ref.name}
-              style={{ padding: 0, fontVariantNumeric: 'tabular-nums' }}
+              style={{ display: 'inline-flex', alignItems: 'flex-start', height: 'auto', padding: 0, whiteSpace: 'normal', textAlign: 'left' }}
             >
-              {cutJobVersionLabel(ref)}
+              <CutJobVersionLines job={ref} />
             </Button>
           );
         },

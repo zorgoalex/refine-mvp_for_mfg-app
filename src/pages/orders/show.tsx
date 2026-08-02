@@ -41,7 +41,8 @@ import { cncTelegramApi } from "../../api/cncTelegramApi";
 import type { CncTelegramOrderCuttingSequence } from "../../api/types/cncTelegramApi.types";
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
-import { cutJobDeepLink, cutJobProfileLabel, cutJobVersionLabel } from "./cutColumnHelpers";
+import { CutJobVersionLines } from "./CutJobVersionLines";
+import { cutJobDeepLink, cutJobProfileLabel } from "./cutColumnHelpers";
 import { calculateOrderTotalArea } from "../../utils/orderArea";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
@@ -1233,7 +1234,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             render: (_: unknown, detail: any) => {
               const ref = cutJobByDetailId.get(detail.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ fontVariantNumeric: 'tabular-nums' }}>{cutJobVersionLabel(ref)}</Link>;
+              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ display: 'inline-block', maxWidth: '100%' }}><CutJobVersionLines job={ref} /></Link>;
             },
           },
           {
@@ -1243,7 +1244,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             render: (_: unknown, detail: any) => {
               const ref = bathCutJobByDetailId.get(detail.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ fontVariantNumeric: 'tabular-nums' }}>{cutJobVersionLabel(ref)}</Link>;
+              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ display: 'inline-block', maxWidth: '100%' }}><CutJobVersionLines job={ref} /></Link>;
             },
           },
         ]
@@ -2041,12 +2042,18 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                       key={j.cutJobId}
                                       to={versionRef ? cutJobDeepLink(versionRef) : cutJobDeepLink(j.cutJobId)}
                                       title={j.name}
-                                      style={{ fontSize: 12, lineHeight: 1.35, fontVariantNumeric: 'tabular-nums' }}
+                                      style={{ display: 'inline-block', maxWidth: '100%', fontSize: 12, lineHeight: 1.35 }}
                                     >
-                                      {versionRef ? cutJobVersionLabel(versionRef) : j.name}
-                                      <span style={{ color: 'var(--app-text-muted)' }}>
-                                        {' '}· Профиль: {cutJobProfileLabel(j)}
-                                      </span>
+                                      {versionRef ? (
+                                        <CutJobVersionLines job={versionRef} nameSuffix={<> · Профиль: {cutJobProfileLabel(j)}</>} />
+                                      ) : (
+                                        <>
+                                          {j.name}
+                                          <span style={{ color: 'var(--app-text-muted)' }}>
+                                            {' '}· Профиль: {cutJobProfileLabel(j)}
+                                          </span>
+                                        </>
+                                      )}
                                     </Link>
                                   );
                                 })}
