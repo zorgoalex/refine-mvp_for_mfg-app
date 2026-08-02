@@ -1,6 +1,6 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
+import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select, Tag } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -101,6 +101,7 @@ const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: strin
 
 const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 120;
 const ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT = 40;
+const ORDER_DETAIL_STATUS_REFRESH_MS = 15_000;
 
 function cncOrderCuttingSequenceStatusLabel(status: CncTelegramOrderCuttingSequence['completionStatus']): string {
   return status === 'completed' ? 'распилено' : 'не распилено';
@@ -177,9 +178,52 @@ const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'milling_cost_per_sqm', label: 'Цена за кв.м.' },
   { key: 'detail_cost', label: 'Сумма' },
   { key: 'film', label: 'Пленка' },
+  { key: 'production_status_id', label: 'Статус' },
   { key: 'cut_job', label: 'Раскрой' },
   { key: 'basis_project', label: 'Базис проект' },
 ];
+
+type DetailProductionStatusMeta = {
+  name: string;
+  color?: string | null;
+};
+
+const OrderDetailProductionStatusTag: React.FC<{
+  statusId?: number | null;
+  name?: string | null;
+  statusesById: Map<number, DetailProductionStatusMeta>;
+  loading: boolean;
+}> = ({ statusId, name, statusesById, loading }) => {
+  if (statusId === null || statusId === undefined) {
+    return <Tag style={{ marginInlineEnd: 0 }}>Не назначен</Tag>;
+  }
+
+  const statusMeta = statusesById.get(statusId);
+  const directName = typeof name === 'string' ? name.trim() : '';
+  const label = directName || statusMeta?.name || '';
+
+  if (!label && loading) {
+    return <Tag color="blue" style={{ marginInlineEnd: 0 }}>...</Tag>;
+  }
+
+  const text = label || `ID: ${statusId}`;
+
+  return (
+    <Tooltip title={text}>
+      <Tag
+        color={statusMeta?.color || 'blue'}
+        style={{
+          maxWidth: '100%',
+          marginInlineEnd: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {text}
+      </Tag>
+    </Tooltip>
+  );
+};
 
 function createProjectMoveIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -269,7 +313,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       ],
     },
   });
-  const { data, isLoading } = queryResult;
+  const { data, isLoading, refetch: refetchOrder } = queryResult;
 
   const record = data?.data;
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
@@ -282,6 +326,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const canEditOrderContent = canUpdateOrders && canViewFinancials;
   const canCreatePayment = canViewFinancials && (!featureFlags.useBackendPermissions || can('payments.create'));
   const canViewReferences = !featureFlags.useBackendPermissions || can('references.view');
+  const canViewProductionReferences = !featureFlags.useBackendPermissions || can('production.view');
   const canViewDoweling = !featureFlags.useBackendPermissions || can('doweling.view');
   const canViewEmployees = !featureFlags.useBackendPermissions || can('employees.view');
   const orderDetailShowColumnDefinitions = useMemo(
@@ -423,7 +468,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   );
 
   // Загрузка деталей заказа
-  const { data: detailsData, isLoading: detailsLoading } = useList({
+  const { data: detailsData, isLoading: detailsLoading, refetch: refetchDetails } = useList({
     resource: "order_details",
     filters: [
       {
@@ -467,6 +512,39 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     detailsLoading,
     useBackendOrdersRead,
   });
+  const refreshOrderDetailsForStatus = useCallback(() => {
+    if (!record?.order_id) return;
+    if (useBackendOrdersRead) {
+      void refetchOrder();
+      return;
+    }
+    void refetchDetails();
+  }, [record?.order_id, refetchDetails, refetchOrder, useBackendOrdersRead]);
+
+  useEffect(() => {
+    if (!record?.order_id || typeof window === 'undefined' || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'hidden') return;
+      refreshOrderDetailsForStatus();
+    };
+    const refreshOnVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      refreshOrderDetailsForStatus();
+    };
+
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshOnVisibilityChange);
+    const intervalId = window.setInterval(refreshWhenVisible, ORDER_DETAIL_STATUS_REFRESH_MS);
+
+    return () => {
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshOnVisibilityChange);
+      window.clearInterval(intervalId);
+    };
+  }, [record?.order_id, refreshOrderDetailsForStatus]);
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
@@ -580,6 +658,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     queryOptions: { enabled: canViewReferences },
   });
 
+  const { data: productionStatusesData, isLoading: productionStatusesLoading } = useList({
+    resource: "production_statuses",
+    pagination: { pageSize: 100 },
+    filters: [{ field: "is_active", operator: "in", value: [true, false] }],
+    sorters: [{ field: "sort_order", order: "asc" }, { field: "production_status_id", order: "asc" }],
+    queryOptions: { enabled: canViewProductionReferences },
+  });
+
   const { data: paymentTypesData } = useList({
     resource: "payment_types",
     pagination: { pageSize: 1000 },
@@ -631,6 +717,19 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const materialsMap = new Map(
     (materialsData?.data || []).map((item: any) => [item.material_id, item.material_name])
   );
+  const productionStatusesById = useMemo(() => {
+    const map = new Map<number, DetailProductionStatusMeta>();
+    (productionStatusesData?.data || []).forEach((status: any) => {
+      if (status?.production_status_id == null || typeof status.production_status_name !== 'string') {
+        return;
+      }
+      map.set(status.production_status_id, {
+        name: status.production_status_name,
+        color: typeof status.color === 'string' && status.color.trim() ? status.color : null,
+      });
+    });
+    return map;
+  }, [productionStatusesData]);
   const paymentTypesMap = new Map(
     (paymentTypesData?.data || []).map((item: any) => [item.type_paid_id, item.type_paid_name])
   );
@@ -1271,6 +1370,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           </span>
         );
       },
+    },
+    {
+      title: 'Статус',
+      dataIndex: 'production_status_id',
+      key: 'production_status_id',
+      width: 120,
+      render: (_value, detail) => (
+        <OrderDetailProductionStatusTag
+          statusId={detail.production_status_id}
+          name={detail.production_status_name}
+          statusesById={productionStatusesById}
+          loading={productionStatusesLoading}
+        />
+      ),
     },
     ...(cutColumnEnabled
       ? [

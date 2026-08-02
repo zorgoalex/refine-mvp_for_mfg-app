@@ -131,6 +131,7 @@ export interface OrderDetail {
   doweling?: boolean;
   priority: number;
   production_status_id?: number | null;
+  production_status_name?: string | null;
   joint_order_id?: number | null;
 
   // File links

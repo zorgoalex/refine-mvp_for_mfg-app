@@ -16,9 +16,22 @@ describe('cut detail column', () => {
   it('details table is horizontally scrollable with a synced top scrollbar', () => {
     const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
     // Wrapped in the top-scrollbar helper + horizontal scroll enabled so the
-    // (now 13-column) details table is reachable without scrolling to the bottom.
+    // wide details table is reachable without scrolling to the bottom.
     expect(show).toContain('<TableTopScroll');
     expect(show).toContain("scroll={{ x: 'max-content' }}");
+  });
+
+  it('order show page exposes a live detail production status column', () => {
+    const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
+    expect(show).toContain("{ key: 'production_status_id', label: 'Статус' }");
+    expect(show).toContain("title: 'Статус'");
+    expect(show).toContain('OrderDetailProductionStatusTag');
+    expect(show).toContain('productionStatusesById');
+    expect(show).toContain('ORDER_DETAIL_STATUS_REFRESH_MS');
+    expect(show).toContain('refetchDetails');
+    expect(show).toContain("document.addEventListener('visibilitychange'");
+    expect(show).toContain("resource: \"production_statuses\"");
+    expect(show).toContain('canViewProductionReferences');
   });
 
   it('summary row aligns with the selection column and the trailing Раскрой column', () => {

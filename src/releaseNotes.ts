@@ -41,6 +41,19 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-02",
+    title: "Карточка заказа: статусы деталей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В списке деталей на форме просмотра заказа появилась колонка «Статус» с производственным статусом каждой детали.",
+    ],
+    changed: [
+      "Статусы деталей в карточке заказа автоматически обновляются без ручной перезагрузки страницы.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
     title: "Календарь: фильтр дефолтного материала",
     services: ["ERP"],
     repositories: ["repo_erp"],
