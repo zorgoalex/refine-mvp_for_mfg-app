@@ -73,6 +73,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [searchInput, setSearchInput] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>(null);
+  const [readyCutsOnly, setReadyCutsOnly] = useState(false);
   const [headerFilters, setHeaderFilters] = useState<HeaderFilterState>(() => createDefaultHeaderFilters());
   const [sortState, setSortState] = useState<HeaderSortState>(DEFAULT_SORT_STATE);
   const [refreshRevision, setRefreshRevision] = useState(0);
@@ -88,16 +89,17 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const rows = response?.data ?? EMPTY_RESOURCE_DEMAND_ROWS;
   const filterOptions = useMemo(() => buildResourceDemandFilterOptions(rows), [rows]);
   const tableRows = useMemo(
-    () => sortResourceDemandRows(filterResourceDemandRows(rows, headerFilters), sortState),
-    [headerFilters, rows, sortState],
+    () => sortResourceDemandRows(filterResourceDemandRows(rows, headerFilters, readyCutsOnly), sortState),
+    [headerFilters, readyCutsOnly, rows, sortState],
   );
   const hasActiveHeaderFilters = useMemo(() => hasResourceDemandHeaderFilters(headerFilters), [headerFilters]);
+  const hasActiveListFilters = hasActiveHeaderFilters || readyCutsOnly;
   const hasActiveSort = sortState.columnKey != null && sortState.order != null;
   const hasDateRange = Boolean(dateRange?.[0] || dateRange?.[1]);
   const hasListViewChanges =
     searchInput.trim().length > 0 ||
     hasDateRange ||
-    hasActiveHeaderFilters ||
+    hasActiveListFilters ||
     hasActiveSort ||
     page !== DEFAULT_PAGE ||
     pageSize !== DEFAULT_PAGE_SIZE;
@@ -115,6 +117,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const resetListView = useCallback(() => {
     setSearchInput('');
     setDateRange(null);
+    setReadyCutsOnly(false);
     setHeaderFilters(createDefaultHeaderFilters());
     setSortState(DEFAULT_SORT_STATE);
     setPage(DEFAULT_PAGE);
@@ -173,6 +176,15 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
               resetPage();
             }}
           />
+          <Checkbox
+            checked={readyCutsOnly}
+            onChange={(event) => {
+              setReadyCutsOnly(event.target.checked);
+              resetPage();
+            }}
+          >
+            Готовые раскрои
+          </Checkbox>
           <Button onClick={resetListView} disabled={!hasListViewChanges}>
             Сбросить фильтры
           </Button>
@@ -213,7 +225,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             showSizeChanger: true,
             pageSizeOptions: [10, 20, 50, 100],
             showTotal: (total) => (
-              hasActiveHeaderFilters ? `Заказов: ${total}; показано: ${tableRows.length}` : `Заказов: ${total}`
+              hasActiveListFilters ? `Заказов: ${total}; показано: ${tableRows.length}` : `Заказов: ${total}`
             ),
             onChange: (nextPage, nextPageSize) => {
               setPage(nextPageSize === pageSize ? nextPage : DEFAULT_PAGE);
@@ -419,11 +431,17 @@ function sortHeaderFilterOptions(options: HeaderFilterOption[]): HeaderFilterOpt
 function filterResourceDemandRows(
   rows: OrderResourceDemandRow[],
   filters: HeaderFilterState,
+  readyCutsOnly: boolean,
 ): OrderResourceDemandRow[] {
-  if (!hasResourceDemandHeaderFilters(filters)) return rows;
+  if (!hasResourceDemandHeaderFilters(filters) && !readyCutsOnly) return rows;
   return rows.filter((row) =>
+    (!readyCutsOnly || rowHasReadyCut(row)) &&
     (Object.keys(filters) as HeaderFilterField[]).every((field) => rowMatchesHeaderFilter(field, filters[field], row)),
   );
+}
+
+function rowHasReadyCut(row: OrderResourceDemandRow): boolean {
+  return row.films.some((film) => film.hasCutData);
 }
 
 function rowMatchesHeaderFilter(field: HeaderFilterField, keys: Key[] | null, row: OrderResourceDemandRow): boolean {

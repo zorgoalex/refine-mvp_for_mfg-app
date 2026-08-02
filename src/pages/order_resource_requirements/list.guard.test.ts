@@ -25,9 +25,17 @@ describe('order resource requirements list guards', () => {
   it('имеет отдельную кнопку полного сброса вида списка', () => {
     expect(source).toContain('Сбросить фильтры');
     expect(source).toContain('resetListView');
+    expect(source).toContain('setReadyCutsOnly(false)');
     expect(source).toContain('setHeaderFilters(createDefaultHeaderFilters())');
     expect(source).toContain('setSortState(DEFAULT_SORT_STATE)');
     expect(source).toContain('setPage(DEFAULT_PAGE)');
     expect(source).toContain('setPageSize(DEFAULT_PAGE_SIZE)');
+  });
+
+  it('имеет верхний чекбокс фильтра готовых раскроев', () => {
+    expect(source).toContain('Готовые раскрои');
+    expect(source).toContain('readyCutsOnly');
+    expect(source).toContain('rowHasReadyCut');
+    expect(source).toContain('film.hasCutData');
   });
 });
