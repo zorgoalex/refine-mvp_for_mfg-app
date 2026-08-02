@@ -189,18 +189,20 @@ type DetailProductionStatusMeta = {
 };
 
 const ORDER_DETAIL_STATUS_BADGE_STYLE: CSSProperties = {
-  display: 'inline-block',
-  maxWidth: '100%',
-  height: 22,
-  lineHeight: '20px',
-  padding: '0 7px',
+  display: 'block',
+  width: '100%',
+  boxSizing: 'border-box',
+  minHeight: 18,
+  lineHeight: 1.1,
+  padding: '1px 3px',
   border: '1px solid #91caff',
   borderRadius: 4,
   background: '#e6f4ff',
   color: '#0958d9',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
+  fontSize: 10,
+  textAlign: 'center',
+  whiteSpace: 'normal',
+  overflowWrap: 'anywhere',
   verticalAlign: 'middle',
 };
 
@@ -1493,7 +1495,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       title: 'Статус',
       dataIndex: 'production_status_id',
       key: 'production_status_id',
-      width: 120,
+      width: 60,
+      align: 'center',
       render: (_value, detail) => {
         const detailId = Number(detail.detail_id);
         const hasLiveStatus = Number.isInteger(detailId) && currentDetailProductionStatusById.has(detailId);

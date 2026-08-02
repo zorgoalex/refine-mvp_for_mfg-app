@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-02",
+    title: "Карточка заказа: компактная колонка статуса деталей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В таблице деталей карточки заказа колонка «Статус» стала в два раза уже, а бейджи статусов получили компактный шрифт и перенос внутри колонки.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
     title: "Backend CORS: локальная диагностика stage",
     services: ["ERP"],
     repositories: ["repo_erp"],

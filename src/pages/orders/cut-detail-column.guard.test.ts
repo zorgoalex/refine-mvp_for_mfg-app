@@ -44,6 +44,19 @@ describe('cut detail column', () => {
     expect(statusCell).not.toContain('<Tag');
   });
 
+  it('keeps the order show detail production status column narrow', () => {
+    const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
+    const columnStart = show.indexOf("title: 'Статус',\n      dataIndex: 'production_status_id'");
+    const columnEnd = show.indexOf("...(cutColumnEnabled", columnStart);
+    const statusColumn = show.slice(columnStart, columnEnd);
+
+    expect(statusColumn).toContain('width: 60');
+    expect(statusColumn).toContain("align: 'center'");
+    expect(show).toContain('const ORDER_DETAIL_STATUS_BADGE_STYLE');
+    expect(show).toContain('fontSize: 10');
+    expect(show).toContain("overflowWrap: 'anywhere'");
+  });
+
   it('summary row aligns with the selection column and the trailing Раскрой column', () => {
     const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
     // rowSelection (cutSelectMode) prepends a checkbox column → `base`. «Раскрой»

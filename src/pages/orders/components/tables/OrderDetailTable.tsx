@@ -1296,7 +1296,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Статус</div>,
       dataIndex: 'production_status_id',
       key: 'production_status_id',
-      width: 120,
+      width: 60,
+      align: 'center',
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
@@ -1321,7 +1322,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               namesById={productionStatusNameById}
               loading={referencesLoading}
             />
-          ) : <Tag>Не назначен</Tag>
+          ) : <span style={ORDER_DETAIL_TABLE_STATUS_EMPTY_BADGE_STYLE}>Не назначен</span>
         );
       },
     },
@@ -2480,6 +2481,30 @@ const ProductionStatusCell: React.FC<{
   loading: boolean;
 }> = ({ statusId, namesById, loading }) => {
   const statusName = resolveReferenceLabel(statusId, namesById);
-  if (!statusName && loading) return <Tag color="blue">…</Tag>;
-  return <Tag color="blue">{statusName || `ID: ${statusId}`}</Tag>;
+  if (!statusName && loading) return <span style={ORDER_DETAIL_TABLE_STATUS_BADGE_STYLE}>…</span>;
+  return <span style={ORDER_DETAIL_TABLE_STATUS_BADGE_STYLE}>{statusName || `ID: ${statusId}`}</span>;
+};
+
+const ORDER_DETAIL_TABLE_STATUS_BADGE_STYLE: React.CSSProperties = {
+  display: 'block',
+  width: '100%',
+  boxSizing: 'border-box',
+  minHeight: 18,
+  lineHeight: 1.1,
+  padding: '1px 3px',
+  border: '1px solid #91caff',
+  borderRadius: 4,
+  background: '#e6f4ff',
+  color: '#0958d9',
+  fontSize: 10,
+  textAlign: 'center',
+  whiteSpace: 'normal',
+  overflowWrap: 'anywhere',
+};
+
+const ORDER_DETAIL_TABLE_STATUS_EMPTY_BADGE_STYLE: React.CSSProperties = {
+  ...ORDER_DETAIL_TABLE_STATUS_BADGE_STYLE,
+  borderColor: 'var(--app-border)',
+  background: 'var(--app-surface)',
+  color: 'var(--app-text-muted)',
 };

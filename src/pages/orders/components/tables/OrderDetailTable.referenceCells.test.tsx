@@ -27,4 +27,17 @@ describe('OrderDetailTable reference cells', () => {
     expect(source).toContain("fontSize: 11, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums'");
     expect(source).toContain("scroll={{ x: 'max-content', y: 500 }}");
   });
+
+  it('keeps the detail production status column compact in the order card table', () => {
+    const columnStart = source.indexOf("title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Статус</div>");
+    const columnEnd = source.indexOf("key: 'basis_project'", columnStart);
+    const statusColumn = source.slice(columnStart, columnEnd);
+
+    expect(statusColumn).toContain('width: 60');
+    expect(statusColumn).toContain("align: 'center'");
+    expect(source).toContain('const ORDER_DETAIL_TABLE_STATUS_BADGE_STYLE');
+    expect(source).toContain('fontSize: 10');
+    expect(source).toContain("overflowWrap: 'anywhere'");
+    expect(source).not.toContain('return <Tag color="blue">');
+  });
 });
