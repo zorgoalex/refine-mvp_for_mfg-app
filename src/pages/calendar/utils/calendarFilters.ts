@@ -85,13 +85,15 @@ export const matchesCalendarFilters = (
   if (hasValue(filters.materialName)) {
     const materialQuery = filters.materialName;
     const materialNames = detailMaterialNames(order);
-    const materialMatches = materialNames.some((name) =>
-      includesNormalized(name, filters.materialName),
-    );
-    const defaultMdf16Matches =
-      isDefaultMdf16Material(materialQuery ?? '') && !hasVisibleMaterialBadge(materialNames);
 
-    if (!materialMatches && !defaultMdf16Matches) return false;
+    if (isDefaultMdf16Material(materialQuery ?? '')) {
+      if (hasVisibleMaterialBadge(materialNames)) return false;
+    } else {
+      const materialMatches = materialNames.some((name) =>
+        includesNormalized(name, filters.materialName),
+      );
+      if (!materialMatches) return false;
+    }
   }
 
   if (hasValue(filters.millingTypeName)) {

@@ -83,6 +83,19 @@ describe('calendarFilters', () => {
         order_name: 'A-3',
         order_details: [{ material: { material_name: 'ЛДСП Дуб' } }],
       }),
+      order({
+        order_id: 4,
+        order_name: 'A-4',
+        order_details: [
+          { material: { material_name: 'МДФ 16мм' } },
+          { material: { material_name: 'ЛДСП Дуб' } },
+        ],
+      }),
+      order({
+        order_id: 5,
+        order_name: 'A-5',
+        order_details: [{ material: { material_name: 'Черновой МДФ 16мм' } }],
+      }),
     ];
 
     expect(applyCalendarFilters(rows, {
