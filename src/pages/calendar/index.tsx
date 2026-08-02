@@ -63,14 +63,33 @@ export const CalendarList: React.FC = () => {
           )}
         />
       ) : (
-        <h2 style={{ margin: '16px 24px 0', fontSize: '20px', fontWeight: 500 }}>
-          Производственный календарь
-        </h2>
+        <div className="calendar-page-header">
+          <h2>Производственный календарь</h2>
+          <div className="calendar-page-header__actions">
+            <Badge count={activeFilterCount} size="small" offset={[-4, 5]}>
+              <Button
+                type={filtersOpen || activeFilterCount > 0 ? 'primary' : 'default'}
+                icon={<FilterOutlined />}
+                aria-expanded={filtersOpen}
+                onClick={() => setFiltersOpen((open) => !open)}
+              >
+                {filtersOpen ? 'Скрыть фильтры' : activeFilterCount > 0 ? 'Фильтры активны' : 'Фильтры'}
+              </Button>
+            </Badge>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => navigate('/orders/create')}
+            >
+              Запланировать заказ
+            </Button>
+          </div>
+        </div>
       )}
       <div className="calendar-page">
         <CalendarBoard
           filters={filters}
-          filtersOpen={isOperational && filtersOpen}
+          filtersOpen={filtersOpen}
           onFiltersChange={setFilters}
         />
       </div>

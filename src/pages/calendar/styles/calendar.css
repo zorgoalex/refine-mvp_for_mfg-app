@@ -16,6 +16,27 @@
   flex-direction: column;
 }
 
+.calendar-page-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 24px 0;
+}
+
+.calendar-page-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.calendar-page-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* Страница календаря - без скролла */
 .calendar-page {
   padding: 0;

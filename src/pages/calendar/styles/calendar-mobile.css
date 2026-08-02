@@ -5,6 +5,16 @@
    ============================================ */
 
 @media (max-width: 768px) {
+  .calendar-page-header {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 12px 12px 0;
+  }
+
+  .calendar-page-header__actions {
+    flex-wrap: wrap;
+  }
+
   /* Двухрядная навигация (AD-4) */
   .calendar-navigation--mobile {
     flex-direction: column;

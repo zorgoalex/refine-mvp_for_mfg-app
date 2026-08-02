@@ -12,6 +12,9 @@ describe('calendar filters integration', () => {
     expect(calendarList).toContain('getCalendarActiveFilterCount(filters)');
     expect(calendarList).toContain('filters={filters}');
     expect(calendarList).toContain('onFiltersChange={setFilters}');
+    expect(calendarList).toContain('className="calendar-page-header"');
+    expect(calendarList).toContain('filtersOpen={filtersOpen}');
+    expect(calendarList).not.toContain('filtersOpen={isOperational && filtersOpen}');
     expect(board).toContain('placeholder="Заказ / клиент"');
     expect(board).toContain('quickSearch');
   });

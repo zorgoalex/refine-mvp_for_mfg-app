@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-02",
+    title: "Календарь: фильтры видны во всех вариантах интерфейса",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Кнопка фильтров календаря теперь доступна не только в новом операционном варианте интерфейса, но и в обычной шапке календаря.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
     title: "Потребности заказов: фильтры и сортировка",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
