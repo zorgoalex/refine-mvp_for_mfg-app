@@ -305,6 +305,23 @@ export function filterJobsByStatus<T extends { status: string }>(jobs: ReadonlyA
   return jobs.filter((job) => job.status === status);
 }
 
+/** Select value used to filter jobs whose profile is the frozen create-time default. */
+export const CUT_JOB_PROFILE_FILTER_DEFAULT = 'default';
+
+export type CutJobProfileFilter = number | typeof CUT_JOB_PROFILE_FILTER_DEFAULT | undefined;
+
+/** Filter jobs by the explicitly selected profile, including the null/default bucket. */
+export function filterJobsByProfile<T extends { paramProfileId: number | null }>(
+  jobs: ReadonlyArray<T>,
+  profile: CutJobProfileFilter,
+): T[] {
+  if (profile === undefined) return [...jobs];
+  if (profile === CUT_JOB_PROFILE_FILTER_DEFAULT) {
+    return jobs.filter((job) => job.paramProfileId === null);
+  }
+  return jobs.filter((job) => job.paramProfileId === profile);
+}
+
 /** Item/group counts for a job-list row (items reserved, groups computed). */
 export function cutJobCounts(job: { items?: unknown[]; groups?: unknown[] }): { items: number; groups: number } {
   return { items: job.items?.length ?? 0, groups: job.groups?.length ?? 0 };

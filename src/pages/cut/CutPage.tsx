@@ -81,12 +81,15 @@ import {
 } from './cutLayoutGeometry';
 import type { CutAxisOrigin, ManualViolation } from './cutLayoutGeometry';
 import {
+  CUT_JOB_PROFILE_FILTER_DEFAULT,
   CUT_JOB_STATUS_FILTER_ALL,
   CUT_JOB_STATUS_FILTER_OPTIONS,
+  type CutJobProfileFilter,
   cutJobCounts,
   cutJobSourceLabel,
   cutJobStatusLabel,
   distinctOrderIdsFromItems,
+  filterJobsByProfile,
   filterJobsByStatus,
   formatGroupSummary,
   noSheetSpecMessage,
@@ -841,6 +844,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [embeddedJobIds, setEmbeddedJobIds] = useState<Set<number> | null>(null);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
+  const [profileFilter, setProfileFilter] = useState<CutJobProfileFilter>();
   const [jobSearch, setJobSearch] = useState('');
   const [operationalSheetFilter, setOperationalSheetFilter] = useState<number | undefined>();
   const [operationalFilmFilter, setOperationalFilmFilter] = useState<number | undefined>();
@@ -867,6 +871,25 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     () => mergeCutSelectOptions(sheetTypeOptions, currentJobSheetTypeOptions),
     [currentJobSheetTypeOptions, sheetTypeOptions],
   );
+  const jobProfileFilterOptions = useMemo(() => {
+    const knownProfileIds = new Set(profiles.map((profile) => profile.cutParamProfileId));
+    const historicalProfileIds = [...new Set(
+      jobs
+        .map((candidate) => candidate.paramProfileId)
+        .filter((profileId): profileId is number => profileId !== null && !knownProfileIds.has(profileId)),
+    )].sort((a, b) => a - b);
+    return [
+      { value: CUT_JOB_PROFILE_FILTER_DEFAULT, label: 'По умолчанию' },
+      ...profiles.map((profile) => ({
+        value: profile.cutParamProfileId,
+        label: resolveProfileLabel(profile.cutParamProfileId, profiles, cutSettings),
+      })),
+      ...historicalProfileIds.map((profileId) => ({
+        value: profileId,
+        label: resolveProfileLabel(profileId, profiles, cutSettings),
+      })),
+    ];
+  }, [cutSettings, jobs, profiles]);
 
   // ── Manual layout editor state ──────────────────────────────────────────────
   // The group currently open for editing (null = no editor active).
@@ -2128,7 +2151,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     const statusFiltered = statusFilter === 'work'
       ? jobs.filter((candidate) => candidate.status === 'draft' || candidate.status === 'calculating')
       : filterJobsByStatus(jobs, statusFilter);
-    const scoped = !isEmbeddedOrder ? statusFiltered : statusFiltered.filter((candidate) =>
+    const profileFiltered = isEmbeddedOrder
+      ? statusFiltered
+      : filterJobsByProfile(statusFiltered, profileFilter);
+    const scoped = !isEmbeddedOrder ? profileFiltered : profileFiltered.filter((candidate) =>
       embeddedJobIds?.has(candidate.cutJobId) ||
       candidate.items?.some((item) => item.orderId === embeddedOrderId),
     );
@@ -2164,6 +2190,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     jobs,
     operationalFilmFilter,
     operationalSheetFilter,
+    profileFilter,
     statusFilter,
   ]);
 
@@ -2964,6 +2991,19 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               onChange={setOperationalFilmFilter}
             />
           </label>
+          <label className="cut-operational-filter">
+            <span>Профиль раскроя</span>
+            <Select<CutJobProfileFilter>
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              aria-label="Фильтр по профилю раскроя"
+              placeholder="Все профили"
+              options={jobProfileFilterOptions}
+              value={profileFilter}
+              onChange={setProfileFilter}
+            />
+          </label>
           <Button
             icon={<FilterOutlined />}
             onClick={() => {
@@ -3143,6 +3183,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               onChange={setStatusFilter}
               options={[...CUT_JOB_STATUS_FILTER_OPTIONS]}
               style={{ width: 160 }}
+            />
+            <Select<CutJobProfileFilter>
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              aria-label="Фильтр по профилю раскроя"
+              placeholder="Все профили"
+              options={jobProfileFilterOptions}
+              value={profileFilter}
+              onChange={setProfileFilter}
+              style={{ width: 220 }}
             />
             <Button onClick={loadJobs} loading={jobsLoading}>
               Обновить

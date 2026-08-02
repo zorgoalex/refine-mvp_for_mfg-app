@@ -3,12 +3,14 @@ import {
   buildCutAddWarning,
   buildFilmTextureMap,
   formatPlacementsMessage,
+  CUT_JOB_PROFILE_FILTER_DEFAULT,
   CUT_JOB_STATUS_FILTER_ALL,
   cutJobCounts,
   cutJobSourceLabel,
   cutJobStatusLabel,
   distinctOrderIdsFromItems,
   filterJobsByStatus,
+  filterJobsByProfile,
   formatGroupSummary,
   noSheetSpecMessage,
   parseIdCsv,
@@ -116,6 +118,20 @@ describe('cutPageHelpers', () => {
     expect(filterJobsByStatus(jobs, CUT_JOB_STATUS_FILTER_ALL)).toEqual(jobs);
     expect(filterJobsByStatus(jobs, CUT_JOB_STATUS_FILTER_ALL)).not.toBe(jobs);
     expect(filterJobsByStatus(jobs, '')).toEqual(jobs);
+  });
+
+  it('filters jobs by profile, including default and unknown historical profile ids', () => {
+    const jobs = [
+      { cutJobId: 1, paramProfileId: null },
+      { cutJobId: 2, paramProfileId: 7 },
+      { cutJobId: 3, paramProfileId: 99 },
+      { cutJobId: 4, paramProfileId: 7 },
+    ];
+    expect(filterJobsByProfile(jobs, undefined)).toEqual(jobs);
+    expect(filterJobsByProfile(jobs, undefined)).not.toBe(jobs);
+    expect(filterJobsByProfile(jobs, CUT_JOB_PROFILE_FILTER_DEFAULT).map((job) => job.cutJobId)).toEqual([1]);
+    expect(filterJobsByProfile(jobs, 7).map((job) => job.cutJobId)).toEqual([2, 4]);
+    expect(filterJobsByProfile(jobs, 99).map((job) => job.cutJobId)).toEqual([3]);
   });
 
   it('builds a reason-aware add-to-cut warning (no_sheet_spec / wrong_status counts)', () => {

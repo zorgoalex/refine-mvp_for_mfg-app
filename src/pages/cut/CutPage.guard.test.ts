@@ -452,6 +452,15 @@ describe('CutPage source guards', () => {
 });
 
 describe('CutPage profile + totals columns (source guard)', () => {
+  it('filters the job list by cut profile from the top filter block', () => {
+    expect(source).toContain('const [profileFilter, setProfileFilter]');
+    expect(source).toContain(': filterJobsByProfile(statusFiltered, profileFilter)');
+    expect(source).toContain('<span>Профиль раскроя</span>');
+    expect(source).toContain('aria-label="Фильтр по профилю раскроя"');
+    expect(source).toContain('placeholder="Все профили"');
+    expect(source).toContain('options={jobProfileFilterOptions}');
+  });
+
   it('renames the positions column and adds totals/profile/sheets columns', () => {
     expect(source).toContain("title: 'Позиции'");
     expect(source).toContain("title: 'Заказы'");
