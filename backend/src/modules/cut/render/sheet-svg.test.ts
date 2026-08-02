@@ -406,7 +406,7 @@ describe('vacuum bath meter guides', () => {
     }
     for (const svg of [normal, bath]) {
       expect(svg).toContain('viewBox="-117.6 0 1517.6 2800"');
-      expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="-9.8" y="800" fill="#374151"');
+      expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="-9.8" y="800" fill="#ff6a00"');
       expect(svg).toContain('text-anchor="end"');
     }
   });
@@ -422,7 +422,7 @@ describe('vacuum bath meter guides', () => {
     expect(svg).toContain('data-offset-mm="800" x1="800" y1="0" x2="800" y2="1400"');
     expect(svg).toContain('data-offset-mm="1800" x1="1800" y1="0" x2="1800" y2="1400"');
     expect(svg).toContain('viewBox="0 -44.8 2800 1444.8"');
-    expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="800" y="-22.4" fill="#374151"');
+    expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="800" y="-22.4" fill="#ff6a00"');
     expect(svg).toContain('text-anchor="middle"');
   });
 
@@ -435,7 +435,7 @@ describe('vacuum bath meter guides', () => {
     });
 
     expect(svg).toContain('viewBox="0 -44.8 2800 1444.8"');
-    expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="800" y="-22.4" fill="#374151"');
+    expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="800" y="-22.4" fill="#ff6a00"');
     expect(svg).toContain('text-anchor="middle"');
   });
 
@@ -452,7 +452,7 @@ describe('vacuum bath meter guides', () => {
     });
 
     expect(svg).toContain('viewBox="0 -33.6 2800 1083.6"');
-    expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="800" y="-16.8" fill="#374151"');
+    expect(svg).toContain('class="cut-bath-meter-guide-label" data-offset-mm="800" x="800" y="-16.8" fill="#ff6a00"');
     expect(svg).toContain('text-anchor="middle"');
   });
 
@@ -469,7 +469,7 @@ describe('vacuum bath meter guides', () => {
     expect(once.match(/class="cut-bath-meter-guide"/g)).toHaveLength(2);
     expect(once.match(/class="cut-bath-meter-guide-label"/g)).toHaveLength(2);
     expect(once).toContain('viewBox="-117.6 0 1517.6 2800"');
-    expect(once).toContain('data-offset-mm="800" x="-9.8" y="800" fill="#374151"');
+    expect(once).toContain('data-offset-mm="800" x="-9.8" y="800" fill="#ff6a00"');
     expect(twice).toBe(once);
   });
 
@@ -485,7 +485,7 @@ describe('vacuum bath meter guides', () => {
     const upgraded = addBathMeterGuidesToSvg(legacy, bathSheet, false);
 
     expect(upgraded).toContain('viewBox="-117.6 0 1517.6 2800"');
-    expect(upgraded).toContain('data-offset-mm="800" x="-9.8" y="800" fill="#374151"');
+    expect(upgraded).toContain('data-offset-mm="800" x="-9.8" y="800" fill="#ff6a00"');
     expect(upgraded).not.toContain('x="19.6" y="780.4"');
     expect(upgraded.match(/class="cut-bath-meter-guide"/g)).toHaveLength(2);
     expect(upgraded.match(/class="cut-bath-meter-guide-label"/g)).toHaveLength(2);

@@ -139,7 +139,6 @@ const BATH_DIMENSION_EDGE_INSET_RATIO = 0.55;
 const BATH_DIMENSION_RESERVED_RATIO = 1.05;
 const BATH_PDF_SHEET_FILL = '#f7f7f7';
 const BATH_PDF_PIECE_FILL = '#ffffff';
-const BATH_PDF_GUIDE_LABEL_FILL = '#374151';
 const BATH_DETAIL_META_LINE_SPACING = 0.9;
 const BATH_DETAIL_META_GLYPH_HEIGHT_RATIO = 0.75;
 const BATH_CENTER_PREVIOUS_BASELINE_DISTANCE_RATIO = 1.1;
@@ -259,7 +258,7 @@ function renderBathMeterGuideLabels(
       const label = bathMeterGuideLabel(line, labelFontMm);
       return `<text class="cut-bath-meter-guide-label" data-offset-mm="${num(line.offsetMm)}" x="${num(
         label.x,
-      )}" y="${num(label.y)}" fill="${BATH_PDF_GUIDE_LABEL_FILL}" font-family="Liberation Sans, sans-serif" font-size="${num(
+      )}" y="${num(label.y)}" fill="${BATH_METER_GUIDE_STYLE.labelFill}" font-family="Liberation Sans, sans-serif" font-size="${num(
         labelFontMm,
       )}" font-weight="${num(BATH_METER_GUIDE_STYLE.labelFontWeight)}" text-anchor="${label.textAnchor}" dominant-baseline="middle" pointer-events="none" style="font-variant-numeric:tabular-nums">${label.text}</text>`;
     })
