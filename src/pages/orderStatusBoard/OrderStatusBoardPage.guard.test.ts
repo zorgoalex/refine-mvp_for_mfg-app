@@ -91,9 +91,11 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('shows the completed-status opt-in only on the production tab with a usable hit area', () => {
     expect(page).toContain("viewState.view === 'production'");
     expect(page).toContain('Показывать завершённые');
-    expect(page).toContain('showDone: event.target.checked');
-    expect(css).toContain('.status-board-toolbar__checkbox');
-    expect(css).toContain('min-height: 40px');
+    expect(page).toContain('icon={<CheckCircleOutlined />}');
+    expect(page).toContain('showDone: !viewState.showDone');
+    expect(page).toContain('StatusBoardToolbarIconToggle');
+    expect(css).toContain('.status-board-toolbar__icon-toggle.ant-btn');
+    expect(css).toContain('height: 32px');
   });
 
   it('keeps CNC work as a separate visual flow and API contract', () => {
@@ -693,6 +695,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('status-board-card__status-row');
     expect(page).toContain('status-board-card__status-badge');
     expect(page).toContain('status-board-card__standard-grid');
+    expect(page).toContain('productionToolbarCompact');
+    expect(page).toContain('status-board-toolbar--production');
+    expect(page).toContain('StatusBoardToolbarIconToggle');
+    expect(page).toContain('STATUS_BOARD_CARD_DISPLAY_ICONS');
+    expect(page).toContain('productionCardDisplayOptions');
+    expect(page).toContain('placeholder={productionToolbarCompact ?');
+    expect(page).toContain('prefix={productionToolbarCompact ? <SearchOutlined /> : undefined}');
     expect(page).toContain('status-board-columns--${activeBoard}');
     expect(page).toContain("cardDisplayMode !== 'standard' ? 'status-board-columns--narrow-cards' : ''");
     expect(css).toContain('.status-board-toolbar__display-mode');
@@ -700,14 +709,21 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-toolbar__date-range');
     expect(css).toContain('width: 224px');
     expect(css).toContain('flex-wrap: nowrap');
+    expect(css).toContain('.status-board-toolbar--production');
+    expect(css).toContain('overflow-x: visible');
+    expect(css).toContain('.status-board-toolbar__icon-toggle.ant-btn');
+    expect(css).toContain('.status-board-toolbar__display-mode-icon');
+    expect(css).toContain('.status-board-toolbar--production .status-board-toolbar__display-mode-label');
     expect(css).toContain('.status-board-card--compact');
     expect(css).toContain('.status-board-card--minimal');
     expect(css).toContain('.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-column');
-    expect(css).toContain('width: 152px');
-    expect(css).toContain('min-width: 152px');
-    expect(css).toContain('width: calc((100vw - 48px) / 2)');
+    expect(css).toContain('width: 182px');
+    expect(css).toContain('min-width: 182px');
+    expect(css).toContain('width: calc((100vw - 48px) * 0.6)');
     expect(css).toContain('.status-board-card__status-row');
     expect(css).toContain('.status-board-card__status-badge.ant-tag');
+    expect(css).toContain('.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card__number.ant-btn');
+    expect(css).toContain('.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card__status-badge.ant-tag');
     expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
     expect(css).toContain('.status-board-card__number.ant-btn');
     expect(css).toContain('overflow-wrap: anywhere');

@@ -205,6 +205,11 @@ const STATUS_BOARD_CARD_DISPLAY_OPTIONS: Array<{
   { label: 'Компактный', value: 'compact' },
   { label: 'Минимальный', value: 'minimal' },
 ];
+const STATUS_BOARD_CARD_DISPLAY_ICONS: Record<StatusBoardCardDisplayMode, React.ReactNode> = {
+  standard: <ProfileOutlined />,
+  compact: <CompressOutlined />,
+  minimal: <FileTextOutlined />,
+};
 
 interface BoardDragItem {
   card: OrderStatusBoardCard;
@@ -613,6 +618,24 @@ export const OrderStatusBoardPage: React.FC = () => {
   );
 
   const isCncToday = viewState.view === 'cnc_today';
+  const productionToolbarCompact = viewState.view === 'production';
+  const productionCardDisplayOptions = useMemo(
+    () =>
+      STATUS_BOARD_CARD_DISPLAY_OPTIONS.map((option) => ({
+        value: option.value,
+        label: (
+          <Tooltip title={option.label}>
+            <span
+              className="status-board-toolbar__display-mode-icon"
+              aria-hidden="true"
+            >
+              {STATUS_BOARD_CARD_DISPLAY_ICONS[option.value]}
+            </span>
+          </Tooltip>
+        ),
+      })),
+    [],
+  );
   const statusBoardTabItems = useMemo(
     () => [
       { key: 'order', label: 'Статусы заказов' },
@@ -1092,50 +1115,74 @@ export const OrderStatusBoardPage: React.FC = () => {
         />
 
         {!isCncToday && (
-          <div className="status-board-toolbar" aria-label="Фильтры доски">
+          <div
+            className={[
+              'status-board-toolbar',
+              productionToolbarCompact ? 'status-board-toolbar--production' : '',
+            ].filter(Boolean).join(' ')}
+            aria-label="Фильтры доски"
+          >
             <Input
               allowClear
               className="status-board-toolbar__search"
-              placeholder="Номер заказа или клиент"
+              prefix={productionToolbarCompact ? <SearchOutlined /> : undefined}
+              placeholder={productionToolbarCompact ? '' : 'Номер заказа или клиент'}
               value={searchDraft}
               onChange={(event) => setSearchDraft(event.target.value)}
               aria-label="Поиск по заказам"
             />
-            <Checkbox
-              className="status-board-toolbar__checkbox"
-              checked={viewState.onlyMyOrders}
-              onChange={(event) =>
-                updateViewState({ onlyMyOrders: event.target.checked })
-              }
-            >
-              Связанные со мной
-            </Checkbox>
-            <Checkbox
-              className="status-board-toolbar__checkbox"
-              checked={viewState.overdueOnly}
-              onChange={(event) =>
-                updateViewState({ overdueOnly: event.target.checked })
-              }
-            >
-              Плановая дата прошла
-            </Checkbox>
+            {productionToolbarCompact ? (
+              <>
+                <StatusBoardToolbarIconToggle
+                  active={viewState.onlyMyOrders}
+                  label="Связанные со мной"
+                  icon={<UserOutlined />}
+                  onToggle={() => updateViewState({ onlyMyOrders: !viewState.onlyMyOrders })}
+                />
+                <StatusBoardToolbarIconToggle
+                  active={viewState.overdueOnly}
+                  label="Плановая дата прошла"
+                  icon={<ClockCircleOutlined />}
+                  onToggle={() => updateViewState({ overdueOnly: !viewState.overdueOnly })}
+                />
+              </>
+            ) : (
+              <>
+                <Checkbox
+                  className="status-board-toolbar__checkbox"
+                  checked={viewState.onlyMyOrders}
+                  onChange={(event) =>
+                    updateViewState({ onlyMyOrders: event.target.checked })
+                  }
+                >
+                  Связанные со мной
+                </Checkbox>
+                <Checkbox
+                  className="status-board-toolbar__checkbox"
+                  checked={viewState.overdueOnly}
+                  onChange={(event) =>
+                    updateViewState({ overdueOnly: event.target.checked })
+                  }
+                >
+                  Плановая дата прошла
+                </Checkbox>
+              </>
+            )}
             {viewState.view === 'production' && (
-              <Checkbox
-                className="status-board-toolbar__checkbox"
-                checked={viewState.showDone}
-                onChange={(event) =>
-                  updateViewState({ showDone: event.target.checked })
-                }
-              >
-                Показывать завершённые
-              </Checkbox>
+              <StatusBoardToolbarIconToggle
+                active={viewState.showDone}
+                label="Показывать завершённые"
+                icon={<CheckCircleOutlined />}
+                onToggle={() => updateViewState({ showDone: !viewState.showDone })}
+              />
             )}
             <DatePicker.RangePicker
               className="status-board-toolbar__date-range"
               value={dateRange}
               format={DATE_FORMAT}
               allowEmpty={[true, true]}
-              placeholder={['План с', 'План по']}
+              placeholder={productionToolbarCompact ? ['', ''] : ['План с', 'План по']}
+              suffixIcon={productionToolbarCompact ? <CalendarOutlined /> : undefined}
               onChange={(dates) =>
                 updateViewState({
                   plannedFrom: dates?.[0]?.format('YYYY-MM-DD'),
@@ -1143,23 +1190,41 @@ export const OrderStatusBoardPage: React.FC = () => {
                 })
               }
             />
-            <label className="status-board-toolbar__switch">
-              <Switch
-                size="small"
-                checked={viewState.hideEmpty}
-                onChange={(checked) => updateViewState({ hideEmpty: checked })}
+            {productionToolbarCompact ? (
+              <StatusBoardToolbarIconToggle
+                active={viewState.hideEmpty}
+                label="Скрыть пустые"
+                icon={<FilterOutlined />}
+                onToggle={() => updateViewState({ hideEmpty: !viewState.hideEmpty })}
               />
-              Скрыть пустые
-            </label>
+            ) : (
+              <label className="status-board-toolbar__switch">
+                <Switch
+                  size="small"
+                  checked={viewState.hideEmpty}
+                  onChange={(checked) => updateViewState({ hideEmpty: checked })}
+                />
+                Скрыть пустые
+              </label>
+            )}
             <div
               className="status-board-toolbar__display-mode"
               aria-label="Вид карточек заказов"
             >
-              <Typography.Text type="secondary">Карточки</Typography.Text>
+              <Typography.Text
+                className="status-board-toolbar__display-mode-label"
+                type="secondary"
+              >
+                Карточки
+              </Typography.Text>
               <Segmented
                 size="small"
                 value={cardDisplayMode}
-                options={STATUS_BOARD_CARD_DISPLAY_OPTIONS}
+                options={
+                  productionToolbarCompact
+                    ? productionCardDisplayOptions
+                    : STATUS_BOARD_CARD_DISPLAY_OPTIONS
+                }
                 onChange={(value) =>
                   setCardDisplayMode(value as StatusBoardCardDisplayMode)
                 }
@@ -1459,6 +1524,24 @@ export const OrderStatusBoardPage: React.FC = () => {
     </DndProvider>
   );
 };
+
+const StatusBoardToolbarIconToggle: React.FC<{
+  active: boolean;
+  label: string;
+  icon: React.ReactNode;
+  onToggle: () => void;
+}> = ({ active, label, icon, onToggle }) => (
+  <Tooltip title={label}>
+    <Button
+      className="status-board-toolbar__icon-toggle"
+      type={active ? 'primary' : 'default'}
+      aria-label={label}
+      aria-pressed={active}
+      icon={icon}
+      onClick={onToggle}
+    />
+  </Tooltip>
+);
 
 interface CncTelegramTodayColumnsProps {
   columns: CncTelegramTodayColumn[];
