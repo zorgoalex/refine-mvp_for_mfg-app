@@ -8,7 +8,7 @@
 import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider, Checkbox } from 'antd';
 import type { MenuProps } from 'antd';
-import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { useDragSelection } from '../../../../hooks/useDragSelection';
 import { FilmQuickCreate } from '../modals/FilmQuickCreate';
@@ -47,6 +47,8 @@ interface OrderDetailTableProps {
   onQuickAdd?: () => void;
   onInsertAfter?: (detail: OrderDetail) => void;
   onCopyRow?: (detail: OrderDetail) => void;
+  onTransferRows?: (rowKeys: React.Key[]) => void;
+  getTransferRowsDisabledReason?: (rowKeys: React.Key[]) => string | null;
   selectedRowKeys?: React.Key[];
   onSelectChange?: (selectedRowKeys: React.Key[]) => void;
   highlightedRowKey?: React.Key | null;
@@ -243,6 +245,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   onQuickAdd,
   onInsertAfter,
   onCopyRow,
+  onTransferRows,
+  getTransferRowsDisabledReason,
   selectedRowKeys = [],
   onSelectChange,
   highlightedRowKey = null,
@@ -1787,6 +1791,20 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     return map;
   }, [selectionAggregates.noteValues]);
 
+  const contextTransferRowKeys = useMemo<React.Key[]>(() => {
+    const record = rowContextMenu?.record;
+    if (!record) return [];
+    const rowKey = getRowKey(record);
+    return selectedRowKeys.includes(rowKey) ? selectedRowKeys : [rowKey];
+  }, [getRowKey, rowContextMenu?.record, selectedRowKeys]);
+
+  const contextTransferDisabledReason = useMemo(
+    () => onTransferRows
+      ? getTransferRowsDisabledReason?.(contextTransferRowKeys) ?? null
+      : 'Перенос недоступен',
+    [contextTransferRowKeys, getTransferRowsDisabledReason, onTransferRows],
+  );
+
   const selectionMenuItems: MenuProps['items'] = useMemo(() => {
     const sortByLabel = (ids: number[], map: Map<number, string>) =>
       ids
@@ -1886,6 +1904,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     return [
       { key: 'action:insert', label: 'Вставить строку', icon: <PlusOutlined style={{ color: '#1890ff' }} /> },
       { key: 'action:copy', label: 'Скопировать строку', icon: <CopyOutlined style={{ color: '#52c41a' }} /> },
+      {
+        key: 'action:transfer',
+        label: <span title={contextTransferDisabledReason ?? undefined}>Перенести детали</span>,
+        icon: <SwapOutlined style={{ color: '#13c2c2' }} />,
+        disabled: !!contextTransferDisabledReason,
+      },
       { type: 'divider' as const },
       { key: 'select', label: 'Выделить', children: categories, disabled: !onSelectChange || sortedDetails.length === 0 },
       { type: 'divider' as const },
@@ -1893,6 +1917,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     ];
   }, [
     edgeNameById,
+    contextTransferDisabledReason,
     filmNameById,
     sheetNameById,
     millingNameById,
@@ -1930,6 +1955,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     if (key === 'action:copy') {
       if (rowContextMenu?.record) {
         onCopyRow?.(rowContextMenu.record);
+      }
+      closeRowContextMenu();
+      return;
+    }
+
+    if (key === 'action:transfer') {
+      if (onTransferRows && contextTransferRowKeys.length > 0) {
+        onTransferRows(contextTransferRowKeys);
       }
       closeRowContextMenu();
       return;
@@ -2054,7 +2087,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         closeRowContextMenu();
       }
     }
-  }, [closeRowContextMenu, noteValueKeyToValue, onCopyRow, onDelete, onInsertAfter, rowContextMenu?.record, selectRows]);
+  }, [closeRowContextMenu, contextTransferRowKeys, noteValueKeyToValue, onCopyRow, onDelete, onInsertAfter, onTransferRows, rowContextMenu?.record, selectRows]);
 
   // Handle film quick create success
   const handleFilmCreated = (filmId: number) => {

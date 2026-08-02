@@ -156,33 +156,33 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   const canTransferDetails = can('orders.update') && can('orders.view_financials');
   const canCreateTransferTarget = can('orders.create');
   const sourceVersion = Number(version ?? header?.version ?? 0);
-  const transferDisabled =
-    !canTransferDetails ||
-    isDirty ||
-    isSaving ||
-    header?.order_id == null ||
-    !Number.isInteger(sourceVersion) ||
-    selectedRowKeys.length === 0 ||
-    transferDetailIds.length === 0 ||
-    transferDetailIds.length !== selectedRowKeys.length ||
-    transferDetailIds.length >= persistedDetailIds.length;
-  const transferTooltip = !canTransferDetails
-    ? 'Недостаточно прав'
-    : isDirty || isSaving
-      ? 'Сначала сохраните изменения заказа'
-      : header?.order_id == null
-        ? 'Сначала сохраните заказ'
-        : !Number.isInteger(sourceVersion)
-          ? 'Неизвестная версия заказа'
-          : selectedRowKeys.length === 0
-            ? 'Выберите детали'
-            : transferDetailIds.length === 0
-              ? 'Выберите сохраненные детали'
-              : transferDetailIds.length !== selectedRowKeys.length
-                ? 'Сначала сохраните выбранные новые строки'
-                : transferDetailIds.length >= persistedDetailIds.length
-                  ? 'В исходном заказе должна остаться хотя бы одна деталь'
-                  : `Перенести детали (${transferDetailIds.length})`;
+  const getTransferDetailIdsForRowKeys = useCallback(
+    (rowKeys: React.Key[]) => selectedDetailIds(details as any[], rowKeys),
+    [details],
+  );
+  const getTransferRowsDisabledReason = useCallback((rowKeys: React.Key[]) => {
+    const detailIds = getTransferDetailIdsForRowKeys(rowKeys);
+    if (!canTransferDetails) return 'Недостаточно прав';
+    if (isDirty || isSaving) return 'Сначала сохраните изменения заказа';
+    if (header?.order_id == null) return 'Сначала сохраните заказ';
+    if (!Number.isInteger(sourceVersion)) return 'Неизвестная версия заказа';
+    if (rowKeys.length === 0) return 'Выберите детали';
+    if (detailIds.length === 0) return 'Выберите сохраненные детали';
+    if (detailIds.length !== rowKeys.length) return 'Сначала сохраните выбранные новые строки';
+    if (detailIds.length >= persistedDetailIds.length) return 'В исходном заказе должна остаться хотя бы одна деталь';
+    return null;
+  }, [
+    canTransferDetails,
+    getTransferDetailIdsForRowKeys,
+    header?.order_id,
+    isDirty,
+    isSaving,
+    persistedDetailIds.length,
+    sourceVersion,
+  ]);
+  const transferDisabledReason = getTransferRowsDisabledReason(selectedRowKeys);
+  const transferDisabled = !!transferDisabledReason;
+  const transferTooltip = transferDisabledReason ?? `Перенести детали (${transferDetailIds.length})`;
   const cutJobMaps = useCutDetailLastReady({
     enabled: cutColumnEnabled,
     detailIds: persistedDetailIds,
@@ -397,6 +397,17 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         : `Перенесено деталей: ${response.movedDetailIds.length}`,
     );
   }, [loadOrder, storeApi]);
+
+  const handleTransferRows = useCallback((rowKeys: React.Key[]) => {
+    const disabledReason = getTransferRowsDisabledReason(rowKeys);
+    if (disabledReason) {
+      message.warning(disabledReason);
+      return;
+    }
+    setSelectedRowKeys(rowKeys);
+    setDragSelectionState(null);
+    setTransferOpen(true);
+  }, [getTransferRowsDisabledReason]);
 
   // Handle drag selection pending - show confirmation bar
   const handleDragSelectionPending = useCallback((
@@ -654,6 +665,8 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
           onQuickAdd={handleQuickAdd}
           onInsertAfter={handleInsertAfter}
           onCopyRow={handleCopyRow}
+          onTransferRows={handleTransferRows}
+          getTransferRowsDisabledReason={getTransferRowsDisabledReason}
           selectedRowKeys={selectedRowKeys}
           onSelectChange={handleSelectChange}
           highlightedRowKey={highlightedRowKey}
