@@ -29,7 +29,16 @@ describe('order resource requirements list guards', () => {
     expect(source).toContain('setHeaderFilters(createDefaultHeaderFilters())');
     expect(source).toContain('setSortState(DEFAULT_SORT_STATE)');
     expect(source).toContain('setPage(DEFAULT_PAGE)');
-    expect(source).toContain('setPageSize(DEFAULT_PAGE_SIZE)');
+    expect(source).not.toContain('setPageSize(DEFAULT_PAGE_SIZE)');
+  });
+
+  it('имеет быстрый фильтр периода «Сегодня» в одной строке шапки', () => {
+    expect(source).toContain('Сегодня');
+    expect(source).toContain('wrap={false}');
+    expect(source).toContain("overflowX: 'auto'");
+    expect(source).toContain("whiteSpace: 'nowrap'");
+    expect(source).toContain('style={{ width: 220 }}');
+    expect(source).toContain('setDateRange([today, today])');
   });
 
   it('имеет верхний чекбокс фильтра готовых раскроев', () => {
@@ -55,5 +64,12 @@ describe('order resource requirements list guards', () => {
     expect(source).toContain('downloadResourceDemandReport');
     expect(source).toContain('Формат отчёта');
     expect(source).toContain('Формат файла');
+  });
+
+  it('запоминает размер страницы через пользовательские настройки', () => {
+    expect(source).toContain('usePageSizePreference');
+    expect(source).toContain('order-resource-requirements:list');
+    expect(source).toContain('PAGE_SIZE_OPTIONS');
+    expect(source).toContain('rememberPageSize(nextPageSize)');
   });
 });

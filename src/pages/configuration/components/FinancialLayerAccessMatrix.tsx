@@ -5,6 +5,7 @@ import { useList } from '@refinedev/core';
 
 import { featureFlags } from '../../../config/featureFlags';
 import { useAppSettings, SETTING_KEYS } from '../../../hooks/useAppSettings';
+import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../../hooks/usePageSizePreference';
 import { can } from '../../../utils/permissions';
 import { getCurrentUserRoleKey, normalizeRoleKey } from '../../../utils/resourceVisibility';
 import {
@@ -57,11 +58,18 @@ export const FinancialLayerAccessMatrix: React.FC = () => {
   const [savingCell, setSavingCell] = useState<string | null>(null);
   const [accountSearch, setAccountSearch] = useState('');
   const [accountPage, setAccountPage] = useState(1);
-  const [accountPageSize, setAccountPageSize] = useState(20);
+  const { pageSize: accountPageSize, setPageSize: rememberAccountPageSize } = usePageSizePreference(
+    'configuration:financial-layer-users',
+    20,
+  );
 
   useEffect(() => {
     setMatrix(savedMatrix);
   }, [savedMatrix]);
+
+  useEffect(() => {
+    setAccountPage(1);
+  }, [accountPageSize]);
 
   const { data: rolesData, isLoading: isRolesLoading } = useList<FinancialRoleRow>({
     resource: 'roles',
@@ -297,10 +305,14 @@ export const FinancialLayerAccessMatrix: React.FC = () => {
               pageSize: accountPageSize,
               total: usersData?.total ?? 0,
               showSizeChanger: true,
-              pageSizeOptions: [20, 50, 100],
+              pageSizeOptions: PAGE_SIZE_OPTIONS,
               onChange: (page, pageSize) => {
+                if (pageSize !== accountPageSize) {
+                  rememberAccountPageSize(pageSize);
+                  setAccountPage(1);
+                  return;
+                }
                 setAccountPage(page);
-                setAccountPageSize(pageSize);
               },
             }}
             size="middle"
