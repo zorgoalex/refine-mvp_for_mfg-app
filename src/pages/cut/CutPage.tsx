@@ -705,8 +705,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const manualCommandRef = useRef<{ key: string; commandId: string } | null>(null);
   const isHistoricalResult = selectedResult !== null && isFrozenResultSelection;
   const pdfTemplateIsRequestOnly = isHistoricalResult || job?.status === 'archived';
-  // Per-user, per-job sheet preview orientation (portrait by default), persisted
-  // in localStorage. Landscape rotates the render server-side (labels stay upright).
+  // Per-user, per-job sheet preview orientation, persisted in localStorage.
+  // Vacuum-table jobs default to landscape; other profiles default to portrait.
+  // Landscape rotates the render server-side (labels stay upright).
   const [sheetPortrait, setSheetPortrait] = useState(true);
   // Per-user, per-job origin anchor for the rotated (portrait) render: when true
   // (default) the dense cluster sits at the view's top-left (transpose); when
@@ -762,16 +763,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     });
   }, []);
 
-  // Load this user's saved orientation + origin for the opened job (default
-  // portrait, origin top-left).
+  // Load this user's saved orientation + origin for the opened job. An explicit
+  // saved choice wins; otherwise vacuum-table defaults to landscape and all
+  // other profiles default to portrait.
   useEffect(() => {
     if (!job) return;
     const uid = authSession.getUser()?.id ?? 'anon';
-    setSheetPortrait(loadSheetOrientationPortrait(uid, job.cutJobId));
+    setSheetPortrait(loadSheetOrientationPortrait(
+      uid,
+      job.cutJobId,
+      !isVacuumTableProfile(job.paramProfileId, profiles),
+    ));
     setSheetOriginTopLeft(loadSheetOriginTopLeft(uid, job.cutJobId));
     setSheetAxisOrigin(loadSheetAxisOrigin(uid, job.cutJobId));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job?.cutJobId]);
+  }, [job?.cutJobId, job?.paramProfileId, profiles]);
 
   useEffect(() => {
     if (!job) {

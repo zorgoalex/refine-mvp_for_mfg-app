@@ -126,6 +126,12 @@ describe('cutPreviewHelpers', () => {
     it('returns false only for the explicit landscape value', () => {
       expect(parseStoredPortrait('landscape')).toBe(false);
     });
+    it('uses a landscape fallback while preserving an explicit user choice', () => {
+      expect(parseStoredPortrait(null, false)).toBe(false);
+      expect(parseStoredPortrait('garbage', false)).toBe(false);
+      expect(parseStoredPortrait('portrait', false)).toBe(true);
+      expect(parseStoredPortrait('landscape', true)).toBe(false);
+    });
   });
 
   describe('sheetOriginKey', () => {

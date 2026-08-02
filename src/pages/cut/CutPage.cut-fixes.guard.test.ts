@@ -25,7 +25,13 @@ describe('CutPage cut-fixes guard', () => {
 
   it('vacuum_table profile disables both grouping checkboxes', () => {
     expect(src).toMatch(/isVacuumTableProfile/);
-    expect(src.match(/isVacuumTableProfile\(job\.paramProfileId, profiles\)/g)).toHaveLength(2);
+    expect(src.match(/isVacuumTableProfile\(job\.paramProfileId, profiles\)/g)).toHaveLength(3);
+  });
+
+  it('defaults vacuum-table sheet previews to landscape', () => {
+    expect(src).toMatch(
+      /loadSheetOrientationPortrait\(\s*uid,\s*job\.cutJobId,\s*!isVacuumTableProfile\(job\.paramProfileId, profiles\)/,
+    );
   });
 
   it('renders a fixed back-to-top button once the page has been scrolled', () => {

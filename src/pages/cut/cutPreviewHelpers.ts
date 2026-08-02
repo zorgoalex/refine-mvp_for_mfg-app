@@ -47,17 +47,27 @@ export function sheetOrientationKey(userId: string, cutJobId: number): string {
   return `cut:sheet-orientation:${userId}:${cutJobId}`;
 }
 
-/** Parse a stored orientation value. Default (absent / unknown) = portrait. */
-export function parseStoredPortrait(raw: string | null): boolean {
-  return raw !== 'landscape';
+/** Parse a stored orientation value, preserving an explicit user choice and
+ * using the caller's profile-specific fallback for absent/unknown values. */
+export function parseStoredPortrait(raw: string | null, defaultPortrait = true): boolean {
+  if (raw === 'portrait') return true;
+  if (raw === 'landscape') return false;
+  return defaultPortrait;
 }
 
-/** Read the per-user per-job portrait preference (default portrait = true). */
-export function loadSheetOrientationPortrait(userId: string, cutJobId: number): boolean {
+/** Read the per-user per-job portrait preference. */
+export function loadSheetOrientationPortrait(
+  userId: string,
+  cutJobId: number,
+  defaultPortrait = true,
+): boolean {
   try {
-    return parseStoredPortrait(localStorage.getItem(sheetOrientationKey(userId, cutJobId)));
+    return parseStoredPortrait(
+      localStorage.getItem(sheetOrientationKey(userId, cutJobId)),
+      defaultPortrait,
+    );
   } catch {
-    return true;
+    return defaultPortrait;
   }
 }
 
