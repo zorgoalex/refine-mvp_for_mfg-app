@@ -413,6 +413,7 @@
 }
 
 .cnc-detailed-workspace__machine {
+  --cnc-detailed-machine-preview-max-height: clamp(220px, calc(100dvh - 280px), 720px);
   padding: clamp(4px, 0.65vw, 10px);
   border: 1px solid var(--app-border-soft);
   border-top: 3px solid #1677ff;
@@ -576,16 +577,30 @@
   font-size: 11px;
 }
 
-.cnc-detailed-machine-map__svg {
-  max-height: none;
+.cnc-bath-card__sheet-svg.cnc-detailed-machine-map__svg {
+  max-height: var(--cnc-detailed-machine-preview-max-height);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
   outline: 1px solid var(--app-image-outline);
   outline-offset: -1px;
 }
 
+.cnc-bath-card__sheet-svg.cnc-detailed-machine-map__svg svg {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: var(--cnc-detailed-machine-preview-max-height);
+}
+
 .cnc-detailed-machine-map__screenshot {
   display: block;
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   height: auto;
+  max-height: var(--cnc-detailed-machine-preview-max-height);
+  justify-self: center;
+  object-fit: contain;
   border-radius: 6px;
   outline: 1px solid var(--app-image-outline);
   outline-offset: -1px;

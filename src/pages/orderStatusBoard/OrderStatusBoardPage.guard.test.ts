@@ -446,6 +446,21 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-detailed-machine-map__toggle.ant-btn');
   });
 
+  it('fits detailed machine-file maps into the available viewport height', () => {
+    expect(css).toContain(
+      '--cnc-detailed-machine-preview-max-height: clamp(220px, calc(100dvh - 280px), 720px)',
+    );
+    expect(css).toMatch(
+      /\.cnc-bath-card__sheet-svg\.cnc-detailed-machine-map__svg\s*\{[^}]*max-height: var\(--cnc-detailed-machine-preview-max-height\);[^}]*overflow: hidden;[^}]*display: grid;[^}]*place-items: center;/s,
+    );
+    expect(css).toMatch(
+      /\.cnc-bath-card__sheet-svg\.cnc-detailed-machine-map__svg svg\s*\{[^}]*width: auto;[^}]*max-width: 100%;[^}]*max-height: var\(--cnc-detailed-machine-preview-max-height\);/s,
+    );
+    expect(css).toMatch(
+      /\.cnc-detailed-machine-map__screenshot\s*\{[^}]*max-width: 100%;[^}]*height: auto;[^}]*max-height: var\(--cnc-detailed-machine-preview-max-height\);[^}]*justify-self: center;[^}]*object-fit: contain;/s,
+    );
+  });
+
   it('forces the fifth orders column compact and half-width in detailed mode', () => {
     expect(page).toContain('const summaryOnly = detailedBathActive || isCncCardSummaryOnly(');
     expect(page).toContain("displayToggleVisible={!detailedBathActive && cardDisplayMode === 'compact'}");
