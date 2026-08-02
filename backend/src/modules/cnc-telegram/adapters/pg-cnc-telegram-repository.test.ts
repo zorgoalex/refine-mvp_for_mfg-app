@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { PgCncTelegramRepository } from './pg-cnc-telegram-repository';
+import {
+  cncWholeOrderKeys,
+  PgCncTelegramRepository,
+} from './pg-cnc-telegram-repository';
 
 describe('PgCncTelegramRepository', () => {
   it('uses database current date for today when caller omits date', async () => {
@@ -1460,6 +1463,334 @@ describe('PgCncTelegramRepository', () => {
 
     expect(queries.some((query) => /FROM orders o\s+JOIN order_details od/i.test(query.text))).toBe(false);
   });
+
+  it('marks only fully cut matched details when a packet first becomes completed and automation is enabled', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    let auditIndex = 0;
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return {
+            rows: [{
+              packet_id: '00000000-0000-0000-0000-000000000001',
+              source_version: 1,
+              payload_hash: 'sha256:previous',
+              completion_status: 'pending',
+              thumbs_up: false,
+            }],
+          };
+        }
+        if (/FROM unnest\(\$1::bigint\[\], \$2::bigint\[\]\)/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              source_version: 2,
+              completion_status: 'completed',
+              thumbs_up: true,
+              comments_json: [],
+            })],
+          };
+        }
+        if (/FROM app_settings/i.test(text)) {
+          return { rows: [{ is_active: true, value_json: { value: true } }] };
+        }
+        if (/FROM production_statuses/i.test(text) && /lower\(trim\(production_status_name\)\) = 'распилен'/i.test(text)) {
+          return {
+            rows: [{
+              production_status_id: 4,
+              production_status_name: 'Распилен',
+              production_status_code: 'cut',
+              sort_order: 40,
+            }],
+          };
+        }
+        if (/WITH completed_quantities AS/i.test(text)) {
+          return { rows: [{ order_id: 2689, detail_id: 3101 }] };
+        }
+        if (/FROM orders\s+WHERE \(\s*order_id = ANY/i.test(text)) {
+          return {
+            rows: [{
+              order_id: 2689,
+              order_name: '2689',
+              client_id: 77,
+              version: 8,
+              production_status_id: 2,
+              production_status_from_details_enabled: true,
+            }],
+          };
+        }
+        if (/FROM order_details details/i.test(text) && /FOR UPDATE OF details/i.test(text)) {
+          return {
+            rows: [{
+              order_id: 2689,
+              detail_id: 3101,
+              production_status_id: 2,
+              production_status_sort_order: 20,
+            }],
+          };
+        }
+        if (/UPDATE order_details/i.test(text) && /RETURNING order_id, detail_id/i.test(text)) {
+          return { rows: [{ order_id: 2689, detail_id: 3101 }] };
+        }
+        if (/UPDATE orders/i.test(text) && /version = version \+ 1/i.test(text)) {
+          return {
+            rows: [{
+              order_id: 2689,
+              order_name: '2689',
+              client_id: 77,
+              version: 9,
+              production_status_id: 4,
+              production_status_from_details_enabled: true,
+            }],
+          };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          auditIndex += 1;
+          return { rows: [{ audit_id: `audit-${auditIndex}` }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+    const dto = {
+      ...ingestDto(),
+      idempotencyKey: 'cnc:test:auto-cut-status',
+      source: { ...ingestDto().source, version: 2 },
+      cuttingSequenceNo: 12,
+      completionStatus: 'completed' as const,
+      comments: [],
+    };
+
+    await repo.ingest({ currentUser: user(), dto, requestId: 'request-cnc-auto-cut' });
+
+    const targetQuery = queries.find((query) => /WITH completed_quantities AS/i.test(query.text));
+    const orderLockIndex = queries.findIndex((query) =>
+      /FROM orders\s+WHERE \(\s*order_id = ANY/i.test(query.text),
+    );
+    const targetQueryIndex = queries.findIndex((query) => /WITH completed_quantities AS/i.test(query.text));
+    const detailUpdate = queries.find((query) =>
+      /UPDATE order_details/i.test(query.text) && /RETURNING order_id, detail_id/i.test(query.text),
+    );
+    const autoCutOutbox = queries.find((query) =>
+      /INSERT INTO outbox_events/i.test(query.text)
+      && query.params[0] === 'cnc.telegram_packet.auto_cut_status_applied',
+    );
+
+    expect(targetQuery?.params).toEqual([[3101], [], [2689]]);
+    expect(targetQuery?.text).toContain('SUM(GREATEST(item.quantity, 0))');
+    expect(targetQuery?.text).toContain('completed.completed_quantity, 0) >= GREATEST');
+    expect(orderLockIndex).toBeGreaterThan(-1);
+    expect(targetQueryIndex).toBeGreaterThan(orderLockIndex);
+    expect(detailUpdate?.params).toEqual([4, [3101]]);
+    expect(queries.some((query) =>
+      /SELECT recalc_order_production_status\(\$1\)/i.test(query.text)
+      && query.params[0] === 2689,
+    )).toBe(true);
+    expect(autoCutOutbox?.params[4]).toBe('cnc:test:auto-cut-status:auto-cut-status');
+  });
+
+  it('does not run auto-cut status changes when the setting is disabled', async () => {
+    const queries = await runAutoCutIngest({ settingRows: [] });
+
+    expect(queries.some((query) => /FROM app_settings/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /FROM production_statuses/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
+  });
+
+  it.each([
+    { is_active: false, value_json: { value: true } },
+    { is_active: true, value_json: { value: false } },
+    { is_active: true, value_json: 'true' },
+  ])('rejects inactive or malformed auto-cut setting %#', async (settingRow) => {
+    const queries = await runAutoCutIngest({ settingRows: [settingRow] });
+
+    expect(queries.some((query) => /FROM production_statuses/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
+  });
+
+  it('accepts the legacy raw-boolean setting representation', async () => {
+    const queries = await runAutoCutIngest({
+      settingRows: [{ is_active: true, value_json: true }],
+    });
+
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(true);
+  });
+
+  it('does not repeat auto-cut status changes for an already completed packet', async () => {
+    const queries = await runAutoCutIngest({
+      previousCompletionStatus: 'completed',
+      previousThumbsUp: true,
+    });
+
+    expect(queries.some((query) => /FROM app_settings/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
+  });
+
+  it('applies auto-cut status when a new packet is initially ingested as completed', async () => {
+    const queries = await runAutoCutIngest({ previousExists: false });
+
+    expect(queries.some((query) => /FROM app_settings/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(true);
+  });
+
+  it('does not run auto-cut status changes while the packet remains pending', async () => {
+    const queries = await runAutoCutIngest({
+      currentCompletionStatus: 'pending',
+      currentThumbsUp: false,
+    });
+
+    expect(queries.some((query) => /FROM app_settings/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
+  });
+
+  it('runs auto-cut status changes for a thumbs-up-only completion transition', async () => {
+    const queries = await runAutoCutIngest({
+      currentCompletionStatus: 'pending',
+      currentThumbsUp: true,
+    });
+
+    expect(queries.some((query) => /FROM app_settings/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(true);
+  });
+
+  it('stops auto-cut status changes when the target production status is unavailable', async () => {
+    const queries = await runAutoCutIngest({ statusRows: [] });
+
+    expect(queries.some((query) => /FROM production_statuses/i.test(query.text))).toBe(true);
+    expect(queries.some((query) =>
+      /pg_advisory_xact_lock/i.test(query.text)
+      && query.params[0] === 'status_automation.cnc_mark_cut_details',
+    )).toBe(false);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
+  });
+
+  it('resolves the target production status by stable code when its name differs', async () => {
+    const queries = await runAutoCutIngest({
+      statusRows: [{
+        production_status_id: 4,
+        production_status_name: 'Распил завершён',
+        production_status_code: 'cut',
+        sort_order: 40,
+      }],
+    });
+
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(true);
+  });
+
+  it('stops before loading a status when the completed packet has no matched details', async () => {
+    const queries = await runAutoCutIngest({ currentItemMatched: false });
+
+    expect(queries.some((query) => /FROM app_settings/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /FROM production_statuses/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
+  });
+
+  it('waits for the cumulative completed quantity before marking a detail as cut', async () => {
+    const queries = await runAutoCutIngest({ targetRows: [] });
+
+    expect(queries.some((query) => /WITH completed_quantities AS/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
+  });
+
+  it('does not downgrade a detail whose production status is later than «Распилен»', async () => {
+    const queries = await runAutoCutIngest({
+      detailRows: [{
+        order_id: 2689,
+        detail_id: 3101,
+        production_status_id: 7,
+        production_status_sort_order: 70,
+      }],
+    });
+
+    expect(queries.some((query) => /FOR UPDATE OF details/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
+  });
+
+  it('does not rewrite a detail already in the target production status', async () => {
+    const queries = await runAutoCutIngest({
+      detailRows: [{
+        order_id: 2689,
+        detail_id: 3101,
+        production_status_id: 4,
+        production_status_sort_order: 40,
+      }],
+    });
+
+    expect(queries.some((query) => /FOR UPDATE OF details/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
+  });
+
+  it('stops after the parent lock when all candidate orders disappeared', async () => {
+    const queries = await runAutoCutIngest({ orderRows: [] });
+
+    expect(queries.some((query) => /FROM orders\s+WHERE \(/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /WITH completed_quantities AS/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
+  });
+
+  it('updates eligible details without recalculating an order in manual production-status mode', async () => {
+    const queries = await runAutoCutIngest({
+      orderRows: [{
+        order_id: 2689,
+        order_name: '2689',
+        client_id: 77,
+        version: 8,
+        production_status_id: 2,
+        production_status_from_details_enabled: false,
+      }],
+      detailRows: [{
+        order_id: 2689,
+        detail_id: 3101,
+        production_status_id: null,
+        production_status_sort_order: null,
+      }],
+    });
+
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /recalc_order_production_status/i.test(query.text))).toBe(false);
+    expect(queries.some((query) =>
+      /INSERT INTO outbox_events/i.test(query.text)
+      && query.params[0] === 'cnc.telegram_packet.auto_cut_status_applied',
+    )).toBe(true);
+  });
+
+  it('passes an explicitly named whole order to the all-details target branch', async () => {
+    const queries = await runAutoCutIngest({ comments: ['2689 — весь заказ'] });
+    const orderLock = queries.find((query) =>
+      /FROM orders\s+WHERE \(\s*order_id = ANY/i.test(query.text),
+    );
+    const targetQuery = queries.find((query) => /WITH completed_quantities AS/i.test(query.text));
+
+    expect(orderLock?.params).toEqual([[2689], ['2689']]);
+    expect(targetQuery?.params).toEqual([[3101], [2689], [2689]]);
+    expect(targetQuery?.text).toContain('OR details.order_id = ANY($2::bigint[])');
+  });
+
+  it('resolves explicit and single-order «весь заказ» comments without guessing across orders', () => {
+    const item = (orderName: string) => ({ orderName }) as never;
+
+    expect(cncWholeOrderKeys({
+      comments: ['11380 — весь заказ'],
+      items: [item('11380'), item('11770')],
+    })).toEqual(['11380']);
+    expect(cncWholeOrderKeys({
+      comments: ['весь заказ'],
+      items: [item('11380')],
+    })).toEqual(['11380']);
+    expect(cncWholeOrderKeys({
+      comments: ['весь заказ'],
+      items: [item('11380'), item('11770')],
+    })).toEqual([]);
+  });
 });
 
 function user(): CurrentUser {
@@ -1578,6 +1909,148 @@ function packetRowBase() {
     match_status: 'matched',
     review_note: null,
   };
+}
+
+interface AutoCutIngestOptions {
+  previousExists?: boolean;
+  previousCompletionStatus?: 'pending' | 'completed' | 'failed';
+  previousThumbsUp?: boolean;
+  currentCompletionStatus?: 'pending' | 'completed' | 'failed';
+  currentThumbsUp?: boolean;
+  currentItemMatched?: boolean;
+  comments?: string[];
+  settingRows?: Array<{ is_active: boolean; value_json: unknown }>;
+  statusRows?: Array<{
+    production_status_id: number;
+    production_status_name: string;
+    production_status_code: string | null;
+    sort_order: number;
+  }>;
+  targetRows?: Array<{ order_id: number; detail_id: number }>;
+  orderRows?: Array<{
+    order_id: number;
+    order_name: string;
+    client_id: number | null;
+    version: number;
+    production_status_id: number | null;
+    production_status_from_details_enabled: boolean;
+  }>;
+  detailRows?: Array<{
+    order_id: number;
+    detail_id: number;
+    production_status_id: number | null;
+    production_status_sort_order: number | null;
+  }>;
+}
+
+async function runAutoCutIngest(options: AutoCutIngestOptions = {}) {
+  const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  let auditIndex = 0;
+  const targetRows = options.targetRows ?? [{ order_id: 2689, detail_id: 3101 }];
+  const orderRows = options.orderRows ?? [{
+    order_id: 2689,
+    order_name: '2689',
+    client_id: 77,
+    version: 8,
+    production_status_id: 2,
+    production_status_from_details_enabled: true,
+  }];
+  const detailRows = options.detailRows ?? [{
+    order_id: 2689,
+    detail_id: 3101,
+    production_status_id: 2,
+    production_status_sort_order: 20,
+  }];
+  const tx = {
+    query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+      queries.push({ text, params });
+      if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+        return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+      }
+      if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+        return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+      }
+      if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+        return {
+          rows: options.previousExists === false ? [] : [{
+            packet_id: '00000000-0000-0000-0000-000000000001',
+            source_version: 1,
+            payload_hash: 'sha256:previous',
+            completion_status: options.previousCompletionStatus ?? 'pending',
+            thumbs_up: options.previousThumbsUp ?? false,
+          }],
+        };
+      }
+      if (/FROM unnest\(\$1::bigint\[\], \$2::bigint\[\]\)/i.test(text)) {
+        return { rows: [] };
+      }
+      if (/FROM cnc_telegram_packets p/i.test(text)) {
+        return {
+          rows: [packetRow({
+            source_version: 2,
+            completion_status: options.currentCompletionStatus ?? 'completed',
+            thumbs_up: options.currentThumbsUp ?? true,
+            comments_json: options.comments ?? [],
+            ...(options.currentItemMatched === false
+              ? { match_order_id: null, match_detail_id: null, match_status: 'unmatched' }
+              : {}),
+          })],
+        };
+      }
+      if (/FROM app_settings/i.test(text)) {
+        return {
+          rows: options.settingRows ?? [{ is_active: true, value_json: { value: true } }],
+        };
+      }
+      if (/FROM production_statuses/i.test(text)
+        && /lower\(trim\(production_status_name\)\) = 'распилен'/i.test(text)) {
+        return {
+          rows: options.statusRows ?? [{
+            production_status_id: 4,
+            production_status_name: 'Распилен',
+            production_status_code: 'cut',
+            sort_order: 40,
+          }],
+        };
+      }
+      if (/WITH completed_quantities AS/i.test(text)) return { rows: targetRows };
+      if (/FROM orders\s+WHERE \(\s*order_id = ANY/i.test(text)) return { rows: orderRows };
+      if (/FROM order_details details/i.test(text) && /FOR UPDATE OF details/i.test(text)) {
+        return { rows: detailRows };
+      }
+      if (/UPDATE order_details/i.test(text) && /RETURNING order_id, detail_id/i.test(text)) {
+        return { rows: targetRows };
+      }
+      if (/UPDATE orders/i.test(text) && /version = version \+ 1/i.test(text)) {
+        return {
+          rows: orderRows.map((row) => ({
+            ...row,
+            version: row.version + 1,
+            production_status_id: 4,
+          })),
+        };
+      }
+      if (/INSERT INTO audit_log/i.test(text)) {
+        auditIndex += 1;
+        return { rows: [{ audit_id: `audit-${auditIndex}` }] };
+      }
+      return { rows: [] };
+    }),
+  };
+  const database = { transaction: vi.fn((handler) => handler(tx)) };
+  const repo = new PgCncTelegramRepository(database as never);
+  const dto = {
+    ...ingestDto(),
+    idempotencyKey: 'cnc:test:auto-cut-status-guard',
+    source: { ...ingestDto().source, version: 2 },
+    cuttingSequenceNo: 12,
+    completionStatus: options.currentCompletionStatus ?? 'completed',
+    thumbsUp: options.currentThumbsUp ?? true,
+    comments: options.comments ?? [],
+  };
+
+  await repo.ingest({ currentUser: user(), dto, requestId: 'request-cnc-auto-cut-guard' });
+  return queries;
 }
 
 function bathPlacementRow(overrides: Record<string, unknown> = {}) {

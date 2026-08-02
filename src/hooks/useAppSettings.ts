@@ -116,7 +116,7 @@ export const useAppSettings = (options?: { enabled?: boolean }): UseAppSettingsR
       }
 
       // Refetch to get updated data
-      refetch();
+      await refetch();
     },
     [settings, createSetting, updateSetting, refetch]
   );
@@ -173,6 +173,7 @@ export const SETTING_KEYS = {
   VLM_DEFAULTS: 'vlm.defaults',
   // Production workflow (production_status_events)
   PRODUCTION_WORKFLOW_DEFAULT: 'production.workflow.default',
+  STATUS_AUTOMATION_CNC_MARK_CUT_DETAILS: 'status_automation.cnc_mark_cut_details',
   RESOURCE_VISIBILITY_BY_ROLE: 'navigation.resource_visibility_by_role',
   ORDER_FINANCIAL_VISIBILITY: 'orders.financial_visibility',
 } as const;

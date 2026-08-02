@@ -29,6 +29,7 @@ import type {
   StatusAutomationRuleDto,
 } from '../../../api/types/statusAutomationApi.types';
 import { featureFlags } from '../../../config/featureFlags';
+import { SETTING_KEYS, useAppSettings } from '../../../hooks/useAppSettings';
 import { can } from '../../../utils/permissions';
 import { DeadlineTransitionRulesConfig } from './DeadlineTransitionRulesConfig';
 import {
@@ -59,6 +60,7 @@ interface PaymentStatusRow {
 interface ProductionStatusRow {
   production_status_id: number;
   production_status_name: string;
+  production_status_code?: string | null;
   sort_order?: number;
   is_active?: boolean;
 }
@@ -143,8 +145,15 @@ export function StatusAutomationConfig() {
   const [editor, setEditor] = useState<EditorMode>({ kind: 'closed' });
   const [form, setForm] = useState<StatusAutomationFormValues>(emptyForm());
   const [saving, setSaving] = useState(false);
+  const [autoCutStatusSaving, setAutoCutStatusSaving] = useState(false);
+  const [autoCutStatusEnabled, setAutoCutStatusEnabled] = useState(false);
   const [deletingRuleId, setDeletingRuleId] = useState<number | null>(null);
   const [updatingRuleId, setUpdatingRuleId] = useState<number | null>(null);
+  const {
+    getSetting,
+    saveSetting,
+    isLoading: appSettingsLoading,
+  } = useAppSettings({ enabled: canView });
 
   const { data: orderStatusesData, isLoading: orderStatusesLoading, error: orderStatusesError } =
     useList<OrderStatusRow>({
@@ -201,6 +210,18 @@ export function StatusAutomationConfig() {
       })),
     [productionStatusesData],
   );
+  const cutProductionStatusAvailable = useMemo(
+    () => (productionStatusesData?.data ?? []).some((status) =>
+      status.is_active !== false
+      && (
+        status.production_status_name.trim().toLocaleLowerCase('ru-RU') === 'распилен'
+        || status.production_status_code?.trim().toLocaleLowerCase('ru-RU') === 'cut'
+      ),
+    ),
+    [productionStatusesData],
+  );
+  const storedAutoCutStatusEnabled =
+    getSetting<boolean>(SETTING_KEYS.STATUS_AUTOMATION_CNC_MARK_CUT_DETAILS) === true;
   const catalogs = useMemo<StatusAutomationCatalogs>(
     () => ({
       orderStatusNames: new Map(orderStatusOptions.map((option) => [option.value, option.label])),
@@ -250,6 +271,12 @@ export function StatusAutomationConfig() {
   useEffect(() => {
     void loadRules();
   }, [loadRules]);
+
+  useEffect(() => {
+    if (!autoCutStatusSaving) {
+      setAutoCutStatusEnabled(storedAutoCutStatusEnabled);
+    }
+  }, [autoCutStatusSaving, storedAutoCutStatusEnabled]);
 
   useEffect(() => {
     const catalogError = orderStatusesError ?? paymentStatusesError ?? productionStatusesError;
@@ -389,6 +416,29 @@ export function StatusAutomationConfig() {
     }
   };
 
+  const handleAutoCutStatusToggle = async (enabled: boolean) => {
+    if (enabled && !cutProductionStatusAvailable) {
+      message.warning('Сначала добавьте активный производственный статус «Распилен»');
+      return;
+    }
+    const previous = autoCutStatusEnabled;
+    setAutoCutStatusEnabled(enabled);
+    setAutoCutStatusSaving(true);
+    try {
+      await saveSetting(
+        SETTING_KEYS.STATUS_AUTOMATION_CNC_MARK_CUT_DETAILS,
+        enabled,
+        'Автоматически ставить деталям статус «Распилен» при завершении карточки файла станка',
+      );
+      message.success(enabled ? 'Автостатус распила включён' : 'Автостатус распила выключен');
+    } catch (error) {
+      setAutoCutStatusEnabled(previous);
+      message.error(errorText(error, 'Не удалось сохранить настройку автостатуса распила'));
+    } finally {
+      setAutoCutStatusSaving(false);
+    }
+  };
+
   if (!canView) {
     return (
       <Alert
@@ -406,6 +456,40 @@ export function StatusAutomationConfig() {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%', padding: '16px 0' }}>
+      <Card size="small" title="Автостатус распила">
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Space
+            wrap
+            style={{ width: '100%', justifyContent: 'space-between' }}
+            align="center"
+          >
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <Text strong>Детали из завершённых файлов станка</Text>
+              <br />
+              <Text type="secondary">
+                При переходе карточки в «Распилено» ставить статус «Распилен» только её деталям.
+                Комментарий «весь заказ» применяет статус ко всем деталям указанного заказа.
+              </Text>
+            </div>
+            <Switch
+              checked={autoCutStatusEnabled}
+              loading={autoCutStatusSaving || appSettingsLoading}
+              disabled={!canManage || appSettingsLoading || (!cutProductionStatusAvailable && !autoCutStatusEnabled)}
+              aria-label="Автоматически отмечать распиленными детали завершённых файлов станка"
+              onChange={(checked) => void handleAutoCutStatusToggle(checked)}
+            />
+          </Space>
+          {!cutProductionStatusAvailable && !productionStatusesLoading && (
+            <Alert
+              type="warning"
+              showIcon
+              message="Производственный статус «Распилен» не найден"
+              description="Создайте или активируйте этот статус, чтобы включить автоматизацию."
+            />
+          )}
+        </Space>
+      </Card>
+
       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
         <Text strong>Правила автостатусов</Text>
         {canManage && (

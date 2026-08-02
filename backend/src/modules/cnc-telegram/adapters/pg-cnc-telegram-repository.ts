@@ -48,6 +48,8 @@ import type {
 
 const SOURCE = 'backend-cnc-telegram-command';
 const COMMAND_NAME = 'cnc.telegram_packet.ingest';
+const CNC_AUTO_CUT_STATUS_SETTING_KEY = 'status_automation.cnc_mark_cut_details';
+const CNC_AUTO_CUT_STATUS_EVENT = 'cnc.telegram_packet.auto_cut_status_applied';
 const IGNORED_ANALYSIS_WARNINGS = new Set([
   'RapidOCR found text, but no detail rows with order and size',
 ]);
@@ -108,6 +110,41 @@ interface PacketReplayRow extends QueryResultRow {
   packet_id: string;
   source_version: string | number;
   payload_hash: string;
+  completion_status: CncTelegramPacketDto['completionStatus'];
+  thumbs_up: boolean;
+}
+
+interface CncAutoCutSettingRow extends QueryResultRow {
+  is_active: boolean;
+  value_json: unknown;
+}
+
+interface CncAutoCutStatusRow extends QueryResultRow {
+  production_status_id: string | number;
+  production_status_name: string;
+  production_status_code: string | null;
+  sort_order: string | number;
+}
+
+interface CncAutoCutTargetRow extends QueryResultRow {
+  order_id: string | number;
+  detail_id: string | number;
+}
+
+interface CncAutoCutOrderRow extends QueryResultRow {
+  order_id: string | number;
+  order_name: string;
+  client_id: string | number | null;
+  version: string | number;
+  production_status_id: string | number | null;
+  production_status_from_details_enabled: boolean;
+}
+
+interface CncAutoCutDetailRow extends QueryResultRow {
+  order_id: string | number;
+  detail_id: string | number;
+  production_status_id: string | number | null;
+  production_status_sort_order: string | number | null;
 }
 
 interface IdempotencyRow extends QueryResultRow {
@@ -265,7 +302,7 @@ export class PgCncTelegramRepository
 
       const replay = await tx.query<PacketReplayRow>(
         `
-        SELECT packet_id, source_version, payload_hash
+        SELECT packet_id, source_version, payload_hash, completion_status, thumbs_up
         FROM cnc_telegram_packets
         WHERE external_packet_key = $1
         FOR UPDATE
@@ -273,6 +310,9 @@ export class PgCncTelegramRepository
         [command.dto.externalPacketKey],
       );
       const existing = replay.rows[0] ?? null;
+      const previouslyCompleted = existing
+        ? existing.completion_status === 'completed' || existing.thumbs_up === true
+        : false;
 
       if (existing && command.dto.source.version < Number(existing.source_version)) {
         await ensureCuttingSequenceNo(tx, existing.packet_id, command.dto, Number(command.currentUser.id));
@@ -345,6 +385,14 @@ export class PgCncTelegramRepository
         requestId,
         previousSourceVersion: existing ? Number(existing.source_version) : null,
       });
+      if (!previouslyCompleted && packetIsCompleted(packet)) {
+        await applyCompletedPacketAutoCutStatus(tx, {
+          command: resolvedCommand,
+          packet,
+          requestId,
+          packetAuditId: auditId,
+        });
+      }
       await enqueuePacketEvents(tx, resolvedCommand, packet, requestId, auditId);
 
       const response: CncTelegramIngestResponseDto = {
@@ -1985,6 +2033,352 @@ function packetOutboxPayload(
     commentsCount: packet.comments.length,
     idempotencyKey: command.dto.idempotencyKey,
   };
+}
+
+function packetIsCompleted(packet: CncTelegramPacketDto): boolean {
+  return packet.completionStatus === 'completed' || packet.thumbsUp;
+}
+
+async function applyCompletedPacketAutoCutStatus(
+  tx: TransactionClient,
+  input: {
+    command: IngestCncTelegramPacketCommand;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    packetAuditId: string;
+  },
+): Promise<void> {
+  if (!await cncAutoCutStatusEnabled(tx)) return;
+
+  const matchedDetailIds = Array.from(new Set(
+    input.packet.items
+      .filter((item) =>
+        item.matchStatus === 'matched'
+        && item.matchOrderId != null
+        && item.matchDetailId != null,
+      )
+      .map((item) => Number(item.matchDetailId))
+      .filter(isPositiveNumber),
+  ));
+  const matchedOrderIds = Array.from(new Set(
+    input.packet.items
+      .filter((item) =>
+        item.matchStatus === 'matched'
+        && item.matchOrderId != null
+        && item.matchDetailId != null,
+      )
+      .map((item) => Number(item.matchOrderId))
+      .filter(isPositiveNumber),
+  )).sort((left, right) => left - right);
+  const wholeOrderKeys = cncWholeOrderKeys(input.packet);
+  if (matchedDetailIds.length === 0 && wholeOrderKeys.length === 0) return;
+
+  const targetStatus = await loadCncAutoCutProductionStatus(tx);
+  if (!targetStatus) return;
+
+  // Completed quantities can be split across several machine-file cards. Serializing this
+  // calculation avoids two concurrent completions both missing the final cumulative threshold.
+  await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+    CNC_AUTO_CUT_STATUS_SETTING_KEY,
+  ]);
+
+  // Lock parent orders before checking their live detail quantities. Order edits use the same
+  // parent-before-detail discipline, so the quantity threshold below cannot be based on stale data.
+  const lockedOrders = await tx.query<CncAutoCutOrderRow>(
+    `
+    SELECT
+      order_id,
+      order_name,
+      client_id,
+      version,
+      production_status_id,
+      COALESCE(production_status_from_details_enabled, true) AS production_status_from_details_enabled
+    FROM orders
+    WHERE (
+        order_id = ANY($1::bigint[])
+        OR lower(trim(order_name)) = ANY($2::text[])
+      )
+      AND COALESCE(delete_flag, false) = false
+    ORDER BY order_id
+    FOR UPDATE
+    `,
+    [matchedOrderIds, wholeOrderKeys],
+  );
+  if (lockedOrders.rows.length === 0) return;
+
+  const wholeOrderKeySet = new Set(wholeOrderKeys);
+  const wholeOrderIds = lockedOrders.rows
+    .filter((row) => {
+      const orderKey = normalizeOptional(row.order_name)?.toLocaleLowerCase('ru-RU');
+      return orderKey ? wholeOrderKeySet.has(orderKey) : false;
+    })
+    .map((row) => toNumber(row.order_id));
+  const liveOrderIds = lockedOrders.rows.map((row) => toNumber(row.order_id));
+
+  const targets = await tx.query<CncAutoCutTargetRow>(
+    `
+    WITH completed_quantities AS (
+      SELECT
+        item.match_detail_id::bigint AS detail_id,
+        SUM(GREATEST(item.quantity, 0))::integer AS completed_quantity
+      FROM cnc_telegram_packet_items item
+      JOIN cnc_telegram_packets packet ON packet.packet_id = item.packet_id
+      WHERE item.match_status = 'matched'
+        AND item.match_detail_id = ANY($1::bigint[])
+        AND (packet.completion_status = 'completed' OR packet.thumbs_up = true)
+      GROUP BY item.match_detail_id
+    )
+    SELECT DISTINCT details.order_id, details.detail_id
+    FROM order_details details
+    JOIN orders ON orders.order_id = details.order_id
+    LEFT JOIN completed_quantities completed ON completed.detail_id = details.detail_id
+    WHERE COALESCE(details.delete_flag, false) = false
+      AND COALESCE(orders.delete_flag, false) = false
+      AND details.order_id = ANY($3::bigint[])
+      AND (
+        (
+          details.detail_id = ANY($1::bigint[])
+          AND COALESCE(completed.completed_quantity, 0) >= GREATEST(COALESCE(details.quantity, 1), 1)
+        )
+        OR details.order_id = ANY($2::bigint[])
+      )
+    ORDER BY details.order_id, details.detail_id
+    `,
+    [matchedDetailIds, wholeOrderIds, liveOrderIds],
+  );
+  if (targets.rows.length === 0) return;
+
+  const targetDetailIds = targets.rows.map((row) => toNumber(row.detail_id));
+  const liveOrderIdSet = new Set(liveOrderIds);
+
+  const lockedDetails = await tx.query<CncAutoCutDetailRow>(
+    `
+    SELECT
+      details.order_id,
+      details.detail_id,
+      details.production_status_id,
+      current_status.sort_order AS production_status_sort_order
+    FROM order_details details
+    LEFT JOIN production_statuses current_status
+      ON current_status.production_status_id = details.production_status_id
+    WHERE details.detail_id = ANY($1::bigint[])
+      AND COALESCE(details.delete_flag, false) = false
+    ORDER BY details.order_id, details.detail_id
+    FOR UPDATE OF details
+    `,
+    [targetDetailIds],
+  );
+  const eligibleDetailIds = lockedDetails.rows
+    .filter((row) => {
+      const orderId = toNumber(row.order_id);
+      if (!liveOrderIdSet.has(orderId)) return false;
+      if (row.production_status_id === null) return true;
+      const currentStatusId = toNumber(row.production_status_id);
+      if (currentStatusId === toNumber(targetStatus.production_status_id)) return false;
+      if (row.production_status_sort_order === null) return false;
+      return Number(row.production_status_sort_order) <= Number(targetStatus.sort_order);
+    })
+    .map((row) => toNumber(row.detail_id));
+  if (eligibleDetailIds.length === 0) return;
+
+  const updated = await tx.query<CncAutoCutTargetRow>(
+    `
+    UPDATE order_details
+    SET production_status_id = $1
+    WHERE detail_id = ANY($2::bigint[])
+      AND COALESCE(delete_flag, false) = false
+      AND production_status_id IS DISTINCT FROM $1
+    RETURNING order_id, detail_id
+    `,
+    [toNumber(targetStatus.production_status_id), eligibleDetailIds],
+  );
+  if (updated.rows.length === 0) return;
+
+  const changedDetailIdsByOrder = new Map<number, number[]>();
+  for (const row of updated.rows) {
+    const orderId = toNumber(row.order_id);
+    const detailIds = changedDetailIdsByOrder.get(orderId) ?? [];
+    detailIds.push(toNumber(row.detail_id));
+    changedDetailIdsByOrder.set(orderId, detailIds);
+  }
+  const changedOrderIds = Array.from(changedDetailIdsByOrder.keys()).sort((left, right) => left - right);
+  const orderById = new Map(
+    lockedOrders.rows.map((row) => [toNumber(row.order_id), row] as const),
+  );
+  for (const orderId of changedOrderIds) {
+    if (orderById.get(orderId)?.production_status_from_details_enabled !== false) {
+      await tx.query('SELECT recalc_order_production_status($1)', [orderId]);
+    }
+  }
+
+  const bumpedOrders = await tx.query<CncAutoCutOrderRow>(
+    `
+    UPDATE orders
+    SET version = version + 1, updated_at = now()
+    WHERE order_id = ANY($1::bigint[])
+    RETURNING
+      order_id,
+      order_name,
+      client_id,
+      version,
+      production_status_id,
+      COALESCE(production_status_from_details_enabled, true) AS production_status_from_details_enabled
+    `,
+    [changedOrderIds],
+  );
+  const statusId = toNumber(targetStatus.production_status_id);
+  const changedDetailIds = updated.rows.map((row) => toNumber(row.detail_id));
+  const autoCutAuditId = await auditService.record(tx, {
+    event: CNC_AUTO_CUT_STATUS_EVENT,
+    entityType: 'cnc_telegram_packet',
+    entityId: input.packet.packetId,
+    actorUserId: input.command.currentUser.id,
+    actorUsername: input.command.currentUser.username ?? null,
+    actorRole: input.command.currentUser.role ?? null,
+    requestId: input.requestId,
+    source: SOURCE,
+    statusField: 'productionDetailBatch',
+    statusId,
+    statusName: targetStatus.production_status_name,
+    statusCode: targetStatus.production_status_code,
+    before: {
+      packetCompletionStatus: 'pending',
+    },
+    after: {
+      packetCompletionStatus: 'completed',
+      changedOrderIds,
+      changedDetailIds,
+    },
+    diff: {
+      changedDetailIdsByOrder: Object.fromEntries(changedDetailIdsByOrder),
+      productionStatusId: statusId,
+    },
+    metadata: {
+      source: SOURCE,
+      action: 'cnc_completed_packet_auto_cut_status',
+      settingKey: CNC_AUTO_CUT_STATUS_SETTING_KEY,
+      packetAuditId: input.packetAuditId,
+      externalPacketKey: input.packet.externalPacketKey,
+      cuttingSequenceNo: input.packet.cuttingSequenceNo,
+      matchedDetailIds,
+      wholeOrderKeys,
+      requestId: input.requestId,
+    },
+    relatedEntities: [
+      ...changedOrderIds.map((entityId) => ({ entityType: 'order', entityId })),
+      ...changedDetailIds.map((entityId) => ({ entityType: 'order_detail', entityId })),
+    ],
+  });
+
+  await enqueueOutbox(tx, {
+    eventType: CNC_AUTO_CUT_STATUS_EVENT,
+    aggregateType: 'cnc_telegram_packet',
+    aggregateId: input.packet.packetId,
+    idempotencyKey: `${input.command.dto.idempotencyKey}:auto-cut-status`,
+    payload: {
+      eventType: CNC_AUTO_CUT_STATUS_EVENT,
+      actorUserId: input.command.currentUser.id,
+      requestId: input.requestId,
+      auditId: autoCutAuditId,
+      packetId: input.packet.packetId,
+      externalPacketKey: input.packet.externalPacketKey,
+      cuttingSequenceNo: input.packet.cuttingSequenceNo,
+      productionStatusId: statusId,
+      productionStatusCode: targetStatus.production_status_code,
+      changedOrderIds,
+      changedDetailIds,
+      changedDetailIdsByOrder: Object.fromEntries(changedDetailIdsByOrder),
+      orders: bumpedOrders.rows.map((row) => ({
+        orderId: toNumber(row.order_id),
+        clientId: row.client_id === null ? null : toNumber(row.client_id),
+        version: toNumber(row.version),
+        productionStatusId: row.production_status_id === null
+          ? null
+          : toNumber(row.production_status_id),
+        productionStatusFromDetailsEnabled: row.production_status_from_details_enabled,
+      })),
+      idempotencyKey: input.command.dto.idempotencyKey,
+    },
+  });
+}
+
+async function cncAutoCutStatusEnabled(tx: TransactionClient): Promise<boolean> {
+  const result = await tx.query<CncAutoCutSettingRow>(
+    `
+    SELECT is_active, value_json
+    FROM app_settings
+    WHERE setting_key = $1
+    LIMIT 1
+    `,
+    [CNC_AUTO_CUT_STATUS_SETTING_KEY],
+  );
+  const row = result.rows[0];
+  if (!row?.is_active) return false;
+  if (row.value_json === true) return true;
+  if (!row.value_json || typeof row.value_json !== 'object' || Array.isArray(row.value_json)) {
+    return false;
+  }
+  const value = row.value_json as Record<string, unknown>;
+  return value.value === true || value.enabled === true;
+}
+
+async function loadCncAutoCutProductionStatus(
+  tx: TransactionClient,
+): Promise<CncAutoCutStatusRow | null> {
+  const result = await tx.query<CncAutoCutStatusRow>(
+    `
+    SELECT
+      production_status_id,
+      production_status_name,
+      production_status_code,
+      sort_order
+    FROM production_statuses
+    WHERE COALESCE(is_active, true) = true
+      AND sort_order IS NOT NULL
+      AND (
+        lower(trim(production_status_name)) = 'распилен'
+        OR lower(trim(production_status_code)) = 'cut'
+      )
+    ORDER BY
+      CASE WHEN lower(trim(production_status_name)) = 'распилен' THEN 0 ELSE 1 END,
+      production_status_id
+    LIMIT 1
+    `,
+  );
+  return result.rows[0] ?? null;
+}
+
+export function cncWholeOrderKeys(
+  packet: Pick<CncTelegramPacketDto, 'comments' | 'items'>,
+): string[] {
+  const keys = new Set<string>();
+  const packetOrderKeys = Array.from(new Set(
+    packet.items
+      .map((item) => normalizeOptional(item.orderName)?.toLocaleLowerCase('ru-RU'))
+      .filter((value): value is string => Boolean(value)),
+  ));
+
+  for (const comment of packet.comments) {
+    if (!/весь\s+заказ/iu.test(comment)) continue;
+    const normalizedComment = comment.toLocaleLowerCase('ru-RU');
+    let explicitOrderFound = false;
+    for (const orderKey of packetOrderKeys) {
+      if (normalizedComment.includes(orderKey)) {
+        keys.add(orderKey);
+        explicitOrderFound = true;
+      }
+    }
+    for (const match of comment.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g)) {
+      if (match[2]) {
+        keys.add(match[2].toLocaleLowerCase('ru-RU'));
+        explicitOrderFound = true;
+      }
+    }
+    if (!explicitOrderFound && packetOrderKeys.length === 1) {
+      keys.add(packetOrderKeys[0]);
+    }
+  }
+  return Array.from(keys);
 }
 
 async function reconcileIdempotency(
