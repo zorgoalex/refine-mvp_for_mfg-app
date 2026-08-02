@@ -19,18 +19,40 @@ import type {
 const FILTER_OPTIONS_RECENT_LIMIT = 5000;
 const FILTER_OPTION_LIMIT = 200;
 
-interface CountRow extends QueryResultRow { total: number | string }
+interface CountRow extends QueryResultRow {
+  total: number | string;
+}
 interface AuditRow extends QueryResultRow {
-  audit_id: string; event: string; entity_type: string | null; entity_id: string | null;
-  user_id: string | number | null; username: string | null; role: string | null; source: string | null;
-  related_order_id: string | number | null; related_client_id: string | number | null;
-  related_payment_id: string | number | null; related_deadline_id: string | number | null;
+  audit_id: string;
+  event: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  entity_name: string | null;
+  entity_detail_number: string | number | null;
+  user_id: string | number | null;
+  username: string | null;
+  role: string | null;
+  source: string | null;
+  related_order_id: string | number | null;
+  related_client_id: string | number | null;
+  related_order_name: string | null;
+  related_client_name: string | null;
+  related_payment_id: string | number | null;
+  related_deadline_id: string | number | null;
   related_production_event_id: string | number | null;
   related_user_id: string | number | null;
-  status_field: string | null; status_id: string | number | null; status_name: string | null;
-  status_code: string | null; stage_code: string | null; request_id: string;
-  ip_address: string | null; user_agent: string | null;
-  before_json: unknown; after_json: unknown; diff_json: unknown; metadata_json: unknown;
+  status_field: string | null;
+  status_id: string | number | null;
+  status_name: string | null;
+  status_code: string | null;
+  stage_code: string | null;
+  request_id: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  before_json: unknown;
+  after_json: unknown;
+  diff_json: unknown;
+  metadata_json: unknown;
   related_entities: unknown;
   created_at: string | Date;
 }
@@ -54,17 +76,75 @@ interface AuditFilterOptionsRow extends QueryResultRow {
 }
 
 const SELECT_COLUMNS = `
-  audit_id, event, entity_type, entity_id, user_id, username, role, source,
-  related_order_id, related_client_id, related_payment_id, related_deadline_id, related_production_event_id,
-  related_user_id,
-  status_field, status_id, status_name, status_code, stage_code,
-  request_id, ip_address, user_agent, before_json, after_json, diff_json, metadata_json,
+  audit_log.audit_id, audit_log.event, audit_log.entity_type, audit_log.entity_id,
   COALESCE(
-    (SELECT json_agg(json_build_object('entityType', r.entity_type, 'entityId', r.entity_id))
-     FROM audit_log_related_entity r WHERE r.audit_id = audit_log.audit_id),
+    CASE WHEN audit_log.entity_type = 'order' THEN entity_order.order_name END,
+    CASE WHEN audit_log.entity_type = 'client' THEN entity_client.client_name::text END
+  ) AS entity_name,
+  CASE
+    WHEN audit_log.entity_type IN ('order_detail', 'detail') THEN entity_detail.detail_number
+    ELSE NULL
+  END AS entity_detail_number,
+  audit_log.user_id, audit_log.username, audit_log.role, audit_log.source,
+  audit_log.related_order_id, related_order.order_name AS related_order_name,
+  audit_log.related_client_id, related_client.client_name::text AS related_client_name,
+  audit_log.related_payment_id, audit_log.related_deadline_id, audit_log.related_production_event_id,
+  audit_log.related_user_id,
+  audit_log.status_field, audit_log.status_id, audit_log.status_name, audit_log.status_code, audit_log.stage_code,
+  audit_log.request_id, audit_log.ip_address, audit_log.user_agent,
+  audit_log.before_json, audit_log.after_json, audit_log.diff_json, audit_log.metadata_json,
+  COALESCE(
+    (
+      SELECT json_agg(
+        json_build_object(
+          'entityType', r.entity_type,
+          'entityId', r.entity_id,
+          'entityName', CASE
+            WHEN r.entity_type = 'order' THEN related_entity_order.order_name
+            WHEN r.entity_type = 'client' THEN related_entity_client.client_name::text
+            ELSE NULL
+          END,
+          'detailNumber', CASE
+            WHEN r.entity_type IN ('order_detail', 'detail') THEN related_entity_detail.detail_number
+            ELSE NULL
+          END
+        )
+      )
+      FROM audit_log_related_entity r
+      LEFT JOIN orders related_entity_order
+        ON r.entity_type = 'order' AND related_entity_order.order_id = r.entity_id
+      LEFT JOIN clients related_entity_client
+        ON r.entity_type = 'client' AND related_entity_client.client_id = r.entity_id
+      LEFT JOIN order_details related_entity_detail
+        ON r.entity_type IN ('order_detail', 'detail') AND related_entity_detail.detail_id = r.entity_id
+      WHERE r.audit_id = audit_log.audit_id
+    ),
     '[]'::json
   ) AS related_entities,
-  created_at
+  audit_log.created_at
+`;
+
+const AUDIT_LABEL_JOINS = `
+  LEFT JOIN orders related_order ON related_order.order_id = audit_log.related_order_id
+  LEFT JOIN clients related_client ON related_client.client_id = audit_log.related_client_id
+  LEFT JOIN orders entity_order
+    ON entity_order.order_id = CASE
+      WHEN audit_log.entity_type = 'order' AND audit_log.entity_id ~ '^[0-9]{1,18}$'
+        THEN audit_log.entity_id::bigint
+      ELSE NULL
+    END
+  LEFT JOIN clients entity_client
+    ON entity_client.client_id = CASE
+      WHEN audit_log.entity_type = 'client' AND audit_log.entity_id ~ '^[0-9]{1,18}$'
+        THEN audit_log.entity_id::bigint
+      ELSE NULL
+    END
+  LEFT JOIN order_details entity_detail
+    ON entity_detail.detail_id = CASE
+      WHEN audit_log.entity_type IN ('order_detail', 'detail') AND audit_log.entity_id ~ '^[0-9]{1,18}$'
+        THEN audit_log.entity_id::bigint
+      ELSE NULL
+    END
 `;
 
 const FILTER_OPTIONS_SQL = `
@@ -81,6 +161,28 @@ related AS (
   FROM audit_log_related_entity r
   JOIN recent ON recent.audit_id = r.audit_id
   GROUP BY r.entity_type, r.entity_id
+),
+related_enriched AS (
+  SELECT
+    related.entity_type,
+    related.entity_id,
+    related.latest,
+    CASE
+      WHEN related.entity_type = 'order' THEN related_order.order_name
+      WHEN related.entity_type = 'client' THEN related_client.client_name::text
+      ELSE NULL
+    END AS entity_name,
+    CASE
+      WHEN related.entity_type IN ('order_detail', 'detail') THEN related_detail.detail_number
+      ELSE NULL
+    END AS detail_number
+  FROM related
+  LEFT JOIN orders related_order
+    ON related.entity_type = 'order' AND related_order.order_id = related.entity_id
+  LEFT JOIN clients related_client
+    ON related.entity_type = 'client' AND related_client.client_id = related.entity_id
+  LEFT JOIN order_details related_detail
+    ON related.entity_type IN ('order_detail', 'detail') AND related_detail.detail_id = related.entity_id
 )
 SELECT
   COALESCE((SELECT jsonb_agg(event ORDER BY latest DESC, event)
@@ -123,37 +225,41 @@ SELECT
       LIMIT $2
     ) s), '[]'::jsonb) AS related_user_ids,
   COALESCE((SELECT jsonb_agg(entity_type ORDER BY latest DESC, entity_type)
-    FROM (SELECT entity_type, max(latest) AS latest FROM related GROUP BY entity_type ORDER BY latest DESC, entity_type LIMIT $2) s), '[]'::jsonb) AS related_entity_types,
-  COALESCE((SELECT jsonb_agg(jsonb_build_object('entityType', entity_type, 'entityId', entity_id) ORDER BY latest DESC, entity_type, entity_id)
-    FROM (SELECT entity_type, entity_id, latest FROM related ORDER BY latest DESC, entity_type, entity_id LIMIT $2) s), '[]'::jsonb) AS related_entities,
+    FROM (SELECT entity_type, max(latest) AS latest FROM related_enriched GROUP BY entity_type ORDER BY latest DESC, entity_type LIMIT $2) s), '[]'::jsonb) AS related_entity_types,
+  COALESCE((SELECT jsonb_agg(jsonb_build_object('entityType', entity_type, 'entityId', entity_id, 'entityName', entity_name, 'detailNumber', detail_number) ORDER BY latest DESC, entity_type, entity_id)
+    FROM (SELECT entity_type, entity_id, entity_name, detail_number, latest FROM related_enriched ORDER BY latest DESC, entity_type, entity_id LIMIT $2) s), '[]'::jsonb) AS related_entities,
   COALESCE((SELECT jsonb_agg(request_id ORDER BY latest DESC, request_id)
     FROM (SELECT request_id, max(created_at) AS latest FROM recent WHERE request_id IS NOT NULL GROUP BY request_id ORDER BY latest DESC, request_id LIMIT $2) s), '[]'::jsonb) AS request_ids
 `;
 
-function buildWhere(filters: AuditLogFilters): { where: string; params: unknown[] } {
+function buildWhere(filters: AuditLogFilters): {
+  where: string;
+  params: unknown[];
+} {
   const clauses: string[] = [];
   const params: unknown[] = [];
   const add = (column: string, op: string, value: unknown) => {
     params.push(value);
     clauses.push(`${column} ${op} $${params.length}`);
   };
-  if (filters.event) add('event', '=', filters.event);
-  if (filters.entityType) add('entity_type', '=', filters.entityType);
-  if (filters.entityId) add('entity_id', '=', filters.entityId);
-  if (filters.userId != null) add('user_id', '=', filters.userId);
-  if (filters.role) add('role', '=', filters.role);
-  if (filters.source) add('source', '=', filters.source);
-  if (filters.relatedOrderId != null) add('related_order_id', '=', filters.relatedOrderId);
-  if (filters.relatedClientId != null) add('related_client_id', '=', filters.relatedClientId);
-  if (filters.relatedPaymentId != null) add('related_payment_id', '=', filters.relatedPaymentId);
-  if (filters.relatedDeadlineId != null) add('related_deadline_id', '=', filters.relatedDeadlineId);
-  if (filters.relatedProductionEventId != null) add('related_production_event_id', '=', filters.relatedProductionEventId);
+  if (filters.event) add('audit_log.event', '=', filters.event);
+  if (filters.entityType) add('audit_log.entity_type', '=', filters.entityType);
+  if (filters.entityId) add('audit_log.entity_id', '=', filters.entityId);
+  if (filters.userId != null) add('audit_log.user_id', '=', filters.userId);
+  if (filters.role) add('audit_log.role', '=', filters.role);
+  if (filters.source) add('audit_log.source', '=', filters.source);
+  if (filters.relatedOrderId != null) add('audit_log.related_order_id', '=', filters.relatedOrderId);
+  if (filters.relatedClientId != null) add('audit_log.related_client_id', '=', filters.relatedClientId);
+  if (filters.relatedPaymentId != null) add('audit_log.related_payment_id', '=', filters.relatedPaymentId);
+  if (filters.relatedDeadlineId != null) add('audit_log.related_deadline_id', '=', filters.relatedDeadlineId);
+  if (filters.relatedProductionEventId != null)
+    add('audit_log.related_production_event_id', '=', filters.relatedProductionEventId);
   if (filters.relatedUserId != null) {
     params.push(filters.relatedUserId);
     const p = params.length;
     clauses.push(
-      `(related_user_id = $${p} OR EXISTS (SELECT 1 FROM audit_log_related_entity r ` +
-        `WHERE r.audit_id = audit_log.audit_id AND r.entity_type = 'user' AND r.entity_id = $${p}))`,
+      `(audit_log.related_user_id = $${p} OR EXISTS (SELECT 1 FROM audit_log_related_entity r ` +
+        `WHERE r.audit_id = audit_log.audit_id AND r.entity_type = 'user' AND r.entity_id = $${p}))`
     );
   }
   if (filters.relatedEntityType && filters.relatedEntityId != null) {
@@ -163,13 +269,16 @@ function buildWhere(filters: AuditLogFilters): { where: string; params: unknown[
     const pid = params.length;
     clauses.push(
       `EXISTS (SELECT 1 FROM audit_log_related_entity r ` +
-        `WHERE r.audit_id = audit_log.audit_id AND r.entity_type = $${pt} AND r.entity_id = $${pid})`,
+        `WHERE r.audit_id = audit_log.audit_id AND r.entity_type = $${pt} AND r.entity_id = $${pid})`
     );
   }
-  if (filters.requestId) add('request_id', '=', filters.requestId);
-  if (filters.createdFrom) add('created_at', '>=', filters.createdFrom);
-  if (filters.createdTo) add('created_at', '<=', filters.createdTo);
-  return { where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params };
+  if (filters.requestId) add('audit_log.request_id', '=', filters.requestId);
+  if (filters.createdFrom) add('audit_log.created_at', '>=', filters.createdFrom);
+  if (filters.createdTo) add('audit_log.created_at', '<=', filters.createdTo);
+  return {
+    where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '',
+    params,
+  };
 }
 
 function num(value: string | number | null): number | null {
@@ -178,18 +287,26 @@ function num(value: string | number | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function str(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
 function mapRow(row: AuditRow): AuditLogEventDto {
   return {
     auditId: row.audit_id,
     event: row.event,
     entityType: row.entity_type,
     entityId: row.entity_id,
+    entityName: str(row.entity_name),
+    entityDetailNumber: num(row.entity_detail_number),
     userId: num(row.user_id),
     username: row.username,
     role: row.role,
     source: row.source,
     relatedOrderId: num(row.related_order_id),
+    relatedOrderName: str(row.related_order_name),
     relatedClientId: num(row.related_client_id),
+    relatedClientName: str(row.related_client_name),
     relatedPaymentId: num(row.related_payment_id),
     relatedDeadlineId: num(row.related_deadline_id),
     relatedProductionEventId: num(row.related_production_event_id),
@@ -207,10 +324,24 @@ function mapRow(row: AuditRow): AuditLogEventDto {
     diff: row.diff_json == null ? null : redactLogValue(row.diff_json),
     metadata: row.metadata_json == null ? null : redactLogValue(row.metadata_json),
     relatedEntities: Array.isArray(row.related_entities)
-      ? (row.related_entities as Array<{ entityType: string; entityId: unknown }>).map((e) => ({
-          entityType: e.entityType,
-          entityId: num(e.entityId as string | number | null) ?? 0,
-        }))
+      ? (
+          row.related_entities as Array<{
+            entityType: string;
+            entityId: unknown;
+            entityName?: unknown;
+            detailNumber?: unknown;
+          }>
+        ).map((e) => {
+          const entity: AuditLogEventDto['relatedEntities'][number] = {
+            entityType: e.entityType,
+            entityId: num(e.entityId as string | number | null) ?? 0,
+          };
+          const entityName = str(e.entityName);
+          const detailNumber = num(e.detailNumber as string | number | null);
+          if (entityName) entity.entityName = entityName;
+          if (detailNumber != null) entity.detailNumber = detailNumber;
+          return entity;
+        })
       : [],
     createdAt: typeof row.created_at === 'string' ? row.created_at : row.created_at.toISOString(),
   };
@@ -240,7 +371,11 @@ function userOptions(value: unknown): AuditUserFilterOptionDto[] {
   const result: AuditUserFilterOptionDto[] = [];
   for (const item of value) {
     if (!item || typeof item !== 'object') continue;
-    const row = item as { userId?: unknown; username?: unknown; role?: unknown };
+    const row = item as {
+      userId?: unknown;
+      username?: unknown;
+      role?: unknown;
+    };
     const userId = num(row.userId as string | number | null);
     if (userId == null || seen.has(userId)) continue;
     seen.add(userId);
@@ -259,14 +394,27 @@ function relatedEntityOptions(value: unknown): AuditRelatedEntityFilterOptionDto
   const result: AuditRelatedEntityFilterOptionDto[] = [];
   for (const item of value) {
     if (!item || typeof item !== 'object') continue;
-    const row = item as { entityType?: unknown; entityId?: unknown };
+    const row = item as {
+      entityType?: unknown;
+      entityId?: unknown;
+      entityName?: unknown;
+      detailNumber?: unknown;
+    };
     if (typeof row.entityType !== 'string' || row.entityType.trim().length === 0) continue;
     const entityId = num(row.entityId as string | number | null);
     if (entityId == null) continue;
     const key = `${row.entityType}:${entityId}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push({ entityType: row.entityType, entityId });
+    const option: AuditRelatedEntityFilterOptionDto = {
+      entityType: row.entityType,
+      entityId,
+    };
+    const entityName = str(row.entityName);
+    const detailNumber = num(row.detailNumber as string | number | null);
+    if (entityName) option.entityName = entityName;
+    if (detailNumber != null) option.detailNumber = detailNumber;
+    result.push(option);
   }
   return result;
 }
@@ -298,14 +446,14 @@ export class PgAuditLogRepository implements AuditLogRepositoryPort {
     const { where, params } = buildWhere(command.filters);
     const countResult = await this.database.query<CountRow>(
       `SELECT COUNT(*)::int AS total FROM audit_log ${where}`,
-      params,
+      params
     );
     const total = Number(countResult.rows[0]?.total ?? 0);
     const limitParam = params.length + 1;
     const offsetParam = params.length + 2;
     const rowsResult = await this.database.query<AuditRow>(
-      `SELECT ${SELECT_COLUMNS} FROM audit_log ${where} ORDER BY created_at DESC, audit_id DESC LIMIT $${limitParam} OFFSET $${offsetParam}`,
-      [...params, command.pageSize, (command.page - 1) * command.pageSize],
+      `SELECT ${SELECT_COLUMNS} FROM audit_log ${AUDIT_LABEL_JOINS} ${where} ORDER BY audit_log.created_at DESC, audit_log.audit_id DESC LIMIT $${limitParam} OFFSET $${offsetParam}`,
+      [...params, command.pageSize, (command.page - 1) * command.pageSize]
     );
     return {
       data: rowsResult.rows.map(mapRow),
@@ -320,10 +468,10 @@ export class PgAuditLogRepository implements AuditLogRepositoryPort {
   }
 
   async filterOptions(command: AuditFilterOptionsCommand): Promise<AuditFilterOptionsResponseDto> {
-    const result = await this.database.query<AuditFilterOptionsRow>(
-      FILTER_OPTIONS_SQL,
-      [FILTER_OPTIONS_RECENT_LIMIT, FILTER_OPTION_LIMIT],
-    );
+    const result = await this.database.query<AuditFilterOptionsRow>(FILTER_OPTIONS_SQL, [
+      FILTER_OPTIONS_RECENT_LIMIT,
+      FILTER_OPTION_LIMIT,
+    ]);
     return {
       data: mapFilterOptions(result.rows[0]),
       requestId: command.requestId,

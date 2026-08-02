@@ -57,8 +57,7 @@ const EVENT_TITLES: Record<string, string> = {
   'orders.detail_transfer': 'Перенесены детали заказа',
   'orders.status_change': STATUS_EVENT_CONFIG['orders.status_change'].title,
   'orders.production_status_change': STATUS_EVENT_CONFIG['orders.production_status_change'].title,
-  'orders.detail_production_status_change':
-    STATUS_EVENT_CONFIG['orders.detail_production_status_change'].title,
+  'orders.detail_production_status_change': STATUS_EVENT_CONFIG['orders.detail_production_status_change'].title,
   'orders.detail_production_status_batch_change':
     STATUS_EVENT_CONFIG['orders.detail_production_status_batch_change'].title,
   'orders.production_status_mode_restore': 'Включён авторасчёт производственного статуса',
@@ -160,7 +159,7 @@ export function buildAuditReadableSummary(record: AuditLogEventDto): AuditReadab
   addStatusChange(record, before, after, diff, metadata, changes);
   addProductionModeChange(record, diff, before, after, changes);
   addGenericChanges(diff, changes);
-  addDetailNotes(diff, metadata, notes);
+  addDetailNotes(record, diff, metadata, notes);
   addSourceNote(record, metadata, notes);
 
   if (changes.length === 0) {
@@ -203,17 +202,35 @@ export function auditObject(record: AuditLogEventDto, metadata?: JsonObject): st
     return detailTransferRouteLabel(record, meta);
   }
 
-  const orderId = record.relatedOrderId ?? numberValue(meta.orderId);
-  if (orderId != null) return `Заказ #${orderId}`;
+  if (isDetailEntityType(record.entityType)) {
+    return detailEntityLabel(
+      numericEntityId(record.entityId),
+      record.entityDetailNumber ?? numberValue(meta.detailNumber)
+    );
+  }
+
+  if (record.entityType === 'client') {
+    return clientEntityLabel(numericEntityId(record.entityId), record.entityName);
+  }
+
+  const orderId =
+    record.relatedOrderId ??
+    (record.entityType === 'order' ? numericEntityId(record.entityId) : undefined) ??
+    numberValue(meta.orderId);
+  if (orderId != null) {
+    const orderName =
+      (record.relatedOrderId === orderId ? record.relatedOrderName : null) ??
+      (record.entityType === 'order' ? record.entityName : null) ??
+      stringValue(meta.orderName);
+    return orderEntityLabel(orderId, orderName);
+  }
 
   if (record.entityType) {
-    const label = ENTITY_LABELS[record.entityType] ?? humanizeToken(record.entityType);
-    if (record.entityId) return `${label} #${record.entityId}`;
-    return label;
+    return auditEntityLabel(record.entityType, record.entityId, record.entityName, record.entityDetailNumber);
   }
 
   const clientId = record.relatedClientId ?? numberValue(meta.clientId);
-  if (clientId != null) return `Клиент #${clientId}`;
+  if (clientId != null) return clientEntityLabel(clientId, record.relatedClientName ?? stringValue(meta.clientName));
 
   return 'Объект не указан';
 }
@@ -222,17 +239,18 @@ function addDetailTransferSummary(
   record: AuditLogEventDto,
   metadata: JsonObject,
   changes: AuditReadableChange[],
-  notes: string[],
+  notes: string[]
 ): void {
   if (record.event !== 'orders.detail_transfer') return;
 
   const source = detailTransferOrderLabel(
     numberValue(metadata.sourceOrderId) ?? numericEntityId(record.entityId),
-    stringValue(metadata.sourceOrderName),
+    stringValue(metadata.sourceOrderName) ??
+      (record.entityType === 'order' ? record.entityName ?? undefined : undefined)
   );
   const target = detailTransferOrderLabel(
     numberValue(metadata.targetOrderId) ?? record.relatedOrderId ?? undefined,
-    stringValue(metadata.targetOrderName),
+    stringValue(metadata.targetOrderName) ?? record.relatedOrderName ?? undefined
   );
   const details = formatTransferDetailList(metadata);
 
@@ -252,7 +270,7 @@ function addStatusChange(
   after: JsonObject,
   diff: JsonObject,
   metadata: JsonObject,
-  changes: AuditReadableChange[],
+  changes: AuditReadableChange[]
 ): void {
   const config = STATUS_EVENT_CONFIG[record.event];
   if (!config) return;
@@ -272,7 +290,7 @@ function addProductionModeChange(
   diff: JsonObject,
   before: JsonObject,
   after: JsonObject,
-  changes: AuditReadableChange[],
+  changes: AuditReadableChange[]
 ): void {
   if (
     record.event !== 'orders.production_status_mode_restore' &&
@@ -317,19 +335,18 @@ function addGenericChanges(diff: JsonObject, changes: AuditReadableChange[]): vo
   }
 }
 
-function addDetailNotes(diff: JsonObject, metadata: JsonObject, notes: string[]): void {
+function addDetailNotes(record: AuditLogEventDto, diff: JsonObject, metadata: JsonObject, notes: string[]): void {
   const detailIds = numericArray(diff.detailIds) ?? numericArray(metadata.detailIds);
   const changedDetailIds = numericArray(diff.changedDetailIds) ?? numericArray(metadata.changedDetailIds);
-  const selectedDetailCount =
-    numberValue(diff.selectedDetailCount) ?? numberValue(metadata.selectedDetailCount);
-  const affectedDetailCount =
-    numberValue(diff.affectedDetailCount) ?? numberValue(metadata.affectedDetailCount);
+  const selectedDetailCount = numberValue(diff.selectedDetailCount) ?? numberValue(metadata.selectedDetailCount);
+  const affectedDetailCount = numberValue(diff.affectedDetailCount) ?? numberValue(metadata.affectedDetailCount);
+  const detailLabelsById = detailLabels(record, metadata);
 
   if (selectedDetailCount != null) notes.push(`Выбрано деталей: ${selectedDetailCount}`);
   if (affectedDetailCount != null) notes.push(`Изменено деталей: ${affectedDetailCount}`);
-  if (detailIds && detailIds.length > 0) notes.push(`Детали: ${formatIdList(detailIds)}`);
+  if (detailIds && detailIds.length > 0) notes.push(`Детали: ${formatDetailIdList(detailIds, detailLabelsById)}`);
   if (!detailIds && changedDetailIds && changedDetailIds.length > 0) {
-    notes.push(`Изменённые детали: ${formatIdList(changedDetailIds)}`);
+    notes.push(`Изменённые детали: ${formatDetailIdList(changedDetailIds, detailLabelsById)}`);
   }
 }
 
@@ -353,24 +370,17 @@ function statusLabel(
   before: JsonObject,
   after: JsonObject,
   diff: JsonObject,
-  metadata: JsonObject,
+  metadata: JsonObject
 ): string {
   const container = side === 'before' ? before : after;
   const pair = diff[`${config.statusPrefix}Id`];
   const pairValue = isDiffPair(pair) ? pair[side] : undefined;
   const capitalizedPrefix = capitalize(config.statusPrefix);
-  const previousId =
-    side === 'before'
-      ? metadata[`previous${capitalizedPrefix}Id`]
-      : undefined;
-  const previousName =
-    side === 'before' ? stringValue(metadata[`previous${capitalizedPrefix}Name`]) : undefined;
-  const previousCode =
-    side === 'before' ? stringValue(metadata[`previous${capitalizedPrefix}Code`]) : undefined;
-  const targetName =
-    side === 'after' ? stringValue(metadata[`${config.statusPrefix}Name`]) : undefined;
-  const targetCode =
-    side === 'after' ? stringValue(metadata[`${config.statusPrefix}Code`]) : undefined;
+  const previousId = side === 'before' ? metadata[`previous${capitalizedPrefix}Id`] : undefined;
+  const previousName = side === 'before' ? stringValue(metadata[`previous${capitalizedPrefix}Name`]) : undefined;
+  const previousCode = side === 'before' ? stringValue(metadata[`previous${capitalizedPrefix}Code`]) : undefined;
+  const targetName = side === 'after' ? stringValue(metadata[`${config.statusPrefix}Name`]) : undefined;
+  const targetCode = side === 'after' ? stringValue(metadata[`${config.statusPrefix}Code`]) : undefined;
   const rawId =
     pairValue ??
     container[`${config.statusPrefix}Id`] ??
@@ -397,8 +407,8 @@ function statusLabel(
 
 function auditRelated(record: AuditLogEventDto): string[] {
   const related: string[] = [];
-  pushRelated(related, 'Заказ', record.relatedOrderId);
-  pushRelated(related, 'Клиент', record.relatedClientId);
+  pushOrderRelated(related, record.relatedOrderId, record.relatedOrderName);
+  pushClientRelated(related, record.relatedClientId, record.relatedClientName);
   pushRelated(related, 'Платёж', record.relatedPaymentId);
   pushRelated(related, 'Дедлайн', record.relatedDeadlineId);
   pushRelated(related, 'Произв. событие', record.relatedProductionEventId);
@@ -415,27 +425,80 @@ function pushRelated(parts: string[], label: string, id: number | null | undefin
   if (id != null) parts.push(`${label} #${id}`);
 }
 
+function pushOrderRelated(parts: string[], id: number | null | undefined, orderName?: string | null): void {
+  if (id != null || orderName) parts.push(orderEntityLabel(id ?? undefined, orderName ?? undefined));
+}
+
+function pushClientRelated(parts: string[], id: number | null | undefined, clientName?: string | null): void {
+  if (id != null || clientName) parts.push(clientEntityLabel(id ?? undefined, clientName ?? undefined));
+}
+
 function relatedEntityLabel(entity: AuditRelatedEntity): string {
-  const label = ENTITY_LABELS[entity.entityType] ?? humanizeToken(entity.entityType);
-  return `${label} #${entity.entityId}`;
+  return auditEntityLabel(entity.entityType, String(entity.entityId), entity.entityName, entity.detailNumber);
+}
+
+function auditEntityLabel(
+  entityType: string,
+  entityId: string | null,
+  entityName?: string | null,
+  detailNumber?: number | null
+): string {
+  if (entityType === 'order') return orderEntityLabel(numberValue(entityId), entityName ?? undefined);
+  if (entityType === 'client') return clientEntityLabel(numberValue(entityId), entityName ?? undefined);
+  if (isDetailEntityType(entityType)) {
+    return detailEntityLabel(numberValue(entityId), detailNumber ?? undefined);
+  }
+
+  const label = ENTITY_LABELS[entityType] ?? humanizeToken(entityType);
+  const name = stringValue(entityName);
+  if (entityId && name) return `${label} ${name} (#${entityId})`;
+  if (entityId) return `${label} #${entityId}`;
+  return label;
+}
+
+function orderEntityLabel(orderId: number | null | undefined, orderName?: string | null): string {
+  const name = stringValue(orderName);
+  if (name && orderId != null) return `Заказ ${name} (#${orderId})`;
+  if (name) return `Заказ ${name}`;
+  if (orderId != null) return `Заказ #${orderId}`;
+  return 'Заказ';
+}
+
+function clientEntityLabel(clientId: number | null | undefined, clientName?: string | null): string {
+  const name = stringValue(clientName);
+  if (name && clientId != null) return `Клиент ${name} (#${clientId})`;
+  if (name) return `Клиент ${name}`;
+  if (clientId != null) return `Клиент #${clientId}`;
+  return 'Клиент';
+}
+
+function detailEntityLabel(detailId: number | null | undefined, detailNumber?: number | null): string {
+  if (detailNumber != null && detailId != null) return `Деталь №${detailNumber} (#${detailId})`;
+  if (detailNumber != null) return `Деталь №${detailNumber}`;
+  if (detailId != null) return `Деталь #${detailId}`;
+  return 'Деталь';
+}
+
+function isDetailEntityType(entityType: string | null | undefined): boolean {
+  return entityType === 'order_detail' || entityType === 'detail';
 }
 
 function detailTransferRouteLabel(record: AuditLogEventDto, metadata: JsonObject): string {
   const source = detailTransferOrderLabel(
     numberValue(metadata.sourceOrderId) ?? numericEntityId(record.entityId),
-    stringValue(metadata.sourceOrderName),
+    stringValue(metadata.sourceOrderName) ??
+      (record.entityType === 'order' ? record.entityName ?? undefined : undefined)
   );
   const target = detailTransferOrderLabel(
     numberValue(metadata.targetOrderId) ?? record.relatedOrderId ?? undefined,
-    stringValue(metadata.targetOrderName),
+    stringValue(metadata.targetOrderName) ?? record.relatedOrderName ?? undefined
   );
   return `${source} → ${target}`;
 }
 
 function detailTransferOrderLabel(orderId: number | undefined, orderName: string | undefined): string {
-  if (orderName && orderId != null) return `${orderName} (#${orderId})`;
-  if (orderName) return orderName;
-  if (orderId != null) return `Заказ #${orderId}`;
+  if (orderId != null) return orderEntityLabel(orderId, orderName);
+  if (orderName) return `Заказ ${orderName}`;
   return 'заказ не указан';
 }
 
@@ -446,9 +509,7 @@ function numericEntityId(entityId: string | null): number | undefined {
 function formatTransferDetailList(metadata: JsonObject): string | null {
   const movedDetails = Array.isArray(metadata.movedDetails) ? metadata.movedDetails : [];
   if (movedDetails.length > 0) {
-    const labels = movedDetails
-      .map(formatTransferDetail)
-      .filter((label): label is string => Boolean(label));
+    const labels = movedDetails.map(formatTransferDetail).filter((label): label is string => Boolean(label));
     if (labels.length > 0) {
       const visible = labels.slice(0, 6);
       const suffix = labels.length > visible.length ? ` и ещё ${labels.length - visible.length}` : '';
@@ -469,13 +530,17 @@ function formatTransferDetail(value: unknown): string | null {
     sourceNumber != null && targetNumber != null && sourceNumber !== targetNumber
       ? `№${sourceNumber}→№${targetNumber}`
       : sourceNumber != null
-        ? `№${sourceNumber}`
-        : targetNumber != null
-          ? `№${targetNumber}`
-          : null;
-  const idPart = detailId != null ? `#${detailId}` : null;
+      ? `№${sourceNumber}`
+      : targetNumber != null
+      ? `№${targetNumber}`
+      : null;
+  const idPart = detailId != null ? `(#${detailId})` : null;
   const sizePart = formatTransferDetailSize(detail);
-  const main = [numberPart, idPart].filter(Boolean).join(' ');
+  const main = numberPart
+    ? ['Деталь', numberPart, idPart].filter(Boolean).join(' ')
+    : detailId != null
+    ? `Деталь #${detailId}`
+    : null;
   if (!main && !sizePart) return null;
   return sizePart ? `${main || 'деталь'} (${sizePart})` : main;
 }
@@ -552,11 +617,7 @@ function formatStringValue(value: string): string {
 }
 
 function humanizeEvent(event: string): string {
-  const readable = event
-    .split('.')
-    .map(humanizeToken)
-    .filter(Boolean)
-    .join(': ');
+  const readable = event.split('.').map(humanizeToken).filter(Boolean).join(': ');
   return readable ? `Выполнено действие — ${readable}` : 'Выполнено действие';
 }
 
@@ -600,10 +661,38 @@ function numberValue(value: unknown): number | undefined {
 
 function numericArray(value: unknown): Array<number | string> | undefined {
   if (!Array.isArray(value)) return undefined;
-  const ids = value.filter((item): item is number | string =>
-    typeof item === 'number' || typeof item === 'string',
-  );
+  const ids = value.filter((item): item is number | string => typeof item === 'number' || typeof item === 'string');
   return ids.length > 0 ? ids : undefined;
+}
+
+function detailLabels(record: AuditLogEventDto, metadata: JsonObject): Map<string, string> {
+  const labels = new Map<string, string>();
+
+  const recordDetailId = isDetailEntityType(record.entityType) ? numericEntityId(record.entityId) : undefined;
+  if (recordDetailId != null) {
+    labels.set(
+      String(recordDetailId),
+      detailEntityLabel(recordDetailId, record.entityDetailNumber ?? numberValue(metadata.detailNumber))
+    );
+  }
+
+  const metadataDetailId = numberValue(metadata.detailId);
+  if (metadataDetailId != null && !labels.has(String(metadataDetailId))) {
+    labels.set(String(metadataDetailId), detailEntityLabel(metadataDetailId, numberValue(metadata.detailNumber)));
+  }
+
+  for (const entity of record.relatedEntities ?? []) {
+    if (!isDetailEntityType(entity.entityType)) continue;
+    labels.set(String(entity.entityId), detailEntityLabel(entity.entityId, entity.detailNumber));
+  }
+
+  return labels;
+}
+
+function formatDetailIdList(ids: Array<number | string>, labelsById: Map<string, string>): string {
+  const visible = ids.slice(0, 8).map((id) => labelsById.get(String(id)) ?? `#${String(id)}`);
+  const suffix = ids.length > visible.length ? ` и ещё ${ids.length - visible.length}` : '';
+  return `${visible.join(', ')}${suffix}`;
 }
 
 function formatIdList(ids: Array<number | string>): string {

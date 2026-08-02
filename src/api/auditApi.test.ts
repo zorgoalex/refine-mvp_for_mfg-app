@@ -18,10 +18,7 @@ describe('auditApi', () => {
 
     await auditApi.list();
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/audit',
-      expect.objectContaining({ method: 'GET' }),
-    );
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/audit', expect.objectContaining({ method: 'GET' }));
   });
 
   it('builds correct query string with all supported params', async () => {
@@ -46,7 +43,7 @@ describe('auditApi', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/audit?page=2&pageSize=50&event=ORDER_CREATED&entityType=order&entityId=42&userId=7&source=backend&relatedOrderId=10&relatedClientId=3&relatedPaymentId=5&relatedProductionEventId=8&requestId=req-abc&createdFrom=2026-01-01T00%3A00%3A00.000Z&createdTo=2026-01-31T23%3A59%3A59.999Z',
-      expect.objectContaining({ method: 'GET' }),
+      expect.objectContaining({ method: 'GET' })
     );
   });
 
@@ -60,16 +57,18 @@ describe('auditApi', () => {
       userId: undefined,
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/audit?page=1',
-      expect.objectContaining({ method: 'GET' }),
-    );
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/audit?page=1', expect.objectContaining({ method: 'GET' }));
   });
 
   it('maps the response data and pagination correctly', async () => {
     const event = createAuditEvent();
     const fetchMock = mockFetch(
-      createListResponse([event], { page: 3, pageSize: 50, total: 120, totalPages: 3 }),
+      createListResponse([event], {
+        page: 3,
+        pageSize: 50,
+        total: 120,
+        totalPages: 3,
+      })
     );
 
     const result = await auditApi.list({ page: 3 });
@@ -77,7 +76,12 @@ describe('auditApi', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.data).toHaveLength(1);
     expect(result.data[0]).toEqual(event);
-    expect(result.pagination).toEqual({ page: 3, pageSize: 50, total: 120, totalPages: 3 });
+    expect(result.pagination).toEqual({
+      page: 3,
+      pageSize: 50,
+      total: 120,
+      totalPages: 3,
+    });
     expect(typeof result.requestId).toBe('string');
   });
 
@@ -88,7 +92,7 @@ describe('auditApi', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/audit?relatedDeadlineId=42',
-      expect.objectContaining({ method: 'GET' }),
+      expect.objectContaining({ method: 'GET' })
     );
   });
 
@@ -97,10 +101,7 @@ describe('auditApi', () => {
 
     const result = await auditApi.filterOptions();
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/audit/filter-options',
-      expect.objectContaining({ method: 'GET' }),
-    );
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/audit/filter-options', expect.objectContaining({ method: 'GET' }));
     expect(result.data.events).toContain('orders.detail_transfer');
   });
 });
@@ -114,7 +115,7 @@ function mockFetch(...bodies: unknown[]) {
       new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
-      }),
+      })
     );
   }
   vi.stubGlobal('fetch', fetchMock);
@@ -124,7 +125,7 @@ function mockFetch(...bodies: unknown[]) {
 function createListResponse(
   data: AuditLogEventDto[],
   pagination = { page: 1, pageSize: 50, total: 0, totalPages: 0 },
-  requestId = 'req-test-1',
+  requestId = 'req-test-1'
 ) {
   return { data, pagination, requestId };
 }
@@ -145,7 +146,7 @@ function createFilterOptionsResponse(requestId = 'req-filter-options') {
       relatedProductionEventIds: [],
       relatedUserIds: [7],
       relatedEntityTypes: ['order_detail'],
-      relatedEntities: [{ entityType: 'order_detail', entityId: 1001 }],
+      relatedEntities: [{ entityType: 'order_detail', entityId: 1001, detailNumber: 3 }],
       requestIds: ['req-1'],
     },
     requestId,
@@ -158,12 +159,16 @@ function createAuditEvent(): AuditLogEventDto {
     event: 'ORDER_CREATED',
     entityType: 'order',
     entityId: '42',
+    entityName: 'Test Order',
+    entityDetailNumber: null,
     userId: 7,
     username: 'testuser',
     role: 'manager',
     source: 'backend',
     relatedOrderId: 42,
+    relatedOrderName: 'Test Order',
     relatedClientId: 3,
+    relatedClientName: 'Test Client',
     relatedPaymentId: null,
     relatedDeadlineId: null,
     relatedProductionEventId: null,

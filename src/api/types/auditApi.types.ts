@@ -1,6 +1,8 @@
 export interface AuditRelatedEntity {
   entityType: string;
   entityId: number;
+  entityName?: string | null;
+  detailNumber?: number | null;
 }
 
 export interface AuditLogEventDto {
@@ -8,12 +10,16 @@ export interface AuditLogEventDto {
   event: string;
   entityType: string | null;
   entityId: string | null;
+  entityName: string | null;
+  entityDetailNumber: number | null;
   userId: number | null;
   username: string | null;
   role: string | null;
   source: string | null;
   relatedOrderId: number | null;
+  relatedOrderName: string | null;
   relatedClientId: number | null;
+  relatedClientName: string | null;
   relatedPaymentId: number | null;
   relatedDeadlineId: number | null;
   relatedProductionEventId: number | null;
@@ -56,6 +62,8 @@ export interface AuditUserFilterOption {
 export interface AuditRelatedEntityFilterOption {
   entityType: string;
   entityId: number;
+  entityName?: string | null;
+  detailNumber?: number | null;
 }
 
 export interface AuditFilterOptions {

@@ -11,12 +11,16 @@ function event(overrides: Partial<AuditLogEventDto> = {}): AuditLogEventDto {
     event: 'org.direction_head_added',
     entityType: 'direction',
     entityId: '5',
+    entityName: null,
+    entityDetailNumber: null,
     userId: 1,
     username: 'admin',
     role: 'admin',
     source: 'backend-org-command',
     relatedOrderId: null,
+    relatedOrderName: null,
     relatedClientId: null,
+    relatedClientName: null,
     relatedPaymentId: null,
     relatedDeadlineId: null,
     relatedProductionEventId: null,
@@ -42,7 +46,12 @@ function event(overrides: Partial<AuditLogEventDto> = {}): AuditLogEventDto {
 describe('buildAuditQuery', () => {
   it('includes role and relatedUserId filters', () => {
     const q = buildAuditQuery({ role: 'admin', relatedUserId: 158 }, 50);
-    expect(q).toMatchObject({ page: 1, pageSize: 50, role: 'admin', relatedUserId: 158 });
+    expect(q).toMatchObject({
+      page: 1,
+      pageSize: 50,
+      role: 'admin',
+      relatedUserId: 158,
+    });
   });
 
   it('converts createdFrom/createdTo Dayjs to ISO strings', () => {
@@ -65,6 +74,24 @@ describe('RelatedIds', () => {
     expect(html).toContain('Пользователь #');
     expect(html).toContain('158');
     expect(html).toContain('ant-tag-cyan');
+  });
+
+  it('renders order, client and detail labels with names and position numbers', () => {
+    const html = renderToString(
+      <RelatedIds
+        record={event({
+          relatedOrderId: 11472,
+          relatedOrderName: '2729',
+          relatedClientId: 55,
+          relatedClientName: 'Иван Петров',
+          relatedEntities: [{ entityType: 'order_detail', entityId: 1001, detailNumber: 3 }],
+        })}
+      />
+    );
+
+    expect(html).toContain('Заказ 2729 (#11472)');
+    expect(html).toContain('Клиент Иван Петров (#55)');
+    expect(html).toContain('Деталь №3 (#1001)');
   });
 
   it('renders a dash when no related ids are present', () => {
@@ -102,7 +129,7 @@ describe('ContextBlock', () => {
           ip: '10.0.0.5',
           userAgent: 'Mozilla/5.0',
         })}
-      />,
+      />
     );
     expect(html).toContain('status_name');
     expect(html).toContain('Готов к выдаче');
@@ -125,6 +152,7 @@ describe('ReadableAuditEvent', () => {
         record={event({
           event: 'orders.status_change',
           relatedOrderId: 42,
+          relatedOrderName: '2728',
           statusField: 'orderStatus',
           statusId: 2,
           statusName: 'Готов к выдаче',
@@ -132,7 +160,7 @@ describe('ReadableAuditEvent', () => {
           after: { orderStatusId: 2, orderStatusName: 'Готов к выдаче' },
           diff: { orderStatusId: { before: 1, after: 2 } },
         })}
-      />,
+      />
     );
 
     expect(html).toContain('Изменён статус заказа');

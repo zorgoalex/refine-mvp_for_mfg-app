@@ -14,11 +14,7 @@ import {
   Segmented,
   Select,
 } from 'antd';
-import {
-  FilterOutlined,
-  ClearOutlined,
-  AuditOutlined,
-} from '@ant-design/icons';
+import { FilterOutlined, ClearOutlined, AuditOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { auditApi } from '../../api/auditApi';
 import type {
@@ -42,6 +38,18 @@ const PAGE_SIZE_DEFAULT = 50;
 
 type AuditViewMode = 'readable' | 'technical';
 type FilterSelectOption = { value: string | number; label: string };
+
+const AUDIT_ENTITY_LABELS: Record<string, string> = {
+  order: 'Заказ',
+  order_detail: 'Деталь',
+  detail: 'Деталь',
+  client: 'Клиент',
+  client_phone: 'Телефон клиента',
+  payment: 'Платёж',
+  deadline: 'Дедлайн',
+  production_event: 'Производственное событие',
+  user: 'Пользователь',
+};
 
 const EMPTY_FILTER_OPTIONS: AuditFilterOptions = {
   events: [],
@@ -104,7 +112,7 @@ function userSelectOptions(values: readonly AuditUserFilterOption[]): FilterSele
 
 function relatedEntityIdSelectOptions(
   values: readonly AuditRelatedEntityFilterOption[],
-  entityType?: string,
+  entityType?: string
 ): FilterSelectOption[] {
   const seen = new Set<number>();
   const filtered = entityType ? values.filter((value) => value.entityType === entityType) : values;
@@ -114,10 +122,66 @@ function relatedEntityIdSelectOptions(
     seen.add(value.entityId);
     options.push({
       value: value.entityId,
-      label: entityType ? `#${value.entityId}` : `${value.entityType} #${value.entityId}`,
+      label: relatedEntityOptionLabel(value, Boolean(entityType)),
     });
   }
   return options;
+}
+
+function entityTypeLabel(entityType: string): string {
+  return AUDIT_ENTITY_LABELS[entityType] ?? entityType;
+}
+
+function orderLabel(id: number | null | undefined, name?: string | null): string {
+  const cleanName = name?.trim();
+  if (cleanName && id != null) return `Заказ ${cleanName} (#${id})`;
+  if (cleanName) return `Заказ ${cleanName}`;
+  return id != null ? `Заказ #${id}` : 'Заказ';
+}
+
+function clientLabel(id: number | null | undefined, name?: string | null): string {
+  const cleanName = name?.trim();
+  if (cleanName && id != null) return `Клиент ${cleanName} (#${id})`;
+  if (cleanName) return `Клиент ${cleanName}`;
+  return id != null ? `Клиент #${id}` : 'Клиент';
+}
+
+function detailLabel(id: number | null | undefined, detailNumber?: number | null): string {
+  if (detailNumber != null && id != null) return `Деталь №${detailNumber} (#${id})`;
+  if (detailNumber != null) return `Деталь №${detailNumber}`;
+  return id != null ? `Деталь #${id}` : 'Деталь';
+}
+
+function relatedEntityLabel(entity: AuditRelatedEntity): string {
+  if (entity.entityType === 'order') return orderLabel(entity.entityId, entity.entityName);
+  if (entity.entityType === 'client') return clientLabel(entity.entityId, entity.entityName);
+  if (entity.entityType === 'order_detail' || entity.entityType === 'detail') {
+    return detailLabel(entity.entityId, entity.detailNumber);
+  }
+  const base = entityTypeLabel(entity.entityType);
+  const cleanName = entity.entityName?.trim();
+  if (cleanName) return `${base} ${cleanName} (#${entity.entityId})`;
+  return `${base} #${entity.entityId}`;
+}
+
+function relatedEntityOptionLabel(entity: AuditRelatedEntityFilterOption, omitType: boolean): string {
+  if (entity.entityType === 'order') {
+    const label = orderLabel(entity.entityId, entity.entityName);
+    return omitType ? label.replace(/^Заказ\s+/, '') : label;
+  }
+  if (entity.entityType === 'client') {
+    const label = clientLabel(entity.entityId, entity.entityName);
+    return omitType ? label.replace(/^Клиент\s+/, '') : label;
+  }
+  if (entity.entityType === 'order_detail' || entity.entityType === 'detail') {
+    const label = detailLabel(entity.entityId, entity.detailNumber);
+    return omitType ? label.replace(/^Деталь\s+/, '') : label;
+  }
+  const cleanName = entity.entityName?.trim();
+  if (omitType) return cleanName ? `${cleanName} (#${entity.entityId})` : `#${entity.entityId}`;
+  return cleanName
+    ? `${entityTypeLabel(entity.entityType)} ${cleanName} (#${entity.entityId})`
+    : `${entityTypeLabel(entity.entityType)} #${entity.entityId}`;
 }
 
 function selectFilterOption(input: string, option?: { label?: React.ReactNode; value?: unknown }): boolean {
@@ -158,8 +222,7 @@ export function buildAuditQuery(values: FilterValues, pageSize: number): AuditLo
   if (values.relatedClientId != null) next.relatedClientId = values.relatedClientId;
   if (values.relatedPaymentId != null) next.relatedPaymentId = values.relatedPaymentId;
   if (values.relatedDeadlineId != null) next.relatedDeadlineId = values.relatedDeadlineId;
-  if (values.relatedProductionEventId != null)
-    next.relatedProductionEventId = values.relatedProductionEventId;
+  if (values.relatedProductionEventId != null) next.relatedProductionEventId = values.relatedProductionEventId;
   if (values.relatedUserId != null) next.relatedUserId = values.relatedUserId;
   if (values.relatedEntityType) next.relatedEntityType = values.relatedEntityType;
   if (values.relatedEntityId != null) next.relatedEntityId = values.relatedEntityId;
@@ -188,23 +251,47 @@ export function isRowExpandable(record: AuditLogEventDto): boolean {
 export function RelatedIds({ record }: { record: AuditLogEventDto }) {
   const parts: React.ReactNode[] = [];
   if (record.relatedOrderId != null)
-    parts.push(<Tag key="order" color="blue">Заказ #{record.relatedOrderId}</Tag>);
+    parts.push(
+      <Tag key="order" color="blue">
+        {orderLabel(record.relatedOrderId, record.relatedOrderName)}
+      </Tag>
+    );
   if (record.relatedClientId != null)
-    parts.push(<Tag key="client" color="geekblue">Клиент #{record.relatedClientId}</Tag>);
+    parts.push(
+      <Tag key="client" color="geekblue">
+        {clientLabel(record.relatedClientId, record.relatedClientName)}
+      </Tag>
+    );
   if (record.relatedPaymentId != null)
-    parts.push(<Tag key="payment" color="green">Платёж #{record.relatedPaymentId}</Tag>);
+    parts.push(
+      <Tag key="payment" color="green">
+        Платёж #{record.relatedPaymentId}
+      </Tag>
+    );
   if (record.relatedDeadlineId != null)
-    parts.push(<Tag key="deadline" color="orange">Дедлайн #{record.relatedDeadlineId}</Tag>);
+    parts.push(
+      <Tag key="deadline" color="orange">
+        Дедлайн #{record.relatedDeadlineId}
+      </Tag>
+    );
   if (record.relatedProductionEventId != null)
-    parts.push(<Tag key="prod" color="purple">Произв. #{record.relatedProductionEventId}</Tag>);
+    parts.push(
+      <Tag key="prod" color="purple">
+        Произв. #{record.relatedProductionEventId}
+      </Tag>
+    );
   if (record.relatedUserId != null)
-    parts.push(<Tag key="user" color="cyan">Пользователь #{record.relatedUserId}</Tag>);
+    parts.push(
+      <Tag key="user" color="cyan">
+        Пользователь #{record.relatedUserId}
+      </Tag>
+    );
   if (Array.isArray(record.relatedEntities)) {
     for (const e of record.relatedEntities) {
       parts.push(
         <Tag key={`re-${e.entityType}-${e.entityId}`} color="magenta">
-          {e.entityType}#{e.entityId}
-        </Tag>,
+          {relatedEntityLabel(e)}
+        </Tag>
       );
     }
   }
@@ -232,7 +319,9 @@ export function ContextBlock({ record }: { record: AuditLogEventDto }) {
   if (!hasStatus && record.ip == null && record.userAgent == null) return null;
   return (
     <div style={{ flex: '1 1 220px', minWidth: 220 }}>
-      <Text strong style={{ fontSize: 12 }}>контекст</Text>
+      <Text strong style={{ fontSize: 12 }}>
+        контекст
+      </Text>
       <div style={{ marginTop: 2 }}>
         <ContextRow label="status_field" value={record.statusField} />
         <ContextRow label="status_id" value={record.statusId} />
@@ -292,11 +381,18 @@ export const AuditList: React.FC = () => {
   const [viewMode, setViewMode] = useState<AuditViewMode>('readable');
   const { pageSize: preferredPageSize, setPageSize: rememberPageSize } = usePageSizePreference(
     'audit:list',
-    PAGE_SIZE_DEFAULT,
+    PAGE_SIZE_DEFAULT
   );
-  const [query, setQuery] = useState<AuditLogListQuery>({ page: 1, pageSize: preferredPageSize });
+  const [query, setQuery] = useState<AuditLogListQuery>({
+    page: 1,
+    pageSize: preferredPageSize,
+  });
   const [data, setData] = useState<AuditLogEventDto[]>([]);
-  const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE_DEFAULT, total: 0 });
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pageSize: PAGE_SIZE_DEFAULT,
+    total: 0,
+  });
   const [loading, setLoading] = useState(false);
   const [filterOptions, setFilterOptions] = useState<AuditFilterOptions>(EMPTY_FILTER_OPTIONS);
   const [filterOptionsLoading, setFilterOptionsLoading] = useState(false);
@@ -309,8 +405,7 @@ export const AuditList: React.FC = () => {
 
   // Permission check: audit.view is required when backend permissions are on
   const currentUser = featureFlags.useBackendPermissions ? authSession.getUser() : null;
-  const hasPermission =
-    !featureFlags.useBackendPermissions || can('audit.view', currentUser);
+  const hasPermission = !featureFlags.useBackendPermissions || can('audit.view', currentUser);
 
   const fetchData = useCallback(
     async (q: AuditLogListQuery) => {
@@ -342,7 +437,7 @@ export const AuditList: React.FC = () => {
         setLoading(false);
       }
     },
-    [hasPermission],
+    [hasPermission]
   );
 
   const fetchFilterOptions = useCallback(async () => {
@@ -379,9 +474,9 @@ export const AuditList: React.FC = () => {
   }, [fetchFilterOptions, filterOptionsLoaded, filterOptionsLoading, filtersVisible]);
 
   useEffect(() => {
-    setQuery((current) => current.pageSize === preferredPageSize
-      ? current
-      : { ...current, page: 1, pageSize: preferredPageSize });
+    setQuery((current) =>
+      current.pageSize === preferredPageSize ? current : { ...current, page: 1, pageSize: preferredPageSize }
+    );
   }, [preferredPageSize]);
 
   const handleFilter = (values: FilterValues) => {
@@ -399,7 +494,7 @@ export const AuditList: React.FC = () => {
     if (pageSizeChanged) rememberPageSize(nextPageSize);
     setQuery((prev) => ({
       ...prev,
-      page: pageSizeChanged ? 1 : (pag.current ?? 1),
+      page: pageSizeChanged ? 1 : pag.current ?? 1,
       pageSize: nextPageSize,
     }));
   };
@@ -422,7 +517,7 @@ export const AuditList: React.FC = () => {
       relatedEntityIds: relatedEntityIdSelectOptions(filterOptions.relatedEntities, relatedEntityType),
       requestIds: stringSelectOptions(filterOptions.requestIds),
     }),
-    [filterOptions, relatedEntityType],
+    [filterOptions, relatedEntityType]
   );
 
   const commonSelectProps = {
@@ -438,19 +533,27 @@ export const AuditList: React.FC = () => {
     <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
       <ContextBlock record={record} />
       <div style={{ flex: '1 1 220px', minWidth: 220 }}>
-        <Text strong style={{ fontSize: 12 }}>before</Text>
+        <Text strong style={{ fontSize: 12 }}>
+          before
+        </Text>
         <JsonCell value={record.before} />
       </div>
       <div style={{ flex: '1 1 220px', minWidth: 220 }}>
-        <Text strong style={{ fontSize: 12 }}>after</Text>
+        <Text strong style={{ fontSize: 12 }}>
+          after
+        </Text>
         <JsonCell value={record.after} />
       </div>
       <div style={{ flex: '1 1 220px', minWidth: 220 }}>
-        <Text strong style={{ fontSize: 12 }}>diff</Text>
+        <Text strong style={{ fontSize: 12 }}>
+          diff
+        </Text>
         <JsonCell value={record.diff} />
       </div>
       <div style={{ flex: '1 1 220px', minWidth: 220 }}>
-        <Text strong style={{ fontSize: 12 }}>metadata</Text>
+        <Text strong style={{ fontSize: 12 }}>
+          metadata
+        </Text>
         <JsonCell value={record.metadata} />
       </div>
     </div>
@@ -506,33 +609,17 @@ export const AuditList: React.FC = () => {
         </Space>
       </div>
 
-      {permissionError && (
-        <Alert
-          type="error"
-          showIcon
-          message={permissionError}
-          style={{ marginBottom: 12 }}
-        />
-      )}
+      {permissionError && <Alert type="error" showIcon message={permissionError} style={{ marginBottom: 12 }} />}
 
       {filtersVisible && (
-        <Card
-          size="small"
-          style={{ marginBottom: 12 }}
-          bodyStyle={{ padding: '8px 12px' }}
-        >
+        <Card size="small" style={{ marginBottom: 12 }} bodyStyle={{ padding: '8px 12px' }}>
           <style>{`
             .audit-filters .ant-form-item { margin-bottom: 6px; }
             .audit-filters .ant-form-item-label > label { font-size: 11px; }
             .audit-filters-grid { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-end; }
             .audit-filters-grid > .aff-item { flex-shrink: 0; }
           `}</style>
-          <Form
-            form={form}
-            layout="vertical"
-            onFinish={handleFilter}
-            className="audit-filters"
-          >
+          <Form form={form} layout="vertical" onFinish={handleFilter} className="audit-filters">
             <div className="audit-filters-grid">
               <div className="aff-item">
                 <Form.Item name="event" label="Событие">
@@ -687,24 +774,12 @@ export const AuditList: React.FC = () => {
               </div>
               <div className="aff-item">
                 <Form.Item name="createdFrom" label="Дата с">
-                  <DatePicker
-                    showTime
-                    allowClear
-                    format="DD.MM.YYYY HH:mm:ss"
-                    size="small"
-                    style={{ width: 180 }}
-                  />
+                  <DatePicker showTime allowClear format="DD.MM.YYYY HH:mm:ss" size="small" style={{ width: 180 }} />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="createdTo" label="Дата по">
-                  <DatePicker
-                    showTime
-                    allowClear
-                    format="DD.MM.YYYY HH:mm:ss"
-                    size="small"
-                    style={{ width: 180 }}
-                  />
+                  <DatePicker showTime allowClear format="DD.MM.YYYY HH:mm:ss" size="small" style={{ width: 180 }} />
                 </Form.Item>
               </div>
               <div className="aff-item">

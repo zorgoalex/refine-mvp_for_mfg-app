@@ -8,12 +8,16 @@ function event(overrides: Partial<AuditLogEventDto> = {}): AuditLogEventDto {
     event: 'orders.update',
     entityType: 'order',
     entityId: '42',
+    entityName: '2728',
+    entityDetailNumber: null,
     userId: 7,
     username: 'manager',
     role: 'top_manager',
     source: 'backend-production-actions',
     relatedOrderId: 42,
+    relatedOrderName: '2728',
     relatedClientId: 12,
+    relatedClientName: 'Тест клиент',
     relatedPaymentId: null,
     relatedDeadlineId: null,
     relatedProductionEventId: null,
@@ -45,7 +49,11 @@ describe('buildAuditReadableSummary', () => {
         statusId: 2,
         statusName: 'Готов к выдаче',
         before: { orderStatusId: 1, version: 5 },
-        after: { orderStatusId: 2, orderStatusName: 'Готов к выдаче', version: 6 },
+        after: {
+          orderStatusId: 2,
+          orderStatusName: 'Готов к выдаче',
+          version: 6,
+        },
         diff: { orderStatusId: { before: 1, after: 2 } },
         metadata: {
           orderId: 42,
@@ -54,12 +62,12 @@ describe('buildAuditReadableSummary', () => {
           previousOrderStatusId: 1,
           requestId: 'req-1',
         },
-      }),
+      })
     );
 
     expect(summary.title).toBe('Изменён статус заказа');
     expect(summary.actor).toBe('manager (top_manager)');
-    expect(summary.object).toBe('Заказ #42');
+    expect(summary.object).toBe('Заказ 2728 (#42)');
     expect(summary.changes).toContainEqual({
       label: 'Статус заказа',
       before: '#1',
@@ -89,7 +97,12 @@ describe('buildAuditReadableSummary', () => {
           productionStatusName: 'Раскрой',
           productionStatusCode: 'CUT',
         },
-      }),
+        relatedEntities: [
+          { entityType: 'order_detail', entityId: 101, detailNumber: 1 },
+          { entityType: 'order_detail', entityId: 102, detailNumber: 2 },
+          { entityType: 'order_detail', entityId: 103, detailNumber: 3 },
+        ],
+      })
     );
 
     expect(summary.title).toBe('Изменён производственный статус деталей заказа');
@@ -99,7 +112,11 @@ describe('buildAuditReadableSummary', () => {
       after: 'Раскрой (CUT)',
     });
     expect(summary.notes).toEqual(
-      expect.arrayContaining(['Выбрано деталей: 3', 'Изменено деталей: 2', 'Детали: #101, #102, #103']),
+      expect.arrayContaining([
+        'Выбрано деталей: 3',
+        'Изменено деталей: 2',
+        'Детали: Деталь №1 (#101), Деталь №2 (#102), Деталь №3 (#103)',
+      ])
     );
   });
 
@@ -117,7 +134,7 @@ describe('buildAuditReadableSummary', () => {
         },
         diff: { orderStatusId: { before: 2, after: 3 } },
         after: { orderStatusName: 'Просрочен' },
-      }),
+      })
     );
 
     expect(summary.actor).toBe('Deadline rule #9');
@@ -136,7 +153,7 @@ describe('buildAuditReadableSummary', () => {
           version: { before: 1, after: 2 },
           requestId: { before: 'old', after: 'new' },
         },
-      }),
+      })
     );
 
     expect(summary.title).toBe('Обновлён заказ');
@@ -170,23 +187,23 @@ describe('buildAuditReadableSummary', () => {
             },
           ],
         },
-      }),
+      })
     );
 
     expect(summary.title).toBe('Перенесены детали заказа');
     expect(summary.actor).toBe('ivan (manager)');
-    expect(summary.object).toBe('2728 (#11471) → 2729 (#11472)');
+    expect(summary.object).toBe('Заказ 2728 (#11471) → Заказ 2729 (#11472)');
     expect(summary.changes).toContainEqual({
       label: 'Детали',
-      before: '2728 (#11471)',
-      after: '2729 (#11472)',
+      before: 'Заказ 2728 (#11471)',
+      after: 'Заказ 2729 (#11472)',
     });
     expect(summary.notes).toEqual(
       expect.arrayContaining([
-        'Какие детали: №3→№7 #1001 (716x396 x2)',
-        'Из заказа: 2728 (#11471)',
-        'В заказ: 2729 (#11472)',
-      ]),
+        'Какие детали: Деталь №3→№7 (#1001) (716x396 x2)',
+        'Из заказа: Заказ 2728 (#11471)',
+        'В заказ: Заказ 2729 (#11472)',
+      ])
     );
   });
 });
