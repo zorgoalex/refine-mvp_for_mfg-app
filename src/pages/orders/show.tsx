@@ -36,12 +36,12 @@ import {
 } from "../../utils/orderFinancialVisibility";
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 import { cutApi } from "../../api/cutApi";
-import type { CutJobDto, CutJobRef } from "../../api/types/cutApi.types";
+import type { CutDetailLastReadyJobRef, CutJobDto, CutJobRef } from "../../api/types/cutApi.types";
 import { cncTelegramApi } from "../../api/cncTelegramApi";
 import type { CncTelegramOrderCuttingSequence } from "../../api/types/cncTelegramApi.types";
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
-import { cutJobDeepLink, cutJobProfileLabel } from "./cutColumnHelpers";
+import { cutJobDeepLink, cutJobProfileLabel, cutJobVersionLabel } from "./cutColumnHelpers";
 import { calculateOrderTotalArea } from "../../utils/orderArea";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
@@ -705,6 +705,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     orderId: record?.order_id,
   });
   const { cutJobByDetailId, bathCutJobByDetailId } = cutJobMaps;
+  const latestReadyCutRefByJobId = useMemo(() => {
+    const map = new Map<number, CutDetailLastReadyJobRef>();
+    for (const ref of [...cutJobByDetailId.values(), ...bathCutJobByDetailId.values()]) {
+      if (!map.has(ref.cutJobId)) map.set(ref.cutJobId, ref);
+    }
+    return map;
+  }, [bathCutJobByDetailId, cutJobByDetailId]);
   const latestReadyCutJobIds = useMemo(
     () => [...new Set([...bathCutJobByDetailId.values()].map((ref) => ref.cutJobId))].sort((a, b) => a - b),
     [bathCutJobByDetailId],
@@ -1226,7 +1233,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             render: (_: unknown, detail: any) => {
               const ref = cutJobByDetailId.get(detail.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref)}>{ref.name || ref.cutNumber}</Link>;
+              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ fontVariantNumeric: 'tabular-nums' }}>{cutJobVersionLabel(ref)}</Link>;
             },
           },
           {
@@ -1236,7 +1243,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             render: (_: unknown, detail: any) => {
               const ref = bathCutJobByDetailId.get(detail.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref)}>{ref.name || ref.cutNumber}</Link>;
+              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ fontVariantNumeric: 'tabular-nums' }}>{cutJobVersionLabel(ref)}</Link>;
             },
           },
         ]
@@ -2027,18 +2034,22 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                               <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>—</span>
                             ) : (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                                {cutOrderJobs.map((j) => (
-                                  <Link
-                                    key={j.cutJobId}
-                                    to={cutJobDeepLink(j)}
-                                    style={{ fontSize: 12, lineHeight: 1.35 }}
-                                  >
-                                    {j.name || j.cutNumber}
-                                    <span style={{ color: 'var(--app-text-muted)' }}>
-                                      {' '}· Профиль: {cutJobProfileLabel(j)}
-                                    </span>
-                                  </Link>
-                                ))}
+                                {cutOrderJobs.map((j) => {
+                                  const versionRef = latestReadyCutRefByJobId.get(j.cutJobId);
+                                  return (
+                                    <Link
+                                      key={j.cutJobId}
+                                      to={versionRef ? cutJobDeepLink(versionRef) : cutJobDeepLink(j.cutJobId)}
+                                      title={j.name}
+                                      style={{ fontSize: 12, lineHeight: 1.35, fontVariantNumeric: 'tabular-nums' }}
+                                    >
+                                      {versionRef ? cutJobVersionLabel(versionRef) : j.name}
+                                      <span style={{ color: 'var(--app-text-muted)' }}>
+                                        {' '}· Профиль: {cutJobProfileLabel(j)}
+                                      </span>
+                                    </Link>
+                                  );
+                                })}
                               </div>
                             )}
                             {cncOrderCuttingSequences.length > 0 && (

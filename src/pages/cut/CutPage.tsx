@@ -63,6 +63,7 @@ import { pushHistory } from './editorHistory';
 import { CutSheetLabelGenerateAction } from './CutSheetLabelGenerateAction';
 import { authSession } from '../../api/authSession';
 import { useCutDetailLastReady } from '../orders/useCutDetailLastReady';
+import { cutJobVersionLabel } from '../orders/cutColumnHelpers';
 import type {
   CutGroupDto,
   CutJobDto,
@@ -1390,12 +1391,26 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     [job, loadJobs, openJob],
   );
 
+  const emitCutJobUpdate = useCallback(
+    (
+      updated: Pick<CutJobDto, 'cutJobId' | 'name' | 'items'>,
+      previous?: Pick<CutJobDto, 'items'> | null,
+    ) => {
+      emitCutJobReady(updated, {
+        detailIds: previous?.items.map((item) => item.orderDetailId),
+        orderIds: previous?.items.map((item) => item.orderId),
+      });
+    },
+    [],
+  );
+
   const setCurrentResult = useCallback(
     async (result: CutResultSummary) => {
       if (!job || result.isCurrent || result.isArchived) return;
       setBusy(true);
       try {
-        await cutApi.setCurrentResult(job.cutJobId, result.resultNo);
+        const updated = await cutApi.setCurrentResult(job.cutJobId, result.resultNo);
+        emitCutJobUpdate(updated, job);
         message.success(`Раскрой ${result.cutNumber} назначен действующим`);
         await refreshAfterResultStateChange();
       } catch (error) {
@@ -1404,7 +1419,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setBusy(false);
       }
     },
-    [handleError, job, refreshAfterResultStateChange],
+    [emitCutJobUpdate, handleError, job, refreshAfterResultStateChange],
   );
 
   const archiveResult = useCallback(
@@ -1412,7 +1427,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       if (!job || result.isCurrent || result.isArchived) return;
       setBusy(true);
       try {
-        await cutApi.archiveResult(job.cutJobId, result.resultNo);
+        const updated = await cutApi.archiveResult(job.cutJobId, result.resultNo);
+        emitCutJobUpdate(updated, job);
         message.success(`Раскрой ${result.cutNumber} отправлен в архив`);
         await refreshAfterResultStateChange(selectedResult?.resultNo === result.resultNo ? result.resultNo : undefined);
       } catch (error) {
@@ -1421,7 +1437,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setBusy(false);
       }
     },
-    [handleError, job, refreshAfterResultStateChange, selectedResult?.resultNo],
+    [emitCutJobUpdate, handleError, job, refreshAfterResultStateChange, selectedResult?.resultNo],
   );
 
   const unarchiveResult = useCallback(
@@ -1429,7 +1445,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       if (!job || !result.isArchived) return;
       setBusy(true);
       try {
-        await cutApi.unarchiveResult(job.cutJobId, result.resultNo);
+        const updated = await cutApi.unarchiveResult(job.cutJobId, result.resultNo);
+        emitCutJobUpdate(updated, job);
         message.success(`Раскрой ${result.cutNumber} возвращён из архива`);
         await refreshAfterResultStateChange(selectedResult?.resultNo === result.resultNo ? result.resultNo : undefined);
       } catch (error) {
@@ -1438,7 +1455,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setBusy(false);
       }
     },
-    [handleError, job, refreshAfterResultStateChange, selectedResult?.resultNo],
+    [emitCutJobUpdate, handleError, job, refreshAfterResultStateChange, selectedResult?.resultNo],
   );
 
   const cutResultColumns: ColumnsType<CutResultSummary> = useMemo(
@@ -1547,7 +1564,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       setBusy(true);
       try {
         const fresh = await cutApi.get(target.cutJobId);
-        await cutApi.archive(fresh.cutJobId, fresh.version);
+        const archived = await cutApi.archive(fresh.cutJobId, fresh.version);
+        emitCutJobUpdate(archived, fresh);
         message.success('Раскрой архивирован');
         if (job?.cutJobId === target.cutJobId) {
           setJob(null);
@@ -1562,7 +1580,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setBusy(false);
       }
     },
-    [job, loadJobs, handleError, resetSheetViews],
+    [emitCutJobUpdate, job, loadJobs, handleError, resetSheetViews],
   );
 
   const previewCreateJob = useCallback(async () => {
@@ -1650,6 +1668,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const updated = await cutApi.addItems(job.cutJobId, { detailIds: selected, version: job.version });
       setJob(updated);
       applyPdfTemplateState(updated);
+      emitCutJobUpdate(updated, job);
       message.success('Детали добавлены в раскрой');
       await loadJobs();
     } catch (error) {
@@ -1657,7 +1676,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     } finally {
       setBusy(false);
     }
-  }, [applyPdfTemplateState, job, selected, loadJobs, handleError]);
+  }, [applyPdfTemplateState, emitCutJobUpdate, job, selected, loadJobs, handleError]);
 
   const removeJobItem = useCallback(
     async (cutJobItemId: number) => {
@@ -1667,6 +1686,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         const updated = await cutApi.removeItem(job.cutJobId, cutJobItemId, job.version);
         setJob(updated);
         applyPdfTemplateState(updated);
+        emitCutJobUpdate(updated, job);
         message.success('Деталь убрана из раскроя');
         await loadJobs();
       } catch (error) {
@@ -1675,7 +1695,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setBusy(false);
       }
     },
-    [applyPdfTemplateState, job, loadJobs, handleError],
+    [applyPdfTemplateState, emitCutJobUpdate, job, loadJobs, handleError],
   );
 
   const calculate = useCallback(async () => {
@@ -2081,6 +2101,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setSelectedResult(updated.currentCutResult ?? null);
         setIsFrozenResultSelection(false);
         applyPdfTemplateState(updated);
+        emitCutJobUpdate(updated, job);
         setShowAlternativeByGroup((prev) => ({ ...prev, [group.cutGroupId]: true }));
         void loadJobs();
         resetSheetViews();
@@ -2095,7 +2116,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setBusy(false);
       }
     },
-    [applyPdfTemplateState, editorSheetMirrors, editorSheetRotations, job, workingSheets, loadJobs, handleError, resetSheetViews],
+    [applyPdfTemplateState, editorSheetMirrors, editorSheetRotations, emitCutJobUpdate, job, workingSheets, loadJobs, handleError, resetSheetViews],
   );
 
   const filteredJobs = useMemo(() => {
@@ -2645,9 +2666,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               type="link"
               onClick={() => void openJob(ref.cutJobId, ref.resultNo)}
               disabled={busy}
-              style={{ padding: 0 }}
+              title={ref.name}
+              style={{ padding: 0, fontVariantNumeric: 'tabular-nums' }}
             >
-              {ref.name || ref.cutNumber}
+              {cutJobVersionLabel(ref)}
             </Button>
           );
         },

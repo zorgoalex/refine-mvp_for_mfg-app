@@ -3,6 +3,7 @@ import { Alert, Form, Input, Modal, Radio, Select, Space, message } from 'antd';
 import { cutApi } from '../../../api/cutApi';
 import { ApiError } from '../../../api/httpClient';
 import type { CutDetailPlacements, CutJobDto } from '../../../api/types/cutApi.types';
+import { emitCutJobReady } from '../../cut/cutJobEvents';
 import { buildCutAddWarning, formatPlacementsMessage, restrictDetailIds, selectableDetailIds } from '../../cut/cutPageHelpers';
 
 interface AddToCutModalProps {
@@ -91,6 +92,7 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
         return;
       }
       const updated = await cutApi.addItems(job.cutJobId, { detailIds: finalIds, version: job.version });
+      emitCutJobReady(updated, { detailIds: finalIds, orderIds });
       // Count-free: a same-job re-add is a no-op server-side, so we don't claim a
       // precise "added N" that may not reflect newly-inserted rows.
       message.success(`Раскрой #${updated.cutJobId} обновлён`);

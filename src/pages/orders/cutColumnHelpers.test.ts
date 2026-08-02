@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCutJobByDetailId, buildCutJobLinkMaps, cutJobDeepLink, cutJobProfileLabel } from './cutColumnHelpers';
+import { buildCutJobByDetailId, buildCutJobLinkMaps, cutJobDeepLink, cutJobProfileLabel, cutJobVersionLabel } from './cutColumnHelpers';
 
 describe('cutColumnHelpers', () => {
   it('buildCutJobByDetailId maps each detail to its ref', () => {
@@ -36,6 +36,11 @@ describe('cutColumnHelpers', () => {
     expect(cutJobDeepLink(45)).toBe('/cut?job=45');
     expect(cutJobDeepLink(45, 3)).toBe('/cut?job=45&result=3');
     expect(cutJobDeepLink({ cutJobId: 45, resultNo: 3 })).toBe('/cut?job=45&result=3');
+  });
+
+  it('cutJobVersionLabel prefers the current result cut number', () => {
+    expect(cutJobVersionLabel({ cutJobId: 45, resultNo: 3, cutNumber: '45-3' })).toBe('45-3');
+    expect(cutJobVersionLabel({ cutJobId: 45, resultNo: 3, cutNumber: '   ' })).toBe('45-3');
   });
 
   it('cutJobProfileLabel resolves profile display names', () => {

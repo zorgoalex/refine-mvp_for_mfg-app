@@ -27,7 +27,9 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(source).toContain('cncOrderCuttingSequences');
     expect(source).toContain("title: 'Расчет ванны'");
     expect(source).toContain("key: 'bath_cut_job'");
-    expect(source).toContain('cutJobDeepLink(j)');
+    expect(source).toContain('versionRef ? cutJobDeepLink(versionRef) : cutJobDeepLink(j.cutJobId)');
+    expect(source).toContain('cutJobVersionLabel(ref)');
+    expect(source).toContain('cutJobVersionLabel(versionRef)');
     expect(source).toContain('Профиль: {cutJobProfileLabel(j)}');
     expect(source).toContain('Файлы станка');
     expect(source).toContain('№{sequence.cuttingSequenceNo}');

@@ -37,6 +37,7 @@ describe('CutPage result history guard', () => {
     expect(source).toContain('cutApi.setCurrentResult(job.cutJobId, result.resultNo)');
     expect(source).toContain('cutApi.archiveResult(job.cutJobId, result.resultNo)');
     expect(source).toContain('cutApi.unarchiveResult(job.cutJobId, result.resultNo)');
+    expect(source).toContain('emitCutJobUpdate(updated, job)');
     expect(source).toContain('отправлен в архив');
     expect(source).toContain('Сделать действующим');
   });

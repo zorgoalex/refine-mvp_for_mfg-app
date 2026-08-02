@@ -12,6 +12,11 @@ export interface CutJobReadyEventPayload {
   orderIds: number[];
 }
 
+export interface CutJobReadyPayloadOptions {
+  detailIds?: readonly unknown[];
+  orderIds?: readonly unknown[];
+}
+
 interface CutJobReadyMessage {
   eventId: string;
   payload: CutJobReadyEventPayload;
@@ -20,18 +25,30 @@ interface CutJobReadyMessage {
 let channel: BroadcastChannel | null = null;
 let eventSequence = 0;
 
-export function buildCutJobReadyPayload(job: Pick<CutJobDto, 'cutJobId' | 'name' | 'items'>): CutJobReadyEventPayload {
+export function buildCutJobReadyPayload(
+  job: Pick<CutJobDto, 'cutJobId' | 'name' | 'items'>,
+  options: CutJobReadyPayloadOptions = {},
+): CutJobReadyEventPayload {
   return {
     cutJobId: job.cutJobId,
     name: job.name,
-    detailIds: uniquePositiveIntegers(job.items.map((item) => item.orderDetailId)),
-    orderIds: uniquePositiveIntegers(job.items.map((item) => item.orderId)),
+    detailIds: uniquePositiveIntegers([
+      ...job.items.map((item) => item.orderDetailId),
+      ...(options.detailIds ?? []),
+    ]),
+    orderIds: uniquePositiveIntegers([
+      ...job.items.map((item) => item.orderId),
+      ...(options.orderIds ?? []),
+    ]),
   };
 }
 
-export function emitCutJobReady(job: Pick<CutJobDto, 'cutJobId' | 'name' | 'items'>): void {
+export function emitCutJobReady(
+  job: Pick<CutJobDto, 'cutJobId' | 'name' | 'items'>,
+  options: CutJobReadyPayloadOptions = {},
+): void {
   if (typeof window === 'undefined') return;
-  const payload = buildCutJobReadyPayload(job);
+  const payload = buildCutJobReadyPayload(job, options);
   const message: CutJobReadyMessage = {
     eventId: `${Date.now()}-${eventSequence += 1}-${payload.cutJobId}`,
     payload,

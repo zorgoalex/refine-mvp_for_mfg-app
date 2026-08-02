@@ -59,5 +59,6 @@ describe('edit-form detail grouping', () => {
     expect(table).toContain("key: 'cut_job'");
     expect(table).toContain("key: 'bath_cut_job'");
     expect(table).toContain('cutJobDeepLink(ref)');
+    expect(table).toContain('cutJobVersionLabel(ref)');
   });
 });

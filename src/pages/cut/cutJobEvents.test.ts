@@ -26,6 +26,22 @@ describe('cut job ready events', () => {
     });
   });
 
+  it('includes explicit affected ids for removed or reassigned items', () => {
+    const payload = buildCutJobReadyPayload({
+      cutJobId: 42,
+      name: 'Раскрой 42',
+      items: [
+        { cutJobItemId: 1, orderDetailId: 10, orderId: 100, qty: 1, cutGroupId: null, detail: null },
+      ],
+    }, {
+      detailIds: [10, 11],
+      orderIds: [100, 101],
+    });
+
+    expect(payload.detailIds).toEqual([10, 11]);
+    expect(payload.orderIds).toEqual([100, 101]);
+  });
+
   it('checks whether a ready job touches an open order/detail table', () => {
     const payload = { cutJobId: 42, name: 'J', detailIds: [10, 11], orderIds: [100] };
 

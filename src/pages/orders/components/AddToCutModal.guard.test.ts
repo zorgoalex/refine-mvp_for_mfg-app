@@ -19,6 +19,10 @@ describe('AddToCutModal wiring (backend-owned, flag-guarded)', () => {
     expect(modalSrc).toMatch(/selectableDetailIds/);
   });
 
+  it('broadcasts updated cut job refs after adding details', () => {
+    expect(modalSrc).toContain('emitCutJobReady(updated, { detailIds: finalIds, orderIds })');
+  });
+
   it('is mounted in the orders list only behind the useBackendCut flag', () => {
     expect(listSrc).toMatch(/featureFlags\.useBackendCut/);
     // Both the toolbar button and the modal are guarded by the flag.
