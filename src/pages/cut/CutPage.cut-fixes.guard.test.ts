@@ -34,6 +34,15 @@ describe('CutPage cut-fixes guard', () => {
     );
   });
 
+  it('declares profiles before the orientation effect reads it', () => {
+    const profileStateIndex = src.indexOf('const [profiles, setProfiles] = useState<CutParamProfile[]>([])');
+    const orientationEffectIndex = src.indexOf('loadSheetOrientationPortrait(');
+
+    expect(profileStateIndex).toBeGreaterThan(-1);
+    expect(orientationEffectIndex).toBeGreaterThan(-1);
+    expect(profileStateIndex).toBeLessThan(orientationEffectIndex);
+  });
+
   it('renders a fixed back-to-top button once the page has been scrolled', () => {
     expect(src).toMatch(/backToTopFixedStyle/);
     expect(src).toMatch(/position: 'fixed'/);

@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-02",
+    title: "Навигация: исправление открытия разделов",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Раздел «Раскрой» больше не падает при открытии из меню из-за ошибки инициализации настроек профиля.",
+      "Список пользователей снова открывается после синхронизации backend с актуальными ролями, включая «Упаковщик».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
     title: "Левое меню: личный порядок пунктов",
     services: ["ERP"],
     repositories: ["repo_erp"],

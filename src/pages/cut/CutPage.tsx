@@ -705,6 +705,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const manualCommandRef = useRef<{ key: string; commandId: string } | null>(null);
   const isHistoricalResult = selectedResult !== null && isFrozenResultSelection;
   const pdfTemplateIsRequestOnly = isHistoricalResult || job?.status === 'archived';
+  const [profiles, setProfiles] = useState<CutParamProfile[]>([]);
   // Per-user, per-job sheet preview orientation, persisted in localStorage.
   // Vacuum-table jobs default to landscape; other profiles default to portrait.
   // Landscape rotates the render server-side (labels stay upright).
@@ -835,7 +836,6 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [presetOptions, setPresetOptions] = useState(DEFAULT_PRESET_OPTIONS);
   const [pdfTemplateOptions, setPdfTemplateOptions] = useState(DEFAULT_PDF_TEMPLATE_OPTIONS);
   const [pdfTemplateForJob, setPdfTemplateForJob] = useState('standard');
-  const [profiles, setProfiles] = useState<CutParamProfile[]>([]);
   const [cutSettings, setCutSettings] = useState<CutSettingRow[]>([]);
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
   const [embeddedJobIds, setEmbeddedJobIds] = useState<Set<number> | null>(null);
