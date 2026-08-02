@@ -180,6 +180,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('border-radius: 50%');
   });
 
+  it('hides the red bath readiness check in «Карты ванн» and keeps it in the ready column', () => {
+    expect(page).toContain("showReadyIcon={column.key === 'baths_ready'}");
+    expect(page).toContain('!summaryOnly && showReadyIcon && (');
+    expect(page).toContain('<CheckCircleFilled');
+  });
+
   it('shows CNC order totals directly on each card', () => {
     expect(page).toContain('buildCncOrderSummaries(packet.items)');
     expect(page).toContain('aria-label="Итоги по заказам"');

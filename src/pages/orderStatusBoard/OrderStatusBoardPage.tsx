@@ -1750,6 +1750,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         detailedPlacement={detailedPlacement}
                         summaryOnly={summaryOnly}
                         displayToggleVisible={cardDisplayMode === 'compact'}
+                        showReadyIcon={column.key === 'baths_ready'}
                         selectedDetailId={selectedDetailId}
                         onToggleDisplay={() => toggleCardDisplay(cardKey)}
                         onSelect={() => {
@@ -1828,6 +1829,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 detailedPlacement="right"
                 summaryOnly={false}
                 displayToggleVisible={false}
+                showReadyIcon
                 selectedDetailId={selectedDetailedDetailId}
                 onToggleDisplay={() => undefined}
                 onSelect={() => undefined}
@@ -2678,6 +2680,7 @@ interface CncTelegramBathCardViewProps {
   detailedPlacement: CncDetailedBathPlacement;
   summaryOnly: boolean;
   displayToggleVisible: boolean;
+  showReadyIcon: boolean;
   selectedDetailId: number | null;
   onToggleDisplay: () => void;
   onSelect: () => void;
@@ -2697,6 +2700,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   detailedPlacement,
   summaryOnly,
   displayToggleVisible,
+  showReadyIcon,
   selectedDetailId,
   onToggleDisplay,
   onSelect,
@@ -2767,7 +2771,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           >
             {bath.cutNumber}
           </Tag>
-          {!summaryOnly && (
+          {!summaryOnly && showReadyIcon && (
             <Tooltip
               title={bath.ready ? 'Все детали ванны уже в колонке «Распилено»' : 'Не все детали ванны распилены'}
             >
