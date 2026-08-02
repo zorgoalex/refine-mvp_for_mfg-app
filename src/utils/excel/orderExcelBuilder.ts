@@ -36,6 +36,12 @@ interface OrderDetail {
   material?: { material_name: string } | null;
 }
 
+export interface OrderExcelBlankRow {
+  kind: 'blank';
+}
+
+export type OrderExcelDetailRow = OrderDetail | OrderExcelBlankRow;
+
 interface OrderPayment {
   payment_id: number;
   payment_date: string | Date | null;
@@ -60,7 +66,7 @@ interface Order {
 
 export interface GenerateOrderExcelParams {
   order: Order;
-  details: OrderDetail[];
+  details: OrderExcelDetailRow[];
   payments?: OrderPayment[];
   client?: { client_name: string } | null;
   clientPhone?: string | null;
@@ -72,6 +78,10 @@ const cloneValue = (value: any) => (
   value && typeof value === 'object'
     ? JSON.parse(JSON.stringify(value))
     : value
+);
+
+const isBlankDetailRow = (detail: OrderExcelDetailRow): detail is OrderExcelBlankRow => (
+  'kind' in detail && detail.kind === 'blank'
 );
 
 function address(row: number, column: number) {
@@ -160,7 +170,7 @@ function applyDetailRowLayout(
     targetCell.style = cloneStyle(sourceCell.style);
   }
 
-  targetRow.getCell(1).value = rowNumber - DETAIL_START_ROW + 1;
+  targetRow.getCell(1).value = null;
   targetRow.getCell(5).value = {
     formula: `ROUND((B${rowNumber}/1000)*(C${rowNumber}/1000)*D${rowNumber},2)`,
   };
@@ -272,9 +282,10 @@ export const buildOrderExcelBuffer = async ({
 
     // Функция для получения общего значения (если одинаково для всех деталей)
     const getCommonValue = (getValue: (detail: OrderDetail) => string | undefined | null): string => {
-      if (details.length === 0) return '';
+      const realDetails = details.filter((detail): detail is OrderDetail => !isBlankDetailRow(detail));
+      if (realDetails.length === 0) return '';
 
-      const values = details.map(getValue).filter(v => v); // Убрать null/undefined
+      const values = realDetails.map(getValue).filter(v => v); // Убрать null/undefined
       if (values.length === 0) return '';
 
       const firstValue = values[0];
@@ -306,11 +317,22 @@ export const buildOrderExcelBuffer = async ({
       worksheet.getCell('K4').value = null;
     }
 
+    let detailOrdinal = 0;
     details.forEach((detail, index) => {
       const rowNumber = DETAIL_START_ROW + index;
       const row = worksheet.getRow(rowNumber);
 
-      // Заполняем ТОЛЬКО данные, формулы/нумерацию ставит prepareDetailRows().
+      if (isBlankDetailRow(detail)) {
+        for (let column = 1; column <= 13; column += 1) {
+          row.getCell(column).value = null;
+        }
+        row.commit();
+        return;
+      }
+
+      detailOrdinal += 1;
+      // Заполняем только данные; формулы ставит prepareDetailRows().
+      row.getCell(1).value = detailOrdinal; // A: № без учета пустых строк группировки
       row.getCell(2).value = detail.length || null; // B: Высота (мм)
       row.getCell(3).value = detail.width || null; // C: Ширина (мм)
       row.getCell(4).value = detail.quantity; // D: Кол-во

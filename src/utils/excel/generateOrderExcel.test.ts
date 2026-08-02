@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
 import { buildOrderExcelBuffer } from './orderExcelBuilder';
+import type { OrderExcelDetailRow } from './orderExcelBuilder';
 
 const templatePath = path.resolve(process.cwd(), 'public/templates/order_template.xlsx');
 
@@ -25,6 +26,13 @@ async function buildWorkbook(
   detailCount: number,
   pricingMode: 'full' | 'omit' = 'full',
 ) {
+  return buildWorkbookFromRows(makeDetails(detailCount), pricingMode);
+}
+
+async function buildWorkbookFromRows(
+  details: OrderExcelDetailRow[],
+  pricingMode: 'full' | 'omit' = 'full',
+) {
   const template = await fs.readFile(templatePath);
   vi.stubGlobal('fetch', vi.fn(async () => ({
     ok: true,
@@ -36,11 +44,11 @@ async function buildWorkbook(
 
   const buffer = await buildOrderExcelBuffer({
     order: {
-      order_id: 1000 + detailCount,
-      order_name: `E2E Excel ${detailCount}`,
+      order_id: 1000 + details.length,
+      order_name: `E2E Excel ${details.length}`,
       order_date: '2026-06-19',
     },
-    details: makeDetails(detailCount),
+    details,
     payments: [],
     client: { client_name: 'Тестовый клиент' },
     clientPhone: '+7 777 000 00 00',
@@ -152,6 +160,29 @@ describe('buildOrderExcelBuffer dynamic detail rows', () => {
     expect(worksheet.getCell('K8').value).toEqual({
       formula: 'ROUND(SUMPRODUCT(B12:B66,C12:C66,D12:D66)/1000000,2)',
     });
+    expect(worksheet.getCell('M8').value).toEqual({ formula: 'SUM(D12:D66)' });
+  });
+
+  it('keeps one blank Excel row between grouped detail blocks without group subtotals', async () => {
+    const [first, second, third] = makeDetails(3);
+    const worksheet = await buildWorkbookFromRows([first, second, { kind: 'blank' }, third]);
+
+    expect(worksheet.getCell('A12').value).toBe(1);
+    expect(worksheet.getCell('A13').value).toBe(2);
+    expect(worksheet.getCell('B13').value).toBe(second.length);
+    expect(worksheet.getCell('H13').value).toBe(second.notes);
+
+    for (const cell of ['A14', 'B14', 'C14', 'D14', 'E14', 'F14', 'G14', 'H14', 'I14', 'J14', 'K14', 'L14', 'M14']) {
+      expect(worksheet.getCell(cell).value).toBeNull();
+    }
+
+    expect(worksheet.getCell('A15').value).toBe(3);
+    expect(worksheet.getCell('B15').value).toBe(third.length);
+    expect(worksheet.getCell('E15').value).toEqual({
+      formula: 'ROUND((B15/1000)*(C15/1000)*D15,2)',
+    });
+    expect(worksheet.getCell('J15').value).toEqual({ formula: 'E15*I15' });
+    expect(worksheet.getCell('J2').value).toEqual({ formula: 'SUM(J12:J66)' });
     expect(worksheet.getCell('M8').value).toEqual({ formula: 'SUM(D12:D66)' });
   });
 });

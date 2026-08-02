@@ -1004,6 +1004,27 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         const dateB = b.payment_date ? new Date(b.payment_date).getTime() : 0;
         return dateA - dateB;
       });
+      const mapDetailToExcelRow = (detail: any) => ({
+        detail_id: detail.detail_id,
+        length: detail.height, // ⚠️ В БД height = длина детали
+        width: detail.width,
+        quantity: detail.quantity,
+        area: detail.area,
+        milling_cost_per_sqm: detail.milling_cost_per_sqm,
+        detail_cost: detail.detail_cost,
+        notes: detail.note,
+        milling_type: { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' },
+        edge_type: { edge_type_name: edgeTypesMap.get(detail.edge_type_id) || '' },
+        film: { film_name: filmsMap.get(detail.film_id) || '' },
+        material: { material_name: resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap) || '' },
+      });
+      const excelDetailRows = groupingActive && grouping.state.field
+        ? buildGroupedRows(details, grouping.state.field, { groupLabelOf }).flatMap((row) => {
+          if (row.kind === 'separator') return [{ kind: 'blank' as const }];
+          if (row.kind === 'detail') return [mapDetailToExcelRow(row.detail)];
+          return [];
+        })
+        : details.map(mapDetailToExcelRow);
 
       // Генерация и скачивание Excel
       await downloadOrderExcel(
@@ -1022,20 +1043,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               prisadkaDesignerName,
             },
           },
-          details: details.map(detail => ({
-            detail_id: detail.detail_id,
-            length: detail.height, // ⚠️ В БД height = длина детали
-            width: detail.width,
-            quantity: detail.quantity,
-            area: detail.area,
-            milling_cost_per_sqm: detail.milling_cost_per_sqm,
-            detail_cost: detail.detail_cost,
-            notes: detail.note,
-            milling_type: { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' },
-            edge_type: { edge_type_name: edgeTypesMap.get(detail.edge_type_id) || '' },
-            film: { film_name: filmsMap.get(detail.film_id) || '' },
-            material: { material_name: resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap) || '' },
-          })),
+          details: excelDetailRows,
           payments: sortedPayments.map((payment: any) => ({
             payment_id: payment.payment_id,
             payment_date: payment.payment_date,

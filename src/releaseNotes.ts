@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-02",
+    title: "Excel: группировка деталей в экспорте",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Если список деталей в карточке заказа сгруппирован, Excel-экспорт сохраняет такой же порядок групп.",
+      "Между группами в Excel вставляется одна пустая строка без промежуточных итогов.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
     title: "Excel: генерация без блокировки интерфейса",
     services: ["ERP"],
     repositories: ["repo_erp"],
