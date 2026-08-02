@@ -117,6 +117,37 @@
   width: 24px;
   min-width: 24px;
   height: 24px;
+  margin-left: 0;
+}
+
+.status-board-toolbar__cnc-card-mode-icon {
+  flex: 0 0 auto;
+  color: var(--app-text-muted);
+  font-size: 16px;
+}
+
+.status-board-toolbar__cnc-detail-indicator {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--app-text-muted);
+  font-size: 16px;
+  opacity: 0.5;
+  transition-property: color, background-color, box-shadow, opacity;
+  transition-duration: 140ms;
+  transition-timing-function: ease;
+}
+
+.status-board-toolbar__cnc-detail-indicator[data-active="true"] {
+  color: #1677ff;
+  background: #e6f4ff;
+  box-shadow: 0 0 0 1px rgba(22, 119, 255, 0.18);
+  opacity: 1;
 }
 
 .status-board-settings {

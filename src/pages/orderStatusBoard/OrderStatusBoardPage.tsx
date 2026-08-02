@@ -45,6 +45,7 @@ import {
   PictureOutlined,
   PlusOutlined,
   PrinterOutlined,
+  ProfileOutlined,
   ReloadOutlined,
   RightOutlined,
   SearchOutlined,
@@ -1223,7 +1224,6 @@ export const OrderStatusBoardPage: React.FC = () => {
               className="status-board-toolbar__cnc-period"
               aria-label="Период отображения МДФ-работ"
             >
-              <Typography.Text type="secondary">Период</Typography.Text>
               {CNC_ORDER_SEARCH_PERIOD_OPTIONS.map((option) => {
                 const active = cncDisplayPeriod === option.value;
                 return (
@@ -1249,7 +1249,13 @@ export const OrderStatusBoardPage: React.FC = () => {
               className="status-board-toolbar__display-mode status-board-toolbar__cnc-card-mode"
               aria-label="Формат карточек МДФ-доски"
             >
-              <Typography.Text type="secondary">Карточки</Typography.Text>
+              <Tooltip title="Формат карточек">
+                <ProfileOutlined
+                  className="status-board-toolbar__cnc-card-mode-icon"
+                  role="img"
+                  aria-label="Формат карточек"
+                />
+              </Tooltip>
               <Segmented
                 size="small"
                 value={cncCardDisplayMode}
@@ -1272,6 +1278,18 @@ export const OrderStatusBoardPage: React.FC = () => {
                 </Button>
               </Tooltip>
             )}
+            <Tooltip
+              title={cncDetailedEnabled ? 'Подробный режим включён' : 'Подробный режим выключен'}
+            >
+              <span
+                className="status-board-toolbar__cnc-detail-indicator"
+                data-active={cncDetailedEnabled}
+                role="img"
+                aria-label={cncDetailedEnabled ? 'Подробный режим включён' : 'Подробный режим выключен'}
+              >
+                <SearchOutlined />
+              </span>
+            </Tooltip>
             <StatusBoardColumnSettingsButton
               key={STATUS_BOARD_COLUMN_PREFERENCE_KEYS.cnc_today}
               boardLabel={STATUS_BOARD_LABELS.cnc_today}

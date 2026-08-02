@@ -97,7 +97,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('options={cncOrderFilterOptions}');
     expect(page).toContain('aria-label="Фильтр МДФ-работ по номеру заказа"');
     expect(page).toContain('status-board-toolbar__cnc-period');
-    expect(page).toContain('Период');
+    expect(page).not.toContain('<Typography.Text type="secondary">Период</Typography.Text>');
     expect(page).toContain('DEFAULT_CNC_ORDER_SEARCH_PERIOD');
     expect(page).toContain("label: '1нед'");
     expect(page).toContain("label: '2нед'");
@@ -438,6 +438,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(settings).toContain('Скрыть пустые');
     expect(cncToolbar).not.toContain('Вчера');
     expect(cncToolbar).not.toContain('checked={viewState.hideEmpty}');
+    expect(cncToolbar).not.toContain('<Typography.Text type="secondary">Период</Typography.Text>');
+    expect(cncToolbar).not.toContain('<Typography.Text type="secondary">Карточки</Typography.Text>');
+    expect(cncToolbar).toContain('<ProfileOutlined');
+    expect(cncToolbar).toContain('className="status-board-toolbar__cnc-detail-indicator"');
+    expect(cncToolbar).toContain('data-active={cncDetailedEnabled}');
+    expect(cncToolbar.indexOf('status-board-toolbar__cnc-detail-indicator')).toBeLessThan(
+      cncToolbar.indexOf('<StatusBoardColumnSettingsButton'),
+    );
     expect(cncToolbar.match(/size="small"/g)?.length).toBeGreaterThanOrEqual(7);
     expect(css).toContain('.status-board-toolbar__settings-button.ant-btn');
     expect(css).toContain('margin-left: auto');
@@ -445,6 +453,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(/\.status-board-toolbar--cnc\s*\{[^}]*padding: 2px 6px;/);
     expect(css).toMatch(
       /\.status-board-toolbar--cnc \.status-board-toolbar__settings-button\.ant-btn\s*\{[^}]*width: 24px;[^}]*height: 24px;/s,
+    );
+    expect(css).toMatch(
+      /\.status-board-toolbar__cnc-detail-indicator\s*\{[^}]*margin-left: auto;[^}]*color: var\(--app-text-muted\);/s,
+    );
+    expect(css).toMatch(
+      /\.status-board-toolbar__cnc-detail-indicator\[data-active="true"\]\s*\{[^}]*color: #1677ff;/s,
     );
   });
 
