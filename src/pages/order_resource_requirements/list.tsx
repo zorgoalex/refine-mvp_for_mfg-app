@@ -13,7 +13,7 @@ import { DownloadOutlined, FileTextOutlined, FilterFilled, ReloadOutlined } from
 import { Alert, Button, Checkbox, DatePicker, Input, Modal, Segmented, Select, Space, Table, Tag, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import type { FilterDropdownProps, SortOrder } from 'antd/es/table/interface';
-import type { Dayjs } from 'dayjs';
+import dayjs, { type Dayjs } from 'dayjs';
 import { Link } from 'react-router-dom';
 import {
   ordersApi,
@@ -26,6 +26,7 @@ import type {
   OrderSheetMaterialDemandDto,
 } from '../../api/types/orderApi.types';
 import { LocalizedList } from '../../components/LocalizedList';
+import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 import { formatDate, formatDateTime } from '../../utils/dateFormat';
 import { subscribeCutJobReady } from '../cut/cutJobEvents';
 import {
@@ -91,7 +92,10 @@ function createDefaultHeaderFilters(): HeaderFilterState {
 
 export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = () => {
   const [page, setPage] = useState(DEFAULT_PAGE);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const { pageSize, setPageSize: rememberPageSize } = usePageSizePreference(
+    'order-resource-requirements:list',
+    DEFAULT_PAGE_SIZE,
+  );
   const [searchInput, setSearchInput] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>(null);
   const [readyCutsOnly, setReadyCutsOnly] = useState(false);
@@ -133,15 +137,21 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const hasActiveListFilters = hasActiveHeaderFilters || readyCutsOnly;
   const hasActiveSort = sortState.columnKey != null && sortState.order != null;
   const hasDateRange = Boolean(dateRange?.[0] || dateRange?.[1]);
+  const hasTodayRange = Boolean(
+    dateRange?.[0]?.isSame(dayjs(), 'day') && dateRange?.[1]?.isSame(dayjs(), 'day'),
+  );
   const hasListViewChanges =
     searchInput.trim().length > 0 ||
     hasDateRange ||
     hasActiveListFilters ||
     hasActiveSort ||
-    page !== DEFAULT_PAGE ||
-    pageSize !== DEFAULT_PAGE_SIZE;
+    page !== DEFAULT_PAGE;
 
   const resetPage = useCallback(() => setPage(DEFAULT_PAGE), []);
+
+  useEffect(() => {
+    setPage(DEFAULT_PAGE);
+  }, [pageSize]);
 
   const applyHeaderFilter = useCallback((field: HeaderFilterField, keys: Key[] | null) => {
     setHeaderFilters((current) => ({
@@ -158,7 +168,6 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     setHeaderFilters(createDefaultHeaderFilters());
     setSortState(DEFAULT_SORT_STATE);
     setPage(DEFAULT_PAGE);
-    setPageSize(DEFAULT_PAGE_SIZE);
     setRefreshRevision((value) => value + 1);
   }, []);
 
@@ -197,7 +206,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   return (
     <LocalizedList title="Потребности заказов в ресурсах">
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Space wrap size={8}>
+        <Space wrap={false} size={8} style={{ width: '100%', overflowX: 'auto', whiteSpace: 'nowrap' }}>
           <Input.Search
             allowClear
             aria-label="Поиск заказа"
@@ -207,7 +216,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
               setSearchInput(event.target.value);
               resetPage();
             }}
-            style={{ width: 280 }}
+            style={{ width: 220 }}
           />
           <DatePicker.RangePicker
             allowClear
@@ -219,8 +228,19 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
               resetPage();
             }}
           />
+          <Button
+            type={hasTodayRange ? 'primary' : 'default'}
+            onClick={() => {
+              const today = dayjs();
+              setDateRange([today, today]);
+              resetPage();
+            }}
+          >
+            Сегодня
+          </Button>
           <Checkbox
             checked={readyCutsOnly}
+            style={{ whiteSpace: 'nowrap' }}
             onChange={(event) => {
               setReadyCutsOnly(event.target.checked);
               resetPage();
@@ -269,13 +289,17 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             pageSize: response?.pagination.pageSize ?? pageSize,
             total: response?.pagination.total ?? 0,
             showSizeChanger: true,
-            pageSizeOptions: [10, 20, 50, 100],
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
             showTotal: (total) => (
               hasActiveListFilters ? `Заказов: ${total}; показано: ${tableRows.length}` : `Заказов: ${total}`
             ),
             onChange: (nextPage, nextPageSize) => {
-              setPage(nextPageSize === pageSize ? nextPage : DEFAULT_PAGE);
-              setPageSize(nextPageSize);
+              if (nextPageSize !== pageSize) {
+                rememberPageSize(nextPageSize);
+                setPage(DEFAULT_PAGE);
+                return;
+              }
+              setPage(nextPage);
             },
           }}
           locale={{ emptyText: 'Заказы по выбранным условиям не найдены' }}

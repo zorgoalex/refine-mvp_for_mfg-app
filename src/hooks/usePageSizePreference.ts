@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
+import { authSession } from '../api/authSession';
 import { profileApi } from '../api/profileApi';
 import type { PageSizePreferences } from '../api/types/profileApi.types';
 import { authStorage } from '../utils/auth';
@@ -18,7 +19,11 @@ const channelName = 'erp-page-size-preferences';
 let channel: BroadcastChannel | null = null;
 
 export function usePageSizePreference(listKey: string, defaultPageSize = DEFAULT_PAGE_SIZE) {
-  const userId = getCurrentUserId();
+  const userId = useSyncExternalStore(
+    authSession.subscribe,
+    getCurrentUserId,
+    () => null,
+  );
   const fallback = normalizePageSize(defaultPageSize) ?? DEFAULT_PAGE_SIZE;
   const pageSize = useSyncExternalStore(
     useCallback((listener) => subscribe(userId, listener), [userId]),
@@ -81,7 +86,7 @@ function isPreferenceKey(value: string): boolean {
 
 function getCurrentUserId(): string | null {
   if (typeof localStorage === 'undefined') return null;
-  const id = authStorage.getUser()?.id;
+  const id = authSession.getUser()?.id ?? authStorage.getUser()?.id;
   return id == null ? null : String(id);
 }
 
