@@ -13,11 +13,14 @@ import type {
   OrderListResponse,
   OrderResourceDemandQuery,
   OrderResourceDemandResponse,
+  OrderTransferTargetsResponse,
   OrderResponse,
   RestoreOrderRequest,
   RestoreOrderResponse,
   SaveOrderDto,
   SaveOrderResponse,
+  TransferOrderDetailsRequest,
+  TransferOrderDetailsResponse,
 } from './types/orderApi.types';
 
 export const ordersApi = {
@@ -38,6 +41,15 @@ export const ordersApi = {
     const path = opts?.includeDeleted ? withQuery(basePath, { includeDeleted: 'true' }) : basePath;
     const response = await httpClient.get<OrderResponse>(path);
     return response.order;
+  },
+
+  listTransferTargets(
+    orderId: number,
+    params: { search?: string; limit?: number } = {},
+  ): Promise<OrderTransferTargetsResponse> {
+    return httpClient.get<OrderTransferTargetsResponse>(
+      withQuery(apiRoutes.orders.transferTargets(validateOrderId(orderId)), params),
+    );
   },
 
   async create(dto: SaveOrderDto): Promise<SaveOrderResponse> {
@@ -91,6 +103,30 @@ export const ordersApi = {
           'If-Match': `"${version}"`,
           'Idempotency-Key': request.idempotencyKey ?? createOrderDeleteIdempotencyKey(),
         },
+      },
+    );
+  },
+
+  transferDetails(
+    orderId: number,
+    request: TransferOrderDetailsRequest,
+  ): Promise<TransferOrderDetailsResponse> {
+    const version = validateOrderVersion(request.sourceVersion);
+    const body = {
+      detailIds: request.detailIds,
+      target: request.target,
+      ...(request.note !== undefined ? { note: request.note } : {}),
+    };
+    return httpClient.request<TransferOrderDetailsResponse>(
+      apiRoutes.orders.transferDetails(validateOrderId(orderId)),
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'If-Match': `"${version}"`,
+          'Idempotency-Key': request.idempotencyKey ?? createOrderTransferIdempotencyKey(),
+        },
+        body: JSON.stringify(body),
       },
     );
   },
@@ -229,6 +265,15 @@ export function createOrderRestoreIdempotencyKey(): string {
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   return `order-restore:${uuid}`;
+}
+
+export function createOrderTransferIdempotencyKey(): string {
+  const uuid =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  return `order-detail-transfer:${uuid}`;
 }
 
 function saveBlob(blob: Blob, fileName: string): void {

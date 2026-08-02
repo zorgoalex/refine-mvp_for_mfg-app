@@ -38,6 +38,12 @@ import {
   type SortOrder,
 } from '../application/order-query.types';
 import { OrderTransactionService } from '../application/order-transaction.service';
+import {
+  OrderDetailTransferService,
+  type OrderTransferTargetsResponseDto,
+  type TransferOrderDetailsDto,
+  type TransferOrderDetailsResponseDto,
+} from '../application/order-detail-transfer.service';
 import type {
   DeleteOrderResponseDto,
   OrderAuditListResponseDto,
@@ -786,6 +792,104 @@ const restoreOrderResponseSwaggerSchema = {
   },
 } as const;
 
+const orderTransferTargetSwaggerSchema = {
+  type: 'object',
+  required: [
+    'orderId',
+    'orderName',
+    'clientId',
+    'clientName',
+    'orderDate',
+    'projectId',
+    'projectCode',
+    'projectName',
+    'orderStatusId',
+    'orderStatusName',
+    'productionStatusId',
+    'productionStatusName',
+    'version',
+  ],
+  properties: {
+    orderId: { type: 'integer' },
+    orderName: { type: 'string' },
+    clientId: { type: 'integer' },
+    clientName: nullableStringSwaggerSchema,
+    orderDate: dateOnlySwaggerSchema,
+    projectId: { type: 'integer' },
+    projectCode: nullableStringSwaggerSchema,
+    projectName: nullableStringSwaggerSchema,
+    orderStatusId: { type: 'integer' },
+    orderStatusName: nullableStringSwaggerSchema,
+    productionStatusId: nullableIntegerSwaggerSchema,
+    productionStatusName: nullableStringSwaggerSchema,
+    version: { type: 'integer' },
+  },
+} as const;
+
+const orderTransferTargetsResponseSwaggerSchema = {
+  type: 'object',
+  required: ['data', 'requestId'],
+  properties: {
+    data: { type: 'array', items: orderTransferTargetSwaggerSchema },
+    requestId: { type: 'string' },
+  },
+} as const;
+
+const transferOrderDetailsRequestSwaggerSchema = {
+  type: 'object',
+  required: ['detailIds', 'target'],
+  properties: {
+    detailIds: { type: 'array', items: { type: 'integer' } },
+    target: {
+      oneOf: [
+        {
+          type: 'object',
+          required: ['mode', 'orderId', 'version'],
+          properties: {
+            mode: { type: 'string', enum: ['existing'] },
+            orderId: { type: 'integer' },
+            version: { type: 'integer' },
+          },
+        },
+        {
+          type: 'object',
+          required: ['mode', 'orderName'],
+          properties: {
+            mode: { type: 'string', enum: ['new'] },
+            orderName: { type: 'string' },
+            projectId: nullableIntegerSwaggerSchema,
+          },
+        },
+      ],
+    },
+    note: nullableStringSwaggerSchema,
+  },
+} as const;
+
+const transferOrderDetailsResponseSwaggerSchema = {
+  type: 'object',
+  required: [
+    'sourceOrder',
+    'targetOrder',
+    'movedDetailIds',
+    'sourceVersion',
+    'targetVersion',
+    'targetCreated',
+    'auditId',
+    'requestId',
+  ],
+  properties: {
+    sourceOrder: orderSwaggerSchema,
+    targetOrder: orderSwaggerSchema,
+    movedDetailIds: { type: 'array', items: { type: 'integer' } },
+    sourceVersion: { type: 'integer' },
+    targetVersion: { type: 'integer' },
+    targetCreated: { type: 'boolean' },
+    auditId: { type: 'string' },
+    requestId: { type: 'string' },
+  },
+} as const;
+
 @ApiTags('Orders')
 @ApiBearerAuth()
 @Controller('orders')
@@ -795,6 +899,8 @@ export class OrdersController {
     private readonly orders: OrderTransactionService,
     @Inject(OrderQueryService)
     private readonly orderQueries: OrderQueryService,
+    @Inject(OrderDetailTransferService)
+    private readonly detailTransfer: OrderDetailTransferService,
     @Inject(OrdersRuntimeConfigService)
     private readonly runtimeConfig: OrdersRuntimeConfigService,
     @Inject(DatabaseService)
@@ -862,6 +968,33 @@ export class OrdersController {
 
     const currentUser = this.requireCurrentUser(request);
     return this.orderQueries.getFormData({ currentUser });
+  }
+
+  @ApiParam({ name: 'orderId', type: Number, description: 'Source order ID' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Target search text: order, client, project, status' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Maximum returned targets' })
+  @ApiResponse({ status: 200, description: 'Transfer target orders', schema: swaggerSchema(orderTransferTargetsResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Source order not found' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled' })
+  @ApiOperation({ operationId: 'listOrderTransferTargets', summary: 'List recent transfer target orders' })
+  @Get(':orderId/transfer-targets')
+  async listTransferTargets(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Query() query: Record<string, string | string[] | undefined>,
+  ): Promise<OrderTransferTargetsResponseDto> {
+    this.assertOrdersReadEnabled();
+
+    const currentUser = this.requireCurrentUser(request);
+    return this.detailTransfer.listTransferTargets({
+      currentUser,
+      sourceOrderId: parseOrderId(orderIdParam),
+      search: parseSearch(query.search),
+      limit: parsePositiveInteger(query.limit, 'limit', 20, 1, 50),
+      requestId: request.requestId,
+    });
   }
 
   @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
@@ -1016,6 +1149,51 @@ export class OrdersController {
     });
 
     return { order };
+  }
+
+  @ApiParam({ name: 'orderId', type: Number, description: 'Source order ID' })
+  @ApiHeader({
+    name: 'If-Match',
+    required: true,
+    description: 'Source order version/ETag version is required.',
+    schema: { type: 'string' },
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description: 'Idempotency key for safe retry of the detail transfer request.',
+    schema: { type: 'string', minLength: 8, maxLength: 200 },
+  })
+  @ApiBody({ schema: swaggerSchema(transferOrderDetailsRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Transferred order details', schema: swaggerSchema(transferOrderDetailsResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Missing or invalid transfer request headers' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Source, target, or detail not found' })
+  @ApiResponse({ status: 409, description: 'Stale version, source-empty, duplicate name, or idempotency conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid transfer payload' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled or read-only' })
+  @ApiOperation({ operationId: 'transferOrderDetails', summary: 'Transfer selected details to another or new order' })
+  @Post(':orderId/details/transfer')
+  @HttpCode(200)
+  async transferDetails(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Headers('if-match') ifMatchHeader: string | string[] | undefined,
+    @Headers('idempotency-key') idempotencyKeyHeader: string | string[] | undefined,
+    @Body() body: unknown,
+  ): Promise<TransferOrderDetailsResponseDto> {
+    this.assertOrdersWriteEnabled();
+
+    const currentUser = this.requireCurrentUser(request);
+    return this.detailTransfer.transfer({
+      currentUser,
+      sourceOrderId: parseOrderId(orderIdParam),
+      sourceVersion: parseIfMatchVersion(ifMatchHeader),
+      idempotencyKey: parseIdempotencyKeyHeader(idempotencyKeyHeader),
+      dto: parseTransferOrderDetailsRequest(body),
+      requestId: request.requestId,
+    });
   }
 
   @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
@@ -1293,8 +1471,93 @@ export function parseIdempotencyKeyHeader(value: string | string[] | undefined):
   return idempotencyKey;
 }
 
+export function parseTransferOrderDetailsRequest(body: unknown): TransferOrderDetailsDto {
+  if (!isRecord(body)) {
+    throw validationError('body', 'Transfer payload must be an object');
+  }
+
+  const detailIds = parseTransferDetailIds(body.detailIds);
+  const target = parseTransferTarget(body.target);
+  const note = body.note === undefined || body.note === null ? undefined : String(body.note).trim();
+  if (note !== undefined && note.length > 500) {
+    throw validationError('note', 'note must be 500 characters or fewer');
+  }
+
+  return {
+    detailIds,
+    target,
+    ...(note ? { note } : {}),
+  };
+}
+
 function headerError(header: string, message: string): ApiError {
   return new ApiError(400, 'BAD_REQUEST', message, { header });
+}
+
+function parseTransferDetailIds(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    throw validationError('detailIds', 'detailIds must be an array');
+  }
+  if (value.length === 0) {
+    throw validationError('detailIds', 'detailIds must not be empty');
+  }
+  if (value.length > 500) {
+    throw validationError('detailIds', 'detailIds supports at most 500 IDs');
+  }
+  const ids = value.map((item, index) => {
+    const parsed = Number(item);
+    if (!Number.isInteger(parsed) || parsed <= 0 || !Number.isSafeInteger(parsed)) {
+      throw validationError(`detailIds[${index}]`, 'detail id must be a positive integer');
+    }
+    return parsed;
+  });
+  if (new Set(ids).size !== ids.length) {
+    throw validationError('detailIds', 'detailIds must not contain duplicates');
+  }
+  return ids;
+}
+
+function parseTransferTarget(value: unknown): TransferOrderDetailsDto['target'] {
+  if (!isRecord(value)) {
+    throw validationError('target', 'target must be an object');
+  }
+  if (value.mode === 'existing') {
+    const orderId = Number(value.orderId);
+    const version = Number(value.version);
+    if (!Number.isInteger(orderId) || orderId <= 0 || !Number.isSafeInteger(orderId)) {
+      throw validationError('target.orderId', 'target.orderId must be a positive integer');
+    }
+    if (
+      value.version === null ||
+      value.version === undefined ||
+      value.version === '' ||
+      !Number.isInteger(version) ||
+      version < 0 ||
+      !Number.isSafeInteger(version)
+    ) {
+      throw validationError('target.version', 'target.version must be a non-negative integer');
+    }
+    return { mode: 'existing', orderId, version };
+  }
+  if (value.mode === 'new') {
+    const orderName = String(value.orderName ?? '').trim();
+    if (!orderName || orderName.length > 200) {
+      throw validationError('target.orderName', 'target.orderName must be 1-200 characters');
+    }
+    const projectId =
+      value.projectId === undefined || value.projectId === null || value.projectId === ''
+        ? undefined
+        : Number(value.projectId);
+    if (projectId !== undefined && (!Number.isInteger(projectId) || projectId <= 0 || !Number.isSafeInteger(projectId))) {
+      throw validationError('target.projectId', 'target.projectId must be a positive integer');
+    }
+    return { mode: 'new', orderName, ...(projectId === undefined ? {} : { projectId }) };
+  }
+  throw validationError('target.mode', 'target.mode must be existing or new');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function parseSortBy(value: string | string[] | undefined): OrderListSortBy {

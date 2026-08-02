@@ -68,6 +68,41 @@
   align-items: center;
 }
 
+.status-board-toolbar--production {
+  gap: 6px;
+  padding: 6px 8px;
+  overflow-x: visible;
+}
+
+.status-board-toolbar--production .status-board-toolbar__search {
+  width: 132px;
+  flex-basis: 132px;
+}
+
+.status-board-toolbar--production .status-board-toolbar__date-range {
+  width: 176px;
+  flex-basis: 176px;
+}
+
+.status-board-toolbar__icon-toggle.ant-btn,
+.status-board-toolbar--production .status-board-toolbar__settings-button.ant-btn {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  flex: 0 0 auto;
+}
+
+.status-board-toolbar__icon-toggle.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-board-toolbar--production .status-board-toolbar__settings-button.ant-btn {
+  margin-left: 0;
+}
+
 .status-board-toolbar--cnc {
   gap: 6px;
   padding: 2px 6px;
@@ -252,6 +287,23 @@
 
 .status-board-toolbar__display-mode .ant-segmented {
   flex: 0 0 auto;
+}
+
+.status-board-toolbar__display-mode-icon {
+  width: 22px;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.status-board-toolbar--production .status-board-toolbar__display-mode {
+  gap: 0;
+}
+
+.status-board-toolbar--production .status-board-toolbar__display-mode-label {
+  display: none;
 }
 
 .status-board-scrollbar {
@@ -643,6 +695,11 @@
     background-color 160ms ease;
 }
 
+.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-column {
+  width: 182px;
+  min-width: 182px;
+}
+
 .status-board-column--drop {
   border-color: var(--status-color);
   background: var(--app-selection-bg);
@@ -923,6 +980,21 @@
   white-space: normal;
 }
 
+.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card__number.ant-btn {
+  min-height: 26px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card__number.ant-btn > span {
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .status-board-card__actions {
   display: flex;
   flex: 0 0 auto;
@@ -980,6 +1052,16 @@
   white-space: normal;
 }
 
+.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card__status-badge.ant-tag {
+  display: block;
+  overflow: hidden;
+  padding-inline: 6px;
+  font-size: 10.5px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .status-board-card__tags {
   display: flex;
   flex-wrap: wrap;
@@ -1019,6 +1101,14 @@
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card--compact .status-board-card__compact-text {
+  overflow: visible;
+  overflow-wrap: normal;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: normal;
 }
 
 .status-board-card__standard-grid {
@@ -2087,6 +2177,27 @@
     flex: 1 1 0;
   }
 
+  .status-board-toolbar--production {
+    align-items: center;
+    flex-wrap: nowrap;
+    overflow-x: visible;
+  }
+
+  .status-board-toolbar--production .status-board-toolbar__search {
+    width: 112px;
+    flex: 0 0 112px;
+  }
+
+  .status-board-toolbar--production .status-board-toolbar__date-range {
+    width: 138px;
+    flex: 0 0 138px;
+  }
+
+  .status-board-toolbar--production .status-board-toolbar__display-mode {
+    width: auto;
+    margin-left: 0;
+  }
+
   .status-board-viewport {
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
@@ -2096,6 +2207,11 @@
     width: calc(100vw - 48px);
     min-width: calc(100vw - 48px);
     scroll-snap-align: start;
+  }
+
+  .status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-column {
+    width: calc((100vw - 48px) * 0.6);
+    min-width: calc((100vw - 48px) * 0.6);
   }
 
   .status-board-card__actions .ant-btn {

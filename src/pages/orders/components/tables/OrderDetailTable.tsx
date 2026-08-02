@@ -5,10 +5,10 @@
 // Проблема: race condition между внутренним состоянием InputNumber и Form.Item
 // Решение: используем useRef для синхронного хранения значений полей
 
-import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
-import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider, Checkbox } from 'antd';
+import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback, useContext } from 'react';
+import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider, Checkbox, notification } from 'antd';
 import type { MenuProps } from 'antd';
-import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { useDragSelection } from '../../../../hooks/useDragSelection';
 import { FilmQuickCreate } from '../modals/FilmQuickCreate';
@@ -41,6 +41,10 @@ import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
 import type { CutDetailLastReadyJobRef } from '../../../../api/types/cutApi.types';
 import { CutJobVersionLines } from '../../CutJobVersionLines';
 import { cutJobDeepLink } from '../../cutColumnHelpers';
+import {
+  OrderSaveValidationContext,
+  orderValidationDetailKey,
+} from '../../../../hooks/orderSaveValidation';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -48,6 +52,8 @@ interface OrderDetailTableProps {
   onQuickAdd?: () => void;
   onInsertAfter?: (detail: OrderDetail) => void;
   onCopyRow?: (detail: OrderDetail) => void;
+  onTransferRows?: (rowKeys: React.Key[]) => void;
+  getTransferRowsDisabledReason?: (rowKeys: React.Key[]) => string | null;
   selectedRowKeys?: React.Key[];
   onSelectChange?: (selectedRowKeys: React.Key[]) => void;
   highlightedRowKey?: React.Key | null;
@@ -83,6 +89,22 @@ interface FieldValues {
   area: number | null;
   milling_cost_per_sqm: number | null;
   detail_cost: number | null;
+}
+
+interface InlineFormValidationError {
+  errorFields?: Array<{ errors?: unknown[] }>;
+}
+
+export function orderDetailInlineErrorMessages(error: unknown): string[] {
+  const errorFields = typeof error === 'object' && error !== null
+    ? (error as InlineFormValidationError).errorFields
+    : undefined;
+  const messages = (errorFields ?? []).flatMap((field) =>
+    (field.errors ?? []).filter((message): message is string => typeof message === 'string'),
+  );
+  return messages.length > 0
+    ? [...new Set(messages)]
+    : ['Проверьте обязательные числовые поля позиции'];
 }
 
 type DetailSortOrder = 'ascend' | 'descend';
@@ -149,88 +171,36 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
 
 const ORDER_DETAIL_EDIT_DEFAULT_ORDER = ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS.map((definition) => definition.key);
 
+const ORDER_DETAIL_TOTAL_COLUMN_WIDTHS = {
+  detailNumber: 44,
+  quantity: 96,
+  area: 128,
+  detailCost: 150,
+} as const;
+
+const SUMMARY_TEXT_BASE_STYLE: React.CSSProperties = {
+  display: 'block',
+  width: 'max-content',
+  maxWidth: 'none',
+  whiteSpace: 'nowrap',
+  fontSize: 13,
+  lineHeight: 1.2,
+  fontVariantNumeric: 'tabular-nums',
+  letterSpacing: 0,
+};
+
 const FitSummaryText: React.FC<{
   children: React.ReactNode;
-  maxFontSize?: number;
-  minFontSize?: number;
   align?: 'left' | 'center' | 'right';
   style?: React.CSSProperties;
-}> = ({ children, maxFontSize = 13, minFontSize = 9, align = 'right', style }) => {
-  const containerRef = useRef<HTMLSpanElement>(null);
-  const [fontSize, setFontSize] = useState<number>(maxFontSize);
-  const [scaleX, setScaleX] = useState<number>(1);
-
-  const recompute = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    el.style.fontSize = `${maxFontSize}px`;
-    el.style.transform = '';
-
-    const availableWidth = el.clientWidth;
-    if (availableWidth <= 0) return;
-
-    if (el.scrollWidth <= availableWidth) {
-      setFontSize(maxFontSize);
-      setScaleX(1);
-      return;
-    }
-
-    let low = minFontSize;
-    let high = maxFontSize;
-    let best = minFontSize;
-
-    while (low <= high) {
-      const mid = Math.floor((low + high) / 2);
-      el.style.fontSize = `${mid}px`;
-      if (el.scrollWidth <= availableWidth) {
-        best = mid;
-        low = mid + 1;
-      } else {
-        high = mid - 1;
-      }
-    }
-
-    setFontSize(best);
-    el.style.fontSize = `${best}px`;
-    if (el.scrollWidth > availableWidth) {
-      setScaleX(availableWidth / el.scrollWidth);
-    } else {
-      setScaleX(1);
-    }
-  }, [maxFontSize, minFontSize]);
-
-  useLayoutEffect(() => {
-    recompute();
-  }, [children, recompute]);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-
-    const ro = new ResizeObserver(() => recompute());
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [recompute]);
-
+}> = ({ children, align = 'right', style }) => {
   return (
     <span
-      ref={containerRef}
       style={{
+        ...SUMMARY_TEXT_BASE_STYLE,
         ...style,
-        fontSize,
-        display: 'block',
-        width: '100%',
-        whiteSpace: 'nowrap',
-        overflow: 'visible',
-        textOverflow: 'clip',
-        transform: scaleX !== 1 ? `scaleX(${scaleX})` : undefined,
-        transformOrigin:
-          align === 'right'
-            ? 'right center'
-            : align === 'center'
-              ? 'center'
-              : 'left center',
+        marginLeft: align === 'right' || align === 'center' ? 'auto' : undefined,
+        marginRight: align === 'center' ? 'auto' : undefined,
       }}
     >
       {children}
@@ -244,6 +214,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   onQuickAdd,
   onInsertAfter,
   onCopyRow,
+  onTransferRows,
+  getTransferRowsDisabledReason,
   selectedRowKeys = [],
   onSelectChange,
   highlightedRowKey = null,
@@ -257,6 +229,21 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   toolbarActions,
 }, ref) => {
   const { header, details, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
+  const saveValidation = useContext(OrderSaveValidationContext);
+  const [inlineInvalidDetailKey, setInlineInvalidDetailKey] = useState<string | null>(null);
+  const [validationScrollTargetKey, setValidationScrollTargetKey] = useState<React.Key | null>(null);
+  const invalidDetailKeys = useMemo(
+    () => new Set(saveValidation?.invalidDetailKeys ?? []),
+    [saveValidation],
+  );
+  const isValidationInvalid = useCallback(
+    (detail: OrderDetail) => {
+      const key = orderValidationDetailKey(detail);
+      return invalidDetailKeys.has(key) || inlineInvalidDetailKey === key;
+    },
+    [inlineInvalidDetailKey, invalidDetailKeys],
+  );
+  const shownValidationRef = useRef<typeof saveValidation>(null);
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
 
@@ -349,6 +336,23 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     record: OrderDetail;
   } | null>(null);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
+
+  const showInlineValidationErrors = useCallback((record: OrderDetail, error: unknown) => {
+    const rowKey = record.temp_id ?? record.detail_id ?? record.detail_number;
+    const messages = orderDetailInlineErrorMessages(error);
+    setInlineInvalidDetailKey(orderValidationDetailKey(record));
+    setValidationScrollTargetKey(rowKey);
+    notification.error({
+      key: `order-detail-inline-validation:${rowKey}`,
+      message: `Позиция №${record.detail_number}: исправьте данные`,
+      description: (
+        <ul style={{ margin: 0, paddingLeft: 20 }}>
+          {messages.map((message) => <li key={message}>{message}</li>)}
+        </ul>
+      ),
+      duration: 0,
+    });
+  }, []);
 
   // ============================================================================
   // FIX: useRef для синхронного хранения значений полей
@@ -608,31 +612,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     const record = details.find(d => (d.temp_id || d.detail_id) === editingKey);
     if (!record) return true;
 
-    // Check if this is an "empty" detail (only default values, no essential data)
-    // Such details should be cancelled, not validated
-    const currentValues = form.getFieldsValue();
-    const isEmptyDetail = (
-      !record.detail_id && // Only for new details (not existing ones)
-      (!currentValues.height || currentValues.height === 0) &&
-      (!currentValues.width || currentValues.width === 0) &&
-      (!currentValues.quantity || currentValues.quantity === 0) &&
-      (!currentValues.area || currentValues.area === 0)
-    );
-
-    if (isEmptyDetail) {
-      console.log('[OrderDetailTable] saveCurrentRow - empty detail detected, removing from store');
-      // Remove empty detail from store so it won't cause validation errors
-      const tempId = record.temp_id || record.detail_id;
-      if (tempId) {
-        deleteDetail(tempId, record.detail_id);
-      }
-      cancelEdit();
-      return true; // Allow save to continue
-    }
-
     // Check dimension validation
     if (dimensionValidationError) {
       console.log('[OrderDetailTable] saveCurrentRow - dimension validation failed');
+      showInlineValidationErrors(record, {
+        errorFields: [{ errors: [dimensionValidationError] }],
+      });
       return false;
     }
 
@@ -647,6 +632,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       return true;
     } catch (error) {
       console.log('[OrderDetailTable] saveCurrentRow - validation failed:', error);
+      showInlineValidationErrors(record, error);
       return false;
     }
   };
@@ -695,6 +681,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   }));
 
   const cancelEdit = () => {
+    if (editingKey !== null) {
+      notification.destroy(`order-detail-inline-validation:${editingKey}`);
+    }
+    setInlineInvalidDetailKey(null);
     setEditingKey(null);
     setCurrentFilmId(null);
     setDimensionValidationError(null);
@@ -730,19 +720,26 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     // Check dimension validation first
     if (dimensionValidationError) {
       console.error('[OrderDetailTable] saveEdit - dimension validation failed:', dimensionValidationError);
+      showInlineValidationErrors(record, {
+        errorFields: [{ errors: [dimensionValidationError] }],
+      });
       return;
     }
 
-    const values = await form.validateFields();
-    console.log('[OrderDetailTable] saveEdit - form values:', values);
-    console.log('[OrderDetailTable] saveEdit - area:', values.area, 'price:', values.milling_cost_per_sqm, 'cost:', values.detail_cost);
+    try {
+      const values = await form.validateFields();
+      console.log('[OrderDetailTable] saveEdit - form values:', values);
+      console.log('[OrderDetailTable] saveEdit - area:', values.area, 'price:', values.milling_cost_per_sqm, 'cost:', values.detail_cost);
 
-    const tempId = record.temp_id || record.detail_id!;
-    updateDetail(tempId, values);
-    if (Number.isSafeInteger(values.sheet_material_type_id) && values.sheet_material_type_id > 0) {
-      sheetMaterials.promoteUsage(values.sheet_material_type_id);
+      const tempId = record.temp_id || record.detail_id!;
+      updateDetail(tempId, values);
+      if (Number.isSafeInteger(values.sheet_material_type_id) && values.sheet_material_type_id > 0) {
+        sheetMaterials.promoteUsage(values.sheet_material_type_id);
+      }
+      cancelEdit();
+    } catch (error) {
+      showInlineValidationErrors(record, error);
     }
-    cancelEdit();
   };
 
   // ============================================================================
@@ -775,7 +772,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '70%' }}>№</div>,
       dataIndex: 'detail_number',
       key: 'detail_number',
-      width: 27,
+      width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.detailNumber,
       fixed: 'left',
       sorter: (a: OrderDetail, b: OrderDetail) => a.detail_number - b.detail_number,
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: DATA_COLUMN_COUNT } : {},
@@ -810,12 +807,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           return formatNumber(num, num % 1 === 0 ? 0 : 2);
         }
         return (
-          <Form.Item name="height" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item
+            name="height"
+            style={{ margin: 0, padding: '0 4px' }}
+            rules={[
+              { required: true, message: 'Укажите высоту детали' },
+              { type: 'number', min: 0.01, message: 'Высота должна быть больше 0' },
+            ]}
+          >
             <CurrencyInput
               autoFocus
               controls={false}
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedHeight) }}
-              min={0}
+              min={0.01}
               precision={2}
               emptyWhenUnset
               onChange={handleHeightChange}
@@ -847,11 +851,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           return formatNumber(num, num % 1 === 0 ? 0 : 2);
         }
         return (
-          <Form.Item name="width" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item
+            name="width"
+            style={{ margin: 0, padding: '0 4px' }}
+            rules={[
+              { required: true, message: 'Укажите ширину детали' },
+              { type: 'number', min: 0.01, message: 'Ширина должна быть больше 0' },
+            ]}
+          >
             <CurrencyInput
               controls={false}
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedWidth) }}
-              min={0}
+              min={0.01}
               precision={2}
               emptyWhenUnset
               onChange={handleWidthChange}
@@ -865,7 +876,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Кол-во</div>,
       dataIndex: 'quantity',
       key: 'quantity',
-      width: 54,
+      width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.quantity,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.quantity || 0) - (b.quantity || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
@@ -873,7 +884,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="quantity" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item
+            name="quantity"
+            style={{ margin: 0, padding: '0 4px' }}
+            rules={[
+              { required: true, message: 'Укажите количество деталей' },
+              { type: 'number', min: 1, message: 'Количество должно быть больше 0' },
+            ]}
+          >
             <InputNumber
               controls={false}
               style={{ width: '100%', minWidth: '70px' }}
@@ -898,7 +916,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       ),
       dataIndex: 'area',
       key: 'area',
-      width: 63,
+      width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.area,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.area || 0) - (b.area || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
@@ -1061,12 +1079,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="milling_cost_per_sqm" style={{ margin: 0, padding: '0 4px' }}>
+          <Form.Item
+            name="milling_cost_per_sqm"
+            style={{ margin: 0, padding: '0 4px' }}
+            rules={[
+              { required: true, message: 'Укажите цену за кв.м.' },
+              { type: 'number', min: 0.01, message: 'Цена за кв.м. должна быть больше 0' },
+            ]}
+          >
             <InputNumber
               controls={false}
               style={{ width: '100%', minWidth: '90px' }}
               precision={2}
-              min={0}
+              min={0.01}
               formatter={currencySmartFormatter}
               parser={numberParser}
               onChange={handleMillingCostChange}
@@ -1084,7 +1109,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Сумма</div>,
       dataIndex: 'detail_cost',
       key: 'detail_cost',
-      width: 70,
+      width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.detailCost,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.detail_cost || 0) - (b.detail_cost || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
@@ -1096,12 +1121,16 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             <Form.Item
               name="detail_cost"
               style={{ margin: 0, padding: '0 4px' }}
+              rules={[
+                { required: true, message: 'Укажите сумму детали' },
+                { type: 'number', min: 0.01, message: 'Сумма детали должна быть больше 0' },
+              ]}
             >
               <InputNumber
                 controls={false}
                 style={{ width: '100%', minWidth: '90px' }}
                 precision={2}
-                min={0}
+                min={0.01}
                 formatter={currencySmartFormatter}
                 parser={numberParser}
                 disabled={!isSumEditable}
@@ -1538,6 +1567,36 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   ]);
 
   useEffect(() => {
+    if (!saveValidation) {
+      shownValidationRef.current = null;
+      return;
+    }
+    if (shownValidationRef.current === saveValidation) return;
+    shownValidationRef.current = saveValidation;
+    const firstInvalidDetail = paginatedDetails.find(isValidationInvalid);
+    if (!firstInvalidDetail) return;
+    if (!groupingActive) {
+      setCurrentPage(pageContainingOrderDetail(paginatedDetails, firstInvalidDetail, pageSize));
+    }
+    const firstInvalidRowKey = firstInvalidDetail.temp_id
+      ?? firstInvalidDetail.detail_id
+      ?? firstInvalidDetail.detail_number;
+    setValidationScrollTargetKey(firstInvalidRowKey);
+  }, [groupingActive, isValidationInvalid, pageSize, paginatedDetails, saveValidation]);
+
+  useEffect(() => {
+    if (validationScrollTargetKey === null) return;
+    const frame = requestAnimationFrame(() => {
+      const row = tableContainerRef.current?.querySelector<HTMLElement>(
+        `[data-row-key="${String(validationScrollTargetKey)}"]`,
+      );
+      row?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (row) setValidationScrollTargetKey(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [currentPage, groupingActive, validationScrollTargetKey]);
+
+  useEffect(() => {
     if (editingKey == null || groupingActive) return;
     const frame = requestAnimationFrame(() => {
       const row = tableContainerRef.current?.querySelector<HTMLElement>(
@@ -1788,6 +1847,20 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     return map;
   }, [selectionAggregates.noteValues]);
 
+  const contextTransferRowKeys = useMemo<React.Key[]>(() => {
+    const record = rowContextMenu?.record;
+    if (!record) return [];
+    const rowKey = getRowKey(record);
+    return selectedRowKeys.includes(rowKey) ? selectedRowKeys : [rowKey];
+  }, [getRowKey, rowContextMenu?.record, selectedRowKeys]);
+
+  const contextTransferDisabledReason = useMemo(
+    () => onTransferRows
+      ? getTransferRowsDisabledReason?.(contextTransferRowKeys) ?? null
+      : 'Перенос недоступен',
+    [contextTransferRowKeys, getTransferRowsDisabledReason, onTransferRows],
+  );
+
   const selectionMenuItems: MenuProps['items'] = useMemo(() => {
     const sortByLabel = (ids: number[], map: Map<number, string>) =>
       ids
@@ -1887,6 +1960,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     return [
       { key: 'action:insert', label: 'Вставить строку', icon: <PlusOutlined style={{ color: '#1890ff' }} /> },
       { key: 'action:copy', label: 'Скопировать строку', icon: <CopyOutlined style={{ color: '#52c41a' }} /> },
+      {
+        key: 'action:transfer',
+        label: <span title={contextTransferDisabledReason ?? undefined}>Перенести детали</span>,
+        icon: <SwapOutlined style={{ color: '#13c2c2' }} />,
+        disabled: !!contextTransferDisabledReason,
+      },
       { type: 'divider' as const },
       { key: 'select', label: 'Выделить', children: categories, disabled: !onSelectChange || sortedDetails.length === 0 },
       { type: 'divider' as const },
@@ -1894,6 +1973,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     ];
   }, [
     edgeNameById,
+    contextTransferDisabledReason,
     filmNameById,
     sheetNameById,
     millingNameById,
@@ -1931,6 +2011,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     if (key === 'action:copy') {
       if (rowContextMenu?.record) {
         onCopyRow?.(rowContextMenu.record);
+      }
+      closeRowContextMenu();
+      return;
+    }
+
+    if (key === 'action:transfer') {
+      if (onTransferRows && contextTransferRowKeys.length > 0) {
+        onTransferRows(contextTransferRowKeys);
       }
       closeRowContextMenu();
       return;
@@ -2055,7 +2143,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         closeRowContextMenu();
       }
     }
-  }, [closeRowContextMenu, noteValueKeyToValue, onCopyRow, onDelete, onInsertAfter, rowContextMenu?.record, selectRows]);
+  }, [closeRowContextMenu, contextTransferRowKeys, noteValueKeyToValue, onCopyRow, onDelete, onInsertAfter, onTransferRows, rowContextMenu?.record, selectRows]);
 
   // Handle film quick create success
   const handleFilmCreated = (filmId: number) => {
@@ -2132,13 +2220,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           const record = asDetail(row)!;
           const rowKey = record.temp_id || record.detail_id || 0;
           if (!groupingActive) {
-            return dragSelection.isInPendingSelection(rowKey) ? 'drag-selection-pending' : '';
+            const classes: string[] = [];
+            if (dragSelection.isInPendingSelection(rowKey)) classes.push('drag-selection-pending');
+            if (isValidationInvalid(record)) classes.push('order-detail-validation-error');
+            return classes.join(' ');
           }
           const groupIndex = row?.kind === 'detail' ? row.groupIndex : 0;
           const classes = [`detail-group-tint-${groupIndex % GROUP_TINT_COUNT}`];
           if (isEditing(record)) classes.push('dg-editing');
           else if (dragSelection.isInPendingSelection(rowKey)) classes.push('dg-pending');
           else if (highlightedRowKey !== null && rowKey === highlightedRowKey) classes.push('dg-highlight');
+          if (isValidationInvalid(record)) classes.push('order-detail-validation-error');
           return classes.join(' ');
         }}
         summary={() => (
@@ -2192,9 +2284,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           const isHighlighted = highlightedRowKey !== null && rowKey === highlightedRowKey;
           const isCurrentlyEditing = isEditing(record);
           const isPendingSelection = dragSelection.isInPendingSelection(rowKey);
+          const isValidationError = isValidationInvalid(record);
 
           return {
             ref: isHighlighted ? highlightedRowRef : undefined,
+            'aria-invalid': isValidationError || undefined,
+            title: isValidationError ? `Позиция №${record.detail_number ?? ''} содержит ошибки` : undefined,
             style: {
               backgroundColor: isCurrentlyEditing
                 ? 'var(--app-highlight)' // Warm yellow for editing row
@@ -2204,6 +2299,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                 ? 'var(--app-selection-bg)' // Light blue for highlighted row
                 : (index! % 2 === 0 ? 'var(--app-surface)' : 'var(--app-surface-muted)'),
               boxShadow: isCurrentlyEditing ? '0 4px 12px rgba(0, 0, 0, 0.15)' : 'none',
+              outline: isValidationError ? '2px solid #ff4d4f' : undefined,
+              outlineOffset: isValidationError ? '-2px' : undefined,
               transform: isCurrentlyEditing ? 'scale(1.01)' : 'scale(1)',
               position: isCurrentlyEditing ? 'relative' as const : 'relative' as const,
               zIndex: isCurrentlyEditing ? 10 : 1,

@@ -165,9 +165,18 @@ export const orderHeaderSchema = z
 export const orderDetailSchema = z.object({
   // Required fields
   detail_number: z.number().int().positive("Номер детали должен быть > 0"),
-  height: z.number().positive("Высота должна быть положительной"),
-  width: z.number().positive("Ширина должна быть положительной"),
-  quantity: z.number().int().positive("Количество должно быть > 0"),
+  height: z.number({
+    required_error: "Укажите высоту детали",
+    invalid_type_error: "Укажите высоту детали",
+  }).positive("Высота должна быть больше 0"),
+  width: z.number({
+    required_error: "Укажите ширину детали",
+    invalid_type_error: "Укажите ширину детали",
+  }).positive("Ширина должна быть больше 0"),
+  quantity: z.number({
+    required_error: "Укажите количество деталей",
+    invalid_type_error: "Укажите количество деталей",
+  }).int("Количество должно быть целым числом").positive("Количество должно быть больше 0"),
   area: z.number().min(0, "Площадь должна быть >= 0"),
 
   // Materials and processing
@@ -184,13 +193,16 @@ export const orderDetailSchema = z.object({
   film_id: z.number().nullable().optional(),
 
   // Costs
-  milling_cost_per_sqm: z.number().min(0, "Стоимость >= 0").nullable().optional(),
+  milling_cost_per_sqm: z.number({
+    required_error: "Укажите цену за кв.м.",
+    invalid_type_error: "Укажите цену за кв.м.",
+  }).positive("Цена за кв.м. должна быть больше 0"),
   detail_cost: z
     .number({
       required_error: "Сумма детали обязательна",
       invalid_type_error: "Сумма детали обязательна",
     })
-    .min(0, "Стоимость >= 0"),
+    .positive("Сумма детали должна быть больше 0"),
 
   // Additional
   note: z.string().max(1000, "Примечание не может превышать 1000 символов").nullable().optional(),

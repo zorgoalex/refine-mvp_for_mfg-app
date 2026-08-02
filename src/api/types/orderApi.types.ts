@@ -156,6 +156,48 @@ export interface RestoreOrderResponse {
   requestId: string;
 }
 
+export interface OrderTransferTarget {
+  orderId: number;
+  orderName: string;
+  clientId: number;
+  clientName: string | null;
+  orderDate: DateOnlyString;
+  projectId: number;
+  projectCode: string | null;
+  projectName: string | null;
+  orderStatusId: number;
+  orderStatusName: string | null;
+  productionStatusId: number | null;
+  productionStatusName: string | null;
+  version: number;
+}
+
+export interface OrderTransferTargetsResponse {
+  data: OrderTransferTarget[];
+  requestId: string;
+}
+
+export interface TransferOrderDetailsRequest {
+  detailIds: number[];
+  target:
+    | { mode: 'existing'; orderId: number; version: number }
+    | { mode: 'new'; orderName: string; projectId?: number | null };
+  sourceVersion: number;
+  idempotencyKey?: string;
+  note?: string | null;
+}
+
+export interface TransferOrderDetailsResponse {
+  sourceOrder: OrderDto;
+  targetOrder: OrderDto;
+  movedDetailIds: number[];
+  sourceVersion: number;
+  targetVersion: number;
+  targetCreated: boolean;
+  auditId: string;
+  requestId: string;
+}
+
 export interface ExportOrderRequest {
   format?: 'xlsx';
   fileName?: string | null;

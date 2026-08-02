@@ -36,6 +36,27 @@ describe('edit-form detail grouping', () => {
     expect(table).toContain("color: '#52c41a'");
     expect(table).toContain('detail-group-summary');
   });
+  it('renders summary totals without layout measuring or text scaling', () => {
+    expect(table).toContain('SUMMARY_TEXT_BASE_STYLE');
+    expect(table).toContain("width: 'max-content'");
+    expect(table).toContain("whiteSpace: 'nowrap'");
+    expect(table).toContain("fontVariantNumeric: 'tabular-nums'");
+    expect(table).not.toContain('ResizeObserver');
+    expect(table).not.toContain('scrollWidth');
+    expect(table).not.toContain('clientWidth');
+    expect(table).not.toContain('scaleX');
+  });
+  it('keeps total columns wide enough for full summary values', () => {
+    expect(table).toContain('ORDER_DETAIL_TOTAL_COLUMN_WIDTHS');
+    expect(table).toContain('detailNumber: 44');
+    expect(table).toContain('quantity: 96');
+    expect(table).toContain('area: 128');
+    expect(table).toContain('detailCost: 150');
+    expect(table).toContain('width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.detailNumber');
+    expect(table).toContain('width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.quantity');
+    expect(table).toContain('width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.area');
+    expect(table).toContain('width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.detailCost');
+  });
   it('renders a persisted-only group checkbox + group label on separators when cutSelectable', () => {
     expect(table).toContain('cutSelectable');
     expect(table).toContain('groupCheckboxState');
@@ -50,6 +71,13 @@ describe('edit-form detail grouping', () => {
     expect(tab).toContain('cutSelectable');
     expect(tab).toContain('selectedDetailIds');
     expect(tab).toContain('orderNames={[header.order_name]}');
+  });
+  it('wires persisted detail transfer into row context menu', () => {
+    expect(table).toContain("key: 'action:transfer'");
+    expect(table).toContain('Перенести детали');
+    expect(table).toContain('onTransferRows(contextTransferRowKeys)');
+    expect(tab).toContain('getTransferRowsDisabledReason={getTransferRowsDisabledReason}');
+    expect(tab).toContain('onTransferRows={handleTransferRows}');
   });
   it('edit detail table exposes a cut.view-gated Раскрой column refreshed by cut ready events', () => {
     expect(tab).toContain("const cutColumnEnabled = featureFlags.useBackendCut && can('cut.view')");

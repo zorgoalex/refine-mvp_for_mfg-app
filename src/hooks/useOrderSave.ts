@@ -1,7 +1,7 @@
 // Hook for saving order with MVP strategy
 // Uses sequential requests with rollback on error
 
-import { useState } from 'react';
+import { createElement, useCallback, useState } from 'react';
 import { useDataProvider, useInvalidate } from '@refinedev/core';
 import { notification, Modal } from 'antd';
 import { bazisApi } from '../api/bazisApi';
@@ -13,11 +13,22 @@ import type { CreateOrderFromDraftNode } from '../api/types/bazisApi.types';
 import { featureFlags } from '../config/featureFlags';
 import { saveOrderViaBackend } from './useOrderSaveBackend';
 import { calculateOrderTotalArea } from '../utils/orderArea';
+import {
+  summarizeOrderValidation,
+  type OrderSaveValidationSummary,
+  type OrderValidationDetailRef,
+} from './orderSaveValidation';
 
 interface UseOrderSaveResult {
   saveOrder: (values: OrderFormValues, isEdit: boolean) => Promise<number | null>;
   isSaving: boolean;
   error: Error | null;
+  validation: OrderSaveValidationSummary | null;
+  showValidationErrors: (
+    source: unknown,
+    details: readonly OrderValidationDetailRef[],
+  ) => OrderSaveValidationSummary | null;
+  clearValidation: () => void;
 }
 
 interface BazisDraftSaveContext {
@@ -50,6 +61,47 @@ export const useOrderSave = (
   const invalidate = useInvalidate();
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [validation, setValidation] = useState<OrderSaveValidationSummary | null>(null);
+  const validationNotificationKey = `order-save-validation:${orderKey}`;
+
+  const showValidationErrors = useCallback((
+    source: unknown,
+    details: readonly OrderValidationDetailRef[],
+  ): OrderSaveValidationSummary | null => {
+    const summary = summarizeOrderValidation(source, details);
+    if (!summary) return null;
+    setValidation(summary);
+    notification.error({
+      key: validationNotificationKey,
+      message: 'Проверьте данные заказа',
+      className: 'order-save-validation-notification',
+      description: createElement(
+        'div',
+        { style: { maxHeight: 360, overflowY: 'auto', paddingRight: 4 } },
+        createElement(
+          'p',
+          { style: { margin: '0 0 8px', fontWeight: 600 } },
+          'Исправьте следующие ошибки:',
+        ),
+        createElement(
+          'ul',
+          { style: { margin: 0, paddingLeft: 20 } },
+          ...summary.items.map((item, index) => createElement(
+            'li',
+            { key: `${item.field}:${index}`, style: { marginBottom: 4 } },
+            item.text,
+          )),
+        ),
+      ),
+      duration: 0,
+    });
+    return summary;
+  }, [validationNotificationKey]);
+
+  const clearValidation = useCallback(() => {
+    setValidation(null);
+    notification.destroy(validationNotificationKey);
+  }, [validationNotificationKey]);
 
   /**
    * Parse error message from various error formats
@@ -73,6 +125,7 @@ export const useOrderSave = (
       !isEdit ? options.getBazisDraftSaveContext?.() ?? null : null;
     setIsSaving(true);
     setError(null);
+    clearValidation();
 
     try {
       if (featureFlags.useBackendOrdersWrite) {
@@ -81,19 +134,19 @@ export const useOrderSave = (
           // рассчитанную сумму (без цены деталь не добавить). Draft-строки
           // приходят программно мимо модалки — гейтим цены здесь.
           const unpricedRows = (values.details ?? [])
-            .map((detail, index) => ({ detail, position: index + 1 }))
+            .map((detail, index) => ({ detail, index }))
             .filter(
               ({ detail }) =>
                 detail.milling_cost_per_sqm == null || detail.milling_cost_per_sqm === 0,
             );
           if (unpricedRows.length > 0) {
-            notification.error({
-              message: 'Не заполнены цены деталей',
-              description: `Укажите «Цена за кв.м.» для всех деталей (строки: ${unpricedRows
-                .map(({ position }) => position)
-                .join(', ')}). Массово — через «Групповые действия».`,
-              duration: 0,
-            });
+            showValidationErrors(
+              unpricedRows.map(({ index }) => ({
+                path: ['details', index, 'milling_cost_per_sqm'],
+                message: 'Укажите «Цена за кв.м.» для детали. Массово — через «Групповые действия»',
+              })),
+              values.details ?? [],
+            );
             setIsSaving(false);
             return null;
           }
@@ -824,6 +877,13 @@ export const useOrderSave = (
         bazisDraftSaveContext.regenerateIdempotencyKey();
       }
 
+      // Backend order validators return precise field errors in details.errors.
+      // Render every issue and retain the affected detail keys for row highlighting.
+      if (showValidationErrors(err, values.details ?? [])) {
+        setIsSaving(false);
+        return null;
+      }
+
       // ========== SHOW ERROR MESSAGE ==========
       const errorMessage = parseErrorMessage(err);
       notification.error({
@@ -841,5 +901,8 @@ export const useOrderSave = (
     saveOrder,
     isSaving,
     error,
+    validation,
+    showValidationErrors,
+    clearValidation,
   };
 };

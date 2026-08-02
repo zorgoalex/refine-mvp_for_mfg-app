@@ -1,6 +1,6 @@
-import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
+import { useShow, useList, useUpdate, useOne, useDataProvider, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select, Tag } from "antd";
+import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -188,6 +188,51 @@ type DetailProductionStatusMeta = {
   color?: string | null;
 };
 
+const ORDER_DETAIL_STATUS_BADGE_STYLE: CSSProperties = {
+  display: 'inline-block',
+  maxWidth: '100%',
+  height: 22,
+  lineHeight: '20px',
+  padding: '0 7px',
+  border: '1px solid #91caff',
+  borderRadius: 4,
+  background: '#e6f4ff',
+  color: '#0958d9',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  verticalAlign: 'middle',
+};
+
+const ORDER_DETAIL_STATUS_EMPTY_BADGE_STYLE: CSSProperties = {
+  ...ORDER_DETAIL_STATUS_BADGE_STYLE,
+  borderColor: 'var(--app-border)',
+  background: 'var(--app-surface)',
+  color: 'var(--app-text-muted)',
+};
+
+type DetailProductionStatusSnapshot = {
+  detailId: number;
+  productionStatusId: number | null;
+};
+
+const normalizeProductionStatusId = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+};
+
+const areDetailProductionStatusMapsEqual = (
+  left: ReadonlyMap<number, number | null>,
+  right: ReadonlyMap<number, number | null>,
+): boolean => {
+  if (left.size !== right.size) return false;
+  for (const [key, value] of left.entries()) {
+    if (!right.has(key) || right.get(key) !== value) return false;
+  }
+  return true;
+};
+
 const OrderDetailProductionStatusTag: React.FC<{
   statusId?: number | null;
   name?: string | null;
@@ -195,7 +240,7 @@ const OrderDetailProductionStatusTag: React.FC<{
   loading: boolean;
 }> = ({ statusId, name, statusesById, loading }) => {
   if (statusId === null || statusId === undefined) {
-    return <Tag style={{ marginInlineEnd: 0 }}>Не назначен</Tag>;
+    return <span style={ORDER_DETAIL_STATUS_EMPTY_BADGE_STYLE}>Не назначен</span>;
   }
 
   const statusMeta = statusesById.get(statusId);
@@ -203,25 +248,22 @@ const OrderDetailProductionStatusTag: React.FC<{
   const label = directName || statusMeta?.name || '';
 
   if (!label && loading) {
-    return <Tag color="blue" style={{ marginInlineEnd: 0 }}>...</Tag>;
+    return <span style={ORDER_DETAIL_STATUS_BADGE_STYLE}>...</span>;
   }
 
   const text = label || `ID: ${statusId}`;
+  const statusColor = statusMeta?.color;
 
   return (
-    <Tooltip title={text}>
-      <Tag
-        color={statusMeta?.color || 'blue'}
-        style={{
-          maxWidth: '100%',
-          marginInlineEnd: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-      >
-        {text}
-      </Tag>
-    </Tooltip>
+    <span
+      title={text}
+      style={{
+        ...ORDER_DETAIL_STATUS_BADGE_STYLE,
+        ...(statusColor ? { borderColor: statusColor, color: statusColor } : null),
+      }}
+    >
+      {text}
+    </span>
   );
 };
 
@@ -251,6 +293,7 @@ const modalConfirm = (content: string): Promise<boolean> =>
 
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
+  const dataProvider = useDataProvider();
   const isOperational = useOperationalUi();
   const isMobile = useIsMobile();
   const { id: currentOrderId } = useParams();
@@ -313,7 +356,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       ],
     },
   });
-  const { data, isLoading, refetch: refetchOrder } = queryResult;
+  const { data, isLoading } = queryResult;
 
   const record = data?.data;
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
@@ -468,7 +511,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   );
 
   // Загрузка деталей заказа
-  const { data: detailsData, isLoading: detailsLoading, refetch: refetchDetails } = useList({
+  const { data: detailsData, isLoading: detailsLoading } = useList({
     resource: "order_details",
     filters: [
       {
@@ -512,14 +555,89 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     detailsLoading,
     useBackendOrdersRead,
   });
-  const refreshOrderDetailsForStatus = useCallback(() => {
-    if (!record?.order_id) return;
-    if (useBackendOrdersRead) {
-      void refetchOrder();
-      return;
+  const [liveDetailProductionStatusById, setLiveDetailProductionStatusById] = useState<Map<number, number | null>>(
+    () => new Map(),
+  );
+  const liveDetailProductionStatusByIdRef = useRef(liveDetailProductionStatusById);
+  const detailStatusPollInFlightRef = useRef(false);
+  const detailProductionStatusBaseById = useMemo(() => {
+    const map = new Map<number, number | null>();
+    (details || []).forEach((detail: any) => {
+      const detailId = Number(detail?.detail_id);
+      if (!Number.isInteger(detailId) || detailId <= 0) return;
+      map.set(detailId, normalizeProductionStatusId(detail.production_status_id));
+    });
+    return map;
+  }, [details]);
+  const detailProductionStatusBaseByIdRef = useRef(detailProductionStatusBaseById);
+  const currentDetailProductionStatusById = useMemo(() => {
+    const map = new Map(detailProductionStatusBaseById);
+    liveDetailProductionStatusById.forEach((statusId, detailId) => {
+      if (map.has(detailId)) map.set(detailId, statusId);
+    });
+    return map;
+  }, [detailProductionStatusBaseById, liveDetailProductionStatusById]);
+
+  useEffect(() => {
+    liveDetailProductionStatusByIdRef.current = liveDetailProductionStatusById;
+  }, [liveDetailProductionStatusById]);
+
+  useEffect(() => {
+    detailProductionStatusBaseByIdRef.current = detailProductionStatusBaseById;
+  }, [detailProductionStatusBaseById]);
+
+  useEffect(() => {
+    setLiveDetailProductionStatusById((current) => (current.size === 0 ? current : new Map()));
+  }, [record?.order_id]);
+
+  const refreshLiveDetailProductionStatuses = useCallback(async () => {
+    const orderId = Number(record?.order_id);
+    if (!Number.isInteger(orderId) || orderId <= 0) return;
+    if (detailProductionStatusBaseByIdRef.current.size === 0) return;
+    if (detailStatusPollInFlightRef.current) return;
+
+    detailStatusPollInFlightRef.current = true;
+    try {
+      let snapshots: DetailProductionStatusSnapshot[] = [];
+
+      if (useBackendOrdersRead) {
+        const freshOrder = await ordersApi.getById(orderId);
+        snapshots = freshOrder.details.map((detail) => ({
+          detailId: detail.id,
+          productionStatusId: normalizeProductionStatusId(detail.productionStatusId),
+        }));
+      } else {
+        const result = await dataProvider().getList({
+          resource: "order_details",
+          filters: [{ field: "order_id", operator: "eq", value: orderId }],
+          pagination: { pageSize: 1000 },
+          sorters: [{ field: "detail_id", order: "asc" }],
+        });
+        snapshots = (result.data || []).map((detail: any) => ({
+          detailId: Number(detail.detail_id),
+          productionStatusId: normalizeProductionStatusId(detail.production_status_id),
+        }));
+      }
+
+      const baseStatuses = detailProductionStatusBaseByIdRef.current;
+      const nextLiveStatuses = new Map<number, number | null>();
+      snapshots.forEach((snapshot) => {
+        if (!Number.isInteger(snapshot.detailId) || snapshot.detailId <= 0) return;
+        if (!baseStatuses.has(snapshot.detailId)) return;
+        if (baseStatuses.get(snapshot.detailId) !== snapshot.productionStatusId) {
+          nextLiveStatuses.set(snapshot.detailId, snapshot.productionStatusId);
+        }
+      });
+
+      if (!areDetailProductionStatusMapsEqual(liveDetailProductionStatusByIdRef.current, nextLiveStatuses)) {
+        setLiveDetailProductionStatusById(nextLiveStatuses);
+      }
+    } catch {
+      // Keep the last visible statuses; the next poll/focus event can recover.
+    } finally {
+      detailStatusPollInFlightRef.current = false;
     }
-    void refetchDetails();
-  }, [record?.order_id, refetchDetails, refetchOrder, useBackendOrdersRead]);
+  }, [dataProvider, record?.order_id, useBackendOrdersRead]);
 
   useEffect(() => {
     if (!record?.order_id || typeof window === 'undefined' || typeof document === 'undefined') {
@@ -528,11 +646,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'hidden') return;
-      refreshOrderDetailsForStatus();
+      void refreshLiveDetailProductionStatuses();
     };
     const refreshOnVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return;
-      refreshOrderDetailsForStatus();
+      void refreshLiveDetailProductionStatuses();
     };
 
     window.addEventListener('focus', refreshWhenVisible);
@@ -544,7 +662,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       document.removeEventListener('visibilitychange', refreshOnVisibilityChange);
       window.clearInterval(intervalId);
     };
-  }, [record?.order_id, refreshOrderDetailsForStatus]);
+  }, [record?.order_id, refreshLiveDetailProductionStatuses]);
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
@@ -1376,14 +1494,25 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       dataIndex: 'production_status_id',
       key: 'production_status_id',
       width: 120,
-      render: (_value, detail) => (
-        <OrderDetailProductionStatusTag
-          statusId={detail.production_status_id}
-          name={detail.production_status_name}
-          statusesById={productionStatusesById}
-          loading={productionStatusesLoading}
-        />
-      ),
+      render: (_value, detail) => {
+        const detailId = Number(detail.detail_id);
+        const hasLiveStatus = Number.isInteger(detailId) && currentDetailProductionStatusById.has(detailId);
+        const statusId = hasLiveStatus
+          ? currentDetailProductionStatusById.get(detailId)
+          : normalizeProductionStatusId(detail.production_status_id);
+        const statusName =
+          statusId === normalizeProductionStatusId(detail.production_status_id)
+            ? detail.production_status_name
+            : undefined;
+        return (
+          <OrderDetailProductionStatusTag
+            statusId={statusId}
+            name={statusName}
+            statusesById={productionStatusesById}
+            loading={productionStatusesLoading}
+          />
+        );
+      },
     },
     ...(cutColumnEnabled
       ? [
