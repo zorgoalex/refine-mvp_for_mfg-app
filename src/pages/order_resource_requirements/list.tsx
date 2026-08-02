@@ -243,7 +243,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             {...filterProps('order', filterOptions.orders)}
             render={(_, row: OrderResourceDemandRow) => (
               <Space direction="vertical" size={0}>
-                <Link to={`/orders/show/${row.orderId}`}>{row.fullNumber}</Link>
+                <Link to={`/orders/show/${row.orderId}`}>{orderDisplayNumber(row)}</Link>
                 <Typography.Text type="secondary">
                   {row.clientName || 'Клиент не указан'}
                 </Typography.Text>
@@ -377,7 +377,7 @@ function buildResourceDemandFilterOptions(rows: OrderResourceDemandRow[]): Recor
   let hasRowsWithoutFilms = false;
 
   for (const row of rows) {
-    const orderLabel = [row.fullNumber, row.clientName?.trim()].filter(Boolean).join(' · ');
+    const orderLabel = [orderDisplayNumber(row), row.clientName?.trim()].filter(Boolean).join(' · ');
     orders.set(String(row.orderId), { value: String(row.orderId), label: orderLabel || `#${row.orderId}` });
 
     if (row.orderDate) {
@@ -475,10 +475,14 @@ function compareResourceDemandRows(
   left: OrderResourceDemandRow,
   right: OrderResourceDemandRow,
 ): number {
-  if (columnKey === 'order') return compareText(left.fullNumber, right.fullNumber);
+  if (columnKey === 'order') return compareText(orderDisplayNumber(left), orderDisplayNumber(right));
   if (columnKey === 'date') return compareDates(left.orderDate, right.orderDate);
   if (columnKey === 'sheetMaterials') return compareText(resourceDemandSheetText(left), resourceDemandSheetText(right));
   return compareText(resourceDemandFilmText(left), resourceDemandFilmText(right));
+}
+
+function orderDisplayNumber(row: OrderResourceDemandRow): string {
+  return row.orderName?.trim() || `#${row.orderId}`;
 }
 
 function resourceDemandSheetText(row: OrderResourceDemandRow): string {

@@ -38,4 +38,11 @@ describe('order resource requirements list guards', () => {
     expect(source).toContain('rowHasReadyCut');
     expect(source).toContain('film.hasCutData');
   });
+
+  it('в колонке «Заказ» показывает номер заказа без кода проекта', () => {
+    expect(source).toContain('orderDisplayNumber(row)');
+    expect(source).toContain("return row.orderName?.trim() || `#${row.orderId}`;");
+    expect(source).not.toContain('{row.fullNumber}</Link>');
+    expect(source).toContain('compareText(orderDisplayNumber(left), orderDisplayNumber(right))');
+  });
 });
