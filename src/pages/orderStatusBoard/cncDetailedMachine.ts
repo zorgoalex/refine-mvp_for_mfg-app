@@ -7,9 +7,10 @@ import type {
 } from '../../api/types/cncTelegramApi.types';
 import type { CutResultDto } from '../../api/types/cutApi.types';
 
-export const CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM = 1;
+export const CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM = 3;
+const CNC_WHOLE_ORDER_OTHER_MATERIAL_PATTERN = /(?:hdf|хдф|лдсп|ldsp|fanera|фанера)/i;
 
-export type CncDetailedMachineMatchKind = 'exact' | 'fallback';
+export type CncDetailedMachineMatchKind = 'exact' | 'fallback' | 'whole_order';
 export type CncDetailedMachinePreviewKind = 'svg' | 'screenshot' | 'unavailable';
 
 export interface CncDetailedMachineSource {
@@ -34,7 +35,7 @@ export interface CncMachineResultSheet {
 interface BuildSourcesParams {
   columns: CncTelegramTodayColumn[];
   bath: CncTelegramBathCard;
-  selectedDetailId: number;
+  selectedDetailId: number | null;
   canViewCut: boolean;
 }
 
@@ -44,8 +45,10 @@ export function buildCncDetailedMachineSources({
   selectedDetailId,
   canViewCut,
 }: BuildSourcesParams): CncDetailedMachineSource[] {
-  const selectedBathItem = bath.items.find((item) => item.detailId === selectedDetailId);
-  if (!selectedBathItem) return [];
+  const selectedBathItems = selectedDetailId === null
+    ? bath.items
+    : bath.items.filter((item) => item.detailId === selectedDetailId);
+  if (selectedBathItems.length === 0) return [];
 
   const sources: CncDetailedMachineSource[] = [];
   const seenPackets = new Set<string>();
@@ -54,15 +57,11 @@ export function buildCncDetailedMachineSources({
     for (const packet of column.packets) {
       if (seenPackets.has(packet.packetId)) continue;
 
-      const hasExactMatch = packet.items.some((item) => isExactMatch(item, selectedBathItem));
-      const fallbackMatches = hasExactMatch
-        ? []
-        : packet.items.filter((item) => isFallbackMatch(item, selectedBathItem));
-
-      if (!hasExactMatch && fallbackMatches.length !== 1) continue;
+      const matchKind = cncDetailedMachineMatchKind(packet, selectedBathItems);
+      if (matchKind === null) continue;
 
       seenPackets.add(packet.packetId);
-      sources.push(toSource(packet, hasExactMatch ? 'exact' : 'fallback', canViewCut));
+      sources.push(toSource(packet, matchKind, canViewCut));
     }
   }
 
@@ -96,13 +95,12 @@ export function selectCncMachineResultSheets(
 }
 
 function isExactMatch(item: CncTelegramPacketItem, bathItem: CncTelegramBathItem): boolean {
-  return item.matchStatus === 'matched'
-    && item.matchOrderId === bathItem.orderId
+  return item.matchOrderId === bathItem.orderId
     && item.matchDetailId === bathItem.detailId;
 }
 
 function isFallbackMatch(item: CncTelegramPacketItem, bathItem: CncTelegramBathItem): boolean {
-  if (item.matchStatus !== 'unmatched' || item.matchOrderId !== null || item.matchDetailId !== null) {
+  if (item.matchOrderId !== null || item.matchDetailId !== null) {
     return false;
   }
   if (item.detailNumber === null || item.detailNumber !== bathItem.detailNumber) return false;
@@ -112,8 +110,40 @@ function isFallbackMatch(item: CncTelegramPacketItem, bathItem: CncTelegramBathI
   const bathDimensions = normalizedDimensions(bathItem.widthMm, bathItem.heightMm);
   if (!itemDimensions || !bathDimensions) return false;
 
-  return Math.abs(itemDimensions[0] - bathDimensions[0]) <= CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM
-    && Math.abs(itemDimensions[1] - bathDimensions[1]) <= CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM;
+  const toleranceMm = item.source === 'ocr' ? CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM : 0;
+  return Math.abs(itemDimensions[0] - bathDimensions[0]) <= toleranceMm
+    && Math.abs(itemDimensions[1] - bathDimensions[1]) <= toleranceMm;
+}
+
+function cncDetailedMachineMatchKind(
+  packet: CncTelegramPacket,
+  bathItems: readonly CncTelegramBathItem[],
+): CncDetailedMachineMatchKind | null {
+  if (packet.items.some((item) => bathItems.some((bathItem) => isExactMatch(item, bathItem)))) {
+    return 'exact';
+  }
+  if (packet.items.some((item) => bathItems.some((bathItem) => isFallbackMatch(item, bathItem)))) {
+    return 'fallback';
+  }
+  return packetCompletesWholeBathOrder(packet, bathItems) ? 'whole_order' : null;
+}
+
+function packetCompletesWholeBathOrder(
+  packet: CncTelegramPacket,
+  bathItems: readonly CncTelegramBathItem[],
+): boolean {
+  if (packet.completionStatus !== 'completed' && !packet.thumbsUp) return false;
+  if (packet.comments.some((comment) => CNC_WHOLE_ORDER_OTHER_MATERIAL_PATTERN.test(comment))) {
+    return false;
+  }
+  const bathOrderKeys = new Set(
+    bathItems.map((item) => item.orderName.trim().toLocaleLowerCase('ru-RU')),
+  );
+  return packet.comments.some((comment) => {
+    if (!comment.toLocaleLowerCase('ru-RU').includes('весь')) return false;
+    return Array.from(comment.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g))
+      .some((match) => bathOrderKeys.has((match[2] ?? '').toLocaleLowerCase('ru-RU')));
+  });
 }
 
 function belongsToBathOrder(item: CncTelegramPacketItem, bathItem: CncTelegramBathItem): boolean {

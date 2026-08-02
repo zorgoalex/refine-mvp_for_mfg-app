@@ -487,9 +487,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("style={{ gridColumn: '1 / span 4', gridRow: 1 }}");
     expect(page).toContain('<CncDetailedMachineMaps');
     expect(page).toContain('buildCncDetailedMachineSources({');
+    expect(page).toContain('detailedContext?.activeBath\n      ? buildCncDetailedMachineSources({');
+    expect(page).toContain('selectedDetailId: number | null;');
+    expect(page).toContain("source.matchKind === 'whole_order'");
+    expect(page).toContain('Выберите деталь на раскладке ванны, чтобы открыть предпросмотр');
     expect(page).toContain("const canViewCncCutMaps = can('cut.view')");
     expect(page).toContain('canViewCut={canViewCncCutMaps}');
-    expect(page).toContain('loadCncDetailedMachineSvgPreview(source, selectedDetailId)');
+    expect(page).toContain('loadCncDetailedMachineSvgPreview(source, detailId)');
     expect(page).toContain('cncDetailedMachinePreviewsShareSheets(current, preview) ? current : preview');
     expect(page).toContain('loadCncDetailedMachineScreenshot(imageUrl)');
     expect(page).toContain('syncCncBathSelectedDetail(svgBodyRef.current, selectedDetailId)');
@@ -581,6 +585,17 @@ describe('OrderStatusBoardPage UX guards', () => {
       /\.cnc-bath-card__tabs\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/s,
     );
     expect(css).toContain('.cnc-bath-card__pdf-modal');
+  });
+
+  it('shows the bath cut job name only inside detail and PDF preview headers', () => {
+    expect(page).not.toContain('className="cnc-bath-card__job"');
+    expect(page).toContain('className="cnc-bath-card__block-heading"');
+    expect(page).toContain('className="cnc-bath-card__block-heading cnc-bath-card__block-heading--modal"');
+    expect(page).toContain('className="cnc-bath-card__block-job" title={bath.cutJobName}');
+    expect(page).toContain('Список деталей');
+    expect(page).toContain('Предпросмотр PDF · раскрой №{bath.cutNumber}');
+    expect(css).toContain('.cnc-bath-card__block-heading');
+    expect(css).toContain('.cnc-bath-card__block-job');
   });
 
   it('keeps order cards dense, badge-based and project-code-free', () => {

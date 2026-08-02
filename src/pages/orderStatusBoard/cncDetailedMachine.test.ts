@@ -13,7 +13,7 @@ import {
 } from './cncDetailedMachine';
 
 describe('CNC detailed machine sources', () => {
-  it('accepts exact details only with matched status and both matching IDs', () => {
+  it('accepts both matching IDs regardless of review status, like bath completion', () => {
     const exact = packet({
       items: [packetItem({
         matchStatus: 'matched',
@@ -56,30 +56,36 @@ describe('CNC detailed machine sources', () => {
       canViewCut: true,
     });
 
-    expect(sources.map((source) => source.packet.packetId)).toEqual(['packet-1']);
+    expect(sources.map((source) => source.packet.packetId)).toEqual([
+      'packet-1',
+      'packet-conflict',
+      'packet-review',
+    ]);
     expect(sources[0]).toMatchObject({ matchKind: 'exact', previewKind: 'svg' });
   });
 
-  it('allows one unmatched ID-free orientation-normalized fallback within inclusive 1 mm', () => {
-    expect(CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM).toBe(1);
+  it('uses server-compatible orientation-normalized OCR tolerance of 3 mm', () => {
+    expect(CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM).toBe(3);
     const boundary = packet({
       items: [packetItem({
+        source: 'ocr',
         matchStatus: 'unmatched',
         matchOrderId: null,
         matchDetailId: null,
-        widthMm: 476,
-        heightMm: 498,
+        widthMm: 474,
+        heightMm: 500,
       })],
     });
     const outside = packet({
       packetId: 'packet-outside',
       items: [packetItem({
         packetItemId: 'item-outside',
+        source: 'ocr',
         matchStatus: 'unmatched',
         matchOrderId: null,
         matchDetailId: null,
-        widthMm: 475.99,
-        heightMm: 498.01,
+        widthMm: 473.99,
+        heightMm: 500.01,
       })],
     });
 
@@ -94,7 +100,7 @@ describe('CNC detailed machine sources', () => {
     expect(sources[0].matchKind).toBe('fallback');
   });
 
-  it('rejects ambiguous fallback rows and whole-order comments without a detail match', () => {
+  it('keeps repeated fallback rows and whole-order completion cards', () => {
     const ambiguousItem = packetItem({
       matchStatus: 'unmatched',
       matchOrderId: null,
@@ -108,6 +114,7 @@ describe('CNC detailed machine sources', () => {
     });
     const wholeOrderOnly = packet({
       packetId: 'packet-whole-order',
+      completionStatus: 'completed',
       comments: ['Весь заказ: 2701'],
       items: [packetItem({
         packetItemId: 'other-detail',
@@ -122,7 +129,81 @@ describe('CNC detailed machine sources', () => {
       bath: bath(),
       selectedDetailId: 7001,
       canViewCut: true,
-    })).toEqual([]);
+    }).map((source) => [source.packet.packetId, source.matchKind])).toEqual([
+      ['packet-1', 'fallback'],
+      ['packet-whole-order', 'whole_order'],
+    ]);
+  });
+
+  it('accepts whole-order comments only from completed or approved MDF packets', () => {
+    const pending = packet({
+      packetId: 'packet-pending-whole-order',
+      comments: ['Весь заказ: 2701'],
+      items: [],
+    });
+    const approved = packet({
+      packetId: 'packet-approved-whole-order',
+      thumbsUp: true,
+      comments: ['Весь заказ: 2701'],
+      items: [],
+    });
+    const otherMaterial = packet({
+      packetId: 'packet-other-material-whole-order',
+      completionStatus: 'completed',
+      comments: ['Весь заказ: 2701', 'Материал HDF'],
+      items: [],
+    });
+
+    expect(buildCncDetailedMachineSources({
+      columns: machineColumns([pending, approved, otherMaterial]),
+      bath: bath(),
+      selectedDetailId: 7001,
+      canViewCut: true,
+    }).map((source) => source.packet.packetId)).toEqual([
+      'packet-approved-whole-order',
+    ]);
+  });
+
+  it('shows cards for every bath detail before a concrete detail is selected', () => {
+    const secondDetailPacket = packet({
+      packetId: 'packet-second-detail',
+      sheetImageUrl: null,
+      svgCutJobId: null,
+      svgCutResultId: null,
+      svgCutResultNo: null,
+      svgCutImportStatus: 'none',
+      items: [packetItem({
+        packetItemId: 'item-second-detail',
+        detailNumber: 32,
+        matchOrderId: 2701,
+        matchDetailId: 7002,
+      })],
+    });
+    const expandedBath = {
+      ...bath(),
+      items: [
+        ...bath().items,
+        {
+          ...bath().items[0],
+          bathItemId: 'bath-item-2',
+          detailId: 7002,
+          detailNumber: 32,
+        },
+      ],
+    };
+
+    const sources = buildCncDetailedMachineSources({
+      columns: machineColumns([packet(), secondDetailPacket]),
+      bath: expandedBath,
+      selectedDetailId: null,
+      canViewCut: true,
+    });
+
+    expect(sources.map((source) => source.packet.packetId)).toEqual([
+      'packet-1',
+      'packet-second-detail',
+    ]);
+    expect(sources[1].previewKind).toBe('unavailable');
   });
 
   it('uses imported SVG with cut.view and screenshot fallback without cut.view', () => {

@@ -1559,7 +1559,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   const detailedPacketHighlightEnabled = cncDetailedContextHasActiveDetail(detailedContext);
   const selectedDetailedDetailId = detailedContext?.activeDetail?.detailId ?? null;
   const detailedMachineSources = useMemo(
-    () => detailedContext?.activeBath && selectedDetailedDetailId !== null
+    () => detailedContext?.activeBath
       ? buildCncDetailedMachineSources({
           columns,
           bath: detailedContext.activeBath,
@@ -1863,29 +1863,29 @@ const CncDetailedMachineMaps: React.FC<CncDetailedMachineMapsProps> = ({
   sources,
   selectedDetailId,
 }) => {
-  if (selectedDetailId === null) {
-    return (
-      <div className="cnc-detailed-machine-maps__empty">
-        <PictureOutlined aria-hidden="true" />
-        <strong>Выберите деталь на раскладке ванны</strong>
-        <span>Здесь откроются точные листы файлов станка.</span>
-      </div>
-    );
-  }
-
   if (sources.length === 0) {
     return (
       <Alert
         type="info"
         showIcon
-        message="Для выбранной детали файл станка не найден"
-        description="Проверьте сопоставление детали с заданием на экране «Раскрой»."
+        message={selectedDetailId === null
+          ? 'Для деталей этой ванны файлы станка не найдены'
+          : 'Для выбранной детали файл станка не найден'}
+        description={selectedDetailId === null
+          ? 'Карточки появятся здесь при наличии связанных деталей в файлах станка.'
+          : 'Проверьте сопоставление детали с заданием на экране «Раскрой».'}
       />
     );
   }
 
   return (
     <div className="cnc-detailed-machine-maps" aria-live="polite">
+      {selectedDetailId === null && (
+        <div className="cnc-detailed-machine-maps__hint">
+          <PictureOutlined aria-hidden="true" />
+          <span>Выберите деталь на раскладке ванны, чтобы открыть предпросмотр.</span>
+        </div>
+      )}
       {sources.map((source) => (
         <CncDetailedMachineMapCard
           key={source.packet.packetId}
@@ -1899,7 +1899,7 @@ const CncDetailedMachineMaps: React.FC<CncDetailedMachineMapsProps> = ({
 
 interface CncDetailedMachineMapCardProps {
   source: CncDetailedMachineSource;
-  selectedDetailId: number;
+  selectedDetailId: number | null;
 }
 
 const CncDetailedMachineMapCard: React.FC<CncDetailedMachineMapCardProps> = ({
@@ -1916,11 +1916,12 @@ const CncDetailedMachineMapCard: React.FC<CncDetailedMachineMapCardProps> = ({
     const requestSeq = requestSeqRef.current + 1;
     requestSeqRef.current = requestSeq;
     setError(null);
-    if (source.previewKind !== 'svg') {
+    if (selectedDetailId === null || source.previewKind !== 'svg') {
       setSvgPreview(null);
       setLoading(false);
       return;
     }
+    const detailId = selectedDetailId;
 
     setSvgPreview((current) => current
       && current.result.cutJobId === source.cutJobId
@@ -1930,7 +1931,7 @@ const CncDetailedMachineMapCard: React.FC<CncDetailedMachineMapCardProps> = ({
 
     let cancelled = false;
     setLoading(true);
-    void loadCncDetailedMachineSvgPreview(source, selectedDetailId)
+    void loadCncDetailedMachineSvgPreview(source, detailId)
       .then((preview) => {
         if (!isCncPreviewRequestCurrent(cancelled, requestSeqRef.current, requestSeq)) return;
         setSvgPreview((current) => (
@@ -1963,7 +1964,7 @@ const CncDetailedMachineMapCard: React.FC<CncDetailedMachineMapCardProps> = ({
     syncCncBathSelectedDetail(svgBodyRef.current, selectedDetailId);
   }, [selectedDetailId, svgPreview]);
 
-  const showScreenshot = source.imageUrl !== null
+  const showScreenshot = selectedDetailId !== null && source.imageUrl !== null
     && (source.previewKind === 'screenshot' || (source.previewKind === 'svg' && error !== null));
 
   return (
@@ -1976,6 +1977,9 @@ const CncDetailedMachineMapCard: React.FC<CncDetailedMachineMapCardProps> = ({
         <div className="cnc-detailed-machine-map__badges">
           {source.matchKind === 'fallback' && (
             <Tag color="warning">по № и размеру</Tag>
+          )}
+          {source.matchKind === 'whole_order' && (
+            <Tag color="blue">весь заказ</Tag>
           )}
           {source.cutJobId !== null && source.resultNo !== null && (
             <a
@@ -2025,7 +2029,7 @@ const CncDetailedMachineMapCard: React.FC<CncDetailedMachineMapCardProps> = ({
           title={source.packet.programName ?? source.packet.externalPacketKey}
         />
       )}
-      {!loading && !svgPreview && !showScreenshot && !error && (
+      {selectedDetailId !== null && !loading && !svgPreview && !showScreenshot && !error && (
         <Alert
           type="info"
           showIcon
@@ -2703,11 +2707,6 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               />
             ))}
           </div>
-          {!summaryOnly && (
-            <Typography.Text className="cnc-bath-card__job">
-              {bath.cutJobName} · раскрой №{bath.cutNumber}
-            </Typography.Text>
-          )}
         </div>
         <div className="cnc-bath-card__actions">
           <CncCardDisplayToggle
@@ -2793,6 +2792,12 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               className="cnc-bath-card__items-panel"
               onClick={stopCncCardClickPropagation}
             >
+              <div className="cnc-bath-card__block-heading">
+                <span className="cnc-bath-card__block-label">Список деталей</span>
+                <span className="cnc-bath-card__block-job" title={bath.cutJobName}>
+                  {bath.cutJobName}
+                </span>
+              </div>
               <div className="cnc-packet-card__items" role="table" aria-label="Детали ванны">
             <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
               <span>Заказ</span>
@@ -3464,7 +3469,16 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath, open, onClo
         onClose();
       }}
       footer={null}
-      title={`PDF карты раскроя ${bath.cutNumber}`}
+      title={(
+        <div className="cnc-bath-card__block-heading cnc-bath-card__block-heading--modal">
+          <span className="cnc-bath-card__block-label">
+            Предпросмотр PDF · раскрой №{bath.cutNumber}
+          </span>
+          <span className="cnc-bath-card__block-job" title={bath.cutJobName}>
+            {bath.cutJobName}
+          </span>
+        </div>
+      )}
       className="cnc-bath-card__pdf-modal"
       width="min(96vw, 1440px)"
       modalRender={(modalNode) => (
