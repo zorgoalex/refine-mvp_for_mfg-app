@@ -30,6 +30,9 @@ describe('packer Hasura lookup guards', () => {
       expect(resourceBlock(orderShowSource, resource)).toContain('canViewReferences');
     }
     expect(resourceBlock(orderShowSource, 'payment_types')).toContain('canViewFinancials');
+    expect(resourceBlock(orderShowSource, 'production_statuses')).toContain(
+      'canViewProductionReferences',
+    );
     expect(resourceBlock(orderShowSource, 'client_phones')).toContain('canExportOrders');
     expect(resourceBlock(orderShowSource, 'employees')).toContain('canViewEmployees');
   });
