@@ -166,3 +166,14 @@ export interface CncTelegramOrderCuttingSequencesResponse {
   orderId: number;
   sequences: CncTelegramOrderCuttingSequence[];
 }
+
+export interface CncAutoCutStatusConfigureResponse {
+  settingEnabled: boolean;
+  requestId: string;
+  auditId: string;
+  completedPacketCount: number;
+  matchedDetailCount: number;
+  wholeOrderCount: number;
+  changedOrderCount: number;
+  changedDetailCount: number;
+}

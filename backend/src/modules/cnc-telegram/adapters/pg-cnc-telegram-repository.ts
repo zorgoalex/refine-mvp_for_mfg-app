@@ -21,12 +21,14 @@ import {
 import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
+  ConfigureCncAutoCutStatusCommand,
   IngestCncTelegramPacketCommand,
   ListCncTelegramOrderCuttingSequencesCommand,
   ListCncTelegramTodayCommand,
   RecordCncTelegramDeniedAuditCommand,
 } from '../application/cnc-telegram.types';
 import type {
+  CncAutoCutStatusConfigureResponseDto,
   CncTelegramBathCardDto,
   CncTelegramBathItemDto,
   CncTelegramBathSheetDto,
@@ -48,8 +50,10 @@ import type {
 
 const SOURCE = 'backend-cnc-telegram-command';
 const COMMAND_NAME = 'cnc.telegram_packet.ingest';
+const CNC_AUTO_CUT_STATUS_CONFIGURE_COMMAND = 'cnc.telegram_packet.auto_cut_status.configure';
 const CNC_AUTO_CUT_STATUS_SETTING_KEY = 'status_automation.cnc_mark_cut_details';
 const CNC_AUTO_CUT_STATUS_EVENT = 'cnc.telegram_packet.auto_cut_status_applied';
+const CNC_AUTO_CUT_STATUS_CONFIGURE_EVENT = 'cnc.telegram_packet.auto_cut_status_configured';
 const IGNORED_ANALYSIS_WARNINGS = new Set([
   'RapidOCR found text, but no detail rows with order and size',
 ]);
@@ -144,12 +148,38 @@ interface CncAutoCutDetailRow extends QueryResultRow {
   order_id: string | number;
   detail_id: string | number;
   production_status_id: string | number | null;
-  production_status_sort_order: string | number | null;
+}
+
+interface CncAutoCutCurrentStatusRow extends QueryResultRow {
+  production_status_id: string | number;
+  sort_order: string | number | null;
+}
+
+interface CncAutoCutBackfillCandidateRow extends QueryResultRow {
+  completed_packet_count: string | number;
+  matched_detail_ids: unknown;
+  matched_order_ids: unknown;
+}
+
+interface CncAutoCutBackfillCommentRow extends QueryResultRow {
+  comments_json: unknown;
+  items_json: unknown;
+}
+
+interface CncAutoCutApplyResult {
+  changedOrderIds: number[];
+  changedDetailIds: number[];
+  changedDetailIdsByOrder: Map<number, number[]>;
+  bumpedOrders: CncAutoCutOrderRow[];
 }
 
 interface IdempotencyRow extends QueryResultRow {
   request_hash: string;
-  response_json: CncTelegramIngestResponseDto | string | null;
+  response_json:
+    | CncTelegramIngestResponseDto
+    | CncAutoCutStatusConfigureResponseDto
+    | string
+    | null;
   status: 'processing' | 'completed' | 'failed';
 }
 
@@ -310,9 +340,6 @@ export class PgCncTelegramRepository
         [command.dto.externalPacketKey],
       );
       const existing = replay.rows[0] ?? null;
-      const previouslyCompleted = existing
-        ? existing.completion_status === 'completed' || existing.thumbs_up === true
-        : false;
 
       if (existing && command.dto.source.version < Number(existing.source_version)) {
         await ensureCuttingSequenceNo(tx, existing.packet_id, command.dto, Number(command.currentUser.id));
@@ -385,7 +412,9 @@ export class PgCncTelegramRepository
         requestId,
         previousSourceVersion: existing ? Number(existing.source_version) : null,
       });
-      if (!previouslyCompleted && packetIsCompleted(packet)) {
+      // A newer revision of an already-completed packet can add matches, quantities, or
+      // a verified whole-order comment. Reconcile every completed revision; updates are idempotent.
+      if (packetIsCompleted(packet)) {
         await applyCompletedPacketAutoCutStatus(tx, {
           command: resolvedCommand,
           packet,
@@ -407,6 +436,86 @@ export class PgCncTelegramRepository
     });
   }
 
+  async configureAutoCutStatus(
+    command: ConfigureCncAutoCutStatusCommand,
+  ): Promise<CncAutoCutStatusConfigureResponseDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const requestId = command.requestId || 'cnc-auto-cut-status-configure';
+      const replay = await reconcileCncAutoCutStatusConfigureIdempotency(tx, command);
+      if (replay) return replay;
+
+      await lockCncAutoCutStatus(tx);
+      const previousSettingEnabled = await cncAutoCutStatusEnabled(tx);
+      const targetStatus = command.enabled
+        ? await loadCncAutoCutProductionStatus(tx)
+        : null;
+      if (command.enabled && !targetStatus) {
+        throw new ApiError(
+          409,
+          'CNC_AUTO_CUT_STATUS_NOT_FOUND',
+          'Активный производственный статус «Распилен» не найден',
+        );
+      }
+
+      await saveCncAutoCutStatusSetting(tx, command.enabled, Number(command.currentUser.id));
+
+      let completedPacketCount = 0;
+      let matchedDetailIds: number[] = [];
+      let matchedOrderIds: number[] = [];
+      let wholeOrderIds: number[] = [];
+      let applied = emptyCncAutoCutApplyResult();
+      if (command.enabled && targetStatus) {
+        const candidates = await loadCncAutoCutBackfillCandidates(tx);
+        completedPacketCount = candidates.completedPacketCount;
+        matchedDetailIds = candidates.matchedDetailIds;
+        matchedOrderIds = candidates.matchedOrderIds;
+        wholeOrderIds = candidates.wholeOrderIds;
+        applied = await applyCncAutoCutStatusCandidates(tx, {
+          matchedDetailIds,
+          matchedOrderIds,
+          wholeOrderIds,
+          targetStatus,
+        });
+      }
+
+      const auditId = await writeCncAutoCutStatusConfigureAudit(tx, {
+        command,
+        requestId,
+        previousSettingEnabled,
+        targetStatus,
+        completedPacketCount,
+        matchedDetailIds,
+        wholeOrderIds,
+        applied,
+      });
+      await enqueueCncAutoCutStatusConfigureEvent(tx, {
+        command,
+        requestId,
+        auditId,
+        completedPacketCount,
+        matchedDetailIds,
+        wholeOrderIds,
+        applied,
+      });
+
+      const counts = cncAutoCutStatusConfigureCounts({
+        completedPacketCount,
+        matchedDetailIds,
+        wholeOrderIds,
+        applied,
+      });
+      const response: CncAutoCutStatusConfigureResponseDto = {
+        settingEnabled: command.enabled,
+        requestId,
+        auditId,
+        ...counts,
+      };
+      await completeIdempotency(tx, command.idempotencyKey, response);
+      return response;
+    });
+  }
+
   async recordIngestDenied(command: RecordCncTelegramDeniedAuditCommand): Promise<void> {
     await auditService.recordDenied(this.database, {
       event: command.event,
@@ -422,6 +531,24 @@ export class PgCncTelegramRepository
       metadata: {
         externalPacketKey: command.externalPacketKey ?? null,
       },
+    });
+  }
+
+  async recordAutoCutStatusConfigureDenied(
+    command: RecordCncTelegramDeniedAuditCommand,
+  ): Promise<void> {
+    await auditService.recordDenied(this.database, {
+      event: command.event,
+      entityType: 'app_setting',
+      entityId: CNC_AUTO_CUT_STATUS_SETTING_KEY,
+      actorUserId: command.currentUser.id,
+      actorUsername: command.currentUser.username ?? null,
+      actorRole: command.currentUser.role ?? null,
+      requestId: command.requestId ?? 'cnc-auto-cut-status-configure-denied',
+      source: SOURCE,
+      reason: command.reason,
+      requiredPermissions: command.requiredPermissions,
+      metadata: { settingKey: CNC_AUTO_CUT_STATUS_SETTING_KEY },
     });
   }
 }
@@ -2048,6 +2175,9 @@ async function applyCompletedPacketAutoCutStatus(
     packetAuditId: string;
   },
 ): Promise<void> {
+  // Serialize setting changes, backfills, and packet completion. Whichever transaction wins,
+  // the completed packet is handled exactly once by either the backfill or this path.
+  await lockCncAutoCutStatus(tx);
   if (!await cncAutoCutStatusEnabled(tx)) return;
 
   const matchedDetailIds = Array.from(new Set(
@@ -2070,20 +2200,111 @@ async function applyCompletedPacketAutoCutStatus(
       .map((item) => Number(item.matchOrderId))
       .filter(isPositiveNumber),
   )).sort((left, right) => left - right);
-  const wholeOrderKeys = cncWholeOrderKeys(input.packet);
-  if (matchedDetailIds.length === 0 && wholeOrderKeys.length === 0) return;
+  const wholeOrderIds = cncWholeOrderIds(input.packet);
+  if (matchedDetailIds.length === 0 && wholeOrderIds.length === 0) return;
 
   const targetStatus = await loadCncAutoCutProductionStatus(tx);
   if (!targetStatus) return;
 
-  // Completed quantities can be split across several machine-file cards. Serializing this
-  // calculation avoids two concurrent completions both missing the final cumulative threshold.
+  const applied = await applyCncAutoCutStatusCandidates(tx, {
+    matchedDetailIds,
+    matchedOrderIds,
+    wholeOrderIds,
+    targetStatus,
+  });
+  if (applied.changedDetailIds.length === 0) return;
+
+  const statusId = toNumber(targetStatus.production_status_id);
+  const autoCutAuditId = await auditService.record(tx, {
+    event: CNC_AUTO_CUT_STATUS_EVENT,
+    entityType: 'cnc_telegram_packet',
+    entityId: input.packet.packetId,
+    actorUserId: input.command.currentUser.id,
+    actorUsername: input.command.currentUser.username ?? null,
+    actorRole: input.command.currentUser.role ?? null,
+    requestId: input.requestId,
+    source: SOURCE,
+    statusField: 'productionDetailBatch',
+    statusId,
+    statusName: targetStatus.production_status_name,
+    statusCode: targetStatus.production_status_code,
+    before: { packetCompletionStatus: 'pending' },
+    after: {
+      packetCompletionStatus: 'completed',
+      changedOrderIds: applied.changedOrderIds,
+      changedDetailIds: applied.changedDetailIds,
+    },
+    diff: {
+      changedDetailIdsByOrder: Object.fromEntries(applied.changedDetailIdsByOrder),
+      productionStatusId: statusId,
+    },
+    metadata: {
+      source: SOURCE,
+      action: 'cnc_completed_packet_auto_cut_status',
+      settingKey: CNC_AUTO_CUT_STATUS_SETTING_KEY,
+      packetAuditId: input.packetAuditId,
+      externalPacketKey: input.packet.externalPacketKey,
+      cuttingSequenceNo: input.packet.cuttingSequenceNo,
+      matchedDetailIds,
+      wholeOrderIds,
+      requestId: input.requestId,
+    },
+    relatedEntities: [
+      ...applied.changedOrderIds.map((entityId) => ({ entityType: 'order', entityId })),
+      ...applied.changedDetailIds.map((entityId) => ({ entityType: 'order_detail', entityId })),
+    ],
+  });
+
+  await enqueueOutbox(tx, {
+    eventType: CNC_AUTO_CUT_STATUS_EVENT,
+    aggregateType: 'cnc_telegram_packet',
+    aggregateId: input.packet.packetId,
+    idempotencyKey: `${input.command.dto.idempotencyKey}:auto-cut-status`,
+    payload: {
+      eventType: CNC_AUTO_CUT_STATUS_EVENT,
+      actorUserId: input.command.currentUser.id,
+      requestId: input.requestId,
+      auditId: autoCutAuditId,
+      packetId: input.packet.packetId,
+      externalPacketKey: input.packet.externalPacketKey,
+      cuttingSequenceNo: input.packet.cuttingSequenceNo,
+      productionStatusId: statusId,
+      productionStatusCode: targetStatus.production_status_code,
+      changedOrderIds: applied.changedOrderIds,
+      changedDetailIds: applied.changedDetailIds,
+      changedDetailIdsByOrder: Object.fromEntries(applied.changedDetailIdsByOrder),
+      orders: cncAutoCutOrderEventPayload(applied.bumpedOrders),
+      idempotencyKey: input.command.dto.idempotencyKey,
+    },
+  });
+}
+
+async function lockCncAutoCutStatus(tx: TransactionClient): Promise<void> {
   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
     CNC_AUTO_CUT_STATUS_SETTING_KEY,
   ]);
+}
 
-  // Lock parent orders before checking their live detail quantities. Order edits use the same
-  // parent-before-detail discipline, so the quantity threshold below cannot be based on stale data.
+async function applyCncAutoCutStatusCandidates(
+  tx: TransactionClient,
+  input: {
+    matchedDetailIds: number[];
+    matchedOrderIds: number[];
+    wholeOrderIds: number[];
+    targetStatus: CncAutoCutStatusRow;
+  },
+): Promise<CncAutoCutApplyResult> {
+  if (input.matchedDetailIds.length === 0 && input.wholeOrderIds.length === 0) {
+    return emptyCncAutoCutApplyResult();
+  }
+
+  const candidateOrderIds = Array.from(new Set([
+    ...input.matchedOrderIds,
+    ...input.wholeOrderIds,
+  ])).sort((left, right) => left - right);
+
+  // Caller holds CNC_AUTO_CUT_STATUS_SETTING_KEY advisory lock. Lock parent orders before details
+  // so quantity thresholds cannot race with order edits or another completed machine-file card.
   const lockedOrders = await tx.query<CncAutoCutOrderRow>(
     `
     SELECT
@@ -2094,24 +2315,18 @@ async function applyCompletedPacketAutoCutStatus(
       production_status_id,
       COALESCE(production_status_from_details_enabled, true) AS production_status_from_details_enabled
     FROM orders
-    WHERE (
-        order_id = ANY($1::bigint[])
-        OR lower(trim(order_name)) = ANY($2::text[])
-      )
+    WHERE order_id = ANY($1::bigint[])
       AND COALESCE(delete_flag, false) = false
     ORDER BY order_id
     FOR UPDATE
     `,
-    [matchedOrderIds, wholeOrderKeys],
+    [candidateOrderIds],
   );
-  if (lockedOrders.rows.length === 0) return;
+  if (lockedOrders.rows.length === 0) return emptyCncAutoCutApplyResult();
 
-  const wholeOrderKeySet = new Set(wholeOrderKeys);
+  const wholeOrderIdSet = new Set(input.wholeOrderIds);
   const wholeOrderIds = lockedOrders.rows
-    .filter((row) => {
-      const orderKey = normalizeOptional(row.order_name)?.toLocaleLowerCase('ru-RU');
-      return orderKey ? wholeOrderKeySet.has(orderKey) : false;
-    })
+    .filter((row) => wholeOrderIdSet.has(toNumber(row.order_id)))
     .map((row) => toNumber(row.order_id));
   const liveOrderIds = lockedOrders.rows.map((row) => toNumber(row.order_id));
 
@@ -2144,9 +2359,9 @@ async function applyCompletedPacketAutoCutStatus(
       )
     ORDER BY details.order_id, details.detail_id
     `,
-    [matchedDetailIds, wholeOrderIds, liveOrderIds],
+    [input.matchedDetailIds, wholeOrderIds, liveOrderIds],
   );
-  if (targets.rows.length === 0) return;
+  if (targets.rows.length === 0) return emptyCncAutoCutApplyResult();
 
   const targetDetailIds = targets.rows.map((row) => toNumber(row.detail_id));
   const liveOrderIdSet = new Set(liveOrderIds);
@@ -2156,11 +2371,8 @@ async function applyCompletedPacketAutoCutStatus(
     SELECT
       details.order_id,
       details.detail_id,
-      details.production_status_id,
-      current_status.sort_order AS production_status_sort_order
+      details.production_status_id
     FROM order_details details
-    LEFT JOIN production_statuses current_status
-      ON current_status.production_status_id = details.production_status_id
     WHERE details.detail_id = ANY($1::bigint[])
       AND COALESCE(details.delete_flag, false) = false
     ORDER BY details.order_id, details.detail_id
@@ -2168,18 +2380,42 @@ async function applyCompletedPacketAutoCutStatus(
     `,
     [targetDetailIds],
   );
+  const currentStatusIds = Array.from(new Set(
+    lockedDetails.rows
+      .map((row) => row.production_status_id === null ? null : Number(row.production_status_id))
+      .filter((statusId): statusId is number => statusId !== null && isPositiveNumber(statusId)),
+  )).sort((left, right) => left - right);
+  const currentStatuses = currentStatusIds.length > 0
+    ? await tx.query<CncAutoCutCurrentStatusRow>(
+        `
+        SELECT production_status_id, sort_order
+        FROM production_statuses
+        WHERE production_status_id = ANY($1::bigint[])
+        ORDER BY production_status_id
+        FOR SHARE
+        `,
+        [currentStatusIds],
+      )
+    : { rows: [] };
+  const currentStatusSortOrderById = new Map(
+    currentStatuses.rows.map((row) => [
+      toNumber(row.production_status_id),
+      row.sort_order === null ? null : Number(row.sort_order),
+    ]),
+  );
   const eligibleDetailIds = lockedDetails.rows
     .filter((row) => {
       const orderId = toNumber(row.order_id);
       if (!liveOrderIdSet.has(orderId)) return false;
       if (row.production_status_id === null) return true;
       const currentStatusId = toNumber(row.production_status_id);
-      if (currentStatusId === toNumber(targetStatus.production_status_id)) return false;
-      if (row.production_status_sort_order === null) return false;
-      return Number(row.production_status_sort_order) <= Number(targetStatus.sort_order);
+      if (currentStatusId === toNumber(input.targetStatus.production_status_id)) return false;
+      const currentSortOrder = currentStatusSortOrderById.get(currentStatusId);
+      if (currentSortOrder === undefined || currentSortOrder === null) return false;
+      return currentSortOrder <= Number(input.targetStatus.sort_order);
     })
     .map((row) => toNumber(row.detail_id));
-  if (eligibleDetailIds.length === 0) return;
+  if (eligibleDetailIds.length === 0) return emptyCncAutoCutApplyResult();
 
   const updated = await tx.query<CncAutoCutTargetRow>(
     `
@@ -2190,9 +2426,9 @@ async function applyCompletedPacketAutoCutStatus(
       AND production_status_id IS DISTINCT FROM $1
     RETURNING order_id, detail_id
     `,
-    [toNumber(targetStatus.production_status_id), eligibleDetailIds],
+    [toNumber(input.targetStatus.production_status_id), eligibleDetailIds],
   );
-  if (updated.rows.length === 0) return;
+  if (updated.rows.length === 0) return emptyCncAutoCutApplyResult();
 
   const changedDetailIdsByOrder = new Map<number, number[]>();
   for (const row of updated.rows) {
@@ -2226,80 +2462,56 @@ async function applyCompletedPacketAutoCutStatus(
     `,
     [changedOrderIds],
   );
-  const statusId = toNumber(targetStatus.production_status_id);
   const changedDetailIds = updated.rows.map((row) => toNumber(row.detail_id));
-  const autoCutAuditId = await auditService.record(tx, {
-    event: CNC_AUTO_CUT_STATUS_EVENT,
-    entityType: 'cnc_telegram_packet',
-    entityId: input.packet.packetId,
-    actorUserId: input.command.currentUser.id,
-    actorUsername: input.command.currentUser.username ?? null,
-    actorRole: input.command.currentUser.role ?? null,
-    requestId: input.requestId,
-    source: SOURCE,
-    statusField: 'productionDetailBatch',
-    statusId,
-    statusName: targetStatus.production_status_name,
-    statusCode: targetStatus.production_status_code,
-    before: {
-      packetCompletionStatus: 'pending',
-    },
-    after: {
-      packetCompletionStatus: 'completed',
-      changedOrderIds,
-      changedDetailIds,
-    },
-    diff: {
-      changedDetailIdsByOrder: Object.fromEntries(changedDetailIdsByOrder),
-      productionStatusId: statusId,
-    },
-    metadata: {
-      source: SOURCE,
-      action: 'cnc_completed_packet_auto_cut_status',
-      settingKey: CNC_AUTO_CUT_STATUS_SETTING_KEY,
-      packetAuditId: input.packetAuditId,
-      externalPacketKey: input.packet.externalPacketKey,
-      cuttingSequenceNo: input.packet.cuttingSequenceNo,
-      matchedDetailIds,
-      wholeOrderKeys,
-      requestId: input.requestId,
-    },
-    relatedEntities: [
-      ...changedOrderIds.map((entityId) => ({ entityType: 'order', entityId })),
-      ...changedDetailIds.map((entityId) => ({ entityType: 'order_detail', entityId })),
-    ],
-  });
+  return {
+    changedOrderIds,
+    changedDetailIds,
+    changedDetailIdsByOrder,
+    bumpedOrders: bumpedOrders.rows,
+  };
+}
 
-  await enqueueOutbox(tx, {
-    eventType: CNC_AUTO_CUT_STATUS_EVENT,
-    aggregateType: 'cnc_telegram_packet',
-    aggregateId: input.packet.packetId,
-    idempotencyKey: `${input.command.dto.idempotencyKey}:auto-cut-status`,
-    payload: {
-      eventType: CNC_AUTO_CUT_STATUS_EVENT,
-      actorUserId: input.command.currentUser.id,
-      requestId: input.requestId,
-      auditId: autoCutAuditId,
-      packetId: input.packet.packetId,
-      externalPacketKey: input.packet.externalPacketKey,
-      cuttingSequenceNo: input.packet.cuttingSequenceNo,
-      productionStatusId: statusId,
-      productionStatusCode: targetStatus.production_status_code,
-      changedOrderIds,
-      changedDetailIds,
-      changedDetailIdsByOrder: Object.fromEntries(changedDetailIdsByOrder),
-      orders: bumpedOrders.rows.map((row) => ({
-        orderId: toNumber(row.order_id),
-        clientId: row.client_id === null ? null : toNumber(row.client_id),
-        version: toNumber(row.version),
-        productionStatusId: row.production_status_id === null
-          ? null
-          : toNumber(row.production_status_id),
-        productionStatusFromDetailsEnabled: row.production_status_from_details_enabled,
-      })),
-      idempotencyKey: input.command.dto.idempotencyKey,
-    },
-  });
+function emptyCncAutoCutApplyResult(): CncAutoCutApplyResult {
+  return {
+    changedOrderIds: [],
+    changedDetailIds: [],
+    changedDetailIdsByOrder: new Map(),
+    bumpedOrders: [],
+  };
+}
+
+function cncAutoCutOrderEventPayload(rows: CncAutoCutOrderRow[]): Array<Record<string, unknown>> {
+  return rows.map((row) => ({
+    orderId: toNumber(row.order_id),
+    clientId: row.client_id === null ? null : toNumber(row.client_id),
+    version: toNumber(row.version),
+    productionStatusId: row.production_status_id === null
+      ? null
+      : toNumber(row.production_status_id),
+    productionStatusFromDetailsEnabled: row.production_status_from_details_enabled,
+  }));
+}
+
+function cncAutoCutStatusConfigureCounts(input: {
+  completedPacketCount: number;
+  matchedDetailIds: number[];
+  wholeOrderIds: number[];
+  applied: CncAutoCutApplyResult;
+}): Pick<
+  CncAutoCutStatusConfigureResponseDto,
+  | 'completedPacketCount'
+  | 'matchedDetailCount'
+  | 'wholeOrderCount'
+  | 'changedOrderCount'
+  | 'changedDetailCount'
+> {
+  return {
+    completedPacketCount: input.completedPacketCount,
+    matchedDetailCount: input.matchedDetailIds.length,
+    wholeOrderCount: input.wholeOrderIds.length,
+    changedOrderCount: input.applied.changedOrderIds.length,
+    changedDetailCount: input.applied.changedDetailIds.length,
+  };
 }
 
 async function cncAutoCutStatusEnabled(tx: TransactionClient): Promise<boolean> {
@@ -2343,13 +2555,213 @@ async function loadCncAutoCutProductionStatus(
       CASE WHEN lower(trim(production_status_name)) = 'распилен' THEN 0 ELSE 1 END,
       production_status_id
     LIMIT 1
+    FOR SHARE
     `,
   );
   return result.rows[0] ?? null;
 }
 
+async function loadCncAutoCutBackfillCandidates(
+  tx: TransactionClient,
+): Promise<{
+  completedPacketCount: number;
+  matchedDetailIds: number[];
+  matchedOrderIds: number[];
+  wholeOrderIds: number[];
+}> {
+  const candidates = await tx.query<CncAutoCutBackfillCandidateRow>(
+    `
+    SELECT
+      COUNT(DISTINCT packet.packet_id)::integer AS completed_packet_count,
+      COALESCE(
+        array_agg(DISTINCT item.match_detail_id)
+          FILTER (
+            WHERE item.match_status = 'matched'
+              AND item.match_order_id IS NOT NULL
+              AND item.match_detail_id IS NOT NULL
+          ),
+        ARRAY[]::bigint[]
+      ) AS matched_detail_ids,
+      COALESCE(
+        array_agg(DISTINCT item.match_order_id)
+          FILTER (
+            WHERE item.match_status = 'matched'
+              AND item.match_order_id IS NOT NULL
+              AND item.match_detail_id IS NOT NULL
+          ),
+        ARRAY[]::bigint[]
+      ) AS matched_order_ids
+    FROM cnc_telegram_packets packet
+    LEFT JOIN cnc_telegram_packet_items item ON item.packet_id = packet.packet_id
+    WHERE packet.completion_status = 'completed' OR packet.thumbs_up = true
+    `,
+  );
+  const candidate = candidates.rows[0];
+
+  const comments = await tx.query<CncAutoCutBackfillCommentRow>(
+    `
+    SELECT
+      packet.comments_json,
+      COALESCE(
+        jsonb_agg(DISTINCT jsonb_build_object(
+          'orderName', item.order_name,
+          'matchOrderId', item.match_order_id
+        )) FILTER (
+          WHERE item.match_status = 'matched'
+            AND item.match_order_id IS NOT NULL
+            AND NULLIF(trim(item.order_name), '') IS NOT NULL
+        ),
+        '[]'::jsonb
+      ) AS items_json
+    FROM cnc_telegram_packets packet
+    LEFT JOIN cnc_telegram_packet_items item ON item.packet_id = packet.packet_id
+    WHERE (packet.completion_status = 'completed' OR packet.thumbs_up = true)
+      AND EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements_text(COALESCE(packet.comments_json, '[]'::jsonb)) AS comment(value)
+        WHERE comment.value ~* 'весь[[:space:]]+заказ'
+      )
+    GROUP BY packet.packet_id, packet.comments_json
+    `,
+  );
+  const wholeOrderIds = new Set<number>();
+  for (const row of comments.rows) {
+    const packet = {
+      comments: stringArray(row.comments_json),
+      items: cncAutoCutBackfillItems(row.items_json),
+    };
+    for (const orderId of cncWholeOrderIds(packet)) wholeOrderIds.add(orderId);
+  }
+
+  return {
+    completedPacketCount: toNumber(candidate?.completed_packet_count),
+    matchedDetailIds: positiveNumberArray(candidate?.matched_detail_ids),
+    matchedOrderIds: positiveNumberArray(candidate?.matched_order_ids),
+    wholeOrderIds: Array.from(wholeOrderIds).sort((left, right) => left - right),
+  };
+}
+
+async function saveCncAutoCutStatusSetting(
+  tx: TransactionClient,
+  enabled: boolean,
+  actorUserId: number,
+): Promise<void> {
+  await tx.query(
+    `
+    INSERT INTO app_settings (
+      setting_key, value_json, description, is_active, created_by, edited_by
+    )
+    VALUES ($1, $2::jsonb, $3, true, $4, $4)
+    ON CONFLICT (setting_key) DO UPDATE
+    SET value_json = EXCLUDED.value_json,
+        description = EXCLUDED.description,
+        is_active = true,
+        edited_by = EXCLUDED.edited_by,
+        updated_at = now()
+    `,
+    [
+      CNC_AUTO_CUT_STATUS_SETTING_KEY,
+      JSON.stringify({ value: enabled }),
+      'Автоматически ставить деталям статус «Распилен» при завершении карточки файла станка',
+      actorUserId,
+    ],
+  );
+}
+
+async function writeCncAutoCutStatusConfigureAudit(
+  tx: TransactionClient,
+  input: {
+    command: ConfigureCncAutoCutStatusCommand;
+    requestId: string;
+    previousSettingEnabled: boolean;
+    targetStatus: CncAutoCutStatusRow | null;
+    completedPacketCount: number;
+    matchedDetailIds: number[];
+    wholeOrderIds: number[];
+    applied: CncAutoCutApplyResult;
+  },
+): Promise<string> {
+  const counts = cncAutoCutStatusConfigureCounts(input);
+  return auditService.record(tx, {
+    event: CNC_AUTO_CUT_STATUS_CONFIGURE_EVENT,
+    entityType: 'app_setting',
+    entityId: CNC_AUTO_CUT_STATUS_SETTING_KEY,
+    actorUserId: input.command.currentUser.id,
+    actorUsername: input.command.currentUser.username ?? null,
+    actorRole: input.command.currentUser.role ?? null,
+    requestId: input.requestId,
+    source: SOURCE,
+    statusField: 'enabled',
+    statusId: input.targetStatus ? toNumber(input.targetStatus.production_status_id) : null,
+    statusName: input.targetStatus?.production_status_name ?? null,
+    statusCode: input.targetStatus?.production_status_code ?? null,
+    before: { enabled: input.previousSettingEnabled },
+    after: {
+      enabled: input.command.enabled,
+      changedOrderIds: input.applied.changedOrderIds,
+      changedDetailIds: input.applied.changedDetailIds,
+    },
+    diff: {
+      enabled: { before: input.previousSettingEnabled, after: input.command.enabled },
+      changedDetailIdsByOrder: Object.fromEntries(input.applied.changedDetailIdsByOrder),
+    },
+    metadata: {
+      source: SOURCE,
+      action: 'configure_cnc_auto_cut_status_and_backfill',
+      settingKey: CNC_AUTO_CUT_STATUS_SETTING_KEY,
+      ...counts,
+      matchedDetailIds: input.matchedDetailIds,
+      wholeOrderIds: input.wholeOrderIds,
+      idempotencyKey: input.command.idempotencyKey,
+    },
+    relatedEntities: [
+      ...input.applied.changedOrderIds.map((entityId) => ({ entityType: 'order', entityId })),
+      ...input.applied.changedDetailIds.map((entityId) => ({ entityType: 'order_detail', entityId })),
+    ],
+  });
+}
+
+async function enqueueCncAutoCutStatusConfigureEvent(
+  tx: TransactionClient,
+  input: {
+    command: ConfigureCncAutoCutStatusCommand;
+    requestId: string;
+    auditId: string;
+    completedPacketCount: number;
+    matchedDetailIds: number[];
+    wholeOrderIds: number[];
+    applied: CncAutoCutApplyResult;
+  },
+): Promise<void> {
+  const counts = cncAutoCutStatusConfigureCounts(input);
+  await enqueueOutbox(tx, {
+    eventType: CNC_AUTO_CUT_STATUS_CONFIGURE_EVENT,
+    aggregateType: 'app_setting',
+    aggregateId: CNC_AUTO_CUT_STATUS_SETTING_KEY,
+    idempotencyKey: `${input.command.idempotencyKey}:configured`,
+    payload: {
+      eventType: CNC_AUTO_CUT_STATUS_CONFIGURE_EVENT,
+      actorUserId: input.command.currentUser.id,
+      requestId: input.requestId,
+      auditId: input.auditId,
+      settingKey: CNC_AUTO_CUT_STATUS_SETTING_KEY,
+      settingEnabled: input.command.enabled,
+      ...counts,
+      matchedDetailIds: input.matchedDetailIds,
+      wholeOrderIds: input.wholeOrderIds,
+      changedOrderIds: input.applied.changedOrderIds,
+      changedDetailIds: input.applied.changedDetailIds,
+      changedDetailIdsByOrder: Object.fromEntries(input.applied.changedDetailIdsByOrder),
+      orders: cncAutoCutOrderEventPayload(input.applied.bumpedOrders),
+      idempotencyKey: input.command.idempotencyKey,
+    },
+  });
+}
+
 export function cncWholeOrderKeys(
-  packet: Pick<CncTelegramPacketDto, 'comments' | 'items'>,
+  packet: Pick<CncTelegramPacketDto, 'comments'> & {
+    items: Array<Pick<CncTelegramPacketItemDto, 'orderName'>>;
+  },
 ): string[] {
   const keys = new Set<string>();
   const packetOrderKeys = Array.from(new Set(
@@ -2361,24 +2773,81 @@ export function cncWholeOrderKeys(
   for (const comment of packet.comments) {
     if (!/весь\s+заказ/iu.test(comment)) continue;
     const normalizedComment = comment.toLocaleLowerCase('ru-RU');
-    let explicitOrderFound = false;
-    for (const orderKey of packetOrderKeys) {
-      if (normalizedComment.includes(orderKey)) {
-        keys.add(orderKey);
-        explicitOrderFound = true;
-      }
-    }
-    for (const match of comment.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g)) {
-      if (match[2]) {
-        keys.add(match[2].toLocaleLowerCase('ru-RU'));
-        explicitOrderFound = true;
-      }
-    }
-    if (!explicitOrderFound && packetOrderKeys.length === 1) {
+    const explicitOrderKeys = explicitOrderKeysFromComment(normalizedComment, packetOrderKeys);
+    for (const orderKey of explicitOrderKeys) keys.add(orderKey);
+    if (explicitOrderKeys.length === 0 && packetOrderKeys.length === 1) {
       keys.add(packetOrderKeys[0]);
     }
   }
   return Array.from(keys);
+}
+
+export function cncWholeOrderIds(
+  packet: Pick<CncTelegramPacketDto, 'comments'> & {
+    items: Array<Pick<CncTelegramPacketItemDto, 'orderName' | 'matchOrderId' | 'matchStatus'>>;
+  },
+): number[] {
+  const wholeOrderKeys = new Set(cncWholeOrderKeys(packet));
+  const idsByOrderKey = new Map<string, Set<number>>();
+  for (const item of packet.items) {
+    if (item.matchStatus !== 'matched') continue;
+    const orderKey = normalizeOptional(item.orderName)?.toLocaleLowerCase('ru-RU');
+    const orderId = Number(item.matchOrderId);
+    if (!orderKey || !wholeOrderKeys.has(orderKey) || !isPositiveNumber(orderId)) continue;
+    const ids = idsByOrderKey.get(orderKey) ?? new Set<number>();
+    ids.add(orderId);
+    idsByOrderKey.set(orderKey, ids);
+  }
+
+  const wholeOrderIds = new Set<number>();
+  for (const ids of idsByOrderKey.values()) {
+    if (ids.size === 1) wholeOrderIds.add(Array.from(ids)[0]);
+  }
+  return Array.from(wholeOrderIds).sort((left, right) => left - right);
+}
+
+function cncAutoCutBackfillItems(
+  value: unknown,
+): Array<Pick<CncTelegramPacketItemDto, 'orderName' | 'matchOrderId' | 'matchStatus'>> {
+  if (!Array.isArray(value)) return [];
+  const items: Array<
+    Pick<CncTelegramPacketItemDto, 'orderName' | 'matchOrderId' | 'matchStatus'>
+  > = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
+    const row = candidate as Record<string, unknown>;
+    const orderName = typeof row.orderName === 'string' ? normalizeOptional(row.orderName) : null;
+    const matchOrderId = Number(row.matchOrderId);
+    if (!orderName || !isPositiveNumber(matchOrderId)) continue;
+    items.push({ orderName, matchOrderId, matchStatus: 'matched' });
+  }
+  return items;
+}
+
+function explicitOrderKeysFromComment(comment: string, orderKeys: string[]): string[] {
+  const occupiedRanges: Array<{ start: number; end: number }> = [];
+  const matchedKeys: string[] = [];
+  const longestFirst = [...orderKeys].sort((left, right) =>
+    right.length - left.length || left.localeCompare(right, 'ru-RU'),
+  );
+
+  for (const orderKey of longestFirst) {
+    const escapedOrderKey = orderKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(
+      `(^|[^\\p{L}\\p{N}])(${escapedOrderKey})(?=$|[^\\p{L}\\p{N}])`,
+      'giu',
+    );
+    let accepted = false;
+    for (const match of comment.matchAll(pattern)) {
+      const start = (match.index ?? 0) + (match[1]?.length ?? 0);
+      const end = start + orderKey.length;
+      if (occupiedRanges.some((range) => start < range.end && end > range.start)) continue;
+      occupiedRanges.push({ start, end });
+      accepted = true;
+    }
+    if (accepted) matchedKeys.push(orderKey);
+  }
+  return matchedKeys;
 }
 
 async function reconcileIdempotency(
@@ -2438,10 +2907,94 @@ async function reconcileIdempotency(
   throw idempotencyError('IDEMPOTENCY_IN_PROGRESS', input.dto.idempotencyKey);
 }
 
+async function reconcileCncAutoCutStatusConfigureIdempotency(
+  tx: TransactionClient,
+  command: ConfigureCncAutoCutStatusCommand,
+): Promise<CncAutoCutStatusConfigureResponseDto | null> {
+  const requestHash = hashRequest({
+    actorUserId: command.currentUser.id,
+    commandName: CNC_AUTO_CUT_STATUS_CONFIGURE_COMMAND,
+    enabled: command.enabled,
+  });
+  const inserted = await tx.query<IdempotencyRow>(
+    `
+    INSERT INTO command_idempotency_keys (
+      idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status
+    )
+    VALUES ($1, $2, $3, 'app_setting', $4, $5, 'processing')
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING request_hash, response_json, status
+    `,
+    [
+      command.idempotencyKey,
+      CNC_AUTO_CUT_STATUS_CONFIGURE_COMMAND,
+      Number(command.currentUser.id),
+      CNC_AUTO_CUT_STATUS_SETTING_KEY,
+      requestHash,
+    ],
+  );
+  if (inserted.rows[0]) return null;
+
+  const existing = await tx.query<IdempotencyRow>(
+    `
+    SELECT request_hash, response_json, status
+    FROM command_idempotency_keys
+    WHERE idempotency_key = $1
+    FOR UPDATE
+    `,
+    [command.idempotencyKey],
+  );
+  const row = existing.rows[0];
+  if (!row) throw idempotencyError('IDEMPOTENCY_IN_PROGRESS', command.idempotencyKey);
+  if (row.request_hash !== requestHash) {
+    throw idempotencyError('IDEMPOTENCY_KEY_REUSED', command.idempotencyKey);
+  }
+  if (row.status === 'completed' && row.response_json) {
+    const response = cncAutoCutStatusConfigureResponse(row.response_json);
+    if (response) return response;
+    throw new ApiError(
+      500,
+      'IDEMPOTENCY_RESPONSE_INVALID',
+      'Stored CNC auto cut status response is invalid',
+      { idempotencyKey: command.idempotencyKey },
+    );
+  }
+  if (row.status === 'failed') {
+    throw idempotencyError('IDEMPOTENCY_FAILED', command.idempotencyKey);
+  }
+  throw idempotencyError('IDEMPOTENCY_IN_PROGRESS', command.idempotencyKey);
+}
+
+function cncAutoCutStatusConfigureResponse(
+  value: IdempotencyRow['response_json'],
+): CncAutoCutStatusConfigureResponseDto | null {
+  let parsed: unknown = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const response = parsed as Partial<CncAutoCutStatusConfigureResponseDto>;
+  if (
+    typeof response.settingEnabled !== 'boolean'
+    || typeof response.requestId !== 'string'
+    || typeof response.auditId !== 'string'
+    || !Number.isSafeInteger(response.completedPacketCount)
+    || !Number.isSafeInteger(response.matchedDetailCount)
+    || !Number.isSafeInteger(response.wholeOrderCount)
+    || !Number.isSafeInteger(response.changedOrderCount)
+    || !Number.isSafeInteger(response.changedDetailCount)
+  ) return null;
+  return response as CncAutoCutStatusConfigureResponseDto;
+}
+
 async function completeIdempotency(
   tx: TransactionClient,
   idempotencyKey: string,
-  response: CncTelegramIngestResponseDto,
+  response: CncTelegramIngestResponseDto | CncAutoCutStatusConfigureResponseDto,
 ): Promise<void> {
   await tx.query(
     `
@@ -3101,6 +3654,15 @@ function normalizeOptional(value: string | null | undefined): string | null {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function positiveNumberArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(
+    value
+      .map((item) => Number(item))
+      .filter(isPositiveNumber),
+  )).sort((left, right) => left - right);
 }
 
 function analysisWarningsArray(value: unknown): string[] {

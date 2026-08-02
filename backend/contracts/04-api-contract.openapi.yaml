@@ -9396,6 +9396,86 @@ paths:
         '503':
           $ref: '#/components/responses/FeatureDisabled'
 
+  /api/v1/cnc-telegram/auto-cut-status:
+    post:
+      tags:
+        - CncTelegram
+      operationId: configureCncAutoCutStatus
+      summary: Configure CNC cut auto-status and backfill completed machine-file packets
+      security:
+        - bearerAuth: []
+      x-permission: status_automation.manage
+      x-transactional: true
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - enabled
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        '201':
+          description: Setting configured and completed packets reconciled
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - settingEnabled
+                  - requestId
+                  - auditId
+                  - completedPacketCount
+                  - matchedDetailCount
+                  - wholeOrderCount
+                  - changedOrderCount
+                  - changedDetailCount
+                properties:
+                  settingEnabled:
+                    type: boolean
+                  requestId:
+                    type: string
+                  auditId:
+                    type: string
+                  completedPacketCount:
+                    type: integer
+                    minimum: 0
+                  matchedDetailCount:
+                    type: integer
+                    minimum: 0
+                  wholeOrderCount:
+                    type: integer
+                    minimum: 0
+                  changedOrderCount:
+                    type: integer
+                    minimum: 0
+                  changedDetailCount:
+                    type: integer
+                    minimum: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+
   /api/v1/cnc-telegram/ingest:
     post:
       tags:

@@ -72,4 +72,35 @@ describe('cncTelegramApi', () => {
       '/api/v1/cnc-telegram/orders/2700/cutting-sequences',
     );
   });
+
+  it('configures auto-cut status with an idempotency header', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        settingEnabled: true,
+        requestId: 'request-1',
+        auditId: 'audit-1',
+        completedPacketCount: 4,
+        matchedDetailCount: 3,
+        wholeOrderCount: 1,
+        changedOrderCount: 2,
+        changedDetailCount: 3,
+      }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cncTelegramApi.configureAutoCutStatus(true, 'cnc-auto-cut-status:test');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cnc-telegram/auto-cut-status');
+    const request = fetchMock.mock.calls[0]?.[1];
+    expect(request).toEqual(expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ enabled: true }),
+    }));
+    expect(new Headers(request?.headers).get('Idempotency-Key')).toBe(
+      'cnc-auto-cut-status:test',
+    );
+  });
 });

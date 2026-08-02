@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import {
+  cncWholeOrderIds,
   cncWholeOrderKeys,
   PgCncTelegramRepository,
 } from './pg-cnc-telegram-repository';
@@ -1510,10 +1511,13 @@ describe('PgCncTelegramRepository', () => {
             }],
           };
         }
+        if (/FROM production_statuses/i.test(text) && /production_status_id = ANY/i.test(text)) {
+          return { rows: [{ production_status_id: 2, sort_order: 20 }] };
+        }
         if (/WITH completed_quantities AS/i.test(text)) {
           return { rows: [{ order_id: 2689, detail_id: 3101 }] };
         }
-        if (/FROM orders\s+WHERE \(\s*order_id = ANY/i.test(text)) {
+        if (/FROM orders\s+WHERE order_id = ANY/i.test(text)) {
           return {
             rows: [{
               order_id: 2689,
@@ -1574,9 +1578,14 @@ describe('PgCncTelegramRepository', () => {
 
     const targetQuery = queries.find((query) => /WITH completed_quantities AS/i.test(query.text));
     const orderLockIndex = queries.findIndex((query) =>
-      /FROM orders\s+WHERE \(\s*order_id = ANY/i.test(query.text),
+      /FROM orders\s+WHERE order_id = ANY/i.test(query.text),
     );
     const targetQueryIndex = queries.findIndex((query) => /WITH completed_quantities AS/i.test(query.text));
+    const detailLockIndex = queries.findIndex((query) => /FOR UPDATE OF details/i.test(query.text));
+    const currentStatusLockIndex = queries.findIndex((query) =>
+      /FROM production_statuses/i.test(query.text)
+      && /production_status_id = ANY/i.test(query.text),
+    );
     const detailUpdate = queries.find((query) =>
       /UPDATE order_details/i.test(query.text) && /RETURNING order_id, detail_id/i.test(query.text),
     );
@@ -1590,6 +1599,8 @@ describe('PgCncTelegramRepository', () => {
     expect(targetQuery?.text).toContain('completed.completed_quantity, 0) >= GREATEST');
     expect(orderLockIndex).toBeGreaterThan(-1);
     expect(targetQueryIndex).toBeGreaterThan(orderLockIndex);
+    expect(currentStatusLockIndex).toBeGreaterThan(detailLockIndex);
+    expect(queries[currentStatusLockIndex]?.text).toContain('FOR SHARE');
     expect(detailUpdate?.params).toEqual([4, [3101]]);
     expect(queries.some((query) =>
       /SELECT recalc_order_production_status\(\$1\)/i.test(query.text)
@@ -1625,13 +1636,20 @@ describe('PgCncTelegramRepository', () => {
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(true);
   });
 
-  it('does not repeat auto-cut status changes for an already completed packet', async () => {
+  it('reconciles an already-completed packet revision without rewriting an already-cut detail', async () => {
     const queries = await runAutoCutIngest({
       previousCompletionStatus: 'completed',
       previousThumbsUp: true,
+      detailRows: [{
+        order_id: 2689,
+        detail_id: 3101,
+        production_status_id: 4,
+        production_status_sort_order: 40,
+      }],
     });
 
-    expect(queries.some((query) => /FROM app_settings/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /FROM app_settings/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /pg_advisory_xact_lock/i.test(query.text))).toBe(true);
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
 
@@ -1669,7 +1687,7 @@ describe('PgCncTelegramRepository', () => {
     expect(queries.some((query) =>
       /pg_advisory_xact_lock/i.test(query.text)
       && query.params[0] === 'status_automation.cnc_mark_cut_details',
-    )).toBe(false);
+    )).toBe(true);
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
 
@@ -1683,6 +1701,8 @@ describe('PgCncTelegramRepository', () => {
       }],
     });
 
+    const targetStatusQuery = queries.find((query) => /FROM production_statuses/i.test(query.text));
+    expect(targetStatusQuery?.text).toContain('FOR SHARE');
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(true);
   });
 
@@ -1732,7 +1752,7 @@ describe('PgCncTelegramRepository', () => {
   it('stops after the parent lock when all candidate orders disappeared', async () => {
     const queries = await runAutoCutIngest({ orderRows: [] });
 
-    expect(queries.some((query) => /FROM orders\s+WHERE \(/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /FROM orders\s+WHERE order_id = ANY/i.test(query.text))).toBe(true);
     expect(queries.some((query) => /WITH completed_quantities AS/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
@@ -1766,13 +1786,123 @@ describe('PgCncTelegramRepository', () => {
   it('passes an explicitly named whole order to the all-details target branch', async () => {
     const queries = await runAutoCutIngest({ comments: ['2689 — весь заказ'] });
     const orderLock = queries.find((query) =>
-      /FROM orders\s+WHERE \(\s*order_id = ANY/i.test(query.text),
+      /FROM orders\s+WHERE order_id = ANY/i.test(query.text),
     );
     const targetQuery = queries.find((query) => /WITH completed_quantities AS/i.test(query.text));
 
-    expect(orderLock?.params).toEqual([[2689], ['2689']]);
+    expect(orderLock?.params).toEqual([[2689]]);
+    expect(orderLock?.text).not.toContain('lower(trim(order_name))');
     expect(targetQuery?.params).toEqual([[3101], [2689], [2689]]);
     expect(targetQuery?.text).toContain('OR details.order_id = ANY($2::bigint[])');
+  });
+
+  it('enables auto-cut status and backfills every existing completed card atomically', async () => {
+    const { result, queries } = await runAutoCutConfigure();
+    const lockIndex = queries.findIndex((query) => /pg_advisory_xact_lock/i.test(query.text));
+    const settingReadIndex = queries.findIndex((query) => /FROM app_settings/i.test(query.text));
+    const settingWriteIndex = queries.findIndex((query) => /INSERT INTO app_settings/i.test(query.text));
+    const backfillIndex = queries.findIndex((query) => /COUNT\(DISTINCT packet.packet_id\)/i.test(query.text));
+    const targetQuery = queries.find((query) => /WITH completed_quantities AS/i.test(query.text));
+
+    expect(result).toEqual({
+      settingEnabled: true,
+      requestId: 'request-auto-cut-configure',
+      auditId: 'audit-configure',
+      completedPacketCount: 3,
+      matchedDetailCount: 1,
+      wholeOrderCount: 1,
+      changedOrderCount: 1,
+      changedDetailCount: 1,
+    });
+    expect(lockIndex).toBeGreaterThan(-1);
+    expect(settingReadIndex).toBeGreaterThan(lockIndex);
+    expect(settingWriteIndex).toBeGreaterThan(settingReadIndex);
+    expect(backfillIndex).toBeGreaterThan(settingWriteIndex);
+    expect(targetQuery?.params).toEqual([[3101], [2689], [2689]]);
+    const configureAudit = queries.find((query) =>
+      /INSERT INTO audit_log/i.test(query.text)
+      && query.params[0] === 'cnc.telegram_packet.auto_cut_status_configured',
+    );
+    const configureOutbox = queries.find((query) =>
+      /INSERT INTO outbox_events/i.test(query.text)
+      && query.params[0] === 'cnc.telegram_packet.auto_cut_status_configured',
+    );
+    const expectedCounts = {
+      completedPacketCount: 3,
+      matchedDetailCount: 1,
+      wholeOrderCount: 1,
+      changedOrderCount: 1,
+      changedDetailCount: 1,
+    };
+    expect(JSON.parse(String(configureAudit?.params[22]))).toMatchObject(expectedCounts);
+    expect(JSON.parse(String(configureOutbox?.params[3]))).toMatchObject(expectedCounts);
+    expect(queries.some((query) =>
+      /UPDATE command_idempotency_keys/i.test(query.text)
+      && query.params[0] === 'cnc-auto-cut-status:test-configure',
+    )).toBe(true);
+  });
+
+  it('disables auto-cut status without running a backfill', async () => {
+    const { result, queries } = await runAutoCutConfigure({ enabled: false });
+
+    expect(result).toMatchObject({
+      settingEnabled: false,
+      completedPacketCount: 0,
+      matchedDetailCount: 0,
+      changedDetailCount: 0,
+    });
+    expect(queries.some((query) => /pg_advisory_xact_lock/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /INSERT INTO app_settings/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /FROM production_statuses/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /COUNT\(DISTINCT packet.packet_id\)/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
+  });
+
+  it('replays completed auto-cut configuration without repeating the backfill', async () => {
+    const replay = {
+      settingEnabled: true,
+      requestId: 'request-original',
+      auditId: 'audit-original',
+      completedPacketCount: 3,
+      matchedDetailCount: 1,
+      wholeOrderCount: 1,
+      changedOrderCount: 1,
+      changedDetailCount: 1,
+    };
+    const { result, queries } = await runAutoCutConfigure({ replay });
+
+    expect(result).toEqual(replay);
+    expect(queries.some((query) => /pg_advisory_xact_lock/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO app_settings/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
+  });
+
+  it('does not enable auto-cut status when «Распилен» is unavailable', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM app_settings/i.test(text)) return { rows: [] };
+        if (/FROM production_statuses/i.test(text)) return { rows: [] };
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository({
+      transaction: vi.fn((handler) => handler(tx)),
+    } as never);
+
+    await expect(repo.configureAutoCutStatus({
+      currentUser: user(),
+      enabled: true,
+      idempotencyKey: 'cnc-auto-cut-status:test-missing',
+      requestId: 'request-missing',
+    })).rejects.toMatchObject({ code: 'CNC_AUTO_CUT_STATUS_NOT_FOUND', statusCode: 409 });
+
+    expect(queries.some((query) => /INSERT INTO app_settings/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
 
   it('resolves explicit and single-order «весь заказ» comments without guessing across orders', () => {
@@ -1789,6 +1919,55 @@ describe('PgCncTelegramRepository', () => {
     expect(cncWholeOrderKeys({
       comments: ['весь заказ'],
       items: [item('11380'), item('11770')],
+    })).toEqual([]);
+    expect(cncWholeOrderKeys({
+      comments: ['12345 — весь заказ'],
+      items: [item('1234'), item('12345')],
+    })).toEqual(['12345']);
+    expect(cncWholeOrderKeys({
+      comments: ['MDF-12 — весь заказ'],
+      items: [item('MDF-1'), item('MDF-12')],
+    })).toEqual(['mdf-12']);
+    expect(cncWholeOrderKeys({
+      comments: ['MDF-1-2 — весь заказ'],
+      items: [item('MDF-1'), item('MDF-1-2')],
+    })).toEqual(['mdf-1-2']);
+    expect(cncWholeOrderKeys({
+      comments: ['MDF-1-2 и MDF-1 — весь заказ'],
+      items: [item('MDF-1'), item('MDF-1-2')],
+    })).toEqual(['mdf-1-2', 'mdf-1']);
+    expect(cncWholeOrderKeys({
+      comments: ['телефон 77001234567 — весь заказ'],
+      items: [item('1234'), item('12345')],
+    })).toEqual([]);
+  });
+
+  it('resolves whole-order comments only to one stable matched order id', () => {
+    const item = (
+      orderName: string,
+      matchOrderId: number | null,
+      matchStatus: 'matched' | 'conflict' = 'matched',
+    ) => ({
+      orderName,
+      matchOrderId,
+      matchStatus,
+    }) as never;
+
+    expect(cncWholeOrderIds({
+      comments: ['12345 — весь заказ'],
+      items: [item('1234', 100), item('12345', 200), item('12345', 200)],
+    })).toEqual([200]);
+    expect(cncWholeOrderIds({
+      comments: ['12345 — весь заказ'],
+      items: [item('12345', 200), item('12345', 201)],
+    })).toEqual([]);
+    expect(cncWholeOrderIds({
+      comments: ['12345 — весь заказ'],
+      items: [item('12345', null)],
+    })).toEqual([]);
+    expect(cncWholeOrderIds({
+      comments: ['12345 — весь заказ'],
+      items: [item('12345', 200, 'conflict')],
     })).toEqual([]);
   });
 });
@@ -2013,8 +2192,20 @@ async function runAutoCutIngest(options: AutoCutIngestOptions = {}) {
           }],
         };
       }
+      if (/FROM production_statuses/i.test(text) && /production_status_id = ANY/i.test(text)) {
+        const requestedStatusIds = new Set((params[0] as number[]) ?? []);
+        return {
+          rows: detailRows
+            .filter((row) => row.production_status_id !== null
+              && requestedStatusIds.has(row.production_status_id))
+            .map((row) => ({
+              production_status_id: row.production_status_id,
+              sort_order: row.production_status_sort_order,
+            })),
+        };
+      }
       if (/WITH completed_quantities AS/i.test(text)) return { rows: targetRows };
-      if (/FROM orders\s+WHERE \(\s*order_id = ANY/i.test(text)) return { rows: orderRows };
+      if (/FROM orders\s+WHERE order_id = ANY/i.test(text)) return { rows: orderRows };
       if (/FROM order_details details/i.test(text) && /FOR UPDATE OF details/i.test(text)) {
         return { rows: detailRows };
       }
@@ -2051,6 +2242,136 @@ async function runAutoCutIngest(options: AutoCutIngestOptions = {}) {
 
   await repo.ingest({ currentUser: user(), dto, requestId: 'request-cnc-auto-cut-guard' });
   return queries;
+}
+
+interface AutoCutConfigureOptions {
+  enabled?: boolean;
+  replay?: {
+    settingEnabled: boolean;
+    requestId: string;
+    auditId: string;
+    completedPacketCount: number;
+    matchedDetailCount: number;
+    wholeOrderCount: number;
+    changedOrderCount: number;
+    changedDetailCount: number;
+  };
+}
+
+async function runAutoCutConfigure(options: AutoCutConfigureOptions = {}) {
+  const enabled = options.enabled ?? true;
+  const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  const requestHash = createHash('sha256').update(stableStringifyForTest({
+    actorUserId: '42',
+    commandName: 'cnc.telegram_packet.auto_cut_status.configure',
+    enabled,
+  })).digest('hex');
+  const tx = {
+    query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+      queries.push({ text, params });
+      if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+        return options.replay
+          ? { rows: [] }
+          : { rows: [{ request_hash: requestHash, response_json: null, status: 'processing' }] };
+      }
+      if (/FROM command_idempotency_keys/i.test(text)) {
+        return {
+          rows: [{
+            request_hash: requestHash,
+            response_json: options.replay ?? null,
+            status: options.replay ? 'completed' : 'processing',
+          }],
+        };
+      }
+      if (/FROM app_settings/i.test(text)) {
+        return { rows: [{ is_active: true, value_json: { value: false } }] };
+      }
+      if (/FROM production_statuses/i.test(text) && /production_status_id = ANY/i.test(text)) {
+        return { rows: [{ production_status_id: 2, sort_order: 20 }] };
+      }
+      if (/FROM production_statuses/i.test(text)) {
+        return {
+          rows: [{
+            production_status_id: 4,
+            production_status_name: 'Распилен',
+            production_status_code: 'cut',
+            sort_order: 40,
+          }],
+        };
+      }
+      if (/COUNT\(DISTINCT packet.packet_id\)/i.test(text)) {
+        return {
+          rows: [{
+            completed_packet_count: 3,
+            matched_detail_ids: [3101],
+            matched_order_ids: [2689],
+          }],
+        };
+      }
+      if (/jsonb_array_elements_text/i.test(text)) {
+        return {
+          rows: [{
+            comments_json: ['2689 — весь заказ'],
+            items_json: [{ orderName: '2689', matchOrderId: 2689 }],
+          }],
+        };
+      }
+      if (/FROM orders\s+WHERE order_id = ANY/i.test(text)) {
+        return {
+          rows: [{
+            order_id: 2689,
+            order_name: '2689',
+            client_id: 77,
+            version: 8,
+            production_status_id: 2,
+            production_status_from_details_enabled: true,
+          }],
+        };
+      }
+      if (/WITH completed_quantities AS/i.test(text)) {
+        return { rows: [{ order_id: 2689, detail_id: 3101 }] };
+      }
+      if (/FROM order_details details/i.test(text) && /FOR UPDATE OF details/i.test(text)) {
+        return {
+          rows: [{
+            order_id: 2689,
+            detail_id: 3101,
+            production_status_id: 2,
+            production_status_sort_order: 20,
+          }],
+        };
+      }
+      if (/UPDATE order_details/i.test(text) && /RETURNING order_id, detail_id/i.test(text)) {
+        return { rows: [{ order_id: 2689, detail_id: 3101 }] };
+      }
+      if (/UPDATE orders/i.test(text) && /version = version \+ 1/i.test(text)) {
+        return {
+          rows: [{
+            order_id: 2689,
+            order_name: '2689',
+            client_id: 77,
+            version: 9,
+            production_status_id: 4,
+            production_status_from_details_enabled: true,
+          }],
+        };
+      }
+      if (/INSERT INTO audit_log/i.test(text)) {
+        return { rows: [{ audit_id: 'audit-configure' }] };
+      }
+      return { rows: [] };
+    }),
+  };
+  const repo = new PgCncTelegramRepository({
+    transaction: vi.fn((handler) => handler(tx)),
+  } as never);
+  const result = await repo.configureAutoCutStatus({
+    currentUser: user(),
+    enabled,
+    idempotencyKey: 'cnc-auto-cut-status:test-configure',
+    requestId: 'request-auto-cut-configure',
+  });
+  return { result, queries };
 }
 
 function bathPlacementRow(overrides: Record<string, unknown> = {}) {

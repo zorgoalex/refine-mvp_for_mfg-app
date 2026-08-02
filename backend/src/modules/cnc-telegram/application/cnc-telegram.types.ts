@@ -1,5 +1,6 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type {
+  CncAutoCutStatusConfigureResponseDto,
   CncTelegramIngestResponseDto,
   CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramStructuredIngestDto,
@@ -26,23 +27,36 @@ export interface IngestCncTelegramPacketCommand {
   requestId?: string;
 }
 
+export interface ConfigureCncAutoCutStatusCommand {
+  currentUser: CurrentUser;
+  enabled: boolean;
+  idempotencyKey: string;
+  requestId?: string;
+}
+
 export interface CncTelegramRepositoryPort {
   listToday(command: ListCncTelegramTodayCommand): Promise<CncTelegramTodayResponseDto>;
   listOrderCuttingSequences(
     command: ListCncTelegramOrderCuttingSequencesCommand,
   ): Promise<CncTelegramOrderCuttingSequencesResponseDto>;
   ingest(command: IngestCncTelegramPacketCommand): Promise<CncTelegramIngestResponseDto>;
+  configureAutoCutStatus(
+    command: ConfigureCncAutoCutStatusCommand,
+  ): Promise<CncAutoCutStatusConfigureResponseDto>;
 }
 
 export interface RecordCncTelegramDeniedAuditCommand {
   currentUser: CurrentUser;
-  event: 'cnc.telegram_packet.ingest_denied';
+  event:
+    | 'cnc.telegram_packet.ingest_denied'
+    | 'cnc.telegram_packet.auto_cut_status_configure_denied';
   requestId?: string;
   externalPacketKey?: string;
   reason: 'PERMISSION_DENIED';
-  requiredPermissions: ['cut.manage'];
+  requiredPermissions: ['cut.manage'] | ['status_automation.manage'];
 }
 
 export interface CncTelegramDeniedAuditPort {
   recordIngestDenied(command: RecordCncTelegramDeniedAuditCommand): Promise<void>;
+  recordAutoCutStatusConfigureDenied(command: RecordCncTelegramDeniedAuditCommand): Promise<void>;
 }

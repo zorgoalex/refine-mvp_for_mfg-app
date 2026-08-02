@@ -15,6 +15,9 @@ describe('CncTelegramService', () => {
         async ingest() {
           throw new Error('unused');
         },
+        async configureAutoCutStatus() {
+          throw new Error('unused');
+        },
       },
     });
 
@@ -30,7 +33,10 @@ describe('CncTelegramService', () => {
   });
 
   it('requires cut.manage for structured ingest and records denied audit', async () => {
-    const deniedAudit = { recordIngestDenied: vi.fn().mockResolvedValue(undefined) };
+    const deniedAudit = {
+      recordIngestDenied: vi.fn().mockResolvedValue(undefined),
+      recordAutoCutStatusConfigureDenied: vi.fn().mockResolvedValue(undefined),
+    };
     const service = new CncTelegramService({
       packets: {
         async listToday() {
@@ -41,6 +47,9 @@ describe('CncTelegramService', () => {
         },
         async ingest() {
           throw new Error('repository must not be called');
+        },
+        async configureAutoCutStatus() {
+          throw new Error('unused');
         },
       },
       deniedAudit,
@@ -77,6 +86,9 @@ describe('CncTelegramService', () => {
         async ingest() {
           throw new Error('unused');
         },
+        async configureAutoCutStatus() {
+          throw new Error('unused');
+        },
       },
     });
 
@@ -89,6 +101,69 @@ describe('CncTelegramService', () => {
       code: 'PERMISSION_DENIED',
       statusCode: 403,
     });
+  });
+
+  it('requires status_automation.manage for auto-cut status and audits denial', async () => {
+    const deniedAudit = {
+      recordIngestDenied: vi.fn().mockResolvedValue(undefined),
+      recordAutoCutStatusConfigureDenied: vi.fn().mockResolvedValue(undefined),
+    };
+    const configureAutoCutStatus = vi.fn();
+    const service = new CncTelegramService({
+      packets: {
+        listToday: vi.fn(),
+        listOrderCuttingSequences: vi.fn(),
+        ingest: vi.fn(),
+        configureAutoCutStatus,
+      },
+      deniedAudit,
+    });
+
+    await expect(service.configureAutoCutStatus({
+      currentUser: user(['status_automation.view']),
+      enabled: true,
+      idempotencyKey: 'cnc-auto-cut-status:test-denied',
+      requestId: 'request-denied',
+    })).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+
+    expect(configureAutoCutStatus).not.toHaveBeenCalled();
+    expect(deniedAudit.recordAutoCutStatusConfigureDenied).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'cnc.telegram_packet.auto_cut_status_configure_denied',
+        requiredPermissions: ['status_automation.manage'],
+      }),
+    );
+  });
+
+  it('delegates auto-cut status configuration with manage permission', async () => {
+    const response = {
+      settingEnabled: true,
+      requestId: 'request-allowed',
+      auditId: 'audit-allowed',
+      completedPacketCount: 2,
+      matchedDetailCount: 1,
+      wholeOrderCount: 0,
+      changedOrderCount: 1,
+      changedDetailCount: 1,
+    };
+    const configureAutoCutStatus = vi.fn().mockResolvedValue(response);
+    const service = new CncTelegramService({
+      packets: {
+        listToday: vi.fn(),
+        listOrderCuttingSequences: vi.fn(),
+        ingest: vi.fn(),
+        configureAutoCutStatus,
+      },
+    });
+    const command = {
+      currentUser: user(['status_automation.manage']),
+      enabled: true,
+      idempotencyKey: 'cnc-auto-cut-status:test-allowed',
+      requestId: 'request-allowed',
+    };
+
+    await expect(service.configureAutoCutStatus(command)).resolves.toEqual(response);
+    expect(configureAutoCutStatus).toHaveBeenCalledWith(command);
   });
 });
 

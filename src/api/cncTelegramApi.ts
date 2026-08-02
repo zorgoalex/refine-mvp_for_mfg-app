@@ -2,6 +2,7 @@ import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
+  CncAutoCutStatusConfigureResponse,
   CncTelegramOrderCuttingSequencesResponse,
   CncTelegramTodayResponse,
 } from './types/cncTelegramApi.types';
@@ -26,7 +27,28 @@ export const cncTelegramApi = {
       apiRoutes.cncTelegram.orderCuttingSequences(orderId),
     );
   },
+  configureAutoCutStatus(
+    enabled: boolean,
+    idempotencyKey = createCncAutoCutStatusIdempotencyKey(),
+  ): Promise<CncAutoCutStatusConfigureResponse> {
+    if (typeof enabled !== 'boolean') throw new Error('Invalid enabled');
+    if (idempotencyKey.trim().length < 8 || idempotencyKey.length > 160) {
+      throw new Error('Invalid idempotencyKey');
+    }
+    return httpClient.post<CncAutoCutStatusConfigureResponse>(
+      apiRoutes.cncTelegram.autoCutStatus,
+      { enabled },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+  },
   downloadSheetImage(path: string): Promise<{ blob: Blob; fileName: string | null; status: number }> {
     return httpClient.download(path);
   },
 };
+
+export function createCncAutoCutStatusIdempotencyKey(): string {
+  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `cnc-auto-cut-status:${suffix}`;
+}

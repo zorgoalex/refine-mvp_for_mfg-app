@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
-import { parseDateQuery, parseIdempotencyKey, parseStructuredIngest, parseTodayQuery } from './cnc-telegram.controller';
+import {
+  parseAutoCutStatusConfigure,
+  parseDateQuery,
+  parseIdempotencyKey,
+  parseStructuredIngest,
+  parseTodayQuery,
+} from './cnc-telegram.controller';
 
 describe('CncTelegramController parsing', () => {
   it('accepts structured packet ingest and rejects raw fields', () => {
@@ -33,6 +39,13 @@ describe('CncTelegramController parsing', () => {
     expect(parseIdempotencyKey(['cnc:test:first', 'cnc:test:second'])).toBe('cnc:test:first');
     expect(() => parseIdempotencyKey(undefined)).toThrow(ApiError);
     expect(() => parseIdempotencyKey('short')).toThrow(ApiError);
+  });
+
+  it('accepts only a strict boolean auto-cut status setting body', () => {
+    expect(parseAutoCutStatusConfigure({ enabled: true })).toBe(true);
+    expect(parseAutoCutStatusConfigure({ enabled: false })).toBe(false);
+    expect(() => parseAutoCutStatusConfigure({ enabled: 'true' })).toThrow(ApiError);
+    expect(() => parseAutoCutStatusConfigure({ enabled: true, extra: true })).toThrow(ApiError);
   });
 
   it('keeps match ids coherent in structured rows', () => {

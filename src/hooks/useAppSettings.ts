@@ -38,7 +38,7 @@ interface UseAppSettingsResult {
   setSettingActive: (key: string, isActive: boolean) => Promise<void>;
 
   // Refetch settings
-  refetch: () => void;
+  refetch: () => Promise<unknown>;
 }
 
 export const useAppSettings = (options?: { enabled?: boolean }): UseAppSettingsResult => {

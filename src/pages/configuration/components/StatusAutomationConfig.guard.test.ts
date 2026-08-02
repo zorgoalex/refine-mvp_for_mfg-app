@@ -14,13 +14,17 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
     );
     expect(config).toContain('SETTING_KEYS.STATUS_AUTOMATION_CNC_MARK_CUT_DETAILS');
     expect(config).toContain('getSetting<boolean>');
-    expect(config).toContain('saveSetting(');
+    expect(config).toContain('cncTelegramApi.configureAutoCutStatus(enabled)');
+    expect(config).toContain('setConfirmedAutoCutStatusEnabled(result.settingEnabled)');
+    expect(config).toContain('await refetchAppSettings().catch(() => undefined)');
+    expect(config).toContain('storedAutoCutStatusEnabled === confirmedAutoCutStatusEnabled');
   });
 
   it('shows a permission-aware toggle in the Auto statuses tab', () => {
     expect(config).toContain('title="Автостатус распила"');
     expect(config).toContain('При переходе карточки в «Распилено»');
     expect(config).toContain('Комментарий «весь заказ»');
+    expect(config).toContain('карточки обрабатываются сразу');
     expect(config).toContain('disabled={!canManage');
     expect(config).toContain(
       'aria-label="Автоматически отмечать распиленными детали завершённых файлов станка"',

@@ -178,6 +178,17 @@ export interface CncTelegramIngestResponseDto {
   ignoredStaleSourceVersion: boolean;
 }
 
+export interface CncAutoCutStatusConfigureResponseDto {
+  settingEnabled: boolean;
+  requestId: string;
+  auditId: string;
+  completedPacketCount: number;
+  matchedDetailCount: number;
+  wholeOrderCount: number;
+  changedOrderCount: number;
+  changedDetailCount: number;
+}
+
 export interface CncTelegramStructuredIngestDto {
   idempotencyKey: string;
   externalPacketKey: string;

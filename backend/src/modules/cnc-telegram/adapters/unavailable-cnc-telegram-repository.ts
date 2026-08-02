@@ -2,12 +2,14 @@ import { ApiError } from '../../../common/errors/api-error';
 import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
+  ConfigureCncAutoCutStatusCommand,
   IngestCncTelegramPacketCommand,
   ListCncTelegramOrderCuttingSequencesCommand,
   ListCncTelegramTodayCommand,
   RecordCncTelegramDeniedAuditCommand,
 } from '../application/cnc-telegram.types';
 import type {
+  CncAutoCutStatusConfigureResponseDto,
   CncTelegramIngestResponseDto,
   CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramTodayResponseDto,
@@ -30,7 +32,19 @@ export class UnavailableCncTelegramRepository
     throw unavailable();
   }
 
+  async configureAutoCutStatus(
+    _command: ConfigureCncAutoCutStatusCommand,
+  ): Promise<CncAutoCutStatusConfigureResponseDto> {
+    throw unavailable();
+  }
+
   async recordIngestDenied(_command: RecordCncTelegramDeniedAuditCommand): Promise<void> {
+    // No database, no denied-audit sink.
+  }
+
+  async recordAutoCutStatusConfigureDenied(
+    _command: RecordCncTelegramDeniedAuditCommand,
+  ): Promise<void> {
     // No database, no denied-audit sink.
   }
 }

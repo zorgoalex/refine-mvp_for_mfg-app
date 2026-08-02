@@ -18,6 +18,7 @@ import type { BackendEnv } from '../../../config/env.validation';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { CncTelegramService } from '../application/cnc-telegram.service';
 import type {
+  CncAutoCutStatusConfigureResponseDto,
   CncTelegramIngestResponseDto,
   CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramStructuredIngestDto,
@@ -143,6 +144,10 @@ const ingestSchema = z.object({
   items: z.array(itemSchema).min(1).max(2000),
 }).strict();
 
+const autoCutStatusConfigureSchema = z.object({
+  enabled: z.boolean(),
+}).strict();
+
 @ApiTags('CncTelegram')
 @ApiBearerAuth()
 @Controller('cnc-telegram')
@@ -204,6 +209,33 @@ export class CncTelegramController {
     return this.cncTelegram.listOrderCuttingSequences({
       currentUser,
       orderId: parsePositiveIntegerParam(orderId, 'orderId'),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({
+    operationId: 'configureCncAutoCutStatus',
+    summary: 'Configure CNC cut auto-status and backfill completed machine-file packets',
+  })
+  @ApiHeader({ name: 'Idempotency-Key', required: true })
+  @ApiResponse({ status: 201, description: 'Setting configured and completed packets processed' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 409, description: 'Required production status is unavailable' })
+  @ApiResponse({ status: 422, description: 'Invalid request' })
+  @ApiResponse({ status: 503, description: 'CNC Telegram API is disabled' })
+  @Post('auto-cut-status')
+  configureAutoCutStatus(
+    @Req() request: RequestWithCurrentUser,
+    @Headers('idempotency-key') idempotencyKey: string | string[] | undefined,
+    @Body() body: unknown,
+  ): Promise<CncAutoCutStatusConfigureResponseDto> {
+    this.assertEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.cncTelegram.configureAutoCutStatus({
+      currentUser,
+      enabled: parseAutoCutStatusConfigure(body),
+      idempotencyKey: parseIdempotencyKey(idempotencyKey),
       requestId: request.requestId,
     });
   }
@@ -310,6 +342,19 @@ export function parseStructuredIngest(
     });
   }
   return { ...parsed.data, idempotencyKey };
+}
+
+export function parseAutoCutStatusConfigure(body: unknown): boolean {
+  const parsed = autoCutStatusConfigureSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid CNC auto-cut status setting', {
+      issues: parsed.error.issues.map((issue) => ({
+        path: issue.path.join('.'),
+        message: issue.message,
+      })),
+    });
+  }
+  return parsed.data.enabled;
 }
 
 export function parseIdempotencyKey(value: string | string[] | undefined): string {

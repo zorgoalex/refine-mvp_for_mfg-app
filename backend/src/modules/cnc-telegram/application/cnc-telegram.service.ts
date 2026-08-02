@@ -3,11 +3,13 @@ import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
+  ConfigureCncAutoCutStatusCommand,
   IngestCncTelegramPacketCommand,
   ListCncTelegramOrderCuttingSequencesCommand,
   ListCncTelegramTodayCommand,
 } from './cnc-telegram.types';
 import type {
+  CncAutoCutStatusConfigureResponseDto,
   CncTelegramIngestResponseDto,
   CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramTodayResponseDto,
@@ -56,6 +58,21 @@ export class CncTelegramService {
     return this.ports.packets.ingest(command);
   }
 
+  async configureAutoCutStatus(
+    command: ConfigureCncAutoCutStatusCommand,
+  ): Promise<CncAutoCutStatusConfigureResponseDto> {
+    if (!this.permissions.canUser(command.currentUser, 'status_automation.manage')) {
+      await this.recordAutoCutStatusConfigureDenied(command);
+      throw new ApiError(
+        403,
+        'PERMISSION_DENIED',
+        'Недостаточно прав для настройки автостатуса распила',
+        { requiredPermissions: ['status_automation.manage'] },
+      );
+    }
+    return this.ports.packets.configureAutoCutStatus(command);
+  }
+
   private async recordDenied(command: IngestCncTelegramPacketCommand): Promise<void> {
     try {
       await this.ports.deniedAudit?.recordIngestDenied({
@@ -65,6 +82,22 @@ export class CncTelegramService {
         externalPacketKey: command.dto.externalPacketKey,
         reason: 'PERMISSION_DENIED',
         requiredPermissions: ['cut.manage'],
+      });
+    } catch {
+      // Deny response must not depend on the audit sink.
+    }
+  }
+
+  private async recordAutoCutStatusConfigureDenied(
+    command: ConfigureCncAutoCutStatusCommand,
+  ): Promise<void> {
+    try {
+      await this.ports.deniedAudit?.recordAutoCutStatusConfigureDenied({
+        currentUser: command.currentUser,
+        event: 'cnc.telegram_packet.auto_cut_status_configure_denied',
+        requestId: command.requestId,
+        reason: 'PERMISSION_DENIED',
+        requiredPermissions: ['status_automation.manage'],
       });
     } catch {
       // Deny response must not depend on the audit sink.

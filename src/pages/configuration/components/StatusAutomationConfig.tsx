@@ -20,6 +20,7 @@ import {
 } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../../api/apiError';
+import { cncTelegramApi } from '../../../api/cncTelegramApi';
 import { statusAutomationApi } from '../../../api/statusAutomationApi';
 import type {
   StatusAutomationActionType,
@@ -147,11 +148,13 @@ export function StatusAutomationConfig() {
   const [saving, setSaving] = useState(false);
   const [autoCutStatusSaving, setAutoCutStatusSaving] = useState(false);
   const [autoCutStatusEnabled, setAutoCutStatusEnabled] = useState(false);
+  const [confirmedAutoCutStatusEnabled, setConfirmedAutoCutStatusEnabled] =
+    useState<boolean | null>(null);
   const [deletingRuleId, setDeletingRuleId] = useState<number | null>(null);
   const [updatingRuleId, setUpdatingRuleId] = useState<number | null>(null);
   const {
     getSetting,
-    saveSetting,
+    refetch: refetchAppSettings,
     isLoading: appSettingsLoading,
   } = useAppSettings({ enabled: canView });
 
@@ -273,10 +276,16 @@ export function StatusAutomationConfig() {
   }, [loadRules]);
 
   useEffect(() => {
-    if (!autoCutStatusSaving) {
-      setAutoCutStatusEnabled(storedAutoCutStatusEnabled);
+    if (autoCutStatusSaving) return;
+    if (confirmedAutoCutStatusEnabled !== null) {
+      setAutoCutStatusEnabled(confirmedAutoCutStatusEnabled);
+      if (storedAutoCutStatusEnabled === confirmedAutoCutStatusEnabled) {
+        setConfirmedAutoCutStatusEnabled(null);
+      }
+      return;
     }
-  }, [autoCutStatusSaving, storedAutoCutStatusEnabled]);
+    setAutoCutStatusEnabled(storedAutoCutStatusEnabled);
+  }, [autoCutStatusSaving, confirmedAutoCutStatusEnabled, storedAutoCutStatusEnabled]);
 
   useEffect(() => {
     const catalogError = orderStatusesError ?? paymentStatusesError ?? productionStatusesError;
@@ -425,12 +434,17 @@ export function StatusAutomationConfig() {
     setAutoCutStatusEnabled(enabled);
     setAutoCutStatusSaving(true);
     try {
-      await saveSetting(
-        SETTING_KEYS.STATUS_AUTOMATION_CNC_MARK_CUT_DETAILS,
-        enabled,
-        'Автоматически ставить деталям статус «Распилен» при завершении карточки файла станка',
+      const result = await cncTelegramApi.configureAutoCutStatus(enabled);
+      setConfirmedAutoCutStatusEnabled(result.settingEnabled);
+      setAutoCutStatusEnabled(result.settingEnabled);
+      await refetchAppSettings().catch(() => undefined);
+      message.success(
+        enabled
+          ? result.changedDetailCount > 0
+            ? `Автостатус распила включён. Обновлено деталей: ${result.changedDetailCount}, заказов: ${result.changedOrderCount}`
+            : 'Автостатус распила включён. Существующие карточки уже обработаны'
+          : 'Автостатус распила выключен',
       );
-      message.success(enabled ? 'Автостатус распила включён' : 'Автостатус распила выключен');
     } catch (error) {
       setAutoCutStatusEnabled(previous);
       message.error(errorText(error, 'Не удалось сохранить настройку автостатуса распила'));
@@ -469,6 +483,7 @@ export function StatusAutomationConfig() {
               <Text type="secondary">
                 При переходе карточки в «Распилено» ставить статус «Распилен» только её деталям.
                 Комментарий «весь заказ» применяет статус ко всем деталям указанного заказа.
+                При включении уже находящиеся в «Распилено» карточки обрабатываются сразу.
               </Text>
             </div>
             <Switch
