@@ -971,6 +971,12 @@ html {
     inset 0 -2px 0 #ff4d4f !important;
 }
 
+/* Field errors are summarized by the order form. Keep their inline status border,
+   but remove Ant Form's additional message container from the table layout. */
+.order-details-table .ant-form-item-additional {
+  display: none !important;
+}
+
 :root {
   --app-deleted-reference-bg: #f3f4f6;
   --app-deleted-reference-text: var(--app-text-muted);

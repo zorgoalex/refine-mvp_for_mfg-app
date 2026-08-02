@@ -163,5 +163,7 @@ describe('order detail required numeric validation', () => {
     expect(validationCss).not.toContain('border-top:');
     expect(validationCss).not.toContain('border-bottom:');
     expect((tableSource.match(/help=\{null\}/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    expect(validationCss).toContain('.order-details-table .ant-form-item-additional');
+    expect(validationCss).toContain('display: none !important;');
   });
 });
