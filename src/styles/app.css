@@ -971,9 +971,10 @@ html {
     inset 0 -2px 0 #ff4d4f !important;
 }
 
-/* Field errors are summarized by the order form. Keep their inline status border,
-   but remove Ant Form's additional message container from the table layout. */
-.order-details-table .ant-form-item-additional {
+/* Ant Design 5.0 renders field messages in .ant-form-item-explain (there is no
+   .ant-form-item-additional wrapper). Keep the error status border, but remove
+   the message itself from the table layout; the order form shows the summary. */
+.order-details-table .ant-form-item-explain {
   display: none !important;
 }
 

@@ -37,6 +37,7 @@ import {
   type OrderDetailColumnDefinition,
 } from './OrderDetailColumnSettings';
 import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
+import { validateSheetDimensions } from '../../../../utils/materialDimensionValidation';
 import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
 import type { CutDetailLastReadyJobRef } from '../../../../api/types/cutApi.types';
 import { CutJobVersionLines } from '../../CutJobVersionLines';
@@ -459,10 +460,39 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     ? createBackendSelectProps(orderFormData.references.productionStatuses, orderFormData.isLoading)
     : productionStatusSelectProps;
 
-  // VB: legacy material dimension validation removed; all details use sheet types.
-  const validateDimensions = useCallback(() => {
-    setDimensionValidationError(null);
-  }, []);
+  // Validate against the selected sheet's actual dimensions. Read dimensions from
+  // the synchronous ref so a fast click after typing cannot validate stale values.
+  const validateDimensions = useCallback((sheetIdOverride?: number | null): string | null => {
+    const height = fieldValuesRef.current.height ?? form.getFieldValue('height');
+    const width = fieldValuesRef.current.width ?? form.getFieldValue('width');
+    const sheetId = sheetIdOverride ?? form.getFieldValue('sheet_material_type_id');
+    const sheetOption = typeof sheetId === 'number' && sheetId > 0
+      ? sheetMaterials.byId.get(sheetId)
+      : undefined;
+    const result = validateSheetDimensions(
+      height,
+      width,
+      sheetOption
+        ? { name: sheetOption.label, widthMm: sheetOption.widthMm, heightMm: sheetOption.heightMm }
+        : null,
+    );
+    const error = result.isValid ? null : result.errorMessage ?? 'Размер детали превышает размер листа';
+    setDimensionValidationError(error);
+    return error;
+  }, [form, sheetMaterials.byId]);
+
+  const showDimensionValidationError = useCallback((record: OrderDetail, message: string) => {
+    const errorFields = [
+      { name: ['height'], errors: [message] },
+      { name: ['width'], errors: [message] },
+    ];
+    form.setFields(errorFields);
+    showInlineValidationErrors(record, { errorFields });
+  }, [form, showInlineValidationErrors]);
+
+  useEffect(() => {
+    if (editingKey !== null) validateDimensions();
+  }, [editingKey, validateDimensions]);
 
   // ============================================================================
   // FIX: Обновлённая функция recalcSum с использованием useRef
@@ -612,12 +642,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     const record = details.find(d => (d.temp_id || d.detail_id) === editingKey);
     if (!record) return true;
 
-    // Check dimension validation
-    if (dimensionValidationError) {
+    // Recompute on save; state may lag behind the latest InputNumber event.
+    const currentDimensionError = validateDimensions();
+    if (currentDimensionError) {
       console.log('[OrderDetailTable] saveCurrentRow - dimension validation failed');
-      showInlineValidationErrors(record, {
-        errorFields: [{ errors: [dimensionValidationError] }],
-      });
+      showDimensionValidationError(record, currentDimensionError);
       return false;
     }
 
@@ -717,12 +746,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   };
 
   const saveEdit = async (record: OrderDetail) => {
-    // Check dimension validation first
-    if (dimensionValidationError) {
-      console.error('[OrderDetailTable] saveEdit - dimension validation failed:', dimensionValidationError);
-      showInlineValidationErrors(record, {
-        errorFields: [{ errors: [dimensionValidationError] }],
-      });
+    // Recompute on save; state may lag behind the latest InputNumber event.
+    const currentDimensionError = validateDimensions();
+    if (currentDimensionError) {
+      console.error('[OrderDetailTable] saveEdit - dimension validation failed:', currentDimensionError);
+      showDimensionValidationError(record, currentDimensionError);
       return;
     }
 
@@ -1024,6 +1052,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               showSearch
               optionFilterProp="label"
               dropdownMatchSelectWidth={false}
+              onChange={(value) => queueMicrotask(() => validateDimensions(value))}
               style={{ minWidth: 160, textAlign: 'left' }}
             />
           </Form.Item>
@@ -1438,17 +1467,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             {isEditing(d) ? (
               <>
                 {dimensionValidationError && (
-                  <Tooltip title={dimensionValidationError}>
-                    <ExclamationCircleOutlined style={{ fontSize: '14px', color: '#ff4d4f', marginRight: '4px' }} />
-                  </Tooltip>
+                  <ExclamationCircleOutlined style={{ fontSize: '14px', color: '#ff4d4f', marginRight: '4px' }} />
                 )}
                 <Button
                   type="text"
                   size="small"
-                  icon={<CheckOutlined style={{ fontSize: '16px', color: dimensionValidationError ? 'var(--app-border)' : '#52c41a' }} />}
+                  icon={<CheckOutlined style={{ fontSize: '16px', color: '#52c41a' }} />}
                   onClick={() => saveEdit(d)}
                   style={{ padding: '0 4px' }}
-                  disabled={!!dimensionValidationError}
                 />
               </>
             ) : (

@@ -11,9 +11,10 @@ describe('validateSheetDimensions (SP3 UX mirror)', () => {
   });
 
   it('fails when the detail exceeds the sheet', () => {
-    const res = validateSheetDimensions(2900, 1000, sheet);
+    const res = validateSheetDimensions(2807, 1000, sheet);
     expect(res.isValid).toBe(false);
     expect(res.errorMessage).toContain('не помещается');
+    expect(res.errorMessage).toContain('2807×1000');
   });
 
   it('is a no-op when dimensions or sheet dims are missing', () => {
