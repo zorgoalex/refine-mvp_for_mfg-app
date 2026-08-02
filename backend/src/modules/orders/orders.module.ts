@@ -28,6 +28,7 @@ import { UnavailableOrderSnapshot } from './adapters/unavailable-order-snapshot'
 import { OrderExportService } from './application/order-export.service';
 import { OrderGroupLinkService } from './application/order-group-link.service';
 import { OrderSnapshotService } from './application/order-snapshot.service';
+import { OrderDetailTransferService } from './application/order-detail-transfer.service';
 import { OrderTransactionService } from './application/order-transaction.service';
 import { OrderQueryService } from './application/order-query.service';
 import { OrderStatusBoardService } from './application/order-status-board.service';
@@ -131,6 +132,24 @@ export function shouldEnableOrderDeadlineSync(input: {
                 config.get('BACKEND_SHEET_ORDERS_READS', { infer: true }),
               )
             : new UnavailableOrderReadRepository(),
+        }),
+      inject: [DatabaseService, ConfigService],
+    },
+    {
+      provide: OrderDetailTransferService,
+      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) =>
+        new OrderDetailTransferService({
+          database,
+          sheetOrdersReads: config.get('BACKEND_SHEET_ORDERS_READS', { infer: true }),
+          deadlineSync:
+            shouldEnableOrderDeadlineSync({
+              databaseConfigured: database.isConfigured,
+              deadlinesEnabled: config.get('BACKEND_ENABLE_DEADLINES', { infer: true }),
+              deadlinesReadOnly: config.get('BACKEND_DEADLINES_READ_ONLY', { infer: true }),
+              orderSyncEnabled: config.get('BACKEND_ENABLE_DEADLINE_ORDER_SYNC', { infer: true }),
+            })
+              ? new PgOrderDeadlineSync(database)
+              : undefined,
         }),
       inject: [DatabaseService, ConfigService],
     },

@@ -13,6 +13,7 @@ import {
   CloseOutlined,
   ClearOutlined,
   ScissorOutlined,
+  SwapOutlined,
 } from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
@@ -35,6 +36,9 @@ import { useOrderFormData } from '../../../../hooks/useOrderFormData';
 import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { OrderToolbarLabel } from '../OrderDetailsToolbar';
 import { useCutDetailLastReady } from '../../useCutDetailLastReady';
+import { OrderDetailTransferModal } from '../OrderDetailTransferModal';
+import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
+import type { TransferOrderDetailsResponse } from '../../../../api/types/orderApi.types';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -79,7 +83,19 @@ const AccessibleToolbarTooltip: React.FC<{
 );
 
 export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boolean }>(({ isSaving = false }, ref) => {
-  const { details, addDetail, insertDetailAfter, updateDetail, deleteDetail, reorderDetails, header, updateHeaderField, isDirty } = useOrderFormStore();
+  const {
+    details,
+    addDetail,
+    insertDetailAfter,
+    updateDetail,
+    deleteDetail,
+    reorderDetails,
+    header,
+    updateHeaderField,
+    isDirty,
+    version,
+    loadOrder,
+  } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
 
   const groupingUserId = authSession.getUser()?.id ?? 'anon';
@@ -119,13 +135,14 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   const bazisCutVisible = featureFlags.bazisCut;
   const bazisCutManage = can('cut.manage');
   const [addToBazisCutOpen, setAddToBazisCutOpen] = useState(false);
-  const bazisCutDetailIds = useMemo(
+  const selectedPersistedDetailIds = useMemo(
     () => selectedDetailIds(details as any[], selectedRowKeys),
     [details, selectedRowKeys],
   );
+  const bazisCutDetailIds = selectedPersistedDetailIds;
   const eligibleCutDetailIds = useMemo(
-    () => (cutEnabled ? selectedDetailIds(details as any[], selectedRowKeys) : []),
-    [cutEnabled, details, selectedRowKeys],
+    () => (cutEnabled ? selectedPersistedDetailIds : []),
+    [cutEnabled, selectedPersistedDetailIds],
   );
   const persistedDetailIds = useMemo(
     () =>
@@ -134,6 +151,38 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         .filter((detailId): detailId is number => Number.isInteger(detailId) && detailId > 0),
     [details],
   );
+  const [transferOpen, setTransferOpen] = useState(false);
+  const transferDetailIds = selectedPersistedDetailIds;
+  const canTransferDetails = can('orders.update') && can('orders.view_financials');
+  const canCreateTransferTarget = can('orders.create');
+  const sourceVersion = Number(version ?? header?.version ?? 0);
+  const transferDisabled =
+    !canTransferDetails ||
+    isDirty ||
+    isSaving ||
+    header?.order_id == null ||
+    !Number.isInteger(sourceVersion) ||
+    selectedRowKeys.length === 0 ||
+    transferDetailIds.length === 0 ||
+    transferDetailIds.length !== selectedRowKeys.length ||
+    transferDetailIds.length >= persistedDetailIds.length;
+  const transferTooltip = !canTransferDetails
+    ? 'Недостаточно прав'
+    : isDirty || isSaving
+      ? 'Сначала сохраните изменения заказа'
+      : header?.order_id == null
+        ? 'Сначала сохраните заказ'
+        : !Number.isInteger(sourceVersion)
+          ? 'Неизвестная версия заказа'
+          : selectedRowKeys.length === 0
+            ? 'Выберите детали'
+            : transferDetailIds.length === 0
+              ? 'Выберите сохраненные детали'
+              : transferDetailIds.length !== selectedRowKeys.length
+                ? 'Сначала сохраните выбранные новые строки'
+                : transferDetailIds.length >= persistedDetailIds.length
+                  ? 'В исходном заказе должна остаться хотя бы одна деталь'
+                  : `Перенести детали (${transferDetailIds.length})`;
   const cutJobMaps = useCutDetailLastReady({
     enabled: cutColumnEnabled,
     detailIds: persistedDetailIds,
@@ -333,6 +382,21 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     // Clear drag selection state when selection changes
     setDragSelectionState(null);
   };
+
+  const handleTransferDone = useCallback((response: TransferOrderDetailsResponse) => {
+    loadOrder(mapOrderDtoToFormValues(response.sourceOrder));
+    setTransferOpen(false);
+    setSelectedRowKeys([]);
+    setDragSelectionState(null);
+    window.setTimeout(() => {
+      storeApi.getState().finalizeInitialization();
+    }, 200);
+    message.success(
+      response.targetCreated
+        ? `Создан заказ ${response.targetOrder.header.orderName}, перенесено: ${response.movedDetailIds.length}`
+        : `Перенесено деталей: ${response.movedDetailIds.length}`,
+    );
+  }, [loadOrder, storeApi]);
 
   // Handle drag selection pending - show confirmation bar
   const handleDragSelectionPending = useCallback((
@@ -683,6 +747,16 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
                   </AccessibleToolbarTooltip>
                 );
               })()}
+              <AccessibleToolbarTooltip title={transferTooltip} disabled={transferDisabled}>
+                <Button
+                  icon={<SwapOutlined />}
+                  onClick={() => setTransferOpen(true)}
+                  disabled={transferDisabled}
+                  aria-label={transferTooltip}
+                >
+                  <OrderToolbarLabel>Перенести</OrderToolbarLabel>
+                </Button>
+              </AccessibleToolbarTooltip>
               <AccessibleToolbarTooltip title="Пересчитать суммы" disabled={details.length === 0}>
                 <Button
                   icon={<CalculatorOutlined />}
@@ -770,6 +844,18 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
             detailIds={bazisCutDetailIds}
             onClose={() => setAddToBazisCutOpen(false)}
             onDone={() => handleSelectChange([])}
+          />
+        )}
+        {header?.order_id != null && (
+          <OrderDetailTransferModal
+            open={transferOpen}
+            sourceOrderId={header.order_id}
+            sourceOrderName={header.order_name || ''}
+            sourceVersion={sourceVersion}
+            detailIds={transferDetailIds}
+            canCreateTarget={canCreateTransferTarget}
+            onClose={() => setTransferOpen(false)}
+            onDone={handleTransferDone}
           />
         )}
       </Space>
