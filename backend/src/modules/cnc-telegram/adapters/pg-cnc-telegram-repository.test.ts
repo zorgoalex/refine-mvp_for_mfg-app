@@ -155,8 +155,10 @@ describe('PgCncTelegramRepository', () => {
   });
 
   it('returns only posted and completed columns for the daily CNC board', async () => {
+    const queries: string[] = [];
     const database = {
       query: vi.fn(async (text: string) => {
+        queries.push(text);
         if (/FROM cnc_telegram_packets p/i.test(text)) {
           return {
             rows: [
@@ -170,6 +172,9 @@ describe('PgCncTelegramRepository', () => {
                 packet_id: '00000000-0000-0000-0000-000000000012',
                 completion_status: 'completed',
                 thumbs_up: true,
+                svg_cut_job_id: 35,
+                svg_cut_result_id: 54,
+                svg_cut_result_no: 3,
               }),
             ],
           };
@@ -187,6 +192,13 @@ describe('PgCncTelegramRepository', () => {
       ['baths', 'Ванны', 0],
       ['baths_ready', 'Готовы к закатке', 0],
     ]);
+    expect(queries[0]).toContain('LEFT JOIN cut_result svg_result');
+    expect(queries[0]).toContain('svg_result.result_no AS svg_cut_result_no');
+    expect(result.columns[1].packets[0]).toMatchObject({
+      svgCutJobId: 35,
+      svgCutResultId: 54,
+      svgCutResultNo: 3,
+    });
   });
 
   it('lists stored machine-file cutting sequence numbers for an order card', async () => {
@@ -1544,6 +1556,12 @@ function packetRowBase() {
     analysis_warnings_json: [],
     ocr_engine: 'glm-ocr-0.9b-q8-llama.cpp',
     parser_version: 'cnc-telegram-structured-v1',
+    cut_layout_json: null,
+    svg_cut_job_id: null,
+    svg_cut_result_id: null,
+    svg_cut_result_no: null,
+    svg_cut_import_status: null,
+    svg_cut_import_note: null,
     updated_at: '2026-07-24T08:00:10.000Z',
     packet_item_id: '00000000-0000-0000-0000-000000000002',
     source_item_key: '2689:31:497x477',

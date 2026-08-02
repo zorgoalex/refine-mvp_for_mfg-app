@@ -83,6 +83,7 @@ interface PacketJoinedRow extends QueryResultRow {
   cut_layout_json: unknown;
   svg_cut_job_id: string | number | null;
   svg_cut_result_id: string | number | null;
+  svg_cut_result_no: string | number | null;
   svg_cut_import_status: 'none' | 'skipped' | 'needs_review' | 'imported' | null;
   svg_cut_import_note: string | null;
   updated_at: string | Date;
@@ -410,6 +411,7 @@ function packetSelectSql(whereSql: string): string {
       p.cut_layout_json,
       p.svg_cut_job_id,
       p.svg_cut_result_id,
+      svg_result.result_no AS svg_cut_result_no,
       p.svg_cut_import_status,
       p.svg_cut_import_note,
       p.updated_at,
@@ -429,6 +431,9 @@ function packetSelectSql(whereSql: string): string {
       i.match_status,
       i.review_note
     FROM cnc_telegram_packets p
+    LEFT JOIN cut_result svg_result
+      ON svg_result.cut_job_id = p.svg_cut_job_id
+     AND svg_result.cut_result_id = p.svg_cut_result_id
     LEFT JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
     LEFT JOIN (
       SELECT
@@ -2575,6 +2580,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         cutLayout: cutLayoutOrNull(row.cut_layout_json),
         svgCutJobId: toNullableNumber(row.svg_cut_job_id),
         svgCutResultId: toNullableNumber(row.svg_cut_result_id),
+        svgCutResultNo: toNullableNumber(row.svg_cut_result_no),
         svgCutImportStatus: row.svg_cut_import_status ?? 'none',
         svgCutImportNote: row.svg_cut_import_note,
         itemCount: 0,

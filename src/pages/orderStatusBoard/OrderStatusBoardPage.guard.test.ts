@@ -400,7 +400,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('STATUS_BOARD_COLUMN_PREFERENCE_KEYS[viewState.view]');
     expect(page).toContain('STATUS_BOARD_COLUMN_PREFERENCE_KEYS.cnc_today');
     expect(page).toContain('filterVisibleStatusBoardColumns(');
-    expect(page).toContain('showOrdersColumn={cncOrdersColumnVisible}');
+    expect(page).toContain('showOrdersColumn={cncDetailedWorkspaceActive || cncOrdersColumnVisible}');
+    expect(page).toContain('columns={cncDetailedWorkspaceActive ? cncActiveColumns : cncVisibleColumns}');
+    expect(page).toContain('const cncHasVisibleColumns = cncDetailedWorkspaceActive');
     expect(columnVisibility).toContain("order: 'statusBoardOrder'");
     expect(columnVisibility).toContain("production: 'statusBoardProduction'");
     expect(columnVisibility).toContain("cnc_today: 'statusBoardCnc'");
@@ -457,9 +459,19 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('onSelectDetailedBath={selectCncDetailedBath}');
     expect(page).toContain('onCloseDetailedBath={closeCncDetailedBath}');
     expect(page).toContain('onSelectDetailedDetail={selectCncDetailedDetail}');
-    expect(page).toMatch(
-      /const detailed = detailedContext\?\.activeBathId === bath\.bathCardId;\s+const summaryOnly = isCncCardSummaryOnly\([\s\S]*?cardKey,\s+detailed,\s+\);/,
-    );
+    expect(page).toContain('const detailed = !detailedBathActive');
+    expect(page).toContain("className=\"cnc-detailed-workspace\"");
+    expect(page).toContain("style={{ gridColumn: '1 / span 4', gridRow: 1 }}");
+    expect(page).toContain('<CncDetailedMachineMaps');
+    expect(page).toContain('buildCncDetailedMachineSources({');
+    expect(page).toContain("const canViewCncCutMaps = can('cut.view')");
+    expect(page).toContain('canViewCut={canViewCncCutMaps}');
+    expect(page).toContain('loadCncDetailedMachineSvgPreview(source, selectedDetailId)');
+    expect(page).toContain('cncDetailedMachinePreviewsShareSheets(current, preview) ? current : preview');
+    expect(page).toContain('loadCncDetailedMachineScreenshot(imageUrl)');
+    expect(page).toContain('syncCncBathSelectedDetail(svgBodyRef.current, selectedDetailId)');
+    expect(page).toContain('SVG недоступна — показан скрин');
+    expect(page).toContain('Для просмотра SVG-раскладки нужен доступ к разделу «Раскрой»');
     expect(page).toContain('data-cnc-detailed-state');
     expect(page).toContain('Свернуть подробный вид ванны');
     expect(page).toContain('detailed ? false : true');
@@ -494,8 +506,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('getCncPacketDisplayState');
     expect(page).toContain('cncDetailFingerprintsIntersect');
     expect(page).toContain('cncPacketWholeOrderIntersects');
-    expect(css).toContain('.status-board-columns--cnc-detailed .cnc-today-column--detailed');
-    expect(css).toContain('.status-board-columns--cnc-detailed .cnc-today-column--parsed');
+    expect(css).toContain('.status-board-columns--cnc-detailed .cnc-today-column--detailed-covered');
+    expect(css).toContain('visibility: hidden');
+    expect(css).toContain('.cnc-detailed-workspace');
+    expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(css).toContain('.cnc-detailed-workspace__machine');
+    expect(css).toContain('overflow-y: auto');
+    expect(css).toContain('scrollbar-gutter: stable');
     expect(css).toContain(
       'grid-template-columns: repeat(var(--status-board-cnc-column-count, 5), minmax(0, 1fr));',
     );
@@ -506,13 +523,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-bath-card--detailed');
     expect(css).toContain('--status-board-cnc-column-gap: clamp(4px, 0.8vw, 12px);');
     expect(css).toMatch(
-      /\.cnc-bath-card--detailed\s*\{[^}]*width: calc\(200% \+ var\(--status-board-cnc-column-gap\)\);[^}]*max-width: calc\(200% \+ var\(--status-board-cnc-column-gap\)\);/s,
-    );
-    expect(css).toMatch(
-      /\.cnc-bath-card--detailed-left\s*\{[^}]*margin-left: calc\(-100% - var\(--status-board-cnc-column-gap\)\);/s,
-    );
-    expect(css).not.toMatch(
-      /@media \(max-width: 768px\)[\s\S]*?\.cnc-bath-card--detailed\s*\{[^}]*width: 100%;/,
+      /\.cnc-detailed-workspace__bath \.cnc-bath-card--detailed\s*\{[^}]*width: 100%;[^}]*max-width: 100%;[^}]*margin-left: 0;/s,
     );
     expect(css).toMatch(
       /@container status-board-viewport \(max-width: 960px\)[\s\S]*?\.status-board-columns--cnc-detailed \.cnc-bath-card--detailed \.cnc-packet-card__sheet[^}]*\{[^}]*display: block;/,

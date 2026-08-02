@@ -30,6 +30,19 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-02",
+    title: "МДФ-работы: связанные раскрои файлов станка",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В режиме «Подробный» выбор детали на раскладке ванны открывает слева точные листы связанных файлов станка и выделяет эту деталь на всех найденных раскроях.",
+    ],
+    changed: [
+      "Несколько раскроев файлов станка показываются с вертикальной прокруткой; при отсутствии доступной SVG-раскладки используется сохранённый скрин файла станка.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-07-31",
     title: "Доски статусов: персональная видимость колонок",
     services: ["ERP"],

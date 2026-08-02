@@ -129,6 +129,17 @@ import {
   isPackerAllowedOrderStatusName,
   isPackerUser,
 } from '../../utils/packerStatusAccess';
+import { can } from '../../utils/permissions';
+import {
+  buildCncDetailedMachineSources,
+  type CncDetailedMachineSource,
+} from './cncDetailedMachine';
+import {
+  cncDetailedMachinePreviewsShareSheets,
+  loadCncDetailedMachineScreenshot,
+  loadCncDetailedMachineSvgPreview,
+  type CncDetailedMachineSvgPreview,
+} from './cncDetailedMachinePreview';
 
 const BOARD_DRAG_TYPE = 'ORDER_STATUS_BOARD_CARD';
 const DATE_FORMAT = 'DD.MM.YYYY';
@@ -203,6 +214,7 @@ interface BoardDragItem {
 export const OrderStatusBoardPage: React.FC = () => {
   const isOperational = useOperationalUi();
   const { canViewFinancials } = useOrderFinancialVisibility();
+  const canViewCncCutMaps = can('cut.view');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const viewState = useMemo(
@@ -775,9 +787,12 @@ export const OrderStatusBoardPage: React.FC = () => {
       ).filter((column) => !viewState.hideEmpty || column.total > 0),
     [cncActiveColumns, cncColumnPreferences.settings.hidden, viewState.hideEmpty],
   );
+  const cncDetailedWorkspaceActive = cncDetailedEnabled && cncDetailedContext !== null;
   const cncOrdersColumnVisible =
     !cncColumnPreferences.settings.hidden.includes('orders');
-  const cncHasVisibleColumns = cncVisibleColumns.length > 0 || cncOrdersColumnVisible;
+  const cncHasVisibleColumns = cncDetailedWorkspaceActive
+    || cncVisibleColumns.length > 0
+    || cncOrdersColumnVisible;
   const allCncColumnsHidden = CNC_STATUS_BOARD_COLUMN_DEFINITIONS.every(
     (definition) => cncColumnPreferences.settings.hidden.includes(definition.key),
   );
@@ -1352,7 +1367,7 @@ export const OrderStatusBoardPage: React.FC = () => {
               />
             ) : (
               <CncTelegramTodayColumns
-                columns={cncVisibleColumns}
+                columns={cncDetailedWorkspaceActive ? cncActiveColumns : cncVisibleColumns}
                 orderCards={cncOrderCards}
                 orderStatusColumns={cncOrderBoardColumns}
                 orderCardsLoading={cncOrderBoardLoading}
@@ -1360,8 +1375,9 @@ export const OrderStatusBoardPage: React.FC = () => {
                 relationsEnabled={cncRelationsEnabled}
                 detailedContext={cncDetailedContext}
                 detailedEnabled={cncDetailedEnabled}
+                canViewCut={canViewCncCutMaps}
                 cardDisplayMode={cncCardDisplayMode}
-                showOrdersColumn={cncOrdersColumnVisible}
+                showOrdersColumn={cncDetailedWorkspaceActive || cncOrdersColumnVisible}
                 printDate={cncNavigationDate.format(DATE_FORMAT)}
                 onSelectRelation={toggleCncRelation}
                 onSelectDetailedBath={selectCncDetailedBath}
@@ -1419,6 +1435,7 @@ interface CncTelegramTodayColumnsProps {
   relationsEnabled: boolean;
   detailedContext: CncDetailedContext | null;
   detailedEnabled: boolean;
+  canViewCut: boolean;
   cardDisplayMode: CncCardDisplayMode;
   showOrdersColumn: boolean;
   printDate: string;
@@ -1452,6 +1469,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   relationsEnabled,
   detailedContext,
   detailedEnabled,
+  canViewCut,
   cardDisplayMode,
   showOrdersColumn,
   printDate,
@@ -1480,24 +1498,49 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   }, []);
   const detailedBathActive = detailedEnabled && Boolean(detailedContext?.activeBathId);
   const displayColumns = useMemo(
-    () => [
-      ...columns,
-      ...(showOrdersColumn
-        ? [
-            {
-              key: 'orders' as const,
-              title: 'Заказы',
-              total: orderCards.length,
+    () => {
+      const machineAndBathColumns = detailedBathActive
+        ? CNC_STATUS_BOARD_COLUMN_DEFINITIONS
+            .filter((definition) => definition.key !== 'orders')
+            .map((definition) => columns.find((column) => column.key === definition.key) ?? ({
+              key: definition.key as CncTelegramTodayColumn['key'],
+              title: definition.label,
+              total: 0,
               packets: [],
               baths: [],
-              orderCards,
-            },
-          ]
-        : []),
-    ],
-    [columns, orderCards, showOrdersColumn],
+            }))
+        : columns;
+      return [
+        ...machineAndBathColumns,
+        ...(showOrdersColumn
+          ? [
+              {
+                key: 'orders' as const,
+                title: 'Заказы',
+                total: orderCards.length,
+                packets: [],
+                baths: [],
+                orderCards,
+              },
+            ]
+          : []),
+      ];
+    },
+    [columns, detailedBathActive, orderCards, showOrdersColumn],
   );
   const detailedPacketHighlightEnabled = cncDetailedContextHasActiveDetail(detailedContext);
+  const selectedDetailedDetailId = detailedContext?.activeDetail?.detailId ?? null;
+  const detailedMachineSources = useMemo(
+    () => detailedContext?.activeBath && selectedDetailedDetailId !== null
+      ? buildCncDetailedMachineSources({
+          columns,
+          bath: detailedContext.activeBath,
+          selectedDetailId: selectedDetailedDetailId,
+          canViewCut,
+        })
+      : [],
+    [canViewCut, columns, detailedContext?.activeBath, selectedDetailedDetailId],
+  );
 
   return (
     <>
@@ -1512,7 +1555,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           } as React.CSSProperties
         }
       >
-      {displayColumns.map((column) => {
+      {displayColumns.map((column, columnIndex) => {
         const bathColumn = column.key === 'baths' || column.key === 'baths_ready';
         const orderColumn = column.key === 'orders';
         const columnClassNames = [`cnc-today-column--${column.key}`];
@@ -1538,9 +1581,10 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         const sortedOrderCards = relationContext
           ? sortCncRelationCards(orderSourceCards, orderStateFor)
           : orderSourceCards;
-        const columnDetailed = detailedEnabled && bathColumn && bathSourceCards.some(
+        const columnDetailed = !detailedBathActive && detailedEnabled && bathColumn && bathSourceCards.some(
           (bath) => bath.bathCardId === detailedContext?.activeBathId,
         );
+        const columnCovered = detailedBathActive && !orderColumn;
 
         return (
           <article
@@ -1549,7 +1593,10 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
               'status-board-column cnc-today-column',
               ...columnClassNames,
               columnDetailed ? 'cnc-today-column--detailed' : '',
+              columnCovered ? 'cnc-today-column--detailed-covered' : '',
             ].filter(Boolean).join(' ')}
+            style={{ gridColumn: columnIndex + 1, gridRow: 1 }}
+            aria-hidden={columnCovered || undefined}
             aria-label={`${title}: ${column.total} ${
               orderColumn ? 'заказов' : bathColumn ? 'ванн' : 'CNC-пакетов'
             }`}
@@ -1648,7 +1695,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 ) : (
                   bathCards.map((bath) => {
                     const cardKey = `bath:${bath.bathCardId}`;
-                    const detailed = detailedContext?.activeBathId === bath.bathCardId;
+                    const detailed = !detailedBathActive
+                      && detailedContext?.activeBathId === bath.bathCardId;
                     const summaryOnly = isCncCardSummaryOnly(
                       cardDisplayMode,
                       standardCardOverrides,
@@ -1729,6 +1777,41 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           </article>
         );
         })}
+        {detailedBathActive && detailedContext?.activeBath && (
+          <section
+            className="cnc-detailed-workspace"
+            style={{ gridColumn: '1 / span 4', gridRow: 1 }}
+            aria-label={`Подробный раскрой ${detailedContext.activeBath.cutNumber}`}
+          >
+            <div className="cnc-detailed-workspace__machine">
+              <CncDetailedMachineMaps
+                sources={detailedMachineSources}
+                selectedDetailId={selectedDetailedDetailId}
+              />
+            </div>
+            <div className="cnc-detailed-workspace__bath">
+              <CncTelegramBathCardView
+                bath={detailedContext.activeBath}
+                relationState={getCncBathRelationState(detailedContext.activeBath, relationContext)}
+                relationsEnabled={relationsEnabled}
+                highlightEnabled={relationsEnabled}
+                detailed
+                detailedEnabled
+                detailedPlacement="right"
+                summaryOnly={false}
+                displayToggleVisible={false}
+                selectedDetailId={selectedDetailedDetailId}
+                onToggleDisplay={() => undefined}
+                onSelect={() => undefined}
+                onCloseDetailed={() => onCloseDetailedBath(detailedContext.activeBathId)}
+                onSelectDetail={(detailId) =>
+                  onSelectDetailedDetail({ bathId: detailedContext.activeBathId, detailId })
+                }
+                onOpenOrder={onOpenOrder}
+              />
+            </div>
+          </section>
+        )}
       </div>
       {cardDisplayMode === 'compact' && createPortal(
         <CncTelegramPrintBoard
@@ -1739,6 +1822,239 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         document.body,
       )}
     </>
+  );
+};
+
+interface CncDetailedMachineMapsProps {
+  sources: CncDetailedMachineSource[];
+  selectedDetailId: number | null;
+}
+
+const CncDetailedMachineMaps: React.FC<CncDetailedMachineMapsProps> = ({
+  sources,
+  selectedDetailId,
+}) => {
+  if (selectedDetailId === null) {
+    return (
+      <div className="cnc-detailed-machine-maps__empty">
+        <PictureOutlined aria-hidden="true" />
+        <strong>Выберите деталь на раскладке ванны</strong>
+        <span>Здесь откроются точные листы файлов станка.</span>
+      </div>
+    );
+  }
+
+  if (sources.length === 0) {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        message="Для выбранной детали файл станка не найден"
+        description="Проверьте сопоставление детали с заданием на экране «Раскрой»."
+      />
+    );
+  }
+
+  return (
+    <div className="cnc-detailed-machine-maps" aria-live="polite">
+      {sources.map((source) => (
+        <CncDetailedMachineMapCard
+          key={source.packet.packetId}
+          source={source}
+          selectedDetailId={selectedDetailId}
+        />
+      ))}
+    </div>
+  );
+};
+
+interface CncDetailedMachineMapCardProps {
+  source: CncDetailedMachineSource;
+  selectedDetailId: number;
+}
+
+const CncDetailedMachineMapCard: React.FC<CncDetailedMachineMapCardProps> = ({
+  source,
+  selectedDetailId,
+}) => {
+  const [svgPreview, setSvgPreview] = useState<CncDetailedMachineSvgPreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const svgBodyRef = useRef<HTMLDivElement | null>(null);
+  const requestSeqRef = useRef(0);
+
+  useEffect(() => {
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
+    setError(null);
+    if (source.previewKind !== 'svg') {
+      setSvgPreview(null);
+      setLoading(false);
+      return;
+    }
+
+    setSvgPreview((current) => current
+      && current.result.cutJobId === source.cutJobId
+      && current.result.resultNo === source.resultNo
+        ? current
+        : null);
+
+    let cancelled = false;
+    setLoading(true);
+    void loadCncDetailedMachineSvgPreview(source, selectedDetailId)
+      .then((preview) => {
+        if (!isCncPreviewRequestCurrent(cancelled, requestSeqRef.current, requestSeq)) return;
+        setSvgPreview((current) => (
+          cncDetailedMachinePreviewsShareSheets(current, preview) ? current : preview
+        ));
+      })
+      .catch((previewError: unknown) => {
+        if (!isCncPreviewRequestCurrent(cancelled, requestSeqRef.current, requestSeq)) return;
+        setSvgPreview(null);
+        setError(errorMessage(previewError, 'Не удалось загрузить SVG-раскладку файла станка'));
+      })
+      .finally(() => {
+        if (isCncPreviewRequestCurrent(cancelled, requestSeqRef.current, requestSeq)) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedDetailId,
+    source.cutJobId,
+    source.packet.packetId,
+    source.previewKind,
+    source.resultNo,
+  ]);
+
+  useEffect(() => {
+    syncCncBathSelectedDetail(svgBodyRef.current, selectedDetailId);
+  }, [selectedDetailId, svgPreview]);
+
+  const showScreenshot = source.imageUrl !== null
+    && (source.previewKind === 'screenshot' || (source.previewKind === 'svg' && error !== null));
+
+  return (
+    <article className="cnc-detailed-machine-map">
+      <header className="cnc-detailed-machine-map__header">
+        <div>
+          <strong>{source.packet.programName ?? 'Файл станка'}</strong>
+          <span>{source.packet.materialName}</span>
+        </div>
+        <div className="cnc-detailed-machine-map__badges">
+          {source.matchKind === 'fallback' && (
+            <Tag color="warning">по № и размеру</Tag>
+          )}
+          {source.cutJobId !== null && source.resultNo !== null && (
+            <a
+              href={`/cut?job=${source.cutJobId}&result=${source.resultNo}`}
+              target="_blank"
+              rel="noreferrer"
+              onClick={stopCncCardClickPropagation}
+            >
+              Раскрой {source.cutJobId}-{source.resultNo}
+            </a>
+          )}
+        </div>
+      </header>
+
+      {loading && (
+        <div className="cnc-detailed-machine-map__loading">
+          <Spin size="small" /> Загрузка раскладки…
+        </div>
+      )}
+      {error && (
+        <Alert
+          type="warning"
+          showIcon
+          message={showScreenshot ? 'SVG недоступна — показан скрин' : error}
+          description={showScreenshot ? error : undefined}
+        />
+      )}
+      {svgPreview && (
+        <div ref={svgBodyRef} className="cnc-detailed-machine-map__sheets">
+          {svgPreview.sheets.map((sheet) => (
+            <figure key={sheet.key} className="cnc-detailed-machine-map__figure">
+              <figcaption>Лист {sheet.sheetNumber}</figcaption>
+              <div
+                className="cnc-bath-card__sheet-svg cnc-detailed-machine-map__svg"
+                role="img"
+                aria-label={`Лист ${sheet.sheetNumber} · ${source.packet.programName ?? 'файл станка'}`}
+                // SVG comes from the authenticated frozen-result renderer, not Telegram markup.
+                dangerouslySetInnerHTML={{ __html: sheet.svgText }}
+              />
+            </figure>
+          ))}
+        </div>
+      )}
+      {showScreenshot && source.imageUrl && (
+        <CncDetailedMachineScreenshot
+          imageUrl={source.imageUrl}
+          title={source.packet.programName ?? source.packet.externalPacketKey}
+        />
+      )}
+      {!loading && !svgPreview && !showScreenshot && !error && (
+        <Alert
+          type="info"
+          showIcon
+          message={source.svgPermissionRequired
+            ? 'Для просмотра SVG-раскладки нужен доступ к разделу «Раскрой»'
+            : 'Для файла станка нет доступной раскладки или скрина'}
+        />
+      )}
+    </article>
+  );
+};
+
+interface CncDetailedMachineScreenshotProps {
+  imageUrl: string;
+  title: string;
+}
+
+const CncDetailedMachineScreenshot: React.FC<CncDetailedMachineScreenshotProps> = ({
+  imageUrl,
+  title,
+}) => {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let localObjectUrl: string | null = null;
+    setObjectUrl(null);
+    setError(null);
+    void loadCncDetailedMachineScreenshot(imageUrl)
+      .then((blob) => {
+        if (cancelled) return;
+        localObjectUrl = URL.createObjectURL(blob);
+        setObjectUrl(localObjectUrl);
+      })
+      .catch((previewError: unknown) => {
+        if (!cancelled) setError(errorMessage(previewError, 'Не удалось загрузить скрин файла станка'));
+      });
+    return () => {
+      cancelled = true;
+      if (localObjectUrl) URL.revokeObjectURL(localObjectUrl);
+    };
+  }, [imageUrl]);
+
+  if (error) return <Alert type="warning" showIcon message={error} />;
+  if (!objectUrl) {
+    return (
+      <div className="cnc-detailed-machine-map__loading">
+        <Spin size="small" /> Загрузка скрина…
+      </div>
+    );
+  }
+  return (
+    <img
+      className="cnc-detailed-machine-map__screenshot"
+      src={objectUrl}
+      alt={`Скрин раскроя ${title}`}
+    />
   );
 };
 
@@ -3888,6 +4204,7 @@ interface CncRelationContext {
 
 interface CncDetailedContext {
   activeBathId: string;
+  activeBath: CncTelegramBathCard;
   activeDetail: CncDetailedDetailTarget | null;
   fingerprint: CncRelationFingerprint | null;
 }
@@ -3965,7 +4282,7 @@ function buildCncDetailedContext(
     .find((bath) => bath.bathCardId === activeBathId);
   if (!activeBath) return null;
   if (!activeDetail || activeDetail.bathId !== activeBathId) {
-    return { activeBathId, activeDetail: null, fingerprint: null };
+    return { activeBathId, activeBath, activeDetail: null, fingerprint: null };
   }
 
   const fingerprint = emptyCncRelationFingerprint();
@@ -3984,7 +4301,7 @@ function buildCncDetailedContext(
     }
   }
 
-  return { activeBathId, activeDetail, fingerprint };
+  return { activeBathId, activeBath, activeDetail, fingerprint };
 }
 
 function cncDetailedContextHasActiveDetail(

@@ -90,6 +90,7 @@ export interface CncTelegramPacketDto {
   cutLayout: CncTelegramCutLayoutDto | null;
   svgCutJobId?: number | null;
   svgCutResultId?: number | null;
+  svgCutResultNo?: number | null;
   svgCutImportStatus?: 'none' | 'skipped' | 'needs_review' | 'imported';
   svgCutImportNote?: string | null;
   itemCount: number;

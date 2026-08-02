@@ -258,6 +258,174 @@
   isolation: isolate;
 }
 
+.status-board-columns--cnc-detailed .cnc-today-column--detailed-covered {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.cnc-detailed-workspace {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  z-index: 15;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--status-board-cnc-column-gap);
+  overflow: hidden;
+}
+
+.cnc-detailed-workspace__machine,
+.cnc-detailed-workspace__bath {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.cnc-detailed-workspace__machine {
+  padding: clamp(4px, 0.65vw, 10px);
+  border: 1px solid var(--app-border-soft);
+  border-top: 3px solid #1677ff;
+  border-radius: 10px;
+  background: #edf7ff;
+  box-shadow: var(--app-shadow-border);
+}
+
+.cnc-detailed-workspace__bath {
+  padding: clamp(4px, 0.65vw, 10px);
+  border: 1px solid var(--app-border-soft);
+  border-top: 3px solid #cf1322;
+  border-radius: 10px;
+  background: #fff7e6;
+  box-shadow: var(--app-shadow-border);
+}
+
+.cnc-detailed-workspace__bath .cnc-bath-card--detailed {
+  width: 100%;
+  max-width: 100%;
+  margin-left: 0;
+}
+
+.cnc-detailed-machine-maps {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.cnc-detailed-machine-maps__empty {
+  min-height: 180px;
+  padding: 24px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  border: 1px dashed var(--app-border);
+  border-radius: 8px;
+  color: var(--app-text-muted);
+  text-align: center;
+  background: var(--app-surface);
+}
+
+.cnc-detailed-machine-maps__empty > .anticon {
+  font-size: 28px;
+}
+
+.cnc-detailed-machine-maps__empty strong {
+  color: var(--app-text);
+}
+
+.cnc-detailed-machine-map {
+  min-width: 0;
+  padding: clamp(8px, 0.9vw, 14px);
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--app-border-soft);
+  border-radius: 8px;
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow-border);
+}
+
+.cnc-detailed-machine-map__header {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cnc-detailed-machine-map__header > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.cnc-detailed-machine-map__header strong,
+.cnc-detailed-machine-map__header span {
+  overflow-wrap: anywhere;
+}
+
+.cnc-detailed-machine-map__header span {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.cnc-detailed-machine-map__badges {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.cnc-detailed-machine-map__badges .ant-tag {
+  margin: 0;
+}
+
+.cnc-detailed-machine-map__loading {
+  min-height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--app-text-muted);
+}
+
+.cnc-detailed-machine-map__sheets {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.cnc-detailed-machine-map__figure {
+  min-width: 0;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.cnc-detailed-machine-map__figure figcaption {
+  color: var(--app-text-muted);
+  font-size: 11px;
+}
+
+.cnc-detailed-machine-map__svg {
+  max-height: none;
+  outline: 1px solid var(--app-image-outline);
+  outline-offset: -1px;
+}
+
+.cnc-detailed-machine-map__screenshot {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  outline: 1px solid var(--app-image-outline);
+  outline-offset: -1px;
+  background: #fff;
+}
+
 .status-board-columns--cnc-detailed .cnc-today-column--parsed,
 .status-board-columns--cnc-detailed .cnc-today-column--completed {
   width: auto;
@@ -1280,7 +1448,8 @@
   max-height: 420px;
   object-fit: contain;
   border-radius: 6px;
-  outline: 1px solid rgba(0, 0, 0, 0.1);
+  outline: 1px solid var(--app-image-outline);
+  outline-offset: -1px;
   background: #fff;
 }
 
@@ -1369,7 +1538,8 @@
   max-height: 720px;
   overflow: auto;
   border-radius: 6px;
-  outline: 1px solid rgba(0, 0, 0, 0.1);
+  outline: 1px solid var(--app-image-outline);
+  outline-offset: -1px;
   background: #fff;
 }
 
