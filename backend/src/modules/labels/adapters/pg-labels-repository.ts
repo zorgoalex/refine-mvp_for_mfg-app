@@ -1017,7 +1017,7 @@ export class PgLabelsRepository implements LabelsPort {
               END AS dimensions_match
        FROM order_details_view od
        LEFT JOIN (
-         SELECT p.cut_result_placement_id, p.order_detail_id, p.instance,
+         SELECT p.cut_result_placement_id, p.order_id, p.order_detail_id, p.instance,
                 p.cut_result_id, p.cut_job_id, p.variant, p.sheet_index,
                 s.sheet_ordinal, projection.snapshot_digest
          FROM cut_result_placement p
@@ -1026,7 +1026,9 @@ export class PgLabelsRepository implements LabelsPort {
           AND s.is_effective = true
          JOIN cut_result_label_map_projection projection
            ON projection.cut_result_id = p.cut_result_id
-       ) maps ON maps.order_detail_id = od.detail_id
+       ) maps
+         ON maps.order_detail_id = od.detail_id
+        AND maps.order_id = od.order_id
        LEFT JOIN cut_result r
          ON r.cut_result_id = maps.cut_result_id
         AND r.snapshot_digest = maps.snapshot_digest
