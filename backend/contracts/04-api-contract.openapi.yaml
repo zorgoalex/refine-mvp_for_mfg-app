@@ -1228,6 +1228,104 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/orders/{orderId}/transfer-targets:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Orders
+      operationId: listOrderTransferTargets
+      summary: Найти целевые заказы для переноса деталей
+      description: Возвращает доступные заказы того же клиента, кроме исходного заказа.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.view
+        - orders.update
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Целевые заказы для переноса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderTransferTargetsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/details/transfer:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    post:
+      tags:
+        - Orders
+      operationId: transferOrderDetails
+      summary: Перенести детали в другой или новый заказ
+      description: |
+        Stale-safe и retry-safe команда переноса выбранных сохранённых деталей.
+        Исходный заказ не может остаться пустым. Новый заказ создаётся без копирования оплат.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.update
+        - orders.view_financials
+      x-transactional: true
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatchVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferOrderDetailsRequest'
+      responses:
+        '200':
+          description: Детали перенесены
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferOrderDetailsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/orders/{orderId}/groups:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -15250,6 +15348,145 @@ components:
         requestId:
           type: string
           description: Correlation/request id команды.
+
+    OrderTransferTargetsResponse:
+      type: object
+      required:
+        - data
+        - requestId
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            required:
+              - orderId
+              - orderName
+              - projectId
+              - projectCode
+              - projectName
+              - orderStatusId
+              - orderStatusName
+              - productionStatusId
+              - productionStatusName
+              - version
+            properties:
+              orderId:
+                type: integer
+                format: int64
+              orderName:
+                type: string
+              projectId:
+                type: integer
+                format: int64
+              projectCode:
+                type: string
+                nullable: true
+              projectName:
+                type: string
+                nullable: true
+              orderStatusId:
+                type: integer
+              orderStatusName:
+                type: string
+                nullable: true
+              productionStatusId:
+                type: integer
+                nullable: true
+              productionStatusName:
+                type: string
+                nullable: true
+              version:
+                type: integer
+        requestId:
+          type: string
+
+    TransferOrderDetailsRequest:
+      type: object
+      required:
+        - detailIds
+        - target
+      properties:
+        detailIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: integer
+            format: int64
+            minimum: 1
+          uniqueItems: true
+        target:
+          oneOf:
+            - type: object
+              required:
+                - mode
+                - orderId
+                - version
+              properties:
+                mode:
+                  type: string
+                  enum: [existing]
+                orderId:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                version:
+                  type: integer
+                  minimum: 0
+            - type: object
+              required:
+                - mode
+                - orderName
+              properties:
+                mode:
+                  type: string
+                  enum: [new]
+                orderName:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                projectId:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  nullable: true
+        note:
+          type: string
+          maxLength: 500
+          nullable: true
+
+    TransferOrderDetailsResponse:
+      type: object
+      required:
+        - sourceOrder
+        - targetOrder
+        - movedDetailIds
+        - sourceVersion
+        - targetVersion
+        - targetCreated
+        - auditId
+        - requestId
+      properties:
+        sourceOrder:
+          $ref: '#/components/schemas/OrderDto'
+        targetOrder:
+          $ref: '#/components/schemas/OrderDto'
+        movedDetailIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+        sourceVersion:
+          type: integer
+        targetVersion:
+          type: integer
+        targetCreated:
+          type: boolean
+        auditId:
+          type: string
+        requestId:
+          type: string
 
     MoveCalendarDateRequest:
       type: object
