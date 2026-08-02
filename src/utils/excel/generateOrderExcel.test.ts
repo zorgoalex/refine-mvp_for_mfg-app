@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
-import { buildOrderExcelBuffer } from './generateOrderExcel';
+import { buildOrderExcelBuffer } from './orderExcelBuilder';
 
 const templatePath = path.resolve(process.cwd(), 'public/templates/order_template.xlsx');
 

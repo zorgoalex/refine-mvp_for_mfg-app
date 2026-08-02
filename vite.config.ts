@@ -10,6 +10,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    worker: {
+      format: "es",
+    },
     resolve: {
       alias: {
         // Shared pure-TS geometry/validation module (no FE/BE deps).

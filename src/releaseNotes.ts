@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-02",
+    title: "Excel: генерация без блокировки интерфейса",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "ExcelJS больше не загружается при обычном открытии карточек и разделов.",
+      "Генерация Excel в карточке заказа выполняется в фоновом worker, чтобы не блокировать интерфейс и не вызывать массовые Chrome Violation warnings.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
     title: "Навигация: исправление открытия разделов",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
