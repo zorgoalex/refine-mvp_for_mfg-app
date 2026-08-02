@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -8,8 +9,8 @@ import {
 } from 'react';
 import type { Key } from 'react';
 import type { IResourceComponentsProps } from '@refinedev/core';
-import { FilterFilled, ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Checkbox, DatePicker, Input, Space, Table, Tag, Typography } from 'antd';
+import { DownloadOutlined, FileTextOutlined, FilterFilled, ReloadOutlined } from '@ant-design/icons';
+import { Alert, Button, Checkbox, DatePicker, Input, Modal, Segmented, Select, Space, Table, Tag, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import type { FilterDropdownProps, SortOrder } from 'antd/es/table/interface';
 import type { Dayjs } from 'dayjs';
@@ -27,6 +28,13 @@ import type {
 import { LocalizedList } from '../../components/LocalizedList';
 import { formatDate, formatDateTime } from '../../utils/dateFormat';
 import { subscribeCutJobReady } from '../cut/cutJobEvents';
+import {
+  buildResourceDemandReport,
+  type ResourceDemandReport,
+  type ResourceDemandReportFileFormat,
+  type ResourceDemandReportFormat,
+  type ResourceDemandReportMaterial,
+} from './resourceDemandReport';
 
 const LIVE_REFRESH_INTERVAL_MS = 5_000;
 const numberFormatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
@@ -39,6 +47,19 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
 const RESOURCE_FILTER_EMPTY = '__order_resource_requirement_filter_empty__';
 const RESOURCE_FILTER_NONE = '__order_resource_requirement_filter_none__';
+const REPORT_MATERIAL_OPTIONS: Array<{ value: ResourceDemandReportMaterial; label: string }> = [
+  { value: 'films', label: 'Плёнка' },
+  { value: 'sheetMaterials', label: 'Листовые материалы' },
+];
+const REPORT_FORMAT_OPTIONS: Array<{ value: ResourceDemandReportFormat; label: string }> = [
+  { value: 'brief', label: 'Краткий' },
+  { value: 'detailed', label: 'Подробный' },
+];
+const REPORT_FILE_FORMAT_OPTIONS: Array<{ value: ResourceDemandReportFileFormat; label: string }> = [
+  { value: 'xls', label: 'XLS' },
+  { value: 'csv', label: 'CSV' },
+  { value: 'txt', label: 'TXT' },
+];
 
 type DateRange = [Dayjs | null, Dayjs | null] | null;
 type OrderResourceDemandRow = OrderResourceDemandResponse['data'][number];
@@ -74,6 +95,12 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const [searchInput, setSearchInput] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>(null);
   const [readyCutsOnly, setReadyCutsOnly] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportRows, setReportRows] = useState<OrderResourceDemandRow[]>(EMPTY_RESOURCE_DEMAND_ROWS);
+  const [reportGeneratedAt, setReportGeneratedAt] = useState(() => new Date());
+  const [reportMaterial, setReportMaterial] = useState<ResourceDemandReportMaterial>('films');
+  const [reportFormat, setReportFormat] = useState<ResourceDemandReportFormat>('brief');
+  const [reportFileFormat, setReportFileFormat] = useState<ResourceDemandReportFileFormat>('txt');
   const [headerFilters, setHeaderFilters] = useState<HeaderFilterState>(() => createDefaultHeaderFilters());
   const [sortState, setSortState] = useState<HeaderSortState>(DEFAULT_SORT_STATE);
   const [refreshRevision, setRefreshRevision] = useState(0);
@@ -91,6 +118,16 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const tableRows = useMemo(
     () => sortResourceDemandRows(filterResourceDemandRows(rows, headerFilters, readyCutsOnly), sortState),
     [headerFilters, readyCutsOnly, rows, sortState],
+  );
+  const report = useMemo(
+    () => buildResourceDemandReport({
+      rows: reportRows,
+      material: reportMaterial,
+      reportFormat,
+      fileFormat: reportFileFormat,
+      generatedAt: reportGeneratedAt,
+    }),
+    [reportFileFormat, reportFormat, reportGeneratedAt, reportMaterial, reportRows],
   );
   const hasActiveHeaderFilters = useMemo(() => hasResourceDemandHeaderFilters(headerFilters), [headerFilters]);
   const hasActiveListFilters = hasActiveHeaderFilters || readyCutsOnly;
@@ -124,6 +161,12 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     setPageSize(DEFAULT_PAGE_SIZE);
     setRefreshRevision((value) => value + 1);
   }, []);
+
+  const openReportModal = useCallback(() => {
+    setReportRows(tableRows);
+    setReportGeneratedAt(new Date());
+    setReportOpen(true);
+  }, [tableRows]);
 
   const handleTableChange: TableProps<OrderResourceDemandRow>['onChange'] = useCallback(
     (_pagination, _filters, sorter, extra) => {
@@ -185,6 +228,9 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           >
             Готовые раскрои
           </Checkbox>
+          <Button icon={<FileTextOutlined />} onClick={openReportModal}>
+            Отчёт
+          </Button>
           <Button onClick={resetListView} disabled={!hasListViewChanges}>
             Сбросить фильтры
           </Button>
@@ -284,6 +330,18 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             )}
           />
         </Table>
+        <ResourceDemandReportModal
+          open={reportOpen}
+          report={report}
+          material={reportMaterial}
+          reportFormat={reportFormat}
+          fileFormat={reportFileFormat}
+          onMaterialChange={setReportMaterial}
+          onReportFormatChange={setReportFormat}
+          onFileFormatChange={setReportFileFormat}
+          onClose={() => setReportOpen(false)}
+          onDownload={() => downloadResourceDemandReport(report)}
+        />
       </Space>
     </LocalizedList>
   );
@@ -353,6 +411,178 @@ const ResourceDemandFilterDropdown: React.FC<
     </div>
   );
 };
+
+const ResourceDemandReportModal: React.FC<{
+  open: boolean;
+  report: ResourceDemandReport;
+  material: ResourceDemandReportMaterial;
+  reportFormat: ResourceDemandReportFormat;
+  fileFormat: ResourceDemandReportFileFormat;
+  onMaterialChange: (value: ResourceDemandReportMaterial) => void;
+  onReportFormatChange: (value: ResourceDemandReportFormat) => void;
+  onFileFormatChange: (value: ResourceDemandReportFileFormat) => void;
+  onClose: () => void;
+  onDownload: () => void;
+}> = ({
+  open,
+  report,
+  material,
+  reportFormat,
+  fileFormat,
+  onMaterialChange,
+  onReportFormatChange,
+  onFileFormatChange,
+  onClose,
+  onDownload,
+}) => (
+  <Modal
+    title="Отчёт по потребностям"
+    open={open}
+    width={920}
+    onCancel={onClose}
+    footer={[
+      <Button key="close" onClick={onClose}>
+        Закрыть
+      </Button>,
+      <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={onDownload}>
+        Скачать
+      </Button>,
+    ]}
+  >
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space wrap size={12}>
+        <Space size={6}>
+          <Typography.Text>Материал</Typography.Text>
+          <Select<ResourceDemandReportMaterial>
+            value={material}
+            options={REPORT_MATERIAL_OPTIONS}
+            onChange={onMaterialChange}
+            style={{ width: 180 }}
+          />
+        </Space>
+        <Space size={6}>
+          <Typography.Text>Формат отчёта</Typography.Text>
+          <Segmented
+            value={reportFormat}
+            options={REPORT_FORMAT_OPTIONS}
+            onChange={(value) => onReportFormatChange(value as ResourceDemandReportFormat)}
+          />
+        </Space>
+        <Space size={6}>
+          <Typography.Text>Формат файла</Typography.Text>
+          <Segmented
+            value={fileFormat}
+            options={REPORT_FILE_FORMAT_OPTIONS}
+            onChange={(value) => onFileFormatChange(value as ResourceDemandReportFileFormat)}
+          />
+        </Space>
+      </Space>
+      <Typography.Text type="secondary" style={numericStyle}>
+        Строк в отчёте: {reportRowCount(report)}
+      </Typography.Text>
+      <ResourceDemandReportPreview report={report} />
+    </Space>
+  </Modal>
+);
+
+function ResourceDemandReportPreview({ report }: { report: ResourceDemandReport }) {
+  if (report.fileFormat !== 'xls') {
+    return (
+      <pre
+        style={{
+          margin: 0,
+          maxHeight: 460,
+          overflow: 'auto',
+          padding: 12,
+          border: '1px solid #d9d9d9',
+          borderRadius: 6,
+          whiteSpace: 'pre-wrap',
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+          fontSize: 13,
+          lineHeight: 1.5,
+        }}
+      >
+        {report.content}
+      </pre>
+    );
+  }
+
+  return (
+    <div style={{ maxHeight: 460, overflow: 'auto', border: '1px solid #d9d9d9', borderRadius: 6 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <tbody>
+          <tr>
+            <th colSpan={report.columns.length} style={reportTableHeaderStyle}>{report.title}</th>
+          </tr>
+          <tr>
+            <td colSpan={report.columns.length} style={reportTableCellStyle}>{report.subtitle}</td>
+          </tr>
+          {report.groups.length === 0 ? (
+            <tr>
+              <td colSpan={report.columns.length} style={reportTableCellStyle}>Нет данных для отчета</td>
+            </tr>
+          ) : (
+            report.groups.map((group) => (
+              <Fragment key={group.providerName}>
+                <tr>
+                  <th colSpan={report.columns.length} style={reportTableGroupStyle}>{group.providerName}</th>
+                </tr>
+                <tr>
+                  {report.columns.map((column) => (
+                    <th key={column.key} style={reportTableHeaderStyle}>{column.title}</th>
+                  ))}
+                </tr>
+                {group.rows.map((row, index) => (
+                  <tr key={`${group.providerName}:${row.orderNumber}:${row.materialName}:${index}`}>
+                    {report.columns.map((column) => (
+                      <td key={column.key} style={reportTableCellStyle}>{row[column.key]}</td>
+                    ))}
+                  </tr>
+                ))}
+              </Fragment>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const reportTableCellStyle = {
+  padding: '6px 8px',
+  border: '1px solid #d9d9d9',
+  textAlign: 'left',
+  verticalAlign: 'top',
+} as const;
+
+const reportTableHeaderStyle = {
+  ...reportTableCellStyle,
+  fontWeight: 600,
+  background: '#fafafa',
+} as const;
+
+const reportTableGroupStyle = {
+  ...reportTableCellStyle,
+  fontWeight: 600,
+  background: '#f2f2f2',
+} as const;
+
+function reportRowCount(report: ResourceDemandReport): number {
+  return report.groups.reduce((sum, group) => sum + group.rows.length, 0);
+}
+
+function downloadResourceDemandReport(report: ResourceDemandReport) {
+  const content = report.fileFormat === 'xls' ? report.content : `\uFEFF${report.content}`;
+  const blob = new Blob([content], { type: report.mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = report.fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 
 function normalizeFilterKeys(keys: Key[] | null): Key[] | null {
   if (!keys || keys.length === 0) return null;

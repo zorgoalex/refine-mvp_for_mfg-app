@@ -45,4 +45,15 @@ describe('order resource requirements list guards', () => {
     expect(source).not.toContain('{row.fullNumber}</Link>');
     expect(source).toContain('compareText(orderDisplayNumber(left), orderDisplayNumber(right))');
   });
+
+  it('добавляет отчет по текущим отфильтрованным строкам с предпросмотром и выгрузкой', () => {
+    expect(source).toContain('Отчёт');
+    expect(source).toContain('openReportModal');
+    expect(source).toContain('setReportRows(tableRows)');
+    expect(source).toContain('ResourceDemandReportModal');
+    expect(source).toContain('ResourceDemandReportPreview');
+    expect(source).toContain('downloadResourceDemandReport');
+    expect(source).toContain('Формат отчёта');
+    expect(source).toContain('Формат файла');
+  });
 });
