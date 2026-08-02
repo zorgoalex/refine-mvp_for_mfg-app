@@ -5,7 +5,7 @@
 // Проблема: race condition между внутренним состоянием InputNumber и Form.Item
 // Решение: используем useRef для синхронного хранения значений полей
 
-import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback, useContext } from 'react';
+import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback, useContext } from 'react';
 import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider, Checkbox } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
@@ -155,88 +155,36 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
 
 const ORDER_DETAIL_EDIT_DEFAULT_ORDER = ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS.map((definition) => definition.key);
 
+const ORDER_DETAIL_TOTAL_COLUMN_WIDTHS = {
+  detailNumber: 44,
+  quantity: 96,
+  area: 128,
+  detailCost: 150,
+} as const;
+
+const SUMMARY_TEXT_BASE_STYLE: React.CSSProperties = {
+  display: 'block',
+  width: 'max-content',
+  maxWidth: 'none',
+  whiteSpace: 'nowrap',
+  fontSize: 13,
+  lineHeight: 1.2,
+  fontVariantNumeric: 'tabular-nums',
+  letterSpacing: 0,
+};
+
 const FitSummaryText: React.FC<{
   children: React.ReactNode;
-  maxFontSize?: number;
-  minFontSize?: number;
   align?: 'left' | 'center' | 'right';
   style?: React.CSSProperties;
-}> = ({ children, maxFontSize = 13, minFontSize = 9, align = 'right', style }) => {
-  const containerRef = useRef<HTMLSpanElement>(null);
-  const [fontSize, setFontSize] = useState<number>(maxFontSize);
-  const [scaleX, setScaleX] = useState<number>(1);
-
-  const recompute = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    el.style.fontSize = `${maxFontSize}px`;
-    el.style.transform = '';
-
-    const availableWidth = el.clientWidth;
-    if (availableWidth <= 0) return;
-
-    if (el.scrollWidth <= availableWidth) {
-      setFontSize(maxFontSize);
-      setScaleX(1);
-      return;
-    }
-
-    let low = minFontSize;
-    let high = maxFontSize;
-    let best = minFontSize;
-
-    while (low <= high) {
-      const mid = Math.floor((low + high) / 2);
-      el.style.fontSize = `${mid}px`;
-      if (el.scrollWidth <= availableWidth) {
-        best = mid;
-        low = mid + 1;
-      } else {
-        high = mid - 1;
-      }
-    }
-
-    setFontSize(best);
-    el.style.fontSize = `${best}px`;
-    if (el.scrollWidth > availableWidth) {
-      setScaleX(availableWidth / el.scrollWidth);
-    } else {
-      setScaleX(1);
-    }
-  }, [maxFontSize, minFontSize]);
-
-  useLayoutEffect(() => {
-    recompute();
-  }, [children, recompute]);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-
-    const ro = new ResizeObserver(() => recompute());
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [recompute]);
-
+}> = ({ children, align = 'right', style }) => {
   return (
     <span
-      ref={containerRef}
       style={{
+        ...SUMMARY_TEXT_BASE_STYLE,
         ...style,
-        fontSize,
-        display: 'block',
-        width: '100%',
-        whiteSpace: 'nowrap',
-        overflow: 'visible',
-        textOverflow: 'clip',
-        transform: scaleX !== 1 ? `scaleX(${scaleX})` : undefined,
-        transformOrigin:
-          align === 'right'
-            ? 'right center'
-            : align === 'center'
-              ? 'center'
-              : 'left center',
+        marginLeft: align === 'right' || align === 'center' ? 'auto' : undefined,
+        marginRight: align === 'center' ? 'auto' : undefined,
       }}
     >
       {children}
@@ -793,7 +741,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '70%' }}>№</div>,
       dataIndex: 'detail_number',
       key: 'detail_number',
-      width: 27,
+      width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.detailNumber,
       fixed: 'left',
       sorter: (a: OrderDetail, b: OrderDetail) => a.detail_number - b.detail_number,
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: DATA_COLUMN_COUNT } : {},
@@ -883,7 +831,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Кол-во</div>,
       dataIndex: 'quantity',
       key: 'quantity',
-      width: 54,
+      width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.quantity,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.quantity || 0) - (b.quantity || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
@@ -916,7 +864,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       ),
       dataIndex: 'area',
       key: 'area',
-      width: 63,
+      width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.area,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.area || 0) - (b.area || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
@@ -1102,7 +1050,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Сумма</div>,
       dataIndex: 'detail_cost',
       key: 'detail_cost',
-      width: 70,
+      width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.detailCost,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.detail_cost || 0) - (b.detail_cost || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
