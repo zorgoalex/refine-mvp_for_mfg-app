@@ -45,6 +45,11 @@ const optionalUrlFromEnv = z
   .union([z.string().trim().url(), emptyTrimmedStringFromEnv])
   .optional();
 
+const LOCAL_DEV_CORS_ORIGINS = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+] as const;
+
 function isPostgresUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -713,8 +718,10 @@ export const envSchema = z
   .transform((env) => ({
     ...env,
     FRONTEND_ORIGIN: env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
-    CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS: appendLocalDevCorsOrigins(
       env.CORS_ALLOWED_ORIGINS ?? env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
+      env,
+    ),
   }));
 
 export type BackendEnv = z.infer<typeof envSchema>;
@@ -730,6 +737,65 @@ export function validateEnv(env: NodeJS.ProcessEnv): BackendEnv {
   }
 
   return parsed.data;
+}
+
+function appendLocalDevCorsOrigins(
+  configuredOrigins: string,
+  env: {
+    NODE_ENV: 'development' | 'test' | 'staging' | 'production';
+    FRONTEND_ORIGIN?: string;
+    CORS_ALLOWED_ORIGINS?: string;
+  },
+): string {
+  const origins = parseCommaSeparatedOrigins(configuredOrigins);
+  if (origins.includes('*') || !shouldAllowLocalDevCorsOrigins(env, origins)) {
+    return origins.join(',');
+  }
+
+  return Array.from(new Set([...origins, ...LOCAL_DEV_CORS_ORIGINS])).join(',');
+}
+
+function shouldAllowLocalDevCorsOrigins(
+  env: {
+    NODE_ENV: 'development' | 'test' | 'staging' | 'production';
+    FRONTEND_ORIGIN?: string;
+    CORS_ALLOWED_ORIGINS?: string;
+  },
+  configuredOrigins: string[],
+): boolean {
+  if (env.NODE_ENV !== 'production') {
+    return true;
+  }
+
+  return [
+    env.FRONTEND_ORIGIN,
+    env.CORS_ALLOWED_ORIGINS,
+    ...configuredOrigins,
+  ].some(hasNonProductionOrigin);
+}
+
+function hasNonProductionOrigin(value: string | undefined): boolean {
+  if (!value) return false;
+
+  return parseCommaSeparatedOrigins(value).some((origin) => {
+    try {
+      const hostname = new URL(origin).hostname.toLowerCase();
+      return (
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        /(^|[.-])(dev|test|stage|staging)([.-]|$)/.test(hostname)
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+function parseCommaSeparatedOrigins(value: string): string[] {
+  return value
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 }
 
 export function validateEnvForNest(env: Record<string, unknown>): BackendEnv {

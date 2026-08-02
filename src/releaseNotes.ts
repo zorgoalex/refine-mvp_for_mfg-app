@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-02",
+    title: "Backend CORS: локальная диагностика stage",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Stage/test backend CORS теперь допускает точные origins локального Vite: http://localhost:5173 и http://127.0.0.1:5173.",
+      "Production frontend origins не расширяются localhost-доступом автоматически.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
     title: "Редактирование заказа: стабильные итоги деталей",
     services: ["ERP"],
     repositories: ["repo_erp"],
