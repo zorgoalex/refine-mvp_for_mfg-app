@@ -680,6 +680,16 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
                   <OrderToolbarLabel>Добавить</OrderToolbarLabel>
                 </Button>
               </AccessibleToolbarTooltip>
+              <AccessibleToolbarTooltip title={transferTooltip} disabled={transferDisabled}>
+                <Button
+                  icon={<SwapOutlined />}
+                  onClick={() => setTransferOpen(true)}
+                  disabled={transferDisabled}
+                  aria-label={transferTooltip}
+                >
+                  Перенести
+                </Button>
+              </AccessibleToolbarTooltip>
               <AccessibleToolbarTooltip title="Групповые действия" disabled={details.length === 0}>
                 <Button
                   icon={<EditOutlined />}
@@ -747,16 +757,6 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
                   </AccessibleToolbarTooltip>
                 );
               })()}
-              <AccessibleToolbarTooltip title={transferTooltip} disabled={transferDisabled}>
-                <Button
-                  icon={<SwapOutlined />}
-                  onClick={() => setTransferOpen(true)}
-                  disabled={transferDisabled}
-                  aria-label={transferTooltip}
-                >
-                  <OrderToolbarLabel>Перенести</OrderToolbarLabel>
-                </Button>
-              </AccessibleToolbarTooltip>
               <AccessibleToolbarTooltip title="Пересчитать суммы" disabled={details.length === 0}>
                 <Button
                   icon={<CalculatorOutlined />}
