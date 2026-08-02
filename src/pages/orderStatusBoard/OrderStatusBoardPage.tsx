@@ -2483,6 +2483,14 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   );
   const orderSummaries = buildCncOrderSummaries(packet.items);
   const otherMaterial = cncPacketHasOtherMaterialMarker(packet);
+  const hasSheetImage = Boolean(packet.sheetImageUrl);
+  const [activeAuxView, setActiveAuxView] = useState<'items' | 'sheet' | null>(null);
+
+  useEffect(() => {
+    if (activeAuxView === 'sheet' && !hasSheetImage) {
+      setActiveAuxView(null);
+    }
+  }, [activeAuxView, hasSheetImage]);
 
   return (
     <div
@@ -2589,18 +2597,40 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
             </div>
           ) : null}
 
-          <Collapse
-            className="cnc-packet-card__collapse compact-collapse"
-            size="small"
-            ghost
+          <div
+            className="cnc-packet-card__tabs"
+            role="group"
+            aria-label="Данные файла станка"
+            onClick={stopCncCardClickPropagation}
           >
-            <Collapse.Panel
-              key="items"
-              header={
-                <span className="cnc-packet-card__collapse-label">
-                  <FileTextOutlined /> {packet.itemQuantityTotal} дет.
-                </span>
-              }
+            <Button
+              type="text"
+              className="cnc-packet-card__tab"
+              icon={<FileTextOutlined />}
+              aria-expanded={activeAuxView === 'items'}
+              aria-pressed={activeAuxView === 'items'}
+              onClick={() => setActiveAuxView((current) => current === 'items' ? null : 'items')}
+            >
+              {packet.itemQuantityTotal} дет.
+            </Button>
+            <Button
+              type="text"
+              className="cnc-packet-card__tab"
+              icon={<PictureOutlined />}
+              disabled={!hasSheetImage}
+              aria-disabled={!hasSheetImage}
+              aria-expanded={activeAuxView === 'sheet'}
+              aria-pressed={activeAuxView === 'sheet'}
+              onClick={() => setActiveAuxView((current) => current === 'sheet' ? null : 'sheet')}
+            >
+              Скрин
+            </Button>
+          </div>
+
+          {activeAuxView === 'items' && (
+            <div
+              className="cnc-packet-card__items-panel"
+              onClick={stopCncCardClickPropagation}
             >
               <div className="cnc-packet-card__items" role="table" aria-label="Результаты распознавания">
             <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
@@ -2661,13 +2691,14 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               );
             })}
               </div>
-            </Collapse.Panel>
-          </Collapse>
+            </div>
+          )}
 
           {packet.sheetImageUrl && (
             <CncTelegramSheetImagePreview
               imageUrl={packet.sheetImageUrl}
               title={packet.programName ?? packet.externalPacketKey}
+              open={activeAuxView === 'sheet'}
             />
           )}
 
@@ -2684,16 +2715,22 @@ CncTelegramPacketCard.displayName = 'CncTelegramPacketCard';
 interface CncTelegramSheetImagePreviewProps {
   imageUrl: string;
   title: string;
+  open: boolean;
 }
 
 const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> = ({
   imageUrl,
   title,
+  open,
 }) => {
-  const [open, setOpen] = useState(false);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setObjectUrl(null);
+    setError(null);
+  }, [imageUrl]);
 
   useEffect(() => {
     if (!open || objectUrl) return;
@@ -2724,38 +2761,29 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
     if (objectUrl) URL.revokeObjectURL(objectUrl);
   }, [objectUrl]);
 
+  if (!open) return null;
+
   return (
-    <Collapse
-      className="cnc-packet-card__sheet"
-      size="small"
-      ghost
-      onChange={(keys) => setOpen(Array.isArray(keys) ? keys.includes('sheet') : keys === 'sheet')}
+    <div
+      className="cnc-packet-card__sheet-panel"
+      onClick={stopCncCardClickPropagation}
     >
-      <Collapse.Panel
-        key="sheet"
-        header={
-          <span className="cnc-packet-card__collapse-label">
-            <PictureOutlined /> Скрин листа
-          </span>
-        }
-      >
-        <div className="cnc-packet-card__sheet-body">
-          {loading && (
-            <div className="cnc-packet-card__sheet-loading">
-              <Spin size="small" />
-            </div>
-          )}
-          {error && <Alert type="warning" showIcon message={error} />}
-          {objectUrl && (
-            <img
-              className="cnc-packet-card__sheet-image"
-              src={objectUrl}
-              alt={`Скрин листа ${title}`}
-            />
-          )}
-        </div>
-      </Collapse.Panel>
-    </Collapse>
+      <div className="cnc-packet-card__sheet-body">
+        {loading && (
+          <div className="cnc-packet-card__sheet-loading">
+            <Spin size="small" />
+          </div>
+        )}
+        {error && <Alert type="warning" showIcon message={error} />}
+        {objectUrl && (
+          <img
+            className="cnc-packet-card__sheet-image"
+            src={objectUrl}
+            alt={`Скрин листа ${title}`}
+          />
+        )}
+      </div>
+    </div>
   );
 };
 

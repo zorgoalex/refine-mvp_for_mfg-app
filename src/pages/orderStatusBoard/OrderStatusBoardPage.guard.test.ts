@@ -667,6 +667,32 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-bath-card__pdf-modal');
   });
 
+  it('keeps MDF machine file details and sheet preview as exclusive side-by-side tabs', () => {
+    const packetCardStart = page.indexOf('const CncTelegramPacketCard =');
+    const packetCardEnd = page.indexOf('interface CncTelegramSheetImagePreviewProps', packetCardStart);
+    const packetCard = page.slice(packetCardStart, packetCardEnd);
+    const sheetPreviewEnd = page.indexOf('interface CncTelegramBathCardViewProps', packetCardEnd);
+    const sheetPreview = page.slice(packetCardEnd, sheetPreviewEnd);
+
+    expect(packetCard).toContain("useState<'items' | 'sheet' | null>(null)");
+    expect(packetCard).toContain('className="cnc-packet-card__tabs"');
+    expect(packetCard).toContain("activeAuxView === 'items'");
+    expect(packetCard).toContain("activeAuxView === 'sheet'");
+    expect(packetCard).toContain("current === 'items' ? null : 'items'");
+    expect(packetCard).toContain("current === 'sheet' ? null : 'sheet'");
+    expect(packetCard).toContain('className="cnc-packet-card__items-panel"');
+    expect(packetCard).not.toContain('className="cnc-packet-card__collapse compact-collapse"');
+    expect(sheetPreview).toContain('open: boolean;');
+    expect(sheetPreview).toContain('if (!open) return null;');
+    expect(sheetPreview).toContain('className="cnc-packet-card__sheet-panel"');
+    expect(css).toMatch(
+      /\.cnc-packet-card__tabs\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/s,
+    );
+    expect(css).toContain('.cnc-packet-card__tab.ant-btn[aria-pressed="true"]');
+    expect(css).toContain('.cnc-packet-card__items-panel');
+    expect(css).toContain('.cnc-packet-card__sheet-panel');
+  });
+
   it('shows the bath cut job name only inside detail and PDF preview headers', () => {
     expect(page).not.toContain('className="cnc-bath-card__job"');
     expect(page).toContain('className="cnc-bath-card__block-heading"');
