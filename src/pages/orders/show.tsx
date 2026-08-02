@@ -1,6 +1,6 @@
 import { useShow, useList, useUpdate, useOne, useDataProvider, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select, Tag } from "antd";
+import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -188,6 +188,29 @@ type DetailProductionStatusMeta = {
   color?: string | null;
 };
 
+const ORDER_DETAIL_STATUS_BADGE_STYLE: CSSProperties = {
+  display: 'inline-block',
+  maxWidth: '100%',
+  height: 22,
+  lineHeight: '20px',
+  padding: '0 7px',
+  border: '1px solid #91caff',
+  borderRadius: 4,
+  background: '#e6f4ff',
+  color: '#0958d9',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  verticalAlign: 'middle',
+};
+
+const ORDER_DETAIL_STATUS_EMPTY_BADGE_STYLE: CSSProperties = {
+  ...ORDER_DETAIL_STATUS_BADGE_STYLE,
+  borderColor: 'var(--app-border)',
+  background: 'var(--app-surface)',
+  color: 'var(--app-text-muted)',
+};
+
 type DetailProductionStatusSnapshot = {
   detailId: number;
   productionStatusId: number | null;
@@ -217,7 +240,7 @@ const OrderDetailProductionStatusTag: React.FC<{
   loading: boolean;
 }> = ({ statusId, name, statusesById, loading }) => {
   if (statusId === null || statusId === undefined) {
-    return <Tag style={{ marginInlineEnd: 0 }}>Не назначен</Tag>;
+    return <span style={ORDER_DETAIL_STATUS_EMPTY_BADGE_STYLE}>Не назначен</span>;
   }
 
   const statusMeta = statusesById.get(statusId);
@@ -225,25 +248,22 @@ const OrderDetailProductionStatusTag: React.FC<{
   const label = directName || statusMeta?.name || '';
 
   if (!label && loading) {
-    return <Tag color="blue" style={{ marginInlineEnd: 0 }}>...</Tag>;
+    return <span style={ORDER_DETAIL_STATUS_BADGE_STYLE}>...</span>;
   }
 
   const text = label || `ID: ${statusId}`;
+  const statusColor = statusMeta?.color;
 
   return (
-    <Tooltip title={text}>
-      <Tag
-        color={statusMeta?.color || 'blue'}
-        style={{
-          maxWidth: '100%',
-          marginInlineEnd: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-      >
-        {text}
-      </Tag>
-    </Tooltip>
+    <span
+      title={text}
+      style={{
+        ...ORDER_DETAIL_STATUS_BADGE_STYLE,
+        ...(statusColor ? { borderColor: statusColor, color: statusColor } : null),
+      }}
+    >
+      {text}
+    </span>
   );
 };
 

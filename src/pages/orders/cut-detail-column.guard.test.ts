@@ -35,6 +35,13 @@ describe('cut detail column', () => {
     expect(show).toContain("resource: \"production_statuses\"");
     expect(show).toContain('canViewProductionReferences');
     expect(show).not.toContain('refetch: refetchDetails');
+
+    const statusCellStart = show.indexOf('const OrderDetailProductionStatusTag');
+    const statusCellEnd = show.indexOf('function createProjectMoveIdempotencyKey');
+    const statusCell = show.slice(statusCellStart, statusCellEnd);
+    expect(statusCell).toContain('title={text}');
+    expect(statusCell).not.toContain('<Tooltip');
+    expect(statusCell).not.toContain('<Tag');
   });
 
   it('summary row aligns with the selection column and the trailing Раскрой column', () => {
