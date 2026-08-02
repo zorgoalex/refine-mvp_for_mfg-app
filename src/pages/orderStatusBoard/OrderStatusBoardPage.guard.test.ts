@@ -491,6 +491,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('const expanded = open;');
     expect(page).not.toContain('const expanded = detailed || open;');
     expect(page.match(/onClick=\{stopCncCardClickPropagation\}/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(page).toContain('const interactive = relationsEnabled;');
+    expect(page).not.toContain('if (detailedEnabled) onSelectDetailedBath(bath.bathCardId);');
+    expect(page).toContain('onOpenDetailed={() => onSelectDetailedBath(bath.bathCardId)}');
+    expect(page).toContain('const [open, setOpen] = useState(detailed);');
+    expect(page).toContain('if (nextOpen) onOpenDetailed();');
+    expect(page).toContain('else if (detailed) onCloseDetailed();');
     expect(page).toContain('syncCncBathSelectedDetail(sheetBodyRef.current, selectedDetailId)');
     expect(page).toContain('loadedPreviewKeyRef.current = releaseCncPreviewLoadKey(');
     expect(page).toContain('const loadedPdfKeyRef = useRef<string | null>(null)');
@@ -537,6 +543,21 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-bath-card__sheet-svg [data-detail-id]');
     expect(css).toContain('.cnc-bath-card__sheet-svg [data-cnc-order-fill="true"]');
     expect(css).toContain('.cnc-bath-card__sheet-svg [data-cnc-selected-detail="true"] > rect:first-child');
+  });
+
+  it('keeps bath detail and PDF controls side by side and opens PDF only in a full preview modal', () => {
+    expect(page).toContain("useState<'items' | 'pdf' | null>(null)");
+    expect(page).toContain('className="cnc-bath-card__tabs"');
+    expect(page).toContain("activeAuxView === 'items'");
+    expect(page).toContain("activeAuxView === 'pdf'");
+    expect(page).toContain('aria-haspopup="dialog"');
+    expect(page).toContain('className="cnc-bath-card__pdf-modal"');
+    expect(page).toContain('width="min(96vw, 1440px)"');
+    expect(page).not.toContain('className="cnc-packet-card__sheet cnc-bath-card__pdf"');
+    expect(css).toMatch(
+      /\.cnc-bath-card__tabs\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/s,
+    );
+    expect(css).toContain('.cnc-bath-card__pdf-modal');
   });
 
   it('keeps order cards dense, badge-based and project-code-free', () => {

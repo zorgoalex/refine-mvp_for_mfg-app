@@ -1728,8 +1728,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                           if (relationsEnabled) {
                             onSelectRelation({ kind: 'bath', id: bath.bathCardId });
                           }
-                          if (detailedEnabled) onSelectDetailedBath(bath.bathCardId);
                         }}
+                        onOpenDetailed={() => onSelectDetailedBath(bath.bathCardId)}
                         onCloseDetailed={() => onCloseDetailedBath(bath.bathCardId)}
                         onSelectDetail={(detailId) =>
                           onSelectDetailedDetail({ bathId: bath.bathCardId, detailId })
@@ -1803,6 +1803,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 selectedDetailId={selectedDetailedDetailId}
                 onToggleDisplay={() => undefined}
                 onSelect={() => undefined}
+                onOpenDetailed={() => undefined}
                 onCloseDetailed={() => onCloseDetailedBath(detailedContext.activeBathId)}
                 onSelectDetail={(detailId) =>
                   onSelectDetailedDetail({ bathId: detailedContext.activeBathId, detailId })
@@ -2616,6 +2617,7 @@ interface CncTelegramBathCardViewProps {
   selectedDetailId: number | null;
   onToggleDisplay: () => void;
   onSelect: () => void;
+  onOpenDetailed: () => void;
   onCloseDetailed: () => void;
   onSelectDetail: (detailId: number) => void;
   onOpenOrder: (orderId: number) => void;
@@ -2634,13 +2636,15 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   selectedDetailId,
   onToggleDisplay,
   onSelect,
+  onOpenDetailed,
   onCloseDetailed,
   onSelectDetail,
   onOpenOrder,
 }) => {
   const isOperational = useOperationalUi();
   const orderSummaries = buildCncOrderSummaries(bath.items);
-  const interactive = relationsEnabled || detailedEnabled;
+  const interactive = relationsEnabled;
+  const [activeAuxView, setActiveAuxView] = useState<'items' | 'pdf' | null>(null);
 
   return (
     <div
@@ -2649,14 +2653,13 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           'status-board-card cnc-bath-card',
           detailed ? 'cnc-bath-card--detailed' : '',
           detailed ? `cnc-bath-card--detailed-${detailedPlacement}` : '',
-          detailedEnabled ? 'cnc-bath-card--detailed-selectable' : '',
           summaryOnly ? 'cnc-card--summary-only' : '',
         ].filter(Boolean).join(' '),
         relationState,
         highlightEnabled,
       )}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
-      data-cnc-detailed-state={detailed ? 'active' : detailedEnabled ? 'selectable' : undefined}
+      data-cnc-detailed-state={detailed ? 'active' : detailedEnabled ? 'available' : undefined}
       data-cnc-card-view={summaryOnly ? 'compact' : 'standard'}
       data-cnc-clickable={interactive ? 'true' : undefined}
       onClick={interactive ? onSelect : undefined}
@@ -2729,19 +2732,38 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
             </div>
           ) : null}
 
-          <Collapse
-            className="cnc-packet-card__collapse compact-collapse"
-            size="small"
-            ghost
+          <div
+            className="cnc-bath-card__tabs"
+            role="group"
+            aria-label="Данные ванны"
             onClick={stopCncCardClickPropagation}
           >
-            <Collapse.Panel
-              key="items"
-              header={
-                <span className="cnc-packet-card__collapse-label">
-                  <FileTextOutlined /> {bath.itemQuantityTotal} дет.
-                </span>
-              }
+            <Button
+              type="text"
+              className="cnc-bath-card__tab"
+              icon={<FileTextOutlined />}
+              aria-expanded={activeAuxView === 'items'}
+              aria-pressed={activeAuxView === 'items'}
+              onClick={() => setActiveAuxView((current) => current === 'items' ? null : 'items')}
+            >
+              {bath.itemQuantityTotal} дет.
+            </Button>
+            <Button
+              type="text"
+              className="cnc-bath-card__tab"
+              icon={<FilePdfOutlined />}
+              aria-haspopup="dialog"
+              aria-pressed={activeAuxView === 'pdf'}
+              onClick={() => setActiveAuxView('pdf')}
+            >
+              PDF
+            </Button>
+          </div>
+
+          {activeAuxView === 'items' && (
+            <div
+              className="cnc-bath-card__items-panel"
+              onClick={stopCncCardClickPropagation}
             >
               <div className="cnc-packet-card__items" role="table" aria-label="Детали ванны">
             <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
@@ -2785,15 +2807,22 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               </div>
             ))}
               </div>
-            </Collapse.Panel>
-          </Collapse>
+            </div>
+          )}
 
-          <CncBathPdfPreview bath={bath} />
+          <CncBathPdfPreview
+            bath={bath}
+            open={activeAuxView === 'pdf'}
+            onClose={() => setActiveAuxView(null)}
+          />
           {bath.sheets.length > 0 && (
             <CncBathSheetPreview
               bath={bath}
               detailed={detailed}
+              detailedEnabled={detailedEnabled}
               selectedDetailId={selectedDetailId}
+              onOpenDetailed={onOpenDetailed}
+              onCloseDetailed={onCloseDetailed}
               onSelectDetail={onSelectDetail}
             />
           )}
@@ -2811,7 +2840,10 @@ CncTelegramBathCardView.displayName = 'CncTelegramBathCardView';
 interface CncBathSheetPreviewProps {
   bath: CncTelegramBathCard;
   detailed: boolean;
+  detailedEnabled: boolean;
   selectedDetailId: number | null;
+  onOpenDetailed: () => void;
+  onCloseDetailed: () => void;
   onSelectDetail: (detailId: number) => void;
 }
 
@@ -2825,10 +2857,13 @@ interface CncBathSheetPreviewItem {
 const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
   bath,
   detailed,
+  detailedEnabled,
   selectedDetailId,
+  onOpenDetailed,
+  onCloseDetailed,
   onSelectDetail,
 }) => {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(detailed);
   const [previews, setPreviews] = useState<CncBathSheetPreviewItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2956,8 +2991,16 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
   }, [revokePreviewUrls]);
 
   const handleCollapseChange = useCallback((keys: string | string[]) => {
-    setOpen(Array.isArray(keys) ? keys.includes('bath-sheet') : keys === 'bath-sheet');
-  }, []);
+    const nextOpen = Array.isArray(keys) ? keys.includes('bath-sheet') : keys === 'bath-sheet';
+    if (nextOpen && detailedEnabled && !detailed) {
+      onOpenDetailed();
+      return;
+    }
+    setOpen(nextOpen);
+    if (!detailedEnabled) return;
+    if (nextOpen) onOpenDetailed();
+    else if (detailed) onCloseDetailed();
+  }, [detailed, detailedEnabled, onCloseDetailed, onOpenDetailed]);
 
   const handleSheetClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -3196,6 +3239,8 @@ function formatCncSvgNumber(value: number): string {
 
 interface CncBathPdfPreviewProps {
   bath: CncTelegramBathCard;
+  open: boolean;
+  onClose: () => void;
 }
 
 interface CncBathPdfPagePreview {
@@ -3203,11 +3248,10 @@ interface CncBathPdfPagePreview {
   url: string;
 }
 
-const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
+const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath, open, onClose }) => {
   const requestSeqRef = useRef(0);
   const loadedPdfKeyRef = useRef<string | null>(null);
   const pagePreviewUrlsRef = useRef<string[]>([]);
-  const [open, setOpen] = useState(false);
   const [template, setTemplate] = useState(CNC_BATH_DEFAULT_PDF_TEMPLATE);
   const [templateOptions, setTemplateOptions] = useState(CNC_BATH_PDF_TEMPLATE_OPTIONS);
   const [url, setUrl] = useState<string | null>(null);
@@ -3385,22 +3429,21 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
   }, [fetchFreshPdf, url]);
 
   return (
-    <Collapse
-      className="cnc-packet-card__sheet cnc-bath-card__pdf"
-      size="small"
-      ghost
-      onChange={(keys) => setOpen(Array.isArray(keys) ? keys.includes('bath-pdf') : keys === 'bath-pdf')}
-      onClick={stopCncCardClickPropagation}
+    <Modal
+      open={open}
+      onCancel={(event) => {
+        event.stopPropagation();
+        onClose();
+      }}
+      footer={null}
+      title={`PDF карты раскроя ${bath.cutNumber}`}
+      className="cnc-bath-card__pdf-modal"
+      width="min(96vw, 1440px)"
+      modalRender={(modalNode) => (
+        <div onClick={stopCncCardClickPropagation}>{modalNode}</div>
+      )}
     >
-      <Collapse.Panel
-        key="bath-pdf"
-        header={
-          <span className="cnc-packet-card__collapse-label">
-            <FilePdfOutlined /> PDF
-          </span>
-        }
-      >
-        <div className="cnc-bath-card__pdf-body">
+      <div className="cnc-bath-card__pdf-body">
           <div className="cnc-bath-card__pdf-toolbar">
             <Select
               size="small"
@@ -3457,9 +3500,8 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath }) => {
               ))}
             </div>
           )}
-        </div>
-      </Collapse.Panel>
-    </Collapse>
+      </div>
+    </Modal>
   );
 };
 
