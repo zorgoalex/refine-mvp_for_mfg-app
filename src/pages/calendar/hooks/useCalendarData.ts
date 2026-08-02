@@ -124,6 +124,21 @@ export const useCalendarData = (
     queryOptions: { staleTime: 60000 },
   });
 
+  // В фильтре календаря «Материал» варианты берём только из справочника
+  // «Листовые материалы», а не из legacy-materials или уже попавших в календарь деталей.
+  const { data: sheetMaterialTypesData } = useList({
+    resource: 'sheet_material_types',
+    filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
+    pagination: { pageSize: 10000 },
+    sorters: [
+      { field: 'sort_order', order: 'asc' },
+      { field: 'name', order: 'asc' },
+      { field: 'sheet_material_type_id', order: 'asc' },
+    ],
+    meta: { fields: ['sheet_material_type_id', 'name', 'sort_order', 'is_active'] },
+    queryOptions: { staleTime: 60000 },
+  });
+
   // Загружаем справочник production_statuses
   const { data: productionStatusesData } = useList({
     resource: 'production_statuses',
@@ -196,14 +211,11 @@ export const useCalendarData = (
 
   const materialOptions = useMemo(() => {
     const names = new Set<string>();
-    (materialsData?.data || []).forEach((material: any) => {
-      if (material?.material_name) names.add(material.material_name);
-    });
-    (detailNamesData?.data || []).forEach((detail: any) => {
-      if (detail?.material_name) names.add(detail.material_name);
+    (sheetMaterialTypesData?.data || []).forEach((sheetMaterialType: any) => {
+      if (sheetMaterialType?.name) names.add(sheetMaterialType.name);
     });
     return toSortedOptions(names);
-  }, [detailNamesData?.data, materialsData?.data]);
+  }, [sheetMaterialTypesData?.data]);
 
   const millingTypeOptions = useMemo(() => {
     const names = new Set<string>();

@@ -15,6 +15,9 @@ describe('calendar filters integration', () => {
     expect(calendarList).toContain('className="calendar-page-header"');
     expect(calendarList).toContain('filtersOpen={filtersOpen}');
     expect(calendarList).not.toContain('filtersOpen={isOperational && filtersOpen}');
+    expect(calendarList).not.toContain('Запланировать заказ');
+    expect(calendarList).not.toContain("navigate('/orders/create')");
+    expect(calendarList).not.toContain('PlusOutlined');
     expect(board).toContain('placeholder="Заказ / клиент"');
     expect(board).toContain('quickSearch');
   });
@@ -35,5 +38,13 @@ describe('calendar filters integration', () => {
     expect(dataHook).toContain('applyCalendarFilters(ordersWithDetails, filters)');
     expect(dataHook).toContain('materialOptions');
     expect(dataHook).toContain('millingTypeOptions');
+  });
+
+  it('sources material filter options only from sheet material reference', () => {
+    expect(dataHook).toContain("resource: 'sheet_material_types'");
+    expect(dataHook).toContain("meta: { fields: ['sheet_material_type_id', 'name', 'sort_order', 'is_active'] }");
+    expect(dataHook).toMatch(/const materialOptions = useMemo\(\(\) => \{[\s\S]*sheetMaterialTypesData\?\.data[\s\S]*sheetMaterialType\?\.name[\s\S]*\}, \[sheetMaterialTypesData\?\.data\]\)/);
+    expect(dataHook).not.toMatch(/const materialOptions = useMemo\(\(\) => \{[\s\S]*material\?\.material_name[\s\S]*\}, \[[^\]]*materialsData\?\.data/);
+    expect(dataHook).not.toMatch(/const materialOptions = useMemo\(\(\) => \{[\s\S]*detail\?\.material_name[\s\S]*\}, \[[^\]]*detailNamesData\?\.data/);
   });
 });

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Badge, Button } from 'antd';
-import { FilterOutlined, PlusOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { FilterOutlined } from '@ant-design/icons';
 import CalendarBoard from './components/CalendarBoard';
 import type { CalendarFilters } from './types/calendar';
 import { getCalendarActiveFilterCount } from './utils/calendarFilters';
@@ -15,7 +14,6 @@ import './styles/calendar-mobile.css';
  */
 export const CalendarList: React.FC = () => {
   const isOperational = useOperationalUi();
-  const navigate = useNavigate();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<CalendarFilters>({});
   const activeFilterCount = useMemo(() => getCalendarActiveFilterCount(filters), [filters]);
@@ -52,13 +50,6 @@ export const CalendarList: React.FC = () => {
                   {filtersOpen ? 'Скрыть фильтры' : activeFilterCount > 0 ? 'Фильтры активны' : 'Фильтры'}
                 </Button>
               </Badge>
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => navigate('/orders/create')}
-              >
-                Запланировать заказ
-              </Button>
             </>
           )}
         />
@@ -76,13 +67,6 @@ export const CalendarList: React.FC = () => {
                 {filtersOpen ? 'Скрыть фильтры' : activeFilterCount > 0 ? 'Фильтры активны' : 'Фильтры'}
               </Button>
             </Badge>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => navigate('/orders/create')}
-            >
-              Запланировать заказ
-            </Button>
           </div>
         </div>
       )}

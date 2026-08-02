@@ -31,6 +31,26 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-02",
+    title: "Календарь: материалы фильтра из листовых материалов",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В фильтре «Материал» календаря выпадающий список теперь строится только из справочника «Листовые материалы».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
+    title: "Календарь: убрана дублирующая кнопка создания заказа",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "С экрана календаря убрана кнопка «Запланировать заказ», потому что создание заказа уже доступно из сайдбара.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
     title: "Календарь: фильтры видны во всех вариантах интерфейса",
     services: ["ERP"],
     repositories: ["repo_erp"],
