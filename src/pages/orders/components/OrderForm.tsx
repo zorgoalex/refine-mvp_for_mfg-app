@@ -147,7 +147,6 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     setInitializing,
     finalizeInitialization,
     isTotalAmountManual,
-    deleteDetail,
   } = useOrderDraftStore(orderKey);
 
   // Refs for tabs to apply current edits before save
@@ -1157,10 +1156,6 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       const applied = await detailsTabRef.current.applyCurrentEdits();
       if (!applied) {
         console.log('[OrderForm] handleSave - failed to apply current edits, aborting save');
-        notification.warning({
-          message: 'Ошибка валидации',
-          description: 'Заполните обязательные поля в редактируемой позиции',
-        });
         return;
       }
       console.log('[OrderForm] handleSave - current edits applied successfully');
@@ -1186,26 +1181,9 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       console.log('[OrderForm] handleSave - formValues:', formValues);
       console.log('[OrderForm] handleSave - details count:', formValues.details?.length || 0);
 
-      // Filter out unfilled details before validation (new details with only default values)
-      const isDetailUnfilled = (detail: any): boolean => {
-        // Only check new details (no detail_id)
-        if (detail.detail_id) return false;
-        // Check if essential fields are empty/null/zero
-        const hasNoHeight = !detail.height || detail.height === 0;
-        const hasNoWidth = !detail.width || detail.width === 0;
-        const hasNoArea = !detail.area || detail.area === 0;
-        return hasNoHeight && hasNoWidth && hasNoArea;
-      };
-
-      const filteredDetails = (formValues.details || []).filter(detail => !isDetailUnfilled(detail));
-      const skippedCount = (formValues.details?.length || 0) - filteredDetails.length;
-      if (skippedCount > 0) {
-        console.log(`[OrderForm] handleSave - filtered out ${skippedCount} unfilled detail(s)`);
-      }
-
       // Normalize detail_numbers: sort by current number and renumber sequentially 1, 2, 3...
       // This fixes any duplicates or gaps in numbering before validation
-      const sortedDetails = [...filteredDetails].sort((a, b) =>
+      const sortedDetails = [...(formValues.details || [])].sort((a, b) =>
         (a.detail_number || 0) - (b.detail_number || 0)
       );
       formValues.details = sortedDetails.map((detail, index) => ({
@@ -1261,24 +1239,6 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           console.log('[OrderForm] handleSave - setting dirty to false');
           setDirty(false);
 
-          // Clean up unfilled details from the store
-          const currentDetails = peekOrderDraftStore(orderKey)?.getState().details ?? [];
-          const unfilledDetails = currentDetails.filter(detail => {
-            if (detail.detail_id) return false;
-            const hasNoHeight = !detail.height || detail.height === 0;
-            const hasNoWidth = !detail.width || detail.width === 0;
-            const hasNoArea = !detail.area || detail.area === 0;
-            return hasNoHeight && hasNoWidth && hasNoArea;
-          });
-          if (unfilledDetails.length > 0) {
-            console.log(`[OrderForm] handleSave - removing ${unfilledDetails.length} unfilled detail(s) from store`);
-            unfilledDetails.forEach(detail => {
-              const tempId = detail.temp_id || detail.detail_id;
-              if (tempId) {
-                deleteDetail(tempId, detail.detail_id);
-              }
-            });
-          }
         }
 
         console.log('[OrderForm] handleSave - onSaveSuccess callback exists?', !!onSaveSuccess);

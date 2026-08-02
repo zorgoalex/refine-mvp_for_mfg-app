@@ -1,5 +1,6 @@
 // Task 8 (Variant B): Zod save gate — sheet_material_type_id required,
 // material_id must be null/absent (positive material_id = stale pre-034 payload).
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { orderHeaderSchema, orderDetailSchema } from '../orderSchema';
 
@@ -13,6 +14,7 @@ const validSheetDetail = {
   sheet_material_type_id: 5,
   milling_type_id: 1,
   edge_type_id: 1,
+  milling_cost_per_sqm: 100,
   detail_cost: 100,
 };
 
@@ -109,5 +111,47 @@ describe('orderHeaderSchema Variant B — material_id must be null/absent', () =
     const out = orderHeaderSchema.parse({ ...validHeader });
     expect(out.sheet_material_type_id ?? null).toBeNull();
     expect(out.material_id ?? null).toBeNull();
+  });
+});
+
+describe('order detail required numeric validation', () => {
+  it('reports every empty or zero dimension, quantity, and cost field', () => {
+    const result = orderDetailSchema.safeParse({
+      ...validSheetDetail,
+      height: null,
+      width: 0,
+      quantity: null,
+      milling_cost_per_sqm: null,
+      detail_cost: 0,
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(new Set(result.error.issues.map((issue) => issue.path.join('.')))).toEqual(new Set([
+      'height',
+      'width',
+      'quantity',
+      'milling_cost_per_sqm',
+      'detail_cost',
+    ]));
+  });
+
+  it('keeps invalid rows for validation and visibly scrolls to the first one', () => {
+    const orderFormSource = readFileSync(
+      new URL('../../pages/orders/components/OrderForm.tsx', import.meta.url),
+      'utf8',
+    );
+    const tableSource = readFileSync(
+      new URL('../../pages/orders/components/tables/OrderDetailTable.tsx', import.meta.url),
+      'utf8',
+    );
+    const appCss = readFileSync(new URL('../../styles/app.css', import.meta.url), 'utf8');
+
+    expect(orderFormSource).not.toContain('filtered out ${skippedCount} unfilled detail(s)');
+    expect(tableSource).not.toContain('empty detail detected, removing from store');
+    expect(tableSource).toContain("classes.push('order-detail-validation-error')");
+    expect(tableSource).toContain('setValidationScrollTargetKey(firstInvalidRowKey)');
+    expect(tableSource).toContain("row?.scrollIntoView({ behavior: 'smooth', block: 'center' })");
+    expect(appCss).toContain('tr.order-detail-validation-error > td');
   });
 });

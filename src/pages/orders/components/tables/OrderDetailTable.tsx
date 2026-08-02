@@ -6,7 +6,7 @@
 // Решение: используем useRef для синхронного хранения значений полей
 
 import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback, useContext } from 'react';
-import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider, Checkbox } from 'antd';
+import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider, Checkbox, notification } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
@@ -89,6 +89,22 @@ interface FieldValues {
   area: number | null;
   milling_cost_per_sqm: number | null;
   detail_cost: number | null;
+}
+
+interface InlineFormValidationError {
+  errorFields?: Array<{ errors?: unknown[] }>;
+}
+
+export function orderDetailInlineErrorMessages(error: unknown): string[] {
+  const errorFields = typeof error === 'object' && error !== null
+    ? (error as InlineFormValidationError).errorFields
+    : undefined;
+  const messages = (errorFields ?? []).flatMap((field) =>
+    (field.errors ?? []).filter((message): message is string => typeof message === 'string'),
+  );
+  return messages.length > 0
+    ? [...new Set(messages)]
+    : ['Проверьте обязательные числовые поля позиции'];
 }
 
 type DetailSortOrder = 'ascend' | 'descend';
@@ -214,13 +230,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 }, ref) => {
   const { header, details, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
   const saveValidation = useContext(OrderSaveValidationContext);
+  const [inlineInvalidDetailKey, setInlineInvalidDetailKey] = useState<string | null>(null);
+  const [validationScrollTargetKey, setValidationScrollTargetKey] = useState<React.Key | null>(null);
   const invalidDetailKeys = useMemo(
     () => new Set(saveValidation?.invalidDetailKeys ?? []),
     [saveValidation],
   );
   const isValidationInvalid = useCallback(
-    (detail: OrderDetail) => invalidDetailKeys.has(orderValidationDetailKey(detail)),
-    [invalidDetailKeys],
+    (detail: OrderDetail) => {
+      const key = orderValidationDetailKey(detail);
+      return invalidDetailKeys.has(key) || inlineInvalidDetailKey === key;
+    },
+    [inlineInvalidDetailKey, invalidDetailKeys],
   );
   const shownValidationRef = useRef<typeof saveValidation>(null);
   const orderFormData = useOrderFormData();
@@ -315,6 +336,23 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     record: OrderDetail;
   } | null>(null);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
+
+  const showInlineValidationErrors = useCallback((record: OrderDetail, error: unknown) => {
+    const rowKey = record.temp_id ?? record.detail_id ?? record.detail_number;
+    const messages = orderDetailInlineErrorMessages(error);
+    setInlineInvalidDetailKey(orderValidationDetailKey(record));
+    setValidationScrollTargetKey(rowKey);
+    notification.error({
+      key: `order-detail-inline-validation:${rowKey}`,
+      message: `Позиция №${record.detail_number}: исправьте данные`,
+      description: (
+        <ul style={{ margin: 0, paddingLeft: 20 }}>
+          {messages.map((message) => <li key={message}>{message}</li>)}
+        </ul>
+      ),
+      duration: 0,
+    });
+  }, []);
 
   // ============================================================================
   // FIX: useRef для синхронного хранения значений полей
@@ -574,31 +612,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     const record = details.find(d => (d.temp_id || d.detail_id) === editingKey);
     if (!record) return true;
 
-    // Check if this is an "empty" detail (only default values, no essential data)
-    // Such details should be cancelled, not validated
-    const currentValues = form.getFieldsValue();
-    const isEmptyDetail = (
-      !record.detail_id && // Only for new details (not existing ones)
-      (!currentValues.height || currentValues.height === 0) &&
-      (!currentValues.width || currentValues.width === 0) &&
-      (!currentValues.quantity || currentValues.quantity === 0) &&
-      (!currentValues.area || currentValues.area === 0)
-    );
-
-    if (isEmptyDetail) {
-      console.log('[OrderDetailTable] saveCurrentRow - empty detail detected, removing from store');
-      // Remove empty detail from store so it won't cause validation errors
-      const tempId = record.temp_id || record.detail_id;
-      if (tempId) {
-        deleteDetail(tempId, record.detail_id);
-      }
-      cancelEdit();
-      return true; // Allow save to continue
-    }
-
     // Check dimension validation
     if (dimensionValidationError) {
       console.log('[OrderDetailTable] saveCurrentRow - dimension validation failed');
+      showInlineValidationErrors(record, {
+        errorFields: [{ errors: [dimensionValidationError] }],
+      });
       return false;
     }
 
@@ -613,6 +632,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       return true;
     } catch (error) {
       console.log('[OrderDetailTable] saveCurrentRow - validation failed:', error);
+      showInlineValidationErrors(record, error);
       return false;
     }
   };
@@ -661,6 +681,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   }));
 
   const cancelEdit = () => {
+    if (editingKey !== null) {
+      notification.destroy(`order-detail-inline-validation:${editingKey}`);
+    }
+    setInlineInvalidDetailKey(null);
     setEditingKey(null);
     setCurrentFilmId(null);
     setDimensionValidationError(null);
@@ -696,19 +720,26 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     // Check dimension validation first
     if (dimensionValidationError) {
       console.error('[OrderDetailTable] saveEdit - dimension validation failed:', dimensionValidationError);
+      showInlineValidationErrors(record, {
+        errorFields: [{ errors: [dimensionValidationError] }],
+      });
       return;
     }
 
-    const values = await form.validateFields();
-    console.log('[OrderDetailTable] saveEdit - form values:', values);
-    console.log('[OrderDetailTable] saveEdit - area:', values.area, 'price:', values.milling_cost_per_sqm, 'cost:', values.detail_cost);
+    try {
+      const values = await form.validateFields();
+      console.log('[OrderDetailTable] saveEdit - form values:', values);
+      console.log('[OrderDetailTable] saveEdit - area:', values.area, 'price:', values.milling_cost_per_sqm, 'cost:', values.detail_cost);
 
-    const tempId = record.temp_id || record.detail_id!;
-    updateDetail(tempId, values);
-    if (Number.isSafeInteger(values.sheet_material_type_id) && values.sheet_material_type_id > 0) {
-      sheetMaterials.promoteUsage(values.sheet_material_type_id);
+      const tempId = record.temp_id || record.detail_id!;
+      updateDetail(tempId, values);
+      if (Number.isSafeInteger(values.sheet_material_type_id) && values.sheet_material_type_id > 0) {
+        sheetMaterials.promoteUsage(values.sheet_material_type_id);
+      }
+      cancelEdit();
+    } catch (error) {
+      showInlineValidationErrors(record, error);
     }
-    cancelEdit();
   };
 
   // ============================================================================
@@ -776,12 +807,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           return formatNumber(num, num % 1 === 0 ? 0 : 2);
         }
         return (
-          <Form.Item name="height" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item
+            name="height"
+            style={{ margin: 0, padding: '0 4px' }}
+            rules={[
+              { required: true, message: 'Укажите высоту детали' },
+              { type: 'number', min: 0.01, message: 'Высота должна быть больше 0' },
+            ]}
+          >
             <CurrencyInput
               autoFocus
               controls={false}
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedHeight) }}
-              min={0}
+              min={0.01}
               precision={2}
               emptyWhenUnset
               onChange={handleHeightChange}
@@ -813,11 +851,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           return formatNumber(num, num % 1 === 0 ? 0 : 2);
         }
         return (
-          <Form.Item name="width" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item
+            name="width"
+            style={{ margin: 0, padding: '0 4px' }}
+            rules={[
+              { required: true, message: 'Укажите ширину детали' },
+              { type: 'number', min: 0.01, message: 'Ширина должна быть больше 0' },
+            ]}
+          >
             <CurrencyInput
               controls={false}
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedWidth) }}
-              min={0}
+              min={0.01}
               precision={2}
               emptyWhenUnset
               onChange={handleWidthChange}
@@ -839,7 +884,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="quantity" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item
+            name="quantity"
+            style={{ margin: 0, padding: '0 4px' }}
+            rules={[
+              { required: true, message: 'Укажите количество деталей' },
+              { type: 'number', min: 1, message: 'Количество должно быть больше 0' },
+            ]}
+          >
             <InputNumber
               controls={false}
               style={{ width: '100%', minWidth: '70px' }}
@@ -1027,12 +1079,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="milling_cost_per_sqm" style={{ margin: 0, padding: '0 4px' }}>
+          <Form.Item
+            name="milling_cost_per_sqm"
+            style={{ margin: 0, padding: '0 4px' }}
+            rules={[
+              { required: true, message: 'Укажите цену за кв.м.' },
+              { type: 'number', min: 0.01, message: 'Цена за кв.м. должна быть больше 0' },
+            ]}
+          >
             <InputNumber
               controls={false}
               style={{ width: '100%', minWidth: '90px' }}
               precision={2}
-              min={0}
+              min={0.01}
               formatter={currencySmartFormatter}
               parser={numberParser}
               onChange={handleMillingCostChange}
@@ -1062,12 +1121,16 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             <Form.Item
               name="detail_cost"
               style={{ margin: 0, padding: '0 4px' }}
+              rules={[
+                { required: true, message: 'Укажите сумму детали' },
+                { type: 'number', min: 0.01, message: 'Сумма детали должна быть больше 0' },
+              ]}
             >
               <InputNumber
                 controls={false}
                 style={{ width: '100%', minWidth: '90px' }}
                 precision={2}
-                min={0}
+                min={0.01}
                 formatter={currencySmartFormatter}
                 parser={numberParser}
                 disabled={!isSumEditable}
@@ -1508,12 +1571,30 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       shownValidationRef.current = null;
       return;
     }
-    if (groupingActive || shownValidationRef.current === saveValidation) return;
+    if (shownValidationRef.current === saveValidation) return;
     shownValidationRef.current = saveValidation;
     const firstInvalidDetail = paginatedDetails.find(isValidationInvalid);
     if (!firstInvalidDetail) return;
-    setCurrentPage(pageContainingOrderDetail(paginatedDetails, firstInvalidDetail, pageSize));
+    if (!groupingActive) {
+      setCurrentPage(pageContainingOrderDetail(paginatedDetails, firstInvalidDetail, pageSize));
+    }
+    const firstInvalidRowKey = firstInvalidDetail.temp_id
+      ?? firstInvalidDetail.detail_id
+      ?? firstInvalidDetail.detail_number;
+    setValidationScrollTargetKey(firstInvalidRowKey);
   }, [groupingActive, isValidationInvalid, pageSize, paginatedDetails, saveValidation]);
+
+  useEffect(() => {
+    if (validationScrollTargetKey === null) return;
+    const frame = requestAnimationFrame(() => {
+      const row = tableContainerRef.current?.querySelector<HTMLElement>(
+        `[data-row-key="${String(validationScrollTargetKey)}"]`,
+      );
+      row?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (row) setValidationScrollTargetKey(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [currentPage, groupingActive, validationScrollTargetKey]);
 
   useEffect(() => {
     if (editingKey == null || groupingActive) return;
@@ -2139,13 +2220,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           const record = asDetail(row)!;
           const rowKey = record.temp_id || record.detail_id || 0;
           if (!groupingActive) {
-            return dragSelection.isInPendingSelection(rowKey) ? 'drag-selection-pending' : '';
+            const classes: string[] = [];
+            if (dragSelection.isInPendingSelection(rowKey)) classes.push('drag-selection-pending');
+            if (isValidationInvalid(record)) classes.push('order-detail-validation-error');
+            return classes.join(' ');
           }
           const groupIndex = row?.kind === 'detail' ? row.groupIndex : 0;
           const classes = [`detail-group-tint-${groupIndex % GROUP_TINT_COUNT}`];
           if (isEditing(record)) classes.push('dg-editing');
           else if (dragSelection.isInPendingSelection(rowKey)) classes.push('dg-pending');
           else if (highlightedRowKey !== null && rowKey === highlightedRowKey) classes.push('dg-highlight');
+          if (isValidationInvalid(record)) classes.push('order-detail-validation-error');
           return classes.join(' ');
         }}
         summary={() => (
