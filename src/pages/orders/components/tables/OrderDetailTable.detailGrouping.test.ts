@@ -51,6 +51,13 @@ describe('edit-form detail grouping', () => {
     expect(tab).toContain('selectedDetailIds');
     expect(tab).toContain('orderNames={[header.order_name]}');
   });
+  it('wires persisted detail transfer into row context menu', () => {
+    expect(table).toContain("key: 'action:transfer'");
+    expect(table).toContain('Перенести детали');
+    expect(table).toContain('onTransferRows(contextTransferRowKeys)');
+    expect(tab).toContain('getTransferRowsDisabledReason={getTransferRowsDisabledReason}');
+    expect(tab).toContain('onTransferRows={handleTransferRows}');
+  });
   it('edit detail table exposes a cut.view-gated Раскрой column refreshed by cut ready events', () => {
     expect(tab).toContain("const cutColumnEnabled = featureFlags.useBackendCut && can('cut.view')");
     expect(tab).toContain('useCutDetailLastReady');
