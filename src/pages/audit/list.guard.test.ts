@@ -15,4 +15,10 @@ describe('audit list related-entity UI', () => {
     expect(src).toContain('Понятный');
     expect(src).toContain('Технический');
   });
+  it('loads filter option values and renders filter fields as dropdowns', () => {
+    expect(src).toContain('auditApi.filterOptions');
+    expect(src).toContain('filterSelectOptions.events');
+    expect(src).toContain('<Select');
+    expect(src).toContain('showSearch');
+  });
 });

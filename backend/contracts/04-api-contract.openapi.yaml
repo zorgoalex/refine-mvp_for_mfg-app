@@ -163,6 +163,30 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/audit/filter-options:
+    get:
+      tags:
+        - Audit
+      operationId: getAuditFilterOptions
+      summary: Значения фильтров audit
+      description: Возвращает distinct-значения для выпадающих списков фильтров журнала аудита. Требует право audit.view.
+      security:
+        - bearerAuth: []
+      x-permission: audit.view
+      responses:
+        '200':
+          description: Значения фильтров audit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditFilterOptionsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/auth/login:
     post:
       tags:
@@ -942,6 +966,72 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '500':
           $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/resource-demands:
+    get:
+      tags:
+        - Orders
+      operationId: listOrderResourceDemands
+      summary: List live resource demands by order
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - name: dateFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: sheetMaterialTypeId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: filmId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: supplierId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: vendorId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Live order resource demand projection
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -9443,6 +9533,37 @@ paths:
       responses:
         '200':
           description: Current-day CNC Telegram packets
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+
+  /api/v1/cnc-telegram/orders/{orderId}/cutting-sequences:
+    get:
+      tags:
+        - CncTelegram
+      operationId: listCncTelegramOrderCuttingSequences
+      summary: List machine-file cutting sequence numbers linked to an order
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Order machine-file cutting sequence numbers
           content:
             application/json:
               schema:
@@ -18703,6 +18824,122 @@ components:
             cost:
               type: number
               nullable: true
+
+    AuditFilterOptionsResponse:
+      type: object
+      required:
+        - data
+        - requestId
+      properties:
+        data:
+          $ref: '#/components/schemas/AuditFilterOptions'
+        requestId:
+          type: string
+
+    AuditFilterOptions:
+      type: object
+      required:
+        - events
+        - entityTypes
+        - entityIds
+        - users
+        - roles
+        - sources
+        - relatedOrderIds
+        - relatedClientIds
+        - relatedPaymentIds
+        - relatedDeadlineIds
+        - relatedProductionEventIds
+        - relatedUserIds
+        - relatedEntityTypes
+        - relatedEntities
+        - requestIds
+      properties:
+        events:
+          type: array
+          items:
+            type: string
+        entityTypes:
+          type: array
+          items:
+            type: string
+        entityIds:
+          type: array
+          items:
+            type: string
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditUserFilterOption'
+        roles:
+          type: array
+          items:
+            type: string
+        sources:
+          type: array
+          items:
+            type: string
+        relatedOrderIds:
+          type: array
+          items:
+            type: integer
+        relatedClientIds:
+          type: array
+          items:
+            type: integer
+        relatedPaymentIds:
+          type: array
+          items:
+            type: integer
+        relatedDeadlineIds:
+          type: array
+          items:
+            type: integer
+        relatedProductionEventIds:
+          type: array
+          items:
+            type: integer
+        relatedUserIds:
+          type: array
+          items:
+            type: integer
+        relatedEntityTypes:
+          type: array
+          items:
+            type: string
+        relatedEntities:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditRelatedEntityFilterOption'
+        requestIds:
+          type: array
+          items:
+            type: string
+
+    AuditUserFilterOption:
+      type: object
+      required:
+        - userId
+      properties:
+        userId:
+          type: integer
+        username:
+          type: string
+          nullable: true
+        role:
+          type: string
+          nullable: true
+
+    AuditRelatedEntityFilterOption:
+      type: object
+      required:
+        - entityType
+        - entityId
+      properties:
+        entityType:
+          type: string
+        entityId:
+          type: integer
 
     AuditListResponse:
       type: object

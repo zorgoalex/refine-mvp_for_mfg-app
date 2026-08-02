@@ -38,7 +38,10 @@ describe('parseAuditListQuery', () => {
 
 describe('AuditController.list', () => {
   it('passes current user, filters, paging, requestId to the service', async () => {
-    const service = { list: vi.fn(async () => ({ data: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, requestId: 'req-1' })) };
+    const service = {
+      list: vi.fn(async () => ({ data: [], pagination: { page: 1, pageSize: 50, total: 0, totalPages: 1 }, requestId: 'req-1' })),
+      filterOptions: vi.fn(),
+    };
     const controller = new AuditController(service);
     const request: RequestWithCurrentUser = {
       requestId: 'req-1',
@@ -49,6 +52,25 @@ describe('AuditController.list', () => {
       currentUser: request.user,
       filters: { relatedPaymentId: 42 },
       page: 1, pageSize: 50, requestId: 'req-1',
+    });
+  });
+
+  it('passes current user and requestId to filter options service', async () => {
+    const service = {
+      list: vi.fn(),
+      filterOptions: vi.fn(async () => ({ data: { events: [] }, requestId: 'req-options' })),
+    };
+    const controller = new AuditController(service);
+    const request: RequestWithCurrentUser = {
+      requestId: 'req-options',
+      user: { id: '1', username: 'admin', role: 'admin', roleId: 1, permissions: ['audit.view'] },
+    };
+
+    await controller.filterOptions(request);
+
+    expect(service.filterOptions).toHaveBeenCalledWith({
+      currentUser: request.user,
+      requestId: 'req-options',
     });
   });
 });

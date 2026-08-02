@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
-import type { AuditLogListResponseDto } from '../dto/audit.dto';
+import type { AuditFilterOptionsResponseDto, AuditLogListResponseDto } from '../dto/audit.dto';
 import { AuditQueryService } from '../application/audit-query.service';
 import type { ListAuditCommand } from '../application/audit-query.types';
 
@@ -53,7 +53,16 @@ export function parseAuditListQuery(
 @ApiBearerAuth()
 @Controller('audit')
 export class AuditController {
-  constructor(@Inject(AuditQueryService) private readonly audit: Pick<AuditQueryService, 'list'>) {}
+  constructor(@Inject(AuditQueryService) private readonly audit: Pick<AuditQueryService, 'list' | 'filterOptions'>) {}
+
+  @ApiOperation({ summary: 'Значения фильтров audit', description: 'Возвращает distinct-значения для выпадающих списков фильтров журнала аудита. Требует право audit.view.' })
+  @Get('filter-options')
+  async filterOptions(@Req() request: RequestWithCurrentUser): Promise<AuditFilterOptionsResponseDto> {
+    return this.audit.filterOptions({
+      currentUser: request.user,
+      requestId: request.requestId ?? 'audit-filter-options',
+    });
+  }
 
   @ApiOperation({ summary: 'Список audit events', description: 'Возвращает постраничный список audit log событий с фильтрами по actor, entity, related ids, action и времени. Требует право audit.view.' })
   @Get()

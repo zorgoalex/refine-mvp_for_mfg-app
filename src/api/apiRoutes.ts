@@ -274,5 +274,6 @@ export const apiRoutes = {
   },
   audit: {
     list: backendApiPath('/audit'),
+    filterOptions: backendApiPath('/audit/filter-options'),
   },
 } as const;

@@ -1,9 +1,7 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Table,
   Form,
-  Input,
-  InputNumber,
   Button,
   Card,
   Space,
@@ -14,6 +12,7 @@ import {
   Alert,
   DatePicker,
   Segmented,
+  Select,
 } from 'antd';
 import {
   FilterOutlined,
@@ -22,7 +21,14 @@ import {
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { auditApi } from '../../api/auditApi';
-import type { AuditLogEventDto, AuditLogListQuery, AuditRelatedEntity } from '../../api/types/auditApi.types';
+import type {
+  AuditFilterOptions,
+  AuditLogEventDto,
+  AuditLogListQuery,
+  AuditRelatedEntity,
+  AuditRelatedEntityFilterOption,
+  AuditUserFilterOption,
+} from '../../api/types/auditApi.types';
 import { ApiError } from '../../api/httpClient';
 import { featureFlags } from '../../config/featureFlags';
 import { authSession } from '../../api/authSession';
@@ -35,6 +41,25 @@ const { Text } = Typography;
 const PAGE_SIZE_DEFAULT = 50;
 
 type AuditViewMode = 'readable' | 'technical';
+type FilterSelectOption = { value: string | number; label: string };
+
+const EMPTY_FILTER_OPTIONS: AuditFilterOptions = {
+  events: [],
+  entityTypes: [],
+  entityIds: [],
+  users: [],
+  roles: [],
+  sources: [],
+  relatedOrderIds: [],
+  relatedClientIds: [],
+  relatedPaymentIds: [],
+  relatedDeadlineIds: [],
+  relatedProductionEventIds: [],
+  relatedUserIds: [],
+  relatedEntityTypes: [],
+  relatedEntities: [],
+  requestIds: [],
+};
 
 export interface FilterValues {
   event?: string;
@@ -59,6 +84,45 @@ export interface FilterValues {
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—';
   return dayjs(value).format('DD.MM.YYYY HH:mm:ss');
+}
+
+function stringSelectOptions(values: readonly string[]): FilterSelectOption[] {
+  return values.map((value) => ({ value, label: value }));
+}
+
+function numberSelectOptions(values: readonly number[], prefix: string): FilterSelectOption[] {
+  return values.map((value) => ({ value, label: `${prefix} #${value}` }));
+}
+
+function userSelectOptions(values: readonly AuditUserFilterOption[]): FilterSelectOption[] {
+  return values.map((value) => {
+    const name = value.username?.trim() || `Пользователь #${value.userId}`;
+    const role = value.role ? ` · ${value.role}` : '';
+    return { value: value.userId, label: `${name} (#${value.userId})${role}` };
+  });
+}
+
+function relatedEntityIdSelectOptions(
+  values: readonly AuditRelatedEntityFilterOption[],
+  entityType?: string,
+): FilterSelectOption[] {
+  const seen = new Set<number>();
+  const filtered = entityType ? values.filter((value) => value.entityType === entityType) : values;
+  const options: FilterSelectOption[] = [];
+  for (const value of filtered) {
+    if (seen.has(value.entityId)) continue;
+    seen.add(value.entityId);
+    options.push({
+      value: value.entityId,
+      label: entityType ? `#${value.entityId}` : `${value.entityType} #${value.entityId}`,
+    });
+  }
+  return options;
+}
+
+function selectFilterOption(input: string, option?: { label?: React.ReactNode; value?: unknown }): boolean {
+  const haystack = `${option?.label ?? ''} ${option?.value ?? ''}`.toLocaleLowerCase('ru-RU');
+  return haystack.includes(input.toLocaleLowerCase('ru-RU'));
 }
 
 function JsonCell({ value }: { value: unknown }) {
@@ -234,9 +298,14 @@ export const AuditList: React.FC = () => {
   const [data, setData] = useState<AuditLogEventDto[]>([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: PAGE_SIZE_DEFAULT, total: 0 });
   const [loading, setLoading] = useState(false);
+  const [filterOptions, setFilterOptions] = useState<AuditFilterOptions>(EMPTY_FILTER_OPTIONS);
+  const [filterOptionsLoading, setFilterOptionsLoading] = useState(false);
+  const [filterOptionsLoaded, setFilterOptionsLoaded] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const filterOptionsAbortRef = useRef<AbortController | null>(null);
+  const relatedEntityType = Form.useWatch('relatedEntityType', form);
 
   // Permission check: audit.view is required when backend permissions are on
   const currentUser = featureFlags.useBackendPermissions ? authSession.getUser() : null;
@@ -276,9 +345,38 @@ export const AuditList: React.FC = () => {
     [hasPermission],
   );
 
+  const fetchFilterOptions = useCallback(async () => {
+    if (!hasPermission) return;
+
+    filterOptionsAbortRef.current?.abort();
+    filterOptionsAbortRef.current = new AbortController();
+    setFilterOptionsLoading(true);
+
+    try {
+      const response = await auditApi.filterOptions();
+      setFilterOptions(response.data);
+      setFilterOptionsLoaded(true);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      setFilterOptionsLoaded(true);
+      if (err instanceof ApiError && (err.statusCode === 403 || err.statusCode === 401)) {
+        setPermissionError('Недостаточно прав для просмотра журнала аудита (audit.view).');
+      } else if (err instanceof Error) {
+        setPermissionError(`Ошибка загрузки фильтров: ${err.message}`);
+      }
+    } finally {
+      setFilterOptionsLoading(false);
+    }
+  }, [hasPermission]);
+
   useEffect(() => {
     void fetchData(query);
   }, [query, fetchData]);
+
+  useEffect(() => {
+    if (!filtersVisible || filterOptionsLoaded || filterOptionsLoading) return;
+    void fetchFilterOptions();
+  }, [fetchFilterOptions, filterOptionsLoaded, filterOptionsLoading, filtersVisible]);
 
   useEffect(() => {
     setQuery((current) => current.pageSize === preferredPageSize
@@ -304,6 +402,36 @@ export const AuditList: React.FC = () => {
       page: pageSizeChanged ? 1 : (pag.current ?? 1),
       pageSize: nextPageSize,
     }));
+  };
+
+  const filterSelectOptions = useMemo(
+    () => ({
+      events: stringSelectOptions(filterOptions.events),
+      entityTypes: stringSelectOptions(filterOptions.entityTypes),
+      entityIds: stringSelectOptions(filterOptions.entityIds),
+      users: userSelectOptions(filterOptions.users),
+      roles: stringSelectOptions(filterOptions.roles),
+      sources: stringSelectOptions(filterOptions.sources),
+      relatedOrderIds: numberSelectOptions(filterOptions.relatedOrderIds, 'Заказ'),
+      relatedClientIds: numberSelectOptions(filterOptions.relatedClientIds, 'Клиент'),
+      relatedPaymentIds: numberSelectOptions(filterOptions.relatedPaymentIds, 'Платёж'),
+      relatedDeadlineIds: numberSelectOptions(filterOptions.relatedDeadlineIds, 'Дедлайн'),
+      relatedProductionEventIds: numberSelectOptions(filterOptions.relatedProductionEventIds, 'Произв. событие'),
+      relatedUserIds: numberSelectOptions(filterOptions.relatedUserIds, 'Пользователь'),
+      relatedEntityTypes: stringSelectOptions(filterOptions.relatedEntityTypes),
+      relatedEntityIds: relatedEntityIdSelectOptions(filterOptions.relatedEntities, relatedEntityType),
+      requestIds: stringSelectOptions(filterOptions.requestIds),
+    }),
+    [filterOptions, relatedEntityType],
+  );
+
+  const commonSelectProps = {
+    allowClear: true,
+    showSearch: true,
+    size: 'small' as const,
+    loading: filterOptionsLoading,
+    optionFilterProp: 'label',
+    filterOption: selectFilterOption,
   };
 
   const expandedRowRender = (record: AuditLogEventDto) => (
@@ -408,77 +536,153 @@ export const AuditList: React.FC = () => {
             <div className="audit-filters-grid">
               <div className="aff-item">
                 <Form.Item name="event" label="Событие">
-                  <Input allowClear placeholder="ORDER_CREATED..." size="small" style={{ width: 160 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="Событие"
+                    options={filterSelectOptions.events}
+                    style={{ width: 190 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="entityType" label="Тип сущности">
-                  <Input allowClear placeholder="order..." size="small" style={{ width: 110 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="Тип"
+                    options={filterSelectOptions.entityTypes}
+                    style={{ width: 130 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="entityId" label="ID сущности">
-                  <Input allowClear placeholder="42" size="small" style={{ width: 80 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="ID"
+                    options={filterSelectOptions.entityIds}
+                    style={{ width: 110 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="userId" label="ID пользователя">
-                  <InputNumber min={1} placeholder="7" size="small" style={{ width: 90 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="Пользователь"
+                    options={filterSelectOptions.users}
+                    style={{ width: 170 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="role" label="Роль">
-                  <Input allowClear placeholder="admin..." size="small" style={{ width: 100 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="Роль"
+                    options={filterSelectOptions.roles}
+                    style={{ width: 120 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="source" label="Источник">
-                  <Input allowClear placeholder="backend" size="small" style={{ width: 100 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="Источник"
+                    options={filterSelectOptions.sources}
+                    style={{ width: 180 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="relatedOrderId" label="Заказ #">
-                  <InputNumber min={1} placeholder="ID" size="small" style={{ width: 80 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="ID"
+                    options={filterSelectOptions.relatedOrderIds}
+                    style={{ width: 120 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="relatedClientId" label="Клиент #">
-                  <InputNumber min={1} placeholder="ID" size="small" style={{ width: 80 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="ID"
+                    options={filterSelectOptions.relatedClientIds}
+                    style={{ width: 120 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="relatedPaymentId" label="Платёж #">
-                  <InputNumber min={1} placeholder="ID" size="small" style={{ width: 80 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="ID"
+                    options={filterSelectOptions.relatedPaymentIds}
+                    style={{ width: 120 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="relatedDeadlineId" label="Дедлайн #">
-                  <InputNumber min={1} placeholder="ID" size="small" style={{ width: 80 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="ID"
+                    options={filterSelectOptions.relatedDeadlineIds}
+                    style={{ width: 120 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="relatedProductionEventId" label="Произв. событие #">
-                  <InputNumber min={1} placeholder="ID" size="small" style={{ width: 90 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="ID"
+                    options={filterSelectOptions.relatedProductionEventIds}
+                    style={{ width: 150 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="relatedUserId" label="Пользователь #">
-                  <InputNumber min={1} placeholder="ID" size="small" style={{ width: 90 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="ID"
+                    options={filterSelectOptions.relatedUserIds}
+                    style={{ width: 140 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="relatedEntityType" label="Related тип">
-                  <Input allowClear placeholder="user / employee" size="small" style={{ width: 120 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="Тип"
+                    options={filterSelectOptions.relatedEntityTypes}
+                    style={{ width: 150 }}
+                    onChange={() => form.setFieldValue('relatedEntityId', undefined)}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="relatedEntityId" label="Related #">
-                  <InputNumber min={1} placeholder="ID" size="small" style={{ width: 90 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="ID"
+                    options={filterSelectOptions.relatedEntityIds}
+                    style={{ width: 130 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">
                 <Form.Item name="requestId" label="Request ID">
-                  <Input allowClear placeholder="uuid..." size="small" style={{ width: 140 }} />
+                  <Select
+                    {...commonSelectProps}
+                    placeholder="Request ID"
+                    options={filterSelectOptions.requestIds}
+                    style={{ width: 190 }}
+                  />
                 </Form.Item>
               </div>
               <div className="aff-item">

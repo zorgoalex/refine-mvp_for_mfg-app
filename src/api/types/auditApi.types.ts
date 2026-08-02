@@ -47,6 +47,40 @@ export interface AuditLogListResponse {
   requestId: string;
 }
 
+export interface AuditUserFilterOption {
+  userId: number;
+  username: string | null;
+  role: string | null;
+}
+
+export interface AuditRelatedEntityFilterOption {
+  entityType: string;
+  entityId: number;
+}
+
+export interface AuditFilterOptions {
+  events: string[];
+  entityTypes: string[];
+  entityIds: string[];
+  users: AuditUserFilterOption[];
+  roles: string[];
+  sources: string[];
+  relatedOrderIds: number[];
+  relatedClientIds: number[];
+  relatedPaymentIds: number[];
+  relatedDeadlineIds: number[];
+  relatedProductionEventIds: number[];
+  relatedUserIds: number[];
+  relatedEntityTypes: string[];
+  relatedEntities: AuditRelatedEntityFilterOption[];
+  requestIds: string[];
+}
+
+export interface AuditFilterOptionsResponse {
+  data: AuditFilterOptions;
+  requestId: string;
+}
+
 export interface AuditLogListQuery {
   page?: number;
   pageSize?: number;

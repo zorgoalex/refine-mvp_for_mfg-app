@@ -1,8 +1,23 @@
 import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../../database/database.types';
 import { redactLogValue } from '../../../common/logging/redaction';
-import type { AuditLogEventDto, AuditLogListResponseDto } from '../dto/audit.dto';
-import type { AuditLogFilters, AuditLogRepositoryPort, ListAuditCommand } from '../application/audit-query.types';
+import type {
+  AuditFilterOptionsDto,
+  AuditFilterOptionsResponseDto,
+  AuditLogEventDto,
+  AuditLogListResponseDto,
+  AuditRelatedEntityFilterOptionDto,
+  AuditUserFilterOptionDto,
+} from '../dto/audit.dto';
+import type {
+  AuditFilterOptionsCommand,
+  AuditLogFilters,
+  AuditLogRepositoryPort,
+  ListAuditCommand,
+} from '../application/audit-query.types';
+
+const FILTER_OPTIONS_RECENT_LIMIT = 5000;
+const FILTER_OPTION_LIMIT = 200;
 
 interface CountRow extends QueryResultRow { total: number | string }
 interface AuditRow extends QueryResultRow {
@@ -20,6 +35,24 @@ interface AuditRow extends QueryResultRow {
   created_at: string | Date;
 }
 
+interface AuditFilterOptionsRow extends QueryResultRow {
+  events: unknown;
+  entity_types: unknown;
+  entity_ids: unknown;
+  users: unknown;
+  roles: unknown;
+  sources: unknown;
+  related_order_ids: unknown;
+  related_client_ids: unknown;
+  related_payment_ids: unknown;
+  related_deadline_ids: unknown;
+  related_production_event_ids: unknown;
+  related_user_ids: unknown;
+  related_entity_types: unknown;
+  related_entities: unknown;
+  request_ids: unknown;
+}
+
 const SELECT_COLUMNS = `
   audit_id, event, entity_type, entity_id, user_id, username, role, source,
   related_order_id, related_client_id, related_payment_id, related_deadline_id, related_production_event_id,
@@ -32,6 +65,69 @@ const SELECT_COLUMNS = `
     '[]'::json
   ) AS related_entities,
   created_at
+`;
+
+const FILTER_OPTIONS_SQL = `
+WITH recent AS (
+  SELECT audit_id, event, entity_type, entity_id, user_id, username, role, source,
+         related_order_id, related_client_id, related_payment_id, related_deadline_id,
+         related_production_event_id, related_user_id, request_id, created_at
+  FROM audit_log
+  ORDER BY created_at DESC, audit_id DESC
+  LIMIT $1
+),
+related AS (
+  SELECT r.entity_type, r.entity_id, max(recent.created_at) AS latest
+  FROM audit_log_related_entity r
+  JOIN recent ON recent.audit_id = r.audit_id
+  GROUP BY r.entity_type, r.entity_id
+)
+SELECT
+  COALESCE((SELECT jsonb_agg(event ORDER BY latest DESC, event)
+    FROM (SELECT event, max(created_at) AS latest FROM recent WHERE event IS NOT NULL GROUP BY event ORDER BY latest DESC, event LIMIT $2) s), '[]'::jsonb) AS events,
+  COALESCE((SELECT jsonb_agg(entity_type ORDER BY latest DESC, entity_type)
+    FROM (SELECT entity_type, max(created_at) AS latest FROM recent WHERE entity_type IS NOT NULL GROUP BY entity_type ORDER BY latest DESC, entity_type LIMIT $2) s), '[]'::jsonb) AS entity_types,
+  COALESCE((SELECT jsonb_agg(entity_id ORDER BY latest DESC, entity_id)
+    FROM (SELECT entity_id, max(created_at) AS latest FROM recent WHERE entity_id IS NOT NULL GROUP BY entity_id ORDER BY latest DESC, entity_id LIMIT $2) s), '[]'::jsonb) AS entity_ids,
+  COALESCE((SELECT jsonb_agg(jsonb_build_object('userId', user_id, 'username', username, 'role', role) ORDER BY created_at DESC, user_id)
+    FROM (
+      SELECT user_id, username, role, created_at
+      FROM (SELECT DISTINCT ON (user_id) user_id, username, role, created_at FROM recent WHERE user_id IS NOT NULL ORDER BY user_id, created_at DESC) distinct_users
+      ORDER BY created_at DESC, user_id
+      LIMIT $2
+    ) s), '[]'::jsonb) AS users,
+  COALESCE((SELECT jsonb_agg(role ORDER BY latest DESC, role)
+    FROM (SELECT role, max(created_at) AS latest FROM recent WHERE role IS NOT NULL GROUP BY role ORDER BY latest DESC, role LIMIT $2) s), '[]'::jsonb) AS roles,
+  COALESCE((SELECT jsonb_agg(source ORDER BY latest DESC, source)
+    FROM (SELECT source, max(created_at) AS latest FROM recent WHERE source IS NOT NULL GROUP BY source ORDER BY latest DESC, source LIMIT $2) s), '[]'::jsonb) AS sources,
+  COALESCE((SELECT jsonb_agg(related_order_id ORDER BY latest DESC, related_order_id)
+    FROM (SELECT related_order_id, max(created_at) AS latest FROM recent WHERE related_order_id IS NOT NULL GROUP BY related_order_id ORDER BY latest DESC, related_order_id LIMIT $2) s), '[]'::jsonb) AS related_order_ids,
+  COALESCE((SELECT jsonb_agg(related_client_id ORDER BY latest DESC, related_client_id)
+    FROM (SELECT related_client_id, max(created_at) AS latest FROM recent WHERE related_client_id IS NOT NULL GROUP BY related_client_id ORDER BY latest DESC, related_client_id LIMIT $2) s), '[]'::jsonb) AS related_client_ids,
+  COALESCE((SELECT jsonb_agg(related_payment_id ORDER BY latest DESC, related_payment_id)
+    FROM (SELECT related_payment_id, max(created_at) AS latest FROM recent WHERE related_payment_id IS NOT NULL GROUP BY related_payment_id ORDER BY latest DESC, related_payment_id LIMIT $2) s), '[]'::jsonb) AS related_payment_ids,
+  COALESCE((SELECT jsonb_agg(related_deadline_id ORDER BY latest DESC, related_deadline_id)
+    FROM (SELECT related_deadline_id, max(created_at) AS latest FROM recent WHERE related_deadline_id IS NOT NULL GROUP BY related_deadline_id ORDER BY latest DESC, related_deadline_id LIMIT $2) s), '[]'::jsonb) AS related_deadline_ids,
+  COALESCE((SELECT jsonb_agg(related_production_event_id ORDER BY latest DESC, related_production_event_id)
+    FROM (SELECT related_production_event_id, max(created_at) AS latest FROM recent WHERE related_production_event_id IS NOT NULL GROUP BY related_production_event_id ORDER BY latest DESC, related_production_event_id LIMIT $2) s), '[]'::jsonb) AS related_production_event_ids,
+  COALESCE((SELECT jsonb_agg(id ORDER BY latest DESC, id)
+    FROM (
+      SELECT id, max(latest) AS latest
+      FROM (
+        SELECT related_user_id AS id, created_at AS latest FROM recent WHERE related_user_id IS NOT NULL
+        UNION ALL
+        SELECT entity_id AS id, latest FROM related WHERE entity_type = 'user'
+      ) related_users
+      GROUP BY id
+      ORDER BY latest DESC, id
+      LIMIT $2
+    ) s), '[]'::jsonb) AS related_user_ids,
+  COALESCE((SELECT jsonb_agg(entity_type ORDER BY latest DESC, entity_type)
+    FROM (SELECT entity_type, max(latest) AS latest FROM related GROUP BY entity_type ORDER BY latest DESC, entity_type LIMIT $2) s), '[]'::jsonb) AS related_entity_types,
+  COALESCE((SELECT jsonb_agg(jsonb_build_object('entityType', entity_type, 'entityId', entity_id) ORDER BY latest DESC, entity_type, entity_id)
+    FROM (SELECT entity_type, entity_id, latest FROM related ORDER BY latest DESC, entity_type, entity_id LIMIT $2) s), '[]'::jsonb) AS related_entities,
+  COALESCE((SELECT jsonb_agg(request_id ORDER BY latest DESC, request_id)
+    FROM (SELECT request_id, max(created_at) AS latest FROM recent WHERE request_id IS NOT NULL GROUP BY request_id ORDER BY latest DESC, request_id LIMIT $2) s), '[]'::jsonb) AS request_ids
 `;
 
 function buildWhere(filters: AuditLogFilters): { where: string; params: unknown[] } {
@@ -120,6 +216,81 @@ function mapRow(row: AuditRow): AuditLogEventDto {
   };
 }
 
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
+function numberArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<number>();
+  const result: number[] = [];
+  for (const item of value) {
+    const next = num(item as string | number | null);
+    if (next == null || seen.has(next)) continue;
+    seen.add(next);
+    result.push(next);
+  }
+  return result;
+}
+
+function userOptions(value: unknown): AuditUserFilterOptionDto[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<number>();
+  const result: AuditUserFilterOptionDto[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as { userId?: unknown; username?: unknown; role?: unknown };
+    const userId = num(row.userId as string | number | null);
+    if (userId == null || seen.has(userId)) continue;
+    seen.add(userId);
+    result.push({
+      userId,
+      username: typeof row.username === 'string' ? row.username : null,
+      role: typeof row.role === 'string' ? row.role : null,
+    });
+  }
+  return result;
+}
+
+function relatedEntityOptions(value: unknown): AuditRelatedEntityFilterOptionDto[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const result: AuditRelatedEntityFilterOptionDto[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as { entityType?: unknown; entityId?: unknown };
+    if (typeof row.entityType !== 'string' || row.entityType.trim().length === 0) continue;
+    const entityId = num(row.entityId as string | number | null);
+    if (entityId == null) continue;
+    const key = `${row.entityType}:${entityId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({ entityType: row.entityType, entityId });
+  }
+  return result;
+}
+
+function mapFilterOptions(row: AuditFilterOptionsRow | undefined): AuditFilterOptionsDto {
+  return {
+    events: stringArray(row?.events),
+    entityTypes: stringArray(row?.entity_types),
+    entityIds: stringArray(row?.entity_ids),
+    users: userOptions(row?.users),
+    roles: stringArray(row?.roles),
+    sources: stringArray(row?.sources),
+    relatedOrderIds: numberArray(row?.related_order_ids),
+    relatedClientIds: numberArray(row?.related_client_ids),
+    relatedPaymentIds: numberArray(row?.related_payment_ids),
+    relatedDeadlineIds: numberArray(row?.related_deadline_ids),
+    relatedProductionEventIds: numberArray(row?.related_production_event_ids),
+    relatedUserIds: numberArray(row?.related_user_ids),
+    relatedEntityTypes: stringArray(row?.related_entity_types),
+    relatedEntities: relatedEntityOptions(row?.related_entities),
+    requestIds: stringArray(row?.request_ids),
+  };
+}
+
 export class PgAuditLogRepository implements AuditLogRepositoryPort {
   constructor(private readonly database: DatabaseClient) {}
 
@@ -144,6 +315,17 @@ export class PgAuditLogRepository implements AuditLogRepositoryPort {
         total,
         totalPages: Math.max(1, Math.ceil(total / command.pageSize)),
       },
+      requestId: command.requestId,
+    };
+  }
+
+  async filterOptions(command: AuditFilterOptionsCommand): Promise<AuditFilterOptionsResponseDto> {
+    const result = await this.database.query<AuditFilterOptionsRow>(
+      FILTER_OPTIONS_SQL,
+      [FILTER_OPTIONS_RECENT_LIMIT, FILTER_OPTION_LIMIT],
+    );
+    return {
+      data: mapFilterOptions(result.rows[0]),
       requestId: command.requestId,
     };
   }

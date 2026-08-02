@@ -91,6 +91,18 @@ describe('auditApi', () => {
       expect.objectContaining({ method: 'GET' }),
     );
   });
+
+  it('calls GET /api/v1/audit/filter-options for dropdown values', async () => {
+    const fetchMock = mockFetch(createFilterOptionsResponse());
+
+    const result = await auditApi.filterOptions();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/audit/filter-options',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(result.data.events).toContain('orders.detail_transfer');
+  });
 });
 
 // Helpers
@@ -115,6 +127,29 @@ function createListResponse(
   requestId = 'req-test-1',
 ) {
   return { data, pagination, requestId };
+}
+
+function createFilterOptionsResponse(requestId = 'req-filter-options') {
+  return {
+    data: {
+      events: ['orders.detail_transfer'],
+      entityTypes: ['order'],
+      entityIds: ['11472'],
+      users: [{ userId: 7, username: 'manager', role: 'admin' }],
+      roles: ['admin'],
+      sources: ['backend-orders-command'],
+      relatedOrderIds: [11472],
+      relatedClientIds: [55],
+      relatedPaymentIds: [],
+      relatedDeadlineIds: [],
+      relatedProductionEventIds: [],
+      relatedUserIds: [7],
+      relatedEntityTypes: ['order_detail'],
+      relatedEntities: [{ entityType: 'order_detail', entityId: 1001 }],
+      requestIds: ['req-1'],
+    },
+    requestId,
+  };
 }
 
 function createAuditEvent(): AuditLogEventDto {

@@ -1,5 +1,5 @@
 import type { CurrentUser } from '../../../permissions/current-user';
-import type { AuditLogListResponseDto } from '../dto/audit.dto';
+import type { AuditFilterOptionsResponseDto, AuditLogListResponseDto } from '../dto/audit.dto';
 
 export interface AuditLogFilters {
   event?: string;
@@ -29,6 +29,12 @@ export interface ListAuditCommand {
   requestId: string;
 }
 
+export interface AuditFilterOptionsCommand {
+  currentUser: CurrentUser | undefined;
+  requestId: string;
+}
+
 export interface AuditLogRepositoryPort {
   list(command: ListAuditCommand): Promise<AuditLogListResponseDto>;
+  filterOptions(command: AuditFilterOptionsCommand): Promise<AuditFilterOptionsResponseDto>;
 }

@@ -43,3 +43,37 @@ export interface AuditLogListResponseDto {
   pagination: AuditPaginationDto;
   requestId: string;
 }
+
+export interface AuditUserFilterOptionDto {
+  userId: number;
+  username: string | null;
+  role: string | null;
+}
+
+export interface AuditRelatedEntityFilterOptionDto {
+  entityType: string;
+  entityId: number;
+}
+
+export interface AuditFilterOptionsDto {
+  events: string[];
+  entityTypes: string[];
+  entityIds: string[];
+  users: AuditUserFilterOptionDto[];
+  roles: string[];
+  sources: string[];
+  relatedOrderIds: number[];
+  relatedClientIds: number[];
+  relatedPaymentIds: number[];
+  relatedDeadlineIds: number[];
+  relatedProductionEventIds: number[];
+  relatedUserIds: number[];
+  relatedEntityTypes: string[];
+  relatedEntities: AuditRelatedEntityFilterOptionDto[];
+  requestIds: string[];
+}
+
+export interface AuditFilterOptionsResponseDto {
+  data: AuditFilterOptionsDto;
+  requestId: string;
+}

@@ -159,3 +159,57 @@ describe('PgAuditLogRepository.list', () => {
     expect(res.data[0].relatedEntities).toEqual([]);
   });
 });
+
+describe('PgAuditLogRepository.filterOptions', () => {
+  it('loads distinct recent filter values and maps option DTOs', async () => {
+    const { client, calls } = db([
+      {
+        rows: [
+          {
+            events: ['orders.detail_transfer', 'orders.update'],
+            entity_types: ['order'],
+            entity_ids: ['11472'],
+            users: [{ userId: '7', username: 'manager', role: 'admin' }],
+            roles: ['admin'],
+            sources: ['backend-orders-command'],
+            related_order_ids: ['11472'],
+            related_client_ids: ['55'],
+            related_payment_ids: ['9'],
+            related_deadline_ids: ['12'],
+            related_production_event_ids: ['33'],
+            related_user_ids: ['7'],
+            related_entity_types: ['order_detail'],
+            related_entities: [{ entityType: 'order_detail', entityId: '1001' }],
+            request_ids: ['req-1'],
+          },
+        ],
+      },
+    ]);
+    const repo = new PgAuditLogRepository(client);
+
+    const res = await repo.filterOptions({ currentUser: undefined, requestId: 'rq-options' });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].text).toMatch(/WITH recent AS/i);
+    expect(calls[0].text).toMatch(/audit_log_related_entity/i);
+    expect(calls[0].params).toEqual([5000, 200]);
+    expect(res.requestId).toBe('rq-options');
+    expect(res.data).toMatchObject({
+      events: ['orders.detail_transfer', 'orders.update'],
+      entityTypes: ['order'],
+      entityIds: ['11472'],
+      users: [{ userId: 7, username: 'manager', role: 'admin' }],
+      roles: ['admin'],
+      sources: ['backend-orders-command'],
+      relatedOrderIds: [11472],
+      relatedClientIds: [55],
+      relatedPaymentIds: [9],
+      relatedDeadlineIds: [12],
+      relatedProductionEventIds: [33],
+      relatedUserIds: [7],
+      relatedEntityTypes: ['order_detail'],
+      relatedEntities: [{ entityType: 'order_detail', entityId: 1001 }],
+      requestIds: ['req-1'],
+    });
+  });
+});
