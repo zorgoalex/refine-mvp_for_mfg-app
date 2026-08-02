@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-02",
+    title: "Календарь: фильтр дефолтного материала",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "При выборе «МДФ 16мм» в фильтре материалов календаря теперь находятся карточки без material-бейджей, потому что это дефолтный материал календаря.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
     title: "Календарь: материалы фильтра из листовых материалов",
     services: ["ERP"],
     repositories: ["repo_erp"],

@@ -328,7 +328,7 @@ export function getMaterialsForCard(
   }));
 }
 
-function isDefaultMdf16Material(material: string): boolean {
+export function isDefaultMdf16Material(material: string): boolean {
   const normalized = material
     .toLowerCase()
     .replace(/\s+/g, ' ')

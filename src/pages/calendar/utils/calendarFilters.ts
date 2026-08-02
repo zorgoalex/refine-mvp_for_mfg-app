@@ -1,4 +1,5 @@
 import type { CalendarFilters, CalendarOrder } from '../types/calendar';
+import { isDefaultMdf16Material } from './statusColors';
 
 const FILTER_KEYS: Array<keyof CalendarFilters> = [
   'quickSearch',
@@ -35,7 +36,10 @@ const orderTextFields = (order: CalendarOrder) => [
 const detailMaterialNames = (order: CalendarOrder) =>
   (order.order_details ?? [])
     .map((detail) => detail.material?.material_name)
-    .filter(Boolean);
+    .filter((name): name is string => !!name);
+
+const hasVisibleMaterialBadge = (materialNames: string[]): boolean =>
+  materialNames.some((name) => !isDefaultMdf16Material(name));
 
 const detailMillingNames = (order: CalendarOrder) =>
   (order.order_details ?? [])
@@ -79,10 +83,15 @@ export const matchesCalendarFilters = (
   }
 
   if (hasValue(filters.materialName)) {
-    const materialMatches = detailMaterialNames(order).some((name) =>
+    const materialQuery = filters.materialName;
+    const materialNames = detailMaterialNames(order);
+    const materialMatches = materialNames.some((name) =>
       includesNormalized(name, filters.materialName),
     );
-    if (!materialMatches) return false;
+    const defaultMdf16Matches =
+      isDefaultMdf16Material(materialQuery ?? '') && !hasVisibleMaterialBadge(materialNames);
+
+    if (!materialMatches && !defaultMdf16Matches) return false;
   }
 
   if (hasValue(filters.millingTypeName)) {

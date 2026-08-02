@@ -66,6 +66,30 @@ describe('calendarFilters', () => {
     }).map((row) => row.order_id)).toEqual([2]);
   });
 
+  it('treats cards without visible material badges as default MDF 16mm', () => {
+    const rows = [
+      order({
+        order_id: 1,
+        order_name: 'A-1',
+        order_details: [],
+      }),
+      order({
+        order_id: 2,
+        order_name: 'A-2',
+        order_details: [{ material: { material_name: 'МДФ 16 мм' } }],
+      }),
+      order({
+        order_id: 3,
+        order_name: 'A-3',
+        order_details: [{ material: { material_name: 'ЛДСП Дуб' } }],
+      }),
+    ];
+
+    expect(applyCalendarFilters(rows, {
+      materialName: 'МДФ 16мм',
+    }).map((row) => row.order_id)).toEqual([1, 2]);
+  });
+
   it('trims empty values before counting active filters', () => {
     const cleaned = cleanCalendarFilters({
       quickSearch: '  ФК26 ',
