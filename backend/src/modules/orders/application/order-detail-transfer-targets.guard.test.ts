@@ -18,4 +18,13 @@ describe('order detail transfer target list contract', () => {
     expect(source).toContain('orderDate: dateOnly(row.order_date)');
     expect(source).toContain('orderStatusName: row.order_status_name');
   });
+
+  it('records self-contained audit metadata for moved details and order route', () => {
+    expect(source).toContain("event: 'orders.detail_transfer'");
+    expect(source).toContain('sourceOrderName');
+    expect(source).toContain('targetOrderName');
+    expect(source).toContain('movedDetails: movedDetailAuditItems');
+    expect(source).toContain('sourceDetailNumber');
+    expect(source).toContain('targetDetailNumber');
+  });
 });

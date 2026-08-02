@@ -144,4 +144,49 @@ describe('buildAuditReadableSummary', () => {
     expect(summary.changes.map((change) => change.label)).not.toContain('Version');
     expect(summary.changes.map((change) => change.label)).not.toContain('Request id');
   });
+
+  it('describes order detail transfers with detail list and source/target orders', () => {
+    const summary = buildAuditReadableSummary(
+      event({
+        event: 'orders.detail_transfer',
+        entityType: 'order',
+        entityId: '11471',
+        relatedOrderId: 11472,
+        username: 'ivan',
+        role: 'manager',
+        metadata: {
+          sourceOrderId: 11471,
+          sourceOrderName: '2728',
+          targetOrderId: 11472,
+          targetOrderName: '2729',
+          movedDetails: [
+            {
+              detailId: 1001,
+              sourceDetailNumber: 3,
+              targetDetailNumber: 7,
+              height: 716,
+              width: 396,
+              quantity: 2,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(summary.title).toBe('Перенесены детали заказа');
+    expect(summary.actor).toBe('ivan (manager)');
+    expect(summary.object).toBe('2728 (#11471) → 2729 (#11472)');
+    expect(summary.changes).toContainEqual({
+      label: 'Детали',
+      before: '2728 (#11471)',
+      after: '2729 (#11472)',
+    });
+    expect(summary.notes).toEqual(
+      expect.arrayContaining([
+        'Какие детали: №3→№7 #1001 (716x396 x2)',
+        'Из заказа: 2728 (#11471)',
+        'В заказ: 2729 (#11472)',
+      ]),
+    );
+  });
 });

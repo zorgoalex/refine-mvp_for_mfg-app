@@ -54,6 +54,7 @@ const EVENT_TITLES: Record<string, string> = {
   'orders.update': 'Обновлён заказ',
   'orders.delete': 'Удалён заказ',
   'orders.restore': 'Восстановлен заказ',
+  'orders.detail_transfer': 'Перенесены детали заказа',
   'orders.status_change': STATUS_EVENT_CONFIG['orders.status_change'].title,
   'orders.production_status_change': STATUS_EVENT_CONFIG['orders.production_status_change'].title,
   'orders.detail_production_status_change':
@@ -155,6 +156,7 @@ export function buildAuditReadableSummary(record: AuditLogEventDto): AuditReadab
   const changes: AuditReadableChange[] = [];
   const notes: string[] = [];
 
+  addDetailTransferSummary(record, metadata, changes, notes);
   addStatusChange(record, before, after, diff, metadata, changes);
   addProductionModeChange(record, diff, before, after, changes);
   addGenericChanges(diff, changes);
@@ -197,6 +199,10 @@ export function auditActor(record: AuditLogEventDto, metadata?: JsonObject): str
 
 export function auditObject(record: AuditLogEventDto, metadata?: JsonObject): string {
   const meta = metadata ?? objectOrEmpty(record.metadata);
+  if (record.event === 'orders.detail_transfer') {
+    return detailTransferRouteLabel(record, meta);
+  }
+
   const orderId = record.relatedOrderId ?? numberValue(meta.orderId);
   if (orderId != null) return `Заказ #${orderId}`;
 
@@ -210,6 +216,34 @@ export function auditObject(record: AuditLogEventDto, metadata?: JsonObject): st
   if (clientId != null) return `Клиент #${clientId}`;
 
   return 'Объект не указан';
+}
+
+function addDetailTransferSummary(
+  record: AuditLogEventDto,
+  metadata: JsonObject,
+  changes: AuditReadableChange[],
+  notes: string[],
+): void {
+  if (record.event !== 'orders.detail_transfer') return;
+
+  const source = detailTransferOrderLabel(
+    numberValue(metadata.sourceOrderId) ?? numericEntityId(record.entityId),
+    stringValue(metadata.sourceOrderName),
+  );
+  const target = detailTransferOrderLabel(
+    numberValue(metadata.targetOrderId) ?? record.relatedOrderId ?? undefined,
+    stringValue(metadata.targetOrderName),
+  );
+  const details = formatTransferDetailList(metadata);
+
+  changes.push({
+    label: 'Детали',
+    before: source,
+    after: target,
+  });
+  if (details) notes.push(`Какие детали: ${details}`);
+  notes.push(`Из заказа: ${source}`);
+  notes.push(`В заказ: ${target}`);
 }
 
 function addStatusChange(
@@ -384,6 +418,74 @@ function pushRelated(parts: string[], label: string, id: number | null | undefin
 function relatedEntityLabel(entity: AuditRelatedEntity): string {
   const label = ENTITY_LABELS[entity.entityType] ?? humanizeToken(entity.entityType);
   return `${label} #${entity.entityId}`;
+}
+
+function detailTransferRouteLabel(record: AuditLogEventDto, metadata: JsonObject): string {
+  const source = detailTransferOrderLabel(
+    numberValue(metadata.sourceOrderId) ?? numericEntityId(record.entityId),
+    stringValue(metadata.sourceOrderName),
+  );
+  const target = detailTransferOrderLabel(
+    numberValue(metadata.targetOrderId) ?? record.relatedOrderId ?? undefined,
+    stringValue(metadata.targetOrderName),
+  );
+  return `${source} → ${target}`;
+}
+
+function detailTransferOrderLabel(orderId: number | undefined, orderName: string | undefined): string {
+  if (orderName && orderId != null) return `${orderName} (#${orderId})`;
+  if (orderName) return orderName;
+  if (orderId != null) return `Заказ #${orderId}`;
+  return 'заказ не указан';
+}
+
+function numericEntityId(entityId: string | null): number | undefined {
+  return numberValue(entityId);
+}
+
+function formatTransferDetailList(metadata: JsonObject): string | null {
+  const movedDetails = Array.isArray(metadata.movedDetails) ? metadata.movedDetails : [];
+  if (movedDetails.length > 0) {
+    const labels = movedDetails
+      .map(formatTransferDetail)
+      .filter((label): label is string => Boolean(label));
+    if (labels.length > 0) {
+      const visible = labels.slice(0, 6);
+      const suffix = labels.length > visible.length ? ` и ещё ${labels.length - visible.length}` : '';
+      return `${visible.join(', ')}${suffix}`;
+    }
+  }
+
+  const ids = numericArray(metadata.movedDetailIds) ?? numericArray(metadata.detailIds);
+  return ids ? formatIdList(ids) : null;
+}
+
+function formatTransferDetail(value: unknown): string | null {
+  const detail = objectOrEmpty(value);
+  const detailId = numberValue(detail.detailId);
+  const sourceNumber = numberValue(detail.sourceDetailNumber);
+  const targetNumber = numberValue(detail.targetDetailNumber);
+  const numberPart =
+    sourceNumber != null && targetNumber != null && sourceNumber !== targetNumber
+      ? `№${sourceNumber}→№${targetNumber}`
+      : sourceNumber != null
+        ? `№${sourceNumber}`
+        : targetNumber != null
+          ? `№${targetNumber}`
+          : null;
+  const idPart = detailId != null ? `#${detailId}` : null;
+  const sizePart = formatTransferDetailSize(detail);
+  const main = [numberPart, idPart].filter(Boolean).join(' ');
+  if (!main && !sizePart) return null;
+  return sizePart ? `${main || 'деталь'} (${sizePart})` : main;
+}
+
+function formatTransferDetailSize(detail: JsonObject): string | null {
+  const height = numberValue(detail.height);
+  const width = numberValue(detail.width);
+  const quantity = numberValue(detail.quantity);
+  if (height == null || width == null || quantity == null) return null;
+  return `${height}x${width} x${quantity}`;
 }
 
 function fieldLabel(field: string): string {

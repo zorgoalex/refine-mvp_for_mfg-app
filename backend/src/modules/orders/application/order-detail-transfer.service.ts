@@ -128,6 +128,15 @@ interface LockedDetailRow {
   detail_cost: string | number | null;
 }
 
+interface TransferAuditDetail {
+  detailId: number;
+  sourceDetailNumber: number | null;
+  targetDetailNumber: number | null;
+  height: number;
+  width: number;
+  quantity: number;
+}
+
 interface PaymentRow {
   amount: string | number;
   payment_date: string | Date;
@@ -369,6 +378,8 @@ export class OrderDetailTransferService {
           sourceOrderId: command.sourceOrderId,
         });
       }
+      const movedDetailsInSourceOrder = [...movedDetails].sort(compareDetailOrder);
+      const movedDetailIds = movedDetailsInSourceOrder.map((detail) => toNumber(detail.detail_id));
 
       const sourceBefore = await loadOrderSnapshot(tx, command.sourceOrderId);
       const targetBefore = command.dto.target.mode === 'existing'
@@ -386,28 +397,31 @@ export class OrderDetailTransferService {
           note: command.dto.note,
         });
       }
+      const sourceRenumbering = buildRenumbering(remainingSourceDetails);
+      const targetRenumbering = buildRenumbering([...targetExistingDetails, ...movedDetailsInSourceOrder]);
+      const targetDetailNumbers = new Map(targetRenumbering.map((row) => [row.detailId, row.detailNumber]));
+      const movedDetailAuditItems = buildTransferAuditDetails(movedDetailsInSourceOrder, targetDetailNumbers);
+      const sourceOrderName = source.order_name;
+      const targetOrderName =
+        command.dto.target.mode === 'existing'
+          ? target?.order_name ?? String(targetOrderId)
+          : command.dto.target.orderName.trim();
 
       await assertBazisTransferDoesNotConflict(tx, {
         sourceOrderId: command.sourceOrderId,
         targetOrderId,
-        movedDetailIds: command.dto.detailIds,
+        movedDetailIds,
       });
       await moveDetails(tx, {
         targetOrderId,
-        movedDetailIds: command.dto.detailIds,
+        movedDetailIds,
         actorUserId: actorUserIdOf(command.currentUser),
       });
-      await renumberDetails(tx, [
-        ...buildRenumbering(remainingSourceDetails),
-        ...buildRenumbering([
-          ...targetExistingDetails,
-          ...movedDetails.sort(compareDetailOrder),
-        ]),
-      ]);
+      await renumberDetails(tx, [...sourceRenumbering, ...targetRenumbering]);
       await updateDenormalizedReferences(tx, {
         sourceOrderId: command.sourceOrderId,
         targetOrderId,
-        movedDetailIds: command.dto.detailIds,
+        movedDetailIds,
       });
 
       if (toBoolean(source.production_status_from_details_enabled)) {
@@ -462,13 +476,19 @@ export class OrderDetailTransferService {
           metadata: {
             commandName: 'orders.create',
             source: 'order_detail_transfer',
+            sourceOrderId: command.sourceOrderId,
+            sourceOrderName,
+            targetOrderId,
+            targetOrderName,
             splitFromOrderId: command.sourceOrderId,
-            movedDetailIds: command.dto.detailIds,
+            movedDetails: movedDetailAuditItems,
+            movedDetailIds,
+            movedCount: movedDetailIds.length,
           },
           relatedEntities: [
             { entityType: 'order', entityId: targetOrderId },
             { entityType: 'order', entityId: command.sourceOrderId },
-            ...command.dto.detailIds.map((detailId) => ({ entityType: 'order_detail', entityId: detailId })),
+            ...movedDetailIds.map((detailId) => ({ entityType: 'order_detail', entityId: detailId })),
           ],
         });
         await evaluateStatusAutomation(tx, {
@@ -483,7 +503,6 @@ export class OrderDetailTransferService {
         targetAfter = await loadOrderSnapshot(tx, targetOrderId);
       }
 
-      const movedDetailIds = movedDetails.sort(compareDetailOrder).map((detail) => toNumber(detail.detail_id));
       const transferAuditId = await auditService.record(tx, {
         event: 'orders.detail_transfer',
         entityType: 'order',
@@ -500,9 +519,14 @@ export class OrderDetailTransferService {
         diff: computeDiff({ source: sourceBefore, target: targetBefore }, { source: sourceAfter, target: targetAfter }),
         metadata: {
           commandName: 'orders.detail_transfer',
+          sourceOrderId: command.sourceOrderId,
+          sourceOrderName,
+          targetOrderId,
+          targetOrderName,
           targetMode: command.dto.target.mode,
           targetCreated,
           createAuditId,
+          movedDetails: movedDetailAuditItems,
           movedDetailIds,
           movedCount: movedDetailIds.length,
           note: command.dto.note ?? null,
@@ -1204,6 +1228,23 @@ function compareDetailOrder(left: LockedDetailRow, right: LockedDetailRow): numb
     return leftNumber - rightNumber;
   }
   return toNumber(left.detail_id) - toNumber(right.detail_id);
+}
+
+function buildTransferAuditDetails(
+  movedDetails: readonly LockedDetailRow[],
+  targetDetailNumbers: ReadonlyMap<number, number>,
+): TransferAuditDetail[] {
+  return movedDetails.map((detail) => {
+    const detailId = toNumber(detail.detail_id);
+    return {
+      detailId,
+      sourceDetailNumber: toNullableNumber(detail.detail_number),
+      targetDetailNumber: targetDetailNumbers.get(detailId) ?? null,
+      height: toNumber(detail.height),
+      width: toNumber(detail.width),
+      quantity: toNumber(detail.quantity),
+    };
+  });
 }
 
 function mapTransferTarget(row: TargetSearchRow): OrderTransferTargetDto {
