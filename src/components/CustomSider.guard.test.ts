@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(new URL('./CustomSider.tsx', import.meta.url), 'utf8');
 const mobileSource = readFileSync(new URL('./MobileSiderDrawer.tsx', import.meta.url), 'utf8');
+const settingsSource = readFileSync(new URL('./SidebarMenuSettingsButton.tsx', import.meta.url), 'utf8');
 
 describe('CustomSider expanded labels', () => {
   it('uses half-size text and wraps complete labels by words', () => {
@@ -21,5 +22,14 @@ describe('CustomSider expanded labels', () => {
     expect(mobileSource).toContain('"orders-trash": "Производство"');
     // Пункт больше НЕ в top-menu:
     expect(source).not.toContain("trash: canViewNavigation('orders-trash')");
+  });
+
+  it('renders per-user menu order settings below create and at collapsed bottom', () => {
+    expect(source).toContain('useSidebarMenuPreferences');
+    expect(source).toContain('SidebarMenuSettingsButton');
+    expect(source).toContain('topItems={sider.topMenuOrderItems}');
+    expect(source).toContain('settings={sider.menuOrderSettings}');
+    expect(source).toContain('{collapsed && (');
+    expect(settingsSource).toContain('Настроить порядок меню');
   });
 });

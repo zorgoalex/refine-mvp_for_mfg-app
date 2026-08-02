@@ -415,6 +415,29 @@
   box-shadow: var(--evo-button-shadow);
 }
 
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-sider__settings-inline {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-sider__settings-inline--solo {
+  padding: 12px 4px 2px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-sider__settings-bottom {
+  position: absolute;
+  right: 0;
+  bottom: 10px;
+  left: 0;
+  display: flex;
+  justify-content: center;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-sider.ant-layout-sider-collapsed .evolution-sider__nav {
+  padding-bottom: 64px;
+}
+
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-header.ant-layout-header {
   position: sticky;
   top: 0;

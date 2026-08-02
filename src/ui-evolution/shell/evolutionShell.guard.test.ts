@@ -29,7 +29,17 @@ describe('evolution shell behavior preservation', () => {
   it('reuses the established permission and role-visibility gates', () => {
     expect(navigation).toContain('canViewNavigationResource');
     expect(navigation).toContain('canViewResourceByRoleVisibility');
-    expect(navigation).toContain("can('orders.create', currentUser)");
+    expect(navigation).toContain("canManageOrderContent('orders.create', currentUser, canViewFinancials)");
+  });
+
+  it('supports per-user sidebar menu ordering in the modern sider', () => {
+    expect(navigation).toContain('useSidebarMenuPreferences');
+    expect(navigation).toContain('sidebarMenuOrder: sidebarMenuPreferences.settings');
+    expect(sider).toContain('SidebarMenuSettingsButton');
+    expect(sider).toContain('sider.categoryOrder.map');
+    expect(sider).toContain('className="evolution-sider__settings-bottom"');
+    expect(styles).toContain('.evolution-sider__settings-bottom');
+    expect(styles).toContain('.evolution-sider.ant-layout-sider-collapsed .evolution-sider__nav');
   });
 
   it('renders AIR as a separate top-nav and utility-rail shell, not a recolored sider', () => {

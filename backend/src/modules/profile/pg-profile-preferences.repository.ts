@@ -7,6 +7,7 @@ import type {
   PageSizePreferencesDto,
   RecentReferenceEntitiesDto,
   RecentReferenceResource,
+  SidebarMenuOrderPreferenceDto,
   ThemeMode,
   UiSize,
   UiVariant,
@@ -24,6 +25,7 @@ interface PreferenceRow extends QueryResultRow {
   order_detail_columns: unknown;
   recent_reference_entities: unknown;
   page_size_preferences: unknown;
+  sidebar_menu_order: unknown;
 }
 
 export class PgProfilePreferencesRepository implements UserPreferencesRepositoryPort {
@@ -32,7 +34,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
   async getUserPreferences(userId: number): Promise<UserPreferencesDto> {
     const result = await this.database.query<PreferenceRow>(
       `
-      SELECT theme_mode, ui_size, ui_variant, order_detail_columns, recent_reference_entities, page_size_preferences
+      SELECT theme_mode, ui_size, ui_variant, order_detail_columns, recent_reference_entities, page_size_preferences, sidebar_menu_order
       FROM user_preferences
       WHERE user_id = $1
       `,
@@ -51,21 +53,23 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
       preferences.uiSize === undefined &&
       preferences.uiVariant === undefined &&
       preferences.orderDetailColumns === undefined &&
-      preferences.pageSizePreferences === undefined
+      preferences.pageSizePreferences === undefined &&
+      preferences.sidebarMenuOrder === undefined
     ) {
       return this.getUserPreferences(userId);
     }
 
     const result = await this.database.query<PreferenceRow>(
       `
-      INSERT INTO user_preferences (user_id, theme_mode, ui_size, ui_variant, order_detail_columns, page_size_preferences)
+      INSERT INTO user_preferences (user_id, theme_mode, ui_size, ui_variant, order_detail_columns, page_size_preferences, sidebar_menu_order)
       VALUES (
         $1,
         COALESCE($2, 'light'),
         $3,
         COALESCE($4, 'evolution'),
         COALESCE($5::jsonb, '{}'::jsonb),
-        COALESCE($6::jsonb, '{}'::jsonb)
+        COALESCE($6::jsonb, '{}'::jsonb),
+        COALESCE($7::jsonb, '{}'::jsonb)
       )
       ON CONFLICT (user_id)
       DO UPDATE SET
@@ -73,6 +77,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
         ui_size = COALESCE($3, user_preferences.ui_size),
         ui_variant = COALESCE($4, user_preferences.ui_variant),
         order_detail_columns = COALESCE($5::jsonb, user_preferences.order_detail_columns),
+        sidebar_menu_order = COALESCE($7::jsonb, user_preferences.sidebar_menu_order),
         page_size_preferences = CASE
           WHEN $6::jsonb IS NULL THEN user_preferences.page_size_preferences
           ELSE user_preferences.page_size_preferences || $6::jsonb
@@ -80,7 +85,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
         updated_at = now()
       WHERE $6::jsonb IS NULL
         OR jsonb_object_length(user_preferences.page_size_preferences || $6::jsonb) <= 128
-      RETURNING theme_mode, ui_size, ui_variant, order_detail_columns, recent_reference_entities, page_size_preferences
+      RETURNING theme_mode, ui_size, ui_variant, order_detail_columns, recent_reference_entities, page_size_preferences, sidebar_menu_order
       `,
       [
         userId,
@@ -89,6 +94,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
         preferences.uiVariant ?? null,
         preferences.orderDetailColumns === undefined ? null : JSON.stringify(preferences.orderDetailColumns),
         preferences.pageSizePreferences === undefined ? null : JSON.stringify(preferences.pageSizePreferences),
+        preferences.sidebarMenuOrder === undefined ? null : JSON.stringify(preferences.sidebarMenuOrder),
       ],
     );
 
@@ -156,7 +162,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
           true
         ),
         updated_at = now()
-      RETURNING theme_mode, ui_size, ui_variant, order_detail_columns, recent_reference_entities, page_size_preferences
+      RETURNING theme_mode, ui_size, ui_variant, order_detail_columns, recent_reference_entities, page_size_preferences, sidebar_menu_order
       `,
       [userId, resource, entityId],
     );
@@ -173,6 +179,7 @@ function mapPreferenceRow(row: PreferenceRow | undefined): UserPreferencesDto {
     orderDetailColumns: normalizeOrderDetailColumns(row?.order_detail_columns),
     recentReferences: normalizeRecentReferences(row?.recent_reference_entities),
     pageSizePreferences: normalizePageSizePreferences(row?.page_size_preferences),
+    sidebarMenuOrder: normalizeSidebarMenuOrder(row?.sidebar_menu_order),
   };
 }
 
@@ -239,6 +246,45 @@ function normalizeOrderDetailColumns(value: unknown): OrderDetailColumnPreferenc
       order: normalizeStringList(settings.order),
       hidden: normalizeStringList(settings.hidden),
     };
+  }
+  return result;
+}
+
+function normalizeSidebarMenuOrder(value: unknown): SidebarMenuOrderPreferenceDto {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { top: [], categories: [], resources: {} };
+  }
+
+  const raw = value as Record<string, unknown>;
+  const resources: Record<string, string[]> = {};
+  const rawResources = raw.resources;
+  if (rawResources && typeof rawResources === 'object' && !Array.isArray(rawResources)) {
+    let sectionCount = 0;
+    for (const [rawSection, rawOrder] of Object.entries(rawResources as Record<string, unknown>)) {
+      const section = rawSection.trim();
+      if (!section || section.length > 80 || sectionCount >= 40) continue;
+      resources[section] = normalizeLimitedStringList(rawOrder, 160, 80);
+      sectionCount += 1;
+    }
+  }
+
+  return {
+    top: normalizeLimitedStringList(raw.top, 160, 80),
+    categories: normalizeLimitedStringList(raw.categories, 40, 80),
+    resources,
+  };
+}
+
+function normalizeLimitedStringList(value: unknown, maxItems: number, maxLength: number): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of value) {
+    if (result.length >= maxItems || typeof item !== 'string') continue;
+    const normalized = item.trim();
+    if (!normalized || normalized.length > maxLength || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
   }
   return result;
 }

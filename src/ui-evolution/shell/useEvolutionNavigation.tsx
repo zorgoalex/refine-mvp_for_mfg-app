@@ -6,6 +6,7 @@ import { authSession } from '../../api/authSession';
 import { bitrix24MenuConfig } from '../../config/bitrix24';
 import { featureFlags } from '../../config/featureFlags';
 import { useAppSettings, SETTING_KEYS } from '../../hooks/useAppSettings';
+import { useSidebarMenuPreferences } from '../../hooks/useSidebarMenuPreferences';
 import { authStorage } from '../../utils/auth';
 import {
   canViewNavigationResource,
@@ -84,6 +85,7 @@ export function useEvolutionNavigation(onNavigate?: () => void) {
   const location = useLocation();
   const { getSetting } = useAppSettings();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const sidebarMenuPreferences = useSidebarMenuPreferences();
 
   const currentUser = featureFlags.useBackendPermissions
     ? authSession.getUser()
@@ -132,7 +134,8 @@ export function useEvolutionNavigation(onNavigate?: () => void) {
     crm: bitrix24MenuConfig
       ? { ...bitrix24MenuConfig, icon: <ContactsOutlined /> }
       : null,
+    sidebarMenuOrder: sidebarMenuPreferences.settings,
   });
 
-  return { sider, isCreateModalOpen, setIsCreateModalOpen };
+  return { sider, isCreateModalOpen, setIsCreateModalOpen, sidebarMenuPreferences };
 }

@@ -24,11 +24,19 @@ describe('ProfilePreferencesController', () => {
     const controller = createController({
       async get(command) {
         calls.push(`get:${command.currentUser.id}`);
-        return { themeMode: 'light', uiSize: 'default', uiVariant: 'legacy', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} };
+        return { themeMode: 'light', uiSize: 'default', uiVariant: 'legacy', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {}, sidebarMenuOrder: { top: [], categories: [], resources: {} } };
       },
       async update(command) {
         calls.push(`update:${command.currentUser.id}:${command.preferences.themeMode}:${Object.keys(command.preferences.orderDetailColumns ?? {}).join(',')}`);
-        return { themeMode: 'dark', uiSize: 'default', uiVariant: command.preferences.uiVariant ?? 'legacy', orderDetailColumns: command.preferences.orderDetailColumns ?? {}, recentReferences: {}, pageSizePreferences: command.preferences.pageSizePreferences ?? {} };
+        return {
+          themeMode: 'dark',
+          uiSize: 'default',
+          uiVariant: command.preferences.uiVariant ?? 'legacy',
+          orderDetailColumns: command.preferences.orderDetailColumns ?? {},
+          recentReferences: {},
+          pageSizePreferences: command.preferences.pageSizePreferences ?? {},
+          sidebarMenuOrder: command.preferences.sidebarMenuOrder ?? { top: [], categories: [], resources: {} },
+        };
       },
       async promoteReferenceUsage(command) {
         calls.push(`promote:${command.currentUser.id}:${command.resource}:${command.entityId}`);
@@ -39,18 +47,35 @@ describe('ProfilePreferencesController', () => {
           orderDetailColumns: {},
           recentReferences: { [command.resource]: [command.entityId] },
           pageSizePreferences: {},
+          sidebarMenuOrder: { top: [], categories: [], resources: {} },
         };
       },
     });
 
     await expect(controller.get({ user: currentUser('15') })).resolves.toEqual({
-      preferences: { themeMode: 'light', uiSize: 'default', uiVariant: 'legacy', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} },
+      preferences: {
+        themeMode: 'light',
+        uiSize: 'default',
+        uiVariant: 'legacy',
+        orderDetailColumns: {},
+        recentReferences: {},
+        pageSizePreferences: {},
+        sidebarMenuOrder: { top: [], categories: [], resources: {} },
+      },
     });
     await expect(controller.update({ user: currentUser('15') }, {
       themeMode: 'dark',
       orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } },
     })).resolves.toEqual({
-      preferences: { themeMode: 'dark', uiSize: 'default', uiVariant: 'legacy', orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } }, recentReferences: {}, pageSizePreferences: {} },
+      preferences: {
+        themeMode: 'dark',
+        uiSize: 'default',
+        uiVariant: 'legacy',
+        orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } },
+        recentReferences: {},
+        pageSizePreferences: {},
+        sidebarMenuOrder: { top: [], categories: [], resources: {} },
+      },
     });
     await expect(controller.promoteReferenceUsage(
       { user: currentUser('15') },
@@ -63,6 +88,7 @@ describe('ProfilePreferencesController', () => {
         orderDetailColumns: {},
         recentReferences: { sheet_material_types: [27] },
         pageSizePreferences: {},
+        sidebarMenuOrder: { top: [], categories: [], resources: {} },
       },
     });
     expect(calls).toEqual([
@@ -105,9 +131,29 @@ describe('ProfilePreferencesController', () => {
     expect(parseUpdateUserPreferencesRequest({ uiVariant: 'air' })).toEqual({ uiVariant: 'air' });
     expect(parseUpdateUserPreferencesRequest({ pageSizePreferences: { 'refine:orders_view': 50 } }))
       .toEqual({ pageSizePreferences: { 'refine:orders_view': 50 } });
+    expect(parseUpdateUserPreferencesRequest({
+      sidebarMenuOrder: {
+        top: ['calendar', 'orders_view'],
+        categories: ['Материалы', 'Производство'],
+        resources: { Материалы: ['materials', 'films'] },
+      },
+    })).toEqual({
+      sidebarMenuOrder: {
+        top: ['calendar', 'orders_view'],
+        categories: ['Материалы', 'Производство'],
+        resources: { Материалы: ['materials', 'films'] },
+      },
+    });
     expect(() => parseUpdateUserPreferencesRequest({ uiSize: 'huge' })).toThrowError();
     expect(() => parseUpdateUserPreferencesRequest({ uiVariant: 'future' })).toThrow(ApiError);
     expect(() => parseUpdateUserPreferencesRequest({ pageSizePreferences: { audit: 200 } })).toThrow(ApiError);
+    expect(() => parseUpdateUserPreferencesRequest({
+      sidebarMenuOrder: {
+        top: [],
+        categories: [],
+        resources: Object.fromEntries(Array.from({ length: 41 }, (_, index) => [`section:${index}`, []])),
+      },
+    })).toThrow(ApiError);
     expect(() => parseUpdateUserPreferencesRequest({
       pageSizePreferences: Object.fromEntries(
         Array.from({ length: 33 }, (_, index) => [`list:${index}`, 20]),

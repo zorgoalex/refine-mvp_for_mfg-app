@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-02",
+    title: "Левое меню: личный порядок пунктов",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "Каждый пользователь может настроить порядок пунктов левого меню через шестерёнку в сайдбаре.",
+      "В развернутом сайдбаре настройка находится под кнопкой создания заказа, а в свернутом виде закреплена внизу меню.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
     title: "Карточка заказа: актуальные версии раскроя в деталях",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

@@ -6,13 +6,16 @@ const orderFormSource = readFileSync(new URL('./components/OrderForm.tsx', impor
 const deletedOrderCardSource = readFileSync(new URL('./DeletedOrderCard.tsx', import.meta.url), 'utf8');
 
 describe('order delete guards', () => {
-  it('delete button is gated by the unified permission gate in BOTH cards', () => {
+  it('delete action is gated by the unified permission gate in BOTH cards', () => {
     for (const source of [showSource, orderFormSource]) {
       expect(source).toMatch(/canManageOrderTrash\s*=\s*!featureFlags\.useBackendPermissions\s*\|\|\s*can\('orders\.delete'\)/);
       expect(source).toContain('featureFlags.useBackendOrdersWrite && canManageOrderTrash');
-      expect(source).toContain('Popconfirm');
       expect(source).toContain('ordersApi.delete');
     }
+
+    expect(showSource).toContain('Modal.confirm');
+    expect(showSource).toContain("key: 'delete-order'");
+    expect(orderFormSource).toContain('Popconfirm');
   });
 
   it('show page uses deleted-order fallback guards', () => {

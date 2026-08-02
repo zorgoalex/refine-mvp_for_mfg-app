@@ -44,6 +44,12 @@ export type RecentReferenceResource = (typeof RECENT_REFERENCE_RESOURCES)[number
 export type RecentReferenceEntitiesDto = Partial<Record<RecentReferenceResource, number[]>>;
 export type PageSizePreferencesDto = Record<string, number>;
 
+export interface SidebarMenuOrderPreferenceDto {
+  top: string[];
+  categories: string[];
+  resources: Record<string, string[]>;
+}
+
 export interface UserPreferencesDto {
   themeMode: ThemeMode;
   uiSize: UiSize;
@@ -51,6 +57,7 @@ export interface UserPreferencesDto {
   orderDetailColumns: OrderDetailColumnPreferencesDto;
   recentReferences: RecentReferenceEntitiesDto;
   pageSizePreferences: PageSizePreferencesDto;
+  sidebarMenuOrder: SidebarMenuOrderPreferenceDto;
 }
 
 export interface UserPreferencesResponseDto {

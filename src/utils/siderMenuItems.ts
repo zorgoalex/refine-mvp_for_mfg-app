@@ -1,6 +1,7 @@
 import type { IResourceItem } from '@refinedev/core';
 import type { MenuProps } from 'antd';
 import { useMemo } from 'react';
+import type { SidebarMenuOrderPreference } from '../api/types/profileApi.types';
 
 export type SiderResource = IResourceItem;
 
@@ -10,10 +11,25 @@ export interface SiderMenuItem {
   route: string;
 }
 
+export interface SiderMenuOrderItem {
+  key: string;
+  label: string;
+}
+
+export interface SidebarMenuOrderDefaults {
+  top: string[];
+  categories: string[];
+  resources: Record<string, string[]>;
+}
+
 export interface SiderMenuData {
   topMenuItems: NonNullable<MenuProps['items']>;
+  topMenuOrderItems: SiderMenuOrderItem[];
   flatMenuItems: NonNullable<MenuProps['items']>;
   categorizedResources: Record<string, SiderMenuItem[]>;
+  categoryOrder: string[];
+  menuOrderDefaults: SidebarMenuOrderDefaults;
+  menuOrderSettings: SidebarMenuOrderPreference;
   selectedKey: string;
   canCreateOrders: boolean;
   canViewSettings: boolean;
@@ -45,6 +61,8 @@ export interface UseSiderMenuItemsInput {
   setIsCreateModalOpen: (open: boolean) => void;
   /** Optional external CRM link shown below Calendar; omit/null to hide. */
   crm?: TopMenuCrmInput | null;
+  /** Optional current-user ordering for the sidebar menu. */
+  sidebarMenuOrder?: Partial<SidebarMenuOrderPreference> | null;
   /** Injectable external-link opener (default: window.open in a new tab). */
   openExternal?: (url: string) => void;
 }
@@ -92,6 +110,122 @@ export function makeCrmOpener(
 
 const defaultOpenExternal = makeCrmOpener();
 
+function uniqueKnownKeys(keys: readonly string[] | undefined, allowed: Set<string>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const key of keys ?? []) {
+    if (!allowed.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+export function applySidebarOrder(defaultOrder: readonly string[], preferredOrder?: readonly string[] | null): string[] {
+  const allowed = new Set(defaultOrder);
+  return uniqueKnownKeys([...(preferredOrder ?? []), ...defaultOrder], allowed);
+}
+
+export function normalizeSidebarMenuOrderPreference(
+  defaults: SidebarMenuOrderDefaults,
+  value?: Partial<SidebarMenuOrderPreference> | null,
+): SidebarMenuOrderPreference {
+  const resources: Record<string, string[]> = {};
+  for (const category of defaults.categories) {
+    resources[category] = applySidebarOrder(
+      defaults.resources[category] ?? [],
+      value?.resources?.[category],
+    );
+  }
+
+  return {
+    top: applySidebarOrder(defaults.top, value?.top),
+    categories: applySidebarOrder(defaults.categories, value?.categories),
+    resources,
+  };
+}
+
+export function buildSidebarMenuOrderDefaults(args: {
+  topMenuItems: NonNullable<MenuProps['items']>;
+  categoryOrder: readonly string[];
+  categorizedResources: Record<string, SiderMenuItem[]>;
+}): SidebarMenuOrderDefaults {
+  const top = extractMenuOrderItems(args.topMenuItems).map((item) => item.key);
+  return {
+    top,
+    categories: [...args.categoryOrder],
+    resources: Object.fromEntries(
+      args.categoryOrder.map((category) => [
+        category,
+        (args.categorizedResources[category] ?? []).map((item) => item.name),
+      ]),
+    ),
+  };
+}
+
+export function extractMenuOrderItems(items: NonNullable<MenuProps['items']>): SiderMenuOrderItem[] {
+  return items
+    .map((item) => {
+      if (!item || typeof item !== 'object' || !('key' in item)) return null;
+      const key = String((item as { key?: unknown }).key ?? '');
+      if (!key) return null;
+      const title = (item as { title?: unknown }).title;
+      const label = (item as { label?: unknown }).label;
+      return {
+        key,
+        label: typeof title === 'string'
+          ? title
+          : typeof label === 'string'
+            ? label
+            : key,
+      };
+    })
+    .filter((item): item is SiderMenuOrderItem => Boolean(item));
+}
+
+function orderMenuItems(
+  items: NonNullable<MenuProps['items']>,
+  order?: readonly string[] | null,
+): NonNullable<MenuProps['items']> {
+  const byKey = new Map<string, NonNullable<MenuProps['items']>[number]>();
+  for (const item of items) {
+    if (!item || typeof item !== 'object' || !('key' in item)) continue;
+    const key = String((item as { key?: unknown }).key ?? '');
+    if (key) byKey.set(key, item);
+  }
+
+  const result: NonNullable<MenuProps['items']> = [];
+  for (const key of order ?? []) {
+    const item = byKey.get(key);
+    if (!item) continue;
+    result.push(item);
+    byKey.delete(key);
+  }
+  result.push(...byKey.values());
+  return result;
+}
+
+export function applySidebarMenuOrderToResources(
+  categorizedResources: Record<string, SiderMenuItem[]>,
+  categoryOrder: readonly string[],
+  order: SidebarMenuOrderPreference,
+): Record<string, SiderMenuItem[]> {
+  const result: Record<string, SiderMenuItem[]> = {};
+  for (const category of categoryOrder) {
+    const items = categorizedResources[category] ?? [];
+    const byName = new Map(items.map((item) => [item.name, item]));
+    result[category] = [];
+    for (const name of order.resources[category] ?? []) {
+      const item = byName.get(name);
+      if (!item) continue;
+      result[category].push(item);
+      byName.delete(name);
+    }
+    result[category].push(...byName.values());
+  }
+  return result;
+}
+
 /**
  * Pure helper: build the top menu items (Orders, Calendar, and an optional
  * external CRM link rendered directly below Calendar). The CRM item navigates
@@ -108,6 +242,7 @@ export function buildTopMenuItems(args: {
   push: (route: string) => void;
   crm?: TopMenuCrmInput | null;
   openExternal?: (url: string) => void;
+  order?: readonly string[] | null;
 }): NonNullable<MenuProps['items']> {
   const openExternal = args.openExternal ?? defaultOpenExternal;
   const items: MenuProps['items'] = [
@@ -148,7 +283,7 @@ export function buildTopMenuItems(args: {
         }
       : null,
   ];
-  return items.filter(Boolean) as NonNullable<MenuProps['items']>;
+  return orderMenuItems(items.filter(Boolean) as NonNullable<MenuProps['items']>, args.order);
 }
 
 /**
@@ -293,6 +428,7 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
     canCreateOrders,
     setIsCreateModalOpen,
     crm,
+    sidebarMenuOrder,
     openExternal,
   } = input;
 
@@ -301,7 +437,7 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
     [resources, pathname],
   );
 
-  const categorizedResources = useMemo(
+  const defaultCategorizedResources = useMemo(
     () =>
       buildCategorizedResources({
         resources,
@@ -341,28 +477,76 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
     setIsCreateModalOpen(true);
   };
 
-  const topMenuItems = buildTopMenuItems({
-    canViewNavigation,
-    resourceIcons,
-    ordersRoute,
-    ordersLabel,
-    calendarRoute,
-    calendarLabel,
-    statusBoard,
-    push,
-    crm,
-    openExternal,
-  });
+  const defaultTopMenuItems = useMemo(
+    () => buildTopMenuItems({
+      canViewNavigation,
+      resourceIcons,
+      ordersRoute,
+      ordersLabel,
+      calendarRoute,
+      calendarLabel,
+      statusBoard,
+      push,
+      crm,
+      openExternal,
+    }),
+    [
+      canViewNavigation,
+      resourceIcons,
+      ordersRoute,
+      ordersLabel,
+      calendarRoute,
+      calendarLabel,
+      statusBoard,
+      push,
+      crm,
+      openExternal,
+    ],
+  );
+
+  const menuOrderDefaults = useMemo(
+    () => buildSidebarMenuOrderDefaults({
+      topMenuItems: defaultTopMenuItems,
+      categoryOrder,
+      categorizedResources: defaultCategorizedResources,
+    }),
+    [defaultTopMenuItems, categoryOrder, defaultCategorizedResources],
+  );
+
+  const menuOrderSettings = useMemo(
+    () => normalizeSidebarMenuOrderPreference(menuOrderDefaults, sidebarMenuOrder),
+    [menuOrderDefaults, sidebarMenuOrder],
+  );
+
+  const topMenuItems = useMemo(
+    () => orderMenuItems(defaultTopMenuItems, menuOrderSettings.top),
+    [defaultTopMenuItems, menuOrderSettings.top],
+  );
+
+  const categorizedResources = useMemo(
+    () => applySidebarMenuOrderToResources(
+      defaultCategorizedResources,
+      categoryOrder,
+      menuOrderSettings,
+    ),
+    [defaultCategorizedResources, categoryOrder, menuOrderSettings],
+  );
+
+  const orderedCategoryOrder = menuOrderSettings.categories;
 
   const flatMenuItems = useMemo(
-    () => buildFlatMenuItems(categorizedResources, categoryOrder, resourceIcons, handleNavigate),
-    [categorizedResources, categoryOrder, resourceIcons, handleNavigate],
+    () => buildFlatMenuItems(categorizedResources, orderedCategoryOrder, resourceIcons, handleNavigate),
+    [categorizedResources, orderedCategoryOrder, resourceIcons, handleNavigate],
   );
 
   return {
     topMenuItems,
+    topMenuOrderItems: extractMenuOrderItems(defaultTopMenuItems),
     flatMenuItems,
     categorizedResources,
+    categoryOrder: orderedCategoryOrder,
+    menuOrderDefaults,
+    menuOrderSettings,
     selectedKey,
     canCreateOrders,
     canViewSettings,

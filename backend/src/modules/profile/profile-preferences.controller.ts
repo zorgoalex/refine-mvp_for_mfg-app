@@ -13,6 +13,20 @@ import {
 } from './profile-preferences.types';
 
 const MAX_PAGE_SIZE_PREFERENCES_PER_REQUEST = 32;
+const MAX_SIDEBAR_MENU_SECTIONS = 40;
+const MAX_SIDEBAR_MENU_ITEMS_PER_SECTION = 160;
+
+const sidebarMenuOrderSchema = z.object({
+  top: z.array(z.string().min(1).max(80)).max(MAX_SIDEBAR_MENU_ITEMS_PER_SECTION),
+  categories: z.array(z.string().min(1).max(80)).max(MAX_SIDEBAR_MENU_SECTIONS),
+  resources: z.record(
+    z.string().min(1).max(80),
+    z.array(z.string().min(1).max(80)).max(MAX_SIDEBAR_MENU_ITEMS_PER_SECTION),
+  ).refine(
+    (sections) => Object.keys(sections).length <= MAX_SIDEBAR_MENU_SECTIONS,
+    { message: `sidebarMenuOrder.resources must contain at most ${MAX_SIDEBAR_MENU_SECTIONS} sections` },
+  ),
+});
 
 const updatePreferencesSchema = z.object({
   themeMode: z.enum(['light', 'dark']).optional(),
@@ -38,6 +52,7 @@ const updatePreferencesSchema = z.object({
     (preferences) => Object.keys(preferences).length <= MAX_PAGE_SIZE_PREFERENCES_PER_REQUEST,
     { message: `pageSizePreferences must contain at most ${MAX_PAGE_SIZE_PREFERENCES_PER_REQUEST} entries` },
   ).optional(),
+  sidebarMenuOrder: sidebarMenuOrderSchema.optional(),
 });
 
 const referenceUsageSchema = z.object({
