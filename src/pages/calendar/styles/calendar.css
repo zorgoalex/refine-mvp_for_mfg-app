@@ -49,6 +49,69 @@
   box-shadow: 0 2px 4px var(--app-shadow);
 }
 
+.calendar-navigation__operational {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.calendar-navigation__period {
+  display: grid;
+  min-width: 120px;
+  line-height: 1.15;
+}
+
+.calendar-navigation__period span {
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+.calendar-navigation__period strong {
+  font-size: 13px;
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+.calendar-navigation__quick-filter {
+  width: clamp(180px, 16vw, 260px);
+  flex: 0 0 auto;
+}
+
+.calendar-navigation__grow {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.calendar-navigation__scale {
+  min-width: 38px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--app-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-filters-panel {
+  flex-shrink: 0;
+  margin: 12px 16px 0;
+  box-shadow: var(--app-shadow-border);
+  border-radius: 8px;
+}
+
+.calendar-filters-panel .ant-card-body {
+  padding: 12px 14px;
+}
+
+.calendar-filters-panel .ant-form-item {
+  margin-bottom: 10px;
+}
+
+.calendar-filters-panel__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 /* Индикатор загрузки */
 .calendar-loading {
   display: flex;

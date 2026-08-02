@@ -22,9 +22,11 @@ export interface CalendarViewSettings {
  * Деталь заказа для вычисления фрезеровки, материалов и статусов производства
  */
 export interface CalendarOrderDetail {
+  milling_type_id?: number;
   milling_type?: {
     milling_type_name: string;
   };
+  material_id?: number;
   material?: {
     material_name: string;
   };
@@ -47,6 +49,7 @@ export interface CalendarOrder {
   total_price?: number;
 
   // Поля из orders_view
+  client_id?: number;
   client_name?: string;
   order_status_name?: string;
   payment_status_name?: string;
@@ -133,11 +136,18 @@ export interface CalendarSettings {
  * Фильтры календаря
  */
 export interface CalendarFilters {
-  searchQuery?: string; // Поиск по номеру заказа
-  orderStatus?: string; // Фильтр по статусу заказа
-  paymentStatus?: string; // Фильтр по статусу оплаты
-  client?: string; // Фильтр по клиенту
-  material?: string; // Фильтр по материалу
+  quickSearch?: string; // Верхний поиск по заказу или клиенту
+  orderQuery?: string; // Фильтр по номеру/названию заказа
+  clientQuery?: string; // Фильтр по клиенту
+  materialName?: string; // Фильтр по материалу
+  millingTypeName?: string; // Фильтр по фрезеровке
+  paymentStatusName?: string; // Фильтр по статусу оплаты
+  orderStatusName?: string; // Фильтр по статусу заказа
+}
+
+export interface CalendarFilterOption {
+  label: string;
+  value: string;
 }
 
 /**
@@ -196,6 +206,8 @@ export interface CalendarDataResult {
   isLoading: boolean;
   refetch: () => void;
   productionWorkflowDisplay?: ProductionWorkflowDisplay;
+  materialOptions: CalendarFilterOption[];
+  millingTypeOptions: CalendarFilterOption[];
   error?: Error;
 }
 

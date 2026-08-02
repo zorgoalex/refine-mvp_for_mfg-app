@@ -1,6 +1,17 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Spin, Alert, Button, Space, Segmented, Tooltip, message } from 'antd';
-import { LeftOutlined, RightOutlined, CalendarOutlined, ZoomInOutlined, ZoomOutOutlined, UndoOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Spin, Alert, Button, Space, Segmented, Tooltip, message, Input, Card, Form, Row, Col, Select } from 'antd';
+import {
+  LeftOutlined,
+  RightOutlined,
+  CalendarOutlined,
+  ZoomInOutlined,
+  ZoomOutOutlined,
+  UndoOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  FilterOutlined,
+  ClearOutlined,
+} from '@ant-design/icons';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { TouchBackend } from 'react-dnd-touch-backend';
@@ -19,7 +30,7 @@ import {
   isProductionActionPermissionDenied,
 } from '../../../api/productionActionsApi';
 import { authSession } from '../../../api/authSession';
-import { DragItem, CalendarOrder, ViewMode } from '../types/calendar';
+import { DragItem, CalendarOrder, ViewMode, CalendarFilters, CalendarFilterOption } from '../types/calendar';
 import {
   applyKnownCalendarOrderVersion,
   reserveCalendarOrderVersion,
@@ -39,13 +50,31 @@ import {
   isPackerUser,
 } from '../../../utils/packerStatusAccess';
 import { useOrderFinancialVisibility } from '../../../hooks/useOrderFinancialVisibility';
+import { cleanCalendarFilters } from '../utils/calendarFilters';
+
+interface CalendarBoardProps {
+  filters: CalendarFilters;
+  filtersOpen?: boolean;
+  onFiltersChange: (filters: CalendarFilters) => void;
+}
+
+const selectFilterOption = (input: string, option?: { label?: React.ReactNode }) =>
+  (option?.label ?? '').toString().toLowerCase().includes(input.toLowerCase());
+
+const statusOptions = (statuses: Array<{ id: number; name: string }>): CalendarFilterOption[] =>
+  statuses.map((status) => ({ label: status.name, value: status.name }));
 
 /**
  * Основной компонент доски календаря
  */
-const CalendarBoard: React.FC = () => {
+const CalendarBoard: React.FC<CalendarBoardProps> = ({
+  filters,
+  filtersOpen = false,
+  onFiltersChange,
+}) => {
   const isOperational = useOperationalUi();
   const containerRef = useRef<HTMLDivElement>(null);
+  const [filterForm] = Form.useForm();
   const [containerWidth, setContainerWidth] = useState(1200);
   // Responsive: classify container width for mobile vs desktop nav/layout
   const responsive = useResponsive(containerRef);
@@ -116,9 +145,18 @@ const CalendarBoard: React.FC = () => {
   }, [displayedDays]);
 
   // Загрузка данных заказов
-  const { ordersByDate, isLoading, error, refetch, productionWorkflowDisplay } = useCalendarData(
+  const {
+    ordersByDate,
+    isLoading,
+    error,
+    refetch,
+    productionWorkflowDisplay,
+    materialOptions,
+    millingTypeOptions,
+  } = useCalendarData(
     startDate,
-    endDate
+    endDate,
+    filters,
   );
 
   // Hook для перемещения заказов
@@ -133,8 +171,63 @@ const CalendarBoard: React.FC = () => {
     loadPayment: canViewFinancials,
   });
   const menuOrderStatuses = filterOrderStatusesForPacker(orderStatuses, currentUser);
+  const orderStatusOptions = useMemo(() => statusOptions(orderStatuses), [orderStatuses]);
+  const paymentStatusOptions = useMemo(() => statusOptions(paymentStatuses), [paymentStatuses]);
   const { updateStatus, isUpdating } = useOrderStatusUpdate();
   const invalidate = useInvalidate();
+
+  const {
+    orderQuery,
+    clientQuery,
+    materialName,
+    millingTypeName,
+    paymentStatusName,
+    orderStatusName,
+  } = filters;
+
+  useEffect(() => {
+    filterForm.setFieldsValue({
+      orderQuery,
+      clientQuery,
+      materialName,
+      millingTypeName,
+      paymentStatusName,
+      orderStatusName,
+    });
+  }, [
+    clientQuery,
+    filterForm,
+    materialName,
+    millingTypeName,
+    orderQuery,
+    orderStatusName,
+    paymentStatusName,
+  ]);
+
+  const updateFilters = useCallback((patch: Partial<CalendarFilters>) => {
+    onFiltersChange(cleanCalendarFilters({ ...filters, ...patch }));
+  }, [filters, onFiltersChange]);
+
+  const handleQuickSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    updateFilters({ quickSearch: event.target.value });
+  }, [updateFilters]);
+
+  const handleFilterSubmit = useCallback((values: CalendarFilters) => {
+    onFiltersChange(cleanCalendarFilters({
+      quickSearch: filters.quickSearch,
+      orderQuery: values.orderQuery,
+      clientQuery: values.clientQuery,
+      materialName: values.materialName,
+      millingTypeName: values.millingTypeName,
+      paymentStatusName: values.paymentStatusName,
+      orderStatusName: values.orderStatusName,
+    }));
+  }, [filters.quickSearch, onFiltersChange]);
+
+  const handleClearFilters = useCallback(() => {
+    filterForm.resetFields();
+    onFiltersChange({});
+  }, [filterForm, onFiltersChange]);
 
   // State для контекстного меню
   const [contextMenu, setContextMenu] = useState<{
@@ -495,7 +588,16 @@ const CalendarBoard: React.FC = () => {
                 {!isNarrow && <span className="calendar-navigation__btn-label">Обновить</span>}
               </Button>
             </div>
-            {/* Row 2: Segmented — переключатель режимов отображения */}
+            <div className="calendar-navigation__row">
+              <Input
+                allowClear
+                prefix={<SearchOutlined />}
+                placeholder="Заказ / клиент"
+                value={filters.quickSearch}
+                onChange={handleQuickSearchChange}
+              />
+            </div>
+            {/* Row 3: Segmented — переключатель режимов отображения */}
             <div className="calendar-navigation__row">
               <Segmented
                 block
@@ -524,6 +626,14 @@ const CalendarBoard: React.FC = () => {
               <span>{periodDays === 7 ? 'Неделя' : periodDays === 14 ? 'Две недели' : 'Месяц'}</span>
               <strong>{periodLabel}</strong>
             </div>
+            <Input
+              allowClear
+              className="calendar-navigation__quick-filter"
+              prefix={<SearchOutlined />}
+              placeholder="Заказ / клиент"
+              value={filters.quickSearch}
+              onChange={handleQuickSearchChange}
+            />
             <Segmented
               options={[
                 { label: 'Неделя', value: 7 },
@@ -608,6 +718,15 @@ const CalendarBoard: React.FC = () => {
               </Button>
             </Space>
 
+            <Input
+              allowClear
+              style={{ width: 220 }}
+              prefix={<SearchOutlined />}
+              placeholder="Заказ / клиент"
+              value={filters.quickSearch}
+              onChange={handleQuickSearchChange}
+            />
+
             {/* Переключатель режимов отображения */}
             <Segmented
               options={[
@@ -651,6 +770,81 @@ const CalendarBoard: React.FC = () => {
           </Space>
         )}
       </div>
+
+      {filtersOpen ? (
+        <Card className="calendar-filters-panel" aria-label="Фильтры календаря">
+          <Form form={filterForm} layout="vertical" onFinish={handleFilterSubmit}>
+            <Row gutter={12}>
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Form.Item name="orderQuery" label="Заказ">
+                  <Input allowClear placeholder="Номер заказа" />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Form.Item name="clientQuery" label="Клиент">
+                  <Input allowClear placeholder="Клиент" />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Form.Item name="materialName" label="Материал">
+                  <Select
+                    allowClear
+                    showSearch
+                    placeholder="Материал"
+                    options={materialOptions}
+                    filterOption={selectFilterOption}
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Form.Item name="millingTypeName" label="Фрезеровка">
+                  <Select
+                    allowClear
+                    showSearch
+                    placeholder="Фрезеровка"
+                    options={millingTypeOptions}
+                    filterOption={selectFilterOption}
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={4}>
+                <Form.Item name="orderStatusName" label="Статус заказа">
+                  <Select
+                    allowClear
+                    showSearch
+                    placeholder="Статус"
+                    options={orderStatusOptions}
+                    filterOption={selectFilterOption}
+                  />
+                </Form.Item>
+              </Col>
+              {canViewFinancials ? (
+                <Col xs={24} sm={12} md={8} lg={4}>
+                  <Form.Item name="paymentStatusName" label="Статус оплаты">
+                    <Select
+                      allowClear
+                      showSearch
+                      placeholder="Оплата"
+                      options={paymentStatusOptions}
+                      filterOption={selectFilterOption}
+                    />
+                  </Form.Item>
+                </Col>
+              ) : null}
+            </Row>
+            <div className="calendar-filters-panel__actions">
+              <Space size="middle">
+                <Button type="primary" htmlType="submit" icon={<FilterOutlined />}>
+                  Применить
+                </Button>
+                <Button onClick={handleClearFilters} icon={<ClearOutlined />}>
+                  Сбросить
+                </Button>
+              </Space>
+            </div>
+          </Form>
+        </Card>
+      ) : null}
 
       {/* Индикатор загрузки */}
       {isLoading && (

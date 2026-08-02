@@ -1,12 +1,18 @@
 import { useMemo } from 'react';
 import { useList } from '@refinedev/core';
-import { CalendarOrder, CalendarDataResult } from '../types/calendar';
+import { CalendarOrder, CalendarDataResult, CalendarFilters, CalendarFilterOption } from '../types/calendar';
 import { groupOrdersByDate } from '../utils/groupOrdersByDate';
 import { formatDateForApi } from '../utils/dateUtils';
+import { applyCalendarFilters } from '../utils/calendarFilters';
 import { useAppSettings, SETTING_KEYS } from '../../../hooks/useAppSettings';
 import { resolveDetailMaterialName } from '../../../utils/materialDisplayName';
 import { buildProductionStagesDisplayConfig } from '../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../types/productionWorkflow';
+
+const toSortedOptions = (values: Iterable<string>): CalendarFilterOption[] =>
+  Array.from(new Set(Array.from(values).map((value) => value.trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'ru'))
+    .map((value) => ({ label: value, value }));
 
 /**
  * Hook для загрузки данных заказов календаря из Hasura GraphQL
@@ -16,7 +22,8 @@ import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../typ
  */
 export const useCalendarData = (
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  filters: CalendarFilters = {},
 ): CalendarDataResult => {
   const { getSetting } = useAppSettings();
 
@@ -187,6 +194,25 @@ export const useCalendarData = (
     return map;
   }, [detailNamesData]);
 
+  const materialOptions = useMemo(() => {
+    const names = new Set<string>();
+    (materialsData?.data || []).forEach((material: any) => {
+      if (material?.material_name) names.add(material.material_name);
+    });
+    (detailNamesData?.data || []).forEach((detail: any) => {
+      if (detail?.material_name) names.add(detail.material_name);
+    });
+    return toSortedOptions(names);
+  }, [detailNamesData?.data, materialsData?.data]);
+
+  const millingTypeOptions = useMemo(() => {
+    const names = new Set<string>();
+    (millingTypesData?.data || []).forEach((millingType: any) => {
+      if (millingType?.milling_type_name) names.add(millingType.milling_type_name);
+    });
+    return toSortedOptions(names);
+  }, [millingTypesData?.data]);
+
   // Создаём Map для быстрого поиска названия статуса производства
   const productionStatusesMap = useMemo(() => {
     const map = new Map<number, string>();
@@ -284,9 +310,11 @@ export const useCalendarData = (
         map[detail.order_id] = [];
       }
       map[detail.order_id].push({
+        milling_type_id: detail.milling_type_id,
         milling_type: detail.milling_type_id
           ? { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' }
           : undefined,
+        material_id: detail.material_id,
         material: (() => {
           const name = resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap);
           return name ? { material_name: name } : undefined;
@@ -329,14 +357,16 @@ export const useCalendarData = (
       };
     });
 
-    return groupOrdersByDate(ordersWithDetails);
-  }, [data?.data, detailsByOrderId, dowelingByOrderId, passedCodesByOrderId]);
+    return groupOrdersByDate(applyCalendarFilters(ordersWithDetails, filters));
+  }, [data?.data, detailsByOrderId, dowelingByOrderId, filters, passedCodesByOrderId]);
 
   return {
     ordersByDate,
     isLoading,
     refetch,
     productionWorkflowDisplay,
+    materialOptions,
+    millingTypeOptions,
     error: isError ? (error as Error) : undefined,
   };
 };

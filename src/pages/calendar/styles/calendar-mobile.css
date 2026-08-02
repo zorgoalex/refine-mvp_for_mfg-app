@@ -18,6 +18,18 @@
     width: 100%;
   }
 
+  .calendar-navigation__quick-filter {
+    width: 100%;
+  }
+
+  .calendar-filters-panel {
+    margin: 8px 8px 0;
+  }
+
+  .calendar-filters-panel__actions {
+    justify-content: flex-start;
+  }
+
   .calendar-navigation__flex-btn {
     flex: 1 1 0;
     min-width: 0;

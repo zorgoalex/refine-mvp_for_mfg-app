@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-02",
+    title: "Календарь: расширенные фильтры заказов",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В производственном календаре появился отдельный блок фильтров по заказу, клиенту, материалу, фрезеровке, оплате и статусу заказа.",
+      "В верхней строке настроек календаря сохранён быстрый поиск по заказу или клиенту в одном поле.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
     title: "Excel: группировка деталей в экспорте",
     services: ["ERP"],
     repositories: ["repo_erp"],

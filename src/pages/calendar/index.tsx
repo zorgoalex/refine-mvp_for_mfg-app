@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import { Badge, Button, Switch } from 'antd';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Badge, Button } from 'antd';
 import { FilterOutlined, PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import CalendarBoard from './components/CalendarBoard';
+import type { CalendarFilters } from './types/calendar';
+import { getCalendarActiveFilterCount } from './utils/calendarFilters';
 import { OperationalPageHeader, useOperationalUi } from '../../ui-operational/OperationalPrimitives';
 import './styles/calendar.css';
 import './styles/calendar-mobile.css';
@@ -15,6 +17,8 @@ export const CalendarList: React.FC = () => {
   const isOperational = useOperationalUi();
   const navigate = useNavigate();
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState<CalendarFilters>({});
+  const activeFilterCount = useMemo(() => getCalendarActiveFilterCount(filters), [filters]);
   // Убираем скролл у родительского контейнера при монтировании
   useEffect(() => {
     const content = document.querySelector('.ant-layout-content');
@@ -38,13 +42,14 @@ export const CalendarList: React.FC = () => {
           description="Нагрузка по дням, сроки заказов и риски производства на одной временной шкале."
           actions={(
             <>
-              <Badge count={3} size="small" offset={[-4, 5]}>
+              <Badge count={activeFilterCount} size="small" offset={[-4, 5]}>
                 <Button
+                  type={filtersOpen || activeFilterCount > 0 ? 'primary' : 'default'}
                   icon={<FilterOutlined />}
                   aria-expanded={filtersOpen}
                   onClick={() => setFiltersOpen((open) => !open)}
                 >
-                  Фильтры
+                  {filtersOpen ? 'Скрыть фильтры' : activeFilterCount > 0 ? 'Фильтры активны' : 'Фильтры'}
                 </Button>
               </Badge>
               <Button
@@ -62,15 +67,12 @@ export const CalendarList: React.FC = () => {
           Производственный календарь
         </h2>
       )}
-      {isOperational && filtersOpen ? (
-        <div className="calendar-filter-summary" aria-label="Фильтры календаря">
-          <label><Switch size="small" defaultChecked /> С активными производственными этапами</label>
-          <label><Switch size="small" defaultChecked /> Показывать риски сроков</label>
-          <label><Switch size="small" defaultChecked /> Только открытые заказы</label>
-        </div>
-      ) : null}
       <div className="calendar-page">
-        <CalendarBoard />
+        <CalendarBoard
+          filters={filters}
+          filtersOpen={isOperational && filtersOpen}
+          onFiltersChange={setFilters}
+        />
       </div>
     </div>
   );
