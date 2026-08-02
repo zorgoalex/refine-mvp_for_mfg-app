@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-02",
+    title: "Карточка заказа: обновление статусов деталей без дерганья",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Колонка «Статус» в списке деталей больше не перезагружает всю таблицу по таймеру и не вызывает постоянные пересчёты layout в карточке заказа.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-02",
     title: "Календарь: строгий фильтр МДФ 16мм",
     services: ["ERP"],
     repositories: ["repo_erp"],

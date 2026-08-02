@@ -28,10 +28,13 @@ describe('cut detail column', () => {
     expect(show).toContain('OrderDetailProductionStatusTag');
     expect(show).toContain('productionStatusesById');
     expect(show).toContain('ORDER_DETAIL_STATUS_REFRESH_MS');
-    expect(show).toContain('refetchDetails');
+    expect(show).toContain('refreshLiveDetailProductionStatuses');
+    expect(show).toContain('areDetailProductionStatusMapsEqual');
+    expect(show).toContain('setLiveDetailProductionStatusById(nextLiveStatuses)');
     expect(show).toContain("document.addEventListener('visibilitychange'");
     expect(show).toContain("resource: \"production_statuses\"");
     expect(show).toContain('canViewProductionReferences');
+    expect(show).not.toContain('refetch: refetchDetails');
   });
 
   it('summary row aligns with the selection column and the trailing Раскрой column', () => {
