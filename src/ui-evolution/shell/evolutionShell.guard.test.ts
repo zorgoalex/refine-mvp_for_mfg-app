@@ -32,6 +32,16 @@ describe('evolution shell behavior preservation', () => {
     expect(navigation).toContain("can('orders.create', currentUser)");
   });
 
+  it('supports per-user sidebar menu ordering in the modern sider', () => {
+    expect(navigation).toContain('useSidebarMenuPreferences');
+    expect(navigation).toContain('sidebarMenuOrder: sidebarMenuPreferences.settings');
+    expect(sider).toContain('SidebarMenuSettingsButton');
+    expect(sider).toContain('sider.categoryOrder.map');
+    expect(sider).toContain('className="evolution-sider__settings-bottom"');
+    expect(styles).toContain('.evolution-sider__settings-bottom');
+    expect(styles).toContain('.evolution-sider.ant-layout-sider-collapsed .evolution-sider__nav');
+  });
+
   it('renders AIR as a separate top-nav and utility-rail shell, not a recolored sider', () => {
     expect(layout).toContain("variant === 'air'");
     expect(layout).toContain('<EvolutionAirNavigation />');

@@ -11852,6 +11852,38 @@ components:
           format: int64
           minimum: 1
 
+    SidebarMenuOrderPreference:
+      type: object
+      required:
+        - top
+        - categories
+        - resources
+      properties:
+        top:
+          type: array
+          maxItems: 160
+          items:
+            type: string
+            minLength: 1
+            maxLength: 80
+        categories:
+          type: array
+          maxItems: 40
+          items:
+            type: string
+            minLength: 1
+            maxLength: 80
+        resources:
+          type: object
+          maxProperties: 40
+          additionalProperties:
+            type: array
+            maxItems: 160
+            items:
+              type: string
+              minLength: 1
+              maxLength: 80
+
     UserPreferences:
       type: object
       required:
@@ -11861,6 +11893,7 @@ components:
         - orderDetailColumns
         - recentReferences
         - pageSizePreferences
+        - sidebarMenuOrder
       properties:
         themeMode:
           type: string
@@ -11883,6 +11916,8 @@ components:
           additionalProperties:
             type: integer
             enum: [10, 20, 25, 50, 100]
+        sidebarMenuOrder:
+          $ref: '#/components/schemas/SidebarMenuOrderPreference'
 
     UserPreferencesResponse:
       type: object
@@ -11914,6 +11949,8 @@ components:
           additionalProperties:
             type: integer
             enum: [10, 20, 25, 50, 100]
+        sidebarMenuOrder:
+          $ref: '#/components/schemas/SidebarMenuOrderPreference'
 
     ReferenceUsageRequest:
       type: object

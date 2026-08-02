@@ -15,6 +15,7 @@ import {
 } from '@ant-design/icons';
 import { useGetIdentity } from '@refinedev/core';
 import { OrderCreateModal } from '../../pages/orders/components/OrderCreateModal';
+import { SidebarMenuSettingsButton } from '../../components/SidebarMenuSettingsButton';
 import { SIDER_RESOURCE_ICONS } from '../../components/siderResourceIcons';
 import type { UserIdentity } from '../../types/auth';
 import { APP_VERSION } from '../../version';
@@ -31,7 +32,7 @@ export interface EvolutionSiderProps {
 }
 
 export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCollapse, operational = false }) => {
-  const { sider, isCreateModalOpen, setIsCreateModalOpen } = useEvolutionNavigation();
+  const { sider, isCreateModalOpen, setIsCreateModalOpen, sidebarMenuPreferences } = useEvolutionNavigation();
   const { data: identity } = useGetIdentity<UserIdentity>();
   const resourceItems = Object.values(sider.categorizedResources).flat();
   const activeCategory = Object.entries(sider.categorizedResources)
@@ -208,12 +209,44 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                       {collapsed ? null : 'Создать заказ'}
                     </Button>
                   </Tooltip>
+                  {!collapsed ? (
+                    <div className="evolution-sider__settings-inline">
+                      <SidebarMenuSettingsButton
+                        topItems={sider.topMenuOrderItems}
+                        categorizedResources={sider.categorizedResources}
+                        categoryLabels={EVOLUTION_CATEGORY_LABELS}
+                        defaults={sider.menuOrderDefaults}
+                        settings={sider.menuOrderSettings}
+                        onChange={sidebarMenuPreferences.saveSettings}
+                        buttonProps={{ size: 'small', shape: 'circle' }}
+                        tooltipPlacement="right"
+                      />
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
-              {EVOLUTION_CATEGORY_ORDER.map((category) => {
+              {!sider.canCreateOrders && !collapsed ? (
+                <div className="evolution-sider__settings-inline evolution-sider__settings-inline--solo">
+                  <SidebarMenuSettingsButton
+                    topItems={sider.topMenuOrderItems}
+                    categorizedResources={sider.categorizedResources}
+                    categoryLabels={EVOLUTION_CATEGORY_LABELS}
+                    defaults={sider.menuOrderDefaults}
+                    settings={sider.menuOrderSettings}
+                    onChange={sidebarMenuPreferences.saveSettings}
+                    buttonProps={{ size: 'small', shape: 'circle' }}
+                    tooltipPlacement="right"
+                  />
+                </div>
+              ) : null}
+
+              {sider.categoryOrder.map((category) => {
                 const resources = sider.categorizedResources[category] ?? [];
                 if (resources.length === 0) return null;
+                const categoryLabel = EVOLUTION_CATEGORY_LABELS[
+                  category as keyof typeof EVOLUTION_CATEGORY_LABELS
+                ] ?? category;
                 const items = resources.map((item) => ({
                   key: item.name,
                   icon: SIDER_RESOURCE_ICONS[item.name],
@@ -226,11 +259,11 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                   <div className="evolution-sider__group" key={category}>
                     {!collapsed ? (
                       <Typography.Text className="evolution-sider__group-label">
-                        {EVOLUTION_CATEGORY_LABELS[category]}
+                        {categoryLabel}
                       </Typography.Text>
                     ) : null}
                     <Menu
-                      aria-label={EVOLUTION_CATEGORY_LABELS[category]}
+                      aria-label={categoryLabel}
                       inlineCollapsed={collapsed}
                       items={items}
                       mode="inline"
@@ -241,6 +274,20 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                 );
               })}
             </nav>
+            {collapsed ? (
+              <div className="evolution-sider__settings-bottom">
+                <SidebarMenuSettingsButton
+                  topItems={sider.topMenuOrderItems}
+                  categorizedResources={sider.categorizedResources}
+                  categoryLabels={EVOLUTION_CATEGORY_LABELS}
+                  defaults={sider.menuOrderDefaults}
+                  settings={sider.menuOrderSettings}
+                  onChange={sidebarMenuPreferences.saveSettings}
+                  buttonProps={{ shape: 'circle', type: 'text' }}
+                  tooltipPlacement="right"
+                />
+              </div>
+            ) : null}
           </>
         )}
       </Layout.Sider>

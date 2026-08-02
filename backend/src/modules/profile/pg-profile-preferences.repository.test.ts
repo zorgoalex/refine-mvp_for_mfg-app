@@ -7,7 +7,15 @@ describe('PgProfilePreferencesRepository', () => {
     const database = new FakeDatabase([{ rows: [] }]);
     const repository = new PgProfilePreferencesRepository(database);
 
-    await expect(repository.getUserPreferences(7)).resolves.toEqual({ themeMode: 'light', uiSize: 'default', uiVariant: 'evolution', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {} });
+    await expect(repository.getUserPreferences(7)).resolves.toEqual({
+      themeMode: 'light',
+      uiSize: 'default',
+      uiVariant: 'evolution',
+      orderDetailColumns: {},
+      recentReferences: {},
+      pageSizePreferences: {},
+      sidebarMenuOrder: { top: [], categories: [], resources: {} },
+    });
     expect(database.queries[0].text).toContain('FROM user_preferences');
     expect(database.queries[0].params).toEqual([7]);
   });
@@ -23,6 +31,7 @@ describe('PgProfilePreferencesRepository', () => {
       orderDetailColumns: { orderShow: { order: ['height'], hidden: ['note'] } },
       recentReferences: {},
       pageSizePreferences: {},
+      sidebarMenuOrder: { top: [], categories: [], resources: {} },
     });
   });
 
@@ -37,10 +46,11 @@ describe('PgProfilePreferencesRepository', () => {
       orderDetailColumns: {},
       recentReferences: {},
       pageSizePreferences: {},
+      sidebarMenuOrder: { top: [], categories: [], resources: {} },
     });
     expect(database.queries[0].text).toContain('INSERT INTO user_preferences');
     expect(database.queries[0].text).toContain('ON CONFLICT (user_id)');
-    expect(database.queries[0].params).toEqual([7, 'dark', null, null, null, null]);
+    expect(database.queries[0].params).toEqual([7, 'dark', null, null, null, null, null]);
   });
 
   it('upserts order detail column preferences without changing theme', async () => {
@@ -56,6 +66,7 @@ describe('PgProfilePreferencesRepository', () => {
       orderDetailColumns: { orderEdit: { order: ['width'], hidden: [] } },
       recentReferences: {},
       pageSizePreferences: {},
+      sidebarMenuOrder: { top: [], categories: [], resources: {} },
     });
     expect(database.queries[0].params).toEqual([
       7,
@@ -64,7 +75,38 @@ describe('PgProfilePreferencesRepository', () => {
       null,
       JSON.stringify({ orderEdit: { order: ['width'], hidden: [] } }),
       null,
+      null,
     ]);
+  });
+
+  it('upserts sidebar menu order without replacing page-size preferences', async () => {
+    const sidebarMenuOrder = {
+      top: ['calendar', 'orders_view'],
+      categories: ['Материалы', 'Производство'],
+      resources: { Материалы: ['materials', 'films'] },
+    };
+    const database = new FakeDatabase([{
+      rows: [{
+        theme_mode: 'light',
+        order_detail_columns: {},
+        page_size_preferences: { 'refine:orders_view': 50 },
+        sidebar_menu_order: sidebarMenuOrder,
+      }],
+    }]);
+    const repository = new PgProfilePreferencesRepository(database);
+
+    await expect(repository.updateUserPreferences(7, { sidebarMenuOrder }))
+      .resolves.toMatchObject({ sidebarMenuOrder });
+    expect(database.queries[0].params).toEqual([
+      7,
+      null,
+      null,
+      null,
+      null,
+      null,
+      JSON.stringify(sidebarMenuOrder),
+    ]);
+    expect(database.queries[0].text).toContain('sidebar_menu_order = COALESCE($7::jsonb, user_preferences.sidebar_menu_order)');
   });
 
   it('upserts ui size and normalizes garbage to default (uiSize)', async () => {
@@ -78,8 +120,9 @@ describe('PgProfilePreferencesRepository', () => {
       orderDetailColumns: {},
       recentReferences: {},
       pageSizePreferences: {},
+      sidebarMenuOrder: { top: [], categories: [], resources: {} },
     });
-    expect(database.queries[0].params).toEqual([7, null, 'small', null, null, null]);
+    expect(database.queries[0].params).toEqual([7, null, 'small', null, null, null, null]);
 
     const garbage = new FakeDatabase([{ rows: [{ theme_mode: 'light', ui_size: 'huge', order_detail_columns: {} }] }]);
     await expect(new PgProfilePreferencesRepository(garbage).getUserPreferences(7)).resolves.toMatchObject({
@@ -96,7 +139,7 @@ describe('PgProfilePreferencesRepository', () => {
 
     await expect(repository.updateUserPreferences(7, { uiVariant: 'line' }))
       .resolves.toMatchObject({ uiVariant: 'line' });
-    expect(database.queries[0].params).toEqual([7, null, null, 'line', null, null]);
+    expect(database.queries[0].params).toEqual([7, null, null, 'line', null, null, null]);
     expect(database.queries[0].text).toContain('ui_variant = COALESCE($4, user_preferences.ui_variant)');
 
     const air = new FakeDatabase([{
@@ -135,6 +178,7 @@ describe('PgProfilePreferencesRepository', () => {
       null,
       null,
       JSON.stringify({ 'refine:orders_view': 50 }),
+      null,
     ]);
     expect(database.queries[0].text).toContain('user_preferences.page_size_preferences || $6::jsonb');
     expect(database.queries[0].text).toContain('jsonb_object_length(user_preferences.page_size_preferences || $6::jsonb) <= 128');
@@ -213,6 +257,30 @@ describe('PgProfilePreferencesRepository', () => {
 
     await expect(new PgProfilePreferencesRepository(database).getUserPreferences(7))
       .resolves.toMatchObject({ pageSizePreferences: { orders: 50 } });
+  });
+
+  it('normalizes malformed, duplicate and oversized sidebar menu order data', async () => {
+    const database = new FakeDatabase([{
+      rows: [{
+        sidebar_menu_order: {
+          top: ['orders_view', 'orders_view', ' calendar ', 7, 'x'.repeat(81)],
+          categories: ['Материалы', 'Материалы', ' Производство '],
+          resources: {
+            ' Материалы ': ['materials', 'materials', 'films'],
+            ['x'.repeat(81)]: ['ignored'],
+          },
+        },
+      }],
+    }]);
+
+    await expect(new PgProfilePreferencesRepository(database).getUserPreferences(7))
+      .resolves.toMatchObject({
+        sidebarMenuOrder: {
+          top: ['orders_view', 'calendar'],
+          categories: ['Материалы', 'Производство'],
+          resources: { Материалы: ['materials', 'films'] },
+        },
+      });
   });
 
   it('caps oversized legacy page-size maps before returning them', async () => {

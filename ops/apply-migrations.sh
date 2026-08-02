@@ -764,6 +764,17 @@ probe_file() {
     092_cut_result_archive_state*) probe_all "$(q_tbl cut_result_archive_state)" \
                      "$(q_con fk_cut_result_archive_state_job)" \
                      "$(q_con chk_cut_result_archive_state_result_no)" ;;
+    093_cnc_telegram_svg_cut_import*) probe_all "$(q_col cnc_telegram_packets cut_layout_json)" \
+                     "$(q_col cnc_telegram_packets svg_cut_job_id)" \
+                     "$(q_col cnc_telegram_packets svg_cut_result_id)" \
+                     "$(q_col cnc_telegram_packets svg_cut_import_status)" \
+                     "$(q_con_on cnc_telegram_packets chk_cnc_telegram_packets_svg_cut_import_status)" \
+                     "$(q_con_on cnc_telegram_packets fk_cnc_telegram_packets_svg_cut_job)" \
+                     "$(q_con_on cnc_telegram_packets fk_cnc_telegram_packets_svg_cut_result_same_job)" \
+                     "$(q_con_on cnc_telegram_packets chk_cnc_telegram_packets_svg_cut_result_requires_job)" \
+                     "$(q_idx idx_cnc_telegram_packets_svg_cut_job)" \
+                     "$(q_idx idx_cnc_telegram_packets_cut_layout_valid)" ;;
+    094_user_preferences_sidebar_menu_order*) probe_all "$(q_col user_preferences sidebar_menu_order)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }

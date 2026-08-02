@@ -29,12 +29,14 @@ import {
 } from "../config/bitrix24";
 import { RESOURCE_LABELS } from "../utils/tabLabels";
 import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
+import { useSidebarMenuPreferences } from "../hooks/useSidebarMenuPreferences";
 import {
   canViewResourceByRoleVisibility,
   getCurrentUserRoleKey,
   normalizeRoleVisibilityMatrix,
 } from "../utils/resourceVisibility";
 import { APP_VERSION } from "../version";
+import { SidebarMenuSettingsButton } from "./SidebarMenuSettingsButton";
 import { SIDER_RESOURCE_ICONS } from "./siderResourceIcons";
 
 const { Panel } = Collapse;
@@ -99,6 +101,7 @@ export const CustomSider: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
   const { getSetting } = useAppSettings();
+  const sidebarMenuPreferences = useSidebarMenuPreferences();
 
   // Warm DNS/TLS to Bitrix24 while the user works in ERP.
   useEffect(() => {
@@ -149,6 +152,7 @@ export const CustomSider: React.FC = () => {
     crm: bitrix24MenuConfig
       ? { ...bitrix24MenuConfig, icon: <ContactsOutlined /> }
       : null,
+    sidebarMenuOrder: sidebarMenuPreferences.settings,
   });
 
   return (
@@ -177,85 +181,147 @@ export const CustomSider: React.FC = () => {
         style={{
           background: "#37474F",
           height: "calc(100vh - 120px)",
-          overflowY: "auto",
-          overflowX: "hidden",
-          padding: "8px 0",
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
         }}
       >
-        <Menu
-          mode="inline"
-          selectedKeys={
-            sider.selectedKey === "orders_view" ||
-            sider.selectedKey === "calendar" ||
-            sider.selectedKey === "order-status-board"
-              ? [sider.selectedKey]
-              : []
-          }
-          items={sider.topMenuItems}
-          style={{ background: "transparent", border: "none", marginBottom: 0, color: "#E0E0E0" }}
-          className="orders-menu"
-        />
-
-        {canCreateOrders && (
-          <div style={{ padding: collapsed ? "8px 4px" : "8px 16px", marginTop: "72px", textAlign: "center" }}>
-            <Button
-              type="primary"
-              icon={collapsed ? <PlusOutlined /> : undefined}
-              onClick={sider.handleNewOrder}
-              block={!collapsed}
-              style={{ marginBottom: 8 }}
-              title={collapsed ? "Создать заказ" : undefined}
-            >
-              {!collapsed && "Создать заказ"}
-            </Button>
-          </div>
-        )}
-
-        {collapsed ? (
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            overflowX: "hidden",
+            padding: "8px 0",
+          }}
+        >
           <Menu
             mode="inline"
-            selectedKeys={sider.selectedKey ? [sider.selectedKey] : []}
-            items={sider.flatMenuItems}
-            style={{ border: "none", background: "transparent", fontSize: "0.98em" }}
+            selectedKeys={
+              sider.selectedKey === "orders_view" ||
+              sider.selectedKey === "calendar" ||
+              sider.selectedKey === "order-status-board"
+                ? [sider.selectedKey]
+                : []
+            }
+            items={sider.topMenuItems}
+            style={{ background: "transparent", border: "none", marginBottom: 0, color: "#E0E0E0" }}
+            className="orders-menu"
           />
-        ) : (
-          <Collapse accordion ghost defaultActiveKey={undefined} style={{ background: "transparent", border: "none" }} className="sidebar-collapse">
-            {CATEGORY_ORDER.map((category) => {
-              const items = sider.categorizedResources[category];
-              if (!items || items.length === 0) return null;
-              if (category === "Настройки" && !canViewSettings) return null;
 
-              const categoryItems: MenuProps["items"] = items.map((item) => ({
-                key: item.name,
-                icon: SIDER_RESOURCE_ICONS[item.name],
-                label: menuLabelWithTooltip(item.label),
-                title: item.label,
-                onClick: () => push(item.route),
-              }));
+          {canCreateOrders && (
+            <div style={{ padding: collapsed ? "8px 4px" : "8px 16px", marginTop: "72px", textAlign: "center" }}>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={sider.handleNewOrder}
+                block={!collapsed}
+                style={{ marginBottom: 8 }}
+                title={collapsed ? "Создать заказ" : undefined}
+              >
+                {!collapsed && "Создать заказ"}
+              </Button>
+              {!collapsed && (
+                <SidebarMenuSettingsButton
+                  topItems={sider.topMenuOrderItems}
+                  categorizedResources={sider.categorizedResources}
+                  defaults={sider.menuOrderDefaults}
+                  settings={sider.menuOrderSettings}
+                  onChange={sidebarMenuPreferences.saveSettings}
+                  buttonProps={{
+                    size: "small",
+                    shape: "circle",
+                    style: { color: "#E0E0E0", borderColor: "rgba(255, 255, 255, 0.24)", background: "transparent" },
+                  }}
+                  tooltipPlacement="right"
+                />
+              )}
+            </div>
+          )}
 
-              const isSelected = items.some((item) => item.name === sider.selectedKey);
+          {!canCreateOrders && !collapsed && (
+            <div style={{ padding: "8px 16px", marginTop: "72px", textAlign: "center" }}>
+              <SidebarMenuSettingsButton
+                topItems={sider.topMenuOrderItems}
+                categorizedResources={sider.categorizedResources}
+                defaults={sider.menuOrderDefaults}
+                settings={sider.menuOrderSettings}
+                onChange={sidebarMenuPreferences.saveSettings}
+                buttonProps={{
+                  size: "small",
+                  shape: "circle",
+                  style: { color: "#E0E0E0", borderColor: "rgba(255, 255, 255, 0.24)", background: "transparent" },
+                }}
+                tooltipPlacement="right"
+              />
+            </div>
+          )}
 
-              return (
-                <Panel
-                  header={
-                    <span>
-                      <span style={{ marginRight: "8px" }}>{CATEGORY_ICONS[category]}</span>
-                      {category}
-                    </span>
-                  }
-                  key={category}
-                  style={{ color: "#E0E0E0" }}
-                >
-                  <Menu
-                    mode="inline"
-                    selectedKeys={isSelected ? [sider.selectedKey] : []}
-                    items={categoryItems}
-                    style={{ border: "none", background: "transparent", fontSize: "0.98em" }}
-                  />
-                </Panel>
-              );
-            })}
-          </Collapse>
+          {collapsed ? (
+            <Menu
+              mode="inline"
+              selectedKeys={sider.selectedKey ? [sider.selectedKey] : []}
+              items={sider.flatMenuItems}
+              style={{ border: "none", background: "transparent", fontSize: "0.98em" }}
+            />
+          ) : (
+            <Collapse accordion ghost defaultActiveKey={undefined} style={{ background: "transparent", border: "none" }} className="sidebar-collapse">
+              {sider.categoryOrder.map((category) => {
+                const items = sider.categorizedResources[category];
+                if (!items || items.length === 0) return null;
+                if (category === "Настройки" && !canViewSettings) return null;
+
+                const categoryItems: MenuProps["items"] = items.map((item) => ({
+                  key: item.name,
+                  icon: SIDER_RESOURCE_ICONS[item.name],
+                  label: menuLabelWithTooltip(item.label),
+                  title: item.label,
+                  onClick: () => push(item.route),
+                }));
+
+                const isSelected = items.some((item) => item.name === sider.selectedKey);
+
+                return (
+                  <Panel
+                    header={
+                      <span>
+                        <span style={{ marginRight: "8px" }}>{CATEGORY_ICONS[category]}</span>
+                        {category}
+                      </span>
+                    }
+                    key={category}
+                    style={{ color: "#E0E0E0" }}
+                  >
+                    <Menu
+                      mode="inline"
+                      selectedKeys={isSelected ? [sider.selectedKey] : []}
+                      items={categoryItems}
+                      style={{ border: "none", background: "transparent", fontSize: "0.98em" }}
+                    />
+                  </Panel>
+                );
+              })}
+            </Collapse>
+          )}
+        </div>
+
+        {collapsed && (
+          <div style={{ padding: "8px 4px 10px", borderTop: "1px solid rgba(255, 255, 255, 0.1)", textAlign: "center" }}>
+            <SidebarMenuSettingsButton
+              topItems={sider.topMenuOrderItems}
+              categorizedResources={sider.categorizedResources}
+              defaults={sider.menuOrderDefaults}
+              settings={sider.menuOrderSettings}
+              onChange={sidebarMenuPreferences.saveSettings}
+              buttonProps={{
+                size: "small",
+                shape: "circle",
+                type: "text",
+                style: { color: "#E0E0E0" },
+              }}
+              tooltipPlacement="right"
+            />
+          </div>
         )}
       </div>
 

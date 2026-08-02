@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { IResourceItem } from '@refinedev/core';
 import {
+  applySidebarMenuOrderToResources,
+  applySidebarOrder,
   buildCategorizedResources,
   buildFlatMenuItems,
+  buildSidebarMenuOrderDefaults,
   buildTopMenuItems,
   computeSelectedKey,
   makeCrmOpener,
+  normalizeSidebarMenuOrderPreference,
   resolveCalendarRoute,
   resolveOrdersRoute,
   resolveStatusBoardRoute,
@@ -347,6 +351,108 @@ describe('buildTopMenuItems', () => {
       openExternal: () => {},
     });
     expect(items.map((i) => (i as { key: string }).key)).toEqual(['orders_view', 'crm']);
+  });
+
+  it('applies per-user order and appends newly available top items', () => {
+    const items = buildTopMenuItems({
+      ...baseArgs,
+      statusBoard: { route: '/order-status-board', label: 'Доски статусов' },
+      crm: { url: 'https://crm-test.mebelkz.app', label: 'CRM' },
+      openExternal: () => {},
+      order: ['crm', 'orders_view'],
+    });
+    expect(items.map((item) => (item as { key: string }).key)).toEqual([
+      'crm',
+      'orders_view',
+      'calendar',
+      'order-status-board',
+    ]);
+  });
+});
+
+describe('sidebar menu order preferences', () => {
+  it('normalizes order against currently available keys', () => {
+    const defaults = {
+      top: ['orders_view', 'calendar', 'crm'],
+      categories: ['Контрагенты', 'Материалы'],
+      resources: {
+        Контрагенты: ['clients', 'suppliers'],
+        Материалы: ['materials', 'films'],
+      },
+    };
+
+    expect(normalizeSidebarMenuOrderPreference(defaults, {
+      top: ['crm', 'unknown', 'crm'],
+      categories: ['Материалы'],
+      resources: { Материалы: ['films', 'ghost'] },
+    })).toEqual({
+      top: ['crm', 'orders_view', 'calendar'],
+      categories: ['Материалы', 'Контрагенты'],
+      resources: {
+        Контрагенты: ['clients', 'suppliers'],
+        Материалы: ['films', 'materials'],
+      },
+    });
+  });
+
+  it('applies resource order inside each category only', () => {
+    const categorized = {
+      Контрагенты: [
+        { name: 'clients', label: 'Клиенты', route: '/clients' },
+        { name: 'suppliers', label: 'Поставщики', route: '/suppliers' },
+      ],
+      Материалы: [
+        { name: 'materials', label: 'Материалы', route: '/materials' },
+        { name: 'films', label: 'Пленки', route: '/films' },
+      ],
+    };
+
+    expect(applySidebarOrder(['Контрагенты', 'Материалы'], ['Материалы'])).toEqual([
+      'Материалы',
+      'Контрагенты',
+    ]);
+    expect(applySidebarMenuOrderToResources(categorized, ['Контрагенты', 'Материалы'], {
+      top: [],
+      categories: ['Материалы', 'Контрагенты'],
+      resources: {
+        Контрагенты: ['suppliers'],
+        Материалы: ['films', 'materials'],
+      },
+    })).toEqual({
+      Контрагенты: [
+        { name: 'suppliers', label: 'Поставщики', route: '/suppliers' },
+        { name: 'clients', label: 'Клиенты', route: '/clients' },
+      ],
+      Материалы: [
+        { name: 'films', label: 'Пленки', route: '/films' },
+        { name: 'materials', label: 'Материалы', route: '/materials' },
+      ],
+    });
+  });
+
+  it('builds reset defaults from menu items and categorized resources', () => {
+    const topItems = buildTopMenuItems({
+      canViewNavigation: () => true,
+      resourceIcons: {},
+      ordersRoute: '/orders',
+      ordersLabel: 'Заказы',
+      calendarRoute: '/calendar',
+      calendarLabel: 'Календарь',
+      push: () => {},
+    });
+    const defaults = buildSidebarMenuOrderDefaults({
+      topMenuItems: topItems,
+      categoryOrder: ['Контрагенты'],
+      categorizedResources: {
+        Контрагенты: [{ name: 'clients', label: 'Клиенты', route: '/clients' }],
+      },
+    });
+
+    expect(defaults).toEqual({
+      top: ['orders_view', 'calendar'],
+      categories: ['Контрагенты'],
+      resources: { Контрагенты: ['clients'] },
+    });
   });
 });
 
