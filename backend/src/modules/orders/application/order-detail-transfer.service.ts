@@ -40,6 +40,9 @@ export interface TransferOrderDetailsCommand {
 export interface OrderTransferTargetDto {
   orderId: number;
   orderName: string;
+  clientId: number;
+  clientName: string | null;
+  orderDate: string;
   projectId: number;
   projectCode: string | null;
   projectName: string | null;
@@ -141,6 +144,9 @@ interface VersionRow {
 interface TargetSearchRow {
   order_id: string | number;
   order_name: string;
+  client_id: string | number;
+  client_name: string | null;
+  order_date: string | Date;
   project_id: string | number;
   project_code: string | null;
   project_name: string | null;
@@ -169,11 +175,13 @@ export class OrderDetailTransferService {
 
     const source = await this.ports.database.query<TargetSearchRow>(
       `
-      SELECT o.order_id, o.order_name, o.project_id, p.code AS project_code, p.name AS project_name,
+      SELECT o.order_id, o.order_name, o.client_id, c.client_name, o.order_date,
+             o.project_id, p.code AS project_code, p.name AS project_name,
              o.order_status_id, os.order_status_name,
              o.production_status_id, ps.production_status_name,
              o.version, o.created_by, o.manager_id
       FROM orders o
+      LEFT JOIN clients c ON c.client_id = o.client_id
       LEFT JOIN projects p ON p.project_id = o.project_id
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
       LEFT JOIN production_statuses ps ON ps.production_status_id = o.production_status_id
@@ -191,36 +199,40 @@ export class OrderDetailTransferService {
       });
     }
 
-    const sourceClient = await this.ports.database.query<{ client_id: string | number }>(
-      'SELECT client_id FROM orders WHERE order_id = $1 AND delete_flag = false',
-      [command.sourceOrderId],
-    );
-    const clientId = toNumber(sourceClient.rows[0]?.client_id);
+    const clientId = toNumber(sourceRow.client_id);
     const search = command.search?.trim() ?? '';
     const queryLimit = Math.min(Math.max(command.limit * 5, command.limit), 100);
     const rows = await this.ports.database.query<TargetSearchRow>(
       `
-      SELECT o.order_id, o.order_name, o.project_id, p.code AS project_code, p.name AS project_name,
+      SELECT o.order_id, o.order_name, o.client_id, c.client_name, o.order_date,
+             o.project_id, p.code AS project_code, p.name AS project_name,
              o.order_status_id, os.order_status_name,
              o.production_status_id, ps.production_status_name,
              o.version, o.created_by, o.manager_id
       FROM orders o
+      LEFT JOIN clients c ON c.client_id = o.client_id
       LEFT JOIN projects p ON p.project_id = o.project_id
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
       LEFT JOIN production_statuses ps ON ps.production_status_id = o.production_status_id
       WHERE o.delete_flag = false
-        AND o.client_id = $1
-        AND o.order_id <> $2
+        AND o.order_id <> $1
+        AND o.order_date >= (CURRENT_DATE - INTERVAL '1 month')
         AND (
-          $3::text = ''
-          OR o.order_name ILIKE '%' || $3 || '%'
-          OR p.code ILIKE '%' || $3 || '%'
-          OR p.name ILIKE '%' || $3 || '%'
+          $2::text = ''
+          OR o.order_name ILIKE '%' || $2 || '%'
+          OR c.client_name::text ILIKE '%' || $2 || '%'
+          OR p.code ILIKE '%' || $2 || '%'
+          OR p.name ILIKE '%' || $2 || '%'
+          OR os.order_status_name::text ILIKE '%' || $2 || '%'
         )
-      ORDER BY o.updated_at DESC, o.order_id DESC
+      ORDER BY
+        CASE WHEN o.client_id = $3 THEN 0 ELSE 1 END,
+        o.order_date DESC NULLS LAST,
+        o.updated_at DESC,
+        o.order_id DESC
       LIMIT $4
       `,
-      [clientId, command.sourceOrderId, search, queryLimit],
+      [command.sourceOrderId, search, clientId, queryLimit],
     );
 
     const data = rows.rows
@@ -1198,6 +1210,9 @@ function mapTransferTarget(row: TargetSearchRow): OrderTransferTargetDto {
   return {
     orderId: toNumber(row.order_id),
     orderName: row.order_name,
+    clientId: toNumber(row.client_id),
+    clientName: row.client_name,
+    orderDate: dateOnly(row.order_date),
     projectId: toNumber(row.project_id),
     projectCode: row.project_code,
     projectName: row.project_name,

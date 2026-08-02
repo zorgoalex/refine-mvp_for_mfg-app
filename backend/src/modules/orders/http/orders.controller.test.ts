@@ -677,12 +677,15 @@ describe('OrdersController read endpoints', () => {
     });
   });
 
-  it('lists same-client transfer targets through detail transfer service', async () => {
+  it('lists recent transfer targets through detail transfer service', async () => {
     const response = {
       data: [
         {
           orderId: 43,
           orderName: 'Target order',
+          clientId: 12,
+          clientName: 'Client A',
+          orderDate: '2026-08-01',
           projectId: 1001,
           projectCode: 'P-1',
           projectName: 'Project',

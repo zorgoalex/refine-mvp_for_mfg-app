@@ -1236,7 +1236,7 @@ paths:
         - Orders
       operationId: listOrderTransferTargets
       summary: Найти целевые заказы для переноса деталей
-      description: Возвращает доступные заказы того же клиента, кроме исходного заказа.
+      description: Возвращает доступные заказы за последний месяц, кроме исходного заказа; заказы того же клиента идут первыми.
       security:
         - bearerAuth: []
       x-permissions:
@@ -15362,6 +15362,9 @@ components:
             required:
               - orderId
               - orderName
+              - clientId
+              - clientName
+              - orderDate
               - projectId
               - projectCode
               - projectName
@@ -15376,6 +15379,15 @@ components:
                 format: int64
               orderName:
                 type: string
+              clientId:
+                type: integer
+                format: int64
+              clientName:
+                type: string
+                nullable: true
+              orderDate:
+                type: string
+                format: date
               projectId:
                 type: integer
                 format: int64

@@ -159,6 +159,9 @@ export interface RestoreOrderResponse {
 export interface OrderTransferTarget {
   orderId: number;
   orderName: string;
+  clientId: number;
+  clientName: string | null;
+  orderDate: DateOnlyString;
   projectId: number;
   projectCode: string | null;
   projectName: string | null;

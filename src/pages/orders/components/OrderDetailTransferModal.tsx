@@ -6,6 +6,7 @@ import type {
   OrderTransferTarget,
   TransferOrderDetailsResponse,
 } from '../../../api/types/orderApi.types';
+import { formatDate } from '../../../utils/dateFormat';
 
 interface OrderDetailTransferModalProps {
   open: boolean;
@@ -161,14 +162,17 @@ export const OrderDetailTransferModal: React.FC<OrderDetailTransferModalProps> =
               notFoundContent={loadingTargets ? <Spin size="small" /> : null}
               options={targets.map((target) => ({
                 value: target.orderId,
-                label: `${target.orderName}${target.projectCode ? ` · ${target.projectCode}` : ''}`,
+                label: formatTargetOptionLabel(target),
+                title: formatTargetOptionLabel(target),
               }))}
               style={{ width: '100%' }}
             />
             {selectedTarget && (
               <Typography.Text type="secondary">
                 Версия {selectedTarget.version}
-                {selectedTarget.orderStatusName ? ` · ${selectedTarget.orderStatusName}` : ''}
+                {` · Клиент: ${selectedTarget.clientName ?? '—'}`}
+                {` · Дата: ${formatDate(selectedTarget.orderDate)}`}
+                {` · Статус заказа: ${selectedTarget.orderStatusName ?? '—'}`}
                 {selectedTarget.productionStatusName ? ` · ${selectedTarget.productionStatusName}` : ''}
               </Typography.Text>
             )}
@@ -183,4 +187,13 @@ function nextSplitName(sourceOrderName: string): string {
   const base = sourceOrderName.trim();
   if (!base) return '';
   return `${base}-1`;
+}
+
+function formatTargetOptionLabel(target: OrderTransferTarget): string {
+  return [
+    target.orderName,
+    target.clientName ?? '—',
+    formatDate(target.orderDate),
+    target.orderStatusName ?? '—',
+  ].join(' · ');
 }

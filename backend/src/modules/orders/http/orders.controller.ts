@@ -797,6 +797,9 @@ const orderTransferTargetSwaggerSchema = {
   required: [
     'orderId',
     'orderName',
+    'clientId',
+    'clientName',
+    'orderDate',
     'projectId',
     'projectCode',
     'projectName',
@@ -809,6 +812,9 @@ const orderTransferTargetSwaggerSchema = {
   properties: {
     orderId: { type: 'integer' },
     orderName: { type: 'string' },
+    clientId: { type: 'integer' },
+    clientName: nullableStringSwaggerSchema,
+    orderDate: dateOnlySwaggerSchema,
     projectId: { type: 'integer' },
     projectCode: nullableStringSwaggerSchema,
     projectName: nullableStringSwaggerSchema,
@@ -965,14 +971,14 @@ export class OrdersController {
   }
 
   @ApiParam({ name: 'orderId', type: Number, description: 'Source order ID' })
-  @ApiQuery({ name: 'search', required: false, type: String, description: 'Target search text' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Target search text: order, client, project, status' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Maximum returned targets' })
   @ApiResponse({ status: 200, description: 'Transfer target orders', schema: swaggerSchema(orderTransferTargetsResponseSwaggerSchema) })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 404, description: 'Source order not found' })
   @ApiResponse({ status: 503, description: 'Orders API is disabled' })
-  @ApiOperation({ operationId: 'listOrderTransferTargets', summary: 'List same-client transfer target orders' })
+  @ApiOperation({ operationId: 'listOrderTransferTargets', summary: 'List recent transfer target orders' })
   @Get(':orderId/transfer-targets')
   async listTransferTargets(
     @Req() request: RequestWithCurrentUser,
