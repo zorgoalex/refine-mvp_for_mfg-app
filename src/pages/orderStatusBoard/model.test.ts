@@ -143,6 +143,11 @@ describe('order status board model', () => {
       dateTo: '2026-07-23',
       days: 7,
     });
+    expect(buildCncOrderSearchDateRange('2026-07-23', '1d')).toEqual({
+      dateFrom: '2026-07-23',
+      dateTo: '2026-07-23',
+      days: 1,
+    });
     expect(buildCncOrderSearchDateRange('2026-07-23', '1w')).toEqual({
       dateFrom: '2026-07-17',
       dateTo: '2026-07-23',

@@ -22,10 +22,10 @@ const MDF_HIDDEN_ORDER_STATUS_NAMES = new Set([
   'завершён',
 ]);
 export type OrderStatusBoardVisualFlow = OrderStatusBoardType | 'cnc_today';
-export type CncOrderSearchPeriod = '1w' | '2w' | '1m';
+export type CncOrderSearchPeriod = '1d' | '1w' | '2w' | '1m';
 export type CncCardDisplayMode = 'standard' | 'compact';
 export const DEFAULT_CNC_ORDER_SEARCH_PERIOD: CncOrderSearchPeriod = '1w';
-const CNC_ORDER_SEARCH_PERIODS = new Set<CncOrderSearchPeriod>(['1w', '2w', '1m']);
+const CNC_ORDER_SEARCH_PERIODS = new Set<CncOrderSearchPeriod>(['1d', '1w', '2w', '1m']);
 
 export interface OrderStatusBoardViewState {
   view: OrderStatusBoardVisualFlow;
@@ -294,6 +294,7 @@ export function buildCncOrderSearchDateRange(
 export function cncOrderSearchPeriodDays(
   period: CncOrderSearchPeriod | undefined,
 ): number {
+  if (period === '1d') return 1;
   if (period === '1w') return 7;
   if (period === '2w') return 14;
   if (period === '1m') return 31;

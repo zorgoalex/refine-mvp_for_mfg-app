@@ -99,10 +99,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('status-board-toolbar__cnc-period');
     expect(page).not.toContain('<Typography.Text type="secondary">Период</Typography.Text>');
     expect(page).toContain('DEFAULT_CNC_ORDER_SEARCH_PERIOD');
+    expect(page).toContain("label: '1 день', value: '1d'");
     expect(page).toContain("label: '1нед'");
     expect(page).toContain("label: '2нед'");
     expect(page).toContain("label: '1м'");
     expect(page).toContain('aria-pressed={active}');
+    expect(page).toContain("if (period === '1d')");
+    expect(page).toContain("cncWorkday: dayjs().format('YYYY-MM-DD')");
+    expect(page).toContain('onClick={() => updateCncDisplayPeriod(option.value)}');
     expect(page).toContain('buildCncOrderSearchDateRange');
     expect(page).toContain('dateFrom: displayRange.dateFrom');
     expect(page).toContain('dateTo: displayRange.dateTo');
@@ -441,9 +445,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(cncToolbar).not.toContain('<Typography.Text type="secondary">Период</Typography.Text>');
     expect(cncToolbar).not.toContain('<Typography.Text type="secondary">Карточки</Typography.Text>');
     expect(cncToolbar).toContain('<ProfileOutlined');
-    expect(cncToolbar).toContain('className="status-board-toolbar__cnc-detail-indicator"');
+    expect(cncToolbar).toContain('className="status-board-toolbar__cnc-detail-toggle"');
     expect(cncToolbar).toContain('data-active={cncDetailedEnabled}');
-    expect(cncToolbar.indexOf('status-board-toolbar__cnc-detail-indicator')).toBeLessThan(
+    expect(cncToolbar).toContain('aria-pressed={cncDetailedEnabled}');
+    expect(cncToolbar).toContain('onClick={() => setCncDetailedEnabled((current) => !current)}');
+    expect(cncToolbar).toContain("cncDetailedEnabled ? 'Выключить подробный режим' : 'Включить подробный режим'");
+    expect(cncToolbar.indexOf('status-board-toolbar__cnc-detail-toggle')).toBeLessThan(
       cncToolbar.indexOf('<StatusBoardColumnSettingsButton'),
     );
     expect(cncToolbar.match(/size="small"/g)?.length).toBeGreaterThanOrEqual(7);
@@ -455,11 +462,13 @@ describe('OrderStatusBoardPage UX guards', () => {
       /\.status-board-toolbar--cnc \.status-board-toolbar__settings-button\.ant-btn\s*\{[^}]*width: 24px;[^}]*height: 24px;/s,
     );
     expect(css).toMatch(
-      /\.status-board-toolbar__cnc-detail-indicator\s*\{[^}]*margin-left: auto;[^}]*color: var\(--app-text-muted\);/s,
+      /\.status-board-toolbar__cnc-detail-toggle\.ant-btn\s*\{[^}]*margin-left: auto;[^}]*color: var\(--app-text-muted\);/s,
     );
     expect(css).toMatch(
-      /\.status-board-toolbar__cnc-detail-indicator\[data-active="true"\]\s*\{[^}]*color: #1677ff;/s,
+      /\.status-board-toolbar__cnc-detail-toggle\.ant-btn\[data-active="true"\]\s*\{[^}]*color: #1677ff;/s,
     );
+    expect(css).toContain('.status-board-toolbar__cnc-detail-toggle.ant-btn:active');
+    expect(css).toContain('transform: scale(0.96)');
   });
 
   it('keeps CNC detailed bath mode explicit and clickable by SVG detail metadata', () => {

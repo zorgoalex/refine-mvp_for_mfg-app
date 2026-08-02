@@ -161,6 +161,7 @@ const CNC_ORDER_SEARCH_PERIOD_OPTIONS: Array<{
   label: string;
   value: CncOrderSearchPeriod;
 }> = [
+  { label: '1 день', value: '1d' },
   { label: '1нед', value: '1w' },
   { label: '2нед', value: '2w' },
   { label: '1м', value: '1m' },
@@ -951,6 +952,17 @@ export const OrderStatusBoardPage: React.FC = () => {
   const cncCanStepForward = cncNavigationDate.startOf('day').isBefore(cncMaxDate);
   const updateCncWorkday = (date: Dayjs) =>
     updateViewState({ cncWorkday: date.format('YYYY-MM-DD'), cncOrderFilters: [] });
+  const updateCncDisplayPeriod = (period: CncOrderSearchPeriod) => {
+    if (period === '1d') {
+      updateViewState({
+        cncOrderSearchPeriod: period,
+        cncWorkday: dayjs().format('YYYY-MM-DD'),
+        cncOrderFilters: [],
+      });
+      return;
+    }
+    updateViewState({ cncOrderSearchPeriod: period });
+  };
   const cncSettingsContent = (
     <section className="status-board-settings__modes" aria-label="Настройки отображения МДФ-доски">
       <strong>Отображение</strong>
@@ -1234,11 +1246,7 @@ export const OrderStatusBoardPage: React.FC = () => {
                     type={active ? 'primary' : 'default'}
                     aria-pressed={active}
                     className="status-board-toolbar__cnc-period-chip"
-                    onClick={() =>
-                      updateViewState({
-                        cncOrderSearchPeriod: option.value,
-                      })
-                    }
+                    onClick={() => updateCncDisplayPeriod(option.value)}
                   >
                     {option.label}
                   </Button>
@@ -1279,16 +1287,18 @@ export const OrderStatusBoardPage: React.FC = () => {
               </Tooltip>
             )}
             <Tooltip
-              title={cncDetailedEnabled ? 'Подробный режим включён' : 'Подробный режим выключен'}
+              title={cncDetailedEnabled ? 'Выключить подробный режим' : 'Включить подробный режим'}
             >
-              <span
-                className="status-board-toolbar__cnc-detail-indicator"
+              <Button
+                type="text"
+                size="small"
+                className="status-board-toolbar__cnc-detail-toggle"
+                icon={<SearchOutlined />}
                 data-active={cncDetailedEnabled}
-                role="img"
-                aria-label={cncDetailedEnabled ? 'Подробный режим включён' : 'Подробный режим выключен'}
-              >
-                <SearchOutlined />
-              </span>
+                aria-pressed={cncDetailedEnabled}
+                aria-label={cncDetailedEnabled ? 'Выключить подробный режим' : 'Включить подробный режим'}
+                onClick={() => setCncDetailedEnabled((current) => !current)}
+              />
             </Tooltip>
             <StatusBoardColumnSettingsButton
               key={STATUS_BOARD_COLUMN_PREFERENCE_KEYS.cnc_today}
