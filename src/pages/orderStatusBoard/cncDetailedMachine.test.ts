@@ -9,6 +9,7 @@ import type { CutResultDto } from '../../api/types/cutApi.types';
 import {
   CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM,
   buildCncDetailedMachineSources,
+  cncPacketHasOtherMaterialMarker,
   selectCncMachineResultSheets,
 } from './cncDetailedMachine';
 
@@ -135,7 +136,7 @@ describe('CNC detailed machine sources', () => {
     ]);
   });
 
-  it('accepts whole-order comments only from completed or approved MDF packets', () => {
+  it('keeps related non-MDF order cards visible but marks only MDF for auto expansion', () => {
     const pending = packet({
       packetId: 'packet-pending-whole-order',
       comments: ['Весь заказ: 2701'],
@@ -153,15 +154,56 @@ describe('CNC detailed machine sources', () => {
       comments: ['Весь заказ: 2701', 'Материал HDF'],
       items: [],
     });
+    const plywoodFilename = packet({
+      packetId: 'packet-plywood-filename',
+      programName: 'CNC#1_2701-plywood.TXT',
+      materialName: 'Не определён',
+      items: [],
+    });
 
-    expect(buildCncDetailedMachineSources({
-      columns: machineColumns([pending, approved, otherMaterial]),
+    const sources = buildCncDetailedMachineSources({
+      columns: machineColumns([pending, approved, otherMaterial, plywoodFilename]),
       bath: bath(),
       selectedDetailId: 7001,
       canViewCut: true,
-    }).map((source) => source.packet.packetId)).toEqual([
-      'packet-approved-whole-order',
+    });
+
+    expect(sources.map((source) => ({
+      packetId: source.packet.packetId,
+      matchKind: source.matchKind,
+      otherMaterial: source.otherMaterial,
+      autoExpand: source.autoExpand,
+    }))).toEqual([
+      {
+        packetId: 'packet-approved-whole-order',
+        matchKind: 'whole_order',
+        otherMaterial: false,
+        autoExpand: true,
+      },
+      {
+        packetId: 'packet-other-material-whole-order',
+        matchKind: 'order',
+        otherMaterial: true,
+        autoExpand: false,
+      },
+      {
+        packetId: 'packet-plywood-filename',
+        matchKind: 'order',
+        otherMaterial: true,
+        autoExpand: false,
+      },
     ]);
+  });
+
+  it('recognizes explicit non-MDF material in material, filename and comments', () => {
+    expect(cncPacketHasOtherMaterialMarker(packet({ materialName: 'ХДФ 3 мм' }))).toBe(true);
+    expect(cncPacketHasOtherMaterialMarker(packet({ comments: ['ЛДСП белый'] }))).toBe(true);
+    expect(cncPacketHasOtherMaterialMarker(packet({ programName: '2701-Фанера.TXT' }))).toBe(true);
+    expect(cncPacketHasOtherMaterialMarker(packet({ materialName: 'OSB 12 мм' }))).toBe(true);
+    expect(cncPacketHasOtherMaterialMarker(packet({ materialName: 'МДФ / ХДФ' }))).toBe(true);
+    expect(cncPacketHasOtherMaterialMarker(packet({ materialName: 'МДФ 16 мм' }))).toBe(false);
+    expect(cncPacketHasOtherMaterialMarker(packet({ materialName: 'Не определён' }))).toBe(false);
+    expect(cncPacketHasOtherMaterialMarker(packet({ materialName: 'Не определено' }))).toBe(false);
   });
 
   it('shows cards for every bath detail before a concrete detail is selected', () => {

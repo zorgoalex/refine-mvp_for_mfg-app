@@ -107,7 +107,7 @@ const screenshotRequests = new Map<string, Promise<Blob>>();
 
 export async function loadCncDetailedMachineSvgPreview(
   source: CncDetailedMachineSource,
-  selectedDetailId: number,
+  selectedDetailId: number | null,
   dependencies: CncDetailedMachinePreviewDependencies = defaultDependencies,
 ): Promise<CncDetailedMachineSvgPreview> {
   if (source.previewKind !== 'svg' || source.cutJobId === null || source.resultNo === null) {
@@ -122,7 +122,7 @@ export async function loadCncDetailedMachineSvgPreview(
     () => dependencies.getResult(source.cutJobId!, source.resultNo!),
   );
   const matchingSheets = selectCncMachineResultSheets(result, selectedDetailId);
-  if (matchingSheets.length === 0) {
+  if (selectedDetailId !== null && matchingSheets.length === 0) {
     throw new CncDetailedMachinePreviewError(
       'DETAIL_SHEET_NOT_FOUND',
       'В привязанной SVG-раскладке деталь не найдена',

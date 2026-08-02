@@ -45,6 +45,18 @@ describe('CNC detailed machine preview cache', () => {
     expect(dependencies.fetchSheetSvg).toHaveBeenCalledTimes(2);
   });
 
+  it('loads every SVG sheet for a manually expanded non-MDF overview', async () => {
+    const dependencies = previewDependencies();
+    vi.mocked(dependencies.getResult).mockResolvedValue(
+      result(35, 3, [0, 1], ['det-7001']),
+    );
+
+    const preview = await loadCncDetailedMachineSvgPreview(source(35, 3), null, dependencies);
+
+    expect(preview.sheets.map((sheet) => sheet.sheetIndex)).toEqual([0, 1]);
+    expect(dependencies.fetchSheetSvg).toHaveBeenCalledTimes(2);
+  });
+
   it('commits a multi-sheet preview atomically and retries only the failed sheet', async () => {
     const dependencies = previewDependencies();
     vi.mocked(dependencies.getResult).mockResolvedValue(result(35, 3, [0, 1]));
@@ -120,6 +132,8 @@ function source(cutJobId: number, resultNo: number): CncDetailedMachineSource {
     resultNo,
     imageUrl: '/sheet.jpg',
     svgPermissionRequired: false,
+    otherMaterial: false,
+    autoExpand: true,
   };
 }
 

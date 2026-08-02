@@ -8,9 +8,11 @@ import type {
 import type { CutResultDto } from '../../api/types/cutApi.types';
 
 export const CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM = 3;
-const CNC_WHOLE_ORDER_OTHER_MATERIAL_PATTERN = /(?:hdf|хдф|лдсп|ldsp|fanera|фанера)/i;
+const CNC_OTHER_MATERIAL_MARKER_PATTERN = /(?:^|[^a-zа-яё])(?:hdf|хдф|лдсп|ldsp|lдсп|дсп|dsp|двп|dvp|osb|осп|fanera|фанера|plywood|акрил|acrylic|пластик|plastic)(?=$|[^a-zа-яё])/i;
+const CNC_MDF_MATERIAL_PATTERN = /(?:^|[^a-zа-яё])(?:mdf|мдф)(?=$|[^a-zа-яё])/i;
+const CNC_UNKNOWN_MATERIAL_PATTERN = /^(?:не\s*(?:определ[её]н(?:о)?|распознан(?:о)?)|неизвестн(?:ый|о)?|unknown|[-—])$/i;
 
-export type CncDetailedMachineMatchKind = 'exact' | 'fallback' | 'whole_order';
+export type CncDetailedMachineMatchKind = 'exact' | 'fallback' | 'whole_order' | 'order';
 export type CncDetailedMachinePreviewKind = 'svg' | 'screenshot' | 'unavailable';
 
 export interface CncDetailedMachineSource {
@@ -21,6 +23,8 @@ export interface CncDetailedMachineSource {
   resultNo: number | null;
   imageUrl: string | null;
   svgPermissionRequired: boolean;
+  otherMaterial: boolean;
+  autoExpand: boolean;
 }
 
 export interface CncMachineResultSheet {
@@ -57,11 +61,12 @@ export function buildCncDetailedMachineSources({
     for (const packet of column.packets) {
       if (seenPackets.has(packet.packetId)) continue;
 
-      const matchKind = cncDetailedMachineMatchKind(packet, selectedBathItems);
+      const otherMaterial = cncPacketHasOtherMaterialMarker(packet);
+      const matchKind = cncDetailedMachineMatchKind(packet, selectedBathItems, otherMaterial);
       if (matchKind === null) continue;
 
       seenPackets.add(packet.packetId);
-      sources.push(toSource(packet, matchKind, canViewCut));
+      sources.push(toSource(packet, matchKind, canViewCut, otherMaterial));
     }
   }
 
@@ -70,14 +75,15 @@ export function buildCncDetailedMachineSources({
 
 export function selectCncMachineResultSheets(
   result: CutResultDto,
-  selectedDetailId: number,
+  selectedDetailId: number | null,
 ): CncMachineResultSheet[] {
-  const targetItemId = `det-${selectedDetailId}`;
+  const targetItemId = selectedDetailId === null ? null : `det-${selectedDetailId}`;
   const sheets: CncMachineResultSheet[] = [];
 
   for (const group of result.job.groups) {
     for (const sheet of group.sheets) {
-      const containsDetail = sheet.placements.pieces.some((piece) => piece.item_id === targetItemId);
+      const containsDetail = targetItemId === null
+        || sheet.placements.pieces.some((piece) => piece.item_id === targetItemId);
       if (!containsDetail) continue;
 
       sheets.push({
@@ -92,6 +98,20 @@ export function selectCncMachineResultSheets(
   }
 
   return sheets;
+}
+
+export function cncPacketHasOtherMaterialMarker(packet: CncTelegramPacket): boolean {
+  const metadata = [
+    packet.materialName,
+    packet.programName ?? '',
+    packet.externalPacketKey,
+    ...packet.comments,
+  ];
+  if (metadata.some((text) => CNC_OTHER_MATERIAL_MARKER_PATTERN.test(text))) return true;
+
+  const materialName = packet.materialName.trim();
+  if (!materialName || CNC_UNKNOWN_MATERIAL_PATTERN.test(materialName)) return false;
+  return !CNC_MDF_MATERIAL_PATTERN.test(materialName);
 }
 
 function isExactMatch(item: CncTelegramPacketItem, bathItem: CncTelegramBathItem): boolean {
@@ -118,6 +138,7 @@ function isFallbackMatch(item: CncTelegramPacketItem, bathItem: CncTelegramBathI
 function cncDetailedMachineMatchKind(
   packet: CncTelegramPacket,
   bathItems: readonly CncTelegramBathItem[],
+  otherMaterial: boolean,
 ): CncDetailedMachineMatchKind | null {
   if (packet.items.some((item) => bathItems.some((bathItem) => isExactMatch(item, bathItem)))) {
     return 'exact';
@@ -125,7 +146,10 @@ function cncDetailedMachineMatchKind(
   if (packet.items.some((item) => bathItems.some((bathItem) => isFallbackMatch(item, bathItem)))) {
     return 'fallback';
   }
-  return packetCompletesWholeBathOrder(packet, bathItems) ? 'whole_order' : null;
+  if (!otherMaterial && packetCompletesWholeBathOrder(packet, bathItems)) {
+    return 'whole_order';
+  }
+  return otherMaterial && packetSharesBathOrder(packet, bathItems) ? 'order' : null;
 }
 
 function packetCompletesWholeBathOrder(
@@ -133,9 +157,6 @@ function packetCompletesWholeBathOrder(
   bathItems: readonly CncTelegramBathItem[],
 ): boolean {
   if (packet.completionStatus !== 'completed' && !packet.thumbsUp) return false;
-  if (packet.comments.some((comment) => CNC_WHOLE_ORDER_OTHER_MATERIAL_PATTERN.test(comment))) {
-    return false;
-  }
   const bathOrderKeys = new Set(
     bathItems.map((item) => item.orderName.trim().toLocaleLowerCase('ru-RU')),
   );
@@ -144,6 +165,45 @@ function packetCompletesWholeBathOrder(
     return Array.from(comment.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g))
       .some((match) => bathOrderKeys.has((match[2] ?? '').toLocaleLowerCase('ru-RU')));
   });
+}
+
+function packetSharesBathOrder(
+  packet: CncTelegramPacket,
+  bathItems: readonly CncTelegramBathItem[],
+): boolean {
+  const bathOrderKeys = new Set<string>();
+  for (const item of bathItems) {
+    addCncMachineOrderKeys(bathOrderKeys, item.orderName, item.orderId);
+  }
+
+  const packetOrderKeys = new Set<string>();
+  for (const item of packet.items) {
+    addCncMachineOrderKeys(packetOrderKeys, item.orderName, item.orderId, item.matchOrderId);
+  }
+  for (const text of [packet.programName, ...packet.comments]) {
+    for (const match of (text ?? '').matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g)) {
+      const orderName = match[2];
+      if (orderName) packetOrderKeys.add(cncMachineOrderNameKey(orderName));
+    }
+  }
+
+  return Array.from(packetOrderKeys).some((key) => bathOrderKeys.has(key));
+}
+
+function addCncMachineOrderKeys(
+  target: Set<string>,
+  orderName: string,
+  ...orderIds: Array<number | null | undefined>
+): void {
+  for (const orderId of orderIds) {
+    if (Number.isInteger(orderId) && Number(orderId) > 0) target.add(`id:${orderId}`);
+  }
+  const normalizedOrderName = orderName.trim();
+  if (normalizedOrderName) target.add(cncMachineOrderNameKey(normalizedOrderName));
+}
+
+function cncMachineOrderNameKey(orderName: string): string {
+  return `name:${orderName.trim().toLocaleLowerCase('ru-RU')}`;
 }
 
 function belongsToBathOrder(item: CncTelegramPacketItem, bathItem: CncTelegramBathItem): boolean {
@@ -164,6 +224,7 @@ function toSource(
   packet: CncTelegramPacket,
   matchKind: CncDetailedMachineMatchKind,
   canViewCut: boolean,
+  otherMaterial: boolean,
 ): CncDetailedMachineSource {
   const hasImportedSvg = packet.svgCutImportStatus === 'imported'
     && isPositiveInteger(packet.svgCutJobId)
@@ -180,6 +241,8 @@ function toSource(
     resultNo: canUseImportedSvg ? packet.svgCutResultNo! : null,
     imageUrl,
     svgPermissionRequired: hasImportedSvg && !canViewCut,
+    otherMaterial,
+    autoExpand: !otherMaterial,
   };
 }
 

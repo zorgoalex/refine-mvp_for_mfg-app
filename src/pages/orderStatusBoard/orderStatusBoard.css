@@ -9,6 +9,12 @@
   color: var(--app-text);
 }
 
+.status-board-page.status-board-page--cnc {
+  height: auto;
+  min-height: calc(100vh - 132px);
+  overflow: visible;
+}
+
 .status-board-page__header {
   display: flex;
   align-items: flex-start;
@@ -279,6 +285,12 @@
   scrollbar-gutter: stable;
 }
 
+.status-board-page--cnc .status-board-viewport {
+  min-height: 0;
+  flex: 0 0 auto;
+  overflow-y: visible;
+}
+
 .status-board-columns {
   height: 100%;
   min-width: max-content;
@@ -298,6 +310,31 @@
   gap: var(--status-board-cnc-column-gap);
 }
 
+.status-board-page--cnc .status-board-columns--cnc {
+  height: auto;
+  min-height: 0;
+}
+
+.status-board-page--cnc .status-board-column {
+  height: auto;
+}
+
+.status-board-page--cnc .status-board-column__cards {
+  overflow-y: visible;
+  overscroll-behavior-y: auto;
+}
+
+.status-board-page--cnc .cnc-detailed-workspace {
+  height: auto;
+  overflow: visible;
+}
+
+.status-board-page--cnc .cnc-detailed-workspace__machine,
+.status-board-page--cnc .cnc-detailed-workspace__bath {
+  overflow-y: visible;
+  scrollbar-gutter: auto;
+}
+
 .status-board-columns--cnc > .status-board-column {
   width: auto;
   min-width: 0;
@@ -306,6 +343,49 @@
 
 .status-board-columns--cnc-detailed {
   isolation: isolate;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 0.5fr);
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--orders .status-board-column__header {
+  padding-inline: 7px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--orders .cnc-today-column__header-main {
+  gap: 4px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--orders .status-board-column__title {
+  gap: 5px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--orders .status-board-column__title .ant-typography {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--orders .cnc-today-column__totals {
+  display: none;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--orders .status-board-column__cards {
+  padding: 6px;
+  gap: 6px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--orders .cnc-order-card--summary-only {
+  padding: 6px 7px;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--orders .status-board-card__status-badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-board-columns--cnc-detailed .cnc-today-column--orders .cnc-order-card__compact-client {
+  width: 100%;
 }
 
 .status-board-columns--cnc-detailed .cnc-today-column--detailed-covered {
@@ -410,6 +490,13 @@
   box-shadow: var(--app-shadow-border);
 }
 
+.cnc-detailed-machine-map--other-material {
+  border-color: #8b5a2b;
+  box-shadow:
+    0 0 0 2px rgba(139, 90, 43, 0.34),
+    var(--app-shadow-border);
+}
+
 .cnc-detailed-machine-map__header {
   min-width: 0;
   display: flex;
@@ -445,6 +532,21 @@
 
 .cnc-detailed-machine-map__badges .ant-tag {
   margin: 0;
+}
+
+.cnc-detailed-machine-map__toggle.ant-btn {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  padding: 0;
+  color: #8b5a2b;
+  transition-property: background-color, color, transform;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.cnc-detailed-machine-map__toggle.ant-btn:active {
+  transform: scale(0.96);
 }
 
 .cnc-detailed-machine-map__loading {
@@ -722,6 +824,13 @@
   box-shadow:
     0 0 0 2px #fa541c,
     0 2px 8px rgba(250, 84, 28, 0.28);
+}
+
+.cnc-packet-card--other-material {
+  border-color: #8b5a2b;
+  box-shadow:
+    0 0 0 2px rgba(139, 90, 43, 0.34),
+    0 2px 8px var(--app-shadow);
 }
 
 .cnc-relation-card--dimmed {
@@ -1907,6 +2016,11 @@
     height: calc(100vh - 116px);
     min-height: 560px;
     padding: 12px;
+  }
+
+  .status-board-page.status-board-page--cnc {
+    height: auto;
+    min-height: calc(100vh - 116px);
   }
 
   .status-board-page__header {

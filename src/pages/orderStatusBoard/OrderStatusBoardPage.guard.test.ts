@@ -25,6 +25,10 @@ const interaction = readFileSync(
   'src/pages/orderStatusBoard/interaction.ts',
   'utf8',
 );
+const detailedMachine = readFileSync(
+  'src/pages/orderStatusBoard/cncDetailedMachine.ts',
+  'utf8',
+);
 
 describe('OrderStatusBoardPage UX guards', () => {
   it('keeps keyboard move, live announcements and focus restoration', () => {
@@ -56,6 +60,22 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('aria-controls="status-board-viewport"');
     expect(css).toContain('.status-board-scrollbar');
     expect(css).toContain('overflow-x: auto');
+  });
+
+  it('lets the MDF board grow to its tallest column without nested vertical scrolling', () => {
+    expect(page).toContain("isCncToday ? ' status-board-page--cnc' : ''");
+    expect(css).toMatch(
+      /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
+    );
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*flex: 0 0 auto;[^}]*overflow-y: visible;/s,
+    );
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*overflow-y: visible;/s,
+    );
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.cnc-detailed-workspace\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
+    );
   });
 
   it('summarizes payment without exposing money amounts in status-board cards', () => {
@@ -364,7 +384,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('getCncPacketRelationState');
     expect(page).toContain('getCncBathRelationState');
     expect(page).toContain("'order-mentioned'");
-    expect(page).toContain('CNC_OTHER_MATERIAL_MARKER_PATTERN');
+    expect(detailedMachine).toContain('CNC_OTHER_MATERIAL_MARKER_PATTERN');
     expect(page).toContain('orderKeys: Set<string>');
     expect(page).toContain('mentionedOrderKeys: Set<string>');
     expect(page).toContain('addCncOrderRelationKeys(fingerprint, item.orderName, item.orderId, item.matchOrderId)');
@@ -397,6 +417,43 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('border-color: #722ed1');
     expect(css).toContain('0 0 0 2px #722ed1');
     expect(css).not.toContain('transition: all');
+  });
+
+  it('frames non-MDF machine-file cards in brown based on file metadata and comments', () => {
+    expect(page).toContain('const otherMaterial = cncPacketHasOtherMaterialMarker(packet)');
+    expect(page).toContain("otherMaterial ? 'cnc-packet-card--other-material' : ''");
+    expect(page).toContain("data-cnc-material-kind={otherMaterial ? 'other' : undefined}");
+    expect(detailedMachine).toContain("packet.programName ?? ''");
+    expect(detailedMachine).toContain('...packet.comments');
+    expect(detailedMachine).toContain('CNC_OTHER_MATERIAL_MARKER_PATTERN');
+    expect(css).toMatch(
+      /\.cnc-packet-card--other-material\s*\{[^}]*border-color: #8b5a2b;[^}]*box-shadow:/s,
+    );
+  });
+
+  it('auto-expands only MDF machine maps while keeping non-MDF cards manually expandable', () => {
+    expect(detailedMachine).toContain("export type CncDetailedMachineMatchKind = 'exact' | 'fallback' | 'whole_order' | 'order'");
+    expect(detailedMachine).toContain('otherMaterial: boolean;');
+    expect(detailedMachine).toContain('autoExpand: boolean;');
+    expect(page).toContain('const automaticallyExpanded = source.autoExpand && selectedDetailId !== null');
+    expect(page).toContain('const expanded = automaticallyExpanded || manuallyExpanded');
+    expect(page).toContain('setManuallyExpanded((current) => !current)');
+    expect(page).toContain("source.matchKind === 'order'");
+    expect(page).toContain('Развернуть карту файла станка');
+    expect(page).toContain('Свернуть карту файла станка');
+    expect(page).toContain('loadCncDetailedMachineSvgPreview(source, previewDetailId)');
+    expect(css).toContain('.cnc-detailed-machine-map--other-material');
+    expect(css).toContain('.cnc-detailed-machine-map__toggle.ant-btn');
+  });
+
+  it('forces the fifth orders column compact and half-width in detailed mode', () => {
+    expect(page).toContain('const summaryOnly = detailedBathActive || isCncCardSummaryOnly(');
+    expect(page).toContain("displayToggleVisible={!detailedBathActive && cardDisplayMode === 'compact'}");
+    expect(css).toMatch(
+      /\.status-board-columns--cnc-detailed\s*\{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\) minmax\(0, 0\.5fr\);/s,
+    );
+    expect(css).toContain('.status-board-columns--cnc-detailed .cnc-today-column--orders');
+    expect(css).toContain('.cnc-order-card--summary-only');
   });
 
   it('gives every board its own personal column settings gear', () => {
@@ -493,10 +550,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('Выберите деталь на раскладке ванны, чтобы открыть предпросмотр');
     expect(page).toContain("const canViewCncCutMaps = can('cut.view')");
     expect(page).toContain('canViewCut={canViewCncCutMaps}');
-    expect(page).toContain('loadCncDetailedMachineSvgPreview(source, detailId)');
+    expect(page).toContain('loadCncDetailedMachineSvgPreview(source, previewDetailId)');
     expect(page).toContain('cncDetailedMachinePreviewsShareSheets(current, preview) ? current : preview');
     expect(page).toContain('loadCncDetailedMachineScreenshot(imageUrl)');
-    expect(page).toContain('syncCncBathSelectedDetail(svgBodyRef.current, selectedDetailId)');
+    expect(page).toContain('syncCncBathSelectedDetail(svgBodyRef.current, previewDetailId)');
     expect(page).toContain('SVG недоступна — показан скрин');
     expect(page).toContain('Для просмотра SVG-раскладки нужен доступ к разделу «Раскрой»');
     expect(page).toContain('data-cnc-detailed-state');
