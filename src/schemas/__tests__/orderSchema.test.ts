@@ -153,5 +153,15 @@ describe('order detail required numeric validation', () => {
     expect(tableSource).toContain('setValidationScrollTargetKey(firstInvalidRowKey)');
     expect(tableSource).toContain("row?.scrollIntoView({ behavior: 'smooth', block: 'center' })");
     expect(appCss).toContain('tr.order-detail-validation-error > td');
+
+    const validationCss = appCss.slice(
+      appCss.indexOf('/* Save validation:'),
+      appCss.indexOf(':root', appCss.indexOf('/* Save validation:')),
+    );
+    expect(validationCss).toContain('box-shadow:');
+    expect(validationCss).not.toContain('background-color:');
+    expect(validationCss).not.toContain('border-top:');
+    expect(validationCss).not.toContain('border-bottom:');
+    expect((tableSource.match(/help=\{null\}/g) ?? []).length).toBeGreaterThanOrEqual(5);
   });
 });

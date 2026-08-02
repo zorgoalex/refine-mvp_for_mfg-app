@@ -809,6 +809,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         return (
           <Form.Item
             name="height"
+            help={null}
             style={{ margin: 0, padding: '0 4px' }}
             rules={[
               { required: true, message: 'Укажите высоту детали' },
@@ -853,6 +854,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         return (
           <Form.Item
             name="width"
+            help={null}
             style={{ margin: 0, padding: '0 4px' }}
             rules={[
               { required: true, message: 'Укажите ширину детали' },
@@ -886,6 +888,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         return isEditing(d) ? (
           <Form.Item
             name="quantity"
+            help={null}
             style={{ margin: 0, padding: '0 4px' }}
             rules={[
               { required: true, message: 'Укажите количество деталей' },
@@ -1081,6 +1084,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         return isEditing(d) ? (
           <Form.Item
             name="milling_cost_per_sqm"
+            help={null}
             style={{ margin: 0, padding: '0 4px' }}
             rules={[
               { required: true, message: 'Укажите цену за кв.м.' },
@@ -1120,6 +1124,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           return (
             <Form.Item
               name="detail_cost"
+              help={null}
               style={{ margin: 0, padding: '0 4px' }}
               rules={[
                 { required: true, message: 'Укажите сумму детали' },
@@ -2304,7 +2309,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               transform: isCurrentlyEditing ? 'scale(1.01)' : 'scale(1)',
               position: isCurrentlyEditing ? 'relative' as const : 'relative' as const,
               zIndex: isCurrentlyEditing ? 10 : 1,
-              transition: 'all 0.3s ease',
+              transition: 'background-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease',
               border: isCurrentlyEditing ? '2px solid #faad14' : 'none',
             },
             // Drag selection handlers

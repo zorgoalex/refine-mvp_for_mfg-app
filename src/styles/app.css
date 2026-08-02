@@ -946,23 +946,29 @@ html {
 .details-grouped .ant-table-tbody > tr.detail-group-separator:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
 .details-grouped .ant-table-tbody > tr.detail-group-summary:hover > td { background-color: var(--app-surface-muted, #e6ebf2) !important; }
 
-/* Save validation: draw the border on cells because Ant Table cell backgrounds
-   cover outlines placed on the <tr> itself. Keep this after grouped-row tints. */
+/* Save validation: draw an inset frame on cells because Ant Table cell backgrounds
+   cover outlines placed on the <tr>. Inset shadows preserve row geometry and fill. */
 .ant-table-tbody > tr.order-detail-validation-error > td,
 .ant-table-tbody > tr.order-detail-validation-error:hover > td,
 .details-grouped .ant-table-tbody > tr.order-detail-validation-error > td,
 .details-grouped .ant-table-tbody > tr.order-detail-validation-error:hover > td {
-  background-color: #fff1f0 !important;
-  border-top: 2px solid #ff4d4f !important;
-  border-bottom: 2px solid #ff4d4f !important;
+  box-shadow:
+    inset 0 2px 0 #ff4d4f,
+    inset 0 -2px 0 #ff4d4f !important;
 }
 
 .ant-table-tbody > tr.order-detail-validation-error > td:first-child {
-  border-left: 2px solid #ff4d4f !important;
+  box-shadow:
+    inset 2px 0 0 #ff4d4f,
+    inset 0 2px 0 #ff4d4f,
+    inset 0 -2px 0 #ff4d4f !important;
 }
 
 .ant-table-tbody > tr.order-detail-validation-error > td:last-child {
-  border-right: 2px solid #ff4d4f !important;
+  box-shadow:
+    inset -2px 0 0 #ff4d4f,
+    inset 0 2px 0 #ff4d4f,
+    inset 0 -2px 0 #ff4d4f !important;
 }
 
 :root {
