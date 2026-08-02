@@ -5,6 +5,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import { ROLE_POLICIES, type Scope } from '../../../permissions/policies/role-policies';
 import type { OrderQueryService } from '../application/order-query.service';
+import type { OrderDetailTransferService } from '../application/order-detail-transfer.service';
 import type { OrderTransactionService } from '../application/order-transaction.service';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
 import type { OrderDto, OrderListResponseDto, RestoreOrderResponseDto } from '../dto/order.dto';
@@ -16,6 +17,7 @@ import {
   parseOrderAuditQuery,
   parseOrderId,
   parseOrderListQuery,
+  parseTransferOrderDetailsRequest,
 } from './orders.controller';
 import type { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 
@@ -675,6 +677,50 @@ describe('OrdersController read endpoints', () => {
     });
   });
 
+  it('lists same-client transfer targets through detail transfer service', async () => {
+    const response = {
+      data: [
+        {
+          orderId: 43,
+          orderName: 'Target order',
+          projectId: 1001,
+          projectCode: 'P-1',
+          projectName: 'Project',
+          orderStatusId: 1,
+          orderStatusName: 'Новый',
+          productionStatusId: null,
+          productionStatusName: null,
+          version: 7,
+        },
+      ],
+      requestId: 'request-transfer-targets-1',
+    };
+    const calls: string[] = [];
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: true,
+      },
+      detailTransfer: {
+        async listTransferTargets(command) {
+          calls.push(
+            `targets:${command.currentUser.id}:${command.sourceOrderId}:${command.search}:${command.limit}:${command.requestId}`,
+          );
+          return response;
+        },
+      },
+    });
+
+    await expect(
+      controller.listTransferTargets(
+        { user: currentUser('manager-id'), requestId: 'request-transfer-targets-1' },
+        '42',
+        { search: '  Target ', limit: '10' },
+      ),
+    ).resolves.toBe(response);
+    expect(calls).toEqual(['targets:manager-id:42:Target:10:request-transfer-targets-1']);
+  });
+
   it('drops blank projectId and rejects non-positive values like other optional integer filters', () => {
     expect(parseOrderListQuery({ projectId: '' }).projectId).toBeUndefined();
     expect(() => parseOrderListQuery({ projectId: '0' })).toThrow(ApiError);
@@ -794,6 +840,57 @@ describe('OrdersController write endpoints', () => {
       }),
     ).resolves.toEqual({ order });
     expect(calls).toEqual(['update:42:manager-id:3']);
+  });
+
+  it('parses transfer headers/body and delegates detail transfer', async () => {
+    const response = {
+      sourceOrder: createOrderDto({ orderId: 42 }),
+      targetOrder: createOrderDto({ orderId: 43 }),
+      movedDetailIds: [1001, 1002],
+      sourceVersion: 4,
+      targetVersion: 8,
+      targetCreated: false,
+      auditId: 'audit-transfer-1',
+      requestId: 'request-transfer-1',
+    };
+    const calls: string[] = [];
+    const controller = createController({
+      flags: {
+        ordersEnabled: true,
+        ordersReadOnly: false,
+      },
+      detailTransfer: {
+        async transfer(command) {
+          calls.push(
+            [
+              command.sourceOrderId,
+              command.sourceVersion,
+              command.idempotencyKey,
+              command.dto.detailIds.join(','),
+              command.dto.target.mode,
+              command.dto.target.mode === 'existing' ? command.dto.target.orderId : 0,
+              command.requestId,
+            ].join(':'),
+          );
+          return response;
+        },
+      },
+    });
+
+    await expect(
+      controller.transferDetails(
+        { user: currentUser('manager-id'), requestId: 'request-transfer-1' },
+        '42',
+        '"3"',
+        'order-detail-transfer-key-1',
+        {
+          detailIds: ['1001', 1002],
+          target: { mode: 'existing', orderId: '43', version: 7 },
+          note: '  move to target ',
+        },
+      ),
+    ).resolves.toBe(response);
+    expect(calls).toEqual(['42:3:order-detail-transfer-key-1:1001,1002:existing:43:request-transfer-1']);
   });
 
   it('parses stale-safe delete headers and delegates delete to OrderTransactionService', async () => {
@@ -1003,12 +1100,52 @@ describe('OrdersController write endpoints', () => {
     expect(() => parseOrderId('raw_sql')).toThrow(ApiError);
     expect(parseOrderId('42')).toBe(42);
   });
+
+  it('normalizes detail transfer payloads and rejects ambiguous input', () => {
+    expect(
+      parseTransferOrderDetailsRequest({
+        detailIds: ['10', 11],
+        target: { mode: 'new', orderName: '  Split-1 ', projectId: '15' },
+        note: '  selected rows ',
+      }),
+    ).toEqual({
+      detailIds: [10, 11],
+      target: { mode: 'new', orderName: 'Split-1', projectId: 15 },
+      note: 'selected rows',
+    });
+
+    expect(() =>
+      parseTransferOrderDetailsRequest({
+        detailIds: [10, 10],
+        target: { mode: 'existing', orderId: 43, version: 7 },
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      parseTransferOrderDetailsRequest({
+        detailIds: [10],
+        target: { mode: 'new', orderName: '   ' },
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      parseTransferOrderDetailsRequest({
+        detailIds: [10],
+        target: { mode: 'existing', orderId: 43, version: -1 },
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      parseTransferOrderDetailsRequest({
+        detailIds: [10],
+        target: { mode: 'existing', orderId: 43, version: '' },
+      }),
+    ).toThrow(ApiError);
+  });
 });
 
 function createController(options: {
   flags: { ordersEnabled: boolean; ordersReadOnly: boolean };
   service?: Partial<OrderTransactionService>;
   queries?: Partial<OrderQueryService>;
+  detailTransfer?: Partial<OrderDetailTransferService>;
   database?: ReturnType<typeof createDatabase>;
 }): OrdersController {
   const service = {
@@ -1041,6 +1178,15 @@ function createController(options: {
     },
     ...options.queries,
   } as unknown as OrderQueryService;
+  const detailTransfer = {
+    async listTransferTargets() {
+      throw new Error('listTransferTargets should not be called');
+    },
+    async transfer() {
+      throw new Error('transfer should not be called');
+    },
+    ...options.detailTransfer,
+  } as unknown as OrderDetailTransferService;
   const runtimeConfig = {
     getFeatureFlags() {
       return options.flags;
@@ -1052,7 +1198,7 @@ function createController(options: {
     },
   }) as unknown as DatabaseService;
 
-  return new OrdersController(service, queries, runtimeConfig, database);
+  return new OrdersController(service, queries, detailTransfer, runtimeConfig, database);
 }
 
 function currentUser(

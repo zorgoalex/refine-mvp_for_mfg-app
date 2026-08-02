@@ -188,6 +188,57 @@ describe('ordersApi', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('lists transfer targets with optional search and limit', async () => {
+    const fetchMock = mockFetch({
+      data: [],
+      requestId: 'request-transfer-targets-1',
+    });
+
+    await ordersApi.listTransferTargets(15, { search: 'Target', limit: 20 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/orders/15/transfer-targets?search=Target&limit=20',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it('transfers details with stale-safe headers and body without sourceVersion', async () => {
+    const sourceOrder = createOrderDto();
+    const targetOrder = createOrderDto();
+    targetOrder.header.orderId = 16;
+    const fetchMock = mockFetch({
+      sourceOrder,
+      targetOrder,
+      movedDetailIds: [1001, 1002],
+      sourceVersion: 5,
+      targetVersion: 8,
+      targetCreated: false,
+      auditId: 'audit-transfer-1',
+      requestId: 'request-transfer-1',
+    });
+
+    await ordersApi.transferDetails(15, {
+      sourceVersion: 4,
+      detailIds: [1001, 1002],
+      target: { mode: 'existing', orderId: 16, version: 7 },
+      idempotencyKey: 'order-detail-transfer-key-1',
+      note: 'selected rows',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/15/details/transfer');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
+    expect(headers.get('If-Match')).toBe('"4"');
+    expect(headers.get('Idempotency-Key')).toBe('order-detail-transfer-key-1');
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({
+        detailIds: [1001, 1002],
+        target: { mode: 'existing', orderId: 16, version: 7 },
+        note: 'selected rows',
+      }),
+    );
+  });
+
   it('getById appends includeDeleted=true only when requested', async () => {
     const fetchMock = mockFetch({ order: createOrderDto() }, { order: createOrderDto() });
 

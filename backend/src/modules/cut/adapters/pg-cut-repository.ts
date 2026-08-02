@@ -2757,6 +2757,7 @@ export class PgCutRepository implements CutRepositoryPort {
         WHERE cji.order_detail_id = ANY($1::bigint[])
           AND cji.is_active = true
           AND cj.status = 'ready'
+          AND cj.last_calc_basis IS NOT NULL
           AND archived.cut_job_id IS NULL
       ),
       ranked AS (

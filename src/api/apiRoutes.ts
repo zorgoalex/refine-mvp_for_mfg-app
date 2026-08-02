@@ -49,6 +49,8 @@ export const apiRoutes = {
     resourceDemands: backendApiPath('/orders/resource-demands'),
     statusBoard: backendApiPath('/orders/status-board'),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
+    transferTargets: (orderId: number) => backendApiPath(`/orders/${orderId}/transfer-targets`),
+    transferDetails: (orderId: number) => backendApiPath(`/orders/${orderId}/details/transfer`),
     restore: (orderId: number) => backendApiPath(`/orders/${orderId}/restore`),
     status: (orderId: number) => backendApiPath(`/orders/${orderId}/status`),
     paymentStatus: (orderId: number) => backendApiPath(`/orders/${orderId}/payment-status`),
