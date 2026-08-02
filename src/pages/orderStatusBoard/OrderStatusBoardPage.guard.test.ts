@@ -693,6 +693,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('status-board-card__status-row');
     expect(page).toContain('status-board-card__status-badge');
     expect(page).toContain('status-board-card__standard-grid');
+    expect(page).toContain('status-board-columns--${activeBoard}');
+    expect(page).toContain("cardDisplayMode !== 'standard' ? 'status-board-columns--narrow-cards' : ''");
     expect(css).toContain('.status-board-toolbar__display-mode');
     expect(css).toContain('width: min(160px, 100%)');
     expect(css).toContain('.status-board-toolbar__date-range');
@@ -700,6 +702,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('flex-wrap: nowrap');
     expect(css).toContain('.status-board-card--compact');
     expect(css).toContain('.status-board-card--minimal');
+    expect(css).toContain('.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-column');
+    expect(css).toContain('width: 152px');
+    expect(css).toContain('min-width: 152px');
+    expect(css).toContain('width: calc((100vw - 48px) / 2)');
     expect(css).toContain('.status-board-card__status-row');
     expect(css).toContain('.status-board-card__status-badge.ant-tag');
     expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
@@ -723,5 +729,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-card__compact-text');
     expect(css).toContain('white-space: nowrap');
     expect(css).toContain('text-overflow: ellipsis');
+    expect(css).toContain('.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card--compact .status-board-card__compact-text');
+    expect(css).toContain('white-space: normal');
+    expect(css).toContain('word-break: normal');
   });
 });

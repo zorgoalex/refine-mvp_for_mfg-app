@@ -1424,7 +1424,13 @@ export const OrderStatusBoardPage: React.FC = () => {
               }
             />
           ) : (
-            <div className="status-board-columns">
+            <div
+              className={[
+                'status-board-columns',
+                `status-board-columns--${activeBoard}`,
+                cardDisplayMode !== 'standard' ? 'status-board-columns--narrow-cards' : '',
+              ].filter(Boolean).join(' ')}
+            >
               {columns.map((column) => (
                 <StatusBoardColumnView
                   key={column.key}
