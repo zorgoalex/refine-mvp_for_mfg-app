@@ -10,11 +10,19 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 
 const COMPLETED_ORDER_STATUS_NAMES = new Set(['завершен', 'завершён']);
-const MDF_HIDDEN_PRODUCTION_STATUS_NAMES = new Set([
+export interface MdfBoardHiddenProductionStatusesSetting {
+  productionStatusIds: number[];
+}
+
+export const DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES = [
   'закатан',
   'упакован',
   'выдан',
-]);
+] as const;
+
+const MDF_DEFAULT_HIDDEN_PRODUCTION_STATUS_NAMES = new Set(
+  DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES,
+);
 const MDF_HIDDEN_ORDER_STATUS_NAMES = new Set([
   'готов к выдаче',
   'выдан',
@@ -227,22 +235,47 @@ export function filterCncBathColumnsByMachineOrderMatches(
 
 export function isCncOrderHiddenFromMdfBoard(
   card: OrderStatusBoardCard,
+  hiddenProductionStatusIds?: ReadonlySet<number>,
 ): boolean {
   const productionStatusName = normalizeStatusName(card.productionStatusName);
   const orderStatusName = normalizeStatusName(card.orderStatusName);
+  const hiddenByProductionStatus = hiddenProductionStatusIds
+    ? isPositiveInteger(card.productionStatusId) && hiddenProductionStatusIds.has(card.productionStatusId)
+    : MDF_DEFAULT_HIDDEN_PRODUCTION_STATUS_NAMES.has(productionStatusName);
   return (
-    MDF_HIDDEN_PRODUCTION_STATUS_NAMES.has(productionStatusName)
+    hiddenByProductionStatus
     || MDF_HIDDEN_ORDER_STATUS_NAMES.has(orderStatusName)
   );
+}
+
+export function resolveMdfBoardHiddenProductionStatusIds(
+  columns: readonly OrderStatusBoardColumn[],
+  setting: MdfBoardHiddenProductionStatusesSetting | null | undefined,
+): Set<number> {
+  if (setting && Array.isArray(setting.productionStatusIds)) {
+    return new Set(normalizePositiveIntegerArray(setting.productionStatusIds));
+  }
+
+  const ids = new Set<number>();
+  for (const column of columns) {
+    if (
+      isPositiveInteger(column.status.id)
+      && MDF_DEFAULT_HIDDEN_PRODUCTION_STATUS_NAMES.has(normalizeStatusName(column.status.name))
+    ) {
+      ids.add(column.status.id);
+    }
+  }
+  return ids;
 }
 
 export function filterCncBathColumnsByOrderStatuses(
   columns: CncTelegramTodayColumn[],
   orderCards: readonly OrderStatusBoardCard[],
+  hiddenProductionStatusIds?: ReadonlySet<number>,
 ): CncTelegramTodayColumn[] {
   const hiddenOrderIds = new Set(
     orderCards
-      .filter(isCncOrderHiddenFromMdfBoard)
+      .filter((card) => isCncOrderHiddenFromMdfBoard(card, hiddenProductionStatusIds))
       .map((card) => card.orderId),
   );
   if (hiddenOrderIds.size === 0) return columns;
@@ -426,6 +459,19 @@ function normalizeCncOrderKey(value: string | null | undefined): string {
 
 function normalizeStatusName(value: string | null | undefined): string {
   return (value ?? '').trim().toLocaleLowerCase('ru-RU');
+}
+
+function normalizePositiveIntegerArray(value: readonly unknown[]): number[] {
+  const ids = new Set<number>();
+  for (const item of value) {
+    const numeric = typeof item === 'number' ? item : Number(item);
+    if (Number.isInteger(numeric) && numeric > 0) ids.add(numeric);
+  }
+  return Array.from(ids).sort((left, right) => left - right);
+}
+
+function isPositiveInteger(value: number | null | undefined): value is number {
+  return Number.isInteger(value) && Number(value) > 0;
 }
 
 function normalizeCncOrderFilterValues(values: readonly string[]): string[] {

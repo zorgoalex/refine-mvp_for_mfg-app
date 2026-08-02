@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CncTelegramTodayColumn } from '../../api/types/cncTelegramApi.types';
 import type {
   OrderStatusBoardCard,
+  OrderStatusBoardColumn,
   OrderStatusBoardResponse,
 } from '../../api/types/orderStatusBoardApi.types';
 import {
@@ -16,6 +17,7 @@ import {
   isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
+  resolveMdfBoardHiddenProductionStatusIds,
   serializeOrderStatusBoardViewState,
   toggleCncCardStandardOverride,
   toOrderStatusBoardQuery,
@@ -46,7 +48,7 @@ describe('order status board model', () => {
 
   it('hides the completed column only on the order board', () => {
     const completed = column('completed', [], 0, null);
-    const columns = [
+    const columns: OrderStatusBoardColumn[] = [
       column('active', [], 0, null),
       {
         ...completed,
@@ -271,7 +273,7 @@ describe('order status board model', () => {
     expect(collectCncOrderIds(columns)).toEqual([2700, 2706, 2712]);
   });
 
-  it('hides MDF orders for configured production and order statuses', () => {
+  it('hides MDF orders for default production names until explicit setting exists', () => {
     for (const productionStatusName of [' Закатан ', 'УПАКОВАН', 'выдан']) {
       expect(isCncOrderHiddenFromMdfBoard({
         ...card(2700),
@@ -289,6 +291,59 @@ describe('order status board model', () => {
       productionStatusName: 'Закатка',
       orderStatusName: 'В работе',
     })).toBe(false);
+    expect(isCncOrderHiddenFromMdfBoard({
+      ...card(2700),
+      productionStatusId: 10,
+      productionStatusName: 'Закатан',
+      orderStatusName: 'В работе',
+    }, new Set([11]))).toBe(false);
+    expect(isCncOrderHiddenFromMdfBoard({
+      ...card(2700),
+      productionStatusId: 11,
+      productionStatusName: 'На отгрузку',
+      orderStatusName: 'В работе',
+    }, new Set([11]))).toBe(true);
+  });
+
+  it('resolves explicit MDF board hidden production statuses by id', () => {
+    const columns = [
+      {
+        key: 'rolled',
+        status: {
+          id: 10,
+          code: 'rolled',
+          name: 'Закатан',
+          color: null,
+          sortOrder: 10,
+          isActive: true,
+        },
+        total: 0,
+        cards: [],
+        nextCursor: null,
+      },
+      {
+        key: 'packed',
+        status: {
+          id: 11,
+          code: 'packed',
+          name: 'Упакован',
+          color: null,
+          sortOrder: 11,
+          isActive: true,
+        },
+        total: 0,
+        cards: [],
+        nextCursor: null,
+      },
+    ];
+
+    expect(Array.from(resolveMdfBoardHiddenProductionStatusIds(columns, null))).toEqual([10, 11]);
+    expect(Array.from(resolveMdfBoardHiddenProductionStatusIds(columns, {
+      productionStatusIds: [11, 11, 0, Number.NaN, 10],
+    }))).toEqual([10, 11]);
+    expect(Array.from(resolveMdfBoardHiddenProductionStatusIds(columns, {
+      productionStatusIds: [],
+    }))).toEqual([]);
   });
 
   it('removes a bath only when every linked order has left the MDF board', () => {
@@ -307,12 +362,12 @@ describe('order status board model', () => {
       },
     ] as CncTelegramTodayColumn[];
     const cards = [
-      { ...card(2700), productionStatusName: 'Закатан' },
-      { ...card(2706), productionStatusName: 'К закатке' },
+      { ...card(2700), productionStatusId: 10, productionStatusName: 'Закатан' },
+      { ...card(2706), productionStatusId: 9, productionStatusName: 'К закатке' },
       { ...card(2712), orderStatusName: 'Готов к выдаче' },
     ];
 
-    const filtered = filterCncBathColumnsByOrderStatuses(columns, cards);
+    const filtered = filterCncBathColumnsByOrderStatuses(columns, cards, new Set([10]));
 
     expect(filtered[0]?.baths.map((bath) => bath.bathCardId)).toEqual([
       'mixed',

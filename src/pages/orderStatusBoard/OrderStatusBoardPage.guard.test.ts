@@ -312,7 +312,10 @@ describe('OrderStatusBoardPage UX guards', () => {
       /\.cnc-bath-card__cut-result-badge\.ant-tag\s*\{[^}]*padding-inline: 6px;[^}]*border-radius: 4px;[^}]*font-size: 1\.2em;[^}]*font-variant-numeric: tabular-nums;/s,
     );
     expect(page).toContain('filterCncBathColumnsByOrderStatuses(');
-    expect(page).toContain('!isCncOrderHiddenFromMdfBoard(card)');
+    expect(page).toContain('SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES');
+    expect(page).toContain('resolveMdfBoardHiddenProductionStatusIds(');
+    expect(page).toContain('cncHiddenProductionStatusIds');
+    expect(page).toContain('!isCncOrderHiddenFromMdfBoard(card, cncHiddenProductionStatusIds)');
   });
 
   it('keeps visible MDF columns fluid and switches narrow boards to order numbers only', () => {

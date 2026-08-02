@@ -79,6 +79,7 @@ import type {
   CncTelegramTodayResponse,
 } from '../../api/types/cncTelegramApi.types';
 import { featureFlags } from '../../config/featureFlags';
+import { SETTING_KEYS, useAppSettings } from '../../hooks/useAppSettings';
 import { useOrderFinancialVisibility } from '../../hooks/useOrderFinancialVisibility';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
@@ -104,11 +105,13 @@ import {
   isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
+  resolveMdfBoardHiddenProductionStatusIds,
   serializeOrderStatusBoardViewState,
   toggleCncCardStandardOverride,
   toOrderStatusBoardQuery,
   type CncCardDisplayMode,
   type CncOrderSearchPeriod,
+  type MdfBoardHiddenProductionStatusesSetting,
   type OrderStatusBoardViewState,
 } from './model';
 import {
@@ -230,6 +233,12 @@ export const OrderStatusBoardPage: React.FC = () => {
     }),
     [searchParams],
   );
+  const isCncToday = viewState.view === 'cnc_today';
+  const { getSetting: getAppSetting } = useAppSettings({ enabled: isCncToday });
+  const mdfBoardHiddenProductionStatusSetting =
+    getAppSetting<MdfBoardHiddenProductionStatusesSetting>(
+      SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
+    );
   const datasetKey = useMemo(() => {
     const params = new URLSearchParams(searchParams);
     if (params.get('flow') === 'cnc') params.delete('order');
@@ -617,7 +626,6 @@ export const OrderStatusBoardPage: React.FC = () => {
     [fetchInitial, replacePending, stale, viewState.view],
   );
 
-  const isCncToday = viewState.view === 'cnc_today';
   const productionToolbarCompact = viewState.view === 'production';
   const productionCardDisplayOptions = useMemo(
     () =>
@@ -773,13 +781,26 @@ export const OrderStatusBoardPage: React.FC = () => {
     () => buildCncOrderStatusCards(cncOrderBoardColumns, cncOrderIds),
     [cncOrderBoardColumns, cncOrderIds],
   );
+  const cncHiddenProductionStatusIds = useMemo(
+    () => resolveMdfBoardHiddenProductionStatusIds(
+      cncOrderBoardColumns,
+      mdfBoardHiddenProductionStatusSetting,
+    ),
+    [cncOrderBoardColumns, mdfBoardHiddenProductionStatusSetting],
+  );
   const cncActiveColumns = useMemo(
-    () => filterCncBathColumnsByOrderStatuses(cncFilteredColumns, cncOrderStatusCards),
-    [cncFilteredColumns, cncOrderStatusCards],
+    () => filterCncBathColumnsByOrderStatuses(
+      cncFilteredColumns,
+      cncOrderStatusCards,
+      cncHiddenProductionStatusIds,
+    ),
+    [cncFilteredColumns, cncOrderStatusCards, cncHiddenProductionStatusIds],
   );
   const cncOrderCards = useMemo(
-    () => cncOrderStatusCards.filter((card) => !isCncOrderHiddenFromMdfBoard(card)),
-    [cncOrderStatusCards],
+    () => cncOrderStatusCards.filter((card) =>
+      !isCncOrderHiddenFromMdfBoard(card, cncHiddenProductionStatusIds),
+    ),
+    [cncOrderStatusCards, cncHiddenProductionStatusIds],
   );
   const cncRelationContext = useMemo(
     () =>

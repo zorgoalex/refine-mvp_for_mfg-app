@@ -20,6 +20,21 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
     expect(config).toContain('storedAutoCutStatusEnabled === confirmedAutoCutStatusEnabled');
   });
 
+  it('stores explicit MDF board production statuses in the Auto statuses tab', () => {
+    expect(settings).toContain(
+      "STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES:",
+    );
+    expect(settings).toContain(
+      "'status_automation.mdf_board_hidden_production_statuses'",
+    );
+    expect(config).toContain('DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES');
+    expect(config).toContain('MdfBoardHiddenProductionStatusesSetting');
+    expect(config).toContain('title="МДФ-доска"');
+    expect(config).toContain('SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES');
+    expect(config).toContain('{ productionStatusIds: nextStatusIds }');
+    expect(config).toContain('aria-label="Производственные статусы, скрывающие карточки с МДФ-доски"');
+  });
+
   it('shows a permission-aware toggle in the Auto statuses tab', () => {
     expect(config).toContain('title="Автостатус распила"');
     expect(config).toContain('При переходе карточки в «Распилено»');

@@ -174,6 +174,8 @@ export const SETTING_KEYS = {
   // Production workflow (production_status_events)
   PRODUCTION_WORKFLOW_DEFAULT: 'production.workflow.default',
   STATUS_AUTOMATION_CNC_MARK_CUT_DETAILS: 'status_automation.cnc_mark_cut_details',
+  STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES:
+    'status_automation.mdf_board_hidden_production_statuses',
   RESOURCE_VISIBILITY_BY_ROLE: 'navigation.resource_visibility_by_role',
   ORDER_FINANCIAL_VISIBILITY: 'orders.financial_visibility',
 } as const;

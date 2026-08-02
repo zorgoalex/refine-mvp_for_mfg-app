@@ -32,6 +32,10 @@ import type {
 import { featureFlags } from '../../../config/featureFlags';
 import { SETTING_KEYS, useAppSettings } from '../../../hooks/useAppSettings';
 import { can } from '../../../utils/permissions';
+import {
+  DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES,
+  type MdfBoardHiddenProductionStatusesSetting,
+} from '../../orderStatusBoard/model';
 import { DeadlineTransitionRulesConfig } from './DeadlineTransitionRulesConfig';
 import {
   allowedConditionKeysForEvent,
@@ -135,6 +139,20 @@ function isConflict(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409;
 }
 
+function normalizeProductionStatusIds(value: readonly unknown[] | null | undefined): number[] {
+  const ids = new Set<number>();
+  for (const item of value ?? []) {
+    const numeric = typeof item === 'number' ? item : Number(item);
+    if (Number.isInteger(numeric) && numeric > 0) ids.add(numeric);
+  }
+  return Array.from(ids).sort((left, right) => left - right);
+}
+
+function productionStatusIdsEqual(left: readonly number[], right: readonly number[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
 export function StatusAutomationConfig() {
   const canView = !featureFlags.useBackendPermissions || can('status_automation.view');
   const canManage = !featureFlags.useBackendPermissions || can('status_automation.manage');
@@ -150,10 +168,13 @@ export function StatusAutomationConfig() {
   const [autoCutStatusEnabled, setAutoCutStatusEnabled] = useState(false);
   const [confirmedAutoCutStatusEnabled, setConfirmedAutoCutStatusEnabled] =
     useState<boolean | null>(null);
+  const [mdfBoardHiddenStatusIdsSaving, setMdfBoardHiddenStatusIdsSaving] = useState(false);
+  const [mdfBoardHiddenStatusIds, setMdfBoardHiddenStatusIds] = useState<number[]>([]);
   const [deletingRuleId, setDeletingRuleId] = useState<number | null>(null);
   const [updatingRuleId, setUpdatingRuleId] = useState<number | null>(null);
   const {
     getSetting,
+    saveSetting,
     refetch: refetchAppSettings,
     isLoading: appSettingsLoading,
   } = useAppSettings({ enabled: canView });
@@ -225,6 +246,32 @@ export function StatusAutomationConfig() {
   );
   const storedAutoCutStatusEnabled =
     getSetting<boolean>(SETTING_KEYS.STATUS_AUTOMATION_CNC_MARK_CUT_DETAILS) === true;
+  const storedMdfBoardHiddenStatusSetting =
+    getSetting<MdfBoardHiddenProductionStatusesSetting>(
+      SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
+    );
+  const defaultMdfBoardHiddenStatusIds = useMemo(() => {
+    const defaultNames = new Set(DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES);
+    return normalizeProductionStatusIds(
+      (productionStatusesData?.data ?? [])
+        .filter((status) => defaultNames.has(
+          status.production_status_name.trim().toLocaleLowerCase('ru-RU'),
+        ))
+        .map((status) => status.production_status_id),
+    );
+  }, [productionStatusesData]);
+  const storedMdfBoardHiddenStatusIds = useMemo(
+    () => normalizeProductionStatusIds(storedMdfBoardHiddenStatusSetting?.productionStatusIds),
+    [storedMdfBoardHiddenStatusSetting],
+  );
+  const effectiveMdfBoardHiddenStatusIds =
+    storedMdfBoardHiddenStatusSetting && Array.isArray(storedMdfBoardHiddenStatusSetting.productionStatusIds)
+      ? storedMdfBoardHiddenStatusIds
+      : defaultMdfBoardHiddenStatusIds;
+  const mdfBoardHiddenStatusIdsDirty = !productionStatusIdsEqual(
+    mdfBoardHiddenStatusIds,
+    effectiveMdfBoardHiddenStatusIds,
+  );
   const catalogs = useMemo<StatusAutomationCatalogs>(
     () => ({
       orderStatusNames: new Map(orderStatusOptions.map((option) => [option.value, option.label])),
@@ -286,6 +333,11 @@ export function StatusAutomationConfig() {
     }
     setAutoCutStatusEnabled(storedAutoCutStatusEnabled);
   }, [autoCutStatusSaving, confirmedAutoCutStatusEnabled, storedAutoCutStatusEnabled]);
+
+  useEffect(() => {
+    if (mdfBoardHiddenStatusIdsSaving) return;
+    setMdfBoardHiddenStatusIds(effectiveMdfBoardHiddenStatusIds);
+  }, [effectiveMdfBoardHiddenStatusIds, mdfBoardHiddenStatusIdsSaving]);
 
   useEffect(() => {
     const catalogError = orderStatusesError ?? paymentStatusesError ?? productionStatusesError;
@@ -453,6 +505,28 @@ export function StatusAutomationConfig() {
     }
   };
 
+  const handleMdfBoardHiddenStatusesSave = async () => {
+    setMdfBoardHiddenStatusIdsSaving(true);
+    const nextStatusIds = normalizeProductionStatusIds(mdfBoardHiddenStatusIds);
+    setMdfBoardHiddenStatusIds(nextStatusIds);
+    try {
+      await saveSetting(
+        SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
+        { productionStatusIds: nextStatusIds },
+        'Производственные статусы заказов, скрывающие карточки заказов и ванн на доске МДФ-работы',
+      );
+      message.success('Настройка МДФ-доски сохранена');
+    } catch (error) {
+      message.error(errorText(error, 'Не удалось сохранить настройку МДФ-доски'));
+    } finally {
+      setMdfBoardHiddenStatusIdsSaving(false);
+    }
+  };
+
+  const handleMdfBoardHiddenStatusesReset = () => {
+    setMdfBoardHiddenStatusIds(defaultMdfBoardHiddenStatusIds);
+  };
+
   if (!canView) {
     return (
       <Alert
@@ -502,6 +576,53 @@ export function StatusAutomationConfig() {
               description="Создайте или активируйте этот статус, чтобы включить автоматизацию."
             />
           )}
+        </Space>
+      </Card>
+
+      <Card size="small" title="МДФ-доска">
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Text type="secondary">
+            Заказы с выбранными производственными статусами скрываются из колонки заказов,
+            а ванны исчезают, когда все связанные заказы находятся в этих статусах.
+          </Text>
+          <Space wrap style={{ width: '100%' }} align="start">
+            <Select<number[]>
+              mode="multiple"
+              value={mdfBoardHiddenStatusIds}
+              onChange={(value) => setMdfBoardHiddenStatusIds(
+                normalizeProductionStatusIds(value),
+              )}
+              options={productionStatusOptions}
+              disabled={!canManage || appSettingsLoading || productionStatusesLoading}
+              loading={appSettingsLoading || productionStatusesLoading}
+              placeholder="Статусы, скрывающие карточки с МДФ-доски"
+              style={{ minWidth: 360, flex: 1 }}
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              maxTagCount="responsive"
+              aria-label="Производственные статусы, скрывающие карточки с МДФ-доски"
+            />
+            <Button
+              onClick={handleMdfBoardHiddenStatusesReset}
+              disabled={
+                !canManage
+                || appSettingsLoading
+                || productionStatusesLoading
+                || mdfBoardHiddenStatusIdsSaving
+              }
+            >
+              По умолчанию
+            </Button>
+            <Button
+              type="primary"
+              loading={mdfBoardHiddenStatusIdsSaving}
+              disabled={!canManage || appSettingsLoading || !mdfBoardHiddenStatusIdsDirty}
+              onClick={() => void handleMdfBoardHiddenStatusesSave()}
+            >
+              Сохранить
+            </Button>
+          </Space>
         </Space>
       </Card>
 
