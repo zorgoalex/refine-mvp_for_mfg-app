@@ -664,6 +664,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(
       /\.cnc-bath-card__tabs\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/s,
     );
+    expect(css).toMatch(
+      /\.cnc-bath-card__tab\.ant-btn\s*\{[^}]*height: 22px;[^}]*min-height: 22px;[^}]*font-size: 10px;/s,
+    );
     expect(css).toContain('.cnc-bath-card__pdf-modal');
   });
 
@@ -687,6 +690,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('className="cnc-packet-card__sheet-panel"');
     expect(css).toMatch(
       /\.cnc-packet-card__tabs\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/s,
+    );
+    expect(css).toMatch(
+      /\.cnc-packet-card__tab\.ant-btn\s*\{[^}]*height: 22px;[^}]*min-height: 22px;[^}]*font-size: 10px;/s,
     );
     expect(css).toContain('.cnc-packet-card__tab.ant-btn[aria-pressed="true"]');
     expect(css).toContain('.cnc-packet-card__items-panel');

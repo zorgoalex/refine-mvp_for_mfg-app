@@ -1588,20 +1588,37 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 6px;
+  padding-top: 4px;
   border-top: 1px solid var(--app-border-soft);
 }
 
 .cnc-packet-card__tab.ant-btn {
   min-width: 0;
-  min-height: 40px;
-  padding-inline: 8px;
+  height: 22px;
+  min-height: 22px;
+  padding-block: 0;
+  padding-inline: 6px;
   border: 1px solid var(--app-border-soft);
   border-radius: 6px;
   color: var(--app-text-muted);
   background: var(--app-surface-muted);
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.cnc-packet-card__tab.ant-btn,
+.cnc-bath-card__tab.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.cnc-packet-card__tab.ant-btn > .ant-btn-icon,
+.cnc-bath-card__tab.ant-btn > .ant-btn-icon {
+  line-height: 0;
 }
 
 .cnc-packet-card__tab.ant-btn[aria-pressed="true"] {
@@ -1644,14 +1661,15 @@
 
 .status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__tabs,
 .status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__tabs {
-  padding-top: 5px;
+  padding-top: 3px;
 }
 
 .status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__tab.ant-btn,
 .status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__tab.ant-btn {
-  min-height: 30px;
-  padding-inline: 4px;
-  font-size: 10px;
+  height: 20px;
+  min-height: 20px;
+  padding-inline: 3px;
+  font-size: 9px;
 }
 
 .cnc-packet-card__note-file {
@@ -1913,12 +1931,17 @@
 
 .cnc-bath-card__tab.ant-btn {
   min-width: 0;
-  min-height: 40px;
-  padding-inline: 8px;
+  height: 22px;
+  min-height: 22px;
+  padding-block: 0;
+  padding-inline: 6px;
   border: 1px solid var(--app-border-soft);
   border-radius: 6px;
   color: var(--app-text-muted);
   background: var(--app-surface-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 .cnc-bath-card__tab.ant-btn[aria-pressed="true"] {
