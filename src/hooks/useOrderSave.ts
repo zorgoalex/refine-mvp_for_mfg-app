@@ -100,7 +100,7 @@ export const useOrderSave = (
 
   const clearValidation = useCallback(() => {
     setValidation(null);
-    notification.close(validationNotificationKey);
+    notification.destroy(validationNotificationKey);
   }, [validationNotificationKey]);
 
   /**

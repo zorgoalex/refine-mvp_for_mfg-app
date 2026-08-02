@@ -109,4 +109,11 @@ describe('order save validation presentation', () => {
     expect(tableSource).toContain("outline: isValidationError ? '2px solid #ff4d4f'");
     expect(tableSource).toContain('pageContainingOrderDetail(paginatedDetails, firstInvalidDetail, pageSize)');
   });
+
+  it('clears static Ant Design notifications through the supported API', () => {
+    const saveHookSource = readFileSync(new URL('./useOrderSave.ts', import.meta.url), 'utf8');
+
+    expect(saveHookSource).toContain('notification.destroy(validationNotificationKey)');
+    expect(saveHookSource).not.toContain('notification.close(');
+  });
 });
