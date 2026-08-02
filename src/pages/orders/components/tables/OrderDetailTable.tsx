@@ -5,7 +5,7 @@
 // Проблема: race condition между внутренним состоянием InputNumber и Form.Item
 // Решение: используем useRef для синхронного хранения значений полей
 
-import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback, useContext } from 'react';
 import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider, Checkbox } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined } from '@ant-design/icons';
@@ -41,6 +41,10 @@ import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
 import type { CutDetailLastReadyJobRef } from '../../../../api/types/cutApi.types';
 import { CutJobVersionLines } from '../../CutJobVersionLines';
 import { cutJobDeepLink } from '../../cutColumnHelpers';
+import {
+  OrderSaveValidationContext,
+  orderValidationDetailKey,
+} from '../../../../hooks/orderSaveValidation';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -257,6 +261,16 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   toolbarActions,
 }, ref) => {
   const { header, details, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
+  const saveValidation = useContext(OrderSaveValidationContext);
+  const invalidDetailKeys = useMemo(
+    () => new Set(saveValidation?.invalidDetailKeys ?? []),
+    [saveValidation],
+  );
+  const isValidationInvalid = useCallback(
+    (detail: OrderDetail) => invalidDetailKeys.has(orderValidationDetailKey(detail)),
+    [invalidDetailKeys],
+  );
+  const shownValidationRef = useRef<typeof saveValidation>(null);
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
 
@@ -1538,6 +1552,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   ]);
 
   useEffect(() => {
+    if (!saveValidation) {
+      shownValidationRef.current = null;
+      return;
+    }
+    if (groupingActive || shownValidationRef.current === saveValidation) return;
+    shownValidationRef.current = saveValidation;
+    const firstInvalidDetail = paginatedDetails.find(isValidationInvalid);
+    if (!firstInvalidDetail) return;
+    setCurrentPage(pageContainingOrderDetail(paginatedDetails, firstInvalidDetail, pageSize));
+  }, [groupingActive, isValidationInvalid, pageSize, paginatedDetails, saveValidation]);
+
+  useEffect(() => {
     if (editingKey == null || groupingActive) return;
     const frame = requestAnimationFrame(() => {
       const row = tableContainerRef.current?.querySelector<HTMLElement>(
@@ -2192,9 +2218,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           const isHighlighted = highlightedRowKey !== null && rowKey === highlightedRowKey;
           const isCurrentlyEditing = isEditing(record);
           const isPendingSelection = dragSelection.isInPendingSelection(rowKey);
+          const isValidationError = isValidationInvalid(record);
 
           return {
             ref: isHighlighted ? highlightedRowRef : undefined,
+            'aria-invalid': isValidationError || undefined,
+            title: isValidationError ? `Позиция №${record.detail_number ?? ''} содержит ошибки` : undefined,
             style: {
               backgroundColor: isCurrentlyEditing
                 ? 'var(--app-highlight)' // Warm yellow for editing row
@@ -2204,6 +2233,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                 ? 'var(--app-selection-bg)' // Light blue for highlighted row
                 : (index! % 2 === 0 ? 'var(--app-surface)' : 'var(--app-surface-muted)'),
               boxShadow: isCurrentlyEditing ? '0 4px 12px rgba(0, 0, 0, 0.15)' : 'none',
+              outline: isValidationError ? '2px solid #ff4d4f' : undefined,
+              outlineOffset: isValidationError ? '-2px' : undefined,
               transform: isCurrentlyEditing ? 'scale(1.01)' : 'scale(1)',
               position: isCurrentlyEditing ? 'relative' as const : 'relative' as const,
               zIndex: isCurrentlyEditing ? 10 : 1,

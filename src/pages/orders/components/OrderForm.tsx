@@ -22,6 +22,7 @@ import { useWorkspaceTabKey } from '../../../components/workspace/KeepAliveConte
 import { useDefaultStatuses } from '../../../hooks/useDefaultStatuses';
 import { loadOrderViaBackend } from '../../../hooks/useOrderBackendRead';
 import { useOrderSave } from '../../../hooks/useOrderSave';
+import { OrderSaveValidationContext } from '../../../hooks/orderSaveValidation';
 import { useOrderExport } from '../../../hooks/useOrderExport';
 import { projectsApi, type ProjectDto } from '../../../api/projectsApi';
 import { OrderFormMode } from '../../../types/orders';
@@ -183,7 +184,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       !featureFlags.useBackendOrdersWrite,
     schedule: null,
   });
-  const { saveOrder, isSaving } = useOrderSave(orderKey, {
+  const {
+    saveOrder,
+    isSaving,
+    validation: saveValidation,
+    showValidationErrors,
+    clearValidation,
+  } = useOrderSave(orderKey, {
     getBazisDraftSaveContext: () => {
       const runtime = bazisDraftRuntimeRef.current;
       if (!runtime) {
@@ -279,6 +286,12 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const labelsEnabled = featureFlags.labels && can('labels.view');
   const cutTabEnabled = featureFlags.useBackendCut && can('cut.view');
   const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
+
+  useEffect(() => {
+    if (saveValidation?.invalidDetailKeys.length) {
+      setActiveTab('details');
+    }
+  }, [saveValidation]);
 
   useEffect(() => {
     if (
@@ -1136,6 +1149,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     console.log('[OrderForm] ========== handleSave STARTED ==========');
     console.log('[OrderForm] handleSave - mode:', mode);
     console.log('[OrderForm] handleSave - orderId:', orderId);
+    clearValidation();
 
     // Apply current edits from detail table before saving
     if (detailsTabRef.current) {
@@ -1206,183 +1220,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       console.log('[OrderForm] handleSave - full result object:', result);
 
       if (!result.success) {
-        // Show validation errors
-        console.log('[OrderForm] handleSave - result.error (FULL):', result.error);
-        console.log('[OrderForm] handleSave - result.error type:', typeof result.error);
-        console.log('[OrderForm] handleSave - result.error keys:', result.error ? Object.keys(result.error) : 'null');
-        console.log('[OrderForm] handleSave - result.error.issues:', result.error?.issues);
-        console.log('[OrderForm] handleSave - result.error.errors:', result.error?.errors);
-
-        // Zod uses 'issues' property, not 'errors'!
-        const issues = result.error?.issues || [];
-        console.log('[OrderForm] handleSave - validation issues:', issues);
-        console.log('[OrderForm] handleSave - validation issues (detailed):', JSON.stringify(issues, null, 2));
-        console.log('[OrderForm] handleSave - validation issues length:', issues.length);
-
-        // Check if the error is about missing details (array too small)
-        const hasDetailsError = issues.some(err => {
-          const pathStr = err.path.join('.');
-          const isDetailsPath = pathStr === 'details';
-          const isTooSmall = err.code === 'too_small';
-          const hasMinimumText = err.message.includes('минимум');
-
-          console.log('[OrderForm] handleSave - checking error:', {
-            path: err.path,
-            pathStr,
-            code: err.code,
-            message: err.message,
-            isDetailsPath,
-            isTooSmall,
-            hasMinimumText,
-            result: isDetailsPath && (isTooSmall || hasMinimumText)
-          });
-
-          // Check if it's a 'details' error with too_small code (array length validation)
-          return isDetailsPath && (isTooSmall || hasMinimumText);
-        });
-
-        console.log('[OrderForm] handleSave - hasDetailsError:', hasDetailsError);
-
-        if (hasDetailsError) {
-          // Special handling for missing details error - prominent notification
-          console.log('[OrderForm] handleSave - showing SPECIAL details error notification');
-          notification.error({
-            message: '⚠️ Невозможно сохранить заказ',
-            description: (
-              <div style={{ fontSize: '14px' }}>
-                <p style={{ marginBottom: '12px', fontWeight: 'bold', fontSize: '15px', color: '#ff4d4f' }}>
-                  Для создания заказа необходимо добавить минимум одну позицию (деталь).
-                </p>
-                <p style={{ marginBottom: '8px' }}>
-                  📋 Перейдите на вкладку <strong>"Позиции заказа"</strong>
-                </p>
-                <p style={{ marginBottom: 0 }}>
-                  ➕ Нажмите кнопку <strong>"Добавить"</strong> для создания позиции
-                </p>
-              </div>
-            ),
-            duration: 0, // Don't auto-hide
-          });
-        } else {
-          // Regular validation errors - format them nicely
-          console.log('[OrderForm] handleSave - showing REGULAR validation error notification');
-
-          // Field name mappings for human-readable messages
-          const fieldLabels: Record<string, string> = {
-            // Header fields
-            'header.order_name': 'Название заказа',
-            'header.client_id': 'Клиент',
-            'header.order_date': 'Дата заказа',
-            'header.order_status_id': 'Статус заказа',
-            'header.payment_status_id': 'Статус оплаты',
-            'header.planned_completion_date': 'Плановая дата завершения',
-            'header.total_amount': 'Сумма заказа',
-            'header.discount': 'Скидка',
-            'header.paid_amount': 'Оплачено',
-            // Detail fields
-            'height': 'Высота',
-            'width': 'Ширина',
-            'quantity': 'Количество',
-            'area': 'Площадь',
-            'material_id': 'Материал',
-            'milling_type_id': 'Тип фрезеровки',
-            'edge_type_id': 'Тип обката',
-            'detail_cost': 'Сумма детали',
-            'milling_cost_per_sqm': 'Цена за м²',
-          };
-
-          // Group errors by section (header vs details)
-          const headerErrors: string[] = [];
-          const detailErrors: Map<number, string[]> = new Map();
-          const generalDetailErrors: string[] = [];
-
-          issues.forEach((err) => {
-            const pathStr = err.path.join('.');
-
-            // Check if it's a general details error (e.g., "details" without index)
-            if (pathStr === 'details' && err.message) {
-              generalDetailErrors.push(err.message);
-              return;
-            }
-
-            // Check if it's a detail error (e.g., details.0.height)
-            const detailMatch = pathStr.match(/^details\.(\d+)\.(.+)$/);
-            if (detailMatch) {
-              const detailIndex = parseInt(detailMatch[1], 10);
-              const fieldName = detailMatch[2];
-              const label = fieldLabels[fieldName] || fieldName;
-
-              if (!detailErrors.has(detailIndex)) {
-                detailErrors.set(detailIndex, []);
-              }
-              detailErrors.get(detailIndex)!.push(label);
-            } else {
-              // Header error
-              const label = fieldLabels[pathStr] || pathStr;
-              headerErrors.push(label);
-            }
-          });
-
-          notification.error({
-            message: '⚠️ Не удалось сохранить заказ',
-            className: 'order-save-validation-notification',
-            description: (
-              <div style={{ fontSize: '14px' }}>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-                  <Button size="small" onClick={() => notification.destroy()}>
-                    Закрыть все
-                  </Button>
-                </div>
-                {generalDetailErrors.length === 0 && (headerErrors.length > 0 || detailErrors.size > 0) && (
-                  <p style={{ marginBottom: '12px', fontWeight: 'bold', color: '#ff4d4f' }}>
-                    Пожалуйста, заполните обязательные поля:
-                  </p>
-                )}
-
-                {generalDetailErrors.length > 0 && (
-                  <div style={{ marginBottom: '12px' }}>
-                    <div style={{ fontWeight: 600, marginBottom: '4px', color: '#ff4d4f' }}>⚠️ Ошибка в деталях:</div>
-                    <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                      {generalDetailErrors.map((msg, idx) => (
-                        <li key={idx} style={{ color: 'var(--app-text-muted)' }}>{msg}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {headerErrors.length > 0 && (
-                  <div style={{ marginBottom: '12px' }}>
-                    <div style={{ fontWeight: 600, marginBottom: '4px' }}>📋 Основная информация:</div>
-                    <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                      {headerErrors.map((field, idx) => (
-                        <li key={idx} style={{ color: 'var(--app-text-muted)' }}>{field}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {detailErrors.size > 0 && (
-                  <div>
-                    <div style={{ fontWeight: 600, marginBottom: '4px' }}>📦 Детали заказа:</div>
-                    {Array.from(detailErrors.entries()).map(([detailIdx, fields]) => (
-                      <div key={detailIdx} style={{ marginBottom: '8px' }}>
-                        <div style={{ color: '#fa8c16', fontWeight: 500 }}>
-                          Позиция #{detailIdx + 1}:
-                        </div>
-                        <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                          {fields.map((field, idx) => (
-                            <li key={idx} style={{ color: 'var(--app-text-muted)' }}>{field}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ),
-            duration: 0, // Don't auto-hide
-          });
-        }
+        showValidationErrors(result.error.issues, formValues.details);
         return;
       }
 
@@ -1506,7 +1344,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       {
         key: 'details',
         label: isOperational ? 'Состав' : 'Детали заказа',
-        children: <OrderDetailsTab ref={detailsTabRef} isSaving={isSaving} />,
+        children: (
+          <OrderSaveValidationContext.Provider value={saveValidation}>
+            <OrderDetailsTab ref={detailsTabRef} isSaving={isSaving} />
+          </OrderSaveValidationContext.Provider>
+        ),
       },
       {
         key: 'dates',
@@ -1589,7 +1431,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         .map((key) => items.find((item) => item.key === key))
         .filter((item): item is (typeof items)[number] => Boolean(item));
     },
-    [mode, header.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled, bazisDraftClientLocked, isOperational]
+    [mode, header.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled, bazisDraftClientLocked, isOperational, isSaving, saveValidation]
   );
 
   const enabledTabKeys = useMemo(
