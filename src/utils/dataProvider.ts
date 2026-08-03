@@ -1100,9 +1100,28 @@ const sanitizeVariables = (input: AnyObject) => {
   return out;
 };
 
+const GRAPHQL_FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+const scalarFieldsFor = (resource: string): Set<string> | null => {
+  const fields = RESOURCE_FIELDS[resource];
+  if (!fields) return null;
+  return new Set(fields.filter((field) => GRAPHQL_FIELD_NAME.test(field)));
+};
+
+const filterValidResourceFields = (resource: string, items?: any[]) => {
+  if (!items || items.length === 0) return [];
+  const fields = scalarFieldsFor(resource);
+  return items.filter((item) => {
+    const field = item?.field;
+    if (typeof field !== "string" || !GRAPHQL_FIELD_NAME.test(field)) return false;
+    return fields ? fields.has(field) : true;
+  });
+};
+
 const buildOrderBy = (resource: string, sorters?: any[]) => {
-  if (!sorters || sorters.length === 0) return "";
-  const parts = sorters.map((s) => `{ ${s.field}: ${s.order === "desc" ? "desc" : "asc"} }`);
+  const safeSorters = filterValidResourceFields(resource, sorters);
+  if (safeSorters.length === 0) return "";
+  const parts = safeSorters.map((s) => `{ ${s.field}: ${s.order === "desc" ? "desc" : "asc"} }`);
   return `, order_by: [${parts.join(", ")}]`;
 };
 
@@ -1140,9 +1159,10 @@ const normalizeContains = (op: string, value: any) => {
   return value;
 };
 
-const buildWhere = (filters?: any[]) => {
-  if (!filters || filters.length === 0) return "";
-  const andParts = filters.map((f) => {
+const buildWhere = (resource: string, filters?: any[]) => {
+  const safeFilters = filterValidResourceFields(resource, filters);
+  if (safeFilters.length === 0) return "";
+  const andParts = safeFilters.map((f) => {
     const op = mapOperator(f.operator);
     let val = normalizeContains(f.operator, f.value);
     // Drop null/undefined from `_in` arrays — Hasura rejects `_in: [null]` for
@@ -1811,7 +1831,7 @@ export const dataProvider = (_apiUrl: string) => {
         }
       }
 
-      const where = buildWhere(enhancedFilters);
+      const where = buildWhere(resource, enhancedFilters);
       const selection = fieldsFor(resource);
       // For aggregate, remove leading comma from where clause
       const aggregateWhere = where ? `(${where.replace(/^,\s*/, '')})` : '';
