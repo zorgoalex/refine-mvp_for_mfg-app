@@ -57,6 +57,17 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).toContain('s.base_svg');
   });
 
+  it('hydrates existing generated-label cut maps with their frozen vacuum classification', () => {
+    const loaderStart = source.indexOf('async function loadCutMapAssets');
+    const loaderEnd = source.indexOf('interface PreviewTokenPayload', loaderStart);
+    const loader = source.slice(loaderStart, loaderEnd);
+
+    expect(source).toContain("group_json #>> '{summary,engine_used}'");
+    expect(source).toContain("= 'vacuum_table'");
+    expect(loader).toContain('${CUT_RESULT_SHEET_IS_VACUUM_SQL} AS is_vacuum');
+    expect(loader).toContain('isVacuum: row.is_vacuum === true');
+  });
+
   it('exposes detail cut and bath calculation numbers for source selection in order labels', () => {
     expect(source).toContain('cutJobCutNumber: row.regular_cut_number');
     expect(source).toContain('bathCutJobCutNumber: row.vacuum_cut_number');

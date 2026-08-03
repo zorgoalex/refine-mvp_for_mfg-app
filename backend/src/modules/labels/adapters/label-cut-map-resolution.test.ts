@@ -24,7 +24,10 @@ describe('label cut-map resolution', () => {
       yMm: 70,
     });
     expect(resolved.rows[0].values).toMatchObject({ 'cut.number': '30-4', 'cut.sheet_number': 2 });
-    expect(resolved.assets.get(600)).toContain('<svg');
+    expect(resolved.assets.get(600)).toEqual({
+      svg: expect.stringContaining('<svg'),
+      isVacuum: false,
+    });
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("jsonb_array_elements(r.snapshot_job -> 'items')"),
       [[700], 20],
@@ -126,8 +129,32 @@ describe('label cut-map resolution', () => {
     });
   });
 
-  it('rotates a landscape cut sheet to match a portrait template placeholder', async () => {
-    const client = databaseReturning(placementRow());
+  it('keeps a portrait non-vacuum sheet top-left when fitting a landscape label box', async () => {
+    const client = databaseReturning(placementRow({
+      sheet_width_mm: 2070,
+      sheet_height_mm: 2800,
+      base_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2070 2800"></svg>',
+    }));
+    const resolved = await resolveLabelCutMaps(
+      client,
+      template(),
+      [labelRow()],
+      [{ detailId: 10, copyIndex: 1, cutResultPlacementId: 700 }],
+      20,
+    );
+
+    const svg = renderSvgPages(template(), resolved.rows, resolved.assets).pages[0];
+    expect(svg).toContain('width="40" height="20" viewBox="0 0 2800 2070"');
+    expect(svg).toContain('transform="matrix(0 1 1 0 0 0)"');
+    expect(svg).not.toContain('transform="translate(2800 0) rotate(90)"');
+  });
+
+  it('keeps a landscape non-vacuum sheet top-left when fitting a portrait label box', async () => {
+    const client = databaseReturning(placementRow({
+      sheet_width_mm: 1000,
+      sheet_height_mm: 500,
+      base_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500"></svg>',
+    }));
     const portraitTemplate = template();
     portraitTemplate.elements[0] = {
       ...portraitTemplate.elements[0],
@@ -143,8 +170,29 @@ describe('label cut-map resolution', () => {
     );
 
     const svg = renderSvgPages(portraitTemplate, resolved.rows, resolved.assets).pages[0];
-    expect(svg).toContain('width="18" height="42" viewBox="0 0 2070 2800"');
-    expect(svg).toContain('transform="translate(2070 0) rotate(90)"');
+    expect(svg).toContain('width="18" height="42" viewBox="0 0 500 1000"');
+    expect(svg).toContain('transform="matrix(0 1 1 0 0 0)"');
+    expect(svg).not.toContain('transform="translate(500 0) rotate(90)"');
+  });
+
+  it('preserves the legacy rotated orientation for vacuum cut sheets', async () => {
+    const client = databaseReturning(placementRow({
+      sheet_width_mm: 2070,
+      sheet_height_mm: 2800,
+      base_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2070 2800"></svg>',
+      is_vacuum: true,
+    }));
+    const resolved = await resolveLabelCutMaps(
+      client,
+      template(),
+      [labelRow()],
+      [{ detailId: 10, copyIndex: 1, cutResultPlacementId: 700 }],
+      20,
+    );
+
+    const svg = renderSvgPages(template(), resolved.rows, resolved.assets).pages[0];
+    expect(svg).toContain('transform="translate(2800 0) rotate(90)"');
+    expect(svg).not.toContain('transform="matrix(0 1 1 0 0 0)"');
   });
 });
 

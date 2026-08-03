@@ -13,9 +13,14 @@ export interface RenderedPreview {
   pages: string[];
 }
 
-export type LabelCutMapAssets = ReadonlyMap<number, string>;
+export interface LabelCutMapAsset {
+  svg: string;
+  isVacuum: boolean;
+}
 
-const CUT_MAP_RENDERER_VERSION = 3;
+export type LabelCutMapAssets = ReadonlyMap<number, LabelCutMapAsset>;
+
+const CUT_MAP_RENDERER_VERSION = 4;
 const CUT_MAP_DETAIL_STROKE_MULTIPLIER = 2;
 const CUT_MAP_SELECTED_FILL = '#000000';
 
@@ -142,10 +147,12 @@ function renderCutMapElement(
 ): string {
   const map = row.cutMap;
   if (!map) return '';
-  const baseSvg = cutMapAssets.get(map.cutResultSheetMapId);
-  if (!baseSvg) {
+  const frozenAsset = cutMapAssets.get(map.cutResultSheetMapId);
+  if (!frozenAsset) {
     throw new Error(`Missing frozen cut-map asset ${map.cutResultSheetMapId}`);
   }
+  const baseSvg = frozenAsset.svg;
+  const keepLegacyRotatedOrigin = frozenAsset.isVacuum;
   const safeBody = extractSafeCutSheetBody(baseSvg);
   if (safeBody === null) {
     throw new Error(`Invalid frozen cut-map asset ${map.cutResultSheetMapId}`);
@@ -180,9 +187,11 @@ function renderCutMapElement(
     `<rect x="${num(map.xMm)}" y="${num(map.yMm)}" width="${num(map.widthMm)}" height="${num(map.heightMm)}" fill="${CUT_MAP_SELECTED_FILL}" stroke="${CUT_MAP_SELECTED_FILL}" stroke-width="${num(selectedStroke)}"/>`,
     marker,
   ].join('');
-  const orientedSheetBody = rotateSheet
-    ? `<g transform="translate(${num(map.sheetHeightMm)} 0) rotate(90)">${sheetBody}</g>`
-    : sheetBody;
+  const orientedSheetBody = !rotateSheet
+    ? sheetBody
+    : keepLegacyRotatedOrigin
+      ? `<g transform="translate(${num(map.sheetHeightMm)} 0) rotate(90)">${sheetBody}</g>`
+      : `<g transform="matrix(0 1 1 0 0 0)">${sheetBody}</g>`;
 
   return [
     `<g data-label-element-kind="cut_map" data-cut-number="${escapeXml(map.cutNumber)}" data-cut-result-placement-id="${map.cutResultPlacementId}">`,

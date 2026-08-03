@@ -62,12 +62,15 @@ describe('label renderer', () => {
     };
 
     const svg = renderSvgPages(base, [mapped], new Map([
-      [9, [
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500">',
-        '<rect x="0" y="0" width="1000" height="500" fill="#fff" stroke="#9aa7b4" stroke-width="3"/>',
-        '<rect x="10" y="20" width="300" height="100" fill="#eef3f8" stroke="#1f2d3d" stroke-width="2"/>',
-        '</svg>',
-      ].join('')],
+      [9, {
+        svg: [
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500">',
+          '<rect x="0" y="0" width="1000" height="500" fill="#fff" stroke="#9aa7b4" stroke-width="3"/>',
+          '<rect x="10" y="20" width="300" height="100" fill="#eef3f8" stroke="#1f2d3d" stroke-width="2"/>',
+          '</svg>',
+        ].join(''),
+        isVacuum: false,
+      }],
     ])).pages[0];
 
     expect(svg).toContain('data-label-element-kind="cut_map"');
@@ -79,7 +82,10 @@ describe('label renderer', () => {
     expect(svg).not.toContain('stroke="#d4380d"');
 
     expect(() => renderSvgPages(base, [mapped], new Map([
-      [9, '<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="1" height="1" onload="alert(1)"/></svg>'],
+      [9, {
+        svg: '<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="1" height="1" onload="alert(1)"/></svg>',
+        isVacuum: false,
+      }],
     ]))).toThrow(/Invalid frozen cut-map asset/);
   });
 
@@ -130,16 +136,19 @@ describe('label renderer', () => {
     };
 
     const svg = renderSvgPages(base, [mapped], new Map([
-      [344, [
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1050 2800">',
-        '<rect x="0" y="0" width="1050" height="2800" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>',
-        '<g class="cut-sheet-piece" data-item-id="det-62196" data-piece-instance="1" data-piece-cx="275" data-piece-cy="415" data-detail-id="62196">',
-        '<rect x="0" y="0" width="550" height="830" fill="#d7e9ff" stroke="#1f2d3d" stroke-width="2"/>',
-        '</g>',
-        '<line class="cut-bath-meter-guide" data-offset-mm="800" x1="0" y1="800" x2="1050" y2="800" stroke="#536273" stroke-opacity="0.28" stroke-width="3" stroke-dasharray="18 14" pointer-events="none"/>',
-        '<text class="cut-bath-meter-guide-label" data-offset-mm="800" x="14.7" y="785.3" fill="#ff6a00" font-family="Liberation Sans, sans-serif" font-size="21" font-weight="700" text-anchor="start" dominant-baseline="middle" stroke="#ffffff" stroke-width="3.36" paint-order="stroke" pointer-events="none" style="font-variant-numeric:tabular-nums">800мм</text>',
-        '</svg>',
-      ].join('')],
+      [344, {
+        svg: [
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1050 2800">',
+          '<rect x="0" y="0" width="1050" height="2800" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>',
+          '<g class="cut-sheet-piece" data-item-id="det-62196" data-piece-instance="1" data-piece-cx="275" data-piece-cy="415" data-detail-id="62196">',
+          '<rect x="0" y="0" width="550" height="830" fill="#d7e9ff" stroke="#1f2d3d" stroke-width="2"/>',
+          '</g>',
+          '<line class="cut-bath-meter-guide" data-offset-mm="800" x1="0" y1="800" x2="1050" y2="800" stroke="#536273" stroke-opacity="0.28" stroke-width="3" stroke-dasharray="18 14" pointer-events="none"/>',
+          '<text class="cut-bath-meter-guide-label" data-offset-mm="800" x="14.7" y="785.3" fill="#ff6a00" font-family="Liberation Sans, sans-serif" font-size="21" font-weight="700" text-anchor="start" dominant-baseline="middle" stroke="#ffffff" stroke-width="3.36" paint-order="stroke" pointer-events="none" style="font-variant-numeric:tabular-nums">800мм</text>',
+          '</svg>',
+        ].join(''),
+        isVacuum: true,
+      }],
     ])).pages[0];
 
     expect(svg).toContain('stroke-dasharray="18 14"');

@@ -6,7 +6,12 @@ import type { DatabaseClient } from '../../../database/database.types';
 import { DatabaseService } from '../../../database/database.service';
 import { actorId } from '../application/labels.service';
 import { buildLabelRows, hashLabelRows, type LabelRow, type LabelRowCutMapSnapshot } from '../application/label-row-builder';
-import { renderLabelsZip, renderSvgPages, type LabelCutMapAssets } from '../application/label-renderer';
+import {
+  renderLabelsZip,
+  renderSvgPages,
+  type LabelCutMapAsset,
+  type LabelCutMapAssets,
+} from '../application/label-renderer';
 import type {
   CreateLabelOcrTemplateCommand,
   CreateLabelQrTemplateCommand,
@@ -162,6 +167,20 @@ LEFT JOIN LATERAL (
   FROM ranked
 ) cut_version_fields ON true
 `;
+
+const CUT_RESULT_SHEET_IS_VACUUM_SQL = `COALESCE(
+  (
+    SELECT (frozen_group.group_json #>> '{summary,engine_used}') = 'vacuum_table'
+    FROM jsonb_array_elements(r.snapshot_job -> 'groups') AS frozen_group(group_json)
+    WHERE (frozen_group.group_json ->> 'cutGroupId')::BIGINT = s.cut_group_id
+    LIMIT 1
+  ),
+  COALESCE(
+    j.last_calc_params->>'layout_mode',
+    cpp.params->>'layout_mode',
+    j.params->>'layout_mode'
+  ) = 'vacuum_table'
+)`;
 
 const DETAIL_FIELDS_JSON_SQL = `(
   row_to_json(od)::jsonb
@@ -1898,11 +1917,7 @@ export async function resolveLabelCutMaps(
             r.result_no,
             cut_version_fields.regular_cut_number, cut_version_fields.vacuum_cut_number,
             COALESCE(r.snapshot_job ->> 'name', 'Раскрой ' || p.cut_job_id::text) AS cut_job_name,
-            COALESCE(
-              j.last_calc_params->>'layout_mode',
-              cpp.params->>'layout_mode',
-              j.params->>'layout_mode'
-            ) = 'vacuum_table' AS is_vacuum,
+            ${CUT_RESULT_SHEET_IS_VACUUM_SQL} AS is_vacuum,
             COALESCE(
               EXISTS (
                 SELECT 1
@@ -1958,7 +1973,7 @@ export async function resolveLabelCutMaps(
     }
   }
 
-  const assets = new Map<number, string>();
+  const assets = new Map<number, LabelCutMapAsset>();
   const resolvedRows = rows.map((row): LabelRow => {
     const selection = selectionByCopy.get(`${row.detailId}:${row.copyIndex}`);
     if (!selection) return row;
@@ -1997,7 +2012,10 @@ export async function resolveLabelCutMaps(
       widthMm: toNumber(placement.width_mm),
       heightMm: toNumber(placement.height_mm),
     };
-    assets.set(cutResultSheetMapId, placement.base_svg);
+    assets.set(cutResultSheetMapId, {
+      svg: placement.base_svg,
+      isVacuum: placement.is_vacuum === true,
+    });
     return {
       ...row,
       cutMap,
@@ -2059,13 +2077,24 @@ async function insertGenerationCutPlacements(
 async function loadCutMapAssets(client: DatabaseClient, rows: LabelRow[]): Promise<LabelCutMapAssets> {
   const ids = [...new Set(rows.flatMap((row) => row.cutMap ? [row.cutMap.cutResultSheetMapId] : []))];
   if (ids.length === 0) return new Map();
-  const result = await client.query<{ cut_result_sheet_map_id: string | number; base_svg: string }>(
-    `SELECT cut_result_sheet_map_id, base_svg
-     FROM cut_result_sheet_map
-     WHERE cut_result_sheet_map_id = ANY($1::bigint[])`,
+  const result = await client.query<{
+    cut_result_sheet_map_id: string | number;
+    base_svg: string;
+    is_vacuum: boolean;
+  }>(
+    `SELECT s.cut_result_sheet_map_id, s.base_svg,
+            ${CUT_RESULT_SHEET_IS_VACUUM_SQL} AS is_vacuum
+     FROM cut_result_sheet_map s
+     JOIN cut_result r ON r.cut_result_id = s.cut_result_id
+     JOIN cut_job j ON j.cut_job_id = s.cut_job_id
+     LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = j.param_profile_id
+     WHERE s.cut_result_sheet_map_id = ANY($1::bigint[])`,
     [ids],
   );
-  return new Map(result.rows.map((row) => [toNumber(row.cut_result_sheet_map_id), row.base_svg]));
+  return new Map(result.rows.map((row) => [
+    toNumber(row.cut_result_sheet_map_id),
+    { svg: row.base_svg, isVacuum: row.is_vacuum === true },
+  ]));
 }
 
 interface PreviewTokenPayload {
