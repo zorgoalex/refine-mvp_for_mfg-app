@@ -48,6 +48,23 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).toContain('isVacuum: row.is_vacuum === true');
   });
 
+  it('exposes detail cut and bath calculation numbers for source selection in order labels', () => {
+    expect(source).toContain('cutJobCutNumber: row.regular_cut_number');
+    expect(source).toContain('bathCutJobCutNumber: row.vacuum_cut_number');
+    expect(source).toContain('cut_version_fields.regular_cut_number, cut_version_fields.vacuum_cut_number');
+  });
+
+  it('filters required label cut-map selections by selected source', () => {
+    expect(source).toContain("$4::text = 'bath'");
+    expect(source).toContain("$4::text = 'regular'");
+    expect(source).toContain("= cut_version_fields.vacuum_cut_number");
+    expect(source).toContain("= cut_version_fields.regular_cut_number");
+    expect(source).toContain('LABEL_CUT_MAP_SELECTION_SOURCE_MISMATCH');
+    expect(source).toContain('cutMapSourceMatches');
+    expect(source).toContain('cutMapPlacementMatchesSource');
+    expect(source).toContain('expectedCutNumber');
+  });
+
   it('persists field catalog snapshots for label and QR templates', () => {
     expect(source).toMatch(/field_catalog_snapshot/);
     expect(source).toMatch(/JSON\.stringify\(command\.fieldCatalogSnapshot \?\? \{\}\)/);

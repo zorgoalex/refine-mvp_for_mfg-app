@@ -9317,6 +9317,8 @@ paths:
                         detailNumber: { type: string, nullable: true }
                         detailName: { type: string, nullable: true }
                         quantity: { type: integer, minimum: 0 }
+                        cutJobCutNumber: { type: string, nullable: true }
+                        bathCutJobCutNumber: { type: string, nullable: true }
                         options:
                           type: array
                           items:
@@ -9337,6 +9339,7 @@ paths:
                               - createdAt
                               - isCurrent
                               - isArchived
+                              - isVacuum
                               - dimensionsMatch
                             properties:
                               cutResultPlacementId: { type: integer }
@@ -9354,6 +9357,7 @@ paths:
                               createdAt: { type: string, format: date-time }
                               isCurrent: { type: boolean }
                               isArchived: { type: boolean }
+                              isVacuum: { type: boolean }
                               dimensionsMatch: { type: boolean }
         '401':
           $ref: '#/components/responses/Unauthorized'

@@ -29,6 +29,7 @@ import type {
   LabelTemplateElementInput,
   LabelsPermissionDeniedInput,
   LabelsPort,
+  LabelCutMapSource,
   DetailLabelsPreviewDto,
   LatestOrderLabelsPreviewDto,
   ListLabelOcrTemplatesQuery,
@@ -187,6 +188,8 @@ interface CutMapOptionRow extends QueryResultRow {
   detail_number: string | null;
   detail_name: string | null;
   quantity: string | number;
+  regular_cut_number: string | null;
+  vacuum_cut_number: string | null;
   cut_result_placement_id: string | number | null;
   instance: string | number | null;
   cut_result_id: string | number | null;
@@ -225,6 +228,9 @@ interface ResolvedCutMapRow extends QueryResultRow {
   cut_job_name: string;
   base_svg: string;
   dimensions_match: boolean;
+  is_vacuum: boolean;
+  regular_cut_number: string | null;
+  vacuum_cut_number: string | null;
 }
 
 const TEMPLATE_COLUMNS = `label_template_id, name, description, version, is_active,
@@ -1052,6 +1058,7 @@ export class PgLabelsRepository implements LabelsPort {
     await assertOrderExists(this.database, query.orderId);
     const result = await this.database.query<CutMapOptionRow>(
       `SELECT od.detail_id, od.detail_number, od.detail_name, od.quantity,
+              cut_version_fields.regular_cut_number, cut_version_fields.vacuum_cut_number,
               maps.cut_result_placement_id, maps.instance, maps.cut_result_id,
               maps.cut_job_id, maps.variant, maps.sheet_index, maps.sheet_ordinal,
               r.result_no, r.result_kind, r.created_at,
@@ -1074,6 +1081,7 @@ export class PgLabelsRepository implements LabelsPort {
                 )
               END AS dimensions_match
        FROM order_details_view od
+       ${DETAIL_CUT_RESULT_VERSION_FIELDS_SQL}
        LEFT JOIN (
          SELECT p.cut_result_placement_id, p.order_id, p.order_detail_id, p.instance,
                 p.cut_result_id, p.cut_job_id, p.variant, p.sheet_index,
@@ -1122,6 +1130,8 @@ export class PgLabelsRepository implements LabelsPort {
         detailNumber: row.detail_number,
         detailName: row.detail_name,
         quantity: Math.max(0, Math.trunc(toNumber(row.quantity))),
+        cutJobCutNumber: row.regular_cut_number,
+        bathCutJobCutNumber: row.vacuum_cut_number,
         options: [],
       };
       if (
@@ -1167,6 +1177,7 @@ export class PgLabelsRepository implements LabelsPort {
     await assertOrderExists(this.database, command.orderId);
     const detailIds = command.input.detailFilters?.detailIds ?? [];
     const useBasisFields = command.input.useBasisFields ?? true;
+    const cutMapSource = command.input.cutMapSource;
     await assertDetailsBelongToOrder(this.database, command.orderId, detailIds);
     const orderFields = await readOrderFields(this.database, command.orderId);
     const orderName = readOrderNameFromFields(orderFields);
@@ -1180,6 +1191,7 @@ export class PgLabelsRepository implements LabelsPort {
       buildLabelRows({ orderName, orderFields, template, details, useBasisFields }),
       command.input.cutMapSelections,
       command.orderId,
+      cutMapSource,
     );
     const rows = resolved.rows;
     const rowHash = hashLabelRows(rows);
@@ -1197,6 +1209,7 @@ export class PgLabelsRepository implements LabelsPort {
         templateVersion: template.version,
         detailIds,
         useBasisFields,
+        cutMapSource,
         rowHash,
       }),
     };
@@ -1206,6 +1219,7 @@ export class PgLabelsRepository implements LabelsPort {
     return this.database.transaction(async (tx) => {
       const detailIds = command.input.detailFilters?.detailIds ?? [];
       const useBasisFields = command.input.useBasisFields ?? true;
+      const cutMapSource = command.input.cutMapSource;
       const token = decodePreviewToken(command.input.previewToken);
       if (
         token.orderId !== command.orderId
@@ -1213,6 +1227,7 @@ export class PgLabelsRepository implements LabelsPort {
         || token.templateVersion !== command.input.templateVersion
         || JSON.stringify(token.detailIds ?? []) !== JSON.stringify(detailIds)
         || (token.useBasisFields ?? true) !== useBasisFields
+        || (token.cutMapSource ?? null) !== (cutMapSource ?? null)
       ) {
         throw new ApiError(409, 'LABEL_PREVIEW_TOKEN_STALE', 'Label preview token is stale');
       }
@@ -1222,6 +1237,7 @@ export class PgLabelsRepository implements LabelsPort {
         templateVersion: command.input.templateVersion,
         detailIds,
         useBasisFields,
+        cutMapSource,
         rowHash: token.rowHash,
         exportFormats: command.input.exportFormats,
         ...(command.input.cutMapSelections !== undefined
@@ -1255,6 +1271,7 @@ export class PgLabelsRepository implements LabelsPort {
         buildLabelRows({ orderName, orderFields, template, details, useBasisFields }),
         command.input.cutMapSelections,
         command.orderId,
+        cutMapSource,
       );
       const rows = resolved.rows;
       const rowHash = hashLabelRows(rows);
@@ -1279,7 +1296,7 @@ export class PgLabelsRepository implements LabelsPort {
           command.input.idempotencyKey,
           requestHash,
           sha256(command.input.previewToken),
-          JSON.stringify({ detailIds, useBasisFields }),
+          JSON.stringify({ detailIds, useBasisFields, cutMapSource }),
           JSON.stringify(template),
           JSON.stringify(rows),
           rows.length,
@@ -1757,6 +1774,7 @@ export async function resolveLabelCutMaps(
   rows: LabelRow[],
   selections: LabelCutMapSelectionInput[] | undefined,
   orderId?: number,
+  cutMapSource?: LabelCutMapSource,
 ): Promise<{ rows: LabelRow[]; assets: LabelCutMapAssets }> {
   const usesCutMap = template.elements.some((element) => element.kind === 'cut_map');
   if (!usesCutMap) {
@@ -1811,6 +1829,8 @@ export async function resolveLabelCutMaps(
        JOIN cut_job j
          ON j.cut_job_id = p.cut_job_id
         AND j.status <> 'archived'
+       LEFT JOIN cut_param_profiles cpp
+         ON cpp.cut_param_profile_id = j.param_profile_id
        LEFT JOIN cut_result_archive_state archive
          ON archive.cut_job_id = r.cut_job_id
         AND archive.result_no = r.result_no
@@ -1818,16 +1838,33 @@ export async function resolveLabelCutMaps(
          ON od.detail_id = p.order_detail_id
         AND od.order_id = p.order_id
         AND od.delete_flag = false
+       ${DETAIL_CUT_RESULT_VERSION_FIELDS_SQL}
        JOIN unnest($1::bigint[], $2::bigint[], $3::integer[])
          AS requested(order_id, detail_id, instance)
          ON requested.order_id = p.order_id
         AND requested.detail_id = p.order_detail_id
         AND requested.instance = p.instance
-       WHERE archive.archived_at IS NULL`,
+       WHERE archive.archived_at IS NULL
+         AND (
+           $4::text IS NULL
+           OR ($4::text = 'bath' AND COALESCE(
+             j.last_calc_params->>'layout_mode',
+             cpp.params->>'layout_mode',
+             j.params->>'layout_mode'
+           ) = 'vacuum_table'
+           AND (p.cut_job_id::text || '-' || r.result_no::text) = cut_version_fields.vacuum_cut_number)
+           OR ($4::text = 'regular' AND COALESCE(
+             j.last_calc_params->>'layout_mode',
+             cpp.params->>'layout_mode',
+             j.params->>'layout_mode'
+           ) IS DISTINCT FROM 'vacuum_table'
+           AND (p.cut_job_id::text || '-' || r.result_no::text) = cut_version_fields.regular_cut_number)
+         )`,
       [
         unselectedRows.map((row) => row.orderId),
         unselectedRows.map((row) => row.detailId),
         unselectedRows.map((row) => row.copyIndex),
+        cutMapSource ?? null,
       ],
     );
     const omittedPlacementState = new Map<string, boolean>();
@@ -1859,7 +1896,13 @@ export async function resolveLabelCutMaps(
             p.width_mm, p.height_mm, s.sheet_ordinal,
             s.sheet_width_mm, s.sheet_height_mm, s.base_svg,
             r.result_no,
+            cut_version_fields.regular_cut_number, cut_version_fields.vacuum_cut_number,
             COALESCE(r.snapshot_job ->> 'name', 'Раскрой ' || p.cut_job_id::text) AS cut_job_name,
+            COALESCE(
+              j.last_calc_params->>'layout_mode',
+              cpp.params->>'layout_mode',
+              j.params->>'layout_mode'
+            ) = 'vacuum_table' AS is_vacuum,
             COALESCE(
               EXISTS (
                 SELECT 1
@@ -1884,12 +1927,15 @@ export async function resolveLabelCutMaps(
      JOIN cut_job j
        ON j.cut_job_id = p.cut_job_id
       AND j.status <> 'archived'
+     LEFT JOIN cut_param_profiles cpp
+       ON cpp.cut_param_profile_id = j.param_profile_id
      LEFT JOIN cut_result_archive_state archive
        ON archive.cut_job_id = r.cut_job_id
       AND archive.result_no = r.result_no
      JOIN order_details od
        ON od.detail_id = p.order_detail_id
       AND od.delete_flag = false
+     ${DETAIL_CUT_RESULT_VERSION_FIELDS_SQL}
      WHERE p.cut_result_placement_id = ANY($1::bigint[])
        AND ($2::bigint IS NULL OR p.order_id = $2)
        AND archive.archived_at IS NULL`,
@@ -1898,6 +1944,18 @@ export async function resolveLabelCutMaps(
   const placementById = new Map(result.rows.map((row) => [toNumber(row.cut_result_placement_id), row]));
   if (placementById.size !== placementIds.size) {
     throw new ApiError(409, 'LABEL_CUT_MAP_SELECTION_STALE', 'Выбранный раскрой больше недоступен');
+  }
+  if (cutMapSource) {
+    for (const placement of placementById.values()) {
+      if (!cutMapPlacementMatchesSource(placement, cutMapSource)) {
+        throw new ApiError(422, 'LABEL_CUT_MAP_SELECTION_SOURCE_MISMATCH', 'Раскрой не соответствует выбранному полю детали', {
+          cutMapSource,
+          cutNumber: `${toNumber(placement.cut_job_id)}-${toNumber(placement.result_no)}`,
+          expectedCutNumber: cutMapSource === 'bath' ? placement.vacuum_cut_number : placement.regular_cut_number,
+          cutResultPlacementId: toNumber(placement.cut_result_placement_id),
+        });
+      }
+    }
   }
 
   const assets = new Map<number, string>();
@@ -1955,6 +2013,16 @@ export async function resolveLabelCutMaps(
   return { rows: resolvedRows, assets };
 }
 
+function cutMapSourceMatches(isVacuum: boolean, source: LabelCutMapSource): boolean {
+  return source === 'bath' ? isVacuum : !isVacuum;
+}
+
+function cutMapPlacementMatchesSource(placement: ResolvedCutMapRow, source: LabelCutMapSource): boolean {
+  if (!cutMapSourceMatches(placement.is_vacuum === true, source)) return false;
+  const expectedCutNumber = source === 'bath' ? placement.vacuum_cut_number : placement.regular_cut_number;
+  return expectedCutNumber === `${toNumber(placement.cut_job_id)}-${toNumber(placement.result_no)}`;
+}
+
 function assertCutMapOrderScope(template: LabelTemplateDto): void {
   if (template.elements.some((element) => element.kind === 'cut_map')) {
     throw new ApiError(
@@ -2007,6 +2075,7 @@ interface PreviewTokenPayload {
   templateVersion: number;
   detailIds: number[];
   useBasisFields?: boolean;
+  cutMapSource?: LabelCutMapSource;
   rowHash: string;
 }
 

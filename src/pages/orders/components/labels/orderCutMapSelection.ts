@@ -1,4 +1,5 @@
 import type {
+  LabelCutMapSource,
   LabelCutMapOption,
   LabelCutMapSelection,
   OrderLabelCutMapOptions,
@@ -9,10 +10,13 @@ export interface OrderCutMapLabelRow {
   detailId: number;
   copyIndex: number;
   label: string;
+  cutJobCutNumber: string | null;
+  bathCutJobCutNumber: string | null;
   options: LabelCutMapOption[];
 }
 
 export type OrderCutMapSelectionState = Record<string, number>;
+export type OrderCutMapSelectionSource = LabelCutMapSource;
 
 export function buildOrderCutMapLabelRows(data: OrderLabelCutMapOptions | null): OrderCutMapLabelRow[] {
   if (!data) return [];
@@ -23,6 +27,8 @@ export function buildOrderCutMapLabelRows(data: OrderLabelCutMapOptions | null):
       detailId: detail.detailId,
       copyIndex,
       label: `${detail.detailNumber ?? detail.detailId}: ${detail.detailName ?? 'Деталь'} · экз. ${copyIndex}`,
+      cutJobCutNumber: detail.cutJobCutNumber,
+      bathCutJobCutNumber: detail.bathCutJobCutNumber,
       options: detail.options.filter((option) => option.instance === copyIndex && option.dimensionsMatch && !option.isArchived),
     };
   }));
@@ -51,6 +57,79 @@ export function buildDefaultOrderCutMapSelection(rows: OrderCutMapLabelRow[]): O
     }
   }
   return selected;
+}
+
+export function pickDefaultOrderCutMapSource(rows: OrderCutMapLabelRow[]): OrderCutMapSelectionSource {
+  if (rows.some((row) => orderCutMapRowHasSourceOption(row, 'regular'))) return 'regular';
+  if (rows.some((row) => orderCutMapRowHasSourceOption(row, 'bath'))) return 'bath';
+  return 'regular';
+}
+
+export function buildOrderCutMapSelectionForSource(
+  rows: OrderCutMapLabelRow[],
+  source: OrderCutMapSelectionSource,
+): OrderCutMapSelectionState {
+  const selected: OrderCutMapSelectionState = {};
+  for (const row of rows) {
+    const option = pickSourceOption(row, source);
+    if (option) selected[row.key] = option.cutResultPlacementId;
+  }
+  return selected;
+}
+
+export function filterOrderCutMapRowOptions(
+  row: OrderCutMapLabelRow,
+  source: OrderCutMapSelectionSource,
+): LabelCutMapOption[] {
+  return row.options.filter((option) => cutMapOptionMatchesSource(row, option, source));
+}
+
+export function orderCutMapRowHasSourceOption(
+  row: OrderCutMapLabelRow,
+  source: OrderCutMapSelectionSource,
+): boolean {
+  return row.options.some((option) => cutMapOptionMatchesSource(row, option, source));
+}
+
+export function orderCutMapSourceCutNumbers(
+  rows: OrderCutMapLabelRow[],
+  source: OrderCutMapSelectionSource,
+): string[] {
+  const numbers = new Set<string>();
+  for (const row of rows) {
+    const cutNumber = cutMapSourceCutNumber(row, source);
+    if (cutNumber) numbers.add(cutNumber);
+  }
+  return [...numbers].sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
+export function orderCutMapRawOptionMatchesSource(
+  detail: OrderLabelCutMapOptions['details'][number],
+  option: LabelCutMapOption,
+  source: OrderCutMapSelectionSource,
+): boolean {
+  const cutNumber = source === 'regular' ? detail.cutJobCutNumber : detail.bathCutJobCutNumber;
+  if (!cutNumber || option.cutNumber !== cutNumber) return false;
+  return source === 'bath' ? option.isVacuum === true : option.isVacuum !== true;
+}
+
+function pickSourceOption(row: OrderCutMapLabelRow, source: OrderCutMapSelectionSource): LabelCutMapOption | undefined {
+  const options = filterOrderCutMapRowOptions(row, source);
+  return options.find((option) => option.isCurrent) ?? options[0];
+}
+
+function cutMapOptionMatchesSource(
+  row: OrderCutMapLabelRow,
+  option: LabelCutMapOption,
+  source: OrderCutMapSelectionSource,
+): boolean {
+  const cutNumber = cutMapSourceCutNumber(row, source);
+  if (!cutNumber || option.cutNumber !== cutNumber) return false;
+  return source === 'bath' ? option.isVacuum === true : option.isVacuum !== true;
+}
+
+function cutMapSourceCutNumber(row: OrderCutMapLabelRow, source: OrderCutMapSelectionSource): string | null {
+  return source === 'regular' ? row.cutJobCutNumber : row.bathCutJobCutNumber;
 }
 
 function pickDefaultCutMapCandidate(

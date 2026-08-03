@@ -173,8 +173,11 @@ export interface PreviewOrderLabelsInput {
   templateVersion: number;
   detailFilters?: { detailIds?: number[] };
   useBasisFields?: boolean;
+  cutMapSource?: LabelCutMapSource;
   cutMapSelections?: LabelCutMapSelection[];
 }
+
+export type LabelCutMapSource = 'regular' | 'bath';
 
 export interface LabelCutMapSelection {
   detailId: number;
@@ -209,6 +212,8 @@ export interface OrderLabelCutMapOptions {
     detailNumber: string | null;
     detailName: string | null;
     quantity: number;
+    cutJobCutNumber: string | null;
+    bathCutJobCutNumber: string | null;
     options: LabelCutMapOption[];
   }>;
 }

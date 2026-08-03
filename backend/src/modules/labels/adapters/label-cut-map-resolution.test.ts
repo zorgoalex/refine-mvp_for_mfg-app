@@ -51,7 +51,18 @@ describe('label cut-map resolution', () => {
       .not.toContain('data-label-element-kind="cut_map"');
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining('JOIN unnest($1::bigint[], $2::bigint[], $3::integer[])'),
-      [[20], [10], [1]],
+      [[20], [10], [1], null],
+    );
+  });
+
+  it('limits omitted placement requirements to the selected cut-map source', async () => {
+    const client = databaseReturning();
+    const resolved = await resolveLabelCutMaps(client, template(), [labelRow()], [], 20, 'regular');
+
+    expect(resolved.rows[0].cutMap).toBeUndefined();
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("$4::text = 'regular'"),
+      [[20], [10], [1], 'regular'],
     );
   });
 
@@ -84,6 +95,35 @@ describe('label cut-map resolution', () => {
     const pages = renderSvgPages(template(), resolved.rows, resolved.assets).pages;
     expect(pages[0]).toContain('data-label-element-kind="cut_map"');
     expect(pages[1]).not.toContain('data-label-element-kind="cut_map"');
+  });
+
+  it('rejects a selected placement from another cut-map source', async () => {
+    const client = databaseReturning(placementRow({ is_vacuum: true }));
+
+    await expect(resolveLabelCutMaps(
+      client,
+      template(),
+      [labelRow()],
+      [{ detailId: 10, copyIndex: 1, cutResultPlacementId: 700 }],
+      20,
+      'regular',
+    )).rejects.toMatchObject({ code: 'LABEL_CUT_MAP_SELECTION_SOURCE_MISMATCH' });
+  });
+
+  it('rejects a selected placement when it does not match the detail source cut number', async () => {
+    const client = databaseReturning(placementRow({ regular_cut_number: '31-4' }));
+
+    await expect(resolveLabelCutMaps(
+      client,
+      template(),
+      [labelRow()],
+      [{ detailId: 10, copyIndex: 1, cutResultPlacementId: 700 }],
+      20,
+      'regular',
+    )).rejects.toMatchObject({
+      code: 'LABEL_CUT_MAP_SELECTION_SOURCE_MISMATCH',
+      details: expect.objectContaining({ cutNumber: '30-4', expectedCutNumber: '31-4' }),
+    });
   });
 
   it('rotates a landscape cut sheet to match a portrait template placeholder', async () => {
@@ -188,6 +228,9 @@ function placementRow(overrides: Record<string, unknown> = {}) {
     cut_job_name: 'Кухня',
     base_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2800 2070"></svg>',
     dimensions_match: true,
+    is_vacuum: false,
+    regular_cut_number: '30-4',
+    vacuum_cut_number: null,
     ...overrides,
   };
 }

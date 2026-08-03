@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-03",
+    title: "Бирки: выбор источника миниатюры раскроя",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В модалке «Сформировать бирки» можно выбрать для всего списка деталей, откуда брать миниатюру: из поля «Раскрой» или из поля «Расчет ванны».",
+      "Backend проверяет, что выбранная карта раскроя совпадает с номером версии из выбранного поля детали.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-03",
     title: "Бирки: полный номер версии раскроя",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

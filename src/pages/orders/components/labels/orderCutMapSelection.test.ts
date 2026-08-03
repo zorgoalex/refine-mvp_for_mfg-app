@@ -3,8 +3,13 @@ import type { OrderLabelCutMapOptions } from '../../../../api/types/labelsApi.ty
 import {
   buildDefaultOrderCutMapSelection,
   buildOrderCutMapLabelRows,
+  buildOrderCutMapSelectionForSource,
   buildOrderCutMapSelections,
+  filterOrderCutMapRowOptions,
   missingOrderCutMapRows,
+  orderCutMapRawOptionMatchesSource,
+  orderCutMapSourceCutNumbers,
+  pickDefaultOrderCutMapSource,
 } from './orderCutMapSelection';
 
 const data: OrderLabelCutMapOptions = {
@@ -14,6 +19,8 @@ const data: OrderLabelCutMapOptions = {
     detailNumber: '3',
     detailName: 'Фасад',
     quantity: 2,
+    cutJobCutNumber: '50-4',
+    bathCutJobCutNumber: null,
     options: [
       option(101, 1, 5, '50-4', true),
       option(102, 2, 5, '50-4', true),
@@ -90,6 +97,76 @@ describe('order cut-map selection', () => {
     });
 
     expect(buildDefaultOrderCutMapSelection(rows)).toEqual({ '11:1': 601, '11:2': 602 });
+  });
+
+  it('builds a regular-source selection from the detail cut field only', () => {
+    const rows = buildOrderCutMapLabelRows({
+      ...data,
+      details: [{
+        ...data.details[0],
+        quantity: 5,
+        cutJobCutNumber: '45-1',
+        bathCutJobCutNumber: '28-2',
+        options: [
+          option(601, 1, 21, '45-1', true),
+          option(602, 2, 21, '45-1', true),
+          option(603, 3, 21, '45-1', true),
+          option(604, 4, 21, '45-1', true),
+          { ...option(501, 1, 20, '28-2', true), isVacuum: true },
+          { ...option(502, 2, 20, '28-2', true), isVacuum: true },
+          { ...option(503, 3, 20, '28-2', true), isVacuum: true },
+          { ...option(504, 4, 20, '28-2', true), isVacuum: true },
+          { ...option(505, 5, 20, '28-2', true), isVacuum: true },
+        ],
+      }],
+    });
+
+    expect(pickDefaultOrderCutMapSource(rows)).toBe('regular');
+    expect(orderCutMapSourceCutNumbers(rows, 'regular')).toEqual(['45-1']);
+    expect(orderCutMapSourceCutNumbers(rows, 'bath')).toEqual(['28-2']);
+    expect(buildOrderCutMapSelectionForSource(rows, 'regular')).toEqual({
+      '11:1': 601,
+      '11:2': 602,
+      '11:3': 603,
+      '11:4': 604,
+    });
+    expect(filterOrderCutMapRowOptions(rows[4], 'regular')).toEqual([]);
+    const regularRows = rows
+      .map((row) => ({ ...row, options: filterOrderCutMapRowOptions(row, 'regular') }))
+      .filter((row) => row.options.length > 0);
+    expect(missingOrderCutMapRows(regularRows, buildOrderCutMapSelectionForSource(rows, 'regular'))).toEqual([]);
+  });
+
+  it('builds a bath-source selection from the detail bath calculation field', () => {
+    const rows = buildOrderCutMapLabelRows({
+      ...data,
+      details: [{
+        ...data.details[0],
+        cutJobCutNumber: '45-1',
+        bathCutJobCutNumber: '28-2',
+        options: [
+          option(601, 1, 21, '45-1', true),
+          option(602, 2, 21, '45-1', true),
+          { ...option(501, 1, 20, '28-2', true), isVacuum: true },
+          { ...option(502, 2, 20, '28-2', true), isVacuum: true },
+        ],
+      }],
+    });
+
+    expect(buildOrderCutMapSelectionForSource(rows, 'bath')).toEqual({ '11:1': 501, '11:2': 502 });
+    expect(filterOrderCutMapRowOptions(rows[0], 'bath').map((item) => item.cutNumber)).toEqual(['28-2']);
+  });
+
+  it('matches stale raw options against the selected source cut number', () => {
+    const detail = {
+      ...data.details[0],
+      cutJobCutNumber: '45-1',
+      bathCutJobCutNumber: '28-2',
+    };
+
+    expect(orderCutMapRawOptionMatchesSource(detail, option(601, 1, 21, '45-1', false), 'regular')).toBe(true);
+    expect(orderCutMapRawOptionMatchesSource(detail, { ...option(501, 1, 20, '28-2', false), isVacuum: true }, 'bath')).toBe(true);
+    expect(orderCutMapRawOptionMatchesSource(detail, { ...option(501, 1, 20, '28-2', false), isVacuum: true }, 'regular')).toBe(false);
   });
 });
 

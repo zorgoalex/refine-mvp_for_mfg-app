@@ -202,7 +202,7 @@ export class LabelsService {
 
   async previewOrderLabels(command: PreviewOrderLabelsCommand): Promise<OrderLabelsPreviewDto> {
     await this.require(command, [VIEW, GENERATE, MANAGE_TEMPLATES], command.orderId, 'order');
-    if (command.input.cutMapSelections !== undefined) {
+    if (command.input.cutMapSelections !== undefined || command.input.cutMapSource !== undefined) {
       await this.require(command, [CUT_VIEW], command.orderId, 'order');
     }
     return this.repo.previewOrderLabels(command);
@@ -210,7 +210,7 @@ export class LabelsService {
 
   async generateOrderLabels(command: GenerateOrderLabelsCommand): Promise<OrderLabelGenerationDto> {
     await this.require(command, [GENERATE], command.orderId, 'order');
-    if (command.input.cutMapSelections !== undefined) {
+    if (command.input.cutMapSelections !== undefined || command.input.cutMapSource !== undefined) {
       await this.require(command, [CUT_VIEW], command.orderId, 'order');
     }
     return this.repo.generateOrderLabels(command);

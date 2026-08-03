@@ -34,12 +34,15 @@ const cutMapSelectionSchema = z.object({
   cutResultPlacementId: z.number().int().positive(),
 }).strict();
 
+const cutMapSourceSchema = z.enum(['regular', 'bath']);
+
 export const previewOrderLabelsSchema = z
   .object({
     templateId: z.number().int().positive(),
     templateVersion: z.number().int().min(1),
     detailFilters: detailFiltersSchema.optional(),
     useBasisFields: z.boolean().optional().default(true),
+    cutMapSource: cutMapSourceSchema.optional(),
     cutMapSelections: z.array(cutMapSelectionSchema).max(5000).optional(),
   })
   .strict();

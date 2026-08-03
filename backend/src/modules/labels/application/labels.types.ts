@@ -158,6 +158,8 @@ export interface OrderLabelCutMapDetailOptionsDto {
   detailNumber: string | null;
   detailName: string | null;
   quantity: number;
+  cutJobCutNumber: string | null;
+  bathCutJobCutNumber: string | null;
   options: LabelCutMapOptionDto[];
 }
 
@@ -166,11 +168,14 @@ export interface OrderLabelCutMapOptionsDto {
   details: OrderLabelCutMapDetailOptionsDto[];
 }
 
+export type LabelCutMapSource = 'regular' | 'bath';
+
 export interface PreviewOrderLabelsInput {
   templateId: number;
   templateVersion: number;
   detailFilters?: LabelDetailFilterInput;
   useBasisFields?: boolean;
+  cutMapSource?: LabelCutMapSource;
   cutMapSelections?: LabelCutMapSelectionInput[];
 }
 
