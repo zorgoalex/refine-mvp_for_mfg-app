@@ -362,6 +362,8 @@ const ORDER_DETAIL_TABLE_COMPONENTS = {
   body: { cell: OrderDetailBodyCell, row: OrderDetailBodyRow },
 } as const;
 
+const EMPTY_ORDER_DETAIL_TABLE_ROWS: any[] = [];
+
 interface MemoizedOrderDetailTableProps extends React.ComponentProps<typeof Table> {
   renderVersion: string;
 }
@@ -2561,6 +2563,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     [...invalidDetailKeys].map(String).sort().join(','),
     validationScrollTargetKey ?? '',
   ].join('|');
+  const [tableRowsReady, setTableRowsReady] = useState(false);
+  useEffect(() => {
+    let timer = 0;
+    const frame = window.requestAnimationFrame(() => {
+      timer = window.setTimeout(() => setTableRowsReady(true), 0);
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, []);
+  const mountedTableRows = tableRowsReady ? tableRows : EMPTY_ORDER_DETAIL_TABLE_ROWS;
 
   return (
     <>
@@ -2586,7 +2600,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       <MemoizedOrderDetailTable
         renderVersion={tableRenderVersion}
         className={`order-details-table${groupingActive ? ' details-grouped' : ''}`}
-        dataSource={tableRows as any}
+        dataSource={mountedTableRows as any}
         columns={stableRenderedColumns}
         components={ORDER_DETAIL_TABLE_COMPONENTS}
         rowKey={(row: any) => {

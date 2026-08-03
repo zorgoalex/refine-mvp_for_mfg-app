@@ -97,4 +97,11 @@ describe('OrderDetailTable interaction performance guards', () => {
   it('isolates edit-table scrolling from rc-table ping updates', () => {
     expect(source).toContain('<TableTopScroll manageAntTableScroll>');
   });
+
+  it('lets rc-table finish its initial measurement before mounting detail rows', () => {
+    expect(source).toContain('const [tableRowsReady, setTableRowsReady] = useState(false);');
+    expect(source).toContain('window.requestAnimationFrame(() => {');
+    expect(source).toContain('window.setTimeout(() => setTableRowsReady(true), 0);');
+    expect(source).toContain('dataSource={mountedTableRows as any}');
+  });
 });
