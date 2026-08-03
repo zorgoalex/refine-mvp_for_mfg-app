@@ -59,6 +59,7 @@ interface UseOrderFormDataResult {
 let cachedFormData: OrderFormDataResponse | null = null;
 let pendingFormDataRequest: Promise<OrderFormDataResponse> | null = null;
 let formDataCacheGeneration = 0;
+let formDataCacheStale = false;
 
 export function useOrderFormData(enabled = featureFlags.useBackendReferences): UseOrderFormDataResult {
   const [data, setData] = useState<OrderFormDataResponse | null>(() =>
@@ -102,13 +103,16 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
     let cancelled = false;
     setError(null);
 
-    if (cachedFormData) {
+    if (cachedFormData && !formDataCacheStale && refreshVersion === 0) {
       setData(cachedFormData);
       setIsLoading(false);
       return;
     }
 
-    setIsLoading(true);
+    const isBackgroundRefresh = data !== null;
+    if (!isBackgroundRefresh) {
+      setIsLoading(true);
+    }
     loadOrderFormData()
       .then((response) => {
         if (cancelled) return;
@@ -206,12 +210,13 @@ export function resetOrderFormDataCacheForTests(): void {
   formDataCacheGeneration += 1;
   cachedFormData = null;
   pendingFormDataRequest = null;
+  formDataCacheStale = false;
 }
 
 export function invalidateOrderFormDataCache(): void {
   formDataCacheGeneration += 1;
-  cachedFormData = null;
   pendingFormDataRequest = null;
+  formDataCacheStale = true;
 }
 
 async function loadOrderFormData(): Promise<OrderFormDataResponse> {
@@ -222,6 +227,7 @@ async function loadOrderFormData(): Promise<OrderFormDataResponse> {
       .then((response) => {
         if (requestGeneration === formDataCacheGeneration) {
           cachedFormData = response;
+          formDataCacheStale = false;
         }
         return response;
       })

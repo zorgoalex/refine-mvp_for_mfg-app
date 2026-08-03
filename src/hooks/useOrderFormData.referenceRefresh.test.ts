@@ -156,6 +156,70 @@ describe('useOrderFormData live reference refresh', () => {
       'Новая плёнка',
     ]);
   });
+
+  it('keeps existing references ready while focus refresh runs in background', async () => {
+    let resolveRefresh!: (response: OrderFormDataResponse) => void;
+    const refreshResponse = new Promise<OrderFormDataResponse>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    ordersApiMock.getFormData
+      .mockResolvedValueOnce(createFormDataResponse([{ id: 8, name: 'Белая' }]))
+      .mockReturnValueOnce(refreshResponse);
+
+    renderHook();
+    await flushPromises();
+    expect(renderHook().references.films.map((option) => option.label)).toEqual(['Белая']);
+
+    window.dispatchEvent(new Event('focus'));
+    renderHook();
+    const refreshing = renderHook();
+
+    expect(refreshing.isLoading).toBe(false);
+    expect(refreshing.references.films.map((option) => option.label)).toEqual(['Белая']);
+
+    resolveRefresh(createFormDataResponse([
+      { id: 8, name: 'Белая' },
+      { id: 9, name: 'Новая плёнка' },
+    ]));
+    await flushPromises();
+
+    expect(renderHook().references.films.map((option) => option.label)).toEqual([
+      'Белая',
+      'Новая плёнка',
+    ]);
+    expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a stale cached snapshot after a failed refresh and remount', async () => {
+    ordersApiMock.getFormData
+      .mockResolvedValueOnce(createFormDataResponse([{ id: 8, name: 'Белая' }]))
+      .mockRejectedValueOnce(new Error('temporary network failure'))
+      .mockResolvedValueOnce(createFormDataResponse([
+        { id: 8, name: 'Белая' },
+        { id: 9, name: 'Новая плёнка' },
+      ]));
+
+    renderHook();
+    await flushPromises();
+    expect(renderHook().references.films.map((option) => option.label)).toEqual(['Белая']);
+
+    window.dispatchEvent(new Event('focus'));
+    renderHook();
+    await flushPromises();
+    expect(renderHook().error?.message).toBe('temporary network failure');
+
+    reactHarness.reset();
+    renderHook();
+    await flushPromises();
+    const remounted = renderHook();
+
+    expect(remounted.isLoading).toBe(false);
+    expect(remounted.references.films.map((option) => option.label)).toEqual([
+      'Белая',
+      'Новая плёнка',
+    ]);
+    expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(3);
+  });
 });
 
 function renderHook() {
