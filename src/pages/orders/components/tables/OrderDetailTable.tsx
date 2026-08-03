@@ -2596,11 +2596,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           onChange={saveColumnSettings}
         />
       </OrderDetailsToolbar>
-      <TableTopScroll manageAntTableScroll>
+      <TableTopScroll
+        manageAntTableScroll
+        className={tableRowsReady ? undefined : 'order-details-table-scroll-shell--initializing'}
+      >
       <OrderDetailCellRuntimeContext.Provider value={cellRuntime}>
       <MemoizedOrderDetailTable
         renderVersion={tableRenderVersion}
         className={`order-details-table${groupingActive ? ' details-grouped' : ''}`}
+        loading={!tableRowsReady}
         dataSource={mountedTableRows as any}
         columns={stableRenderedColumns}
         components={ORDER_DETAIL_TABLE_COMPONENTS}
