@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-03",
+    title: "Базис: перенос обозначений панелей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В карточке Базис-проекта значения колонки «Обозначение» теперь переносятся по словам и отображаются полностью.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-03",
     title: "Базис XML: разделение проекта и заказа",
     services: ["ERP"],
     repositories: ["repo_erp"],

@@ -41,3 +41,12 @@
 .bazis-panels-table .ant-table-tbody > tr > td.bazis-panel-cell-sm {
   font-size: 67.5%;
 }
+
+/* Обозначение читается целиком: обычный перенос идёт по пробелам,
+   а длинный код без пробелов переносится только при нехватке ширины. */
+.bazis-panels-table .ant-table-tbody > tr > td.bazis-panel-designation-cell {
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+  text-wrap: pretty;
+}

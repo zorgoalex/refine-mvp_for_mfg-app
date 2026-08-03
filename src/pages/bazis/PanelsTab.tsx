@@ -500,9 +500,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       {
         title: 'Обозначение',
         key: 'designation',
-        className: 'bazis-panel-cell-sm',
+        className: 'bazis-panel-cell-sm bazis-panel-designation-cell',
         width: 100,
-        ellipsis: true,
         sorter: panelComparators.designation,
         render: (_, row) =>
           row.rowType === 'group' ? row.designations.join(', ') || '—' : row.designation?.trim() || '—',
