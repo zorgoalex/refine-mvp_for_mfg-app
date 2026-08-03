@@ -191,6 +191,28 @@ export const DYNAMIC_LABEL_FIELDS: readonly LabelFieldCatalogItem[] = [
   },
 ];
 
+export const DETAIL_CUT_RESULT_VERSION_REGULAR_FIELD = 'cut_result_version_no';
+export const DETAIL_CUT_RESULT_VERSION_VACUUM_FIELD = 'bath_cut_result_version_no';
+
+export const COMPUTED_DETAIL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = [
+  {
+    id: `detail.${DETAIL_CUT_RESULT_VERSION_REGULAR_FIELD}`,
+    source: 'dynamic',
+    sourceColumn: null,
+    label: '№ версии раскроя (обычные профили)',
+    type: 'number',
+    category: 'Деталь',
+  },
+  {
+    id: `detail.${DETAIL_CUT_RESULT_VERSION_VACUUM_FIELD}`,
+    source: 'dynamic',
+    sourceColumn: null,
+    label: '№ версии раскроя (вакуумный стол)',
+    type: 'number',
+    category: 'Деталь',
+  },
+];
+
 const DETAIL_FIELD_LABELS: Record<string, string> = {
   detail_id: 'ID детали',
   order_id: 'ID заказа',
@@ -224,6 +246,8 @@ const DETAIL_FIELD_LABELS: Record<string, string> = {
   basis_data: 'Базис данные',
   basis_designation: 'Базис обозн. детали',
   doweling: 'Присадка',
+  cut_job: 'Раскрой',
+  bath_cut_job: 'Расчет ванны',
 };
 
 const ORDER_FIELD_LABELS: Record<string, string> = {
@@ -303,12 +327,13 @@ export function buildDetailFieldCatalog(columns: readonly DetailFieldColumnMetad
 export function buildRuntimeLabelFieldCatalog(
   detailColumns: readonly DetailFieldColumnMetadata[],
 ): LabelFieldCatalogItem[] {
-  return [
+  return uniqueCatalogItems([
     ...BAZIS_FIELD_CATALOG,
     ...buildDetailFieldCatalog(detailColumns),
+    ...COMPUTED_DETAIL_FIELD_CATALOG,
     ...ORDER_FIELD_CATALOG,
     ...DYNAMIC_LABEL_FIELDS,
-  ];
+  ]);
 }
 
 export const ORDER_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.entries(ORDER_FIELD_LABELS).map(([column, label]) => ({
@@ -320,14 +345,24 @@ export const ORDER_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.entr
   category: 'Заказ',
 }));
 
-export const LABEL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = [
+export const LABEL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = uniqueCatalogItems([
   ...BAZIS_FIELD_CATALOG,
   ...DETAIL_FIELD_CATALOG,
+  ...COMPUTED_DETAIL_FIELD_CATALOG,
   ...ORDER_FIELD_CATALOG,
   ...DYNAMIC_LABEL_FIELDS,
-] as const;
+]);
 
 const LABEL_FIELD_IDS = new Set(LABEL_FIELD_CATALOG.map((field) => field.id));
+
+function uniqueCatalogItems(fields: readonly LabelFieldCatalogItem[]): LabelFieldCatalogItem[] {
+  const seen = new Set<string>();
+  return fields.filter((field) => {
+    if (seen.has(field.id)) return false;
+    seen.add(field.id);
+    return true;
+  });
+}
 
 export function isBuiltInLabelFieldId(value: string, runtimeFieldIds?: ReadonlySet<string>): boolean {
   return LABEL_FIELD_IDS.has(value) || runtimeFieldIds?.has(value) === true;

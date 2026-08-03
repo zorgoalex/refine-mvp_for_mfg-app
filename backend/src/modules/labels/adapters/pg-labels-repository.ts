@@ -51,6 +51,10 @@ import type {
   UpdateLabelTemplateCommand,
 } from '../application/labels.types';
 import { assertRenderableTemplateShape, LABEL_RENDERER_CAPABILITIES } from '../application/label-template-advanced';
+import {
+  DETAIL_CUT_RESULT_VERSION_REGULAR_FIELD,
+  DETAIL_CUT_RESULT_VERSION_VACUUM_FIELD,
+} from '../application/bazis-field-catalog';
 import type { OcrTemplateForMatch, OcrTemplateRule } from '../application/scan/ocr-template-matcher';
 import {
   LabelCustomFieldSchemaStaleError,
@@ -117,6 +121,54 @@ interface OrderLabelDetailRow extends QueryResultRow {
 interface OrderFieldsRow extends QueryResultRow {
   order_fields: Record<string, unknown> | null;
 }
+
+const DETAIL_CUT_RESULT_VERSION_FIELDS_SQL = `
+LEFT JOIN LATERAL (
+  WITH candidates AS (
+    SELECT cj.cut_job_id,
+           cr.result_no,
+           COALESCE(
+             cj.last_calc_params->>'layout_mode',
+             cpp.params->>'layout_mode',
+             cj.params->>'layout_mode'
+           ) = 'vacuum_table' AS is_vacuum
+    FROM cut_job_item cji
+    JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
+    JOIN cut_result cr
+      ON cr.cut_result_id = cj.current_cut_result_id
+     AND cr.cut_job_id = cj.cut_job_id
+    LEFT JOIN cut_result_archive_state archived
+      ON archived.cut_job_id = cr.cut_job_id
+     AND archived.result_no = cr.result_no
+    LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = cj.param_profile_id
+    WHERE cji.order_detail_id = od.detail_id
+      AND cji.is_active = true
+      AND cj.status = 'ready'
+      AND cj.last_calc_basis IS NOT NULL
+      AND archived.cut_job_id IS NULL
+  ),
+  ranked AS (
+    SELECT *,
+           row_number() OVER (
+             PARTITION BY (is_vacuum IS TRUE)
+             ORDER BY cut_job_id DESC
+           ) AS rn
+    FROM candidates
+  )
+  SELECT
+    max(result_no) FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_result_no,
+    max(result_no) FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_result_no
+  FROM ranked
+) cut_version_fields ON true
+`;
+
+const DETAIL_FIELDS_JSON_SQL = `(
+  row_to_json(od)::jsonb
+  || jsonb_build_object(
+    '${DETAIL_CUT_RESULT_VERSION_REGULAR_FIELD}', cut_version_fields.regular_result_no,
+    '${DETAIL_CUT_RESULT_VERSION_VACUUM_FIELD}', cut_version_fields.vacuum_result_no
+  )
+) AS detail_fields`;
 
 interface GenerationRow extends QueryResultRow {
   order_label_generation_id: string | number;
@@ -2194,9 +2246,10 @@ async function readOrderLabelDetails(
   const result = await client.query<OrderLabelDetailRow>(
     `SELECT od.detail_id, od.order_id, od.detail_number, od.detail_name, od.height, od.width, od.quantity,
             od.material_name, od.note, od.basis_project, od.basis_data,
-            row_to_json(od)::jsonb AS detail_fields,
+            ${DETAIL_FIELDS_JSON_SQL},
             ld.bazis_fields, ld.custom_fields, ld.custom_field_schema_snapshot, ld.version
      FROM order_details_view od
+     ${DETAIL_CUT_RESULT_VERSION_FIELDS_SQL}
      LEFT JOIN order_label_detail_data ld
        ON ld.order_id=od.order_id AND ld.detail_id=od.detail_id AND ld.label_template_id=$2
      WHERE od.order_id=$1
@@ -2219,9 +2272,10 @@ async function readDetailLabelDetails(
   const result = await client.query<OrderLabelDetailRow>(
     `SELECT od.detail_id, od.order_id, od.detail_number, od.detail_name, od.height, od.width, od.quantity,
             od.material_name, od.note, od.basis_project, od.basis_data,
-            row_to_json(od)::jsonb AS detail_fields,
+            ${DETAIL_FIELDS_JSON_SQL},
             ld.bazis_fields, ld.custom_fields, ld.custom_field_schema_snapshot, ld.version
      FROM order_details_view od
+     ${DETAIL_CUT_RESULT_VERSION_FIELDS_SQL}
      LEFT JOIN order_label_detail_data ld
        ON ld.order_id=od.order_id AND ld.detail_id=od.detail_id AND ld.label_template_id=$2
      WHERE od.detail_id = ANY($1::bigint[])

@@ -4,6 +4,7 @@ import {
   BAZIS_COLUMN_LABELS,
   BAZIS_FIELD_CATALOG,
   buildRuntimeLabelFieldCatalog,
+  COMPUTED_DETAIL_FIELD_CATALOG,
   DETAIL_FIELD_CATALOG,
   DYNAMIC_LABEL_FIELDS,
   ORDER_FIELD_CATALOG,
@@ -50,6 +51,41 @@ describe('Bazis label field catalog', () => {
         expect.objectContaining({ id: 'order.client_name', source: 'order', sourceColumn: 'client_name' }),
       ]),
     );
+  });
+
+  it('adds computed detail cut result version fields to static and runtime catalogs', () => {
+    expect(COMPUTED_DETAIL_FIELD_CATALOG).toEqual([
+      expect.objectContaining({
+        id: 'detail.cut_result_version_no',
+        source: 'dynamic',
+        sourceColumn: null,
+        label: '№ версии раскроя (обычные профили)',
+        type: 'number',
+        category: 'Деталь',
+      }),
+      expect.objectContaining({
+        id: 'detail.bath_cut_result_version_no',
+        source: 'dynamic',
+        sourceColumn: null,
+        label: '№ версии раскроя (вакуумный стол)',
+        type: 'number',
+        category: 'Деталь',
+      }),
+    ]);
+
+    const catalog = buildRuntimeLabelFieldCatalog([
+      { columnName: 'future_detail_code', dataType: 'text' },
+      { columnName: 'cut_result_version_no', dataType: 'integer' },
+    ]);
+    const ids = catalog.map((field) => field.id);
+    expect(catalog).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'detail.future_detail_code', label: 'Future detail code' }),
+      expect.objectContaining({ id: 'detail.cut_result_version_no', type: 'number' }),
+      expect.objectContaining({ id: 'detail.bath_cut_result_version_no', type: 'number' }),
+    ]));
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(isSupportedFieldBinding('detail.cut_result_version_no')).toBe(true);
+    expect(isSupportedFieldBinding('detail.bath_cut_result_version_no')).toBe(true);
   });
 
   it('builds detail fields from the live view schema without a hardcoded column entry', () => {

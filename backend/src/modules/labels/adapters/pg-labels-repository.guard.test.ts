@@ -29,6 +29,18 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).toMatch(/ORDER BY ordinal_position/);
   });
 
+  it('enriches label detail fields with current regular and vacuum cut result version numbers', () => {
+    expect(source).toContain('DETAIL_CUT_RESULT_VERSION_REGULAR_FIELD');
+    expect(source).toContain('DETAIL_CUT_RESULT_VERSION_VACUUM_FIELD');
+    expect(source.match(/DETAIL_FIELDS_JSON_SQL/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    expect(source.match(/DETAIL_CUT_RESULT_VERSION_FIELDS_SQL/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    expect(source).toContain("cpp.params->>'layout_mode'");
+    expect(source).toContain("= 'vacuum_table' AS is_vacuum");
+    expect(source).toContain('PARTITION BY (is_vacuum IS TRUE)');
+    expect(source).toContain('FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_result_no');
+    expect(source).toContain('FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_result_no');
+  });
+
   it('persists field catalog snapshots for label and QR templates', () => {
     expect(source).toMatch(/field_catalog_snapshot/);
     expect(source).toMatch(/JSON\.stringify\(command\.fieldCatalogSnapshot \?\? \{\}\)/);

@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-03",
+    title: "Бирки: свежие поля деталей в редакторе шаблона",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Список полей в редакторе шаблона бирки пополняется из актуальной схемы деталей и включает новые вычисляемые поля версии раскроя отдельно для обычных профилей и профиля «Вакуумный стол».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-03",
     title: "Редактирование заказа: шире колонки раскроя",
     services: ["ERP"],
     repositories: ["repo_erp"],
