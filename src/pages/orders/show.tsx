@@ -1697,14 +1697,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         const originalRender = column.render;
         const originalShouldCellUpdate = column.shouldCellUpdate;
         const dataIndex = typeof column.dataIndex === 'string' ? column.dataIndex : null;
-        const isLiveStatusColumn = column.key === 'production_status_id';
+        const isLiveExternalColumn = column.key === 'production_status_id'
+          || column.key === 'cut_job'
+          || column.key === 'bath_cut_job';
         return {
           ...column,
           shouldCellUpdate: (row: any, previousRow: any) => {
             if (originalShouldCellUpdate) return originalShouldCellUpdate(row, previousRow);
             // Status values live outside the row record. Other cells can skip
             // unrelated parent updates such as sticky-header state changes.
-            return isLiveStatusColumn || row !== previousRow;
+            return isLiveExternalColumn || row !== previousRow;
           },
           onCell: (row: any) => {
             if (row?.kind !== 'separator') return {};

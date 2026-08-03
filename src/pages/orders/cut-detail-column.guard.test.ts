@@ -12,6 +12,9 @@ describe('cut detail column', () => {
     expect(show).toContain('bathCutJobByDetailId');
     expect(show).toContain('<CutJobVersionLines job={ref} />');
     expect(show).toContain('pollIntervalMs: ORDER_DETAIL_STATUS_REFRESH_MS');
+    expect(show).toContain("column.key === 'cut_job'");
+    expect(show).toContain("column.key === 'bath_cut_job'");
+    expect(show).toContain('return isLiveExternalColumn || row !== previousRow');
 
     const hook = readFileSync('src/pages/orders/useCutDetailLastReady.ts', 'utf8');
     expect(hook).toContain('window.setInterval(refreshWhenVisible, pollIntervalMs)');
