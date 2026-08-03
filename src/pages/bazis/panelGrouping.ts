@@ -7,6 +7,7 @@ import type { BazisOrderRef, BazisTreeNode } from '../../api/types/bazisApi.type
 export type PanelLike = BazisTreeNode & {
   pathTitle: string;
   productName: string | null;
+  bazisProjectNo: string | null;
   productOrderNo: string | null;
 };
 
@@ -29,6 +30,8 @@ export interface PanelGroupRow {
   designations: string[];
   /** Уникальные непустые изделия детей в порядке появления. */
   productNames: string[];
+  /** Уникальные непустые номера Базис-проекта детей в порядке появления. */
+  projectNos: string[];
   /** Уникальные непустые номера Базис-заказа детей в порядке появления. */
   orderNos: string[];
   /** Уникальные по orderId ERP-заказы детей в порядке появления. */
@@ -67,6 +70,27 @@ function pushUniqueText(target: string[], value: string | null | undefined): voi
   }
 }
 
+export function resolveBazisDocumentColumns(input: {
+  rootProductCount: number;
+  productOrderNo: string | null | undefined;
+  revisionBazisOrderNo: string | null | undefined;
+}): { bazisProjectNo: string | null; productOrderNo: string | null } {
+  const productOrderNo = input.productOrderNo?.trim() || null;
+  const revisionBazisOrderNo = input.revisionBazisOrderNo?.trim() || null;
+
+  if (input.rootProductCount > 1) {
+    return {
+      bazisProjectNo: revisionBazisOrderNo ?? productOrderNo,
+      productOrderNo: null,
+    };
+  }
+
+  return {
+    bazisProjectNo: null,
+    productOrderNo: productOrderNo ?? revisionBazisOrderNo,
+  };
+}
+
 /** Ключ группы, содержащей панель (для авто-раскрытия выбранной панели). */
 export function findGroupKeyByPanelId(groups: PanelGroupRow[], bazisNodeId: number | null): string | null {
   if (bazisNodeId == null) {
@@ -99,6 +123,7 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
         names: [],
         designations: [],
         productNames: [],
+        projectNos: [],
         orderNos: [],
         orders: [],
         uniformEdgeCount: null,
@@ -123,6 +148,7 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
     pushUniqueText(group.names, panel.name);
     pushUniqueText(group.designations, panel.designation);
     pushUniqueText(group.productNames, panel.productName);
+    pushUniqueText(group.projectNos, panel.bazisProjectNo);
     pushUniqueText(group.orderNos, panel.productOrderNo);
 
     for (const order of panel.orders) {
