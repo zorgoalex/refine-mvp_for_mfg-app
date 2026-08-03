@@ -39,3 +39,15 @@ export function nextOrderDetailInlineTabField(
   if (currentIndex < 0) return null;
   return fieldKeys[currentIndex + (backwards ? -1 : 1)] ?? null;
 }
+
+export function findOrderDetailInlineEditor(
+  row: ParentNode | null,
+  field: string,
+): HTMLElement | null {
+  const editingCell = row?.querySelector<HTMLElement>(
+    `[data-order-detail-column-key="${field}"]`,
+  );
+  return editingCell?.querySelector<HTMLElement>(
+    'input, textarea, [role="combobox"]',
+  ) ?? null;
+}

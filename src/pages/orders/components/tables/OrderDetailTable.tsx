@@ -47,6 +47,7 @@ import {
   orderValidationDetailKey,
 } from '../../../../hooks/orderSaveValidation';
 import {
+  findOrderDetailInlineEditor,
   nextOrderDetailInlineTabField,
   orderDetailInlineTabFields,
 } from './orderDetailInlineNavigation';
@@ -429,6 +430,7 @@ function useStableOrderDetailColumns(
         const currentProps = runtime.onCellByKey.get(key)?.(row, index) ?? {};
         return {
           ...currentProps,
+          'data-order-detail-column-key': String(key),
           onClick: (event: React.MouseEvent<HTMLElement>) => {
             runtime.onCellByKey.get(key)?.(row, index)?.onClick?.(event);
           },
@@ -2031,7 +2033,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         scrollToEditingRowRef.current = false;
       }
       focusFrame = requestAnimationFrame(() => {
-        row?.querySelector<HTMLElement>('input, textarea, [role="combobox"]')
+        findOrderDetailInlineEditor(row ?? null, String(editingField))
           ?.focus({ preventScroll: true });
       });
     });

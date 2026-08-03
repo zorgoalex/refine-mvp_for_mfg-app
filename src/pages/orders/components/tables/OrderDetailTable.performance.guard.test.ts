@@ -31,7 +31,14 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(editingFocusEffect).toContain(
       "scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' })",
     );
+    expect(source).toContain("'data-order-detail-column-key': String(key)");
+    expect(editingFocusEffect).toContain(
+      'findOrderDetailInlineEditor(row ?? null, String(editingField))',
+    );
     expect(editingFocusEffect).toContain('focus({ preventScroll: true })');
+    expect(editingFocusEffect).not.toContain(
+      "row?.querySelector<HTMLElement>('input, textarea, [role=\"combobox\"]')",
+    );
     expect(editingFocusEffect).not.toContain("behavior: 'smooth'");
   });
 

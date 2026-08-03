@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  findOrderDetailInlineEditor,
   nextOrderDetailInlineTabField,
   orderDetailInlineTabFields,
 } from './orderDetailInlineNavigation';
@@ -28,5 +29,27 @@ describe('order detail inline Tab navigation', () => {
     expect(nextOrderDetailInlineTabField(fields, 'width', true)).toBe('height');
     expect(nextOrderDetailInlineTabField(fields, 'quantity', false)).toBeNull();
     expect(nextOrderDetailInlineTabField(fields, 'height', true)).toBeNull();
+  });
+
+  it('finds the editor inside the active cell instead of the row selection checkbox', () => {
+    const selectionCheckbox = { focus: vi.fn() };
+    const activeEditor = { focus: vi.fn() };
+    const editingCellQuery = vi.fn().mockReturnValue(activeEditor);
+    const rowQuery = vi.fn((selector: string) =>
+      selector === 'input, textarea, [role="combobox"]'
+        ? selectionCheckbox
+        : { querySelector: editingCellQuery },
+    );
+
+    const editor = findOrderDetailInlineEditor(
+      { querySelector: rowQuery } as unknown as ParentNode,
+      'width',
+    );
+
+    expect(rowQuery).toHaveBeenCalledTimes(1);
+    expect(rowQuery).toHaveBeenCalledWith('[data-order-detail-column-key="width"]');
+    expect(editingCellQuery).toHaveBeenCalledWith('input, textarea, [role="combobox"]');
+    expect(editor).toBe(activeEditor);
+    expect(editor).not.toBe(selectionCheckbox);
   });
 });
